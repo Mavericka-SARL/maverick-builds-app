@@ -1,0 +1,263 @@
+# PostgreSQL 16 — primary database for the Mavericks platform.
+# Configured for streaming replication readiness (wal_level=replica, archive_mode=on).
+#
+# Continuous WAL archiving + point-in-time recovery via WAL-G, pushing
+# straight to MinIO (s3://mavericks-backups/wal) — no local disk archive
+# needed. Runs on a custom image (deploy/docker/postgres-walg/), postgres
+# itself plus the wal-g binary (built from source; wal-g has no
+# first-party Docker image). A sidecar container in this same pod
+# periodically pushes base backups (WAL replay needs a starting point;
+# continuous archiving alone isn't enough for PITR) and prunes old ones.
+#
+# This is complementary to, not a replacement for, the periodic pg_dump
+# logical backup (deploy/docker/pg-backup/, deploy/k8s/base/infra/
+# postgres-backup.yaml) — that one is a portable snapshot; this one is a
+# continuous physical backup enabling restore to an arbitrary point in
+# time. Both run. Restoring to a point in time: fetch the desired base
+# backup (`wal-g backup-fetch $PGDATA LATEST`, or a specific
+# `base_...` name from `wal-g backup-list`), write an empty
+# `recovery.signal` in PGDATA, and add to postgresql.auto.conf:
+#   restore_command = 'wal-g wal-fetch %f %p'
+#   recovery_target_time = '<timestamp>'
+#   recovery_target_action = 'promote'
+# then start postgres — verified live against this exact image and
+# config (real base backup + WAL segments, real restore to a timestamp
+# between two marker rows, confirmed the earlier one survived and the
+# later one didn't).
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: mavericks
+  labels:
+    app: postgres
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: mavericks-engine
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: postgres
+          image: ghcr.io/konstantintokarev/mavericks/postgres-walg:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            # WAL / replication settings passed as server flags so they take
+            # effect without a custom postgresql.conf.
+            - "-c"
+            - "wal_level=replica"
+            - "-c"
+            - "archive_mode=on"
+            - "-c"
+            - "archive_command=wal-g wal-push %p"
+            - "-c"
+            - "restore_command=wal-g wal-fetch %f %p"
+            - "-c"
+            - "max_wal_senders=3"
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          # Postgres itself never needed the shared ConfigMap before —
+          # added here only so the WAL-G env vars below can reference
+          # $(MINIO_URL)/$(MINIO_ROOT_USER) rather than duplicating those
+          # literal values (this container also picks up other,
+          # irrelevant-to-it keys like POLICY_ADDR — harmless, same as
+          # every other service in this repo that envFroms the full
+          # ConfigMap and uses only what it needs).
+          envFrom:
+            - configMapRef:
+                name: mavericks-config
+          env:
+            - name: POSTGRES_USER
+              value: "mavericks"
+            - name: POSTGRES_DB
+              value: "mavericks"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mavericks-secrets
+                  key: POSTGRES_PASSWORD
+            # Tell pg where to put PGDATA so it lands on the PVC.
+            - name: PGDATA
+              value: "/var/lib/postgresql/data/pgdata"
+            # WAL-G S3-compatible config (archive_command/restore_command
+            # above invoke wal-g, which reads these) — reuses the same
+            # MinIO already deployed for object storage/logical backups,
+            # verified live: AWS_S3_FORCE_PATH_STYLE=true is required for
+            # MinIO (without it the AWS SDK tries virtual-hosted-style
+            # URLs MinIO doesn't serve). AWS_REGION is a required-but-
+            # unused-by-MinIO SDK value.
+            - name: AWS_ENDPOINT
+              value: "$(MINIO_URL)"
+            - name: AWS_ACCESS_KEY_ID
+              value: "$(MINIO_ROOT_USER)"
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mavericks-secrets
+                  key: MINIO_ROOT_PASSWORD
+            - name: AWS_S3_FORCE_PATH_STYLE
+              value: "true"
+            - name: AWS_REGION
+              value: "us-east-1"
+            - name: WALG_S3_PREFIX
+              value: "s3://mavericks-backups/wal"
+            - name: WALG_COMPRESSION_METHOD
+              value: "lz4"
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - mavericks
+                - -d
+                - mavericks
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 5
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - mavericks
+                - -d
+                - mavericks
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            runAsUser: 70    # postgres uid in alpine image
+            runAsGroup: 70
+        - name: wal-g-basebackup
+          image: ghcr.io/konstantintokarev/mavericks/postgres-walg:latest
+          imagePullPolicy: IfNotPresent
+          command: ["basebackup-loop.sh"]
+          envFrom:
+            - configMapRef:
+                name: mavericks-config
+          env:
+            - name: PGDATA
+              value: "/var/lib/postgresql/data/pgdata"
+            # wal-g backup-push calls pg_start_backup()/pg_stop_backup()
+            # over a REGULAR SQL connection (confirmed live — it does NOT
+            # need the replication protocol). This is a separate
+            # container from postgres's own, so it needs real connection
+            # env vars, not OS-user trust: localhost reaches the primary
+            # since both containers share this pod's network namespace.
+            - name: PGHOST
+              value: "localhost"
+            - name: PGPORT
+              value: "5432"
+            - name: PGUSER
+              value: "mavericks"
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mavericks-secrets
+                  key: POSTGRES_PASSWORD
+            - name: PGDATABASE
+              value: "mavericks"
+            - name: AWS_ENDPOINT
+              value: "$(MINIO_URL)"
+            - name: AWS_ACCESS_KEY_ID
+              value: "$(MINIO_ROOT_USER)"
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mavericks-secrets
+                  key: MINIO_ROOT_PASSWORD
+            - name: AWS_S3_FORCE_PATH_STYLE
+              value: "true"
+            - name: AWS_REGION
+              value: "us-east-1"
+            - name: WALG_S3_PREFIX
+              value: "s3://mavericks-backups/wal"
+            - name: WALG_COMPRESSION_METHOD
+              value: "lz4"
+          volumeMounts:
+            # Read-only: backup-push only reads PGDATA. Postgres's data
+            # directory is 0700 (owner-only), so this container MUST run
+            # as the same uid as the postgres container to read anything
+            # in it at all — hence the matching securityContext below.
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+              readOnly: true
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          securityContext:
+            runAsUser: 70
+            runAsGroup: 70
+      # fsGroup makes the kubelet chgrp the mounted volume to this GID.
+      # Without it a freshly provisioned block volume stays root-owned and
+      # this pod, which runs as UID 70, cannot write to it: postgres would fail to initialise PGDATA the same way
+      # Local-path/hostPath volumes hide this because the kubelet creates
+      # those directories permissively — it only appears on real CSI
+      # storage, which is why it surfaced on the first Hetzner deploy.
+      securityContext:
+        fsGroup: 70
+
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+        labels:
+          app: postgres
+          app.kubernetes.io/part-of: mavericks-engine
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: standard
+        resources:
+          requests:
+            storage: 20Gi
+
+---
+# Headless Service — required by StatefulSet for stable DNS names
+# (postgres-0.postgres.mavericks.svc.cluster.local).
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: mavericks
+  labels:
+    app: postgres
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP

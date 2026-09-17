@@ -1,0 +1,2265 @@
+:root {
+  /* Brand */
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-200: #c7d2fe;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+
+  /* Neutral */
+  --color-page: #f7f8fb;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f8fafc;
+  --color-surface-muted: #f3f4f6;
+  --color-surface-faint: #f9fafb;
+  --color-surface-raised: #ffffff;
+  --color-overlay: rgba(15, 23, 42, 0.46);
+  --color-border: #e5e7eb;
+  --color-border-muted: #d1d5db;
+  --color-border-strong: #cbd5e1;
+  --color-focus: #2563eb;
+  --color-text: #111827;
+  --color-text-strong: #374151;
+  --color-text-muted: #64748b;
+  --color-text-subtle: #94a3b8;
+  --color-text-quiet: #6b7280;
+  --color-text-inverse: #ffffff;
+
+  /* Status */
+  --color-success: #16a34a;
+  --color-success-bg: #ecfdf3;
+  --color-success-border: #bbf7d0;
+  --color-warning: #d97706;
+  --color-warning-bg: #fffbeb;
+  --color-warning-border: #fde68a;
+  --color-danger: #dc2626;
+  --color-danger-bg: #fef2f2;
+  --color-danger-border: #fecaca;
+  --color-danger-accent: #ef4444;
+  --color-info: #0284c7;
+  --color-info-bg: #f0f9ff;
+  --color-info-border: #bae6fd;
+  --color-live: #15803d;
+  --color-draft: #b45309;
+  --color-disabled: #9ca3af;
+
+  /* Data visualization */
+  /* Developer console diagrams (dependency graph, dashboard canvas widget
+     palette) — distinct shades from the semantic info/success tokens above;
+     kept as their own named values rather than reused so migrating a
+     hard-coded hex here can never silently shift an unrelated status color. */
+  --color-diagram-input-bg: #dbeafe;
+  --color-diagram-input-border: #93c5fd;
+  --color-diagram-calc-bg: #f0fdf4;
+  --color-diagram-calc-border: #86efac;
+  /* Dashboard canvas widget-type chip palette — grid/automation reuse the
+     diagram tokens above (same shade); the rest are new categorical
+     accents with no existing equivalent. */
+  --color-widget-grid-text: #1d4ed8;
+  --color-widget-chart-bg: #fce7f3;
+  --color-widget-chart-text: #9d174d;
+  --color-widget-form-bg: #fef3c7;
+  --color-widget-form-text: #92400e;
+  --color-widget-integration-bg: #ede9fe;
+  --color-widget-integration-text: #6d28d9;
+  --color-widget-metric-bg: #ecfdf5;
+  --color-widget-metric-text: #065f46;
+  --color-widget-import-bg: #fff7ed;
+  --color-widget-import-text: #9a3412;
+  --color-chart-1: #2563eb;
+  --color-chart-2: #0891b2;
+  --color-chart-3: #059669;
+  --color-chart-4: #ca8a04;
+  --color-chart-5: #dc2626;
+  --color-chart-6: #7c3aed;
+  --color-chart-7: #db2777;
+  --color-chart-8: #0f766e;
+  --color-chart-9: #ea580c;
+  --color-chart-10: #475569;
+  /* Business console planning-grid pivot column-header accent family —
+     deliberately not reusing the developer-console diagram/widget tokens
+     above even where hex values happen to bit-match; those are scoped to
+     the developer console's own subsystem and reusing them here would
+     silently couple two unrelated consoles' colors together. */
+  --color-grid-col-header-bg: #ecfdf5;
+  --color-grid-col-header-border: #a7f3d0;
+  --color-grid-col-header-text: #065f46;
+  --color-grid-col-header-bg-soft: #f0fdf4;
+  --color-grid-col-header-border-soft: #d1fae5;
+  --color-grid-calc-text: #1e40af;
+  --color-grid-row-alt-bg: #fafafa;
+  /* Planning-grid cell roles (Anaplan/Pigment/Board convention): editable
+     cells carry a visible tint + border so a planner can see at a glance
+     where input goes; calculated and read-only cells stay flat/grey. */
+  --color-grid-input-bg: #f4f8ff;
+  --color-grid-input-border: #cfdcf7;
+  --color-grid-input-hover-border: #8fb0ee;
+  /* Workflow editor selection/accent family — the workflow-definition editor
+     (step list, ProcessCanvas, properties panels) has its own selected-state
+     blue and success/warning accents, distinct from the developer/business
+     tokens above even where unrelated. */
+  --color-selected: #3b82f6;
+  --color-selected-bg: #eff6ff;
+  --color-warning-accent: #f59e0b;
+  --color-success-chip-bg: #dcfce7;
+  --color-success-chip-text: #166534;
+
+  /* Layout */
+  --sidebar-width: 260px;
+  /* Drives BOTH the sidebar brand block and the context bar, which sit side
+     by side and each draw a bottom border — see .mvx-app-shell__brand.
+     48px, not 44: the context bar's tallest content (a revision chip) is 32px,
+     which with 7px padding and a 1px border needs 47. At 44 the min-height
+     stopped binding on that side, the bar grew to fit its content, and the two
+     borders missed each other by 3px. */
+  --context-bar-height: 48px;
+  --header-height: 56px;
+  --page-padding-x: 32px;
+  --page-padding-y: 28px;
+  --toolbar-height: 40px;
+  --table-row-height: 42px;
+  --table-row-height-compact: 34px;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+
+  /* Radii */
+  --radius-card: 8px;
+  --radius-panel: 8px;
+  --radius-button: 6px;
+  --radius-badge: 4px;
+  --radius-input: 6px;
+  --radius-pill: 999px;
+
+  /* Shadows */
+  --shadow-card: none;
+  --shadow-raised: 0 1px 2px rgba(15, 23, 42, 0.08);
+  --shadow-popover: 0 12px 32px rgba(15, 23, 42, 0.16);
+  --shadow-modal: 0 24px 56px rgba(15, 23, 42, 0.22);
+
+  /* Typography */
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-size-page-title: 20px;
+  --font-size-section-title: 15px;
+  --font-size-body: 13px;
+  --font-size-body-sm: 12px;
+  --font-size-caption: 11px;
+  --line-height-tight: 1.25;
+  --line-height-body: 1.5;
+
+  /* Motion */
+  --motion-fast: 120ms ease;
+  --motion-normal: 180ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 1ms linear;
+    --motion-normal: 1ms linear;
+  }
+}
+
+.mvx-focus-ring:focus-visible,
+.mvx-button:focus-visible,
+.mvx-icon-button:focus-visible,
+.mvx-input:focus-visible,
+.mvx-select:focus-visible,
+.mvx-textarea:focus-visible,
+.mvx-checkbox:focus-visible,
+.mvx-switch:focus-visible,
+.mvx-tabs__button:focus-visible,
+.mvx-segmented__button:focus-visible,
+.mvx-sidebar-nav__item:focus-visible,
+/* Canvas widgets and their resize handles are focusable so they can be
+   selected, moved and resized from the keyboard; the widget previously set
+   `outline: none` inline, leaving a focusable element with no focus state. */
+.mvx-canvas-widget:focus-visible,
+.mvx-canvas-widget [role="button"]:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.mvx-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-button);
+  font-family: var(--font-sans);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast), box-shadow var(--motion-fast), opacity var(--motion-fast);
+}
+
+.mvx-button:disabled,
+.mvx-button[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.mvx-button--sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.mvx-button--md {
+  height: 36px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+.mvx-button--lg {
+  height: 44px;
+  padding: 0 20px;
+  font-size: 14px;
+}
+
+.mvx-button--primary {
+  background: var(--color-brand-600);
+  border-color: var(--color-brand-600);
+  color: var(--color-text-inverse);
+}
+
+.mvx-button--primary:hover:not(:disabled) {
+  background: var(--color-brand-700);
+  border-color: var(--color-brand-700);
+}
+
+.mvx-button--secondary {
+  background: var(--color-surface);
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+}
+
+.mvx-button--secondary:hover:not(:disabled) {
+  background: var(--color-surface-subtle);
+  border-color: var(--color-border-strong);
+}
+
+.mvx-button--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-text-muted);
+}
+
+.mvx-button--ghost:hover:not(:disabled) {
+  background: var(--color-surface-subtle);
+  color: var(--color-text);
+}
+
+.mvx-button--danger {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  color: var(--color-text-inverse);
+}
+
+.mvx-button--danger:hover:not(:disabled) {
+  background: #b91c1c;
+  border-color: #b91c1c;
+}
+
+.mvx-button--dangerSecondary {
+  background: var(--color-surface);
+  border-color: var(--color-danger-border);
+  color: var(--color-danger);
+}
+
+.mvx-button--dangerSecondary:hover:not(:disabled) {
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger);
+}
+
+.mvx-button__spinner {
+  animation: spin 1s linear infinite;
+}
+
+.mvx-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast), opacity var(--motion-fast);
+}
+
+.mvx-icon-button:hover:not(:disabled) {
+  background: var(--color-surface-subtle);
+  color: var(--color-text);
+}
+
+.mvx-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* A danger button at 55% opacity is still red, and red reads as "armed" — two
+   trash icons side by side, one disabled, looked identical in practice. Drop
+   the colour as well so unavailable is legible at a glance and not only on
+   hover. The :disabled pseudo-class outranks the plain --danger rule, so this
+   applies wherever both match. */
+.mvx-icon-button--danger:disabled {
+  color: var(--color-text-muted);
+}
+
+.mvx-icon-button--danger {
+  color: var(--color-danger);
+}
+
+.mvx-icon-button--danger:hover:not(:disabled) {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.mvx-input,
+.mvx-select,
+.mvx-textarea {
+  width: 100%;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-input);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  transition: border-color var(--motion-fast), box-shadow var(--motion-fast), background var(--motion-fast);
+}
+
+.mvx-input,
+.mvx-select {
+  height: 34px;
+  padding: 0 10px;
+}
+
+.mvx-textarea {
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+  line-height: var(--line-height-body);
+}
+
+.mvx-input:hover:not(:disabled),
+.mvx-select:hover:not(:disabled),
+.mvx-textarea:hover:not(:disabled) {
+  border-color: var(--color-text-subtle);
+}
+
+.mvx-input:focus,
+.mvx-select:focus,
+.mvx-textarea:focus {
+  border-color: var(--color-focus);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  outline: none;
+}
+
+.mvx-input:disabled,
+.mvx-select:disabled,
+.mvx-textarea:disabled {
+  background: var(--color-surface-subtle);
+  color: var(--color-disabled);
+  cursor: not-allowed;
+}
+
+.mvx-input--error,
+.mvx-select--error,
+.mvx-textarea--error {
+  border-color: var(--color-danger);
+}
+
+.mvx-select {
+  appearance: none;
+  padding-right: 28px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+
+/* Hierarchical + searchable dimension-value selector (HierarchicalMemberSelect) —
+   the one shared control every business-user-facing context selector uses
+   (chart widgets, planning grid), replacing the two previously-inconsistent
+   native <select> renderings. */
+.mvx-hier-select__trigger {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  min-width: 120px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-input);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+
+.mvx-hier-select__trigger--full-width {
+  width: 100%;
+}
+
+.mvx-hier-select__trigger:hover:not(:disabled) {
+  border-color: var(--color-text-subtle);
+}
+
+.mvx-hier-select__trigger:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.mvx-hier-select__trigger:disabled {
+  background-color: var(--color-surface-subtle);
+  color: var(--color-disabled);
+  cursor: not-allowed;
+}
+
+.mvx-hier-select__trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mvx-hier-select__popover {
+  z-index: 500;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-modal);
+  min-width: 220px;
+  max-width: 320px;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.mvx-hier-select__search {
+  padding: 8px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.mvx-hier-select__tree {
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.mvx-hier-select__option {
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--color-text);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mvx-hier-select__option:hover {
+  background: var(--color-surface-subtle);
+}
+
+.mvx-hier-select__option--selected {
+  background: var(--color-brand-50);
+  color: var(--color-brand-600);
+  font-weight: 600;
+}
+
+.mvx-hier-select__option--group {
+  cursor: default;
+  color: var(--color-text-subtle);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.mvx-hier-select__option--group:hover {
+  background: transparent;
+}
+
+.mvx-hier-select__option--active {
+  box-shadow: inset 2px 0 0 var(--color-focus);
+}
+
+.mvx-hier-select__empty {
+  padding: 10px;
+  font-size: 12px;
+  color: var(--color-text-subtle);
+  text-align: center;
+}
+
+.mvx-card,
+.mvx-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+}
+
+.mvx-card--raised,
+.mvx-panel--raised {
+  box-shadow: var(--shadow-raised);
+}
+
+.mvx-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 20px;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-badge);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.mvx-badge--neutral {
+  background: var(--color-surface-subtle);
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.mvx-badge--brand {
+  background: var(--color-brand-50);
+  border-color: var(--color-brand-200);
+  color: var(--color-brand-700);
+}
+
+.mvx-badge--info {
+  background: var(--color-info-bg);
+  border-color: var(--color-info-border);
+  color: var(--color-info);
+}
+
+.mvx-badge--success,
+.mvx-badge--live {
+  background: var(--color-success-bg);
+  border-color: var(--color-success-border);
+  color: var(--color-success);
+}
+
+.mvx-badge--warning,
+.mvx-badge--draft {
+  background: var(--color-warning-bg);
+  border-color: var(--color-warning-border);
+  color: var(--color-warning);
+}
+
+.mvx-badge--danger {
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
+  color: var(--color-danger);
+}
+
+.mvx-app-shell {
+  display: flex;
+  min-height: 100vh;
+  background: var(--color-page);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+}
+
+.mvx-app-shell__sidebar {
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+/* Height is shared with .mvx-context-bar deliberately. The two sit side by
+   side at the top of the page and each draws its own bottom border, so any
+   difference in height shows up as two rules that almost line up. Sizing both
+   from --context-bar-height keeps that seam straight no matter how long the
+   brand text is. */
+.mvx-app-shell__brand {
+  min-height: var(--context-bar-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px 7px 18px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.mvx-app-shell__brand-logo img {
+  display: block;
+  height: 28px;
+  width: auto;
+  max-width: 120px;
+}
+
+.mvx-app-shell--sidebar-collapsed .mvx-app-shell__brand-logo {
+  display: none;
+}
+
+.mvx-app-shell__brand-text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+.mvx-app-shell__collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.mvx-app-shell__collapse:hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+
+/* ── Collapsed sidebar (icon rail) ─────────────────────────────────────────
+   ChatGPT-style toggle: the sidebar narrows to an icon-only rail; nav items
+   keep working via their icons (each carries its label as a title tooltip,
+   set by SidebarNav's collapsed prop). Group labels, the brand text, and the
+   footer (persona/console switchers) hide — expanding brings them back. */
+.mvx-app-shell--sidebar-collapsed .mvx-app-shell__sidebar {
+  width: 56px;
+  min-width: 56px;
+}
+
+.mvx-app-shell--sidebar-collapsed .mvx-app-shell__brand {
+  justify-content: center;
+  padding: 7px 0;
+}
+
+.mvx-app-shell--sidebar-collapsed .mvx-app-shell__brand-text,
+.mvx-app-shell--sidebar-collapsed .mvx-app-shell__footer,
+.mvx-app-shell--sidebar-collapsed .mvx-app-shell__sidebar .mvx-sidebar-nav__group-label {
+  display: none;
+}
+
+.mvx-app-shell--sidebar-collapsed .mvx-app-shell__nav {
+  padding: 14px 8px;
+}
+
+/* Scoped to the shell's own sidebar: .mvx-sidebar-nav__item is reused by
+   in-page lists too (the AI Developer session list), and an unscoped rule
+   hid THEIR labels whenever the main sidebar was collapsed (reported
+   live). */
+.mvx-app-shell--sidebar-collapsed .mvx-app-shell__sidebar .mvx-sidebar-nav__item {
+  justify-content: center;
+  padding: 7px;
+  gap: 0;
+}
+
+/* Everything except the icon (label, badge) disappears in rail mode. */
+.mvx-app-shell--sidebar-collapsed .mvx-app-shell__sidebar .mvx-sidebar-nav__item > :not(.mvx-sidebar-nav__icon) {
+  display: none;
+}
+
+/* One line, always: the brand shares its row with the collapse toggle, and
+   a subtitle like "Platform administration" that fit the full width can wrap
+   beside the button on wider font metrics (Linux CI caught this) — growing
+   the brand past --context-bar-height and breaking the border seam the
+   shell-header-alignment gate guards. Ellipsis over wrap. */
+.mvx-app-shell__brand-name {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 16px;
+  font-weight: 800;
+  line-height: var(--line-height-tight);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mvx-app-shell__brand-subtitle {
+  margin-top: 3px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mvx-app-shell__nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 12px;
+}
+
+.mvx-app-shell__footer {
+  padding: 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.mvx-app-shell__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mvx-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.mvx-sidebar-nav__group-label {
+  padding: 0 10px 6px;
+  color: var(--color-text-subtle);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.mvx-sidebar-nav__items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mvx-sidebar-nav__item {
+  width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast);
+}
+
+.mvx-sidebar-nav__item:hover:not(:disabled) {
+  background: var(--color-surface-subtle);
+  color: var(--color-text);
+}
+
+.mvx-sidebar-nav__item--active {
+  background: var(--color-brand-50);
+  border-color: var(--color-brand-100);
+  color: var(--color-brand-700);
+}
+
+.mvx-sidebar-nav__item:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.mvx-sidebar-nav__icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.mvx-sidebar-nav__label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mvx-context-bar {
+  min-height: var(--context-bar-height);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 7px var(--page-padding-x);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  overflow-x: auto;
+}
+
+.mvx-context-bar__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: max-content;
+}
+
+.mvx-context-bar__label {
+  color: var(--color-text-subtle);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.mvx-context-bar__value {
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mvx-context-bar__actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mvx-page {
+  flex: 1;
+  min-width: 0;
+  padding: var(--page-padding-y) var(--page-padding-x);
+  overflow-y: auto;
+}
+
+.mvx-page--narrow {
+  max-width: 960px;
+}
+
+.mvx-page--wide {
+  max-width: 1280px;
+}
+
+.mvx-page__header,
+.mvx-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.mvx-page__title,
+.mvx-section-header__title {
+  margin: 0;
+  color: var(--color-text);
+  font-weight: 800;
+  line-height: var(--line-height-tight);
+}
+
+.mvx-page__title {
+  font-size: var(--font-size-page-title);
+}
+
+.mvx-section-header__title {
+  font-size: var(--font-size-section-title);
+}
+
+.mvx-page__subtitle,
+.mvx-section-header__subtitle {
+  margin-top: 4px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: var(--line-height-body);
+}
+
+.mvx-page__actions,
+.mvx-section-header__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.mvx-toolbar,
+.mvx-filter-bar {
+  min-height: var(--toolbar-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+
+.mvx-toolbar__group,
+.mvx-filter-bar__group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.mvx-toolbar__group--end {
+  margin-left: auto;
+}
+
+.mvx-search {
+  position: relative;
+  min-width: 220px;
+}
+
+.mvx-search__icon {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  transform: translateY(-50%);
+  color: var(--color-text-subtle);
+  pointer-events: none;
+}
+
+.mvx-search .mvx-input {
+  padding-left: 32px;
+}
+
+.mvx-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mvx-filter-chip--active {
+  background: var(--color-brand-50);
+  border-color: var(--color-brand-200);
+  color: var(--color-brand-700);
+}
+
+.mvx-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-5);
+}
+
+.mvx-tabs__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--motion-fast), border-color var(--motion-fast);
+}
+
+.mvx-tabs__button--active {
+  border-bottom-color: var(--color-brand-600);
+  color: var(--color-brand-700);
+}
+
+.mvx-tabs__count {
+  min-width: 16px;
+  padding: 1px 5px;
+  border-radius: var(--radius-pill);
+  background: var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.mvx-tabs__count--active {
+  background: var(--color-brand-600);
+  color: var(--color-text-inverse);
+}
+
+.mvx-segmented {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-button);
+  background: var(--color-surface-subtle);
+}
+
+.mvx-segmented__button {
+  min-height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mvx-segmented__button--active {
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-raised);
+}
+
+.mvx-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+}
+
+.mvx-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.mvx-table th {
+  height: 36px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-subtle);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.mvx-table td {
+  min-height: var(--table-row-height);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+  vertical-align: middle;
+}
+
+.mvx-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.mvx-table tbody tr:hover {
+  background: var(--color-surface-subtle);
+}
+
+.mvx-table--compact td {
+  padding: 7px 10px;
+  min-height: var(--table-row-height-compact);
+}
+
+.mvx-table__empty,
+.mvx-table__loading {
+  padding: var(--space-7);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.mvx-property-panel {
+  width: 320px;
+  min-width: 280px;
+  max-width: 420px;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+}
+
+.mvx-property-panel__header {
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.mvx-property-panel__heading {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.mvx-property-panel__title {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.mvx-property-panel__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+
+.mvx-property-panel__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.mvx-split-pane {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+}
+
+.mvx-split-pane__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.mvx-inline-alert {
+  display: flex;
+  gap: var(--space-2);
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  font-size: 13px;
+  line-height: var(--line-height-body);
+}
+
+.mvx-inline-alert--info {
+  background: var(--color-info-bg);
+  border-color: var(--color-info-border);
+  color: var(--color-info);
+}
+
+.mvx-inline-alert--success {
+  background: var(--color-success-bg);
+  border-color: var(--color-success-border);
+  color: var(--color-success);
+}
+
+.mvx-inline-alert--warning {
+  background: var(--color-warning-bg);
+  border-color: var(--color-warning-border);
+  color: var(--color-warning);
+}
+
+.mvx-inline-alert--danger {
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
+  color: var(--color-danger);
+}
+
+.mvx-field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mvx-checkbox-row,
+.mvx-radio-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.mvx-switch {
+  width: 36px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-border-strong);
+  cursor: pointer;
+  transition: background var(--motion-fast);
+}
+
+.mvx-switch--checked {
+  background: var(--color-brand-600);
+}
+
+.mvx-switch__thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-raised);
+  transform: translateX(0);
+  transition: transform var(--motion-fast);
+}
+
+.mvx-switch--checked .mvx-switch__thumb {
+  transform: translateX(16px);
+}
+
+/* Admin object cards: tenant → application → model → revision hierarchy */
+
+.mvx-admin-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.mvx-admin-object {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+.mvx-admin-object--tenant {
+  border-color: var(--color-border-strong);
+}
+
+.mvx-admin-object__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  background: var(--color-surface-subtle);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Single line, ellipsized: header rows mix the title with controls, and
+   .mvx-select's width:100% makes any select in the row grab all free space —
+   which crushed the title to min-content and wrapped "Country data approval"
+   into the date beside it (reported live). The title yields gracefully
+   instead of wrapping; selects placed in these headers should set an
+   explicit width. */
+.mvx-admin-object__title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mvx-admin-object__name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.mvx-admin-object__meta {
+  font-size: var(--font-size-body-sm);
+  color: var(--color-text-muted);
+}
+
+.mvx-admin-object__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+}
+
+.mvx-admin-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-card);
+  color: var(--color-text-inverse);
+  font-weight: 700;
+  font-size: 15px;
+  flex-shrink: 0;
+  background: var(--color-brand-500);
+}
+
+.mvx-admin-avatar--tenant {
+  background: var(--color-brand-700);
+}
+
+.mvx-admin-model {
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  padding: var(--space-3) var(--space-4);
+}
+
+.mvx-admin-model__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.mvx-admin-model__name {
+  flex: 1;
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.mvx-admin-revisions {
+  margin-top: var(--space-2);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--color-brand-100);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.mvx-admin-revisions__label {
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.mvx-admin-revisions__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  align-self: stretch;
+}
+
+.mvx-admin-revision {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-button);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+}
+
+.mvx-admin-revision--active {
+  background: var(--color-success-bg);
+  border-color: var(--color-success-border);
+}
+
+.mvx-admin-revision--working {
+  background: var(--color-brand-50);
+  border-color: var(--color-brand-200);
+}
+
+.mvx-admin-revision--working .mvx-admin-revision__name {
+  font-weight: 600;
+  color: var(--color-brand-700);
+}
+
+.mvx-admin-revision__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.mvx-admin-revision__name {
+  font-size: var(--font-size-body);
+  color: var(--color-text);
+}
+
+.mvx-admin-revision--active .mvx-admin-revision__name {
+  font-weight: 600;
+  color: var(--color-live);
+}
+
+.mvx-admin-revision__meta {
+  font-size: 10px;
+  color: var(--color-text-subtle);
+  font-family: var(--font-mono);
+}
+
+.mvx-admin-inline-form {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.mvx-admin-inline-form--boxed {
+  padding: var(--space-3) var(--space-4);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-panel);
+}
+
+.mvx-admin-muted {
+  font-size: var(--font-size-body-sm);
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.mvx-admin-error {
+  font-size: var(--font-size-body-sm);
+  color: var(--color-danger);
+  margin: 0;
+}
+
+.mvx-admin-mono {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-caption);
+}
+
+.mvx-badge__remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 2px;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.65;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mvx-badge__remove:hover:not(:disabled) {
+  opacity: 1;
+}
+
+.mvx-toolbar--spaced {
+  margin-bottom: var(--space-5);
+}
+
+/* Tighter variant for toolbars living inside dashboard widgets, where the
+   row above/below is already compact. */
+.mvx-toolbar--tight {
+  margin-bottom: 10px;
+}
+
+/* Wizard stepper */
+.mvx-stepper {
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--space-7);
+}
+
+.mvx-stepper__step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mvx-stepper__dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-body-sm);
+  font-weight: 700;
+  flex-shrink: 0;
+  background: var(--color-border);
+  color: var(--color-text-subtle);
+}
+
+.mvx-stepper__dot--done {
+  background: var(--color-brand-600);
+  color: var(--color-text-inverse);
+}
+
+.mvx-stepper__label {
+  font-size: var(--font-size-body);
+  color: var(--color-text-subtle);
+  white-space: nowrap;
+}
+
+.mvx-stepper__label--reached {
+  color: var(--color-text);
+}
+
+.mvx-stepper__label--current {
+  font-weight: 600;
+}
+
+.mvx-stepper__bar {
+  flex: 1;
+  height: 2px;
+  margin: 0 var(--space-3);
+  background: var(--color-border);
+  min-width: 24px;
+}
+
+.mvx-stepper__bar--done {
+  background: var(--color-brand-600);
+}
+
+/* Import wizard drop zone */
+.mvx-dropzone {
+  border: 2px dashed var(--color-border-strong);
+  border-radius: var(--radius-card);
+  padding: 36px 24px;
+  text-align: center;
+  cursor: pointer;
+  background: var(--color-surface-subtle);
+  transition: border-color var(--motion-fast), background var(--motion-fast);
+  margin-bottom: var(--space-4);
+}
+
+.mvx-dropzone--active {
+  border-color: var(--color-brand-600);
+  background: var(--color-brand-50);
+}
+
+.mvx-dropzone--filled {
+  border-color: var(--color-success-border);
+  background: var(--color-success-bg);
+}
+
+/* AI chat message bubbles */
+.mvx-chat-row {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 12px;
+}
+
+.mvx-chat-row--user {
+  justify-content: flex-end;
+}
+
+.mvx-chat-bubble {
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: 14px 14px 14px 4px;
+  background: var(--color-surface-subtle);
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.mvx-chat-bubble--user {
+  border-radius: 14px 14px 4px 14px;
+  background: var(--color-brand-600);
+  color: var(--color-text-inverse);
+}
+
+.mvx-chat-bubble--pending {
+  color: var(--color-text-muted);
+}
+
+/* Dashboard widget chrome */
+.mvx-widget__header {
+  padding: 6px 12px;
+  background: var(--color-surface-subtle);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  color: var(--color-text);
+  flex-shrink: 0;
+}
+
+.mvx-widget__body {
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+}
+
+.mvx-widget__body--flush {
+  padding: 0;
+}
+
+/* Fill-parent command button for dashboard action widgets */
+.mvx-command-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  width: 100%;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--color-text-inverse);
+  background: var(--color-brand-600);
+  border-radius: var(--radius-card);
+}
+
+.mvx-command-button:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+/* Metric KPI widget */
+.mvx-kpi {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  /* A KPI is a TILE, the way the design canvas draws it: its own surface
+     and edge, so four KPIs abreast read as four cards rather than loose
+     numbers floating across the row (reported live: "preview looks not
+     nice, especially KPIs"). Padding shrinks with the tile (see
+     .mvx-dash-cell--kpi container) so a narrow tile spends its width on
+     the number, not on whitespace. */
+  box-sizing: border-box;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: clamp(10px, 6cqi, 18px) clamp(12px, 7cqi, 22px);
+  height: 100%;
+  min-height: 84px;
+  gap: 4px;
+  overflow: hidden;
+}
+
+/* widget_props.background = "white" on a bare widget type: the same
+   surface a KPI tile gets. */
+.mvx-dash-cell--card {
+  box-sizing: border-box;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+/* widget_props.background = "none" on a KPI: the number straight on the
+   page, no tile. */
+.mvx-kpi--plain {
+  background: transparent;
+  border-color: transparent;
+}
+
+.mvx-kpi__label {
+  font-size: var(--font-size-body-sm);
+  font-weight: 600;
+  color: var(--color-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  /* One line: "Attainment Pct" wrapped into three lines in a narrow tile. */
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mvx-kpi__scope {
+  font-weight: 500;
+  color: var(--color-brand-600);
+}
+
+.mvx-kpi__value {
+  /* The value scales with its own tile (cqi = the KPI cell's inline size,
+     see .mvx-dash-cell--kpi's container-type): four tiles abreast on a
+     laptop, or one narrow designed tile, all keep the number on ONE line —
+     36px fixed + overflow-wrap used to break "100,000" mid-digit. */
+  /* Floor raised from 15px: a narrow tile showed a 15px "0" next to a
+     36px one in the same row. */
+  font-size: clamp(22px, 11cqi, 36px);
+  font-weight: 700;
+  color: var(--color-text);
+  line-height: 1.1;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+.mvx-kpi__accent {
+  height: 3px;
+  width: 40px;
+  background: var(--color-brand-500);
+  border-radius: 2px;
+  margin-top: 6px;
+}
+
+/* Dashboard widget cells: grid-column comes from a custom property (set
+   inline per-widget from pos_x/size_w) rather than the grid-column
+   property directly, specifically so the phone-width override below can
+   win on normal cascade order instead of needing !important against an
+   inline style. */
+.mvx-dash-cell {
+  grid-column: var(--dash-col-start) / span var(--dash-col-span);
+}
+
+/* KPI tiles are size containers so their value text can scale with the
+   tile itself (cqi units) instead of the viewport — a dashboard is
+   "adaptable to size" per-widget, not per-screen. inline-size containment
+   is safe here: the tile's width comes from its grid span, never from its
+   content. */
+.mvx-dash-cell--kpi {
+  container-type: inline-size;
+}
+
+@media (max-width: 480px) {
+  /* Two-plus metric_kpi tiles are commonly placed side by side at desktop
+     widths they were designed for. Below phone width there's no longer
+     room for that — stack them to one per row instead of relying on text
+     wrapping alone to keep the value legible. */
+  .mvx-dash-cell--kpi {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Planning grid cell states (MetricCell / EditableCell treatment).
+   Applied to raw <td>/<input> inside the perf-sensitive planning grid. */
+
+.mvx-cell-input {
+  width: 78px;
+  text-align: right;
+  font-family: inherit;
+  font-size: 13px;
+  border: 1px solid var(--color-grid-input-border);
+  border-radius: var(--radius-badge);
+  padding: 2px 4px;
+  background: var(--color-grid-input-bg);
+  color: var(--color-text-strong);
+}
+
+.mvx-cell-input:hover {
+  border-color: var(--color-grid-input-hover-border);
+}
+
+.mvx-cell-input:focus,
+.mvx-cell-input--active {
+  border-color: var(--color-brand-500);
+  background: var(--color-brand-50);
+  outline: none;
+}
+
+.mvx-cell--readonly {
+  background: var(--color-surface-subtle);
+}
+
+.mvx-cell--agg {
+  background: var(--color-surface-subtle);
+  font-weight: 600;
+}
+
+.mvx-cell--calc {
+  font-weight: 600;
+  color: var(--color-info);
+  background: var(--color-surface-subtle);
+}
+
+/* Legend under a planning grid naming the three cell roles. */
+.mvx-grid-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--color-text-quiet);
+}
+
+.mvx-grid-legend__swatch {
+  display: inline-block;
+  width: 14px;
+  height: 12px;
+  margin-right: 5px;
+  vertical-align: -2px;
+  border-radius: 3px;
+  border: 1px solid var(--color-border);
+}
+
+.mvx-grid-legend__swatch--input {
+  background: var(--color-grid-input-bg);
+  border-color: var(--color-grid-input-border);
+}
+
+.mvx-grid-legend__swatch--calc {
+  background: var(--color-surface-subtle);
+  border-color: var(--color-info);
+}
+
+.mvx-grid-legend__swatch--readonly {
+  background: var(--color-surface-subtle);
+}
+
+/* A row/column member label that pushes its member into the dashboard's
+   shared context on click (see useSyncSetter). */
+.mvx-header-cell--pickable {
+  cursor: pointer;
+}
+
+.mvx-header-cell--pickable:hover {
+  text-decoration: underline dotted;
+}
+
+.mvx-cell--empty {
+  color: var(--color-text-subtle);
+}
+
+.mvx-grid-status {
+  font-size: var(--font-size-body-sm);
+  margin-top: 8px;
+}
+
+.mvx-grid-status--saving { color: var(--color-brand-500); }
+.mvx-grid-status--error { color: var(--color-danger); }
+
+/* Pivot panel drop zones and draggable chips */
+.mvx-pivot-zone {
+  min-height: 40px;
+  padding: 4px;
+  border-radius: var(--radius-panel);
+  border: 1.5px dashed var(--color-border-strong);
+  background: var(--color-surface-subtle);
+  transition: border-color var(--motion-fast), background var(--motion-fast);
+}
+
+.mvx-pivot-zone--over {
+  border-color: var(--color-brand-600);
+  background: var(--color-brand-50);
+}
+
+.mvx-pivot-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: var(--radius-button);
+  margin-bottom: 3px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-raised);
+  cursor: grab;
+  user-select: none;
+}
+
+.mvx-pivot-chip--dragging {
+  opacity: 0.45;
+}
+
+.mvx-pivot-zone__empty {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-caption);
+  text-align: center;
+  padding: 7px 0;
+  font-style: italic;
+}
+
+/* Floating variant: property panel used inside a flex row (e.g. dashboard builder) */
+.mvx-property-panel--floating {
+  width: 280px;
+  min-width: 280px;
+  flex-shrink: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  align-self: flex-start;
+  font-size: 13px;
+}
+
+/* Small uppercase section label inside property panels */
+.mvx-prop-section {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-subtle);
+  font-weight: 600;
+  margin-bottom: 6px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Tree expand/collapse toggle inside tree tables */
+.mvx-tree-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-body-sm);
+  line-height: 1;
+  flex-shrink: 0;
+  border-radius: var(--radius-badge);
+}
+
+.mvx-tree-toggle:hover {
+  color: var(--color-text);
+  background: var(--color-surface-subtle);
+}
+
+/* Integration source tiles */
+.mvx-source-tiles {
+  display: grid;
+  /* Responsive: as many tiles fit at ≥220px; single column on phones. */
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-7);
+}
+@media (max-width: 560px) {
+  .mvx-source-tiles { grid-template-columns: 1fr; }
+}
+
+/* REST API constructor */
+.mvx-api-builder { max-width: 960px; }
+@media (max-width: 900px) {
+  /* Request/response panels stack at tablet widths (they are grid children
+     using auto-fit columns, so this is belt-and-braces for fixed pairs). */
+  .mvx-api-builder [style*="grid-template-columns: 1fr 1fr"] { grid-template-columns: 1fr !important; }
+}
+
+.mvx-source-tile {
+  position: relative;
+  padding: var(--space-4);
+  border-radius: var(--radius-card);
+  text-align: left;
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  font-family: inherit;
+  transition: border-color var(--motion-fast), background var(--motion-fast);
+}
+
+.mvx-source-tile:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+}
+
+.mvx-source-tile--active {
+  border-color: var(--color-brand-600);
+  background: var(--color-brand-50);
+}
+
+.mvx-source-tile:disabled {
+  cursor: not-allowed;
+  background: var(--color-surface-subtle);
+  opacity: 0.7;
+}
+
+.mvx-source-tile__icon {
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-2);
+}
+
+.mvx-source-tile--active .mvx-source-tile__icon {
+  color: var(--color-brand-600);
+}
+
+.mvx-source-tile__title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--color-text);
+  margin-bottom: var(--space-1);
+}
+
+.mvx-source-tile--active .mvx-source-tile__title {
+  color: var(--color-brand-700);
+}
+
+.mvx-source-tile__description {
+  font-size: var(--font-size-body-sm);
+  color: var(--color-text-muted);
+  line-height: var(--line-height-body);
+}
+
+.mvx-source-tile__badge {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+}
+
+/* Click-to-rename object title */
+.mvx-rename-target {
+  background: none;
+  border: none;
+  padding: 0;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--color-text);
+  cursor: text;
+  border-bottom: 1px dashed transparent;
+  font-family: inherit;
+}
+
+.mvx-rename-target:hover {
+  border-bottom-color: var(--color-text-subtle);
+}
+
+/* Brand-tinted banner naming the active application/revision context */
+.mvx-context-banner {
+  padding: 10px 16px;
+  background: var(--color-brand-50);
+  border: 1px solid var(--color-brand-200);
+  border-radius: var(--radius-panel);
+  font-size: var(--font-size-body);
+  color: var(--color-text);
+}
+
+.mvx-context-banner strong {
+  color: var(--color-brand-700);
+}
+
+.mvx-context-banner--warning {
+  background: var(--color-warning-bg);
+  border-color: var(--color-warning-border);
+  color: var(--color-draft);
+}
+
+/* Workflow instance steps and pending-action area */
+
+.mvx-wf-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-body);
+}
+
+.mvx-wf-step__index {
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-caption);
+  width: 16px;
+  text-align: right;
+}
+
+.mvx-wf-step__name {
+  flex: 1;
+  color: var(--color-text);
+}
+
+.mvx-wf-step__comment {
+  color: var(--color-text-muted);
+  font-style: italic;
+  font-size: var(--font-size-body-sm);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mvx-wf-pending {
+  border-top: 1px solid var(--color-warning-border);
+  background: var(--color-warning-bg);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.mvx-wf-pending__label {
+  font-size: var(--font-size-body-sm);
+  font-weight: 600;
+  color: var(--color-draft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mvx-wf-pending__step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--font-size-body);
+}
+
+.mvx-table__group-row {
+  background: var(--color-surface-subtle) !important;
+  font-weight: 600;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.mvx-persona-switcher {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-warning-bg);
+}
+
+.mvx-persona-switcher__label {
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--color-draft);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.mvx-skeleton {
+  display: block;
+  border-radius: var(--radius-button);
+  background: linear-gradient(90deg, #f1f5f9 0%, #e2e8f0 45%, #f1f5f9 90%);
+  background-size: 200% 100%;
+  animation: mvx-skeleton 1.2s ease-in-out infinite;
+}
+
+@keyframes mvx-skeleton {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@media (max-width: 900px) {
+  :root {
+    --sidebar-width: 220px;
+    --page-padding-x: 20px;
+    --page-padding-y: 20px;
+  }
+
+  .mvx-app-shell {
+    flex-direction: column;
+  }
+
+  .mvx-app-shell__sidebar {
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    position: relative;
+  }
+
+  .mvx-app-shell__nav {
+    max-height: 260px;
+  }
+
+  .mvx-page__header,
+  .mvx-section-header {
+    flex-direction: column;
+  }
+
+  .mvx-page__actions,
+  .mvx-section-header__actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  /* Below 900px the sidebar becomes a full-width top bar — an icon rail
+     makes no sense there, so the collapsed state is neutralized and the
+     toggle hidden until the layout is side-by-side again. */
+  .mvx-app-shell--sidebar-collapsed .mvx-app-shell__sidebar {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .mvx-app-shell--sidebar-collapsed .mvx-app-shell__brand {
+    justify-content: space-between;
+    padding: 7px 10px 7px 18px;
+  }
+
+  .mvx-app-shell--sidebar-collapsed .mvx-app-shell__brand-text {
+    display: flex;
+  }
+
+  .mvx-app-shell--sidebar-collapsed .mvx-app-shell__footer,
+  .mvx-app-shell--sidebar-collapsed .mvx-app-shell__sidebar .mvx-sidebar-nav__group-label,
+  .mvx-app-shell--sidebar-collapsed .mvx-app-shell__sidebar .mvx-sidebar-nav__item > :not(.mvx-sidebar-nav__icon) {
+    display: revert;
+  }
+
+  .mvx-app-shell--sidebar-collapsed .mvx-app-shell__sidebar .mvx-sidebar-nav__item {
+    justify-content: flex-start;
+    padding: 7px 10px;
+    gap: 9px;
+  }
+
+  .mvx-app-shell__collapse {
+    display: none;
+  }
+}
+
+/* ── Account menu (top-right) ──────────────────────────────────────────────
+   Sits beside the notification bell in the context bar's actions slot. The
+   trigger matches .mvx-icon-button's 32px footprint so the two line up. */
+.mvx-user-menu__trigger {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  background: var(--color-surface-subtle);
+  color: var(--color-text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.mvx-user-menu__trigger:hover,
+.mvx-user-menu__trigger[aria-expanded="true"] {
+  background: var(--color-surface-raised);
+  border-color: var(--color-border-strong);
+}
+
+/* Fixed and portalled to <body>, with top/left supplied by the component.
+   Absolute positioning put it inside .mvx-context-bar, whose overflow-x: auto
+   clips on BOTH axes, so the panel was cut off at the bar's edge and every
+   click passed through to the page behind it. */
+.mvx-user-menu__popover {
+  position: fixed;
+  z-index: 60;
+  width: 232px;
+  min-width: 232px;
+  padding: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-popover);
+}
+
+.mvx-user-menu__identity {
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 6px;
+}
+
+.mvx-user-menu__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Addresses are long and must not widen the popover past its min-width. */
+.mvx-user-menu__email {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  word-break: break-all;
+}
+
+.mvx-user-menu__roles {
+  margin-top: 6px;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.mvx-user-menu__edition {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.mvx-user-menu__action {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: var(--color-text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mvx-user-menu__action:hover {
+  background: var(--color-surface-subtle);
+}

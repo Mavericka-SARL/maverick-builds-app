@@ -1,0 +1,236 @@
+version: "3.9"
+
+# Usage:
+#   make dev-up          — core services (Postgres, PgBouncer, NATS, Redis, Keycloak, MinIO)
+#   make obs-up          — observability stack (Prometheus, Loki, Tempo, Grafana, OTel Collector)
+#   make dev-down        — stop everything
+
+services:
+
+  # ── Data ──────────────────────────────────────────────────────────────────────
+
+  postgres:
+    build: ./postgres-walg
+    # WAL archiving: wal_level=replica enables streaming replication and
+    # PITR. archive_command/restore_command invoke wal-g, which pushes/
+    # fetches WAL segments straight to MinIO (s3://mavericks-backups/wal)
+    # — no local disk archive needed. Verified live: real base backup +
+    # WAL segments, real restore to an arbitrary timestamp between two
+    # marker rows, confirmed the earlier one survived and the later one
+    # didn't (see deploy/k8s/base/infra/postgres.yaml's header comment
+    # for the exact restore steps — identical here).
+    command: >
+      postgres
+      -c wal_level=replica
+      -c archive_mode=on
+      -c archive_command='wal-g wal-push %p'
+      -c restore_command='wal-g wal-fetch %f %p'
+      -c max_wal_senders=3
+      -c wal_keep_size=512MB
+      -c hot_standby=on
+    environment:
+      POSTGRES_USER: mavericks
+      POSTGRES_PASSWORD: mavericks
+      POSTGRES_DB: mavericks
+      AWS_ENDPOINT: http://minio:9000
+      AWS_ACCESS_KEY_ID: mavericks
+      AWS_SECRET_ACCESS_KEY: mavericks123
+      AWS_S3_FORCE_PATH_STYLE: "true"
+      AWS_REGION: us-east-1
+      WALG_S3_PREFIX: s3://mavericks-backups/wal
+      WALG_COMPRESSION_METHOD: lz4
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mavericks"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Periodic WAL-G base backup — the starting point WAL replay needs for
+  # PITR; continuous wal-g wal-push archiving above alone isn't enough.
+  # Same image as postgres itself, sharing its data volume read-only.
+  wal-g-basebackup:
+    build: ./postgres-walg
+    entrypoint: ["basebackup-loop.sh"]
+    environment:
+      PGDATA: /var/lib/postgresql/data
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: mavericks
+      PGPASSWORD: mavericks
+      PGDATABASE: mavericks
+      AWS_ENDPOINT: http://minio:9000
+      AWS_ACCESS_KEY_ID: mavericks
+      AWS_SECRET_ACCESS_KEY: mavericks123
+      AWS_S3_FORCE_PATH_STYLE: "true"
+      AWS_REGION: us-east-1
+      WALG_S3_PREFIX: s3://mavericks-backups/wal
+      WALG_COMPRESSION_METHOD: lz4
+      WALG_BACKUP_INTERVAL_SECS: "86400"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    environment:
+      POSTGRESQL_HOST: postgres
+      POSTGRESQL_PORT: 5432
+      POSTGRESQL_USERNAME: mavericks
+      POSTGRESQL_PASSWORD: mavericks
+      POSTGRESQL_DATABASE: mavericks
+      PGBOUNCER_PORT: 5433
+      PGBOUNCER_POOL_MODE: transaction
+      PGBOUNCER_MAX_CLIENT_CONN: 200
+      PGBOUNCER_DEFAULT_POOL_SIZE: 20
+    ports:
+      - "5433:5433"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── Messaging ─────────────────────────────────────────────────────────────────
+
+  nats:
+    image: nats:2.10-alpine
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"   # monitoring UI
+
+  # ── Cache ─────────────────────────────────────────────────────────────────────
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Identity ──────────────────────────────────────────────────────────────────
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    command: start-dev --import-realm
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: dev-mem
+    volumes:
+      - ./config/keycloak:/opt/keycloak/data/import
+    ports:
+      - "8180:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
+  # ── Object Storage ────────────────────────────────────────────────────────────
+
+  minio:
+    image: quay.io/minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: mavericks
+      MINIO_ROOT_PASSWORD: mavericks123
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── Observability ─────────────────────────────────────────────────────────────
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.100.0
+    command: ["--config=/etc/otel/otel-collector.yml"]
+    volumes:
+      - ./config/otel-collector.yml:/etc/otel/otel-collector.yml
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8888:8888"   # collector self-metrics (Prometheus scrape)
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+    profiles: [observability]
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-remote-write-receiver"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    profiles: [observability]
+
+  loki:
+    image: grafana/loki:3.0.0
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ./config/loki.yml:/etc/loki/loki.yml
+      - loki_data:/loki
+    ports:
+      - "3100:3100"
+    profiles: [observability]
+
+  tempo:
+    image: grafana/tempo:2.5.0
+    command: ["-config.file=/etc/tempo/tempo.yml"]
+    volumes:
+      - ./config/tempo.yml:/etc/tempo/tempo.yml
+      - tempo_data:/var/tempo
+    ports:
+      - "3200:3200"   # Tempo HTTP API
+      - "9411:9411"   # Zipcon (optional)
+    profiles: [observability]
+
+  grafana:
+    image: grafana/grafana:11.0.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_FEATURE_TOGGLES_ENABLE: traceqlEditor
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+    profiles: [observability]
+
+volumes:
+  postgres_data:
+  minio_data:
+  prometheus_data:
+  loki_data:
+  tempo_data:
+  grafana_data:

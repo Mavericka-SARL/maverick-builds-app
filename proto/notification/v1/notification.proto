@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package notification.v1;
+
+option go_package = "github.com/mavericks-engine/mavericks/gen/go/notification/v1;notificationv1";
+
+import "google/protobuf/timestamp.proto";
+
+service NotificationService {
+  rpc SendNotification(SendNotificationRequest) returns (SendNotificationResponse);
+  rpc ListNotifications(ListNotificationsRequest) returns (ListNotificationsResponse);
+  rpc MarkRead(MarkReadRequest) returns (MarkReadResponse);
+}
+
+enum NotificationChannel {
+  NOTIFICATION_CHANNEL_UNSPECIFIED = 0;
+  NOTIFICATION_CHANNEL_IN_APP = 1;
+  NOTIFICATION_CHANNEL_EMAIL = 2;
+  NOTIFICATION_CHANNEL_WEBHOOK = 3;
+}
+
+enum NotificationStatus {
+  NOTIFICATION_STATUS_UNSPECIFIED = 0;
+  NOTIFICATION_STATUS_PENDING = 1;
+  NOTIFICATION_STATUS_DELIVERED = 2;
+  NOTIFICATION_STATUS_FAILED = 3;
+  NOTIFICATION_STATUS_READ = 4;
+}
+
+message Notification {
+  string id = 1;
+  string recipient_user_id = 2;
+  NotificationChannel channel = 3;
+  string template_id = 4;
+  map<string, string> template_vars = 5;
+  NotificationStatus status = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp delivered_at = 8;
+}
+
+message SendNotificationRequest {
+  string recipient_user_id = 1;
+  NotificationChannel channel = 2;
+  string template_id = 3;
+  map<string, string> template_vars = 4;
+}
+message SendNotificationResponse { string notification_id = 1; }
+
+message ListNotificationsRequest { string user_id = 1; bool unread_only = 2; int32 page_size = 3; string page_token = 4; }
+message ListNotificationsResponse { repeated Notification notifications = 1; string next_page_token = 2; }
+
+message MarkReadRequest { repeated string notification_ids = 1; }
+message MarkReadResponse { int32 updated_count = 1; }

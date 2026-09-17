@@ -1,0 +1,109 @@
+syntax = "proto3";
+
+package tenant.v1;
+
+option go_package = "github.com/mavericks-engine/mavericks/gen/go/tenant/v1;tenantv1";
+
+import "google/protobuf/timestamp.proto";
+import "common/v1/common.proto";
+
+service TenantService {
+  rpc CreateCustomer(CreateCustomerRequest) returns (CreateCustomerResponse);
+  rpc GetCustomer(GetCustomerRequest) returns (GetCustomerResponse);
+  rpc CreateWorkspace(CreateWorkspaceRequest) returns (CreateWorkspaceResponse);
+  rpc GetWorkspace(GetWorkspaceRequest) returns (GetWorkspaceResponse);
+  rpc ListWorkspaces(ListWorkspacesRequest) returns (ListWorkspacesResponse);
+  rpc CreateApplication(CreateApplicationRequest) returns (CreateApplicationResponse);
+  rpc GetApplication(GetApplicationRequest) returns (GetApplicationResponse);
+  rpc ListApplications(ListApplicationsRequest) returns (ListApplicationsResponse);
+  rpc CreateModel(CreateModelRequest) returns (CreateModelResponse);
+  rpc GetModel(GetModelRequest) returns (GetModelResponse);
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+}
+
+enum ApplicationMode {
+  APPLICATION_MODE_UNSPECIFIED = 0;
+  APPLICATION_MODE_PLANNING = 1;
+  APPLICATION_MODE_CRUD = 2;
+  APPLICATION_MODE_EXECUTION = 3;
+}
+
+enum ApplicationStatus {
+  APPLICATION_STATUS_UNSPECIFIED = 0;
+  APPLICATION_STATUS_DRAFT = 1;
+  APPLICATION_STATUS_PUBLISHED = 2;
+  APPLICATION_STATUS_ARCHIVED = 3;
+}
+
+message Customer {
+  string id = 1;
+  string name = 2;
+  string plan = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message Workspace {
+  string id = 1;
+  string customer_id = 2;
+  string name = 3;
+  map<string, string> settings = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message Application {
+  string id = 1;
+  string workspace_id = 2;
+  string name = 3;
+  ApplicationMode mode = 4;
+  ApplicationStatus status = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message CreateCustomerRequest { string name = 1; string plan = 2; }
+message CreateCustomerResponse { Customer customer = 1; }
+
+message GetCustomerRequest { string customer_id = 1; }
+message GetCustomerResponse { Customer customer = 1; }
+
+message CreateWorkspaceRequest { string customer_id = 1; string name = 2; }
+message CreateWorkspaceResponse { Workspace workspace = 1; }
+
+message GetWorkspaceRequest { string workspace_id = 1; }
+message GetWorkspaceResponse { Workspace workspace = 1; }
+
+message ListWorkspacesRequest { string customer_id = 1; common.v1.PageRequest page = 2; }
+message ListWorkspacesResponse { repeated Workspace workspaces = 1; common.v1.PageResponse page = 2; }
+
+message CreateApplicationRequest {
+  string workspace_id = 1;
+  string name = 2;
+  ApplicationMode mode = 3;
+}
+message CreateApplicationResponse { Application application = 1; }
+
+message GetApplicationRequest { string application_id = 1; }
+message GetApplicationResponse { Application application = 1; }
+
+message ListApplicationsRequest { string workspace_id = 1; common.v1.PageRequest page = 2; }
+message ListApplicationsResponse { repeated Application applications = 1; common.v1.PageResponse page = 2; }
+
+message Model {
+  string id = 1;
+  string application_id = 2;
+  string name = 3;
+  string storage_type = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message CreateModelRequest {
+  string application_id = 1;
+  string name = 2;
+  string storage_type = 3;
+}
+message CreateModelResponse { Model model = 1; }
+
+message GetModelRequest { string model_id = 1; }
+message GetModelResponse { Model model = 1; }
+
+message ListModelsRequest { string application_id = 1; common.v1.PageRequest page = 2; }
+message ListModelsResponse { repeated Model models = 1; common.v1.PageResponse page = 2; }

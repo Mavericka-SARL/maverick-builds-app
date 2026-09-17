@@ -1,0 +1,67 @@
+<h2>Limits and what is not supported</h2>
+<p>Stated plainly so you do not design around features that are not there. Each item is either explicitly marked as not implemented in the product's own specifications or is absent from the console.</p>
+<table>
+<tr><th style="width:22%">Area</th><th>Not supported today</th></tr>
+<tr><td>Formulas</td><td>Cell addresses, SUMIF-family conditional aggregation, XLOOKUP/INDEX/MATCH, dotted property references, PARENT/CHILDREN functions, cross-period offsets, JavaScript/Python/SQL formulas.</td></tr>
+<tr><td>Dimensions</td><td>Building a derived dimension from member properties in the console (schema exists, UI is partial); import preview and explicit sort/move controls in the member tree.</td></tr>
+<tr><td>Grids</td><td>Renaming a grid; a metric in more than one grid; collapsing hierarchy levels in the rendered grid (use the grid's Show level instead).</td></tr>
+<tr><td>Dashboards</td><td>Undo/redo, canvas zoom, alignment guides, layout templates, breakpoint preview; form-backed chart sources.</td></tr>
+<tr><td>Workflows</td><td>Drag-and-drop or edge drawing on the canvas (edit in the step list and panel); timeouts, escalations and reminders (SLA hours is informational); unpublish (archive instead); time-scheduled workflow starts; full BPMN.</td></tr>
+<tr><td>Triggers</td><td>Conditions or actions on the rule itself (they belong to workflow steps); scheduled rules.</td></tr>
+<tr><td>Integrations</td><td>Supabase (marked coming soon); OAuth authorization-code flows (client credentials only); Google Sheets through a Google account (link-shared only).</td></tr>
+<tr><td>AI Developer</td><td>Creating workflows, forms, triggers or integrations; a full rollback history of executed plans.</td></tr>
+<tr><td>Users</td><td>Granting developer or administrator roles; deciding application and model access (administrators); business roles, dashboard grants and access rules (Business Admin console).</td></tr>
+<tr><td>Revisions</td><td>Export and import of a revision package (tenant administrators only); a separate "version" axis.</td></tr>
+<tr><td>Audit</td><td>No audit screen for the developer role.</td></tr>
+</table>
+
+<h2>Troubleshooting</h2>
+<table>
+<tr><th style="width:36%">Symptom</th><th>Cause and fix</th></tr>
+<tr><td>Objects you created are missing, or turned up in another application</td><td>They went into the revision that was selected at the time. Models › click the right revision row; check <b>Model</b> and <b>Revision</b> in the context bar. Delete the strays where they landed.</td></tr>
+<tr><td>Business users see an older model, or nothing</td><td>Your revision is not active, or the model is not the business default. Models › <b>Set active</b>, <b>Set as business default</b>.</td></tr>
+<tr><td>A business user cannot see a dashboard</td><td>No business role of theirs has the dashboard. Business Admin › Roles › Configure › tick the dashboard › <b>Save dashboard access</b>.</td></tr>
+<tr><td>Add metric stays disabled</td><td>A formula reference is unknown (red "✗ unknown" badge) or a Rate rule lacks an operand. Create the referenced inputs first; names are snake_case.</td></tr>
+<tr><td>A metric will not tick in a grid</td><td>It already belongs to another grid; untick it there first.</td></tr>
+<tr><td>Calculated cells show $0 or blank</td><td>Inputs were not committed (press Enter or leave the cell), or metric and grid are in different revisions. A blank means no input exists at that intersection.</td></tr>
+<tr><td>A cell cannot be edited</td><td>It is calculated, a parent total, read-only or hidden by an access rule, in a locked workflow scope, or the revision is system-managed. The grid legend and "Save failed: …" message name the reason.</td></tr>
+<tr><td>Preview shows no editable cells</td><td>The grid has no input metrics, or the widget points at a different grid. Grids › Configure.</td></tr>
+<tr><td>Chart widget will not add</td><td>Configuration incomplete: needs a type, a plotted dimension and the required metrics (two distinct ones for scatter).</td></tr>
+<tr><td>Trigger button on a dashboard is disabled</td><td>The rule is disabled, not manual, or gone. Triggers › enable it or pick another rule in Widget Properties.</td></tr>
+<tr><td>Validate reports a loop or unreachable step</td><td>Put a task or approval on the loop or route forward; give the step a route from the first step. Remember that a step without routes falls through to the next in list order.</td></tr>
+<tr><td>Test Run or Publish is disabled</td><td>Unsaved changes. Save first.</td></tr>
+<tr><td>"Event … not found in catalog" on a workflow</td><td>The form or integration that supplied the event was deleted. Pick another event under Starts on.</td></tr>
+<tr><td>Workflow start refused as a duplicate</td><td>"One active instance per scope" is on and an instance with the same members is running. Turn it off for per-request processes, or finish the running instance.</td></tr>
+<tr><td>Import rows rejected</td><td>Wrong member codes, a calculated metric as target, a locked scope, or hidden/read-only members for your user. Fix the file or the rule; use Validate before Commit.</td></tr>
+<tr><td>REST integration cannot be activated</td><td>Activation needs a successful test of the current configuration on the Response step.</td></tr>
+<tr><td>AI Developer refuses to chat</td><td>No API key. AI Settings › provider, model, key › Save settings.</td></tr>
+<tr><td>Unsaved-changes dialog when leaving</td><td>The dashboard canvas or workflow editor has a draft. Save or Cancel.</td></tr>
+</table>
+
+<h2>Glossary</h2>
+<table class="kv">
+<tr><td>Active revision</td><td>The one revision of a model that business users see and edit.</td></tr>
+<tr><td>Access rule</td><td>Per-user write, read or hidden setting on a member or metric, cascading to descendants.</td></tr>
+<tr><td>Aggregation rule</td><td>How a metric's member values combine into totals: Sum, Average, Count, Rate, Formula.</td></tr>
+<tr><td>Automation rule (trigger)</td><td>Event → workflow. Manual rules power dashboard Trigger buttons.</td></tr>
+<tr><td>Business default</td><td>The model of an application that business consoles open.</td></tr>
+<tr><td>Business role</td><td>A named group of users (managed in Business Admin) that dashboards are granted to and tasks assigned to.</td></tr>
+<tr><td>Calculated metric</td><td>A metric defined by a formula; read-only.</td></tr>
+<tr><td>Code</td><td>The identity of a dimension member; labels are display only.</td></tr>
+<tr><td>Context / selectors</td><td>The dimensions a widget lets the user choose; synced widgets share one selector per dimension.</td></tr>
+<tr><td>Form mapping</td><td>Rule that posts a form field into an input metric (Integrations › Form Records).</td></tr>
+<tr><td>Grid</td><td>A set of metrics and dimensions shown as one table; a metric sits in at most one grid.</td></tr>
+<tr><td>Instance</td><td>One run of a workflow; keeps the definition it started with.</td></tr>
+<tr><td>Input metric</td><td>A metric users type into, import or post to.</td></tr>
+<tr><td>Intersection</td><td>One metric at one member per dimension; where a value lives.</td></tr>
+<tr><td>Leaf / root</td><td>A member without children / without a parent.</td></tr>
+<tr><td>Lock</td><td>Write protection of a scope while a workflow instance about it is in progress or approved.</td></tr>
+<tr><td>Revision</td><td>The unit of change; a complete copy of a model's definitions and values.</td></tr>
+<tr><td>System-managed revision</td><td>A revision written only by workflow approvals; read-only otherwise.</td></tr>
+<tr><td>Task</td><td>A workflow step waiting for a person, shown in the Workflow Inbox.</td></tr>
+<tr><td>Widget</td><td>One element on a dashboard: grid, chart, form, KPI, trigger, integration, text, import.</td></tr>
+<tr><td>Workflow object</td><td>What a workflow is about: a grid, a metric in a grid, or form records; defines its lock scope.</td></tr>
+</table>
+
+</body>
+</html>

@@ -1,0 +1,28 @@
+# Direct LoadBalancer to the gateway, for dev clusters only.
+#
+# Moved out of base when TLS moved in-cluster to ingress-nginx: in prod this
+# would be a second Hetzner load balancer serving the API over plain HTTP,
+# which defeats the Ingress. Dev usually has neither an Ingress controller nor
+# a DNS record, so a direct port-80 LoadBalancer is the pragmatic way in.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-lb
+  namespace: mavericks
+  labels:
+    app: gateway
+    app.kubernetes.io/name: gateway
+    app.kubernetes.io/component: api-gateway-lb
+    app.kubernetes.io/part-of: mavericks-engine
+  annotations:
+    load-balancer.hetzner.cloud/name: "mavericks-gateway-dev"
+    load-balancer.hetzner.cloud/use-private-ip: "true"
+spec:
+  type: LoadBalancer
+  selector:
+    app: gateway
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP

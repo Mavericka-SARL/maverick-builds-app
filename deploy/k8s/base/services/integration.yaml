@@ -1,0 +1,96 @@
+# Integration worker — the ONLY process that executes REST-connector
+# requests. Claims runs from the durable Postgres queue (FOR UPDATE SKIP
+# LOCKED) and fires due schedules. The gateway only validates/persists/
+# enqueues. Egress is deny-by-default via networkpolicy.yaml's `integration`
+# policy: DNS + pgbouncer + external 443 ONLY — no other in-cluster service
+# is reachable even before internal/integration's in-process destination
+# rules refuse them (defense in depth).
+#
+# No Service object: nothing dials the worker; its :9090 health endpoint is
+# probed locally by grpc-health-probe (mTLS flags arrive via the prod
+# overlay's component=service patch, like every other service).
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: integration
+  namespace: mavericks
+  labels:
+    app: integration
+    app.kubernetes.io/name: integration
+    app.kubernetes.io/component: service
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: integration
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: integration
+        app.kubernetes.io/name: integration
+        app.kubernetes.io/component: service
+        app.kubernetes.io/part-of: mavericks-engine
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: integration
+          image: ghcr.io/konstantintokarev/mavericks/integration:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: grpc
+              containerPort: 9090
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: mavericks-config
+            - secretRef:
+                name: mavericks-secrets
+            # INTEGRATION_CRED_KEY lives in its own secret (also mounted by
+            # the gateway, which seals credentials at write time). optional
+            # so dev clusters boot without it — credential operations then
+            # fail loudly instead of falling back to plaintext.
+            - secretRef:
+                name: mavericks-integration
+                optional: true
+          env:
+            - name: DATABASE_URL
+              value: "postgres://mavericks:$(POSTGRES_PASSWORD)@pgbouncer:5433/mavericks?sslmode=disable"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "96Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            exec:
+              command:
+                - grpc-health-probe
+                - -addr=:9090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - grpc-health-probe
+                - -addr=:9090
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+      securityContext:
+        fsGroup: 65534

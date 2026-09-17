@@ -1,0 +1,1 @@
+ALTER TABLE model.dashboard_def ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';

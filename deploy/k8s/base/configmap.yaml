@@ -1,0 +1,52 @@
+# Non-sensitive runtime configuration shared across all Mavericks services.
+# Secrets (passwords, tokens) live in mavericks-secrets and are NOT here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mavericks-config
+  namespace: mavericks
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/part-of: mavericks-engine
+data:
+  # PostgreSQL connection via PgBouncer (transaction pool mode, port 5433).
+  # DATABASE_URL is NOT set here: envFrom (used to inject this ConfigMap)
+  # never performs $(VAR) expansion on the values it contributes — only a
+  # container's own explicit `env:` list does that, and only by referencing
+  # a variable already present in the environment (including one already
+  # contributed by envFrom). Each service manifest therefore composes its
+  # own DATABASE_URL via an explicit `env:` entry referencing
+  # $(POSTGRES_PASSWORD), which mavericks-secrets already provides via
+  # envFrom's secretRef. See any services/*.yaml for the pattern.
+
+  # Policy Service (RACI / permission checks)
+  POLICY_ADDR: "policy:9090"
+
+  # Audit Service (records mutating-RPC audit events for every gRPC service)
+  AUDIT_ADDR: "audit:9090"
+
+  # NATS JetStream broker
+  NATS_URL: "nats://nats:4222"
+
+  # Redis cache / session store
+  REDIS_URL: "redis://redis:6379"
+
+  # Keycloak identity provider (internal cluster address)
+  KEYCLOAK_URL: "http://keycloak:8080"
+  KEYCLOAK_REALM: "mavericks"
+
+  # MinIO object storage (S3-compatible). MINIO_ROOT_USER is plain
+  # (non-secret) config, matching infra/minio.yaml's own pod env; the
+  # password counterpart is in mavericks-secrets (MINIO_ROOT_PASSWORD).
+  # Previously only MinIO's own pod had MINIO_ROOT_USER — consumers (the
+  # gateway) had no way to authenticate against it until this key was added.
+  MINIO_URL: "http://minio:9000"
+  MINIO_ROOT_USER: "mavericks"
+  OBJECT_STORE_BUCKET: "mavericks"
+
+  # Default listener ports for service binaries
+  GRPC_PORT: "9090"
+  HTTP_PORT: "8080"
+
+  # OpenTelemetry collector endpoint (no schema — gRPC plain-text)
+  OTEL_ENDPOINT: "otel-collector:4317"

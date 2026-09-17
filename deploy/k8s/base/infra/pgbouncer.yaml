@@ -1,0 +1,119 @@
+# PgBouncer — connection pooler in front of PostgreSQL.
+# Transaction pool mode reduces Postgres connection overhead for short-lived
+# application queries. Listens on port 5433 so services can reach it at
+# pgbouncer:5433 while Postgres itself stays on 5432.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgbouncer
+  namespace: mavericks
+  labels:
+    app: pgbouncer
+    app.kubernetes.io/name: pgbouncer
+    app.kubernetes.io/component: database-proxy
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pgbouncer
+  strategy:
+    # Recreate avoids two instances holding connections simultaneously during
+    # a config change; switch to RollingUpdate once you have proper draining.
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: pgbouncer
+        app.kubernetes.io/name: pgbouncer
+        app.kubernetes.io/component: database-proxy
+        app.kubernetes.io/part-of: mavericks-engine
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: pgbouncer
+          image: edoburu/pgbouncer:v1.25.2-p0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: pgbouncer
+              containerPort: 5433
+              protocol: TCP
+          env:
+            # edoburu/pgbouncer's env contract, as of v1.25: DB_* for the
+            # upstream database and bare names (LISTEN_PORT, POOL_MODE, ...)
+            # for pgbouncer.ini settings. The older POSTGRESQL_*/PGBOUNCER_*
+            # names this file used were silently ignored by the newer image,
+            # which then exited with "You must set DB_HOST env" — verified by
+            # reading the image's own entrypoint rather than guessing.
+            - name: DB_HOST
+              value: "postgres"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              value: "mavericks"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mavericks-secrets
+                  key: POSTGRES_PASSWORD
+            - name: DB_NAME
+              value: "mavericks"
+            - name: LISTEN_PORT
+              value: "5433"
+            # Postgres 16 authenticates with scram-sha-256. pgbouncer's
+            # default (md5) makes it store the wrong credential shape and the
+            # upstream login fails with "wrong password type (SQLSTATE 08P01)"
+            # — the client connects to pgbouncer fine, then pgbouncer cannot
+            # log in to postgres.
+            - name: AUTH_TYPE
+              value: "scram-sha-256"
+            - name: POOL_MODE
+              value: "transaction"
+            - name: MAX_CLIENT_CONN
+              value: "200"
+            - name: DEFAULT_POOL_SIZE
+              value: "25"
+            # Minimum TLS version for upstream Postgres connections.
+            - name: SERVER_TLS_SSLMODE
+              value: "disable"   # set to "require" once Postgres has TLS configured
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          readinessProbe:
+            tcpSocket:
+              port: 5433
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: 5433
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgbouncer
+  namespace: mavericks
+  labels:
+    app: pgbouncer
+    app.kubernetes.io/name: pgbouncer
+    app.kubernetes.io/component: database-proxy
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  type: ClusterIP
+  selector:
+    app: pgbouncer
+  ports:
+    - name: pgbouncer
+      port: 5433
+      targetPort: 5433
+      protocol: TCP

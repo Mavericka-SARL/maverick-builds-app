@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package aiassistant.v1;
+
+option go_package = "github.com/mavericks-engine/mavericks/gen/go/aiassistant/v1;aiassistantv1";
+
+import "google/protobuf/timestamp.proto";
+import "common/v1/common.proto";
+
+service AIAssistantService {
+  rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
+  rpc GenerateDiff(GenerateDiffRequest) returns (GenerateDiffResponse);
+  rpc RunInSandbox(RunInSandboxRequest) returns (RunInSandboxResponse);
+  rpc ApplyDiff(ApplyDiffRequest) returns (ApplyDiffResponse);
+  rpc RollbackAction(RollbackActionRequest) returns (RollbackActionResponse);
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+}
+
+enum ActionType {
+  ACTION_TYPE_UNSPECIFIED = 0;
+  ACTION_TYPE_ADD_METRIC = 1;
+  ACTION_TYPE_MODIFY_FORMULA = 2;
+  ACTION_TYPE_ADD_DIMENSION = 3;
+  ACTION_TYPE_MODIFY_POLICY = 4;
+  ACTION_TYPE_ADD_WORKFLOW = 5;
+  ACTION_TYPE_GENERATE_MIGRATION = 6;
+}
+
+message FileDiff {
+  string path = 1;
+  string before = 2;
+  string after = 3;
+  string diff = 4;
+}
+
+message ImpactSummary {
+  repeated string affected_metrics = 1;
+  repeated string affected_policies = 2;
+  repeated string required_migrations = 3;
+  repeated string warnings = 4;
+}
+
+message AssistantSession {
+  string id = 1;
+  string application_id = 2;
+  common.v1.Actor actor = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message AssistantAction {
+  string id = 1;
+  string session_id = 2;
+  ActionType action_type = 3;
+  string prompt = 4;
+  repeated FileDiff diffs = 5;
+  ImpactSummary impact = 6;
+  bool applied = 7;
+  string rollback_action_id = 8;
+  google.protobuf.Timestamp created_at = 9;
+}
+
+message StartSessionRequest { string application_id = 1; common.v1.Actor actor = 2; }
+message StartSessionResponse { AssistantSession session = 1; }
+
+message GenerateDiffRequest { string session_id = 1; ActionType action_type = 2; string prompt = 3; }
+message GenerateDiffResponse { AssistantAction action = 1; }
+
+message RunInSandboxRequest { string action_id = 1; }
+message RunInSandboxResponse { bool success = 1; string output = 2; string error = 3; }
+
+message ApplyDiffRequest { string action_id = 1; }
+message ApplyDiffResponse { bool success = 1; string deployment_job_id = 2; }
+
+message RollbackActionRequest { string action_id = 1; }
+message RollbackActionResponse { bool success = 1; }
+
+message GetSessionRequest { string session_id = 1; }
+message GetSessionResponse { AssistantSession session = 1; repeated AssistantAction actions = 2; }

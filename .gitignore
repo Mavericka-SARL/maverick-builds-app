@@ -1,0 +1,51 @@
+mavericks_engine_design.pdf
+mavericks_engine_technical_specification.docx
+mavericks_engine_research.pdf
+
+# Go
+bin/
+
+# Node
+node_modules/
+web/node_modules/
+dist/
+web/dist/
+
+# Env files with secrets
+.env.local
+web/.env.local
+
+# License signing keys never belong in a repository (see docs/LICENSING.md).
+*license-signing*
+*.license
+
+# Compiled binaries that "go build ./cmd/<x>" drops in the repository root.
+# Anchored with a leading slash so they never shadow the source directories of
+# the same name (cmd/gateway, internal/gateway). Nine of these were tracked
+# for a year; nothing ever ran them.
+/ai-assistant
+/gateway
+/qa-engine-test
+/seed
+/seed-budget
+/seed-capex
+/seed-payroll
+/seed-sales
+/seed-sandbox
+
+# macOS directory metadata.
+.DS_Store
+
+# A production overlay describes one cluster — its host names, image digests
+# and sealed secrets — and belongs in that deployment's own private
+# repository. prod.example/ shows the shape; a working copy here is ignored.
+deploy/k8s/overlays/prod/
+
+# Generated: the manual is built from manual.html by build.sh, and test
+# runners write their own reports.
+docs/developer-manual/mavericks-developer-manual.pdf
+test-results/
+web/test-results/
+web/playwright-report/
+# Like prod/: a real cluster's overlay, copied in from the private deployment repository at apply time.
+deploy/k8s/overlays/staging/

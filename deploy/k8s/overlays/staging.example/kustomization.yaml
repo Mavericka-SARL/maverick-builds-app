@@ -1,0 +1,61 @@
+# Example staging overlay: the production shape in its own namespace, one
+# replica of everything, on its own hostnames, with self-service sign-up on.
+# Copy this directory into a private repository next to the production
+# overlay and edit it there (README.md); nothing here names a real cluster.
+#
+# Staging exists to run what production runs — same images, same manifests,
+# same identity provider setup — against data nobody minds losing: a release
+# candidate is deployed here first, cmd/loadtest is pointed at it, and only
+# then does the tag move to production.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: mavericks-staging
+
+resources:
+  - ../../base
+  # Add your own, as in the production overlay:
+  #   - mtls.yaml             # cert-manager CA + service cert for gRPC mTLS
+  # Secrets are NOT sealed here: staging holds nothing worth the ceremony, so
+  # its Secrets are created on the cluster by hand (README.md).
+
+# The Namespace resource itself has to change name too.
+patches:
+  - patch: |-
+      - op: replace
+        path: /metadata/name
+        value: mavericks-staging
+    target:
+      kind: Namespace
+      name: mavericks
+  # Hostnames, sign-up, storage, Keycloak — everything staging-specific, in
+  # one file.
+  - path: staging.yaml
+  # Pull on every pod creation, so a rebuilt tag is never served stale.
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
+    target:
+      kind: Deployment
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
+    target:
+      kind: StatefulSet
+  # Demo data has no place here either: sign-up creates tenants.
+  #   - path: seed-remove.yaml
+
+# One of everything. Load tests measure the software, not the replica count;
+# scale the gateway up here only to test the scaled shape itself.
+replicas:
+  - name: gateway
+    count: 1
+  - name: web
+    count: 1
+
+# Pin the same tag production is about to run.
+images:
+  - name: ghcr.io/YOUR-ORG/mavericks/gateway
+    newTag: "sha-REPLACE-ME"

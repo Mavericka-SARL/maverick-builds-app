@@ -1,0 +1,134 @@
+# MinIO — S3-compatible object storage for tenant files, exports, and ML artefacts.
+# API on port 9000, web console on port 9001.
+# Data is persisted to a 20 Gi PVC; use a distributed MinIO StatefulSet in prod.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+  namespace: mavericks
+  labels:
+    app: minio
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: object-storage
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: mavericks
+  labels:
+    app: minio
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: object-storage
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  strategy:
+    # Recreate prevents two instances mounting the same RWO volume.
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: minio
+        app.kubernetes.io/name: minio
+        app.kubernetes.io/component: object-storage
+        app.kubernetes.io/part-of: mavericks-engine
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: minio
+          image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+          imagePullPolicy: IfNotPresent
+          command:
+            - minio
+          args:
+            - "server"
+            - "/data"
+            - "--console-address"
+            - ":9001"
+          ports:
+            - name: api
+              containerPort: 9000
+              protocol: TCP
+            - name: console
+              containerPort: 9001
+              protocol: TCP
+          env:
+            - name: MINIO_ROOT_USER
+              value: "mavericks"
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mavericks-secrets
+                  key: MINIO_ROOT_PASSWORD
+          volumeMounts:
+            - name: minio-data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: minio-data
+          persistentVolumeClaim:
+            claimName: minio-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: mavericks
+  labels:
+    app: minio
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: object-storage
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  type: ClusterIP
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+      protocol: TCP
+    - name: console
+      port: 9001
+      targetPort: 9001
+      protocol: TCP

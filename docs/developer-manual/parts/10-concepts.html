@@ -1,0 +1,134 @@
+<section class="toc">
+<h2 class="first">Contents</h2>
+<div style="columns:2; column-gap:2em">
+<p><b>Part I: General</b><br>About this manual<br>The platform and the developer role<br>Core concepts<br>Getting around the console</p>
+<p><b>Part II: Screens</b><br>Models<br>Metrics<br>Dimensions<br>Dependency Graph<br>Forms<br>Grids<br>Dashboards<br>Workflows<br>Triggers<br>Integrations<br>AI Developer<br>Users</p>
+<p><b>Part III: Reference</b><br>Limits and what is not supported<br>Troubleshooting<br>Glossary</p>
+</div>
+</section>
+
+<h2>About this manual</h2>
+<p>This manual describes everything a person with the <b>developer</b> role can do in the Mavericks Engine console, and the concepts needed to use those screens well. Part I explains the platform and its rules. Part II is a reference, one chapter per sidebar item, in sidebar order: what the screen is for, a screenshot, every control, and the rules behind it. Part III lists limits, common problems and terms.</p>
+<p>Everything here was taken from the console as built on the date on the cover, and every screenshot is from a live session. Exact labels are printed in <b>bold</b>; values you type are in <code>monospace</code>. Nothing in this manual requires the API or a script.</p>
+
+<h2>The platform and the developer role</h2>
+<h3>What Mavericks Engine is</h3>
+<p>Mavericks Engine is a platform for building governed business applications without code. An application combines three kinds of capability that a developer configures and business users operate:</p>
+<table>
+<tr><th style="width:18%">Mode</th><th>What the developer builds</th><th>What business users do</th></tr>
+<tr><td>Planning</td><td>Dimensions, metrics and formulas, grids, dashboards, revisions</td><td>Type and import values, read charts and KPIs, plan in grids</td></tr>
+<tr><td>CRUD</td><td>Forms, form-to-metric posting, imports, integrations</td><td>Submit and manage records that feed the plan</td></tr>
+<tr><td>Execution</td><td>Workflows, triggers, notifications</td><td>Start approvals, act on tasks in their inbox, get notified</td></tr>
+</table>
+<p>The console is one application with one sidebar. Roles are additive: each role adds groups to the sidebar, never a second console. A developer sees the <b>Build</b> group (Models, Metrics, Dimensions, Forms, Grids, Dashboards, Workflows, Triggers, Integrations, Dependency Graph, AI Developer) and the <b>Govern</b> group (Users). A developer who also holds business_admin sees the business <b>Plan</b> and <b>Admin</b> groups as well; a tenant or platform administrator sees the administration groups.</p>
+<h3>The five roles</h3>
+<table>
+<tr><th style="width:18%">Role</th><th>What it does</th><th style="width:34%">Relation to the developer</th></tr>
+<tr><td>platform_admin</td><td>Every tenant: tenants, applications, models, users, audit log, infrastructure</td><td>Creates applications and models; grants the developer role</td></tr>
+<tr><td>tenant_admin</td><td>Own tenant: applications, models, users, application and model access, model export and import</td><td>Same, within one tenant</td></tr>
+<tr><td>developer</td><td>Everything under Build; invites users and grants business roles</td><td>This manual</td></tr>
+<tr><td>business_admin</td><td>Decides approvals, manages business roles, dashboard access and access rules, sees workflow history</td><td>Configures who sees what you built</td></tr>
+<tr><td>business_user</td><td>Plans in dashboards, submits forms, starts workflows, acts on own tasks</td><td>The audience of what you build</td></tr>
+</table>
+<p>A developer can grant business_admin and business_user, never developer or administrator roles. A developer works inside the tenants they have been given; objects in other tenants are invisible.</p>
+
+<h2>Core concepts</h2>
+<h3>Ownership: tenant, application, model, revision</h3>
+<pre>Tenant (customer)
+  └ Application            mode planning / CRUD / execution; what users open
+      └ Model              container of definitions and data; one is the "business default"
+          └ Revision       the unit of change; one revision is ACTIVE (live)
+              ├ dimensions, members, properties
+              ├ metrics, formulas, dependency graph
+              ├ grids, dashboards, folders, widgets
+              ├ forms, form mappings, integrations, imports
+              ├ workflows, automation rules
+              └ facts (the values)</pre>
+<ul>
+  <li><b>Tenant.</b> The isolation boundary. Users, applications and data belong to exactly one tenant.</li>
+  <li><b>Application.</b> What users open. Created by an administrator. Has a mode and a status.</li>
+  <li><b>Model.</b> Owns everything below. An application usually has one; when it has several, the <b>business default</b> model is the one business consoles open.</li>
+  <li><b>Revision.</b> Every definition and every value belongs to a revision. Exactly one revision per model is <b>active</b>: that is what business users see and edit. A developer selects a revision on the Models screen and every Build screen then works inside it.</li>
+</ul>
+<h3>Revisions</h3>
+<ul>
+  <li><b>Creating a revision copies the model.</b> A new revision is a deep copy of the current one: metrics and their dependencies, dimensions with members and properties, grids, dashboards with widgets and folders, forms with their records and mappings, integrations, workflows and automation rules, and the latest value of every cell. Internal references are remapped so the copy is self-contained.</li>
+  <li><b>Activating</b> switches the live revision; it can be changed again. The active revision cannot be deleted.</li>
+  <li><b>Build in a non-active revision, then activate.</b> Users are not affected until you do. Workflow instances that were running keep the definition they started with.</li>
+  <li><b>System-managed revisions</b> are written only by workflow approvals (approved scopes are copied into them) and are read-only for typing and imports.</li>
+  <li><b>Export and import.</b> Tenant administrators can export a revision as a package, with or without data, and import it into another tenant or environment. Developers do not have this control.</li>
+  <li>There is no separate "version" concept. The revision is the unit of change; do not look for one.</li>
+</ul>
+<h3>Dimensions and members</h3>
+<ul>
+  <li>A dimension is an axis; members are its values, identified by a <b>code</b> and shown by a <b>label</b>. Members can have parents, forming a hierarchy; parents are totals of their children under the dimension's rollup rule.</li>
+  <li>A dimension can be declared a child of another dimension (for example Cost Centre under Department); its members are then attached to members of the parent dimension.</li>
+  <li>Properties are typed attributes on members (text, number, date) that can drive groupings and rollups.</li>
+</ul>
+<h3>Metrics, formulas and calculation</h3>
+<ul>
+  <li><b>Input</b> metrics hold typed, imported or posted values. <b>Calculated</b> metrics are defined by a formula over other metrics and are never typed into.</li>
+  <li><b>Calculation is server-side and immediate.</b> Writing a cell, changing a formula, deleting a metric or member, posting a form record and committing an import all recalculate every dependent metric before the screen refreshes. There is no "recalculate" button.</li>
+  <li><b>Dependency graph.</b> The server derives which metrics depend on which from the formulas, orders them, refuses cycles and self-references, and shows the result in the Metrics "Used by" column and the Dependency Graph screen.</li>
+  <li><b>Aggregation rules</b> decide totals: Sum, Average, Count, Rate (numerator ÷ denominator), Formula (evaluate the formula on the aggregated inputs, for ratios and percentages).</li>
+  <li><b>A missing input</b> leaves the calculated cell blank at that intersection; totals are computed over the intersections that exist.</li>
+</ul>
+<h4>Formula language</h4>
+<pre>=revenue - cogs
+=IF(revenue = 0, 0, (revenue - cogs) / revenue)
+=ROUND(quantity * unit_price, 2)
+={salary} * 0.25</pre>
+<ul>
+  <li>References are metric <b>technical names</b>, case-insensitive; the legacy <code>{name}</code> form is accepted. The leading <code>=</code> is optional.</li>
+  <li>Literals: numbers, quoted strings, TRUE, FALSE. Operators: <code>+ - * / ^</code>, <code>= &lt;&gt; &lt; &lt;= &gt; &gt;=</code>, <code>&amp;</code>, unary minus, parentheses. Arguments may be separated by commas or semicolons.</li>
+</ul>
+<table>
+<tr><th style="width:22%">Category</th><th>Functions</th></tr>
+<tr><td>Logic</td><td>IF, IFS, AND, OR, NOT, IFERROR, IFNA, SWITCH</td></tr>
+<tr><td>Math</td><td>ABS, INT, ROUND, ROUNDUP, ROUNDDOWN, CEILING, FLOOR, MOD, POWER, SQRT</td></tr>
+<tr><td>Aggregate over arguments</td><td>SUM, AVERAGE, MIN, MAX, COUNT, COUNTA</td></tr>
+<tr><td>Text</td><td>CONCAT, TEXTJOIN, LEN, LEFT, RIGHT, MID, UPPER, LOWER, TRIM, TEXT, SUBSTITUTE</td></tr>
+<tr><td>Date</td><td>TODAY, DATE, YEAR, MONTH, DAY, DAYS, EDATE, EOMONTH</td></tr>
+</table>
+<p>Not available: spreadsheet cell addresses (A1), conditional aggregates (SUMIF, SUMIFS, AVERAGEIFS and similar), lookups (XLOOKUP, INDEX, MATCH), dotted property references (<code>employee.region</code>), parent or children functions, references to other periods, and user-written code. Cross-dimension and property rollups are configured on grids and dimensions, not written as formulas. Validation happens when you save a metric: unknown names, unsupported functions, syntax errors, self-references and cycles are refused.</p>
+<h3>Data</h3>
+<ul>
+  <li><b>Values are append-only.</b> Every write adds a new fact; the latest one at an intersection is the value. Nothing is ever overwritten in place, which is what makes history and audit possible.</li>
+  <li><b>Formats</b> (Number, Percentage, Currency with symbol and decimals, Boolean, Text) control display everywhere the metric appears.</li>
+  <li><b>Totals</b> in grids, charts and KPIs are computed by the server from the aggregation rules, never by the browser.</li>
+  <li><b>Imports</b> run in <b>Incremental</b> mode (add or update the listed cells), <b>Sync / replace</b> mode (the file is authoritative for the cells it lists) or <b>Full reload</b> (delete all data of the revision first).</li>
+</ul>
+<h3>Grids, dashboards and what users see</h3>
+<ul>
+  <li>A <b>grid</b> is a selection of metrics and dimensions. A metric belongs to one grid at most.</li>
+  <li>A <b>dashboard</b> is a canvas of widgets. A grid widget decides which dimension is rows, columns or a selector; charts and KPIs read from grids and metrics; form, trigger, integration, text and import widgets complete the page.</li>
+  <li>Business users reach a dashboard only when a <b>business role</b> they belong to has been granted it. Roles, grants and per-user access rules are managed in the Business Admin console.</li>
+</ul>
+<h3>Visibility and locks</h3>
+<ul>
+  <li><b>Access rules</b> per user and per dimension member or metric: <b>write</b> (default), <b>read</b> (visible, not editable) or <b>hidden</b> (removed from grids, charts, selectors and totals shown to that user). A rule on a parent member cascades to its descendants. Rules are applied on the server; hidden data never reaches the browser.</li>
+  <li><b>Workflow locks.</b> While a workflow instance about a grid, metric or member scope is in progress or approved, that scope is locked: typing and imports are refused with "… is locked by an in-progress or approved workflow".</li>
+  <li><b>Calculated metrics</b> are always read-only. <b>System-managed revisions</b> are read-only for everyone.</li>
+</ul>
+<h3>Workflows, triggers and notifications</h3>
+<ul>
+  <li>A <b>workflow definition</b> is steps and routes; a <b>trigger</b> (automation rule) starts it on an event; an <b>instance</b> is one run, keeping the definition it started with; a <b>task</b> is one step waiting for a person.</li>
+  <li>Tasks appear in the business Workflow Inbox of everyone holding the assigned role. Business users submit, business admins decide.</li>
+  <li>Notifications are in-app (the bell) and are produced by notification steps, rework and failed starts.</li>
+</ul>
+<h3>Audit</h3>
+<p>Every change made through the console, by developers and business users alike, is recorded in the audit log with the acting user, the object and the action. Administrators read it on the <b>Audit Log</b> screen; developers have no screen for it, but should know that their edits are attributable.</p>
+
+<h2>Getting around the console</h2>
+<figure><img src="img/13-account-menu.png" alt="Developer console with the account menu open showing email, roles and Sign out"><figcaption>The shell: sidebar groups on the left, the context bar at the top with Model and Revision, the notification bell and the account menu.</figcaption></figure>
+<table class="ctl">
+<tr><th>Element</th><th>What it does</th></tr>
+<tr><td>Sidebar</td><td>Groups by role: <b>Build</b> and <b>Govern</b> for a developer. The collapse icon narrows it. The heading names the console.</td></tr>
+<tr><td>Context bar: <b>Model</b></td><td>"application · model" of the revision you are editing.</td></tr>
+<tr><td>Context bar: <b>Revision</b></td><td>The revision name, or an orange <b>No revision selected</b>.</td></tr>
+<tr><td>Bell</td><td>Notifications with an unread count. Clicking an entry marks it read and, when it points at an object such as a workflow instance, opens it.</td></tr>
+<tr><td>Account button</td><td>Your address, full role list and <b>Sign out</b>.</td></tr>
+<tr><td>Unsaved changes</td><td>Screens with drafts (dashboard canvas, workflow editor) block navigation with a confirmation while dirty.</td></tr>
+<tr><td>Local development only</td><td>The yellow <b>Dev, persona</b> box at the bottom of the sidebar switches identity without signing in. It does not exist on a production deployment.</td></tr>
+</table>
+<div class="note warn"><b>First thing in every session: pick the revision.</b> Open Models, click the revision row, and confirm the Model and Revision in the context bar. Objects are created in whatever revision is selected, and many models have a revision called "Working".</div>

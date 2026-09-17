@@ -1,0 +1,143 @@
+syntax = "proto3";
+
+package policy.v1;
+
+option go_package = "github.com/mavericks-engine/mavericks/gen/go/policy/v1;policyv1";
+
+import "common/v1/common.proto";
+
+service PolicyService {
+  rpc CheckPermission(CheckPermissionRequest) returns (CheckPermissionResponse);
+  rpc CheckRACIPermission(CheckRACIPermissionRequest) returns (CheckRACIPermissionResponse);
+  rpc GetEffectivePermissions(GetEffectivePermissionsRequest) returns (GetEffectivePermissionsResponse);
+  rpc InvalidatePolicyCache(InvalidatePolicyCacheRequest) returns (InvalidatePolicyCacheResponse);
+  rpc UpsertRACIRule(UpsertRACIRuleRequest) returns (UpsertRACIRuleResponse);
+  rpc UpsertDimensionPolicy(UpsertDimensionPolicyRequest) returns (UpsertDimensionPolicyResponse);
+  rpc UpsertMetricPolicy(UpsertMetricPolicyRequest) returns (UpsertMetricPolicyResponse);
+  rpc UpsertAttributeRule(UpsertAttributeRuleRequest) returns (UpsertAttributeRuleResponse);
+  rpc UpsertCellPolicy(UpsertCellPolicyRequest) returns (UpsertCellPolicyResponse);
+  rpc CheckCellPermission(CheckCellPermissionRequest) returns (CheckCellPermissionResponse);
+}
+
+enum Action {
+  ACTION_UNSPECIFIED = 0;
+  ACTION_READ = 1;
+  ACTION_WRITE = 2;
+  ACTION_APPROVE = 3;
+  ACTION_ADMIN = 4;
+}
+
+enum RACIType {
+  RACI_TYPE_UNSPECIFIED = 0;
+  RACI_TYPE_RESPONSIBLE = 1;
+  RACI_TYPE_ACCOUNTABLE = 2;
+  RACI_TYPE_CONSULTED = 3;
+  RACI_TYPE_INFORMED = 4;
+}
+
+message CheckPermissionRequest {
+  common.v1.Actor actor = 1;
+  string resource_type = 2;
+  string resource_id = 3;
+  Action action = 4;
+}
+message CheckPermissionResponse {
+  bool allowed = 1;
+  string reason = 2;
+}
+
+message CheckRACIPermissionRequest {
+  common.v1.Actor actor = 1;
+  string application_id = 2;
+  string workflow_step_id = 3;
+  Action action = 4;
+}
+message CheckRACIPermissionResponse {
+  bool allowed = 1;
+  RACIType raci_type = 2;
+  string reason = 3;
+}
+
+message GetEffectivePermissionsRequest {
+  common.v1.Actor actor = 1;
+  string application_id = 2;
+}
+message GetEffectivePermissionsResponse {
+  repeated string allowed_metrics = 1;
+  repeated string allowed_dimension_members = 2;
+  repeated Action allowed_actions = 3;
+}
+
+message InvalidatePolicyCacheRequest { string application_id = 1; }
+message InvalidatePolicyCacheResponse { bool success = 1; }
+
+message RACIRule {
+  string id = 1;
+  string application_id = 2;
+  string user_id = 3;
+  string resource_pattern = 4;
+  RACIType raci_type = 5;
+}
+message UpsertRACIRuleRequest { RACIRule rule = 1; }
+message UpsertRACIRuleResponse { RACIRule rule = 1; }
+
+message DimensionPolicy {
+  string id = 1;
+  string application_id = 2;
+  string user_id = 3;
+  string dimension_id = 4;
+  repeated string allowed_member_codes = 5;
+}
+message UpsertDimensionPolicyRequest { DimensionPolicy policy = 1; }
+message UpsertDimensionPolicyResponse { DimensionPolicy policy = 1; }
+
+message MetricPolicy {
+  string id = 1;
+  string application_id = 2;
+  string user_id = 3;
+  string metric_id = 4;
+  bool can_read = 5;
+  bool can_write = 6;
+}
+message UpsertMetricPolicyRequest { MetricPolicy policy = 1; }
+message UpsertMetricPolicyResponse { MetricPolicy policy = 1; }
+
+// ABAC — attribute-based rule evaluated at request time against actor attributes.
+// Expression is a simple equality check: "attribute_name == value".
+// Multiple rules for the same resource_type are OR-ed together.
+message AttributeRule {
+  string id = 1;
+  string application_id = 2;
+  string name = 3;
+  string resource_type = 4;
+  string attribute_name = 5;   // e.g. "workspace_id", "customer_id"
+  string attribute_value = 6;  // expected value
+  repeated Action actions = 7;
+}
+message UpsertAttributeRuleRequest { AttributeRule rule = 1; }
+message UpsertAttributeRuleResponse { AttributeRule rule = 1; }
+
+// Cell policy — per-cell read/write control keyed by metric + dimension member slice.
+message CellPolicy {
+  string id = 1;
+  string application_id = 2;
+  string user_id = 3;
+  string metric_id = 4;
+  map<string, string> dim_members = 5;
+  bool can_read = 6;
+  bool can_write = 7;
+}
+message UpsertCellPolicyRequest { CellPolicy policy = 1; }
+message UpsertCellPolicyResponse { CellPolicy policy = 1; }
+
+message CheckCellPermissionRequest {
+  common.v1.Actor actor = 1;
+  string application_id = 2;
+  string metric_id = 3;
+  map<string, string> dim_members = 4;
+  Action action = 5;
+}
+message CheckCellPermissionResponse {
+  bool allowed = 1;
+  string reason = 2;
+}

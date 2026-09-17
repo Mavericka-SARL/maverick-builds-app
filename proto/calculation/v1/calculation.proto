@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+package calculation.v1;
+
+option go_package = "github.com/mavericks-engine/mavericks/gen/go/calculation/v1;calculationv1";
+
+import "google/protobuf/timestamp.proto";
+
+service CalculationService {
+  rpc GetPartitionState(GetPartitionStateRequest) returns (GetPartitionStateResponse);
+  rpc TriggerRecalc(TriggerRecalcRequest) returns (TriggerRecalcResponse);
+  rpc TriggerFullRecalc(TriggerFullRecalcRequest) returns (TriggerFullRecalcResponse);
+  rpc GetDependencyGraph(GetDependencyGraphRequest) returns (GetDependencyGraphResponse);
+  rpc GetCalculationResult(GetCalculationResultRequest) returns (GetCalculationResultResponse);
+}
+
+enum PartitionStatus {
+  PARTITION_STATUS_UNSPECIFIED = 0;
+  PARTITION_STATUS_CLEAN = 1;
+  PARTITION_STATUS_DIRTY = 2;
+  PARTITION_STATUS_CALCULATING = 3;
+  PARTITION_STATUS_ERROR = 4;
+}
+
+enum RecalcReason {
+  RECALC_REASON_UNSPECIFIED = 0;
+  RECALC_REASON_WRITEBACK = 1;
+  RECALC_REASON_FORMULA_CHANGE = 2;
+  RECALC_REASON_HIERARCHY_CHANGE = 3;
+  RECALC_REASON_MAPPING_CHANGE = 4;
+  RECALC_REASON_POLICY_CHANGE = 5;
+  RECALC_REASON_BULK_IMPORT = 6;
+  RECALC_REASON_MANUAL = 7;
+}
+
+message PartitionKey {
+  string model_id = 1;
+  string scenario = 2;   // deprecated: use revision_id
+  string version = 3;    // deprecated: use revision_id
+  string metric_id = 4;
+  string time_partition = 5;
+  map<string, string> dimension_scope = 6;
+  string revision_id = 7;
+}
+
+message PartitionState {
+  PartitionKey key = 1;
+  PartitionStatus status = 2;
+  google.protobuf.Timestamp last_calc_at = 3;
+  string error = 4;
+}
+
+message DependencyEdge {
+  string metric_id = 1;
+  string depends_on_metric_id = 2;
+  string dependency_type = 3;
+}
+
+message CalculationResult {
+  PartitionKey key = 1;
+  double value = 2;
+  google.protobuf.Timestamp calc_at = 3;
+}
+
+message GetPartitionStateRequest { PartitionKey key = 1; }
+message GetPartitionStateResponse { PartitionState state = 1; }
+
+message TriggerRecalcRequest {
+  PartitionKey key = 1;
+  RecalcReason reason = 2;
+}
+message TriggerRecalcResponse {
+  string job_id = 1;
+  bool queued = 2;
+}
+
+message TriggerFullRecalcRequest {
+  string model_id = 1;
+  RecalcReason reason = 2;
+}
+message TriggerFullRecalcResponse {
+  string job_id = 1;
+  int32 partitions_queued = 2;
+}
+
+message GetDependencyGraphRequest { string model_id = 1; string revision_id = 2; }
+message GetDependencyGraphResponse { repeated DependencyEdge edges = 1; }
+
+message GetCalculationResultRequest { PartitionKey key = 1; }
+message GetCalculationResultResponse { CalculationResult result = 1; }

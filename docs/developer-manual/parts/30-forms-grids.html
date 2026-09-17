@@ -1,0 +1,54 @@
+<h2>Forms</h2>
+<p class="path">Sidebar: Build › Forms</p>
+<p>A form is a structured record type that business users fill in: a purchase request, an expense claim, a headcount change. This screen defines the <em>schema</em> only. Records are entered and reviewed by business users in their console; posting form values into planning cells is configured under Integrations › Form Records.</p>
+<figure><img src="img/04-forms.png" alt="Forms screen listing the Purchase Request form with six fields"><figcaption>The form list. Each card shows the display label, the technical name, the field count and the field labels.</figcaption></figure>
+<h3>Controls</h3>
+<table class="ctl">
+<tr><th>Control</th><th>What it does</th></tr>
+<tr><td><b>New form</b> / <b>Cancel</b></td><td>Opens or closes the create panel. Closing resets it to one blank text field.</td></tr>
+<tr><td><b>Form name</b></td><td>Technical name, snake_case. Typing is coerced: lowercase, any character other than a–z, 0–9 and underscore becomes an underscore. Example placeholder: <code>purchase_request</code>.</td></tr>
+<tr><td><b>Display label</b></td><td>What users see, free text.</td></tr>
+<tr><td><b>Fields</b> rows</td><td>One row per field: <b>field_name</b> (same coercion as the form name), <b>Field label</b>, <b>Field type</b>, <b>Required</b> checkbox, remove icon. <b>Add field</b> appends a text field.</td></tr>
+<tr><td><b>Field type</b></td><td><b>Text</b>, <b>Number</b>, <b>Date</b>, <b>Select</b>, <b>Boolean</b>, <b>Metric</b>, and under the group <b>Dimensions</b> one entry per dimension of the model. A dimension field stores a member of that dimension. Changing the type clears any type-specific settings.</td></tr>
+<tr><td><b>Metric</b> field options</td><td><b>By ID (fixed)</b>: the field is tied to one input metric chosen from <b>Metric</b> (only input metrics are offered). <b>By name (dynamic)</b>: the record names the metric at runtime and the <b>Amount field</b> select picks which Number field of the form carries the value.</td></tr>
+<tr><td><b>Create form</b></td><td>Enabled once name, label and every field name are filled. Errors are shown under the button.</td></tr>
+<tr><td><b>Edit</b> on a card</td><td>Opens the same editor inline for that form. <b>Save</b> shows a green <b>Saved</b> for a moment and closes; <b>Cancel</b> discards.</td></tr>
+<tr><td>Delete icon</td><td>Confirm <b>Delete form?</b>: "This removes the form and all its submitted records."</td></tr>
+</table>
+<h3>Rules and behaviour</h3>
+<ul>
+  <li><b>Forms are per revision.</b> The list and the create action use the selected revision. Editing never moves a form to another revision.</li>
+  <li><b>Same name overwrites.</b> Creating a form whose technical name already exists in the revision silently replaces that form's label and fields. Pick a new name for a new form.</li>
+  <li><b>Delete cascades.</b> Deleting a form removes every dashboard widget that shows it and every record ever submitted to it.</li>
+  <li><b>Records live in the business console.</b> Business users create, view and export records there (CSV and XLSX). The developer screen has no record controls.</li>
+  <li><b>Posting to cells is a separate object.</b> A form mapping (Integrations › Form Records) decides which field feeds which input metric, at which dimension members, for which record statuses. Metric and Dimension field types exist so the mapping has something to read.</li>
+  <li><b>Where forms appear.</b> Business users open a form through a dashboard <b>Form</b> widget. A form that is on no dashboard is not reachable by them.</li>
+</ul>
+<figure><img src="img/23-form-editor.png" alt="Inline form editor with field rows, types and Required checkboxes"><figcaption>The inline editor. Field rows carry a name, a label, a type and a Required flag; a Metric field shows its By ID / By name choice below the row.</figcaption></figure>
+
+<h2>Grids</h2>
+<p class="path">Sidebar: Build › Grids</p>
+<p>A grid is a selection of metrics and dimensions that is shown as one table. It holds no data of its own; the data lives in the model. The same metric can only sit in one grid, so grids partition the model's metrics into the tables users will edit.</p>
+<figure><img src="img/24-grid-configure.png" alt="Grid configuration with the metric picker on the left and the dimension picker on the right"><figcaption>Configure opens two pickers. Each tick saves immediately, which is why the closing button is Done rather than Save.</figcaption></figure>
+<h3>Controls</h3>
+<table class="ctl">
+<tr><th>Control</th><th>What it does</th></tr>
+<tr><td><b>New grid</b> / <b>Cancel</b></td><td>Shows the create row. <b>Grid name</b> is free text (placeholder <code>OPEX Budget</code>); <b>Create</b> is enabled once it is filled.</td></tr>
+<tr><td>Card header</td><td>Name and "n metrics · n dimensions".</td></tr>
+<tr><td><b>Configure</b> / <b>Done</b></td><td>Expands one grid at a time. Done just collapses; nothing is pending.</td></tr>
+<tr><td><b>Search metrics…</b></td><td>Filters by display label or technical name.</td></tr>
+<tr><td>Metric checkboxes</td><td>Ticked = in this grid. Each metric shows an <b>Input</b> or <b>Calc</b> badge. Sections <b>In this grid (n)</b> and <b>Available (n)</b>.</td></tr>
+<tr><td><b>Search dimensions…</b></td><td>Filters by dimension name.</td></tr>
+<tr><td>Dimension checkboxes</td><td>Ticked = axis of this grid. Shows the member count.</td></tr>
+<tr><td><b>Show:</b> level select</td><td>Appears only for a ticked dimension that has a hierarchy. Options: <b>All levels (hierarchy)</b>, <b>Root only (level 0)</b>, <b>Level 1 only</b> … <b>Level N only</b>, <b>Leaves only</b>. Controls which level of the hierarchy the grid shows as its axis.</td></tr>
+<tr><td>Delete icon</td><td>Confirm <b>Delete grid?</b>: "This removes the grid from all dashboards that use it."</td></tr>
+</table>
+<h3>Rules and behaviour</h3>
+<ul>
+  <li><b>One grid per metric.</b> Ticking a metric that already belongs to another grid is refused by the server and the box stays unticked after refresh. Untick it in the other grid first. Dimensions can be shared freely.</li>
+  <li><b>Same revision.</b> Metrics and grid must be in the selected revision; a mismatch is refused.</li>
+  <li><b>Deleting a grid deletes its widgets.</b> Every dashboard widget that showed the grid disappears; the dashboards themselves stay.</li>
+  <li><b>No rename.</b> The screen has no rename control; create a new grid if the name must change.</li>
+  <li><b>Where the table comes from.</b> A grid becomes visible to users through a dashboard <b>Grid</b> widget (Dashboards chapter). The widget decides which dimension is rows, columns or a selector; the grid only decides the ingredients.</li>
+  <li><b>Level display.</b> Choosing <b>Leaves only</b> hides parent members from the axis; totals for parents are still computed and appear where the widget shows them.</li>
+</ul>

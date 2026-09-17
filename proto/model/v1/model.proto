@@ -1,0 +1,139 @@
+syntax = "proto3";
+
+package model.v1;
+
+option go_package = "github.com/mavericks-engine/mavericks/gen/go/model/v1;modelv1";
+
+import "google/protobuf/timestamp.proto";
+import "common/v1/common.proto";
+
+service ModelService {
+  // Dimensions
+  rpc CreateDimension(CreateDimensionRequest) returns (CreateDimensionResponse);
+  rpc GetDimension(GetDimensionRequest) returns (GetDimensionResponse);
+  rpc ListDimensions(ListDimensionsRequest) returns (ListDimensionsResponse);
+  rpc CreateDimensionMember(CreateDimensionMemberRequest) returns (CreateDimensionMemberResponse);
+  rpc ListDimensionMembers(ListDimensionMembersRequest) returns (ListDimensionMembersResponse);
+
+  // Metrics
+  rpc CreateMetric(CreateMetricRequest) returns (CreateMetricResponse);
+  rpc GetMetric(GetMetricRequest) returns (GetMetricResponse);
+  rpc ListMetrics(ListMetricsRequest) returns (ListMetricsResponse);
+  rpc ValidateMetricFormulas(ValidateMetricFormulasRequest) returns (ValidateMetricFormulasResponse);
+
+  // Hierarchies
+  rpc CreateHierarchy(CreateHierarchyRequest) returns (CreateHierarchyResponse);
+  rpc ListHierarchies(ListHierarchiesRequest) returns (ListHierarchiesResponse);
+
+  // Scenarios
+  rpc CreateScenario(CreateScenarioRequest) returns (CreateScenarioResponse);
+  rpc ListScenarios(ListScenariosRequest) returns (ListScenariosResponse);
+
+  // Model Revision
+  rpc PublishRevision(PublishRevisionRequest) returns (PublishRevisionResponse);
+  rpc GetRevision(GetRevisionRequest) returns (GetRevisionResponse);
+}
+
+enum StorageType {
+  STORAGE_TYPE_UNSPECIFIED = 0;
+  STORAGE_TYPE_OLTP = 1;
+  STORAGE_TYPE_COLUMNAR = 2;
+  STORAGE_TYPE_HYBRID = 3;
+}
+
+message DimensionProperty {
+  string name = 1;
+  string type = 2;
+  bool required = 3;
+}
+
+message Dimension {
+  string id = 1;
+  string model_id = 2;
+  string name = 3;
+  repeated DimensionProperty properties = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message DimensionMember {
+  string id = 1;
+  string dimension_id = 2;
+  string code = 3;
+  string label = 4;
+  string parent_id = 5;
+  map<string, string> properties = 6;
+}
+
+message Metric {
+  string id = 1;
+  string model_id = 2;
+  string name = 3;
+  string formula = 4;
+  StorageType storage_type = 5;
+  bool is_input = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+message Hierarchy {
+  string id = 1;
+  string model_id = 2;
+  string name = 3;
+  string dimension_id = 4;
+  repeated string level_names = 5;
+}
+
+message Scenario {
+  string id = 1;
+  string model_id = 2;
+  string name = 3;
+  string description = 4;
+}
+
+message Revision {
+  string id = 1;
+  string model_id = 2;
+  int32 version_number = 3;
+  string schema_hash = 4;
+  google.protobuf.Timestamp published_at = 5;
+}
+
+// Dimension requests
+message CreateDimensionRequest { string model_id = 1; string name = 2; repeated DimensionProperty properties = 3; }
+message CreateDimensionResponse { Dimension dimension = 1; }
+message GetDimensionRequest { string dimension_id = 1; }
+message GetDimensionResponse { Dimension dimension = 1; }
+message ListDimensionsRequest { string model_id = 1; common.v1.PageRequest page = 2; }
+message ListDimensionsResponse { repeated Dimension dimensions = 1; common.v1.PageResponse page = 2; }
+
+message CreateDimensionMemberRequest { string dimension_id = 1; string code = 2; string label = 3; string parent_id = 4; map<string, string> properties = 5; }
+message CreateDimensionMemberResponse { DimensionMember member = 1; }
+message ListDimensionMembersRequest { string dimension_id = 1; common.v1.PageRequest page = 2; }
+message ListDimensionMembersResponse { repeated DimensionMember members = 1; common.v1.PageResponse page = 2; }
+
+// Metric requests
+message CreateMetricRequest { string model_id = 1; string name = 2; string formula = 3; StorageType storage_type = 4; bool is_input = 5; }
+message CreateMetricResponse { Metric metric = 1; }
+message GetMetricRequest { string metric_id = 1; }
+message GetMetricResponse { Metric metric = 1; }
+message ListMetricsRequest { string model_id = 1; common.v1.PageRequest page = 2; }
+message ListMetricsResponse { repeated Metric metrics = 1; common.v1.PageResponse page = 2; }
+message ValidateMetricFormulasRequest { string model_id = 1; }
+message ValidateMetricFormulasResponse { bool valid = 1; repeated string cycle_errors = 2; }
+
+// Hierarchy requests
+message CreateHierarchyRequest { string model_id = 1; string name = 2; string dimension_id = 3; repeated string level_names = 4; }
+message CreateHierarchyResponse { Hierarchy hierarchy = 1; }
+message ListHierarchiesRequest { string model_id = 1; }
+message ListHierarchiesResponse { repeated Hierarchy hierarchies = 1; }
+
+// Scenario requests
+message CreateScenarioRequest { string model_id = 1; string name = 2; string description = 3; }
+message CreateScenarioResponse { Scenario scenario = 1; }
+message ListScenariosRequest { string model_id = 1; }
+message ListScenariosResponse { repeated Scenario scenarios = 1; }
+
+// Revision requests
+message PublishRevisionRequest { string model_id = 1; }
+message PublishRevisionResponse { Revision revision = 1; }
+message GetRevisionRequest { string revision_id = 1; }
+message GetRevisionResponse { Revision revision = 1; }

@@ -1,0 +1,103 @@
+{
+  "realm": "mavericks",
+  "displayName": "Mavericks Engine",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": false,
+  "roles": {
+    "realm": [
+      { "name": "platform_admin",  "description": "Platform-level administration" },
+      { "name": "tenant_admin",    "description": "Manages one customer's workspaces, apps and users" },
+      { "name": "developer",       "description": "App builder — defines models and policies" },
+      { "name": "business_admin",  "description": "Manages business users and RACI within a workspace" },
+      { "name": "business_user",   "description": "End-user subject to RACI governance" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "mavericks-web",
+      "name": "Mavericks Web App",
+      "description": "React SPA — public OIDC client with PKCE",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:5173/*",
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:5173",
+        "http://localhost:3000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "roles",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "pat",
+      "email": "admin@acme.com",
+      "firstName": "Pat",
+      "lastName": "Platform Admin",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "mavericks", "temporary": false }],
+      "realmRoles": ["platform_admin"]
+    },
+    {
+      "username": "sam",
+      "email": "dev@acme.com",
+      "firstName": "Sam",
+      "lastName": "Developer",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "mavericks", "temporary": false }],
+      "realmRoles": ["developer"]
+    },
+    {
+      "username": "jordan",
+      "email": "finance@acme.com",
+      "firstName": "Jordan",
+      "lastName": "Finance",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "mavericks", "temporary": false }],
+      "realmRoles": ["business_admin"]
+    },
+    {
+      "username": "alex",
+      "email": "dept.head@acme.com",
+      "firstName": "Alex",
+      "lastName": "Dept Head",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "mavericks", "temporary": false }],
+      "realmRoles": ["business_user"]
+    }
+  ]
+}

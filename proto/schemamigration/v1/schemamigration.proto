@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package schemamigration.v1;
+
+option go_package = "github.com/mavericks-engine/mavericks/gen/go/schemamigration/v1;schemamigrationv1";
+
+import "google/protobuf/timestamp.proto";
+
+service SchemaMigrationService {
+  rpc GenerateMigration(GenerateMigrationRequest) returns (GenerateMigrationResponse);
+  rpc PreviewMigration(PreviewMigrationRequest) returns (PreviewMigrationResponse);
+  rpc ApplyMigration(ApplyMigrationRequest) returns (ApplyMigrationResponse);
+  rpc RollbackMigration(RollbackMigrationRequest) returns (RollbackMigrationResponse);
+  rpc ListMigrations(ListMigrationsRequest) returns (ListMigrationsResponse);
+}
+
+enum MigrationStatus {
+  MIGRATION_STATUS_UNSPECIFIED = 0;
+  MIGRATION_STATUS_PENDING = 1;
+  MIGRATION_STATUS_APPLIED = 2;
+  MIGRATION_STATUS_ROLLED_BACK = 3;
+  MIGRATION_STATUS_FAILED = 4;
+}
+
+message MigrationFile {
+  string filename = 1;
+  string sql = 2;
+  string checksum = 3;
+}
+
+message Migration {
+  string id = 1;
+  string model_id = 2;
+  string revision_id = 3;
+  int32 version_number = 4;
+  MigrationStatus status = 5;
+  repeated MigrationFile files = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp applied_at = 8;
+}
+
+message GenerateMigrationRequest { string model_id = 1; string revision_id = 2; }
+message GenerateMigrationResponse { Migration migration = 1; }
+
+message PreviewMigrationRequest { string migration_id = 1; }
+message PreviewMigrationResponse {
+  repeated MigrationFile files = 1;
+  repeated string warnings = 2;
+  bool is_destructive = 3;
+}
+
+message ApplyMigrationRequest { string migration_id = 1; bool confirmed_destructive = 2; }
+message ApplyMigrationResponse { bool success = 1; string error = 2; }
+
+message RollbackMigrationRequest { string migration_id = 1; }
+message RollbackMigrationResponse { bool success = 1; string error = 2; }
+
+message ListMigrationsRequest { string model_id = 1; }
+message ListMigrationsResponse { repeated Migration migrations = 1; }

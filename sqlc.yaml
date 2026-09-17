@@ -1,0 +1,41 @@
+version: "2"
+
+sql:
+  # ── Audit service ──────────────────────────────────────────────────────────────
+  - engine: postgresql
+    schema: migrations/
+    queries: internal/audit/queries/
+    gen:
+      go:
+        package: auditdb
+        out: internal/audit/db/
+        sql_package: pgx/v5
+        emit_json_tags: true
+        emit_pointers_for_null_types: true
+        emit_enum_valid_method: true
+        overrides:
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"
+          - db_type: "timestamptz"
+            go_type: "time.Time"
+          - db_type: "jsonb"
+            go_type: "encoding/json.RawMessage"
+
+  # ── Tenant service ─────────────────────────────────────────────────────────────
+  - engine: postgresql
+    schema: migrations/
+    queries: internal/tenant/queries/
+    gen:
+      go:
+        package: tenantdb
+        out: internal/tenant/db/
+        sql_package: pgx/v5
+        emit_json_tags: true
+        emit_pointers_for_null_types: true
+        overrides:
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"
+          - db_type: "timestamptz"
+            go_type: "time.Time"
+          - db_type: "jsonb"
+            go_type: "encoding/json.RawMessage"

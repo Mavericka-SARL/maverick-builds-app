@@ -1,0 +1,41 @@
+<h2>AI Developer</h2>
+<p class="path">Sidebar: Build › AI Developer</p>
+<p>A chat assistant that can read the model and, when you approve, build in it: metrics, dimensions and members, grids, dashboards and widgets, revisions. Every write happens in an isolated <b>AI draft</b> revision that you promote or discard, so the live model is never touched by accident.</p>
+<figure><img src="img/11-ai-developer.png" alt="AI Developer screen with the session list, chat area and message box"><figcaption>Sessions on the left, the conversation in the middle. Settings hold the provider and key; the Activity panel lists proposals.</figcaption></figure>
+<h3>Controls</h3>
+<table class="ctl">
+<tr><th>Control</th><th>What it does</th></tr>
+<tr><td><b>AI Settings</b> (gear)</td><td><b>LLM Provider</b>: OpenAI, Anthropic (Claude), Mistral, DeepSeek. <b>Model</b> name. <b>API Key</b> (kept server-side; "key saved" once set, leave blank to keep it). <b>Save settings</b>. Chatting is blocked until a key is set: "Set your API key in Settings before chatting."</td></tr>
+<tr><td><b>New session</b></td><td>Starts a conversation; sessions can be renamed and deleted from the list.</td></tr>
+<tr><td>Message box</td><td>"Ask about your model…"; Enter sends, Shift+Enter inserts a newline. The paperclip attaches a document (pdf, xlsx, docx, csv, txt, md) the assistant can read.</td></tr>
+<tr><td>Status line</td><td>"Thinking…" or "Calling &lt;tool&gt;…" while the assistant reads the model.</td></tr>
+<tr><td><b>Action plan</b> card</td><td>When the assistant wants to change something it proposes numbered steps (for example Create metric, Add dimension member, Create grid, Add dashboard widget). <b>Execute</b> runs them; <b>Reject</b> discards. After execution each step shows success or failure; a plan with failures is marked partial.</td></tr>
+<tr><td><b>Activity</b> panel</td><td>This session's proposal history.</td></tr>
+<tr><td>Draft banner</td><td>"Working in an isolated draft revision — changes here won't affect the live model until promoted." <b>Promote to Active</b> makes the draft the active revision; <b>Discard</b> asks <b>Discard this draft?</b> and permanently removes every change the AI made in this session.</td></tr>
+</table>
+<h3>What it can do</h3>
+<ul>
+  <li>Read tools: describe metrics, dimensions, grids and dashboards, validate formulas, answer questions about the model and attached documents.</li>
+  <li>Write tools, always through an approved plan: create, update and delete metrics; create dimensions and add or update members; create grids and attach metrics and dimensions; create dashboards and add widgets; create revisions; generate and apply migrations.</li>
+  <li>Plans are capped at 50 steps; long tasks are continued in a follow-up plan.</li>
+</ul>
+<div class="note"><b>Workflows and forms.</b> The assistant builds the whole chain a workflow needs: the business roles its steps are assigned to, the definition with every step type the editor offers, the automation rule that starts it, and the form and form integration that feed it. It runs the same Validate check as the Workflows editor and reports the verdict with every change. Two things stay yours: <b>publishing</b> a workflow (the assistant leaves it as a draft and tells you so) and adding <b>members</b> to a role. The assistant uses the same validation as the screens, so a formula or a workflow it proposes is rejected under the same rules you would be.</div>
+
+<h2>Users</h2>
+<p class="path">Sidebar: Govern › Users (hidden when an admin section already provides it)</p>
+<p>The developer's Users screen invites people and gives them business roles, so that the applications you build have users. Deciding which applications and models a person may reach, and the platform roles above business level, stay with tenant and platform administrators.</p>
+<figure><img src="img/12-users.png" alt="Users screen with the user table and the Invite user button"><figcaption>Users of the tenant with their roles and workspace assignments.</figcaption></figure>
+<table class="ctl">
+<tr><th>Control</th><th>What it does</th></tr>
+<tr><td><b>Invite user</b></td><td><b>Email</b>, <b>First name</b>, <b>Last name</b>, <b>Initial Role</b>, <b>Workspace</b>. The person receives an invitation to set up their account; the email is the sign-in identity and cannot be changed later.</td></tr>
+<tr><td>Role controls</td><td>A developer can grant and revoke <b>business_admin</b> and <b>business_user</b> only. Developer, tenant admin and platform admin roles are granted by administrators.</td></tr>
+<tr><td><b>Workspace roles</b></td><td>Place a person into a workspace with a business role. The <b>Resource access</b> section (which applications and models a person may open) is shown to administrators only.</td></tr>
+<tr><td>Delete user</td><td>Confirm <b>Delete user?</b>: removes the person and revokes all their access. You cannot delete your own account.</td></tr>
+</table>
+<h3>Where the rest of access is configured</h3>
+<p>Three things decide what a business user sees and may change. All three live in the <b>Business Admin</b> console (sidebar group <b>Admin</b>), which a developer sees only when they also hold the business_admin role or ask a business admin:</p>
+<ul>
+  <li><b>Roles.</b> Named business roles ("Budget Approvers", "Regional Managers") with members. Workflow tasks and approvals are assigned to these roles or to the platform roles.</li>
+  <li><b>Dashboard access.</b> Per role, tick the dashboards its members may open (<b>Save dashboard access</b>). A dashboard on no role is invisible to business users.</li>
+  <li><b>Access rules.</b> Per user, an <b>Access level</b> of write, read or hidden for individual dimension members and metrics (<b>Save rules</b>). Hidden members disappear from grids, charts and selectors; read makes cells read-only; rules on a parent member cascade to its descendants.</li>
+</ul>

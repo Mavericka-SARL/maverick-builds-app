@@ -1,0 +1,9 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  except:
+    - PACKAGE_VERSION_SUFFIX
+breaking:
+  use:
+    - FILE

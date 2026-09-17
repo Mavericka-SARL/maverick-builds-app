@@ -1,0 +1,74 @@
+# postgres-backup — daily pg_dump snapshot to MinIO, pruned by
+# BACKUP_RETENTION_DAYS. This is a periodic full-dump snapshot mechanism,
+# NOT continuous point-in-time recovery — infra/postgres.yaml's WAL
+# archive is still an emptyDir (ephemeral); wiring WAL-G/pgBackRest for
+# continuous archiving remains a separate, larger, not-yet-addressed item.
+#
+# Connects directly to postgres:5432 (see pg-backup.sh's own comment for
+# why, not pgbouncer:5433 like every other service).
+#
+# Restore (deploy/docker/pg-backup/pg-restore.sh) is deliberately NOT
+# wired into this CronJob — it's a manual, human-triggered operation, run
+# via a one-off pod overriding this image's command, e.g.:
+#   kubectl run pg-restore --rm -it --restart=Never \
+#     --image=ghcr.io/konstantintokarev/mavericks/postgres-backup:latest \
+#     --overrides='{"spec":{"containers":[{"name":"pg-restore","image":"ghcr.io/konstantintokarev/mavericks/postgres-backup:latest","command":["pg-restore.sh","latest"],"env":[{"name":"RESTORE_DATABASE_URL","value":"postgres://mavericks:<password>@postgres:5432/mavericks?sslmode=disable"},{"name":"CONFIRM_RESTORE","value":"yes"}],"envFrom":[{"configMapRef":{"name":"mavericks-config"}},{"secretRef":{"name":"mavericks-secrets"}}]}]}}' \
+#     -n mavericks
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: mavericks
+  labels:
+    app: postgres-backup
+    app.kubernetes.io/name: postgres-backup
+    app.kubernetes.io/component: job
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: postgres-backup
+            app.kubernetes.io/name: postgres-backup
+            app.kubernetes.io/component: job
+            app.kubernetes.io/part-of: mavericks-engine
+        spec:
+          restartPolicy: OnFailure
+          terminationGracePeriodSeconds: 30
+          containers:
+            - name: postgres-backup
+              image: ghcr.io/konstantintokarev/mavericks/postgres-backup:latest
+              imagePullPolicy: IfNotPresent
+              envFrom:
+                - configMapRef:
+                    name: mavericks-config
+                - secretRef:
+                    name: mavericks-secrets
+              # DATABASE_URL here targets postgres:5432 directly — every
+              # other service's identical-looking env entry targets
+              # pgbouncer:5433 instead, see pg-backup.sh's header comment.
+              env:
+                - name: DATABASE_URL
+                  value: "postgres://mavericks:$(POSTGRES_PASSWORD)@postgres:5432/mavericks?sslmode=disable"
+                # "all" also dumps every tenant_* database as its own object,
+                # so one tenant can be restored alone (docs/TENANT_DATABASES.md).
+                - name: BACKUP_DATABASES
+                  value: "all"
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "512Mi"
+              securityContext:
+                runAsUser: 70
+                runAsGroup: 70

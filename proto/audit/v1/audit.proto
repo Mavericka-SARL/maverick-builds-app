@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package audit.v1;
+
+option go_package = "github.com/mavericks-engine/mavericks/gen/go/audit/v1;auditv1";
+
+import "google/protobuf/timestamp.proto";
+import "common/v1/common.proto";
+
+service AuditService {
+  rpc RecordEvent(RecordEventRequest) returns (RecordEventResponse);
+  rpc QueryEvents(QueryEventsRequest) returns (QueryEventsResponse);
+  rpc GetEvent(GetEventRequest) returns (GetEventResponse);
+}
+
+enum EventCategory {
+  EVENT_CATEGORY_UNSPECIFIED = 0;
+  EVENT_CATEGORY_AUTH = 1;
+  EVENT_CATEGORY_DATA_CHANGE = 2;
+  EVENT_CATEGORY_MODEL_CHANGE = 3;
+  EVENT_CATEGORY_POLICY_CHANGE = 4;
+  EVENT_CATEGORY_ADMIN = 5;
+  EVENT_CATEGORY_AI_ASSISTANT = 6;
+}
+
+message AuditEvent {
+  string id = 1;
+  EventCategory category = 2;
+  string event_type = 3;
+  common.v1.Actor actor = 4;
+  string resource_type = 5;
+  string resource_id = 6;
+  map<string, string> metadata = 7;
+  bytes before_state = 8;
+  bytes after_state = 9;
+  google.protobuf.Timestamp occurred_at = 10;
+}
+
+message RecordEventRequest { AuditEvent event = 1; }
+message RecordEventResponse { string event_id = 1; }
+
+message QueryEventsRequest {
+  string customer_id = 1;
+  EventCategory category = 2;
+  string resource_type = 3;
+  string resource_id = 4;
+  google.protobuf.Timestamp from = 5;
+  google.protobuf.Timestamp to = 6;
+  common.v1.PageRequest page = 7;
+}
+message QueryEventsResponse {
+  repeated AuditEvent events = 1;
+  common.v1.PageResponse page = 2;
+}
+
+message GetEventRequest { string event_id = 1; }
+message GetEventResponse { AuditEvent event = 1; }

@@ -1,0 +1,61 @@
+Mavericks Engine Enterprise License
+Version 1.0, September 2026
+
+Copyright (c) 2026 the Mavericks Engine copyright holders.
+
+This license applies to all files under the "ee/" directory and the
+"web/src/ee/" directory of the Mavericks Engine repository (the "Enterprise
+Software"). The rest of the repository is licensed under the Mavericks Engine
+Sustainable Use License in the top-level "LICENSE" file.
+
+1. Source-available, not open source
+
+The Enterprise Software is made available in source form so that it can be
+reviewed, built and deployed together with the rest of Mavericks Engine. It is
+not licensed for use under the Sustainable Use License.
+
+2. Grant
+
+Subject to a valid, unexpired license key issued by the licensor that names
+the relevant edition (a "Subscription"), the licensor grants you a
+non-exclusive, non-transferable, non-sublicensable license to use the
+Enterprise Software, and the functionality it unlocks, for your own internal
+business purposes, for the term and within the limits stated in the
+Subscription.
+
+3. Limitations
+
+Without a Subscription you may not use, copy, modify, distribute, make
+available or create derivative works of the Enterprise Software, except to
+build the software from source for the purpose of evaluating it.
+
+You may not remove, disable, or circumvent the license-key checks that gate
+the Enterprise Software, nor use the Enterprise Software beyond the edition,
+term or limits of your Subscription.
+
+You may not distribute, sublicense, resell, host for third parties or
+otherwise make the Enterprise Software available to anyone outside your
+company, unless a separate written agreement with the licensor permits it.
+
+You may not alter, remove, or obscure any licensing, copyright, or other
+notices of the licensor.
+
+4. Term and termination
+
+Your license ends automatically when your Subscription expires or terminates,
+or if you breach these terms. On termination you must stop using the
+Enterprise Software; the rest of Mavericks Engine remains available to you
+under the Sustainable Use License.
+
+5. No warranty, no liability
+
+As far as the law allows, the Enterprise Software comes as is, without any
+warranty or condition, and the licensor will not be liable to you for any
+damages arising out of these terms or the use or nature of the Enterprise
+Software, under any kind of legal claim, except as agreed in writing in your
+Subscription.
+
+6. Definitions
+
+"Licensor", "you", "your company", "use" and "internal business purposes" have
+the meanings given in the Mavericks Engine Sustainable Use License.

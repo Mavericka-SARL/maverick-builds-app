@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package importpkg.v1;
+
+option go_package = "github.com/mavericks-engine/mavericks/gen/go/importpkg/v1;importpkgv1";
+
+import "google/protobuf/timestamp.proto";
+
+service ImportService {
+  rpc CreateImportJob(CreateImportJobRequest) returns (CreateImportJobResponse);
+  rpc ValidateImport(ValidateImportRequest) returns (ValidateImportResponse);
+  rpc GetImportJob(GetImportJobRequest) returns (GetImportJobResponse);
+  rpc ListImportJobs(ListImportJobsRequest) returns (ListImportJobsResponse);
+  rpc CommitImport(CommitImportRequest) returns (CommitImportResponse);
+  rpc AbortImport(AbortImportRequest) returns (AbortImportResponse);
+  rpc GetImportErrors(GetImportErrorsRequest) returns (GetImportErrorsResponse);
+}
+
+enum ImportStatus {
+  IMPORT_STATUS_UNSPECIFIED = 0;
+  IMPORT_STATUS_VALIDATING = 1;
+  IMPORT_STATUS_STAGED = 2;
+  IMPORT_STATUS_COMMITTED = 3;
+  IMPORT_STATUS_FAILED = 4;
+  IMPORT_STATUS_ABORTED = 5;
+}
+
+message ColumnMapping {
+  string source_column = 1;
+  string target_field = 2;
+}
+
+message ImportJob {
+  string id = 1;
+  string model_id = 2;
+  string scenario = 3;   // deprecated: use revision_id
+  reserved 4;             // was: version (deprecated field, removed)
+  reserved "version";
+  ImportStatus status = 5;
+  int32 total_rows = 6;
+  int32 valid_rows = 7;
+  int32 error_rows = 8;
+  repeated ColumnMapping mappings = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp completed_at = 11;
+  string revision_id = 12;
+}
+
+message ImportError {
+  int32 row_number = 1;
+  string column = 2;
+  string error_code = 3;
+  string message = 4;
+  string raw_value = 5;
+}
+
+message CreateImportJobRequest {
+  string model_id = 1;
+  string scenario = 2;   // deprecated: use revision_id
+  string version = 3;    // deprecated: use revision_id
+  repeated ColumnMapping mappings = 4;
+  string file_url = 5;
+  string revision_id = 6;
+}
+message CreateImportJobResponse { ImportJob job = 1; }
+
+message GetImportJobRequest { string job_id = 1; }
+message GetImportJobResponse { ImportJob job = 1; }
+
+message ListImportJobsRequest { string model_id = 1; int32 page_size = 2; string page_token = 3; }
+message ListImportJobsResponse { repeated ImportJob jobs = 1; string next_page_token = 2; }
+
+message CommitImportRequest { string job_id = 1; }
+message CommitImportResponse { bool success = 1; string recalc_job_id = 2; }
+
+message AbortImportRequest { string job_id = 1; }
+message AbortImportResponse { bool success = 1; }
+
+message GetImportErrorsRequest { string job_id = 1; int32 page_size = 2; string page_token = 3; }
+message GetImportErrorsResponse { repeated ImportError errors = 1; string next_page_token = 2; }
+
+// ValidateImport parses csv_content, validates rows against the model schema,
+// populates the staging table, and transitions the job to staged or failed.
+message ValidateImportRequest {
+  string job_id = 1;
+  bytes csv_content = 2;
+}
+message ValidateImportResponse {
+  int32 total_rows = 1;
+  int32 valid_rows = 2;
+  int32 error_rows = 3;
+  ImportStatus status = 4;
+}

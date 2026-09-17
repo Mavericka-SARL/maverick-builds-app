@@ -1,0 +1,65 @@
+# Seed — one-shot data seeding job.
+# Populates initial / reference data into a fresh tenant database, then
+# exits. Runs migrations itself (via pkg/migrate) before seeding, so it can
+# run standalone against an empty database. Unlike every other service
+# under deploy/k8s/base/services/, this binary never opens a network port —
+# it is a batch job, not a long-running gRPC server, so it runs as a Job
+# rather than a probed Deployment (a Deployment would either restart-loop,
+# re-running the whole seed on every restart under the default
+# restartPolicy: Always, or sit failing readiness/liveness forever since
+# nothing here ever listens on the port those probes would target).
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed
+  namespace: mavericks
+  labels:
+    app: seed
+    app.kubernetes.io/name: seed
+    app.kubernetes.io/component: job
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: seed
+        app.kubernetes.io/name: seed
+        app.kubernetes.io/component: job
+        app.kubernetes.io/part-of: mavericks-engine
+    spec:
+      restartPolicy: OnFailure
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: seed
+          image: ghcr.io/konstantintokarev/mavericks/seed:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: mavericks-config
+            - secretRef:
+                name: mavericks-secrets
+          # DATABASE_URL is composed here, not in the ConfigMap: envFrom
+          # never expands $(VAR) references — only an explicit env: entry
+          # can, by referencing $(POSTGRES_PASSWORD) already contributed
+          # above via envFrom's secretRef.
+          env:
+            - name: DATABASE_URL
+              value: "postgres://mavericks:$(POSTGRES_PASSWORD)@pgbouncer:5433/mavericks?sslmode=disable"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
+      securityContext:
+        fsGroup: 65534
