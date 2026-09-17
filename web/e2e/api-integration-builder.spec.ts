@@ -219,8 +219,9 @@ test("secret replacement never discloses the stored secret", async ({ page }) =>
   await page.getByRole("button", { name: "Save new credential" }).click();
   await expect(page.getByText("Credential configured")).toBeVisible();
   expect(state.lastSecretPayload).toContain("new-secret-token");
-  // And the input is a password field — nothing readable on screen.
-  expect(await page.getByLabel("Bearer token").count()).toBe(0);
+  // And the field is gone — nothing readable on screen. toHaveCount retries:
+  // count() reads once, which raced the form unmounting on a slow runner.
+  await expect(page.getByLabel("Bearer token")).toHaveCount(0);
   expect(state.externalContacted).toHaveLength(0);
 });
 
