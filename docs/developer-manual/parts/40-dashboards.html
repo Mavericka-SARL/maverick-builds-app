@@ -1,0 +1,102 @@
+<h2>Dashboards</h2>
+<p class="path">Sidebar: Build › Dashboards</p>
+<p>A dashboard is the page a business user opens. It is a free-form canvas of widgets: grids to plan in, charts and KPIs to read, forms to submit, buttons that start workflows or integrations, text, and an import box. Dashboards are organised in folders and tagged, and are granted to business roles on the Users screen.</p>
+<figure><img src="img/06-dashboards.png" alt="Dashboards list grouped by folder with tag chips and a Design button per dashboard"><figcaption>The dashboard list. Folders group dashboards; the Folder control on a row moves it; Design opens the canvas.</figcaption></figure>
+
+<h3>The list</h3>
+<table class="ctl">
+<tr><th>Control</th><th>What it does</th></tr>
+<tr><td><b>Search dashboards…</b></td><td>Filters by name.</td></tr>
+<tr><td><b>Filter by folder</b></td><td>Shown once a folder exists. <b>All folders</b>, <b>Unfiled</b>, then each folder (nested folders indented).</td></tr>
+<tr><td>Tag chips</td><td>One chip per tag in use; click to filter, click again to clear.</td></tr>
+<tr><td><b>New folder</b></td><td><b>Folder name</b> plus <b>Inside</b> (<b>Top level</b> or a parent folder). <b>Create folder</b>.</td></tr>
+<tr><td><b>New dashboard</b></td><td><b>Name</b>, <b>Folder</b> (defaults to the current folder filter), <b>Tags</b> (Enter or comma adds a tag; tags are lowercased and spaces become hyphens). <b>Create</b>.</td></tr>
+<tr><td>Dashboard name</td><td>Click to rename inline; tags are edited in the same inline panel.</td></tr>
+<tr><td><b>Folder</b> select on a row</td><td>Moves the dashboard immediately.</td></tr>
+<tr><td><b>Design</b></td><td>Opens the canvas.</td></tr>
+<tr><td>Delete folder icon</td><td>Confirm <b>Delete folder?</b>: the folder and folders inside it are removed; their dashboards are kept and become unfiled.</td></tr>
+<tr><td>Delete dashboard icon</td><td>Confirm <b>Delete dashboard?</b>: "This removes the dashboard from all assigned business roles."</td></tr>
+</table>
+<div class="note"><b>Per revision.</b> The list shows the dashboards of the selected revision. A dashboard whose folder belongs to another revision is shown under "Unfiled (folder not in this revision)".</div>
+
+<h3>The canvas: Design and Preview</h3>
+<figure><img src="img/25-dashboard-design.png" alt="Dashboard canvas in Design mode with a grid widget, a trigger button and a text widget"><figcaption>Design mode. The toolbar carries the mode switch and one chip per widget type; widgets sit on a dotted 20-pixel grid.</figcaption></figure>
+<p>The toolbar shows <b>Dashboards</b> (back), the dashboard name, the widget count, the <b>Design</b> / <b>Preview</b> switch and, in Design mode, the widget palette: <b>Grid</b>, <b>Chart</b>, <b>Form</b>, <b>Metric KPI</b>, <b>Trigger</b>, <b>Integration</b>, <b>Text</b>, <b>Import</b>.</p>
+<ul>
+  <li><b>Design</b> is for placing and configuring widgets. Nothing is live.</li>
+  <li><b>Preview</b> renders the dashboard exactly as a business user gets it, against the revision you are designing, and includes property edits you have not saved yet. Values typed into a grid in Preview are real writes.</li>
+</ul>
+
+<h4>Adding a widget</h4>
+<p>Click a palette chip; the <b>Configure &amp; place</b> panel opens. Pick the source and click <b>Add widget</b>. The widget is placed at the first free spot at its default size.</p>
+<table class="ctl">
+<tr><th>Widget</th><th>Source and what it shows</th></tr>
+<tr><td><b>Grid</b></td><td><b>Grid</b>: one grid of the revision. Renders the editable planning table (below).</td></tr>
+<tr><td><b>Chart</b></td><td><b>Grid (source)</b>, then the chart editor (below). Add widget stays disabled until the chart configuration is complete.</td></tr>
+<tr><td><b>Form</b></td><td><b>Form</b>: users submit records of that form here.</td></tr>
+<tr><td><b>Metric KPI</b></td><td><b>Metric</b>: one number tile with a default context (whole model, follow selectors, or pinned to a member).</td></tr>
+<tr><td><b>Trigger</b></td><td><b>Trigger</b>: an automation rule with trigger type manual that is enabled. If none exists the panel says so. Renders a button that starts the rule's workflow.</td></tr>
+<tr><td><b>Integration</b></td><td><b>Integration</b>: a REST API integration. Renders a button that runs it.</td></tr>
+<tr><td><b>Text</b></td><td><b>Content</b>: static text, styled in the properties panel.</td></tr>
+<tr><td><b>Import</b></td><td><b>Grid</b>: an upload box that lets business users import a file into that grid.</td></tr>
+</table>
+
+<h4>Moving, sizing, selecting</h4>
+<ul>
+  <li>Drag the widget header to move; drag the right edge, bottom edge or corner to resize. Everything snaps to 20 px.</li>
+  <li>Keyboard: arrow keys nudge by 20 px, Shift+arrow by 100 px, Alt+arrow resizes, Escape deselects.</li>
+  <li>Widgets may not overlap. A colliding drop snaps back and the other widget shows "Overlaps another widget" while you drag.</li>
+  <li>Minimum sizes: grid 600×300, chart 360×240, form 360×300, KPI 220×120, import 320×280, text 240×100, buttons 40×20.</li>
+  <li>The <b>×</b> on a card asks <b>Delete widget?</b>; the source object (grid, form, rule) is not deleted.</li>
+</ul>
+<p>Each card in Design mode shows a <b>Selectors</b> strip: which dimensions this widget lets the user choose, whether they are <b>synced</b>, <b>own</b>, <b>pinned</b> or <b>total</b>, and, when another widget owns the shared selector, "dim → Owner".</p>
+
+<h4>Widget Properties</h4>
+<figure><img src="img/26-dashboard-widget-properties.png" alt="Selected grid widget with the Widget Properties panel on the right"><figcaption>Selecting a widget opens Widget Properties. Changes go into a draft; Save at the bottom of the page writes them.</figcaption></figure>
+<table class="ctl">
+<tr><th>Section</th><th>Options</th></tr>
+<tr><td><b>Header</b></td><td><b>Show title bar</b> and the title text.</td></tr>
+<tr><td><b>Appearance</b></td><td><b>Background</b>: <b>White card</b> or <b>No background</b>. KPIs default to a white card, everything else to none.</td></tr>
+<tr><td><b>Selectors</b> (grid, chart, KPI)</td><td><b>Position in the widget</b>: <b>Top edge</b>, <b>Bottom edge</b>, <b>Left column</b>, <b>Right column</b>.</td></tr>
+<tr><td><b>Context sync</b> (grid, chart)</td><td><b>Sync context selections with other widgets on this dashboard</b>, on by default. When on, widgets that share a dimension show one selector and follow each other. Off gives the widget its own selectors.</td></tr>
+<tr><td><b>Default view</b> (grid)</td><td>For Metrics and each dimension of the grid: <b>Row</b>, <b>Column</b>, <b>Context</b> (a selector) or none. Default: metrics in rows, first dimension in columns, other dimensions as selectors.</td></tr>
+<tr><td><b>Default context</b> (KPI)</td><td><b>Whole-model total</b>, <b>Follow dashboard selectors</b>, or <b>Pin to a member</b> with a <b>Scope dimension</b> and <b>Scope member</b>.</td></tr>
+<tr><td><b>Chart configuration</b></td><td>The chart editor (below).</td></tr>
+<tr><td>Buttons (Trigger, Integration)</td><td><b>Button label</b>, <b>Button color</b>, and for triggers a <b>Confirmation message</b> shown before the run (blank runs immediately).</td></tr>
+<tr><td><b>Source object</b> (form, KPI, trigger, integration)</td><td>Change the source. Grid, chart and import sources are fixed at placement.</td></tr>
+<tr><td><b>Text style</b></td><td>Content, <b>Size (px)</b> 8–120, <b>Weight</b>, <b>Font family</b>, <b>Color</b>.</td></tr>
+<tr><td><b>Position</b> / <b>Size</b></td><td>Read-out of x and y; <b>Width (px)</b> and <b>Height (px)</b> in steps of 20.</td></tr>
+<tr><td><b>Duplicate</b> / <b>Delete</b></td><td>Duplicate copies the widget with its current, even unsaved, settings to a free spot.</td></tr>
+</table>
+<div class="note warn"><b>Save is explicit.</b> Layout and property changes raise an unsaved-changes bar with <b>Save</b> and <b>Cancel</b>; leaving the page while dirty asks first. An incomplete chart configuration is never saved; the last complete one stays.</div>
+
+<h4>Chart editor</h4>
+<figure><img src="img/27-dashboard-add-chart.png" alt="Configure and place panel for a chart with chart type, plotted dimension and metric choices"><figcaption>The chart editor appears once a source grid is chosen, both when adding and in Widget Properties.</figcaption></figure>
+<table class="ctl">
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td><b>Chart type</b></td><td><b>Bar Chart</b>, <b>Line Chart</b>, <b>Pie Chart</b>, <b>Scatter Plot</b>, <b>Histogram</b>. Switching drops metrics the new type cannot plot and says so.</td></tr>
+<tr><td><b>Plotted dimension</b></td><td>The grid dimension on the axis. Every other dimension becomes a context selector.</td></tr>
+<tr><td><b>Metrics</b></td><td>Bar and line: up to 5. Pie and histogram: exactly 1. Scatter: <b>X-axis metric</b> and <b>Y-axis metric</b>, different.</td></tr>
+<tr><td><b>Bin count</b></td><td>Histogram only, 3 to 30, default 10.</td></tr>
+<tr><td><b>Context defaults</b></td><td>Starting member for each non-plotted dimension; defaults to the first leaf.</td></tr>
+<tr><td><b>Value format</b></td><td>number, currency, percent, compact.</td></tr>
+<tr><td>Checkboxes</td><td><b>Show legend</b> (on), <b>Hide totals</b> such as "All Regions" on the plotted axis (off), <b>Show values on chart</b> (bar and line, off).</td></tr>
+<tr><td><b>Refresh interval</b></td><td>2 s, 5 s, 10 s, 30 s.</td></tr>
+</table>
+<p>A configuration is complete when it has a type, a plotted dimension and the required metrics.</p>
+
+<h3>What business users get: the planning grid</h3>
+<figure><img src="img/28-dashboard-preview.png" alt="Preview of the OPEX Planning dashboard with an editable grid, a Trigger button and a text widget"><figcaption>Preview. Input rows are editable, the calculated row is tinted and marked CALC, and the legend explains the tints.</figcaption></figure>
+<ul>
+  <li><b>Editing.</b> Input metrics are inputs; a value is committed on Enter or when leaving the cell. Non-numeric text is discarded. "Saving…" and "Save failed: …" appear while writing.</li>
+  <li><b>Read-only cells.</b> Calculated metrics, aggregated parent members, members or metrics the user's access rules mark read-only, and grids that mirror another grid are not editable.</li>
+  <li><b>Selectors.</b> One selector per context dimension the widget owns, plus a <b>Metric</b> selector when Metrics is in the context zone. Selectors are searchable trees; with synced widgets, a choice applies to all of them.</li>
+  <li><b>Click to select.</b> Clicking a row or column label sets that member in every synced widget. The legend says so when sync is available.</li>
+  <li><b>Totals.</b> A hierarchical column axis adds a read-only <b>Total</b> column per parent group; a flat row axis with more than one row adds a bold <b>Total</b> footer row.</li>
+  <li><b>Hierarchies</b> render fully expanded, indented per level, parents in bold. There is no collapse control.</li>
+  <li><b>Grid actions (⋯)</b>: <b>Export</b> the grid's values as a file, and <b>Pivot data</b>, a panel where the user drags Metrics and dimensions between <b>Rows</b>, <b>Columns</b> and <b>Context selectors</b>.</li>
+  <li><b>Hidden members</b> never reach the browser: the server strips members and metrics the user may not see and flags read-only ones. If a widget is pinned to a member the viewer cannot see, the first visible member is used instead.</li>
+</ul>
+
+<h3>Making a dashboard reachable</h3>
+<p>A business user sees a dashboard only when one of their business roles has been granted it. Grants are managed on the Users screen (Users chapter). Until then the dashboard exists only for developers.</p>

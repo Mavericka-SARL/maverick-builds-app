@@ -1,0 +1,49 @@
+# Cluster-scoped bootstrap, applied ONCE per cluster and deliberately NOT part
+# of the base kustomization: a ClusterIssuer is not namespaced, so it does not
+# belong to an overlay that sets `namespace:`, and applying it per-overlay
+# would have dev and prod fight over one cluster-wide object.
+#
+#   kubectl apply -f deploy/k8s/bootstrap/cert-manager-issuer.yaml
+#
+# Requires cert-manager to already be installed (its CRDs must exist, or this
+# apply fails with "no matches for kind ClusterIssuer").
+#
+# Staging first. Let's Encrypt's production endpoint has strict rate limits and
+# will lock you out for a week after a handful of failed attempts — which is
+# exactly what happens while DNS is still propagating. Point the Ingress at
+# letsencrypt-staging until you see a certificate issued, then switch the
+# annotation to letsencrypt-prod. Staging certificates are untrusted by
+# browsers; that is expected and is not the thing to debug.
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    # Replace with the operator's address — expiry warnings go here. The
+    # hosted service patches it in its private overlay.
+    email: ops@example.com
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: nginx
+
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: ops@example.com
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: nginx

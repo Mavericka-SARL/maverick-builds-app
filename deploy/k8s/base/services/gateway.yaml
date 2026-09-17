@@ -1,0 +1,175 @@
+# Gateway — the sole HTTP entry-point for the Mavericks platform.
+# Exposes port 8080 internally and is fronted by a LoadBalancer Service (gateway-lb)
+# for external traffic on port 80.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: mavericks
+  labels:
+    app: gateway
+    app.kubernetes.io/name: gateway
+    app.kubernetes.io/component: api-gateway
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: gateway
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: gateway
+        app.kubernetes.io/name: gateway
+        app.kubernetes.io/component: api-gateway
+        app.kubernetes.io/part-of: mavericks-engine
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: gateway
+          image: registry.example.com/mavericks/gateway:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          # Inject non-sensitive config first, then overlay with secrets.
+          envFrom:
+            - configMapRef:
+                name: mavericks-config
+            - secretRef:
+                name: mavericks-secrets
+          # DATABASE_URL is composed here, not in the ConfigMap: envFrom
+          # never expands $(VAR) references — only an explicit env: entry
+          # can, by referencing $(POSTGRES_PASSWORD) already contributed
+          # above via envFrom's secretRef.
+          env:
+            - name: DATABASE_URL
+              value: "postgres://mavericks:$(POSTGRES_PASSWORD)@pgbouncer:5433/mavericks?sslmode=disable"
+            # The edition key (docs/LICENSING.md). Optional: without the
+            # secret the gateway runs the community edition. Create it with
+            #   kubectl create secret generic mavericks-license --from-literal=key=MVX1...
+            # and restart the gateway to apply.
+            # "dedicated" gives each tenant its own database on the same
+            # server (docs/TENANT_DATABASES.md). Leave unset for the shared
+            # database every existing deployment uses.
+            # Outbound e-mail (docs/NOTIFICATIONS.md). Optional: without a
+            # relay, e-mail notifications are reported as undeliverable.
+            - name: SMTP_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: mavericks-config
+                  key: SMTP_HOST
+                  optional: true
+            - name: SMTP_FROM
+              valueFrom:
+                configMapKeyRef:
+                  name: mavericks-config
+                  key: SMTP_FROM
+                  optional: true
+            - name: SMTP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: mavericks-smtp
+                  key: username
+                  optional: true
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mavericks-smtp
+                  key: password
+                  optional: true
+            - name: TENANT_DB_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: mavericks-config
+                  key: TENANT_DB_MODE
+                  optional: true
+            # Public self-service sign-up (docs/PLANS_AND_TRIALS.md). Off
+            # unless the deployment sets SIGNUP_ENABLED: "true"; the
+            # contact URL is where "change the plan" leads.
+            - name: SIGNUP_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: mavericks-config
+                  key: SIGNUP_ENABLED
+                  optional: true
+            - name: PLAN_CONTACT_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: mavericks-config
+                  key: PLAN_CONTACT_URL
+                  optional: true
+            - name: MAVERICKS_LICENSE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mavericks-license
+                  key: key
+                  optional: true
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
+      securityContext:
+        fsGroup: 65534
+
+---
+# Internal ClusterIP for service-to-service communication on the cluster.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: mavericks
+  labels:
+    app: gateway
+    app.kubernetes.io/name: gateway
+    app.kubernetes.io/component: api-gateway
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  type: ClusterIP
+  selector:
+    app: gateway
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+
+# NOTE: the gateway-lb LoadBalancer Service that used to live here has moved to
+# deploy/k8s/overlays/dev/gateway-lb.yaml.
+#
+# TLS now terminates in-cluster at ingress-nginx (see base/ingress.yaml), which
+# brings its own LoadBalancer. Keeping a second one here would provision a
+# second Hetzner load balancer AND publish the API on plain port 80, bypassing
+# the TLS the Ingress exists to enforce. Dev keeps it for direct access to a
+# cluster that has no Ingress controller or DNS.

@@ -1,0 +1,14 @@
+# node_modules is reinstalled by `npm ci` inside the image; copying the host's
+# copy would be slow and can carry platform-specific binaries.
+node_modules
+dist
+
+# Test and report output — never part of a production image.
+e2e
+playwright-report
+test-results
+playwright.config.ts
+playwright.keycloak.config.ts
+
+.env.local
+.env.*.local

@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package query.v1;
+
+option go_package = "github.com/mavericks-engine/mavericks/gen/go/query/v1;queryv1";
+
+import "google/protobuf/timestamp.proto";
+
+service QueryService {
+  rpc Query(QueryRequest) returns (QueryResponse);
+  rpc Writeback(WritebackRequest) returns (WritebackResponse);
+  rpc GetCell(GetCellRequest) returns (GetCellResponse);
+}
+
+message DimensionFilter {
+  string dimension_id = 1;
+  repeated string member_codes = 2;
+}
+
+message QueryRequest {
+  string model_id = 1;
+  string scenario = 2;   // deprecated: use revision_id
+  string version = 3;    // deprecated: use revision_id
+  repeated string metric_ids = 4;
+  repeated string dimension_ids = 5;
+  repeated DimensionFilter filters = 6;
+  string hierarchy_id = 7;
+  int32 hierarchy_level = 8;
+  string user_id = 9;
+  string revision_id = 10;
+}
+
+message CellValue {
+  map<string, string> dim_members = 1;
+  string metric_id = 2;
+  double value = 3;
+  bool is_input = 4;
+  bool is_writable = 5;
+}
+
+message QueryResponse {
+  repeated CellValue cells = 1;
+  google.protobuf.Timestamp as_of = 2;
+  bool from_cache = 3;
+}
+
+message WritebackUpdate {
+  map<string, string> dim_members = 1;
+  string metric_id = 2;
+  double value = 3;
+}
+
+message WritebackRequest {
+  string model_id = 1;
+  string scenario = 2;   // deprecated: use revision_id
+  string version = 3;    // deprecated: use revision_id
+  repeated WritebackUpdate updates = 4;
+  string user_id = 5;
+  string revision_id = 6;
+}
+
+message WritebackResponse {
+  bool success = 1;
+  int32 cells_updated = 2;
+  string recalc_job_id = 3;
+}
+
+message GetCellRequest {
+  string model_id = 1;
+  string scenario = 2;   // deprecated: use revision_id
+  string version = 3;    // deprecated: use revision_id
+  map<string, string> dim_members = 4;
+  string metric_id = 5;
+  string revision_id = 6;
+  string user_id = 7;
+}
+message GetCellResponse { CellValue cell = 1; }

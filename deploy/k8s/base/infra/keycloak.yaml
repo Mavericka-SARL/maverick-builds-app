@@ -1,0 +1,217 @@
+# Keycloak 24 — identity and access management (OIDC / OAuth2).
+# start-dev mode uses an embedded H2 database; set KC_DB=postgres and
+# provide KC_DB_URL for production.  The realm.json ConfigMap is mounted
+# at /opt/keycloak/data/import/ so Keycloak auto-imports it on first boot.
+#
+# "On first boot" is literal: --import-realm SKIPS a realm that already
+# exists. Editing the ConfigMap below therefore has no effect on a cluster
+# that has already imported it — delete the realm and restart Keycloak, or
+# apply the change through the admin API.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm
+  namespace: mavericks
+  labels:
+    app: keycloak
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/component: identity
+    app.kubernetes.io/part-of: mavericks-engine
+data:
+  # The realm the application actually requires, not a placeholder. What was
+  # here before declared "clients": [] and roles named admin/user, which
+  # imports cleanly and then fails at the only two things that matter:
+  #
+  #   1. No mavericks-web client, so the console's keycloak.init() has
+  #      nothing to authenticate against and login is impossible.
+  #   2. Roles that match nothing. The gateway reads a user's roles from
+  #      identity.role_assignment, whose enum is platform_admin /
+  #      tenant_admin / developer / business_admin / business_user
+  #      (migrations/002_identity.sql and 032_tenant_admin_role.sql), and
+  #      the console reads the same names from realm_access.roles to decide
+  #      which console to show.
+  #
+  # Users are deliberately NOT here — they carry credentials and belong in
+  # neither git nor a ConfigMap. Create them through the admin console or
+  # admin API, and mirror each one into identity.user (matching keycloak_sub)
+  # plus identity.role_assignment, which is what the gateway authorizes on.
+  #
+  # Brute-force protection is ON. It is off by default in Keycloak, and this
+  # realm's login page is reachable from the internet the moment the auth
+  # hostname is published. permanentLockout stays false on purpose: with a
+  # handful of named users, a permanent lock means anyone who knows an email
+  # address can lock that person out for good just by guessing wrong.
+  # quickLoginCheckMilliSeconds is the setting that actually stops scripted
+  # attacks — verified live, a rapid-fire run locked the account after two
+  # counted failures rather than the full ten.
+  #
+  # Hostnames are placeholders; patch redirectUris/webOrigins per environment.
+  realm.json: |
+    {
+      "realm": "mavericks",
+      "enabled": true,
+      "registrationAllowed": false,
+      "loginTheme": "keycloak",
+      "sslRequired": "external",
+      "displayName": "Maverick",
+      "bruteForceProtected": true,
+      "failureFactor": 10,
+      "waitIncrementSeconds": 60,
+      "maxFailureWaitSeconds": 900,
+      "minimumQuickLoginWaitSeconds": 60,
+      "quickLoginCheckMilliSeconds": 1000,
+      "maxDeltaTimeSeconds": 43200,
+      "permanentLockout": false,
+      "roles": {
+        "realm": [
+          {"name": "platform_admin", "description": "Full access across all customers"},
+          {"name": "tenant_admin", "description": "Manages one customer's workspaces, apps and users"},
+          {"name": "developer", "description": "Builds models, forms and workflows"},
+          {"name": "business_admin", "description": "Administers business consoles within a workspace"},
+          {"name": "business_user", "description": "Enters and reviews data"}
+        ]
+      },
+      "clients": [
+        {
+          "clientId": "mavericks-web",
+          "name": "Mavericks Console",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "implicitFlowEnabled": false,
+          "serviceAccountsEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "fullScopeAllowed": true,
+          "redirectUris": ["https://mavericks.example.com/*"],
+          "webOrigins": ["https://mavericks.example.com"],
+          "attributes": {
+            "pkce.code.challenge.method": "S256",
+            "post.logout.redirect.uris": "https://mavericks.example.com/*"
+          }
+        },
+        {
+          "clientId": "mavericks-admin",
+          "name": "Gateway user provisioning",
+          "description": "Service account the gateway uses to create users and send invitations. NOT for browser login.",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": false,
+          "standardFlowEnabled": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": true
+        }
+      ]
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: mavericks
+  labels:
+    app: keycloak
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/component: identity
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  strategy:
+    # Recreate avoids split-brain with the embedded dev database.
+    # Switch to RollingUpdate once KC_DB=postgres is configured.
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: keycloak
+        app.kubernetes.io/name: keycloak
+        app.kubernetes.io/component: identity
+        app.kubernetes.io/part-of: mavericks-engine
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:24.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /opt/keycloak/bin/kc.sh
+          args:
+            - "start-dev"
+            - "--import-realm"
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: KEYCLOAK_ADMIN
+              value: "admin"
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mavericks-secrets
+                  key: KEYCLOAK_ADMIN_PASSWORD
+            # Dev-mode uses the embedded H2 database.
+            # For production: KC_DB=postgres, KC_DB_URL, KC_DB_USERNAME, KC_DB_PASSWORD
+            - name: KC_DB
+              value: "dev-mem"
+            # Hostname is required in production; set to your external FQDN.
+            - name: KC_HOSTNAME_STRICT
+              value: "false"
+            - name: KC_PROXY
+              value: "edge"
+          volumeMounts:
+            - name: realm-config
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          readinessProbe:
+            httpGet:
+              path: /realms/master
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 5
+          livenessProbe:
+            httpGet:
+              path: /realms/master
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 3
+      volumes:
+        - name: realm-config
+          configMap:
+            name: keycloak-realm
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: mavericks
+  labels:
+    app: keycloak
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/component: identity
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  type: ClusterIP
+  selector:
+    app: keycloak
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP

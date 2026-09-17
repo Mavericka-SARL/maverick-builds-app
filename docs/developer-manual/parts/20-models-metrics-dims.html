@@ -1,0 +1,92 @@
+<h2>Models</h2>
+<p class="path">Sidebar: Build › Models</p>
+<p>The Models screen lists every application and model you can reach, with their revisions. It is where you choose <em>which revision you are editing</em>; every other Build screen works inside that choice.</p>
+<figure><img src="img/01-models.png" alt="Models screen with the working-revision banner and two applications, each with a model and its revisions"><figcaption>The banner names the selected revision and its short id. Applications are cards; each model lists its revisions with badges.</figcaption></figure>
+<h3>Controls</h3>
+<table class="ctl">
+<tr><th>Control</th><th>What it does</th></tr>
+<tr><td>Banner <b>Working in revision: …</b></td><td>The revision every Build screen edits, with its short id. With nothing selected the banner is orange: "No revision selected — select a revision below to start working".</td></tr>
+<tr><td>Revision row</td><td>Click to select it. The row gets a <b>Working</b> badge; a <b>live</b> badge marks the model's active revision.</td></tr>
+<tr><td><b>Set active</b></td><td>On a non-active revision. Confirm <b>Set as active revision?</b>: the revision "becomes the live revision everyone sees. This can be changed again later."</td></tr>
+<tr><td>Delete revision icon</td><td>On a non-active revision. Confirm <b>Delete revision?</b>: "This permanently removes the revision. This cannot be undone." The active revision cannot be deleted.</td></tr>
+<tr><td><b>New revision</b></td><td>Type a name, press Enter or <b>Save</b>. The new revision is a full copy of the model's current state (see Concepts › Revisions).</td></tr>
+<tr><td><b>Set as business default</b> / badge <b>business default</b></td><td>Business consoles (dashboards, workflows, grids) open the default model of an application. With several models in one application, pick which one users get.</td></tr>
+</table>
+<h3>Rules and behaviour</h3>
+<ul>
+  <li><b>Selection is per session and not saved.</b> On a fresh sign-in the console pre-selects the most recently created revision, and if you skip this screen it falls back to a default revision that may belong to another application. Check the header (<b>Model</b> and <b>Revision</b>) before creating anything.</li>
+  <li><b>Applications and models are created by administrators</b> (Applications screen of the tenant or platform admin). A developer creates revisions, not applications.</li>
+  <li><b>Active means live.</b> Business users always see the active revision. Build and test in a non-active revision, then <b>Set active</b>.</li>
+</ul>
+
+<h2>Metrics</h2>
+<p class="path">Sidebar: Build › Metrics</p>
+<p>A metric is a measure of the model: an <b>Input</b> metric is typed in by users, imported or posted from forms; a <b>Calc</b> metric is computed from a formula over other metrics. The list groups inputs first, then a <b>Calculated</b> section.</p>
+<figure><img src="img/02-metrics.png" alt="Metrics list with input and calculated metrics, type badges, formulas and the Used by column"><figcaption>Each row shows technical name, label, type badges (Input or Calc, aggregation rule, format), the formula, and which calculated metrics use this one.</figcaption></figure>
+<h3>The list</h3>
+<table class="ctl">
+<tr><th>Control</th><th>What it does</th></tr>
+<tr><td><b>Search metrics…</b></td><td>Filters by name or label; the footer reads "n results of m metrics".</td></tr>
+<tr><td>Header line</td><td>App and model name and the model's short id, so you can confirm what you are editing.</td></tr>
+<tr><td><b>Used by</b></td><td>The calculated metrics whose formulas reference this row. This is the dependency graph in table form.</td></tr>
+<tr><td>Edit icon</td><td>Turns the row into an inline editor (below).</td></tr>
+<tr><td>Delete icon</td><td>Confirm <b>Delete metric?</b>: "This removes the metric from all formulas that reference it." Dependents are recalculated afterwards.</td></tr>
+<tr><td><b>Add metric</b> / <b>Cancel</b></td><td>Opens the add form under the list.</td></tr>
+</table>
+<h3>The add form</h3>
+<figure><img src="img/20-metric-add-form.png" alt="Add metric form with name, type, format, formula and aggregation rule"><figcaption>Adding a calculated metric. Formula references are checked as you type; the button stays disabled while a reference is unknown.</figcaption></figure>
+<table class="ctl">
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td><b>Metric name</b></td><td>Technical name in snake_case; formulas refer to it. Example <code>gross_margin</code>.</td></tr>
+<tr><td><b>Type</b></td><td><b>Calc</b> or <b>Input</b>. Choosing Input clears the formula.</td></tr>
+<tr><td><b>Format</b></td><td><b>Number</b>, <b>Percentage</b>, <b>Currency</b>, <b>Boolean</b>, <b>Text</b>. Currency adds <b>Decimal places</b> (0–4) and <b>Symbol</b> (default $). Number and Percentage also take decimal places.</td></tr>
+<tr><td><b>Formula</b> (Calc only)</td><td>Spreadsheet-style expression over metric names, for example <code>=revenue - cogs</code> or <code>{hc_cost} + {software_cost}</code>. Each <code>{name}</code> reference shows a green ✓ or a red "✗ unknown" badge below the field.</td></tr>
+<tr><td><b>Aggregation rule</b> (Calc only in the add form; both types when editing)</td><td>How per-member results combine into totals: <b>Sum</b>, <b>Average</b>, <b>Count</b>, <b>Rate</b>, <b>Formula</b>. Rate asks for a <b>Numerator</b> and a <b>Denominator</b> metric ("total = numerator ÷ denominator"), so the total reflects weight instead of averaging members. Formula evaluates this metric's own formula on aggregated inputs, which is what ratios and percentages need. Formula is refused for input metrics.</td></tr>
+<tr><td><b>Add metric</b></td><td>Enabled when the name is filled, a Calc metric has a formula with only known references, and a Rate rule has both operands. After success the label reads <b>Added</b> and the form stays open for the next metric.</td></tr>
+</table>
+<h3>Editing</h3>
+<figure><img src="img/21-metric-edit-inline.png" alt="A metric row in inline edit mode"><figcaption>Inline editing: name, formula, aggregation rule, format, decimals and symbol, then Save or Cancel.</figcaption></figure>
+<ul>
+  <li>Saving a changed formula or rule triggers recalculation; the row then shows a green <b>Recalc results</b> banner listing "revision → metric = value" per affected total. Dismiss it with the ×.</li>
+  <li>Formula references are validated by the server's parser (both <code>=name</code> and <code>{name}</code> styles). Save is disabled while any reference is unknown.</li>
+  <li>The type (Input or Calc) cannot be changed after creation; create a new metric instead.</li>
+</ul>
+<div class="note"><b>Formula language in short.</b> Optional leading <code>=</code>; names are case-insensitive; operators <code>+ - * / ^</code>, comparisons <code>= &lt;&gt; &lt; &lt;= &gt; &gt;=</code>, text join <code>&amp;</code>, parentheses; arguments separated by commas or semicolons. Functions: see Concepts › Formulas. Not available: cell addresses like A1, SUMIF-style conditional aggregates, lookups, dotted property references, offsets between periods.</div>
+
+<h2>Dimensions</h2>
+<p class="path">Sidebar: Build › Dimensions</p>
+<p>A dimension is an axis of the model (Department, Region, Product, Period). Its members are the values on that axis, optionally arranged in a hierarchy, and each member can carry property values used for grouping and rollups.</p>
+<figure><img src="img/03-dimensions.png" alt="Dimensions screen with one dimension card showing members, codes and actions"><figcaption>One card per dimension. The header shows member count, root count and the rollup rule; the table lists members with code, children and actions.</figcaption></figure>
+<h3>Controls</h3>
+<table class="ctl">
+<tr><th>Control</th><th>What it does</th></tr>
+<tr><td><b>New dimension</b> / <b>Cancel</b></td><td>Opens the form: <b>Name</b> (placeholder <code>department</code>) and <b>Parent dimension (optional)</b>. <b>Create</b>.</td></tr>
+<tr><td>Parent dimension</td><td>Makes this a child dimension of another one: the card shows "child of &lt;parent&gt;", the add button reads <b>Add member</b> and each member's parent is picked from the parent dimension's members ("— unassigned" when none). Use it for a second level that is defined separately, for example Cost Centre under Department.</td></tr>
+<tr><td>Card header</td><td>"n members · n roots · rollup: sum". <b>Props</b> / <b>Hide props</b> toggles the property columns. Expand-all and collapse-all icons. Edit-name icon. Delete icon: confirm <b>Delete dimension?</b> "This removes the dimension and all its n members."</td></tr>
+<tr><td><b>Search members…</b></td><td>Filters the tree.</td></tr>
+<tr><td>Member row</td><td>Label (indented per level, chevron to expand), <b>Code</b>, <b>Children</b> count, actions: <b>Add child</b> (+), <b>Edit</b>, <b>Delete</b> (confirm <b>Delete member?</b>, mentions descendants).</td></tr>
+<tr><td><b>Add root member</b></td><td>Inline row: <b>CODE</b> (monospace), <b>Label</b>, then <b>Save</b>. Adding a child pre-sets the parent.</td></tr>
+<tr><td>Edit member</td><td>Same inline row plus <b>Parent member</b> select (move within the hierarchy) and one input per property.</td></tr>
+<tr><td><b>Dimension Properties</b></td><td>"usable in formulas as dim.propertyName". Add with <b>property_name</b> and a type (<b>text</b>, <b>number</b>, <b>date</b>), then <b>Add</b>. Each property becomes a column in the member table when props are shown; values are edited per member.</td></tr>
+</table>
+<figure><img src="img/22-dimension-member-edit.png" alt="Member row in edit mode with code, label, parent member and property inputs"><figcaption>Editing a member: code, label, parent and property values in one row.</figcaption></figure>
+<h3>Rules and behaviour</h3>
+<ul>
+  <li><b>Codes are identity.</b> Data, imports and formulas refer to members by code; labels are for display. Changing a code re-keys the member for future writes.</li>
+  <li><b>Hierarchy and totals.</b> A parent's value is the rollup of its children using the dimension's rollup rule (sum by default). Grids can show all levels, one level, or leaves only (Grids › Show).</li>
+  <li><b>Deleting a member deletes its descendants</b> and triggers recalculation of every metric that had values there.</li>
+  <li><b>Properties</b> are the basis of property-derived groupings (for example grouping cost centres by their <code>region</code> property). Editing property values per member is available here; building derived dimensions from properties is only partly exposed in the console.</li>
+  <li>Dimensions are per revision, like everything else under Build.</li>
+</ul>
+
+<h2>Dependency Graph</h2>
+<p class="path">Sidebar: Build › Dependency Graph</p>
+<p>A read-only map of every metric in the revision and the arrows between them: an arrow from A to B means B's formula uses A. Use it to understand what a change will recalculate and to spot metrics that are on no grid.</p>
+<figure><img src="img/37-dependency-graph.png" alt="Dependency graph with input and calculated metric nodes joined by arrows"><figcaption>Input metrics and calculated metrics are drawn as differently tinted cards; each card names the grids and dimensions of the metric.</figcaption></figure>
+<table class="ctl">
+<tr><th>Control</th><th>What it does</th></tr>
+<tr><td><b>Find metric…</b></td><td>Highlights matching nodes.</td></tr>
+<tr><td>Click a node</td><td>Selects it and highlights its arrows; click again to clear. Hovering shows label, grids and dimensions.</td></tr>
+<tr><td><b>Zoom to selection</b>, <b>Zoom in</b>, <b>Zoom out</b>, <b>Reset zoom</b></td><td>Also Ctrl+wheel or trackpad pinch to zoom; a plain wheel scrolls.</td></tr>
+<tr><td>Node text</td><td>INPUT or CALC, the metric name, "Grid: …" or the orange warning <b>Not on any grid</b>, and the dimension list.</td></tr>
+</table>

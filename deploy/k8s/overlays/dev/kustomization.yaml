@@ -1,0 +1,94 @@
+# Dev overlay — single-replica, latest images, separate namespace.
+# Apply with:  kubectl apply -k deploy/k8s/overlays/dev
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# All resources get the "dev-" prefix and live in mavericks-dev.
+namePrefix: dev-
+namespace: mavericks-dev
+
+resources:
+  - ../../base
+  # Direct LoadBalancer to the gateway — dev only, see the file header.
+  - gateway-lb.yaml
+  # Throwaway credentials for a local cluster. Prod supplies its own
+  # SealedSecret under the same name instead.
+  - secrets-dev.yaml
+
+# Override the namespace name itself so the Namespace resource also changes.
+patches:
+  - patch: |-
+      - op: replace
+        path: /metadata/name
+        value: mavericks-dev
+    target:
+      kind: Namespace
+      name: mavericks
+
+# Scale every Deployment to 1 replica in dev to save resources.
+# The gateway base already has 2; this brings it back to 1.
+replicas:
+  - name: dev-gateway
+    count: 1
+  - name: dev-ai-assistant
+    count: 1
+  - name: dev-audit
+    count: 1
+  - name: dev-calculation
+    count: 1
+  - name: dev-identity
+    count: 1
+  - name: dev-import
+    count: 1
+  - name: dev-model
+    count: 1
+  - name: dev-notification
+    count: 1
+  - name: dev-policy
+    count: 1
+  - name: dev-query
+    count: 1
+  - name: dev-schema-migration
+    count: 1
+  # seed is a Job, not a Deployment/StatefulSet/ReplicaSet — the replicas
+  # transformer doesn't apply to it, so no entry belongs here.
+  - name: dev-tenant
+    count: 1
+  - name: dev-workflow
+    count: 1
+  - name: dev-web
+    count: 1
+
+# Pin all service images to :latest (the default in base, explicit here for
+# clarity).  Replace with a specific digest in CI after each build.
+images:
+  - name: registry.example.com/mavericks/gateway
+    newTag: latest
+  - name: registry.example.com/mavericks/ai-assistant
+    newTag: latest
+  - name: registry.example.com/mavericks/audit
+    newTag: latest
+  - name: registry.example.com/mavericks/calculation
+    newTag: latest
+  - name: registry.example.com/mavericks/identity
+    newTag: latest
+  - name: registry.example.com/mavericks/import
+    newTag: latest
+  - name: registry.example.com/mavericks/model
+    newTag: latest
+  - name: registry.example.com/mavericks/notification
+    newTag: latest
+  - name: registry.example.com/mavericks/policy
+    newTag: latest
+  - name: registry.example.com/mavericks/query
+    newTag: latest
+  - name: registry.example.com/mavericks/schema-migration
+    newTag: latest
+  - name: registry.example.com/mavericks/seed
+    newTag: latest
+  - name: registry.example.com/mavericks/tenant
+    newTag: latest
+  - name: registry.example.com/mavericks/workflow
+    newTag: latest
+  - name: registry.example.com/mavericks/web
+    newTag: latest

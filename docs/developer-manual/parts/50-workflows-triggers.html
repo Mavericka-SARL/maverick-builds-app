@@ -1,0 +1,98 @@
+<h2>Workflows</h2>
+<p class="path">Sidebar: Build › Workflows</p>
+<p>A workflow is a reusable approval or task process: who has to act, in what order, under which conditions, and who is told. Business users start it (from a dashboard button, a form submission, an import, or on demand), see their tasks in the Workflow Inbox, and decide them there. Developers define and publish it here.</p>
+<figure><img src="img/07-workflows.png" alt="Workflows list with name, status, trigger, step count and updated date"><figcaption>The list. Status badges: Draft, Published, Archived, Invalid. The trigger column shows the event the workflow starts on.</figcaption></figure>
+<h3>The list</h3>
+<table class="ctl">
+<tr><th>Control</th><th>What it does</th></tr>
+<tr><td><b>Search by name…</b>, <b>All statuses</b></td><td>Filter by name and by Draft / Published / Archived / Invalid.</td></tr>
+<tr><td><b>New Workflow</b></td><td>Dialog with <b>Name</b>, <b>Description</b>, <b>Trigger event</b>; <b>Create</b> opens the editor.</td></tr>
+<tr><td><b>From Template</b></td><td><b>Simple Approval</b> (one approval plus notification), <b>Two-Level Approval</b> (manager then finance), <b>Amount-Based Approval</b> (finance only above a threshold), <b>Notify Only</b>. Creates a manual-trigger draft with the template's steps.</td></tr>
+<tr><td>Row menu <b>···</b></td><td><b>Open</b>, <b>Duplicate</b> (creates "&lt;name&gt; (copy)"), <b>Create Trigger</b> (opens the Triggers dialog pre-filled), <b>Archive</b> or <b>Restore to draft</b>, <b>Delete draft</b> (only drafts; anything else must be archived).</td></tr>
+</table>
+
+<h3>The editor</h3>
+<figure><img src="img/29-workflow-editor.png" alt="Workflow editor with the step list on the left, the process canvas in the middle and the properties panel on the right"><figcaption>Three panes: the ordered step list with the Add step palette, the auto-laid-out canvas, and the definition or step properties.</figcaption></figure>
+<table class="ctl">
+<tr><th>Toolbar item</th><th>What it does</th></tr>
+<tr><td><b>← Workflows</b></td><td>Back. With unsaved edits: <b>Discard unsaved changes?</b></td></tr>
+<tr><td>Status badge and rule chips</td><td>Current status; <b>⚡ No rule yet</b> or one chip per automation rule that starts this workflow. Click to open the <b>usage</b> panel.</td></tr>
+<tr><td><b>Validate</b></td><td>Checks the on-screen draft without saving and opens <b>Validation Results</b>: "✓ Workflow is valid" or a list of problems.</td></tr>
+<tr><td><b>Test Run</b></td><td>Only after saving. Asks for the context variables and starts an instance in test mode: real routing, no notifications, no data written. Shows instance id, status and the step it stopped at.</td></tr>
+<tr><td><b>Save</b> / <b>Cancel</b></td><td>Save writes name, description, trigger, subject, steps, context and concurrency. Cancel discards the draft.</td></tr>
+<tr><td><b>Publish</b></td><td>Shown while not published; needs a clean save. Makes the workflow startable. There is no unpublish; archive from the list instead.</td></tr>
+</table>
+<div class="note warn"><b>Published workflows and running instances.</b> Saving a published workflow applies to instances started afterwards. A running instance keeps the definition it started with. Changes across revisions belong to the revision.</div>
+
+<h4>Definition properties (right panel, no step selected)</h4>
+<table class="ctl">
+<tr><th>Tab / field</th><th>Meaning</th></tr>
+<tr><td><b>Properties › Name, Description</b></td><td>The name is edited here only.</td></tr>
+<tr><td><b>Concurrency › One active instance per scope</b></td><td>On by default: a second start with the same dimension members is refused as a duplicate. Turn off for per-request workflows such as an expense request per department.</td></tr>
+<tr><td><b>Starts on</b></td><td>The trigger event, grouped: <b>Manual</b>, <b>Forms</b> (any form submitted, or a specific form), <b>Integrations</b> (any import completed, or a specific integration's import completed or failed), <b>API</b> (API trigger). An event whose source was deleted shows "(unknown)" with an explanation.</td></tr>
+<tr><td><b>Workflow object</b></td><td><b>Not specified</b>, <b>Specific planning grid</b>, <b>Metric in a planning grid</b>, <b>Selected records in a form</b>, <b>Single saved record in a form</b>; then the grid, metric or form. Defines what the approval is about and what gets locked while the instance runs.</td></tr>
+<tr><td><b>Context</b></td><td>Variables the workflow needs beyond the trigger payload: key, <b>Label</b>, <b>Type</b> (Text, Number, Boolean, Date, User, Role, Dimension member, Metric, Form record), <b>Required</b>. A Dimension member variable also takes the <b>Dimension</b> and a <b>Source</b>: manual entry, or the caller's RACI "responsible" scope. Conditions read these; the inbox shows them. Duplicate keys are refused.</td></tr>
+<tr><td><b>Usage</b></td><td>The automation rules that start this workflow, with <b>+ Create Trigger</b>.</td></tr>
+<tr><td><b>Instances</b></td><td>Every instance with status, a "test run" badge where applicable, start time and its context. Refreshes every 10 s.</td></tr>
+</table>
+
+<h4>Steps</h4>
+<figure><img src="img/30-workflow-step-properties.png" alt="Approval step selected with its properties: name, instructions, approver roles, SLA hours, require comment, on approve and on reject routes"><figcaption>Step properties for an approval. Routes are chosen from every other step or an end state.</figcaption></figure>
+<p>Add a step with the <b>Add step</b> palette (<b>Task</b>, <b>Approval</b>, <b>Condition</b>, <b>Notification</b>, <b>Join</b>); it is inserted after the selected step. Rows in the step list can be moved up or down, duplicated and deleted. The canvas is a picture of the list: click a card to select it; there is no dragging or edge drawing on the canvas.</p>
+<table class="ctl">
+<tr><th>Step type</th><th>Properties</th></tr>
+<tr><td>All</td><td><b>Step name</b> (required), <b>Instructions</b> shown to the person acting.</td></tr>
+<tr><td><b>Task</b></td><td><b>Assignee roles</b> (platform roles business_admin and business_user, plus named roles from the Business Admin console; a hint says where to create one), <b>SLA hours</b>, <b>Require comment</b>, <b>Completion button label</b> (default "Complete"), <b>Next step</b> or <b>Parallel branches</b> (add with <b>+ parallel</b>).</td></tr>
+<tr><td><b>Approval</b></td><td><b>Approver roles</b>, <b>SLA hours</b>, <b>Require comment</b>, <b>On approve →</b>, <b>On reject →</b>.</td></tr>
+<tr><td><b>Condition</b></td><td><b>Context field</b>, <b>Operator</b> (equals, not equals, greater than, ≥, less than, ≤, contains, is empty, is not empty), <b>Value</b>, <b>If true →</b>, <b>If false →</b>. Evaluated automatically; if the value is missing the inbox asks a person to pick the branch.</td></tr>
+<tr><td><b>Notification</b></td><td><b>Recipient</b>: Requester or Specific role (then <b>Recipient role</b>), <b>Subject</b>, <b>Message</b>, then Next step or parallel branches. Unconfigured notifications complete without notifying anyone; a warning says so.</td></tr>
+<tr><td><b>Join</b></td><td>Waits for parallel branches, then <b>Next step</b>.</td></tr>
+</table>
+<p>Route targets are any other step, or <b>End: Completed</b>, <b>End: Rejected</b>, <b>End: Cancelled</b>. Routing to an earlier step is how rework loops are built; there is no separate rework control. A step with no route falls through to the next step in list order, so the order of the list matters.</p>
+
+<h4>What Validate checks</h4>
+<ul>
+  <li>Name present, at least one step, every step named and typed.</li>
+  <li>Tasks and approvals have a role; approvals have both routes; conditions have a condition and both routes; a notification to a role names the role.</li>
+  <li>Routes point at existing steps; every step is reachable from the first; some path reaches an end.</li>
+  <li>A loop is allowed only if a task or approval sits on it ("nobody could ever stop it" otherwise).</li>
+</ul>
+<figure><img src="img/31-workflow-validate.png" alt="Validation Results dialog"><figcaption>Validation runs against the draft on screen, so you can check before saving.</figcaption></figure>
+
+<h3>What business users experience</h3>
+<ul>
+  <li><b>Starting.</b> Manual workflows appear under "Start a workflow" in the business Workflow Inbox and behind dashboard <b>Trigger</b> buttons. Context variables become the start form; Dimension member and Metric variables are multi-selects, one instance per combination, at most 20 per submission.</li>
+  <li><b>Acting.</b> Tasks show the step name, workflow, requester, due date (SLA), instructions, a context summary, a comment box (required when the step says so) and the buttons: <b>Approve</b> / <b>Reject</b>, the task's completion label, or <b>Continue as true</b> / <b>Continue as false</b> for an unevaluable condition. Business admins decide; business users submit and also act on tasks assigned to their role.</li>
+  <li><b>Locking.</b> While an instance is in progress or approved, the cells in its scope are locked against edits and imports; the inbox says "the scoped data is locked until a decision is made".</li>
+  <li><b>Rework.</b> A route back to an earlier step re-activates it with a "Sent back for rework (n)" note and notifies the assignee. At most 20 reworks per instance.</li>
+  <li><b>Notifications</b> are in-app: the bell in every console. Notification steps, rework, and failed starts produce them.</li>
+</ul>
+
+<h2>Triggers</h2>
+<p class="path">Sidebar: Build › Triggers</p>
+<p>A trigger (automation rule) connects an event to a workflow: when the event happens, an instance of the workflow starts. Rules are what dashboard <b>Trigger</b> buttons run, and what makes a form submission or a finished import start a process.</p>
+<figure><img src="img/08-triggers.png" alt="Triggers screen with one automation rule and an empty execution log"><figcaption>Automation Rules and, below, the Execution Log of recent starts.</figcaption></figure>
+<h3>Controls</h3>
+<table class="ctl">
+<tr><th>Control</th><th>What it does</th></tr>
+<tr><td><b>New rule</b> / <b>Cancel</b></td><td>Opens the form.</td></tr>
+<tr><td><b>Name</b></td><td>Technical name, for example <code>budget_approval_trigger</code>.</td></tr>
+<tr><td><b>Workflow</b></td><td>Grouped into <b>Published</b> and <b>Draft / Other</b>. Choosing a workflow sets the trigger type from the workflow's own <b>Starts on</b> event and locks it.</td></tr>
+<tr><td><b>Trigger type</b></td><td><b>manual</b> (trigger manually), <b>form_submit</b> (on record creation), <b>form_approval</b> (on record approved / closed), <b>grid_change</b> (on cell writeback), <b>integration_completed</b>, <b>integration_failed</b>, <b>api</b> (external HTTP trigger).</td></tr>
+<tr><td><b>Source form</b> / <b>Source grid</b> / <b>Source integration</b></td><td>Optional narrowing for the form, grid and integration event types; blank means any.</td></tr>
+<tr><td><b>Description</b></td><td>Free text shown in the row.</td></tr>
+<tr><td><b>Create rule</b> / <b>Save</b></td><td>Needs a name and a workflow.</td></tr>
+<tr><td>Row badges</td><td>Disabled state, trigger type, source, "→ workflow", and the workflow's status (published, draft, archived, or "workflow not found").</td></tr>
+<tr><td><b>Trigger</b> button</td><td>Manual rules only. Confirm <b>Fire this trigger?</b>: starts a real, live instance exactly as a business user's dashboard button would. Not a dry run.</td></tr>
+<tr><td>Enable / Disable icon</td><td>Disabling stops the rule from firing (button or event) until re-enabled; running instances are unaffected. Disabling asks for confirmation.</td></tr>
+<tr><td>Edit, Delete</td><td>Inline edit; delete confirms <b>Delete rule?</b>.</td></tr>
+<tr><td><b>Execution Log</b></td><td>Recent runs: id, status (completed, running, failed, cancelled), instance, started. Refreshes every 8 s.</td></tr>
+</table>
+<figure><img src="img/32-trigger-new-rule.png" alt="New rule form with name, workflow, trigger type and description"><figcaption>The rule form. The trigger type follows the chosen workflow's event.</figcaption></figure>
+<h3>Rules and behaviour</h3>
+<ul>
+  <li><b>A rule is event → workflow, nothing more.</b> Conditions and actions belong to the workflow's steps. Time schedules exist for integrations, not for rules.</li>
+  <li><b>Dashboard buttons</b> can only run rules that are manual and enabled. A business user sees a disabled button with the reason when that stops being true.</li>
+  <li><b>A failed start</b> (for example a duplicate refused by "one active instance per scope") produces a "Workflow could not start" notification for the person who triggered it.</li>
+  <li>Rules are per revision and are copied with it.</li>
+</ul>

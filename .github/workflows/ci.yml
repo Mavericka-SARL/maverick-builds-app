@@ -1,0 +1,686 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  # Image publishing is manual. It was 18 jobs and ~40 billable minutes on
+  # every single push to main, whether or not anything was being deployed —
+  # by far the largest line in the Actions bill, for artifacts that were
+  # mostly never pulled.
+  workflow_dispatch:
+    inputs:
+      publish_images:
+        description: "Build and push container images to GHCR"
+        type: boolean
+        default: true
+      deploy:
+        description: "Roll the cluster onto the freshly published images"
+        type: boolean
+        default: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Every job runs wherever RUNNER_LABEL points. It is a repository variable
+# rather than a literal so falling back to GitHub's hosted runners needs no
+# commit: clear RUNNER_LABEL in Settings > Variables and the `|| 'ubuntu-latest'`
+# takes over on the next run.
+#
+# It currently points at "mavericks-ci" — three self-hosted runners on the
+# Hetzner worker-2 node, which bills nothing. They share a systemd ci.slice
+# capped at 5 cores / 9G with low CPU and IO weights, because that node also
+# runs 15 production pods and they must win any contention. Docker there is
+# ROOTLESS on purpose: the rootful daemon sets the iptables FORWARD policy to
+# DROP on start, which would sit in front of the pod network on a live node.
+
+jobs:
+
+  # ── What changed ─────────────────────────────────────────────────────────────
+  # Billing sums every parallel job, so a run costs the TOTAL of its jobs, not
+  # its wall-clock time: a full run is ~67 minutes across 27 jobs. A
+  # frontend-only change was still running the Go test suite, the sqlc/ogen
+  # drift checks and proto lint — around 55 of those minutes doing nothing.
+  #
+  # Computed with git rather than a third-party action to keep the dependency
+  # surface of the workflow small. When the diff base is unknown (first push,
+  # force push, manual run) every filter reports true, so the failure mode is
+  # "runs too much", never "silently skips a gate".
+  changes:
+    name: Detect changed areas
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: filter
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          # All-zeros means no usable predecessor (branch creation, force push).
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "no usable diff base — running everything" >&2
+            echo "go=true"  >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(git diff --name-only "$base" "${{ github.sha }}")
+          echo "changed files:" >&2; echo "$files" >&2
+
+          # The Go gates cover more than *.go: sqlc reads migrations, ogen reads
+          # the OpenAPI spec, and both fail the drift check if their source
+          # moves without the generated output following.
+          if echo "$files" | grep -qE '^(cmd/|internal/|pkg/|migrations/|api/|proto/|deploy/docker/)|(^|/)(go\.mod|go\.sum)$|\.go$'; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          fi
+          if echo "$files" | grep -qE '^web/'; then
+            echo "web=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "web=false" >> "$GITHUB_OUTPUT"
+          fi
+          # A workflow edit can change any gate, so re-run all of them.
+          if echo "$files" | grep -qE '^\.github/workflows/'; then
+            echo "go=true"  >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── Go ───────────────────────────────────────────────────────────────────────
+
+  go-lint:
+    name: Go lint
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          # Only on GitHub's runners. A self-hosted runner keeps its module
+          # cache on disk between jobs, so there is nothing to restore — and
+          # the attempt actively fails, because tar cannot overwrite the
+          # read-only files already in $GOMODCACHE ("tar failed with exit
+          # code 2"). Skipping it removes the noise and a pointless download.
+          cache: ${{ !vars.RUNNER_LABEL }}
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12
+          args: --timeout=5m ./...
+
+  go-test:
+    name: Go test
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    env:
+      TESTCONTAINERS_RYUK_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          # Only on GitHub's runners. A self-hosted runner keeps its module
+          # cache on disk between jobs, so there is nothing to restore — and
+          # the attempt actively fails, because tar cannot overwrite the
+          # read-only files already in $GOMODCACHE ("tar failed with exit
+          # code 2"). Skipping it removes the noise and a pointless download.
+          cache: ${{ !vars.RUNNER_LABEL }}
+      # -race stays: this codebase has had real concurrency bugs that only the
+      # race detector caught, and it is the longest job in the workflow for a
+      # good reason.
+      #
+      # Coverage does not: nothing consumed the profile — no codecov, no
+      # coveralls, no threshold gate — so it was instrumenting every package
+      # and uploading an artifact nobody read. Run it locally when you want it
+      # (the command is in docs/DEVELOPMENT.md).
+      - name: Run tests
+        # -p 4 rather than the default GOMAXPROCS because the self-hosted
+        # runners share a systemd slice capped at 5 cores, and -race on top of
+        # 8 concurrent packages just thrashes.
+        #
+        # It is NOT what fixes the "bind: address already in use" failures this
+        # suite hit on rootless Docker — capping parallelism only made them
+        # rarer. Rootless publishes a port by picking one inside dockerd's own
+        # network namespace, where host bindings are invisible, then having
+        # RootlessKit bind it on the host; both namespaces defaulted to
+        # 32768-60999, so a port Docker saw as free could already be held by an
+        # outbound socket from a test process. The node now sets
+        # net.ipv4.ip_local_port_range=15000-29999 for host clients
+        # (/etc/sysctl.d/99-ci-rootless-ports.conf), leaving Docker the kernel
+        # default its namespace still gets. Disjoint ranges, no race. Verified
+        # to survive a dockerd restart, since a fresh netns takes the kernel
+        # default rather than inheriting the host value.
+        #
+        # Both of these go away if the suite stops starting a container per
+        # package: one shared Postgres with per-test schema isolation would
+        # remove the contention and most of the runtime.
+        run: go test -race -p 4 ./...
+      # Testcontainers leak when a run is killed mid-suite (timeout,
+      # concurrency cancellation): TESTCONTAINERS_RYUK_DISABLED means no
+      # reaper, so orphaned postgres containers and their volumes pile up
+      # until the disk is full — 93GB of them took all three runners down
+      # (2026-08-29, the second disk-full outage after the buildx one).
+      # Age-filtered (>1h) so a PARALLEL run's live containers are never
+      # touched; volume prune only removes volumes nothing references.
+      - name: Clean up leaked test containers
+        if: always()
+        run: |
+          now=$(date +%s)
+          for c in $(docker ps -aq --filter ancestor=postgres:16-alpine); do
+            created=$(docker inspect -f '{{.Created}}' "$c" 2>/dev/null) || continue
+            age=$(( now - $(date -d "$created" +%s) ))
+            [ "$age" -gt 3600 ] && docker rm -f "$c" >/dev/null 2>&1 || true
+          done
+          docker container prune -f --filter until=1h >/dev/null || true
+          docker volume prune -af >/dev/null || true
+
+  go-build:
+    name: Go build (all services)
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          # Only on GitHub's runners. A self-hosted runner keeps its module
+          # cache on disk between jobs, so there is nothing to restore — and
+          # the attempt actively fails, because tar cannot overwrite the
+          # read-only files already in $GOMODCACHE ("tar failed with exit
+          # code 2"). Skipping it removes the noise and a pointless download.
+          cache: ${{ !vars.RUNNER_LABEL }}
+      - run: go build ./...
+
+  # ── sqlc ──────────────────────────────────────────────────────────────────────
+
+  sqlc-generate:
+    name: sqlc generate (verify no drift)
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          # Only on GitHub's runners. A self-hosted runner keeps its module
+          # cache on disk between jobs, so there is nothing to restore — and
+          # the attempt actively fails, because tar cannot overwrite the
+          # read-only files already in $GOMODCACHE ("tar failed with exit
+          # code 2"). Skipping it removes the noise and a pointless download.
+          cache: ${{ !vars.RUNNER_LABEL }}
+      - name: Install sqlc
+        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+      - name: Generate
+        run: sqlc generate
+      - name: Check for drift
+        run: git diff --exit-code -- internal/*/db/
+
+  # ── Proto ─────────────────────────────────────────────────────────────────────
+
+  ogen-generate:
+    name: ogen generate (verify no drift)
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          # Only on GitHub's runners. A self-hosted runner keeps its module
+          # cache on disk between jobs, so there is nothing to restore — and
+          # the attempt actively fails, because tar cannot overwrite the
+          # read-only files already in $GOMODCACHE ("tar failed with exit
+          # code 2"). Skipping it removes the noise and a pointless download.
+          cache: ${{ !vars.RUNNER_LABEL }}
+      - name: Install ogen
+        # Pinned to the version already required by go.mod (ogen's runtime
+        # package is a real dependency of internal/gateway/oas) — @latest
+        # drifts the moment upstream ships a new release, since generated
+        # boilerplate (import list, response-draining pattern, comment
+        # wrapping) changes between ogen versions independent of
+        # api/openapi.yaml. Matches the sqlc-generate job's pinning below.
+        run: go install github.com/ogen-go/ogen/cmd/ogen@v1.20.3
+      - name: Generate
+        run: ogen --target internal/gateway/oas --package oas --clean api/openapi.yaml
+      - name: Check for drift
+        run: git diff --exit-code -- internal/gateway/oas/
+
+  proto-lint:
+    name: Proto lint
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: bufbuild/buf-action@v1
+        with:
+          version: "1.69.0"
+          setup_only: true
+          github_token: ${{ github.token }}
+      - name: Run buf lint
+        run: buf lint --error-format github-actions
+
+  # ── Frontend ──────────────────────────────────────────────────────────────────
+
+  web-lint:
+    name: ESLint
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npx eslint src/
+
+  web-typecheck:
+    name: TypeScript type check
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npx tsc -b --noEmit
+
+  web-e2e:
+    name: Playwright e2e (smoke)
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    defaults:
+      run:
+        working-directory: web
+    env:
+      VITE_DEV_MODE: "true"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+      # Browsers only, never --with-deps: that flag shells out to `sudo
+      # apt-get`, which the self-hosted runner user deliberately cannot do, and
+      # it is the step that wedged for 2h17m on a hosted runner. The system
+      # libraries are present in both environments instead — baked into
+      # GitHub's image, installed once as root on the self-hosted node.
+      #
+      # Unconditional, not gated on the cache hit. Gating it once left the
+      # browsers missing outright: the cache reported a hit and restored 259MB,
+      # but into a different "~" than Playwright reads, and the skipped install
+      # meant nothing noticed until every test failed to launch a browser.
+      # `install` is a cheap no-op when the browsers are already there.
+      - run: npx playwright install chromium
+        timeout-minutes: 10
+      - run: npm run e2e
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          retention-days: 7
+
+  web-build:
+    name: Frontend build
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-artifact@v6
+        with:
+          name: web-dist
+          path: web/dist/
+          retention-days: 7
+
+  # ── Docker publish ────────────────────────────────────────────────────────────
+  # Builds + pushes an image per cmd/* service referenced by
+  # deploy/k8s/base/services/*.yaml (ghcr.io/mavericks-engine/mavericks/<name>),
+  # using deploy/docker/Dockerfile's generic --build-arg SERVICE=<name> build.
+  # Gated behind the Go gates above (needs:) and restricted to pushes on main
+  # (not PRs, not develop) — this is the only job in the workflow that has
+  # side effects outside the run itself (a real registry push), so it must
+  # only fire for code that's already passed lint/test/build.
+
+  docker-publish:
+    name: Publish image (${{ matrix.service }})
+    needs: [go-lint, go-test, go-build]
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_images
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      # Concurrent image builds on the self-hosted runners kept dying with
+      # buildkit's "graceful_stop". Memory pressure was the first suspect and
+      # is real — the ci.slice hits its soft limit constantly — but it was not
+      # the cause: oom_kill stayed 0, and the failures continued at two-way
+      # parallelism. The logs settled it. A failed job's log named a builder
+      # UUID belonging to a DIFFERENT job, because all three runners share
+      # HOME and therefore shared ~/.docker/buildx: one job's cleanup removed
+      # a buildkit container another was still building against. Each runner
+      # now has its own DOCKER_CONFIG/BUILDX_CONFIG (set in its .env on the
+      # node), which is the actual fix.
+      #
+      # Two is kept anyway: peak memory with three concurrent Go builds sits
+      # right on the slice's limit, and that headroom is what keeps CI from
+      # starving the production pods sharing this node.
+      max-parallel: 2
+      matrix:
+        service:
+          - gateway
+          - identity
+          - tenant
+          - model
+          - schema-migration
+          - policy
+          - calculation
+          - workflow
+          - import
+          - query
+          - audit
+          - notification
+          - ai-assistant
+          - integration
+          - seed
+    steps:
+      - uses: actions/checkout@v6
+      # One persistent named builder per runner daemon instead of the
+      # action's default builder-per-job: each default builder is a running
+      # buildkit container with its own cache volume that nothing ever
+      # removes — they accumulated 97GB and filled worker-2's disk, killing
+      # every runner on the box ("No space left on device", 2026-08-28).
+      # The builder is per-RUNNER, not shared: the three runners share one
+      # rootless dockerd, and a shared builder gets re-bootstrapped by
+      # whichever job starts next — restarting buildkit mid-build under its
+      # neighbours (seen live: "graceful_stop" killed 2 of 14 publishes).
+      # A runner executes one job at a time, so its own builder is never
+      # touched concurrently. Each caps its cache via buildkitd GC.
+      - uses: docker/setup-buildx-action@v3
+        with:
+          name: mvx-ci-${{ runner.name }}
+          keep-state: true
+          buildkitd-config-inline: |
+            [worker.oci]
+              gc = true
+              gckeepstorage = "15GB"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # GHCR only accepts pushes from GITHUB_TOKEN under the real repo
+      # owner's namespace, and OCI image names must be all-lowercase —
+      # github.repository already is (GitHub lowercases repository paths),
+      # but github.repository_owner alone preserves the account's real
+      # casing (e.g. "ExampleOrg"), so it must be lowercased
+      # explicitly rather than assumed to already be safe to use raw.
+      - name: Compute image name prefix
+        id: image
+        run: echo "prefix=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/mavericks" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          build-args: |
+            SERVICE=${{ matrix.service }}
+          push: true
+          tags: |
+            ${{ steps.image.outputs.prefix }}/${{ matrix.service }}:latest
+            ${{ steps.image.outputs.prefix }}/${{ matrix.service }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  docker-publish-backup:
+    name: Publish image (postgres-backup)
+    needs: [go-lint, go-test, go-build]
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_images
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    # Not part of the docker-publish matrix above: that job's build always
+    # uses the one shared deploy/docker/Dockerfile (Go, distroless) via
+    # --build-arg SERVICE=<name> — this image is Postgres tooling built
+    # from a different Dockerfile/context (deploy/docker/pg-backup/), so it
+    # needs its own build step rather than a 15th matrix entry.
+    steps:
+      - uses: actions/checkout@v6
+      # One persistent named builder per runner daemon instead of the
+      # action's default builder-per-job: each default builder is a running
+      # buildkit container with its own cache volume that nothing ever
+      # removes — they accumulated 97GB and filled worker-2's disk, killing
+      # every runner on the box ("No space left on device", 2026-08-28).
+      # The builder is per-RUNNER, not shared: the three runners share one
+      # rootless dockerd, and a shared builder gets re-bootstrapped by
+      # whichever job starts next — restarting buildkit mid-build under its
+      # neighbours (seen live: "graceful_stop" killed 2 of 14 publishes).
+      # A runner executes one job at a time, so its own builder is never
+      # touched concurrently. Each caps its cache via buildkitd GC.
+      - uses: docker/setup-buildx-action@v3
+        with:
+          name: mvx-ci-${{ runner.name }}
+          keep-state: true
+          buildkitd-config-inline: |
+            [worker.oci]
+              gc = true
+              gckeepstorage = "15GB"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compute image name prefix
+        id: image
+        run: echo "prefix=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/mavericks" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: deploy/docker/pg-backup
+          file: deploy/docker/pg-backup/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.image.outputs.prefix }}/postgres-backup:latest
+            ${{ steps.image.outputs.prefix }}/postgres-backup:${{ github.sha }}
+          cache-from: type=gha,scope=postgres-backup
+          cache-to: type=gha,mode=max,scope=postgres-backup
+
+  docker-publish-postgres-walg:
+    name: Publish image (postgres-walg)
+    needs: [go-lint, go-test, go-build]
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_images
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    # Same reasoning as docker-publish-backup above: a different
+    # Dockerfile/context (deploy/docker/postgres-walg/), not the shared
+    # Go/distroless one — this becomes postgres's own StatefulSet image
+    # (deploy/k8s/base/infra/postgres.yaml), not a Go service.
+    steps:
+      - uses: actions/checkout@v6
+      # One persistent named builder per runner daemon instead of the
+      # action's default builder-per-job: each default builder is a running
+      # buildkit container with its own cache volume that nothing ever
+      # removes — they accumulated 97GB and filled worker-2's disk, killing
+      # every runner on the box ("No space left on device", 2026-08-28).
+      # The builder is per-RUNNER, not shared: the three runners share one
+      # rootless dockerd, and a shared builder gets re-bootstrapped by
+      # whichever job starts next — restarting buildkit mid-build under its
+      # neighbours (seen live: "graceful_stop" killed 2 of 14 publishes).
+      # A runner executes one job at a time, so its own builder is never
+      # touched concurrently. Each caps its cache via buildkitd GC.
+      - uses: docker/setup-buildx-action@v3
+        with:
+          name: mvx-ci-${{ runner.name }}
+          keep-state: true
+          buildkitd-config-inline: |
+            [worker.oci]
+              gc = true
+              gckeepstorage = "15GB"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compute image name prefix
+        id: image
+        run: echo "prefix=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/mavericks" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: deploy/docker/postgres-walg
+          file: deploy/docker/postgres-walg/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.image.outputs.prefix }}/postgres-walg:latest
+            ${{ steps.image.outputs.prefix }}/postgres-walg:${{ github.sha }}
+          cache-from: type=gha,scope=postgres-walg
+          cache-to: type=gha,mode=max,scope=postgres-walg
+
+  docker-publish-web:
+    name: Publish image (web)
+    # Gated on the FRONTEND checks, not the Go ones: this image contains no Go
+    # code, and its own build runs `tsc -b && vite build` so a type error fails
+    # it regardless. Without this job the console had no deployable artifact at
+    # all — CI built web/dist and uploaded it as an artifact nothing consumed.
+    needs: [web-lint, web-typecheck, web-build, web-e2e]
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_images
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+      # One persistent named builder per runner daemon instead of the
+      # action's default builder-per-job: each default builder is a running
+      # buildkit container with its own cache volume that nothing ever
+      # removes — they accumulated 97GB and filled worker-2's disk, killing
+      # every runner on the box ("No space left on device", 2026-08-28).
+      # The builder is per-RUNNER, not shared: the three runners share one
+      # rootless dockerd, and a shared builder gets re-bootstrapped by
+      # whichever job starts next — restarting buildkit mid-build under its
+      # neighbours (seen live: "graceful_stop" killed 2 of 14 publishes).
+      # A runner executes one job at a time, so its own builder is never
+      # touched concurrently. Each caps its cache via buildkitd GC.
+      - uses: docker/setup-buildx-action@v3
+        with:
+          name: mvx-ci-${{ runner.name }}
+          keep-state: true
+          buildkitd-config-inline: |
+            [worker.oci]
+              gc = true
+              gckeepstorage = "15GB"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compute image name prefix
+        id: image
+        run: echo "prefix=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/mavericks" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          # Context is web/, not the repo root — the image needs only the
+          # frontend, and a root context would ship the whole Go tree.
+          context: web
+          file: web/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.image.outputs.prefix }}/web:latest
+            ${{ steps.image.outputs.prefix }}/web:${{ github.sha }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+  # ── Deploy ────────────────────────────────────────────────────────────────────
+  # Rolls every app deployment onto the images this same run just published,
+  # so "Run workflow" alone means "deploy". The SSH key in DEPLOY_SSH_KEY is
+  # bound on the server to a forced command (/usr/local/bin/ci-deploy via an
+  # authorized_keys command="..."+restrict entry): whatever a holder of the
+  # key asks for, the only thing that ever executes is the rollout-restart
+  # script — the key cannot open a shell, forward ports, or copy files.
+  # If the secret isn't configured the job explains itself and skips rather
+  # than failing the run: publishing without deploying stays a valid use.
+  deploy:
+    name: Deploy to cluster
+    needs: [docker-publish, docker-publish-web]
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_images && inputs.deploy
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    steps:
+      - name: Roll deployments onto the new images
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST || 'set-DEPLOY_HOST-in-repo-variables' }}
+        run: |
+          if [ -z "$DEPLOY_SSH_KEY" ]; then
+            echo "DEPLOY_SSH_KEY secret is not configured — images are published, skipping the rollout."
+            exit 0
+          fi
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          keyfile=$(mktemp "$HOME/.ssh/deploy_key.XXXXXX")
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$keyfile"
+          trap 'rm -f "$keyfile"' EXIT
+          ssh -i "$keyfile" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new "root@$DEPLOY_HOST" deploy

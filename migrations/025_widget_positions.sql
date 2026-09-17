@@ -1,0 +1,3 @@
+ALTER TABLE model.dashboard_widget
+  ADD COLUMN col_start SMALLINT NOT NULL DEFAULT 1,
+  ADD COLUMN col_span  SMALLINT NOT NULL DEFAULT 12;

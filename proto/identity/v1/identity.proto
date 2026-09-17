@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package identity.v1;
+
+option go_package = "github.com/mavericks-engine/mavericks/gen/go/identity/v1;identityv1";
+
+import "google/protobuf/timestamp.proto";
+import "common/v1/common.proto";
+
+service IdentityService {
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+  rpc AssignRole(AssignRoleRequest) returns (AssignRoleResponse);
+  rpc RevokeRole(RevokeRoleRequest) returns (RevokeRoleResponse);
+  rpc CreateAPIKey(CreateAPIKeyRequest) returns (CreateAPIKeyResponse);
+  rpc RevokeAPIKey(RevokeAPIKeyRequest) returns (RevokeAPIKeyResponse);
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+}
+
+message User {
+  string id = 1;
+  string email = 2;
+  string display_name = 3;
+  common.v1.Role role = 4;
+  string customer_id = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp last_login_at = 7;
+}
+
+message GetUserRequest { string user_id = 1; }
+message GetUserResponse { User user = 1; }
+
+message ListUsersRequest {
+  string customer_id = 1;
+  common.v1.PageRequest page = 2;
+}
+message ListUsersResponse {
+  repeated User users = 1;
+  common.v1.PageResponse page = 2;
+}
+
+message AssignRoleRequest {
+  string user_id = 1;
+  common.v1.Role role = 2;
+  string workspace_id = 3;
+}
+message AssignRoleResponse { bool success = 1; }
+
+message RevokeRoleRequest {
+  string user_id = 1;
+  string workspace_id = 3;
+}
+message RevokeRoleResponse { bool success = 1; }
+
+message CreateAPIKeyRequest {
+  string user_id = 1;
+  string name = 2;
+  google.protobuf.Timestamp expires_at = 3;
+}
+message CreateAPIKeyResponse {
+  string api_key_id = 1;
+  string key = 2;
+}
+
+message RevokeAPIKeyRequest { string api_key_id = 1; }
+message RevokeAPIKeyResponse { bool success = 1; }
+
+message ValidateTokenRequest { string token = 1; }
+message ValidateTokenResponse {
+  bool valid = 1;
+  common.v1.Actor actor = 2;
+}

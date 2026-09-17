@@ -1,0 +1,138 @@
+# Web — the React console, served as static files by nginx.
+#
+# Not part of the gateway: the gateway serves no static assets, and building
+# the bundle into it would couple a UI change to an API release. The Ingress
+# routes "/" here and "/api" to the gateway, so the browser's relative /api
+# calls land on the same origin and no CORS or proxy hop is involved.
+---
+# Config the BROWSER needs, which is deliberately separate from
+# mavericks-config: that ConfigMap's KEYCLOAK_URL is the in-cluster address
+# (http://keycloak:8080) used for server-side JWKS validation. A browser
+# cannot resolve it — it needs the public URL, so the two must not be shared.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mavericks-web-config
+  namespace: mavericks
+  labels:
+    app: web
+    app.kubernetes.io/name: web
+    app.kubernetes.io/part-of: mavericks-engine
+data:
+  # MUST stay "false" anywhere reachable from the internet: dev mode disables
+  # JWKS validation in the frontend and turns on persona switching.
+  DEV_MODE: "false"
+  # Public, browser-reachable Keycloak. Patch these in the prod overlay along
+  # with the Ingress host.
+  KEYCLOAK_URL: "https://auth.mavericks.example.com"
+  KEYCLOAK_REALM: "mavericks"
+  KEYCLOAK_CLIENT_ID: "mavericks-web"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: mavericks
+  labels:
+    app: web
+    app.kubernetes.io/name: web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: web
+        app.kubernetes.io/name: web
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/part-of: mavericks-engine
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: web
+          image: registry.example.com/mavericks/web:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          # Read at container start by /docker-entrypoint.d/99-runtime-config.sh,
+          # which writes /tmp/runtime/config.js. One image therefore serves
+          # every environment — see web/src/config.ts.
+          envFrom:
+            - configMapRef:
+                name: mavericks-web-config
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 3
+          volumeMounts:
+            # nginx needs somewhere writable under a read-only root: the
+            # entrypoint writes the runtime config here and nginx serves it
+            # via an alias. Verified by running the image with
+            # `--read-only --tmpfs /tmp`, which is all it required.
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            # 101 = the nginx user in nginxinc/nginx-unprivileged. The Go
+            # services run as 65534, but this image's files and default user
+            # are owned by 101, so it keeps its own.
+            runAsUser: 101
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      securityContext:
+        fsGroup: 101
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: mavericks
+  labels:
+    app: web
+    app.kubernetes.io/name: web
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  type: ClusterIP
+  selector:
+    app: web
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP

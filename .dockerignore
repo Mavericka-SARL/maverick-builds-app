@@ -1,0 +1,16 @@
+# Frontend — never needed to build a Go service image.
+web/node_modules/
+web/dist/
+web/playwright-report/
+web/test-results/
+web/e2e/.cache/
+
+# VCS / editor / CI-local state.
+.git/
+.github/
+.claude/
+
+# Local dev artifacts.
+bin/
+coverage.out
+*.log

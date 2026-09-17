@@ -1,0 +1,36 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck       # unchecked errors
+    - govet          # vet checks
+    - ineffassign    # ineffectual assignments
+    - staticcheck    # static analysis (includes gosimple)
+    - unused         # unused code
+    - misspell       # common spelling mistakes
+    - bodyclose      # http response body not closed
+    - noctx          # http.Request without context
+    - contextcheck   # non-inherited context
+    - exhaustive     # exhaustive enum switch statements
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: true  # a default: case satisfies exhaustiveness
+    govet:
+      disable:
+        - inline   # pedantic reflect.Ptr deprecation check, fires in node_modules we can't modify
+  exclusions:
+    paths:
+      - ^web/
+      - ^gen/
+    rules:
+      - path: _test\.go
+        linters: [errcheck, contextcheck, staticcheck]
+      - path: node_modules
+        linters: [govet, errcheck, staticcheck, exhaustive]
+      - text: "should be inlined"
+        linters: [govet]
+
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 5

@@ -1,0 +1,105 @@
+# Notification service — gRPC on port 9090.
+# Dispatches email, SMS, push, and in-app notifications via NATS events.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification
+  namespace: mavericks
+  labels:
+    app: notification
+    app.kubernetes.io/name: notification
+    app.kubernetes.io/component: service
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notification
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: notification
+        app.kubernetes.io/name: notification
+        app.kubernetes.io/component: service
+        app.kubernetes.io/part-of: mavericks-engine
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: notification
+          image: registry.example.com/mavericks/notification:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: grpc
+              containerPort: 9090
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: mavericks-config
+            - secretRef:
+                name: mavericks-secrets
+          # DATABASE_URL is composed here, not in the ConfigMap: envFrom
+          # never expands $(VAR) references — only an explicit env: entry
+          # can, by referencing $(POSTGRES_PASSWORD) already contributed
+          # above via envFrom's secretRef.
+          env:
+            - name: DATABASE_URL
+              value: "postgres://mavericks:$(POSTGRES_PASSWORD)@pgbouncer:5433/mavericks?sslmode=disable"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          readinessProbe:
+            exec:
+              command:
+                - grpc-health-probe
+                - -addr=:9090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - grpc-health-probe
+                - -addr=:9090
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
+      securityContext:
+        fsGroup: 65534
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification
+  namespace: mavericks
+  labels:
+    app: notification
+    app.kubernetes.io/name: notification
+    app.kubernetes.io/component: service
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  type: ClusterIP
+  selector:
+    app: notification
+  ports:
+    - name: grpc
+      port: 9090
+      targetPort: 9090
+      protocol: TCP

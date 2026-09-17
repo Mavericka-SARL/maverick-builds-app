@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mavericks Engine Developer Manual</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 18mm 15mm; }
+  :root { --ink:#1b1f27; --muted:#5b6472; --line:#d9dee6; --accent:#3b3fd6; --soft:#f4f5fb; --ok:#1d7a4a; --warn:#9a5a00; }
+  html { font-size: 10pt; }
+  body { font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; color: var(--ink); line-height: 1.42; margin: 0; }
+  h1 { font-size: 2.1em; margin: 0 0 .2em; letter-spacing: -.01em; }
+  h2 { font-size: 1.5em; margin: 0 0 .5em; padding-bottom: .2em; border-bottom: 2px solid var(--accent); page-break-after: avoid; page-break-before: always; }
+  h2.first { page-break-before: auto; }
+  h3 { font-size: 1.12em; margin: 1.3em 0 .4em; page-break-after: avoid; }
+  h4 { font-size: 1em; margin: 1em 0 .3em; page-break-after: avoid; }
+  p { margin: .4em 0 .6em; }
+  ul, ol { margin: .3em 0 .7em; padding-left: 1.4em; }
+  li { margin: .12em 0; }
+  code, pre { font-family: "SF Mono", Menlo, Consolas, monospace; }
+  code { background: var(--soft); padding: .05em .3em; border-radius: 3px; font-size: .92em; }
+  pre { background: #1e2230; color: #e8ebf3; padding: .7em .9em; border-radius: 6px; font-size: .84em; line-height: 1.4; white-space: pre-wrap; page-break-inside: avoid; }
+  table { border-collapse: collapse; width: 100%; margin: .5em 0 .9em; font-size: .9em; }
+  th, td { border: 1px solid var(--line); padding: .32em .5em; vertical-align: top; text-align: left; }
+  th { background: var(--soft); font-weight: 600; }
+  tr { page-break-inside: avoid; }
+  .cover { height: 250mm; display: flex; flex-direction: column; justify-content: center; page-break-after: always; }
+  .cover .kicker { color: var(--accent); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; font-size: .85em; }
+  .cover .sub { font-size: 1.25em; color: var(--muted); margin-top: .3em; }
+  .cover .meta { margin-top: 3em; color: var(--muted); font-size: .95em; }
+  .cover .meta div { margin: .2em 0; }
+  .note { border-left: 4px solid var(--accent); background: var(--soft); padding: .5em .8em; margin: .7em 0; page-break-inside: avoid; }
+  .warn { border-left-color: var(--warn); }
+  .ok { border-left-color: var(--ok); }
+  .note b:first-child { display: block; margin-bottom: .15em; }
+  figure { margin: .8em 0 1em; page-break-inside: avoid; }
+  figure img { width: 100%; border: 1px solid var(--line); border-radius: 4px; }
+  figcaption { font-size: .86em; color: var(--muted); margin-top: .35em; }
+  .toc ol { columns: 2; column-gap: 2em; padding-left: 1.4em; }
+  .toc li { margin: .12em 0; break-inside: avoid; }
+  .toc .part { font-weight: 700; margin-top: .6em; list-style: none; margin-left: -1.4em; }
+  .path { font-size: .9em; color: var(--muted); margin: -.3em 0 .8em; }
+  .small { font-size: .9em; color: var(--muted); }
+  .kv td:first-child { width: 28%; font-weight: 600; }
+  .ctl td:first-child { width: 26%; white-space: normal; }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <div class="kicker">Mavericks Engine</div>
+  <h1>Mavericks Engine<br>Developer Manual</h1>
+  <div class="sub">Everything the developer role can do in the console, screen by screen, and the concepts behind it</div>
+  <div class="meta">
+    <div><b>Edition:</b> 2026-09-15, describing the console as built at repository commit 577b65c</div>
+    <div><b>Audience:</b> people with the <b>developer</b> role who build applications: models, grids, dashboards, forms, workflows, triggers and integrations</div>
+    <div><b>Scope:</b> the console only. No API calls, no scripts, no deployment</div>
+    <div><b>Source:</b> <code>docs/developer-manual/parts/*.html</code>, rebuilt into this PDF with <code>build.sh</code></div>
+  </div>
+</section>

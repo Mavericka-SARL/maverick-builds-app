@@ -1,0 +1,9 @@
+# Namespace for all Mavericks Engine workloads.
+# Overlays may override the namespace name (e.g. mavericks-dev for dev).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mavericks
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/part-of: mavericks-engine

@@ -1,0 +1,62 @@
+<h2>Integrations</h2>
+<p class="path">Sidebar: Build › Integrations</p>
+<p>Integrations bring data in and out of the model without typing: file uploads, a link-shared Google Sheet, any JSON REST API, and posting of form records into planning cells. The screen opens with one tile per source; selecting a tile shows that source's list and actions below.</p>
+<figure><img src="img/09-integrations.png" alt="Integrations screen with source tiles and the Excel/CSV import section"><figcaption>Source tiles: Excel / CSV Import, Google Sheets, REST API, Supabase (coming soon), Form Records. The section under the tiles belongs to the selected source.</figcaption></figure>
+
+<h3>Excel / CSV Import</h3>
+<p><b>New Import</b> opens the four-step <b>Import Wizard</b>: <b>Upload</b>, <b>Map Columns</b>, <b>Validate</b>, <b>Commit</b>. The section also lists <b>Saved Integrations</b> and <b>Recent Imports</b>.</p>
+<figure><img src="img/33-import-wizard.png" alt="Import wizard step 1 with target type, grid, target revision, import mode and the file drop zone"><figcaption>Step 1. Target, revision and mode are chosen before the file.</figcaption></figure>
+<table class="ctl">
+<tr><th>Step / field</th><th>Meaning</th></tr>
+<tr><td><b>Import target type</b></td><td><b>Grid</b>, <b>Form</b> or <b>Dimension</b>, then the specific grid, form or dimension.</td></tr>
+<tr><td><b>Target revision</b></td><td>Required. The revision the data goes into; the active one is marked "(active)".</td></tr>
+<tr><td><b>Import mode</b></td><td><b>Incremental</b>: add or update rows, keep existing data. <b>Full reload</b>: delete all data for this revision, then insert.</td></tr>
+<tr><td>File</td><td>Drop or browse: .csv, .xlsx, .xls. For workbooks a <b>Sheet</b> select picks the worksheet.</td></tr>
+<tr><td><b>Map Columns</b></td><td>One row per source column with sample values and a target select: <b>(ignore)</b>, the target's fields (required ones marked *), and for dimensions <b>new property…</b> with a property name. You can name the mapping and <b>Save as draft</b> to finish later, or save it as a reusable integration.</td></tr>
+<tr><td><b>Validate</b></td><td>Counts <b>Total rows</b>, <b>Valid</b>, <b>Errors</b>, <b>Warnings</b> with a per-row issue list (for example "Empty row — will be skipped"). Choose to import valid rows only or <b>Import All Anyway</b>.</td></tr>
+<tr><td><b>Commit</b></td><td>A <b>Confirm Import</b> summary (target, revision, rows, columns mapped, rows skipped), then <b>Import Complete</b> or <b>Import Failed</b> with the reason.</td></tr>
+</table>
+<p><b>File layout by target.</b> Grid: <code>metric_id</code>, <code>value</code>, plus one column per dimension holding member codes. Form: one column per form field name. Dimension: <code>code</code>, <code>label</code> and optionally <code>parent_code</code>.</p>
+<p><b>Saved Integrations</b> lists CSV and Google Sheets integrations with a status badge, tags, <b>Sync Now</b> (Sheets), <b>Run history</b> and <b>Delete integration</b> ("removes the integration and its import history"). Double-click a name to rename. <b>Recent Imports</b> shows each import job with its status (Validating, Committed, error) and a delete action.</p>
+<div class="note warn"><b>Imports write to the revision you choose and respect the same rules as typing.</b> Hidden or read-only members, calculated metrics, locked workflow scopes and system-managed revisions are refused row by row. Each committed import triggers recalculation and can start a workflow through an integration trigger.</div>
+
+<h3>Google Sheets</h3>
+<figure><img src="img/35-integrations-google-sheets.png" alt="Google Sheets section with the URL field and how-it-works notes"><figcaption>Paste a link-shared sheet URL; the rest is the same wizard.</figcaption></figure>
+<ul>
+  <li><b>Google Sheet URL</b> and <b>Fetch</b>. The sheet must be shared as "Anyone with the link → Viewer"; no Google account is connected. The worksheet tab in the URL (gid) is the one fetched.</li>
+  <li>Layout matches the CSV formats. Mapping, validation and commit are the same wizard steps.</li>
+  <li>Import mode for Sheets is <b>Sync (replace listed cells)</b> by default: the sheet is authoritative for the cells it contains, so re-syncing converges instead of double-counting. <b>Full reload</b> is also offered.</li>
+  <li>A saved Sheets integration re-fetches the sheet on every <b>Sync Now</b>.</li>
+</ul>
+
+<h3>REST API</h3>
+<figure><img src="img/34-integrations-rest-api.png" alt="REST API section with the New integration button"><figcaption>REST API integrations are built in a six-step wizard and can run on a schedule.</figcaption></figure>
+<p><b>New integration</b> opens the builder with steps <b>Basics</b>, <b>Auth</b>, <b>Request</b>, <b>Response</b>, <b>Mapping</b>, <b>Schedule</b>. <b>Save draft</b> keeps work in progress; <b>Activate</b> requires a successful test of the current configuration.</p>
+<table class="ctl">
+<tr><th>Step</th><th>Fields</th></tr>
+<tr><td><b>Basics</b></td><td><b>Name</b>, <b>Description</b>, <b>Tags</b>, <b>Direction</b> (<b>Pull</b>: external API → Mavericks; <b>Push</b>: Mavericks → external API), <b>Target type</b> (Grid, Form, Dimension) and the target. Pull: <b>Import mode</b> (incremental adds to existing values; replace overwrites matched cells; full reload wipes the target first). Push: <b>Push mode</b> (one request per record, or one batched JSON request).</td></tr>
+<tr><td><b>Auth</b></td><td><b>Authentication type</b>: None, API key (header or query), Bearer token, Basic auth, OAuth 2.0 client credentials. Credentials live in a reusable <b>Connection</b>, stored encrypted; <b>New connection</b>, <b>Check credential</b>, and Keep / Replace / Remove on an existing one. The secret value is never shown again.</td></tr>
+<tr><td><b>Request</b></td><td><b>Method</b> (GET, POST, PUT, PATCH, DELETE), <b>Request URL</b>, <b>Query parameters</b> and <b>Headers</b> as key/value rows with an enable checkbox, <b>Body</b> (None, JSON, Form URL-encoded, Raw text with <b>Content type</b>), <b>Insert variable…</b> to add template variables, <b>Timeout (s)</b> (default 30, max 120), <b>Max retries</b> (mutations need an idempotency key).</td></tr>
+<tr><td><b>Response</b></td><td><b>Response format</b> (JSON, CSV), <b>Records path</b> such as <code>$.data.items</code>, <b>Send test request</b>. A test really calls the external system; for non-GET methods a confirmation warns "This test may change external data". The step shows the inferred fields and a safe subset of response headers; activation needs a passed test.</td></tr>
+<tr><td><b>Mapping</b></td><td><b>Response shape</b>: <b>Wide</b> (one column per metric) or <b>Long</b> (<b>Metric name field</b> and <b>Value field</b>). Then field mappings: source path (for example <code>$.field</code>, with inferred fields offered) → target (grouped Dimensions and Input metrics; for push, the outbound JSON property), each with an optional transform (date format, default value, value map "a=b, c=d"). Push batches take <b>Batch property</b> (default "items") and <b>Batch size</b>.</td></tr>
+<tr><td><b>Schedule</b></td><td><b>Execution</b>: Manual only, Interval (<b>Every (seconds)</b>, minimum 60), Daily, Weekly, Advanced (cron, five fields), with <b>Timezone (IANA)</b>, <b>Overlap policy</b> (skip this tick, or queue behind it) and a <b>Schedule enabled</b> switch. Limits: <b>Max pages</b>, <b>Max records</b>, <b>Max requests</b>, <b>Failure threshold</b> (abort after this many bad records).</td></tr>
+</table>
+<p>The list shows each integration with its status and actions; deleting removes "the definition, its schedule and run history" and any dashboard buttons that reference it. <b>Run history</b> shows per run: status, trigger, started, duration, HTTP status, pages, requests, retries, read, written, skipped.</p>
+<div class="note"><b>Where REST integrations surface.</b> A dashboard <b>Integration</b> button lets a business user run one on demand. An integration's "import completed" and "import failed" events can start a workflow (Workflows › Starts on; Triggers).</div>
+
+<h3>Form Records → Metrics</h3>
+<figure><img src="img/36-integrations-form-records.png" alt="Form Records section for posting form record values to input metrics"><figcaption>A form mapping posts values from submitted or approved records into an input metric.</figcaption></figure>
+<table class="ctl">
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td><b>Integration name</b></td><td>For example "HC Requests → hc_cost".</td></tr>
+<tr><td><b>Source form</b></td><td>The form whose records are posted.</td></tr>
+<tr><td><b>Target grid</b></td><td>Optional; narrows the metric and dimension choices to that grid ("— All metrics (no grid filter) —" otherwise).</td></tr>
+<tr><td><b>Source value field</b></td><td>The form field carrying the number.</td></tr>
+<tr><td><b>Target input metric</b></td><td>The input metric to write.</td></tr>
+<tr><td><b>Aggregation</b></td><td>How several records at the same intersection combine: <b>sum</b>, <b>replace</b>, <b>average</b>, <b>min</b>, <b>max</b>, <b>count</b>, <b>last</b>.</td></tr>
+<tr><td><b>Post when status is</b></td><td>Any of <b>draft</b>, <b>submitted</b>, <b>approved</b>, <b>rejected</b>; default approved.</td></tr>
+<tr><td>Dimension mapping</td><td>For each dimension of the target: the form field that supplies the member, or <b>— skip —</b>.</td></tr>
+<tr><td><b>Live update</b></td><td>Automatically sync when a record's status changes. Off means posting happens on <b>Backfill</b> or a manual sync.</td></tr>
+<tr><td>Card actions</td><td><b>Preview</b> (what would be posted), <b>Backfill</b> (post existing records now), <b>Delete</b> (confirm <b>Delete integration?</b>: "stops future postings"). A postings table lists record, revision, dimensions, value and time.</td></tr>
+</table>
+<p>Posted values are ordinary input values: they recalculate dependents and obey access rules and locks. Metric-typed form fields ("By name") let one form feed different metrics per record.</p>

@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package gateway.v1;
+
+option go_package = "github.com/mavericks-engine/mavericks/gen/go/gateway/v1;gatewayv1";
+
+// The API Gateway handles auth validation, rate limiting, and REST→gRPC routing.
+// It does not have its own gRPC service — it proxies to downstream services.
+// This proto defines shared gateway config types used across services.
+
+message RateLimitConfig {
+  int32 requests_per_second = 1;
+  int32 burst = 2;
+}
+
+message RouteConfig {
+  string path_prefix = 1;
+  string upstream_service = 2;
+  bool auth_required = 3;
+  RateLimitConfig rate_limit = 4;
+}

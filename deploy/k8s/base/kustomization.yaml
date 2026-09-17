@@ -1,0 +1,54 @@
+# Base kustomization — defines all resources shared by every overlay.
+# Overlays (dev, prod) extend this via `bases:` and patch only what differs.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: mavericks
+
+commonLabels:
+  app.kubernetes.io/managed-by: kustomize
+  app.kubernetes.io/part-of: mavericks-engine
+
+resources:
+  # Cluster-level
+  - namespace.yaml
+
+  # Shared config. NOT secrets: each overlay supplies its own Secret named
+  # "mavericks-secrets" — dev/secrets-dev.yaml (throwaway plaintext) or
+  # prod/sealed-secrets.yaml (encrypted, see prod/README-secrets.md). Keeping
+  # it in base meant prod inherited "changeme" as its JWT secret.
+  - configmap.yaml
+
+  # ── Public entry point ────────────────────────────────────────────────────
+  # Requires ingress-nginx + cert-manager; see the file header.
+  - ingress.yaml
+
+  # ── Application services ──────────────────────────────────────────────────
+  - services/gateway.yaml
+  - services/web.yaml
+  - services/ai-assistant.yaml
+  - services/audit.yaml
+  - services/calculation.yaml
+  - services/identity.yaml
+  - services/import.yaml
+  - services/integration.yaml
+  - services/model.yaml
+  - services/notification.yaml
+  - services/policy.yaml
+  - services/query.yaml
+  - services/schema-migration.yaml
+  - services/seed.yaml
+  - services/tenant.yaml
+  - services/workflow.yaml
+
+  # ── Infrastructure ────────────────────────────────────────────────────────
+  - infra/postgres.yaml
+  - infra/postgres-backup.yaml
+  - infra/pgbouncer.yaml
+  - infra/nats.yaml
+  - infra/redis.yaml
+  - infra/keycloak.yaml
+  - infra/minio.yaml
+
+  # ── Network security ──────────────────────────────────────────────────────
+  - networkpolicy.yaml

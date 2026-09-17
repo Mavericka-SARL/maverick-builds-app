@@ -1,0 +1,152 @@
+# Everything that makes this deployment "staging" rather than production,
+# in one place. Strategic-merge patches against base.
+#
+# Hostnames: staging.example.com (console and API) and
+# auth-staging.example.com (Keycloak). The Ingress hosts, KC_HOSTNAME,
+# KEYCLOAK_ISSUER and the web config's KEYCLOAK_URL must all agree, or login
+# redirects break. Both names need DNS A records pointing at the ingress
+# load balancer before certificates can be issued.
+
+---
+# Gateway configuration: public sign-up on, the console's own origin, and
+# the issuer Keycloak stamps into tokens.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mavericks-config
+  namespace: mavericks-staging
+data:
+  SIGNUP_ENABLED: "true"
+  PLAN_CONTACT_URL: "https://example.com/pricing"
+  CONSOLE_URL: "https://staging.example.com"
+  KEYCLOAK_ISSUER: "https://auth-staging.example.com"
+  KEYCLOAK_ADMIN_CLIENT_ID: "mavericks-admin"
+  # Object storage: a bucket of its own, so staging never writes next to
+  # production's objects or backups.
+  OBJECT_STORE_BUCKET: "mavericks-staging"
+
+---
+# The console reaches Keycloak by its public name.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mavericks-web-config
+  namespace: mavericks-staging
+data:
+  DEV_MODE: "false"
+  KEYCLOAK_URL: "https://auth-staging.example.com"
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mavericks
+  namespace: mavericks-staging
+spec:
+  tls:
+    - hosts: [staging.example.com]
+      secretName: mavericks-staging-tls
+    - hosts: [auth-staging.example.com]
+      secretName: mavericks-staging-auth-tls
+  rules:
+    - host: staging.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: gateway, port: { number: 8080 } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: web, port: { number: 80 } } }
+    - host: auth-staging.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: keycloak, port: { number: 8080 } } }
+
+---
+# Keycloak on Postgres, behind the staging hostname (same reasoning as the
+# production overlay: KC_HOSTNAME is a bare host on Keycloak 24).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: mavericks-staging
+spec:
+  strategy:
+    type: RollingUpdate
+  template:
+    spec:
+      containers:
+        - name: keycloak
+          args: ["start", "--import-realm"]
+          env:
+            - name: KC_DB
+              value: "postgres"
+            - name: KC_DB_URL
+              value: "jdbc:postgresql://postgres:5432/keycloak"
+            - name: KC_DB_USERNAME
+              value: "mavericks"
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mavericks-secrets
+                  key: POSTGRES_PASSWORD
+            - name: KC_HOSTNAME
+              value: "auth-staging.example.com"
+            - name: KC_HOSTNAME_STRICT
+              value: "true"
+            - name: KC_HOSTNAME_STRICT_HTTPS
+              value: "true"
+            - name: KC_PROXY
+              value: "edge"
+
+---
+# A smaller database volume, and WAL-G shipping to a staging prefix — never
+# to production's, whose point-in-time chain must not be interleaved with
+# another server's segments.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: mavericks-staging
+spec:
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: standard
+        resources:
+          requests:
+            storage: 10Gi
+  template:
+    spec:
+      containers:
+        - name: postgres
+          env:
+            - name: WALG_S3_PREFIX
+              value: "s3://mavericks-backups/staging/wal"
+        - name: wal-g-basebackup
+          env:
+            - name: WALG_S3_PREFIX
+              value: "s3://mavericks-backups/staging/wal"
+
+---
+# Nightly dumps land in their own bucket as well.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: mavericks-staging
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: pg-backup
+              env:
+                - name: BACKUP_BUCKET
+                  value: "mavericks-backups-staging"

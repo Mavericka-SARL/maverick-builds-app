@@ -1,0 +1,126 @@
+# NATS 2.10 with JetStream enabled — message broker and event bus.
+# -js  enables JetStream (persistent, replicated streams)
+# -m 8222  exposes the HTTP monitoring endpoint
+# JetStream storage is persisted to a PVC (nats-data) so streams survive
+# pod restarts.
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nats
+  namespace: mavericks
+  labels:
+    app: nats
+    app.kubernetes.io/name: nats
+    app.kubernetes.io/component: message-broker
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  serviceName: nats
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nats
+  template:
+    metadata:
+      labels:
+        app: nats
+        app.kubernetes.io/name: nats
+        app.kubernetes.io/component: message-broker
+        app.kubernetes.io/part-of: mavericks-engine
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: nats
+          image: nats:2.10-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - nats-server
+          args:
+            - "-js"                # enable JetStream
+            - "-m"
+            - "8222"               # monitoring port
+            - "--store_dir"
+            - "/data/jetstream"    # persist JetStream to PVC
+          ports:
+            - name: client
+              containerPort: 4222
+              protocol: TCP
+            - name: monitor
+              containerPort: 8222
+              protocol: TCP
+          volumeMounts:
+            - name: nats-data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8222
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8222
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      # fsGroup makes the kubelet chgrp the mounted volume to this GID.
+      # Without it a freshly provisioned block volume stays root-owned and
+      # this pod, which runs as UID 1000, cannot write to it: JetStream failed with 'mkdir /data/jetstream: permission denied'
+      # Local-path/hostPath volumes hide this because the kubelet creates
+      # those directories permissively — it only appears on real CSI
+      # storage, which is why it surfaced on the first Hetzner deploy.
+      securityContext:
+        fsGroup: 1000
+
+  volumeClaimTemplates:
+    - metadata:
+        name: nats-data
+        labels:
+          app: nats
+          app.kubernetes.io/part-of: mavericks-engine
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: standard
+        resources:
+          requests:
+            storage: 5Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats
+  namespace: mavericks
+  labels:
+    app: nats
+    app.kubernetes.io/name: nats
+    app.kubernetes.io/component: message-broker
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  type: ClusterIP
+  selector:
+    app: nats
+  ports:
+    - name: client
+      port: 4222
+      targetPort: 4222
+      protocol: TCP
+    - name: monitor
+      port: 8222
+      targetPort: 8222
+      protocol: TCP

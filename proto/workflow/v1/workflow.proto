@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+package workflow.v1;
+
+option go_package = "github.com/mavericks-engine/mavericks/gen/go/workflow/v1;workflowv1";
+
+import "google/protobuf/timestamp.proto";
+import "common/v1/common.proto";
+
+service WorkflowService {
+  rpc CreateWorkflowDef(CreateWorkflowDefRequest) returns (CreateWorkflowDefResponse);
+  rpc GetWorkflowDef(GetWorkflowDefRequest) returns (GetWorkflowDefResponse);
+  rpc StartWorkflow(StartWorkflowRequest) returns (StartWorkflowResponse);
+  rpc GetWorkflowInstance(GetWorkflowInstanceRequest) returns (GetWorkflowInstanceResponse);
+  rpc ListWorkflowInstances(ListWorkflowInstancesRequest) returns (ListWorkflowInstancesResponse);
+  rpc CompleteStep(CompleteStepRequest) returns (CompleteStepResponse);
+  rpc GetPendingTasks(GetPendingTasksRequest) returns (GetPendingTasksResponse);
+}
+
+enum WorkflowStatus {
+  WORKFLOW_STATUS_UNSPECIFIED = 0;
+  WORKFLOW_STATUS_RUNNING = 1;
+  WORKFLOW_STATUS_COMPLETED = 2;
+  WORKFLOW_STATUS_CANCELLED = 3;
+  WORKFLOW_STATUS_FAILED = 4;
+}
+
+enum StepType {
+  STEP_TYPE_UNSPECIFIED = 0;
+  STEP_TYPE_TASK = 1;
+  STEP_TYPE_APPROVAL = 2;
+  STEP_TYPE_NOTIFICATION = 3;
+  STEP_TYPE_CONDITION = 4;
+  STEP_TYPE_JOIN = 5;
+}
+
+enum StepStatus {
+  STEP_STATUS_UNSPECIFIED = 0;
+  STEP_STATUS_PENDING = 1;
+  STEP_STATUS_IN_PROGRESS = 2;
+  STEP_STATUS_COMPLETED = 3;
+  STEP_STATUS_REJECTED = 4;
+  STEP_STATUS_SKIPPED = 5;
+}
+
+message WorkflowStepDef {
+  string id = 1;
+  string name = 2;
+  StepType type = 3;
+  repeated string assignee_roles = 4;
+  string condition_expr = 5;
+  repeated string next_step_ids = 6;
+  int32 sla_hours = 7;
+}
+
+message WorkflowDef {
+  string id = 1;
+  string application_id = 2;
+  string name = 3;
+  string trigger_event = 4;
+  repeated WorkflowStepDef steps = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message WorkflowInstance {
+  string id = 1;
+  string workflow_def_id = 2;
+  WorkflowStatus status = 3;
+  common.v1.Actor started_by = 4;
+  map<string, string> context = 5;
+  google.protobuf.Timestamp started_at = 6;
+  google.protobuf.Timestamp completed_at = 7;
+}
+
+message WorkflowStep {
+  string id = 1;
+  string instance_id = 2;
+  string step_def_id = 3;
+  StepStatus status = 4;
+  string assignee_user_id = 5;
+  string decision = 6;
+  string comment = 7;
+  google.protobuf.Timestamp due_at = 8;
+  google.protobuf.Timestamp completed_at = 9;
+}
+
+message CreateWorkflowDefRequest { string application_id = 1; string name = 2; string trigger_event = 3; repeated WorkflowStepDef steps = 4; }
+message CreateWorkflowDefResponse { WorkflowDef workflow_def = 1; }
+
+message GetWorkflowDefRequest { string workflow_def_id = 1; }
+message GetWorkflowDefResponse { WorkflowDef workflow_def = 1; }
+
+message StartWorkflowRequest { string workflow_def_id = 1; common.v1.Actor actor = 2; map<string, string> context = 3; }
+message StartWorkflowResponse { WorkflowInstance instance = 1; }
+
+message GetWorkflowInstanceRequest { string instance_id = 1; }
+message GetWorkflowInstanceResponse { WorkflowInstance instance = 1; repeated WorkflowStep steps = 2; }
+
+message ListWorkflowInstancesRequest { string application_id = 1; WorkflowStatus status = 2; common.v1.PageRequest page = 3; }
+message ListWorkflowInstancesResponse { repeated WorkflowInstance instances = 1; common.v1.PageResponse page = 2; }
+
+message CompleteStepRequest { string step_id = 1; common.v1.Actor actor = 2; string decision = 3; string comment = 4; }
+message CompleteStepResponse { WorkflowStep step = 1; }
+
+message GetPendingTasksRequest { string user_id = 1; string application_id = 2; }
+message GetPendingTasksResponse { repeated WorkflowStep tasks = 1; }

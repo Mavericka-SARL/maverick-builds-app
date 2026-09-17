@@ -1,0 +1,50 @@
+# Example production overlay. Copy this directory into a private repository
+# and edit it there; see README.md. Nothing here names a real cluster.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: mavericks
+
+resources:
+  - ../../base
+  # Add your own, e.g.:
+  #   - pdb-gateway.yaml      # keep a gateway replica during node drains
+  #   - sealed-secrets.yaml   # produced by scripts/seal-secrets.sh
+  #   - mtls.yaml             # cert-manager CA + service cert for gRPC mTLS
+  #   - ingress.yaml          # TLS termination for the console and Keycloak
+
+# The gateway is the only component that needs redundancy by default; scale
+# the rest as load requires.
+replicas:
+  - name: gateway
+    count: 2
+  - name: web
+    count: 2
+
+patches:
+  # Pull on every pod creation, so a rebuilt tag is never served stale from a
+  # node's cache. Deployments, Jobs and StatefulSets each need their own
+  # target: a missing StatefulSet entry once left postgres running a cached
+  # image while a rebuild appeared to have no effect.
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
+    target:
+      kind: Deployment
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
+    target:
+      kind: StatefulSet
+
+  # Demo data has no place in production. Keep this last: patches that target
+  # the seed Job fail once it has been removed.
+  #   - path: seed-remove.yaml
+
+# Replace the registry with your own and pin the tag to a digest or git sha
+# that CI produced. "latest" in production means nobody knows what is running.
+images:
+  - name: ghcr.io/YOUR-ORG/mavericks/gateway
+    newTag: "sha-REPLACE-ME"
