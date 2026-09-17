@@ -1,4 +1,4 @@
-// cmd/license is the vendor-side tool for Mavericks Engine license keys.
+// cmd/license is the vendor-side tool for maverickbuilds.app license keys.
 // Customers never run it; they receive the token it prints.
 //
 //	license keygen  -out ~/.mavericks/license-signing.key

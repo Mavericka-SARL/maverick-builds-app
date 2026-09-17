@@ -9,7 +9,7 @@
 > `.xlsx` import — not an earlier, superseded version of the demo.
 
 A cost-center salary planning and approval scenario built entirely from
-Mavericks Engine's generic platform primitives (dimensions, metrics, grids,
+maverickbuilds.app's generic platform primitives (dimensions, metrics, grids,
 dashboards, workflows, access rules). It demonstrates:
 
 - multidimensional planning (a structural hierarchy *and* a property-based

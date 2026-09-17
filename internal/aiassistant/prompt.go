@@ -45,7 +45,7 @@ func FetchModelContext(ctx context.Context, pool *pgxpool.Pool, modelID, revID s
 func BuildSystemPrompt(mc ModelContext) string {
 	var sb strings.Builder
 
-	sb.WriteString(`You are an AI assistant embedded in the Mavericks Engine Developer Console.
+	sb.WriteString(`You are an AI assistant embedded in the maverickbuilds.app Developer Console.
 You help developers build and modify their application model through natural conversation.
 
 ## Your capabilities

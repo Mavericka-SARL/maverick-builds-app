@@ -1,16 +1,16 @@
 openapi: "3.0.3"
 
 info:
-  title: Mavericks Engine API
+  title: maverickbuilds.app API
   description: |
-    Partial contract for the original core Mavericks Engine gateway routes.
+    Partial contract for the original core maverickbuilds.app gateway routes.
     It is not a complete inventory of the manual router used by cmd/gateway.
     Bearer JWT is the intended production contract and X-Dev-User is the local
     DEV_MODE contract; production bearer transport/validation is not yet wired
     end to end. See docs/API.md for current routes and security exceptions.
   version: "0.1.0"
   contact:
-    name: Mavericks Engine
+    name: maverickbuilds.app
 
 servers:
   - url: http://localhost:8080

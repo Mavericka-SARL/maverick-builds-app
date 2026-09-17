@@ -69,7 +69,7 @@ func (m Message) SubjectFor(brand string) string {
 	if brand != "" {
 		return "Notification from " + brand
 	}
-	return "Notification from Mavericks Engine"
+	return "Notification from maverickbuilds.app"
 }
 
 // Body is the notification's text.

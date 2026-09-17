@@ -1,5 +1,5 @@
 // Package license implements the offline, signed license key that unlocks the
-// commercial and enterprise editions of Mavericks Engine.
+// commercial and enterprise editions of maverickbuilds.app.
 //
 // A key is a self-contained token: a JSON payload (edition, customer, expiry,
 // optional extra features and limits) signed with the vendor's Ed25519 private

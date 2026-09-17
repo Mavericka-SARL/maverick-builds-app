@@ -3,7 +3,7 @@
 > **Classification:** Current — Frontend counterpart of `ee/`.
 
 Files under this directory are licensed under the
-[Mavericks Engine Enterprise License](../../../ee/LICENSE), not the Sustainable
+[maverickbuilds.app Enterprise License](../../../ee/LICENSE), not the Sustainable
 Use License that covers the rest of the repository.
 
 - One folder per enterprise feature, mirroring the Go package under `ee/`.

@@ -1,8 +1,8 @@
-# Mavericks Engine
+# maverickbuilds.app
 
 > **Classification:** Current — Product overview of what the platform does today.
 
-Mavericks Engine is a Go and React platform for building governed business
+maverickbuilds.app is a Go and React platform for building governed business
 applications. The current product combines multidimensional planning grids,
 calculated metrics, forms, imports, dashboards, workflows, automations,
 role-scoped access, revision management, audit history, and an AI-assisted
@@ -125,7 +125,7 @@ after generation.
 
 ## Editions and licensing
 
-Mavericks Engine is one code base in three editions. The Community edition is
+maverickbuilds.app is one code base in three editions. The Community edition is
 licensed under the [Sustainable Use License](LICENSE) (use and modify it for
 your own internal business; do not host or resell it for others). The
 Commercial edition adds the right to build for clients, and the Enterprise

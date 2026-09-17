@@ -163,7 +163,7 @@ func (s *Server) GetSession(ctx context.Context, req *aiassistantv1.GetSessionRe
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func buildSystemPrompt(applicationID string, actionType aiassistantv1.ActionType) string {
-	base := `You are an AI assistant for the Mavericks Engine, a code-first enterprise application factory.
+	base := `You are an AI assistant for maverickbuilds.app, a code-first enterprise application factory.
 Help developers modify application definitions by generating precise diffs.
 
 Response format:
