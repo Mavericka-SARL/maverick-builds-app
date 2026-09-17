@@ -1,17 +1,17 @@
-Mavericks Engine Enterprise License
+maverickbuilds.app Enterprise License
 Version 1.0, September 2026
 
-Copyright (c) 2026 the Mavericks Engine copyright holders.
+Copyright (c) 2026 the maverickbuilds.app copyright holders.
 
 This license applies to all files under the "ee/" directory and the
-"web/src/ee/" directory of the Mavericks Engine repository (the "Enterprise
-Software"). The rest of the repository is licensed under the Mavericks Engine
+"web/src/ee/" directory of the maverickbuilds.app repository (the "Enterprise
+Software"). The rest of the repository is licensed under the maverickbuilds.app
 Sustainable Use License in the top-level "LICENSE" file.
 
 1. Source-available, not open source
 
 The Enterprise Software is made available in source form so that it can be
-reviewed, built and deployed together with the rest of Mavericks Engine. It is
+reviewed, built and deployed together with the rest of maverickbuilds.app. It is
 not licensed for use under the Sustainable Use License.
 
 2. Grant
@@ -44,7 +44,7 @@ notices of the licensor.
 
 Your license ends automatically when your Subscription expires or terminates,
 or if you breach these terms. On termination you must stop using the
-Enterprise Software; the rest of Mavericks Engine remains available to you
+Enterprise Software; the rest of maverickbuilds.app remains available to you
 under the Sustainable Use License.
 
 5. No warranty, no liability
@@ -58,4 +58,4 @@ Subscription.
 6. Definitions
 
 "Licensor", "you", "your company", "use" and "internal business purposes" have
-the meanings given in the Mavericks Engine Sustainable Use License.
+the meanings given in the maverickbuilds.app Sustainable Use License.

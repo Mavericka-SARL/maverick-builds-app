@@ -20,7 +20,7 @@ managers plan employee salaries for 2026 and 2027, submit their own plans to a
 General Manager, and have approved values copied into a protected annual budget
 revision.
 
-The demo must exercise Mavericks Engine's generic dimensions, member
+The demo must exercise maverickbuilds.app's generic dimensions, member
 hierarchies, member properties, metrics, grids, access rules, dashboards,
 revisions, imports, workflows, calculations, and audit history. Do not add
 payroll-specific endpoints, database tables, handlers, roles, or dashboard

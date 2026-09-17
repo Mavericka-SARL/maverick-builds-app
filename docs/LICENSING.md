@@ -4,7 +4,7 @@
 
 > **Last verified:** 2026-09-15
 
-Mavericks Engine ships as one code base in three editions. The edition a
+maverickbuilds.app ships as one code base in three editions. The edition a
 deployment runs is decided by a signed license key the gateway reads at
 start-up; nothing calls home, and a missing, invalid or expired key never
 stops the platform — it runs the Community edition and says why.

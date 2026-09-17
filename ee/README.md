@@ -3,7 +3,7 @@
 > **Classification:** Current — How enterprise and commercial code is organised and gated.
 
 Everything under this directory (and under [`web/src/ee/`](../web/src/ee/README.md)
-on the frontend) is licensed under the [Mavericks Engine Enterprise License](LICENSE),
+on the frontend) is licensed under the [maverickbuilds.app Enterprise License](LICENSE),
 not the Sustainable Use License that covers the rest of the repository.
 
 ## How it works

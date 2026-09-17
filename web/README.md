@@ -2,7 +2,7 @@
 
 > **Last verified:** 2026-07-15
 
-The `web` package is the role-based Mavericks Engine frontend. It is not the
+The `web` package is the role-based maverickbuilds.app frontend. It is not the
 original Vite starter: it implements business, business-admin, developer,
 tenant-admin, and platform-admin product surfaces against the Go gateway.
 

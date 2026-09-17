@@ -1,7 +1,7 @@
 // Arrow/DataFusion spike — Phase 0 evaluation.
 //
 // Goal: validate that apache/arrow-go provides sufficient vectorised in-memory
-// computation for the Mavericks Engine calculation engine WITHOUT requiring a
+// computation for the maverickbuilds.app calculation engine WITHOUT requiring a
 // Rust/CGo dependency on DataFusion.
 //
 // The spike simulates a realistic metric partition:
@@ -107,7 +107,7 @@ func main() {
 	defer rec.Release()
 	buildDur := time.Since(t0)
 
-	fmt.Printf("=== Mavericks Engine — Arrow/DataFusion Spike Report ===\n\n")
+	fmt.Printf("=== maverickbuilds.app — Arrow/DataFusion Spike Report ===\n\n")
 	fmt.Printf("Partition dimensions:\n")
 	fmt.Printf("  dim members  : %d\n", nDimMembers)
 	fmt.Printf("  time periods : %d\n", nTimePeriods)

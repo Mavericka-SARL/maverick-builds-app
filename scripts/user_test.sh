@@ -125,7 +125,7 @@ assert_contains() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-echo -e "${BOLD}Mavericks Engine — Phase 1-3 User Journey Test${NC}"
+echo -e "${BOLD}maverickbuilds.app — Phase 1-3 User Journey Test${NC}"
 echo -e "Gateway: ${CYAN}$BASE${NC}"
 echo ""
 

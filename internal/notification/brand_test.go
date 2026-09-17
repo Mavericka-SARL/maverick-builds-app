@@ -40,7 +40,7 @@ func TestDeliverBrandsEmail(t *testing.T) {
 	d = &Dispatcher{Mailer: plain}
 	delete(m.Vars, "subject")
 	_ = d.deliver(context.Background(), Settings{EmailEnabled: true}, m)
-	if plain.branded || plain.subject != "Notification from Mavericks Engine" {
+	if plain.branded || plain.subject != "Notification from maverickbuilds.app" {
 		t.Errorf("unbranded delivery: %+v", plain)
 	}
 }

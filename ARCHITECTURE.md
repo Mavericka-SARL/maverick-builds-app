@@ -1,4 +1,4 @@
-# Mavericks Engine Architecture
+# maverickbuilds.app Architecture
 
 > **Classification:** Current — Implementation reference for the system as built.
 
@@ -9,7 +9,7 @@
 
 ## System purpose
 
-Mavericks Engine is a metadata-driven business application platform. One
+maverickbuilds.app is a metadata-driven business application platform. One
 application can combine three operating modes:
 
 - planning: dimensions, metrics, formulas, grids, revisions, writeback, and

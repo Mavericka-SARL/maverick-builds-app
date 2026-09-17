@@ -1,4 +1,4 @@
-# Namespace for all Mavericks Engine workloads.
+# Namespace for all maverickbuilds.app workloads.
 # Overlays may override the namespace name (e.g. mavericks-dev for dev).
 apiVersion: v1
 kind: Namespace
