@@ -616,4 +616,4 @@ transfer, chart, workflow, import, and rollup behavior.
 
 These are current boundaries, not promises that the associated target designs
 are already delivered. The prioritized follow-up work is maintained in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
+IMPLEMENTATION_PLAN.md.

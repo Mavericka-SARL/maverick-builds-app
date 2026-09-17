@@ -18,12 +18,10 @@ remain authoritative.
 | [`docs/API.md`](API.md) | current | Actual HTTP route groups and API conventions |
 | [`docs/LICENSING.md`](LICENSING.md) | current | Editions, the signed license key, and the `ee/` enterprise tree |
 | [`docs/PLANS_AND_TRIALS.md`](PLANS_AND_TRIALS.md) | current | Plans and their limits, trials, the read-only state, and public self-service sign-up |
-| [`docs/PUBLIC_RELEASE.md`](PUBLIC_RELEASE.md) | current | How the public repository snapshot is produced from this one, and what stays private |
 | [`docs/STAGING_AND_LOAD_TESTING.md`](STAGING_AND_LOAD_TESTING.md) | current | The staging environment, the load harness (`cmd/loadtest`) and the measured baseline |
 | [`docs/TENANT_DATABASES.md`](TENANT_DATABASES.md) | current | A database per tenant: routing, provisioning, migrations, backups |
 | [`docs/NOTIFICATIONS.md`](NOTIFICATIONS.md) | current | Notification producers, outbound e-mail and webhooks, task reminders |
 | [`docs/developer-manual/`](developer-manual/) | current | Developer-role manual (PDF, built from `parts/*.html` by `build.sh`): every developer console screen plus core concepts |
-| [`IMPLEMENTATION_PLAN.md`](../IMPLEMENTATION_PLAN.md) | current roadmap | Delivered capability matrix and prioritized gaps |
 | [`web/README.md`](../web/README.md) | current | Frontend architecture and commands |
 | [`web/src/ui/DESIGN_SYSTEM.md`](../web/src/ui/DESIGN_SYSTEM.md) | current | Shared UI primitives and regression gates |
 | [`examples/budgeting-demo/README.md`](../examples/budgeting-demo/README.md) | current | Running salary-budgeting demo |
@@ -36,20 +34,12 @@ Their status block records current implementation and remaining gaps.
 
 | Document | Classification |
 |---|---|
-| [`DASHBOARD_CANVAS_REQUIREMENTS.md`](../DASHBOARD_CANVAS_REQUIREMENTS.md) | core implemented; broader specification partial |
-| [`DEVELOPER_WORKFLOWS_TAB_REQUIREMENTS.md`](../DEVELOPER_WORKFLOWS_TAB_REQUIREMENTS.md) | workflow-builder MVP implemented; extended requirements partial |
-| [`DIMENSION_HIERARCHY_UI_INSTRUCTIONS.md`](../DIMENSION_HIERARCHY_UI_INSTRUCTIONS.md) | tree/structural UI implemented; property-derived builder partial |
-| [`GRID_CHART_WIDGET_MVP_INSTRUCTIONS.md`](../GRID_CHART_WIDGET_MVP_INSTRUCTIONS.md) | UI implemented with nonconformant client resolver |
-| [`FORMULA_CALCULATION_INSTRUCTIONS.md`](../FORMULA_CALCULATION_INSTRUCTIONS.md) | current support matrix and convergence plan |
-| [`AI_ASSISTANT_SOW.md`](../AI_ASSISTANT_SOW.md) | partially implemented SOW and remaining delta |
 | [`examples/budgeting-demo/BUILD_INSTRUCTIONS.md`](../examples/budgeting-demo/BUILD_INSTRUCTIONS.md) | implemented demo acceptance contract |
 
 ## UX decision history
 
 | Document | Classification |
 |---|---|
-| [`UI_UX_CONSISTENCY_AUDIT.md`](../UI_UX_CONSISTENCY_AUDIT.md) | historical audit with completed and remaining findings |
-| [`UX_UPGRADE_INSTRUCTIONS.md`](../UX_UPGRADE_INSTRUCTIONS.md) | active UX backlog/reference, not architecture authority |
 
 ## Local ignored binary references
 
