@@ -15,7 +15,12 @@ func startMinioClient(t *testing.T, bucket string) *objectstore.Client {
 	t.Helper()
 	ctx := context.Background()
 
-	ctr, err := tcminio.Run(ctx, "minio/minio:RELEASE.2024-01-16T16-07-38Z")
+	ctr, err := // quay.io, not Docker Hub: the minio/minio repository there was
+		// withdrawn on 2026-09-11 and every other MinIO reference in this
+		// repository already moved. A machine with the old image cached
+		// keeps passing, which is why this survived until a clean runner
+		// tried to pull it.
+		tcminio.Run(ctx, "quay.io/minio/minio:RELEASE.2024-01-16T16-07-38Z")
 	if err != nil {
 		t.Fatalf("start minio: %v", err)
 	}
