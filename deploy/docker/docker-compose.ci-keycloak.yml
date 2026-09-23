@@ -36,6 +36,10 @@ services:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
       KC_DB: dev-mem
+      # Theme resources are served with a 30-day Cache-Control by default, so
+      # an edit to the stylesheet is invisible in a browser that has been to
+      # the page before. Off here; short in the cluster (infra/keycloak.yaml).
+      KC_SPI_THEME_STATIC_MAX_AGE: "-1"
     volumes:
       - ./config/keycloak:/opt/keycloak/data/import:ro
       # The realm asks for loginTheme "maverickbuilds" (see the dev stack).

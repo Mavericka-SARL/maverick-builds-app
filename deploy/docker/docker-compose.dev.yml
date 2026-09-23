@@ -127,6 +127,9 @@ services:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
       KC_DB: dev-mem
+      # Theme resources carry a 30-day Cache-Control by default, which makes
+      # editing the login theme a guessing game. Off here.
+      KC_SPI_THEME_STATIC_MAX_AGE: "-1"
     volumes:
       - ./config/keycloak:/opt/keycloak/data/import
       # The realm asks for loginTheme "maverickbuilds"; without this mount

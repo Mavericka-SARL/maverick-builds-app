@@ -47,6 +47,7 @@ func TestKeycloakThemeConfigMapMatchesTheFiles(t *testing.T) {
 		"theme.properties": "theme.properties",
 		"brand.css":        "resources/css/brand.css",
 		"wordmark.svg":     "resources/img/wordmark.svg",
+		"brand.js":         "resources/js/brand.js",
 	} {
 		want, err := os.ReadFile(filepath.Join(themeDir, path))
 		if err != nil {

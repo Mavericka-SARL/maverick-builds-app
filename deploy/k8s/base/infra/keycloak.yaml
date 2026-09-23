@@ -136,9 +136,21 @@ data:
     # Listing css/login.css before css/brand.css matters — each file is resolved
     # through the theme chain, so login.css comes from the parent and brand.css
     # from here, in that order.
+    #
+    # ?v= on the stylesheet is a cache buster, and the reason it is needed is
+    # worth knowing: theme resources are served under /resources/<server build>/,
+    # a path that does NOT change when a theme file changes, with a
+    # Cache-Control that used to say 30 days. An edit to brand.css was therefore
+    # invisible to everyone who had opened the sign-in page before it. The
+    # cluster now serves these with a short max-age (KC_SPI_THEME_STATIC_MAX_AGE
+    # in deploy/k8s/base/infra/keycloak.yaml) so this stays a one-off, but a
+    # browser that cached the old file under the old rules only asks again for a
+    # URL it has never seen. Raise the number when the stylesheet changes in a
+    # way that must reach people who have already been here.
     parent=keycloak
     import=common/keycloak
-    styles=css/login.css css/brand.css
+    styles=css/login.css css/brand.css?v=2
+    scripts=js/brand.js
   brand.css: |
     /*
      * Sign-in, in the product's own colours: the same near-black ground, warm
@@ -414,6 +426,33 @@ data:
     <path d="M1185.95 344.4C1181.15 344.4 1177.22 344 1174.15 343.2C1171.08 342.534 1168.22 341.134 1165.55 339V313.6H1167.75C1170.68 313.6 1172.75 313.467 1173.95 313.2C1175.28 312.8 1176.28 312 1176.95 310.8C1177.62 309.334 1178.02 307.2 1178.15 304.4C1178.28 302.4 1178.35 298.267 1178.35 292C1178.35 285.734 1178.28 281.6 1178.15 279.6C1178.02 276.667 1177.62 274.534 1176.95 273.2C1176.42 271.867 1175.42 271.067 1173.95 270.8C1172.08 270.534 1170.02 270.4 1167.75 270.4H1165.55V245C1168.22 243 1171.15 241.6 1174.35 240.8C1177.68 240 1181.55 239.6 1185.95 239.6C1191.28 239.6 1195.82 240.467 1199.55 242.2C1203.42 243.934 1206.55 246.734 1208.95 250.6C1213.62 258.334 1215.95 272 1215.95 291.6C1215.95 311.067 1213.62 324.8 1208.95 332.8C1204.28 340.534 1196.62 344.4 1185.95 344.4ZM1120.15 241H1157.15V382.8H1120.15V241Z" fill="#FFC000"/>
     <path d="M1301.58 344.4C1296.78 344.4 1292.84 344 1289.78 343.2C1286.71 342.534 1283.84 341.134 1281.17 339V313.6H1283.38C1286.31 313.6 1288.38 313.467 1289.58 313.2C1290.91 312.8 1291.91 312 1292.58 310.8C1293.24 309.334 1293.64 307.2 1293.78 304.4C1293.91 302.4 1293.97 298.267 1293.97 292C1293.97 285.734 1293.91 281.6 1293.78 279.6C1293.64 276.667 1293.24 274.534 1292.58 273.2C1292.04 271.867 1291.04 271.067 1289.58 270.8C1287.71 270.534 1285.64 270.4 1283.38 270.4H1281.17V245C1283.84 243 1286.77 241.6 1289.97 240.8C1293.31 240 1297.18 239.6 1301.58 239.6C1306.91 239.6 1311.44 240.467 1315.17 242.2C1319.04 243.934 1322.18 246.734 1324.58 250.6C1329.24 258.334 1331.58 272 1331.58 291.6C1331.58 311.067 1329.24 324.8 1324.58 332.8C1319.91 340.534 1312.24 344.4 1301.58 344.4ZM1235.78 241H1272.78V382.8H1235.78V241Z" fill="#FFC000"/>
     </svg>
+  brand.js: |
+    // The tab icon, at a URL no browser has cached.
+    //
+    // Keycloak's login template points the icon at img/favicon.ico and nothing in
+    // a theme can version that path. Before this theme shipped an icon of its
+    // own, that URL answered with Keycloak's — cached, like every theme resource,
+    // for as long as the server's Cache-Control said, which used to be 30 days.
+    // Every browser that saw the sign-in page inside that window keeps showing
+    // the old icon however often the file behind the URL changes.
+    //
+    // So point the icon somewhere else. The query is ignored by the resource
+    // handler but makes the URL one no cache holds. Raise the number whenever the
+    // icon itself changes.
+    //
+    // This is the whole of the theme's behaviour: one attribute of one element,
+    // and the page works the same with the script blocked.
+    (function () {
+      try {
+        var here = document.currentScript && document.currentScript.src;
+        if (!here) return;
+        var icon = document.querySelector("link[rel~='icon']");
+        if (!icon) return;
+        icon.href = here.replace(/\/js\/brand\.js.*$/, "/img/favicon.ico?v=2");
+      } catch (e) {
+        /* The stock icon is a fine fallback; never break sign-in over a picture. */
+      }
+    })();
 binaryData:
   # The tab icon the stock login template asks for by name
   # (img/favicon.ico); base64 because a ConfigMap cannot hold raw bytes.
@@ -1041,6 +1080,15 @@ spec:
               value: "false"
             - name: KC_PROXY
               value: "edge"
+            # Theme resources are served under /resources/<server build>/,
+            # a path that does not change when a theme file does, and the
+            # default Cache-Control on them is 30 days: an edited stylesheet
+            # stayed invisible to everyone who had opened sign-in before
+            # (reported live, 2026-09-23 — the page kept its old head for
+            # hours after the new one shipped). Five minutes instead; the
+            # files are a few KB on a page nobody loads in a loop.
+            - name: KC_SPI_THEME_STATIC_MAX_AGE
+              value: "300"
           volumeMounts:
             - name: realm-config
               mountPath: /opt/keycloak/data/import
@@ -1062,6 +1110,10 @@ spec:
             - name: login-theme
               mountPath: /opt/keycloak/themes/maverickbuilds/login/resources/img/favicon.ico
               subPath: favicon.ico
+              readOnly: true
+            - name: login-theme
+              mountPath: /opt/keycloak/themes/maverickbuilds/login/resources/js/brand.js
+              subPath: brand.js
               readOnly: true
           resources:
             requests:
