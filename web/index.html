@@ -6,8 +6,14 @@
          there for the ones that ask for /favicon.ico regardless (and for
          anything that pastes the link). Both are swapped together when a
          tenant has white-labelled the product — see branding/brand.ts. -->
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="alternate icon" type="image/x-icon" href="/favicon.ico" />
+    <!-- ?v= busts Chrome's favicon cache, which persists across sessions and
+         does not reliably follow normal HTTP caching (a fresh /favicon.ico
+         at the same URL kept showing an old, mis-cropped icon to returning
+         visitors — reported live, 2026-09-24). Bump it whenever either file
+         changes; index.html itself is never cached (see nginx.conf), so the
+         bump takes effect on the next load. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1" />
+    <link rel="alternate icon" type="image/x-icon" href="/favicon.ico?v=1" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>maverickbuilds.app</title>
     <!-- Runtime configuration, written by the container at startup so one
