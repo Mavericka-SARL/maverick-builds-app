@@ -49,12 +49,12 @@ body.login-pf,
 #kc-header-wrapper {
   display: block !important;
   box-sizing: content-box !important;
-  height: 2rem !important;
-  padding: 2rem 0 1rem !important;
+  height: 4rem !important;
+  padding: 2rem 0 1.5rem !important;
   background-image: url("../img/wordmark.svg") !important;
   background-repeat: no-repeat !important;
   background-position: center !important;
-  background-size: auto 2rem !important;
+  background-size: auto 4rem !important;
   background-origin: content-box !important;
   overflow: hidden !important;
   white-space: nowrap !important;
