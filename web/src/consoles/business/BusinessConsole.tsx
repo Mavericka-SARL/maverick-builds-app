@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { invalidateModelData } from "../modelDataQueries";
 import { api } from "../../api/client";
 import { LayoutDashboard, Inbox, History as HistoryIcon, Boxes } from "lucide-react";
 import { PageLayout, LoadingState, ErrorState } from "../../ui";
@@ -32,7 +33,7 @@ export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSe
     if (stored !== ctx.app_id) {
       localStorage.setItem(SELECTED_APP_KEY, ctx.app_id);
       qc.invalidateQueries({ queryKey: ["user-dashboards"] });
-      qc.invalidateQueries({ queryKey: ["grid"] });
+      invalidateModelData(qc);
     }
   }, [enabled, ctx?.app_id, qc]);
 

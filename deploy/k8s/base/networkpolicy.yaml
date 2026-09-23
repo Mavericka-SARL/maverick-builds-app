@@ -46,6 +46,14 @@ spec:
       ports: [{protocol: TCP, port: 9000}]
     - to: [{podSelector: {matchLabels: {app: pgbouncer}}}]
       ports: [{protocol: TCP, port: 5433}]
+    # Outbound SMTP: the gateway runs the notification dispatcher
+    # (docs/NOTIFICATIONS.md), so it is the pod that talks to the relay.
+    # A NetworkPolicy cannot match a hostname, so the relay is admitted by
+    # port alone — 587 submission with STARTTLS, 465 implicit TLS — the same
+    # rule the backup watchdog carries below. Without it every send hangs
+    # until the dispatch deadline and reads like a dead relay.
+    - to: [{ipBlock: {cidr: 0.0.0.0/0}}]
+      ports: [{protocol: TCP, port: 587}, {protocol: TCP, port: 465}]
     - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
 
 ---
@@ -376,6 +384,30 @@ spec:
       ports: [{protocol: TCP, port: 5432}]
     - to: [{podSelector: {matchLabels: {app: minio}}}]
       ports: [{protocol: TCP, port: 9000}]
+    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+
+---
+# postgres-backup-watchdog — the job that checks a backup actually arrived
+# (infra/postgres-backup.yaml). It never touches Postgres: it reads the bucket
+# and, when the news is bad, sends one mail.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-backup-watchdog
+  namespace: mavericks
+  labels: {app: postgres-backup-watchdog}
+spec:
+  podSelector: {matchLabels: {app: postgres-backup-watchdog}}
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to: [{podSelector: {matchLabels: {app: minio}}}]
+      ports: [{protocol: TCP, port: 9000}]
+    # Outbound SMTP for the alert. As everywhere else here, a NetworkPolicy
+    # cannot match a hostname, so the relay is admitted by port alone: 587 is
+    # submission with STARTTLS, 465 implicit TLS. An alert that a policy
+    # silently dropped would be the same failure this job exists to end.
+    - to: [{ipBlock: {cidr: 0.0.0.0/0}}]
+      ports: [{protocol: TCP, port: 587}, {protocol: TCP, port: 465}]
     - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
 
 ---

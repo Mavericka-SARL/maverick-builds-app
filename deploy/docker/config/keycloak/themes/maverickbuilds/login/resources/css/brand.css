@@ -1,0 +1,247 @@
+/*
+ * Sign-in, in the product's own colours: the same near-black ground, warm
+ * accent and heavy headline the console's public pages use
+ * (web/src/public/public.css). Keep the two in step — a visitor moves from
+ * one to the other in a single click.
+ *
+ * Only colours, type and spacing are touched. Every template, message and
+ * flow stays the stock one, so a Keycloak upgrade cannot break sign-in here;
+ * at worst a selector stops matching and that element returns to its default.
+ * Selectors are written for both the PatternFly 4 classes Keycloak 24 emits
+ * (.pf-c-*) and the older Bootstrap ones, so an upgrade in either direction
+ * keeps working.
+ */
+
+:root {
+  --mvx-bg: #0a0a0a;
+  --mvx-raised: #141414;
+  --mvx-line: #262626;
+  --mvx-line-strong: #3a3a3a;
+  --mvx-text: #ffffff;
+  --mvx-muted: #b4b4b4;
+  --mvx-quiet: #7c7c7c;
+  --mvx-accent: #eeb900;
+  --mvx-accent-hover: #ffc915;
+  --mvx-ink: #0a0a0a;
+  --mvx-danger: #ff6b6b;
+  --mvx-font: "Avenir Next", Avenir, "Segoe UI Variable Display", "Segoe UI",
+    system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+}
+
+html,
+body,
+body.login-pf,
+.login-pf body {
+  background: var(--mvx-bg) !important;
+  /* The same warm glow as /signup, drawn rather than fetched. */
+  background-image:
+    radial-gradient(60rem 40rem at 12% -10%, rgba(238, 185, 0, 0.14), transparent 60%),
+    radial-gradient(45rem 30rem at 100% 0%, rgba(238, 185, 0, 0.05), transparent 55%) !important;
+  color: var(--mvx-text) !important;
+  font-family: var(--mvx-font) !important;
+}
+
+/* The head of the page is the product's wordmark, the same mark the console
+   and the front door carry. Keycloak prints the realm's display name here;
+   this theme overrides no template, so the name is pushed out of sight rather
+   than removed — it stays in the page for a screen reader, and the mark is
+   drawn behind it. */
+#kc-header-wrapper {
+  display: block !important;
+  box-sizing: content-box !important;
+  height: 2rem !important;
+  padding: 2rem 0 1rem !important;
+  background-image: url("../img/wordmark.svg") !important;
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+  background-size: auto 2rem !important;
+  background-origin: content-box !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+  text-indent: -200vw !important;
+}
+
+.login-pf-page .card-pf,
+.login-pf-page .pf-c-login__main {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.login-pf-page {
+  padding-top: min(12vh, 5rem) !important;
+}
+
+#kc-page-title,
+.pf-c-login__main-header-desc,
+.login-pf-page .login-pf-header h1 {
+  color: var(--mvx-text) !important;
+  font-size: clamp(1.75rem, 1.2rem + 2.2vw, 2.5rem) !important;
+  line-height: 1.05 !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.02em !important;
+  text-align: left !important;
+}
+
+label,
+.pf-c-form__label,
+.pf-c-form__label-text,
+#kc-form-options,
+#kc-registration,
+#kc-registration-container,
+.login-pf-page .login-pf-signup,
+.instruction,
+#kc-info-message p {
+  color: var(--mvx-muted) !important;
+  font-family: var(--mvx-font) !important;
+}
+
+input[type="text"],
+input[type="password"],
+input[type="email"],
+.pf-c-form-control,
+input.form-control {
+  background: var(--mvx-raised) !important;
+  border: 1px solid var(--mvx-line) !important;
+  border-radius: 0.5rem !important;
+  color: var(--mvx-text) !important;
+  font-family: var(--mvx-font) !important;
+  font-size: 0.9375rem !important;
+  padding: 0.8125rem 0.875rem !important;
+  height: auto !important;
+  box-shadow: none !important;
+}
+
+input::placeholder,
+.pf-c-form-control::placeholder {
+  color: var(--mvx-quiet) !important;
+}
+
+input:focus,
+.pf-c-form-control:focus {
+  border-color: var(--mvx-accent) !important;
+  box-shadow: 0 0 0 3px rgba(238, 185, 0, 0.18) !important;
+  outline: none !important;
+}
+
+/* Keycloak marks invalid fields with a red underline only; make the whole
+   field say so, as the console's fields do. */
+.pf-c-form-control[aria-invalid="true"],
+input.form-control[aria-invalid="true"] {
+  border-color: var(--mvx-danger) !important;
+}
+
+input[type="submit"],
+.pf-c-button.pf-m-primary,
+.btn-primary,
+#kc-login {
+  background: var(--mvx-accent) !important;
+  border: 1px solid transparent !important;
+  border-radius: 0.5rem !important;
+  color: var(--mvx-ink) !important;
+  font-family: var(--mvx-font) !important;
+  font-size: 0.9375rem !important;
+  font-weight: 700 !important;
+  padding: 0.8125rem 1.25rem !important;
+  text-transform: none !important;
+  box-shadow: none !important;
+}
+
+input[type="submit"]:hover,
+.pf-c-button.pf-m-primary:hover,
+.btn-primary:hover,
+#kc-login:hover {
+  background: var(--mvx-accent-hover) !important;
+}
+
+/* The password field's show/hide toggle sits in an input group whose wrapper
+   carries PatternFly's white background. The button itself is already
+   transparent, so that white showed through as a square beside the field. */
+.pf-c-input-group,
+.input-group {
+  background: transparent !important;
+}
+
+/* Field and toggle read as one control: square the edges where they meet. */
+.pf-c-input-group > .pf-c-form-control {
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+  border-right: none !important;
+}
+
+.pf-c-input-group > .pf-c-button.pf-m-control {
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+}
+
+/* Secondary actions — an identity provider, "try another way", cancel. */
+.pf-c-button.pf-m-secondary,
+.pf-c-button.pf-m-control,
+.btn-default,
+#kc-social-providers a,
+.login-pf-page .kc-social-item {
+  background: transparent !important;
+  border: 1px solid var(--mvx-line-strong) !important;
+  border-radius: 0.5rem !important;
+  color: var(--mvx-text) !important;
+  font-family: var(--mvx-font) !important;
+  font-weight: 600 !important;
+}
+
+.pf-c-button.pf-m-secondary:hover,
+.btn-default:hover,
+#kc-social-providers a:hover,
+.login-pf-page .kc-social-item:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  text-decoration: none !important;
+}
+
+a,
+a:visited,
+#kc-registration a,
+#kc-info-message a,
+.login-pf-page .login-pf-signup a {
+  color: var(--mvx-accent) !important;
+}
+
+/* Field-level errors ("Invalid username or password.") render as helper text
+   under the input, which inherits the label colour without this. */
+#input-error,
+#input-error-username,
+#input-error-password,
+.pf-c-form__helper-text.pf-m-error,
+.kc-feedback-text {
+  color: var(--mvx-danger) !important;
+}
+
+/* Alerts: Keycloak's greens and reds are far too bright on black. */
+.alert,
+.pf-c-alert {
+  background: var(--mvx-raised) !important;
+  border: 1px solid var(--mvx-line) !important;
+  border-left: 3px solid var(--mvx-accent) !important;
+  border-radius: 0.375rem !important;
+  color: var(--mvx-muted) !important;
+  box-shadow: none !important;
+}
+
+.alert-error,
+.pf-c-alert.pf-m-danger,
+.pf-m-error {
+  border-left-color: var(--mvx-danger) !important;
+  color: var(--mvx-danger) !important;
+}
+
+.pf-c-alert__title,
+.kc-feedback-text {
+  color: inherit !important;
+}
+
+/* The language picker and footer links sit quietly at the bottom. */
+#kc-locale,
+#kc-locale-dropdown a,
+.login-pf-page-footer,
+.pf-c-login__main-footer {
+  color: var(--mvx-quiet) !important;
+}

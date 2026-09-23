@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	modelv1 "github.com/mavericks-engine/mavericks/gen/go/model/v1"
+	"github.com/mavericks-engine/mavericks/internal/timedim"
 )
 
 type Store struct {
@@ -29,18 +30,32 @@ var ErrDuplicate = errors.New("duplicate name")
 // ── Dimensions ────────────────────────────────────────────────────────────────
 
 func (s *Store) CreateDimension(ctx context.Context, modelID, name string, props []*modelv1.DimensionProperty) (*modelv1.Dimension, error) {
+	return s.CreateDimensionTyped(ctx, modelID, name, props, timedim.Config{})
+}
+
+// CreateDimensionTyped creates a dimension with an explicit time
+// configuration (spec §4.1); the zero Config is a standard dimension.
+func (s *Store) CreateDimensionTyped(ctx context.Context, modelID, name string, props []*modelv1.DimensionProperty, cfg timedim.Config) (*modelv1.Dimension, error) {
 	propsJSON, err := json.Marshal(props)
 	if err != nil {
 		return nil, err
+	}
+	if err := timedim.ValidateConfig(&cfg); err != nil {
+		return nil, err
+	}
+	var granularity *string
+	var fiscalStart *int
+	if cfg.Type == timedim.TypeTime {
+		granularity, fiscalStart = &cfg.Granularity, &cfg.FiscalYearStartMonth
 	}
 
 	var id string
 	var createdAt time.Time
 	err = s.pool.QueryRow(ctx,
-		`INSERT INTO model.dimension_def (model_id, name, properties)
-		 VALUES ($1, $2, $3)
+		`INSERT INTO model.dimension_def (model_id, name, properties, dimension_type, time_granularity, fiscal_year_start_month)
+		 VALUES ($1, $2, $3, $4, $5, $6)
 		 RETURNING id, created_at`,
-		modelID, name, propsJSON,
+		modelID, name, propsJSON, cfg.Type, granularity, fiscalStart,
 	).Scan(&id, &createdAt)
 	if isDuplicate(err) {
 		return nil, fmt.Errorf("%w: dimension %q", ErrDuplicate, name)
@@ -51,7 +66,8 @@ func (s *Store) CreateDimension(ctx context.Context, modelID, name string, props
 
 	return &modelv1.Dimension{
 		Id: id, ModelId: modelID, Name: name, Properties: props,
-		CreatedAt: timestamppb.New(createdAt),
+		CreatedAt:     timestamppb.New(createdAt),
+		DimensionType: cfg.Type, TimeGranularity: cfg.Granularity, FiscalYearStartMonth: int32(cfg.FiscalYearStartMonth),
 	}, nil
 }
 
@@ -103,7 +119,74 @@ func (s *Store) ListDimensions(ctx context.Context, modelID string, limit, offse
 }
 
 func (s *Store) CreateDimensionMember(ctx context.Context, dimensionID, code, label, parentID string, props map[string]string) (*modelv1.DimensionMember, error) {
+	return s.CreateDimensionMemberPeriod(ctx, dimensionID, code, label, parentID, props, "", "")
+}
+
+// CreateDimensionMemberPeriod is CreateDimensionMember with period dates for
+// a time dimension's member. The whole dimension is validated and re-indexed
+// in the same transaction (shared timedim service).
+func (s *Store) CreateDimensionMemberPeriod(ctx context.Context, dimensionID, code, label, parentID string, props map[string]string, periodStart, periodEnd string) (*modelv1.DimensionMember, error) {
 	propsJSON, _ := json.Marshal(props)
+
+	cfg, err := timedim.LoadConfig(ctx, s.pool, dimensionID)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Type == timedim.TypeTime {
+		// Dated = leaf period; undated = aggregate period (H1, FY26).
+		var start, end *time.Time
+		var idx *int
+		if periodStart != "" || periodEnd != "" {
+			ps, err1 := timedim.ParseDate(periodStart)
+			pe, err2 := timedim.ParseDate(periodEnd)
+			if err1 != nil || err2 != nil {
+				return nil, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: "period_start and period_end (YYYY-MM-DD) go together; leave both empty for an aggregate period"}
+			}
+			start, end = &ps, &pe
+			zero := 0
+			idx = &zero
+		}
+		var pid *string
+		if parentID != "" {
+			pid = &parentID
+		}
+		tx, err := s.pool.Begin(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback(ctx) //nolint:errcheck
+		var id string
+		var timeIndex *int32
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO model.dimension_member (dimension_id, code, label, properties, period_start, period_end, time_index, parent_id)
+			 VALUES ($1, $2, $3, $4, $5::date, $6::date, $7, $8) RETURNING id`,
+			dimensionID, code, label, propsJSON, start, end, idx, pid).Scan(&id); err != nil {
+			if isDuplicate(err) {
+				return nil, fmt.Errorf("%w: member %q", ErrDuplicate, code)
+			}
+			return nil, err
+		}
+		if err := timedim.ValidateAndReindex(ctx, tx, dimensionID); err != nil {
+			return nil, err
+		}
+		if err := tx.QueryRow(ctx, `SELECT time_index FROM model.dimension_member WHERE id=$1`, id).Scan(&timeIndex); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		m := &modelv1.DimensionMember{
+			Id: id, DimensionId: dimensionID, Code: code, Label: label, Properties: props, ParentId: parentID,
+			PeriodStart: periodStart, PeriodEnd: periodEnd, TimeIndex: -1,
+		}
+		if timeIndex != nil {
+			m.TimeIndex = *timeIndex
+		}
+		return m, nil
+	}
+	if periodStart != "" || periodEnd != "" {
+		return nil, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: "period_start/period_end apply only to a time dimension's members"}
+	}
 
 	var id string
 	var pid *string
@@ -111,7 +194,7 @@ func (s *Store) CreateDimensionMember(ctx context.Context, dimensionID, code, la
 		pid = &parentID
 	}
 
-	err := s.pool.QueryRow(ctx,
+	err = s.pool.QueryRow(ctx,
 		`INSERT INTO model.dimension_member (dimension_id, code, label, parent_id, properties)
 		 VALUES ($1, $2, $3, $4, $5)
 		 RETURNING id`,
@@ -158,6 +241,12 @@ func (s *Store) ListDimensionMembers(ctx context.Context, dimensionID string, li
 // ── Metrics ───────────────────────────────────────────────────────────────────
 
 func (s *Store) CreateMetric(ctx context.Context, modelID, name, formula, storageType string, isInput bool) (*modelv1.Metric, error) {
+	return s.CreateMetricSummary(ctx, modelID, name, formula, storageType, isInput, "")
+}
+
+// CreateMetricSummary is CreateMetric with an explicit time summary (empty
+// defaults to sum).
+func (s *Store) CreateMetricSummary(ctx context.Context, modelID, name, formula, storageType string, isInput bool, timeSummary string) (*modelv1.Metric, error) {
 	var id string
 	var createdAt time.Time
 
@@ -165,12 +254,18 @@ func (s *Store) CreateMetric(ctx context.Context, modelID, name, formula, storag
 	if formula != "" {
 		formulaPtr = &formula
 	}
+	if timeSummary == "" {
+		timeSummary = "sum"
+	}
+	if !timedim.ValidTimeSummary(timeSummary) {
+		return nil, fmt.Errorf("time_summary must be one of %v", timedim.TimeSummaries)
+	}
 
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO model.metric_def (model_id, name, formula, storage_type, is_input)
-		 VALUES ($1, $2, $3, $4::core.storage_type, $5)
+		`INSERT INTO model.metric_def (model_id, name, formula, storage_type, is_input, time_summary)
+		 VALUES ($1, $2, $3, $4::core.storage_type, $5, $6)
 		 RETURNING id, created_at`,
-		modelID, name, formulaPtr, storageType, isInput,
+		modelID, name, formulaPtr, storageType, isInput, timeSummary,
 	).Scan(&id, &createdAt)
 	if isDuplicate(err) {
 		return nil, fmt.Errorf("%w: metric %q", ErrDuplicate, name)
@@ -181,8 +276,9 @@ func (s *Store) CreateMetric(ctx context.Context, modelID, name, formula, storag
 
 	return &modelv1.Metric{
 		Id: id, ModelId: modelID, Name: name, Formula: formula,
-		IsInput:   isInput,
-		CreatedAt: timestamppb.New(createdAt),
+		IsInput:     isInput,
+		TimeSummary: timeSummary,
+		CreatedAt:   timestamppb.New(createdAt),
 	}, nil
 }
 

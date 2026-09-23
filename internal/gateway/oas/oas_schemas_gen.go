@@ -2069,9 +2069,10 @@ func (s *AuditEventMetadata) init() AuditEventMetadata {
 // other value is at least min_retention_days.
 // Ref: #/components/schemas/AuditSettings
 type AuditSettings struct {
-	RetentionDays    int         `json:"retention_days"`
-	MinRetentionDays OptInt      `json:"min_retention_days"`
-	UpdatedAt        OptDateTime `json:"updated_at"`
+	RetentionDays    int              `json:"retention_days"`
+	MinRetentionDays OptInt           `json:"min_retention_days"`
+	UpdatedAt        OptDateTime      `json:"updated_at"`
+	Scope            OptSettingsScope `json:"scope"`
 }
 
 // GetRetentionDays returns the value of RetentionDays.
@@ -2089,6 +2090,11 @@ func (s *AuditSettings) GetUpdatedAt() OptDateTime {
 	return s.UpdatedAt
 }
 
+// GetScope returns the value of Scope.
+func (s *AuditSettings) GetScope() OptSettingsScope {
+	return s.Scope
+}
+
 // SetRetentionDays sets the value of RetentionDays.
 func (s *AuditSettings) SetRetentionDays(val int) {
 	s.RetentionDays = val
@@ -2104,6 +2110,12 @@ func (s *AuditSettings) SetUpdatedAt(val OptDateTime) {
 	s.UpdatedAt = val
 }
 
+// SetScope sets the value of Scope.
+func (s *AuditSettings) SetScope(val OptSettingsScope) {
+	s.Scope = val
+}
+
+func (*AuditSettings) clearAuditSettingsRes()  {}
 func (*AuditSettings) getAuditSettingsRes()    {}
 func (*AuditSettings) updateAuditSettingsRes() {}
 
@@ -3951,6 +3963,26 @@ func (s *ChartRuntimeRequestContext) init() ChartRuntimeRequestContext {
 	return m
 }
 
+// ClearAuditSettingsBadRequest is response for ClearAuditSettings operation.
+type ClearAuditSettingsBadRequest struct{}
+
+func (*ClearAuditSettingsBadRequest) clearAuditSettingsRes() {}
+
+// ClearAuditSettingsForbidden is response for ClearAuditSettings operation.
+type ClearAuditSettingsForbidden struct{}
+
+func (*ClearAuditSettingsForbidden) clearAuditSettingsRes() {}
+
+// ClearNotificationSettingsBadRequest is response for ClearNotificationSettings operation.
+type ClearNotificationSettingsBadRequest struct{}
+
+func (*ClearNotificationSettingsBadRequest) clearNotificationSettingsRes() {}
+
+// ClearNotificationSettingsForbidden is response for ClearNotificationSettings operation.
+type ClearNotificationSettingsForbidden struct{}
+
+func (*ClearNotificationSettingsForbidden) clearNotificationSettingsRes() {}
+
 // ClearTenantAIKeyForbidden is response for ClearTenantAIKey operation.
 type ClearTenantAIKeyForbidden struct{}
 
@@ -4612,10 +4644,18 @@ func (s *CreateDimensionPropertyOK) SetID(val OptUUID) {
 
 // Ref: #/components/schemas/CreateDimensionRequest
 type CreateDimensionRequest struct {
-	Name              string     `json:"name"`
-	AggRule           OptString  `json:"agg_rule"`
-	RevisionID        OptUUID    `json:"revision_id"`
+	Name       string    `json:"name"`
+	AggRule    OptString `json:"agg_rule"`
+	RevisionID OptUUID   `json:"revision_id"`
+	// Not allowed on a time dimension.
 	ParentDimensionID OptNilUUID `json:"parent_dimension_id"`
+	// Omitted defaults to standard. Only a dimension created as time supports time-series formulas; the
+	// name never implies it. Immutable after creation.
+	DimensionType OptCreateDimensionRequestDimensionType `json:"dimension_type"`
+	// Required when dimension_type is time; immutable.
+	TimeGranularity OptCreateDimensionRequestTimeGranularity `json:"time_granularity"`
+	// Required when dimension_type is time; immutable.
+	FiscalYearStartMonth OptInt `json:"fiscal_year_start_month"`
 }
 
 // GetName returns the value of Name.
@@ -4638,6 +4678,21 @@ func (s *CreateDimensionRequest) GetParentDimensionID() OptNilUUID {
 	return s.ParentDimensionID
 }
 
+// GetDimensionType returns the value of DimensionType.
+func (s *CreateDimensionRequest) GetDimensionType() OptCreateDimensionRequestDimensionType {
+	return s.DimensionType
+}
+
+// GetTimeGranularity returns the value of TimeGranularity.
+func (s *CreateDimensionRequest) GetTimeGranularity() OptCreateDimensionRequestTimeGranularity {
+	return s.TimeGranularity
+}
+
+// GetFiscalYearStartMonth returns the value of FiscalYearStartMonth.
+func (s *CreateDimensionRequest) GetFiscalYearStartMonth() OptInt {
+	return s.FiscalYearStartMonth
+}
+
 // SetName sets the value of Name.
 func (s *CreateDimensionRequest) SetName(val string) {
 	s.Name = val
@@ -4656,6 +4711,141 @@ func (s *CreateDimensionRequest) SetRevisionID(val OptUUID) {
 // SetParentDimensionID sets the value of ParentDimensionID.
 func (s *CreateDimensionRequest) SetParentDimensionID(val OptNilUUID) {
 	s.ParentDimensionID = val
+}
+
+// SetDimensionType sets the value of DimensionType.
+func (s *CreateDimensionRequest) SetDimensionType(val OptCreateDimensionRequestDimensionType) {
+	s.DimensionType = val
+}
+
+// SetTimeGranularity sets the value of TimeGranularity.
+func (s *CreateDimensionRequest) SetTimeGranularity(val OptCreateDimensionRequestTimeGranularity) {
+	s.TimeGranularity = val
+}
+
+// SetFiscalYearStartMonth sets the value of FiscalYearStartMonth.
+func (s *CreateDimensionRequest) SetFiscalYearStartMonth(val OptInt) {
+	s.FiscalYearStartMonth = val
+}
+
+// Omitted defaults to standard. Only a dimension created as time supports time-series formulas; the
+// name never implies it. Immutable after creation.
+type CreateDimensionRequestDimensionType string
+
+const (
+	CreateDimensionRequestDimensionTypeStandard CreateDimensionRequestDimensionType = "standard"
+	CreateDimensionRequestDimensionTypeTime     CreateDimensionRequestDimensionType = "time"
+)
+
+// AllValues returns all CreateDimensionRequestDimensionType values.
+func (CreateDimensionRequestDimensionType) AllValues() []CreateDimensionRequestDimensionType {
+	return []CreateDimensionRequestDimensionType{
+		CreateDimensionRequestDimensionTypeStandard,
+		CreateDimensionRequestDimensionTypeTime,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CreateDimensionRequestDimensionType) MarshalText() ([]byte, error) {
+	switch s {
+	case CreateDimensionRequestDimensionTypeStandard:
+		return []byte(s), nil
+	case CreateDimensionRequestDimensionTypeTime:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CreateDimensionRequestDimensionType) UnmarshalText(data []byte) error {
+	switch CreateDimensionRequestDimensionType(data) {
+	case CreateDimensionRequestDimensionTypeStandard:
+		*s = CreateDimensionRequestDimensionTypeStandard
+		return nil
+	case CreateDimensionRequestDimensionTypeTime:
+		*s = CreateDimensionRequestDimensionTypeTime
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// Required when dimension_type is time; immutable.
+type CreateDimensionRequestTimeGranularity string
+
+const (
+	CreateDimensionRequestTimeGranularityDay      CreateDimensionRequestTimeGranularity = "day"
+	CreateDimensionRequestTimeGranularityWeek     CreateDimensionRequestTimeGranularity = "week"
+	CreateDimensionRequestTimeGranularityMonth    CreateDimensionRequestTimeGranularity = "month"
+	CreateDimensionRequestTimeGranularityQuarter  CreateDimensionRequestTimeGranularity = "quarter"
+	CreateDimensionRequestTimeGranularityHalfYear CreateDimensionRequestTimeGranularity = "half_year"
+	CreateDimensionRequestTimeGranularityYear     CreateDimensionRequestTimeGranularity = "year"
+	CreateDimensionRequestTimeGranularityCustom   CreateDimensionRequestTimeGranularity = "custom"
+)
+
+// AllValues returns all CreateDimensionRequestTimeGranularity values.
+func (CreateDimensionRequestTimeGranularity) AllValues() []CreateDimensionRequestTimeGranularity {
+	return []CreateDimensionRequestTimeGranularity{
+		CreateDimensionRequestTimeGranularityDay,
+		CreateDimensionRequestTimeGranularityWeek,
+		CreateDimensionRequestTimeGranularityMonth,
+		CreateDimensionRequestTimeGranularityQuarter,
+		CreateDimensionRequestTimeGranularityHalfYear,
+		CreateDimensionRequestTimeGranularityYear,
+		CreateDimensionRequestTimeGranularityCustom,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CreateDimensionRequestTimeGranularity) MarshalText() ([]byte, error) {
+	switch s {
+	case CreateDimensionRequestTimeGranularityDay:
+		return []byte(s), nil
+	case CreateDimensionRequestTimeGranularityWeek:
+		return []byte(s), nil
+	case CreateDimensionRequestTimeGranularityMonth:
+		return []byte(s), nil
+	case CreateDimensionRequestTimeGranularityQuarter:
+		return []byte(s), nil
+	case CreateDimensionRequestTimeGranularityHalfYear:
+		return []byte(s), nil
+	case CreateDimensionRequestTimeGranularityYear:
+		return []byte(s), nil
+	case CreateDimensionRequestTimeGranularityCustom:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CreateDimensionRequestTimeGranularity) UnmarshalText(data []byte) error {
+	switch CreateDimensionRequestTimeGranularity(data) {
+	case CreateDimensionRequestTimeGranularityDay:
+		*s = CreateDimensionRequestTimeGranularityDay
+		return nil
+	case CreateDimensionRequestTimeGranularityWeek:
+		*s = CreateDimensionRequestTimeGranularityWeek
+		return nil
+	case CreateDimensionRequestTimeGranularityMonth:
+		*s = CreateDimensionRequestTimeGranularityMonth
+		return nil
+	case CreateDimensionRequestTimeGranularityQuarter:
+		*s = CreateDimensionRequestTimeGranularityQuarter
+		return nil
+	case CreateDimensionRequestTimeGranularityHalfYear:
+		*s = CreateDimensionRequestTimeGranularityHalfYear
+		return nil
+	case CreateDimensionRequestTimeGranularityYear:
+		*s = CreateDimensionRequestTimeGranularityYear
+		return nil
+	case CreateDimensionRequestTimeGranularityCustom:
+		*s = CreateDimensionRequestTimeGranularityCustom
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 type CreateFolderBadRequest Error
@@ -5117,6 +5307,10 @@ type CreateMetricRequest struct {
 	Format         OptString `json:"format"`
 	FormatDecimals OptInt    `json:"format_decimals"`
 	FormatCurrency OptString `json:"format_currency"`
+	// How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
+	// dimension): sum for flows, last for a closing balance, first for an opening balance, none when a
+	// time total is meaningless.
+	TimeSummary OptCreateMetricRequestTimeSummary `json:"time_summary"`
 }
 
 // GetName returns the value of Name.
@@ -5159,6 +5353,11 @@ func (s *CreateMetricRequest) GetFormatCurrency() OptString {
 	return s.FormatCurrency
 }
 
+// GetTimeSummary returns the value of TimeSummary.
+func (s *CreateMetricRequest) GetTimeSummary() OptCreateMetricRequestTimeSummary {
+	return s.TimeSummary
+}
+
 // SetName sets the value of Name.
 func (s *CreateMetricRequest) SetName(val string) {
 	s.Name = val
@@ -5197,6 +5396,90 @@ func (s *CreateMetricRequest) SetFormatDecimals(val OptInt) {
 // SetFormatCurrency sets the value of FormatCurrency.
 func (s *CreateMetricRequest) SetFormatCurrency(val OptString) {
 	s.FormatCurrency = val
+}
+
+// SetTimeSummary sets the value of TimeSummary.
+func (s *CreateMetricRequest) SetTimeSummary(val OptCreateMetricRequestTimeSummary) {
+	s.TimeSummary = val
+}
+
+// How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
+// dimension): sum for flows, last for a closing balance, first for an opening balance, none when a
+// time total is meaningless.
+type CreateMetricRequestTimeSummary string
+
+const (
+	CreateMetricRequestTimeSummarySum     CreateMetricRequestTimeSummary = "sum"
+	CreateMetricRequestTimeSummaryAverage CreateMetricRequestTimeSummary = "average"
+	CreateMetricRequestTimeSummaryMin     CreateMetricRequestTimeSummary = "min"
+	CreateMetricRequestTimeSummaryMax     CreateMetricRequestTimeSummary = "max"
+	CreateMetricRequestTimeSummaryFirst   CreateMetricRequestTimeSummary = "first"
+	CreateMetricRequestTimeSummaryLast    CreateMetricRequestTimeSummary = "last"
+	CreateMetricRequestTimeSummaryNone    CreateMetricRequestTimeSummary = "none"
+)
+
+// AllValues returns all CreateMetricRequestTimeSummary values.
+func (CreateMetricRequestTimeSummary) AllValues() []CreateMetricRequestTimeSummary {
+	return []CreateMetricRequestTimeSummary{
+		CreateMetricRequestTimeSummarySum,
+		CreateMetricRequestTimeSummaryAverage,
+		CreateMetricRequestTimeSummaryMin,
+		CreateMetricRequestTimeSummaryMax,
+		CreateMetricRequestTimeSummaryFirst,
+		CreateMetricRequestTimeSummaryLast,
+		CreateMetricRequestTimeSummaryNone,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CreateMetricRequestTimeSummary) MarshalText() ([]byte, error) {
+	switch s {
+	case CreateMetricRequestTimeSummarySum:
+		return []byte(s), nil
+	case CreateMetricRequestTimeSummaryAverage:
+		return []byte(s), nil
+	case CreateMetricRequestTimeSummaryMin:
+		return []byte(s), nil
+	case CreateMetricRequestTimeSummaryMax:
+		return []byte(s), nil
+	case CreateMetricRequestTimeSummaryFirst:
+		return []byte(s), nil
+	case CreateMetricRequestTimeSummaryLast:
+		return []byte(s), nil
+	case CreateMetricRequestTimeSummaryNone:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CreateMetricRequestTimeSummary) UnmarshalText(data []byte) error {
+	switch CreateMetricRequestTimeSummary(data) {
+	case CreateMetricRequestTimeSummarySum:
+		*s = CreateMetricRequestTimeSummarySum
+		return nil
+	case CreateMetricRequestTimeSummaryAverage:
+		*s = CreateMetricRequestTimeSummaryAverage
+		return nil
+	case CreateMetricRequestTimeSummaryMin:
+		*s = CreateMetricRequestTimeSummaryMin
+		return nil
+	case CreateMetricRequestTimeSummaryMax:
+		*s = CreateMetricRequestTimeSummaryMax
+		return nil
+	case CreateMetricRequestTimeSummaryFirst:
+		*s = CreateMetricRequestTimeSummaryFirst
+		return nil
+	case CreateMetricRequestTimeSummaryLast:
+		*s = CreateMetricRequestTimeSummaryLast
+		return nil
+	case CreateMetricRequestTimeSummaryNone:
+		*s = CreateMetricRequestTimeSummaryNone
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // Ref: #/components/schemas/CreateRecordRequest
@@ -6253,6 +6536,11 @@ func (s *DeleteFormRecordOK) SetStatus(val OptString) {
 
 func (*DeleteFormRecordOK) deleteFormRecordRes() {}
 
+// DeleteGoogleConnectionForbidden is response for DeleteGoogleConnection operation.
+type DeleteGoogleConnectionForbidden struct{}
+
+func (*DeleteGoogleConnectionForbidden) deleteGoogleConnectionRes() {}
+
 type DeleteGridOK struct {
 	Status OptString `json:"status"`
 }
@@ -6425,6 +6713,12 @@ func (*DemoContext) getDemoRes() {}
 type Department struct {
 	Code  string `json:"code"`
 	Label string `json:"label"`
+	// Time members only.
+	PeriodStart OptDate `json:"period_start"`
+	// Time members only.
+	PeriodEnd OptDate `json:"period_end"`
+	// Time members only: server-owned chronological ordinal, read-only.
+	TimeIndex OptInt `json:"time_index"`
 }
 
 // GetCode returns the value of Code.
@@ -6437,6 +6731,21 @@ func (s *Department) GetLabel() string {
 	return s.Label
 }
 
+// GetPeriodStart returns the value of PeriodStart.
+func (s *Department) GetPeriodStart() OptDate {
+	return s.PeriodStart
+}
+
+// GetPeriodEnd returns the value of PeriodEnd.
+func (s *Department) GetPeriodEnd() OptDate {
+	return s.PeriodEnd
+}
+
+// GetTimeIndex returns the value of TimeIndex.
+func (s *Department) GetTimeIndex() OptInt {
+	return s.TimeIndex
+}
+
 // SetCode sets the value of Code.
 func (s *Department) SetCode(val string) {
 	s.Code = val
@@ -6445,6 +6754,21 @@ func (s *Department) SetCode(val string) {
 // SetLabel sets the value of Label.
 func (s *Department) SetLabel(val string) {
 	s.Label = val
+}
+
+// SetPeriodStart sets the value of PeriodStart.
+func (s *Department) SetPeriodStart(val OptDate) {
+	s.PeriodStart = val
+}
+
+// SetPeriodEnd sets the value of PeriodEnd.
+func (s *Department) SetPeriodEnd(val OptDate) {
+	s.PeriodEnd = val
+}
+
+// SetTimeIndex sets the value of TimeIndex.
+func (s *Department) SetTimeIndex(val OptInt) {
+	s.TimeIndex = val
 }
 
 // Ref: #/components/schemas/DevPersona
@@ -6568,11 +6892,18 @@ func (s *DevRevision) SetIsActive(val bool) {
 
 // Ref: #/components/schemas/Dimension
 type Dimension struct {
-	ID                uuid.UUID         `json:"id"`
-	Name              string            `json:"name"`
-	AggRule           string            `json:"agg_rule"`
-	ParentDimensionID OptNilUUID        `json:"parent_dimension_id"`
-	Members           []DimensionMember `json:"members"`
+	ID                uuid.UUID  `json:"id"`
+	Name              string     `json:"name"`
+	AggRule           string     `json:"agg_rule"`
+	ParentDimensionID OptNilUUID `json:"parent_dimension_id"`
+	// Explicit and immutable. A dimension called month is NOT a time dimension unless marked so.
+	DimensionType DimensionDimensionType `json:"dimension_type"`
+	// Time dimensions only.
+	TimeGranularity OptDimensionTimeGranularity `json:"time_granularity"`
+	// Time dimensions only.
+	FiscalYearStartMonth OptInt `json:"fiscal_year_start_month"`
+	// Time members in chronological order.
+	Members []DimensionMember `json:"members"`
 }
 
 // GetID returns the value of ID.
@@ -6593,6 +6924,21 @@ func (s *Dimension) GetAggRule() string {
 // GetParentDimensionID returns the value of ParentDimensionID.
 func (s *Dimension) GetParentDimensionID() OptNilUUID {
 	return s.ParentDimensionID
+}
+
+// GetDimensionType returns the value of DimensionType.
+func (s *Dimension) GetDimensionType() DimensionDimensionType {
+	return s.DimensionType
+}
+
+// GetTimeGranularity returns the value of TimeGranularity.
+func (s *Dimension) GetTimeGranularity() OptDimensionTimeGranularity {
+	return s.TimeGranularity
+}
+
+// GetFiscalYearStartMonth returns the value of FiscalYearStartMonth.
+func (s *Dimension) GetFiscalYearStartMonth() OptInt {
+	return s.FiscalYearStartMonth
 }
 
 // GetMembers returns the value of Members.
@@ -6620,9 +6966,66 @@ func (s *Dimension) SetParentDimensionID(val OptNilUUID) {
 	s.ParentDimensionID = val
 }
 
+// SetDimensionType sets the value of DimensionType.
+func (s *Dimension) SetDimensionType(val DimensionDimensionType) {
+	s.DimensionType = val
+}
+
+// SetTimeGranularity sets the value of TimeGranularity.
+func (s *Dimension) SetTimeGranularity(val OptDimensionTimeGranularity) {
+	s.TimeGranularity = val
+}
+
+// SetFiscalYearStartMonth sets the value of FiscalYearStartMonth.
+func (s *Dimension) SetFiscalYearStartMonth(val OptInt) {
+	s.FiscalYearStartMonth = val
+}
+
 // SetMembers sets the value of Members.
 func (s *Dimension) SetMembers(val []DimensionMember) {
 	s.Members = val
+}
+
+// Explicit and immutable. A dimension called month is NOT a time dimension unless marked so.
+type DimensionDimensionType string
+
+const (
+	DimensionDimensionTypeStandard DimensionDimensionType = "standard"
+	DimensionDimensionTypeTime     DimensionDimensionType = "time"
+)
+
+// AllValues returns all DimensionDimensionType values.
+func (DimensionDimensionType) AllValues() []DimensionDimensionType {
+	return []DimensionDimensionType{
+		DimensionDimensionTypeStandard,
+		DimensionDimensionTypeTime,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s DimensionDimensionType) MarshalText() ([]byte, error) {
+	switch s {
+	case DimensionDimensionTypeStandard:
+		return []byte(s), nil
+	case DimensionDimensionTypeTime:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *DimensionDimensionType) UnmarshalText(data []byte) error {
+	switch DimensionDimensionType(data) {
+	case DimensionDimensionTypeStandard:
+		*s = DimensionDimensionTypeStandard
+		return nil
+	case DimensionDimensionTypeTime:
+		*s = DimensionDimensionTypeTime
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // Ref: #/components/schemas/DimensionMember
@@ -6631,6 +7034,13 @@ type DimensionMember struct {
 	Code           string     `json:"code"`
 	Label          string     `json:"label"`
 	ParentMemberID OptNilUUID `json:"parent_member_id"`
+	// Leaf periods of a time dimension only (YYYY-MM-DD); absent on an aggregate period (H1, FY26).
+	PeriodStart OptDate `json:"period_start"`
+	// Leaf periods only (YYYY-MM-DD).
+	PeriodEnd OptDate `json:"period_end"`
+	// Leaf periods only: server-owned chronological ordinal, read-only. Time functions move by this
+	// order, never by code or label; aggregate periods have none.
+	TimeIndex OptInt `json:"time_index"`
 }
 
 // GetID returns the value of ID.
@@ -6653,6 +7063,21 @@ func (s *DimensionMember) GetParentMemberID() OptNilUUID {
 	return s.ParentMemberID
 }
 
+// GetPeriodStart returns the value of PeriodStart.
+func (s *DimensionMember) GetPeriodStart() OptDate {
+	return s.PeriodStart
+}
+
+// GetPeriodEnd returns the value of PeriodEnd.
+func (s *DimensionMember) GetPeriodEnd() OptDate {
+	return s.PeriodEnd
+}
+
+// GetTimeIndex returns the value of TimeIndex.
+func (s *DimensionMember) GetTimeIndex() OptInt {
+	return s.TimeIndex
+}
+
 // SetID sets the value of ID.
 func (s *DimensionMember) SetID(val uuid.UUID) {
 	s.ID = val
@@ -6671,6 +7096,21 @@ func (s *DimensionMember) SetLabel(val string) {
 // SetParentMemberID sets the value of ParentMemberID.
 func (s *DimensionMember) SetParentMemberID(val OptNilUUID) {
 	s.ParentMemberID = val
+}
+
+// SetPeriodStart sets the value of PeriodStart.
+func (s *DimensionMember) SetPeriodStart(val OptDate) {
+	s.PeriodStart = val
+}
+
+// SetPeriodEnd sets the value of PeriodEnd.
+func (s *DimensionMember) SetPeriodEnd(val OptDate) {
+	s.PeriodEnd = val
+}
+
+// SetTimeIndex sets the value of TimeIndex.
+func (s *DimensionMember) SetTimeIndex(val OptInt) {
+	s.TimeIndex = val
 }
 
 // Ref: #/components/schemas/DimensionProperty
@@ -6721,6 +7161,83 @@ func (s *DimensionProperty) SetDataType(val string) {
 	s.DataType = val
 }
 
+// Time dimensions only.
+type DimensionTimeGranularity string
+
+const (
+	DimensionTimeGranularityDay      DimensionTimeGranularity = "day"
+	DimensionTimeGranularityWeek     DimensionTimeGranularity = "week"
+	DimensionTimeGranularityMonth    DimensionTimeGranularity = "month"
+	DimensionTimeGranularityQuarter  DimensionTimeGranularity = "quarter"
+	DimensionTimeGranularityHalfYear DimensionTimeGranularity = "half_year"
+	DimensionTimeGranularityYear     DimensionTimeGranularity = "year"
+	DimensionTimeGranularityCustom   DimensionTimeGranularity = "custom"
+)
+
+// AllValues returns all DimensionTimeGranularity values.
+func (DimensionTimeGranularity) AllValues() []DimensionTimeGranularity {
+	return []DimensionTimeGranularity{
+		DimensionTimeGranularityDay,
+		DimensionTimeGranularityWeek,
+		DimensionTimeGranularityMonth,
+		DimensionTimeGranularityQuarter,
+		DimensionTimeGranularityHalfYear,
+		DimensionTimeGranularityYear,
+		DimensionTimeGranularityCustom,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s DimensionTimeGranularity) MarshalText() ([]byte, error) {
+	switch s {
+	case DimensionTimeGranularityDay:
+		return []byte(s), nil
+	case DimensionTimeGranularityWeek:
+		return []byte(s), nil
+	case DimensionTimeGranularityMonth:
+		return []byte(s), nil
+	case DimensionTimeGranularityQuarter:
+		return []byte(s), nil
+	case DimensionTimeGranularityHalfYear:
+		return []byte(s), nil
+	case DimensionTimeGranularityYear:
+		return []byte(s), nil
+	case DimensionTimeGranularityCustom:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *DimensionTimeGranularity) UnmarshalText(data []byte) error {
+	switch DimensionTimeGranularity(data) {
+	case DimensionTimeGranularityDay:
+		*s = DimensionTimeGranularityDay
+		return nil
+	case DimensionTimeGranularityWeek:
+		*s = DimensionTimeGranularityWeek
+		return nil
+	case DimensionTimeGranularityMonth:
+		*s = DimensionTimeGranularityMonth
+		return nil
+	case DimensionTimeGranularityQuarter:
+		*s = DimensionTimeGranularityQuarter
+		return nil
+	case DimensionTimeGranularityHalfYear:
+		*s = DimensionTimeGranularityHalfYear
+		return nil
+	case DimensionTimeGranularityYear:
+		*s = DimensionTimeGranularityYear
+		return nil
+	case DimensionTimeGranularityCustom:
+		*s = DimensionTimeGranularityCustom
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
 type DiscardAiDraftBadRequest Error
 
 func (*DiscardAiDraftBadRequest) discardAiDraftRes() {}
@@ -6755,6 +7272,73 @@ func (s *DiscardAiDraftOK) SetMessages(val []AiChatMessage) {
 }
 
 func (*DiscardAiDraftOK) discardAiDraftRes() {}
+
+// DisconnectIntegrationOAuthBadRequest is response for DisconnectIntegrationOAuth operation.
+type DisconnectIntegrationOAuthBadRequest struct{}
+
+func (*DisconnectIntegrationOAuthBadRequest) disconnectIntegrationOAuthRes() {}
+
+type DisconnectIntegrationOAuthOK struct {
+	ID        OptUUID                           `json:"id"`
+	Name      OptString                         `json:"name"`
+	AuthType  OptString                         `json:"auth_type"`
+	Meta      *DisconnectIntegrationOAuthOKMeta `json:"meta"`
+	HasSecret OptBool                           `json:"has_secret"`
+}
+
+// GetID returns the value of ID.
+func (s *DisconnectIntegrationOAuthOK) GetID() OptUUID {
+	return s.ID
+}
+
+// GetName returns the value of Name.
+func (s *DisconnectIntegrationOAuthOK) GetName() OptString {
+	return s.Name
+}
+
+// GetAuthType returns the value of AuthType.
+func (s *DisconnectIntegrationOAuthOK) GetAuthType() OptString {
+	return s.AuthType
+}
+
+// GetMeta returns the value of Meta.
+func (s *DisconnectIntegrationOAuthOK) GetMeta() *DisconnectIntegrationOAuthOKMeta {
+	return s.Meta
+}
+
+// GetHasSecret returns the value of HasSecret.
+func (s *DisconnectIntegrationOAuthOK) GetHasSecret() OptBool {
+	return s.HasSecret
+}
+
+// SetID sets the value of ID.
+func (s *DisconnectIntegrationOAuthOK) SetID(val OptUUID) {
+	s.ID = val
+}
+
+// SetName sets the value of Name.
+func (s *DisconnectIntegrationOAuthOK) SetName(val OptString) {
+	s.Name = val
+}
+
+// SetAuthType sets the value of AuthType.
+func (s *DisconnectIntegrationOAuthOK) SetAuthType(val OptString) {
+	s.AuthType = val
+}
+
+// SetMeta sets the value of Meta.
+func (s *DisconnectIntegrationOAuthOK) SetMeta(val *DisconnectIntegrationOAuthOKMeta) {
+	s.Meta = val
+}
+
+// SetHasSecret sets the value of HasSecret.
+func (s *DisconnectIntegrationOAuthOK) SetHasSecret(val OptBool) {
+	s.HasSecret = val
+}
+
+func (*DisconnectIntegrationOAuthOK) disconnectIntegrationOAuthRes() {}
+
+type DisconnectIntegrationOAuthOKMeta struct{}
 
 type DuplicateIntegrationOK struct{}
 
@@ -6818,7 +7402,9 @@ func (*Error) deleteImportJobRes()             {}
 func (*Error) deleteRevisionRes()              {}
 func (*Error) deleteTenantRes()                {}
 func (*Error) deleteWorkflowRes()              {}
+func (*Error) disconnectIntegrationOAuthRes()  {}
 func (*Error) duplicateIntegrationRes()        {}
+func (*Error) generateDimensionPeriodsRes()    {}
 func (*Error) getAiSessionRes()                {}
 func (*Error) getBusinessDashboardRes()        {}
 func (*Error) getDemoRes()                     {}
@@ -6854,6 +7440,7 @@ func (*Error) setActiveRevisionRes()           {}
 func (*Error) setBARoleDashboardsRes()         {}
 func (*Error) setDefaultModelRes()             {}
 func (*Error) setUserAccessRulesRes()          {}
+func (*Error) startIntegrationOAuthRes()       {}
 func (*Error) testIntegrationConnectionRes()   {}
 func (*Error) updateAutomationRuleRes()        {}
 func (*Error) updateBARoleRes()                {}
@@ -7790,6 +8377,22 @@ func (s *FormulaRefsRequest) SetFormula(val string) {
 	s.Formula = val
 }
 
+type GenerateDimensionPeriodsOK struct {
+	Created OptInt `json:"created"`
+}
+
+// GetCreated returns the value of Created.
+func (s *GenerateDimensionPeriodsOK) GetCreated() OptInt {
+	return s.Created
+}
+
+// SetCreated sets the value of Created.
+func (s *GenerateDimensionPeriodsOK) SetCreated(val OptInt) {
+	s.Created = val
+}
+
+func (*GenerateDimensionPeriodsOK) generateDimensionPeriodsRes() {}
+
 type GenerateMigrationOK struct {
 	ModelID       OptUUID                     `json:"model_id"`
 	VersionNumber OptInt                      `json:"version_number"`
@@ -7835,6 +8438,46 @@ func (s *GenerateMigrationOKFiles) init() GenerateMigrationOKFiles {
 		*s = m
 	}
 	return m
+}
+
+// Ref: #/components/schemas/GeneratePeriodsRequest
+type GeneratePeriodsRequest struct {
+	// First period start (must sit on a boundary of the dimension's granularity).
+	Start time.Time `json:"start"`
+	// Last date to cover, inclusive.
+	End time.Time `json:"end"`
+	// Optional aggregate period the generated leaves go under.
+	ParentMemberID OptUUID `json:"parent_member_id"`
+}
+
+// GetStart returns the value of Start.
+func (s *GeneratePeriodsRequest) GetStart() time.Time {
+	return s.Start
+}
+
+// GetEnd returns the value of End.
+func (s *GeneratePeriodsRequest) GetEnd() time.Time {
+	return s.End
+}
+
+// GetParentMemberID returns the value of ParentMemberID.
+func (s *GeneratePeriodsRequest) GetParentMemberID() OptUUID {
+	return s.ParentMemberID
+}
+
+// SetStart sets the value of Start.
+func (s *GeneratePeriodsRequest) SetStart(val time.Time) {
+	s.Start = val
+}
+
+// SetEnd sets the value of End.
+func (s *GeneratePeriodsRequest) SetEnd(val time.Time) {
+	s.End = val
+}
+
+// SetParentMemberID sets the value of ParentMemberID.
+func (s *GeneratePeriodsRequest) SetParentMemberID(val OptUUID) {
+	s.ParentMemberID = val
 }
 
 // GetAdminBrandingForbidden is response for GetAdminBranding operation.
@@ -8099,6 +8742,16 @@ func (s *GetDeveloperModelOK) SetMetrics(val []MetricDef) {
 	s.Metrics = val
 }
 
+// GetGoogleConnectionConflict is response for GetGoogleConnection operation.
+type GetGoogleConnectionConflict struct{}
+
+func (*GetGoogleConnectionConflict) getGoogleConnectionRes() {}
+
+// GetGoogleConnectionForbidden is response for GetGoogleConnection operation.
+type GetGoogleConnectionForbidden struct{}
+
+func (*GetGoogleConnectionForbidden) getGoogleConnectionRes() {}
+
 type GetGridInternalServerError Error
 
 func (*GetGridInternalServerError) getGridRes() {}
@@ -8255,6 +8908,60 @@ func (s *GetUsageOK) SetTenants(val []TenantUsage) {
 }
 
 func (*GetUsageOK) getUsageRes() {}
+
+// A tenant's Google service account, public half only.
+// Ref: #/components/schemas/GoogleConnection
+type GoogleConnection struct {
+	Configured bool `json:"configured"`
+	// The address to share private sheets with.
+	ClientEmail OptString   `json:"client_email"`
+	ProjectID   OptString   `json:"project_id"`
+	UpdatedAt   OptDateTime `json:"updated_at"`
+}
+
+// GetConfigured returns the value of Configured.
+func (s *GoogleConnection) GetConfigured() bool {
+	return s.Configured
+}
+
+// GetClientEmail returns the value of ClientEmail.
+func (s *GoogleConnection) GetClientEmail() OptString {
+	return s.ClientEmail
+}
+
+// GetProjectID returns the value of ProjectID.
+func (s *GoogleConnection) GetProjectID() OptString {
+	return s.ProjectID
+}
+
+// GetUpdatedAt returns the value of UpdatedAt.
+func (s *GoogleConnection) GetUpdatedAt() OptDateTime {
+	return s.UpdatedAt
+}
+
+// SetConfigured sets the value of Configured.
+func (s *GoogleConnection) SetConfigured(val bool) {
+	s.Configured = val
+}
+
+// SetClientEmail sets the value of ClientEmail.
+func (s *GoogleConnection) SetClientEmail(val OptString) {
+	s.ClientEmail = val
+}
+
+// SetProjectID sets the value of ProjectID.
+func (s *GoogleConnection) SetProjectID(val OptString) {
+	s.ProjectID = val
+}
+
+// SetUpdatedAt sets the value of UpdatedAt.
+func (s *GoogleConnection) SetUpdatedAt(val OptDateTime) {
+	s.UpdatedAt = val
+}
+
+func (*GoogleConnection) deleteGoogleConnectionRes() {}
+func (*GoogleConnection) getGoogleConnectionRes()    {}
+func (*GoogleConnection) putGoogleConnectionRes()    {}
 
 type GrantAdminUserAppAccessOK struct {
 	Status OptString `json:"status"`
@@ -8635,9 +9342,14 @@ func (s *GridDefDimensionLevels) init() GridDefDimensionLevels {
 
 // Ref: #/components/schemas/GridDimension
 type GridDimension struct {
-	ID      uuid.UUID    `json:"id"`
-	Name    string       `json:"name"`
-	Members []Department `json:"members"`
+	ID            uuid.UUID                  `json:"id"`
+	Name          string                     `json:"name"`
+	DimensionType GridDimensionDimensionType `json:"dimension_type"`
+	// Time dimensions only.
+	TimeGranularity OptGridDimensionTimeGranularity `json:"time_granularity"`
+	// Time dimensions only.
+	FiscalYearStartMonth OptInt       `json:"fiscal_year_start_month"`
+	Members              []Department `json:"members"`
 }
 
 // GetID returns the value of ID.
@@ -8648,6 +9360,21 @@ func (s *GridDimension) GetID() uuid.UUID {
 // GetName returns the value of Name.
 func (s *GridDimension) GetName() string {
 	return s.Name
+}
+
+// GetDimensionType returns the value of DimensionType.
+func (s *GridDimension) GetDimensionType() GridDimensionDimensionType {
+	return s.DimensionType
+}
+
+// GetTimeGranularity returns the value of TimeGranularity.
+func (s *GridDimension) GetTimeGranularity() OptGridDimensionTimeGranularity {
+	return s.TimeGranularity
+}
+
+// GetFiscalYearStartMonth returns the value of FiscalYearStartMonth.
+func (s *GridDimension) GetFiscalYearStartMonth() OptInt {
+	return s.FiscalYearStartMonth
 }
 
 // GetMembers returns the value of Members.
@@ -8665,9 +9392,65 @@ func (s *GridDimension) SetName(val string) {
 	s.Name = val
 }
 
+// SetDimensionType sets the value of DimensionType.
+func (s *GridDimension) SetDimensionType(val GridDimensionDimensionType) {
+	s.DimensionType = val
+}
+
+// SetTimeGranularity sets the value of TimeGranularity.
+func (s *GridDimension) SetTimeGranularity(val OptGridDimensionTimeGranularity) {
+	s.TimeGranularity = val
+}
+
+// SetFiscalYearStartMonth sets the value of FiscalYearStartMonth.
+func (s *GridDimension) SetFiscalYearStartMonth(val OptInt) {
+	s.FiscalYearStartMonth = val
+}
+
 // SetMembers sets the value of Members.
 func (s *GridDimension) SetMembers(val []Department) {
 	s.Members = val
+}
+
+type GridDimensionDimensionType string
+
+const (
+	GridDimensionDimensionTypeStandard GridDimensionDimensionType = "standard"
+	GridDimensionDimensionTypeTime     GridDimensionDimensionType = "time"
+)
+
+// AllValues returns all GridDimensionDimensionType values.
+func (GridDimensionDimensionType) AllValues() []GridDimensionDimensionType {
+	return []GridDimensionDimensionType{
+		GridDimensionDimensionTypeStandard,
+		GridDimensionDimensionTypeTime,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s GridDimensionDimensionType) MarshalText() ([]byte, error) {
+	switch s {
+	case GridDimensionDimensionTypeStandard:
+		return []byte(s), nil
+	case GridDimensionDimensionTypeTime:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *GridDimensionDimensionType) UnmarshalText(data []byte) error {
+	switch GridDimensionDimensionType(data) {
+	case GridDimensionDimensionTypeStandard:
+		*s = GridDimensionDimensionTypeStandard
+		return nil
+	case GridDimensionDimensionTypeTime:
+		*s = GridDimensionDimensionTypeTime
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // Ref: #/components/schemas/GridDimensionRequest
@@ -8684,6 +9467,83 @@ func (s *GridDimensionRequest) GetDisplayLevel() OptNilInt {
 // SetDisplayLevel sets the value of DisplayLevel.
 func (s *GridDimensionRequest) SetDisplayLevel(val OptNilInt) {
 	s.DisplayLevel = val
+}
+
+// Time dimensions only.
+type GridDimensionTimeGranularity string
+
+const (
+	GridDimensionTimeGranularityDay      GridDimensionTimeGranularity = "day"
+	GridDimensionTimeGranularityWeek     GridDimensionTimeGranularity = "week"
+	GridDimensionTimeGranularityMonth    GridDimensionTimeGranularity = "month"
+	GridDimensionTimeGranularityQuarter  GridDimensionTimeGranularity = "quarter"
+	GridDimensionTimeGranularityHalfYear GridDimensionTimeGranularity = "half_year"
+	GridDimensionTimeGranularityYear     GridDimensionTimeGranularity = "year"
+	GridDimensionTimeGranularityCustom   GridDimensionTimeGranularity = "custom"
+)
+
+// AllValues returns all GridDimensionTimeGranularity values.
+func (GridDimensionTimeGranularity) AllValues() []GridDimensionTimeGranularity {
+	return []GridDimensionTimeGranularity{
+		GridDimensionTimeGranularityDay,
+		GridDimensionTimeGranularityWeek,
+		GridDimensionTimeGranularityMonth,
+		GridDimensionTimeGranularityQuarter,
+		GridDimensionTimeGranularityHalfYear,
+		GridDimensionTimeGranularityYear,
+		GridDimensionTimeGranularityCustom,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s GridDimensionTimeGranularity) MarshalText() ([]byte, error) {
+	switch s {
+	case GridDimensionTimeGranularityDay:
+		return []byte(s), nil
+	case GridDimensionTimeGranularityWeek:
+		return []byte(s), nil
+	case GridDimensionTimeGranularityMonth:
+		return []byte(s), nil
+	case GridDimensionTimeGranularityQuarter:
+		return []byte(s), nil
+	case GridDimensionTimeGranularityHalfYear:
+		return []byte(s), nil
+	case GridDimensionTimeGranularityYear:
+		return []byte(s), nil
+	case GridDimensionTimeGranularityCustom:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *GridDimensionTimeGranularity) UnmarshalText(data []byte) error {
+	switch GridDimensionTimeGranularity(data) {
+	case GridDimensionTimeGranularityDay:
+		*s = GridDimensionTimeGranularityDay
+		return nil
+	case GridDimensionTimeGranularityWeek:
+		*s = GridDimensionTimeGranularityWeek
+		return nil
+	case GridDimensionTimeGranularityMonth:
+		*s = GridDimensionTimeGranularityMonth
+		return nil
+	case GridDimensionTimeGranularityQuarter:
+		*s = GridDimensionTimeGranularityQuarter
+		return nil
+	case GridDimensionTimeGranularityHalfYear:
+		*s = GridDimensionTimeGranularityHalfYear
+		return nil
+	case GridDimensionTimeGranularityYear:
+		*s = GridDimensionTimeGranularityYear
+		return nil
+	case GridDimensionTimeGranularityCustom:
+		*s = GridDimensionTimeGranularityCustom
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 type HealthzOK struct {
@@ -9637,6 +10497,9 @@ func (s *IntegrationDefConfig) init() IntegrationDefConfig {
 	return m
 }
 
+// IntegrationOAuthCallbackFound is response for IntegrationOAuthCallback operation.
+type IntegrationOAuthCallbackFound struct{}
+
 // Ref: #/components/schemas/IntegrationRunRequest
 type IntegrationRunRequest struct {
 	// Required for type "csv_import". Ignored for type "google_sheets" — those integrations re-fetch
@@ -9652,6 +10515,127 @@ func (s *IntegrationRunRequest) GetCsv() OptString {
 // SetCsv sets the value of Csv.
 func (s *IntegrationRunRequest) SetCsv(val OptString) {
 	s.Csv = val
+}
+
+// Ref: #/components/schemas/LegalInfo
+type LegalInfo struct {
+	// Both documents exist on this deployment.
+	Published bool `json:"published"`
+	// The shipped documents are rendered rather than an operator's own.
+	Builtin bool `json:"builtin"`
+	// Where the terms of service live - empty when none are published.
+	TermsURL OptString `json:"terms_url"`
+	// Where the privacy notice lives - empty when none is published.
+	PrivacyURL OptString `json:"privacy_url"`
+	// The operator's legal name.
+	Entity       OptString `json:"entity"`
+	Address      OptString `json:"address"`
+	Email        OptString `json:"email"`
+	Jurisdiction OptString `json:"jurisdiction"`
+	// Who hosts the deployment and where.
+	Hosting OptString `json:"hosting"`
+	// The date the documents last changed as YYYY-MM-DD.
+	Updated OptString `json:"updated"`
+}
+
+// GetPublished returns the value of Published.
+func (s *LegalInfo) GetPublished() bool {
+	return s.Published
+}
+
+// GetBuiltin returns the value of Builtin.
+func (s *LegalInfo) GetBuiltin() bool {
+	return s.Builtin
+}
+
+// GetTermsURL returns the value of TermsURL.
+func (s *LegalInfo) GetTermsURL() OptString {
+	return s.TermsURL
+}
+
+// GetPrivacyURL returns the value of PrivacyURL.
+func (s *LegalInfo) GetPrivacyURL() OptString {
+	return s.PrivacyURL
+}
+
+// GetEntity returns the value of Entity.
+func (s *LegalInfo) GetEntity() OptString {
+	return s.Entity
+}
+
+// GetAddress returns the value of Address.
+func (s *LegalInfo) GetAddress() OptString {
+	return s.Address
+}
+
+// GetEmail returns the value of Email.
+func (s *LegalInfo) GetEmail() OptString {
+	return s.Email
+}
+
+// GetJurisdiction returns the value of Jurisdiction.
+func (s *LegalInfo) GetJurisdiction() OptString {
+	return s.Jurisdiction
+}
+
+// GetHosting returns the value of Hosting.
+func (s *LegalInfo) GetHosting() OptString {
+	return s.Hosting
+}
+
+// GetUpdated returns the value of Updated.
+func (s *LegalInfo) GetUpdated() OptString {
+	return s.Updated
+}
+
+// SetPublished sets the value of Published.
+func (s *LegalInfo) SetPublished(val bool) {
+	s.Published = val
+}
+
+// SetBuiltin sets the value of Builtin.
+func (s *LegalInfo) SetBuiltin(val bool) {
+	s.Builtin = val
+}
+
+// SetTermsURL sets the value of TermsURL.
+func (s *LegalInfo) SetTermsURL(val OptString) {
+	s.TermsURL = val
+}
+
+// SetPrivacyURL sets the value of PrivacyURL.
+func (s *LegalInfo) SetPrivacyURL(val OptString) {
+	s.PrivacyURL = val
+}
+
+// SetEntity sets the value of Entity.
+func (s *LegalInfo) SetEntity(val OptString) {
+	s.Entity = val
+}
+
+// SetAddress sets the value of Address.
+func (s *LegalInfo) SetAddress(val OptString) {
+	s.Address = val
+}
+
+// SetEmail sets the value of Email.
+func (s *LegalInfo) SetEmail(val OptString) {
+	s.Email = val
+}
+
+// SetJurisdiction sets the value of Jurisdiction.
+func (s *LegalInfo) SetJurisdiction(val OptString) {
+	s.Jurisdiction = val
+}
+
+// SetHosting sets the value of Hosting.
+func (s *LegalInfo) SetHosting(val OptString) {
+	s.Hosting = val
+}
+
+// SetUpdated sets the value of Updated.
+func (s *LegalInfo) SetUpdated(val OptString) {
+	s.Updated = val
 }
 
 // Ref: #/components/schemas/LicenseFeature
@@ -10459,9 +11443,15 @@ func (s *MarkNotificationReadRequest) SetIds(val []uuid.UUID) {
 
 // Ref: #/components/schemas/MemberRequest
 type MemberRequest struct {
-	Code           OptString  `json:"code"`
-	Label          OptString  `json:"label"`
+	Code  OptString `json:"code"`
+	Label OptString `json:"label"`
+	// On a time dimension the parent must be an aggregate (undated) period.
 	ParentMemberID OptNilUUID `json:"parent_member_id"`
+	// Time dimensions: with period_end, makes the member a leaf period (YYYY-MM-DD); omit both for an
+	// aggregate period such as H1 or FY26.
+	PeriodStart OptDate `json:"period_start"`
+	// See period_start.
+	PeriodEnd OptDate `json:"period_end"`
 }
 
 // GetCode returns the value of Code.
@@ -10479,6 +11469,16 @@ func (s *MemberRequest) GetParentMemberID() OptNilUUID {
 	return s.ParentMemberID
 }
 
+// GetPeriodStart returns the value of PeriodStart.
+func (s *MemberRequest) GetPeriodStart() OptDate {
+	return s.PeriodStart
+}
+
+// GetPeriodEnd returns the value of PeriodEnd.
+func (s *MemberRequest) GetPeriodEnd() OptDate {
+	return s.PeriodEnd
+}
+
 // SetCode sets the value of Code.
 func (s *MemberRequest) SetCode(val OptString) {
 	s.Code = val
@@ -10492,6 +11492,16 @@ func (s *MemberRequest) SetLabel(val OptString) {
 // SetParentMemberID sets the value of ParentMemberID.
 func (s *MemberRequest) SetParentMemberID(val OptNilUUID) {
 	s.ParentMemberID = val
+}
+
+// SetPeriodStart sets the value of PeriodStart.
+func (s *MemberRequest) SetPeriodStart(val OptDate) {
+	s.PeriodStart = val
+}
+
+// SetPeriodEnd sets the value of PeriodEnd.
+func (s *MemberRequest) SetPeriodEnd(val OptDate) {
+	s.PeriodEnd = val
 }
 
 // Ref: #/components/schemas/Metric
@@ -10564,6 +11574,10 @@ type MetricDef struct {
 	Format         string       `json:"format"`
 	FormatDecimals int          `json:"format_decimals"`
 	FormatCurrency string       `json:"format_currency"`
+	// How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
+	// dimension): sum for flows, last for a closing balance, first for an opening balance, none when a
+	// time total is meaningless.
+	TimeSummary OptMetricDefTimeSummary `json:"time_summary"`
 	// Names of metrics/dimensions this formula references.
 	DependsOn []string `json:"depends_on"`
 	// Names of metrics whose formula references this one.
@@ -10613,6 +11627,11 @@ func (s *MetricDef) GetFormatDecimals() int {
 // GetFormatCurrency returns the value of FormatCurrency.
 func (s *MetricDef) GetFormatCurrency() string {
 	return s.FormatCurrency
+}
+
+// GetTimeSummary returns the value of TimeSummary.
+func (s *MetricDef) GetTimeSummary() OptMetricDefTimeSummary {
+	return s.TimeSummary
 }
 
 // GetDependsOn returns the value of DependsOn.
@@ -10670,6 +11689,11 @@ func (s *MetricDef) SetFormatCurrency(val string) {
 	s.FormatCurrency = val
 }
 
+// SetTimeSummary sets the value of TimeSummary.
+func (s *MetricDef) SetTimeSummary(val OptMetricDefTimeSummary) {
+	s.TimeSummary = val
+}
+
 // SetDependsOn sets the value of DependsOn.
 func (s *MetricDef) SetDependsOn(val []string) {
 	s.DependsOn = val
@@ -10678,6 +11702,85 @@ func (s *MetricDef) SetDependsOn(val []string) {
 // SetDependedBy sets the value of DependedBy.
 func (s *MetricDef) SetDependedBy(val []string) {
 	s.DependedBy = val
+}
+
+// How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
+// dimension): sum for flows, last for a closing balance, first for an opening balance, none when a
+// time total is meaningless.
+type MetricDefTimeSummary string
+
+const (
+	MetricDefTimeSummarySum     MetricDefTimeSummary = "sum"
+	MetricDefTimeSummaryAverage MetricDefTimeSummary = "average"
+	MetricDefTimeSummaryMin     MetricDefTimeSummary = "min"
+	MetricDefTimeSummaryMax     MetricDefTimeSummary = "max"
+	MetricDefTimeSummaryFirst   MetricDefTimeSummary = "first"
+	MetricDefTimeSummaryLast    MetricDefTimeSummary = "last"
+	MetricDefTimeSummaryNone    MetricDefTimeSummary = "none"
+)
+
+// AllValues returns all MetricDefTimeSummary values.
+func (MetricDefTimeSummary) AllValues() []MetricDefTimeSummary {
+	return []MetricDefTimeSummary{
+		MetricDefTimeSummarySum,
+		MetricDefTimeSummaryAverage,
+		MetricDefTimeSummaryMin,
+		MetricDefTimeSummaryMax,
+		MetricDefTimeSummaryFirst,
+		MetricDefTimeSummaryLast,
+		MetricDefTimeSummaryNone,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s MetricDefTimeSummary) MarshalText() ([]byte, error) {
+	switch s {
+	case MetricDefTimeSummarySum:
+		return []byte(s), nil
+	case MetricDefTimeSummaryAverage:
+		return []byte(s), nil
+	case MetricDefTimeSummaryMin:
+		return []byte(s), nil
+	case MetricDefTimeSummaryMax:
+		return []byte(s), nil
+	case MetricDefTimeSummaryFirst:
+		return []byte(s), nil
+	case MetricDefTimeSummaryLast:
+		return []byte(s), nil
+	case MetricDefTimeSummaryNone:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *MetricDefTimeSummary) UnmarshalText(data []byte) error {
+	switch MetricDefTimeSummary(data) {
+	case MetricDefTimeSummarySum:
+		*s = MetricDefTimeSummarySum
+		return nil
+	case MetricDefTimeSummaryAverage:
+		*s = MetricDefTimeSummaryAverage
+		return nil
+	case MetricDefTimeSummaryMin:
+		*s = MetricDefTimeSummaryMin
+		return nil
+	case MetricDefTimeSummaryMax:
+		*s = MetricDefTimeSummaryMax
+		return nil
+	case MetricDefTimeSummaryFirst:
+		*s = MetricDefTimeSummaryFirst
+		return nil
+	case MetricDefTimeSummaryLast:
+		*s = MetricDefTimeSummaryLast
+		return nil
+	case MetricDefTimeSummaryNone:
+		*s = MetricDefTimeSummaryNone
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // Ref: #/components/schemas/MigrationApplyRequest
@@ -11326,20 +12429,27 @@ func (s *Notification) SetDeliveredAt(val OptNilDateTime) {
 	s.DeliveredAt = val
 }
 
-// Which outbound channels this database delivers on. The SMTP relay is deployment configuration, not
-// a setting here; mailer_configured (read only) says whether one exists. webhook_secret is
-// write-only: it is never returned, and an empty value on update keeps the stored one.
+// Which outbound channels one tenant delivers on (scope says which tenant, or that these are the
+// deployment's defaults). The SMTP relay is deployment configuration, not a setting here;
+// mailer_configured (read only) says whether one exists. webhook_secret is write-only: it is never
+// returned, and an empty value on update keeps the stored one.
 // Ref: #/components/schemas/NotificationSettings
 type NotificationSettings struct {
-	EmailEnabled     bool      `json:"email_enabled"`
-	WebhookEnabled   bool      `json:"webhook_enabled"`
-	WebhookURL       string    `json:"webhook_url"`
-	WebhookSecret    OptString `json:"webhook_secret"`
-	HasWebhookSecret OptBool   `json:"has_webhook_secret"`
-	RemindersEnabled bool      `json:"reminders_enabled"`
+	Scope            OptSettingsScope `json:"scope"`
+	EmailEnabled     bool             `json:"email_enabled"`
+	WebhookEnabled   bool             `json:"webhook_enabled"`
+	WebhookURL       string           `json:"webhook_url"`
+	WebhookSecret    OptString        `json:"webhook_secret"`
+	HasWebhookSecret OptBool          `json:"has_webhook_secret"`
+	RemindersEnabled bool             `json:"reminders_enabled"`
 	// Remind this many hours before a task is due; 0 reminds at the due time.
 	ReminderLeadHours int32   `json:"reminder_lead_hours"`
 	MailerConfigured  OptBool `json:"mailer_configured"`
+}
+
+// GetScope returns the value of Scope.
+func (s *NotificationSettings) GetScope() OptSettingsScope {
+	return s.Scope
 }
 
 // GetEmailEnabled returns the value of EmailEnabled.
@@ -11382,6 +12492,11 @@ func (s *NotificationSettings) GetMailerConfigured() OptBool {
 	return s.MailerConfigured
 }
 
+// SetScope sets the value of Scope.
+func (s *NotificationSettings) SetScope(val OptSettingsScope) {
+	s.Scope = val
+}
+
 // SetEmailEnabled sets the value of EmailEnabled.
 func (s *NotificationSettings) SetEmailEnabled(val bool) {
 	s.EmailEnabled = val
@@ -11422,6 +12537,7 @@ func (s *NotificationSettings) SetMailerConfigured(val OptBool) {
 	s.MailerConfigured = val
 }
 
+func (*NotificationSettings) clearNotificationSettingsRes()  {}
 func (*NotificationSettings) getNotificationSettingsRes()    {}
 func (*NotificationSettings) updateNotificationSettingsRes() {}
 
@@ -12080,6 +13196,98 @@ func (o OptCreateApplicationRequestMode) Or(d CreateApplicationRequestMode) Crea
 	return d
 }
 
+// NewOptCreateDimensionRequestDimensionType returns new OptCreateDimensionRequestDimensionType with value set to v.
+func NewOptCreateDimensionRequestDimensionType(v CreateDimensionRequestDimensionType) OptCreateDimensionRequestDimensionType {
+	return OptCreateDimensionRequestDimensionType{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateDimensionRequestDimensionType is optional CreateDimensionRequestDimensionType.
+type OptCreateDimensionRequestDimensionType struct {
+	Value CreateDimensionRequestDimensionType
+	Set   bool
+}
+
+// IsSet returns true if OptCreateDimensionRequestDimensionType was set.
+func (o OptCreateDimensionRequestDimensionType) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateDimensionRequestDimensionType) Reset() {
+	var v CreateDimensionRequestDimensionType
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateDimensionRequestDimensionType) SetTo(v CreateDimensionRequestDimensionType) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateDimensionRequestDimensionType) Get() (v CreateDimensionRequestDimensionType, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateDimensionRequestDimensionType) Or(d CreateDimensionRequestDimensionType) CreateDimensionRequestDimensionType {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptCreateDimensionRequestTimeGranularity returns new OptCreateDimensionRequestTimeGranularity with value set to v.
+func NewOptCreateDimensionRequestTimeGranularity(v CreateDimensionRequestTimeGranularity) OptCreateDimensionRequestTimeGranularity {
+	return OptCreateDimensionRequestTimeGranularity{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateDimensionRequestTimeGranularity is optional CreateDimensionRequestTimeGranularity.
+type OptCreateDimensionRequestTimeGranularity struct {
+	Value CreateDimensionRequestTimeGranularity
+	Set   bool
+}
+
+// IsSet returns true if OptCreateDimensionRequestTimeGranularity was set.
+func (o OptCreateDimensionRequestTimeGranularity) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateDimensionRequestTimeGranularity) Reset() {
+	var v CreateDimensionRequestTimeGranularity
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateDimensionRequestTimeGranularity) SetTo(v CreateDimensionRequestTimeGranularity) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateDimensionRequestTimeGranularity) Get() (v CreateDimensionRequestTimeGranularity, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateDimensionRequestTimeGranularity) Or(d CreateDimensionRequestTimeGranularity) CreateDimensionRequestTimeGranularity {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptCreateFormMappingRequestDimensionMappings returns new OptCreateFormMappingRequestDimensionMappings with value set to v.
 func NewOptCreateFormMappingRequestDimensionMappings(v CreateFormMappingRequestDimensionMappings) OptCreateFormMappingRequestDimensionMappings {
 	return OptCreateFormMappingRequestDimensionMappings{
@@ -12120,6 +13328,52 @@ func (o OptCreateFormMappingRequestDimensionMappings) Get() (v CreateFormMapping
 
 // Or returns value if set, or given parameter if does not.
 func (o OptCreateFormMappingRequestDimensionMappings) Or(d CreateFormMappingRequestDimensionMappings) CreateFormMappingRequestDimensionMappings {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptCreateMetricRequestTimeSummary returns new OptCreateMetricRequestTimeSummary with value set to v.
+func NewOptCreateMetricRequestTimeSummary(v CreateMetricRequestTimeSummary) OptCreateMetricRequestTimeSummary {
+	return OptCreateMetricRequestTimeSummary{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateMetricRequestTimeSummary is optional CreateMetricRequestTimeSummary.
+type OptCreateMetricRequestTimeSummary struct {
+	Value CreateMetricRequestTimeSummary
+	Set   bool
+}
+
+// IsSet returns true if OptCreateMetricRequestTimeSummary was set.
+func (o OptCreateMetricRequestTimeSummary) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateMetricRequestTimeSummary) Reset() {
+	var v CreateMetricRequestTimeSummary
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateMetricRequestTimeSummary) SetTo(v CreateMetricRequestTimeSummary) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateMetricRequestTimeSummary) Get() (v CreateMetricRequestTimeSummary, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateMetricRequestTimeSummary) Or(d CreateMetricRequestTimeSummary) CreateMetricRequestTimeSummary {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -12218,6 +13472,52 @@ func (o OptCreateWidgetRequestWidgetProps) Or(d CreateWidgetRequestWidgetProps) 
 	return d
 }
 
+// NewOptDate returns new OptDate with value set to v.
+func NewOptDate(v time.Time) OptDate {
+	return OptDate{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptDate is optional time.Time.
+type OptDate struct {
+	Value time.Time
+	Set   bool
+}
+
+// IsSet returns true if OptDate was set.
+func (o OptDate) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptDate) Reset() {
+	var v time.Time
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptDate) SetTo(v time.Time) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptDate) Get() (v time.Time, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptDate) Or(d time.Time) time.Time {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptDateTime returns new OptDateTime with value set to v.
 func NewOptDateTime(v time.Time) OptDateTime {
 	return OptDateTime{
@@ -12258,6 +13558,52 @@ func (o OptDateTime) Get() (v time.Time, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptDateTime) Or(d time.Time) time.Time {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptDimensionTimeGranularity returns new OptDimensionTimeGranularity with value set to v.
+func NewOptDimensionTimeGranularity(v DimensionTimeGranularity) OptDimensionTimeGranularity {
+	return OptDimensionTimeGranularity{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptDimensionTimeGranularity is optional DimensionTimeGranularity.
+type OptDimensionTimeGranularity struct {
+	Value DimensionTimeGranularity
+	Set   bool
+}
+
+// IsSet returns true if OptDimensionTimeGranularity was set.
+func (o OptDimensionTimeGranularity) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptDimensionTimeGranularity) Reset() {
+	var v DimensionTimeGranularity
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptDimensionTimeGranularity) SetTo(v DimensionTimeGranularity) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptDimensionTimeGranularity) Get() (v DimensionTimeGranularity, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptDimensionTimeGranularity) Or(d DimensionTimeGranularity) DimensionTimeGranularity {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -12678,6 +14024,52 @@ func (o OptGridAccessRules) Or(d GridAccessRules) GridAccessRules {
 	return d
 }
 
+// NewOptGridDimensionTimeGranularity returns new OptGridDimensionTimeGranularity with value set to v.
+func NewOptGridDimensionTimeGranularity(v GridDimensionTimeGranularity) OptGridDimensionTimeGranularity {
+	return OptGridDimensionTimeGranularity{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGridDimensionTimeGranularity is optional GridDimensionTimeGranularity.
+type OptGridDimensionTimeGranularity struct {
+	Value GridDimensionTimeGranularity
+	Set   bool
+}
+
+// IsSet returns true if OptGridDimensionTimeGranularity was set.
+func (o OptGridDimensionTimeGranularity) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGridDimensionTimeGranularity) Reset() {
+	var v GridDimensionTimeGranularity
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGridDimensionTimeGranularity) SetTo(v GridDimensionTimeGranularity) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGridDimensionTimeGranularity) Get() (v GridDimensionTimeGranularity, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGridDimensionTimeGranularity) Or(d GridDimensionTimeGranularity) GridDimensionTimeGranularity {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptHistogramChartDataContext returns new OptHistogramChartDataContext with value set to v.
 func NewOptHistogramChartDataContext(v HistogramChartDataContext) OptHistogramChartDataContext {
 	return OptHistogramChartDataContext{
@@ -12902,6 +14294,52 @@ func (o OptLicenseInfoLimits) Get() (v LicenseInfoLimits, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptLicenseInfoLimits) Or(d LicenseInfoLimits) LicenseInfoLimits {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptMetricDefTimeSummary returns new OptMetricDefTimeSummary with value set to v.
+func NewOptMetricDefTimeSummary(v MetricDefTimeSummary) OptMetricDefTimeSummary {
+	return OptMetricDefTimeSummary{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptMetricDefTimeSummary is optional MetricDefTimeSummary.
+type OptMetricDefTimeSummary struct {
+	Value MetricDefTimeSummary
+	Set   bool
+}
+
+// IsSet returns true if OptMetricDefTimeSummary was set.
+func (o OptMetricDefTimeSummary) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptMetricDefTimeSummary) Reset() {
+	var v MetricDefTimeSummary
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptMetricDefTimeSummary) SetTo(v MetricDefTimeSummary) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptMetricDefTimeSummary) Get() (v MetricDefTimeSummary, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptMetricDefTimeSummary) Or(d MetricDefTimeSummary) MetricDefTimeSummary {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -13625,6 +15063,52 @@ func (o OptScatterChartDataContext) Or(d ScatterChartDataContext) ScatterChartDa
 	return d
 }
 
+// NewOptSettingsScope returns new OptSettingsScope with value set to v.
+func NewOptSettingsScope(v SettingsScope) OptSettingsScope {
+	return OptSettingsScope{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptSettingsScope is optional SettingsScope.
+type OptSettingsScope struct {
+	Value SettingsScope
+	Set   bool
+}
+
+// IsSet returns true if OptSettingsScope was set.
+func (o OptSettingsScope) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptSettingsScope) Reset() {
+	var v SettingsScope
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptSettingsScope) SetTo(v SettingsScope) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptSettingsScope) Get() (v SettingsScope, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptSettingsScope) Or(d SettingsScope) SettingsScope {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptSignupOptionsPlan returns new OptSignupOptionsPlan with value set to v.
 func NewOptSignupOptionsPlan(v SignupOptionsPlan) OptSignupOptionsPlan {
 	return OptSignupOptionsPlan{
@@ -13665,6 +15149,52 @@ func (o OptSignupOptionsPlan) Get() (v SignupOptionsPlan, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptSignupOptionsPlan) Or(d SignupOptionsPlan) SignupOptionsPlan {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptStartIntegrationOAuthReq returns new OptStartIntegrationOAuthReq with value set to v.
+func NewOptStartIntegrationOAuthReq(v StartIntegrationOAuthReq) OptStartIntegrationOAuthReq {
+	return OptStartIntegrationOAuthReq{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptStartIntegrationOAuthReq is optional StartIntegrationOAuthReq.
+type OptStartIntegrationOAuthReq struct {
+	Value StartIntegrationOAuthReq
+	Set   bool
+}
+
+// IsSet returns true if OptStartIntegrationOAuthReq was set.
+func (o OptStartIntegrationOAuthReq) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptStartIntegrationOAuthReq) Reset() {
+	var v StartIntegrationOAuthReq
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptStartIntegrationOAuthReq) SetTo(v StartIntegrationOAuthReq) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptStartIntegrationOAuthReq) Get() (v StartIntegrationOAuthReq, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptStartIntegrationOAuthReq) Or(d StartIntegrationOAuthReq) StartIntegrationOAuthReq {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -14223,6 +15753,52 @@ func (o OptUpdateFormMappingRequestDimensionMappings) Or(d UpdateFormMappingRequ
 	return d
 }
 
+// NewOptUpdateMetricRequestTimeSummary returns new OptUpdateMetricRequestTimeSummary with value set to v.
+func NewOptUpdateMetricRequestTimeSummary(v UpdateMetricRequestTimeSummary) OptUpdateMetricRequestTimeSummary {
+	return OptUpdateMetricRequestTimeSummary{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptUpdateMetricRequestTimeSummary is optional UpdateMetricRequestTimeSummary.
+type OptUpdateMetricRequestTimeSummary struct {
+	Value UpdateMetricRequestTimeSummary
+	Set   bool
+}
+
+// IsSet returns true if OptUpdateMetricRequestTimeSummary was set.
+func (o OptUpdateMetricRequestTimeSummary) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptUpdateMetricRequestTimeSummary) Reset() {
+	var v UpdateMetricRequestTimeSummary
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptUpdateMetricRequestTimeSummary) SetTo(v UpdateMetricRequestTimeSummary) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptUpdateMetricRequestTimeSummary) Get() (v UpdateMetricRequestTimeSummary, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptUpdateMetricRequestTimeSummary) Or(d UpdateMetricRequestTimeSummary) UpdateMetricRequestTimeSummary {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptUpdateRecordRequestData returns new OptUpdateRecordRequestData with value set to v.
 func NewOptUpdateRecordRequestData(v UpdateRecordRequestData) OptUpdateRecordRequestData {
 	return OptUpdateRecordRequestData{
@@ -14596,9 +16172,9 @@ type Plan struct {
 	Key         string     `json:"key"`
 	Name        string     `json:"name"`
 	Description string     `json:"description"`
-	TrialDays   int        `json:"trial_days"`
 	SelfService bool       `json:"self_service"`
 	Limits      PlanLimits `json:"limits"`
+	LimitNote   OptString  `json:"limit_note"`
 	SortOrder   int        `json:"sort_order"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
@@ -14618,11 +16194,6 @@ func (s *Plan) GetDescription() string {
 	return s.Description
 }
 
-// GetTrialDays returns the value of TrialDays.
-func (s *Plan) GetTrialDays() int {
-	return s.TrialDays
-}
-
 // GetSelfService returns the value of SelfService.
 func (s *Plan) GetSelfService() bool {
 	return s.SelfService
@@ -14631,6 +16202,11 @@ func (s *Plan) GetSelfService() bool {
 // GetLimits returns the value of Limits.
 func (s *Plan) GetLimits() PlanLimits {
 	return s.Limits
+}
+
+// GetLimitNote returns the value of LimitNote.
+func (s *Plan) GetLimitNote() OptString {
+	return s.LimitNote
 }
 
 // GetSortOrder returns the value of SortOrder.
@@ -14658,11 +16234,6 @@ func (s *Plan) SetDescription(val string) {
 	s.Description = val
 }
 
-// SetTrialDays sets the value of TrialDays.
-func (s *Plan) SetTrialDays(val int) {
-	s.TrialDays = val
-}
-
 // SetSelfService sets the value of SelfService.
 func (s *Plan) SetSelfService(val bool) {
 	s.SelfService = val
@@ -14671,6 +16242,11 @@ func (s *Plan) SetSelfService(val bool) {
 // SetLimits sets the value of Limits.
 func (s *Plan) SetLimits(val PlanLimits) {
 	s.Limits = val
+}
+
+// SetLimitNote sets the value of LimitNote.
+func (s *Plan) SetLimitNote(val OptString) {
+	s.LimitNote = val
 }
 
 // SetSortOrder sets the value of SortOrder.
@@ -14689,12 +16265,12 @@ func (*Plan) upsertPlanRes() {}
 type PlanInput struct {
 	Name        string    `json:"name"`
 	Description OptString `json:"description"`
-	// 0: not a trial; otherwise a tenant put on the plan gets this many days.
-	TrialDays OptInt `json:"trial_days"`
 	// May be chosen at public sign-up.
 	SelfService OptBool       `json:"self_service"`
 	Limits      OptPlanLimits `json:"limits"`
-	SortOrder   OptInt        `json:"sort_order"`
+	// What a tenant is told when a limit stops it; empty: change the plan.
+	LimitNote OptString `json:"limit_note"`
+	SortOrder OptInt    `json:"sort_order"`
 }
 
 // GetName returns the value of Name.
@@ -14707,11 +16283,6 @@ func (s *PlanInput) GetDescription() OptString {
 	return s.Description
 }
 
-// GetTrialDays returns the value of TrialDays.
-func (s *PlanInput) GetTrialDays() OptInt {
-	return s.TrialDays
-}
-
 // GetSelfService returns the value of SelfService.
 func (s *PlanInput) GetSelfService() OptBool {
 	return s.SelfService
@@ -14720,6 +16291,11 @@ func (s *PlanInput) GetSelfService() OptBool {
 // GetLimits returns the value of Limits.
 func (s *PlanInput) GetLimits() OptPlanLimits {
 	return s.Limits
+}
+
+// GetLimitNote returns the value of LimitNote.
+func (s *PlanInput) GetLimitNote() OptString {
+	return s.LimitNote
 }
 
 // GetSortOrder returns the value of SortOrder.
@@ -14737,11 +16313,6 @@ func (s *PlanInput) SetDescription(val OptString) {
 	s.Description = val
 }
 
-// SetTrialDays sets the value of TrialDays.
-func (s *PlanInput) SetTrialDays(val OptInt) {
-	s.TrialDays = val
-}
-
 // SetSelfService sets the value of SelfService.
 func (s *PlanInput) SetSelfService(val OptBool) {
 	s.SelfService = val
@@ -14750,6 +16321,11 @@ func (s *PlanInput) SetSelfService(val OptBool) {
 // SetLimits sets the value of Limits.
 func (s *PlanInput) SetLimits(val OptPlanLimits) {
 	s.Limits = val
+}
+
+// SetLimitNote sets the value of LimitNote.
+func (s *PlanInput) SetLimitNote(val OptString) {
+	s.LimitNote = val
 }
 
 // SetSortOrder sets the value of SortOrder.
@@ -14768,6 +16344,7 @@ type PlanLimits struct {
 	MaxFactRowsPerModel      OptInt `json:"max_fact_rows_per_model"`
 	MaxAiMessagesPerDay      OptInt `json:"max_ai_messages_per_day"`
 	MaxIntegrationRunsPerDay OptInt `json:"max_integration_runs_per_day"`
+	MaxStorageMB             OptInt `json:"max_storage_mb"`
 }
 
 // GetMaxUsers returns the value of MaxUsers.
@@ -14810,6 +16387,11 @@ func (s *PlanLimits) GetMaxIntegrationRunsPerDay() OptInt {
 	return s.MaxIntegrationRunsPerDay
 }
 
+// GetMaxStorageMB returns the value of MaxStorageMB.
+func (s *PlanLimits) GetMaxStorageMB() OptInt {
+	return s.MaxStorageMB
+}
+
 // SetMaxUsers sets the value of MaxUsers.
 func (s *PlanLimits) SetMaxUsers(val OptInt) {
 	s.MaxUsers = val
@@ -14850,15 +16432,17 @@ func (s *PlanLimits) SetMaxIntegrationRunsPerDay(val OptInt) {
 	s.MaxIntegrationRunsPerDay = val
 }
 
+// SetMaxStorageMB sets the value of MaxStorageMB.
+func (s *PlanLimits) SetMaxStorageMB(val OptInt) {
+	s.MaxStorageMB = val
+}
+
 // A tenant's plan as it applies right now.
 // Ref: #/components/schemas/PlanState
 type PlanState struct {
 	Plan Plan `json:"plan"`
 	// False when the tenant names a plan with no row (treated as unlimited).
-	PlanKnown   bool        `json:"plan_known"`
-	Trial       bool        `json:"trial"`
-	TrialEndsAt OptDateTime `json:"trial_ends_at"`
-	DaysLeft    int         `json:"days_left"`
+	PlanKnown bool `json:"plan_known"`
 	// Mutating requests are refused with 402.
 	ReadOnly       bool                `json:"read_only"`
 	Code           OptPlanStateCode    `json:"code"`
@@ -14876,21 +16460,6 @@ func (s *PlanState) GetPlan() Plan {
 // GetPlanKnown returns the value of PlanKnown.
 func (s *PlanState) GetPlanKnown() bool {
 	return s.PlanKnown
-}
-
-// GetTrial returns the value of Trial.
-func (s *PlanState) GetTrial() bool {
-	return s.Trial
-}
-
-// GetTrialEndsAt returns the value of TrialEndsAt.
-func (s *PlanState) GetTrialEndsAt() OptDateTime {
-	return s.TrialEndsAt
-}
-
-// GetDaysLeft returns the value of DaysLeft.
-func (s *PlanState) GetDaysLeft() int {
-	return s.DaysLeft
 }
 
 // GetReadOnly returns the value of ReadOnly.
@@ -14933,21 +16502,6 @@ func (s *PlanState) SetPlanKnown(val bool) {
 	s.PlanKnown = val
 }
 
-// SetTrial sets the value of Trial.
-func (s *PlanState) SetTrial(val bool) {
-	s.Trial = val
-}
-
-// SetTrialEndsAt sets the value of TrialEndsAt.
-func (s *PlanState) SetTrialEndsAt(val OptDateTime) {
-	s.TrialEndsAt = val
-}
-
-// SetDaysLeft sets the value of DaysLeft.
-func (s *PlanState) SetDaysLeft(val int) {
-	s.DaysLeft = val
-}
-
 // SetReadOnly sets the value of ReadOnly.
 func (s *PlanState) SetReadOnly(val bool) {
 	s.ReadOnly = val
@@ -14981,14 +16535,12 @@ func (s *PlanState) SetUsageCheckedAt(val OptDateTime) {
 type PlanStateCode string
 
 const (
-	PlanStateCodeTrialExpired PlanStateCode = "trial_expired"
-	PlanStateCodeOverLimit    PlanStateCode = "over_limit"
+	PlanStateCodeOverLimit PlanStateCode = "over_limit"
 )
 
 // AllValues returns all PlanStateCode values.
 func (PlanStateCode) AllValues() []PlanStateCode {
 	return []PlanStateCode{
-		PlanStateCodeTrialExpired,
 		PlanStateCodeOverLimit,
 	}
 }
@@ -14996,8 +16548,6 @@ func (PlanStateCode) AllValues() []PlanStateCode {
 // MarshalText implements encoding.TextMarshaler.
 func (s PlanStateCode) MarshalText() ([]byte, error) {
 	switch s {
-	case PlanStateCodeTrialExpired:
-		return []byte(s), nil
 	case PlanStateCodeOverLimit:
 		return []byte(s), nil
 	default:
@@ -15008,9 +16558,6 @@ func (s PlanStateCode) MarshalText() ([]byte, error) {
 // UnmarshalText implements encoding.TextUnmarshaler.
 func (s *PlanStateCode) UnmarshalText(data []byte) error {
 	switch PlanStateCode(data) {
-	case PlanStateCodeTrialExpired:
-		*s = PlanStateCodeTrialExpired
-		return nil
 	case PlanStateCodeOverLimit:
 		*s = PlanStateCodeOverLimit
 		return nil
@@ -15232,6 +16779,36 @@ func (*PublishWorkflowBadRequest) publishWorkflowRes() {}
 type PublishWorkflowNotFound Error
 
 func (*PublishWorkflowNotFound) publishWorkflowRes() {}
+
+// PutGoogleConnectionBadRequest is response for PutGoogleConnection operation.
+type PutGoogleConnectionBadRequest struct{}
+
+func (*PutGoogleConnectionBadRequest) putGoogleConnectionRes() {}
+
+// PutGoogleConnectionForbidden is response for PutGoogleConnection operation.
+type PutGoogleConnectionForbidden struct{}
+
+func (*PutGoogleConnectionForbidden) putGoogleConnectionRes() {}
+
+type PutGoogleConnectionReq struct {
+	// The key file's JSON text.
+	KeyFile string `json:"key_file"`
+}
+
+// GetKeyFile returns the value of KeyFile.
+func (s *PutGoogleConnectionReq) GetKeyFile() string {
+	return s.KeyFile
+}
+
+// SetKeyFile sets the value of KeyFile.
+func (s *PutGoogleConnectionReq) SetKeyFile(val string) {
+	s.KeyFile = val
+}
+
+// PutGoogleConnectionServiceUnavailable is response for PutGoogleConnection operation.
+type PutGoogleConnectionServiceUnavailable struct{}
+
+func (*PutGoogleConnectionServiceUnavailable) putGoogleConnectionRes() {}
 
 type RejectAiProposalConflict Error
 
@@ -16091,6 +17668,36 @@ type SendAiMessageTooManyRequests Error
 
 func (*SendAiMessageTooManyRequests) sendAiMessageRes() {}
 
+type SendNotificationTestMailBadGateway Error
+
+func (*SendNotificationTestMailBadGateway) sendNotificationTestMailRes() {}
+
+type SendNotificationTestMailConflict Error
+
+func (*SendNotificationTestMailConflict) sendNotificationTestMailRes() {}
+
+// SendNotificationTestMailForbidden is response for SendNotificationTestMail operation.
+type SendNotificationTestMailForbidden struct{}
+
+func (*SendNotificationTestMailForbidden) sendNotificationTestMailRes() {}
+
+type SendNotificationTestMailOK struct {
+	// The caller's own address.
+	SentTo string `json:"sent_to"`
+}
+
+// GetSentTo returns the value of SentTo.
+func (s *SendNotificationTestMailOK) GetSentTo() string {
+	return s.SentTo
+}
+
+// SetSentTo sets the value of SentTo.
+func (s *SendNotificationTestMailOK) SetSentTo(val string) {
+	s.SentTo = val
+}
+
+func (*SendNotificationTestMailOK) sendNotificationTestMailRes() {}
+
 type SetActiveRevisionOK struct {
 	Status OptString `json:"status"`
 }
@@ -16221,6 +17828,61 @@ func (s *SetUserAccessRulesRequestRulesItem) SetAccess(val string) {
 	s.Access = val
 }
 
+// Whose settings a per-tenant settings response shows. Every such request is about one tenant —
+// named in X-Tenant-Id, or the tenant admin's own — or, for a platform admin naming none, the
+// deployment's own row: the defaults a tenant inherits until it sets its own (enterprise feature
+// deployment_settings).
+// Ref: #/components/schemas/SettingsScope
+type SettingsScope struct {
+	// The tenant; absent for the deployment row.
+	CustomerID OptUUID `json:"customer_id"`
+	Deployment bool    `json:"deployment"`
+	// The tenant has no row of its own and these are the deployment's values.
+	Inherited bool `json:"inherited"`
+	// Whether this edition has a deployment row at all.
+	DeploymentSettingsAvailable bool `json:"deployment_settings_available"`
+}
+
+// GetCustomerID returns the value of CustomerID.
+func (s *SettingsScope) GetCustomerID() OptUUID {
+	return s.CustomerID
+}
+
+// GetDeployment returns the value of Deployment.
+func (s *SettingsScope) GetDeployment() bool {
+	return s.Deployment
+}
+
+// GetInherited returns the value of Inherited.
+func (s *SettingsScope) GetInherited() bool {
+	return s.Inherited
+}
+
+// GetDeploymentSettingsAvailable returns the value of DeploymentSettingsAvailable.
+func (s *SettingsScope) GetDeploymentSettingsAvailable() bool {
+	return s.DeploymentSettingsAvailable
+}
+
+// SetCustomerID sets the value of CustomerID.
+func (s *SettingsScope) SetCustomerID(val OptUUID) {
+	s.CustomerID = val
+}
+
+// SetDeployment sets the value of Deployment.
+func (s *SettingsScope) SetDeployment(val bool) {
+	s.Deployment = val
+}
+
+// SetInherited sets the value of Inherited.
+func (s *SettingsScope) SetInherited(val bool) {
+	s.Inherited = val
+}
+
+// SetDeploymentSettingsAvailable sets the value of DeploymentSettingsAvailable.
+func (s *SettingsScope) SetDeploymentSettingsAvailable(val bool) {
+	s.DeploymentSettingsAvailable = val
+}
+
 // SignupBadGateway is response for Signup operation.
 type SignupBadGateway struct{}
 
@@ -16289,8 +17951,9 @@ type SignupOptionsPlan struct {
 	Key         OptString     `json:"key"`
 	Name        OptString     `json:"name"`
 	Description OptString     `json:"description"`
-	TrialDays   OptInt        `json:"trial_days"`
 	Limits      OptPlanLimits `json:"limits"`
+	// What a tenant is told when a limit stops it.
+	LimitNote OptString `json:"limit_note"`
 }
 
 // GetKey returns the value of Key.
@@ -16308,14 +17971,14 @@ func (s *SignupOptionsPlan) GetDescription() OptString {
 	return s.Description
 }
 
-// GetTrialDays returns the value of TrialDays.
-func (s *SignupOptionsPlan) GetTrialDays() OptInt {
-	return s.TrialDays
-}
-
 // GetLimits returns the value of Limits.
 func (s *SignupOptionsPlan) GetLimits() OptPlanLimits {
 	return s.Limits
+}
+
+// GetLimitNote returns the value of LimitNote.
+func (s *SignupOptionsPlan) GetLimitNote() OptString {
+	return s.LimitNote
 }
 
 // SetKey sets the value of Key.
@@ -16333,14 +17996,14 @@ func (s *SignupOptionsPlan) SetDescription(val OptString) {
 	s.Description = val
 }
 
-// SetTrialDays sets the value of TrialDays.
-func (s *SignupOptionsPlan) SetTrialDays(val OptInt) {
-	s.TrialDays = val
-}
-
 // SetLimits sets the value of Limits.
 func (s *SignupOptionsPlan) SetLimits(val OptPlanLimits) {
 	s.Limits = val
+}
+
+// SetLimitNote sets the value of LimitNote.
+func (s *SignupOptionsPlan) SetLimitNote(val OptString) {
+	s.LimitNote = val
 }
 
 // Ref: #/components/schemas/SignupRequest
@@ -16400,7 +18063,6 @@ type SignupResult struct {
 	ApplicationID uuid.UUID          `json:"application_id"`
 	ModelID       uuid.UUID          `json:"model_id"`
 	Plan          string             `json:"plan"`
-	TrialEndsAt   OptDateTime        `json:"trial_ends_at"`
 	// Dev stack only — the persona the new account is reachable as.
 	DevPersona OptString `json:"dev_persona"`
 }
@@ -16438,11 +18100,6 @@ func (s *SignupResult) GetModelID() uuid.UUID {
 // GetPlan returns the value of Plan.
 func (s *SignupResult) GetPlan() string {
 	return s.Plan
-}
-
-// GetTrialEndsAt returns the value of TrialEndsAt.
-func (s *SignupResult) GetTrialEndsAt() OptDateTime {
-	return s.TrialEndsAt
 }
 
 // GetDevPersona returns the value of DevPersona.
@@ -16483,11 +18140,6 @@ func (s *SignupResult) SetModelID(val uuid.UUID) {
 // SetPlan sets the value of Plan.
 func (s *SignupResult) SetPlan(val string) {
 	s.Plan = val
-}
-
-// SetTrialEndsAt sets the value of TrialEndsAt.
-func (s *SignupResult) SetTrialEndsAt(val OptDateTime) {
-	s.TrialEndsAt = val
 }
 
 // SetDevPersona sets the value of DevPersona.
@@ -16857,6 +18509,54 @@ func (s *SsoSettingsProtocol) UnmarshalText(data []byte) error {
 	default:
 		return errors.Errorf("invalid value: %q", data)
 	}
+}
+
+// StartIntegrationOAuthBadRequest is response for StartIntegrationOAuth operation.
+type StartIntegrationOAuthBadRequest struct{}
+
+func (*StartIntegrationOAuthBadRequest) startIntegrationOAuthRes() {}
+
+type StartIntegrationOAuthOK struct {
+	AuthorizationURL string `json:"authorization_url"`
+	// The callback the provider must be registered with.
+	RedirectURI string `json:"redirect_uri"`
+}
+
+// GetAuthorizationURL returns the value of AuthorizationURL.
+func (s *StartIntegrationOAuthOK) GetAuthorizationURL() string {
+	return s.AuthorizationURL
+}
+
+// GetRedirectURI returns the value of RedirectURI.
+func (s *StartIntegrationOAuthOK) GetRedirectURI() string {
+	return s.RedirectURI
+}
+
+// SetAuthorizationURL sets the value of AuthorizationURL.
+func (s *StartIntegrationOAuthOK) SetAuthorizationURL(val string) {
+	s.AuthorizationURL = val
+}
+
+// SetRedirectURI sets the value of RedirectURI.
+func (s *StartIntegrationOAuthOK) SetRedirectURI(val string) {
+	s.RedirectURI = val
+}
+
+func (*StartIntegrationOAuthOK) startIntegrationOAuthRes() {}
+
+type StartIntegrationOAuthReq struct {
+	// Console path to return to afterwards ("/" when absent or not a path).
+	ReturnTo OptString `json:"return_to"`
+}
+
+// GetReturnTo returns the value of ReturnTo.
+func (s *StartIntegrationOAuthReq) GetReturnTo() OptString {
+	return s.ReturnTo
+}
+
+// SetReturnTo sets the value of ReturnTo.
+func (s *StartIntegrationOAuthReq) SetReturnTo(val OptString) {
+	s.ReturnTo = val
 }
 
 type StartWorkflowInstanceBadRequest Error
@@ -17243,6 +18943,7 @@ func (s *TaskContextEntry) SetDimensionName(val OptString) {
 // personal keys are ignored.
 // Ref: #/components/schemas/TenantAISettings
 type TenantAISettings struct {
+	Scope    OptSettingsScope         `json:"scope"`
 	Provider TenantAISettingsProvider `json:"provider"`
 	// Empty means the provider's default model.
 	Model  string    `json:"model"`
@@ -17250,6 +18951,11 @@ type TenantAISettings struct {
 	HasKey bool      `json:"has_key"`
 	// Ignore personal keys and use this one for every AI call in the tenant.
 	Enforced bool `json:"enforced"`
+}
+
+// GetScope returns the value of Scope.
+func (s *TenantAISettings) GetScope() OptSettingsScope {
+	return s.Scope
 }
 
 // GetProvider returns the value of Provider.
@@ -17275,6 +18981,11 @@ func (s *TenantAISettings) GetHasKey() bool {
 // GetEnforced returns the value of Enforced.
 func (s *TenantAISettings) GetEnforced() bool {
 	return s.Enforced
+}
+
+// SetScope sets the value of Scope.
+func (s *TenantAISettings) SetScope(val OptSettingsScope) {
+	s.Scope = val
 }
 
 // SetProvider sets the value of Provider.
@@ -17634,6 +19345,48 @@ func (s *TestAiSettingsOK) SetReply(val OptString) {
 func (s *TestAiSettingsOK) SetError(val OptString) {
 	s.Error = val
 }
+
+// TestGoogleConnectionBadGateway is response for TestGoogleConnection operation.
+type TestGoogleConnectionBadGateway struct{}
+
+func (*TestGoogleConnectionBadGateway) testGoogleConnectionRes() {}
+
+// TestGoogleConnectionConflict is response for TestGoogleConnection operation.
+type TestGoogleConnectionConflict struct{}
+
+func (*TestGoogleConnectionConflict) testGoogleConnectionRes() {}
+
+// TestGoogleConnectionForbidden is response for TestGoogleConnection operation.
+type TestGoogleConnectionForbidden struct{}
+
+func (*TestGoogleConnectionForbidden) testGoogleConnectionRes() {}
+
+type TestGoogleConnectionOK struct {
+	Status      OptString `json:"status"`
+	ClientEmail OptString `json:"client_email"`
+}
+
+// GetStatus returns the value of Status.
+func (s *TestGoogleConnectionOK) GetStatus() OptString {
+	return s.Status
+}
+
+// GetClientEmail returns the value of ClientEmail.
+func (s *TestGoogleConnectionOK) GetClientEmail() OptString {
+	return s.ClientEmail
+}
+
+// SetStatus sets the value of Status.
+func (s *TestGoogleConnectionOK) SetStatus(val OptString) {
+	s.Status = val
+}
+
+// SetClientEmail sets the value of ClientEmail.
+func (s *TestGoogleConnectionOK) SetClientEmail(val OptString) {
+	s.ClientEmail = val
+}
+
+func (*TestGoogleConnectionOK) testGoogleConnectionRes() {}
 
 type TestIntegrationAccepted struct {
 	RunID  OptString `json:"run_id"`
@@ -18768,6 +20521,10 @@ type UpdateMetricRequest struct {
 	Format         OptString `json:"format"`
 	FormatDecimals OptInt    `json:"format_decimals"`
 	FormatCurrency OptString `json:"format_currency"`
+	// How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
+	// dimension): sum for flows, last for a closing balance, first for an opening balance, none when a
+	// time total is meaningless.
+	TimeSummary OptUpdateMetricRequestTimeSummary `json:"time_summary"`
 }
 
 // GetName returns the value of Name.
@@ -18800,6 +20557,11 @@ func (s *UpdateMetricRequest) GetFormatCurrency() OptString {
 	return s.FormatCurrency
 }
 
+// GetTimeSummary returns the value of TimeSummary.
+func (s *UpdateMetricRequest) GetTimeSummary() OptUpdateMetricRequestTimeSummary {
+	return s.TimeSummary
+}
+
 // SetName sets the value of Name.
 func (s *UpdateMetricRequest) SetName(val OptString) {
 	s.Name = val
@@ -18828,6 +20590,90 @@ func (s *UpdateMetricRequest) SetFormatDecimals(val OptInt) {
 // SetFormatCurrency sets the value of FormatCurrency.
 func (s *UpdateMetricRequest) SetFormatCurrency(val OptString) {
 	s.FormatCurrency = val
+}
+
+// SetTimeSummary sets the value of TimeSummary.
+func (s *UpdateMetricRequest) SetTimeSummary(val OptUpdateMetricRequestTimeSummary) {
+	s.TimeSummary = val
+}
+
+// How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
+// dimension): sum for flows, last for a closing balance, first for an opening balance, none when a
+// time total is meaningless.
+type UpdateMetricRequestTimeSummary string
+
+const (
+	UpdateMetricRequestTimeSummarySum     UpdateMetricRequestTimeSummary = "sum"
+	UpdateMetricRequestTimeSummaryAverage UpdateMetricRequestTimeSummary = "average"
+	UpdateMetricRequestTimeSummaryMin     UpdateMetricRequestTimeSummary = "min"
+	UpdateMetricRequestTimeSummaryMax     UpdateMetricRequestTimeSummary = "max"
+	UpdateMetricRequestTimeSummaryFirst   UpdateMetricRequestTimeSummary = "first"
+	UpdateMetricRequestTimeSummaryLast    UpdateMetricRequestTimeSummary = "last"
+	UpdateMetricRequestTimeSummaryNone    UpdateMetricRequestTimeSummary = "none"
+)
+
+// AllValues returns all UpdateMetricRequestTimeSummary values.
+func (UpdateMetricRequestTimeSummary) AllValues() []UpdateMetricRequestTimeSummary {
+	return []UpdateMetricRequestTimeSummary{
+		UpdateMetricRequestTimeSummarySum,
+		UpdateMetricRequestTimeSummaryAverage,
+		UpdateMetricRequestTimeSummaryMin,
+		UpdateMetricRequestTimeSummaryMax,
+		UpdateMetricRequestTimeSummaryFirst,
+		UpdateMetricRequestTimeSummaryLast,
+		UpdateMetricRequestTimeSummaryNone,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s UpdateMetricRequestTimeSummary) MarshalText() ([]byte, error) {
+	switch s {
+	case UpdateMetricRequestTimeSummarySum:
+		return []byte(s), nil
+	case UpdateMetricRequestTimeSummaryAverage:
+		return []byte(s), nil
+	case UpdateMetricRequestTimeSummaryMin:
+		return []byte(s), nil
+	case UpdateMetricRequestTimeSummaryMax:
+		return []byte(s), nil
+	case UpdateMetricRequestTimeSummaryFirst:
+		return []byte(s), nil
+	case UpdateMetricRequestTimeSummaryLast:
+		return []byte(s), nil
+	case UpdateMetricRequestTimeSummaryNone:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *UpdateMetricRequestTimeSummary) UnmarshalText(data []byte) error {
+	switch UpdateMetricRequestTimeSummary(data) {
+	case UpdateMetricRequestTimeSummarySum:
+		*s = UpdateMetricRequestTimeSummarySum
+		return nil
+	case UpdateMetricRequestTimeSummaryAverage:
+		*s = UpdateMetricRequestTimeSummaryAverage
+		return nil
+	case UpdateMetricRequestTimeSummaryMin:
+		*s = UpdateMetricRequestTimeSummaryMin
+		return nil
+	case UpdateMetricRequestTimeSummaryMax:
+		*s = UpdateMetricRequestTimeSummaryMax
+		return nil
+	case UpdateMetricRequestTimeSummaryFirst:
+		*s = UpdateMetricRequestTimeSummaryFirst
+		return nil
+	case UpdateMetricRequestTimeSummaryLast:
+		*s = UpdateMetricRequestTimeSummaryLast
+		return nil
+	case UpdateMetricRequestTimeSummaryNone:
+		*s = UpdateMetricRequestTimeSummaryNone
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // UpdateNotificationSettingsForbidden is response for UpdateNotificationSettings operation.
@@ -18965,9 +20811,8 @@ func (*UpdateTenantOK) updateTenantRes() {}
 
 // Ref: #/components/schemas/UpdateTenantRequest
 type UpdateTenantRequest struct {
-	Name        OptString `json:"name"`
-	Plan        OptString `json:"plan"`
-	TrialEndsAt OptString `json:"trial_ends_at"`
+	Name OptString `json:"name"`
+	Plan OptString `json:"plan"`
 }
 
 // GetName returns the value of Name.
@@ -18980,11 +20825,6 @@ func (s *UpdateTenantRequest) GetPlan() OptString {
 	return s.Plan
 }
 
-// GetTrialEndsAt returns the value of TrialEndsAt.
-func (s *UpdateTenantRequest) GetTrialEndsAt() OptString {
-	return s.TrialEndsAt
-}
-
 // SetName sets the value of Name.
 func (s *UpdateTenantRequest) SetName(val OptString) {
 	s.Name = val
@@ -18993,11 +20833,6 @@ func (s *UpdateTenantRequest) SetName(val OptString) {
 // SetPlan sets the value of Plan.
 func (s *UpdateTenantRequest) SetPlan(val OptString) {
 	s.Plan = val
-}
-
-// SetTrialEndsAt sets the value of TrialEndsAt.
-func (s *UpdateTenantRequest) SetTrialEndsAt(val OptString) {
-	s.TrialEndsAt = val
 }
 
 // Ref: #/components/schemas/UpdateWidgetRequest

@@ -18,6 +18,7 @@ interface StubState {
   lastSecretPayload: string | null;
   testRunStatus: "success" | "failed";
   testErrorCode?: string;
+  oauthStartBody?: { return_to?: string };
 }
 
 function criticalOf(cfg: unknown): string {
@@ -49,6 +50,10 @@ async function stubConnector(page: Page, state: StubState) {
     const ok = (body: unknown) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
     if (method === "GET") return ok(state.connections);
     if (method === "POST" && url.pathname.endsWith("/test")) return ok({ ok: true });
+    if (method === "POST" && url.pathname.endsWith("/oauth/start")) {
+      state.oauthStartBody = route.request().postDataJSON() as { return_to?: string };
+      return ok({ authorization_url: "https://provider.example.test/authorize?state=abc", redirect_uri: "http://localhost:5173/api/integrations/oauth/callback" });
+    }
     if (method === "POST") {
       const body = route.request().postDataJSON() as { name: string; auth_type: string; secret?: unknown };
       state.lastSecretPayload = JSON.stringify(body.secret ?? null);
@@ -146,12 +151,12 @@ async function stubConnector(page: Page, state: StubState) {
   });
 }
 
-async function openRestAPI(page: Page, state: StubState) {
+async function openRestAPI(page: Page, state: StubState, query = "") {
   // Playwright runs route handlers LIFO: mockApi goes FIRST so the connector
   // stubs (and the external tripwire) registered after it take precedence.
   await mockApi(page);
   await stubConnector(page, state);
-  await loadAs(page, "developer");
+  await loadAs(page, "developer", query);
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Integrations" }).click();
   await page.getByRole("button", { name: /REST API/ }).click();
   await page.getByRole("button", { name: "New integration" }).click();
@@ -197,6 +202,37 @@ test("paginated GET pull: create, test through the backend, map, activate, run â
   await expect(page.getByRole("button", { name: "New integration" })).toBeVisible();
 
   expect(state.externalContacted, `browser contacted external hosts: ${state.externalContacted.join(", ")}`).toHaveLength(0);
+});
+
+test("OAuth authorization code: the developer connects through the provider, never through the browser's own hands", async ({ page }) => {
+  const state = freshState();
+  state.connections = [{ id: "conn-1", application_id: "app-1", name: "CRM", auth_type: "oauth2_authorization_code", meta: { authorization_url: "https://provider.example.test/authorize", token_url: "https://provider.example.test/token", client_id: "client-123" }, has_secret: true, created_at: "", updated_at: "" }];
+  await openRestAPI(page, state);
+  // The consent page is external: the test intercepts the navigation the
+  // Connect button makes instead of leaving the app.
+  await page.route("https://provider.example.test/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: "<html><body>consent</body></html>" }));
+
+  await page.getByRole("button", { name: "Authentication", exact: true }).click();
+  await page.getByLabel("Authentication type").selectOption("oauth2_authorization_code");
+  await page.getByLabel("Connection", { exact: true }).selectOption("conn-1");
+  await expect(page.getByTestId("oauth-connect")).toContainText("Not connected");
+  await expect(page.getByTestId("oauth-connect")).toContainText("/api/integrations/oauth/callback");
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await page.waitForURL(/provider\.example\.test\/authorize/);
+  expect(state.oauthStartBody?.return_to).toMatch(/^\//);
+  expect(state.externalContacted).toHaveLength(0);
+});
+
+test("OAuth authorization code: a connected connection says so, and the callback's outcome shows", async ({ page }) => {
+  const state = freshState();
+  state.connections = [{ id: "conn-1", application_id: "app-1", name: "CRM", auth_type: "oauth2_authorization_code", meta: { authorization_url: "https://p.test/a", token_url: "https://p.test/t", client_id: "c", connected_at: "2026-09-21T10:00:00Z", connected_by: "dev@acme.test" }, has_secret: true, created_at: "", updated_at: "" }];
+  await openRestAPI(page, state, "?oauth=connected");
+  await page.getByRole("button", { name: "Authentication", exact: true }).click();
+  await expect(page.getByText("Connected â€” the provider issued tokens")).toBeVisible();
+  await page.getByLabel("Authentication type").selectOption("oauth2_authorization_code");
+  await page.getByLabel("Connection", { exact: true }).selectOption("conn-1");
+  await expect(page.getByTestId("oauth-connect")).toContainText("by dev@acme.test");
+  await expect(page.getByRole("button", { name: "Disconnect" })).toBeVisible();
 });
 
 test("secret replacement never discloses the stored secret", async ({ page }) => {

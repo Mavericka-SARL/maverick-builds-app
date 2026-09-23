@@ -217,9 +217,10 @@ can see which is which:
   avg_price    agg_rule "rate"     total is revenue over units, so the
                                    high-volume line carries the weight
 
-The forecast holds prior-period actuals as their own input metric, because the
-engine has no LAG or OFFSET function — a formula cannot reach into the previous
-period, so =revenue[-1] has no equivalent here.
+"period" is a declared time dimension (four fiscal quarters of 2026), so the
+forecast reads the previous quarter directly — growth_pct uses
+LAG(revenue, 1, 0) and cagr_pct uses PREVIOUS(revenue) — instead of a
+separately maintained prior-period input.
 
 No users were created; invite real people from the console and set their
 access rules there.

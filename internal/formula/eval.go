@@ -16,6 +16,10 @@ type EvalContext struct {
 	Vars map[string]Value
 	// Funcs overrides or extends built-in functions (keys should be UPPER-CASE).
 	Funcs map[string]CustomFunc
+	// Time is the current time coordinate, set by a caller evaluating a
+	// time-dimensioned metric. nil for scalar evaluation: time functions then
+	// return TIME_CONTEXT_REQUIRED rather than a silent zero.
+	Time *TimeEvalContext
 }
 
 func (ctx *EvalContext) lookup(name string) (Value, bool) {

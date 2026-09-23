@@ -12,7 +12,7 @@ pays for it. This describes whose.
 | Key | Stored in | Managed by | Editions |
 |---|---|---|---|
 | **Personal** | `ai_assistant.llm_settings`, one row per user | the developer, in **AI Assistant › Settings** | all |
-| **Tenant** | `ai_assistant.tenant_llm_settings`, one row per tenant database | the tenant admin, in **Admin › AI keys** | enterprise (`tenant_ai_keys`) |
+| **Tenant** | `ai_assistant.tenant_llm_settings`, one row per tenant (migration 091); on `deployment_settings` also a deployment row that a tenant without a key of its own falls back to | the tenant admin, in **Admin › AI keys**; a platform admin for any tenant, or the deployment | enterprise (`tenant_ai_keys`) |
 
 A community or commercial deployment has personal keys only: every developer
 pastes their own. The routes behind **Admin › AI keys** answer 403 there, and
@@ -50,9 +50,12 @@ settings screen uses, because a key that cannot call tools passes a naive
 ## How keys are stored
 
 Both tables hold the key AES-256-GCM encrypted under
-`AI_KEY_ENCRYPTION_SECRET` (`internal/aiassistant/crypto.go`). Without that
-variable set, values are written in plaintext and a previously encrypted value
-cannot be read back — set it before storing any key.
+`SECRETS_ENCRYPTION_KEY` (`internal/secretbox`; the older name
+`AI_KEY_ENCRYPTION_SECRET` is still accepted). In Kubernetes it is one of the
+two keys in the `mavericks-integration` Secret, sealed with
+`scripts/seal-integration-secret.sh` (docs/HETZNER_DEPLOYMENT.md, step 6).
+Without it set, values are written in plaintext and a previously encrypted
+value cannot be read back — set it before storing any key.
 
 Neither key is ever returned by the API. `has_key` says whether one exists;
 an empty `api_key` on update keeps the stored one, so a form that never

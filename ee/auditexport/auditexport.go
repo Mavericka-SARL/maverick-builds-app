@@ -235,7 +235,9 @@ func jsonOrNil(b []byte) json.RawMessage {
 
 // ── retention ─────────────────────────────────────────────────────────────────
 
-// Settings is the one row of audit.settings.
+// Settings is one scope's row of audit.settings: a tenant's, or — with no
+// tenant — the deployment's own, which a tenant inherits until it sets its
+// own on an edition that includes deployment settings (migration 091).
 type Settings struct {
 	// RetentionDays is how long events are kept; 0 keeps them forever, and
 	// any other value is at least MinRetentionDays.
@@ -246,46 +248,112 @@ type Settings struct {
 // MinRetentionDays is the floor a non-zero retention may not go under.
 const MinRetentionDays = 30
 
-// GetSettings reads the row; a database that predates it reports "forever".
-func GetSettings(ctx context.Context, pool *pgxpool.Pool) (Settings, error) {
-	var s Settings
-	err := pool.QueryRow(ctx, `SELECT retention_days, updated_at FROM audit.settings WHERE id = TRUE`).Scan(&s.RetentionDays, &s.UpdatedAt)
+// DeploymentScope is the customer id of the deployment's own row.
+const DeploymentScope = ""
+
+// GetSettings reads one scope's row; found is false — and the retention
+// "forever" — when the scope has never saved one.
+func GetSettings(ctx context.Context, pool *pgxpool.Pool, customerID string) (s Settings, found bool, err error) {
+	err = pool.QueryRow(ctx, `SELECT retention_days, updated_at FROM audit.settings WHERE customer_id IS NOT DISTINCT FROM NULLIF($1, '')::uuid`,
+		customerID).Scan(&s.RetentionDays, &s.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Settings{}, nil
+		return Settings{}, false, nil
 	}
 	if err != nil {
-		return Settings{}, fmt.Errorf("read audit settings: %w", err)
+		return Settings{}, false, fmt.Errorf("read audit settings: %w", err)
 	}
-	return s, nil
+	return s, true, nil
 }
 
-// UpdateSettings stores the retention. The floor is enforced here as well as
-// by the table, so the message names the rule rather than a constraint.
-func UpdateSettings(ctx context.Context, pool *pgxpool.Pool, days int) (Settings, error) {
+// UpdateSettings stores one scope's retention, creating the row on first
+// save. The floor is enforced here as well as by the table, so the message
+// names the rule rather than a constraint.
+func UpdateSettings(ctx context.Context, pool *pgxpool.Pool, customerID string, days int) (Settings, error) {
 	if days < 0 {
 		return Settings{}, fmt.Errorf("retention_days cannot be negative")
 	}
 	if days != 0 && days < MinRetentionDays {
 		return Settings{}, fmt.Errorf("retention must be 0 (keep forever) or at least %d days", MinRetentionDays)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE audit.settings SET retention_days = $1, updated_at = now() WHERE id = TRUE`, days); err != nil {
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO audit.settings (customer_id, retention_days) VALUES (NULLIF($1, '')::uuid, $2)
+		ON CONFLICT (customer_id) DO UPDATE SET retention_days = EXCLUDED.retention_days, updated_at = now()`, customerID, days); err != nil {
 		return Settings{}, fmt.Errorf("update audit settings: %w", err)
 	}
-	return GetSettings(ctx, pool)
+	s, _, err := GetSettings(ctx, pool, customerID)
+	return s, err
 }
 
-// Sweep removes events older than the retention, returning how many went.
-// A retention of 0 removes nothing.
-func Sweep(ctx context.Context, pool *pgxpool.Pool) (int64, error) {
-	s, err := GetSettings(ctx, pool)
-	if err != nil || s.RetentionDays == 0 {
-		return 0, err
+// ClearSettings removes a tenant's own row, so it inherits again.
+func ClearSettings(ctx context.Context, pool *pgxpool.Pool, customerID string) error {
+	if customerID == DeploymentScope {
+		return fmt.Errorf("the deployment's own settings cannot be cleared")
 	}
-	tag, err := pool.Exec(ctx, `DELETE FROM audit.audit_event WHERE occurred_at < now() - ($1 || ' days')::interval`, fmt.Sprint(s.RetentionDays))
+	_, err := pool.Exec(ctx, `DELETE FROM audit.settings WHERE customer_id = $1::uuid`, customerID)
+	return err
+}
+
+// Defaults supplies the deployment's row from the control plane, or reports
+// that this edition has none. Set once by cmd/gateway; nil means no
+// edition-level defaults.
+var Defaults func(ctx context.Context) (Settings, bool)
+
+// Effective is the retention that applies to a tenant: its own, else the
+// deployment's when the edition includes one, else forever.
+func Effective(ctx context.Context, pool *pgxpool.Pool, customerID string) (s Settings, inherited bool, err error) {
+	s, found, err := GetSettings(ctx, pool, customerID)
+	if err != nil || found || customerID == DeploymentScope {
+		return s, false, err
+	}
+	if Defaults != nil {
+		if d, ok := Defaults(ctx); ok {
+			return d, true, nil
+		}
+	}
+	return Settings{}, false, nil
+}
+
+// Sweep removes, for every tenant of this database, the events older than
+// that tenant's retention, and returns how many went. An event belongs to
+// the tenant of its application, else of its actor; events with neither
+// are the platform's and are kept. A retention of 0 removes nothing.
+func Sweep(ctx context.Context, pool *pgxpool.Pool) (int64, error) {
+	rows, err := pool.Query(ctx, `SELECT id::text FROM core.customer`)
 	if err != nil {
 		return 0, fmt.Errorf("audit retention sweep: %w", err)
 	}
-	return tag.RowsAffected(), nil
+	var tenants []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		tenants = append(tenants, id)
+	}
+	rows.Close()
+	var removed int64
+	for _, cid := range tenants {
+		s, _, err := Effective(ctx, pool, cid)
+		if err != nil {
+			return removed, err
+		}
+		if s.RetentionDays == 0 {
+			continue
+		}
+		tag, err := pool.Exec(ctx, `
+			DELETE FROM audit.audit_event ae
+			WHERE ae.occurred_at < now() - ($2 || ' days')::interval
+			  AND COALESCE(
+			        (SELECT app.customer_id FROM core.application app WHERE app.id = ae.application_id),
+			        (SELECT u.customer_id FROM identity.user u WHERE u.id = ae.actor_user_id)
+			      ) = $1::uuid`, cid, fmt.Sprint(s.RetentionDays))
+		if err != nil {
+			return removed, fmt.Errorf("audit retention sweep: %w", err)
+		}
+		removed += tag.RowsAffected()
+	}
+	return removed, nil
 }
 
 // RunRetention sweeps once, then every interval, while licensed reports

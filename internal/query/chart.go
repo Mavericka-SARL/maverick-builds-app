@@ -181,6 +181,7 @@ type metricDef struct {
 	Format         string
 	FormatDecimals int
 	FormatCurrency string
+	TimeSummary    string // reduction across a time dimension (sum | average | min | max | first | last | none)
 	// DimensionIDs are this metric's own native dimensions (via
 	// grid_metric -> grid_dimension on whatever grid it actually lives
 	// on), used to resolve its value through rollup.Resolve.
@@ -647,7 +648,7 @@ func (r *ChartResolver) resolveMetricPerMember(
 		aggRule := rollup.AggRule(m.AggRule)
 		for i, member := range members {
 			combo := buildDimMembers(effectiveCtx, plottedDimID, member.Code)
-			val, ok, err := rollup.Resolve(ctx, allDims, m.ID, m.DimensionIDs, aggRule, combo, fetch)
+			val, ok, err := rollup.ResolveTime(ctx, allDims, m.ID, m.DimensionIDs, aggRule, rollup.TimeSummaryRule(m.TimeSummary), combo, fetch)
 			if err != nil || !ok {
 				continue
 			}
@@ -751,6 +752,45 @@ func (r *ChartResolver) loadInputFactMap(ctx context.Context, modelID, revisionI
 	return m, rows.Err()
 }
 
+// fetchCalc is fetchInput's twin over runtime.calc_result: a calc metric's
+// persisted per-combo rows (latest per combo), loaded once per metric.
+func (r *ChartResolver) fetchCalc(modelID, revisionID string) rollup.RawValue {
+	cache := map[string]map[string]float64{}
+	return func(ctx context.Context, metricID string, combo map[string]string) (float64, bool, error) {
+		fm, loaded := cache[metricID]
+		if !loaded {
+			rows, err := r.pool.Query(ctx, `
+				SELECT DISTINCT ON (dim_members) value, dim_members
+				FROM runtime.calc_result
+				WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid
+				ORDER BY dim_members, calc_at DESC, id DESC
+			`, modelID, revisionID, metricID)
+			if err != nil {
+				return 0, false, err
+			}
+			fm = map[string]float64{}
+			for rows.Next() {
+				var val float64
+				var dm map[string]string
+				if err := rows.Scan(&val, &dm); err != nil {
+					rows.Close()
+					return 0, false, err
+				}
+				key, _ := json.Marshal(dm)
+				fm[string(key)] = val
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return 0, false, err
+			}
+			cache[metricID] = fm
+		}
+		key, _ := json.Marshal(combo)
+		v, ok := fm[string(key)]
+		return v, ok, nil
+	}
+}
+
 // buildDimMembers constructs the dim_members map for a specific plotted member.
 func buildDimMembers(effectiveCtx map[string]string, plottedDimID, memberCode string) map[string]string {
 	dm := make(map[string]string, len(effectiveCtx)+1)
@@ -769,6 +809,9 @@ type fullMetricDef struct {
 	Formula string
 	IsInput bool
 	AggRule string
+	// TimeSummary reduces the metric across its time dimension; only read
+	// for time-series metrics, which resolve from persisted rows.
+	TimeSummary string
 	// DimensionIDs are this metric's own native dimensions — see metricDef's
 	// field of the same name; needed here too since a calc metric's
 	// dependency may be a metric outside the current grid entirely.
@@ -778,7 +821,7 @@ type fullMetricDef struct {
 
 func (r *ChartResolver) loadAllMetricDefs(ctx context.Context, modelID, revisionID string) (map[string]*fullMetricDef, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id::text, name, COALESCE(formula,''), is_input, COALESCE(agg_rule,'sum')
+		SELECT id::text, name, COALESCE(formula,''), is_input, COALESCE(agg_rule,'sum'), time_summary
 		FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid
 	`, modelID, revisionID)
 	if err != nil {
@@ -788,7 +831,7 @@ func (r *ChartResolver) loadAllMetricDefs(ctx context.Context, modelID, revision
 	defs := make(map[string]*fullMetricDef)
 	for rows.Next() {
 		var d fullMetricDef
-		if err := rows.Scan(&d.ID, &d.Name, &d.Formula, &d.IsInput, &d.AggRule); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.Formula, &d.IsInput, &d.AggRule, &d.TimeSummary); err != nil {
 			return nil, err
 		}
 		defs[d.ID] = &d
@@ -871,6 +914,23 @@ func (r *ChartResolver) evalCalcMetricVisited(
 	visited[metricID] = true
 	defer func() { delete(visited, metricID) }()
 
+	// A time-series metric (PREVIOUS, LAG, MOVINGSUM, ...) cannot be
+	// re-evaluated at one coordinate: its value depends on other periods.
+	// It is served from the scheduler's persisted leaf rows, rolled up
+	// across non-time dimensions by its agg_rule and across time by its
+	// time_summary — the same number the grid and the API show (spec §1.7).
+	if an, aerr := formula.Analyze(def.Formula); aerr == nil && an.UsesTimeSeries {
+		v, ok, err := rollup.ResolveTime(ctx, allDims, metricID, def.DimensionIDs, rollup.AggRule(def.AggRule),
+			rollup.TimeSummaryRule(def.TimeSummary), dimMembers, r.fetchCalc(modelID, revisionID))
+		if err != nil {
+			return 0, err
+		}
+		if !ok {
+			return 0, fmt.Errorf("no persisted value for time-series metric %s at this coordinate", def.Name)
+		}
+		return v, nil
+	}
+
 	fetch := r.fetchInput(modelID, revisionID)
 	varValues := make(map[string]float64, len(def.DependsOnID))
 	for _, depID := range def.DependsOnID {
@@ -880,7 +940,7 @@ func (r *ChartResolver) evalCalcMetricVisited(
 		}
 		var val float64
 		if depDef.IsInput {
-			v, ok, err := rollup.Resolve(ctx, allDims, depID, depDef.DimensionIDs, rollup.AggRule(depDef.AggRule), dimMembers, fetch)
+			v, ok, err := rollup.ResolveTime(ctx, allDims, depID, depDef.DimensionIDs, rollup.AggRule(depDef.AggRule), rollup.TimeSummaryRule(depDef.TimeSummary), dimMembers, fetch)
 			if err == nil && ok {
 				val = v
 			}
@@ -907,7 +967,7 @@ func (r *ChartResolver) loadGridMetrics(ctx context.Context, gridDefID, revision
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT rev.id::text, rev.name, rev.is_input, COALESCE(rev.formula,''), COALESCE(rev.agg_rule,'sum'),
-		       rev.format, rev.format_decimals, rev.format_currency
+		       rev.format, rev.format_decimals, rev.format_currency, rev.time_summary
 		FROM model.grid_metric gm
 		JOIN model.metric_def orig ON orig.id = gm.metric_id
 		JOIN model.metric_def rev
@@ -924,7 +984,7 @@ func (r *ChartResolver) loadGridMetrics(ctx context.Context, gridDefID, revision
 	defs := make(map[string]*metricDef)
 	for rows.Next() {
 		var d metricDef
-		if err := rows.Scan(&d.ID, &d.Name, &d.IsInput, &d.Formula, &d.AggRule, &d.Format, &d.FormatDecimals, &d.FormatCurrency); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.IsInput, &d.Formula, &d.AggRule, &d.Format, &d.FormatDecimals, &d.FormatCurrency, &d.TimeSummary); err != nil {
 			return nil, err
 		}
 		d.Label = toLabel(d.Name)
@@ -972,12 +1032,13 @@ func (r *ChartResolver) loadAllDimensions(ctx context.Context, modelID, revision
 	rows, err := r.pool.Query(ctx, `
 		SELECT d.id::text, COALESCE(d.parent_dimension_id::text,''),
 		       COALESCE(d.source_dimension_id::text,''), COALESCE(d.source_property,''),
-		       m.id::text, m.code, m.properties, COALESCE(pm.code,'') AS parent_code
+		       d.dimension_type = 'time', COALESCE(d.time_granularity,''), COALESCE(d.fiscal_year_start_month,0),
+		       m.id::text, m.code, m.properties, COALESCE(pm.code,'') AS parent_code, COALESCE(m.time_index,-1)
 		FROM model.dimension_def d
 		JOIN model.dimension_member m ON m.dimension_id = d.id
 		LEFT JOIN model.dimension_member pm ON pm.id = m.parent_member_id
 		WHERE d.model_id = $1::uuid AND (d.revision_id = $2::uuid OR d.revision_id IS NULL)
-		ORDER BY d.name, m.sort_order, m.code
+		ORDER BY d.name, m.time_index NULLS LAST, m.sort_order, m.code
 	`, modelID, revisionID)
 	if err != nil {
 		return nil, err
@@ -987,15 +1048,20 @@ func (r *ChartResolver) loadAllDimensions(ctx context.Context, modelID, revision
 	dims := make(map[string]*rollup.Dimension)
 	for rows.Next() {
 		var dimID, parentDimID, sourceDimID, sourceProp string
+		var isTime bool
+		var granularity string
+		var fiscalStart int
 		var memberID, code, parentCode string
 		var properties []byte
-		if err := rows.Scan(&dimID, &parentDimID, &sourceDimID, &sourceProp,
-			&memberID, &code, &properties, &parentCode); err != nil {
+		var timeIndex int
+		if err := rows.Scan(&dimID, &parentDimID, &sourceDimID, &sourceProp, &isTime, &granularity, &fiscalStart,
+			&memberID, &code, &properties, &parentCode, &timeIndex); err != nil {
 			return nil, err
 		}
 		dim, ok := dims[dimID]
 		if !ok {
-			dim = &rollup.Dimension{ID: dimID, ParentDimensionID: parentDimID, SourceDimensionID: sourceDimID, SourceProperty: sourceProp}
+			dim = &rollup.Dimension{ID: dimID, ParentDimensionID: parentDimID, SourceDimensionID: sourceDimID, SourceProperty: sourceProp,
+				IsTime: isTime, TimeGranularity: granularity, FiscalYearStartMonth: fiscalStart}
 			dims[dimID] = dim
 		}
 		if dimRules[memberID] == "hidden" {
@@ -1005,7 +1071,7 @@ func (r *ChartResolver) loadAllDimensions(ctx context.Context, modelID, revision
 		if len(properties) > 0 {
 			_ = json.Unmarshal(properties, &props)
 		}
-		dim.Members = append(dim.Members, rollup.Member{ID: memberID, Code: code, ParentCode: parentCode, Properties: props})
+		dim.Members = append(dim.Members, rollup.Member{ID: memberID, Code: code, ParentCode: parentCode, Properties: props, TimeIndex: timeIndex})
 	}
 	return dims, rows.Err()
 }

@@ -16,6 +16,7 @@ import (
 type reminderFixture struct {
 	store    *Store
 	pool     *pgxpool.Pool
+	customer string
 	approver string // holds business_admin
 	other    string // holds no role the step names
 	stepID   string
@@ -59,7 +60,7 @@ func setupReminder(t *testing.T, dueOffset string, testRun bool) reminderFixture
 	step := one(`INSERT INTO workflow.workflow_step (instance_id, step_def_id, status, due_at)
 	             VALUES ($1::uuid, 's1', 'in_progress', now() + $2::interval) RETURNING id::text`, instance, dueOffset)
 
-	return reminderFixture{store: NewStore(pool), pool: pool, approver: approver, other: other, stepID: step, instance: instance}
+	return reminderFixture{store: NewStore(pool), pool: pool, customer: customer, approver: approver, other: other, stepID: step, instance: instance}
 }
 
 func (f reminderFixture) reminders(t *testing.T) []string {
@@ -82,7 +83,7 @@ func (f reminderFixture) reminders(t *testing.T) []string {
 func TestRemindsAssigneesOfAnOverdueTaskOnce(t *testing.T) {
 	ctx := context.Background()
 	f := setupReminder(t, "-2 hours", false)
-	if _, err := f.store.UpdateSettings(ctx, Settings{RemindersEnabled: true}); err != nil {
+	if _, err := f.store.UpdateSettings(ctx, f.customer, Settings{RemindersEnabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	r := &Reminder{Store: f.store, Log: logger.New("test")}
@@ -131,7 +132,7 @@ func TestReminderRespectsSettingsDueTimeAndTestRuns(t *testing.T) {
 
 	t.Run("not yet due", func(t *testing.T) {
 		f := setupReminder(t, "6 hours", false)
-		if _, err := f.store.UpdateSettings(ctx, Settings{RemindersEnabled: true}); err != nil {
+		if _, err := f.store.UpdateSettings(ctx, f.customer, Settings{RemindersEnabled: true}); err != nil {
 			t.Fatal(err)
 		}
 		r := &Reminder{Store: f.store, Log: logger.New("test")}
@@ -139,7 +140,7 @@ func TestReminderRespectsSettingsDueTimeAndTestRuns(t *testing.T) {
 			t.Fatalf("a task due in six hours was reminded (%d, %v)", n, err)
 		}
 		// With a lead time that covers it, the same task is reminded.
-		if _, err := f.store.UpdateSettings(ctx, Settings{RemindersEnabled: true, ReminderLeadHours: 8}); err != nil {
+		if _, err := f.store.UpdateSettings(ctx, f.customer, Settings{RemindersEnabled: true, ReminderLeadHours: 8}); err != nil {
 			t.Fatal(err)
 		}
 		if n, err := r.RunOnce(ctx); err != nil || n != 1 {
@@ -149,7 +150,7 @@ func TestReminderRespectsSettingsDueTimeAndTestRuns(t *testing.T) {
 
 	t.Run("test runs never page anyone", func(t *testing.T) {
 		f := setupReminder(t, "-2 hours", true)
-		if _, err := f.store.UpdateSettings(ctx, Settings{RemindersEnabled: true}); err != nil {
+		if _, err := f.store.UpdateSettings(ctx, f.customer, Settings{RemindersEnabled: true}); err != nil {
 			t.Fatal(err)
 		}
 		r := &Reminder{Store: f.store, Log: logger.New("test")}
@@ -160,7 +161,7 @@ func TestReminderRespectsSettingsDueTimeAndTestRuns(t *testing.T) {
 
 	t.Run("a completed step is not reminded", func(t *testing.T) {
 		f := setupReminder(t, "-2 hours", false)
-		if _, err := f.store.UpdateSettings(ctx, Settings{RemindersEnabled: true}); err != nil {
+		if _, err := f.store.UpdateSettings(ctx, f.customer, Settings{RemindersEnabled: true}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := f.pool.Exec(ctx, `UPDATE workflow.workflow_step SET status='completed' WHERE id=$1::uuid`, f.stepID); err != nil {
@@ -178,7 +179,7 @@ func TestReminderRespectsSettingsDueTimeAndTestRuns(t *testing.T) {
 func TestReminderGoesOutOnEnabledChannels(t *testing.T) {
 	ctx := context.Background()
 	f := setupReminder(t, "-1 hour", false)
-	if _, err := f.store.UpdateSettings(ctx, Settings{RemindersEnabled: true, EmailEnabled: true}); err != nil {
+	if _, err := f.store.UpdateSettings(ctx, f.customer, Settings{RemindersEnabled: true, EmailEnabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := (&Reminder{Store: f.store, Log: logger.New("test")}).RunOnce(ctx); err != nil {

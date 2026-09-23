@@ -5,8 +5,10 @@
 > **Last verified:** 2026-09-16
 
 Both are enterprise features (`sso`, `scim` in `pkg/license/features.go`)
-and both are per tenant: one tenant's provider and tokens never touch
-another's.
+and both are per tenant — one row per tenant since migration 091, in a
+shared database as much as in a dedicated one — so one tenant's provider
+and tokens never touch another's. There is no deployment-wide provider or
+token: a person signed in or provisioned has to land in one tenant.
 
 ## Single sign-on
 

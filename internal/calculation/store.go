@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	calculationv1 "github.com/mavericks-engine/mavericks/gen/go/calculation/v1"
+	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/rollup"
 )
 
@@ -170,6 +172,15 @@ type MetricDef struct {
 	// metric's own member values. Empty for every other rule.
 	AggNumeratorID   string
 	AggDenominatorID string
+
+	// TimeSummary is how the metric aggregates ACROSS its time dimension
+	// (sum | average | min | max | first | last | none); AggRule stays the
+	// rule for every other dimension. Only meaningful for a metric
+	// dimensioned by a time dimension.
+	TimeSummary string
+	// DependsOn carries each dependency with the time offsets it is read at
+	// (the same IDs as DependsOnID, in the same order).
+	DependsOn []metricformula.Edge
 }
 
 // LoadModelMetrics loads all metric definitions + dependency edges for one
@@ -180,7 +191,8 @@ type MetricDef struct {
 func (s *Store) LoadModelMetrics(ctx context.Context, modelID, revisionID string) (map[string]*MetricDef, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id::text, name, COALESCE(formula,''), is_input, agg_rule,
-		       COALESCE(agg_numerator_metric_id::text,''), COALESCE(agg_denominator_metric_id::text,'')
+		       COALESCE(agg_numerator_metric_id::text,''), COALESCE(agg_denominator_metric_id::text,''),
+		       time_summary
 		FROM model.metric_def WHERE model_id = $1::uuid AND revision_id = $2::uuid
 	`, modelID, revisionID)
 	if err != nil {
@@ -191,7 +203,7 @@ func (s *Store) LoadModelMetrics(ctx context.Context, modelID, revisionID string
 	defs := make(map[string]*MetricDef)
 	for rows.Next() {
 		var d MetricDef
-		if err := rows.Scan(&d.ID, &d.Name, &d.Formula, &d.IsInput, &d.AggRule, &d.AggNumeratorID, &d.AggDenominatorID); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.Formula, &d.IsInput, &d.AggRule, &d.AggNumeratorID, &d.AggDenominatorID, &d.TimeSummary); err != nil {
 			return nil, err
 		}
 		defs[d.ID] = &d
@@ -202,10 +214,12 @@ func (s *Store) LoadModelMetrics(ctx context.Context, modelID, revisionID string
 
 	// Load dependency edges
 	edgeRows, err := s.pool.Query(ctx, `
-		SELECT d.metric_id::text, d.depends_on_metric_id::text
+		SELECT d.metric_id::text, d.depends_on_metric_id::text,
+		       d.min_time_offset, d.max_time_offset, d.unbounded_past, d.unbounded_future
 		FROM model.calc_dependency d
 		JOIN model.metric_def m ON m.id = d.metric_id
 		WHERE m.model_id = $1::uuid AND m.revision_id = $2::uuid
+		ORDER BY d.metric_id, d.depends_on_metric_id
 	`, modelID, revisionID)
 	if err != nil {
 		return nil, err
@@ -213,12 +227,14 @@ func (s *Store) LoadModelMetrics(ctx context.Context, modelID, revisionID string
 	defer edgeRows.Close()
 
 	for edgeRows.Next() {
-		var from, to string
-		if err := edgeRows.Scan(&from, &to); err != nil {
+		var from string
+		var e metricformula.Edge
+		if err := edgeRows.Scan(&from, &e.To, &e.MinTimeOffset, &e.MaxTimeOffset, &e.UnboundedPast, &e.UnboundedFuture); err != nil {
 			return nil, err
 		}
 		if def, ok := defs[from]; ok {
-			def.DependsOnID = append(def.DependsOnID, to)
+			def.DependsOnID = append(def.DependsOnID, e.To)
+			def.DependsOn = append(def.DependsOn, e)
 		}
 	}
 	return defs, edgeRows.Err()
@@ -324,12 +340,14 @@ func (s *Store) LoadAllDimensions(ctx context.Context, modelID, revisionID strin
 	rows, err := s.pool.Query(ctx, `
 		SELECT d.id::text, COALESCE(d.parent_dimension_id::text,''),
 		       COALESCE(d.source_dimension_id::text,''), COALESCE(d.source_property,''),
-		       m.id::text, m.code, m.properties, COALESCE(pm.code,'') AS parent_code
+		       d.dimension_type = 'time', COALESCE(d.time_granularity,''), COALESCE(d.fiscal_year_start_month,0),
+		       m.id::text, m.code, m.properties, COALESCE(pm.code,'') AS parent_code,
+		       COALESCE(m.time_index,-1), m.period_start, m.period_end
 		FROM model.dimension_def d
 		JOIN model.dimension_member m ON m.dimension_id = d.id
 		LEFT JOIN model.dimension_member pm ON pm.id = m.parent_member_id
 		WHERE d.model_id = $1::uuid AND (d.revision_id = $2::uuid OR d.revision_id IS NULL)
-		ORDER BY d.name, m.sort_order, m.code
+		ORDER BY d.name, m.time_index NULLS LAST, m.sort_order, m.code
 	`, modelID, revisionID)
 	if err != nil {
 		return nil, err
@@ -339,22 +357,35 @@ func (s *Store) LoadAllDimensions(ctx context.Context, modelID, revisionID strin
 	dims := make(map[string]*rollup.Dimension)
 	for rows.Next() {
 		var dimID, parentDimID, sourceDimID, sourceProp string
+		var isTime bool
+		var granularity string
+		var fiscalStart int
 		var memberID, code, parentCode string
 		var properties []byte
-		if err := rows.Scan(&dimID, &parentDimID, &sourceDimID, &sourceProp,
-			&memberID, &code, &properties, &parentCode); err != nil {
+		var timeIndex int
+		var periodStart, periodEnd *time.Time
+		if err := rows.Scan(&dimID, &parentDimID, &sourceDimID, &sourceProp, &isTime, &granularity, &fiscalStart,
+			&memberID, &code, &properties, &parentCode, &timeIndex, &periodStart, &periodEnd); err != nil {
 			return nil, err
 		}
 		dim, ok := dims[dimID]
 		if !ok {
-			dim = &rollup.Dimension{ID: dimID, ParentDimensionID: parentDimID, SourceDimensionID: sourceDimID, SourceProperty: sourceProp}
+			dim = &rollup.Dimension{ID: dimID, ParentDimensionID: parentDimID, SourceDimensionID: sourceDimID, SourceProperty: sourceProp,
+				IsTime: isTime, TimeGranularity: granularity, FiscalYearStartMonth: fiscalStart}
 			dims[dimID] = dim
 		}
 		var props map[string]string
 		if len(properties) > 0 {
 			_ = json.Unmarshal(properties, &props)
 		}
-		dim.Members = append(dim.Members, rollup.Member{ID: memberID, Code: code, ParentCode: parentCode, Properties: props})
+		m := rollup.Member{ID: memberID, Code: code, ParentCode: parentCode, Properties: props, TimeIndex: timeIndex}
+		if periodStart != nil {
+			m.PeriodStart = periodStart.UTC()
+		}
+		if periodEnd != nil {
+			m.PeriodEnd = periodEnd.UTC()
+		}
+		dim.Members = append(dim.Members, m)
 	}
 	return dims, rows.Err()
 }
@@ -619,6 +650,45 @@ func (s *Store) ClearPerComboResults(ctx context.Context, modelID, revisionID, m
 }
 
 func (s *Store) WriteCalcResults(ctx context.Context, modelID, revisionID, metricID, partitionKey string, rows []CalcResultRow) error {
+	return writeCalcResults(ctx, s.pool, modelID, revisionID, metricID, partitionKey, rows)
+}
+
+// resultWriter is the subset of pgx shared by a pool and a transaction, so
+// the recurrence executor can persist a whole component atomically through
+// the same functions the per-metric path uses on the pool.
+type resultWriter interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults
+}
+
+// WriteCalcResultTx / ClearPerComboResultsTx / WriteCalcResultsTx are the
+// transaction-scoped forms of the pool methods above. A recurrence (an
+// opening/closing balance pair) is persisted as one unit: a failure at a
+// later period must never leave a half-updated chain behind.
+func (s *Store) WriteCalcResultTx(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID, partitionKey string, dimMembers map[string]string, value float64) error {
+	dimJSON, _ := json.Marshal(dimMembers)
+	_, err := tx.Exec(ctx, `
+		INSERT INTO runtime.calc_result
+		    (model_id, revision_id, dim_members, metric_id, value, partition_key)
+		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6)
+	`, modelID, revisionID, dimJSON, metricID, value, partitionKey)
+	return err
+}
+
+func (s *Store) ClearPerComboResultsTx(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID string) error {
+	_, err := tx.Exec(ctx, `
+		DELETE FROM runtime.calc_result
+		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid
+		  AND dim_members::text <> '{}'
+	`, modelID, revisionID, metricID)
+	return err
+}
+
+func (s *Store) WriteCalcResultsTx(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID, partitionKey string, rows []CalcResultRow) error {
+	return writeCalcResults(ctx, tx, modelID, revisionID, metricID, partitionKey, rows)
+}
+
+func writeCalcResults(ctx context.Context, w resultWriter, modelID, revisionID, metricID, partitionKey string, rows []CalcResultRow) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -631,7 +701,7 @@ func (s *Store) WriteCalcResults(ctx context.Context, modelID, revisionID, metri
 			VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6)
 		`, modelID, revisionID, string(dimJSON), metricID, r.Value, partitionKey)
 	}
-	br := s.pool.SendBatch(ctx, batch)
+	br := w.SendBatch(ctx, batch)
 	defer br.Close() //nolint:errcheck // any real failure already surfaces via br.Exec() below
 	for range rows {
 		if _, err := br.Exec(); err != nil {

@@ -100,10 +100,10 @@ func (s *TokenStore) Issue(ctx context.Context, customerID, name, defaultRole, w
 	}
 	var t Token
 	err = s.pool.QueryRow(ctx, `
-		INSERT INTO identity.scim_token (name, token_hash, default_role, workspace_id, created_by)
-		VALUES ($1, $2, $3::identity.user_role, NULLIF($4,'')::uuid, NULLIF($5,'')::uuid)
+		INSERT INTO identity.scim_token (customer_id, name, token_hash, default_role, workspace_id, created_by)
+		VALUES ($6::uuid, $1, $2, $3::identity.user_role, NULLIF($4,'')::uuid, NULLIF($5,'')::uuid)
 		RETURNING id::text, name, default_role::text, COALESCE(workspace_id::text,''), created_at
-	`, name, hash, defaultRole, workspaceID, createdBy).Scan(&t.ID, &t.Name, &t.DefaultRole, &t.WorkspaceID, &t.CreatedAt)
+	`, name, hash, defaultRole, workspaceID, createdBy, customerID).Scan(&t.ID, &t.Name, &t.DefaultRole, &t.WorkspaceID, &t.CreatedAt)
 	if err != nil {
 		return Token{}, "", fmt.Errorf("issue scim token: %w", err)
 	}
@@ -111,10 +111,11 @@ func (s *TokenStore) Issue(ctx context.Context, customerID, name, defaultRole, w
 }
 
 // List returns every token, revoked ones included, newest first.
-func (s *TokenStore) List(ctx context.Context) ([]Token, error) {
+// List is the tenant's tokens (migration 091: rows carry their tenant).
+func (s *TokenStore) List(ctx context.Context, customerID string) ([]Token, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id::text, name, default_role::text, COALESCE(workspace_id::text,''), created_at, last_used_at, revoked_at
-		FROM identity.scim_token ORDER BY created_at DESC`)
+		FROM identity.scim_token WHERE customer_id = $1::uuid ORDER BY created_at DESC`, customerID)
 	if err != nil {
 		return nil, err
 	}
@@ -131,8 +132,9 @@ func (s *TokenStore) List(ctx context.Context) ([]Token, error) {
 }
 
 // Revoke disables a token; the row stays so the audit trail keeps its name.
-func (s *TokenStore) Revoke(ctx context.Context, id string) error {
-	tag, err := s.pool.Exec(ctx, `UPDATE identity.scim_token SET revoked_at = now() WHERE id = $1::uuid AND revoked_at IS NULL`, id)
+// Revoke ends one of the tenant's tokens; another tenant's is not found.
+func (s *TokenStore) Revoke(ctx context.Context, customerID, id string) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE identity.scim_token SET revoked_at = now() WHERE id = $1::uuid AND customer_id = $2::uuid AND revoked_at IS NULL`, id, customerID)
 	if err != nil {
 		return err
 	}
@@ -148,10 +150,21 @@ func (s *TokenStore) Verify(ctx context.Context, plain string) (Token, error) {
 	err := s.pool.QueryRow(ctx, `
 		UPDATE identity.scim_token SET last_used_at = now()
 		WHERE token_hash = $1 AND revoked_at IS NULL
+		  -- The token names its tenant in its prefix; the row must agree.
+		  AND (customer_id IS NULL OR customer_id = $2::uuid)
 		RETURNING id::text, name, default_role::text, COALESCE(workspace_id::text,''), created_at, last_used_at
-	`, HashToken(plain)).Scan(&t.ID, &t.Name, &t.DefaultRole, &t.WorkspaceID, &t.CreatedAt, &t.LastUsedAt)
+	`, HashToken(plain), tokenCustomer(plain)).Scan(&t.ID, &t.Name, &t.DefaultRole, &t.WorkspaceID, &t.CreatedAt, &t.LastUsedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Token{}, ErrBadToken
 	}
 	return t, err
+}
+
+// tokenCustomer is the tenant a token's prefix names, as a uuid string, or
+// the nil uuid for a malformed token (which then matches no row).
+func tokenCustomer(plain string) string {
+	if cid, ok := ParseToken(plain); ok {
+		return cid
+	}
+	return "00000000-0000-0000-0000-000000000000"
 }

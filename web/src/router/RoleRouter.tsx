@@ -1,6 +1,7 @@
 import { useAuth } from "../auth/useAuth";
 import { AppShell, PageLayout, EmptyState } from "../ui";
 import { PersonaSwitcher } from "../shell/PersonaSwitcher";
+import { BrandMark } from "../branding/BrandMark";
 import UnifiedConsole from "./UnifiedConsole";
 import { enabledSections } from "./sections";
 
@@ -14,7 +15,7 @@ export default function RoleRouter() {
 
   if (enabledSections(userRoles).length === 0) {
     return (
-      <AppShell navGroups={[]} sidebarFooter={<PersonaSwitcher />}>
+      <AppShell brand={<BrandMark markClassName="mvx-app-shell__mark" logoClassName="mvx-app-shell__brand-img" />} navGroups={[]} sidebarFooter={<PersonaSwitcher />}>
         <PageLayout title="No role assigned">
           <EmptyState
             label="Your account has no assigned role. Contact your administrator."

@@ -30,16 +30,24 @@ func (h *handler) tenantAISettings(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	scope, ok := h.settingsScopeFor(w, r, act, true)
+	if !ok {
+		return
+	}
 	store := aikeys.NewStore(h.db.For(ctx))
+	respond := func(s aikeys.Settings, inherited bool) {
+		scope.Inherited = inherited
+		jsonOK(w, tenantAISettingsResponse{Settings: s, Scope: scope})
+	}
 
 	switch r.Method {
 	case http.MethodGet:
-		s, err := store.Get(ctx)
+		s, inherited, err := store.Effective(ctx, scope.CustomerID)
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
-		jsonOK(w, s)
+		respond(s, inherited)
 	case http.MethodPut:
 		var body aikeys.Settings
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -54,7 +62,7 @@ func (h *handler) tenantAISettings(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		s, err := store.Update(ctx, body)
+		s, err := store.Update(ctx, scope.CustomerID, body)
 		if err != nil {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
@@ -62,15 +70,16 @@ func (h *handler) tenantAISettings(w http.ResponseWriter, r *http.Request) {
 		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 			Category: auditlog.CategoryAdmin, EventType: auditlog.EventTenantAISettingsUpdated,
 			ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
-			ResourceType: "tenant_ai_settings", ResourceID: "settings",
+			ResourceType: "tenant_ai_settings", ResourceID: scopeResourceID(scope),
 			Metadata: map[string]string{
+				"scope":           scopeWord(scope),
 				"provider":        s.Provider,
 				"model":           s.Model,
 				"api_key_changed": strconv.FormatBool(strings.TrimSpace(body.APIKey) != ""),
 				"enforced":        boolWord(s.Enforced),
 			},
 		})
-		jsonOK(w, s)
+		respond(s, false)
 	default:
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
 	}
@@ -88,7 +97,11 @@ func (h *handler) tenantAIKeyClear(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s, err := aikeys.NewStore(h.db.For(ctx)).Clear(ctx)
+	scope, ok := h.settingsScopeFor(w, r, act, true)
+	if !ok {
+		return
+	}
+	s, err := aikeys.NewStore(h.db.For(ctx)).Clear(ctx, scope.CustomerID)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -96,9 +109,10 @@ func (h *handler) tenantAIKeyClear(w http.ResponseWriter, r *http.Request) {
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 		Category: auditlog.CategoryAdmin, EventType: auditlog.EventTenantAIKeyCleared,
 		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
-		ResourceType: "tenant_ai_settings", ResourceID: "settings",
+		ResourceType: "tenant_ai_settings", ResourceID: scopeResourceID(scope),
+		Metadata: map[string]string{"scope": scopeWord(scope)},
 	})
-	jsonOK(w, s)
+	jsonOK(w, tenantAISettingsResponse{Settings: s, Scope: scope})
 }
 
 // tenantAITestSettings handles POST /api/admin/ai-settings/test: the same
@@ -115,6 +129,10 @@ func (h *handler) tenantAITestSettings(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	scope, ok := h.settingsScopeFor(w, r, act, true)
+	if !ok {
+		return
+	}
 	var req struct {
 		Provider string `json:"provider"`
 		Model    string `json:"model"`
@@ -122,13 +140,13 @@ func (h *handler) tenantAITestSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	stored, _ := aikeys.NewStore(h.db.For(ctx)).Get(ctx)
+	stored, _, _ := aikeys.NewStore(h.db.For(ctx)).Effective(ctx, scope.CustomerID)
 	provider := firstNonEmpty(req.Provider, stored.Provider, "openai")
 	model := firstNonEmpty(req.Model, stored.Model, providerDefaultModels[provider])
 	apiKey := strings.TrimSpace(req.APIKey)
 	if apiKey == "" {
-		// Nothing typed in the form: probe whatever is already stored.
-		_, _, apiKey, _, _ = aikeys.NewStore(h.db.For(ctx)).Resolve(ctx)
+		// Nothing typed in the form: probe whatever applies already.
+		_, _, apiKey, _, _ = aikeys.NewStore(h.db.For(ctx)).Resolve(ctx, scope.CustomerID)
 	}
 
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
@@ -157,11 +175,11 @@ type tenantAIKeyResult struct {
 	OK       bool
 }
 
-func (h *handler) tenantAIKey(ctx context.Context) tenantAIKeyResult {
-	if h.lic == nil || !h.lic.Has(license.FeatureTenantAIKeys) {
+func (h *handler) tenantAIKey(ctx context.Context, customerID string) tenantAIKeyResult {
+	if h.lic == nil || !h.lic.Has(license.FeatureTenantAIKeys) || customerID == "" {
 		return tenantAIKeyResult{}
 	}
-	provider, model, key, enforced, err := aikeys.NewStore(h.db.For(ctx)).Resolve(ctx)
+	provider, model, key, enforced, err := aikeys.NewStore(h.db.For(ctx)).Resolve(ctx, customerID)
 	if err != nil {
 		return tenantAIKeyResult{Enforced: false}
 	}
@@ -175,4 +193,10 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// tenantAISettingsResponse is the settings with whose they are.
+type tenantAISettingsResponse struct {
+	aikeys.Settings
+	Scope settingsScope `json:"scope"`
 }

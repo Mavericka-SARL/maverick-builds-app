@@ -454,7 +454,7 @@ func TestSsoRegisterDiscoverAndFirstLogin(t *testing.T) {
 	if _, err := f.h.jitProvision(ctx, claims("kc-unlinked", "x@acme.test", "X")); err == nil || errors.As(err, &np) {
 		t.Errorf("a realm user with no provider link must be refused plainly, got %v", err)
 	}
-	if _, err := f.pool.Exec(ctx, `UPDATE identity.sso_provider SET jit_provisioning = FALSE WHERE id = TRUE`); err != nil {
+	if _, err := f.pool.Exec(ctx, `UPDATE identity.sso_provider SET jit_provisioning = FALSE`); err != nil {
 		t.Fatal(err)
 	}
 	f.broker.mu.Lock()

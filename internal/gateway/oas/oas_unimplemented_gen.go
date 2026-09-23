@@ -105,6 +105,24 @@ func (UnimplementedHandler) CancelIntegrationRun(ctx context.Context, params Can
 	return r, ht.ErrNotImplemented
 }
 
+// ClearAuditSettings implements clearAuditSettings operation.
+//
+// Drop the tenant's own retention so it inherits the deployment's again (administrators; enterprise).
+//
+// DELETE /api/admin/audit/settings
+func (UnimplementedHandler) ClearAuditSettings(ctx context.Context) (r ClearAuditSettingsRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// ClearNotificationSettings implements clearNotificationSettings operation.
+//
+// Drop the tenant's own delivery settings so it inherits the deployment's again (administrators).
+//
+// DELETE /api/notifications/settings
+func (UnimplementedHandler) ClearNotificationSettings(ctx context.Context) (r ClearNotificationSettingsRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // ClearTenantAIKey implements clearTenantAIKey operation.
 //
 // Remove the stored tenant key and stop enforcing it, returning the tenant to personal keys
@@ -135,7 +153,7 @@ func (UnimplementedHandler) ConfirmAiProposal(ctx context.Context, params Confir
 
 // CreateAdminApplication implements createAdminApplication operation.
 //
-// Create an application under a tenant.
+// Create an application under a tenant (a tenant admin: their own tenant only).
 //
 // POST /api/admin/applications
 func (UnimplementedHandler) CreateAdminApplication(ctx context.Context, req *CreateApplicationRequest) (r CreateAdminApplicationRes, _ error) {
@@ -555,6 +573,16 @@ func (UnimplementedHandler) DeleteFormRecord(ctx context.Context, params DeleteF
 	return r, ht.ErrNotImplemented
 }
 
+// DeleteGoogleConnection implements deleteGoogleConnection operation.
+//
+// Forget the tenant's Google service account; private sheets become unreachable again (developers
+// and administrators).
+//
+// DELETE /api/developer/integrations/google-service-account
+func (UnimplementedHandler) DeleteGoogleConnection(ctx context.Context) (r DeleteGoogleConnectionRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // DeleteGrid implements deleteGrid operation.
 //
 // Delete a grid.
@@ -637,6 +665,15 @@ func (UnimplementedHandler) DiscardAiDraft(ctx context.Context, params DiscardAi
 	return r, ht.ErrNotImplemented
 }
 
+// DisconnectIntegrationOAuth implements disconnectIntegrationOAuth operation.
+//
+// Forget the connection's tokens, keeping the client so it can be connected again.
+//
+// POST /api/developer/integration-connections/{id}/oauth/disconnect
+func (UnimplementedHandler) DisconnectIntegrationOAuth(ctx context.Context, params DisconnectIntegrationOAuthParams) (r DisconnectIntegrationOAuthRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // DuplicateIntegration implements duplicateIntegration operation.
 //
 // Duplicate a rest_api integration (test state cleared, schedule copied disabled, no run history).
@@ -686,8 +723,8 @@ func (UnimplementedHandler) ExportGrid(ctx context.Context, params ExportGridPar
 
 // ExportModel implements exportModel operation.
 //
-// Export a model revision as a self-contained transfer package (tenant_admin only, scoped to their
-// own tenant).
+// Export a model revision as a self-contained transfer package (tenant admins for their own tenant,
+// platform admins for any).
 //
 // GET /api/admin/models/{id}/export
 func (UnimplementedHandler) ExportModel(ctx context.Context, params ExportModelParams) (r ExportModelRes, _ error) {
@@ -698,7 +735,7 @@ func (UnimplementedHandler) ExportModel(ctx context.Context, params ExportModelP
 //
 // Download a standalone deployment package for a model revision — a tar.gz containing the entity
 // graph (package.json), the complete database migrations, a provenance manifest, and an infra-only
-// docker-compose (tenant_admin only, scoped to their own tenant).
+// docker-compose (tenant admins for their own tenant, platform admins for any).
 //
 // GET /api/admin/models/{id}/export/package
 func (UnimplementedHandler) ExportModelPackage(ctx context.Context, params ExportModelPackageParams) (r ExportModelPackageRes, _ error) {
@@ -711,6 +748,16 @@ func (UnimplementedHandler) ExportModelPackage(ctx context.Context, params Expor
 //
 // POST /api/formula/refs
 func (UnimplementedHandler) ExtractFormulaRefs(ctx context.Context, req *FormulaRefsRequest) (r *ExtractFormulaRefsOK, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// GenerateDimensionPeriods implements generateDimensionPeriods operation.
+//
+// Bulk-generate a time dimension's periods between two dates (same validation and chronological
+// indexing as single members; time dimensions only).
+//
+// POST /api/developer/dimensions/{dimId}/members/generate
+func (UnimplementedHandler) GenerateDimensionPeriods(ctx context.Context, req *GeneratePeriodsRequest, params GenerateDimensionPeriodsParams) (r GenerateDimensionPeriodsRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -824,6 +871,16 @@ func (UnimplementedHandler) GetDeveloperModel(ctx context.Context, params GetDev
 	return r, ht.ErrNotImplemented
 }
 
+// GetGoogleConnection implements getGoogleConnection operation.
+//
+// The tenant's Google service account, public half only — the address to share sheets with
+// (developers and administrators; the tenant of the application in X-App-Id).
+//
+// GET /api/developer/integrations/google-service-account
+func (UnimplementedHandler) GetGoogleConnection(ctx context.Context) (r GetGoogleConnectionRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // GetGrid implements getGrid operation.
 //
 // Get planning grid for a revision.
@@ -848,6 +905,16 @@ func (UnimplementedHandler) GetIntegration(ctx context.Context, params GetIntegr
 //
 // GET /api/developer/integration-runs/{runId}
 func (UnimplementedHandler) GetIntegrationRun(ctx context.Context, params GetIntegrationRunParams) (r GetIntegrationRunRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// GetLegalInfo implements getLegalInfo operation.
+//
+// The operator's identity and the documents it publishes, for the terms of service and privacy
+// notice a visitor reads before signing up (public; see internal/gateway/legal.go).
+//
+// GET /api/legal
+func (UnimplementedHandler) GetLegalInfo(ctx context.Context) (r *LegalInfo, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1016,8 +1083,8 @@ func (UnimplementedHandler) ImportFormRecords(ctx context.Context, req *FormImpo
 
 // ImportModel implements importModel operation.
 //
-// Import a model export package into an application, creating a new model and revision (tenant_admin
-// only, scoped to their own tenant).
+// Import a model export package into an application, creating a new model and revision (tenant
+// admins for their own tenant, platform admins for any).
 //
 // POST /api/admin/models/import
 func (UnimplementedHandler) ImportModel(ctx context.Context, req *ModelImportRequest) (r ImportModelRes, _ error) {
@@ -1043,9 +1110,21 @@ func (UnimplementedHandler) ImportUpload(ctx context.Context, req *ImportUploadR
 	return r, ht.ErrNotImplemented
 }
 
+// IntegrationOAuthCallback implements integrationOAuthCallback operation.
+//
+// Where the provider sends the browser after consent (public: the person arrives with the state
+// only). Exchanges the code, seals the tokens into the connection, and redirects to the console with
+// ?oauth=connected or ?oauth=error&oauth_error=….
+//
+// GET /api/integrations/oauth/callback
+func (UnimplementedHandler) IntegrationOAuthCallback(ctx context.Context, params IntegrationOAuthCallbackParams) error {
+	return ht.ErrNotImplemented
+}
+
 // ListAdminApplications implements listAdminApplications operation.
 //
-// List all applications (unscoped).
+// List the applications in the caller's scope — every tenant's for a platform admin, their own
+// tenant's for a tenant admin.
 //
 // GET /api/admin/applications
 func (UnimplementedHandler) ListAdminApplications(ctx context.Context) (r []AdminApplicationItem, _ error) {
@@ -1490,6 +1569,16 @@ func (UnimplementedHandler) PublishWorkflow(ctx context.Context, params PublishW
 	return r, ht.ErrNotImplemented
 }
 
+// PutGoogleConnection implements putGoogleConnection operation.
+//
+// Store a Google service-account key file for this tenant — the JSON Google Cloud downloaded; only
+// the address and the private key are kept, sealed (developers and administrators).
+//
+// PUT /api/developer/integrations/google-service-account
+func (UnimplementedHandler) PutGoogleConnection(ctx context.Context, req *PutGoogleConnectionReq) (r PutGoogleConnectionRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // RejectAiProposal implements rejectAiProposal operation.
 //
 // Reject a pending proposal without executing it.
@@ -1786,6 +1875,16 @@ func (UnimplementedHandler) SendAiMessage(ctx context.Context, req *AiSendMessag
 	return r, ht.ErrNotImplemented
 }
 
+// SendNotificationTestMail implements sendNotificationTestMail operation.
+//
+// Send the calling administrator a test e-mail through the deployment's relay, synchronously — the
+// relay's verdict comes back as the response (administrators).
+//
+// POST /api/notifications/settings/test
+func (UnimplementedHandler) SendNotificationTestMail(ctx context.Context) (r SendNotificationTestMailRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // SetActiveRevision implements setActiveRevision operation.
 //
 // Set a model's active revision by name.
@@ -1843,6 +1942,17 @@ func (UnimplementedHandler) SsoDiscover(ctx context.Context, params SsoDiscoverP
 	return r, ht.ErrNotImplemented
 }
 
+// StartIntegrationOAuth implements startIntegrationOAuth operation.
+//
+// Begin the OAuth 2.0 authorization-code consent for a connection of that auth type: records the
+// pending authorisation (PKCE) and answers the provider URL to open; the provider returns the
+// browser to /api/integrations/oauth/callback.
+//
+// POST /api/developer/integration-connections/{id}/oauth/start
+func (UnimplementedHandler) StartIntegrationOAuth(ctx context.Context, req OptStartIntegrationOAuthReq, params StartIntegrationOAuthParams) (r StartIntegrationOAuthRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // StartWorkflowInstance implements startWorkflowInstance operation.
 //
 // Start a workflow instance from a published workflow definition.
@@ -1877,6 +1987,16 @@ func (UnimplementedHandler) SyncFormMappings(ctx context.Context, params SyncFor
 //
 // POST /api/ai/settings/test
 func (UnimplementedHandler) TestAiSettings(ctx context.Context, req OptAiTestSettingsRequest) (r *TestAiSettingsOK, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// TestGoogleConnection implements testGoogleConnection operation.
+//
+// Prove the stored key by obtaining an access token from Google; nothing is read (developers and
+// administrators).
+//
+// POST /api/developer/integrations/google-service-account/test
+func (UnimplementedHandler) TestGoogleConnection(ctx context.Context) (r TestGoogleConnectionRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -2213,8 +2333,8 @@ func (UnimplementedHandler) UploadAiDocument(ctx context.Context, req *UploadAiD
 
 // UpsertPlan implements upsertPlan operation.
 //
-// Create or change a plan — name, trial days, self-service flag and limits (platform_admin;
-// applies to every tenant on the plan within a minute).
+// Create or change a plan — name, self-service flag and limits (platform_admin; applies to every
+// tenant on the plan within a minute).
 //
 // PUT /api/admin/plans/{key}
 func (UnimplementedHandler) UpsertPlan(ctx context.Context, req *PlanInput, params UpsertPlanParams) (r UpsertPlanRes, _ error) {

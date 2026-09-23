@@ -45,9 +45,12 @@ func setupStore(t *testing.T) (*Store, *pgxpool.Pool, string) {
 	t.Helper()
 	pool := testdb.New(t, migrationfs.FS, ".")
 	var userID string
+	// The user belongs to a tenant: outbound channels are the tenant's
+	// settings (migration 091), and a user of no tenant gets in-app only.
 	if err := pool.QueryRow(context.Background(),
-		`INSERT INTO identity.user (keycloak_sub, email, display_name)
-		 VALUES ('notif-user', 'jo@example.test', 'Jo Planner') RETURNING id::text`).Scan(&userID); err != nil {
+		`WITH c AS (INSERT INTO core.customer (name, plan) VALUES ('Notify Co', 'standard') RETURNING id)
+		 INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id)
+		 SELECT 'notif-user', 'jo@example.test', 'Jo Planner', c.id FROM c RETURNING id::text`).Scan(&userID); err != nil {
 		t.Fatal(err)
 	}
 	return NewStore(pool), pool, userID
@@ -89,7 +92,7 @@ func TestNotifyFansOutOnlyToEnabledChannels(t *testing.T) {
 		t.Fatalf("with every outbound channel off, channels = %v", channels)
 	}
 
-	if _, err := store.UpdateSettings(ctx, Settings{
+	if _, err := store.UpdateSettings(ctx, tenantOf(t, store, userID), Settings{
 		EmailEnabled: true, WebhookEnabled: true, WebhookURL: "https://hooks.example.test/mvx",
 	}); err != nil {
 		t.Fatal(err)
@@ -139,7 +142,7 @@ func TestDispatcherDeliversEmailAndWebhook(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := store.UpdateSettings(ctx, Settings{
+	if _, err := store.UpdateSettings(ctx, tenantOf(t, store, userID), Settings{
 		EmailEnabled: true, WebhookEnabled: true, WebhookURL: srv.URL, WebhookSecret: "s3cret",
 	}); err != nil {
 		t.Fatal(err)
@@ -198,7 +201,7 @@ func TestDispatcherDeliversEmailAndWebhook(t *testing.T) {
 func TestDeliveryRetriesThenFails(t *testing.T) {
 	ctx := context.Background()
 	store, pool, userID := setupStore(t)
-	if _, err := store.UpdateSettings(ctx, Settings{EmailEnabled: true}); err != nil {
+	if _, err := store.UpdateSettings(ctx, tenantOf(t, store, userID), Settings{EmailEnabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Notify(ctx, userID, "t", map[string]string{"subject": "s"}, "", ""); err != nil {
@@ -250,13 +253,13 @@ func TestDeliveryRetriesThenFails(t *testing.T) {
 func TestDisabledChannelIsNotDelivered(t *testing.T) {
 	ctx := context.Background()
 	store, pool, userID := setupStore(t)
-	if _, err := store.UpdateSettings(ctx, Settings{EmailEnabled: true}); err != nil {
+	if _, err := store.UpdateSettings(ctx, tenantOf(t, store, userID), Settings{EmailEnabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Notify(ctx, userID, "t", map[string]string{"subject": "s"}, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.UpdateSettings(ctx, Settings{EmailEnabled: false}); err != nil {
+	if _, err := store.UpdateSettings(ctx, tenantOf(t, store, userID), Settings{EmailEnabled: false}); err != nil {
 		t.Fatal(err)
 	}
 	mailer := &fakeMailer{}
@@ -273,15 +276,15 @@ func TestDisabledChannelIsNotDelivered(t *testing.T) {
 
 func TestSettingsValidationAndSecretHandling(t *testing.T) {
 	ctx := context.Background()
-	store, _, _ := setupStore(t)
+	store, _, userID := setupStore(t)
 
-	if _, err := store.UpdateSettings(ctx, Settings{WebhookEnabled: true, WebhookURL: "hooks.example.test"}); err == nil {
+	if _, err := store.UpdateSettings(ctx, tenantOf(t, store, userID), Settings{WebhookEnabled: true, WebhookURL: "hooks.example.test"}); err == nil {
 		t.Fatal("a webhook url without a scheme was accepted")
 	}
-	if _, err := store.UpdateSettings(ctx, Settings{ReminderLeadHours: -1}); err == nil {
+	if _, err := store.UpdateSettings(ctx, tenantOf(t, store, userID), Settings{ReminderLeadHours: -1}); err == nil {
 		t.Fatal("a negative lead time was accepted")
 	}
-	got, err := store.UpdateSettings(ctx, Settings{
+	got, err := store.UpdateSettings(ctx, tenantOf(t, store, userID), Settings{
 		WebhookEnabled: true, WebhookURL: "https://hooks.example.test/x", WebhookSecret: "first",
 		RemindersEnabled: true, ReminderLeadHours: 2,
 	})
@@ -293,13 +296,13 @@ func TestSettingsValidationAndSecretHandling(t *testing.T) {
 	}
 	// Saving without the secret keeps the stored one, so a console that never
 	// receives it can still save the form.
-	if _, err := store.UpdateSettings(ctx, Settings{
+	if _, err := store.UpdateSettings(ctx, tenantOf(t, store, userID), Settings{
 		WebhookEnabled: true, WebhookURL: "https://hooks.example.test/x", RemindersEnabled: true, ReminderLeadHours: 2,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if secret, err := store.webhookSecret(ctx); err != nil || secret != "first" {
-		t.Fatalf("secret after a save without one = %q (%v)", secret, err)
+	if got, _, err := store.GetSettings(ctx, tenantOf(t, store, userID)); err != nil || got.webhookSecretValue != "first" {
+		t.Fatalf("secret after a save without one = %q (%v)", got.webhookSecretValue, err)
 	}
 }
 
@@ -318,4 +321,15 @@ func TestBackoffGrows(t *testing.T) {
 		}
 		prev = d
 	}
+}
+
+// tenantOf is the tenant the fixture user belongs to — the scope whose
+// settings decide their outbound channels.
+func tenantOf(t *testing.T, store *Store, userID string) string {
+	t.Helper()
+	cid := store.CustomerOf(context.Background(), userID, "", "")
+	if cid == "" {
+		t.Fatal("fixture user has no tenant")
+	}
+	return cid
 }

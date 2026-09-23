@@ -11,6 +11,7 @@ import (
 
 	commonv1 "github.com/mavericks-engine/mavericks/gen/go/common/v1"
 	modelv1 "github.com/mavericks-engine/mavericks/gen/go/model/v1"
+	"github.com/mavericks-engine/mavericks/internal/timedim"
 )
 
 type Server struct {
@@ -29,7 +30,13 @@ func (s *Server) CreateDimension(ctx context.Context, req *modelv1.CreateDimensi
 	if req.ModelId == "" || req.Name == "" {
 		return nil, status.Error(codes.InvalidArgument, "model_id and name are required")
 	}
-	d, err := s.store.CreateDimension(ctx, req.ModelId, req.Name, req.Properties)
+	d, err := s.store.CreateDimensionTyped(ctx, req.ModelId, req.Name, req.Properties, timedim.Config{
+		Type: req.DimensionType, Granularity: req.TimeGranularity, FiscalYearStartMonth: int(req.FiscalYearStartMonth),
+	})
+	var terr *timedim.Error
+	if errors.As(err, &terr) {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 	if errors.Is(err, ErrDuplicate) {
 		return nil, status.Error(codes.AlreadyExists, err.Error())
 	}
@@ -64,7 +71,11 @@ func (s *Server) CreateDimensionMember(ctx context.Context, req *modelv1.CreateD
 	if req.DimensionId == "" || req.Code == "" {
 		return nil, status.Error(codes.InvalidArgument, "dimension_id and code are required")
 	}
-	m, err := s.store.CreateDimensionMember(ctx, req.DimensionId, req.Code, req.Label, req.ParentId, req.Properties)
+	m, err := s.store.CreateDimensionMemberPeriod(ctx, req.DimensionId, req.Code, req.Label, req.ParentId, req.Properties, req.PeriodStart, req.PeriodEnd)
+	var terr *timedim.Error
+	if errors.As(err, &terr) {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 	if errors.Is(err, ErrDuplicate) {
 		return nil, status.Error(codes.AlreadyExists, err.Error())
 	}
@@ -95,7 +106,7 @@ func (s *Server) CreateMetric(ctx context.Context, req *modelv1.CreateMetricRequ
 	}
 
 	storageStr := storageTypeToString(req.StorageType)
-	metric, err := s.store.CreateMetric(ctx, req.ModelId, req.Name, req.Formula, storageStr, req.IsInput)
+	metric, err := s.store.CreateMetricSummary(ctx, req.ModelId, req.Name, req.Formula, storageStr, req.IsInput, req.TimeSummary)
 	if errors.Is(err, ErrDuplicate) {
 		return nil, status.Error(codes.AlreadyExists, err.Error())
 	}

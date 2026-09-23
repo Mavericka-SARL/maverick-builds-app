@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog"
 
+	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/rollup"
 )
 
@@ -138,7 +140,7 @@ func (s *Scheduler) RecalcAffected(ctx context.Context, modelID, revisionID stri
 }
 
 // RecalcSpecific force-recomputes exactly the given metric IDs (plus any
-// prerequisite calc metrics topoSort pulls in via their still-current
+// prerequisite calc metrics metricformula.Plan pulls in via their still-current
 // dependency edges), regardless of whether the model's present-day
 // dependency graph still reaches them from any input.
 //
@@ -167,25 +169,55 @@ func (s *Scheduler) RecalcSpecific(ctx context.Context, modelID, revisionID stri
 	return s.recalcMetricIDs(ctx, modelID, revisionID, defs, metricIDs)
 }
 
+// revisionLocks serializes recalculation passes per (model, revision)
+// within this process. Passes used to overlap freely: each site that
+// triggers one (a cell write, a member insert, a metric edit) builds its own
+// Scheduler, and two passes over the same revision raced — the one that
+// loaded its inputs BEFORE the latest write could finish LAST and, via
+// ClearPerComboResults + write, replace fresh rows with stale ones (a newly
+// added period's rows vanishing until the next edit; the load-sensitive
+// form-mapping convergence test). A pass that waits its turn sees every
+// write made before it started, so the last pass to run is the current one.
+var revisionLocks sync.Map // "model:revision" → *sync.Mutex
+
+func lockRevision(modelID, revisionID string) func() {
+	v, _ := revisionLocks.LoadOrStore(modelID+":"+revisionID, &sync.Mutex{})
+	mu := v.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
 // recalcMetricIDs is RecalcAffected's execution core, factored out so
 // RecalcSpecific can drive it directly with an explicit target list instead
 // of deriving one from AffectedMetricIDs's graph walk.
 func (s *Scheduler) recalcMetricIDs(ctx context.Context, modelID, revisionID string, defs map[string]*MetricDef, affectedIDs []string) error {
-	// Build forward graph for topological ordering
-	graph := make(map[string][]string, len(affectedIDs))
+	defer lockRevision(modelID, revisionID)()
+	// Definitions were loaded before the lock; reload so a pass that queued
+	// behind another sees the graph as it is now.
+	if fresh, err := s.store.LoadModelMetrics(ctx, modelID, revisionID); err == nil {
+		defs = fresh
+	}
+	// Dependency-ordered components. A component is one metric, or a
+	// recurrence (a cycle broken by time — opening/closing balances) whose
+	// members are evaluated together. Plan rejects any cycle that time does
+	// not break; save-time validation already refused it, so reaching that
+	// here means the graph was written around the validator.
+	graph := make(metricformula.Graph, len(affectedIDs))
+	names := make(map[string]string, len(defs))
+	for id, def := range defs {
+		names[id] = def.Name
+	}
 	for _, id := range affectedIDs {
 		if def, ok := defs[id]; ok {
-			graph[id] = def.DependsOnID
+			graph[id] = def.DependsOn
 		}
 	}
-
-	orderedIDs, err := topoSort(graph, affectedIDs)
+	components, err := metricformula.Plan(graph, affectedIDs, names)
 	if err != nil {
-		return fmt.Errorf("topological sort: %w", err)
+		return fmt.Errorf("dependency order: %w", err)
 	}
 
 	timePartition := PartitionMonth(time.Now())
-
 	// Load dimension ID→name mapping so formulas can reference dimensions by name.
 	dimIDToName, err := s.store.LoadDimIDToName(ctx, modelID, revisionID)
 	if err != nil {
@@ -207,7 +239,12 @@ func (s *Scheduler) recalcMetricIDs(ctx context.Context, modelID, revisionID str
 		return fmt.Errorf("load metric dimension ids: %w", err)
 	}
 
-	for _, metricID := range orderedIDs {
+	for _, comp := range components {
+		if comp.Recurrence {
+			s.runRecurrence(ctx, comp, modelID, revisionID, timePartition, allDims, metricDimIDs, dimIDToName, defs)
+			continue
+		}
+		metricID := comp.Members[0]
 		def, ok := defs[metricID]
 		if !ok || def.IsInput {
 			continue
@@ -238,6 +275,42 @@ func (s *Scheduler) recalcMetricIDs(ctx context.Context, modelID, revisionID str
 	return nil
 }
 
+// runRecurrence claims every member of a recurrence component, executes it
+// as one unit, and marks all members clean or all in error together.
+func (s *Scheduler) runRecurrence(
+	ctx context.Context, comp metricformula.Component, modelID, revisionID, timePartition string,
+	allDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string, defs map[string]*MetricDef,
+) {
+	keys := make([]string, 0, len(comp.Members))
+	for _, id := range comp.Members {
+		def, ok := defs[id]
+		if !ok || def.IsInput {
+			continue
+		}
+		pk := BuildPartitionKey(modelID, revisionID, id, timePartition)
+		if err := s.store.MarkDirty(ctx, []string{pk}, modelID, id, revisionID, timePartition); err != nil {
+			s.log.Error().Err(err).Str("partition_key", pk).Msg("mark dirty")
+			return
+		}
+		claimed, err := s.store.ClaimForCalculation(ctx, pk)
+		if err != nil || !claimed {
+			return
+		}
+		keys = append(keys, pk)
+	}
+	calcErr := s.executeRecurrence(ctx, comp, modelID, revisionID, BuildPartitionKey(modelID, revisionID, comp.Members[0], timePartition), allDims, metricDimIDs, dimIDToName, defs)
+	for _, pk := range keys {
+		if calcErr != nil {
+			s.store.MarkError(ctx, pk, calcErr.Error()) //nolint:errcheck
+		} else {
+			s.store.MarkClean(ctx, pk) //nolint:errcheck
+		}
+	}
+	if calcErr != nil {
+		s.log.Error().Err(calcErr).Strs("metrics", comp.Members).Msg("recurrence calculation failed")
+	}
+}
+
 // executePartition resolves all dependency values and evaluates the formula
 // once per declared leaf-level dimensional intersection of def's own
 // dimensions (config-driven — grid_metric ⋈ grid_dimension, enumerated via
@@ -248,6 +321,22 @@ func (s *Scheduler) executePartition(
 	ctx context.Context, def *MetricDef, modelID, revisionID, partitionKey string,
 	allDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string, allDefs map[string]*MetricDef,
 ) error {
+	// A time-series formula (PREVIOUS, LAG, MOVINGSUM, ...) on a declared
+	// time dimension takes the time-series path: one evaluation per leaf
+	// period with a time context, time_summary for its totals. A time
+	// function on a metric WITHOUT a time dimension is left to the scalar
+	// path below, where it fails every cell with TIME_CONTEXT_REQUIRED — a
+	// validation error, never a silent zero. An ordinary formula on a time
+	// dimension stays on the scalar path: its leaves are period-independent,
+	// and only how they reduce across time changes (time_summary, below).
+	axis, err := timeAxisFor(allDims, metricDimIDs[def.ID])
+	if err != nil {
+		return err
+	}
+	if axis != nil && usesTimeSeries(def.Formula) {
+		return s.executeTimeSeries(ctx, def, modelID, revisionID, partitionKey, axis, allDims, metricDimIDs, dimIDToName, allDefs)
+	}
+
 	// Bulk-prefetch each dependency's recorded values ONCE (not once per
 	// leaf combo) — this is what makes full leaf-combo enumeration viable
 	// instead of the old fact-driven "only combos that already have data"
@@ -288,7 +377,8 @@ func (s *Scheduler) executePartition(
 		values := make(map[string]float64, len(def.DependsOnID))
 		for _, depID := range def.DependsOnID {
 			depDef := allDefs[depID]
-			v, _, err := rollup.Resolve(ctx, allDims, depID, metricDimIDs[depID], rollup.AggRule(depDef.AggRule), combo, fetch[depID])
+			v, _, err := rollup.ResolveTime(ctx, allDims, depID, metricDimIDs[depID], rollup.AggRule(depDef.AggRule),
+				rollup.TimeSummaryRule(depDef.TimeSummary), combo, fetch[depID])
 			if err != nil {
 				return 0, false, fmt.Errorf("resolve %s: %w", depDef.Name, err)
 			}
@@ -425,6 +515,18 @@ func (s *Scheduler) executePartition(
 	// is the difference from the 'average' shortcut further up, which throws
 	// the per-member rows away entirely.
 	aggregate := rollup.CombineAgg(vals, rollup.AggRule(def.AggRule))
+	writeAggregate := true
+	// On a time dimension, a combining rule (sum/average/count) reduces the
+	// non-time dimensions first and time last, by the metric's time_summary
+	// — a closing balance totals as its LAST period, not the sum of every
+	// month's balance. 'formula' and 'rate' are untouched: their total is
+	// the formula re-evaluated at the aggregate, across time as across any
+	// other dimension (Anaplan's Formula summary), so a margin percentage
+	// stays total_margin / total_revenue rather than a sum of quarterly
+	// percentages.
+	if axis != nil && def.AggRule != string(rollup.AggFormula) && def.AggRule != string(rollup.AggRate) {
+		aggregate, writeAggregate = summarizeOverTime(results, axis, def.AggRule, def.TimeSummary, nil)
+	}
 	if def.AggRule == string(rollup.AggFormula) {
 		total, _, totalErr := evalOne(map[string]string{})
 		if totalErr != nil {
@@ -445,9 +547,11 @@ func (s *Scheduler) executePartition(
 	// Write the aggregate FIRST: every existing external reader (/api/metrics,
 	// grid()'s totals) depends only on this '{}' row, so if a per-combo write
 	// below fails partway through, the one row everything else already reads
-	// is safely persisted regardless.
-	if err := s.store.WriteCalcResult(ctx, modelID, revisionID, def.ID, partitionKey, map[string]string{}, aggregate); err != nil {
-		return fmt.Errorf("write aggregate: %w", err)
+	// is safely persisted regardless. (time_summary 'none' writes no total.)
+	if writeAggregate {
+		if err := s.store.WriteCalcResult(ctx, modelID, revisionID, def.ID, partitionKey, map[string]string{}, aggregate); err != nil {
+			return fmt.Errorf("write aggregate: %w", err)
+		}
 	}
 
 	// The single-combo case (leafCombos collapsed to just {} above, or the
@@ -466,7 +570,8 @@ func (s *Scheduler) executePartition(
 	// a large model). Combined exactly as scopeCalcCells (the live scoped
 	// read) does, so the fast path and the recompute fallback never disagree.
 	dimConditional := FormulaReferencesDims(def.Formula, dimIDToName)
-	perComboRows = append(perComboRows, oneDimSliceRows(def.AggRule, dimConditional, metricDimIDs[def.ID], allDims, results, evalOne)...)
+	perComboRows = append(perComboRows, oneDimSliceRows(def.AggRule, dimConditional, metricDimIDs[def.ID], allDims, results, evalOne, axis, def.TimeSummary)...)
+	perComboRows = append(perComboRows, aggregatePeriodRows(def.AggRule, metricDimIDs[def.ID], results, axis, def.TimeSummary)...)
 	// This recompute's per-combo set is authoritative: clear the previous
 	// set first, or intersections that lost their data since the last run
 	// (skipped above, so absent from perComboRows) would keep serving their
@@ -504,6 +609,10 @@ func (s *Scheduler) executePartition(
 //
 // Single-dimension metrics are skipped: their one-dim "slice" is just a leaf or
 // rollup combo, already handled by the leaf/RollupCombos writes above.
+//
+// With a time axis, a non-time member's slice for a combining rule reduces
+// the periods by timeSummary (see summarizeOverTime); the time member's own
+// slice is one period and needs no time reduction.
 func oneDimSliceRows(
 	aggRule string,
 	dimConditional bool,
@@ -511,6 +620,8 @@ func oneDimSliceRows(
 	dims map[string]*rollup.Dimension,
 	leafResults []CalcResultRow,
 	evalOne func(map[string]string) (float64, bool, error),
+	axis *timeAxis,
+	timeSummaryRule string,
 ) []CalcResultRow {
 	if len(dimIDs) < 2 {
 		return nil
@@ -554,6 +665,15 @@ func oneDimSliceRows(
 				sub[c] = true
 				queue = append(queue, childrenOf[c]...)
 			}
+			if axis != nil && (dimID != axis.dim.ID || !m.IsLeafPeriod()) {
+				// A non-time member reduces time by the summary; so does an
+				// AGGREGATE period (H1 = its quarters reduced). A leaf period
+				// is a single period and falls through to the plain combine.
+				if v, ok := summarizeOverTime(leafResults, axis, aggRule, timeSummaryRule, map[string]map[string]bool{dimID: sub}); ok {
+					out = append(out, CalcResultRow{DimMembers: slice, Value: v})
+				}
+				continue
+			}
 			vals := make([]float64, 0)
 			for _, r := range leafResults {
 				if code, ok := r.DimMembers[dimID]; ok && sub[code] {
@@ -564,6 +684,28 @@ func oneDimSliceRows(
 				continue
 			}
 			out = append(out, CalcResultRow{DimMembers: slice, Value: rollup.CombineAgg(vals, rollup.AggRule(aggRule))})
+		}
+	}
+	return out
+}
+
+// aggregatePeriodRows writes {H1}, {FY26} rows for a metric whose ONLY
+// dimension is a time hierarchy (oneDimSliceRows covers the multi-dimension
+// case): each aggregate period is its leaves reduced by the time summary,
+// except under formula/rate rules, whose aggregate rows come from
+// RollupCombos (formula re-evaluated at the aggregate).
+func aggregatePeriodRows(aggRule string, dimIDs []string, leafResults []CalcResultRow, axis *timeAxis, timeSummaryRule string) []CalcResultRow {
+	if axis == nil || len(dimIDs) != 1 || aggRule == string(rollup.AggFormula) || aggRule == string(rollup.AggRate) {
+		return nil
+	}
+	var out []CalcResultRow
+	for _, m := range axis.dim.Members {
+		if m.IsLeafPeriod() {
+			continue
+		}
+		sub := subtreeCodes(axis.dim, m.Code)
+		if v, ok := summarizeOverTime(leafResults, axis, aggRule, timeSummaryRule, map[string]map[string]bool{axis.dim.ID: sub}); ok {
+			out = append(out, CalcResultRow{DimMembers: map[string]string{axis.dim.ID: m.Code}, Value: v})
 		}
 	}
 	return out
@@ -615,7 +757,7 @@ func (s *Scheduler) rateTotal(
 		if total, found := valueMap[dimKey(map[string]string{})]; found {
 			return total, nil
 		}
-		v, _, resolveErr := rollup.Resolve(ctx, allDims, id, metricDimIDs[id], rollup.AggRule(d.AggRule),
+		v, _, resolveErr := rollup.ResolveTime(ctx, allDims, id, metricDimIDs[id], rollup.AggRule(d.AggRule), rollup.TimeSummaryRule(d.TimeSummary),
 			map[string]string{}, func(_ context.Context, _ string, combo map[string]string) (float64, bool, error) {
 				val, hit := valueMap[dimKey(combo)]
 				return val, hit, nil
@@ -766,43 +908,4 @@ func PartitionMonth(t time.Time) string {
 
 func isAlreadyExists(err error) bool {
 	return err != nil && (strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "stream name already in use"))
-}
-
-// topoSort is a local wrapper around the graph package's TopologicalOrder.
-func topoSort(graph map[string][]string, allIDs []string) ([]string, error) {
-	type state int
-	const (
-		unvisited state = iota
-		inStack
-		done
-	)
-	st := make(map[string]state)
-	var order []string
-
-	var visit func(n string) error
-	visit = func(n string) error {
-		switch st[n] {
-		case done:
-			return nil
-		case inStack:
-			return fmt.Errorf("cycle at %s", n)
-		case unvisited: // proceed to visit
-		}
-		st[n] = inStack
-		for _, dep := range graph[n] {
-			if err := visit(dep); err != nil {
-				return err
-			}
-		}
-		st[n] = done
-		order = append(order, n)
-		return nil
-	}
-
-	for _, id := range allIDs {
-		if err := visit(id); err != nil {
-			return nil, err
-		}
-	}
-	return order, nil
 }

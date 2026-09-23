@@ -106,7 +106,7 @@ func (h *handler) ssoSettings(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		s, err := store.Get(tctx)
+		s, err := store.Get(tctx, customerID)
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
@@ -279,7 +279,7 @@ func (h *handler) ssoDiscover(w http.ResponseWriter, r *http.Request) {
 		customerID, alias, err := domains.Lookup(ctx, email[strings.LastIndex(email, "@")+1:])
 		if err == nil && alias != "" {
 			tctx := h.tenantCtx(ctx, customerID)
-			if s, err := sso.NewStore(h.db.For(tctx)).Get(tctx); err == nil && s.Enabled && s.Configured {
+			if s, err := sso.NewStore(h.db.For(tctx)).Get(tctx, customerID); err == nil && s.Enabled && s.Configured {
 				out["alias"] = alias
 				out["display_name"] = s.DisplayName
 			}

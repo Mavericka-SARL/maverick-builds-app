@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateModelData } from "../modelDataQueries";
 import { X as XIcon, Pencil as PencilIcon, Plus as PlusIcon, Trash2, Upload, Download } from "lucide-react";
 import { api, type DemoContext, type Metric, type DevDimension, type DevDimensionMember, type FormDef, type FormRecord, type FormField, type FormImportRowError, type ApiError } from "../../api/client";
 import { Tabs, SectionHeader, Button, InlineAlert, LoadingState, StatusBadge, IconButton, EmptyState, Field, Select, TextInput, NumberInput, useConfirm } from "../../ui";
@@ -144,7 +145,7 @@ export function FormsTab() {
     mutationFn: () => api.createRecord(selectedFormId!, draft, (ctx as DemoContext | undefined)?.revision_id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["records"] });
-      qc.invalidateQueries({ queryKey: ["grid"] });
+      invalidateModelData(qc);
       setDraft({});
       setShowNewRecord(false);
     },
@@ -154,7 +155,7 @@ export function FormsTab() {
     mutationFn: () => api.updateRecord(editingRecord!.id, editStatus, editDraft),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["records"] });
-      qc.invalidateQueries({ queryKey: ["grid"] });
+      invalidateModelData(qc);
       setEditingRecord(null);
     },
   });
@@ -167,7 +168,7 @@ export function FormsTab() {
   const syncForm = useMutation({
     mutationFn: (formId: string) => api.syncForm(formId),
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["grid"] });
+      invalidateModelData(qc);
       qc.invalidateQueries({ queryKey: ["records"] });
       if (data.mappings === 0) {
         setSyncMsg("No active integrations configured for this form.");
@@ -196,7 +197,7 @@ export function FormsTab() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["records"] });
-      qc.invalidateQueries({ queryKey: ["grid"] });
+      invalidateModelData(qc);
       setImportErrors(null);
     },
     onError: (e) => setImportErrors((e as ApiError).body?.errors as FormImportRowError[] | undefined ?? null),

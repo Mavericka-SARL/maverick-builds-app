@@ -367,6 +367,85 @@ jobs:
           path: web/playwright-report/
           retention-days: 7
 
+  web-e2e-keycloak:
+    name: Playwright e2e (real Keycloak login)
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 25
+    needs: changes
+    if: needs.changes.outputs.web == 'true' || needs.changes.outputs.go == 'true'
+    # The one suite the mocked smoke run cannot cover: a genuine Keycloak
+    # PKCE sign-in against a gateway with DEV_MODE=false, then an
+    # authenticated API call (web/e2e-keycloak). It ran only by hand until
+    # 2026-09-21, and its assumptions had quietly drifted (the console's
+    # first /api call is a public one since branding shipped).
+    #
+    # Ports: the smoke suite (web-e2e) runs its console on 5173 on the same
+    # self-hosted node at the same time, so this one takes 3000 — the other
+    # redirect the realm's mavericks-web client allows — and its gateway
+    # 8090; the database and Keycloak sit on 15432/18180. Nothing else on
+    # the node uses any of them, but two of THESE would, so the job is one
+    # at a time across every run.
+    concurrency:
+      group: e2e-keycloak-${{ vars.RUNNER_LABEL || 'hosted' }}
+      cancel-in-progress: false
+    env:
+      E2E_WEB_PORT: "3000"
+      E2E_GATEWAY_PORT: "8090"
+      DATABASE_URL: postgres://mavericks:mavericks@localhost:15432/mavericks?sslmode=disable
+      KEYCLOAK_URL: http://localhost:18180
+      VITE_KEYCLOAK_URL: http://localhost:18180
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: ${{ !vars.RUNNER_LABEL }}   # see go-test: a self-hosted runner keeps its own
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+      - run: npx playwright install chromium   # never --with-deps: see web-e2e
+        working-directory: web
+        timeout-minutes: 10
+      - name: Start Postgres and Keycloak (dev realm)
+        run: |
+          # The concurrency group above serialises this job, but a CANCELLED
+          # run releases the group before its "Stop" post-step has torn the
+          # stack down (seen 2026-09-22: a push run cancelled by the dispatch
+          # run for the same commit still held 18180). Clear what is left
+          # and wait for the ports rather than fail on the first bind.
+          docker compose -f deploy/docker/docker-compose.ci-keycloak.yml down -v --remove-orphans 2>/dev/null || true
+          for i in $(seq 1 45); do
+            ss -ltn 2>/dev/null | grep -qE ':(18180|15432|8090|3000) ' || break
+            echo "waiting for a previous run to release the ports ($i)"; sleep 2
+          done
+          docker compose -f deploy/docker/docker-compose.ci-keycloak.yml up -d --wait
+          # Keycloak's master realm requires HTTPS for callers it deems
+          # external, which the host is from inside the container: relax it,
+          # or the global setup's admin login answers "HTTPS required".
+          docker compose -f deploy/docker/docker-compose.ci-keycloak.yml exec -T keycloak sh -c \
+            '/opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user admin --password admin \
+             && /opt/keycloak/bin/kcadm.sh update realms/master -s sslRequired=NONE'
+      - run: npx playwright test --config=playwright.keycloak.config.ts
+        working-directory: web
+      - name: Stop Postgres and Keycloak
+        if: always()
+        run: docker compose -f deploy/docker/docker-compose.ci-keycloak.yml down -v --remove-orphans
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: playwright-keycloak-report
+          path: web/test-results/
+          retention-days: 7
+
   web-build:
     name: Frontend build
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
@@ -604,7 +683,7 @@ jobs:
     # code, and its own build runs `tsc -b && vite build` so a type error fails
     # it regardless. Without this job the console had no deployable artifact at
     # all — CI built web/dist and uploaded it as an artifact nothing consumed.
-    needs: [web-lint, web-typecheck, web-build, web-e2e]
+    needs: [web-lint, web-typecheck, web-build, web-e2e, web-e2e-keycloak]
     if: github.event_name == 'workflow_dispatch' && inputs.publish_images
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 30

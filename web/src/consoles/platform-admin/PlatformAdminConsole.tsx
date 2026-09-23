@@ -22,7 +22,7 @@ import {
 
 // ── Model Revisions Section ────────────────────────────────────────────────────
 
-function ModelRevisionsSection({ model, tenantId, isTenantAdmin }: { model: AdminModel; tenantId: string; isTenantAdmin: boolean }) {
+function ModelRevisionsSection({ model, tenantId, canTransferModels }: { model: AdminModel; tenantId: string; canTransferModels: boolean }) {
   const qc = useQueryClient();
   const [addRevision, setAddRevision] = useState(false);
   const [revisionName, setRevisionName] = useState("");
@@ -75,7 +75,7 @@ function ModelRevisionsSection({ model, tenantId, isTenantAdmin }: { model: Admi
                   {s.id.slice(0, 8)} · {s.created_at ? s.created_at.slice(0, 16).replace("T", " ") : ""}
                 </div>
               </div>
-              {isTenantAdmin && (
+              {canTransferModels && (
                 <>
                   <IconButton
                     aria-label={`Export revision ${s.name} of ${model.name} with data`}
@@ -156,7 +156,7 @@ function ModelRevisionsSection({ model, tenantId, isTenantAdmin }: { model: Admi
 
 // ── App Section ────────────────────────────────────────────────────────────────
 
-function AppSection({ app, tenantId, onDelete, isTenantAdmin }: { app: AdminApp; tenantId: string; onDelete: () => void; isTenantAdmin: boolean }) {
+function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: AdminApp; tenantId: string; onDelete: () => void; canTransferModels: boolean }) {
   const qc = useQueryClient();
   const [addModel, setAddModel] = useState(false);
   const [modelName, setModelName] = useState("");
@@ -230,7 +230,7 @@ function AppSection({ app, tenantId, onDelete, isTenantAdmin }: { app: AdminApp;
           <div key={m.id} className="mvx-admin-model">
             <div className="mvx-admin-model__header">
               <span className="mvx-admin-model__name">{m.name}</span>
-              {isTenantAdmin && (
+              {canTransferModels && (
                 <IconButton
                   aria-label={`Export model ${m.name}`}
                   title="Export model (active revision)"
@@ -240,7 +240,7 @@ function AppSection({ app, tenantId, onDelete, isTenantAdmin }: { app: AdminApp;
                   <Download size={13} />
                 </IconButton>
               )}
-              {isTenantAdmin && (
+              {canTransferModels && (
                 <IconButton
                   aria-label={`Download deployment package for ${m.name}`}
                   title="Download standalone deployment package (data + migrations + manifest)"
@@ -260,7 +260,7 @@ function AppSection({ app, tenantId, onDelete, isTenantAdmin }: { app: AdminApp;
                 <Trash2 size={13} />
               </IconButton>
             </div>
-            <ModelRevisionsSection model={m} tenantId={tenantId} isTenantAdmin={isTenantAdmin} />
+            <ModelRevisionsSection model={m} tenantId={tenantId} canTransferModels={canTransferModels} />
           </div>
         ))}
 
@@ -290,7 +290,7 @@ function AppSection({ app, tenantId, onDelete, isTenantAdmin }: { app: AdminApp;
             <Button size="sm" variant="ghost" leadingIcon={<Plus size={13} />} onClick={() => { setAddModel(true); setModelName(""); }}>
               Add model
             </Button>
-            {isTenantAdmin && (
+            {canTransferModels && (
               <>
                 <Button
                   size="sm"
@@ -327,35 +327,26 @@ function AppSection({ app, tenantId, onDelete, isTenantAdmin }: { app: AdminApp;
 // ── Tenant Section ─────────────────────────────────────────────────────────────
 
 // planLabel is the tenant's plan as the card's meta line says it: the plan's
-// name, the trial and its days, and whether the tenant is read-only.
+// name, and whether the tenant is read-only.
 function planLabel(tenant: AdminTenant): string {
   const st = tenant.plan_state;
   if (!st) return tenant.plan;
   const parts = [st.plan_known ? st.plan.name : `${tenant.plan} (no such plan)`];
-  if (st.trial) parts.push(st.read_only && st.code === "trial_expired" ? "trial ended" : `trial, ${st.days_left} day${st.days_left === 1 ? "" : "s"} left`);
   if (st.read_only) parts.push("read-only");
   return parts.join(" · ");
 }
 
 /**
- * The platform admin's plan controls on a tenant card: move the tenant to
- * another plan (a trial plan starts its clock), or set the trial's end
- * date directly — an extension, or an early end with an empty date.
+ * The platform admin's plan control on a tenant card: move the tenant to
+ * another plan. The next usage sweep judges it by the new limits.
  */
 function TenantPlanControls({ tenant }: { tenant: AdminTenant }) {
   const qc = useQueryClient();
   const { data: plans } = useQuery({ queryKey: ["admin-plans"], queryFn: api.getPlans });
   const [open, setOpen] = useState(false);
   const [plan, setPlan] = useState(tenant.plan);
-  const [ends, setEnds] = useState(tenant.plan_state?.trial_ends_at ? tenant.plan_state.trial_ends_at.slice(0, 10) : "");
   const save = useMutation({
-    mutationFn: () => {
-      const body: { plan?: string; trial_ends_at?: string } = {};
-      if (plan !== tenant.plan) body.plan = plan;
-      const current = tenant.plan_state?.trial_ends_at ? tenant.plan_state.trial_ends_at.slice(0, 10) : "";
-      if (ends !== current) body.trial_ends_at = ends ? new Date(`${ends}T23:59:59Z`).toISOString() : "";
-      return api.updateAdminTenant(tenant.id, body);
-    },
+    mutationFn: () => api.updateAdminTenant(tenant.id, plan !== tenant.plan ? { plan } : {}),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ["admin-tenants"] }); setOpen(false); },
   });
   if (!open) {
@@ -371,10 +362,6 @@ function TenantPlanControls({ tenant }: { tenant: AdminTenant }) {
         {(plans ?? []).map((p) => <option key={p.key} value={p.key}>{p.name}</option>)}
         {plans && !plans.some((p) => p.key === tenant.plan) && <option value={tenant.plan}>{tenant.plan}</option>}
       </Select>
-      <label className="mvx-admin-muted" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        Trial ends
-        <TextInput type="date" value={ends} onChange={(e) => setEnds(e.target.value)} aria-label="Trial ends" style={{ width: 160 }} />
-      </label>
       <Button variant="primary" size="sm" loading={save.isPending} loadingLabel="Saving…" onClick={() => save.mutate()}>Save</Button>
       <Button size="sm" onClick={() => setOpen(false)}>Cancel</Button>
       {save.isError && <span className="mvx-admin-error">{(save.error as Error).message}</span>}
@@ -382,7 +369,7 @@ function TenantPlanControls({ tenant }: { tenant: AdminTenant }) {
   );
 }
 
-function TenantSection({ tenant, onDelete, isPlatformAdmin, isTenantAdmin }: { tenant: AdminTenant; onDelete: () => void; isPlatformAdmin: boolean; isTenantAdmin: boolean }) {
+function TenantSection({ tenant, onDelete, isPlatformAdmin, canTransferModels }: { tenant: AdminTenant; onDelete: () => void; isPlatformAdmin: boolean; canTransferModels: boolean }) {
   const qc = useQueryClient();
   const [addApp, setAddApp] = useState(false);
   const [appName, setAppName] = useState("");
@@ -462,12 +449,12 @@ function TenantSection({ tenant, onDelete, isPlatformAdmin, isTenantAdmin }: { t
       </div>
 
       <div className="mvx-admin-object__body">
-        {isPlatformAdmin && <TenantPlanControls key={`${tenant.plan}-${tenant.plan_state?.trial_ends_at ?? ""}`} tenant={tenant} />}
+        {isPlatformAdmin && <TenantPlanControls key={tenant.plan} tenant={tenant} />}
         {(tenant.applications ?? []).length === 0 && (
           <p className="mvx-admin-muted">No applications yet.</p>
         )}
         {(tenant.applications ?? []).map(app => (
-          <AppSection key={app.id} app={app} tenantId={tenant.id} onDelete={() => deleteApp.mutate(app.id)} isTenantAdmin={isTenantAdmin} />
+          <AppSection key={app.id} app={app} tenantId={tenant.id} onDelete={() => deleteApp.mutate(app.id)} canTransferModels={canTransferModels} />
         ))}
         {deleteApp.isError && <p className="mvx-admin-error">{(deleteApp.error as Error).message}</p>}
 
@@ -506,7 +493,7 @@ function TenantSection({ tenant, onDelete, isPlatformAdmin, isTenantAdmin }: { t
 
 // ── Applications View ─────────────────────────────────────────────────────────
 
-export function ApplicationsView({ tenants, isPlatformAdmin, isTenantAdmin }: { tenants: AdminTenant[]; isPlatformAdmin: boolean; isTenantAdmin: boolean }) {
+export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }: { tenants: AdminTenant[]; isPlatformAdmin: boolean; canTransferModels: boolean }) {
   const qc = useQueryClient();
   const [addTenant, setAddTenant] = useState(false);
   const [tenantName, setTenantName] = useState("");
@@ -536,7 +523,7 @@ export function ApplicationsView({ tenants, isPlatformAdmin, isTenantAdmin }: { 
       )}
 
       {tenants.map(tenant => (
-        <TenantSection key={tenant.id} tenant={tenant} onDelete={() => deleteTenant.mutate(tenant.id)} isPlatformAdmin={isPlatformAdmin} isTenantAdmin={isTenantAdmin} />
+        <TenantSection key={tenant.id} tenant={tenant} onDelete={() => deleteTenant.mutate(tenant.id)} isPlatformAdmin={isPlatformAdmin} canTransferModels={canTransferModels} />
       ))}
 
       {isPlatformAdmin && addTenant ? (

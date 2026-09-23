@@ -10,7 +10,6 @@ package branding
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"regexp"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/mavericks-engine/mavericks/internal/imagedata"
 )
 
 // Settings is the one row of core.branding.
@@ -37,8 +37,8 @@ type Settings struct {
 }
 
 const (
-	MaxLogoBytes    = 256 * 1024
-	MaxFaviconBytes = 32 * 1024
+	MaxLogoBytes    = imagedata.MaxLogoBytes
+	MaxFaviconBytes = imagedata.MaxFaviconBytes
 	MaxNameLen      = 60
 	MaxTaglineLen   = 120
 )
@@ -47,9 +47,6 @@ var (
 	colorRe  = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 	domainRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
 )
-
-// allowedImageTypes are what a browser tab and a sidebar can show.
-var allowedImageTypes = map[string]bool{"image/png": true, "image/jpeg": true, "image/svg+xml": true, "image/webp": true, "image/x-icon": true, "image/vnd.microsoft.icon": true}
 
 // Store reads and writes one tenant's row. It is keyed by customer even
 // inside a dedicated database: on a shared database that is what keeps one
@@ -105,10 +102,10 @@ func Validate(in Settings) (Settings, error) {
 	if in.BrandColor != "" {
 		in.BrandColor = strings.ToLower(in.BrandColor)
 	}
-	if err := checkImage("logo", in.LogoDataURL, MaxLogoBytes); err != nil {
+	if err := imagedata.Validate("logo", in.LogoDataURL, MaxLogoBytes); err != nil {
 		return Settings{}, err
 	}
-	if err := checkImage("favicon", in.FaviconDataURL, MaxFaviconBytes); err != nil {
+	if err := imagedata.Validate("favicon", in.FaviconDataURL, MaxFaviconBytes); err != nil {
 		return Settings{}, err
 	}
 	dom, err := NormalizeDomain(in.CustomDomain)
@@ -118,32 +115,6 @@ func Validate(in Settings) (Settings, error) {
 	in.CustomDomain = dom
 	in.Configured = in.configured()
 	return in, nil
-}
-
-// checkImage accepts an empty value or a data URL of an allowed image type
-// within the byte limit.
-func checkImage(what, dataURL string, limit int) error {
-	if dataURL == "" {
-		return nil
-	}
-	if !strings.HasPrefix(dataURL, "data:") {
-		return fmt.Errorf("%s must be an image data URL", what)
-	}
-	meta, payload, ok := strings.Cut(dataURL[len("data:"):], ",")
-	if !ok || !strings.HasSuffix(meta, ";base64") {
-		return fmt.Errorf("%s must be a base64 image data URL", what)
-	}
-	typ := strings.TrimSuffix(meta, ";base64")
-	if !allowedImageTypes[typ] {
-		return fmt.Errorf("%s must be a PNG, JPEG, SVG, WebP or ICO image", what)
-	}
-	if n := base64.StdEncoding.DecodedLen(len(payload)); n > limit {
-		return fmt.Errorf("%s must be at most %d KB", what, limit/1024)
-	}
-	if _, err := base64.StdEncoding.DecodeString(payload); err != nil {
-		return fmt.Errorf("%s is not valid base64", what)
-	}
-	return nil
 }
 
 // NormalizeDomain lower-cases a host and strips what people paste with it

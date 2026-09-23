@@ -10,8 +10,11 @@ import { test, expect } from "@playwright/test";
 // browser here — that's the same JWKSValidator.Validate logic already
 // covered directly and deterministically by internal/gateway's Go tests.
 test("real Keycloak login authenticates and an API call succeeds", async ({ page }) => {
+  // The console asks /api/branding and /api/legal before anyone is signed
+  // in (public, no token), so the proof of an authenticated call is /api/me
+  // — the first request the console makes AS the signed-in person.
   const apiResponse = page.waitForResponse(
-    (res) => res.url().includes("/api/") && res.request().method() === "GET",
+    (res) => res.url().includes("/api/me") && res.request().method() === "GET",
   );
 
   await page.goto("/");
@@ -24,7 +27,7 @@ test("real Keycloak login authenticates and an API call succeeds", async ({ page
   await page.click("#kc-login");
 
   // Back on the app, past ProdAuthProvider's `if (!authenticated) return null` gate.
-  await page.waitForURL("http://localhost:5173/**");
+  await page.waitForURL((u) => u.origin === new URL(page.url()).origin && !u.pathname.includes("/realms/"));
 
   const res = await apiResponse;
   expect(res.status()).toBe(200);

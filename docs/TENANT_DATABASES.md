@@ -65,9 +65,17 @@ immediately as a foreign-key violation on `audit_event.actor_user_id`.
   not served, so it can never run against a schema it was not migrated to;
   the other tenants start normally.
 - **Deletion** (`DELETE /api/admin/tenants/{id}`): `DROP DATABASE … WITH (FORCE)`
-  and the catalog row. Final, and the only way the data goes away.
+  and the catalog row. Final, and the only way the data goes away. The
+  tenant's people go with it — every user it owns (signed up into it or
+  created by its administrators) loses their identity row and their
+  Keycloak account, exactly as `DELETE /api/admin/users/{id}` removes one
+  person; a platform administrator is never a tenant's to delete. In the
+  shared database the same cascade runs before the customer row is deleted.
+  Deleting a person never deletes the tenant's data: what they entered,
+  posted, started or imported stays, authored by "a former user"
+  (migration 094).
 - **Pools**: opened on first use, capped at `TENANT_DB_MAX_CONNS` (5 by
-  default) and closed after ten idle minutes. Hundreds of trial tenants
+  default) and closed after ten idle minutes. Hundreds of test-workspace tenants
   therefore cost nothing while idle.
 
 ## Background work
@@ -89,10 +97,12 @@ Both the gateway and `cmd/integration` read them.
 
 ### PgBouncer
 
-The shipped PgBouncer runs in transaction pooling against one database name.
-Dedicated tenants open many database names, so in `dedicated` mode point
-`DATABASE_URL` at PostgreSQL directly, or configure PgBouncer with a wildcard
-database entry (`* = host=postgres`) so any database name is proxied.
+The shipped PgBouncer (`deploy/k8s/base/infra/pgbouncer.yaml`) runs in
+transaction pooling with a wildcard database entry (`* = host=postgres`), so
+any database name is proxied and dedicated tenants open `tenant_<id>`
+through the same address. A PgBouncer pinned to one database name
+(`DB_NAME` set on that image) refuses them with "no such database" — which
+is why the base leaves it unset.
 
 ## Backups
 

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type NotificationSettings } from "../../api/client";
 import { Button, Card, Checkbox, Field, InlineAlert, LoadingState, NumberInput, TextInput } from "../../ui";
+import { SettingsScopeNotice } from "./SettingsScopeNotice";
 
 const EMPTY: NotificationSettings = {
   email_enabled: false,
@@ -42,13 +43,30 @@ export function NotificationSettingsTab() {
     },
   });
 
+  // The relay is proven by sending, not by reading its configuration back:
+  // the message goes to the signed-in administrator's own address, and the
+  // relay's own answer (accepted, refused, no answer) is shown as it came.
+  const testSend = useMutation({ mutationFn: api.sendNotificationTestMail });
+
+  // A tenant with settings of its own can drop them and follow the
+  // deployment's defaults again (enterprise deployment_settings).
+  const inherit = useMutation({
+    mutationFn: api.clearNotificationSettings,
+    onSuccess: (next) => {
+      qc.setQueryData(["notification-settings"], next);
+      setDraft(null);
+    },
+  });
+
   if (isLoading) return <LoadingState label="Loading notification settings…" />;
   if (error) return <InlineAlert tone="danger">{(error as Error).message}</InlineAlert>;
 
   const set = (patch: Partial<NotificationSettings>) => setDraft({ ...form, ...patch });
+  const scope = data?.scope;
 
   return (
     <div className="mvx-admin-stack" data-testid="notification-settings">
+      <SettingsScopeNotice scope={scope} onInherit={() => inherit.mutate()} inheriting={inherit.isPending} />
       <Card>
         <div style={{ fontWeight: 700, marginBottom: 4 }}>E-mail</div>
         <p className="mvx-admin-muted" style={{ marginTop: 0 }}>
@@ -65,6 +83,26 @@ export function NotificationSettingsTab() {
           onChange={(e) => set({ email_enabled: e.target.checked })}
           label="Send notifications by e-mail"
         />
+        {data?.mailer_configured && (
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
+            <Button
+              variant="secondary"
+              onClick={() => testSend.mutate()}
+              disabled={testSend.isPending}
+              data-testid="send-test-mail"
+            >
+              {testSend.isPending ? "Sending…" : "Send me a test e-mail"}
+            </Button>
+            <span className="mvx-admin-muted">Goes to your own address only, through this deployment&apos;s relay.</span>
+          </div>
+        )}
+        {testSend.isSuccess && (
+          <InlineAlert tone="success">
+            The relay accepted a test message for <strong>{testSend.data.sent_to}</strong>. If it does not arrive, the problem is
+            after the relay: the sender address, or the recipient&apos;s filters.
+          </InlineAlert>
+        )}
+        {testSend.isError && <InlineAlert tone="danger">{(testSend.error as Error).message}</InlineAlert>}
       </Card>
 
       <Card>

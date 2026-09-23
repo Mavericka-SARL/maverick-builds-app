@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/mavericks-engine/mavericks/ee/aikeys"
 	"github.com/mavericks-engine/mavericks/ee/auditexport"
 	"github.com/mavericks-engine/mavericks/ee/branding"
 	"net/http"
@@ -96,11 +97,23 @@ type cfg struct {
 	SMTPUsername string `mapstructure:"SMTP_USERNAME"`
 	SMTPPassword string `mapstructure:"SMTP_PASSWORD"`
 	SMTPFrom     string `mapstructure:"SMTP_FROM"`
-	// Self-service sign-up (docs/PLANS_AND_TRIALS.md): off unless a
+	// Self-service sign-up (docs/PLANS_AND_SIGNUP.md): off unless a
 	// deployment opts in. PlanContactURL is where "change the plan" leads
-	// in every trial notice and plan-limit refusal.
+	// in every plan-limit refusal.
 	SignupEnabled  bool   `mapstructure:"SIGNUP_ENABLED"`
 	PlanContactURL string `mapstructure:"PLAN_CONTACT_URL"`
+	// Who operates this deployment, for the terms of service and the
+	// privacy notice the front-door pages serve (internal/gateway/legal.go,
+	// docs/LEGAL_AND_PRIVACY.md). Unset means this deployment publishes no
+	// documents, and /signup then promises agreement to nothing.
+	LegalEntity       string `mapstructure:"LEGAL_ENTITY"`
+	LegalAddress      string `mapstructure:"LEGAL_ADDRESS"`
+	LegalEmail        string `mapstructure:"LEGAL_EMAIL"`
+	LegalJurisdiction string `mapstructure:"LEGAL_JURISDICTION"`
+	LegalHosting      string `mapstructure:"LEGAL_HOSTING"`
+	LegalUpdated      string `mapstructure:"LEGAL_UPDATED"`
+	LegalTermsURL     string `mapstructure:"LEGAL_TERMS_URL"`
+	LegalPrivacyURL   string `mapstructure:"LEGAL_PRIVACY_URL"`
 }
 
 func main() {
@@ -266,6 +279,33 @@ func main() {
 		log.Info().Msg("no license key configured — running the community edition")
 	}
 
+	// The deployment's own settings rows live on the control plane and are
+	// what a tenant without its own inherits — on an edition that includes
+	// them (docs/NOTIFICATIONS.md, migration 091). The resolvers are
+	// process-wide because the control plane is.
+	deploymentSettings := func() bool { return lic.Has(license.FeatureDeploymentSettings) }
+	notification.DeploymentDefaults = func(ctx context.Context) (notification.Settings, bool) {
+		if !deploymentSettings() {
+			return notification.Settings{}, false
+		}
+		s, found, err := notification.NewStore(pool).GetSettings(ctx, notification.DeploymentScope)
+		return s, err == nil && found
+	}
+	auditexport.Defaults = func(ctx context.Context) (auditexport.Settings, bool) {
+		if !deploymentSettings() {
+			return auditexport.Settings{}, false
+		}
+		s, found, err := auditexport.GetSettings(ctx, pool, auditexport.DeploymentScope)
+		return s, err == nil && found
+	}
+	aikeys.Defaults = func(ctx context.Context) (provider, model, apiKey string, enforced, ok bool) {
+		if !deploymentSettings() {
+			return "", "", "", false, false
+		}
+		provider, model, apiKey, enforced, err := aikeys.NewStore(pool).Resolve(ctx, aikeys.DeploymentScope)
+		return provider, model, apiKey, enforced, err == nil
+	}
+
 	// Plans are read from the control plane. One enforcer serves both the
 	// requests and the sweep below, so a sweep's verdict applies at once.
 	planEnforcer := plan.NewEnforcer(pool)
@@ -277,8 +317,13 @@ func main() {
 			License:     lic,
 			Router:      router,
 			Signup:      gateway.SignupConfig{Enabled: c.SignupEnabled, ContactURL: c.PlanContactURL},
+			Legal: gateway.LegalConfig{
+				Entity: c.LegalEntity, Address: c.LegalAddress, Email: c.LegalEmail,
+				Jurisdiction: c.LegalJurisdiction, Hosting: c.LegalHosting, Updated: c.LegalUpdated,
+				TermsURL: c.LegalTermsURL, PrivacyURL: c.LegalPrivacyURL,
+			},
 
-			MailerConfigured:  mailer != nil,
+			Mailer:            mailer,
 			KeycloakPublicURL: firstNonEmptyString(c.KeycloakIssuer, c.KeycloakURL), KeycloakRealm: c.KeycloakRealm, PublicURL: c.ConsoleURL,
 		}),
 		"gateway",

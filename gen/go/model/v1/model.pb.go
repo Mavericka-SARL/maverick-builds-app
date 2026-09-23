@@ -136,14 +136,21 @@ func (x *DimensionProperty) GetRequired() bool {
 }
 
 type Dimension struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	ModelId       string                 `protobuf:"bytes,2,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
-	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	Properties    []*DimensionProperty   `protobuf:"bytes,4,rep,name=properties,proto3" json:"properties,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Id         string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	ModelId    string                 `protobuf:"bytes,2,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
+	Name       string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	Properties []*DimensionProperty   `protobuf:"bytes,4,rep,name=properties,proto3" json:"properties,omitempty"`
+	CreatedAt  *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// Explicit, immutable time marker: "standard" (default) or "time". A
+	// dimension named "month" is not a time dimension unless marked so.
+	DimensionType string `protobuf:"bytes,6,opt,name=dimension_type,json=dimensionType,proto3" json:"dimension_type,omitempty"`
+	// Time dimensions only: day | week | month | quarter | half_year | year | custom.
+	TimeGranularity string `protobuf:"bytes,7,opt,name=time_granularity,json=timeGranularity,proto3" json:"time_granularity,omitempty"`
+	// Time dimensions only: 1-12.
+	FiscalYearStartMonth int32 `protobuf:"varint,8,opt,name=fiscal_year_start_month,json=fiscalYearStartMonth,proto3" json:"fiscal_year_start_month,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *Dimension) Reset() {
@@ -211,14 +218,41 @@ func (x *Dimension) GetCreatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Dimension) GetDimensionType() string {
+	if x != nil {
+		return x.DimensionType
+	}
+	return ""
+}
+
+func (x *Dimension) GetTimeGranularity() string {
+	if x != nil {
+		return x.TimeGranularity
+	}
+	return ""
+}
+
+func (x *Dimension) GetFiscalYearStartMonth() int32 {
+	if x != nil {
+		return x.FiscalYearStartMonth
+	}
+	return 0
+}
+
 type DimensionMember struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	DimensionId   string                 `protobuf:"bytes,2,opt,name=dimension_id,json=dimensionId,proto3" json:"dimension_id,omitempty"`
-	Code          string                 `protobuf:"bytes,3,opt,name=code,proto3" json:"code,omitempty"`
-	Label         string                 `protobuf:"bytes,4,opt,name=label,proto3" json:"label,omitempty"`
-	ParentId      string                 `protobuf:"bytes,5,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
-	Properties    map[string]string      `protobuf:"bytes,6,rep,name=properties,proto3" json:"properties,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	DimensionId string                 `protobuf:"bytes,2,opt,name=dimension_id,json=dimensionId,proto3" json:"dimension_id,omitempty"`
+	Code        string                 `protobuf:"bytes,3,opt,name=code,proto3" json:"code,omitempty"`
+	Label       string                 `protobuf:"bytes,4,opt,name=label,proto3" json:"label,omitempty"`
+	ParentId    string                 `protobuf:"bytes,5,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
+	Properties  map[string]string      `protobuf:"bytes,6,rep,name=properties,proto3" json:"properties,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Leaf periods of a time dimension only: the dates (YYYY-MM-DD) and the
+	// server-owned chronological ordinal (read-only; -1 on an aggregate
+	// period such as H1 or FY26, which carries no dates).
+	PeriodStart   string `protobuf:"bytes,7,opt,name=period_start,json=periodStart,proto3" json:"period_start,omitempty"`
+	PeriodEnd     string `protobuf:"bytes,8,opt,name=period_end,json=periodEnd,proto3" json:"period_end,omitempty"`
+	TimeIndex     int32  `protobuf:"varint,9,opt,name=time_index,json=timeIndex,proto3" json:"time_index,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -295,15 +329,38 @@ func (x *DimensionMember) GetProperties() map[string]string {
 	return nil
 }
 
+func (x *DimensionMember) GetPeriodStart() string {
+	if x != nil {
+		return x.PeriodStart
+	}
+	return ""
+}
+
+func (x *DimensionMember) GetPeriodEnd() string {
+	if x != nil {
+		return x.PeriodEnd
+	}
+	return ""
+}
+
+func (x *DimensionMember) GetTimeIndex() int32 {
+	if x != nil {
+		return x.TimeIndex
+	}
+	return 0
+}
+
 type Metric struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	ModelId       string                 `protobuf:"bytes,2,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
-	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	Formula       string                 `protobuf:"bytes,4,opt,name=formula,proto3" json:"formula,omitempty"`
-	StorageType   StorageType            `protobuf:"varint,5,opt,name=storage_type,json=storageType,proto3,enum=model.v1.StorageType" json:"storage_type,omitempty"`
-	IsInput       bool                   `protobuf:"varint,6,opt,name=is_input,json=isInput,proto3" json:"is_input,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	ModelId     string                 `protobuf:"bytes,2,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
+	Name        string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	Formula     string                 `protobuf:"bytes,4,opt,name=formula,proto3" json:"formula,omitempty"`
+	StorageType StorageType            `protobuf:"varint,5,opt,name=storage_type,json=storageType,proto3,enum=model.v1.StorageType" json:"storage_type,omitempty"`
+	IsInput     bool                   `protobuf:"varint,6,opt,name=is_input,json=isInput,proto3" json:"is_input,omitempty"`
+	CreatedAt   *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// Aggregation across a time dimension: sum | average | min | max | first | last | none.
+	TimeSummary   string `protobuf:"bytes,8,opt,name=time_summary,json=timeSummary,proto3" json:"time_summary,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -385,6 +442,13 @@ func (x *Metric) GetCreatedAt() *timestamppb.Timestamp {
 		return x.CreatedAt
 	}
 	return nil
+}
+
+func (x *Metric) GetTimeSummary() string {
+	if x != nil {
+		return x.TimeSummary
+	}
+	return ""
 }
 
 type Hierarchy struct {
@@ -609,12 +673,16 @@ func (x *Revision) GetPublishedAt() *timestamppb.Timestamp {
 
 // Dimension requests
 type CreateDimensionRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ModelId       string                 `protobuf:"bytes,1,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Properties    []*DimensionProperty   `protobuf:"bytes,3,rep,name=properties,proto3" json:"properties,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	ModelId    string                 `protobuf:"bytes,1,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
+	Name       string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Properties []*DimensionProperty   `protobuf:"bytes,3,rep,name=properties,proto3" json:"properties,omitempty"`
+	// Omitted defaults to "standard". "time" requires time_granularity and fiscal_year_start_month.
+	DimensionType        string `protobuf:"bytes,4,opt,name=dimension_type,json=dimensionType,proto3" json:"dimension_type,omitempty"`
+	TimeGranularity      string `protobuf:"bytes,5,opt,name=time_granularity,json=timeGranularity,proto3" json:"time_granularity,omitempty"`
+	FiscalYearStartMonth int32  `protobuf:"varint,6,opt,name=fiscal_year_start_month,json=fiscalYearStartMonth,proto3" json:"fiscal_year_start_month,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *CreateDimensionRequest) Reset() {
@@ -666,6 +734,27 @@ func (x *CreateDimensionRequest) GetProperties() []*DimensionProperty {
 		return x.Properties
 	}
 	return nil
+}
+
+func (x *CreateDimensionRequest) GetDimensionType() string {
+	if x != nil {
+		return x.DimensionType
+	}
+	return ""
+}
+
+func (x *CreateDimensionRequest) GetTimeGranularity() string {
+	if x != nil {
+		return x.TimeGranularity
+	}
+	return ""
+}
+
+func (x *CreateDimensionRequest) GetFiscalYearStartMonth() int32 {
+	if x != nil {
+		return x.FiscalYearStartMonth
+	}
+	return 0
 }
 
 type CreateDimensionResponse struct {
@@ -905,12 +994,16 @@ func (x *ListDimensionsResponse) GetPage() *v1.PageResponse {
 }
 
 type CreateDimensionMemberRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	DimensionId   string                 `protobuf:"bytes,1,opt,name=dimension_id,json=dimensionId,proto3" json:"dimension_id,omitempty"`
-	Code          string                 `protobuf:"bytes,2,opt,name=code,proto3" json:"code,omitempty"`
-	Label         string                 `protobuf:"bytes,3,opt,name=label,proto3" json:"label,omitempty"`
-	ParentId      string                 `protobuf:"bytes,4,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
-	Properties    map[string]string      `protobuf:"bytes,5,rep,name=properties,proto3" json:"properties,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	DimensionId string                 `protobuf:"bytes,1,opt,name=dimension_id,json=dimensionId,proto3" json:"dimension_id,omitempty"`
+	Code        string                 `protobuf:"bytes,2,opt,name=code,proto3" json:"code,omitempty"`
+	Label       string                 `protobuf:"bytes,3,opt,name=label,proto3" json:"label,omitempty"`
+	ParentId    string                 `protobuf:"bytes,4,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
+	Properties  map[string]string      `protobuf:"bytes,5,rep,name=properties,proto3" json:"properties,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Time dimensions: both set makes a leaf period (YYYY-MM-DD); both empty
+	// makes an aggregate period (H1, FY26). Not allowed on a standard dimension.
+	PeriodStart   string `protobuf:"bytes,6,opt,name=period_start,json=periodStart,proto3" json:"period_start,omitempty"`
+	PeriodEnd     string `protobuf:"bytes,7,opt,name=period_end,json=periodEnd,proto3" json:"period_end,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -978,6 +1071,20 @@ func (x *CreateDimensionMemberRequest) GetProperties() map[string]string {
 		return x.Properties
 	}
 	return nil
+}
+
+func (x *CreateDimensionMemberRequest) GetPeriodStart() string {
+	if x != nil {
+		return x.PeriodStart
+	}
+	return ""
+}
+
+func (x *CreateDimensionMemberRequest) GetPeriodEnd() string {
+	if x != nil {
+		return x.PeriodEnd
+	}
+	return ""
 }
 
 type CreateDimensionMemberResponse struct {
@@ -1130,12 +1237,14 @@ func (x *ListDimensionMembersResponse) GetPage() *v1.PageResponse {
 
 // Metric requests
 type CreateMetricRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ModelId       string                 `protobuf:"bytes,1,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Formula       string                 `protobuf:"bytes,3,opt,name=formula,proto3" json:"formula,omitempty"`
-	StorageType   StorageType            `protobuf:"varint,4,opt,name=storage_type,json=storageType,proto3,enum=model.v1.StorageType" json:"storage_type,omitempty"`
-	IsInput       bool                   `protobuf:"varint,5,opt,name=is_input,json=isInput,proto3" json:"is_input,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	ModelId     string                 `protobuf:"bytes,1,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
+	Name        string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Formula     string                 `protobuf:"bytes,3,opt,name=formula,proto3" json:"formula,omitempty"`
+	StorageType StorageType            `protobuf:"varint,4,opt,name=storage_type,json=storageType,proto3,enum=model.v1.StorageType" json:"storage_type,omitempty"`
+	IsInput     bool                   `protobuf:"varint,5,opt,name=is_input,json=isInput,proto3" json:"is_input,omitempty"`
+	// Aggregation across a time dimension; empty defaults to sum.
+	TimeSummary   string `protobuf:"bytes,6,opt,name=time_summary,json=timeSummary,proto3" json:"time_summary,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1203,6 +1312,13 @@ func (x *CreateMetricRequest) GetIsInput() bool {
 		return x.IsInput
 	}
 	return false
+}
+
+func (x *CreateMetricRequest) GetTimeSummary() string {
+	if x != nil {
+		return x.TimeSummary
+	}
+	return ""
 }
 
 type CreateMetricResponse struct {
@@ -2116,7 +2232,7 @@ const file_model_v1_model_proto_rawDesc = "" +
 	"\x11DimensionProperty\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x1a\n" +
-	"\brequired\x18\x03 \x01(\bR\brequired\"\xc2\x01\n" +
+	"\brequired\x18\x03 \x01(\bR\brequired\"\xcb\x02\n" +
 	"\tDimension\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
 	"\bmodel_id\x18\x02 \x01(\tR\amodelId\x12\x12\n" +
@@ -2125,7 +2241,10 @@ const file_model_v1_model_proto_rawDesc = "" +
 	"properties\x18\x04 \x03(\v2\x1b.model.v1.DimensionPropertyR\n" +
 	"properties\x129\n" +
 	"\n" +
-	"created_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\x95\x02\n" +
+	"created_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12%\n" +
+	"\x0edimension_type\x18\x06 \x01(\tR\rdimensionType\x12)\n" +
+	"\x10time_granularity\x18\a \x01(\tR\x0ftimeGranularity\x125\n" +
+	"\x17fiscal_year_start_month\x18\b \x01(\x05R\x14fiscalYearStartMonth\"\xf6\x02\n" +
 	"\x0fDimensionMember\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fdimension_id\x18\x02 \x01(\tR\vdimensionId\x12\x12\n" +
@@ -2134,10 +2253,15 @@ const file_model_v1_model_proto_rawDesc = "" +
 	"\tparent_id\x18\x05 \x01(\tR\bparentId\x12I\n" +
 	"\n" +
 	"properties\x18\x06 \x03(\v2).model.v1.DimensionMember.PropertiesEntryR\n" +
-	"properties\x1a=\n" +
+	"properties\x12!\n" +
+	"\fperiod_start\x18\a \x01(\tR\vperiodStart\x12\x1d\n" +
+	"\n" +
+	"period_end\x18\b \x01(\tR\tperiodEnd\x12\x1d\n" +
+	"\n" +
+	"time_index\x18\t \x01(\x05R\ttimeIndex\x1a=\n" +
 	"\x0fPropertiesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf1\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x94\x02\n" +
 	"\x06Metric\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
 	"\bmodel_id\x18\x02 \x01(\tR\amodelId\x12\x12\n" +
@@ -2146,7 +2270,8 @@ const file_model_v1_model_proto_rawDesc = "" +
 	"\fstorage_type\x18\x05 \x01(\x0e2\x15.model.v1.StorageTypeR\vstorageType\x12\x19\n" +
 	"\bis_input\x18\x06 \x01(\bR\aisInput\x129\n" +
 	"\n" +
-	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\x8e\x01\n" +
+	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12!\n" +
+	"\ftime_summary\x18\b \x01(\tR\vtimeSummary\"\x8e\x01\n" +
 	"\tHierarchy\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
 	"\bmodel_id\x18\x02 \x01(\tR\amodelId\x12\x12\n" +
@@ -2165,13 +2290,16 @@ const file_model_v1_model_proto_rawDesc = "" +
 	"\x0eversion_number\x18\x03 \x01(\x05R\rversionNumber\x12\x1f\n" +
 	"\vschema_hash\x18\x04 \x01(\tR\n" +
 	"schemaHash\x12=\n" +
-	"\fpublished_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\vpublishedAt\"\x84\x01\n" +
+	"\fpublished_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\vpublishedAt\"\x8d\x02\n" +
 	"\x16CreateDimensionRequest\x12\x19\n" +
 	"\bmodel_id\x18\x01 \x01(\tR\amodelId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12;\n" +
 	"\n" +
 	"properties\x18\x03 \x03(\v2\x1b.model.v1.DimensionPropertyR\n" +
-	"properties\"L\n" +
+	"properties\x12%\n" +
+	"\x0edimension_type\x18\x04 \x01(\tR\rdimensionType\x12)\n" +
+	"\x10time_granularity\x18\x05 \x01(\tR\x0ftimeGranularity\x125\n" +
+	"\x17fiscal_year_start_month\x18\x06 \x01(\x05R\x14fiscalYearStartMonth\"L\n" +
 	"\x17CreateDimensionResponse\x121\n" +
 	"\tdimension\x18\x01 \x01(\v2\x13.model.v1.DimensionR\tdimension\"8\n" +
 	"\x13GetDimensionRequest\x12!\n" +
@@ -2185,7 +2313,7 @@ const file_model_v1_model_proto_rawDesc = "" +
 	"\n" +
 	"dimensions\x18\x01 \x03(\v2\x13.model.v1.DimensionR\n" +
 	"dimensions\x12+\n" +
-	"\x04page\x18\x02 \x01(\v2\x17.common.v1.PageResponseR\x04page\"\x9f\x02\n" +
+	"\x04page\x18\x02 \x01(\v2\x17.common.v1.PageResponseR\x04page\"\xe1\x02\n" +
 	"\x1cCreateDimensionMemberRequest\x12!\n" +
 	"\fdimension_id\x18\x01 \x01(\tR\vdimensionId\x12\x12\n" +
 	"\x04code\x18\x02 \x01(\tR\x04code\x12\x14\n" +
@@ -2193,7 +2321,10 @@ const file_model_v1_model_proto_rawDesc = "" +
 	"\tparent_id\x18\x04 \x01(\tR\bparentId\x12V\n" +
 	"\n" +
 	"properties\x18\x05 \x03(\v26.model.v1.CreateDimensionMemberRequest.PropertiesEntryR\n" +
-	"properties\x1a=\n" +
+	"properties\x12!\n" +
+	"\fperiod_start\x18\x06 \x01(\tR\vperiodStart\x12\x1d\n" +
+	"\n" +
+	"period_end\x18\a \x01(\tR\tperiodEnd\x1a=\n" +
 	"\x0fPropertiesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"R\n" +
@@ -2204,13 +2335,14 @@ const file_model_v1_model_proto_rawDesc = "" +
 	"\x04page\x18\x02 \x01(\v2\x16.common.v1.PageRequestR\x04page\"\x80\x01\n" +
 	"\x1cListDimensionMembersResponse\x123\n" +
 	"\amembers\x18\x01 \x03(\v2\x19.model.v1.DimensionMemberR\amembers\x12+\n" +
-	"\x04page\x18\x02 \x01(\v2\x17.common.v1.PageResponseR\x04page\"\xb3\x01\n" +
+	"\x04page\x18\x02 \x01(\v2\x17.common.v1.PageResponseR\x04page\"\xd6\x01\n" +
 	"\x13CreateMetricRequest\x12\x19\n" +
 	"\bmodel_id\x18\x01 \x01(\tR\amodelId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
 	"\aformula\x18\x03 \x01(\tR\aformula\x128\n" +
 	"\fstorage_type\x18\x04 \x01(\x0e2\x15.model.v1.StorageTypeR\vstorageType\x12\x19\n" +
-	"\bis_input\x18\x05 \x01(\bR\aisInput\"@\n" +
+	"\bis_input\x18\x05 \x01(\bR\aisInput\x12!\n" +
+	"\ftime_summary\x18\x06 \x01(\tR\vtimeSummary\"@\n" +
 	"\x14CreateMetricResponse\x12(\n" +
 	"\x06metric\x18\x01 \x01(\v2\x10.model.v1.MetricR\x06metric\"/\n" +
 	"\x10GetMetricRequest\x12\x1b\n" +

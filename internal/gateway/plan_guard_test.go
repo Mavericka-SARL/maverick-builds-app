@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/mavericks-engine/mavericks/internal/plan"
 	"github.com/mavericks-engine/mavericks/internal/testdb"
@@ -14,9 +13,9 @@ import (
 	"github.com/mavericks-engine/mavericks/pkg/logger"
 )
 
-// What a plan does to requests: an ended trial makes the tenant read-only
-// (its own admin included, the platform admin excluded) until the platform
-// admin changes it; a limit refuses the one creation that would cross it;
+// What a plan does to requests: a tenant the sweep found over its limits is
+// read-only (its own admin included, the platform admin excluded) until the
+// platform admin moves it; a limit refuses the one creation that would cross it;
 // the sweep's verdict makes a tenant read-only except for deleting; and the
 // catalog is the platform admin's to edit, everyone else's to read.
 func TestPlanGuardAndLimits(t *testing.T) {
@@ -37,8 +36,8 @@ func TestPlanGuardAndLimits(t *testing.T) {
 			t.Fatalf("%s: %v", sql, err)
 		}
 	}
-	// Tenant A: a trial that ended yesterday. Tenant B: starter, unlimited.
-	custA := q(`INSERT INTO core.customer (name, plan, trial_ends_at) VALUES ('Ended Co', 'trial', now() - interval '1 day') RETURNING id::text`)
+	// Tenant A: the last sweep found it over its plan. Tenant B: starter, unlimited.
+	custA := q(`INSERT INTO core.customer (name, plan, limit_state, limit_reason) VALUES ('Over Co', 'test', 'over', 'storage 120 MB of 100') RETURNING id::text`)
 	wsA := q(`INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'Default') RETURNING id::text`, custA)
 	adminA := q(`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ('guard-a', 'a@ended.test', 'A', $1::uuid) RETURNING id::text`, custA)
 	exec(`INSERT INTO identity.role_assignment (user_id, role) VALUES ($1::uuid, 'tenant_admin'), ($1::uuid, 'developer')`, adminA)
@@ -57,48 +56,47 @@ func TestPlanGuardAndLimits(t *testing.T) {
 	srv := httptest.NewServer(NewHandlerWithDeps(logger.New("test"), pool, nil, Deps{Plans: enforcer, Signup: SignupConfig{ContactURL: "https://example.test/pricing"}}))
 	t.Cleanup(srv.Close)
 
-	t.Run("ended trial: reads work, writes are refused with the reason, platform admin is exempt", func(t *testing.T) {
+	t.Run("over its limits: reads work, writes are refused with the reason, platform admin is exempt", func(t *testing.T) {
 		if code, _ := callJSONList(t, srv, "guard-a", "/api/admin/tenants"); code != 200 {
 			t.Fatalf("read: %d", code)
 		}
 		code, me := callJSON(t, srv, "guard-a", http.MethodGet, "/api/me", nil)
 		st, _ := me["plan"].(map[string]any)
-		if code != 200 || st["read_only"] != true || st["code"] != plan.CodeTrialExpired {
+		if code != 200 || st["read_only"] != true || st["code"] != plan.CodeOverLimit {
 			t.Fatalf("me: %d %v", code, me)
 		}
+		if _, has := st["trial"]; has {
+			t.Fatalf("plan state still speaks of a trial: %v", st)
+		}
 		code, body := callJSON(t, srv, "guard-a", http.MethodPost, "/api/admin/applications", map[string]any{"customer_id": custA, "name": "Nope", "mode": "planning"})
-		if code != http.StatusPaymentRequired || body["code"] != plan.CodeTrialExpired || body["contact_url"] != "https://example.test/pricing" || !strings.Contains(body["error"].(string), "trial ended") {
-			t.Fatalf("write on ended trial: %d %v", code, body)
+		if code != http.StatusPaymentRequired || body["code"] != plan.CodeOverLimit || body["contact_url"] != "https://example.test/pricing" || !strings.Contains(body["error"].(string), "storage 120 MB of 100") {
+			t.Fatalf("write while over: %d %v", code, body)
 		}
 		if code, body := callJSON(t, srv, "guard-padmin", http.MethodPost, "/api/admin/applications", map[string]any{"customer_id": custA, "name": "By platform", "mode": "planning"}, tenantHeader, custA); code != 200 {
 			t.Fatalf("platform admin write: %d %v", code, body)
 		}
 	})
 
-	t.Run("only the platform admin changes a plan or trial; the tenant is usable again at once", func(t *testing.T) {
-		if code, _ := callJSON(t, srv, "guard-a", http.MethodPatch, "/api/admin/tenants/"+custA, map[string]any{"trial_ends_at": time.Now().Add(48 * time.Hour).UTC().Format(time.RFC3339)}); code != 402 {
+	t.Run("only the platform admin changes a plan; the next sweep judges the tenant by it", func(t *testing.T) {
+		if code, _ := callJSON(t, srv, "guard-a", http.MethodPatch, "/api/admin/tenants/"+custA, map[string]any{"plan": "standard"}); code != 402 {
 			// The guard refuses before the handler's own 403: the tenant is read-only.
-			t.Fatalf("tenant admin extending own trial: %d", code)
+			t.Fatalf("tenant admin lifting own limits: %d", code)
 		}
-		if code, body := callJSON(t, srv, "guard-padmin", http.MethodPatch, "/api/admin/tenants/"+custA, map[string]any{"trial_ends_at": time.Now().Add(48 * time.Hour).UTC().Format(time.RFC3339)}, tenantHeader, custA); code != 200 {
-			t.Fatalf("extend: %d %v", code, body)
+		if code, body := callJSON(t, srv, "guard-padmin", http.MethodPatch, "/api/admin/tenants/"+custA, map[string]any{"plan": "standard"}, tenantHeader, custA); code != 200 {
+			t.Fatalf("plan change: %d %v", code, body)
 		}
-		code, me := callJSON(t, srv, "guard-a", http.MethodGet, "/api/me", nil)
+		_, me := callJSON(t, srv, "guard-a", http.MethodGet, "/api/me", nil)
 		st, _ := me["plan"].(map[string]any)
-		if code != 200 || st["read_only"] != false || st["days_left"] != float64(2) {
-			t.Fatalf("me after extend: %v", st)
+		if st["plan"].(map[string]any)["key"] != "standard" {
+			t.Fatalf("me after plan change: %v", st)
+		}
+		// The unlimited plan has nothing to be over: the sweep clears the
+		// verdict, and the tenant's admin can write again.
+		if tt, err := enforcer.Sweep(ctx, pool, custA); err != nil || tt.LimitState != "ok" {
+			t.Fatalf("sweep after plan change: %+v %v", tt, err)
 		}
 		if code, body := callJSON(t, srv, "guard-a", http.MethodPost, "/api/admin/applications", map[string]any{"customer_id": custA, "name": "Now fine", "mode": "planning"}); code != 200 {
-			t.Fatalf("write after extend: %d %v", code, body)
-		}
-		// Moving to a non-trial plan ends the trial.
-		if code, _ := callJSON(t, srv, "guard-padmin", http.MethodPatch, "/api/admin/tenants/"+custA, map[string]any{"plan": "standard"}, tenantHeader, custA); code != 200 {
-			t.Fatalf("plan change: %d", code)
-		}
-		_, me = callJSON(t, srv, "guard-a", http.MethodGet, "/api/me", nil)
-		st, _ = me["plan"].(map[string]any)
-		if st["trial"] != false || st["plan"].(map[string]any)["key"] != "standard" {
-			t.Fatalf("me after plan change: %v", st)
+			t.Fatalf("write after plan change: %d %v", code, body)
 		}
 		if code, body := callJSON(t, srv, "guard-padmin", http.MethodPatch, "/api/admin/tenants/"+custA, map[string]any{"plan": "no-such-plan"}, tenantHeader, custA); code != 400 || !strings.Contains(body["error"].(string), "unknown plan") {
 			t.Fatalf("unknown plan: %d %v", code, body)
@@ -107,7 +105,7 @@ func TestPlanGuardAndLimits(t *testing.T) {
 
 	t.Run("the catalog: read by admins, written by the platform admin, validated", func(t *testing.T) {
 		code, plans := callJSONList(t, srv, "guard-b", "/api/admin/plans")
-		if code != 200 || len(plans) < 4 || plans[0]["key"] != "trial" {
+		if code != 200 || len(plans) < 4 || plans[0]["key"] != "test" {
 			t.Fatalf("list: %d %v", code, plans)
 		}
 		if code, _ := callJSON(t, srv, "guard-b", http.MethodPut, "/api/admin/plans/starter", map[string]any{"name": "Starter"}); code != 403 {

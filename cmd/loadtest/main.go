@@ -9,7 +9,7 @@
 // it runs against the dev stack, staging or production alike; what differs
 // is how it authenticates.
 //
-//	# dev stack, persona auth, a fresh trial tenant with the starter model:
+//	# dev stack, persona auth, a fresh test-workspace tenant with the starter model:
 //	go run ./cmd/loadtest -base http://localhost:8080 -signup -users 50 -duration 60s
 //
 //	# staging/production, a real account (password grant on the realm):
@@ -97,7 +97,7 @@ func main() {
 	flag.Float64Var(&c.writeRatio, "write-ratio", 0.5, "share of operations that are cell writes (the rest read the grid)")
 	flag.DurationVar(&c.targetP95, "target-p95", 0, "exit 1 when any operation's p95 exceeds this")
 	flag.StringVar(&c.jsonOut, "json", "", "also write the report as JSON to this file")
-	flag.BoolVar(&c.signup, "signup", false, "dev stack: create a fresh trial tenant through /api/signup and load its starter model")
+	flag.BoolVar(&c.signup, "signup", false, "dev stack: create a fresh test-workspace tenant through /api/signup and load its starter model")
 	flag.BoolVar(&c.seed, "seed", false, "as a tenant admin: create an application in the account's tenant and import the starter model into it, then load that")
 	flag.BoolVar(&c.insecure, "insecure", false, "accept any TLS certificate (before DNS/certificates exist)")
 	flag.Var(c.resolve, "resolve", "host=ip, pin a hostname to an address (repeatable)")

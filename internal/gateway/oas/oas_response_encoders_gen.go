@@ -337,6 +337,70 @@ func encodeCancelIntegrationRunResponse(response CancelIntegrationRunRes, w http
 	}
 }
 
+func encodeClearAuditSettingsResponse(response ClearAuditSettingsRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *AuditSettings:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(200)
+		span.SetStatus(codes.Ok, http.StatusText(200))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *ClearAuditSettingsBadRequest:
+		w.WriteHeader(400)
+		span.SetStatus(codes.Error, http.StatusText(400))
+
+		return nil
+
+	case *ClearAuditSettingsForbidden:
+		w.WriteHeader(403)
+		span.SetStatus(codes.Error, http.StatusText(403))
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
+func encodeClearNotificationSettingsResponse(response ClearNotificationSettingsRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *NotificationSettings:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(200)
+		span.SetStatus(codes.Ok, http.StatusText(200))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *ClearNotificationSettingsBadRequest:
+		w.WriteHeader(400)
+		span.SetStatus(codes.Error, http.StatusText(400))
+
+		return nil
+
+	case *ClearNotificationSettingsForbidden:
+		w.WriteHeader(403)
+		span.SetStatus(codes.Error, http.StatusText(403))
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
 func encodeClearTenantAIKeyResponse(response ClearTenantAIKeyRes, w http.ResponseWriter, span trace.Span) error {
 	switch response := response.(type) {
 	case *TenantAISettings:
@@ -1759,6 +1823,32 @@ func encodeDeleteFormRecordResponse(response DeleteFormRecordRes, w http.Respons
 	}
 }
 
+func encodeDeleteGoogleConnectionResponse(response DeleteGoogleConnectionRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *GoogleConnection:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(200)
+		span.SetStatus(codes.Ok, http.StatusText(200))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *DeleteGoogleConnectionForbidden:
+		w.WriteHeader(403)
+		span.SetStatus(codes.Error, http.StatusText(403))
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
 func encodeDeleteGridResponse(response *DeleteGridOK, w http.ResponseWriter, span trace.Span) error {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(200)
@@ -2008,6 +2098,45 @@ func encodeDiscardAiDraftResponse(response DiscardAiDraftRes, w http.ResponseWri
 		return nil
 
 	case *DiscardAiDraftNotFound:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(404)
+		span.SetStatus(codes.Error, http.StatusText(404))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
+func encodeDisconnectIntegrationOAuthResponse(response DisconnectIntegrationOAuthRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *DisconnectIntegrationOAuthOK:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(200)
+		span.SetStatus(codes.Ok, http.StatusText(200))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *DisconnectIntegrationOAuthBadRequest:
+		w.WriteHeader(400)
+		span.SetStatus(codes.Error, http.StatusText(400))
+
+		return nil
+
+	case *Error:
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(404)
 		span.SetStatus(codes.Error, http.StatusText(404))
@@ -2394,6 +2523,39 @@ func encodeExtractFormulaRefsResponse(response *ExtractFormulaRefsOK, w http.Res
 	return nil
 }
 
+func encodeGenerateDimensionPeriodsResponse(response GenerateDimensionPeriodsRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *GenerateDimensionPeriodsOK:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(200)
+		span.SetStatus(codes.Ok, http.StatusText(200))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *Error:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(400)
+		span.SetStatus(codes.Error, http.StatusText(400))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
 func encodeGenerateMigrationResponse(response *GenerateMigrationOK, w http.ResponseWriter, span trace.Span) error {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(200)
@@ -2706,6 +2868,38 @@ func encodeGetDeveloperModelResponse(response *GetDeveloperModelOK, w http.Respo
 	return nil
 }
 
+func encodeGetGoogleConnectionResponse(response GetGoogleConnectionRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *GoogleConnection:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(200)
+		span.SetStatus(codes.Ok, http.StatusText(200))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *GetGoogleConnectionForbidden:
+		w.WriteHeader(403)
+		span.SetStatus(codes.Error, http.StatusText(403))
+
+		return nil
+
+	case *GetGoogleConnectionConflict:
+		w.WriteHeader(409)
+		span.SetStatus(codes.Error, http.StatusText(409))
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
 func encodeGetGridResponse(response GetGridRes, w http.ResponseWriter, span trace.Span) error {
 	switch response := response.(type) {
 	case *GridData:
@@ -2816,6 +3010,20 @@ func encodeGetIntegrationRunResponse(response GetIntegrationRunRes, w http.Respo
 	default:
 		return errors.Errorf("unexpected response type: %T", response)
 	}
+}
+
+func encodeGetLegalInfoResponse(response *LegalInfo, w http.ResponseWriter, span trace.Span) error {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(200)
+	span.SetStatus(codes.Ok, http.StatusText(200))
+
+	e := new(jx.Encoder)
+	response.Encode(e)
+	if _, err := e.WriteTo(w); err != nil {
+		return errors.Wrap(err, "write")
+	}
+
+	return nil
 }
 
 func encodeGetLicenseResponse(response GetLicenseRes, w http.ResponseWriter, span trace.Span) error {
@@ -3433,6 +3641,13 @@ func encodeImportUploadResponse(response ImportUploadRes, w http.ResponseWriter,
 	default:
 		return errors.Errorf("unexpected response type: %T", response)
 	}
+}
+
+func encodeIntegrationOAuthCallbackResponse(response *IntegrationOAuthCallbackFound, w http.ResponseWriter, span trace.Span) error {
+	w.WriteHeader(302)
+	span.SetStatus(codes.Ok, http.StatusText(302))
+
+	return nil
 }
 
 func encodeListAdminApplicationsResponse(response []AdminApplicationItem, w http.ResponseWriter, span trace.Span) error {
@@ -4621,6 +4836,44 @@ func encodePublishWorkflowResponse(response PublishWorkflowRes, w http.ResponseW
 	}
 }
 
+func encodePutGoogleConnectionResponse(response PutGoogleConnectionRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *GoogleConnection:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(200)
+		span.SetStatus(codes.Ok, http.StatusText(200))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *PutGoogleConnectionBadRequest:
+		w.WriteHeader(400)
+		span.SetStatus(codes.Error, http.StatusText(400))
+
+		return nil
+
+	case *PutGoogleConnectionForbidden:
+		w.WriteHeader(403)
+		span.SetStatus(codes.Error, http.StatusText(403))
+
+		return nil
+
+	case *PutGoogleConnectionServiceUnavailable:
+		w.WriteHeader(503)
+		span.SetStatus(codes.Error, http.StatusText(503))
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
 func encodeRejectAiProposalResponse(response RejectAiProposalRes, w http.ResponseWriter, span trace.Span) error {
 	switch response := response.(type) {
 	case *RejectAiProposalOK:
@@ -5647,6 +5900,58 @@ func encodeSendAiMessageResponse(response SendAiMessageRes, w http.ResponseWrite
 	}
 }
 
+func encodeSendNotificationTestMailResponse(response SendNotificationTestMailRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *SendNotificationTestMailOK:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(200)
+		span.SetStatus(codes.Ok, http.StatusText(200))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *SendNotificationTestMailForbidden:
+		w.WriteHeader(403)
+		span.SetStatus(codes.Error, http.StatusText(403))
+
+		return nil
+
+	case *SendNotificationTestMailConflict:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(409)
+		span.SetStatus(codes.Error, http.StatusText(409))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *SendNotificationTestMailBadGateway:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(502)
+		span.SetStatus(codes.Error, http.StatusText(502))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
 func encodeSetActiveRevisionResponse(response SetActiveRevisionRes, w http.ResponseWriter, span trace.Span) error {
 	switch response := response.(type) {
 	case *SetActiveRevisionOK:
@@ -5855,6 +6160,45 @@ func encodeSsoDiscoverResponse(response SsoDiscoverRes, w http.ResponseWriter, s
 	}
 }
 
+func encodeStartIntegrationOAuthResponse(response StartIntegrationOAuthRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *StartIntegrationOAuthOK:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(200)
+		span.SetStatus(codes.Ok, http.StatusText(200))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *StartIntegrationOAuthBadRequest:
+		w.WriteHeader(400)
+		span.SetStatus(codes.Error, http.StatusText(400))
+
+		return nil
+
+	case *Error:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(404)
+		span.SetStatus(codes.Error, http.StatusText(404))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
+}
+
 func encodeStartWorkflowInstanceResponse(response StartWorkflowInstanceRes, w http.ResponseWriter, span trace.Span) error {
 	switch response := response.(type) {
 	case *StartWorkflowInstanceOK:
@@ -6012,6 +6356,44 @@ func encodeTestAiSettingsResponse(response *TestAiSettingsOK, w http.ResponseWri
 	}
 
 	return nil
+}
+
+func encodeTestGoogleConnectionResponse(response TestGoogleConnectionRes, w http.ResponseWriter, span trace.Span) error {
+	switch response := response.(type) {
+	case *TestGoogleConnectionOK:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(200)
+		span.SetStatus(codes.Ok, http.StatusText(200))
+
+		e := new(jx.Encoder)
+		response.Encode(e)
+		if _, err := e.WriteTo(w); err != nil {
+			return errors.Wrap(err, "write")
+		}
+
+		return nil
+
+	case *TestGoogleConnectionForbidden:
+		w.WriteHeader(403)
+		span.SetStatus(codes.Error, http.StatusText(403))
+
+		return nil
+
+	case *TestGoogleConnectionConflict:
+		w.WriteHeader(409)
+		span.SetStatus(codes.Error, http.StatusText(409))
+
+		return nil
+
+	case *TestGoogleConnectionBadGateway:
+		w.WriteHeader(502)
+		span.SetStatus(codes.Error, http.StatusText(502))
+
+		return nil
+
+	default:
+		return errors.Errorf("unexpected response type: %T", response)
+	}
 }
 
 func encodeTestIntegrationResponse(response TestIntegrationRes, w http.ResponseWriter, span trace.Span) error {

@@ -15,6 +15,9 @@
 #   MINIO_ROOT_USER        (required)
 #   MINIO_ROOT_PASSWORD    (required)
 #   BACKUP_BUCKET          default: mavericks-backups
+#   BACKUP_REGION          region used only when the bucket has to be created
+#                          (e.g. fsn1 for Hetzner Object Storage); unset is fine
+#                          when the bucket already exists
 #   BACKUP_RETENTION_DAYS  default: 14
 #   BACKUP_DATABASES       default: the one in DATABASE_URL. "all" also dumps
 #                          every tenant_* database (see docs/TENANT_DATABASES.md),
@@ -41,8 +44,19 @@ BACKUP_DATABASES="${BACKUP_DATABASES:-}"
 log "configuring mc alias"
 mc alias set backupminio "$MINIO_URL" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
 
+# Create the bucket only when it is genuinely missing. `mc mb
+# --ignore-existing` still asks the server to create it, and a provider whose
+# region is not mc's default (Hetzner Object Storage serves fsn1, mc assumes
+# us-east-1) answers "The location constraint differs from the location you
+# are trying to access" rather than a plain "already exists". With set -e that
+# aborted every run: production backups failed silently for three nights from
+# 2026-09-15, when the image picked up a newer mc that reports this.
 log "ensuring bucket ${BACKUP_BUCKET} exists"
-mc mb --ignore-existing "backupminio/${BACKUP_BUCKET}" >/dev/null
+if mc ls "backupminio/${BACKUP_BUCKET}" >/dev/null 2>&1; then
+  log "bucket ${BACKUP_BUCKET} is present"
+else
+  mc mb ${BACKUP_REGION:+--region "$BACKUP_REGION"} "backupminio/${BACKUP_BUCKET}" >/dev/null
+fi
 
 # The DSN with its database name replaced, so every database on the same
 # server is reached with the same credentials.
@@ -51,7 +65,11 @@ dsn_for() {
 }
 
 dump_one() {
-  local db="$1" file="/tmp/backup-${db}-${timestamp}.dump"
+  # Two statements, not one: bash expands every word of a `local` before it
+  # assigns any of them, so "${db}" in a second assignment reads an unset
+  # variable and `set -u` aborts the run.
+  local db="$1"
+  local file="/tmp/backup-${db}-${timestamp}.dump"
   log "dumping ${db} (custom format)"
   pg_dump -Fc --no-owner --no-acl "$(dsn_for "$db")" -f "$file"
   log "uploading $(basename "$file")"

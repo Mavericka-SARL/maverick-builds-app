@@ -211,6 +211,47 @@ func TestAddPlatformLevelRoleGate(t *testing.T) {
 	}
 }
 
+// Granting the same PLATFORM-level role twice must leave one row. The unique
+// constraint cannot enforce it — NULL workspace_id is distinct from NULL — so
+// migration 086 adds a partial index, and /api/me must not repeat the role.
+func TestPlatformLevelRoleGrantIsIdempotent(t *testing.T) {
+	f := setupRolesFixture(t)
+
+	for i := 0; i < 3; i++ {
+		if status, body := f.do(t, "POST", "/api/admin/users/"+f.targetID+"/roles", f.platformAdminSub, map[string]string{"role": "tenant_admin"}); status != http.StatusOK {
+			t.Fatalf("grant %d: status = %d (body %v)", i+1, status, body)
+		}
+	}
+
+	var rows int
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM identity.role_assignment WHERE user_id = $1::uuid AND role = 'tenant_admin' AND workspace_id IS NULL`,
+		f.targetID).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 {
+		t.Fatalf("three grants left %d rows, want 1", rows)
+	}
+
+	// The actor's roles are built with string_agg over this table, so a
+	// duplicate row would surface in the API as a repeated role.
+	var sub string
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT keycloak_sub FROM identity."user" WHERE id = $1::uuid`, f.targetID).Scan(&sub); err != nil {
+		t.Fatal(err)
+	}
+	_, me := f.do(t, "GET", "/api/me", sub, nil)
+	roles, _ := me["roles"].([]any)
+	seen := map[string]bool{}
+	for _, r := range roles {
+		name, _ := r.(string)
+		if seen[name] {
+			t.Fatalf("/api/me repeated the role %q: %v", name, roles)
+		}
+		seen[name] = true
+	}
+}
+
 // ── add-role gate: workspace-scoped grants (the closed escalation path) ────
 
 func TestWorkspaceScopedGrantCannotEscalate(t *testing.T) {

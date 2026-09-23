@@ -58,7 +58,8 @@ func (h *handler) importSheetFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	if _, err := h.resolveActor(ctx, r); err != nil {
+	act, err := h.resolveActor(ctx, r)
+	if err != nil {
 		jsonErr(w, err, http.StatusUnauthorized)
 		return
 	}
@@ -82,7 +83,9 @@ func (h *handler) importSheetFetch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusBadRequest)
 		return
 	}
-	data, err := h.sheetFetcher().FetchCSV(ctx, id, gid)
+	// Through the tenant's own Google service account when it has one —
+	// private sheets — else the link-shared export.
+	data, err := h.fetchSheetCSV(ctx, h.requestCustomerID(ctx, r, act), id, gid)
 	if err != nil {
 		jsonSheetErr(w, err)
 		return

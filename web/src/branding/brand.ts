@@ -11,11 +11,11 @@ export interface BrandState {
 
 export const BrandContext = createContext<BrandState>({ brand: DEFAULT_BRAND, setBrand: () => {} });
 
-/** The brand in force. product_name is "Mavericks" when none is set, so copy
+/** The brand in force. product_name is "maverickbuilds.app" when none is set, so copy
  *  that names the product never has to special-case the default. */
 export function useBrand(): BrandView & { name: string } {
   const { brand: b } = useContext(BrandContext);
-  return { ...b, name: b.product_name || "Mavericks" };
+  return { ...b, name: b.product_name || "maverickbuilds.app" };
 }
 
 /**
@@ -65,6 +65,14 @@ export function brandTokens(hex: string): Record<string, string> | null {
 
 const TOKEN_NAMES = ["--color-brand-50", "--color-brand-100", "--color-brand-200", "--color-brand-500", "--color-brand-600", "--color-brand-700"];
 
+/** The icon links as the document was served with them (index.html), read
+ *  once at load — before any brand has been applied. */
+const DEFAULT_ICONS = Array.from(document.querySelectorAll<HTMLLinkElement>("link[rel~='icon']")).map((link) => ({
+  link,
+  href: link.getAttribute("href") ?? "/favicon.svg",
+  type: link.getAttribute("type") ?? "",
+}));
+
 /** Applies a brand to the document: title, favicon, colour tokens. */
 export function applyBrand(b: BrandView) {
   const root = document.documentElement;
@@ -73,15 +81,18 @@ export function applyBrand(b: BrandView) {
     if (tokens) root.style.setProperty(name, tokens[name]);
     else root.style.removeProperty(name);
   }
-  document.title = b.configured && b.product_name ? b.product_name : "Mavericks";
-  const link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
-  if (link) {
+  document.title = b.configured && b.product_name ? b.product_name : "maverickbuilds.app";
+  // Every icon link, not just the first: index.html declares an SVG and an
+  // .ico fallback, and leaving one of them pointing at the product's own mark
+  // would show it to a tenant that has replaced it. Defaults are the ones the
+  // document was served with, so removing a brand puts both back.
+  for (const icon of DEFAULT_ICONS) {
     if (b.configured && b.favicon_data_url) {
-      link.href = b.favicon_data_url;
-      link.type = "";
+      icon.link.href = b.favicon_data_url;
+      icon.link.type = "";
     } else {
-      link.href = "/favicon.svg";
-      link.type = "image/svg+xml";
+      icon.link.href = icon.href;
+      icon.link.type = icon.type;
     }
   }
 }

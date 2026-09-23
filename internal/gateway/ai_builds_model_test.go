@@ -110,12 +110,22 @@ func TestAIDeveloperBuildsAWholeModel(t *testing.T) {
 		{"LAPTOP", "Laptop", "HARDWARE"}, {"MONITOR", "Monitor", "HARDWARE"},
 		{"LICENSE", "Licence", "SOFTWARE"}, {"SUPPORT", "Support", "SOFTWARE"},
 	})
-	buildDim("period", []node{
-		{"FY26", "FY26", ""},
-		{"H1", "H1", "FY26"}, {"H2", "H2", "FY26"},
-		{"Q1", "Q1", "H1"}, {"Q2", "Q2", "H1"},
-		{"Q3", "Q3", "H2"}, {"Q4", "Q4", "H2"},
+	// period is a TIME dimension, built the way the AI must: the type is
+	// declared on create_dimension, leaf quarters carry their dates, and
+	// H1/H2/FY26 are undated aggregates above them.
+	dimSteps["period"] = add("create_dimension", "Create time dimension 'period'", map[string]any{
+		"name": "period", "dimension_type": "time", "time_granularity": "quarter", "fiscal_year_start_month": 1,
 	})
+	for _, q := range salesdemo.Periods {
+		params := map[string]any{"dimension_id": ref(dimSteps["period"]), "code": q.Code, "label": q.Label}
+		if q.Start != "" {
+			params["period_start"], params["period_end"] = q.Start, q.End
+		}
+		if q.Parent != "" {
+			params["parent_code"] = q.Parent
+		}
+		memberSteps["period/"+q.Code] = add("add_dimension_member", "Add "+q.Label, params)
+	}
 
 	metricSteps := map[string]int{}
 	for _, in := range []string{"units", "revenue", "cost", "target"} {
@@ -144,12 +154,13 @@ func TestAIDeveloperBuildsAWholeModel(t *testing.T) {
 		"agg_denominator_metric_id": ref(metricSteps["units"]),
 	})
 
-	// The forecast: three more inputs and the 24 calculated metrics that
-	// exercise 22 formula functions between them. This is the part the old
-	// hand-rolled validator could not have built at all — every one of these
-	// formulas carries either a function call or a {reference}, and it read
-	// both as missing metric names.
-	for _, in := range []string{"prior_revenue", "seasonality", "pipeline"} {
+	// The forecast: two more inputs and the 24 calculated metrics that
+	// exercise 24 formula functions between them (LAG and PREVIOUS along the
+	// time dimension included). This is the part the old hand-rolled
+	// validator could not have built at all — every one of these formulas
+	// carries either a function call or a {reference}, and it read both as
+	// missing metric names.
+	for _, in := range []string{"seasonality", "pipeline"} {
 		metricSteps[in] = add("create_metric", "Input metric '"+in+"'",
 			map[string]any{"name": in, "is_input": true, "agg_rule": "sum", "format": "number"})
 	}
@@ -356,7 +367,26 @@ func TestAIDeveloperBuildsAWholeModel(t *testing.T) {
 		WHERE d.model_id=$1::uuid AND d.revision_id=$2::uuid`, modelID, draftRev); n != 21 {
 		t.Errorf("%d dimension members in the draft, want 21 (3 dimensions x 7)", n)
 	}
-	wantMetrics := len(salesdemo.MetricNames) + 3 + len(salesdemo.ForecastMetrics)
+	// The time dimension arrived as one, with its periods in order.
+	var periodType string
+	var periodIndexes []int
+	if err := pool.QueryRow(ctx, `SELECT dimension_type FROM model.dimension_def WHERE model_id=$1::uuid AND revision_id=$2::uuid AND name='period'`,
+		modelID, draftRev).Scan(&periodType); err != nil || periodType != "time" {
+		t.Errorf("period dimension_type = %q (%v), want time", periodType, err)
+	}
+	if prow, err := pool.Query(ctx, `SELECT m.time_index FROM model.dimension_member m JOIN model.dimension_def d ON d.id=m.dimension_id
+		WHERE d.model_id=$1::uuid AND d.revision_id=$2::uuid AND d.name='period' AND m.period_start IS NOT NULL ORDER BY m.period_start`, modelID, draftRev); err == nil {
+		for prow.Next() {
+			var i int
+			_ = prow.Scan(&i)
+			periodIndexes = append(periodIndexes, i)
+		}
+		prow.Close()
+	}
+	if fmt.Sprint(periodIndexes) != "[0 1 2 3]" {
+		t.Errorf("period time_index = %v, want [0 1 2 3]", periodIndexes)
+	}
+	wantMetrics := len(salesdemo.MetricNames) + 2 + len(salesdemo.ForecastMetrics)
 	if n := count(`SELECT count(*) FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid`,
 		modelID, draftRev); n != wantMetrics {
 		t.Errorf("%d metrics in the draft, want %d", n, wantMetrics)
@@ -424,7 +454,7 @@ func TestAIDeveloperBuildsAWholeModel(t *testing.T) {
 	wantRule := map[string]string{
 		"units": "sum", "revenue": "sum", "cost": "sum", "target": "sum",
 		"margin": "sum", "margin_pct": "formula", "attainment_pct": "formula", "avg_price": "rate",
-		"prior_revenue": "sum", "seasonality": "sum", "pipeline": "sum",
+		"seasonality": "sum", "pipeline": "sum",
 	}
 	for _, f := range salesdemo.ForecastMetrics {
 		wantRule[f.Name] = f.Agg

@@ -57,8 +57,13 @@ spec:
                 secretKeyRef:
                   name: mavericks-secrets
                   key: POSTGRES_PASSWORD
-            - name: DB_NAME
-              value: "mavericks"
+            # No DB_NAME on purpose: the image then writes a wildcard
+            # `* = host=... port=...` entry, so any database name is
+            # proxied. In shared mode only "mavericks" is ever asked for;
+            # in TENANT_DB_MODE=dedicated the gateway and the integration
+            # worker open tenant_<id> through this same address
+            # (docs/TENANT_DATABASES.md), and a fixed DB_NAME would refuse
+            # them with "no such database".
             - name: LISTEN_PORT
               value: "5433"
             # Postgres 16 authenticates with scram-sha-256. pgbouncer's

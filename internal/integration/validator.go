@@ -154,7 +154,7 @@ func (c *Config) Validate(allowInsecure bool) error {
 				return fmt.Errorf("api_key header: %w", err)
 			}
 		}
-	case "bearer", "basic", "oauth2_client_credentials":
+	case "bearer", "basic", "oauth2_client_credentials", AuthTypeOAuthCode:
 	default:
 		return fmt.Errorf("auth type %q is not supported", c.Auth.Type)
 	}

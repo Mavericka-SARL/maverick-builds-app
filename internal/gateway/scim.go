@@ -36,7 +36,7 @@ func (h *handler) scimTokens(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		list, err := store.List(tctx)
+		list, err := store.List(tctx, customerID)
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
@@ -99,7 +99,7 @@ func (h *handler) scimTokenRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/admin/scim/tokens/")
 	tctx := h.tenantCtx(ctx, customerID)
-	if err := scim.NewTokenStore(h.db.For(tctx)).Revoke(tctx, id); err != nil {
+	if err := scim.NewTokenStore(h.db.For(tctx)).Revoke(tctx, customerID, id); err != nil {
 		jsonErr(w, err, http.StatusNotFound)
 		return
 	}
@@ -145,7 +145,7 @@ func (h *handler) scimEndpoint(w http.ResponseWriter, r *http.Request) {
 	// A tenant that signs in through its own provider gets no invitation
 	// mail: those users never have a password here.
 	invite := true
-	if s, err := sso.NewStore(pool).Get(tctx); err == nil && s.Enabled && s.Configured {
+	if s, err := sso.NewStore(pool).Get(tctx, customerID); err == nil && s.Enabled && s.Configured {
 		invite = false
 	}
 	svc := &scim.Service{

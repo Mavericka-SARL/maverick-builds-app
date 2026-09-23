@@ -604,17 +604,6 @@
   border-bottom: 1px solid var(--color-border);
 }
 
-.mvx-app-shell__brand-logo img {
-  display: block;
-  height: 28px;
-  width: auto;
-  max-width: 120px;
-}
-
-.mvx-app-shell--sidebar-collapsed .mvx-app-shell__brand-logo {
-  display: none;
-}
-
 .mvx-app-shell__brand-text {
   display: flex;
   flex-direction: column;
@@ -688,6 +677,9 @@
    shell-header-alignment gate guards. Ellipsis over wrap. */
 .mvx-app-shell__brand-name {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--color-text);
   font-size: 16px;
   font-weight: 800;
@@ -697,13 +689,23 @@
   text-overflow: ellipsis;
 }
 
-.mvx-app-shell__brand-subtitle {
-  margin-top: 3px;
-  color: var(--color-text-muted);
-  font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* The product's own wordmark (branding/ProductMark), drawn in the sidebar's
+   text colour. 24px keeps the brand row inside --context-bar-height, which
+   the shell-header-alignment gate measures against the context bar. */
+.mvx-app-shell__mark {
+  display: block;
+  height: 24px;
+  width: auto;
+  flex-shrink: 0;
+}
+
+/* A tenant's own logo, white-labelled in place of the mark. */
+.mvx-app-shell__brand-img {
+  display: block;
+  height: 24px;
+  width: auto;
+  max-width: 120px;
+  flex-shrink: 0;
 }
 
 .mvx-app-shell__nav {
@@ -1604,10 +1606,6 @@
 
 /* Metric KPI widget */
 .mvx-kpi {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: flex-start;
   /* A KPI is a TILE, the way the design canvas draws it: its own surface
      and edge, so four KPIs abreast read as four cards rather than loose
      numbers floating across the row (reported live: "preview looks not
@@ -1621,8 +1619,67 @@
   padding: clamp(10px, 6cqi, 18px) clamp(12px, 7cqi, 22px);
   height: 100%;
   min-height: 84px;
-  gap: 4px;
   overflow: hidden;
+}
+
+/* Selectors above or below the number. The band carrying the label and the
+   value is the MIDDLE row of three, between two rows that split the leftover
+   height evenly — so it sits at the tile's vertical centre whether the tile
+   carries a selector row, carries it at the bottom, or carries none at all.
+   Tiles of one row are the same height (the cell stretches, see
+   .mvx-dash-cell--kpi's alignSelf), so their labels and numbers line up. */
+.mvx-kpi--stacked {
+  display: grid;
+  /* The two fr rows stay equal even when only one of them holds anything:
+     sizing a grid to its content resolves ONE flex fraction for all 1fr
+     tracks (the largest base size among them), so a tall selector row —
+     two dimensions wrapped onto two lines in a narrow tile — grows the
+     empty row opposite it by exactly as much, and the number stays put. */
+  grid-template-rows: 1fr auto 1fr;
+  justify-items: start;
+}
+
+.mvx-kpi--stacked > .mvx-kpi__body { grid-row: 2; }
+.mvx-kpi__selectors--top    { grid-row: 1; align-self: start; }
+.mvx-kpi__selectors--bottom { grid-row: 3; align-self: end; }
+
+/* Selectors beside the number: the number keeps the cross-axis centre, which
+   is where a tile without selectors puts it too. */
+.mvx-kpi--side {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  min-width: 0;
+}
+
+.mvx-kpi--side-right { flex-direction: row-reverse; }
+
+.mvx-kpi--side > .mvx-kpi__selectors { flex-shrink: 0; }
+
+.mvx-kpi--side > .mvx-kpi__body {
+  flex: 1 1 0;
+  /* Beside a selector the number has only half the tile, so here it scales
+     against its OWN box rather than the whole cell — "$90,000" was being
+     clipped to "$90,". Only here: a stacked tile's body is the full width
+     of the cell, and re-basing its cqi would shrink every KPI on every
+     dashboard by the tile's padding. Safe because a flex item with a 0
+     basis takes its width from the line, not from its contents, which an
+     inline-size container is not allowed to consult. */
+  container-type: inline-size;
+}
+
+.mvx-kpi__body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  min-width: 0;
+  max-width: 100%;
+  /* Full width of the tile, so the label ellipsises at the tile's edge and
+     the value keeps scaling with the cell (see .mvx-kpi__value). */
+  justify-self: stretch;
 }
 
 /* widget_props.background = "white" on a bare widget type: the same
@@ -1661,8 +1718,9 @@
 }
 
 .mvx-kpi__value {
-  /* The value scales with its own tile (cqi = the KPI cell's inline size,
-     see .mvx-dash-cell--kpi's container-type): four tiles abreast on a
+  /* The value scales with the room it actually has: the KPI cell (see
+     .mvx-dash-cell--kpi's container-type), or the narrower body box when a
+     selector sits beside it (.mvx-kpi--side). Four tiles abreast on a
      laptop, or one narrow designed tile, all keep the number on ONE line —
      36px fixed + overflow-wrap used to break "100,000" mid-digit. */
   /* Floor raised from 15px: a narrow tile showed a 15px "0" next to a

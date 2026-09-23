@@ -13,10 +13,19 @@ export interface DevMetric {
   format: string;           // "number" | "percentage" | "currency" | "boolean" | "text"
   format_decimals: number;
   format_currency: string;
+  // How the metric aggregates ACROSS a time dimension (agg_rule stays the rule
+  // for every other dimension): sum for flows, last for a closing balance.
+  time_summary?: TimeSummary;
   depends_on: string[];
   depended_by: string[];
   calc_error?: string;
 }
+
+export type DimensionType = "standard" | "time";
+export type TimeGranularity = "day" | "week" | "month" | "quarter" | "half_year" | "year" | "custom";
+export type TimeSummary = "sum" | "average" | "min" | "max" | "first" | "last" | "none";
+export const TIME_GRANULARITIES: TimeGranularity[] = ["day", "week", "month", "quarter", "half_year", "year", "custom"];
+export const TIME_SUMMARIES: TimeSummary[] = ["sum", "average", "min", "max", "first", "last", "none"];
 
 export interface DevModel {
   app_name: string;
@@ -34,6 +43,9 @@ export interface DimMember {
   id: string;
   code: string;
   label: string;
+  period_start?: string; // leaf periods of a time dimension only (YYYY-MM-DD); an undated time member is an aggregate period (H1, FY26)
+  period_end?: string;
+  time_index?: number;   // leaf periods only: server-owned chronological ordinal
   parent_code?: string; // set if this member rolls up to a parent; empty/absent = root
   readonly?: boolean;   // true = "read" access rule — visible but not editable
   properties?: Record<string, string>; // arbitrary per-member key/values (e.g. {"region":"LUX"}); consumed by dimensions with source_property set
@@ -42,6 +54,9 @@ export interface DimMember {
 export interface DimInfo {
   id: string;
   name: string;
+  dimension_type?: DimensionType;      // "time" only when explicitly created as such — a name like "month" never implies it
+  time_granularity?: TimeGranularity;  // time dimensions only
+  fiscal_year_start_month?: number;    // time dimensions only
   display_level: number | null; // null=all, 0=roots, -1=leaves, n=depth n
   parent_dimension_id?: string | null; // set when this whole dimension is a declared child of another (e.g. Cabinet -> Department)
   source_dimension_id?: string | null; // set when this dimension's members are a grouping of source_dimension_id's members by their properties[source_property] value
@@ -77,6 +92,18 @@ export interface Actor {
  *  webhook_secret is write-only: it never comes back, and sending an empty one
  *  keeps the stored value. mailer_configured says whether the deployment has an
  *  SMTP relay at all. */
+/**
+ * Whose settings a per-tenant settings response shows: one tenant, or the
+ * deployment's own row — the defaults a tenant inherits until it sets its
+ * own (enterprise `deployment_settings`).
+ */
+export interface SettingsScope {
+  customer_id?: string;
+  deployment: boolean;
+  inherited: boolean;
+  deployment_settings_available: boolean;
+}
+
 export interface NotificationSettings {
   email_enabled: boolean;
   webhook_enabled: boolean;
@@ -86,6 +113,7 @@ export interface NotificationSettings {
   reminders_enabled: boolean;
   reminder_lead_hours: number;
   mailer_configured?: boolean;
+  scope?: SettingsScope;
 }
 
 /** A tenant's single sign-on provider (enterprise `sso`). client_secret is
@@ -144,6 +172,7 @@ export interface AuditSettings {
   retention_days: number;
   min_retention_days?: number;
   updated_at?: string;
+  scope?: SettingsScope;
 }
 
 /** One tenant's usage (enterprise `usage_analytics`). */
@@ -211,7 +240,7 @@ export interface LicenseFeature {
 /** Mirrors pkg/license.Status: edition is the EFFECTIVE one (community when
  *  no key, or the key is invalid or expired); the key's own details stay
  *  filled so the console can say what ran out. */
-// ── Plans, trials and sign-up (internal/plan, docs/PLANS_AND_TRIALS.md) ──────
+// ── Plans and sign-up (internal/plan, docs/PLANS_AND_SIGNUP.md) ──────────────
 
 /** What a plan allows; 0 means unlimited. Keys are the server's. */
 export interface PlanLimits {
@@ -223,15 +252,18 @@ export interface PlanLimits {
   max_fact_rows_per_model: number;
   max_ai_messages_per_day: number;
   max_integration_runs_per_day: number;
+  /** Bytes of data, in MB: exact per dedicated tenant database, estimated in a shared one. */
+  max_storage_mb: number;
 }
 
 export interface PlanDef {
   key: string;
   name: string;
   description: string;
-  trial_days: number;
   self_service: boolean;
   limits: PlanLimits;
+  /** What a tenant is told when a limit stops it; "" means "change the plan". */
+  limit_note: string;
   sort_order: number;
   updated_at?: string;
 }
@@ -240,11 +272,8 @@ export interface PlanDef {
 export interface PlanState {
   plan: PlanDef;
   plan_known: boolean;
-  trial: boolean;
-  trial_ends_at?: string;
-  days_left: number;
   read_only: boolean;
-  code?: "trial_expired" | "over_limit";
+  code?: "over_limit";
   reason?: string;
   limit_state: string;
   limit_reason?: string;
@@ -261,11 +290,27 @@ export interface Me {
   contact_url?: string;
 }
 
+export interface LegalInfo {
+  /** Both documents exist on this deployment; only then does /signup claim agreement to them. */
+  published: boolean;
+  /** The shipped documents are rendered at /terms and /privacy, rather than the operator's own elsewhere. */
+  builtin: boolean;
+  terms_url: string;
+  privacy_url: string;
+  entity: string;
+  address: string;
+  email: string;
+  jurisdiction: string;
+  hosting: string;
+  /** YYYY-MM-DD, shown on both documents. */
+  updated: string;
+}
+
 export interface SignupOptions {
   enabled: boolean;
   reason?: string;
   contact_url?: string;
-  plan?: { key: string; name: string; description: string; trial_days: number; limits: PlanLimits };
+  plan?: { key: string; name: string; description: string; limits: PlanLimits; limit_note: string };
 }
 
 export interface SignupRequest {
@@ -283,7 +328,6 @@ export interface SignupResult {
   application_id: string;
   model_id: string;
   plan: string;
-  trial_ends_at?: string;
   /** Dev stack only: the persona the new account is reachable as. */
   dev_persona?: string;
 }
@@ -338,6 +382,7 @@ export interface Metric {
   format: string;           // "number" | "percentage" | "currency" | "boolean" | "text"
   format_decimals: number;
   format_currency: string;
+  time_summary?: TimeSummary;
   value: number | null;
   readonly?: boolean;   // true = "read" access rule — visible but not editable
   dimension_ids?: string[]; // this metric's OWN grid's dimension IDs, ordered (populated by /api/metrics and /api/grid's all_metrics)
@@ -418,6 +463,12 @@ export interface DevDimensionMember {
   code: string;
   label: string;
   parent_member_id?: string | null;
+  // Leaf periods of a time dimension only: the dates and the server-owned
+  // chronological ordinal. An undated time member is an aggregate period
+  // (H1, FY26) whose value is its leaves reduced by the metric's time summary.
+  period_start?: string;
+  period_end?: string;
+  time_index?: number;
   // Per-member property values (dimension_member.properties).
   properties?: Record<string, string>;
 }
@@ -434,7 +485,10 @@ export interface DevDimension {
   name: string;
   agg_rule: string;
   parent_dimension_id?: string | null; // set when this whole dimension is a declared child of another (e.g. Cabinet -> Department)
-  members: DevDimensionMember[];
+  dimension_type: DimensionType;       // explicit and immutable after creation
+  time_granularity?: TimeGranularity;  // time dimensions only
+  fiscal_year_start_month?: number;    // time dimensions only
+  members: DevDimensionMember[];       // time members in chronological order
 }
 
 
@@ -566,6 +620,9 @@ export interface WidgetProps {
   font_weight?: string;
   color?: string;
   font_family?: string;
+  /** Image widgets: the alternative text, and how the picture fills the box. */
+  alt?: string;
+  image_fit?: "contain" | "cover";
   button_color?: string;
   default_view?: GridDefaultView;
   chart?: GridChartConfig;
@@ -599,7 +656,7 @@ export type ApiDirection = "pull" | "push";
 export type ApiTargetType = "grid" | "form" | "dimension";
 export type ApiBodyMode = "none" | "json" | "form" | "raw";
 export type ApiPaginationMode = "none" | "page_number" | "offset_limit" | "cursor" | "link_header";
-export type ApiAuthType = "none" | "api_key" | "bearer" | "basic" | "oauth2_client_credentials";
+export type ApiAuthType = "none" | "api_key" | "bearer" | "basic" | "oauth2_client_credentials" | "oauth2_authorization_code";
 export type ApiImportMode = "incremental" | "replace" | "full_reload";
 
 export interface ApiKV { key: string; value: string; enabled: boolean }
@@ -752,7 +809,7 @@ export interface AdminTenant {
   plan: string;
   created_at: string;
   applications: AdminApp[];
-  /** The plan as it applies right now: trial, days left, read-only and why. */
+  /** The plan as it applies right now: read-only and why. */
   plan_state?: PlanState;
 }
 
@@ -1173,12 +1230,22 @@ export interface AISettings {
 
 /** The tenant-level AI provider key (enterprise). `api_key` is write-only:
  *  it is never returned, and sending an empty one keeps the stored key. */
+/** The tenant's Google service account, public half — Integrations › Google Sheets
+ *  (GET /api/developer/integrations/google-service-account, scoped by X-App-Id). */
+export interface GoogleServiceAccount {
+  configured: boolean;
+  client_email?: string;
+  project_id?: string;
+  updated_at?: string;
+}
+
 export interface TenantAISettings {
   provider: string;
   model: string;
   api_key?: string;
   has_key: boolean;
   enforced: boolean;
+  scope?: SettingsScope;
 }
 
 /** Result of a live probe that a provider/model/key can actually call tools. */
@@ -1274,6 +1341,21 @@ export function withTenant<T>(tenantId: string, fn: () => Promise<T>): Promise<T
   }
 }
 
+// The scope the platform console's per-tenant settings tabs act on
+// (SettingsScopePicker): a tenant, or "" for the deployment's own row.
+// Sticky, unlike withTenant, because those tabs make their own calls.
+let scopedTenantId = "";
+
+/** Address every following request to `tenantId` ("" = the deployment). */
+export function setScopedTenant(tenantId: string) {
+  scopedTenantId = tenantId;
+}
+
+function tenantHeader(): Record<string, string> {
+  const id = actingTenantId || scopedTenantId;
+  return id ? { "X-Tenant-Id": id } : {};
+}
+
 // authHeader reads the Keycloak singleton's token directly (see
 // ../auth/keycloak) rather than through React context, so it always has the
 // latest value — including a token ProdAuthProvider's background refresh
@@ -1300,7 +1382,7 @@ async function apiFetch<T>(path: string, init?: RequestInit, retrying = false): 
     headers: {
       "Content-Type": "application/json",
       "X-Dev-User": persona(),
-      ...(actingTenantId ? { "X-Tenant-Id": actingTenantId } : {}),
+      ...tenantHeader(),
       ...authHeader(),
       ...(appId ? { "X-App-Id": appId } : {}),
       ...(modelId ? { "X-Model-Id": modelId } : {}),
@@ -1342,7 +1424,7 @@ async function apiFetchBlob(path: string): Promise<{ blob: Blob; filename: strin
   const res = await fetch(path, {
     headers: {
       "X-Dev-User": persona(),
-      ...(actingTenantId ? { "X-Tenant-Id": actingTenantId } : {}),
+      ...tenantHeader(),
       ...authHeader(),
       ...(appId ? { "X-App-Id": appId } : {}),
       ...(modelId ? { "X-Model-Id": modelId } : {}),
@@ -1386,7 +1468,7 @@ async function streamSSE(
     headers: {
       "Content-Type": "application/json",
       "X-Dev-User": persona(),
-      ...(actingTenantId ? { "X-Tenant-Id": actingTenantId } : {}),
+      ...tenantHeader(),
       ...authHeader(),
       ...(appId ? { "X-App-Id": appId } : {}),
       ...(modelId ? { "X-Model-Id": modelId } : {}),
@@ -1493,7 +1575,7 @@ export const api = {
   getDevDimensions: (revisionId?: string) =>
     apiFetch<DevDimension[]>(`/api/developer/dimensions${revisionId ? `?revision_id=${revisionId}` : ""}`),
 
-  addMetric: (body: { name: string; is_input: boolean; formula: string; revision_id?: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string }) =>
+  addMetric: (body: { name: string; is_input: boolean; formula: string; revision_id?: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary }) =>
     apiFetch<{ id: string; status: string }>("/api/developer/metrics", {
       method: "POST",
       body: JSON.stringify(body),
@@ -1524,6 +1606,8 @@ export const api = {
   getMe: () => apiFetch<Me>("/api/me"),
   // Public: no account yet. The sign-up page reads the terms, then registers.
   signupOptions: () => apiFetch<SignupOptions>("/api/signup/options"),
+  /** Public: who operates this deployment and which documents it publishes. */
+  legal: () => apiFetch<LegalInfo>("/api/legal"),
   signup: (body: SignupRequest) => apiFetch<SignupResult>("/api/signup", { method: "POST", body: JSON.stringify(body) }),
   // The plan catalog: read by administrators, written by the platform admin.
   getPlans: () => apiFetch<PlanDef[]>("/api/admin/plans"),
@@ -1533,6 +1617,10 @@ export const api = {
   getNotificationSettings: () => apiFetch<NotificationSettings>("/api/notifications/settings"),
   updateNotificationSettings: (body: NotificationSettings) =>
     apiFetch<NotificationSettings>("/api/notifications/settings", { method: "PUT", body: JSON.stringify(body) }),
+  /** Drops the tenant's own delivery settings so it inherits the deployment's again. */
+  clearNotificationSettings: () => apiFetch<NotificationSettings>("/api/notifications/settings", { method: "DELETE" }),
+  /** Mails the caller through the deployment's relay; the relay's verdict is the response. */
+  sendNotificationTestMail: () => apiFetch<{ sent_to: string }>("/api/notifications/settings/test", { method: "POST" }),
   getSsoSettings: () => apiFetch<SsoSettings>("/api/admin/sso"),
   updateSsoSettings: (body: SsoSettings) => apiFetch<SsoSettings>("/api/admin/sso", { method: "PUT", body: JSON.stringify(body) }),
   removeSso: () => apiFetch<SsoSettings>("/api/admin/sso", { method: "DELETE" }),
@@ -1542,6 +1630,13 @@ export const api = {
   createScimToken: (body: { name: string; default_role?: string; workspace_id?: string }) =>
     apiFetch<ScimToken>("/api/admin/scim/tokens", { method: "POST", body: JSON.stringify(body) }),
   revokeScimToken: (id: string) => apiFetch<{ status: string }>(`/api/admin/scim/tokens/${id}`, { method: "DELETE" }),
+  // A tenant's own Google service account (Admin › Connections): private
+  // sheets are readable once shared with its address.
+  getGoogleServiceAccount: () => apiFetch<GoogleServiceAccount>("/api/developer/integrations/google-service-account"),
+  putGoogleServiceAccount: (keyFile: string) =>
+    apiFetch<GoogleServiceAccount>("/api/developer/integrations/google-service-account", { method: "PUT", body: JSON.stringify({ key_file: keyFile }) }),
+  deleteGoogleServiceAccount: () => apiFetch<GoogleServiceAccount>("/api/developer/integrations/google-service-account", { method: "DELETE" }),
+  testGoogleServiceAccount: () => apiFetch<{ status: string; client_email: string }>("/api/developer/integrations/google-service-account/test", { method: "POST" }),
   getTenantAISettings: () => apiFetch<TenantAISettings>("/api/admin/ai-settings"),
   updateTenantAISettings: (body: TenantAISettings) =>
     apiFetch<TenantAISettings>("/api/admin/ai-settings", { method: "PUT", body: JSON.stringify(body) }),
@@ -1559,6 +1654,8 @@ export const api = {
   getAuditSettings: () => apiFetch<AuditSettings>("/api/admin/audit/settings"),
   updateAuditSettings: (body: { retention_days: number }) =>
     apiFetch<AuditSettings>("/api/admin/audit/settings", { method: "PUT", body: JSON.stringify(body) }),
+  /** Drops the tenant's own retention so it inherits the deployment's again. */
+  clearAuditSettings: () => apiFetch<AuditSettings>("/api/admin/audit/settings", { method: "DELETE" }),
   /** Download the audit export; the server names the file. */
   exportAudit: (params: { format: "csv" | "jsonl"; since?: string; until?: string; category?: string }) => {
     const q = new URLSearchParams({ format: params.format });
@@ -1671,19 +1768,21 @@ export const api = {
 
   deleteMetric: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/metrics/${id}`, { method: "DELETE" }),
-  updateMetric: (id: string, body: { name: string; formula: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string }) =>
+  updateMetric: (id: string, body: { name: string; formula: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary }) =>
     apiFetch<{ status: string; recalc: Array<{ revision: string; metric: string; value: number | null }> }>(
       `/api/developer/metrics/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 
-  createDimension: (body: { name: string; agg_rule?: string; revision_id?: string; parent_dimension_id?: string | null }) =>
+  createDimension: (body: { name: string; agg_rule?: string; revision_id?: string; parent_dimension_id?: string | null; dimension_type: DimensionType; time_granularity?: TimeGranularity; fiscal_year_start_month?: number }) =>
     apiFetch<{ id: string; status: string }>("/api/developer/dimensions", { method: "POST", body: JSON.stringify(body) }),
   updateDimension: (id: string, body: { name: string; agg_rule?: string; parent_dimension_id?: string | null }) =>
     apiFetch<{ status: string }>(`/api/developer/dimensions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteDimension: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/dimensions/${id}`, { method: "DELETE" }),
-  addDimMember: (dimId: string, body: { code: string; label: string; parent_member_id?: string }) =>
+  addDimMember: (dimId: string, body: { code: string; label: string; parent_member_id?: string; period_start?: string; period_end?: string }) =>
     apiFetch<{ id: string }>(`/api/developer/dimensions/${dimId}/members`, { method: "POST", body: JSON.stringify(body) }),
-  updateDimMember: (dimId: string, memberId: string, body: { code: string; label: string; parent_member_id?: string | null; properties?: Record<string, string> }) =>
+  generateDimPeriods: (dimId: string, body: { start: string; end: string; parent_member_id?: string }) =>
+    apiFetch<{ created: number }>(`/api/developer/dimensions/${dimId}/members/generate`, { method: "POST", body: JSON.stringify(body) }),
+  updateDimMember: (dimId: string, memberId: string, body: { code: string; label: string; parent_member_id?: string | null; period_start?: string; period_end?: string; properties?: Record<string, string> }) =>
     apiFetch<{ status: string }>(`/api/developer/dimensions/${dimId}/members/${memberId}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteDimMember: (dimId: string, memberId: string) =>
     apiFetch<{ status: string }>(`/api/developer/dimensions/${dimId}/members/${memberId}`, { method: "DELETE" }),
@@ -1726,9 +1825,8 @@ export const api = {
     apiFetch<{ status: string }>(`/api/admin/users/${id}/access/models/${modelId}`, { method: "DELETE" }),
   createAdminTenant: (body: { name: string; plan: string }) =>
     apiFetch<{ id: string }>("/api/admin/tenants", { method: "POST", body: JSON.stringify(body) }),
-  // name renames; plan / trial_ends_at (RFC 3339, "" ends the trial) are the
-  // platform admin's to change.
-  updateAdminTenant: (id: string, body: { name?: string; plan?: string; trial_ends_at?: string }) =>
+  // name renames; the plan is the platform admin's to change.
+  updateAdminTenant: (id: string, body: { name?: string; plan?: string }) =>
     apiFetch<{ status: string }>(`/api/admin/tenants/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteAdminTenant: (id: string) =>
     apiFetch<{ status: string }>(`/api/admin/tenants/${id}`, { method: "DELETE" }),
@@ -1847,6 +1945,11 @@ export const api = {
     apiFetch<IntegrationConnection>(`/api/developer/integration-connections/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteIntegrationConnection: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/integration-connections/${id}`, { method: "DELETE" }),
+  /** OAuth 2.0 authorization code: where to send the browser; the provider returns it to the gateway's callback. */
+  startIntegrationOAuth: (id: string, returnTo: string) =>
+    apiFetch<{ authorization_url: string; redirect_uri: string }>(`/api/developer/integration-connections/${id}/oauth/start`, { method: "POST", body: JSON.stringify({ return_to: returnTo }) }),
+  disconnectIntegrationOAuth: (id: string) =>
+    apiFetch<IntegrationConnection>(`/api/developer/integration-connections/${id}/oauth/disconnect`, { method: "POST" }),
   testIntegrationConnection: (id: string) =>
     apiFetch<{ ok: boolean; error?: string }>(`/api/developer/integration-connections/${id}/test`, { method: "POST" }),
 
@@ -1972,7 +2075,7 @@ export const api = {
       method: "POST",
       headers: {
         "X-Dev-User": persona(),
-      ...(actingTenantId ? { "X-Tenant-Id": actingTenantId } : {}),
+      ...tenantHeader(),
         ...authHeader(),
         ...(appId ? { "X-App-Id": appId } : {}),
       ...(modelId ? { "X-Model-Id": modelId } : {}),

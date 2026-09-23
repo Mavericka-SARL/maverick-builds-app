@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useAuth } from "../auth/useAuth";
-import { useBrand, useBrandRefresh } from "../branding/brand";
+import { useBrandRefresh } from "../branding/brand";
+import { BrandMark } from "../branding/BrandMark";
 import { AppShell, NotificationCenter } from "../ui";
 import { PersonaSwitcher } from "../shell/PersonaSwitcher";
 import { PlanBanner } from "../shell/PlanBanner";
@@ -9,7 +10,7 @@ import { useBusinessSection } from "../consoles/business/BusinessConsole";
 import { useBusinessAdminSection } from "../consoles/business-admin/section";
 import { useDeveloperSection } from "../consoles/developer/DeveloperConsole";
 import { useAdminSection } from "../consoles/platform-admin/section";
-import { consoleSubtitle, enabledSections, resolveTab, sectionOf, type ConsoleSection, type SectionId } from "./sections";
+import { enabledSections, resolveTab, sectionOf, type ConsoleSection, type SectionId } from "./sections";
 
 /**
  * The one console. Every role the signed-in user holds contributes its
@@ -21,7 +22,6 @@ import { consoleSubtitle, enabledSections, resolveTab, sectionOf, type ConsoleSe
  */
 export default function UnifiedConsole() {
   const { userRoles, persona } = useAuth();
-  const brand = useBrand();
   // The brand by tenant, now that the caller is known (and again when the
   // dev persona changes tenant).
   useBrandRefresh(persona);
@@ -44,9 +44,7 @@ export default function UnifiedConsole() {
 
   return (
     <AppShell
-      productName={brand.configured && brand.product_name ? brand.product_name : undefined}
-      logo={brand.configured && brand.logo_data_url ? <img src={brand.logo_data_url} alt={brand.name} data-testid="brand-logo" /> : undefined}
-      productSubtitle={consoleSubtitle(ids)}
+      brand={<BrandMark markClassName="mvx-app-shell__mark" logoClassName="mvx-app-shell__brand-img" />}
       navGroups={sections.flatMap((s) => s.navGroups)}
       activeNavId={tab}
       onNavSelect={(item) => setTab(item.id)}

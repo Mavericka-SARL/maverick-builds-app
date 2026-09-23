@@ -79,15 +79,33 @@ components:
       properties:
         error: { type: string }
 
+    SettingsScope:
+      type: object
+      description: >-
+        Whose settings a per-tenant settings response shows. Every such
+        request is about one tenant — named in X-Tenant-Id, or the tenant
+        admin's own — or, for a platform admin naming none, the deployment's
+        own row: the defaults a tenant inherits until it sets its own
+        (enterprise feature deployment_settings).
+      required: [deployment, inherited, deployment_settings_available]
+      properties:
+        customer_id: { type: string, format: uuid, description: The tenant; absent for the deployment row }
+        deployment: { type: boolean }
+        inherited: { type: boolean, description: The tenant has no row of its own and these are the deployment's values }
+        deployment_settings_available: { type: boolean, description: Whether this edition has a deployment row at all }
+
     NotificationSettings:
       type: object
       description: >-
-        Which outbound channels this database delivers on. The SMTP relay is
-        deployment configuration, not a setting here; mailer_configured (read
-        only) says whether one exists. webhook_secret is write-only: it is
-        never returned, and an empty value on update keeps the stored one.
+        Which outbound channels one tenant delivers on (scope says which
+        tenant, or that these are the deployment's defaults). The SMTP relay
+        is deployment configuration, not a setting here; mailer_configured
+        (read only) says whether one exists. webhook_secret is write-only:
+        it is never returned, and an empty value on update keeps the stored
+        one.
       required: [email_enabled, webhook_enabled, webhook_url, reminders_enabled, reminder_lead_hours]
       properties:
+        scope: { $ref: "#/components/schemas/SettingsScope" }
         email_enabled: { type: boolean }
         webhook_enabled: { type: boolean }
         webhook_url: { type: string }
@@ -101,6 +119,16 @@ components:
           description: Remind this many hours before a task is due; 0 reminds at the due time.
         mailer_configured: { type: boolean, readOnly: true }
 
+    GoogleConnection:
+      type: object
+      description: A tenant's Google service account, public half only.
+      required: [configured]
+      properties:
+        configured: { type: boolean }
+        client_email: { type: string, description: The address to share private sheets with }
+        project_id: { type: string }
+        updated_at: { type: string, format: date-time }
+
     TenantAISettings:
       type: object
       description: >-
@@ -111,6 +139,7 @@ components:
         this tenant and personal keys are ignored.
       required: [provider, model, has_key, enforced]
       properties:
+        scope: { $ref: "#/components/schemas/SettingsScope" }
         provider:
           type: string
           enum: [openai, anthropic, mistral, deepseek]
@@ -238,6 +267,7 @@ components:
         retention_days: { type: integer, minimum: 0 }
         min_retention_days: { type: integer, readOnly: true }
         updated_at: { type: string, format: date-time, readOnly: true }
+        scope: { $ref: "#/components/schemas/SettingsScope" }
 
     TenantUsage:
       type: object
@@ -365,6 +395,7 @@ components:
         max_fact_rows_per_model:      { type: integer }
         max_ai_messages_per_day:      { type: integer }
         max_integration_runs_per_day: { type: integer }
+        max_storage_mb:               { type: integer }
 
     PlanInput:
       type: object
@@ -372,40 +403,52 @@ components:
       properties:
         name:         { type: string }
         description:  { type: string }
-        trial_days:   { type: integer, description: "0: not a trial; otherwise a tenant put on the plan gets this many days" }
         self_service: { type: boolean, description: May be chosen at public sign-up }
         limits:       { $ref: "#/components/schemas/PlanLimits" }
+        limit_note:   { type: string, description: "What a tenant is told when a limit stops it; empty: change the plan" }
         sort_order:   { type: integer }
 
     Plan:
       type: object
-      required: [key, name, description, trial_days, self_service, limits, sort_order, updated_at]
+      required: [key, name, description, self_service, limits, sort_order, updated_at]
       properties:
         key:          { type: string }
         name:         { type: string }
         description:  { type: string }
-        trial_days:   { type: integer }
         self_service: { type: boolean }
         limits:       { $ref: "#/components/schemas/PlanLimits" }
+        limit_note:   { type: string }
         sort_order:   { type: integer }
         updated_at:   { type: string, format: date-time }
 
     PlanState:
       type: object
       description: A tenant's plan as it applies right now.
-      required: [plan, plan_known, trial, days_left, read_only, limit_state]
+      required: [plan, plan_known, read_only, limit_state]
       properties:
         plan:             { $ref: "#/components/schemas/Plan" }
         plan_known:       { type: boolean, description: False when the tenant names a plan with no row (treated as unlimited) }
-        trial:            { type: boolean }
-        trial_ends_at:    { type: string, format: date-time }
-        days_left:        { type: integer }
         read_only:        { type: boolean, description: Mutating requests are refused with 402 }
-        code:             { type: string, enum: [trial_expired, over_limit] }
+        code:             { type: string, enum: [over_limit] }
         reason:           { type: string }
         limit_state:      { type: string, enum: [ok, over] }
         limit_reason:     { type: string }
         usage_checked_at: { type: string, format: date-time }
+
+    LegalInfo:
+      type: object
+      required: [published, builtin]
+      properties:
+        published:    { type: boolean, description: Both documents exist on this deployment }
+        builtin:      { type: boolean, description: The shipped documents are rendered rather than an operator's own }
+        terms_url:    { type: string, description: Where the terms of service live - empty when none are published }
+        privacy_url:  { type: string, description: Where the privacy notice lives - empty when none is published }
+        entity:       { type: string, description: The operator's legal name }
+        address:      { type: string }
+        email:        { type: string }
+        jurisdiction: { type: string }
+        hosting:      { type: string, description: Who hosts the deployment and where }
+        updated:      { type: string, description: The date the documents last changed as YYYY-MM-DD }
 
     SignupOptions:
       type: object
@@ -420,8 +463,8 @@ components:
             key:         { type: string }
             name:        { type: string }
             description: { type: string }
-            trial_days:  { type: integer }
             limits:      { $ref: "#/components/schemas/PlanLimits" }
+            limit_note:  { type: string, description: What a tenant is told when a limit stops it }
 
     SignupRequest:
       type: object
@@ -443,7 +486,6 @@ components:
         application_id: { type: string, format: uuid }
         model_id:       { type: string, format: uuid }
         plan:           { type: string }
-        trial_ends_at:  { type: string, format: date-time }
         dev_persona:    { type: string, description: Dev stack only — the persona the new account is reachable as }
 
     DemoContext:
@@ -471,6 +513,9 @@ components:
       properties:
         code:  { type: string }
         label: { type: string }
+        period_start: { type: string, format: date, description: "Time members only" }
+        period_end:   { type: string, format: date, description: "Time members only" }
+        time_index:   { type: integer, description: "Time members only: server-owned chronological ordinal, read-only" }
 
     GridData:
       type: object
@@ -521,10 +566,13 @@ components:
 
     GridDimension:
       type: object
-      required: [id, name, members]
+      required: [id, name, dimension_type, members]
       properties:
         id:      { type: string, format: uuid }
         name:    { type: string }
+        dimension_type:          { type: string, enum: [standard, time] }
+        time_granularity:        { type: string, enum: [day, week, month, quarter, half_year, year, custom], description: "Time dimensions only" }
+        fiscal_year_start_month: { type: integer, minimum: 1, maximum: 12, description: "Time dimensions only" }
         members: { type: array, items: { $ref: "#/components/schemas/Department" } }
 
     GridAccessRules:
@@ -664,6 +712,14 @@ components:
         format:          { type: string }
         format_decimals: { type: integer }
         format_currency: { type: string }
+        time_summary:
+          type: string
+          enum: [sum, average, min, max, first, last, none]
+          default: sum
+          description: >-
+            How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every
+            other dimension): sum for flows, last for a closing balance, first for an opening balance,
+            none when a time total is meaningless.
         depends_on:      { type: array, items: { type: string }, description: "Names of metrics/dimensions this formula references" }
         depended_by:     { type: array, items: { type: string }, description: "Names of metrics whose formula references this one" }
 
@@ -675,16 +731,25 @@ components:
         code:              { type: string }
         label:             { type: string }
         parent_member_id:  { type: string, format: uuid, nullable: true }
+        period_start:      { type: string, format: date, description: "Leaf periods of a time dimension only (YYYY-MM-DD); absent on an aggregate period (H1, FY26)" }
+        period_end:        { type: string, format: date, description: "Leaf periods only (YYYY-MM-DD)" }
+        time_index:        { type: integer, description: "Leaf periods only: server-owned chronological ordinal, read-only. Time functions move by this order, never by code or label; aggregate periods have none." }
 
     Dimension:
       type: object
-      required: [id, name, agg_rule, members]
+      required: [id, name, agg_rule, dimension_type, members]
       properties:
         id:                   { type: string, format: uuid }
         name:                 { type: string }
         agg_rule:             { type: string }
         parent_dimension_id:  { type: string, format: uuid, nullable: true }
-        members:              { type: array, items: { $ref: "#/components/schemas/DimensionMember" } }
+        dimension_type:
+          type: string
+          enum: [standard, time]
+          description: "Explicit and immutable. A dimension called month is NOT a time dimension unless marked so."
+        time_granularity:        { type: string, enum: [day, week, month, quarter, half_year, year, custom], description: "Time dimensions only" }
+        fiscal_year_start_month: { type: integer, minimum: 1, maximum: 12, description: "Time dimensions only" }
+        members:              { type: array, items: { $ref: "#/components/schemas/DimensionMember" }, description: "Time members in chronological order" }
 
     DimensionProperty:
       type: object
@@ -717,6 +782,14 @@ components:
         format:          { type: string, default: number }
         format_decimals: { type: integer }
         format_currency: { type: string, default: "$" }
+        time_summary:
+          type: string
+          enum: [sum, average, min, max, first, last, none]
+          default: sum
+          description: >-
+            How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every
+            other dimension): sum for flows, last for a closing balance, first for an opening balance,
+            none when a time total is meaningless.
 
     UpdateMetricRequest:
       type: object
@@ -727,6 +800,14 @@ components:
         format:          { type: string }
         format_decimals: { type: integer }
         format_currency: { type: string }
+        time_summary:
+          type: string
+          enum: [sum, average, min, max, first, last, none]
+          default: sum
+          description: >-
+            How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every
+            other dimension): sum for flows, last for a closing balance, first for an opening balance,
+            none when a time total is meaningless.
 
     CreateRevisionRequest:
       type: object
@@ -742,7 +823,23 @@ components:
         name:                 { type: string }
         agg_rule:             { type: string, default: sum }
         revision_id:          { type: string, format: uuid }
-        parent_dimension_id:  { type: string, format: uuid, nullable: true }
+        parent_dimension_id:  { type: string, format: uuid, nullable: true, description: "Not allowed on a time dimension" }
+        dimension_type:
+          type: string
+          enum: [standard, time]
+          default: standard
+          description: >-
+            Omitted defaults to standard. Only a dimension created as time supports time-series
+            formulas; the name never implies it. Immutable after creation.
+        time_granularity:
+          type: string
+          enum: [day, week, month, quarter, half_year, year, custom]
+          description: "Required when dimension_type is time; immutable"
+        fiscal_year_start_month:
+          type: integer
+          minimum: 1
+          maximum: 12
+          description: "Required when dimension_type is time; immutable"
 
     UpdateDimensionRequest:
       type: object
@@ -756,7 +853,17 @@ components:
       properties:
         code:              { type: string }
         label:             { type: string }
-        parent_member_id:  { type: string, format: uuid, nullable: true }
+        parent_member_id:  { type: string, format: uuid, nullable: true, description: "On a time dimension the parent must be an aggregate (undated) period" }
+        period_start:      { type: string, format: date, description: "Time dimensions: with period_end, makes the member a leaf period (YYYY-MM-DD); omit both for an aggregate period such as H1 or FY26" }
+        period_end:        { type: string, format: date, description: "See period_start" }
+
+    GeneratePeriodsRequest:
+      type: object
+      required: [start, end]
+      properties:
+        start: { type: string, format: date, description: "First period start (must sit on a boundary of the dimension's granularity)" }
+        end:   { type: string, format: date, description: "Last date to cover, inclusive" }
+        parent_member_id: { type: string, format: uuid, description: "Optional aggregate period the generated leaves go under" }
 
     PropertyRequest:
       type: object
@@ -1201,10 +1308,8 @@ components:
       type: object
       properties:
         name: { type: string }
-        # Platform administrators only: a plan key (a trial plan starts its
-        # clock), and/or the trial end as RFC 3339 ("" ends the trial).
-        plan:          { type: string }
-        trial_ends_at: { type: string }
+        # Platform administrators only: the plan key.
+        plan: { type: string }
 
     AdminApplicationItem:
       type: object
@@ -1901,6 +2006,43 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "403": { description: Forbidden }
+    delete:
+      operationId: clearNotificationSettings
+      summary: Drop the tenant's own delivery settings so it inherits the deployment's again (administrators)
+      responses:
+        "200":
+          description: The settings now in force
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotificationSettings" }
+        "400": { description: The deployment's own row cannot be cleared }
+        "403": { description: Forbidden }
+
+  /api/notifications/settings/test:
+    post:
+      operationId: sendNotificationTestMail
+      summary: Send the calling administrator a test e-mail through the deployment's relay, synchronously — the relay's verdict comes back as the response (administrators)
+      responses:
+        "200":
+          description: The relay accepted the message
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sent_to]
+                properties:
+                  sent_to: { type: string, description: The caller's own address, the only recipient this can reach }
+        "403": { description: Forbidden }
+        "409":
+          description: No relay is configured (SMTP_HOST), or the caller's account has no e-mail address
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502":
+          description: The relay refused the message or did not answer; the error carries the relay's own words
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/admin/ai-settings:
     get:
@@ -1962,6 +2104,68 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/TenantAISettings" }
         "403": { description: "Forbidden, or the licence does not include tenant_ai_keys" }
+
+  /api/developer/integrations/google-service-account:
+    get:
+      operationId: getGoogleConnection
+      summary: The tenant's Google service account, public half only — the address to share sheets with (developers and administrators; the tenant of the application in X-App-Id)
+      responses:
+        "200":
+          description: The connection
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GoogleConnection" }
+        "403": { description: Forbidden }
+        "409": { description: A platform admin named no tenant }
+    put:
+      operationId: putGoogleConnection
+      summary: Store a Google service-account key file for this tenant — the JSON Google Cloud downloaded; only the address and the private key are kept, sealed (developers and administrators)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key_file]
+              properties:
+                key_file: { type: string, description: The key file's JSON text }
+      responses:
+        "200":
+          description: Stored
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GoogleConnection" }
+        "400": { description: Not a service-account key file, or its key does not parse }
+        "403": { description: Forbidden }
+        "503": { description: The deployment has no INTEGRATION_CRED_KEY and refuses to store credentials }
+    delete:
+      operationId: deleteGoogleConnection
+      summary: Forget the tenant's Google service account; private sheets become unreachable again (developers and administrators)
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GoogleConnection" }
+        "403": { description: Forbidden }
+
+  /api/developer/integrations/google-service-account/test:
+    post:
+      operationId: testGoogleConnection
+      summary: Prove the stored key by obtaining an access token from Google; nothing is read (developers and administrators)
+      responses:
+        "200":
+          description: Google issued a token for the account
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  client_email: { type: string }
+        "403": { description: Forbidden }
+        "409": { description: No account is stored }
+        "502": { description: Google refused the account; the error carries its words }
 
   /api/sso/discover:
     get:
@@ -2468,6 +2672,17 @@ paths:
               schema: { $ref: "#/components/schemas/AuditSettings" }
         "400": { description: Below the retention floor }
         "403": { description: "Forbidden, or the licence does not include audit_export" }
+    delete:
+      operationId: clearAuditSettings
+      summary: Drop the tenant's own retention so it inherits the deployment's again (administrators; enterprise)
+      responses:
+        "200":
+          description: The settings now in force
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditSettings" }
+        "400": { description: The deployment's own row cannot be cleared }
+        "403": { description: "Forbidden, or the licence does not include audit_export" }
 
   /api/license:
     get:
@@ -2480,6 +2695,17 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/LicenseInfo" }
         "401": { description: Unauthorized }
+
+  /api/legal:
+    get:
+      operationId: getLegalInfo
+      summary: The operator's identity and the documents it publishes, for the terms of service and privacy notice a visitor reads before signing up (public; see internal/gateway/legal.go)
+      responses:
+        "200":
+          description: Legal information
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LegalInfo" }
 
   /api/signup/options:
     get:
@@ -2531,7 +2757,7 @@ paths:
     put:
       operationId: upsertPlan
       tags: [Admin]
-      summary: Create or change a plan — name, trial days, self-service flag and limits (platform_admin; applies to every tenant on the plan within a minute)
+      summary: Create or change a plan — name, self-service flag and limits (platform_admin; applies to every tenant on the plan within a minute)
       parameters:
         - name: key
           in: path
@@ -3198,6 +3424,32 @@ paths:
                   id: { type: string, format: uuid }
         "400": { $ref: "#/components/responses/BadRequest" }
 
+  /api/developer/dimensions/{dimId}/members/generate:
+    post:
+      operationId: generateDimensionPeriods
+      tags: [Developer Console]
+      summary: Bulk-generate a time dimension's periods between two dates (same validation and chronological indexing as single members; time dimensions only)
+      parameters:
+        - name: dimId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GeneratePeriodsRequest" }
+      responses:
+        "200":
+          description: Periods created (existing codes are left untouched)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  created: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
   /api/developer/dimensions/{dimId}/members/{memberId}:
     patch:
       operationId: updateDimensionMember
@@ -3545,6 +3797,68 @@ paths:
       responses:
         "200": {description: Result, content: {application/json: {schema: {type: object, properties: {ok: {type: boolean}, error: {type: string}}}}}}
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/developer/integration-connections/{id}/oauth/start:
+    post:
+      operationId: startIntegrationOAuth
+      tags: [Developer Console]
+      summary: "Begin the OAuth 2.0 authorization-code consent for a connection of that auth type: records the pending authorisation (PKCE) and answers the provider URL to open; the provider returns the browser to /api/integrations/oauth/callback"
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                return_to: { type: string, description: Console path to return to afterwards ("/" when absent or not a path) }
+      responses:
+        "200":
+          description: Where to send the browser
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authorization_url, redirect_uri]
+                properties:
+                  authorization_url: { type: string }
+                  redirect_uri: { type: string, description: The callback the provider must be registered with }
+        "400": { description: Not an authorization-code connection, or its meta is incomplete }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/developer/integration-connections/{id}/oauth/disconnect:
+    post:
+      operationId: disconnectIntegrationOAuth
+      tags: [Developer Console]
+      summary: Forget the connection's tokens, keeping the client so it can be connected again
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        "200":
+          description: The connection
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  name: { type: string }
+                  auth_type: { type: string }
+                  meta: { type: object }
+                  has_secret: { type: boolean }
+        "400": { description: Not an authorization-code connection }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/integrations/oauth/callback:
+    get:
+      operationId: integrationOAuthCallback
+      summary: "Where the provider sends the browser after consent (public: the person arrives with the state only). Exchanges the code, seals the tokens into the connection, and redirects to the console with ?oauth=connected or ?oauth=error&oauth_error=…"
+      parameters:
+        - { name: state, in: query, required: true, schema: { type: string } }
+        - { name: code, in: query, schema: { type: string } }
+        - { name: error, in: query, schema: { type: string } }
+        - { name: error_description, in: query, schema: { type: string } }
+      responses:
+        "302": { description: Back to the console }
 
   /api/developer/grids:
     get:
@@ -4733,7 +5047,7 @@ paths:
     get:
       operationId: listAdminApplications
       tags: [Admin]
-      summary: List all applications (unscoped)
+      summary: "List the applications in the caller's scope — every tenant's for a platform admin, their own tenant's for a tenant admin"
       responses:
         "200":
           description: Application list
@@ -4745,7 +5059,7 @@ paths:
     post:
       operationId: createAdminApplication
       tags: [Admin]
-      summary: Create an application under a tenant
+      summary: "Create an application under a tenant (a tenant admin: their own tenant only)"
       requestBody:
         required: true
         content:
@@ -4866,7 +5180,7 @@ paths:
     get:
       operationId: exportModel
       tags: [Admin]
-      summary: Export a model revision as a self-contained transfer package (tenant_admin only, scoped to their own tenant)
+      summary: Export a model revision as a self-contained transfer package (tenant admins for their own tenant, platform admins for any)
       parameters:
         - name: id
           in: path
@@ -4896,7 +5210,7 @@ paths:
     get:
       operationId: exportModelPackage
       tags: [Admin]
-      summary: Download a standalone deployment package for a model revision — a tar.gz containing the entity graph (package.json), the complete database migrations, a provenance manifest, and an infra-only docker-compose (tenant_admin only, scoped to their own tenant)
+      summary: Download a standalone deployment package for a model revision — a tar.gz containing the entity graph (package.json), the complete database migrations, a provenance manifest, and an infra-only docker-compose (tenant admins for their own tenant, platform admins for any)
       parameters:
         - name: id
           in: path
@@ -4926,7 +5240,7 @@ paths:
     post:
       operationId: importModel
       tags: [Admin]
-      summary: Import a model export package into an application, creating a new model and revision (tenant_admin only, scoped to their own tenant)
+      summary: Import a model export package into an application, creating a new model and revision (tenant admins for their own tenant, platform admins for any)
       requestBody:
         required: true
         content:

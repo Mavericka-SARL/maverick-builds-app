@@ -10,6 +10,10 @@ resources:
   # Add your own, e.g.:
   #   - pdb-gateway.yaml      # keep a gateway replica during node drains
   #   - sealed-secrets.yaml   # produced by scripts/seal-secrets.sh
+  #   - sealed-smtp.yaml      # produced by scripts/seal-smtp-secret.sh: the
+  #                           # mail relay's credentials (docs/NOTIFICATIONS.md)
+  #   - sealed-integration.yaml # produced by scripts/seal-integration-secret.sh:
+  #                           # the keys tenants' credentials are sealed under
   #   - mtls.yaml             # cert-manager CA + service cert for gRPC mTLS
   #   - ingress.yaml          # TLS termination for the console and Keycloak
 

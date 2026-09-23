@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -13,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,13 +31,16 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/formula"
 	"github.com/mavericks-engine/mavericks/internal/identity"
+	"github.com/mavericks-engine/mavericks/internal/imagedata"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/modeltransfer"
+	"github.com/mavericks-engine/mavericks/internal/notification"
 	"github.com/mavericks-engine/mavericks/internal/plan"
 	"github.com/mavericks-engine/mavericks/internal/query"
 	"github.com/mavericks-engine/mavericks/internal/rollup"
 	"github.com/mavericks-engine/mavericks/internal/schemamigration"
+	"github.com/mavericks-engine/mavericks/internal/timedim"
 	"github.com/mavericks-engine/mavericks/internal/workflow"
 	"github.com/mavericks-engine/mavericks/internal/writeguard"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
@@ -66,6 +71,9 @@ type handler struct {
 	// never sets it); nil means the zero-value fetcher, which targets the
 	// real docs.google.com.
 	sheets *importpkg.SheetFetcher
+	// sheetsTokenURL / sheetsAPIBase point a tenant's stored Google service
+	// account at a test's fake Google; empty in production.
+	sheetsTokenURL, sheetsAPIBase string
 	// store backs the standalone deployment package export route
 	// (adminModelExportPackage) — nil unless constructed via
 	// NewHandlerWithObjectStore. A nil store means that one route 500s;
@@ -96,15 +104,19 @@ type handler struct {
 	// lastSeen throttles the per-account last_seen_at refresh.
 	lastSeenMu sync.Mutex
 	lastSeen   map[string]time.Time
-	// mailerConfigured reports whether the deployment has an SMTP relay, so
-	// the console can warn before e-mail notifications are switched on.
-	mailerConfigured bool
+	// mailer is the deployment's SMTP relay, nil when none is configured —
+	// the console warns before e-mail notifications are switched on, and an
+	// administrator can send themselves a test message through it.
+	mailer notification.Mailer
 	// plans answers plan and trial questions per tenant (internal/plan,
 	// see plan.go); signup is the public sign-up configuration and
 	// signupLimit throttles it per address.
 	plans       *plan.Enforcer
 	signupCfg   SignupConfig
 	signupLimit discoverLimiter
+	// legalCfg is who operates this deployment and which documents it
+	// publishes (legal.go).
+	legalCfg LegalConfig
 	// owners caches which tenant an application, model or workspace
 	// belongs to (plan.go).
 	ownerMu sync.Mutex
@@ -122,8 +134,9 @@ type Deps struct {
 	Router *tenantdb.Router
 	// License is the key in force; nil means community edition.
 	License *license.Manager
-	// MailerConfigured says an SMTP relay is available for outbound e-mail.
-	MailerConfigured bool
+	// Mailer is the SMTP relay for outbound e-mail; nil when the deployment
+	// has none.
+	Mailer notification.Mailer
 	// KeycloakPublicURL and KeycloakRealm name the identity-provider
 	// registry as browsers reach it; PublicURL is this deployment's origin.
 	KeycloakPublicURL string
@@ -131,6 +144,10 @@ type Deps struct {
 	PublicURL         string
 	// Signup opens public self-service sign-up (signup.go).
 	Signup SignupConfig
+	// Legal identifies the operator and its published documents (legal.go).
+	// Zero means this deployment publishes none, and the sign-up page then
+	// claims agreement to nothing.
+	Legal LegalConfig
 	// Plans is the enforcer shared with the usage sweep, so a sweep's
 	// verdict reaches requests at once; nil builds a private one.
 	Plans *plan.Enforcer
@@ -191,9 +208,10 @@ func NewHandlerWithDeps(log zerolog.Logger, pool *pgxpool.Pool, jwks *identity.J
 		lic:         deps.License,
 		kcPublicURL: deps.KeycloakPublicURL, kcRealm: deps.KeycloakRealm, publicURL: deps.PublicURL,
 
-		mailerConfigured: deps.MailerConfigured,
-		signupCfg:        deps.Signup,
-		signupLimit:      discoverLimiter{rate: signupRate, burst: signupBurst},
+		mailer:      deps.Mailer,
+		signupCfg:   deps.Signup,
+		legalCfg:    deps.Legal,
+		signupLimit: discoverLimiter{rate: signupRate, burst: signupBurst},
 	}
 	h.plans = deps.Plans
 	if h.plans == nil {
@@ -276,6 +294,9 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	// Self-service sign-up (public; signup.go) and the plan catalog
 	// (plan.go). Both handlers guard themselves.
 	register("GET", "/api/signup/options", "public", cors(h.signupOptions))
+	// The terms and the privacy notice are read before an account exists
+	// (legal.go), so this is public too.
+	register("GET", "/api/legal", "public", cors(h.legalInfo))
 	register("POST", "/api/signup", "public", cors(h.signup))
 	register("GET", "/api/admin/plans", "admin", cors(h.adminPlans))
 	register("PUT", "/api/admin/plans/{key}", "admin", cors(h.adminPlanAction))
@@ -306,6 +327,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("PATCH", "/api/developer/dimensions/{dimId}", "developer", dev(h.developerDimensionAction))
 	register("DELETE", "/api/developer/dimensions/{dimId}", "developer", dev(h.developerDimensionAction))
 	register("POST", "/api/developer/dimensions/{dimId}/members", "developer", dev(h.developerDimensionAction))
+	register("POST", "/api/developer/dimensions/{dimId}/members/generate", "developer", dev(h.developerDimensionAction))
 	register("PATCH", "/api/developer/dimensions/{dimId}/members/{memberId}", "developer", dev(h.developerDimensionAction))
 	register("DELETE", "/api/developer/dimensions/{dimId}/members/{memberId}", "developer", dev(h.developerDimensionAction))
 	register("GET", "/api/developer/dimensions/{dimId}/properties", "developer", dev(h.developerDimensionAction))
@@ -369,6 +391,11 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("PATCH", "/api/developer/integration-connections/{id}", "developer", dev(h.integrationConnectionAction))
 	register("DELETE", "/api/developer/integration-connections/{id}", "developer", dev(h.integrationConnectionAction))
 	register("POST", "/api/developer/integration-connections/{id}/test", "developer", dev(h.integrationConnectionAction))
+	register("POST", "/api/developer/integration-connections/{id}/oauth/start", "developer", dev(h.integrationConnectionAction))
+	register("POST", "/api/developer/integration-connections/{id}/oauth/disconnect", "developer", dev(h.integrationConnectionAction))
+	// The provider sends the browser here after consent; the state is the
+	// only credential it arrives with (rest_api_integrations.go).
+	register("GET", "/api/integrations/oauth/callback", "public", cors(h.integrationOAuthCallback))
 	register("GET", "/api/integrations", "any", cors(h.listIntegrations))
 	register("POST", "/api/integrations/{id}/run", "any", cors(h.integrationRun))
 	register("GET", "/api/developer/form-integrations", "developer", dev(h.developerFormIntegrations))
@@ -430,13 +457,14 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("POST", "/api/admin/models", "admin", adm(h.adminModels))
 	register("PUT", "/api/admin/models/{id}/active-revision", "admin", adm(h.adminModelAction))
 	register("DELETE", "/api/admin/models/{id}", "admin", adm(h.adminModelAction))
-	// Model export/import is restricted to tenant admins only — deliberately
-	// narrower than adm() (which also admits platform_admin) and never
-	// developer: moving whole models across tenants is a tenant-owner action.
-	tenantAdm := func(fn http.HandlerFunc) http.HandlerFunc { return cors(h.guard(fn, "tenant_admin")) }
-	register("GET", "/api/admin/models/{id}/export", "tenant_admin", tenantAdm(h.adminModelExport))
-	register("GET", "/api/admin/models/{id}/export/package", "tenant_admin", tenantAdm(h.adminModelExportPackage))
-	register("POST", "/api/admin/models/import", "tenant_admin", tenantAdm(h.adminModelImport))
+	// Model export/import: the tenant's own administrator and the platform
+	// administrator (who has every tenant's capabilities, decided
+	// 2026-09-20), never a developer — moving whole models across tenants
+	// is an owner action.
+	tenantAdm := func(fn http.HandlerFunc) http.HandlerFunc { return cors(h.guard(fn, "tenant_admin", "platform_admin")) }
+	register("GET", "/api/admin/models/{id}/export", "admin", tenantAdm(h.adminModelExport))
+	register("GET", "/api/admin/models/{id}/export/package", "admin", tenantAdm(h.adminModelExportPackage))
+	register("POST", "/api/admin/models/import", "admin", tenantAdm(h.adminModelImport))
 	register("POST", "/api/admin/revisions", "admin", adm(h.adminRevisions))
 	register("PATCH", "/api/admin/revisions/{id}", "admin", adm(h.adminRevisionAction))
 	register("DELETE", "/api/admin/revisions/{id}", "admin", adm(h.adminRevisionAction))
@@ -479,6 +507,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/admin/audit/export", "admin", auditGate(h.auditExport))
 	register("GET", "/api/admin/audit/settings", "admin", auditGate(h.auditSettings))
 	register("PUT", "/api/admin/audit/settings", "admin", auditGate(h.auditSettings))
+	register("DELETE", "/api/admin/audit/settings", "admin", auditGate(h.auditSettings))
 
 	// Business-admin-only endpoints
 	register("GET", "/api/business-admin/roles", "developer_or_business_admin", baOrDev(h.baRoles))
@@ -506,6 +535,8 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("POST", "/api/notifications/mark-read", "any", cors(h.markNotifRead))
 	register("GET", "/api/notifications/settings", "admin", adm(h.notificationSettings))
 	register("PUT", "/api/notifications/settings", "admin", adm(h.notificationSettings))
+	register("DELETE", "/api/notifications/settings", "admin", adm(h.notificationSettings))
+	register("POST", "/api/notifications/settings/test", "admin", adm(h.notificationTestSend))
 
 	// Tenant-level AI provider key (enterprise). Community and commercial
 	// deployments answer 403 here and keep per-user keys; see ee/aikeys.
@@ -539,6 +570,11 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("PUT", "/api/admin/ai-settings", "admin", tenantAI(h.tenantAISettings))
 	register("POST", "/api/admin/ai-settings/test", "admin", tenantAI(h.tenantAITestSettings))
 	register("DELETE", "/api/admin/ai-settings/key", "admin", tenantAI(h.tenantAIKeyClear))
+	// A tenant's own credentials for external systems (tenant_connections.go).
+	register("GET", "/api/developer/integrations/google-service-account", "developer", devOrAdm(h.googleConnection))
+	register("PUT", "/api/developer/integrations/google-service-account", "developer", devOrAdm(h.googleConnection))
+	register("DELETE", "/api/developer/integrations/google-service-account", "developer", devOrAdm(h.googleConnection))
+	register("POST", "/api/developer/integrations/google-service-account/test", "developer", devOrAdm(h.googleConnectionTest))
 
 	// CRUD forms + automation (authenticated users)
 	register("GET", "/api/dimensions", "any", cors(h.publicDimensions))
@@ -1221,6 +1257,7 @@ var modelScopedResourceSQL = map[string]string{
 // than model-scoped, so they can't go through the model map — an application
 // with no model yet would resolve to nothing and 404 a legitimate request.
 var appScopedResourceSQL = map[string]string{
+	"application":     `SELECT id::text FROM core.application WHERE id=$1::uuid`,
 	"workflow_def":    `SELECT application_id::text FROM workflow.workflow_def WHERE id=$1::uuid`,
 	"automation_rule": `SELECT application_id::text FROM workflow.automation_rule WHERE id=$1::uuid`,
 }
@@ -1407,8 +1444,8 @@ func (h *handler) me(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("unauthorized"), http.StatusUnauthorized)
 		return
 	}
-	// A member of a tenant learns what their plan means right now (trial
-	// days left, read-only and why); a platform admin has no plan.
+	// A member of a tenant learns what their plan means right now
+	// (read-only and why); a platform admin has no plan.
 	cid := ""
 	if !act.hasRole("platform_admin") {
 		cid = h.requestCustomerID(ctx, r, act)
@@ -1467,6 +1504,7 @@ type metricRow struct {
 	Format                 string   `json:"format"`
 	FormatDecimals         int      `json:"format_decimals"`
 	FormatCurrency         string   `json:"format_currency"`
+	TimeSummary            string   `json:"time_summary,omitempty"` // aggregation across a time dimension (sum|average|min|max|first|last|none)
 	Value                  *float64 `json:"value"`
 	Readonly               bool     `json:"readonly,omitempty"`
 	// DimensionIDs is the ordered dimension IDs of the grid this metric belongs
@@ -1525,7 +1563,7 @@ func (h *handler) metrics(w http.ResponseWriter, r *http.Request) {
 			ORDER BY cr.metric_id, cr.calc_at DESC
 		)
 		SELECT m.id::text, m.name, m.is_input, m.formula,
-		       m.format, m.format_decimals, m.format_currency,
+		       m.format, m.format_decimals, m.format_currency, m.time_summary,
 		       CASE WHEN m.is_input THEN li.value ELSE lc.value END AS value
 		FROM model.metric_def m
 		LEFT JOIN latest_input li ON li.metric_id = m.id
@@ -1548,7 +1586,7 @@ func (h *handler) metrics(w http.ResponseWriter, r *http.Request) {
 	var result []metricRow
 	for rows.Next() {
 		var mr metricRow
-		if err := rows.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.Value); err != nil {
+		if err := rows.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.Value); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -1732,7 +1770,7 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if cid := h.customerOfModel(ctx, req.ModelID); cid != "" && h.plans != nil {
-		if err := h.plans.CheckFactRows(ctx, h.db.For(ctx), cid, req.ModelID, 1); err != nil {
+		if err := cmp.Or(h.plans.CheckFactRows(ctx, h.db.For(ctx), cid, req.ModelID, 1), h.plans.CheckStorage(ctx, h.db.For(ctx), cid)); err != nil {
 			h.jsonLimitErr(w, err)
 			return
 		}
@@ -2340,6 +2378,9 @@ type gridDimMember struct {
 	ID             string          `json:"id"`
 	Code           string          `json:"code"`
 	Label          string          `json:"label"`
+	PeriodStart    *string         `json:"period_start,omitempty"` // time members only: YYYY-MM-DD
+	PeriodEnd      *string         `json:"period_end,omitempty"`
+	TimeIndex      *int            `json:"time_index,omitempty"`  // time members only: server-owned chronological ordinal
 	ParentCode     string          `json:"parent_code,omitempty"` // parent member's code; empty = root node
 	ParentMemberID string          `json:"-"`                     // parent member's ID (own dimension or, when the owning dimension declares parent_dimension_id, cross-dimension); internal only, drives writeguard.ExpandHidden — the frontend uses ParentCode instead
 	Readonly       bool            `json:"readonly,omitempty"`    // true = "read" access rule applied
@@ -2349,7 +2390,10 @@ type gridDimMember struct {
 type gridDimension struct {
 	ID                string          `json:"id"`
 	Name              string          `json:"name"`
-	DisplayLevel      *int            `json:"display_level"` // null=all, 0=roots, -1=leaves, n=depth n
+	DimensionType     string          `json:"dimension_type"`                    // "standard" | "time"
+	TimeGranularity   *string         `json:"time_granularity,omitempty"`        // time dimensions only
+	FiscalYearStart   *int            `json:"fiscal_year_start_month,omitempty"` // time dimensions only
+	DisplayLevel      *int            `json:"display_level"`                     // null=all, 0=roots, -1=leaves, n=depth n
 	ParentDimensionID *string         `json:"parent_dimension_id"`
 	SourceDimensionID *string         `json:"source_dimension_id,omitempty"` // set = this dimension's members are a grouping of SourceDimensionID's members by their properties[SourceProperty] value
 	SourceProperty    *string         `json:"source_property,omitempty"`
@@ -2430,7 +2474,13 @@ func factRowHidden(dm map[string]string, hidden map[string]map[string]bool) bool
 func toRollupDims(allDims []gridDimension) map[string]*rollup.Dimension {
 	out := make(map[string]*rollup.Dimension, len(allDims))
 	for _, d := range allDims {
-		rd := &rollup.Dimension{ID: d.ID}
+		rd := &rollup.Dimension{ID: d.ID, IsTime: d.DimensionType == "time"}
+		if d.TimeGranularity != nil {
+			rd.TimeGranularity = *d.TimeGranularity
+		}
+		if d.FiscalYearStart != nil {
+			rd.FiscalYearStartMonth = *d.FiscalYearStart
+		}
 		if d.ParentDimensionID != nil {
 			rd.ParentDimensionID = *d.ParentDimensionID
 		}
@@ -2446,9 +2496,176 @@ func toRollupDims(allDims []gridDimension) map[string]*rollup.Dimension {
 			if len(m.Properties) > 0 {
 				_ = json.Unmarshal(m.Properties, &props)
 			}
-			rd.Members = append(rd.Members, rollup.Member{ID: m.ID, Code: m.Code, ParentCode: m.ParentCode, Properties: props})
+			rm := rollup.Member{ID: m.ID, Code: m.Code, ParentCode: m.ParentCode, Properties: props, TimeIndex: -1}
+			if m.TimeIndex != nil {
+				rm.TimeIndex = *m.TimeIndex
+			}
+			rd.Members = append(rd.Members, rm)
 		}
 		out[d.ID] = rd
+	}
+	return out
+}
+
+// scopedSeries is one time-series metric's persisted per-combo results plus
+// what a scoped read needs to serve them safely: the time axis, the union
+// window of every dependency (spec §3.4), the periods hidden from the
+// caller, and the metric's time summary.
+type scopedSeries struct {
+	TimeDimID   string
+	TimeSummary string
+	Periods     []string           // every period code in chronological order (unscoped)
+	Hidden      map[string]bool    // period codes hidden from this caller
+	Rows        map[string]float64 // dimKey(combo) → persisted leaf value
+	MinOffset   int
+	MaxOffset   int
+	UnbPast     bool
+	UnbFuture   bool
+}
+
+// suppressed reports whether the cell at period t must be withheld because
+// its source window reaches a hidden period.
+func (ts *scopedSeries) suppressed(t int) bool {
+	for i, code := range ts.Periods {
+		if !ts.Hidden[code] {
+			continue
+		}
+		if (ts.UnbPast && i < t) || (ts.UnbFuture && i > t) || (i >= t+ts.MinOffset && i <= t+ts.MaxOffset) {
+			return true
+		}
+	}
+	return false
+}
+
+// scoped returns the metric's cells (keyed code1:code2… in ownDims order)
+// within the visible lattice — every leaf period, plus each aggregate
+// period (H1, FY26) as its visible leaves reduced by the time summary — and
+// its total: non-time dimensions combined by aggRule per period, periods
+// combined by the time summary. ok=false when no total can be derived
+// (formula/rate rules need the scheduler's own rollup rows; a scoped read
+// has none).
+func (ts *scopedSeries) scoped(rollupDims map[string]*rollup.Dimension, ownDims []string, aggRule string) (map[string]float64, float64, bool) {
+	pos := make(map[string]int, len(ts.Periods))
+	for i, c := range ts.Periods {
+		pos[c] = i
+	}
+	cells := map[string]float64{}
+	perPeriod := map[int][]float64{}
+	timePos := -1
+	nonTime := make([]string, 0, len(ownDims))
+	for i, dimID := range ownDims {
+		if dimID == ts.TimeDimID {
+			timePos = i
+		} else {
+			nonTime = append(nonTime, dimID)
+		}
+	}
+	keyOf := func(combo map[string]string) string {
+		codes := make([]string, 0, len(ownDims))
+		for _, dimID := range ownDims {
+			codes = append(codes, combo[dimID])
+		}
+		return strings.Join(codes, ":")
+	}
+	// leafValue: the persisted value at combo, unless its window is hidden.
+	leafValue := func(combo map[string]string) (float64, bool) {
+		t, known := pos[combo[ts.TimeDimID]]
+		if !known || ts.suppressed(t) {
+			return 0, false
+		}
+		b, _ := json.Marshal(combo)
+		v, has := ts.Rows[string(b)]
+		return v, has
+	}
+	for _, combo := range rollup.LeafCombos(rollupDims, ownDims) {
+		v, ok := leafValue(combo)
+		if !ok {
+			continue
+		}
+		cells[keyOf(combo)] = v
+		perPeriod[pos[combo[ts.TimeDimID]]] = append(perPeriod[pos[combo[ts.TimeDimID]]], v)
+	}
+	// Aggregate periods: per non-time leaf group, the visible leaves beneath
+	// the aggregate in chronological order; withheld if any is hidden.
+	if axis := rollupDims[ts.TimeDimID]; axis != nil && timePos >= 0 && ts.TimeSummary != "none" &&
+		aggRule != string(rollup.AggFormula) && aggRule != string(rollup.AggRate) {
+		groups := rollup.LeafCombos(rollupDims, nonTime)
+		if len(groups) == 0 {
+			groups = []map[string]string{{}}
+		}
+		for _, m := range axis.Members {
+			if m.IsLeafPeriod() {
+				continue
+			}
+			var leaves []string
+			for code := range subtreeCodesOf(axis, m.Code) {
+				if _, ok := pos[code]; ok {
+					leaves = append(leaves, code)
+				}
+			}
+			sort.Slice(leaves, func(i, j int) bool { return pos[leaves[i]] < pos[leaves[j]] })
+			for _, g := range groups {
+				vals := make([]float64, 0, len(leaves))
+				complete := true
+				for _, code := range leaves {
+					combo := make(map[string]string, len(g)+1)
+					for k, v := range g {
+						combo[k] = v
+					}
+					combo[ts.TimeDimID] = code
+					v, ok := leafValue(combo)
+					if !ok {
+						complete = false
+						break
+					}
+					vals = append(vals, v)
+				}
+				if !complete || len(vals) == 0 {
+					continue
+				}
+				if v, ok := calculation.TimeSummary(ts.TimeSummary, vals); ok {
+					combo := make(map[string]string, len(g)+1)
+					for k, v := range g {
+						combo[k] = v
+					}
+					combo[ts.TimeDimID] = m.Code
+					cells[keyOf(combo)] = v
+				}
+			}
+		}
+	}
+	if aggRule == string(rollup.AggFormula) || aggRule == string(rollup.AggRate) || len(perPeriod) == 0 || ts.TimeSummary == "none" {
+		return cells, 0, false
+	}
+	var ordered []float64
+	for i := range ts.Periods {
+		if vals, ok := perPeriod[i]; ok {
+			ordered = append(ordered, rollup.CombineAgg(vals, rollup.AggRule(aggRule)))
+		}
+	}
+	total, ok := calculation.TimeSummary(ts.TimeSummary, ordered)
+	return cells, total, ok
+}
+
+// subtreeCodesOf returns code and every descendant code within dim.
+func subtreeCodesOf(dim *rollup.Dimension, code string) map[string]bool {
+	out := map[string]bool{code: true}
+	childrenOf := map[string][]string{}
+	for _, m := range dim.Members {
+		if m.ParentCode != "" {
+			childrenOf[m.ParentCode] = append(childrenOf[m.ParentCode], m.Code)
+		}
+	}
+	queue := []string{code}
+	for len(queue) > 0 {
+		c := queue[0]
+		queue = queue[1:]
+		for _, child := range childrenOf[c] {
+			if !out[child] {
+				out[child] = true
+				queue = append(queue, child)
+			}
+		}
 	}
 	return out
 }
@@ -2490,6 +2707,7 @@ func scopeCalcCells(
 	dimIDToName map[string]string,
 	universe []metricRow, // allMetrics
 	scopedInputCells map[string]float64, // this request's already hidden-member-scoped `cells`, input-only at this point
+	series map[string]*scopedSeries, // time-series metrics: served from persisted rows, never re-evaluated (nil = none)
 ) (cells map[string]float64, totals map[string]float64) {
 	byName := make(map[string]metricRow, len(universe))
 	for _, m := range universe {
@@ -2536,6 +2754,28 @@ func scopeCalcCells(
 	for pass := 0; pass < len(remaining)+1 && len(remaining) > 0; pass++ {
 		var unresolved []metricRow
 		for _, m := range remaining {
+			if ts := series[m.ID]; ts != nil {
+				// A time-series metric is never re-evaluated here: its value
+				// at a period depends on OTHER periods, which a scoped
+				// (trimmed) lattice cannot reproduce — a pinned month would
+				// make LAG see an empty past and answer a different number
+				// than the grid everyone else reads. Serve the scheduler's
+				// persisted leaf rows within the visible lattice, and
+				// suppress any cell whose source window touches a period
+				// this caller may not see (spec §10): omitting the hidden
+				// source from the arithmetic would change the model.
+				tsCells, total, ok := ts.scoped(rollupDims, metricDimIDs[m.ID], m.AggRule)
+				for k, v := range tsCells {
+					key := m.ID + ":" + k
+					cells[key] = v
+					working[key] = v
+				}
+				if ok {
+					totals[m.ID] = total
+					working[m.ID] = total
+				}
+				continue
+			}
 			refs, err := formula.ExtractRefs(*m.Formula)
 			ready := err == nil
 			if ready {
@@ -2785,14 +3025,16 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		dimQuery = `
 			SELECT d.id::text, d.name, gd.display_level, d.parent_dimension_id::text,
 			       d.source_dimension_id::text, d.source_property,
+			       d.dimension_type, d.time_granularity, d.fiscal_year_start_month,
 			       m.id::text, m.code, m.label, m.properties,
-			       COALESCE(pm.code, '') AS parent_code, COALESCE(pm.id::text, '') AS parent_member_id
+			       COALESCE(pm.code, '') AS parent_code, COALESCE(pm.id::text, '') AS parent_member_id,
+			       m.period_start::text, m.period_end::text, m.time_index
 			FROM model.grid_dimension gd
 			JOIN model.dimension_def d ON d.id = gd.dimension_id
 			JOIN model.dimension_member m ON m.dimension_id = d.id
 			LEFT JOIN model.dimension_member pm ON pm.id = m.parent_member_id
 			WHERE gd.grid_id = $1::uuid
-			ORDER BY d.name, m.sort_order, m.code`
+			ORDER BY d.name, m.time_index NULLS LAST, m.sort_order, m.code`
 		dimParam = gridDefID
 	} else {
 		// Revision scoping is not optional here: without it every revision's
@@ -2805,14 +3047,16 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		dimQuery = `
 			SELECT d.id::text, d.name, NULL::int AS display_level, d.parent_dimension_id::text,
 			       d.source_dimension_id::text, d.source_property,
+			       d.dimension_type, d.time_granularity, d.fiscal_year_start_month,
 			       m.id::text, m.code, m.label, m.properties,
-			       COALESCE(pm.code, '') AS parent_code, COALESCE(pm.id::text, '') AS parent_member_id
+			       COALESCE(pm.code, '') AS parent_code, COALESCE(pm.id::text, '') AS parent_member_id,
+			       m.period_start::text, m.period_end::text, m.time_index
 			FROM model.dimension_def d
 			JOIN model.dimension_member m ON m.dimension_id = d.id
 			LEFT JOIN model.dimension_member pm ON pm.id = m.parent_member_id
 			WHERE d.model_id = $1::uuid
 			  AND (d.revision_id IS NULL OR d.revision_id::text = $2)
-			ORDER BY (d.name='department') DESC, d.name, m.sort_order, m.code`
+			ORDER BY (d.name='department') DESC, d.name, m.time_index NULLS LAST, m.sort_order, m.code`
 		dimParam = modelID
 	}
 	dimArgs := []any{dimParam}
@@ -2827,21 +3071,25 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	dimMap := map[string]*gridDimension{}
 	dimOrder := []string{}
 	for dimRows.Next() {
-		var dimID, dimName, memberID, code, label, parentCode, parentMemberID string
-		var displayLevel *int
-		var parentDimensionID, sourceDimensionID, sourceProperty *string
+		var dimID, dimName, memberID, code, label, parentCode, parentMemberID, dimType string
+		var displayLevel, fiscalStart, timeIndex *int
+		var parentDimensionID, sourceDimensionID, sourceProperty, granularity, periodStart, periodEnd *string
 		var properties json.RawMessage
-		if err := dimRows.Scan(&dimID, &dimName, &displayLevel, &parentDimensionID, &sourceDimensionID, &sourceProperty, &memberID, &code, &label, &properties, &parentCode, &parentMemberID); err != nil {
+		if err := dimRows.Scan(&dimID, &dimName, &displayLevel, &parentDimensionID, &sourceDimensionID, &sourceProperty,
+			&dimType, &granularity, &fiscalStart,
+			&memberID, &code, &label, &properties, &parentCode, &parentMemberID, &periodStart, &periodEnd, &timeIndex); err != nil {
 			dimRows.Close()
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
 		if _, ok := dimMap[dimID]; !ok {
-			dimMap[dimID] = &gridDimension{ID: dimID, Name: dimName, DisplayLevel: displayLevel, ParentDimensionID: parentDimensionID, SourceDimensionID: sourceDimensionID, SourceProperty: sourceProperty}
+			dimMap[dimID] = &gridDimension{ID: dimID, Name: dimName, DisplayLevel: displayLevel, ParentDimensionID: parentDimensionID, SourceDimensionID: sourceDimensionID, SourceProperty: sourceProperty,
+				DimensionType: dimType, TimeGranularity: granularity, FiscalYearStart: fiscalStart}
 			dimOrder = append(dimOrder, dimID)
 		}
 		dimMap[dimID].Members = append(dimMap[dimID].Members, gridDimMember{
 			ID: memberID, Code: code, Label: label, ParentCode: parentCode, ParentMemberID: parentMemberID, Properties: properties,
+			PeriodStart: periodStart, PeriodEnd: periodEnd, TimeIndex: timeIndex,
 		})
 	}
 	dimRows.Close()
@@ -2863,13 +3111,15 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		allDimRows, adErr := h.db.Query(ctx, `
 			SELECT d.id::text, d.name, d.parent_dimension_id::text,
 			       d.source_dimension_id::text, d.source_property,
+			       d.dimension_type, d.time_granularity, d.fiscal_year_start_month,
 			       m.id::text, m.code, m.label, m.properties,
-			       COALESCE(pm.code, '') AS parent_code, COALESCE(pm.id::text, '') AS parent_member_id
+			       COALESCE(pm.code, '') AS parent_code, COALESCE(pm.id::text, '') AS parent_member_id,
+			       m.period_start::text, m.period_end::text, m.time_index
 			FROM model.dimension_def d
 			JOIN model.dimension_member m ON m.dimension_id = d.id
 			LEFT JOIN model.dimension_member pm ON pm.id = m.parent_member_id
 			WHERE d.model_id = $1::uuid AND (d.revision_id = $2::uuid OR d.revision_id IS NULL)
-			ORDER BY d.name, m.sort_order, m.code
+			ORDER BY d.name, m.time_index NULLS LAST, m.sort_order, m.code
 		`, modelID, revisionID)
 		if adErr != nil {
 			jsonErr(w, adErr, http.StatusInternalServerError)
@@ -2878,20 +3128,25 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		allDimMap := map[string]*gridDimension{}
 		allDimOrder := []string{}
 		for allDimRows.Next() {
-			var dimID, dimName, memberID, code, label, parentCode, parentMemberID string
-			var parentDimensionID, sourceDimensionID, sourceProperty *string
+			var dimID, dimName, memberID, code, label, parentCode, parentMemberID, dimType string
+			var parentDimensionID, sourceDimensionID, sourceProperty, granularity, periodStart, periodEnd *string
+			var fiscalStart, timeIndex *int
 			var properties json.RawMessage
-			if err := allDimRows.Scan(&dimID, &dimName, &parentDimensionID, &sourceDimensionID, &sourceProperty, &memberID, &code, &label, &properties, &parentCode, &parentMemberID); err != nil {
+			if err := allDimRows.Scan(&dimID, &dimName, &parentDimensionID, &sourceDimensionID, &sourceProperty,
+				&dimType, &granularity, &fiscalStart,
+				&memberID, &code, &label, &properties, &parentCode, &parentMemberID, &periodStart, &periodEnd, &timeIndex); err != nil {
 				allDimRows.Close()
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
 			if _, ok := allDimMap[dimID]; !ok {
-				allDimMap[dimID] = &gridDimension{ID: dimID, Name: dimName, ParentDimensionID: parentDimensionID, SourceDimensionID: sourceDimensionID, SourceProperty: sourceProperty}
+				allDimMap[dimID] = &gridDimension{ID: dimID, Name: dimName, ParentDimensionID: parentDimensionID, SourceDimensionID: sourceDimensionID, SourceProperty: sourceProperty,
+					DimensionType: dimType, TimeGranularity: granularity, FiscalYearStart: fiscalStart}
 				allDimOrder = append(allDimOrder, dimID)
 			}
 			allDimMap[dimID].Members = append(allDimMap[dimID].Members, gridDimMember{
 				ID: memberID, Code: code, Label: label, ParentCode: parentCode, ParentMemberID: parentMemberID, Properties: properties,
+				PeriodStart: periodStart, PeriodEnd: periodEnd, TimeIndex: timeIndex,
 			})
 		}
 		allDimRows.Close()
@@ -3017,12 +3272,56 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 					scopeSubtrees = map[string]map[string]bool{}
 				}
 				scopeSubtrees[d.ID] = seen
-				scopeArgs = append(scopeArgs, d.ID, subtree)
-				n := len(scopeArgs)
-				// $2+n-1 = dimID, $2+n = codes (args after modelID=$1,
-				// revisionID=$2; scope args begin at $3).
-				scopeConds = append(scopeConds,
-					fmt.Sprintf("(dim_members ? $%d AND dim_members->>$%d = ANY($%d))", 2+n-1, 2+n-1, 2+n))
+				// A pin reaches DOWN the cross-dimension hierarchy too: the
+				// facts of a metric dimensioned by department, whose members
+				// roll up into region (parent_dimension_id), carry no region
+				// key at all — pinning region=APAC has to admit the facts of
+				// the departments under APAC, or a regional total computes
+				// from nothing (found live: "Regional Total Cost $0" on the
+				// Regional Expense Planning demo). The same rule
+				// rollup.descendantsInChain applies: level by level, a child
+				// dimension's members whose parent code is in the level
+				// above. Each dimension reached gets its own alternative in
+				// the fact filter and its own subtree for the combo trim.
+				alternatives := []string{}
+				addAlt := func(dimID string, codes []string) {
+					scopeArgs = append(scopeArgs, dimID, codes)
+					n := len(scopeArgs)
+					// $2+n-1 = dimID, $2+n = codes (args after modelID=$1,
+					// revisionID=$2; scope args begin at $3).
+					alternatives = append(alternatives,
+						fmt.Sprintf("(dim_members ? $%d AND dim_members->>$%d = ANY($%d))", 2+n-1, 2+n-1, 2+n))
+				}
+				addAlt(d.ID, subtree)
+				frontier := map[string]map[string]bool{d.ID: seen}
+				for len(frontier) > 0 {
+					next := map[string]map[string]bool{}
+					for _, child := range allDims {
+						if child.ParentDimensionID == nil {
+							continue
+						}
+						parentCodes, ok := frontier[*child.ParentDimensionID]
+						if !ok {
+							continue
+						}
+						codes := map[string]bool{}
+						list := []string{}
+						for _, m := range child.Members {
+							if m.ParentCode != "" && parentCodes[m.ParentCode] {
+								codes[m.Code] = true
+								list = append(list, m.Code)
+							}
+						}
+						if _, done := scopeSubtrees[child.ID]; done {
+							continue // a dimension is reached once (the dimension graph is a tree)
+						}
+						scopeSubtrees[child.ID] = codes
+						addAlt(child.ID, list)
+						next[child.ID] = codes
+					}
+					frontier = next
+				}
+				scopeConds = append(scopeConds, "("+strings.Join(alternatives, " OR ")+")")
 			}
 		}
 	}
@@ -3086,7 +3385,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		// not the revision the grid was originally built against.
 		metricRows2, err = h.db.Query(ctx, `
 			SELECT rev.id::text, rev.name, rev.is_input, rev.formula, rev.agg_rule,
-			       rev.format, rev.format_decimals, rev.format_currency
+			       rev.format, rev.format_decimals, rev.format_currency, rev.time_summary
 			FROM model.grid_metric gm
 			JOIN model.metric_def orig ON orig.id = gm.metric_id
 			JOIN model.metric_def rev
@@ -3099,7 +3398,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	} else {
 		metricRows2, err = h.db.Query(ctx, `
 			SELECT id::text, name, is_input, formula, agg_rule,
-			       format, format_decimals, format_currency
+			       format, format_decimals, format_currency, time_summary
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid
 			ORDER BY is_input DESC, name
 		`, modelID, revisionID)
@@ -3110,7 +3409,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	}
 	for metricRows2.Next() {
 		var mr metricRow
-		if err := metricRows2.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency); err != nil {
+		if err := metricRows2.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary); err != nil {
 			metricRows2.Close()
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
@@ -3166,7 +3465,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	if gridDefID != "" {
 		allRows, aErr := h.db.Query(ctx, `
 			SELECT id::text, name, is_input, formula, agg_rule,
-			       format, format_decimals, format_currency
+			       format, format_decimals, format_currency, time_summary
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid
 			ORDER BY is_input DESC, name
 		`, modelID, revisionID)
@@ -3176,7 +3475,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		}
 		for allRows.Next() {
 			var mr metricRow
-			if err := allRows.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency); err != nil {
+			if err := allRows.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary); err != nil {
 				allRows.Close()
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
@@ -3496,6 +3795,19 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		cellRows.Close()
 	}
 
+	// Inputs on a time dimension total by their time_summary (a closing
+	// balance is its LAST period, not the sum of every period's balance):
+	// non-time dimensions sum per period, then the periods reduce. The
+	// per-period sums come from this request's own (scope/hidden-filtered)
+	// cells, or — on the cell-less totals-only path — from the same
+	// input-value map the scheduler reads.
+	if !metaOnly {
+		if err := h.applyInputTimeSummaries(ctx, modelID, revisionID, allMetrics, metricDims, allDims, cells, totals, groupedInput, scopeSubtrees); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+	}
+
 	// ── calculated-metric cells + totals ──────────────────────────────────────
 	// runtime.calc_result holds one row per leaf combo per calc metric (plus
 	// one '{}' company-wide aggregate row), computed by the calculation
@@ -3617,7 +3929,12 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		for _, d := range allDims {
 			dimIDToName[d.ID] = d.Name
 		}
-		scopedCells, scopedTotals := scopeCalcCells(ctx, rollupDims, metricDims, dimIDToName, allMetrics, cells)
+		series, sErr := h.loadScopedSeries(ctx, modelID, revisionID, allDims, allMetrics, metricDims, hiddenByDim)
+		if sErr != nil {
+			jsonErr(w, sErr, http.StatusInternalServerError)
+			return
+		}
+		scopedCells, scopedTotals := scopeCalcCells(ctx, rollupDims, metricDims, dimIDToName, allMetrics, cells, series)
 		for k, v := range scopedCells {
 			cells[k] = v
 		}
@@ -3949,8 +4266,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		-- 1. Copy metrics; capture old→new ID mapping via name join
 		new_metrics AS (
 			INSERT INTO model.metric_def
-			  (model_id, name, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, revision_id)
-			SELECT model_id, name, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, $2::uuid
+			  (model_id, name, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, revision_id)
+			SELECT model_id, name, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, $2::uuid
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 			RETURNING id AS new_id, name
 		),
@@ -3962,8 +4279,9 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		),
 		-- 2. Copy calc_dependency with remapped metric IDs
 		new_deps AS (
-			INSERT INTO model.calc_dependency (metric_id, depends_on_metric_id)
-			SELECT mm.new_id, dm.new_id
+			INSERT INTO model.calc_dependency
+			  (metric_id, depends_on_metric_id, min_time_offset, max_time_offset, unbounded_past, unbounded_future)
+			SELECT mm.new_id, dm.new_id, cd.min_time_offset, cd.max_time_offset, cd.unbounded_past, cd.unbounded_future
 			FROM model.calc_dependency cd
 			JOIN metric_map mm ON mm.old_id = cd.metric_id
 			JOIN metric_map dm ON dm.old_id = cd.depends_on_metric_id
@@ -3972,8 +4290,10 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		-- 3. Copy dimensions; capture old→new ID mapping via name join
 		new_dims AS (
 			INSERT INTO model.dimension_def
-			  (model_id, name, agg_rule, properties, revision_id, source_property)
-			SELECT model_id, name, agg_rule, properties, $2::uuid, source_property
+			  (model_id, name, agg_rule, properties, revision_id, source_property,
+			   dimension_type, time_granularity, fiscal_year_start_month)
+			SELECT model_id, name, agg_rule, properties, $2::uuid, source_property,
+			       dimension_type, time_granularity, fiscal_year_start_month
 			FROM model.dimension_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 			RETURNING id AS new_id, name
 		),
@@ -3991,8 +4311,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		-- has to rebuild its own mapping for the same reason).
 		new_members AS (
 			INSERT INTO model.dimension_member
-			  (dimension_id, code, label, properties, sort_order)
-			SELECT dm.new_id, m.code, m.label, m.properties, m.sort_order
+			  (dimension_id, code, label, properties, sort_order, period_start, period_end, time_index)
+			SELECT dm.new_id, m.code, m.label, m.properties, m.sort_order, m.period_start, m.period_end, m.time_index
 			FROM model.dimension_member m
 			JOIN dim_map dm ON dm.old_id = m.dimension_id
 			RETURNING id
@@ -4637,6 +4957,14 @@ func (h *handler) activateRevision(ctx context.Context, revisionID string) (mode
 	if err := h.db.QueryRow(ctx, `SELECT model_id::text FROM model.revision WHERE id=$1::uuid`, revisionID).Scan(&modelID); err != nil {
 		return "", fmt.Errorf("revision not found")
 	}
+	// Dimensional time validation (spec §4.4): a revision cannot become
+	// active while a time-series metric has no (or more than one) time
+	// dimension, reads a series on another calendar, or sits in a cycle
+	// time does not break. Formula save cannot check these — a metric's
+	// dimensions come from grid placement — so publication does.
+	if err := metricformula.ValidateTime(ctx, h.db.For(ctx), modelID, revisionID); err != nil {
+		return "", err
+	}
 	if _, err := h.db.Exec(ctx, `
 		UPDATE core.model
 		SET active_revision_id   = $2::uuid,
@@ -4720,6 +5048,10 @@ func (h *handler) developerRevisionAction(w http.ResponseWriter, r *http.Request
 
 	if subPath == "activate" && r.Method == http.MethodPut {
 		if _, err := h.activateRevision(ctx, id); err != nil {
+			if metricformula.IsValidationError(err) {
+				jsonErr(w, err, http.StatusBadRequest)
+				return
+			}
 			jsonErr(w, err, http.StatusNotFound)
 			return
 		}
@@ -4785,6 +5117,9 @@ type devMetric struct {
 	Format         string  `json:"format"`
 	FormatDecimals int     `json:"format_decimals"`
 	FormatCurrency string  `json:"format_currency"`
+	// TimeSummary is how the metric aggregates across a time dimension
+	// (spec §3.3); agg_rule stays the rule for every other dimension.
+	TimeSummary string `json:"time_summary"`
 	// Operands for agg_rule "rate", so the console can show which two metrics
 	// the ratio currently divides.
 	AggNumeratorMetricID   string   `json:"agg_numerator_metric_id,omitempty"`
@@ -4837,7 +5172,7 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.Query(ctx, `
 		SELECT m.id::text, m.name, m.is_input, m.formula, m.agg_rule,
 		       COALESCE(m.agg_numerator_metric_id::text,''), COALESCE(m.agg_denominator_metric_id::text,''),
-		       m.format, m.format_decimals, m.format_currency,
+		       m.format, m.format_decimals, m.format_currency, m.time_summary,
 		       COALESCE(
 		           (SELECT string_agg(dep.name, ',')
 		            FROM model.calc_dependency cd
@@ -4869,7 +5204,7 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 		var dependsOnCSV, dependedByCSV string
 		if err := rows.Scan(&dm.ID, &dm.Name, &dm.IsInput, &dm.Formula, &dm.AggRule,
 			&dm.AggNumeratorMetricID, &dm.AggDenominatorMetricID,
-			&dm.Format, &dm.FormatDecimals, &dm.FormatCurrency, &dependsOnCSV, &dependedByCSV, &dm.CalcError); err != nil {
+			&dm.Format, &dm.FormatDecimals, &dm.FormatCurrency, &dm.TimeSummary, &dependsOnCSV, &dependedByCSV, &dm.CalcError); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -4918,6 +5253,9 @@ type addMetricReq struct {
 	Format                 string `json:"format"`
 	FormatDecimals         int    `json:"format_decimals"`
 	FormatCurrency         string `json:"format_currency"`
+	// TimeSummary: aggregation across a time dimension (spec §3.3). Empty
+	// defaults to sum.
+	TimeSummary string `json:"time_summary"`
 }
 
 func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
@@ -4953,7 +5291,7 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 	// service (see internal/metricformula). The previous check ran through
 	// extractFormulaRefs, which returns nil on a parse error, so anything
 	// that didn't parse produced zero refs and was accepted.
-	var formulaEdges []string
+	var formulaEdges []metricformula.Edge
 	if !req.IsInput && req.Formula != "" {
 		res, vErr := metricformula.Validate(ctx, h.db.For(ctx), metricformula.Request{
 			ModelID: modelID, RevisionID: req.RevisionID, Name: req.Name, Formula: req.Formula,
@@ -4967,7 +5305,7 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		formulaEdges = res.DependsOnMetricIDs
+		formulaEdges = res.Edges
 	}
 
 	// Insert metric
@@ -4984,6 +5322,13 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AggRule == "" {
 		req.AggRule = "sum"
+	}
+	if req.TimeSummary == "" {
+		req.TimeSummary = "sum"
+	}
+	if !timedim.ValidTimeSummary(req.TimeSummary) {
+		jsonErr(w, fmt.Errorf("time_summary must be one of %s", strings.Join(timedim.TimeSummaries, ", ")), http.StatusBadRequest)
+		return
 	}
 	if err := metricformula.ValidateAggRule(req.AggRule, req.IsInput, req.AggNumeratorMetricID, req.AggDenominatorMetricID, ""); err != nil {
 		jsonErr(w, err, http.StatusBadRequest)
@@ -5017,34 +5362,28 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 	if req.RevisionID != "" {
 		metricInsertErr = tx.QueryRow(ctx, `
 			INSERT INTO model.metric_def (model_id, name, formula, is_input, revision_id, agg_rule, format, format_decimals, format_currency,
-			                              agg_numerator_metric_id, agg_denominator_metric_id)
-			VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6, $7, $8, $9, NULLIF($10,'')::uuid, NULLIF($11,'')::uuid)
+			                              agg_numerator_metric_id, agg_denominator_metric_id, time_summary)
+			VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6, $7, $8, $9, NULLIF($10,'')::uuid, NULLIF($11,'')::uuid, $12)
 			RETURNING id::text
 		`, modelID, req.Name, formulaVal, req.IsInput, req.RevisionID, req.AggRule, req.Format, req.FormatDecimals, req.FormatCurrency,
-			req.AggNumeratorMetricID, req.AggDenominatorMetricID).Scan(&newID)
+			req.AggNumeratorMetricID, req.AggDenominatorMetricID, req.TimeSummary).Scan(&newID)
 	} else {
 		metricInsertErr = tx.QueryRow(ctx, `
 			INSERT INTO model.metric_def (model_id, name, formula, is_input, agg_rule, format, format_decimals, format_currency,
-			                              agg_numerator_metric_id, agg_denominator_metric_id)
-			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, NULLIF($9,'')::uuid, NULLIF($10,'')::uuid)
+			                              agg_numerator_metric_id, agg_denominator_metric_id, time_summary)
+			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, NULLIF($9,'')::uuid, NULLIF($10,'')::uuid, $11)
 			RETURNING id::text
 		`, modelID, req.Name, formulaVal, req.IsInput, req.AggRule, req.Format, req.FormatDecimals, req.FormatCurrency,
-			req.AggNumeratorMetricID, req.AggDenominatorMetricID).Scan(&newID)
+			req.AggNumeratorMetricID, req.AggDenominatorMetricID, req.TimeSummary).Scan(&newID)
 	}
 	if metricInsertErr != nil {
 		jsonErr(w, fmt.Errorf("insert metric: %w", metricInsertErr), http.StatusInternalServerError)
 		return
 	}
 
-	for _, depID := range formulaEdges {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO model.calc_dependency (metric_id, depends_on_metric_id)
-			VALUES ($1::uuid, $2::uuid)
-			ON CONFLICT DO NOTHING
-		`, newID, depID); err != nil {
-			jsonErr(w, fmt.Errorf("record formula dependency: %w", err), http.StatusInternalServerError)
-			return
-		}
+	if err := metricformula.WriteDependencies(ctx, tx, newID, formulaEdges); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
 	}
 	if err := tx.Commit(ctx); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
@@ -5567,6 +5906,11 @@ type devMember struct {
 	Code           string  `json:"code"`
 	Label          string  `json:"label"`
 	ParentMemberID *string `json:"parent_member_id"`
+	// Time members only (spec §3.2): the period and the server-owned
+	// chronological ordinal time functions move by.
+	PeriodStart *string `json:"period_start,omitempty"`
+	PeriodEnd   *string `json:"period_end,omitempty"`
+	TimeIndex   *int    `json:"time_index,omitempty"`
 	// Per-member property values (dimension_member.properties) — the
 	// Dimensions tab shows them and property-derived dimensions group by
 	// them. Populated by the developer endpoint; omitted elsewhere.
@@ -5578,6 +5922,9 @@ type devDimension struct {
 	Name              string      `json:"name"`
 	AggRule           string      `json:"agg_rule"`
 	ParentDimensionID *string     `json:"parent_dimension_id"`
+	DimensionType     string      `json:"dimension_type"` // "standard" | "time" — explicit, immutable
+	TimeGranularity   *string     `json:"time_granularity,omitempty"`
+	FiscalYearStart   *int        `json:"fiscal_year_start_month,omitempty"`
 	Members           []devMember `json:"members"`
 }
 
@@ -5598,6 +5945,11 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 			AggRule           string  `json:"agg_rule"`
 			RevisionID        string  `json:"revision_id"`
 			ParentDimensionID *string `json:"parent_dimension_id"`
+			// Time dimension marker (spec §4.1). Omitted = standard; a
+			// name like "month" never implies time.
+			DimensionType   string `json:"dimension_type"`
+			TimeGranularity string `json:"time_granularity"`
+			FiscalYearStart int    `json:"fiscal_year_start_month"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -5609,6 +5961,15 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.AggRule == "" {
 			body.AggRule = "sum"
+		}
+		timeCfg := timedim.Config{Type: body.DimensionType, Granularity: body.TimeGranularity, FiscalYearStartMonth: body.FiscalYearStart}
+		if err := timedim.ValidateConfig(&timeCfg); err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		}
+		if timeCfg.Type == timedim.TypeTime && body.ParentDimensionID != nil {
+			jsonErr(w, fmt.Errorf("a time dimension cannot have a parent dimension"), http.StatusBadRequest)
+			return
 		}
 		if body.ParentDimensionID != nil {
 			var parentModelID string
@@ -5623,16 +5984,21 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 		}
 		var newID string
 		var dimInsertErr error
+		var granularity *string
+		var fiscalStart *int
+		if timeCfg.Type == timedim.TypeTime {
+			granularity, fiscalStart = &timeCfg.Granularity, &timeCfg.FiscalYearStartMonth
+		}
 		if body.RevisionID != "" {
 			dimInsertErr = h.db.QueryRow(ctx, `
-				INSERT INTO model.dimension_def (model_id, name, agg_rule, revision_id, parent_dimension_id)
-				VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid) RETURNING id::text
-			`, modelID, body.Name, body.AggRule, body.RevisionID, body.ParentDimensionID).Scan(&newID)
+				INSERT INTO model.dimension_def (model_id, name, agg_rule, revision_id, parent_dimension_id, dimension_type, time_granularity, fiscal_year_start_month)
+				VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, $7, $8) RETURNING id::text
+			`, modelID, body.Name, body.AggRule, body.RevisionID, body.ParentDimensionID, timeCfg.Type, granularity, fiscalStart).Scan(&newID)
 		} else {
 			dimInsertErr = h.db.QueryRow(ctx, `
-				INSERT INTO model.dimension_def (model_id, name, agg_rule, parent_dimension_id)
-				VALUES ($1::uuid, $2, $3, $4::uuid) RETURNING id::text
-			`, modelID, body.Name, body.AggRule, body.ParentDimensionID).Scan(&newID)
+				INSERT INTO model.dimension_def (model_id, name, agg_rule, parent_dimension_id, dimension_type, time_granularity, fiscal_year_start_month)
+				VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7) RETURNING id::text
+			`, modelID, body.Name, body.AggRule, body.ParentDimensionID, timeCfg.Type, granularity, fiscalStart).Scan(&newID)
 		}
 		if dimInsertErr != nil {
 			jsonErr(w, fmt.Errorf("insert dimension: %w", dimInsertErr), http.StatusInternalServerError)
@@ -5667,7 +6033,8 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 		dimArgs = []any{modelID, revisionID}
 	}
 	dimRows, err := h.db.Query(ctx,
-		`SELECT id::text, name, agg_rule, parent_dimension_id::text FROM model.dimension_def WHERE model_id=$1::uuid AND `+dimFilter+` ORDER BY created_at`,
+		`SELECT id::text, name, agg_rule, parent_dimension_id::text, dimension_type, time_granularity, fiscal_year_start_month
+		 FROM model.dimension_def WHERE model_id=$1::uuid AND `+dimFilter+` ORDER BY created_at`,
 		dimArgs...)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
@@ -5678,7 +6045,7 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 	var dims []devDimension
 	for dimRows.Next() {
 		var d devDimension
-		if err := dimRows.Scan(&d.ID, &d.Name, &d.AggRule, &d.ParentDimensionID); err != nil {
+		if err := dimRows.Scan(&d.ID, &d.Name, &d.AggRule, &d.ParentDimensionID, &d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -5726,9 +6093,13 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for i, d := range dims {
+		// Time members come back in chronological order (time_index), never
+		// in code order — the console shows periods as the engine walks them.
 		mRows, err := h.db.Query(ctx, `
-			SELECT id::text, code, label, parent_member_id::text, properties FROM model.dimension_member
-			WHERE dimension_id=$1::uuid ORDER BY sort_order, code
+			SELECT id::text, code, label, parent_member_id::text, properties,
+			       period_start::text, period_end::text, time_index
+			FROM model.dimension_member
+			WHERE dimension_id=$1::uuid ORDER BY time_index NULLS LAST, sort_order, code
 		`, d.ID)
 		if err != nil {
 			continue
@@ -5736,7 +6107,7 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 		for mRows.Next() {
 			var m devMember
 			var propsJSON []byte
-			if err := mRows.Scan(&m.ID, &m.Code, &m.Label, &m.ParentMemberID, &propsJSON); err != nil {
+			if err := mRows.Scan(&m.ID, &m.Code, &m.Label, &m.ParentMemberID, &propsJSON, &m.PeriodStart, &m.PeriodEnd, &m.TimeIndex); err != nil {
 				continue
 			}
 			if len(propsJSON) > 0 {
@@ -5819,6 +6190,11 @@ func (h *handler) adminMe(w http.ResponseWriter, r *http.Request) {
 func (h *handler) adminInfraNodes(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	// Node health is the platform's, not any tenant's: the console shows
+	// the tab at platform scope only, and the API says the same.
+	if _, ok := h.requireRole(w, r, "platform_admin"); !ok {
 		return
 	}
 	ctx := r.Context()
@@ -6618,7 +6994,7 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if cid := h.customerOfModel(ctx, modelID); cid != "" && h.plans != nil {
-		if err := h.plans.CheckFactRows(ctx, h.db.For(ctx), cid, modelID, len(staged)); err != nil {
+		if err := cmp.Or(h.plans.CheckFactRows(ctx, h.db.For(ctx), cid, modelID, len(staged)), h.plans.CheckStorage(ctx, h.db.For(ctx), cid)); err != nil {
 			h.jsonLimitErr(w, err)
 			return
 		}
@@ -6978,7 +7354,13 @@ func (h *handler) importDimensionMembers(w http.ResponseWriter, r *http.Request)
 	for i, col := range header {
 		colIdx[strings.ToLower(strings.TrimSpace(col))] = i
 	}
-	imported, errs := h.importDimensionMembersCSV(ctx, body.DimensionID, cr, colIdx)
+	imported, errs, importErr := h.importDimensionMembersCSV(ctx, body.DimensionID, cr, colIdx)
+	if importErr != nil {
+		// A time dimension imports as one unit: an invalid period set
+		// (overlap, gap, bad boundary) rejects the whole file.
+		jsonErr(w, importErr, http.StatusBadRequest)
+		return
+	}
 
 	var appID string
 	_ = h.db.QueryRow(ctx, `
@@ -6994,10 +7376,35 @@ func (h *handler) importDimensionMembers(w http.ResponseWriter, r *http.Request)
 	jsonOK(w, map[string]any{"rows_imported": imported, "error_rows": errs})
 }
 
-func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID string, cr *csv.Reader, colIdx map[string]int) (imported, errs int) {
+func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID string, cr *csv.Reader, colIdx map[string]int) (imported, errs int, fatal error) {
 	codeCol, hasCode := colIdx["code"]
 	labelCol, hasLabel := colIdx["label"]
 	parentCol, hasParent := colIdx["parent_code"]
+	// Time dimensions (spec §4.2): period_start / period_end columns are
+	// required (a row with both empty is an aggregate period, parent_code
+	// works as on any hierarchy), and the whole file is validated and
+	// reindexed together in one transaction.
+	startCol, hasStart := colIdx["period_start"]
+	endCol, hasEnd := colIdx["period_end"]
+	timeCfg, cfgErr := timedim.LoadConfig(ctx, h.db.For(ctx), dimensionID)
+	if cfgErr != nil {
+		return 0, 0, fmt.Errorf("dimension not found")
+	}
+	isTime := timeCfg.Type == timedim.TypeTime
+	if isTime && (!hasStart || !hasEnd) {
+		return 0, 0, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: "a time dimension import needs period_start and period_end columns"}
+	}
+	if !isTime && (hasStart || hasEnd) {
+		return 0, 0, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: "period_start/period_end apply only to a time dimension"}
+	}
+	var tx pgx.Tx
+	if isTime {
+		var err error
+		if tx, err = h.db.Begin(ctx); err != nil {
+			return 0, 0, err
+		}
+		defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+	}
 	type propCol struct {
 		name string
 		idx  int
@@ -7076,6 +7483,45 @@ func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID str
 			}
 		}
 		propsJSON, _ := json.Marshal(props)
+		if isTime {
+			var start, end *time.Time
+			var idx *int
+			if cell(record, startCol) != "" || cell(record, endCol) != "" {
+				ps, perr := timedim.ParseDate(cell(record, startCol))
+				pe, perr2 := timedim.ParseDate(cell(record, endCol))
+				if perr != nil || perr2 != nil {
+					return 0, 0, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: fmt.Sprintf("member %q: period_start and period_end must be YYYY-MM-DD dates (both empty for an aggregate period)", code)}
+				}
+				start, end = &ps, &pe
+				zero := 0
+				idx = &zero
+			}
+			var parentID *string
+			if hasParent {
+				if parentCode := cell(record, parentCol); parentCode != "" {
+					var pid string
+					if err := tx.QueryRow(ctx,
+						`SELECT id::text FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2`,
+						dimensionID, parentCode).Scan(&pid); err != nil {
+						return 0, 0, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: fmt.Sprintf("member %q: parent %q not found (list parents before their children)", code, parentCode)}
+					}
+					parentID = &pid
+				}
+			}
+			if _, err = tx.Exec(ctx,
+				`INSERT INTO model.dimension_member (dimension_id, code, label, properties, period_start, period_end, time_index, parent_member_id)
+				 VALUES ($1::uuid, $2, $3, $4::jsonb, $5::date, $6::date, $7, $8::uuid)
+				 ON CONFLICT (dimension_id, code) DO UPDATE SET
+				   label = EXCLUDED.label,
+				   period_start = EXCLUDED.period_start, period_end = EXCLUDED.period_end, time_index = EXCLUDED.time_index,
+				   parent_member_id = COALESCE(EXCLUDED.parent_member_id, model.dimension_member.parent_member_id),
+				   properties = model.dimension_member.properties || EXCLUDED.properties`,
+				dimensionID, code, label, string(propsJSON), start, end, idx, parentID); err != nil {
+				return 0, 0, fmt.Errorf("member %q: %w", code, err)
+			}
+			imported++
+			continue
+		}
 		_, err = h.db.Exec(ctx,
 			`INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id, properties)
 			 VALUES ($1::uuid, $2, $3, NULLIF($4,'')::uuid, $5::jsonb)
@@ -7090,7 +7536,20 @@ func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID str
 			imported++
 		}
 	}
-	return imported, errs
+	if isTime {
+		if err := timedim.ValidateAndReindex(ctx, tx, dimensionID); err != nil {
+			return 0, 0, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return 0, 0, err
+		}
+		var modelID string
+		_ = h.db.QueryRow(ctx, `SELECT model_id::text FROM model.dimension_def WHERE id=$1::uuid`, dimensionID).Scan(&modelID)
+		if modelID != "" && imported > 0 {
+			go h.recalcAllInputsAcrossRevisions(context.WithoutCancel(ctx), modelID) //nolint:contextcheck
+		}
+	}
+	return imported, errs, nil
 }
 
 func deref(s *string) string {
@@ -7602,7 +8061,12 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("integration has no sheet_url configured"), http.StatusBadRequest)
 			return
 		}
-		data, ferr := h.sheetFetcher().FetchCSVFromURL(ctx, cfg.SheetURL)
+		sheetID, gid, perr := importpkg.ParseSheetURL(cfg.SheetURL)
+		if perr != nil {
+			jsonErr(w, perr, http.StatusBadRequest)
+			return
+		}
+		data, ferr := h.fetchSheetCSV(ctx, h.requestCustomerID(ctx, r, act), sheetID, gid)
 		if ferr != nil {
 			jsonSheetErr(w, ferr)
 			return
@@ -7670,7 +8134,12 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]any{"rows_imported": imported, "error_rows": errs})
 
 	case "dimension":
-		imported, errs := h.importDimensionMembersCSV(ctx, intg.TargetID, cr, colIdx)
+		imported, errs, importErr := h.importDimensionMembersCSV(ctx, intg.TargetID, cr, colIdx)
+		if importErr != nil {
+			h.recordIntegrationRun(ctx, intID, act.UserID, 0, 0, "error", importErr.Error())
+			jsonErr(w, importErr, http.StatusBadRequest)
+			return
+		}
 		h.recordIntegrationRun(ctx, intID, act.UserID, imported, errs, "success", "")
 		jsonOK(w, map[string]any{"rows_imported": imported, "error_rows": errs})
 
@@ -9855,6 +10324,7 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			Format                 string `json:"format"`
 			FormatDecimals         int    `json:"format_decimals"`
 			FormatCurrency         string `json:"format_currency"`
+			TimeSummary            string `json:"time_summary"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -9862,6 +10332,13 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		}
 		if body.AggRule == "" {
 			body.AggRule = "sum"
+		}
+		if body.TimeSummary == "" {
+			body.TimeSummary = "sum"
+		}
+		if !timedim.ValidTimeSummary(body.TimeSummary) {
+			jsonErr(w, fmt.Errorf("time_summary must be one of %s", strings.Join(timedim.TimeSummaries, ", ")), http.StatusBadRequest)
+			return
 		}
 		if body.Format == "" {
 			body.Format = "number"
@@ -9898,7 +10375,7 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		// Same shared validation as create, with MetricID set so self-reference
 		// and cycles are caught here too — the scheduler would otherwise only
 		// discover a cycle at calculation time.
-		var formulaEdges []string
+		var formulaEdges []metricformula.Edge
 		if body.Formula != "" {
 			res, vErr := metricformula.Validate(ctx, h.db.For(ctx), metricformula.Request{
 				ModelID: modelID, RevisionID: metricRevisionID, MetricID: metricID,
@@ -9913,7 +10390,7 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 				}
 				return
 			}
-			formulaEdges = res.DependsOnMetricIDs
+			formulaEdges = res.Edges
 		}
 
 		// Metric row and dependency graph move together, so a failed edge
@@ -9929,25 +10406,18 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		if _, err := tx.Exec(ctx, `
 			UPDATE model.metric_def
 			SET name=$2, formula=$3, agg_rule=$4, format=$5, format_decimals=$6, format_currency=$7,
-			    agg_numerator_metric_id=NULLIF($8,'')::uuid, agg_denominator_metric_id=NULLIF($9,'')::uuid
+			    agg_numerator_metric_id=NULLIF($8,'')::uuid, agg_denominator_metric_id=NULLIF($9,'')::uuid,
+			    time_summary=$10
 			WHERE id=$1::uuid`,
 			metricID, body.Name, formulaPtr, body.AggRule, body.Format, body.FormatDecimals, body.FormatCurrency,
-			body.AggNumeratorMetricID, body.AggDenominatorMetricID); err != nil {
+			body.AggNumeratorMetricID, body.AggDenominatorMetricID, body.TimeSummary); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
 		if body.Formula != "" {
-			if _, err := tx.Exec(ctx, `DELETE FROM model.calc_dependency WHERE metric_id = $1::uuid`, metricID); err != nil {
+			if err := metricformula.WriteDependencies(ctx, tx, metricID, formulaEdges); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
-			}
-			for _, depID := range formulaEdges {
-				if _, err := tx.Exec(ctx,
-					`INSERT INTO model.calc_dependency (metric_id, depends_on_metric_id) VALUES ($1::uuid,$2::uuid) ON CONFLICT DO NOTHING`,
-					metricID, depID); err != nil {
-					jsonErr(w, fmt.Errorf("record formula dependency: %w", err), http.StatusInternalServerError)
-					return
-				}
 			}
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -10160,7 +10630,14 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 					jsonErr(w, fmt.Errorf("this would create a dimension hierarchy cycle"), http.StatusBadRequest)
 					return
 				}
+				if cfg, cErr := timedim.LoadConfig(ctx, h.db.For(ctx), dimID); cErr == nil && cfg.Type == timedim.TypeTime {
+					jsonErr(w, fmt.Errorf("a time dimension cannot have a parent dimension"), http.StatusBadRequest)
+					return
+				}
 			}
+			// dimension_type / time_granularity / fiscal_year_start_month are
+			// deliberately not updatable: they are immutable after creation
+			// (a DB trigger enforces it too).
 			if _, err := h.db.Exec(ctx, `UPDATE model.dimension_def SET name=$2, agg_rule=$3, parent_dimension_id=$4::uuid WHERE id=$1::uuid`,
 				dimID, body.Name, body.AggRule, body.ParentDimensionID); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
@@ -10197,17 +10674,30 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 	switch subResource {
 	case "members":
 		switch {
+		case r.Method == http.MethodPost && subID == "generate":
+			// Bulk period generator (spec §4.2): start, end → one member per
+			// period of the dimension's granularity, through the same
+			// validation + reindex path as a single member.
+			h.generateTimeMembers(w, r, dimID)
+
 		case r.Method == http.MethodPost && subID == "":
 			var body struct {
 				Code           string  `json:"code"`
 				Label          string  `json:"label"`
 				ParentMemberID *string `json:"parent_member_id"`
+				PeriodStart    string  `json:"period_start"`
+				PeriodEnd      string  `json:"period_end"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
 				return
 			}
 			if err := h.validateMemberParent(ctx, dimID, body.ParentMemberID); err != nil {
+				jsonErr(w, err, http.StatusBadRequest)
+				return
+			}
+			period, isTime, dated, err := h.memberPeriod(ctx, dimID, body.PeriodStart, body.PeriodEnd)
+			if err != nil {
 				jsonErr(w, err, http.StatusBadRequest)
 				return
 			}
@@ -10218,13 +10708,35 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				}
 			}
 			var newID string
-			err := h.db.QueryRow(ctx, `
-				INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id)
-				VALUES ($1::uuid, $2, $3, $4::uuid) RETURNING id::text
-			`, dimID, body.Code, body.Label, body.ParentMemberID).Scan(&newID)
+			if isTime {
+				// Insert + full-dimension validation + reindex in one
+				// transaction: the deferred unique constraints let the
+				// renumbering happen, and an invalid period (overlap, gap,
+				// bad boundary, a leaf under a leaf) rolls the insert back.
+				newID, err = h.writeTimeMember(ctx, dimID, "", body.Code, body.Label, period, dated, body.ParentMemberID)
+			} else {
+				err = h.db.QueryRow(ctx, `
+					INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id)
+					VALUES ($1::uuid, $2, $3, $4::uuid) RETURNING id::text
+				`, dimID, body.Code, body.Label, body.ParentMemberID).Scan(&newID)
+			}
 			if err != nil {
+				var te *timedim.Error
+				if errors.As(err, &te) {
+					jsonErr(w, err, http.StatusBadRequest)
+					return
+				}
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
+			}
+			if isTime {
+				// Every metric on this time dimension and their dependents
+				// move with the period set (spec §8.3).
+				var modelID string
+				_ = h.db.QueryRow(ctx, `SELECT model_id::text FROM model.dimension_def WHERE id=$1::uuid`, dimID).Scan(&modelID)
+				if modelID != "" {
+					go h.recalcAllInputsAcrossRevisions(context.WithoutCancel(ctx), modelID) //nolint:contextcheck
+				}
 			}
 			if body.ParentMemberID != nil {
 				var childCount int
@@ -10247,6 +10759,8 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				Code           string  `json:"code"`
 				Label          string  `json:"label"`
 				ParentMemberID *string `json:"parent_member_id"`
+				PeriodStart    string  `json:"period_start"`
+				PeriodEnd      string  `json:"period_end"`
 				// Optional per-member property values. Nil = leave properties
 				// untouched (a rename/reparent must not blank them); a map
 				// merges over existing keys, so setting one property keeps the
@@ -10258,6 +10772,11 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				return
 			}
 			if err := h.validateMemberParent(ctx, dimID, body.ParentMemberID); err != nil {
+				jsonErr(w, err, http.StatusBadRequest)
+				return
+			}
+			period, isTime, dated, err := h.memberPeriod(ctx, dimID, body.PeriodStart, body.PeriodEnd)
+			if err != nil {
 				jsonErr(w, err, http.StatusBadRequest)
 				return
 			}
@@ -10276,7 +10795,17 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 			_ = h.db.QueryRow(ctx,
 				`SELECT parent_member_id::text, code FROM model.dimension_member WHERE id=$1::uuid`, subID,
 			).Scan(&prevParentID, &oldCode)
-			if _, err := h.db.Exec(ctx, `
+			if isTime {
+				if _, err := h.writeTimeMember(ctx, dimID, subID, body.Code, body.Label, period, dated, body.ParentMemberID); err != nil {
+					var te *timedim.Error
+					if errors.As(err, &te) {
+						jsonErr(w, err, http.StatusBadRequest)
+						return
+					}
+					jsonErr(w, err, http.StatusInternalServerError)
+					return
+				}
+			} else if _, err := h.db.Exec(ctx, `
 				UPDATE model.dimension_member SET code=$2, label=$3, parent_member_id=$4::uuid WHERE id=$1::uuid
 			`, subID, body.Code, body.Label, body.ParentMemberID); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
@@ -10349,13 +10878,21 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 					}
 				}
 			}
+			if isTime {
+				// A re-dated period shifts every position after it.
+				var modelID string
+				_ = h.db.QueryRow(ctx, `SELECT model_id::text FROM model.dimension_def WHERE id=$1::uuid`, dimID).Scan(&modelID)
+				if modelID != "" {
+					go h.recalcAllInputsAcrossRevisions(context.WithoutCancel(ctx), modelID) //nolint:contextcheck
+				}
+			}
 			h.auditDimensionUpdated(ctx, r, dimID, "member_updated", map[string]string{"member_id": subID, "code": body.Code})
 			jsonOK(w, map[string]string{"status": "ok"})
 
 		case r.Method == http.MethodDelete && subID != "":
 			var memberModelID string
 			_ = h.db.QueryRow(ctx, `SELECT model_id::text FROM model.dimension_def WHERE id=$1::uuid`, dimID).Scan(&memberModelID)
-			if _, err := h.db.Exec(ctx, `DELETE FROM model.dimension_member WHERE id=$1::uuid`, subID); err != nil {
+			if err := h.deleteMemberReindexed(ctx, dimID, subID); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -10464,6 +11001,31 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 
 // ── /api/admin/tenants/{id} ───────────────────────────────────────────────────
 
+// removeUserAccount is the one way a person leaves the platform: their
+// tenant membership (dedicated databases), their identity row — what they
+// entered, posted, started or imported stays with the tenant, authored by
+// "a former user" (migration 094) — and, last, their identity-provider
+// account. Deleting only the row would leave an account that can still
+// authenticate against Keycloak: it resolves to no user so requests 401,
+// but it keeps the address occupied, so the same person could never sign
+// up again and re-creating them later would silently adopt the old
+// account. Keycloak is best effort, and deliberately after the row is
+// gone: a Keycloak that is briefly unreachable must not block removing
+// someone's access. Synthetic dev subjects have no account to remove.
+func (h *handler) removeUserAccount(ctx context.Context, userID, keycloakSub string) error {
+	h.forgetUser(ctx, keycloakSub)
+	if _, err := h.db.Exec(ctx, `DELETE FROM identity.user WHERE id=$1::uuid`, userID); err != nil {
+		return err
+	}
+	if h.kc != nil && keycloakSub != "" && !strings.HasPrefix(keycloakSub, "admin-created-") {
+		if err := h.kc.DeleteUser(ctx, keycloakSub); err != nil {
+			h.log.Error().Err(err).Str("user_id", userID).
+				Msg("application user deleted but the identity provider account remains; remove it by hand")
+		}
+	}
+	return nil
+}
+
 func (h *handler) adminTenantAction(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/admin/tenants/")
 	ctx := r.Context()
@@ -10496,10 +11058,9 @@ func (h *handler) adminTenantAction(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPatch:
 		var body struct {
 			Name string `json:"name"`
-			// The plan half (plan.go): a plan key, a trial end (RFC 3339,
-			// "" to end the trial), or both. Platform administrators only.
-			Plan        *string `json:"plan"`
-			TrialEndsAt *string `json:"trial_ends_at"`
+			// The plan half (plan.go): a plan key. Platform administrators
+			// only.
+			Plan *string `json:"plan"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -10520,14 +11081,14 @@ func (h *handler) adminTenantAction(w http.ResponseWriter, r *http.Request) {
 			}
 			meta["name"] = body.Name
 		}
-		if body.Plan != nil || body.TrialEndsAt != nil {
+		if body.Plan != nil {
 			// The plan is the platform's side of the relationship: a tenant
-			// admin cannot move their own tenant off a trial.
+			// admin cannot lift their own tenant's limits.
 			if !isPlatformAdmin {
-				jsonErr(w, fmt.Errorf("forbidden: only platform_admin can change a tenant's plan or trial"), http.StatusForbidden)
+				jsonErr(w, fmt.Errorf("forbidden: only platform_admin can change a tenant's plan"), http.StatusForbidden)
 				return
 			}
-			changed, err := h.applyTenantPlan(ctx, tctx, id, body.Plan, body.TrialEndsAt)
+			changed, err := h.applyTenantPlan(ctx, tctx, id, body.Plan)
 			if err != nil {
 				jsonErr(w, err, http.StatusBadRequest)
 				return
@@ -10553,6 +11114,43 @@ func (h *handler) adminTenantAction(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
+		// The tenant's people go with it — the ones it owns (signed up
+		// into it or created by its administrators), each removed exactly
+		// as deleting them one by one would, Keycloak account included.
+		// The customer's ON DELETE SET NULL alone would leave orphan
+		// logins that resolve to no tenant and keep their addresses. A
+		// platform administrator is never a tenant's to delete, and the
+		// caller never deletes themselves this way.
+		rows, err := h.db.Query(tctx, `
+			SELECT u.id::text, u.keycloak_sub FROM identity.user u
+			WHERE u.customer_id = $1::uuid AND u.id <> $2::uuid
+			  AND NOT EXISTS (SELECT 1 FROM identity.role_assignment ra WHERE ra.user_id = u.id AND ra.role = 'platform_admin')`,
+			id, act.UserID)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		type member struct{ id, sub string }
+		var members []member
+		for rows.Next() {
+			var m member
+			if err := rows.Scan(&m.id, &m.sub); err == nil {
+				members = append(members, m)
+			}
+		}
+		rows.Close()
+		for _, m := range members {
+			if err := h.removeUserAccount(tctx, m.id, m.sub); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+				Category: auditlog.CategoryAdmin, EventType: auditlog.EventUserDeleted,
+				ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
+				ResourceType: "identity_user", ResourceID: m.id,
+				Metadata: map[string]string{"tenant_id": id, "reason": "tenant deleted"},
+			})
+		}
 		if _, err := h.db.Exec(tctx, `DELETE FROM core.customer WHERE id=$1::uuid`, id); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
@@ -10561,6 +11159,7 @@ func (h *handler) adminTenantAction(w http.ResponseWriter, r *http.Request) {
 			Category: auditlog.CategoryAdmin, EventType: auditlog.EventTenantDeleted,
 			ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
 			ResourceType: "tenant", ResourceID: id,
+			Metadata: map[string]string{"users_removed": strconv.Itoa(len(members))},
 		})
 		if router := h.db.Router(); router != nil {
 			// For a dedicated tenant the deletion IS dropping the database;
@@ -10593,6 +11192,19 @@ func (h *handler) adminApplications(w http.ResponseWriter, r *http.Request) {
 		if body.Mode == "" {
 			body.Mode = "planning"
 		}
+		// The tenant comes from the body, so the body is where the scope
+		// check belongs: a tenant admin creates applications in their own
+		// tenant only (parity audit, 2026-09-20).
+		if act, err := h.resolveActor(ctx, r); err != nil {
+			jsonErr(w, err, http.StatusUnauthorized)
+			return
+		} else if all, mine, err := h.adminScopeCustomerIDs(ctx, act); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		} else if !all && !slices.Contains(mine, body.CustomerID) {
+			jsonErr(w, fmt.Errorf("forbidden: not your tenant"), http.StatusForbidden)
+			return
+		}
 		var id, createdAt string
 		// A platform admin creating an application for a tenant is not routed
 		// to it by the middleware (they have no membership), so the target
@@ -10623,8 +11235,27 @@ func (h *handler) adminApplications(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]string{"id": id, "created_at": createdAt})
 		return
 	}
-	// GET: list all
-	rows, err := h.db.Query(ctx, `SELECT id::text, COALESCE(customer_id::text,''), name, mode::text, status::text, created_at::text FROM core.application ORDER BY created_at DESC`)
+	// GET: every application in the caller's scope — all of them for a
+	// platform admin, their own tenants' for a tenant admin.
+	act, err := h.resolveActor(ctx, r)
+	if err != nil {
+		jsonErr(w, err, http.StatusUnauthorized)
+		return
+	}
+	all, mine, err := h.adminScopeCustomerIDs(ctx, act)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	if !all && len(mine) == 0 {
+		jsonOK(w, []struct{}{})
+		return
+	}
+	rows, err := h.db.Query(ctx, `
+		SELECT id::text, COALESCE(customer_id::text,''), name, mode::text, status::text, created_at::text
+		FROM core.application
+		WHERE $1 OR customer_id::text = ANY($2)
+		ORDER BY created_at DESC`, all, mine)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -10660,6 +11291,11 @@ func (h *handler) adminApplicationAction(w http.ResponseWriter, r *http.Request)
 	// is not routed by the middleware; the directory says which database
 	// holds it. ctx itself stays where the actor is, for the audit row.
 	tctx := h.tenantCtxForApplication(ctx, id)
+	// A tenant admin renames or deletes applications of their own tenant
+	// only; the platform admin any (parity audit, 2026-09-20).
+	if !h.requireResourceAccess(w, r, "application", id) {
+		return
+	}
 	switch r.Method {
 	case http.MethodPatch:
 		var body struct {
@@ -10728,6 +11364,18 @@ func (h *handler) adminModels(w http.ResponseWriter, r *http.Request) {
 		body.StorageType = "oltp"
 	}
 	tctx := h.tenantCtxForApplication(ctx, body.ApplicationID)
+	// The application is named in the body, so it is checked here: a tenant
+	// admin adds models to their own tenant's applications only.
+	if act, err := h.resolveActor(ctx, r); err != nil {
+		jsonErr(w, err, http.StatusUnauthorized)
+		return
+	} else if ok, err := h.actorCanAccessApp(tctx, act, body.ApplicationID); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	} else if !ok {
+		jsonErr(w, fmt.Errorf("forbidden: application is outside your access scope"), http.StatusForbidden)
+		return
+	}
 	if cid := h.customerOfApplication(tctx, body.ApplicationID); cid != "" && h.plans != nil {
 		if err := h.plans.CheckModels(tctx, h.db.For(tctx), cid, 1); err != nil {
 			h.jsonLimitErr(w, err)
@@ -11640,22 +12288,9 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 		// silently adopts the old account instead of provisioning a new one.
 		var delSub string
 		_ = h.db.QueryRow(ctx, `SELECT keycloak_sub FROM identity.user WHERE id=$1::uuid`, userID).Scan(&delSub)
-		// Their membership goes with them, or that identity would keep
-		// routing to a database with no row for them.
-		h.forgetUser(ctx, delSub)
-
-		if _, err := h.db.Exec(ctx, `DELETE FROM identity.user WHERE id=$1::uuid`, userID); err != nil {
+		if err := h.removeUserAccount(ctx, userID, delSub); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
-		}
-		// Best effort, and deliberately after the row is gone: a Keycloak that
-		// is briefly unreachable must not block removing someone's access.
-		// Synthetic dev subjects have no Keycloak account to remove.
-		if h.kc != nil && delSub != "" && !strings.HasPrefix(delSub, "admin-created-") {
-			if err := h.kc.DeleteUser(ctx, delSub); err != nil {
-				h.log.Error().Err(err).Str("user_id", userID).
-					Msg("application user deleted but the identity provider account remains; remove it by hand")
-			}
 		}
 		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 			Category: auditlog.CategoryAdmin, EventType: auditlog.EventUserDeleted,
@@ -12033,9 +12668,13 @@ func (h *handler) developerGridAction(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, fmt.Errorf("metric is already in grid %q — a metric can only belong to one grid; remove it there first", existingGridName), http.StatusConflict)
 				return
 			}
-			if _, err := h.db.Exec(ctx,
+			if err := h.gridMembershipTx(ctx, gridID,
 				`INSERT INTO model.grid_metric (grid_id, metric_id, sort_order) VALUES ($1::uuid,$2::uuid,0) ON CONFLICT DO NOTHING`,
 				gridID, subID); err != nil {
+				if metricformula.IsValidationError(err) {
+					jsonErr(w, err, http.StatusBadRequest)
+					return
+				}
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -12057,9 +12696,13 @@ func (h *handler) developerGridAction(w http.ResponseWriter, r *http.Request) {
 	case "dimensions":
 		switch {
 		case r.Method == http.MethodPost && subID != "":
-			if _, err := h.db.Exec(ctx,
+			if err := h.gridMembershipTx(ctx, gridID,
 				`INSERT INTO model.grid_dimension (grid_id, dimension_id) VALUES ($1::uuid,$2::uuid) ON CONFLICT DO NOTHING`,
 				gridID, subID); err != nil {
+				if metricformula.IsValidationError(err) {
+					jsonErr(w, err, http.StatusBadRequest)
+					return
+				}
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -12488,6 +13131,18 @@ var widgetRefOwnerSQL = map[string]string{
 // widget reads the other tenant's numbers. Unknown widget types and empty
 // refs are allowed through: text widgets carry no ref, and a new widget type
 // shouldn't fail closed on a check that doesn't know about it yet.
+// validateWidgetContent checks what a widget's content column is allowed to
+// hold. Only the image widget constrains it: its content IS the picture, a
+// base64 data URL kept inline so the image travels with the dashboard
+// through revision copies, exports and imports (internal/imagedata). Text
+// widgets take prose, and every other type ignores the column.
+func validateWidgetContent(widgetType string, content *string) error {
+	if widgetType != "image" || content == nil {
+		return nil
+	}
+	return imagedata.Validate("the image", *content, imagedata.MaxWidgetBytes)
+}
+
 func (h *handler) validateWidgetRef(ctx context.Context, dashID, widgetType string, refID *string) error {
 	if refID == nil || *refID == "" {
 		return nil
@@ -12588,6 +13243,35 @@ func (h *handler) dropWidgetsReferencing(ctx context.Context, refID string) {
 	}
 	if _, err := h.db.Exec(ctx, `DELETE FROM model.dashboard_widget WHERE ref_id = $1`, refID); err != nil {
 		h.log.Warn().Err(err).Str("ref_id", refID).Msg("drop widgets referencing deleted entity")
+	}
+	// A chart names its metrics inside widget_props, not in ref_id: a
+	// deleted metric left there made the whole chart fail as "metric not
+	// accessible". Drop the id from every chart's list, and the chart
+	// itself once it plots nothing.
+	// Two statements, not one CTE: Postgres will not update and delete the
+	// same row in one statement (only one of the two silently happens).
+	rows, err := h.db.Query(ctx, `
+		UPDATE model.dashboard_widget
+		SET widget_props = jsonb_set(widget_props, '{chart,metric_ids}', (widget_props->'chart'->'metric_ids') - $1::text)
+		WHERE widget_props->'chart'->'metric_ids' ? $1::text
+		RETURNING id::text, jsonb_array_length(widget_props->'chart'->'metric_ids')`, refID)
+	if err != nil {
+		h.log.Warn().Err(err).Str("ref_id", refID).Msg("drop deleted metric from chart widgets")
+		return
+	}
+	var emptied []string
+	for rows.Next() {
+		var id string
+		var left int
+		if rows.Scan(&id, &left) == nil && left == 0 {
+			emptied = append(emptied, id)
+		}
+	}
+	rows.Close()
+	if len(emptied) > 0 {
+		if _, err := h.db.Exec(ctx, `DELETE FROM model.dashboard_widget WHERE id::text = ANY($1)`, emptied); err != nil {
+			h.log.Warn().Err(err).Msg("drop charts left without metrics")
+		}
 	}
 }
 
@@ -12737,6 +13421,10 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
+		if err := validateWidgetContent(body.WidgetType, body.Content); err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		}
 		var widgetPropsForInsert *string
 		if len(body.WidgetProps) > 0 && string(body.WidgetProps) != "null" {
 			s := string(body.WidgetProps)
@@ -12807,7 +13495,7 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 		if body.SizeH != nil && *body.SizeH < 20 {
 			*body.SizeH = 20
 		}
-		if body.RefID != nil && *body.RefID != "" {
+		if (body.RefID != nil && *body.RefID != "") || body.Content != nil {
 			var existingType string
 			if err := h.db.QueryRow(ctx,
 				`SELECT widget_type FROM model.dashboard_widget WHERE id=$1::uuid AND dashboard_id=$2::uuid`,
@@ -12815,7 +13503,13 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 				jsonErr(w, fmt.Errorf("widget not found on this dashboard"), http.StatusNotFound)
 				return
 			}
-			if err := h.validateWidgetRef(ctx, dashID, existingType, body.RefID); err != nil {
+			if body.RefID != nil && *body.RefID != "" {
+				if err := h.validateWidgetRef(ctx, dashID, existingType, body.RefID); err != nil {
+					jsonErr(w, err, http.StatusBadRequest)
+					return
+				}
+			}
+			if err := validateWidgetContent(existingType, body.Content); err != nil {
 				jsonErr(w, err, http.StatusBadRequest)
 				return
 			}
@@ -13108,6 +13802,428 @@ func (h *handler) validateMemberParent(ctx context.Context, dimID string, parent
 		return fmt.Errorf("parent member must belong to the same dimension")
 	}
 	return nil
+}
+
+// applyInputTimeSummaries rewrites totals for input metrics whose grid has a
+// time dimension and whose time_summary is not the plain sum every reader
+// assumed before time dimensions existed.
+func (h *handler) applyInputTimeSummaries(
+	ctx context.Context, modelID, revisionID string,
+	allMetrics []metricRow, metricDims map[string][]string, allDims []gridDimension,
+	cells, totals map[string]float64, fromStore bool, scopeSubtrees map[string]map[string]bool,
+) error {
+	timeDims := map[string][]string{} // dim id → member codes in chronological order
+	for _, d := range allDims {
+		if d.DimensionType != "time" {
+			continue
+		}
+		members := append([]gridDimMember(nil), d.Members...)
+		sort.SliceStable(members, func(i, j int) bool {
+			ti, tj := 0, 0
+			if members[i].TimeIndex != nil {
+				ti = *members[i].TimeIndex
+			}
+			if members[j].TimeIndex != nil {
+				tj = *members[j].TimeIndex
+			}
+			return ti < tj
+		})
+		for _, m := range members {
+			timeDims[d.ID] = append(timeDims[d.ID], m.Code)
+		}
+	}
+	if len(timeDims) == 0 {
+		return nil
+	}
+	var store *calculation.Store
+	for _, m := range allMetrics {
+		if !m.IsInput || m.TimeSummary == "" || m.TimeSummary == "sum" {
+			continue
+		}
+		ownDims := metricDims[m.ID]
+		axisPos := -1
+		for i, dimID := range ownDims {
+			if _, ok := timeDims[dimID]; ok {
+				axisPos = i
+			}
+		}
+		if axisPos < 0 {
+			continue
+		}
+		axisID := ownDims[axisPos]
+		perPeriod := map[string]float64{}
+		if fromStore {
+			if store == nil {
+				store = calculation.NewStore(h.db.For(ctx))
+			}
+			valueMap, err := store.LoadInputValueMap(ctx, modelID, revisionID, m.ID)
+			if err != nil {
+				return err
+			}
+			for key, v := range valueMap {
+				var dm map[string]string
+				if json.Unmarshal([]byte(key), &dm) != nil {
+					continue
+				}
+				inScope := true
+				for dimID, sub := range scopeSubtrees {
+					if code, pinned := dm[dimID]; pinned && !sub[code] {
+						inScope = false
+						break
+					}
+				}
+				if !inScope {
+					continue
+				}
+				if code, ok := dm[axisID]; ok {
+					perPeriod[code] += v
+				}
+			}
+		} else {
+			prefix := m.ID + ":"
+			for key, v := range cells {
+				if !strings.HasPrefix(key, prefix) {
+					continue
+				}
+				codes := strings.Split(key[len(prefix):], ":")
+				if axisPos < len(codes) {
+					perPeriod[codes[axisPos]] += v
+				}
+			}
+		}
+		var vals []float64
+		for _, code := range timeDims[axisID] {
+			if v, ok := perPeriod[code]; ok {
+				vals = append(vals, v)
+			}
+		}
+		if total, ok := calculation.TimeSummary(m.TimeSummary, vals); ok && len(vals) > 0 {
+			totals[m.ID] = total
+		} else {
+			delete(totals, m.ID)
+		}
+	}
+	return nil
+}
+
+// loadScopedSeries prepares every time-series metric of the revision for a
+// scoped read: its persisted leaf rows, its time axis and the caller's
+// hidden periods on it, and the union window of its dependencies.
+func (h *handler) loadScopedSeries(
+	ctx context.Context, modelID, revisionID string,
+	allDims []gridDimension, allMetrics []metricRow, metricDims map[string][]string, hiddenByDim map[string]map[string]bool,
+) (map[string]*scopedSeries, error) {
+	timeDims := map[string]gridDimension{}
+	for _, d := range allDims {
+		if d.DimensionType == "time" {
+			timeDims[d.ID] = d
+		}
+	}
+	if len(timeDims) == 0 {
+		return nil, nil
+	}
+	var defs map[string]*calculation.MetricDef
+	store := calculation.NewStore(h.db.For(ctx))
+	out := map[string]*scopedSeries{}
+	for _, m := range allMetrics {
+		if m.IsInput || m.Formula == nil || *m.Formula == "" {
+			continue
+		}
+		an, err := formula.Analyze(*m.Formula)
+		if err != nil || !an.UsesTimeSeries {
+			continue
+		}
+		var axis *gridDimension
+		for _, dimID := range metricDims[m.ID] {
+			if d, ok := timeDims[dimID]; ok {
+				dd := d
+				axis = &dd
+			}
+		}
+		if axis == nil {
+			continue // fails at calculation with TIME_CONTEXT_REQUIRED; nothing persisted to serve
+		}
+		if defs == nil {
+			if defs, err = store.LoadModelMetrics(ctx, modelID, revisionID); err != nil {
+				return nil, err
+			}
+		}
+		rows, err := store.LoadCalcValueMap(ctx, modelID, revisionID, m.ID)
+		if err != nil {
+			return nil, err
+		}
+		ts := &scopedSeries{TimeDimID: axis.ID, TimeSummary: m.TimeSummary, Rows: rows, Hidden: hiddenByDim[axis.ID]}
+		if ts.TimeSummary == "" {
+			ts.TimeSummary = "sum"
+		}
+		members := append([]gridDimMember(nil), axis.Members...)
+		sort.SliceStable(members, func(i, j int) bool {
+			ti, tj := 0, 0
+			if members[i].TimeIndex != nil {
+				ti = *members[i].TimeIndex
+			}
+			if members[j].TimeIndex != nil {
+				tj = *members[j].TimeIndex
+			}
+			return ti < tj
+		})
+		for _, mem := range members {
+			ts.Periods = append(ts.Periods, mem.Code)
+		}
+		if def := defs[m.ID]; def != nil {
+			for _, e := range def.DependsOn {
+				if e.MinTimeOffset < ts.MinOffset {
+					ts.MinOffset = e.MinTimeOffset
+				}
+				if e.MaxTimeOffset > ts.MaxOffset {
+					ts.MaxOffset = e.MaxTimeOffset
+				}
+				ts.UnbPast = ts.UnbPast || e.UnboundedPast
+				ts.UnbFuture = ts.UnbFuture || e.UnboundedFuture
+			}
+		}
+		out[m.ID] = ts
+	}
+	return out, nil
+}
+
+// gridMembershipTx applies one grid_metric / grid_dimension change and
+// re-runs the revision's time validation (spec §4.4) in the same
+// transaction, so a grid never ends up with two time dimensions or a
+// time-series metric off its axis — the change rolls back with the reason.
+func (h *handler) gridMembershipTx(ctx context.Context, gridID, sql string, args ...any) error {
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+	if _, err := tx.Exec(ctx, sql, args...); err != nil {
+		return err
+	}
+	var modelID, revisionID string
+	if err := tx.QueryRow(ctx,
+		`SELECT model_id::text, COALESCE(revision_id::text,'') FROM model.grid_def WHERE id=$1::uuid`, gridID,
+	).Scan(&modelID, &revisionID); err != nil {
+		return err
+	}
+	if err := metricformula.ValidateGridTime(ctx, tx, modelID, revisionID, gridID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// memberPeriod parses and checks the period fields of a member write against
+// its dimension's type. On a time dimension a member WITH dates is a leaf
+// period and a member without dates is an aggregate period (H1, FY26): a
+// grouping whose value is its descendants reduced by the metric's time
+// summary. A standard dimension's members carry no dates at all. Returns
+// the parsed period, whether the dimension is a time dimension, and whether
+// the member is a dated leaf.
+func (h *handler) memberPeriod(ctx context.Context, dimID, start, end string) (timedim.Period, bool, bool, error) {
+	cfg, err := timedim.LoadConfig(ctx, h.db.For(ctx), dimID)
+	if err != nil {
+		return timedim.Period{}, false, false, fmt.Errorf("dimension not found")
+	}
+	if cfg.Type != timedim.TypeTime {
+		if start != "" || end != "" {
+			return timedim.Period{}, false, false, &timedim.Error{Code: timedim.CodeInvalidTimeMember,
+				Message: "period_start/period_end apply only to a time dimension's members"}
+		}
+		return timedim.Period{}, false, false, nil
+	}
+	if start == "" && end == "" {
+		return timedim.Period{}, true, false, nil // aggregate period
+	}
+	if start == "" || end == "" {
+		return timedim.Period{}, true, true, &timedim.Error{Code: timedim.CodeInvalidTimeMember,
+			Message: "a leaf period needs both period_start and period_end (leave both empty for an aggregate period such as H1 or FY26)"}
+	}
+	ps, err := timedim.ParseDate(start)
+	if err != nil {
+		return timedim.Period{}, true, true, err
+	}
+	pe, err := timedim.ParseDate(end)
+	if err != nil {
+		return timedim.Period{}, true, true, err
+	}
+	p := timedim.Period{Start: ps, End: pe}
+	if err := timedim.ValidatePeriod(cfg, p); err != nil {
+		return timedim.Period{}, true, true, err
+	}
+	return p, true, true, nil
+}
+
+// writeTimeMember inserts (memberID == "") or updates one time member —
+// a dated leaf period (dated=true) or an aggregate period (no dates, no
+// ordinal) — and re-validates + re-indexes the whole dimension in the same
+// transaction.
+func (h *handler) writeTimeMember(ctx context.Context, dimID, memberID, code, label string, p timedim.Period, dated bool, parentID *string) (string, error) {
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+	var start, end *time.Time
+	var idx *int
+	if dated {
+		start, end = &p.Start, &p.End
+		zero := 0
+		idx = &zero
+	}
+	id := memberID
+	if memberID == "" {
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO model.dimension_member (dimension_id, code, label, period_start, period_end, time_index, parent_member_id)
+			VALUES ($1::uuid, $2, $3, $4::date, $5::date, $6, $7::uuid) RETURNING id::text
+		`, dimID, code, label, start, end, idx, parentID).Scan(&id); err != nil {
+			return "", err
+		}
+	} else if _, err := tx.Exec(ctx, `
+		UPDATE model.dimension_member SET code=$2, label=$3, period_start=$4::date, period_end=$5::date, time_index=$6, parent_member_id=$7::uuid
+		WHERE id=$1::uuid AND dimension_id=$8::uuid
+	`, memberID, code, label, start, end, idx, parentID, dimID); err != nil {
+		return "", err
+	}
+	if err := timedim.ValidateAndReindex(ctx, tx, dimID); err != nil {
+		return "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// deleteMemberReindexed deletes a member and, for a time dimension, closes
+// the gap in time_index so positions stay dense from zero.
+func (h *handler) deleteMemberReindexed(ctx context.Context, dimID, memberID string) error {
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+	if _, err := tx.Exec(ctx, `DELETE FROM model.dimension_member WHERE id=$1::uuid`, memberID); err != nil {
+		return err
+	}
+	cfg, err := timedim.LoadConfig(ctx, tx, dimID)
+	if err != nil {
+		return err
+	}
+	if cfg.Type == timedim.TypeTime {
+		// Removing a period may open a gap in a regular calendar; the
+		// remaining members still reindex densely so time functions keep a
+		// consistent order. The gap itself is reported when the next member
+		// is written.
+		if _, err := tx.Exec(ctx, `
+			WITH ordered AS (
+				SELECT id, row_number() OVER (ORDER BY period_start, period_end, code) - 1 AS idx
+				FROM model.dimension_member WHERE dimension_id=$1::uuid AND period_start IS NOT NULL
+			)
+			UPDATE model.dimension_member m SET time_index = o.idx FROM ordered o
+			WHERE o.id = m.id AND m.time_index IS DISTINCT FROM o.idx
+		`, dimID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// generateTimeMembers is POST /api/developer/dimensions/{id}/members/generate
+// {start, end}: contiguous periods of the dimension's granularity, validated
+// together with any existing members and indexed by the shared service.
+func (h *handler) generateTimeMembers(w http.ResponseWriter, r *http.Request, dimID string) {
+	ctx := r.Context()
+	var body struct {
+		Start string `json:"start"`
+		End   string `json:"end"`
+		// Optional aggregate period (H1, FY26) the generated leaves go under.
+		ParentMemberID *string `json:"parent_member_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
+		return
+	}
+	if body.ParentMemberID != nil {
+		if err := h.validateMemberParent(ctx, dimID, body.ParentMemberID); err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		}
+	}
+	cfg, err := timedim.LoadConfig(ctx, h.db.For(ctx), dimID)
+	if err != nil {
+		jsonErr(w, fmt.Errorf("dimension not found"), http.StatusNotFound)
+		return
+	}
+	if cfg.Type != timedim.TypeTime {
+		jsonErr(w, fmt.Errorf("periods can only be generated for a time dimension"), http.StatusBadRequest)
+		return
+	}
+	start, err := timedim.ParseDate(body.Start)
+	if err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
+		return
+	}
+	end, err := timedim.ParseDate(body.End)
+	if err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
+		return
+	}
+	periods, err := timedim.GeneratePeriods(cfg, start, end)
+	if err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
+		return
+	}
+	if cid, _ := h.customerOfDimension(ctx, dimID); cid != "" && h.plans != nil {
+		if err := h.plans.CheckMembers(ctx, h.db.For(ctx), cid, dimID, len(periods)); err != nil {
+			h.jsonLimitErr(w, err)
+			return
+		}
+	}
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+	created := 0
+	for _, p := range periods {
+		tag, err := tx.Exec(ctx, `
+			INSERT INTO model.dimension_member (dimension_id, code, label, period_start, period_end, time_index, parent_member_id)
+			VALUES ($1::uuid, $2, $3, $4::date, $5::date, 0, $6::uuid)
+			ON CONFLICT (dimension_id, code) DO NOTHING
+		`, dimID, p.Code, periodLabel(cfg.Granularity, p), p.Start, p.End, body.ParentMemberID)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		created += int(tag.RowsAffected())
+	}
+	if err := timedim.ValidateAndReindex(ctx, tx, dimID); err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	var modelID string
+	_ = h.db.QueryRow(ctx, `SELECT model_id::text FROM model.dimension_def WHERE id=$1::uuid`, dimID).Scan(&modelID)
+	if modelID != "" && created > 0 {
+		go h.recalcAllInputsAcrossRevisions(context.WithoutCancel(ctx), modelID) //nolint:contextcheck
+	}
+	h.auditDimensionUpdated(ctx, r, dimID, "members_generated", map[string]string{"count": strconv.Itoa(created), "start": body.Start, "end": body.End})
+	jsonOK(w, map[string]any{"created": created})
+}
+
+// periodLabel is the human label of a generated period.
+func periodLabel(granularity string, p timedim.Period) string {
+	switch granularity {
+	case timedim.GranMonth:
+		return p.Start.Format("Jan 2006")
+	case timedim.GranDay, timedim.GranWeek:
+		return p.Start.Format("2 Jan 2006")
+	default:
+		return p.Code
+	}
 }
 
 // memberHasAncestor walks the parent_member_id chain starting at startID (capped at depth

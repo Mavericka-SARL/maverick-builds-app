@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/mail"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -60,7 +59,7 @@ func (h *handler) signupOptions(w http.ResponseWriter, r *http.Request) {
 		out["reason"] = "No plan is open for self-service sign-up."
 	default:
 		out["enabled"] = true
-		out["plan"] = map[string]any{"key": p.Key, "name": p.Name, "description": p.Description, "trial_days": p.TrialDays, "limits": p.Limits}
+		out["plan"] = map[string]any{"key": p.Key, "name": p.Name, "description": p.Description, "limits": p.Limits, "limit_note": p.LimitNote}
 	}
 	jsonOK(w, out)
 }
@@ -196,13 +195,8 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	var trialEnds *time.Time
-	if p.TrialDays > 0 {
-		t := time.Now().Add(time.Duration(p.TrialDays) * 24 * time.Hour).UTC()
-		trialEnds = &t
-	}
-	if err := plan.SetPlan(tctx, h.db.For(tctx), customerID, p.Key, trialEnds); err != nil {
-		fail(http.StatusInternalServerError, fmt.Errorf("start trial: %w", err))
+	if err := plan.SetPlan(tctx, h.db.For(tctx), customerID, p.Key); err != nil {
+		fail(http.StatusInternalServerError, fmt.Errorf("assign plan: %w", err))
 		return
 	}
 
@@ -259,9 +253,6 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	meta := map[string]string{"email": req.Email, "company": req.Company, "plan": p.Key, "ip": ip, "application_id": appID, "model_id": modelID}
-	if trialEnds != nil {
-		meta["trial_ends_at"] = trialEnds.Format(time.RFC3339)
-	}
 	auditlog.Log(tctx, h.db.For(tctx), h.log, auditlog.Fields{
 		Category: auditlog.CategoryAdmin, EventType: auditlog.EventTenantSignedUp,
 		ActorUserID: userID, ActorRole: "signup",
@@ -273,9 +264,6 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{
 		"status": "created", "invited": invited, "email": req.Email, "tenant_id": customerID,
 		"application_id": appID, "model_id": modelID, "plan": p.Key,
-	}
-	if trialEnds != nil {
-		out["trial_ends_at"] = trialEnds.Format(time.RFC3339)
 	}
 	if invited {
 		out["status"] = "invited"

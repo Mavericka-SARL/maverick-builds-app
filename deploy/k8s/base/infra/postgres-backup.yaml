@@ -46,7 +46,13 @@ spec:
           containers:
             - name: postgres-backup
               image: registry.example.com/mavericks/postgres-backup:latest
-              imagePullPolicy: IfNotPresent
+              # Always, unlike the long-running services whose overlays set it:
+              # a CronJob's pod template is neither a Deployment nor a Job, so
+              # those patches never reached it, and the nightly run kept using
+              # whatever :latest a node had cached. A published fix to the
+              # backup script then could not take effect — which is exactly
+              # how it happened (2026-09-17). One pull a night costs nothing.
+              imagePullPolicy: Always
               envFrom:
                 - configMapRef:
                     name: mavericks-config
@@ -69,6 +75,79 @@ spec:
                 limits:
                   cpu: "500m"
                   memory: "512Mi"
+              securityContext:
+                runAsUser: 70
+                runAsGroup: 70
+
+---
+# The watchdog: a second job whose only purpose is to notice that the first one
+# did not happen.
+#
+# Production ran without backups for three consecutive nights in September 2026
+# because pg-backup.sh failed and nothing said so — the CronJob dutifully
+# recorded each failure where nobody was looking. Checking the RESULT from a
+# separate job catches every shape of that: a dump that failed, a CronJob that
+# was never scheduled, a bucket that was renamed, credentials that stopped
+# working. A job that watched itself could not.
+#
+# ALERT_EMAIL in mavericks-config is where it reports; with none set it still
+# fails loudly, which is the most a job can do on its own.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup-watchdog
+  namespace: mavericks
+  labels:
+    app: postgres-backup-watchdog
+    app.kubernetes.io/name: postgres-backup-watchdog
+    app.kubernetes.io/component: job
+    app.kubernetes.io/part-of: mavericks-engine
+spec:
+  # Two hours after the 03:00 dump: long enough for a slow night to finish,
+  # early enough that a person reading mail at breakfast still has the day to
+  # fix it.
+  schedule: "0 5 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 7
+  jobTemplate:
+    spec:
+      # No retry: the answer would not change within a minute, and three
+      # identical alerts are worse than one.
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app: postgres-backup-watchdog
+            app.kubernetes.io/name: postgres-backup-watchdog
+            app.kubernetes.io/component: job
+            app.kubernetes.io/part-of: mavericks-engine
+        spec:
+          restartPolicy: Never
+          terminationGracePeriodSeconds: 30
+          containers:
+            - name: postgres-backup-watchdog
+              image: registry.example.com/mavericks/postgres-backup:latest
+              imagePullPolicy: Always
+              command: ["/usr/local/bin/backup-watchdog.sh"]
+              envFrom:
+                - configMapRef:
+                    name: mavericks-config
+                - secretRef:
+                    name: mavericks-secrets
+                # The relay credentials the gateway sends with
+                # (scripts/seal-smtp-secret.sh); absent on a deployment
+                # without a relay, where the alert is log-only.
+                - secretRef:
+                    name: mavericks-smtp
+                    optional: true
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "200m"
+                  memory: "256Mi"
               securityContext:
                 runAsUser: 70
                 runAsGroup: 70

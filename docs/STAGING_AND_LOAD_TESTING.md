@@ -22,7 +22,7 @@ namespace `mavericks-staging` on the same cluster — same images, mTLS between
 services, Keycloak on Postgres, network policies — with one replica of
 everything, its own hostnames, a smaller database volume, WAL-G and dumps
 under their own prefixes (never production's point-in-time chain), and
-`SIGNUP_ENABLED: "true"` so the trial funnel can be tried end to end. Its
+`SIGNUP_ENABLED: "true"` so the sign-up funnel can be tried end to end. Its
 README walks through DNS, the hand-created secrets (staging holds nothing
 worth sealing), Keycloak's database, the provisioning service account, the
 first administrator (`scripts/bootstrap-platform-admin.sh`, new — the
@@ -55,7 +55,7 @@ latency per operation, optionally as JSON, and exits non-zero when a
 `-target-p95` is missed or any request failed.
 
 ```bash
-# dev stack: sign up a fresh trial tenant and load its starter model
+# dev stack: sign up a fresh test-workspace tenant and load its starter model
 go run ./cmd/loadtest -base http://localhost:8080 -signup -users 100 -duration 60s -write-ratio 0.2
 
 # staging or production: a real account; -seed creates an application with
@@ -66,17 +66,20 @@ go run ./cmd/loadtest -base https://staging.example.com \
 # before DNS/certificates: -resolve host=ip (twice) -insecure
 ```
 
-The model under load is discovered from the account (`/api/demo` → grids,
-metrics, dimensions); `-grid`, `-metric`, `-app`, `-model`, `-revision` pin
-it. On the dev stack `-signup` exercises the real registration path, so a
+The account is an ordinary tenant_admin + developer, made once with
+`scripts/bootstrap-platform-admin.sh` (`ROLES=tenant_admin,developer
+CUSTOMER_ID=<tenant>`); it prints the password once and stores it nowhere, so
+keep it in a password manager. The model under load is discovered from that
+account (`/api/demo` → grids, metrics, dimensions); `-grid`, `-metric`,
+`-app`, `-model`, `-revision` pin it. On the dev stack `-signup` exercises the real registration path, so a
 run also proves the funnel; note that sign-up is rate-limited per address
 (three attempts, then one every five minutes), so a fourth `-signup` from one
 machine within the window is refused — reuse the account with `-dev-user`.
 
 ## Baseline (2026-09-17)
 
-The starter model (`internal/starter`: 2 dimensions of 3 levels, 4 metrics
-of which 2 calculated, 96 input cells) on a 2024 laptop running the whole dev
+The starter model (`internal/starter`: 2 dimensions of 2 levels, 3 metrics
+of which 1 calculated, 16 input cells) on a 2024 laptop running the whole dev
 stack — gateway, Postgres in Docker, the harness itself — so absolute numbers
 are conservative; the shape is what matters.
 
@@ -109,7 +112,7 @@ What the numbers say:
   gateway CPU and the same rows, which is why the mix matters as much as the
   count.
 - Because the contention is **per model**, hundreds of users spread over
-  many tenants and models — the trial funnel's shape — cost far less than
+  many tenants and models — the sign-up funnel's shape — cost far less than
   hundreds on one model; the numbers above are the worst case, everyone in
   one grid. The measurements were taken on an otherwise idle machine; the
   same profiles with a compiler running alongside were two to four times
@@ -140,6 +143,21 @@ write path. The one 65-second read at 100 users was a single stalled
 connection (p99 was 1.85 s), the kind of outlier to watch for at the
 ingress's keep-alive settings rather than in the engine.
 
+### After the release (2026-09-18)
+
+The same profile against staging once it ran the release that adds plans,
+quotas and sign-up — every mutating request now passes the plan guard, and
+creations ask the enforcer:
+
+| Op | Requests | Errors | rps | p50 | p95 | p99 |
+|---|---|---|---|---|---|---|
+| GET /api/grid | 6 022 | 0 | 44.6 | 1.40 s | 1.81 s | 2.01 s |
+| POST /api/cells | 1 457 | 0 | 10.8 | 3.27 s | 4.86 s | 5.64 s |
+
+Within noise of the numbers above (1.74 s / 4.98 s), so the guard costs
+nothing measurable: its per-tenant state is cached for a minute and the
+limit counts only run for limits a plan actually sets.
+
 ## What to do with them
 
 The measured ceiling is the write path, and the levers are known:
@@ -153,6 +171,6 @@ The measured ceiling is the write path, and the levers are known:
 3. **A second gateway replica** helps reads (CPU-bound JSON and pool use)
    but not writes on one model, which serialise in Postgres either way.
 
-None of these is needed to open the trial: at 20–200 users per model the
+None of these is needed to open sign-up: at 20–200 users per model the
 platform answers within a second or two on a laptop. Rerun the harness against staging after each change to the write
 path and keep the JSON reports next to the release notes.

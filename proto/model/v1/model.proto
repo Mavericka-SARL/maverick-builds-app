@@ -53,6 +53,13 @@ message Dimension {
   string name = 3;
   repeated DimensionProperty properties = 4;
   google.protobuf.Timestamp created_at = 5;
+  // Explicit, immutable time marker: "standard" (default) or "time". A
+  // dimension named "month" is not a time dimension unless marked so.
+  string dimension_type = 6;
+  // Time dimensions only: day | week | month | quarter | half_year | year | custom.
+  string time_granularity = 7;
+  // Time dimensions only: 1-12.
+  int32 fiscal_year_start_month = 8;
 }
 
 message DimensionMember {
@@ -62,6 +69,12 @@ message DimensionMember {
   string label = 4;
   string parent_id = 5;
   map<string, string> properties = 6;
+  // Leaf periods of a time dimension only: the dates (YYYY-MM-DD) and the
+  // server-owned chronological ordinal (read-only; -1 on an aggregate
+  // period such as H1 or FY26, which carries no dates).
+  string period_start = 7;
+  string period_end = 8;
+  int32 time_index = 9;
 }
 
 message Metric {
@@ -72,6 +85,8 @@ message Metric {
   StorageType storage_type = 5;
   bool is_input = 6;
   google.protobuf.Timestamp created_at = 7;
+  // Aggregation across a time dimension: sum | average | min | max | first | last | none.
+  string time_summary = 8;
 }
 
 message Hierarchy {
@@ -98,20 +113,46 @@ message Revision {
 }
 
 // Dimension requests
-message CreateDimensionRequest { string model_id = 1; string name = 2; repeated DimensionProperty properties = 3; }
+message CreateDimensionRequest {
+  string model_id = 1;
+  string name = 2;
+  repeated DimensionProperty properties = 3;
+  // Omitted defaults to "standard". "time" requires time_granularity and fiscal_year_start_month.
+  string dimension_type = 4;
+  string time_granularity = 5;
+  int32 fiscal_year_start_month = 6;
+}
 message CreateDimensionResponse { Dimension dimension = 1; }
 message GetDimensionRequest { string dimension_id = 1; }
 message GetDimensionResponse { Dimension dimension = 1; }
 message ListDimensionsRequest { string model_id = 1; common.v1.PageRequest page = 2; }
 message ListDimensionsResponse { repeated Dimension dimensions = 1; common.v1.PageResponse page = 2; }
 
-message CreateDimensionMemberRequest { string dimension_id = 1; string code = 2; string label = 3; string parent_id = 4; map<string, string> properties = 5; }
+message CreateDimensionMemberRequest {
+  string dimension_id = 1;
+  string code = 2;
+  string label = 3;
+  string parent_id = 4;
+  map<string, string> properties = 5;
+  // Time dimensions: both set makes a leaf period (YYYY-MM-DD); both empty
+  // makes an aggregate period (H1, FY26). Not allowed on a standard dimension.
+  string period_start = 6;
+  string period_end = 7;
+}
 message CreateDimensionMemberResponse { DimensionMember member = 1; }
 message ListDimensionMembersRequest { string dimension_id = 1; common.v1.PageRequest page = 2; }
 message ListDimensionMembersResponse { repeated DimensionMember members = 1; common.v1.PageResponse page = 2; }
 
 // Metric requests
-message CreateMetricRequest { string model_id = 1; string name = 2; string formula = 3; StorageType storage_type = 4; bool is_input = 5; }
+message CreateMetricRequest {
+  string model_id = 1;
+  string name = 2;
+  string formula = 3;
+  StorageType storage_type = 4;
+  bool is_input = 5;
+  // Aggregation across a time dimension; empty defaults to sum.
+  string time_summary = 6;
+}
 message CreateMetricResponse { Metric metric = 1; }
 message GetMetricRequest { string metric_id = 1; }
 message GetMetricResponse { Metric metric = 1; }

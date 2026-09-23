@@ -368,4 +368,43 @@ func TestGridDeleteCascadesWidgetsAndMemberRenameRekeysWidgetProps(t *testing.T)
 	if !kpiWidgetLeft {
 		t.Error("metric_kpi widget was deleted although its metric still exists")
 	}
+
+	// A chart names its metrics INSIDE widget_props. Deleting one of two
+	// plotted metrics strips it from the list; deleting the last one drops
+	// the chart, which would otherwise fail as "metric not accessible". A
+	// chart that never had metrics (still being designed) is left alone.
+	var twoMetricChart, designedChart string
+	if err := f.pool.QueryRow(ctx, `
+		INSERT INTO model.dashboard_widget (dashboard_id, widget_type, ref_id, widget_props, sort_order)
+		VALUES ($1::uuid, 'chart', $2, jsonb_build_object('chart', jsonb_build_object('metric_ids', jsonb_build_array($3::text, $4::text))), 5)
+		RETURNING id::text`, dashID, f.gridStaffID, f.amountMetricID, f.deptTotalMetricID).Scan(&twoMetricChart); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.pool.QueryRow(ctx, `
+		INSERT INTO model.dashboard_widget (dashboard_id, widget_type, ref_id, widget_props, sort_order)
+		VALUES ($1::uuid, 'chart', $2, '{"chart": {"metric_ids": []}}'::jsonb, 6) RETURNING id::text`, dashID, f.gridStaffID).Scan(&designedChart); err != nil {
+		t.Fatal(err)
+	}
+	if status, body = f.do(t, "DELETE", "/api/developer/metrics/"+f.deptTotalMetricID, "rollup-test-approver", nil); status != 200 {
+		t.Fatalf("metric delete: status %d %v", status, body)
+	}
+	var left string
+	if err := f.pool.QueryRow(ctx, `SELECT widget_props->'chart'->'metric_ids' FROM model.dashboard_widget WHERE id=$1::uuid`, twoMetricChart).Scan(&left); err != nil {
+		t.Fatalf("chart after metric delete: %v", err)
+	}
+	if left != `["`+f.amountMetricID+`"]` {
+		t.Errorf("chart metric_ids after deleting one of two = %s, want only the surviving metric", left)
+	}
+	if status, body = f.do(t, "DELETE", "/api/developer/metrics/"+f.amountMetricID, "rollup-test-approver", nil); status != 200 {
+		t.Fatalf("metric delete: status %d %v", status, body)
+	}
+	var chartLeft, designedLeft bool
+	_ = f.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model.dashboard_widget WHERE id=$1::uuid)`, twoMetricChart).Scan(&chartLeft)
+	_ = f.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model.dashboard_widget WHERE id=$1::uuid)`, designedChart).Scan(&designedLeft)
+	if chartLeft {
+		t.Error("a chart whose last metric was deleted still exists")
+	}
+	if !designedLeft {
+		t.Error("a chart that never had metrics was deleted by an unrelated metric's deletion")
+	}
 }

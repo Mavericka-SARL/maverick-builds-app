@@ -12,7 +12,7 @@
 //
 //	Geography  World -> EMEA, AMER -> UK, DE / US, CA
 //	Product    All   -> Hardware, Software -> Laptop, Monitor / License, Support
-//	Period     FY26  -> H1, H2 -> Q1, Q2 / Q3, Q4
+//	Period     FY26  -> H1, H2 -> Q1, Q2 / Q3, Q4 — a declared TIME dimension (quarters of 2026 are the leaves)
 package gateway
 
 import (

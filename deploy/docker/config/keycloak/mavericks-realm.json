@@ -1,6 +1,7 @@
 {
   "realm": "mavericks",
   "displayName": "maverickbuilds.app",
+  "loginTheme": "maverickbuilds",
   "enabled": true,
   "sslRequired": "none",
   "registrationAllowed": false,

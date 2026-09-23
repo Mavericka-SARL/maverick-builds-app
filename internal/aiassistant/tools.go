@@ -30,7 +30,7 @@ func ReadTools() []providers.ToolDef {
 		},
 		{
 			Name:        "list_dimensions",
-			Description: "Returns every dimension and its members: code, label, parent hierarchy, and each member's properties as {key=value} — use these to group or re-parent members by a property (e.g. category).",
+			Description: "Returns every dimension and its members: code, label, parent hierarchy, and each member's properties as {key=value} — use these to group or re-parent members by a property (e.g. category). A time dimension is marked [time · granularity] and lists its leaf periods in chronological order with their dates and its aggregate periods (H1, FY26) as such; only such a dimension supports time-series formulas (PREVIOUS, LAG, MOVINGSUM, CUMULATE, ...).",
 			Parameters:  noParams,
 		},
 		{
@@ -284,23 +284,36 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 
 	rows, err := e.pool.Query(ctx, `
 		SELECT d.name, m.code, m.label, COALESCE(pm.code,'') AS parent_code,
-		       COALESCE(m.properties,'{}'::jsonb)::text
+		       COALESCE(m.properties,'{}'::jsonb)::text,
+		       d.dimension_type, COALESCE(d.time_granularity,''), COALESCE(d.fiscal_year_start_month,0),
+		       COALESCE(m.period_start::text,''), COALESCE(m.period_end::text,'')
 		FROM model.dimension_def d
 		JOIN model.dimension_member m ON m.dimension_id = d.id
 		LEFT JOIN model.dimension_member pm ON pm.id = m.parent_member_id
 		WHERE d.model_id = $1::uuid
-		ORDER BY d.name, m.sort_order`, e.modelID)
+		ORDER BY d.name, m.time_index NULLS LAST, m.sort_order`, e.modelID)
 	if err != nil {
 		return "", err
 	}
 	defer rows.Close()
 
-	type member struct{ code, label, parent, props string }
+	type member struct{ code, label, parent, props, period string }
 	dims := map[string][]member{}
+	timeBadge := map[string]string{}
 	var order []string
 	for rows.Next() {
-		var dname, code, label, parent, propsRaw string
-		_ = rows.Scan(&dname, &code, &label, &parent, &propsRaw)
+		var dname, code, label, parent, propsRaw, dimType, granularity, pStart, pEnd string
+		var fiscalStart int
+		_ = rows.Scan(&dname, &code, &label, &parent, &propsRaw, &dimType, &granularity, &fiscalStart, &pStart, &pEnd)
+		period := ""
+		if dimType == "time" {
+			timeBadge[dname] = fmt.Sprintf(" [time · %s, fiscal year starts month %d]", granularity, fiscalStart)
+			if pStart != "" {
+				period = fmt.Sprintf(" %s..%s", pStart, pEnd)
+			} else {
+				period = " (aggregate period)"
+			}
+		}
 		// Render properties as sorted key=value pairs — the AI was asked (live)
 		// to re-parent members "by their category property" and couldn't,
 		// because this listing never showed properties at all.
@@ -321,7 +334,7 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 		if _, ok := dims[dname]; !ok {
 			order = append(order, dname)
 		}
-		dims[dname] = append(dims[dname], member{code, label, parent, props})
+		dims[dname] = append(dims[dname], member{code, label, parent, props, period})
 	}
 	if err := rows.Err(); err != nil {
 		return "", err
@@ -332,13 +345,13 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 		if parentName, ok := parentDimByName[d]; ok {
 			fmt.Fprintf(&sb, "Dimension: %s (child of: %s — members below roll up to a %s member via parent)\n", d, parentName, parentName)
 		} else {
-			fmt.Fprintf(&sb, "Dimension: %s\n", d)
+			fmt.Fprintf(&sb, "Dimension: %s%s\n", d, timeBadge[d])
 		}
 		for _, m := range dims[d] {
 			if m.parent != "" {
 				fmt.Fprintf(&sb, "  %s (%s) → parent: %s%s\n", m.code, m.label, m.parent, m.props)
 			} else {
-				fmt.Fprintf(&sb, "  %s (%s)%s\n", m.code, m.label, m.props)
+				fmt.Fprintf(&sb, "  %s (%s)%s%s\n", m.code, m.label, m.period, m.props)
 			}
 		}
 	}

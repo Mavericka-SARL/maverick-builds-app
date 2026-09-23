@@ -5,7 +5,7 @@
  * tab must show an issued token exactly once and let it be revoked.
  */
 import { test, expect } from "@playwright/test";
-import { mockApi, loadAs, enterpriseLicense, ssoSettings } from "./mocks";
+import { mockApi, loadAs, chooseTenant, enterpriseLicense, ssoSettings } from "./mocks";
 
 const tab = (page: import("@playwright/test").Page, name: string) =>
   page.getByRole("button", { name, exact: true }).click();
@@ -14,10 +14,12 @@ test("community: both tabs render the feature gate", async ({ page }) => {
   await mockApi(page);
   await loadAs(page, "platform_admin");
   await tab(page, "Single sign-on");
+  await chooseTenant(page);
   await expect(page.locator(".mvx-feature-gate")).toContainText("Single sign-on");
   await expect(page.locator(".mvx-feature-gate")).toContainText("requires the Enterprise edition");
   await expect(page.getByTestId("sso-settings")).toHaveCount(0);
   await tab(page, "Provisioning (SCIM)");
+  await chooseTenant(page);
   await expect(page.locator(".mvx-feature-gate")).toContainText("SCIM provisioning");
   await expect(page.getByTestId("scim-tokens")).toHaveCount(0);
 });
@@ -26,6 +28,7 @@ test("enterprise: the SSO form shows the broker endpoint and adapts to the proto
   await mockApi(page, { license: enterpriseLicense });
   await loadAs(page, "platform_admin");
   await tab(page, "Single sign-on");
+  await chooseTenant(page);
   const panel = page.getByTestId("sso-settings");
   await expect(panel).toBeVisible();
   await expect(panel.getByTestId("broker-endpoint")).toHaveText(/\/broker\/mvx-0000\/endpoint$/);
@@ -46,6 +49,7 @@ test("enterprise with a registered provider: remove asks first", async ({ page }
   });
   await loadAs(page, "platform_admin");
   await tab(page, "Single sign-on");
+  await chooseTenant(page);
   const panel = page.getByTestId("sso-settings");
   await expect(panel.getByLabel("Allowed e-mail domains")).toHaveValue("acme.test");
   await expect(panel.getByLabel("OIDC client secret")).toHaveAttribute("placeholder", "••••••••");
@@ -57,6 +61,7 @@ test("enterprise: SCIM tokens list, issue once, revoke asks", async ({ page }) =
   await mockApi(page, { license: enterpriseLicense });
   await loadAs(page, "platform_admin");
   await tab(page, "Provisioning (SCIM)");
+  await chooseTenant(page);
   const panel = page.getByTestId("scim-tokens");
   await expect(panel.getByTestId("scim-token-tok-1")).toContainText("Active");
   await expect(panel.getByTestId("scim-token-tok-2")).toContainText("Revoked");

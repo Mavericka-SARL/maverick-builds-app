@@ -30,6 +30,22 @@ type Model struct {
 	Metric map[string]string
 }
 
+// TimePeriod is one member of the demo's time dimension: a dated leaf
+// quarter, or an aggregate (no dates) grouping the periods beneath it.
+type TimePeriod struct{ Code, Label, Parent, Start, End string }
+
+// Periods is the period dimension, FY26 → H1/H2 → the four fiscal quarters
+// of 2026, parents first. Time functions move along the quarters; H1, H2 and
+// FY26 show their quarters reduced by each metric's time summary.
+var Periods = []TimePeriod{
+	{"FY26", "FY26", "", "", ""},
+	{"H1", "H1", "FY26", "", ""}, {"H2", "H2", "FY26", "", ""},
+	{"Q1", "Q1", "H1", "2026-01-01", "2026-03-31"},
+	{"Q2", "Q2", "H1", "2026-04-01", "2026-06-30"},
+	{"Q3", "Q3", "H2", "2026-07-01", "2026-09-30"},
+	{"Q4", "Q4", "H2", "2026-10-01", "2026-12-31"},
+}
+
 // MetricNames is every metric Build creates, in the order a grid should show
 // them: inputs first, then what is derived from them.
 var MetricNames = []string{
@@ -60,7 +76,7 @@ func Build(call Caller, revisionID string) (*Model, error) {
 	}
 
 	dimension := func(name string) (string, error) {
-		return id(call("POST", "/api/developer/dimensions", map[string]any{"name": name, "revision_id": revisionID}))
+		return id(call("POST", "/api/developer/dimensions", map[string]any{"name": name, "revision_id": revisionID, "dimension_type": "standard"}))
 	}
 	member := func(dimID, code, label, parent string) (string, error) {
 		body := map[string]any{"code": code, "label": label}
@@ -112,13 +128,29 @@ func Build(call Caller, revisionID string) (*Model, error) {
 	}); err != nil {
 		return nil, err
 	}
-	if m.PeriodDim, err = build("period", m.Period, []node{
-		{"FY26", "FY26", ""},
-		{"H1", "H1", "FY26"}, {"H2", "H2", "FY26"},
-		{"Q1", "Q1", "H1"}, {"Q2", "Q2", "H1"},
-		{"Q3", "Q3", "H2"}, {"Q4", "Q4", "H2"},
-	}); err != nil {
-		return nil, err
+	// period is a TIME dimension — declared as such, not inferred from its
+	// name — so the forecast can read the previous quarter with LAG. Its
+	// quarters are dated leaves; H1, H2 and FY26 are aggregate periods above
+	// them. Codes stay Q1..Q4 so a formula can still say period = "Q1".
+	if m.PeriodDim, err = id(call("POST", "/api/developer/dimensions", map[string]any{
+		"name": "period", "revision_id": revisionID,
+		"dimension_type": "time", "time_granularity": "quarter", "fiscal_year_start_month": 1,
+	})); err != nil {
+		return nil, fmt.Errorf("create dimension period: %w", err)
+	}
+	for _, q := range Periods {
+		body := map[string]any{"code": q.Code, "label": q.Label}
+		if q.Start != "" {
+			body["period_start"], body["period_end"] = q.Start, q.End
+		}
+		if q.Parent != "" {
+			body["parent_member_id"] = m.Period[q.Parent]
+		}
+		memberID, err := id(call("POST", "/api/developer/dimensions/"+m.PeriodDim+"/members", body))
+		if err != nil {
+			return nil, fmt.Errorf("create member period/%s: %w", q.Code, err)
+		}
+		m.Period[q.Code] = memberID
 	}
 
 	metric := func(name, formula string, isInput bool, agg string, extra map[string]any) error {
@@ -225,7 +257,7 @@ func (m *Model) WriteFacts(call Caller, modelID, revisionID string, facts []Fact
 
 // ForecastMetricNames is what BuildForecast adds, inputs first.
 var ForecastMetricNames = []string{
-	"prior_revenue", "seasonality", "pipeline",
+	"seasonality", "pipeline",
 	"growth_pct", "forecast_base", "forecast_seasonal", "forecast_capped",
 	"weighted_target", "h1_revenue", "abs_variance", "cagr_pct", "rmse",
 	"scenario_mid", "best_case", "worst_case", "input_total",
@@ -236,7 +268,6 @@ var ForecastMetricNames = []string{
 
 // BuildForecast adds a quarterly forecast on top of the plan Build created.
 //
-// One thing shapes the whole design: the engine has no time-offset function.
 // ForecastMetric is one calculated forecast metric. Each entry names the
 // functions it is there to exercise, so a failure points at a function
 // rather than at "the forecast".
@@ -248,10 +279,12 @@ type ForecastMetric struct{ Name, Formula, Agg string }
 // can write this" and "the AI Developer can write this" are checked against
 // the same formulas rather than two copies that can drift.
 var ForecastMetrics = []ForecastMetric{
-	// Growth off the prior period. IFERROR is doing real work: the first
-	// period of any series has no prior, and dividing by it is the most
-	// common way a forecast model produces #DIV/0! across a whole column.
-	{Name: "growth_pct", Formula: "=IFERROR(({revenue} - {prior_revenue}) / {prior_revenue} * 100, 0)", Agg: "formula"},
+	// Growth off the prior quarter, read with LAG along the time dimension
+	// (substitute 0 before the first period). IFERROR is doing real work:
+	// the first period of any series has no prior, and dividing by it is
+	// the most common way a forecast model produces #DIV/0! across a whole
+	// column.
+	{Name: "growth_pct", Formula: "=IFERROR(({revenue} - LAG({revenue}, 1, 0)) / LAG({revenue}, 1, 0) * 100, 0)", Agg: "formula"},
 
 	{Name: "forecast_base", Formula: "={revenue} * (1 + {growth_pct} / 100)", Agg: "sum"},
 	{Name: "forecast_seasonal", Formula: "=ROUND({forecast_base} * {seasonality}, 0)", Agg: "sum"},
@@ -273,8 +306,8 @@ var ForecastMetrics = []ForecastMetric{
 	{Name: "quarter_weight", Formula: `=SWITCH(period, "Q1", 0.2, "Q2", 0.25, "Q3", 0.25, 0.3)`, Agg: "sum"},
 
 	{Name: "abs_variance", Formula: "=ABS({revenue} - {target})", Agg: "sum"},
-	// Compound growth over four quarters.
-	{Name: "cagr_pct", Formula: "=IFERROR((POWER({revenue} / {prior_revenue}, 0.25) - 1) * 100, 0)", Agg: "formula"},
+	// Compound growth over four quarters, off the previous one.
+	{Name: "cagr_pct", Formula: "=IFERROR((POWER({revenue} / PREVIOUS({revenue}), 0.25) - 1) * 100, 0)", Agg: "formula"},
 	{Name: "rmse", Formula: "=SQRT(POWER({revenue} - {target}, 2))", Agg: "sum"},
 
 	{Name: "scenario_mid", Formula: "=AVERAGE({revenue}, {target}, {pipeline})", Agg: "sum"},
@@ -302,13 +335,9 @@ var ForecastMetrics = []ForecastMetric{
 	{Name: "scenarios_present", Formula: "=COUNT({revenue}, {target}, {pipeline})", Agg: "sum"},
 }
 
-// There is no LAG, PRIOR or OFFSET among the 46 in internal/formula, so a
-// formula cannot reach into the previous period. Prior-period actuals are
-// therefore held as their own input metric — which is how a planner would
-// model it anyway when the alternative does not exist, and is worth knowing
-// before anyone tries to write =revenue[-1].
-//
-// What a formula CAN do is read the period it is being evaluated at: a bare
+// The previous quarter is read with LAG / PREVIOUS along the declared time
+// dimension; there is no separate "prior revenue" input to maintain. A
+// formula can also read the period it is being evaluated at: a bare
 // dimension name resolves to the current member's code, which is what makes
 // the seasonal and half-year rules below possible.
 func BuildForecast(call Caller, revisionID string, m *Model) error {
@@ -329,7 +358,7 @@ func BuildForecast(call Caller, revisionID string, m *Model) error {
 		return nil
 	}
 
-	for _, in := range []string{"prior_revenue", "seasonality", "pipeline"} {
+	for _, in := range []string{"seasonality", "pipeline"} {
 		if err := add(in, "", true, "sum"); err != nil {
 			return err
 		}
@@ -352,18 +381,21 @@ func BuildForecast(call Caller, revisionID string, m *Model) error {
 
 // ForecastFact is one seeded forecasting input.
 type ForecastFact struct {
-	Geo, Prod, Period                   string
-	PriorRevenue, Seasonality, Pipeline float64
+	Geo, Prod, Period     string
+	Seasonality, Pipeline float64
 }
 
-// SampleForecastFacts gives Q1 a prior period and Q2 none, so the
-// divide-by-zero guard is exercised by real data rather than only in theory.
+// SampleForecastFacts covers UK laptops in Q1 and Q2 (a real prior quarter
+// for the growth rules) and CA licences in Q2 alone (no prior quarter, so
+// the divide-by-zero guard is exercised by real data rather than only in
+// theory).
 func SampleForecastFacts() []ForecastFact {
 	return []ForecastFact{
-		{"UK", "LAPTOP", "Q1", 750_000, 1.10, 1_200_000},
-		{"DE", "LAPTOP", "Q1", 400_000, 0.90, 450_000},
-		{"US", "LICENSE", "Q1", 320_000, 1.00, 500_000},
-		{"CA", "LICENSE", "Q2", 0, 1.25, 120_000},
+		{"UK", "LAPTOP", "Q1", 1.10, 1_200_000},
+		{"UK", "LAPTOP", "Q2", 1.10, 1_200_000},
+		{"DE", "LAPTOP", "Q1", 0.90, 450_000},
+		{"US", "LICENSE", "Q1", 1.00, 500_000},
+		{"CA", "LICENSE", "Q2", 1.25, 120_000},
 	}
 }
 
@@ -371,7 +403,7 @@ func SampleForecastFacts() []ForecastFact {
 func (m *Model) WriteForecastFacts(call Caller, modelID, revisionID string, facts []ForecastFact) error {
 	for _, f := range facts {
 		for name, value := range map[string]float64{
-			"prior_revenue": f.PriorRevenue, "seasonality": f.Seasonality, "pipeline": f.Pipeline,
+			"seasonality": f.Seasonality, "pipeline": f.Pipeline,
 		} {
 			if _, err := call("POST", "/api/cells", map[string]any{
 				"model_id": modelID, "metric_id": m.Metric[name], "revision_id": revisionID,

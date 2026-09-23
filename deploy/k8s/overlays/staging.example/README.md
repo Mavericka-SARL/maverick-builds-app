@@ -49,8 +49,14 @@ namespace changed.
      --from-literal=MINIO_ROOT_PASSWORD="<the object-storage secret key>" \
      --from-literal=KEYCLOAK_ADMIN_CLIENT_SECRET="pending"
    kubectl -n mavericks-staging create secret generic mavericks-integration \
-     --from-literal=INTEGRATION_CRED_KEY="$(openssl rand -base64 32)"
+     --from-literal=INTEGRATION_CRED_KEY="$(openssl rand -base64 48)" \
+     --from-literal=SECRETS_ENCRYPTION_KEY="$(openssl rand -base64 48)"
    ```
+
+   `mavericks-integration` is the one to think twice about even on staging:
+   whatever a tenant stores (connector credentials, OAuth tokens, AI keys)
+   is sealed under these keys and is lost with them. Production seals them
+   into the overlay with `scripts/seal-integration-secret.sh` instead.
 
 3. **Apply**, then create Keycloak's database, exactly as in the production
    guide:
@@ -77,8 +83,10 @@ namespace changed.
 - Deploy a candidate by changing `images:` and applying.
 - `go run ./cmd/loadtest -base https://staging.example.com -keycloak
   https://auth-staging.example.com -username <account> -password <pw>
-  -users 100 -duration 2m -target-p95 2s` drives the account's application;
+  -users 100 -duration 2m -target-p95 2s` drives the account's application.
+  `bootstrap-platform-admin.sh` prints each password once and stores it
+  nowhere, so put both accounts in a password manager as you create them;
   `-json` keeps the report. Before DNS exists, add `-resolve host=ip` for both
   hostnames and `-insecure`.
-- Sign up at `https://staging.example.com/signup` to see the trial funnel end
+- Sign up at `https://staging.example.com/signup` to see the sign-up funnel end
   to end.

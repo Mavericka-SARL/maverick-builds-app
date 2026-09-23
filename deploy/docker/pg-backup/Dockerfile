@@ -9,8 +9,13 @@ FROM quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z AS mc
 FROM postgres:16-alpine
 
 COPY --from=mc /usr/bin/mc /usr/local/bin/mc
-COPY pg-backup.sh pg-restore.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/pg-backup.sh /usr/local/bin/pg-restore.sh
+COPY pg-backup.sh pg-restore.sh backup-watchdog.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/pg-backup.sh /usr/local/bin/pg-restore.sh \
+    /usr/local/bin/backup-watchdog.sh \
+    # curl is the watchdog's SMTP client: it is the one thing in this image
+    # that has to reach a mail relay, and adding a Go binary or a Python
+    # runtime for six lines of message would be worse.
+    && apk add --no-cache curl
 
 # uid 70 matches infra/postgres.yaml's own runAsUser/runAsGroup (the
 # postgres user baked into this same base image) — not the 65534 +
@@ -18,4 +23,6 @@ RUN chmod +x /usr/local/bin/pg-backup.sh /usr/local/bin/pg-restore.sh
 # need a writable /tmp for dump files.
 USER postgres
 
+# The default is the nightly dump; the watchdog CronJob overrides the command
+# with backup-watchdog.sh (deploy/k8s/base/infra/postgres-backup.yaml).
 ENTRYPOINT ["/usr/local/bin/pg-backup.sh"]

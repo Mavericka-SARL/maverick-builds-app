@@ -45,6 +45,16 @@ spec:
                 name: mavericks-config
             - secretRef:
                 name: mavericks-secrets
+            # INTEGRATION_CRED_KEY (and SECRETS_ENCRYPTION_KEY for the AI
+            # keys): the gateway seals a connector's or a tenant's credential
+            # at write time, the integration worker opens it at run time —
+            # both mount the same secret. Was missing here until 2026-09-21:
+            # every credentialed REST connection failed to save in production
+            # with "refusing to handle connector credentials". optional so a
+            # dev cluster boots without it and those operations fail loudly.
+            - secretRef:
+                name: mavericks-integration
+                optional: true
           # DATABASE_URL is composed here, not in the ConfigMap: envFrom
           # never expands $(VAR) references — only an explicit env: entry
           # can, by referencing $(POSTGRES_PASSWORD) already contributed
@@ -61,11 +71,21 @@ spec:
             # database every existing deployment uses.
             # Outbound e-mail (docs/NOTIFICATIONS.md). Optional: without a
             # relay, e-mail notifications are reported as undeliverable.
+            # Host, port and sender live in mavericks-config; the credentials
+            # in the mavericks-smtp secret (scripts/seal-smtp-secret.sh),
+            # which the backup watchdog shares. A change to any of them needs
+            # a gateway restart: they are read once at start-up.
             - name: SMTP_HOST
               valueFrom:
                 configMapKeyRef:
                   name: mavericks-config
                   key: SMTP_HOST
+                  optional: true
+            - name: SMTP_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: mavericks-config
+                  key: SMTP_PORT
                   optional: true
             - name: SMTP_FROM
               valueFrom:
@@ -77,13 +97,13 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: mavericks-smtp
-                  key: username
+                  key: SMTP_USERNAME
                   optional: true
             - name: SMTP_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: mavericks-smtp
-                  key: password
+                  key: SMTP_PASSWORD
                   optional: true
             - name: TENANT_DB_MODE
               valueFrom:
@@ -91,7 +111,7 @@ spec:
                   name: mavericks-config
                   key: TENANT_DB_MODE
                   optional: true
-            # Public self-service sign-up (docs/PLANS_AND_TRIALS.md). Off
+            # Public self-service sign-up (docs/PLANS_AND_SIGNUP.md). Off
             # unless the deployment sets SIGNUP_ENABLED: "true"; the
             # contact URL is where "change the plan" leads.
             - name: SIGNUP_ENABLED
@@ -105,6 +125,59 @@ spec:
                 configMapKeyRef:
                   name: mavericks-config
                   key: PLAN_CONTACT_URL
+                  optional: true
+            # Who operates this deployment, for the terms of service and the
+            # privacy notice at /terms and /privacy
+            # (docs/LEGAL_AND_PRIVACY.md). All optional: with none of them set
+            # the deployment publishes no documents, and /signup then asks
+            # nobody to agree to anything.
+            - name: LEGAL_ENTITY
+              valueFrom:
+                configMapKeyRef:
+                  name: mavericks-config
+                  key: LEGAL_ENTITY
+                  optional: true
+            - name: LEGAL_ADDRESS
+              valueFrom:
+                configMapKeyRef:
+                  name: mavericks-config
+                  key: LEGAL_ADDRESS
+                  optional: true
+            - name: LEGAL_EMAIL
+              valueFrom:
+                configMapKeyRef:
+                  name: mavericks-config
+                  key: LEGAL_EMAIL
+                  optional: true
+            - name: LEGAL_JURISDICTION
+              valueFrom:
+                configMapKeyRef:
+                  name: mavericks-config
+                  key: LEGAL_JURISDICTION
+                  optional: true
+            - name: LEGAL_HOSTING
+              valueFrom:
+                configMapKeyRef:
+                  name: mavericks-config
+                  key: LEGAL_HOSTING
+                  optional: true
+            - name: LEGAL_UPDATED
+              valueFrom:
+                configMapKeyRef:
+                  name: mavericks-config
+                  key: LEGAL_UPDATED
+                  optional: true
+            - name: LEGAL_TERMS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: mavericks-config
+                  key: LEGAL_TERMS_URL
+                  optional: true
+            - name: LEGAL_PRIVACY_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: mavericks-config
+                  key: LEGAL_PRIVACY_URL
                   optional: true
             - name: MAVERICKS_LICENSE_KEY
               valueFrom:

@@ -228,7 +228,7 @@ func (s *Store) GetWorkflowInstance(ctx context.Context, instanceID string) (*wo
 	var completedAt *time.Time
 
 	err := s.pool.QueryRow(ctx, `
-		SELECT id::text, workflow_def_id::text, status::text, started_by::text,
+		SELECT id::text, workflow_def_id::text, status::text, COALESCE(started_by::text, ''),
 		       context, started_at, completed_at
 		FROM workflow.workflow_instance WHERE id = $1::uuid
 	`, instanceID).Scan(&id, &defID, &statusStr, &startedBy, &ctxJSON, &startedAt, &completedAt)
@@ -263,7 +263,7 @@ func (s *Store) GetWorkflowInstance(ctx context.Context, instanceID string) (*wo
 func (s *Store) ListWorkflowInstances(ctx context.Context, applicationID string, filterStatus workflowv1.WorkflowStatus, limit, offset int32) ([]*workflowv1.WorkflowInstance, error) {
 	query := `
 		SELECT wi.id::text, wi.workflow_def_id::text, wi.status::text,
-		       wi.started_by::text, wi.context, wi.started_at, wi.completed_at
+		       COALESCE(wi.started_by::text, ''), wi.context, wi.started_at, wi.completed_at
 		FROM workflow.workflow_instance wi
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
 		WHERE wd.application_id = $1::uuid
@@ -1015,7 +1015,7 @@ func (s *Store) reworkStep(ctx context.Context, instanceID string, target, from 
 	}
 	// The requester learns the request went back, with the reason.
 	var startedBy string
-	if qErr := s.pool.QueryRow(ctx, `SELECT started_by::text FROM workflow.workflow_instance WHERE id = $1::uuid`, instanceID).Scan(&startedBy); qErr == nil && startedBy != "" {
+	if qErr := s.pool.QueryRow(ctx, `SELECT COALESCE(started_by::text, '') FROM workflow.workflow_instance WHERE id = $1::uuid`, instanceID).Scan(&startedBy); qErr == nil && startedBy != "" {
 		vars := map[string]string{"subject": "Sent back for rework", "message": fmt.Sprintf("%q needs another pass. %s", targetName, note)}
 		_, _ = notification.NewStore(s.pool).Notify(ctx, startedBy, "workflow_step_notification", vars, "workflow_instance", instanceID)
 	}
@@ -1386,7 +1386,7 @@ func (s *Store) dispatchStepNotification(ctx context.Context, instanceID string,
 
 	var appID, startedBy string
 	if err := s.pool.QueryRow(ctx, `
-		SELECT wd.application_id::text, wi.started_by::text
+		SELECT wd.application_id::text, COALESCE(wi.started_by::text, '')
 		FROM workflow.workflow_instance wi
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
 		WHERE wi.id = $1::uuid

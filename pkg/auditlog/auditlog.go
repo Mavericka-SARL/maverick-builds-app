@@ -62,8 +62,10 @@ const (
 	// to the plan catalog (internal/plan).
 	EventTenantSignedUp EventType = "tenant.signed_up"
 	EventPlanUpdated    EventType = "plan.updated"
-	// Outbound notification delivery: which channels a tenant sends on.
+	// Outbound notification delivery: which channels a tenant sends on, and
+	// an administrator proving the relay works by mailing themselves.
 	EventNotificationSettingsUpdated EventType = "notification.settings_updated"
+	EventNotificationTestSent        EventType = "notification.test_sent"
 	EventTenantDeleted               EventType = "tenant.deleted"
 	EventApplicationCreated          EventType = "application.created"
 	EventApplicationUpdated          EventType = "application.updated"
@@ -160,6 +162,11 @@ const (
 	// tenant admin changing the key every developer in the tenant then uses.
 	EventTenantAISettingsUpdated EventType = "ai_settings.tenant_updated"
 	EventTenantAIKeyCleared      EventType = "ai_settings.tenant_cleared"
+	// A tenant's own credential for an external system (core.tenant_credential):
+	// stored, tested, or removed.
+	EventTenantCredentialUpdated EventType = "tenant_credential.updated"
+	EventTenantCredentialTested  EventType = "tenant_credential.tested"
+	EventTenantCredentialDeleted EventType = "tenant_credential.deleted"
 	// Enterprise identity: a tenant's own sign-in provider and the tokens
 	// that let its directory provision users.
 	EventSSOProviderUpdated EventType = "sso.provider_updated"

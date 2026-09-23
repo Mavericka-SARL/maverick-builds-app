@@ -78,7 +78,7 @@ type Connection struct {
 
 func validAuthType(t string) bool {
 	switch t {
-	case "none", "api_key", "bearer", "basic", "oauth2_client_credentials":
+	case "none", "api_key", "bearer", "basic", "oauth2_client_credentials", "oauth2_authorization_code":
 		return true
 	}
 	return false

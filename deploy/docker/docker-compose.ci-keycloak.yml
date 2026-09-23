@@ -1,0 +1,51 @@
+# The real-login e2e stack (web/e2e-keycloak, CI job "Playwright e2e
+# (real Keycloak login)"): a plain Postgres and the dev realm on ports that
+# collide with nothing a developer or the shared CI node already runs —
+# 15432 and 18180 rather than the dev stack's 5432 and 8180. No WAL-G, no
+# MinIO, no NATS: the gateway under test only needs its database and the
+# identity provider. The realm import is the same file the dev stack uses,
+# so the seeded "alex"/"mavericks" user and the mavericks-web client (redirect
+# http://localhost:5173/*) are what the spec signs in with.
+#
+#   docker compose -f deploy/docker/docker-compose.ci-keycloak.yml up -d --wait
+#   DATABASE_URL=postgres://mavericks:mavericks@localhost:15432/mavericks?sslmode=disable \
+#   KEYCLOAK_URL=http://localhost:18180 VITE_KEYCLOAK_URL=http://localhost:18180 \
+#     npx playwright test --config=playwright.keycloak.config.ts     # from web/
+#   docker compose -f deploy/docker/docker-compose.ci-keycloak.yml down -v
+name: mavericks-ci-keycloak
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mavericks
+      POSTGRES_PASSWORD: mavericks
+      POSTGRES_DB: mavericks
+    ports:
+      - "15432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mavericks -d mavericks"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    command: start-dev --import-realm --health-enabled=true
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: dev-mem
+    volumes:
+      - ./config/keycloak:/opt/keycloak/data/import:ro
+      # The realm asks for loginTheme "maverickbuilds" (see the dev stack).
+      - ./config/keycloak/themes/maverickbuilds:/opt/keycloak/themes/maverickbuilds:ro
+    ports:
+      - "18180:8080"
+    healthcheck:
+      # The image has no curl; bash's /dev/tcp is enough to know the port answers.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && echo -e 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '200 OK' <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 30s

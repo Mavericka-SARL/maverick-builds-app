@@ -25,6 +25,14 @@ type CancelIntegrationRunRes interface {
 	cancelIntegrationRunRes()
 }
 
+type ClearAuditSettingsRes interface {
+	clearAuditSettingsRes()
+}
+
+type ClearNotificationSettingsRes interface {
+	clearNotificationSettingsRes()
+}
+
 type ClearTenantAIKeyRes interface {
 	clearTenantAIKeyRes()
 }
@@ -149,6 +157,10 @@ type DeleteFormRecordRes interface {
 	deleteFormRecordRes()
 }
 
+type DeleteGoogleConnectionRes interface {
+	deleteGoogleConnectionRes()
+}
+
 type DeleteImportJobRes interface {
 	deleteImportJobRes()
 }
@@ -173,6 +185,10 @@ type DiscardAiDraftRes interface {
 	discardAiDraftRes()
 }
 
+type DisconnectIntegrationOAuthRes interface {
+	disconnectIntegrationOAuthRes()
+}
+
 type DuplicateIntegrationRes interface {
 	duplicateIntegrationRes()
 }
@@ -195,6 +211,10 @@ type ExportModelPackageRes interface {
 
 type ExportModelRes interface {
 	exportModelRes()
+}
+
+type GenerateDimensionPeriodsRes interface {
+	generateDimensionPeriodsRes()
 }
 
 type GetAdminBrandingRes interface {
@@ -223,6 +243,10 @@ type GetChartDataRes interface {
 
 type GetDemoRes interface {
 	getDemoRes()
+}
+
+type GetGoogleConnectionRes interface {
+	getGoogleConnectionRes()
 }
 
 type GetGridRes interface {
@@ -377,6 +401,10 @@ type PublishWorkflowRes interface {
 	publishWorkflowRes()
 }
 
+type PutGoogleConnectionRes interface {
+	putGoogleConnectionRes()
+}
+
 type RejectAiProposalRes interface {
 	rejectAiProposalRes()
 }
@@ -485,6 +513,10 @@ type SendAiMessageRes interface {
 	sendAiMessageRes()
 }
 
+type SendNotificationTestMailRes interface {
+	sendNotificationTestMailRes()
+}
+
 type SetActiveRevisionRes interface {
 	setActiveRevisionRes()
 }
@@ -509,12 +541,20 @@ type SsoDiscoverRes interface {
 	ssoDiscoverRes()
 }
 
+type StartIntegrationOAuthRes interface {
+	startIntegrationOAuthRes()
+}
+
 type StartWorkflowInstanceRes interface {
 	startWorkflowInstanceRes()
 }
 
 type SubmitBudgetRes interface {
 	submitBudgetRes()
+}
+
+type TestGoogleConnectionRes interface {
+	testGoogleConnectionRes()
 }
 
 type TestIntegrationConnectionRes interface {

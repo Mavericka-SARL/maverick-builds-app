@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -69,8 +70,12 @@ func (m Message) SubjectFor(brand string) string {
 	if brand != "" {
 		return "Notification from " + brand
 	}
-	return "Notification from maverickbuilds.app"
+	return "Notification from " + PlatformName
 }
+
+// PlatformName is how outbound mail names the sender when the recipient's
+// tenant is not white-labelled.
+const PlatformName = "maverickbuilds.app"
 
 // Body is the notification's text.
 func (m Message) Body() string {
@@ -96,10 +101,14 @@ type SMTPConfig struct {
 	Username string
 	Password string
 	From     string
-	// StartTLS upgrades the connection before authenticating. On by default
-	// for anything but an unauthenticated local relay.
-	StartTLS bool
 }
+
+// ImplicitTLSPort is the one port on which the relay expects TLS from the
+// first byte (SMTPS). Every other port starts in clear and upgrades with
+// STARTTLS when the relay offers it, which net/smtp does on its own and
+// which PLAIN authentication requires. The backup watchdog's curl draws
+// the same line.
+const ImplicitTLSPort = 465
 
 // SMTPMailer delivers through a standard SMTP relay.
 type SMTPMailer struct{ Cfg SMTPConfig }
@@ -131,10 +140,13 @@ func (m *SMTPMailer) SendAs(ctx context.Context, fromName, to, displayName, subj
 	if displayName != "" {
 		recipient = fmt.Sprintf("%s <%s>", displayName, to)
 	}
-	from := m.Cfg.From
-	if fromName != "" {
-		from = fmt.Sprintf("%q <%s>", strings.ReplaceAll(fromName, "\n", " "), m.Cfg.From)
+	// The From header always carries a display name: the tenant's own when
+	// white-labelled, the platform's otherwise — a bare address is what a
+	// mail client shows as the sender, and it reads like a machine.
+	if fromName == "" {
+		fromName = PlatformName
 	}
+	from := fmt.Sprintf("%q <%s>", strings.ReplaceAll(fromName, "\n", " "), m.Cfg.From)
 	msg := strings.Join([]string{
 		"From: " + from,
 		"To: " + recipient,
@@ -153,13 +165,58 @@ func (m *SMTPMailer) SendAs(ctx context.Context, fromName, to, displayName, subj
 	// net/smtp has no context support; the deadline is the caller's timeout
 	// around the whole dispatch pass.
 	done := make(chan error, 1)
-	go func() { done <- smtp.SendMail(addr, auth, m.Cfg.From, []string{to}, []byte(msg)) }()
+	go func() {
+		if m.Cfg.Port == ImplicitTLSPort {
+			done <- sendImplicitTLS(ctx, addr, m.Cfg.Host, auth, m.Cfg.From, to, []byte(msg))
+			return
+		}
+		done <- smtp.SendMail(addr, auth, m.Cfg.From, []string{to}, []byte(msg))
+	}()
 	select {
 	case err := <-done:
 		return err
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// sendImplicitTLS is smtp.SendMail over a connection that is TLS from the
+// start, which is what a relay on 465 expects; SendMail itself would send
+// EHLO in clear and be cut off.
+func sendImplicitTLS(ctx context.Context, addr, host string, auth smtp.Auth, from, to string, msg []byte) error {
+	dialer := &tls.Dialer{Config: &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close() //nolint:errcheck
+	c, err := smtp.NewClient(conn, host)
+	if err != nil {
+		return err
+	}
+	defer c.Close() //nolint:errcheck
+	if auth != nil {
+		if err := c.Auth(auth); err != nil {
+			return err
+		}
+	}
+	if err := c.Mail(from); err != nil {
+		return err
+	}
+	if err := c.Rcpt(to); err != nil {
+		return err
+	}
+	w, err := c.Data()
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write(msg); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	return c.Quit()
 }
 
 // webhookPayload is the JSON a webhook receiver gets. Stable by contract:
@@ -234,12 +291,21 @@ func (d *Dispatcher) RunOnce(ctx context.Context) (int, error) {
 	if len(msgs) == 0 {
 		return 0, nil
 	}
-	settings, err := d.Store.GetSettings(ctx)
-	if err != nil {
-		return 0, err
-	}
+	// Each message is delivered by its own tenant's settings — the webhook
+	// URL above all (migration 091) — resolved once per tenant per pass.
+	perTenant := map[string]Settings{}
 	delivered := 0
 	for _, m := range msgs {
+		cid := d.Store.CustomerOf(ctx, m.RecipientID, m.ResourceType, m.ResourceID)
+		settings, ok := perTenant[cid]
+		if !ok && cid != "" {
+			var err error
+			settings, _, err = d.Store.Effective(ctx, cid, DeploymentDefaults)
+			if err != nil {
+				return delivered, err
+			}
+			perTenant[cid] = settings
+		} // a message whose tenant is gone has every channel off and fails with that reason
 		if dErr := d.deliver(ctx, settings, m); dErr != nil {
 			if rErr := d.Store.recordFailure(ctx, m.ID, dErr.Error()); rErr != nil {
 				d.Log.Warn().Err(rErr).Str("notification", m.ID).Msg("recording a delivery failure failed")
@@ -303,7 +369,7 @@ func (d *Dispatcher) postWebhook(ctx context.Context, settings Settings, m Messa
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "mavericks-engine")
 	// Let a receiver prove the delivery came from this deployment.
-	if secret, sErr := d.Store.webhookSecret(ctx); sErr == nil && secret != "" {
+	if secret := settings.webhookSecretValue; secret != "" {
 		mac := hmac.New(sha256.New, []byte(secret))
 		mac.Write(body)
 		req.Header.Set("X-Mavericks-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
@@ -393,10 +459,4 @@ func (s *Store) recordFailure(ctx context.Context, id, reason string) error {
 		UPDATE notification.notification SET last_error = $2, next_attempt_at = now() + $3::interval
 		WHERE id = $1::uuid`, id, reason, backoff(attempts).String())
 	return err
-}
-
-func (s *Store) webhookSecret(ctx context.Context) (string, error) {
-	var secret string
-	err := s.pool.QueryRow(ctx, `SELECT webhook_secret FROM notification.settings WHERE id = TRUE`).Scan(&secret)
-	return secret, err
 }

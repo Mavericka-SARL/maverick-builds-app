@@ -98,7 +98,7 @@ func TestScopeCalcCells(t *testing.T) {
 		revenueID + ":B": 2000,
 	}
 
-	cells, totals := scopeCalcCells(context.Background(), dims, metricDimIDs, dimIDToName, universe, scopedInputCells)
+	cells, totals := scopeCalcCells(context.Background(), dims, metricDimIDs, dimIDToName, universe, scopedInputCells, nil)
 
 	if v := cells[taxID+":A"]; v != 100 {
 		t.Errorf("tax[A] = %v, want 100", v)

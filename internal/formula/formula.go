@@ -30,7 +30,7 @@ func EvalWithContext(text string, ctx *EvalContext) (Value, error) {
 		return ErrorVal(ErrValue), err
 	}
 	if ctx != nil && ctx.Vars != nil {
-		ctx = &EvalContext{Vars: upperKeys(ctx.Vars), Funcs: ctx.Funcs}
+		ctx = &EvalContext{Vars: upperKeys(ctx.Vars), Funcs: ctx.Funcs, Time: ctx.Time}
 	}
 	return ctx.eval(node), nil
 }

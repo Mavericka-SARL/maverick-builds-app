@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/mavericks-engine/mavericks/internal/timedim"
 )
 
 const (
@@ -51,6 +53,10 @@ type Member struct {
 	ParentMemberID *string         `json:"parent_member_id,omitempty"`
 	Properties     json.RawMessage `json:"properties,omitempty"`
 	SortOrder      int             `json:"sort_order"`
+	// Time members: the period (YYYY-MM-DD) and chronological ordinal.
+	PeriodStart *string `json:"period_start,omitempty"`
+	PeriodEnd   *string `json:"period_end,omitempty"`
+	TimeIndex   *int    `json:"time_index,omitempty"`
 }
 
 type DimProperty struct {
@@ -66,8 +72,13 @@ type Dimension struct {
 	ParentDimensionID *string         `json:"parent_dimension_id,omitempty"`
 	SourceDimensionID *string         `json:"source_dimension_id,omitempty"`
 	SourceProperty    *string         `json:"source_property,omitempty"`
-	Members           []Member        `json:"members"`
-	TypedProperties   []DimProperty   `json:"typed_properties,omitempty"`
+	// Time marker (spec §3.1). Empty DimensionType reads as "standard" so
+	// packages exported before time dimensions existed import unchanged.
+	DimensionType   string        `json:"dimension_type,omitempty"`
+	TimeGranularity *string       `json:"time_granularity,omitempty"`
+	FiscalYearStart *int          `json:"fiscal_year_start_month,omitempty"`
+	Members         []Member      `json:"members"`
+	TypedProperties []DimProperty `json:"typed_properties,omitempty"`
 }
 
 type Metric struct {
@@ -80,11 +91,17 @@ type Metric struct {
 	Format         string  `json:"format"`
 	FormatDecimals int     `json:"format_decimals"`
 	FormatCurrency string  `json:"format_currency"`
+	TimeSummary    string  `json:"time_summary,omitempty"`
 }
 
 type Dependency struct {
 	MetricID  string `json:"metric_id"`
 	DependsOn string `json:"depends_on_metric_id"`
+	// Time offsets the dependency is read at (spec §3.4).
+	MinTimeOffset   int  `json:"min_time_offset,omitempty"`
+	MaxTimeOffset   int  `json:"max_time_offset,omitempty"`
+	UnboundedPast   bool `json:"unbounded_past,omitempty"`
+	UnboundedFuture bool `json:"unbounded_future,omitempty"`
 }
 
 type GridMetric struct {
@@ -313,7 +330,8 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 
 	// Dimensions + members + typed properties.
 	rows, err := q.Query(ctx, `
-		SELECT id::text, name, agg_rule, properties, parent_dimension_id::text, source_dimension_id::text, source_property
+		SELECT id::text, name, agg_rule, properties, parent_dimension_id::text, source_dimension_id::text, source_property,
+		       dimension_type, time_granularity, fiscal_year_start_month
 		FROM model.dimension_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -321,7 +339,8 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 	for rows.Next() {
 		var d Dimension
-		if err := rows.Scan(&d.ID, &d.Name, &d.AggRule, &d.Properties, &d.ParentDimensionID, &d.SourceDimensionID, &d.SourceProperty); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.AggRule, &d.Properties, &d.ParentDimensionID, &d.SourceDimensionID, &d.SourceProperty,
+			&d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -334,15 +353,16 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 	for i := range pkg.Dimensions {
 		mrows, err := q.Query(ctx, `
-			SELECT id::text, code, label, parent_member_id::text, properties, sort_order
-			FROM model.dimension_member WHERE dimension_id=$1::uuid ORDER BY sort_order, code`,
+			SELECT id::text, code, label, parent_member_id::text, properties, sort_order,
+			       period_start::text, period_end::text, time_index
+			FROM model.dimension_member WHERE dimension_id=$1::uuid ORDER BY time_index NULLS LAST, sort_order, code`,
 			pkg.Dimensions[i].ID)
 		if err != nil {
 			return nil, err
 		}
 		for mrows.Next() {
 			var m Member
-			if err := mrows.Scan(&m.ID, &m.Code, &m.Label, &m.ParentMemberID, &m.Properties, &m.SortOrder); err != nil {
+			if err := mrows.Scan(&m.ID, &m.Code, &m.Label, &m.ParentMemberID, &m.Properties, &m.SortOrder, &m.PeriodStart, &m.PeriodEnd, &m.TimeIndex); err != nil {
 				mrows.Close()
 				return nil, err
 			}
@@ -375,7 +395,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	// Metrics + dependencies.
 	rows, err = q.Query(ctx, `
 		SELECT id::text, name, formula, storage_type::text, is_input, agg_rule,
-		       COALESCE(format,''), COALESCE(format_decimals,0), COALESCE(format_currency,'')
+		       COALESCE(format,''), COALESCE(format_decimals,0), COALESCE(format_currency,''), time_summary
 		FROM model.metric_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -383,7 +403,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 	for rows.Next() {
 		var m Metric
-		if err := rows.Scan(&m.ID, &m.Name, &m.Formula, &m.StorageType, &m.IsInput, &m.AggRule, &m.Format, &m.FormatDecimals, &m.FormatCurrency); err != nil {
+		if err := rows.Scan(&m.ID, &m.Name, &m.Formula, &m.StorageType, &m.IsInput, &m.AggRule, &m.Format, &m.FormatDecimals, &m.FormatCurrency, &m.TimeSummary); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -395,7 +415,8 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 
 	rows, err = q.Query(ctx, `
-		SELECT cd.metric_id::text, cd.depends_on_metric_id::text
+		SELECT cd.metric_id::text, cd.depends_on_metric_id::text,
+		       cd.min_time_offset, cd.max_time_offset, cd.unbounded_past, cd.unbounded_future
 		FROM model.calc_dependency cd
 		JOIN model.metric_def m ON m.id = cd.metric_id
 		WHERE m.model_id=$1::uuid AND (m.revision_id=$2::uuid OR m.revision_id IS NULL)`,
@@ -405,7 +426,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 	for rows.Next() {
 		var d Dependency
-		if err := rows.Scan(&d.MetricID, &d.DependsOn); err != nil {
+		if err := rows.Scan(&d.MetricID, &d.DependsOn, &d.MinTimeOffset, &d.MaxTimeOffset, &d.UnboundedPast, &d.UnboundedFuture); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -908,25 +929,32 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 	memberMap := map[string]string{}
 	for _, d := range pkg.Dimensions {
 		var newID string
+		dimType := d.DimensionType
+		if dimType == "" {
+			dimType = timedim.TypeStandard
+		}
 		if err = tx.QueryRow(ctx, `
-			INSERT INTO model.dimension_def (model_id, revision_id, name, agg_rule, properties, source_property)
-			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE($5::jsonb,'[]'::jsonb), $6)
+			INSERT INTO model.dimension_def (model_id, revision_id, name, agg_rule, properties, source_property,
+			                                 dimension_type, time_granularity, fiscal_year_start_month)
+			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE($5::jsonb,'[]'::jsonb), $6, $7, $8, $9)
 			RETURNING id::text`,
-			modelID, revisionID, d.Name, d.AggRule, []byte(d.Properties), d.SourceProperty).Scan(&newID); err != nil {
+			modelID, revisionID, d.Name, d.AggRule, []byte(d.Properties), d.SourceProperty,
+			dimType, d.TimeGranularity, d.FiscalYearStart).Scan(&newID); err != nil {
 			return "", "", fmt.Errorf("dimension %q: %w", d.Name, err)
 		}
 		dimMap[d.ID] = newID
 		for _, m := range d.Members {
 			var newMemberID string
 			if err = tx.QueryRow(ctx, `
-				INSERT INTO model.dimension_member (dimension_id, code, label, properties, sort_order)
-				VALUES ($1::uuid, $2, $3, COALESCE($4::jsonb,'{}'::jsonb), $5)
+				INSERT INTO model.dimension_member (dimension_id, code, label, properties, sort_order, period_start, period_end, time_index)
+				VALUES ($1::uuid, $2, $3, COALESCE($4::jsonb,'{}'::jsonb), $5, $6::date, $7::date, $8)
 				RETURNING id::text`,
-				newID, m.Code, m.Label, []byte(m.Properties), m.SortOrder).Scan(&newMemberID); err != nil {
+				newID, m.Code, m.Label, []byte(m.Properties), m.SortOrder, m.PeriodStart, m.PeriodEnd, m.TimeIndex).Scan(&newMemberID); err != nil {
 				return "", "", fmt.Errorf("member %q of %q: %w", m.Code, d.Name, err)
 			}
 			memberMap[m.ID] = newMemberID
 		}
+
 		for _, p := range d.TypedProperties {
 			if _, err = tx.Exec(ctx,
 				`INSERT INTO model.dimension_property (dimension_id, name, data_type) VALUES ($1::uuid, $2, $3)`,
@@ -957,17 +985,29 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 				return "", "", fmt.Errorf("member parent of %q: %w", m.Code, err)
 			}
 		}
+		if d.DimensionType == timedim.TypeTime {
+			// Re-validate and re-index (parents now in place) rather than
+			// trust the package's ordinals: the same invariants hold
+			// whichever writer produced the members.
+			if err = timedim.ValidateAndReindex(ctx, tx, dimMap[d.ID]); err != nil {
+				return "", "", fmt.Errorf("time dimension %q: %w", d.Name, err)
+			}
+		}
 	}
 
 	// Metrics + dependencies.
 	metricMap := make(map[string]string, len(pkg.Metrics))
 	for _, m := range pkg.Metrics {
 		var newID string
+		timeSummary := m.TimeSummary
+		if timeSummary == "" {
+			timeSummary = "sum"
+		}
 		if err = tx.QueryRow(ctx, `
-			INSERT INTO model.metric_def (model_id, revision_id, name, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency)
-			VALUES ($1::uuid, $2::uuid, $3, $4, $5::core.storage_type, $6, $7, $8, $9, $10)
+			INSERT INTO model.metric_def (model_id, revision_id, name, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary)
+			VALUES ($1::uuid, $2::uuid, $3, $4, $5::core.storage_type, $6, $7, $8, $9, $10, $11)
 			RETURNING id::text`,
-			modelID, revisionID, m.Name, m.Formula, m.StorageType, m.IsInput, m.AggRule, m.Format, m.FormatDecimals, m.FormatCurrency).Scan(&newID); err != nil {
+			modelID, revisionID, m.Name, m.Formula, m.StorageType, m.IsInput, m.AggRule, m.Format, m.FormatDecimals, m.FormatCurrency, timeSummary).Scan(&newID); err != nil {
 			return "", "", fmt.Errorf("metric %q: %w", m.Name, err)
 		}
 		metricMap[m.ID] = newID
@@ -978,9 +1018,11 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 		if !okFrom || !okTo {
 			continue // dangling dependency in the package; skip rather than abort
 		}
-		if _, err = tx.Exec(ctx,
-			`INSERT INTO model.calc_dependency (metric_id, depends_on_metric_id) VALUES ($1::uuid, $2::uuid) ON CONFLICT DO NOTHING`,
-			from, to); err != nil {
+		if _, err = tx.Exec(ctx, `
+			INSERT INTO model.calc_dependency
+			    (metric_id, depends_on_metric_id, min_time_offset, max_time_offset, unbounded_past, unbounded_future)
+			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
+			from, to, dep.MinTimeOffset, dep.MaxTimeOffset, dep.UnboundedPast, dep.UnboundedFuture); err != nil {
 			return "", "", fmt.Errorf("dependency: %w", err)
 		}
 	}

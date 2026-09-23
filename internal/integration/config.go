@@ -172,7 +172,7 @@ type RunLimits struct {
 // credential goes. The secret itself lives in integration_connection.
 type AuthPlacement struct {
 	// Type mirrors the connection's type for validation: none | api_key |
-	// bearer | basic | oauth2_client_credentials.
+	// bearer | basic | oauth2_client_credentials | oauth2_authorization_code.
 	Type string `json:"type"`
 	// api_key placement:
 	HeaderName string `json:"header_name,omitempty"`

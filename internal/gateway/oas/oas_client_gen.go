@@ -90,6 +90,18 @@ type Invoker interface {
 	//
 	// POST /api/developer/integration-runs/{runId}/cancel
 	CancelIntegrationRun(ctx context.Context, params CancelIntegrationRunParams) (CancelIntegrationRunRes, error)
+	// ClearAuditSettings invokes clearAuditSettings operation.
+	//
+	// Drop the tenant's own retention so it inherits the deployment's again (administrators; enterprise).
+	//
+	// DELETE /api/admin/audit/settings
+	ClearAuditSettings(ctx context.Context) (ClearAuditSettingsRes, error)
+	// ClearNotificationSettings invokes clearNotificationSettings operation.
+	//
+	// Drop the tenant's own delivery settings so it inherits the deployment's again (administrators).
+	//
+	// DELETE /api/notifications/settings
+	ClearNotificationSettings(ctx context.Context) (ClearNotificationSettingsRes, error)
 	// ClearTenantAIKey invokes clearTenantAIKey operation.
 	//
 	// Remove the stored tenant key and stop enforcing it, returning the tenant to personal keys
@@ -111,7 +123,7 @@ type Invoker interface {
 	ConfirmAiProposal(ctx context.Context, params ConfirmAiProposalParams) (ConfirmAiProposalRes, error)
 	// CreateAdminApplication invokes createAdminApplication operation.
 	//
-	// Create an application under a tenant.
+	// Create an application under a tenant (a tenant admin: their own tenant only).
 	//
 	// POST /api/admin/applications
 	CreateAdminApplication(ctx context.Context, request *CreateApplicationRequest) (CreateAdminApplicationRes, error)
@@ -396,6 +408,13 @@ type Invoker interface {
 	//
 	// DELETE /api/records/{id}
 	DeleteFormRecord(ctx context.Context, params DeleteFormRecordParams) (DeleteFormRecordRes, error)
+	// DeleteGoogleConnection invokes deleteGoogleConnection operation.
+	//
+	// Forget the tenant's Google service account; private sheets become unreachable again (developers
+	// and administrators).
+	//
+	// DELETE /api/developer/integrations/google-service-account
+	DeleteGoogleConnection(ctx context.Context) (DeleteGoogleConnectionRes, error)
 	// DeleteGrid invokes deleteGrid operation.
 	//
 	// Delete a grid.
@@ -451,6 +470,12 @@ type Invoker interface {
 	//
 	// POST /api/ai/sessions/{id}/discard-draft
 	DiscardAiDraft(ctx context.Context, params DiscardAiDraftParams) (DiscardAiDraftRes, error)
+	// DisconnectIntegrationOAuth invokes disconnectIntegrationOAuth operation.
+	//
+	// Forget the connection's tokens, keeping the client so it can be connected again.
+	//
+	// POST /api/developer/integration-connections/{id}/oauth/disconnect
+	DisconnectIntegrationOAuth(ctx context.Context, params DisconnectIntegrationOAuthParams) (DisconnectIntegrationOAuthRes, error)
 	// DuplicateIntegration invokes duplicateIntegration operation.
 	//
 	// Duplicate a rest_api integration (test state cleared, schedule copied disabled, no run history).
@@ -485,8 +510,8 @@ type Invoker interface {
 	ExportGrid(ctx context.Context, params ExportGridParams) (ExportGridRes, error)
 	// ExportModel invokes exportModel operation.
 	//
-	// Export a model revision as a self-contained transfer package (tenant_admin only, scoped to their
-	// own tenant).
+	// Export a model revision as a self-contained transfer package (tenant admins for their own tenant,
+	// platform admins for any).
 	//
 	// GET /api/admin/models/{id}/export
 	ExportModel(ctx context.Context, params ExportModelParams) (ExportModelRes, error)
@@ -494,7 +519,7 @@ type Invoker interface {
 	//
 	// Download a standalone deployment package for a model revision — a tar.gz containing the entity
 	// graph (package.json), the complete database migrations, a provenance manifest, and an infra-only
-	// docker-compose (tenant_admin only, scoped to their own tenant).
+	// docker-compose (tenant admins for their own tenant, platform admins for any).
 	//
 	// GET /api/admin/models/{id}/export/package
 	ExportModelPackage(ctx context.Context, params ExportModelPackageParams) (ExportModelPackageRes, error)
@@ -504,6 +529,13 @@ type Invoker interface {
 	//
 	// POST /api/formula/refs
 	ExtractFormulaRefs(ctx context.Context, request *FormulaRefsRequest) (*ExtractFormulaRefsOK, error)
+	// GenerateDimensionPeriods invokes generateDimensionPeriods operation.
+	//
+	// Bulk-generate a time dimension's periods between two dates (same validation and chronological
+	// indexing as single members; time dimensions only).
+	//
+	// POST /api/developer/dimensions/{dimId}/members/generate
+	GenerateDimensionPeriods(ctx context.Context, request *GeneratePeriodsRequest, params GenerateDimensionPeriodsParams) (GenerateDimensionPeriodsRes, error)
 	// GenerateMigration invokes generateMigration operation.
 	//
 	// Generate (but do not apply) the next schema migration for a model's current definition.
@@ -578,6 +610,13 @@ type Invoker interface {
 	//
 	// GET /api/developer/model
 	GetDeveloperModel(ctx context.Context, params GetDeveloperModelParams) (*GetDeveloperModelOK, error)
+	// GetGoogleConnection invokes getGoogleConnection operation.
+	//
+	// The tenant's Google service account, public half only — the address to share sheets with
+	// (developers and administrators; the tenant of the application in X-App-Id).
+	//
+	// GET /api/developer/integrations/google-service-account
+	GetGoogleConnection(ctx context.Context) (GetGoogleConnectionRes, error)
 	// GetGrid invokes getGrid operation.
 	//
 	// Get planning grid for a revision.
@@ -596,6 +635,13 @@ type Invoker interface {
 	//
 	// GET /api/developer/integration-runs/{runId}
 	GetIntegrationRun(ctx context.Context, params GetIntegrationRunParams) (GetIntegrationRunRes, error)
+	// GetLegalInfo invokes getLegalInfo operation.
+	//
+	// The operator's identity and the documents it publishes, for the terms of service and privacy
+	// notice a visitor reads before signing up (public; see internal/gateway/legal.go).
+	//
+	// GET /api/legal
+	GetLegalInfo(ctx context.Context) (*LegalInfo, error)
 	// GetLicense invokes getLicense operation.
 	//
 	// Report the edition in force, the features it unlocks and the full gated-feature catalog (any
@@ -710,8 +756,8 @@ type Invoker interface {
 	ImportFormRecords(ctx context.Context, request *FormImportRequest, params ImportFormRecordsParams) (ImportFormRecordsRes, error)
 	// ImportModel invokes importModel operation.
 	//
-	// Import a model export package into an application, creating a new model and revision (tenant_admin
-	// only, scoped to their own tenant).
+	// Import a model export package into an application, creating a new model and revision (tenant
+	// admins for their own tenant, platform admins for any).
 	//
 	// POST /api/admin/models/import
 	ImportModel(ctx context.Context, request *ModelImportRequest) (ImportModelRes, error)
@@ -728,9 +774,18 @@ type Invoker interface {
 	//
 	// POST /api/import/upload
 	ImportUpload(ctx context.Context, request *ImportUploadRequest) (ImportUploadRes, error)
+	// IntegrationOAuthCallback invokes integrationOAuthCallback operation.
+	//
+	// Where the provider sends the browser after consent (public: the person arrives with the state
+	// only). Exchanges the code, seals the tokens into the connection, and redirects to the console with
+	// ?oauth=connected or ?oauth=error&oauth_error=….
+	//
+	// GET /api/integrations/oauth/callback
+	IntegrationOAuthCallback(ctx context.Context, params IntegrationOAuthCallbackParams) error
 	// ListAdminApplications invokes listAdminApplications operation.
 	//
-	// List all applications (unscoped).
+	// List the applications in the caller's scope — every tenant's for a platform admin, their own
+	// tenant's for a tenant admin.
 	//
 	// GET /api/admin/applications
 	ListAdminApplications(ctx context.Context) ([]AdminApplicationItem, error)
@@ -1031,6 +1086,13 @@ type Invoker interface {
 	//
 	// POST /api/developer/workflows/{id}/publish
 	PublishWorkflow(ctx context.Context, params PublishWorkflowParams) (PublishWorkflowRes, error)
+	// PutGoogleConnection invokes putGoogleConnection operation.
+	//
+	// Store a Google service-account key file for this tenant — the JSON Google Cloud downloaded; only
+	// the address and the private key are kept, sealed (developers and administrators).
+	//
+	// PUT /api/developer/integrations/google-service-account
+	PutGoogleConnection(ctx context.Context, request *PutGoogleConnectionReq) (PutGoogleConnectionRes, error)
 	// RejectAiProposal invokes rejectAiProposal operation.
 	//
 	// Reject a pending proposal without executing it.
@@ -1234,6 +1296,13 @@ type Invoker interface {
 	//
 	// POST /api/ai/sessions/{id}/messages
 	SendAiMessage(ctx context.Context, request *AiSendMessageRequest, params SendAiMessageParams) (SendAiMessageRes, error)
+	// SendNotificationTestMail invokes sendNotificationTestMail operation.
+	//
+	// Send the calling administrator a test e-mail through the deployment's relay, synchronously — the
+	// relay's verdict comes back as the response (administrators).
+	//
+	// POST /api/notifications/settings/test
+	SendNotificationTestMail(ctx context.Context) (SendNotificationTestMailRes, error)
 	// SetActiveRevision invokes setActiveRevision operation.
 	//
 	// Set a model's active revision by name.
@@ -1273,6 +1342,14 @@ type Invoker interface {
 	//
 	// GET /api/sso/discover
 	SsoDiscover(ctx context.Context, params SsoDiscoverParams) (SsoDiscoverRes, error)
+	// StartIntegrationOAuth invokes startIntegrationOAuth operation.
+	//
+	// Begin the OAuth 2.0 authorization-code consent for a connection of that auth type: records the
+	// pending authorisation (PKCE) and answers the provider URL to open; the provider returns the
+	// browser to /api/integrations/oauth/callback.
+	//
+	// POST /api/developer/integration-connections/{id}/oauth/start
+	StartIntegrationOAuth(ctx context.Context, request OptStartIntegrationOAuthReq, params StartIntegrationOAuthParams) (StartIntegrationOAuthRes, error)
 	// StartWorkflowInstance invokes startWorkflowInstance operation.
 	//
 	// Start a workflow instance from a published workflow definition.
@@ -1298,6 +1375,13 @@ type Invoker interface {
 	//
 	// POST /api/ai/settings/test
 	TestAiSettings(ctx context.Context, request OptAiTestSettingsRequest) (*TestAiSettingsOK, error)
+	// TestGoogleConnection invokes testGoogleConnection operation.
+	//
+	// Prove the stored key by obtaining an access token from Google; nothing is read (developers and
+	// administrators).
+	//
+	// POST /api/developer/integrations/google-service-account/test
+	TestGoogleConnection(ctx context.Context) (TestGoogleConnectionRes, error)
 	// TestIntegration invokes testIntegration operation.
 	//
 	// Enqueue a test (or dry_run=1) execution — 202 + run id; the worker executes it, never the
@@ -1526,8 +1610,8 @@ type Invoker interface {
 	UploadAiDocument(ctx context.Context, request *UploadAiDocumentReq, params UploadAiDocumentParams) (UploadAiDocumentRes, error)
 	// UpsertPlan invokes upsertPlan operation.
 	//
-	// Create or change a plan — name, trial days, self-service flag and limits (platform_admin;
-	// applies to every tenant on the plan within a minute).
+	// Create or change a plan — name, self-service flag and limits (platform_admin; applies to every
+	// tenant on the plan within a minute).
 	//
 	// PUT /api/admin/plans/{key}
 	UpsertPlan(ctx context.Context, request *PlanInput, params UpsertPlanParams) (UpsertPlanRes, error)
@@ -2860,6 +2944,220 @@ func (c *Client) sendCancelIntegrationRun(ctx context.Context, params CancelInte
 	return result, nil
 }
 
+// ClearAuditSettings invokes clearAuditSettings operation.
+//
+// Drop the tenant's own retention so it inherits the deployment's again (administrators; enterprise).
+//
+// DELETE /api/admin/audit/settings
+func (c *Client) ClearAuditSettings(ctx context.Context) (ClearAuditSettingsRes, error) {
+	res, err := c.sendClearAuditSettings(ctx)
+	return res, err
+}
+
+func (c *Client) sendClearAuditSettings(ctx context.Context) (res ClearAuditSettingsRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("clearAuditSettings"),
+		semconv.HTTPRequestMethodKey.String("DELETE"),
+		semconv.URLTemplateKey.String("/api/admin/audit/settings"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ClearAuditSettingsOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/admin/audit/settings"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "DELETE", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ClearAuditSettingsOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeClearAuditSettingsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// ClearNotificationSettings invokes clearNotificationSettings operation.
+//
+// Drop the tenant's own delivery settings so it inherits the deployment's again (administrators).
+//
+// DELETE /api/notifications/settings
+func (c *Client) ClearNotificationSettings(ctx context.Context) (ClearNotificationSettingsRes, error) {
+	res, err := c.sendClearNotificationSettings(ctx)
+	return res, err
+}
+
+func (c *Client) sendClearNotificationSettings(ctx context.Context) (res ClearNotificationSettingsRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("clearNotificationSettings"),
+		semconv.HTTPRequestMethodKey.String("DELETE"),
+		semconv.URLTemplateKey.String("/api/notifications/settings"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ClearNotificationSettingsOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/notifications/settings"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "DELETE", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ClearNotificationSettingsOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeClearNotificationSettingsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // ClearTenantAIKey invokes clearTenantAIKey operation.
 //
 // Remove the stored tenant key and stop enforcing it, returning the tenant to personal keys
@@ -3244,7 +3542,7 @@ func (c *Client) sendConfirmAiProposal(ctx context.Context, params ConfirmAiProp
 
 // CreateAdminApplication invokes createAdminApplication operation.
 //
-// Create an application under a tenant.
+// Create an application under a tenant (a tenant admin: their own tenant only).
 //
 // POST /api/admin/applications
 func (c *Client) CreateAdminApplication(ctx context.Context, request *CreateApplicationRequest) (CreateAdminApplicationRes, error) {
@@ -8663,6 +8961,114 @@ func (c *Client) sendDeleteFormRecord(ctx context.Context, params DeleteFormReco
 	return result, nil
 }
 
+// DeleteGoogleConnection invokes deleteGoogleConnection operation.
+//
+// Forget the tenant's Google service account; private sheets become unreachable again (developers
+// and administrators).
+//
+// DELETE /api/developer/integrations/google-service-account
+func (c *Client) DeleteGoogleConnection(ctx context.Context) (DeleteGoogleConnectionRes, error) {
+	res, err := c.sendDeleteGoogleConnection(ctx)
+	return res, err
+}
+
+func (c *Client) sendDeleteGoogleConnection(ctx context.Context) (res DeleteGoogleConnectionRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("deleteGoogleConnection"),
+		semconv.HTTPRequestMethodKey.String("DELETE"),
+		semconv.URLTemplateKey.String("/api/developer/integrations/google-service-account"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, DeleteGoogleConnectionOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/developer/integrations/google-service-account"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "DELETE", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, DeleteGoogleConnectionOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeDeleteGoogleConnectionResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // DeleteGrid invokes deleteGrid operation.
 //
 // Delete a grid.
@@ -9790,6 +10196,132 @@ func (c *Client) sendDiscardAiDraft(ctx context.Context, params DiscardAiDraftPa
 	return result, nil
 }
 
+// DisconnectIntegrationOAuth invokes disconnectIntegrationOAuth operation.
+//
+// Forget the connection's tokens, keeping the client so it can be connected again.
+//
+// POST /api/developer/integration-connections/{id}/oauth/disconnect
+func (c *Client) DisconnectIntegrationOAuth(ctx context.Context, params DisconnectIntegrationOAuthParams) (DisconnectIntegrationOAuthRes, error) {
+	res, err := c.sendDisconnectIntegrationOAuth(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendDisconnectIntegrationOAuth(ctx context.Context, params DisconnectIntegrationOAuthParams) (res DisconnectIntegrationOAuthRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("disconnectIntegrationOAuth"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/developer/integration-connections/{id}/oauth/disconnect"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, DisconnectIntegrationOAuthOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/developer/integration-connections/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/oauth/disconnect"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, DisconnectIntegrationOAuthOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeDisconnectIntegrationOAuthResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // DuplicateIntegration invokes duplicateIntegration operation.
 //
 // Duplicate a rest_api integration (test state cleared, schedule copied disabled, no run history).
@@ -10585,8 +11117,8 @@ func (c *Client) sendExportGrid(ctx context.Context, params ExportGridParams) (r
 
 // ExportModel invokes exportModel operation.
 //
-// Export a model revision as a self-contained transfer package (tenant_admin only, scoped to their
-// own tenant).
+// Export a model revision as a self-contained transfer package (tenant admins for their own tenant,
+// platform admins for any).
 //
 // GET /api/admin/models/{id}/export
 func (c *Client) ExportModel(ctx context.Context, params ExportModelParams) (ExportModelRes, error) {
@@ -10752,7 +11284,7 @@ func (c *Client) sendExportModel(ctx context.Context, params ExportModelParams) 
 //
 // Download a standalone deployment package for a model revision — a tar.gz containing the entity
 // graph (package.json), the complete database migrations, a provenance manifest, and an infra-only
-// docker-compose (tenant_admin only, scoped to their own tenant).
+// docker-compose (tenant admins for their own tenant, platform admins for any).
 //
 // GET /api/admin/models/{id}/export/package
 func (c *Client) ExportModelPackage(ctx context.Context, params ExportModelPackageParams) (ExportModelPackageRes, error) {
@@ -11017,6 +11549,136 @@ func (c *Client) sendExtractFormulaRefs(ctx context.Context, request *FormulaRef
 
 	stage = "DecodeResponse"
 	result, err := decodeExtractFormulaRefsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// GenerateDimensionPeriods invokes generateDimensionPeriods operation.
+//
+// Bulk-generate a time dimension's periods between two dates (same validation and chronological
+// indexing as single members; time dimensions only).
+//
+// POST /api/developer/dimensions/{dimId}/members/generate
+func (c *Client) GenerateDimensionPeriods(ctx context.Context, request *GeneratePeriodsRequest, params GenerateDimensionPeriodsParams) (GenerateDimensionPeriodsRes, error) {
+	res, err := c.sendGenerateDimensionPeriods(ctx, request, params)
+	return res, err
+}
+
+func (c *Client) sendGenerateDimensionPeriods(ctx context.Context, request *GeneratePeriodsRequest, params GenerateDimensionPeriodsParams) (res GenerateDimensionPeriodsRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("generateDimensionPeriods"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/developer/dimensions/{dimId}/members/generate"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GenerateDimensionPeriodsOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/developer/dimensions/"
+	{
+		// Encode "dimId" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "dimId",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.DimId))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/members/generate"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeGenerateDimensionPeriodsRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, GenerateDimensionPeriodsOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGenerateDimensionPeriodsResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -12472,6 +13134,114 @@ func (c *Client) sendGetDeveloperModel(ctx context.Context, params GetDeveloperM
 	return result, nil
 }
 
+// GetGoogleConnection invokes getGoogleConnection operation.
+//
+// The tenant's Google service account, public half only — the address to share sheets with
+// (developers and administrators; the tenant of the application in X-App-Id).
+//
+// GET /api/developer/integrations/google-service-account
+func (c *Client) GetGoogleConnection(ctx context.Context) (GetGoogleConnectionRes, error) {
+	res, err := c.sendGetGoogleConnection(ctx)
+	return res, err
+}
+
+func (c *Client) sendGetGoogleConnection(ctx context.Context) (res GetGoogleConnectionRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getGoogleConnection"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/developer/integrations/google-service-account"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetGoogleConnectionOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/developer/integrations/google-service-account"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, GetGoogleConnectionOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetGoogleConnectionResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // GetGrid invokes getGrid operation.
 //
 // Get planning grid for a revision.
@@ -12911,6 +13681,114 @@ func (c *Client) sendGetIntegrationRun(ctx context.Context, params GetIntegratio
 
 	stage = "DecodeResponse"
 	result, err := decodeGetIntegrationRunResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// GetLegalInfo invokes getLegalInfo operation.
+//
+// The operator's identity and the documents it publishes, for the terms of service and privacy
+// notice a visitor reads before signing up (public; see internal/gateway/legal.go).
+//
+// GET /api/legal
+func (c *Client) GetLegalInfo(ctx context.Context) (*LegalInfo, error) {
+	res, err := c.sendGetLegalInfo(ctx)
+	return res, err
+}
+
+func (c *Client) sendGetLegalInfo(ctx context.Context) (res *LegalInfo, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getLegalInfo"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/legal"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetLegalInfoOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/legal"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, GetLegalInfoOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetLegalInfoResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -14892,8 +15770,8 @@ func (c *Client) sendImportFormRecords(ctx context.Context, request *FormImportR
 
 // ImportModel invokes importModel operation.
 //
-// Import a model export package into an application, creating a new model and revision (tenant_admin
-// only, scoped to their own tenant).
+// Import a model export package into an application, creating a new model and revision (tenant
+// admins for their own tenant, platform admins for any).
 //
 // POST /api/admin/models/import
 func (c *Client) ImportModel(ctx context.Context, request *ModelImportRequest) (ImportModelRes, error) {
@@ -15222,9 +16100,188 @@ func (c *Client) sendImportUpload(ctx context.Context, request *ImportUploadRequ
 	return result, nil
 }
 
+// IntegrationOAuthCallback invokes integrationOAuthCallback operation.
+//
+// Where the provider sends the browser after consent (public: the person arrives with the state
+// only). Exchanges the code, seals the tokens into the connection, and redirects to the console with
+// ?oauth=connected or ?oauth=error&oauth_error=….
+//
+// GET /api/integrations/oauth/callback
+func (c *Client) IntegrationOAuthCallback(ctx context.Context, params IntegrationOAuthCallbackParams) error {
+	_, err := c.sendIntegrationOAuthCallback(ctx, params)
+	return err
+}
+
+func (c *Client) sendIntegrationOAuthCallback(ctx context.Context, params IntegrationOAuthCallbackParams) (res *IntegrationOAuthCallbackFound, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("integrationOAuthCallback"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/integrations/oauth/callback"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, IntegrationOAuthCallbackOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/integrations/oauth/callback"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "state" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "state",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			return e.EncodeValue(conv.StringToString(params.State))
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "code" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "code",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.Code.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "error" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "error",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.Error.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "error_description" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "error_description",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.ErrorDescription.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, IntegrationOAuthCallbackOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeIntegrationOAuthCallbackResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // ListAdminApplications invokes listAdminApplications operation.
 //
-// List all applications (unscoped).
+// List the applications in the caller's scope — every tenant's for a platform admin, their own
+// tenant's for a tenant admin.
 //
 // GET /api/admin/applications
 func (c *Client) ListAdminApplications(ctx context.Context) ([]AdminApplicationItem, error) {
@@ -20872,6 +21929,117 @@ func (c *Client) sendPublishWorkflow(ctx context.Context, params PublishWorkflow
 	return result, nil
 }
 
+// PutGoogleConnection invokes putGoogleConnection operation.
+//
+// Store a Google service-account key file for this tenant — the JSON Google Cloud downloaded; only
+// the address and the private key are kept, sealed (developers and administrators).
+//
+// PUT /api/developer/integrations/google-service-account
+func (c *Client) PutGoogleConnection(ctx context.Context, request *PutGoogleConnectionReq) (PutGoogleConnectionRes, error) {
+	res, err := c.sendPutGoogleConnection(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendPutGoogleConnection(ctx context.Context, request *PutGoogleConnectionReq) (res PutGoogleConnectionRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("putGoogleConnection"),
+		semconv.HTTPRequestMethodKey.String("PUT"),
+		semconv.URLTemplateKey.String("/api/developer/integrations/google-service-account"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, PutGoogleConnectionOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/developer/integrations/google-service-account"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "PUT", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodePutGoogleConnectionRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, PutGoogleConnectionOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodePutGoogleConnectionResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // RejectAiProposal invokes rejectAiProposal operation.
 //
 // Reject a pending proposal without executing it.
@@ -24904,6 +26072,114 @@ func (c *Client) sendSendAiMessage(ctx context.Context, request *AiSendMessageRe
 	return result, nil
 }
 
+// SendNotificationTestMail invokes sendNotificationTestMail operation.
+//
+// Send the calling administrator a test e-mail through the deployment's relay, synchronously — the
+// relay's verdict comes back as the response (administrators).
+//
+// POST /api/notifications/settings/test
+func (c *Client) SendNotificationTestMail(ctx context.Context) (SendNotificationTestMailRes, error) {
+	res, err := c.sendSendNotificationTestMail(ctx)
+	return res, err
+}
+
+func (c *Client) sendSendNotificationTestMail(ctx context.Context) (res SendNotificationTestMailRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("sendNotificationTestMail"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/notifications/settings/test"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, SendNotificationTestMailOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/notifications/settings/test"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, SendNotificationTestMailOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeSendNotificationTestMailResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // SetActiveRevision invokes setActiveRevision operation.
 //
 // Set a model's active revision by name.
@@ -25658,6 +26934,137 @@ func (c *Client) sendSsoDiscover(ctx context.Context, params SsoDiscoverParams) 
 	return result, nil
 }
 
+// StartIntegrationOAuth invokes startIntegrationOAuth operation.
+//
+// Begin the OAuth 2.0 authorization-code consent for a connection of that auth type: records the
+// pending authorisation (PKCE) and answers the provider URL to open; the provider returns the
+// browser to /api/integrations/oauth/callback.
+//
+// POST /api/developer/integration-connections/{id}/oauth/start
+func (c *Client) StartIntegrationOAuth(ctx context.Context, request OptStartIntegrationOAuthReq, params StartIntegrationOAuthParams) (StartIntegrationOAuthRes, error) {
+	res, err := c.sendStartIntegrationOAuth(ctx, request, params)
+	return res, err
+}
+
+func (c *Client) sendStartIntegrationOAuth(ctx context.Context, request OptStartIntegrationOAuthReq, params StartIntegrationOAuthParams) (res StartIntegrationOAuthRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("startIntegrationOAuth"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/developer/integration-connections/{id}/oauth/start"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, StartIntegrationOAuthOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/developer/integration-connections/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/oauth/start"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeStartIntegrationOAuthRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, StartIntegrationOAuthOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeStartIntegrationOAuthResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // StartWorkflowInstance invokes startWorkflowInstance operation.
 //
 // Start a workflow instance from a published workflow definition.
@@ -26108,6 +27515,114 @@ func (c *Client) sendTestAiSettings(ctx context.Context, request OptAiTestSettin
 
 	stage = "DecodeResponse"
 	result, err := decodeTestAiSettingsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// TestGoogleConnection invokes testGoogleConnection operation.
+//
+// Prove the stored key by obtaining an access token from Google; nothing is read (developers and
+// administrators).
+//
+// POST /api/developer/integrations/google-service-account/test
+func (c *Client) TestGoogleConnection(ctx context.Context) (TestGoogleConnectionRes, error) {
+	res, err := c.sendTestGoogleConnection(ctx)
+	return res, err
+}
+
+func (c *Client) sendTestGoogleConnection(ctx context.Context) (res TestGoogleConnectionRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("testGoogleConnection"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/developer/integrations/google-service-account/test"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, TestGoogleConnectionOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/developer/integrations/google-service-account/test"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, TestGoogleConnectionOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeTestGoogleConnectionResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -30600,8 +32115,8 @@ func (c *Client) sendUploadAiDocument(ctx context.Context, request *UploadAiDocu
 
 // UpsertPlan invokes upsertPlan operation.
 //
-// Create or change a plan — name, trial days, self-service flag and limits (platform_admin;
-// applies to every tenant on the plan within a minute).
+// Create or change a plan — name, self-service flag and limits (platform_admin; applies to every
+// tenant on the plan within a minute).
 //
 // PUT /api/admin/plans/{key}
 func (c *Client) UpsertPlan(ctx context.Context, request *PlanInput, params UpsertPlanParams) (UpsertPlanRes, error) {

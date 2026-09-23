@@ -1337,6 +1337,114 @@ func (s CreateApplicationRequestMode) Validate() error {
 	}
 }
 
+func (s *CreateDimensionRequest) Validate() error {
+	if s == nil {
+		return validate.ErrNilPointer
+	}
+
+	var failures []validate.FieldError
+	if err := func() error {
+		if value, ok := s.DimensionType.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "dimension_type",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		if value, ok := s.TimeGranularity.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "time_granularity",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		if value, ok := s.FiscalYearStartMonth.Get(); ok {
+			if err := func() error {
+				if err := (validate.Int{
+					MinSet:        true,
+					Min:           1,
+					MaxSet:        true,
+					Max:           12,
+					MinExclusive:  false,
+					MaxExclusive:  false,
+					MultipleOfSet: false,
+					MultipleOf:    0,
+					Pattern:       nil,
+				}).Validate(int64(value)); err != nil {
+					return errors.Wrap(err, "int")
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "fiscal_year_start_month",
+			Error: err,
+		})
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
+func (s CreateDimensionRequestDimensionType) Validate() error {
+	switch s {
+	case "standard":
+		return nil
+	case "time":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
+}
+
+func (s CreateDimensionRequestTimeGranularity) Validate() error {
+	switch s {
+	case "day":
+		return nil
+	case "week":
+		return nil
+	case "month":
+		return nil
+	case "quarter":
+		return nil
+	case "half_year":
+		return nil
+	case "year":
+		return nil
+	case "custom":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
+}
+
 func (s *CreateFormRequest) Validate() error {
 	if s == nil {
 		return validate.ErrNilPointer
@@ -1372,6 +1480,57 @@ func (s *CreateFormRequest) Validate() error {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
+}
+
+func (s *CreateMetricRequest) Validate() error {
+	if s == nil {
+		return validate.ErrNilPointer
+	}
+
+	var failures []validate.FieldError
+	if err := func() error {
+		if value, ok := s.TimeSummary.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "time_summary",
+			Error: err,
+		})
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
+func (s CreateMetricRequestTimeSummary) Validate() error {
+	switch s {
+	case "sum":
+		return nil
+	case "average":
+		return nil
+	case "min":
+		return nil
+	case "max":
+		return nil
+	case "first":
+		return nil
+	case "last":
+		return nil
+	case "none":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s *DashboardDef) Validate() error {
@@ -1594,6 +1753,63 @@ func (s *Dimension) Validate() error {
 
 	var failures []validate.FieldError
 	if err := func() error {
+		if err := s.DimensionType.Validate(); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "dimension_type",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		if value, ok := s.TimeGranularity.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "time_granularity",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		if value, ok := s.FiscalYearStartMonth.Get(); ok {
+			if err := func() error {
+				if err := (validate.Int{
+					MinSet:        true,
+					Min:           1,
+					MaxSet:        true,
+					Max:           12,
+					MinExclusive:  false,
+					MaxExclusive:  false,
+					MultipleOfSet: false,
+					MultipleOf:    0,
+					Pattern:       nil,
+				}).Validate(int64(value)); err != nil {
+					return errors.Wrap(err, "int")
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "fiscal_year_start_month",
+			Error: err,
+		})
+	}
+	if err := func() error {
 		if s.Members == nil {
 			return errors.New("nil is invalid value")
 		}
@@ -1608,6 +1824,38 @@ func (s *Dimension) Validate() error {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
+}
+
+func (s DimensionDimensionType) Validate() error {
+	switch s {
+	case "standard":
+		return nil
+	case "time":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
+}
+
+func (s DimensionTimeGranularity) Validate() error {
+	switch s {
+	case "day":
+		return nil
+	case "week":
+		return nil
+	case "month":
+		return nil
+	case "quarter":
+		return nil
+	case "half_year":
+		return nil
+	case "year":
+		return nil
+	case "custom":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s *DiscardAiDraftOK) Validate() error {
@@ -2250,6 +2498,63 @@ func (s *GridDimension) Validate() error {
 
 	var failures []validate.FieldError
 	if err := func() error {
+		if err := s.DimensionType.Validate(); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "dimension_type",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		if value, ok := s.TimeGranularity.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "time_granularity",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		if value, ok := s.FiscalYearStartMonth.Get(); ok {
+			if err := func() error {
+				if err := (validate.Int{
+					MinSet:        true,
+					Min:           1,
+					MaxSet:        true,
+					Max:           12,
+					MinExclusive:  false,
+					MaxExclusive:  false,
+					MultipleOfSet: false,
+					MultipleOf:    0,
+					Pattern:       nil,
+				}).Validate(int64(value)); err != nil {
+					return errors.Wrap(err, "int")
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "fiscal_year_start_month",
+			Error: err,
+		})
+	}
+	if err := func() error {
 		if s.Members == nil {
 			return errors.New("nil is invalid value")
 		}
@@ -2264,6 +2569,38 @@ func (s *GridDimension) Validate() error {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
+}
+
+func (s GridDimensionDimensionType) Validate() error {
+	switch s {
+	case "standard":
+		return nil
+	case "time":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
+}
+
+func (s GridDimensionTimeGranularity) Validate() error {
+	switch s {
+	case "day":
+		return nil
+	case "week":
+		return nil
+	case "month":
+		return nil
+	case "quarter":
+		return nil
+	case "half_year":
+		return nil
+	case "year":
+		return nil
+	case "custom":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s *HistogramBin) Validate() error {
@@ -3000,6 +3337,24 @@ func (s *MetricDef) Validate() error {
 
 	var failures []validate.FieldError
 	if err := func() error {
+		if value, ok := s.TimeSummary.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "time_summary",
+			Error: err,
+		})
+	}
+	if err := func() error {
 		if s.DependsOn == nil {
 			return errors.New("nil is invalid value")
 		}
@@ -3025,6 +3380,27 @@ func (s *MetricDef) Validate() error {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
+}
+
+func (s MetricDefTimeSummary) Validate() error {
+	switch s {
+	case "sum":
+		return nil
+	case "average":
+		return nil
+	case "min":
+		return nil
+	case "max":
+		return nil
+	case "first":
+		return nil
+	case "last":
+		return nil
+	case "none":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s *NotificationSettings) Validate() error {
@@ -3103,8 +3479,6 @@ func (s *PlanState) Validate() error {
 
 func (s PlanStateCode) Validate() error {
 	switch s {
-	case "trial_expired":
-		return nil
 	case "over_limit":
 		return nil
 	default:
@@ -3816,6 +4190,57 @@ func (s *UpdateMetricOKRecalcItem) Validate() error {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
+}
+
+func (s *UpdateMetricRequest) Validate() error {
+	if s == nil {
+		return validate.ErrNilPointer
+	}
+
+	var failures []validate.FieldError
+	if err := func() error {
+		if value, ok := s.TimeSummary.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "time_summary",
+			Error: err,
+		})
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
+func (s UpdateMetricRequestTimeSummary) Validate() error {
+	switch s {
+	case "sum":
+		return nil
+	case "average":
+		return nil
+	case "min":
+		return nil
+	case "max":
+		return nil
+	case "first":
+		return nil
+	case "last":
+		return nil
+	case "none":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s *UpdateRecordRequest) Validate() error {

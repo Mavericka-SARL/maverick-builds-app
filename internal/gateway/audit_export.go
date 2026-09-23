@@ -139,14 +139,39 @@ func (h *handler) auditSettings(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	scope, ok := h.settingsScopeFor(w, r, act, true)
+	if !ok {
+		return
+	}
+	respond := func(s auditexport.Settings, inherited bool) {
+		scope.Inherited = inherited
+		jsonOK(w, map[string]any{"retention_days": s.RetentionDays, "min_retention_days": auditexport.MinRetentionDays, "updated_at": s.UpdatedAt, "scope": scope})
+	}
 	switch r.Method {
 	case http.MethodGet:
-		s, err := auditexport.GetSettings(ctx, h.db.For(ctx))
+		s, inherited, err := auditexport.Effective(ctx, h.db.For(ctx), scope.CustomerID)
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
-		jsonOK(w, map[string]any{"retention_days": s.RetentionDays, "min_retention_days": auditexport.MinRetentionDays, "updated_at": s.UpdatedAt})
+		respond(s, inherited)
+	case http.MethodDelete:
+		if err := auditexport.ClearSettings(ctx, h.db.For(ctx), scope.CustomerID); err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		}
+		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+			Category: auditlog.CategoryAdmin, EventType: auditlog.EventAuditRetentionUpdated,
+			ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
+			ResourceType: "audit_log", ResourceID: scopeResourceID(scope),
+			Metadata: map[string]string{"scope": scopeWord(scope), "cleared": "true"},
+		})
+		s, inherited, err := auditexport.Effective(ctx, h.db.For(ctx), scope.CustomerID)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		respond(s, inherited)
 	case http.MethodPut:
 		var body struct {
 			RetentionDays int `json:"retention_days"`
@@ -155,7 +180,7 @@ func (h *handler) auditSettings(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
 			return
 		}
-		s, err := auditexport.UpdateSettings(ctx, h.db.For(ctx), body.RetentionDays)
+		s, err := auditexport.UpdateSettings(ctx, h.db.For(ctx), scope.CustomerID, body.RetentionDays)
 		if err != nil {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
@@ -163,10 +188,10 @@ func (h *handler) auditSettings(w http.ResponseWriter, r *http.Request) {
 		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 			Category: auditlog.CategoryAdmin, EventType: auditlog.EventAuditRetentionUpdated,
 			ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
-			ResourceType: "audit_log", ResourceID: "settings",
-			Metadata: map[string]string{"retention_days": strconv.Itoa(s.RetentionDays)},
+			ResourceType: "audit_log", ResourceID: scopeResourceID(scope),
+			Metadata: map[string]string{"scope": scopeWord(scope), "retention_days": strconv.Itoa(s.RetentionDays)},
 		})
-		jsonOK(w, map[string]any{"retention_days": s.RetentionDays, "min_retention_days": auditexport.MinRetentionDays, "updated_at": s.UpdatedAt})
+		respond(s, false)
 	default:
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
 	}

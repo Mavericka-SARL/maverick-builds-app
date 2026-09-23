@@ -199,9 +199,9 @@ func (rn *Runner) execute(ctx context.Context, run *Run) (res RunResult) {
 	}
 
 	if cfg.Direction == DirectionPush {
-		return rn.executePush(ctx, run, def, client, tctx, authType, authMeta, secret, res)
+		return rn.executePush(ctx, run, def, appID, client, tctx, authType, authMeta, secret, res)
 	}
-	return rn.executePull(ctx, run, def, client, tctx, authType, authMeta, secret, res)
+	return rn.executePull(ctx, run, def, appID, client, tctx, authType, authMeta, secret, res)
 }
 
 // openAuth resolves the connection's credential (client-credentials tokens
@@ -247,9 +247,23 @@ func applyAuth(req *http.Request, placement AuthPlacement, authType string, secr
 		req.Header.Set("Authorization", "Bearer "+secret["token"])
 	case "basic":
 		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(secret["username"]+":"+secret["password"])))
-	case "oauth2_client_credentials":
+	case "oauth2_client_credentials", AuthTypeOAuthCode:
 		req.Header.Set("Authorization", "Bearer "+bearerToken)
 	}
+}
+
+// bearerFor obtains the per-run bearer for the two OAuth auth types:
+// a client-credentials exchange, or the connection's authorised access
+// token (refreshed and re-stored when expired).
+func (rn *Runner) bearerFor(ctx context.Context, client *http.Client, appID, connectionID, authType string, meta, secret map[string]string) (string, error) {
+	switch authType {
+	case "oauth2_client_credentials":
+		return rn.fetchOAuthToken(ctx, client, meta, secret)
+	case AuthTypeOAuthCode:
+		metaJSON, _ := json.Marshal(meta)
+		return rn.Store.OAuthBearer(ctx, client, appID, connectionID, metaJSON, secret, rn.AllowInsecure)
+	}
+	return "", nil
 }
 
 // fetchOAuthToken performs the client-credentials exchange against the
@@ -454,16 +468,12 @@ func (rn *Runner) doRequestWithRetry(ctx context.Context, client *http.Client, c
 }
 
 // executePull: page loop → extract → map → commit (or dry-run report).
-func (rn *Runner) executePull(ctx context.Context, run *Run, def *Definition, client *http.Client, tctx TemplateContext, authType string, authMeta, secret map[string]string, res RunResult) RunResult {
+func (rn *Runner) executePull(ctx context.Context, run *Run, def *Definition, appID string, client *http.Client, tctx TemplateContext, authType string, authMeta, secret map[string]string, res RunResult) RunResult {
 	cfg := def.Config
-	bearer := ""
-	if authType == "oauth2_client_credentials" {
-		tok, terr := rn.fetchOAuthToken(ctx, client, authMeta, secret)
-		if terr != nil {
-			res.ErrorCode, res.Message = classifyAuthErr(terr), "OAuth token: "+terr.Error()
-			return res
-		}
-		bearer = tok
+	bearer, terr := rn.bearerFor(ctx, client, appID, def.ConnectionID, authType, authMeta, secret)
+	if terr != nil {
+		res.ErrorCode, res.Message = classifyAuthErr(terr), "OAuth token: "+terr.Error()
+		return res
 	}
 
 	maxRecords := cfg.Limits.MaxRecords
@@ -655,16 +665,12 @@ func (rn *Runner) attachPreview(res *RunResult, resp *http.Response, body []byte
 }
 
 // executePush: load rows → per-record or batched requests.
-func (rn *Runner) executePush(ctx context.Context, run *Run, def *Definition, client *http.Client, tctx TemplateContext, authType string, authMeta, secret map[string]string, res RunResult) RunResult {
+func (rn *Runner) executePush(ctx context.Context, run *Run, def *Definition, appID string, client *http.Client, tctx TemplateContext, authType string, authMeta, secret map[string]string, res RunResult) RunResult {
 	cfg := def.Config
-	bearer := ""
-	if authType == "oauth2_client_credentials" {
-		tok, terr := rn.fetchOAuthToken(ctx, client, authMeta, secret)
-		if terr != nil {
-			res.ErrorCode, res.Message = classifyAuthErr(terr), "OAuth token: "+terr.Error()
-			return res
-		}
-		bearer = tok
+	bearer, terr := rn.bearerFor(ctx, client, appID, def.ConnectionID, authType, authMeta, secret)
+	if terr != nil {
+		res.ErrorCode, res.Message = classifyAuthErr(terr), "OAuth token: "+terr.Error()
+		return res
 	}
 
 	rows, lerr := rn.Committer.LoadPushRows(ctx, def)

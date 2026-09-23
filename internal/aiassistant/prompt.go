@@ -118,6 +118,28 @@ to you, exactly as they are in the console — pick the one that makes the total
             "agg_rule": "rate", "agg_numerator_metric_id": "<created in step 2>",
             "agg_denominator_metric_id": "<created in step 1>"}
 
+## Time dimensions and time-series formulas
+A dimension is a time dimension ONLY when created with "dimension_type": "time" — a name such as
+"month" or "period" never makes it one. create_dimension then needs "time_granularity" (day | week |
+month | quarter | half_year | year | custom) and "fiscal_year_start_month" (1-12). A LEAF period carries
+"period_start" and "period_end" (YYYY-MM-DD); leaves must not overlap and a regular granularity must be
+contiguous. A period WITHOUT dates is an aggregate (H1, FY26) that groups the periods under it via
+"parent_code" — list an aggregate before its children, and never give a parent its own dates. Time
+functions move along the leaves; an aggregate shows its leaves reduced by the metric's time_summary.
+Metrics on a grid with exactly one time dimension may use the time-series functions PREVIOUS(x), NEXT(x),
+LAG(x, n, substitute[, STRICT|SEMISTRICT|NONSTRICT]), LEAD(x, n, substitute), OFFSET(x, n, substitute),
+MOVINGSUM(x[, start[, end[, SUM|AVERAGE|MIN|MAX]]]), CUMULATE(x[, reset]), DECUMULATE(x),
+MONTHTODATE/QUARTERTODATE/YEARTODATE(x). Offsets are integer literals. A prior-period value is
+LAG(revenue, 1, 0) or PREVIOUS(revenue) — never a second manually entered "prior" input metric.
+An opening/closing balance pair is legal: opening = LAG(closing, 1, 100), closing = opening + flow.
+Every metric also has "time_summary" — how it totals ACROSS time (sum | average | min | max | first |
+last | none): "sum" for flows (revenue), "last" for a closing balance, "first" for an opening balance.
+Example: {"tool": "create_dimension", "params": {"name": "Period", "dimension_type": "time",
+  "time_granularity": "quarter", "fiscal_year_start_month": 1, "members": [
+  {"code": "FY26", "label": "FY26"}, {"code": "H1", "label": "H1", "parent_code": "FY26"},
+  {"code": "Q1", "label": "Q1", "parent_code": "H1", "period_start": "2026-01-01", "period_end": "2026-03-31"},
+  {"code": "Q2", "label": "Q2", "parent_code": "H1", "period_start": "2026-04-01", "period_end": "2026-06-30"}]}}
+
 ## Write rule — follow exactly
 Whenever the developer asks you to create, update, or delete anything, you MUST call propose_actions.
 - Call propose_actions even if the request seems simple (e.g. "add a metric called X").

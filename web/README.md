@@ -150,6 +150,27 @@ The Playwright web server starts Vite with `VITE_DEV_MODE=true`. These tests do
 not prove the real Keycloak flow, PostgreSQL behavior, or all gateway business
 semantics.
 
+The real sign-in is covered separately by `e2e-keycloak/`
+(`playwright.keycloak.config.ts`): a genuine Keycloak PKCE login against a
+gateway running with `DEV_MODE=false`, then an authenticated `/api/me`. CI
+runs it (job "Playwright e2e (real Keycloak login)") on its own Postgres and
+Keycloak from `deploy/docker/docker-compose.ci-keycloak.yml`, ports 15432
+and 18180. Locally, beside a running dev stack and console:
+
+```bash
+docker compose -f ../deploy/docker/docker-compose.ci-keycloak.yml up -d --wait
+docker compose -f ../deploy/docker/docker-compose.ci-keycloak.yml exec -T keycloak sh -c \
+  '/opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user admin --password admin && /opt/keycloak/bin/kcadm.sh update realms/master -s sslRequired=NONE'
+CI=1 E2E_WEB_PORT=3000 E2E_GATEWAY_PORT=8090 \
+  DATABASE_URL='postgres://mavericks:mavericks@localhost:15432/mavericks?sslmode=disable' \
+  KEYCLOAK_URL=http://localhost:18180 VITE_KEYCLOAK_URL=http://localhost:18180 \
+  npx playwright test --config=playwright.keycloak.config.ts
+```
+
+`E2E_WEB_PORT` is 5173 or 3000 — the only redirect URIs the dev realm's
+client allows; `CI=1` makes the config start its own gateway and console
+rather than reusing yours.
+
 ## Design system
 
 Use exports from `src/ui/index.ts` and the tokens/classes in

@@ -4,6 +4,8 @@ import { api } from "../api/client";
 import { AuthContext } from "./context";
 import { config } from "../config";
 import { useBrand } from "../branding/brand";
+import { PublicPage } from "../public/PublicPage";
+import { LegalFooter } from "../public/LegalFooter";
 
 const DEV_MODE = config.devMode;
 
@@ -125,20 +127,23 @@ function SignIn({ onPassword }: { onPassword: () => void }) {
     setNote("No company sign-in is registered for that address. Sign in with your password instead.");
   };
   return (
-    <div className="mvx-signin" style={{ maxWidth: 380, margin: "12vh auto", padding: 24 }} data-testid="sign-in">
-      {brand.configured && brand.logo_data_url && <img src={brand.logo_data_url} alt={brand.name} style={{ height: 36, marginBottom: 12 }} />}
-      <h1 style={{ fontSize: 20, marginBottom: 4 }}>Sign in to {brand.name}</h1>
-      <p style={{ color: "var(--color-text-muted)", marginTop: 0 }}>{brand.configured && brand.tagline ? brand.tagline : "Use your company account, or your password."}</p>
-      <form onSubmit={(e) => { e.preventDefault(); void company(); }} style={{ display: "grid", gap: 10 }}>
-        <input className="mvx-input" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+    <PublicPage testId="sign-in">
+      {/* The mark above the form already says whose sign-in this is; only a
+          white-labelled name, which is text and not a mark, is worth
+          repeating in the heading. */}
+      <h1>{brand.configured && brand.product_name ? `Sign in to ${brand.product_name}` : "Sign in"}</h1>
+      <p>{brand.configured && brand.tagline ? brand.tagline : "Use your company account, or your password."}</p>
+      <form className="mvx-public__form" onSubmit={(e) => { e.preventDefault(); void company(); }}>
+        <input className="mvx-public__field" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
           placeholder="you@company.com" aria-label="Work e-mail" autoComplete="email" />
-        <button className="mvx-button mvx-button--primary" type="submit" disabled={busy || !email.includes("@")}>
+        <button className="mvx-public__button" type="submit" disabled={busy || !email.includes("@")}>
           {busy ? "Looking up…" : "Continue with company account"}
         </button>
-        <button className="mvx-button" type="button" onClick={onPassword}>Sign in with password</button>
+        <button className="mvx-public__button mvx-public__button--ghost" type="button" onClick={onPassword}>Sign in with password</button>
       </form>
-      {note && <p role="status" style={{ color: "var(--color-text-muted)" }}>{note}</p>}
-    </div>
+      {note && <p role="status" className="mvx-public__note">{note}</p>}
+      <LegalFooter />
+    </PublicPage>
   );
 }
 
@@ -197,11 +202,11 @@ function ProdAuthProvider({ children }: { children: ReactNode }) {
   if (!authenticated) return null;
   if (refused) {
     return (
-      <div style={{ maxWidth: 480, margin: "12vh auto", padding: 24 }} data-testid="sign-in-refused">
-        <h1 style={{ fontSize: 20 }}>Your account could not be created</h1>
+      <PublicPage testId="sign-in-refused">
+        <h1>Your account could not be created</h1>
         <p>{refused.replace(/^\w+ \d+: ?/, "")}</p>
-        <button className="mvx-button" type="button" onClick={() => keycloak.logout()}>Sign out</button>
-      </div>
+        <button className="mvx-public__button mvx-public__button--ghost" type="button" onClick={() => keycloak.logout()}>Sign out</button>
+      </PublicPage>
     );
   }
 

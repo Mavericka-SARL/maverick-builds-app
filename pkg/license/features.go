@@ -24,6 +24,11 @@ const (
 	// FeatureTenantAIKeys is tenant-level AI provider keys shared by all
 	// developers of a tenant (community and commercial keep per-user keys).
 	FeatureTenantAIKeys Feature = "tenant_ai_keys"
+	// FeatureDeploymentSettings is a deployment-wide row of the per-tenant
+	// settings (notification delivery, audit retention, the AI key) that
+	// every tenant inherits until it sets its own; without it each tenant
+	// only ever has its own.
+	FeatureDeploymentSettings Feature = "deployment_settings"
 )
 
 // Info describes a feature for the console and the documentation.
@@ -45,6 +50,7 @@ var catalogOrder = []Info{
 	{FeatureUsageAnalytics, "Usage analytics", "Active users, models, storage and integration runs per tenant.", EditionEnterprise},
 	{FeatureWhiteLabel, "White-labelling", "Custom logo, colours and domain for the console.", EditionCommercial},
 	{FeatureTenantAIKeys, "Tenant AI keys", "One AI provider key per tenant, managed by the tenant admin, used by every developer.", EditionEnterprise},
+	{FeatureDeploymentSettings, "Deployment settings", "Deployment-wide defaults for notification delivery, audit retention and the AI key, inherited by every tenant that has not set its own.", EditionEnterprise},
 }
 
 var catalog = func() map[Feature]Info {

@@ -43,24 +43,10 @@ export function adminProvidesUsers(roles: string[]): boolean {
   return roles.includes("tenant_admin") || roles.includes("platform_admin");
 }
 
-/**
- * The sidebar heading names the widest thing the user is: it stays what a
- * single-role user has always seen, and for a multi-role user it names their
- * highest section while the sidebar shows all of them.
- */
-const SUBTITLE: Record<SectionId, string> = {
-  "platform-admin": "Platform administration",
-  "tenant-admin": "Tenant administration",
-  developer: "Developer console",
-  "business-admin": "Business administration",
-  business: "Planning workspace",
-};
-const SUBTITLE_PRIORITY: SectionId[] = ["platform-admin", "tenant-admin", "developer", "business-admin", "business"];
-
-export function consoleSubtitle(sections: SectionId[]): string {
-  const top = SUBTITLE_PRIORITY.find((s) => sections.includes(s));
-  return top ? SUBTITLE[top] : "Planning workspace";
-}
+/* The sidebar head used to name the widest section a person held
+   ("Tenant administration"). It no longer does: the head carries the product
+   mark for every role, and only white-labelling changes it (branding/
+   BrandMark). Which sections someone holds is what the groups below it say. */
 
 /** Tab ids are namespaced by section ("business-admin:history") so groups never collide. */
 export function tabId(section: SectionId, tab: string): string {

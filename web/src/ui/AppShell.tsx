@@ -6,16 +6,13 @@ import type { ContextBarItem, NavGroup, NavItem } from "./types";
 
 interface AppShellProps {
   /**
-   * Optional product name above the subtitle. Omitted by default: the
-   * subtitle already names where you are ("Developer console"), and stacking
-   * a product name on top of it made the brand block two lines tall, which no
-   * longer lined up with the context bar across the top of the main area.
-   * Pass one only where the product name genuinely adds information.
+   * The brand block at the head of the sidebar — the product mark, or a
+   * tenant's own logo and name where white-labelling is configured (see
+   * branding/BrandMark). It is one line high and the same for every role:
+   * the sidebar groups below it already say which parts of the product the
+   * person holds, so the head never names a console.
    */
-  productName?: string;
-  productSubtitle?: string;
-  /** A tenant's logo (white-labelling), shown before the brand text. */
-  logo?: React.ReactNode;
+  brand?: React.ReactNode;
   navGroups: NavGroup[];
   activeNavId?: string;
   onNavSelect?: (item: NavItem) => void;
@@ -32,9 +29,7 @@ interface AppShellProps {
 const SIDEBAR_COLLAPSED_KEY = "mvx.sidebar.collapsed";
 
 export function AppShell({
-  productName,
-  logo,
-  productSubtitle = "Planning workspace",
+  brand,
   navGroups,
   activeNavId,
   onNavSelect,
@@ -77,18 +72,11 @@ export function AppShell({
     >
       <aside className="mvx-app-shell__sidebar">
         <div className="mvx-app-shell__brand">
-          {logo && <div className="mvx-app-shell__brand-logo">{logo}</div>}
-          <div className="mvx-app-shell__brand-text">
-            {productName && <h1 className="mvx-app-shell__brand-name">{productName}</h1>}
-            {productSubtitle && (
-              productName
-                ? <div className="mvx-app-shell__brand-subtitle">{productSubtitle}</div>
-                // With no product name above it, the subtitle IS the heading —
-                // so it becomes the h1 rather than leaving the sidebar with no
-                // heading element at all.
-                : <h1 className="mvx-app-shell__brand-name">{productSubtitle}</h1>
-            )}
-          </div>
+          {brand && (
+            <div className="mvx-app-shell__brand-text">
+              <h1 className="mvx-app-shell__brand-name">{brand}</h1>
+            </div>
+          )}
           <button
             type="button"
             className="mvx-app-shell__collapse"

@@ -1,12 +1,14 @@
-// Package plan is what a tenant's plan means: the limits it carries, whether
-// the tenant is on a trial and how long is left, and whether the tenant is
-// read-only because the trial ended or a limit was exceeded.
+// Package plan is what a tenant's plan means: the limits it carries, and
+// whether the tenant is read-only because a limit was exceeded. A plan
+// bounds how much a tenant may use, never for how long — there is no trial
+// (migration 090).
 //
 // Plans are rows in platform.plan, edited by the platform administrator; a
 // tenant names one in core.customer.plan (migration 085). Nothing here is a
 // license question — the license key decides the edition a deployment runs,
 // a plan decides how much one tenant may use. A community deployment with no
-// key still has plans, because a trial funnel is not an enterprise feature.
+// key still has plans, because a hosted sign-up funnel is not an enterprise
+// feature.
 //
 // Enforcement has two halves. The request-time checks (Enforcer.CheckX)
 // refuse a creation that would cross a limit, with a message naming the plan
@@ -22,7 +24,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -50,25 +51,43 @@ type Limits struct {
 	MaxFactRowsPerModel      int `json:"max_fact_rows_per_model"`
 	MaxAIMessagesPerDay      int `json:"max_ai_messages_per_day"`
 	MaxIntegrationRunsPerDay int `json:"max_integration_runs_per_day"`
+	// MaxStorageMB bounds the bytes a tenant's data occupies — exact in a
+	// dedicated tenant database, an estimate over the data tables in a
+	// shared one (see StorageBytes).
+	MaxStorageMB int `json:"max_storage_mb"`
 }
 
 // Any reports whether any limit is set at all; a plan without one never
 // needs counting.
 func (l Limits) Any() bool {
 	return l.MaxUsers > 0 || l.MaxApplications > 0 || l.MaxModels > 0 || l.MaxMetricsPerModel > 0 ||
-		l.MaxMembersPerDimension > 0 || l.MaxFactRowsPerModel > 0 || l.MaxAIMessagesPerDay > 0 || l.MaxIntegrationRunsPerDay > 0
+		l.MaxMembersPerDimension > 0 || l.MaxFactRowsPerModel > 0 || l.MaxAIMessagesPerDay > 0 || l.MaxIntegrationRunsPerDay > 0 ||
+		l.MaxStorageMB > 0
 }
 
 // Plan is one row of platform.plan.
 type Plan struct {
-	Key         string    `json:"key"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	TrialDays   int       `json:"trial_days"`
-	SelfService bool      `json:"self_service"`
-	Limits      Limits    `json:"limits"`
-	SortOrder   int       `json:"sort_order"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	SelfService bool   `json:"self_service"`
+	Limits      Limits `json:"limits"`
+	// LimitNote is what a tenant is told when a limit stops it — where to go
+	// from here. Empty means "change the plan": the words the engine uses
+	// for a deployment whose answer is another plan. A deployment whose
+	// answer is elsewhere (run it yourself, a licence) says so here.
+	LimitNote string    `json:"limit_note"`
+	SortOrder int       `json:"sort_order"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// NextStep is the sentence appended to every refusal: the plan's note, or
+// the default for a deployment where the next step is another plan.
+func (p Plan) NextStep() string {
+	if n := strings.TrimSpace(p.LimitNote); n != "" {
+		return n
+	}
+	return "Change the plan to add more."
 }
 
 // ErrUnknownPlan is returned by Get for a key with no row.
@@ -87,11 +106,11 @@ func (p Plan) Validate() error {
 	if len(p.Description) > 300 {
 		return fmt.Errorf("description is at most 300 characters")
 	}
-	if p.TrialDays < 0 || p.TrialDays > 365 {
-		return fmt.Errorf("trial_days must be between 0 and 365")
+	if len(p.LimitNote) > 500 {
+		return fmt.Errorf("limit_note is at most 500 characters")
 	}
 	for _, v := range []int{p.Limits.MaxUsers, p.Limits.MaxApplications, p.Limits.MaxModels, p.Limits.MaxMetricsPerModel,
-		p.Limits.MaxMembersPerDimension, p.Limits.MaxFactRowsPerModel, p.Limits.MaxAIMessagesPerDay, p.Limits.MaxIntegrationRunsPerDay} {
+		p.Limits.MaxMembersPerDimension, p.Limits.MaxFactRowsPerModel, p.Limits.MaxAIMessagesPerDay, p.Limits.MaxIntegrationRunsPerDay, p.Limits.MaxStorageMB} {
 		if v < 0 {
 			return fmt.Errorf("a limit cannot be negative (0 means unlimited)")
 		}
@@ -99,12 +118,12 @@ func (p Plan) Validate() error {
 	return nil
 }
 
-const planColumns = `key, name, description, trial_days, self_service, limits, sort_order, updated_at`
+const planColumns = `key, name, description, self_service, limits, limit_note, sort_order, updated_at`
 
 func scanPlan(row pgx.Row) (Plan, error) {
 	var p Plan
 	var limits []byte
-	if err := row.Scan(&p.Key, &p.Name, &p.Description, &p.TrialDays, &p.SelfService, &limits, &p.SortOrder, &p.UpdatedAt); err != nil {
+	if err := row.Scan(&p.Key, &p.Name, &p.Description, &p.SelfService, &limits, &p.LimitNote, &p.SortOrder, &p.UpdatedAt); err != nil {
 		return Plan{}, err
 	}
 	if len(limits) > 0 {
@@ -163,13 +182,13 @@ func Upsert(ctx context.Context, db DB, p Plan) (Plan, error) {
 	}
 	limits, _ := json.Marshal(p.Limits)
 	return scanPlan(db.QueryRow(ctx, `
-		INSERT INTO platform.plan (key, name, description, trial_days, self_service, limits, sort_order, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, now())
+		INSERT INTO platform.plan (key, name, description, self_service, limits, limit_note, sort_order, updated_at)
+		VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, now())
 		ON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description,
-		    trial_days = EXCLUDED.trial_days, self_service = EXCLUDED.self_service, limits = EXCLUDED.limits,
-		    sort_order = EXCLUDED.sort_order, updated_at = now()
+		    self_service = EXCLUDED.self_service, limits = EXCLUDED.limits,
+		    limit_note = EXCLUDED.limit_note, sort_order = EXCLUDED.sort_order, updated_at = now()
 		RETURNING `+planColumns,
-		p.Key, strings.TrimSpace(p.Name), strings.TrimSpace(p.Description), p.TrialDays, p.SelfService, limits, p.SortOrder))
+		p.Key, strings.TrimSpace(p.Name), strings.TrimSpace(p.Description), p.SelfService, limits, strings.TrimSpace(p.LimitNote), p.SortOrder))
 }
 
 // Tenant is the plan-related part of one core.customer row.
@@ -177,7 +196,6 @@ type Tenant struct {
 	CustomerID     string     `json:"customer_id"`
 	Name           string     `json:"name"`
 	Plan           string     `json:"plan"`
-	TrialEndsAt    *time.Time `json:"trial_ends_at,omitempty"`
 	LimitState     string     `json:"limit_state"`
 	LimitReason    string     `json:"limit_reason,omitempty"`
 	UsageCheckedAt *time.Time `json:"usage_checked_at,omitempty"`
@@ -187,28 +205,24 @@ type Tenant struct {
 func LoadTenant(ctx context.Context, db DB, customerID string) (Tenant, error) {
 	var t Tenant
 	err := db.QueryRow(ctx, `
-		SELECT id::text, name, plan, trial_ends_at, limit_state, limit_reason, usage_checked_at
+		SELECT id::text, name, plan, limit_state, limit_reason, usage_checked_at
 		FROM core.customer WHERE id = $1::uuid`, customerID,
-	).Scan(&t.CustomerID, &t.Name, &t.Plan, &t.TrialEndsAt, &t.LimitState, &t.LimitReason, &t.UsageCheckedAt)
+	).Scan(&t.CustomerID, &t.Name, &t.Plan, &t.LimitState, &t.LimitReason, &t.UsageCheckedAt)
 	if err != nil {
 		return Tenant{}, fmt.Errorf("tenant %s: %w", customerID, err)
 	}
 	return t, nil
 }
 
-// SetPlan puts a tenant on a plan. trialEndsAt nil ends any trial; a date
-// starts or extends one. The caller has already checked the key exists.
-func SetPlan(ctx context.Context, db DB, customerID, planKey string, trialEndsAt *time.Time) error {
-	_, err := db.Exec(ctx, `UPDATE core.customer SET plan = $2, trial_ends_at = $3, updated_at = now() WHERE id = $1::uuid`,
-		customerID, planKey, trialEndsAt)
+// SetPlan puts a tenant on a plan. The caller has already checked the key
+// exists.
+func SetPlan(ctx context.Context, db DB, customerID, planKey string) error {
+	_, err := db.Exec(ctx, `UPDATE core.customer SET plan = $2, updated_at = now() WHERE id = $1::uuid`, customerID, planKey)
 	return err
 }
 
-// Codes a read-only tenant reports.
-const (
-	CodeTrialExpired = "trial_expired"
-	CodeOverLimit    = "over_limit"
-)
+// CodeOverLimit is the one reason a tenant is read-only.
+const CodeOverLimit = "over_limit"
 
 // State is what a tenant's plan means right now — what /api/me reports and
 // what the request guard acts on.
@@ -217,11 +231,7 @@ type State struct {
 	// PlanKnown is false when the tenant names a plan that has no row. Such
 	// a tenant is treated as unlimited: a catalog gap must never lock a
 	// paying customer out.
-	PlanKnown   bool       `json:"plan_known"`
-	Trial       bool       `json:"trial"`
-	TrialEndsAt *time.Time `json:"trial_ends_at,omitempty"`
-	// DaysLeft counts whole days until the trial ends (0 once it has).
-	DaysLeft int `json:"days_left"`
+	PlanKnown bool `json:"plan_known"`
 	// ReadOnly means mutating requests are refused; Code says why and
 	// Reason is the sentence shown to the person.
 	ReadOnly       bool       `json:"read_only"`
@@ -232,25 +242,13 @@ type State struct {
 	UsageCheckedAt *time.Time `json:"usage_checked_at,omitempty"`
 }
 
-// Evaluate combines a plan and a tenant row into the state at now.
-func Evaluate(p Plan, known bool, t Tenant, now time.Time) State {
+// Evaluate combines a plan and a tenant row into the state.
+func Evaluate(p Plan, known bool, t Tenant) State {
 	st := State{Plan: p, PlanKnown: known, LimitState: t.LimitState, LimitReason: t.LimitReason, UsageCheckedAt: t.UsageCheckedAt}
-	if t.TrialEndsAt != nil {
-		st.Trial = true
-		ends := t.TrialEndsAt.UTC()
-		st.TrialEndsAt = &ends
-		if left := ends.Sub(now); left > 0 {
-			st.DaysLeft = int(math.Ceil(left.Hours() / 24))
-		} else {
-			st.ReadOnly = true
-			st.Code = CodeTrialExpired
-			st.Reason = fmt.Sprintf("The trial ended on %s. The workspace is read-only until the plan is changed.", ends.Format("2 January 2006"))
-		}
-	}
-	if !st.ReadOnly && t.LimitState == "over" {
+	if t.LimitState == "over" {
 		st.ReadOnly = true
 		st.Code = CodeOverLimit
-		st.Reason = fmt.Sprintf("This tenant is over its plan's limits (%s). The workspace is read-only, except for deleting, until it is back within them or the plan is changed.", t.LimitReason)
+		st.Reason = fmt.Sprintf("This tenant is over its plan's limits (%s). The workspace is read-only, except for deleting, until it is back within them.", t.LimitReason)
 	}
 	return st
 }

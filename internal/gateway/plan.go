@@ -278,60 +278,33 @@ func (h *handler) adminPlanAction(w http.ResponseWriter, r *http.Request) {
 		Category: auditlog.CategoryAdmin, EventType: auditlog.EventPlanUpdated,
 		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
 		ResourceType: "plan", ResourceID: saved.Key,
-		Metadata: map[string]string{"name": saved.Name, "trial_days": fmt.Sprint(saved.TrialDays),
-			"self_service": fmt.Sprint(saved.SelfService), "limits": string(limits)},
+		Metadata: map[string]string{"name": saved.Name, "self_service": fmt.Sprint(saved.SelfService), "limits": string(limits)},
 	})
 	jsonOK(w, saved)
 }
 
 // applyTenantPlan handles the plan half of PATCH /api/admin/tenants/{id}:
-// a new plan key, a trial end (RFC 3339, or "" to end the trial), or both.
-// Returns what changed for the audit row.
-func (h *handler) applyTenantPlan(ctx, tctx context.Context, customerID string, planKey *string, trialEndsAt *string) (map[string]string, error) {
+// a new plan key. Returns what changed for the audit row.
+func (h *handler) applyTenantPlan(ctx, tctx context.Context, customerID string, planKey *string) (map[string]string, error) {
 	cur, err := plan.LoadTenant(tctx, h.db.For(tctx), customerID)
 	if err != nil {
 		return nil, err
 	}
-	key, ends := cur.Plan, cur.TrialEndsAt
 	changed := map[string]string{}
-	if planKey != nil && *planKey != cur.Plan {
-		p, err := plan.Get(ctx, h.db.Control(), *planKey)
-		if err != nil {
-			return nil, err
-		}
-		key = p.Key
-		changed["plan"] = p.Key
-		// A move onto a trial plan starts its clock; a move off one ends
-		// the trial unless the request says otherwise.
-		if p.TrialDays > 0 {
-			t := time.Now().Add(time.Duration(p.TrialDays) * 24 * time.Hour)
-			ends = &t
-		} else {
-			ends = nil
-		}
-	}
-	if trialEndsAt != nil {
-		if *trialEndsAt == "" {
-			ends = nil
-			changed["trial_ends_at"] = ""
-		} else {
-			t, err := time.Parse(time.RFC3339, *trialEndsAt)
-			if err != nil {
-				return nil, fmt.Errorf("trial_ends_at must be an RFC 3339 timestamp")
-			}
-			ends = &t
-			changed["trial_ends_at"] = t.UTC().Format(time.RFC3339)
-		}
-	}
-	if len(changed) == 0 {
+	if planKey == nil || *planKey == cur.Plan {
 		return changed, nil
 	}
-	if err := plan.SetPlan(tctx, h.db.For(tctx), customerID, key, ends); err != nil {
+	p, err := plan.Get(ctx, h.db.Control(), *planKey)
+	if err != nil {
+		return nil, err
+	}
+	changed["plan"] = p.Key
+	if err := plan.SetPlan(tctx, h.db.For(tctx), customerID, p.Key); err != nil {
 		return nil, err
 	}
 	if router := h.db.Router(); router != nil {
 		if t, gErr := router.Catalog().Get(ctx, customerID); gErr == nil {
-			_ = router.Catalog().Rename(ctx, customerID, t.Name, key)
+			_ = router.Catalog().Rename(ctx, customerID, t.Name, p.Key)
 		}
 	}
 	h.plans.Invalidate(customerID)

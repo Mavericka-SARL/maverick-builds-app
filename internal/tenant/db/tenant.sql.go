@@ -44,7 +44,7 @@ func (q *Queries) CreateApplication(ctx context.Context, arg CreateApplicationPa
 
 const createCustomer = `-- name: CreateCustomer :one
 INSERT INTO core.customer (name, plan)
-VALUES ($1, $2) RETURNING id, name, plan, created_at, updated_at, trial_ends_at, limit_state, limit_reason, usage_checked_at
+VALUES ($1, $2) RETURNING id, name, plan, created_at, updated_at, limit_state, limit_reason, usage_checked_at
 `
 
 type CreateCustomerParams struct {
@@ -61,7 +61,6 @@ func (q *Queries) CreateCustomer(ctx context.Context, arg CreateCustomerParams) 
 		&i.Plan,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TrialEndsAt,
 		&i.LimitState,
 		&i.LimitReason,
 		&i.UsageCheckedAt,
@@ -451,7 +450,7 @@ func (q *Queries) PublishRevision(ctx context.Context, id uuid.UUID) (CoreSchema
 
 const updateCustomer = `-- name: UpdateCustomer :one
 UPDATE core.customer SET name = $2, plan = $3
-WHERE id = $1 RETURNING id, name, plan, created_at, updated_at, trial_ends_at, limit_state, limit_reason, usage_checked_at
+WHERE id = $1 RETURNING id, name, plan, created_at, updated_at, limit_state, limit_reason, usage_checked_at
 `
 
 type UpdateCustomerParams struct {
@@ -469,7 +468,6 @@ func (q *Queries) UpdateCustomer(ctx context.Context, arg UpdateCustomerParams) 
 		&i.Plan,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.TrialEndsAt,
 		&i.LimitState,
 		&i.LimitReason,
 		&i.UsageCheckedAt,

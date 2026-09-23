@@ -71,6 +71,18 @@ type Handler interface {
 	//
 	// POST /api/developer/integration-runs/{runId}/cancel
 	CancelIntegrationRun(ctx context.Context, params CancelIntegrationRunParams) (CancelIntegrationRunRes, error)
+	// ClearAuditSettings implements clearAuditSettings operation.
+	//
+	// Drop the tenant's own retention so it inherits the deployment's again (administrators; enterprise).
+	//
+	// DELETE /api/admin/audit/settings
+	ClearAuditSettings(ctx context.Context) (ClearAuditSettingsRes, error)
+	// ClearNotificationSettings implements clearNotificationSettings operation.
+	//
+	// Drop the tenant's own delivery settings so it inherits the deployment's again (administrators).
+	//
+	// DELETE /api/notifications/settings
+	ClearNotificationSettings(ctx context.Context) (ClearNotificationSettingsRes, error)
 	// ClearTenantAIKey implements clearTenantAIKey operation.
 	//
 	// Remove the stored tenant key and stop enforcing it, returning the tenant to personal keys
@@ -92,7 +104,7 @@ type Handler interface {
 	ConfirmAiProposal(ctx context.Context, params ConfirmAiProposalParams) (ConfirmAiProposalRes, error)
 	// CreateAdminApplication implements createAdminApplication operation.
 	//
-	// Create an application under a tenant.
+	// Create an application under a tenant (a tenant admin: their own tenant only).
 	//
 	// POST /api/admin/applications
 	CreateAdminApplication(ctx context.Context, req *CreateApplicationRequest) (CreateAdminApplicationRes, error)
@@ -377,6 +389,13 @@ type Handler interface {
 	//
 	// DELETE /api/records/{id}
 	DeleteFormRecord(ctx context.Context, params DeleteFormRecordParams) (DeleteFormRecordRes, error)
+	// DeleteGoogleConnection implements deleteGoogleConnection operation.
+	//
+	// Forget the tenant's Google service account; private sheets become unreachable again (developers
+	// and administrators).
+	//
+	// DELETE /api/developer/integrations/google-service-account
+	DeleteGoogleConnection(ctx context.Context) (DeleteGoogleConnectionRes, error)
 	// DeleteGrid implements deleteGrid operation.
 	//
 	// Delete a grid.
@@ -432,6 +451,12 @@ type Handler interface {
 	//
 	// POST /api/ai/sessions/{id}/discard-draft
 	DiscardAiDraft(ctx context.Context, params DiscardAiDraftParams) (DiscardAiDraftRes, error)
+	// DisconnectIntegrationOAuth implements disconnectIntegrationOAuth operation.
+	//
+	// Forget the connection's tokens, keeping the client so it can be connected again.
+	//
+	// POST /api/developer/integration-connections/{id}/oauth/disconnect
+	DisconnectIntegrationOAuth(ctx context.Context, params DisconnectIntegrationOAuthParams) (DisconnectIntegrationOAuthRes, error)
 	// DuplicateIntegration implements duplicateIntegration operation.
 	//
 	// Duplicate a rest_api integration (test state cleared, schedule copied disabled, no run history).
@@ -466,8 +491,8 @@ type Handler interface {
 	ExportGrid(ctx context.Context, params ExportGridParams) (ExportGridRes, error)
 	// ExportModel implements exportModel operation.
 	//
-	// Export a model revision as a self-contained transfer package (tenant_admin only, scoped to their
-	// own tenant).
+	// Export a model revision as a self-contained transfer package (tenant admins for their own tenant,
+	// platform admins for any).
 	//
 	// GET /api/admin/models/{id}/export
 	ExportModel(ctx context.Context, params ExportModelParams) (ExportModelRes, error)
@@ -475,7 +500,7 @@ type Handler interface {
 	//
 	// Download a standalone deployment package for a model revision — a tar.gz containing the entity
 	// graph (package.json), the complete database migrations, a provenance manifest, and an infra-only
-	// docker-compose (tenant_admin only, scoped to their own tenant).
+	// docker-compose (tenant admins for their own tenant, platform admins for any).
 	//
 	// GET /api/admin/models/{id}/export/package
 	ExportModelPackage(ctx context.Context, params ExportModelPackageParams) (ExportModelPackageRes, error)
@@ -485,6 +510,13 @@ type Handler interface {
 	//
 	// POST /api/formula/refs
 	ExtractFormulaRefs(ctx context.Context, req *FormulaRefsRequest) (*ExtractFormulaRefsOK, error)
+	// GenerateDimensionPeriods implements generateDimensionPeriods operation.
+	//
+	// Bulk-generate a time dimension's periods between two dates (same validation and chronological
+	// indexing as single members; time dimensions only).
+	//
+	// POST /api/developer/dimensions/{dimId}/members/generate
+	GenerateDimensionPeriods(ctx context.Context, req *GeneratePeriodsRequest, params GenerateDimensionPeriodsParams) (GenerateDimensionPeriodsRes, error)
 	// GenerateMigration implements generateMigration operation.
 	//
 	// Generate (but do not apply) the next schema migration for a model's current definition.
@@ -559,6 +591,13 @@ type Handler interface {
 	//
 	// GET /api/developer/model
 	GetDeveloperModel(ctx context.Context, params GetDeveloperModelParams) (*GetDeveloperModelOK, error)
+	// GetGoogleConnection implements getGoogleConnection operation.
+	//
+	// The tenant's Google service account, public half only — the address to share sheets with
+	// (developers and administrators; the tenant of the application in X-App-Id).
+	//
+	// GET /api/developer/integrations/google-service-account
+	GetGoogleConnection(ctx context.Context) (GetGoogleConnectionRes, error)
 	// GetGrid implements getGrid operation.
 	//
 	// Get planning grid for a revision.
@@ -577,6 +616,13 @@ type Handler interface {
 	//
 	// GET /api/developer/integration-runs/{runId}
 	GetIntegrationRun(ctx context.Context, params GetIntegrationRunParams) (GetIntegrationRunRes, error)
+	// GetLegalInfo implements getLegalInfo operation.
+	//
+	// The operator's identity and the documents it publishes, for the terms of service and privacy
+	// notice a visitor reads before signing up (public; see internal/gateway/legal.go).
+	//
+	// GET /api/legal
+	GetLegalInfo(ctx context.Context) (*LegalInfo, error)
 	// GetLicense implements getLicense operation.
 	//
 	// Report the edition in force, the features it unlocks and the full gated-feature catalog (any
@@ -691,8 +737,8 @@ type Handler interface {
 	ImportFormRecords(ctx context.Context, req *FormImportRequest, params ImportFormRecordsParams) (ImportFormRecordsRes, error)
 	// ImportModel implements importModel operation.
 	//
-	// Import a model export package into an application, creating a new model and revision (tenant_admin
-	// only, scoped to their own tenant).
+	// Import a model export package into an application, creating a new model and revision (tenant
+	// admins for their own tenant, platform admins for any).
 	//
 	// POST /api/admin/models/import
 	ImportModel(ctx context.Context, req *ModelImportRequest) (ImportModelRes, error)
@@ -709,9 +755,18 @@ type Handler interface {
 	//
 	// POST /api/import/upload
 	ImportUpload(ctx context.Context, req *ImportUploadRequest) (ImportUploadRes, error)
+	// IntegrationOAuthCallback implements integrationOAuthCallback operation.
+	//
+	// Where the provider sends the browser after consent (public: the person arrives with the state
+	// only). Exchanges the code, seals the tokens into the connection, and redirects to the console with
+	// ?oauth=connected or ?oauth=error&oauth_error=….
+	//
+	// GET /api/integrations/oauth/callback
+	IntegrationOAuthCallback(ctx context.Context, params IntegrationOAuthCallbackParams) error
 	// ListAdminApplications implements listAdminApplications operation.
 	//
-	// List all applications (unscoped).
+	// List the applications in the caller's scope — every tenant's for a platform admin, their own
+	// tenant's for a tenant admin.
 	//
 	// GET /api/admin/applications
 	ListAdminApplications(ctx context.Context) ([]AdminApplicationItem, error)
@@ -1012,6 +1067,13 @@ type Handler interface {
 	//
 	// POST /api/developer/workflows/{id}/publish
 	PublishWorkflow(ctx context.Context, params PublishWorkflowParams) (PublishWorkflowRes, error)
+	// PutGoogleConnection implements putGoogleConnection operation.
+	//
+	// Store a Google service-account key file for this tenant — the JSON Google Cloud downloaded; only
+	// the address and the private key are kept, sealed (developers and administrators).
+	//
+	// PUT /api/developer/integrations/google-service-account
+	PutGoogleConnection(ctx context.Context, req *PutGoogleConnectionReq) (PutGoogleConnectionRes, error)
 	// RejectAiProposal implements rejectAiProposal operation.
 	//
 	// Reject a pending proposal without executing it.
@@ -1215,6 +1277,13 @@ type Handler interface {
 	//
 	// POST /api/ai/sessions/{id}/messages
 	SendAiMessage(ctx context.Context, req *AiSendMessageRequest, params SendAiMessageParams) (SendAiMessageRes, error)
+	// SendNotificationTestMail implements sendNotificationTestMail operation.
+	//
+	// Send the calling administrator a test e-mail through the deployment's relay, synchronously — the
+	// relay's verdict comes back as the response (administrators).
+	//
+	// POST /api/notifications/settings/test
+	SendNotificationTestMail(ctx context.Context) (SendNotificationTestMailRes, error)
 	// SetActiveRevision implements setActiveRevision operation.
 	//
 	// Set a model's active revision by name.
@@ -1254,6 +1323,14 @@ type Handler interface {
 	//
 	// GET /api/sso/discover
 	SsoDiscover(ctx context.Context, params SsoDiscoverParams) (SsoDiscoverRes, error)
+	// StartIntegrationOAuth implements startIntegrationOAuth operation.
+	//
+	// Begin the OAuth 2.0 authorization-code consent for a connection of that auth type: records the
+	// pending authorisation (PKCE) and answers the provider URL to open; the provider returns the
+	// browser to /api/integrations/oauth/callback.
+	//
+	// POST /api/developer/integration-connections/{id}/oauth/start
+	StartIntegrationOAuth(ctx context.Context, req OptStartIntegrationOAuthReq, params StartIntegrationOAuthParams) (StartIntegrationOAuthRes, error)
 	// StartWorkflowInstance implements startWorkflowInstance operation.
 	//
 	// Start a workflow instance from a published workflow definition.
@@ -1279,6 +1356,13 @@ type Handler interface {
 	//
 	// POST /api/ai/settings/test
 	TestAiSettings(ctx context.Context, req OptAiTestSettingsRequest) (*TestAiSettingsOK, error)
+	// TestGoogleConnection implements testGoogleConnection operation.
+	//
+	// Prove the stored key by obtaining an access token from Google; nothing is read (developers and
+	// administrators).
+	//
+	// POST /api/developer/integrations/google-service-account/test
+	TestGoogleConnection(ctx context.Context) (TestGoogleConnectionRes, error)
 	// TestIntegration implements testIntegration operation.
 	//
 	// Enqueue a test (or dry_run=1) execution — 202 + run id; the worker executes it, never the
@@ -1507,8 +1591,8 @@ type Handler interface {
 	UploadAiDocument(ctx context.Context, req *UploadAiDocumentReq, params UploadAiDocumentParams) (UploadAiDocumentRes, error)
 	// UpsertPlan implements upsertPlan operation.
 	//
-	// Create or change a plan — name, trial days, self-service flag and limits (platform_admin;
-	// applies to every tenant on the plan within a minute).
+	// Create or change a plan — name, self-service flag and limits (platform_admin; applies to every
+	// tenant on the plan within a minute).
 	//
 	// PUT /api/admin/plans/{key}
 	UpsertPlan(ctx context.Context, req *PlanInput, params UpsertPlanParams) (UpsertPlanRes, error)

@@ -1,8 +1,43 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateModelData } from "../modelDataQueries";
 import { Plus, X, Pencil, Trash2, Check, AlertTriangle } from "lucide-react";
-import { api, type DevModel, type DevMetric } from "../../api/client";
+import { api, type DevModel, type DevMetric, type TimeSummary, TIME_SUMMARIES } from "../../api/client";
 import { Toolbar, ToolbarGroup, SearchInput, Button, TextInput, Select, NumberInput, StatusBadge, IconButton, useConfirm, Field, SegmentedControl } from "../../ui";
+
+// Time summary (how a metric totals ACROSS its time dimension) is only
+// meaningful for a metric on a grid that carries a time dimension, so the
+// selector is shown only there. Computed once per tab from the revision's
+// grids and dimensions: metric id → true when its grid has a time dimension.
+function useTimeDimensionedMetrics(revisionId?: string): Set<string> {
+  const { data: grids = [] } = useQuery({ queryKey: ["dev-grids", revisionId], queryFn: () => api.listGrids(revisionId) });
+  const { data: dims = [] } = useQuery({ queryKey: ["dev-dimensions", revisionId], queryFn: () => api.getDevDimensions(revisionId) });
+  const timeDimIDs = new Set(dims.filter(d => d.dimension_type === "time").map(d => d.id));
+  const out = new Set<string>();
+  for (const g of grids) {
+    if (g.dimension_ids.some(id => timeDimIDs.has(id))) for (const mid of g.metric_ids) out.add(mid);
+  }
+  return out;
+}
+
+const TIME_SUMMARY_HELP: Record<TimeSummary, string> = {
+  sum: "flows — revenue, cost, units — add up over periods",
+  average: "the mean of the periods",
+  min: "the smallest period value",
+  max: "the largest period value",
+  first: "an opening balance: the first period's value",
+  last: "a closing balance: the last period's value",
+  none: "a time total is meaningless for this metric and is not shown",
+};
+
+function TimeSummarySelect({ value, onChange, width = 130 }: { value: TimeSummary; onChange: (v: TimeSummary) => void; width?: number }) {
+  return (
+    <Select value={value} onChange={(e) => onChange(e.target.value as TimeSummary)} style={{ width }} aria-label="Time summary"
+      title={`Time summary: ${TIME_SUMMARY_HELP[value]}`}>
+      {TIME_SUMMARIES.map(t => <option key={t} value={t}>{t === "sum" ? "Time: sum" : `Time: ${t}`}</option>)}
+    </Select>
+  );
+}
 
 function fmtBadge(format: string, decimals: number, currency: string): string {
   switch (format) {
@@ -55,6 +90,7 @@ function RatioOperands({
 }
 
 export function MetricsTab({ model, revisionId }: { model: DevModel; revisionId?: string }) {
+  const timeMetrics = useTimeDimensionedMetrics(revisionId);
   const [showAdd, setShowAdd] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -102,11 +138,11 @@ export function MetricsTab({ model, revisionId }: { model: DevModel; revisionId?
             </tr>
           </thead>
           <tbody>
-            {inputs.map((m) => <MetricRow key={m.id} m={m} allMetrics={model.metrics} />)}
+            {inputs.map((m) => <MetricRow key={m.id} m={m} allMetrics={model.metrics} onTimeGrid={timeMetrics.has(m.id)} />)}
             {inputs.length > 0 && calcs.length > 0 && (
               <tr><td colSpan={6} className="mvx-table__group-row">Calculated</td></tr>
             )}
-            {calcs.map((m) => <MetricRow key={m.id} m={m} allMetrics={model.metrics} />)}
+            {calcs.map((m) => <MetricRow key={m.id} m={m} allMetrics={model.metrics} onTimeGrid={timeMetrics.has(m.id)} />)}
             {inputs.length === 0 && calcs.length === 0 && q && (
               <tr><td colSpan={6} style={{ padding: 20, textAlign: "center" }} className="mvx-admin-muted">No metrics match "{search}"</td></tr>
             )}
@@ -141,12 +177,13 @@ export function MetricsTab({ model, revisionId }: { model: DevModel; revisionId?
 
 type RecalcRow = { revision: string; metric: string; value: number | null };
 
-function MetricRow({ m, allMetrics }: { m: DevMetric; allMetrics: DevMetric[] }) {
+function MetricRow({ m, allMetrics, onTimeGrid }: { m: DevMetric; allMetrics: DevMetric[]; onTimeGrid: boolean }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(m.name);
   const [formula, setFormula] = useState(m.formula ?? "");
   const [aggRule, setAggRule] = useState(m.agg_rule ?? "sum");
+  const [timeSummary, setTimeSummary] = useState<TimeSummary>(m.time_summary ?? "sum");
   const [numeratorId, setNumeratorId] = useState(m.agg_numerator_metric_id ?? "");
   const [denominatorId, setDenominatorId] = useState(m.agg_denominator_metric_id ?? "");
   const [format, setFormat] = useState(m.format ?? "number");
@@ -171,10 +208,11 @@ function MetricRow({ m, allMetrics }: { m: DevMetric; allMetrics: DevMetric[] })
       agg_numerator_metric_id: aggRule === "rate" ? numeratorId : "",
       agg_denominator_metric_id: aggRule === "rate" ? denominatorId : "",
       format, format_decimals: formatDecimals, format_currency: formatCurrency,
+      time_summary: timeSummary,
     }),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["dev-model"] });
-      qc.invalidateQueries({ queryKey: ["grid"] });
+      invalidateModelData(qc);
       setEditing(false);
       if (data.recalc && data.recalc.length > 0) setRecalcResults(data.recalc);
     },
@@ -238,6 +276,7 @@ function MetricRow({ m, allMetrics }: { m: DevMetric; allMetrics: DevMetric[] })
                   onDenominator={setDenominatorId}
                 />
               )}
+              {onTimeGrid && <TimeSummarySelect value={timeSummary} onChange={setTimeSummary} />}
               <Select value={format} onChange={(e) => setFormat(e.target.value)} style={{ width: 120 }} aria-label="Format">
                 <option value="number">Number</option>
                 <option value="percentage">Percentage</option>
@@ -287,6 +326,11 @@ function MetricRow({ m, allMetrics }: { m: DevMetric; allMetrics: DevMetric[] })
           <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-start" }}>
             <StatusBadge tone={m.is_input ? "info" : "success"}>{m.is_input ? "Input" : "Calc"}</StatusBadge>
             <StatusBadge>{(m.agg_rule ?? "sum").toUpperCase()}</StatusBadge>
+            {onTimeGrid && (m.time_summary ?? "sum") !== "sum" && (
+              <span title={`Time summary: ${TIME_SUMMARY_HELP[m.time_summary ?? "sum"]}`}>
+                <StatusBadge tone="brand">time: {m.time_summary}</StatusBadge>
+              </span>
+            )}
             <StatusBadge tone="warning">{fmtBadge(m.format ?? "number", m.format_decimals ?? 0, m.format_currency ?? "$")}</StatusBadge>
           </div>
         </td>
@@ -327,6 +371,11 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
   const [name, setName] = useState("");
   const [isInput, setIsInput] = useState(false);
   const [formula, setFormula] = useState("");
+  const [timeSummary, setTimeSummary] = useState<TimeSummary>("sum");
+  // A new metric is not on any grid yet; offer the time summary whenever the
+  // revision has a time dimension it could land on.
+  const { data: revisionDims = [] } = useQuery({ queryKey: ["dev-dimensions", revisionId], queryFn: () => api.getDevDimensions(revisionId) });
+  const hasTimeDim = revisionDims.some(d => d.dimension_type === "time");
   const [format, setFormat] = useState("number");
   const [formatDecimals, setFormatDecimals] = useState(0);
   const [formatCurrency, setFormatCurrency] = useState("$");
@@ -342,10 +391,11 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
       agg_numerator_metric_id: aggRule === "rate" ? numeratorId : "",
       agg_denominator_metric_id: aggRule === "rate" ? denominatorId : "",
       format, format_decimals: formatDecimals, format_currency: formatCurrency,
+      time_summary: timeSummary,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["dev-model"] });
-      setName(""); setFormula(""); setNumeratorId(""); setDenominatorId("");
+      setName(""); setFormula(""); setNumeratorId(""); setDenominatorId(""); setTimeSummary("sum");
       onSuccess?.();
     },
   });
@@ -451,6 +501,12 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
             onNumerator={setNumeratorId}
             onDenominator={setDenominatorId}
           />
+        )}
+
+        {hasTimeDim && (
+          <Field label="Time summary" description={`across the time dimension: ${TIME_SUMMARY_HELP[timeSummary]}`}>
+            <TimeSummarySelect value={timeSummary} onChange={setTimeSummary} width={160} />
+          </Field>
         )}
 
         <Button

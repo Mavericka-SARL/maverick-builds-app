@@ -24,7 +24,9 @@ func TestTenantAISettingsGatedByEdition(t *testing.T) {
 	pool := testdb.New(t, migrationfs.FS, ".")
 	var adminID string
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO identity.user (keycloak_sub, email, display_name) VALUES ('tai-admin', 'admin@tai.dev', 'Admin') RETURNING id::text`,
+		`WITH c AS (INSERT INTO core.customer (name, plan) VALUES ('TAI Co', 'enterprise') RETURNING id)
+		 INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id)
+		 SELECT 'tai-admin', 'admin@tai.dev', 'Admin', c.id FROM c RETURNING id::text`,
 	).Scan(&adminID); err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +111,7 @@ func TestTenantAISettingsGatedByEdition(t *testing.T) {
 
 		// The stored value is encrypted at rest, not the plaintext key.
 		var stored string
-		if err := pool.QueryRow(ctx, `SELECT api_key_enc FROM ai_assistant.tenant_llm_settings WHERE id = TRUE`).Scan(&stored); err != nil {
+		if err := pool.QueryRow(ctx, `SELECT api_key_enc FROM ai_assistant.tenant_llm_settings WHERE customer_id IS NOT NULL`).Scan(&stored); err != nil {
 			t.Fatal(err)
 		}
 		if stored == "sk-tenant-secret" || stored == "" {
@@ -133,10 +135,12 @@ func TestAIKeyResolutionOrder(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
-	var userID string
+	var userID, custID string
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO identity.user (keycloak_sub, email, display_name) VALUES ('res-dev', 'dev@res.dev', 'Dev') RETURNING id::text`,
-	).Scan(&userID); err != nil {
+		`WITH c AS (INSERT INTO core.customer (name, plan) VALUES ('Res Co', 'enterprise') RETURNING id)
+		 INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id)
+		 SELECT 'res-dev', 'dev@res.dev', 'Dev', c.id FROM c RETURNING id::text, customer_id::text`,
+	).Scan(&userID, &custID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -151,7 +155,7 @@ func TestAIKeyResolutionOrder(t *testing.T) {
 	tenantStore := aikeys.NewStore(pool)
 
 	t.Run("no key anywhere is an actionable error", func(t *testing.T) {
-		_, _, _, err := newHandler(enterpriseManager(t)).buildProviderForRequest(req, userID)
+		_, _, _, err := newHandler(enterpriseManager(t)).buildProviderForRequest(req, &actor{UserID: userID, CustomerID: custID})
 		if err == nil || !strings.Contains(err.Error(), "OPENAI_API_KEY") {
 			t.Fatalf("err = %v", err)
 		}
@@ -161,34 +165,34 @@ func TestAIKeyResolutionOrder(t *testing.T) {
 		if err := chat.SaveSettings(ctx, userID, "openai", "gpt-4o-mini", "sk-personal"); err != nil {
 			t.Fatal(err)
 		}
-		_, provider, model, err := newHandler(enterpriseManager(t)).buildProviderForRequest(req, userID)
+		_, provider, model, err := newHandler(enterpriseManager(t)).buildProviderForRequest(req, &actor{UserID: userID, CustomerID: custID})
 		if err != nil || provider != "openai" || model != "gpt-4o-mini" {
 			t.Fatalf("provider=%q model=%q err=%v", provider, model, err)
 		}
 	})
 
 	t.Run("an unenforced tenant key does not displace a personal key", func(t *testing.T) {
-		if _, err := tenantStore.Update(ctx, aikeys.Settings{Provider: "anthropic", Model: "claude-opus-4-8", APIKey: "sk-tenant"}); err != nil {
+		if _, err := tenantStore.Update(ctx, custID, aikeys.Settings{Provider: "anthropic", Model: "claude-opus-4-8", APIKey: "sk-tenant"}); err != nil {
 			t.Fatal(err)
 		}
-		_, provider, _, err := newHandler(enterpriseManager(t)).buildProviderForRequest(req, userID)
+		_, provider, _, err := newHandler(enterpriseManager(t)).buildProviderForRequest(req, &actor{UserID: userID, CustomerID: custID})
 		if err != nil || provider != "openai" {
 			t.Fatalf("provider=%q err=%v — the personal key should still win", provider, err)
 		}
 	})
 
 	t.Run("an enforced tenant key overrides the personal key", func(t *testing.T) {
-		if _, err := tenantStore.Update(ctx, aikeys.Settings{Provider: "anthropic", Model: "claude-opus-4-8", Enforced: true}); err != nil {
+		if _, err := tenantStore.Update(ctx, custID, aikeys.Settings{Provider: "anthropic", Model: "claude-opus-4-8", Enforced: true}); err != nil {
 			t.Fatal(err)
 		}
-		_, provider, model, err := newHandler(enterpriseManager(t)).buildProviderForRequest(req, userID)
+		_, provider, model, err := newHandler(enterpriseManager(t)).buildProviderForRequest(req, &actor{UserID: userID, CustomerID: custID})
 		if err != nil || provider != "anthropic" || model != "claude-opus-4-8" {
 			t.Fatalf("provider=%q model=%q err=%v", provider, model, err)
 		}
 	})
 
 	t.Run("without the licence the tenant key is invisible even when enforced", func(t *testing.T) {
-		_, provider, _, err := newHandler(nil).buildProviderForRequest(req, userID)
+		_, provider, _, err := newHandler(nil).buildProviderForRequest(req, &actor{UserID: userID, CustomerID: custID})
 		if err != nil || provider != "openai" {
 			t.Fatalf("community provider=%q err=%v — the tenant key must not apply", provider, err)
 		}
@@ -197,14 +201,14 @@ func TestAIKeyResolutionOrder(t *testing.T) {
 	t.Run("a tenant key fills in for a developer with no personal key", func(t *testing.T) {
 		var otherID string
 		if err := pool.QueryRow(ctx,
-			`INSERT INTO identity.user (keycloak_sub, email, display_name) VALUES ('res-dev2', 'dev2@res.dev', 'Dev2') RETURNING id::text`,
+			`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ('res-dev2', 'dev2@res.dev', 'Dev2', $1::uuid) RETURNING id::text`, custID,
 		).Scan(&otherID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tenantStore.Update(ctx, aikeys.Settings{Provider: "anthropic", Model: "claude-opus-4-8", Enforced: false}); err != nil {
+		if _, err := tenantStore.Update(ctx, custID, aikeys.Settings{Provider: "anthropic", Model: "claude-opus-4-8", Enforced: false}); err != nil {
 			t.Fatal(err)
 		}
-		_, provider, _, err := newHandler(enterpriseManager(t)).buildProviderForRequest(req, otherID)
+		_, provider, _, err := newHandler(enterpriseManager(t)).buildProviderForRequest(req, &actor{UserID: otherID, CustomerID: custID})
 		if err != nil || provider != "anthropic" {
 			t.Fatalf("provider=%q err=%v", provider, err)
 		}

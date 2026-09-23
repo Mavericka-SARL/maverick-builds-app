@@ -32,8 +32,20 @@ reaches the console even when every outbound channel is off, or misconfigured.
   designer set through SLA hours, optionally a configurable number of hours
   before.
 
-The settings belong to the database they are stored in, so with dedicated
-tenant databases each tenant decides for itself.
+The settings are **per tenant** (migration 091): each tenant's row decides
+its own channels, in a shared database as much as in a dedicated one —
+tenant A's webhook never receives tenant B's notifications. A tenant admin
+edits their own tenant's; a platform admin any tenant's, by naming it
+(`X-Tenant-Id`, the console's *Settings of* picker at platform scope).
+
+On the enterprise edition (`deployment_settings`) the platform admin can
+also set the **deployment's defaults** — the row with no tenant, edited at
+platform scope without naming a tenant — which every tenant follows until
+it saves settings of its own; *Follow the deployment's defaults instead*
+(`DELETE /api/notifications/settings`) drops a tenant's own row again.
+Every settings response carries `scope` saying whose values it shows and
+whether they are inherited. Other editions have no deployment row: each
+tenant only ever has its own.
 
 ## The mail relay is deployment configuration
 
@@ -50,6 +62,41 @@ mail. The gateway reads them from its environment:
 
 The console shows a warning on the settings screen when no relay is
 configured, so e-mail is never switched on into a void.
+
+On Kubernetes (`deploy/k8s`), the host, port and sender are keys of the
+`mavericks-config` ConfigMap and the credentials are the `mavericks-smtp`
+Secret, sealed with `scripts/seal-smtp-secret.sh` — a Secret of its own so a
+relay key can be rotated without re-sealing the database password. The
+backup watchdog's alert mail reads the same Secret. The gateway reads all of
+it once, at start-up: after any change, `kubectl rollout restart
+deployment/gateway`. The gateway's NetworkPolicy admits egress on 587 and
+465 for this; a prod overlay that restates the gateway's egress list (the
+object-storage one does) has to repeat that rule, or every send hangs until
+the dispatch deadline and looks like a dead relay.
+
+Two things bite on the first roll-out. A pod that starts in the same
+apply that creates the sealed Secret comes up with empty credentials —
+`optional: true` on a Secret that does not exist *yet* is silently empty,
+and the relay then answers `530 authentication Required` — so restart the
+gateway once more after the Secret exists. And a NetworkPolicy rule is easy
+to put in the wrong policy: several service policies end in the same
+pgbouncer-plus-DNS tail; `kubectl diff` before `apply` is what shows which
+policies actually change.
+
+The port decides the transport: 587 is submission with STARTTLS, which
+`net/smtp` negotiates on its own and which Resend, Postmark, SES and the
+like all serve; 465 (implicit TLS) is not supported by the gateway — the
+watchdog's `curl` handles both.
+
+**Prove it by sending.** Reading the configuration back shows only that it
+was stored; a wrong key, an unverified sending domain, or a NetworkPolicy
+that drops the port is invisible until something actually tries to send. So
+the settings screen has *Send me a test e-mail*: the signed-in administrator
+is mailed, synchronously, and the relay's own answer comes back — "535
+authentication failed", "450 domain not verified", or "no answer within
+20s" with the NetworkPolicy hint. The recipient is fixed to the caller's own
+address; the relay cannot be used to mail anyone else. Each attempt is an
+audit event (`notification.test_sent`, with the outcome).
 
 ## Webhook deliveries
 

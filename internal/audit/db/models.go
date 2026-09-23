@@ -1080,12 +1080,12 @@ type AiAssistantSession struct {
 }
 
 type AiAssistantTenantLlmSetting struct {
-	ID        bool      `json:"id"`
-	Provider  string    `json:"provider"`
-	Model     string    `json:"model"`
-	ApiKeyEnc string    `json:"api_key_enc"`
-	Enforced  bool      `json:"enforced"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Provider   string      `json:"provider"`
+	Model      string      `json:"model"`
+	ApiKeyEnc  string      `json:"api_key_enc"`
+	Enforced   bool        `json:"enforced"`
+	UpdatedAt  time.Time   `json:"updated_at"`
+	CustomerID pgtype.UUID `json:"customer_id"`
 }
 
 type AuditAuditEvent struct {
@@ -1128,9 +1128,9 @@ type AuditPartitionRegistry struct {
 }
 
 type AuditSetting struct {
-	ID            bool      `json:"id"`
-	RetentionDays int32     `json:"retention_days"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	RetentionDays int32       `json:"retention_days"`
+	UpdatedAt     time.Time   `json:"updated_at"`
+	CustomerID    pgtype.UUID `json:"customer_id"`
 }
 
 type CoreApplication struct {
@@ -1163,7 +1163,6 @@ type CoreCustomer struct {
 	Plan           string             `json:"plan"`
 	CreatedAt      time.Time          `json:"created_at"`
 	UpdatedAt      time.Time          `json:"updated_at"`
-	TrialEndsAt    pgtype.Timestamptz `json:"trial_ends_at"`
 	LimitState     string             `json:"limit_state"`
 	LimitReason    string             `json:"limit_reason"`
 	UsageCheckedAt pgtype.Timestamptz `json:"usage_checked_at"`
@@ -1187,6 +1186,15 @@ type CoreSchemaVersion struct {
 	SchemaHash    string             `json:"schema_hash"`
 	PublishedAt   pgtype.Timestamptz `json:"published_at"`
 	CreatedAt     time.Time          `json:"created_at"`
+}
+
+type CoreTenantCredential struct {
+	CustomerID uuid.UUID       `json:"customer_id"`
+	Kind       string          `json:"kind"`
+	Meta       json.RawMessage `json:"meta"`
+	SecretEnc  string          `json:"secret_enc"`
+	CreatedBy  pgtype.UUID     `json:"created_by"`
+	UpdatedAt  time.Time       `json:"updated_at"`
 }
 
 type CoreWorkspace struct {
@@ -1259,10 +1267,10 @@ type IdentityScimToken struct {
 	CreatedAt   time.Time          `json:"created_at"`
 	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
 	RevokedAt   pgtype.Timestamptz `json:"revoked_at"`
+	CustomerID  pgtype.UUID        `json:"customer_id"`
 }
 
 type IdentitySsoProvider struct {
-	ID              bool             `json:"id"`
 	Alias           string           `json:"alias"`
 	Protocol        string           `json:"protocol"`
 	DisplayName     string           `json:"display_name"`
@@ -1273,6 +1281,7 @@ type IdentitySsoProvider struct {
 	DefaultRole     IdentityUserRole `json:"default_role"`
 	Enabled         bool             `json:"enabled"`
 	UpdatedAt       time.Time        `json:"updated_at"`
+	CustomerID      pgtype.UUID      `json:"customer_id"`
 }
 
 type IdentityUser struct {
@@ -1329,7 +1338,7 @@ type ImportImportJob struct {
 	TotalRows   int32              `json:"total_rows"`
 	ValidRows   int32              `json:"valid_rows"`
 	ErrorRows   int32              `json:"error_rows"`
-	CreatedBy   uuid.UUID          `json:"created_by"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
 	CreatedAt   time.Time          `json:"created_at"`
 	CompletedAt pgtype.Timestamptz `json:"completed_at"`
 	RevisionID  pgtype.UUID        `json:"revision_id"`
@@ -1350,6 +1359,10 @@ type ModelCalcDependency struct {
 	MetricID          uuid.UUID `json:"metric_id"`
 	DependsOnMetricID uuid.UUID `json:"depends_on_metric_id"`
 	DependencyType    string    `json:"dependency_type"`
+	MinTimeOffset     int32     `json:"min_time_offset"`
+	MaxTimeOffset     int32     `json:"max_time_offset"`
+	UnboundedPast     bool      `json:"unbounded_past"`
+	UnboundedFuture   bool      `json:"unbounded_future"`
 }
 
 type ModelDashboardDef struct {
@@ -1375,7 +1388,7 @@ type ModelDashboardFolder struct {
 type ModelDashboardWidget struct {
 	ID          uuid.UUID `json:"id"`
 	DashboardID uuid.UUID `json:"dashboard_id"`
-	// grid | form | automation_button | integration_button | text | workflow_action
+	// grid | form | automation_button | integration_button | text | image | workflow_action
 	WidgetType  string  `json:"widget_type"`
 	RefID       *string `json:"ref_id"`
 	Content     *string `json:"content"`
@@ -1392,17 +1405,20 @@ type ModelDashboardWidget struct {
 }
 
 type ModelDimensionDef struct {
-	ID                uuid.UUID       `json:"id"`
-	ModelID           uuid.UUID       `json:"model_id"`
-	Name              string          `json:"name"`
-	Properties        json.RawMessage `json:"properties"`
-	CreatedAt         time.Time       `json:"created_at"`
-	UpdatedAt         time.Time       `json:"updated_at"`
-	AggRule           string          `json:"agg_rule"`
-	RevisionID        pgtype.UUID     `json:"revision_id"`
-	ParentDimensionID pgtype.UUID     `json:"parent_dimension_id"`
-	SourceDimensionID pgtype.UUID     `json:"source_dimension_id"`
-	SourceProperty    *string         `json:"source_property"`
+	ID                   uuid.UUID       `json:"id"`
+	ModelID              uuid.UUID       `json:"model_id"`
+	Name                 string          `json:"name"`
+	Properties           json.RawMessage `json:"properties"`
+	CreatedAt            time.Time       `json:"created_at"`
+	UpdatedAt            time.Time       `json:"updated_at"`
+	AggRule              string          `json:"agg_rule"`
+	RevisionID           pgtype.UUID     `json:"revision_id"`
+	ParentDimensionID    pgtype.UUID     `json:"parent_dimension_id"`
+	SourceDimensionID    pgtype.UUID     `json:"source_dimension_id"`
+	SourceProperty       *string         `json:"source_property"`
+	DimensionType        string          `json:"dimension_type"`
+	TimeGranularity      *string         `json:"time_granularity"`
+	FiscalYearStartMonth *int16          `json:"fiscal_year_start_month"`
 }
 
 type ModelDimensionMember struct {
@@ -1415,6 +1431,9 @@ type ModelDimensionMember struct {
 	SortOrder      int32           `json:"sort_order"`
 	CreatedAt      time.Time       `json:"created_at"`
 	ParentMemberID pgtype.UUID     `json:"parent_member_id"`
+	PeriodStart    pgtype.Date     `json:"period_start"`
+	PeriodEnd      pgtype.Date     `json:"period_end"`
+	TimeIndex      *int32          `json:"time_index"`
 }
 
 type ModelDimensionProperty struct {
@@ -1530,6 +1549,17 @@ type ModelIntegrationDef struct {
 	Description    string             `json:"description"`
 }
 
+type ModelIntegrationOauthState struct {
+	State         string      `json:"state"`
+	ConnectionID  uuid.UUID   `json:"connection_id"`
+	ApplicationID uuid.UUID   `json:"application_id"`
+	UserID        pgtype.UUID `json:"user_id"`
+	CodeVerifier  string      `json:"code_verifier"`
+	ReturnTo      string      `json:"return_to"`
+	CreatedAt     time.Time   `json:"created_at"`
+	ExpiresAt     time.Time   `json:"expires_at"`
+}
+
 type ModelIntegrationRun struct {
 	ID             uuid.UUID          `json:"id"`
 	IntegrationID  uuid.UUID          `json:"integration_id"`
@@ -1590,6 +1620,7 @@ type ModelMetricDef struct {
 	FormatCurrency         string          `json:"format_currency"`
 	AggNumeratorMetricID   pgtype.UUID     `json:"agg_numerator_metric_id"`
 	AggDenominatorMetricID pgtype.UUID     `json:"agg_denominator_metric_id"`
+	TimeSummary            string          `json:"time_summary"`
 }
 
 type ModelRevision struct {
@@ -1618,14 +1649,14 @@ type NotificationNotification struct {
 }
 
 type NotificationSetting struct {
-	ID                bool      `json:"id"`
-	EmailEnabled      bool      `json:"email_enabled"`
-	WebhookEnabled    bool      `json:"webhook_enabled"`
-	WebhookUrl        string    `json:"webhook_url"`
-	WebhookSecret     string    `json:"webhook_secret"`
-	RemindersEnabled  bool      `json:"reminders_enabled"`
-	ReminderLeadHours int32     `json:"reminder_lead_hours"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	EmailEnabled      bool        `json:"email_enabled"`
+	WebhookEnabled    bool        `json:"webhook_enabled"`
+	WebhookUrl        string      `json:"webhook_url"`
+	WebhookSecret     string      `json:"webhook_secret"`
+	RemindersEnabled  bool        `json:"reminders_enabled"`
+	ReminderLeadHours int32       `json:"reminder_lead_hours"`
+	UpdatedAt         time.Time   `json:"updated_at"`
+	CustomerID        pgtype.UUID `json:"customer_id"`
 }
 
 type OpsNodeStat struct {
@@ -1655,11 +1686,11 @@ type PlatformPlan struct {
 	Key         string          `json:"key"`
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
-	TrialDays   int32           `json:"trial_days"`
 	SelfService bool            `json:"self_service"`
 	Limits      json.RawMessage `json:"limits"`
 	SortOrder   int32           `json:"sort_order"`
 	UpdatedAt   time.Time       `json:"updated_at"`
+	LimitNote   string          `json:"limit_note"`
 }
 
 type PlatformSsoDomain struct {
@@ -1718,7 +1749,7 @@ type RuntimeFactInput struct {
 	DimMembers   json.RawMessage `json:"dim_members"`
 	MetricID     uuid.UUID       `json:"metric_id"`
 	Value        pgtype.Numeric  `json:"value"`
-	EnteredBy    uuid.UUID       `json:"entered_by"`
+	EnteredBy    pgtype.UUID     `json:"entered_by"`
 	EnteredAt    time.Time       `json:"entered_at"`
 	RevisionID   uuid.UUID       `json:"revision_id"`
 	SourceRef    pgtype.UUID     `json:"source_ref"`
@@ -1732,7 +1763,7 @@ type RuntimeFactInputDefault struct {
 	DimMembers   json.RawMessage `json:"dim_members"`
 	MetricID     uuid.UUID       `json:"metric_id"`
 	Value        pgtype.Numeric  `json:"value"`
-	EnteredBy    uuid.UUID       `json:"entered_by"`
+	EnteredBy    pgtype.UUID     `json:"entered_by"`
 	EnteredAt    time.Time       `json:"entered_at"`
 }
 
@@ -1755,7 +1786,7 @@ type RuntimeFormRecord struct {
 	FormID    uuid.UUID           `json:"form_id"`
 	Data      json.RawMessage     `json:"data"`
 	Status    RuntimeRecordStatus `json:"status"`
-	CreatedBy uuid.UUID           `json:"created_by"`
+	CreatedBy pgtype.UUID         `json:"created_by"`
 	CreatedAt time.Time           `json:"created_at"`
 	UpdatedAt time.Time           `json:"updated_at"`
 }
@@ -1911,7 +1942,7 @@ type WorkflowWorkflowInstance struct {
 	ID                    uuid.UUID              `json:"id"`
 	WorkflowDefID         uuid.UUID              `json:"workflow_def_id"`
 	Status                WorkflowWorkflowStatus `json:"status"`
-	StartedBy             uuid.UUID              `json:"started_by"`
+	StartedBy             pgtype.UUID            `json:"started_by"`
 	Context               json.RawMessage        `json:"context"`
 	StartedAt             time.Time              `json:"started_at"`
 	CompletedAt           pgtype.Timestamptz     `json:"completed_at"`

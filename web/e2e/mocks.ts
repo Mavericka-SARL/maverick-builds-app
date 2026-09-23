@@ -20,6 +20,7 @@ const personaRoles: Record<string, string[]> = {
   developer: ["developer"],
   finance: ["business_admin"],
   platform_admin: ["platform_admin"],
+  tenant_admin: ["tenant_admin"],
 };
 
 function demoContextFor(persona: string) {
@@ -109,6 +110,25 @@ const dashboards = [
   { id: "dash-2", name: "OPEX Dashboard", tags: ["finance", "actuals"], folder_id: null, widgets: [] },
   { id: "dash-3", name: "OPEX form 2", tags: ["finance"], widgets: [{ id: "w3", widget_type: "form", ref_id: "form-1", content: null, sort_order: 0, col_start: 1, col_span: 12 }] },
   { id: "dash-4", name: "Sales Pipeline", tags: ["sales"], widgets: [] },
+  // Prose and a picture: what the sign-up tour is written in, and what any
+  // tenant can write for its own people.
+  {
+    id: "dash-5",
+    name: "Explainer",
+    tags: ["guide"],
+    folder_id: null,
+    widgets: [
+      {
+        id: "w5", widget_type: "text", ref_id: null, sort_order: 0, col_start: 1, col_span: 12, pos_x: 0, pos_y: 0, size_w: 600, size_h: 240,
+        content: "# How this works\n\nEvery number is **addressed** by a member of each dimension.\n\n- Input — someone types it\n- Calculated — the platform works it out\n\nSee [the handbook](https://example.com/handbook).",
+      },
+      {
+        id: "w6", widget_type: "image", ref_id: null, sort_order: 1, col_start: 1, col_span: 12, pos_x: 0, pos_y: 260, size_w: 400, size_h: 160,
+        content: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMCAxMCI+PHJlY3Qgd2lkdGg9IjIwIiBoZWlnaHQ9IjEwIiBmaWxsPSIjNGY0NmU1Ii8+PC9zdmc+",
+        widget_props: { alt: "A diagram of the model", image_fit: "contain" },
+      },
+    ],
+  },
 ];
 
 const gridData = {
@@ -299,27 +319,64 @@ const adminAudit = [
   { id: "a2", category: "policy_change", event_type: "role.dashboard.updated", actor_name: "Jordan Lee", actor_role: "business_admin", resource_type: "role", resource_id: "role-1", metadata: { dashboards: 2 }, occurred_at: "2026-05-19T11:45:00Z" },
 ];
 
-// ── Plans, trials and sign-up ────────────────────────────────────────────────
+// ── Plans and sign-up ────────────────────────────────────────────────────────
 
-const noLimits = { max_users: 0, max_applications: 0, max_models: 0, max_metrics_per_model: 0, max_members_per_dimension: 0, max_fact_rows_per_model: 0, max_ai_messages_per_day: 0, max_integration_runs_per_day: 0 };
-const trialLimits = { ...noLimits, max_users: 5, max_applications: 2, max_models: 3, max_metrics_per_model: 50, max_members_per_dimension: 500, max_fact_rows_per_model: 100000, max_ai_messages_per_day: 100, max_integration_runs_per_day: 50 };
+const noLimits = { max_users: 0, max_applications: 0, max_models: 0, max_metrics_per_model: 0, max_members_per_dimension: 0, max_fact_rows_per_model: 0, max_ai_messages_per_day: 0, max_integration_runs_per_day: 0, max_storage_mb: 0 };
+const testLimits = { ...noLimits, max_storage_mb: 100, max_ai_messages_per_day: 100, max_integration_runs_per_day: 50 };
+const testNote = "A test workspace holds up to 100 MB. To go further, run the platform on your own infrastructure — free of charge and without limits for non-commercial use, under a commercial licence otherwise — or get the enterprise edition.";
+const smallLimits = { ...noLimits, max_users: 5, max_applications: 2, max_models: 3, max_metrics_per_model: 50, max_members_per_dimension: 500, max_fact_rows_per_model: 100000, max_ai_messages_per_day: 100, max_integration_runs_per_day: 50 };
 
 /** GET /api/admin/plans as the seeded catalog answers it. */
 export const adminPlans = [
-  { key: "trial", name: "Trial", description: "Fourteen days to try the platform.", trial_days: 14, self_service: true, limits: trialLimits, sort_order: 10, updated_at: "2026-09-17T00:00:00Z" },
-  { key: "starter", name: "Starter", description: "", trial_days: 0, self_service: false, limits: noLimits, sort_order: 20, updated_at: "2026-09-17T00:00:00Z" },
-  { key: "enterprise", name: "Enterprise", description: "No limits.", trial_days: 0, self_service: false, limits: noLimits, sort_order: 40, updated_at: "2026-09-17T00:00:00Z" },
+  { key: "test", name: "Test workspace", description: "Try the platform for as long as you like, with up to 100 MB of data.", self_service: true, limits: testLimits, limit_note: testNote, sort_order: 5, updated_at: "2026-09-19T00:00:00Z" },
+  { key: "small", name: "Small", description: "A handful of everything.", self_service: false, limits: smallLimits, limit_note: "", sort_order: 10, updated_at: "2026-09-17T00:00:00Z" },
+  { key: "starter", name: "Starter", description: "", self_service: false, limits: noLimits, limit_note: "", sort_order: 20, updated_at: "2026-09-17T00:00:00Z" },
+  { key: "enterprise", name: "Enterprise", description: "No limits.", self_service: false, limits: noLimits, limit_note: "", sort_order: 40, updated_at: "2026-09-17T00:00:00Z" },
 ];
 
-/** A tenant's plan state on a running trial with `days` left. */
-export function trialPlanState(days: number, extra: Record<string, unknown> = {}) {
-  return { plan: adminPlans[0], plan_known: true, trial: true, trial_ends_at: "2026-10-01T12:00:00Z", days_left: days, read_only: false, limit_state: "ok", ...extra };
+/** A tenant's plan state on the small plan, within its limits unless `extra` says otherwise. */
+export function smallPlanState(extra: Record<string, unknown> = {}) {
+  return { plan: adminPlans[1], plan_known: true, read_only: false, limit_state: "ok", ...extra };
 }
 
-/** GET /api/signup/options with sign-up open. */
+/** GET /api/legal for a deployment that has named its operator. */
+export const legalInfo = {
+  published: true,
+  builtin: true,
+  terms_url: "/terms",
+  privacy_url: "/privacy",
+  entity: "Acme Software SARL",
+  address: "1 Rue de Test, L-1000 Luxembourg",
+  email: "legal@acme.test",
+  jurisdiction: "Luxembourg",
+  hosting: "Hetzner Online GmbH (Germany)",
+  updated: "2026-09-18",
+};
+
+/** GET /api/legal for one that has published nothing. */
+export const legalUnpublished = {
+  published: false, builtin: false, terms_url: "", privacy_url: "",
+  entity: "", address: "", email: "", jurisdiction: "", hosting: "", updated: "",
+};
+
+/** GET /api/signup/options with sign-up open: the test workspace, as seeded. */
 export const signupOptions = {
   enabled: true, contact_url: "https://example.test/pricing",
-  plan: { key: "trial", name: "Trial", description: "Fourteen days to try the platform.", trial_days: 14, limits: trialLimits },
+  plan: { key: "test", name: "Test workspace", description: "Try the platform for as long as you like, with up to 100 MB of data.", limits: testLimits, limit_note: testNote },
+};
+
+/** A test-workspace tenant that has filled its 100 MB. */
+export function overStoragePlanState() {
+  return {
+    plan: adminPlans[0], plan_known: true, read_only: true, code: "over_limit", limit_state: "over",
+    reason: `This tenant is over its plan's limits (The Test workspace plan allows 100 MB of storage; this tenant uses 104 MB. ${testNote}). The workspace is read-only, except for deleting, until it is back within them.`,
+  };
+}
+
+/** The same with a plan that has no note of its own — the terms then fall back to the generic wording. */
+export const signupOptionsSmall = {
+  ...signupOptions,
+  plan: { key: "small", name: "Small", description: "A handful of everything.", limits: smallLimits, limit_note: "" },
 };
 
 /** GET /api/license as a deployment without a key answers it. */
@@ -347,7 +404,7 @@ export const commercialLicense = {
 export const acmeBrand = {
   product_name: "Acme Planning", tagline: "Numbers you can sign.", brand_color: "#0f766e", configured: true, source: "tenant",
   logo_data_url: "data:image/svg+xml;base64," + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="28"><rect width="80" height="28" fill="#0f766e"/></svg>'),
-  favicon_data_url: "",
+  favicon_data_url: "data:image/svg+xml;base64," + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#0f766e"/></svg>'),
 };
 
 /** The same deployment with an enterprise key installed. */
@@ -394,7 +451,7 @@ export const notificationSettings = {
   mailer_configured: false,
 };
 
-export async function mockApi(page: Page, overrides: { license?: unknown; tenantAI?: unknown; sso?: unknown; scimTokens?: unknown; brand?: unknown; plan?: unknown; plans?: unknown; signup?: unknown } = {}) {
+export async function mockApi(page: Page, overrides: { license?: unknown; tenantAI?: unknown; sso?: unknown; scimTokens?: unknown; brand?: unknown; plan?: unknown; plans?: unknown; signup?: unknown; legal?: unknown } = {}) {
   await page.route("**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -414,7 +471,7 @@ export async function mockApi(page: Page, overrides: { license?: unknown; tenant
     }
     if (method === "POST" && path === "/api/signup") {
       const body = route.request().postDataJSON() as { email: string };
-      return ok({ status: "invited", invited: true, email: body.email, tenant_id: "t-new", application_id: "app-new", model_id: "model-new", plan: "trial", trial_ends_at: "2026-10-01T12:00:00Z" });
+      return ok({ status: "invited", invited: true, email: body.email, tenant_id: "t-new", application_id: "app-new", model_id: "model-new", plan: "test" });
     }
     if (method === "PUT" && path.startsWith("/api/admin/plans/")) {
       return ok({ key: path.split("/").pop(), updated_at: "2026-09-17T00:00:00Z", ...(route.request().postDataJSON() as object) });
@@ -432,11 +489,21 @@ export async function mockApi(page: Page, overrides: { license?: unknown; tenant
     if (path === "/api/admin/scim/tokens") return ok(overrides.scimTokens ?? scimTokens);
     if (path === "/api/license") return ok(overrides.license ?? communityLicense);
     if (path === "/api/signup/options") return ok(overrides.signup ?? signupOptions);
+    if (path === "/api/legal") return ok(overrides.legal ?? legalInfo);
     if (path === "/api/admin/plans") return ok(overrides.plans ?? adminPlans);
     if (path === "/api/branding") return ok(overrides.brand ?? { product_name: "", tagline: "", logo_data_url: "", favicon_data_url: "", brand_color: "", configured: false, source: "default" });
     if (path === "/api/admin/branding") return ok(overrides.brand ? { ...(overrides.brand as object), email_from_name: "", custom_domain: "planning.acme.test" } : { product_name: "", tagline: "", logo_data_url: "", favicon_data_url: "", brand_color: "", email_from_name: "", custom_domain: "", configured: false });
-    if (path === "/api/notifications/settings") return ok(notificationSettings);
+    if (path === "/api/notifications/settings") {
+      // Whose settings: the tenant named in the header, else the deployment's
+      // own row — as the server answers a platform admin (migration 091).
+      const tenant = route.request().headers()["x-tenant-id"] ?? "";
+      const scope = tenant
+        ? { customer_id: tenant, deployment: false, inherited: true, deployment_settings_available: true }
+        : { deployment: true, inherited: false, deployment_settings_available: true };
+      return ok({ ...notificationSettings, scope });
+    }
     if (path === "/api/admin/ai-settings") return ok(overrides.tenantAI ?? tenantAISettings);
+    if (path === "/api/developer/integrations/google-service-account") return ok({ configured: false });
     if (path === "/api/demo") return ok(demoContextFor(route.request().headers()["x-dev-user"] ?? "dept_head"));
     // Every console's shell asks who is signed in. Without this the catch-all
     // below answered with [], which is not an actor.
@@ -475,7 +542,7 @@ export async function mockApi(page: Page, overrides: { license?: unknown; tenant
     if (path === "/api/automation/rules") return ok([{ id: "rule-1", application_id: "app-1", name: "Submit Budget", description: "Starts approval", trigger_type: "manual", workflow_name: "Budget Approval", enabled: true, created_at: "2026-05-01T00:00:00Z" }]);
     if (path === "/api/automation/executions") return ok([{ id: "exec-1", rule_id: "rule-1", application_id: "app-1", status: "completed", trigger_payload: {}, instance_id: "inst-1", started_at: "2026-05-19T10:00:00Z" }]);
     if (path === "/api/developer/integrations" || path === "/api/integrations") return ok(integrations);
-    if (path === "/api/admin/tenants") return ok(overrides.plan ? adminTenants.map((t, i) => (i === 0 ? { ...t, plan: "trial", plan_state: overrides.plan } : t)) : adminTenants);
+    if (path === "/api/admin/tenants") return ok(overrides.plan ? adminTenants.map((t, i) => (i === 0 ? { ...t, plan: "small", plan_state: overrides.plan } : t)) : adminTenants);
     if (path === "/api/admin/users") return ok(adminUsers);
     if (path === "/api/admin/workspaces") return ok(adminWorkspaces);
     if (path === "/api/admin/audit") return ok(adminAudit);
@@ -484,9 +551,18 @@ export async function mockApi(page: Page, overrides: { license?: unknown; tenant
   });
 }
 
-export async function loadAs(page: Page, persona: string) {
+export async function loadAs(page: Page, persona: string, query = "") {
   await page.addInitScript((p) => localStorage.setItem("dev_persona", p), persona);
-  await page.goto("/");
+  await page.goto("/" + query);
   await page.waitForLoadState("networkidle");
 }
 
+
+/**
+ * At platform scope the per-tenant settings tabs (SSO, SCIM, branding, AI
+ * keys, delivery, retention) show nothing until the administrator says whose
+ * settings they mean — the platform admin has no tenant of their own.
+ */
+export async function chooseTenant(page: Page, tenantId = "tenant-1") {
+  await page.getByLabel("Settings scope").selectOption(tenantId);
+}

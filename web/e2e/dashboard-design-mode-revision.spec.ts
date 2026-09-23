@@ -27,8 +27,10 @@ const draftDashboards = [{
   tags: [],
   folder_id: null,
   widgets: [{
+    // Sized in pixels, like the canvas saves them: prose is laid out in the
+    // widget's own box, so a widget a few pixels wide has nowhere to put it.
     id: "w-1", widget_type: "text", ref_id: null, content: WIDGET_TEXT, title: null, show_title: false,
-    widget_props: null, sort_order: 0, col_start: 1, col_span: 12, pos_x: 0, pos_y: 0, size_w: 6, size_h: 2,
+    widget_props: null, sort_order: 0, col_start: 1, col_span: 12, pos_x: 0, pos_y: 0, size_w: 300, size_h: 60,
   }, {
     // A grid widget: design mode must show ITS selectors (grid-1's dims minus
     // the first, which lands on columns by default) as a strip on the card.

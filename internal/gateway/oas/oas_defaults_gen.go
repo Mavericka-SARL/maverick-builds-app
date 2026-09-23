@@ -60,6 +60,10 @@ func (s *CreateDimensionRequest) setDefaults() {
 		val := string("sum")
 		s.AggRule.SetTo(val)
 	}
+	{
+		val := CreateDimensionRequestDimensionType("standard")
+		s.DimensionType.SetTo(val)
+	}
 }
 
 // setDefaults set default value of fields.
@@ -96,6 +100,10 @@ func (s *CreateMetricRequest) setDefaults() {
 		val := string("$")
 		s.FormatCurrency.SetTo(val)
 	}
+	{
+		val := CreateMetricRequestTimeSummary("sum")
+		s.TimeSummary.SetTo(val)
+	}
 }
 
 // setDefaults set default value of fields.
@@ -123,6 +131,14 @@ func (s *ImportUploadRequest) setDefaults() {
 }
 
 // setDefaults set default value of fields.
+func (s *MetricDef) setDefaults() {
+	{
+		val := MetricDefTimeSummary("sum")
+		s.TimeSummary.SetTo(val)
+	}
+}
+
+// setDefaults set default value of fields.
 func (s *PropertyRequest) setDefaults() {
 	{
 		val := string("text")
@@ -135,6 +151,14 @@ func (s *UpdateFormMappingRequest) setDefaults() {
 	{
 		val := bool(true)
 		s.LivePosting.SetTo(val)
+	}
+}
+
+// setDefaults set default value of fields.
+func (s *UpdateMetricRequest) setDefaults() {
+	{
+		val := UpdateMetricRequestTimeSummary("sum")
+		s.TimeSummary.SetTo(val)
 	}
 }
 

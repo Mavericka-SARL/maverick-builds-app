@@ -2,9 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- The app icon. The SVG is what a modern browser draws; the .ico is
+         there for the ones that ask for /favicon.ico regardless (and for
+         anything that pastes the link). Both are swapped together when a
+         tenant has white-labelled the product — see branding/brand.ts. -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" type="image/x-icon" href="/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mavericks</title>
+    <title>maverickbuilds.app</title>
     <!-- Runtime configuration, written by the container at startup so one
          image serves every environment. Must load BEFORE the bundle. -->
     <script src="/config.js"></script>

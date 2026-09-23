@@ -33,7 +33,7 @@ func TestScopeCalcCellsEmitsScopedRollupCells(t *testing.T) {
 		"rev:A": 100, "cost:A": 80,
 	}
 
-	cells, totals := scopeCalcCells(context.Background(), rollupDims, metricDims, map[string]string{geoID: "geography"}, universe, scoped)
+	cells, totals := scopeCalcCells(context.Background(), rollupDims, metricDims, map[string]string{geoID: "geography"}, universe, scoped, nil)
 
 	if got := cells["pct:A"]; math.Abs(got-20) > 1e-6 {
 		t.Errorf("leaf A = %v, want 20", got)

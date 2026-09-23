@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -14,6 +15,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/modeltransfer"
+	"github.com/mavericks-engine/mavericks/internal/timedim"
 	"github.com/mavericks-engine/mavericks/internal/workflow"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 )
@@ -333,6 +335,9 @@ type createMetricParams struct {
 	// clean and then failed in the scheduler on every recalculation.
 	AggNumeratorMetricID   string `json:"agg_numerator_metric_id"`
 	AggDenominatorMetricID string `json:"agg_denominator_metric_id"`
+	// TimeSummary: aggregation across a time dimension (sum | average | min
+	// | max | first | last | none). Empty = sum.
+	TimeSummary string `json:"time_summary"`
 }
 
 func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -355,6 +360,12 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 	if p.AggRule == "" {
 		p.AggRule = "sum"
 	}
+	if p.TimeSummary == "" {
+		p.TimeSummary = "sum"
+	}
+	if !timedim.ValidTimeSummary(p.TimeSummary) {
+		return "", "", fmt.Errorf("time_summary must be one of %s", strings.Join(timedim.TimeSummaries, ", "))
+	}
 	revID := e.effectiveRevision(p.RevisionID)
 
 	// The same two checks the developer role's metric handler runs. Neither
@@ -370,7 +381,7 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 	}
 
 	var formulaPtr *string
-	var formulaEdges []string
+	var formulaEdges []metricformula.Edge
 	if !p.IsInput && p.Formula != "" {
 		formulaPtr = &p.Formula
 		// Validate through internal/metricformula, the same service the
@@ -388,7 +399,7 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 		if vErr != nil {
 			return "", "", vErr
 		}
-		formulaEdges = res.DependsOnMetricIDs
+		formulaEdges = res.Edges
 	}
 
 	var newID string
@@ -396,19 +407,19 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 	if revID != "" {
 		err = e.pool.QueryRow(ctx, `
 			INSERT INTO model.metric_def (model_id, name, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule,
-			                              agg_numerator_metric_id, agg_denominator_metric_id)
-			VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6, $7, $8, $9, NULLIF($10,'')::uuid, NULLIF($11,'')::uuid)
+			                              agg_numerator_metric_id, agg_denominator_metric_id, time_summary)
+			VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6, $7, $8, $9, NULLIF($10,'')::uuid, NULLIF($11,'')::uuid, $12)
 			RETURNING id::text
 		`, e.modelID, p.Name, formulaPtr, p.IsInput, revID, p.Format, p.FormatDecimals, p.FormatCurrency, p.AggRule,
-			p.AggNumeratorMetricID, p.AggDenominatorMetricID).Scan(&newID)
+			p.AggNumeratorMetricID, p.AggDenominatorMetricID, p.TimeSummary).Scan(&newID)
 	} else {
 		err = e.pool.QueryRow(ctx, `
 			INSERT INTO model.metric_def (model_id, name, formula, is_input, format, format_decimals, format_currency, agg_rule,
-			                              agg_numerator_metric_id, agg_denominator_metric_id)
-			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, NULLIF($9,'')::uuid, NULLIF($10,'')::uuid)
+			                              agg_numerator_metric_id, agg_denominator_metric_id, time_summary)
+			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, NULLIF($9,'')::uuid, NULLIF($10,'')::uuid, $11)
 			RETURNING id::text
 		`, e.modelID, p.Name, formulaPtr, p.IsInput, p.Format, p.FormatDecimals, p.FormatCurrency, p.AggRule,
-			p.AggNumeratorMetricID, p.AggDenominatorMetricID).Scan(&newID)
+			p.AggNumeratorMetricID, p.AggDenominatorMetricID, p.TimeSummary).Scan(&newID)
 	}
 	if err != nil {
 		return "", "", fmt.Errorf("insert metric: %w", err)
@@ -418,13 +429,8 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 	// looked them up within the metric's own revision; the loop that used to
 	// be here resolved names model-wide, so an edge could point at a
 	// same-named metric belonging to a different revision.
-	for _, depID := range formulaEdges {
-		if _, er := e.pool.Exec(ctx, `
-			INSERT INTO model.calc_dependency (metric_id, depends_on_metric_id)
-			VALUES ($1::uuid,$2::uuid) ON CONFLICT DO NOTHING
-		`, newID, depID); er != nil {
-			return "", "", fmt.Errorf("wire formula dependencies: %w", er)
-		}
+	if er := metricformula.WriteDependencies(ctx, e.pool, newID, formulaEdges); er != nil {
+		return "", "", fmt.Errorf("wire formula dependencies: %w", er)
 	}
 
 	return fmt.Sprintf("Metric '%s' created (id: %s)", p.Name, newID), newID, nil
@@ -443,6 +449,7 @@ type updateMetricParams struct {
 
 	AggNumeratorMetricID   string `json:"agg_numerator_metric_id"`
 	AggDenominatorMetricID string `json:"agg_denominator_metric_id"`
+	TimeSummary            string `json:"time_summary"`
 }
 
 func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -460,6 +467,12 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 	p.MetricID = mappedMetricID
 	if p.AggRule == "" {
 		p.AggRule = "sum"
+	}
+	if p.TimeSummary == "" {
+		p.TimeSummary = "sum"
+	}
+	if !timedim.ValidTimeSummary(p.TimeSummary) {
+		return "", "", fmt.Errorf("time_summary must be one of %s", strings.Join(timedim.TimeSummaries, ", "))
 	}
 	if p.Format == "" {
 		p.Format = "number"
@@ -495,7 +508,7 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 	}
 
 	var formulaPtr *string
-	var formulaEdges []string
+	var formulaEdges []metricformula.Edge
 	if p.Formula != "" {
 		formulaPtr = &p.Formula
 		res, vErr := metricformula.Validate(ctx, e.pool, metricformula.Request{
@@ -505,30 +518,22 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 		if vErr != nil {
 			return "", "", vErr
 		}
-		formulaEdges = res.DependsOnMetricIDs
+		formulaEdges = res.Edges
 	}
 	if _, err := e.pool.Exec(ctx, `
 		UPDATE model.metric_def
 		SET name=$2, formula=$3, agg_rule=$4, format=$5, format_decimals=$6, format_currency=$7,
-		    agg_numerator_metric_id=NULLIF($8,'')::uuid, agg_denominator_metric_id=NULLIF($9,'')::uuid
+		    agg_numerator_metric_id=NULLIF($8,'')::uuid, agg_denominator_metric_id=NULLIF($9,'')::uuid,
+		    time_summary=$10
 		WHERE id=$1::uuid
 	`, p.MetricID, p.Name, formulaPtr, p.AggRule, p.Format, p.FormatDecimals, p.FormatCurrency,
-		p.AggNumeratorMetricID, p.AggDenominatorMetricID); err != nil {
+		p.AggNumeratorMetricID, p.AggDenominatorMetricID, p.TimeSummary); err != nil {
 		return "", "", fmt.Errorf("update metric: %w", err)
 	}
 	// Re-wire dependencies when the formula changed.
 	if formulaPtr != nil {
-		if _, er := e.pool.Exec(ctx,
-			`DELETE FROM model.calc_dependency WHERE metric_id=$1::uuid`, p.MetricID); er != nil {
-			return "", "", fmt.Errorf("clear formula dependencies: %w", er)
-		}
-		for _, depID := range formulaEdges {
-			if _, er := e.pool.Exec(ctx, `
-				INSERT INTO model.calc_dependency (metric_id, depends_on_metric_id)
-				VALUES ($1::uuid,$2::uuid) ON CONFLICT DO NOTHING
-			`, p.MetricID, depID); er != nil {
-				return "", "", fmt.Errorf("wire formula dependencies: %w", er)
-			}
+		if er := metricformula.WriteDependencies(ctx, e.pool, p.MetricID, formulaEdges); er != nil {
+			return "", "", fmt.Errorf("wire formula dependencies: %w", er)
 		}
 	}
 	return fmt.Sprintf("Metric '%s' updated", p.Name), "", nil
@@ -566,10 +571,18 @@ type createDimensionParams struct {
 	AggRule             string `json:"agg_rule"`
 	RevisionID          string `json:"revision_id"`
 	ParentDimensionName string `json:"parent_dimension_name"` // if set, this dimension is a child of that one — members' parent_code resolves against the PARENT dimension's members
-	Members             []struct {
-		Code       string `json:"code"`
-		Label      string `json:"label"`
-		ParentCode string `json:"parent_code"`
+	// Time dimension marker (spec §4.1): "standard" (default) or "time".
+	// A time dimension needs time_granularity and fiscal_year_start_month,
+	// and its members carry period_start/period_end instead of parents.
+	DimensionType   string `json:"dimension_type"`
+	TimeGranularity string `json:"time_granularity"`
+	FiscalYearStart int    `json:"fiscal_year_start_month"`
+	Members         []struct {
+		Code        string `json:"code"`
+		Label       string `json:"label"`
+		ParentCode  string `json:"parent_code"`
+		PeriodStart string `json:"period_start"`
+		PeriodEnd   string `json:"period_end"`
 	} `json:"members"`
 }
 
@@ -583,6 +596,13 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 	}
 	if p.AggRule == "" {
 		p.AggRule = "sum"
+	}
+	timeCfg := timedim.Config{Type: p.DimensionType, Granularity: p.TimeGranularity, FiscalYearStartMonth: p.FiscalYearStart}
+	if err := timedim.ValidateConfig(&timeCfg); err != nil {
+		return "", "", err
+	}
+	if timeCfg.Type == timedim.TypeTime && p.ParentDimensionName != "" {
+		return "", "", fmt.Errorf("a time dimension cannot have a parent dimension")
 	}
 	revID := e.effectiveRevision(p.RevisionID)
 
@@ -599,19 +619,78 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 
 	var newID string
 	var err error
+	var granularity *string
+	var fiscalStart *int
+	if timeCfg.Type == timedim.TypeTime {
+		granularity, fiscalStart = &timeCfg.Granularity, &timeCfg.FiscalYearStartMonth
+	}
 	if revID != "" {
 		err = e.pool.QueryRow(ctx, `
-			INSERT INTO model.dimension_def (model_id, name, agg_rule, revision_id, parent_dimension_id)
-			VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid) RETURNING id::text
-		`, e.modelID, p.Name, p.AggRule, revID, parentDimID).Scan(&newID)
+			INSERT INTO model.dimension_def (model_id, name, agg_rule, revision_id, parent_dimension_id, dimension_type, time_granularity, fiscal_year_start_month)
+			VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, $7, $8) RETURNING id::text
+		`, e.modelID, p.Name, p.AggRule, revID, parentDimID, timeCfg.Type, granularity, fiscalStart).Scan(&newID)
 	} else {
 		err = e.pool.QueryRow(ctx, `
-			INSERT INTO model.dimension_def (model_id, name, agg_rule, parent_dimension_id)
-			VALUES ($1::uuid, $2, $3, $4::uuid) RETURNING id::text
-		`, e.modelID, p.Name, p.AggRule, parentDimID).Scan(&newID)
+			INSERT INTO model.dimension_def (model_id, name, agg_rule, parent_dimension_id, dimension_type, time_granularity, fiscal_year_start_month)
+			VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7) RETURNING id::text
+		`, e.modelID, p.Name, p.AggRule, parentDimID, timeCfg.Type, granularity, fiscalStart).Scan(&newID)
 	}
 	if err != nil {
 		return "", "", fmt.Errorf("insert dimension: %w", err)
+	}
+	if timeCfg.Type == timedim.TypeTime {
+		// Time members go through the shared validation + reindex path in
+		// one transaction, exactly as the developer console's do.
+		tx, err := e.pool.Begin(ctx)
+		if err != nil {
+			return "", "", err
+		}
+		defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+		// A member with dates is a leaf period; one without is an aggregate
+		// period (H1, FY26). parent_code resolves against members created
+		// earlier in this same call, so parents go first.
+		codeToID := map[string]string{}
+		for _, m := range p.Members {
+			var start, end *time.Time
+			var idx *int
+			if m.PeriodStart != "" || m.PeriodEnd != "" {
+				ps, err1 := timedim.ParseDate(m.PeriodStart)
+				pe, err2 := timedim.ParseDate(m.PeriodEnd)
+				if err1 != nil || err2 != nil {
+					return "", "", fmt.Errorf("member %q: period_start and period_end (YYYY-MM-DD) go together; leave both empty for an aggregate period", m.Code)
+				}
+				start, end = &ps, &pe
+				zero := 0
+				idx = &zero
+			}
+			var parentID *string
+			if m.ParentCode != "" {
+				pid, ok := codeToID[m.ParentCode]
+				if !ok {
+					return "", "", fmt.Errorf("member %q: parent %q must be listed before it", m.Code, m.ParentCode)
+				}
+				parentID = &pid
+			}
+			var memID string
+			if err := tx.QueryRow(ctx, `
+				INSERT INTO model.dimension_member (dimension_id, code, label, period_start, period_end, time_index, parent_member_id)
+				VALUES ($1::uuid, $2, $3, $4::date, $5::date, $6, $7::uuid) RETURNING id::text
+			`, newID, m.Code, m.Label, start, end, idx, parentID).Scan(&memID); err != nil {
+				return "", "", fmt.Errorf("insert time member %q: %w", m.Code, err)
+			}
+			codeToID[m.Code] = memID
+		}
+		if err := timedim.ValidateAndReindex(ctx, tx, newID); err != nil {
+			return "", "", err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return "", "", err
+		}
+		msg := fmt.Sprintf("Time dimension '%s' (%s) created (id: %s)", p.Name, timeCfg.Granularity, newID)
+		if len(p.Members) > 0 {
+			msg += fmt.Sprintf(" with %d period(s)", len(p.Members))
+		}
+		return msg, newID, nil
 	}
 
 	// When members are children of a declared parent dimension, parent_code must
@@ -668,6 +747,8 @@ func (e *WriteExecutor) addDimensionMember(ctx context.Context, raw json.RawMess
 		Code        string `json:"code"`
 		Label       string `json:"label"`
 		ParentCode  string `json:"parent_code"`
+		PeriodStart string `json:"period_start"`
+		PeriodEnd   string `json:"period_end"`
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
@@ -680,6 +761,64 @@ func (e *WriteExecutor) addDimensionMember(ctx context.Context, raw json.RawMess
 		return "", "", err
 	}
 	p.DimensionID = mappedDimID
+
+	// A time dimension's member is a period: dates instead of a parent,
+	// validated and indexed with the rest of the dimension in one
+	// transaction.
+	if cfg, cErr := timedim.LoadConfig(ctx, e.pool, p.DimensionID); cErr == nil && cfg.Type == timedim.TypeTime {
+		// Dated = leaf period; undated = aggregate period (H1, FY26). A
+		// parent, when given, must be an aggregate of the same dimension
+		// (checked with the rest of the hierarchy by ValidateAndReindex).
+		var start, end *time.Time
+		var idx *int
+		if p.PeriodStart != "" || p.PeriodEnd != "" {
+			ps, err1 := timedim.ParseDate(p.PeriodStart)
+			pe, err2 := timedim.ParseDate(p.PeriodEnd)
+			if err1 != nil || err2 != nil {
+				return "", "", fmt.Errorf("period_start and period_end (YYYY-MM-DD) go together; leave both empty for an aggregate period")
+			}
+			if err := timedim.ValidatePeriod(cfg, timedim.Period{Code: p.Code, Start: ps, End: pe}); err != nil {
+				return "", "", err
+			}
+			start, end = &ps, &pe
+			zero := 0
+			idx = &zero
+		}
+		var parentID *string
+		if p.ParentCode != "" {
+			var pid string
+			if err := e.pool.QueryRow(ctx, `SELECT id::text FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2`,
+				p.DimensionID, p.ParentCode).Scan(&pid); err != nil {
+				return "", "", fmt.Errorf("parent period %q not found in this dimension", p.ParentCode)
+			}
+			parentID = &pid
+		}
+		tx, err := e.pool.Begin(ctx)
+		if err != nil {
+			return "", "", err
+		}
+		defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+		var newID string
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO model.dimension_member (dimension_id, code, label, period_start, period_end, time_index, parent_member_id)
+			VALUES ($1::uuid, $2, $3, $4::date, $5::date, $6, $7::uuid) RETURNING id::text
+		`, p.DimensionID, p.Code, p.Label, start, end, idx, parentID).Scan(&newID); err != nil {
+			return "", "", fmt.Errorf("insert time member: %w", err)
+		}
+		if err := timedim.ValidateAndReindex(ctx, tx, p.DimensionID); err != nil {
+			return "", "", err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return "", "", err
+		}
+		if start == nil {
+			return fmt.Sprintf("Aggregate period '%s' (%s) added (id: %s)", p.Label, p.Code, newID), newID, nil
+		}
+		return fmt.Sprintf("Period '%s' (%s, %s..%s) added (id: %s)", p.Label, p.Code, p.PeriodStart, p.PeriodEnd, newID), newID, nil
+	}
+	if p.PeriodStart != "" || p.PeriodEnd != "" {
+		return "", "", fmt.Errorf("period_start/period_end apply only to a time dimension's members")
+	}
 
 	var parentID *string
 	autoCreatedParent := false
@@ -924,6 +1063,14 @@ func (e *WriteExecutor) createGrid(ctx context.Context, raw json.RawMessage) (st
 			VALUES ($1::uuid, $2::uuid) ON CONFLICT DO NOTHING
 		`, newID, did)
 	}
+	if len(p.DimensionIDs) > 0 {
+		var gridModelID, gridRevID string
+		_ = e.pool.QueryRow(ctx, `SELECT model_id::text, COALESCE(revision_id::text,'') FROM model.grid_def WHERE id=$1::uuid`, newID).Scan(&gridModelID, &gridRevID)
+		if err := metricformula.ValidateGridTime(ctx, e.pool, gridModelID, gridRevID, newID); err != nil {
+			_, _ = e.pool.Exec(ctx, `DELETE FROM model.grid_def WHERE id=$1::uuid`, newID)
+			return "", "", fmt.Errorf("grid configuration: %w", err)
+		}
+	}
 
 	msg := fmt.Sprintf("Grid '%s' created (id: %s, %d/%d metrics attached, %d dims)",
 		p.Name, newID, attached, len(p.MetricIDs), len(p.DimensionIDs))
@@ -979,13 +1126,38 @@ func (e *WriteExecutor) addGridMetric(ctx context.Context, raw json.RawMessage) 
 
 	var sortOrder int
 	_ = e.pool.QueryRow(ctx, `SELECT COALESCE(MAX(sort_order),0)+1 FROM model.grid_metric WHERE grid_id=$1::uuid`, p.GridID).Scan(&sortOrder)
-	if _, err := e.pool.Exec(ctx, `
+	if err := e.gridMembershipTx(ctx, p.GridID, `
 		INSERT INTO model.grid_metric (grid_id, metric_id, sort_order)
 		VALUES ($1::uuid, $2::uuid, $3) ON CONFLICT DO NOTHING
 	`, p.GridID, p.MetricID, sortOrder); err != nil {
 		return "", "", fmt.Errorf("add grid metric: %w", err)
 	}
 	return "Metric added to grid", "", nil
+}
+
+// gridMembershipTx applies a grid membership change and re-runs the
+// revision's time validation in the same transaction — the AI Developer's
+// twin of the developer console's grid handlers, so a grid can never gain a
+// second time dimension or strand a time-series metric off its axis.
+func (e *WriteExecutor) gridMembershipTx(ctx context.Context, gridID, sql string, args ...any) error {
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+	if _, err := tx.Exec(ctx, sql, args...); err != nil {
+		return err
+	}
+	var modelID, revisionID string
+	if err := tx.QueryRow(ctx,
+		`SELECT model_id::text, COALESCE(revision_id::text,'') FROM model.grid_def WHERE id=$1::uuid`, gridID,
+	).Scan(&modelID, &revisionID); err != nil {
+		return err
+	}
+	if err := metricformula.ValidateGridTime(ctx, tx, modelID, revisionID, gridID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // ── add_grid_dimension ────────────────────────────────────────────────────────
@@ -1008,7 +1180,7 @@ func (e *WriteExecutor) addGridDimension(ctx context.Context, raw json.RawMessag
 		return "", "", err
 	}
 	p.DimensionID = mappedDimID
-	if _, err := e.pool.Exec(ctx, `
+	if err := e.gridMembershipTx(ctx, p.GridID, `
 		INSERT INTO model.grid_dimension (grid_id, dimension_id)
 		VALUES ($1::uuid, $2::uuid) ON CONFLICT DO NOTHING
 	`, p.GridID, p.DimensionID); err != nil {
@@ -1170,8 +1342,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 	if srcID != "" {
 		// Copy metrics
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO model.metric_def (model_id, name, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule)
-			SELECT model_id, name, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule
+			INSERT INTO model.metric_def (model_id, name, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule, time_summary)
+			SELECT model_id, name, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule, time_summary
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 		`, e.modelID, newID, srcID); err != nil {
 			return "", "", fmt.Errorf("copy metrics into new revision: %w", err)
@@ -1219,8 +1391,9 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 		// (internal/gateway/handler.go) — the developer-console "Duplicate
 		// revision" action already does this; this AI-draft path didn't.
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO model.calc_dependency (metric_id, depends_on_metric_id)
-			SELECT new_m.id, new_dep.id
+			INSERT INTO model.calc_dependency
+			    (metric_id, depends_on_metric_id, min_time_offset, max_time_offset, unbounded_past, unbounded_future)
+			SELECT new_m.id, new_dep.id, cd.min_time_offset, cd.max_time_offset, cd.unbounded_past, cd.unbounded_future
 			FROM model.calc_dependency cd
 			JOIN model.metric_def old_m   ON old_m.id = cd.metric_id             AND old_m.revision_id = $3::uuid
 			JOIN model.metric_def old_dep ON old_dep.id = cd.depends_on_metric_id AND old_dep.revision_id = $3::uuid
@@ -1243,8 +1416,10 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 		if _, err := tx.Exec(ctx, `
 			WITH
 			new_dims AS (
-				INSERT INTO model.dimension_def (model_id, name, agg_rule, properties, revision_id, source_property)
-				SELECT model_id, name, agg_rule, properties, $2::uuid, source_property
+				INSERT INTO model.dimension_def (model_id, name, agg_rule, properties, revision_id, source_property,
+				                                 dimension_type, time_granularity, fiscal_year_start_month)
+				SELECT model_id, name, agg_rule, properties, $2::uuid, source_property,
+				       dimension_type, time_granularity, fiscal_year_start_month
 				FROM model.dimension_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 				RETURNING id AS new_id, name
 			),
@@ -1255,8 +1430,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 				WHERE o.model_id=$1::uuid AND o.revision_id=$3::uuid
 			),
 			new_members AS (
-				INSERT INTO model.dimension_member (dimension_id, code, label, properties, sort_order)
-				SELECT dm.new_id, m.code, m.label, m.properties, m.sort_order
+				INSERT INTO model.dimension_member (dimension_id, code, label, properties, sort_order, period_start, period_end, time_index)
+				SELECT dm.new_id, m.code, m.label, m.properties, m.sort_order, m.period_start, m.period_end, m.time_index
 				FROM model.dimension_member m
 				JOIN dim_map dm ON dm.old_id = m.dimension_id
 				RETURNING id

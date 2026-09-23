@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
+	"github.com/mavericks-engine/mavericks/internal/starter"
 	"github.com/mavericks-engine/mavericks/internal/testdb"
 	migrationfs "github.com/mavericks-engine/mavericks/migrations"
 	"github.com/mavericks-engine/mavericks/pkg/logger"
@@ -45,7 +45,7 @@ func callJSON(t *testing.T, srv *httptest.Server, persona, method, path string, 
 }
 
 // Sign-up on the dev stack (no identity provider): the whole tenant comes
-// out of one request — plan, trial, roles, application, starter model with
+// out of one request — plan, roles, application, starter model with
 // its numbers computed — and the account is immediately usable as a dev
 // persona. Then the guards around it: validation, an address already
 // registered, the per-address throttle, and the switch being off.
@@ -75,7 +75,8 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 	if code != 200 || opts["enabled"] != true || opts["contact_url"] != "https://example.test/pricing" {
 		t.Fatalf("options: %d %v", code, opts)
 	}
-	if p, _ := opts["plan"].(map[string]any); p["key"] != "trial" || p["trial_days"] != float64(14) {
+	// What sign-up offers is the test workspace: no trial, 100 MB of storage.
+	if p, _ := opts["plan"].(map[string]any); p["key"] != "test" || p["limits"].(map[string]any)["max_storage_mb"] != float64(100) {
 		t.Fatalf("options plan: %v", opts["plan"])
 	}
 
@@ -84,13 +85,12 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 		t.Fatalf("short company: %d %v", code, body)
 	}
 	// 2nd: success.
-	code, out := callJSON(t, srv, "", http.MethodPost, "/api/signup", map[string]any{"company": "Acme Trial", "first_name": "Ann", "last_name": "Lee", "email": "Ann@Acme.test"})
-	if code != 200 || out["status"] != "created" || out["plan"] != "trial" || out["dev_persona"] != "signup-ann@acme.test" {
+	code, out := callJSON(t, srv, "", http.MethodPost, "/api/signup", map[string]any{"company": "Acme Test", "first_name": "Ann", "last_name": "Lee", "email": "Ann@Acme.test"})
+	if code != 200 || out["status"] != "created" || out["plan"] != "test" || out["dev_persona"] != "signup-ann@acme.test" {
 		t.Fatalf("signup: %d %v", code, out)
 	}
-	ends, err := time.Parse(time.RFC3339, out["trial_ends_at"].(string))
-	if err != nil || time.Until(ends) < 13*24*time.Hour || time.Until(ends) > 14*24*time.Hour+time.Minute {
-		t.Fatalf("trial_ends_at = %v (%v)", out["trial_ends_at"], err)
+	if _, has := out["trial_ends_at"]; has {
+		t.Fatalf("a test workspace has no trial end: %v", out)
 	}
 	tenantID, modelID := out["tenant_id"].(string), out["model_id"].(string)
 
@@ -104,7 +104,7 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 		t.Fatalf("roles = %v", roles)
 	}
 	st, _ := me["plan"].(map[string]any)
-	if st["trial"] != true || st["days_left"] != float64(14) || st["read_only"] != false || st["plan"].(map[string]any)["key"] != "trial" {
+	if _, has := st["trial"]; has || st["read_only"] != false || st["plan"].(map[string]any)["key"] != "test" {
 		t.Fatalf("me.plan = %v", st)
 	}
 	code, apps := callJSONList(t, srv, "signup-ann@acme.test", "/api/apps")
@@ -124,7 +124,7 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 		q(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input, agg_rule) VALUES ($1::uuid, $2::uuid, $3, true, 'sum') RETURNING id::text`, otherModel, otherRev, "m"+strconv.Itoa(i))
 	}
 	code, demo := callJSON(t, srv, "signup-ann@acme.test", http.MethodGet, "/api/demo", nil)
-	if code != 200 || demo["model_id"] != modelID || demo["revision"] != "FY2026 Plan" {
+	if code != 200 || demo["model_id"] != modelID || demo["revision"] != starter.RevisionName {
 		t.Fatalf("first screen resolved model %v (%v), want the starter model %s", demo["model_id"], demo["revision"], modelID)
 	}
 	code, tenantsSeen := callJSONList(t, srv, "signup-ann@acme.test", "/api/admin/tenants")
@@ -132,8 +132,12 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 		t.Fatalf("tenant list for the new account: %d %v", code, tenantsSeen)
 	}
 	code, dashboards := callJSONList(t, srv, "signup-ann@acme.test", "/api/developer/dashboards", "X-App-Id", appID(apps))
-	if code != 200 || len(dashboards) != 1 || dashboards[0]["name"] != "Budget overview" {
-		t.Fatalf("developer dashboards: %d %v", code, dashboards)
+	if code != 200 || len(dashboards) != len(starter.Package().Dashboards) || dashboards[0]["name"] != starter.DashboardName {
+		names := make([]any, 0, len(dashboards))
+		for _, d := range dashboards {
+			names = append(names, d["name"])
+		}
+		t.Fatalf("developer dashboards: %d %v", code, names)
 	}
 	var metrics, members, facts, calc, audit int
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM model.metric_def WHERE model_id=$1::uuid`, modelID).Scan(&metrics)
@@ -141,21 +145,22 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM runtime.fact_input WHERE model_id=$1::uuid`, modelID).Scan(&facts)
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM runtime.calc_result WHERE model_id=$1::uuid`, modelID).Scan(&calc)
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit.audit_event WHERE event_type='tenant.signed_up' AND resource_id=$1`, tenantID).Scan(&audit)
-	if metrics != 4 || members != 22 || facts != 96 || calc == 0 || audit != 1 {
+	if metrics != 3 || members != 8 || facts != 16 || calc == 0 || audit != 1 {
 		t.Fatalf("starter model: metrics=%d members=%d facts=%d calc=%d audit=%d", metrics, members, facts, calc, audit)
 	}
-	// Variance is computed from the sample figures, not left blank.
-	var variance float64
+	// The tour's calculated metric is worked out from its own figures, not
+	// left blank: the first screen has to show a real number.
+	var cost float64
 	if err := pool.QueryRow(ctx, `SELECT cr.value FROM runtime.calc_result cr JOIN model.metric_def m ON m.id=cr.metric_id
-		WHERE cr.model_id=$1::uuid AND m.name='variance' AND cr.dim_members->>(SELECT id::text FROM model.dimension_def WHERE model_id=$1::uuid AND name='department')='SALES'
-		  AND cr.dim_members->>(SELECT id::text FROM model.dimension_def WHERE model_id=$1::uuid AND name='period')='Jan' LIMIT 1`, modelID).Scan(&variance); err != nil {
-		t.Fatalf("variance cell: %v", err)
+		WHERE cr.model_id=$1::uuid AND m.name='cost' AND cr.dim_members->>(SELECT id::text FROM model.dimension_def WHERE model_id=$1::uuid AND name='team')='SALES'
+		  AND cr.dim_members->>(SELECT id::text FROM model.dimension_def WHERE model_id=$1::uuid AND name='quarter')='Q1' LIMIT 1`, modelID).Scan(&cost); err != nil {
+		t.Fatalf("cost cell: %v", err)
 	}
-	if variance != -4800 { // 120,000 * -4%
-		t.Fatalf("variance Jan/SALES = %v, want -4800", variance)
+	if cost != 48000 { // 4 people at 12,000
+		t.Fatalf("cost Q1/SALES = %v, want 48000", cost)
 	}
 
-	// The platform admin's tenant list carries the trial state.
+	// The platform admin's tenant list carries the plan state.
 	code, tenants := callJSONList(t, srv, "signup-padmin", "/api/admin/tenants")
 	if code != 200 {
 		t.Fatalf("tenants: %d", code)
@@ -165,7 +170,7 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 		if tn["id"] == tenantID {
 			found = true
 			ps, _ := tn["plan_state"].(map[string]any)
-			if tn["plan"] != "trial" || ps["trial"] != true || ps["days_left"] != float64(14) {
+			if tn["plan"] != "test" || ps["limit_state"] != "ok" {
 				t.Fatalf("tenant listing: %v", tn)
 			}
 		}

@@ -6,6 +6,7 @@ import { CellHistoryDrawer, type CellRef } from "../../ee/cellhistory/CellHistor
 import { LoadingState, ErrorState, Toolbar, ToolbarGroup, Select, PropertyPanel, IconButton } from "../../ui";
 import { defaultLeafCode } from "../dashboardLayout";
 import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
+import { invalidateModelData } from "../modelDataQueries";
 import { useSelectorOwnership, useSyncSetter, useWidgetContextSync } from "../dashboardContextSync";
 import { downloadBlob } from "./blobUtils";
 
@@ -441,10 +442,21 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
     refetchInterval: 30000, // structure changes rarely
   });
 
+  // Optimistic overlay: the value the user just committed, keyed like
+  // g.cells, shown (and summed into the client-side rollups) from the moment
+  // of commit until the refetch that follows the write has landed. Without
+  // it the cell snapped back to the OLD server value for the whole round
+  // trip — the write plus a synchronous recalc is a second or two on a real
+  // model — and only then jumped to the new one.
+  const [pending, setPending] = useState<Record<string, number>>({});
   const writeback = useMutation({
-    mutationFn: (vars: { metric_id: string; dim_codes: Record<string, string>; value: number }) =>
-      api.writeback({ ...vars, model_id: ctx.model_id, revision_id: ctx.revision_id }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["grid-cells"] }); qc.invalidateQueries({ queryKey: ["grid-meta"] }); },
+    mutationFn: ({ metric_id, dim_codes, value }: { cellKey: string; metric_id: string; dim_codes: Record<string, string>; value: number }) =>
+      api.writeback({ metric_id, dim_codes, value, model_id: ctx.model_id, revision_id: ctx.revision_id }),
+    // Every fact-derived query on the page, not just this grid's own: the
+    // KPI cards and charts beside it must show the new number too.
+    // Returning the promise defers onSettled until those refetches complete.
+    onSuccess: () => invalidateModelData(qc),
+    onSettled: (_data, _err, { cellKey: k }) => setPending((p) => { if (!(k in p)) return p; const n = { ...p }; delete n[k]; return n; }),
   });
 
   // Export requires a specific grid_def_id (the raw fact_input values are
@@ -500,8 +512,8 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
   // from the scoped query).
   const grid = useMemo(() => {
     if (!gridMeta) return undefined;
-    return { ...gridMeta, cells: cellsData?.cells ?? {}, totals: cellsData?.totals ?? {} };
-  }, [gridMeta, cellsData]);
+    return { ...gridMeta, cells: { ...(cellsData?.cells ?? {}), ...pending }, totals: cellsData?.totals ?? {} };
+  }, [gridMeta, cellsData, pending]);
   const isLoading = metaLoading;
   const error = metaError ?? cellsError;
 
@@ -786,7 +798,8 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
     if (!isNaN(value)) {
       const dim_codes: Record<string, string> = {};
       dims.forEach((d, i) => { dim_codes[d.id] = fc[i]?.code ?? ""; });
-      writeback.mutate({ metric_id: metric.id, dim_codes, value });
+      setPending((p) => ({ ...p, [key]: value }));
+      writeback.mutate({ cellKey: key, metric_id: metric.id, dim_codes, value });
     }
     setEditing(e => { const n = { ...e }; delete n[key]; return n; });
   }

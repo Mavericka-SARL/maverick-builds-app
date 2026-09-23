@@ -67,14 +67,15 @@ type Store struct{ pool *pgxpool.Pool }
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
-// Get returns the row; a database that predates the feature reports defaults.
-func (s *Store) Get(ctx context.Context) (Settings, error) {
+// Get returns the tenant's row (migration 091: one per tenant); a tenant
+// that has never registered a provider reports the defaults.
+func (s *Store) Get(ctx context.Context, customerID string) (Settings, error) {
 	var out Settings
 	err := s.pool.QueryRow(ctx, `
 		SELECT alias, protocol, display_name, metadata_url, client_id, allowed_domains,
 		       jit_provisioning, default_role::text, enabled
-		FROM identity.sso_provider WHERE id = TRUE
-	`).Scan(&out.Alias, &out.Protocol, &out.DisplayName, &out.MetadataURL, &out.ClientID, &out.AllowedDomains,
+		FROM identity.sso_provider WHERE customer_id = $1::uuid
+	`, customerID).Scan(&out.Alias, &out.Protocol, &out.DisplayName, &out.MetadataURL, &out.ClientID, &out.AllowedDomains,
 		&out.JITProvisioning, &out.DefaultRole, &out.Enabled)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -89,14 +90,17 @@ func (s *Store) Get(ctx context.Context) (Settings, error) {
 	return out, nil
 }
 
-func (s *Store) save(ctx context.Context, in Settings) error {
+func (s *Store) save(ctx context.Context, customerID string, in Settings) error {
 	_, err := s.pool.Exec(ctx, `
-		UPDATE identity.sso_provider SET
-		    alias = $1, protocol = $2, display_name = $3, metadata_url = $4, client_id = $5,
-		    allowed_domains = $6, jit_provisioning = $7, default_role = $8::identity.user_role,
-		    enabled = $9, updated_at = now()
-		WHERE id = TRUE
-	`, in.Alias, in.Protocol, in.DisplayName, in.MetadataURL, in.ClientID, in.AllowedDomains,
+		INSERT INTO identity.sso_provider
+		    (customer_id, alias, protocol, display_name, metadata_url, client_id, allowed_domains, jit_provisioning, default_role, enabled)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::identity.user_role, $10)
+		ON CONFLICT (customer_id) DO UPDATE SET
+		    alias = EXCLUDED.alias, protocol = EXCLUDED.protocol, display_name = EXCLUDED.display_name,
+		    metadata_url = EXCLUDED.metadata_url, client_id = EXCLUDED.client_id, allowed_domains = EXCLUDED.allowed_domains,
+		    jit_provisioning = EXCLUDED.jit_provisioning, default_role = EXCLUDED.default_role,
+		    enabled = EXCLUDED.enabled, updated_at = now()
+	`, customerID, in.Alias, in.Protocol, in.DisplayName, in.MetadataURL, in.ClientID, in.AllowedDomains,
 		in.JITProvisioning, in.DefaultRole, in.Enabled)
 	if err != nil {
 		return fmt.Errorf("save sso settings: %w", err)
@@ -104,12 +108,9 @@ func (s *Store) save(ctx context.Context, in Settings) error {
 	return nil
 }
 
-// clear resets the row to "no provider".
-func (s *Store) clear(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, `
-		UPDATE identity.sso_provider SET alias = '', display_name = '', metadata_url = '', client_id = '',
-		    allowed_domains = '{}', enabled = FALSE, updated_at = now()
-		WHERE id = TRUE`)
+// clear forgets the tenant's provider.
+func (s *Store) clear(ctx context.Context, customerID string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM identity.sso_provider WHERE customer_id = $1::uuid`, customerID)
 	return err
 }
 
@@ -225,7 +226,7 @@ func Register(ctx context.Context, store *Store, domains *Domains, broker Broker
 	}
 	in.Alias = Alias(customerID)
 
-	cur, err := store.Get(ctx)
+	cur, err := store.Get(ctx, customerID)
 	if err != nil {
 		return Settings{}, err
 	}
@@ -285,7 +286,7 @@ func Register(ctx context.Context, store *Store, domains *Domains, broker Broker
 			return Settings{}, err
 		}
 	}
-	if err := store.save(ctx, in); err != nil {
+	if err := store.save(ctx, customerID, in); err != nil {
 		return Settings{}, err
 	}
 	if domains != nil {
@@ -293,7 +294,7 @@ func Register(ctx context.Context, store *Store, domains *Domains, broker Broker
 			return Settings{}, err
 		}
 	}
-	return store.Get(ctx)
+	return store.Get(ctx, customerID)
 }
 
 // Remove deletes the provider from Keycloak and the tenant's row and domains.
@@ -310,10 +311,10 @@ func Remove(ctx context.Context, store *Store, domains *Domains, broker Broker, 
 			return Settings{}, err
 		}
 	}
-	if err := store.clear(ctx); err != nil {
+	if err := store.clear(ctx, customerID); err != nil {
 		return Settings{}, err
 	}
-	return store.Get(ctx)
+	return store.Get(ctx, customerID)
 }
 
 // Probe reads the provider document without registering anything: the
@@ -369,7 +370,7 @@ func (e *ErrNotProvisionable) Error() string { return e.Reason }
 // default role in its first workspace. It returns the user id. Idempotent:
 // an account that already exists is returned as is.
 func ProvisionFirstLogin(ctx context.Context, pool *pgxpool.Pool, customerID, sub, email, displayName string) (string, error) {
-	settings, err := NewStore(pool).Get(ctx)
+	settings, err := NewStore(pool).Get(ctx, customerID)
 	if err != nil {
 		return "", err
 	}

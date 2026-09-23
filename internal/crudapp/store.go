@@ -191,7 +191,7 @@ func (s *Store) CreateRecord(ctx context.Context, formID, userID string, data ma
 
 func (s *Store) ListRecords(ctx context.Context, formID string, limit int) ([]*FormRecord, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id::text, form_id::text, data, status::text, created_by::text, created_at, updated_at
+		SELECT id::text, form_id::text, data, status::text, COALESCE(created_by::text, ''), created_at, updated_at
 		FROM runtime.form_record WHERE form_id = $1::uuid
 		ORDER BY created_at DESC LIMIT $2
 	`, formID, limit)
@@ -215,7 +215,7 @@ func (s *Store) GetRecord(ctx context.Context, recordID string) (*FormRecord, er
 	var r FormRecord
 	var dataJSON []byte
 	err := s.pool.QueryRow(ctx, `
-		SELECT id::text, form_id::text, data, status::text, created_by::text, created_at, updated_at
+		SELECT id::text, form_id::text, data, status::text, COALESCE(created_by::text, ''), created_at, updated_at
 		FROM runtime.form_record WHERE id = $1::uuid
 	`, recordID).Scan(&r.ID, &r.FormID, &dataJSON, &r.Status, &r.CreatedBy, &r.CreatedAt, &r.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {

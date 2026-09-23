@@ -144,12 +144,37 @@ The HTTP AI assistant can use a per-user key or a platform fallback:
 - `ANTHROPIC_API_KEY`
 - `MISTRAL_API_KEY`
 - `DEEPSEEK_API_KEY`
-- `AI_KEY_ENCRYPTION_SECRET`
+- `SECRETS_ENCRYPTION_KEY` (the older name `AI_KEY_ENCRYPTION_SECRET` still works)
 
-Per-user keys are AES-256-GCM encrypted only when
-`AI_KEY_ENCRYPTION_SECRET` is set; without it, the store retains a legacy
-plaintext path. Treat that variable as mandatory outside disposable local
-development. The separate legacy gRPC assistant uses `ANTHROPIC_API_KEY`.
+Per-user and per-tenant keys are AES-256-GCM encrypted only when
+`SECRETS_ENCRYPTION_KEY` is set (`internal/secretbox`); without it, the
+store retains a legacy plaintext path. Treat that variable as mandatory
+outside disposable local development, together with `INTEGRATION_CRED_KEY`,
+which seals connector credentials and has no plaintext fallback at all
+(docs/HETZNER_DEPLOYMENT.md, step 6). The separate legacy gRPC assistant
+uses `ANTHROPIC_API_KEY`.
+
+## Migrations are frozen once released
+
+`pkg/migrate` matches an already-applied migration by filename **and**
+checksum. Editing a released file therefore does not "update" anything: on
+the next start-up every database that already ran it refuses to come up
+with `migration NNN_x.sql checksum mismatch`, all of them at once. Renaming
+one is the mirror image — the runner sees an unapplied migration and runs it
+again, against a schema that already has it.
+
+So a change to the schema, or even to a `COMMENT`, goes in a **new**
+migration. `migrations/checksums.txt` records what has been released and
+`go test ./migrations/` enforces it; a new migration appends a line:
+
+```bash
+UPDATE_MIGRATION_LOCK=1 go test ./migrations/
+```
+
+Regenerate the lock for an *existing* migration only when it has
+demonstrably never been applied anywhere, including staging and a
+colleague's dev database. Name migrations `NNN_lower_snake_case.sql`: the
+number orders them, and two files may not share one.
 
 Never commit real credentials. The Kubernetes secret manifest contains
 development placeholders and must be replaced for any deployed environment.

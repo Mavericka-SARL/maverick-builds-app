@@ -231,7 +231,13 @@ func (s *Store) Notify(ctx context.Context, recipientUserID, templateID string, 
 	if err != nil {
 		return "", err
 	}
-	settings, sErr := s.GetSettings(ctx)
+	// Outbound channels are the recipient's tenant's choice (migration
+	// 091); a notification that belongs to no tenant stays in-app.
+	cid := s.CustomerOf(ctx, recipientUserID, resourceType, resourceID)
+	if cid == "" {
+		return id, nil
+	}
+	settings, _, sErr := s.Effective(ctx, cid, DeploymentDefaults)
 	if sErr != nil {
 		return id, nil //nolint:nilerr // the in-app notification stands on its own
 	}

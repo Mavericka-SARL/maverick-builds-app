@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound } from "lucide-react";
+import { SettingsScopeNotice } from "../../consoles/admin/SettingsScopeNotice";
 import { api, type ProviderProbeResult, type TenantAISettings } from "../../api/client";
 import { FeatureGate } from "../../license/FeatureGate";
 import { Button, Card, Checkbox, Field, InlineAlert, LoadingState, Select, TextInput, useConfirm } from "../../ui";
@@ -65,6 +66,9 @@ function TenantAIKeysForm() {
     onSuccess: setProbe,
   });
   const clear = useMutation({ mutationFn: api.clearTenantAIKey, onSuccess: onSettings });
+  // No DELETE here: clearing the key is what "follow the deployment" means
+  // for an AI key, since a tenant row without a key inherits the deployment's.
+  const inherit = useMutation({ mutationFn: api.clearTenantAIKey, onSuccess: onSettings });
 
   if (isLoading) return <LoadingState label="Loading tenant AI settings…" />;
   if (error) return <InlineAlert tone="danger">{(error as Error).message}</InlineAlert>;
@@ -86,6 +90,7 @@ function TenantAIKeysForm() {
 
   return (
     <div className="mvx-admin-stack" data-testid="tenant-ai-settings">
+      <SettingsScopeNotice scope={data?.scope} onInherit={() => inherit.mutate()} inheriting={inherit.isPending} />
       <Card>
         <div style={{ fontWeight: 700, marginBottom: 4 }}>Provider</div>
         <p className="mvx-admin-muted" style={{ marginTop: 0 }}>

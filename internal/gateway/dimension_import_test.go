@@ -50,7 +50,11 @@ func TestImportDimensionMembersPropertiesAndAutoCodes(t *testing.T) {
 		for i, c := range header {
 			colIdx[strings.ToLower(strings.TrimSpace(c))] = i
 		}
-		return h.importDimensionMembersCSV(ctx, dimID, cr, colIdx)
+		imported, errs, fatal := h.importDimensionMembersCSV(ctx, dimID, cr, colIdx)
+		if fatal != nil {
+			t.Fatalf("import: %v", fatal)
+		}
+		return imported, errs
 	}
 
 	// No code column at all: codes auto-generate from labels; a property

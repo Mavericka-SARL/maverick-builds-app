@@ -166,6 +166,7 @@ func (h *handler) adminModelImport(w http.ResponseWriter, r *http.Request) {
 			h.plans.CheckMetrics(ctx, db, cid, "", len(req.Package.Metrics)),
 			h.plans.CheckMembers(ctx, db, cid, "", largest),
 			h.plans.CheckFactRows(ctx, db, cid, "", len(req.Package.Facts)),
+			h.plans.CheckStorage(ctx, db, cid),
 		} {
 			if check != nil {
 				h.jsonLimitErr(w, check)

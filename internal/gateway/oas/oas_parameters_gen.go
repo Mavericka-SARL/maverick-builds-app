@@ -3159,6 +3159,71 @@ func decodeDiscardAiDraftParams(args [1]string, argsEscaped bool, r *http.Reques
 	return params, nil
 }
 
+// DisconnectIntegrationOAuthParams is parameters of disconnectIntegrationOAuth operation.
+type DisconnectIntegrationOAuthParams struct {
+	ID uuid.UUID
+}
+
+func unpackDisconnectIntegrationOAuthParams(packed middleware.Parameters) (params DisconnectIntegrationOAuthParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeDisconnectIntegrationOAuthParams(args [1]string, argsEscaped bool, r *http.Request) (params DisconnectIntegrationOAuthParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // DuplicateIntegrationParams is parameters of duplicateIntegration operation.
 type DuplicateIntegrationParams struct {
 	ID uuid.UUID
@@ -4340,6 +4405,71 @@ func decodeExportModelPackageParams(args [1]string, argsEscaped bool, r *http.Re
 		return params, &ogenerrors.DecodeParamError{
 			Name: "include_data",
 			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// GenerateDimensionPeriodsParams is parameters of generateDimensionPeriods operation.
+type GenerateDimensionPeriodsParams struct {
+	DimId uuid.UUID
+}
+
+func unpackGenerateDimensionPeriodsParams(packed middleware.Parameters) (params GenerateDimensionPeriodsParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "dimId",
+			In:   "path",
+		}
+		params.DimId = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeGenerateDimensionPeriodsParams(args [1]string, argsEscaped bool, r *http.Request) (params GenerateDimensionPeriodsParams, _ error) {
+	// Decode path: dimId.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "dimId",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.DimId = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "dimId",
+			In:   "path",
 			Err:  err,
 		}
 	}
@@ -5852,6 +5982,216 @@ func decodeImportFormRecordsParams(args [1]string, argsEscaped bool, r *http.Req
 		return params, &ogenerrors.DecodeParamError{
 			Name: "id",
 			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// IntegrationOAuthCallbackParams is parameters of integrationOAuthCallback operation.
+type IntegrationOAuthCallbackParams struct {
+	State            string
+	Code             OptString `json:",omitempty,omitzero"`
+	Error            OptString `json:",omitempty,omitzero"`
+	ErrorDescription OptString `json:",omitempty,omitzero"`
+}
+
+func unpackIntegrationOAuthCallbackParams(packed middleware.Parameters) (params IntegrationOAuthCallbackParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "state",
+			In:   "query",
+		}
+		params.State = packed[key].(string)
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "code",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.Code = v.(OptString)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "error",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.Error = v.(OptString)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "error_description",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.ErrorDescription = v.(OptString)
+		}
+	}
+	return params
+}
+
+func decodeIntegrationOAuthCallbackParams(args [0]string, argsEscaped bool, r *http.Request) (params IntegrationOAuthCallbackParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: state.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "state",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToString(val)
+				if err != nil {
+					return err
+				}
+
+				params.State = c
+				return nil
+			}); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "state",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: code.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "code",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotCodeVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotCodeVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.Code.SetTo(paramsDotCodeVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "code",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: error.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "error",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotErrorVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotErrorVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.Error.SetTo(paramsDotErrorVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "error",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: error_description.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "error_description",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotErrorDescriptionVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotErrorDescriptionVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.ErrorDescription.SetTo(paramsDotErrorDescriptionVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "error_description",
+			In:   "query",
 			Err:  err,
 		}
 	}
@@ -9949,6 +10289,71 @@ func decodeSsoDiscoverParams(args [0]string, argsEscaped bool, r *http.Request) 
 		return params, &ogenerrors.DecodeParamError{
 			Name: "email",
 			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// StartIntegrationOAuthParams is parameters of startIntegrationOAuth operation.
+type StartIntegrationOAuthParams struct {
+	ID uuid.UUID
+}
+
+func unpackStartIntegrationOAuthParams(packed middleware.Parameters) (params StartIntegrationOAuthParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeStartIntegrationOAuthParams(args [1]string, argsEscaped bool, r *http.Request) (params StartIntegrationOAuthParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
 			Err:  err,
 		}
 	}

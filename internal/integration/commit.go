@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
@@ -12,6 +13,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/calculation"
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
+	"github.com/mavericks-engine/mavericks/internal/timedim"
 )
 
 // DBCommitter is the production Committer: pulls commit through the SAME
@@ -119,6 +121,13 @@ func (c *DBCommitter) commitDimension(ctx context.Context, def *Definition, head
 		// Fall back to the first mapped column as the code.
 		codeIdx = 0
 	}
+	cfg, err := timedim.LoadConfig(ctx, c.Pool, dimID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("dimension not found: %w", err)
+	}
+	if cfg.Type == timedim.TypeTime {
+		return c.commitTimeDimension(ctx, dimID, cfg, col, codeIdx, rows, dryRun)
+	}
 	written, skipped := 0, 0
 	for _, r := range rows {
 		code := strings.TrimSpace(r[codeIdx])
@@ -168,6 +177,102 @@ func (c *DBCommitter) commitDimension(ctx context.Context, def *Definition, head
 		written++
 	}
 	return written, skipped, nil
+}
+
+// commitTimeDimension is commitDimension for a time dimension: a row with
+// period_start and period_end is a leaf period, a row without is an
+// aggregate period (H1, FY26); parent_code works as on any hierarchy
+// (parents listed first). The whole batch is validated and re-indexed
+// through the shared timedim service in one transaction — a bad period set
+// rejects the run rather than half-applying.
+func (c *DBCommitter) commitTimeDimension(ctx context.Context, dimID string, cfg timedim.Config, col map[string]int, codeIdx int, rows [][]string, dryRun bool) (int, int, error) {
+	startIdx, okS := col["period_start"]
+	endIdx, okE := col["period_end"]
+	if !okS || !okE {
+		return 0, 0, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: "a time dimension import needs period_start and period_end columns"}
+	}
+	parentIdx, hasParent := col["parent_code"]
+	cell := func(r []string, i int) string {
+		if i < 0 || i >= len(r) {
+			return ""
+		}
+		return strings.TrimSpace(r[i])
+	}
+	type row struct {
+		code, label, parent string
+		start, end          *time.Time
+	}
+	var parsed []row
+	var shapes []timedim.MemberShape
+	for _, r := range rows {
+		code := cell(r, codeIdx)
+		if code == "" {
+			continue
+		}
+		var start, end *time.Time
+		if cell(r, startIdx) != "" || cell(r, endIdx) != "" {
+			ps, err1 := timedim.ParseDate(cell(r, startIdx))
+			pe, err2 := timedim.ParseDate(cell(r, endIdx))
+			if err1 != nil || err2 != nil {
+				return 0, 0, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: fmt.Sprintf("member %q: period_start and period_end must be YYYY-MM-DD dates (both empty for an aggregate period)", code)}
+			}
+			start, end = &ps, &pe
+		}
+		label := code
+		if li, ok := col["label"]; ok && cell(r, li) != "" {
+			label = cell(r, li)
+		}
+		parent := ""
+		if hasParent {
+			parent = cell(r, parentIdx)
+		}
+		parsed = append(parsed, row{code: code, label: label, parent: parent, start: start, end: end})
+		shapes = append(shapes, timedim.MemberShape{ID: code, Code: code, ParentID: parent, Start: start, End: end})
+	}
+	if dryRun {
+		// Validate the file on its own so a dry run reports what a real run
+		// would reject.
+		if _, err := timedim.ValidateHierarchy(cfg, shapes); err != nil {
+			return 0, 0, err
+		}
+		return len(parsed), len(rows) - len(parsed), nil
+	}
+	tx, err := c.Pool.Begin(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+	for _, r := range parsed {
+		var idx *int
+		if r.start != nil {
+			zero := 0
+			idx = &zero
+		}
+		var parentID *string
+		if r.parent != "" {
+			var pid string
+			if err := tx.QueryRow(ctx, `SELECT id::text FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2`, dimID, r.parent).Scan(&pid); err != nil {
+				return 0, 0, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: fmt.Sprintf("member %q: parent %q not found (list parents before their children)", r.code, r.parent)}
+			}
+			parentID = &pid
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO model.dimension_member (dimension_id, code, label, period_start, period_end, time_index, parent_member_id)
+			VALUES ($1::uuid, $2, $3, $4::date, $5::date, $6, $7::uuid)
+			ON CONFLICT (dimension_id, code) DO UPDATE SET
+			    label=EXCLUDED.label, period_start=EXCLUDED.period_start, period_end=EXCLUDED.period_end, time_index=EXCLUDED.time_index,
+			    parent_member_id=COALESCE(EXCLUDED.parent_member_id, model.dimension_member.parent_member_id)
+		`, dimID, r.code, r.label, r.start, r.end, idx, parentID); err != nil {
+			return 0, 0, fmt.Errorf("member %q: %w", r.code, err)
+		}
+	}
+	if err := timedim.ValidateAndReindex(ctx, tx, dimID); err != nil {
+		return 0, 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, 0, err
+	}
+	return len(parsed), len(rows) - len(parsed), nil
 }
 
 func (c *DBCommitter) commitForm(ctx context.Context, def *Definition, header []string, rows [][]string, dryRun bool, runBy string) (int, int, error) {

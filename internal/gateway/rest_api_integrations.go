@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -456,6 +457,10 @@ func (h *handler) integrationConnectionAction(w http.ResponseWriter, r *http.Req
 	id := parts[0]
 	st := h.intStore(ctx)
 
+	if len(parts) == 3 && parts[1] == "oauth" && r.Method == http.MethodPost {
+		h.integrationConnectionOAuth(w, r, appID, id, parts[2])
+		return
+	}
 	if len(parts) == 2 && parts[1] == "test" && r.Method == http.MethodPost {
 		// A connection test verifies the credential is present, decryptable
 		// and shaped for its auth type. It deliberately makes NO network
@@ -478,12 +483,19 @@ func (h *handler) integrationConnectionAction(w http.ResponseWriter, r *http.Req
 		need := map[string][]string{
 			"api_key": {"value"}, "bearer": {"token"}, "basic": {"username", "password"},
 			"oauth2_client_credentials": {"client_id", "client_secret", "token_url"},
+			// The client secret is set by the developer; the tokens arrive
+			// through the consent round trip (Connect).
+			integration.AuthTypeOAuthCode: {"client_secret", "access_token"},
 		}
 		for _, k := range need[authType] {
 			if k == "token_url" {
 				continue // lives in public meta
 			}
 			if v, ok := doc[k].(string); !ok || v == "" {
+				if k == "access_token" {
+					jsonOK(w, map[string]any{"ok": false, "error": integration.ErrOAuthNotConnected.Error()})
+					return
+				}
 				jsonOK(w, map[string]any{"ok": false, "error": fmt.Sprintf("credential is missing %q", k)})
 				return
 			}
@@ -591,4 +603,126 @@ func (h *handler) restAPIRunEnqueue(w http.ResponseWriter, r *http.Request, id s
 		return
 	}
 	h.restAPIEnqueue(w, r, modelID, id, "manual", false)
+}
+
+// ── OAuth 2.0 authorization code ──────────────────────────────────────────────
+//
+// POST /api/developer/integration-connections/{id}/oauth/start answers the
+// provider URL the console opens; the provider sends the browser back to
+// GET /api/integrations/oauth/callback (public: the person arrives with
+// nothing but the state), which exchanges the code and returns them to the
+// console. POST …/oauth/disconnect forgets the tokens.
+
+// oauthRedirectURI is the gateway's public callback, from the deployment's
+// own origin (CONSOLE_URL), else the request's — a dev stack.
+func (h *handler) oauthRedirectURI(r *http.Request) string {
+	base := strings.TrimSuffix(h.publicURL, "/")
+	if base == "" {
+		scheme := "http"
+		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+			scheme = "https"
+		}
+		base = scheme + "://" + r.Host
+	}
+	return base + "/api/integrations/oauth/callback"
+}
+
+func (h *handler) integrationConnectionOAuth(w http.ResponseWriter, r *http.Request, appID, id, action string) {
+	ctx := r.Context()
+	act, err := h.resolveActor(ctx, r)
+	if err != nil {
+		jsonErr(w, err, http.StatusUnauthorized)
+		return
+	}
+	st := h.intStore(ctx)
+	switch action {
+	case "start":
+		var body struct {
+			ReturnTo string `json:"return_to"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		// return_to is a console path, never a foreign URL.
+		if body.ReturnTo == "" || !strings.HasPrefix(body.ReturnTo, "/") || strings.HasPrefix(body.ReturnTo, "//") {
+			body.ReturnTo = "/"
+		}
+		authURL, err := st.StartOAuth(ctx, appID, id, act.UserID, h.oauthRedirectURI(r), body.ReturnTo, h.integrationAllowInsecure())
+		if err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		}
+		jsonOK(w, map[string]string{"authorization_url": authURL, "redirect_uri": h.oauthRedirectURI(r)})
+	case "disconnect":
+		if err := st.DisconnectOAuth(ctx, appID, id); err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		}
+		h.auditIntegrationEvent(r, appID, id, auditlog.EventIntegrationUpdated, map[string]string{"kind": "connection", "oauth": "disconnected"})
+		conn, err := st.GetConnection(ctx, appID, id)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, conn)
+	default:
+		jsonErr(w, fmt.Errorf("not found"), http.StatusNotFound)
+	}
+}
+
+// integrationOAuthCallback is where the provider sends the browser. It
+// finishes the exchange and returns the person to the console with the
+// outcome in the query, never with the tokens.
+func (h *handler) integrationOAuthCallback(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	q := r.URL.Query()
+	state, code := q.Get("state"), q.Get("code")
+	console := strings.TrimSuffix(h.publicURL, "/")
+	back := func(returnTo, status, msg string) {
+		u := console + returnTo
+		sep := "?"
+		if strings.Contains(u, "?") {
+			sep = "&"
+		}
+		u += sep + "oauth=" + url.QueryEscape(status)
+		if msg != "" {
+			u += "&oauth_error=" + url.QueryEscape(msg)
+		}
+		http.Redirect(w, r, u, http.StatusFound)
+	}
+	if state == "" {
+		back("/", "error", "missing state")
+		return
+	}
+	if e := q.Get("error"); e != "" {
+		// The provider refused (or the person did). The state is still
+		// consumed so it cannot be replayed.
+		res, _ := h.intStore(ctx).CompleteOAuth(ctx, nil, state, "", "", "", h.integrationAllowInsecure())
+		back(orRoot(res.ReturnTo), "error", strings.TrimSpace(e+" "+q.Get("error_description")))
+		return
+	}
+	connectedBy := ""
+	if a, err := h.resolveActor(ctx, r); err == nil {
+		connectedBy = a.Email
+	}
+	// The exchange leaves the process through the same pinned-dial client
+	// as connector traffic: the token endpoint is a destination like any.
+	client := integration.NewSafeClient(&integration.Limits{}, h.integrationAllowInsecure())
+	res, err := h.intStore(ctx).CompleteOAuth(ctx, client, state, code, h.oauthRedirectURI(r), connectedBy, h.integrationAllowInsecure())
+	if err != nil {
+		back(orRoot(res.ReturnTo), "error", err.Error())
+		return
+	}
+	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+		Category: auditlog.CategoryModelChange, EventType: auditlog.EventIntegrationUpdated,
+		ActorRole:     "oauth_callback",
+		ApplicationID: res.ApplicationID, ResourceType: "integration_connection", ResourceID: res.ConnectionID,
+		Metadata: map[string]string{"kind": "connection", "oauth": "connected", "connected_by": connectedBy},
+	})
+	back(orRoot(res.ReturnTo), "connected", "")
+}
+
+func orRoot(p string) string {
+	if p == "" {
+		return "/"
+	}
+	return p
 }

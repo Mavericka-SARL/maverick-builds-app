@@ -50,6 +50,14 @@ retention. It runs only while the licence includes the feature: if a key
 lapses, events are kept, never deleted. Export before shortening retention;
 the sweep does not archive.
 
+Retention is **per tenant** (migration 091): the sweep removes each
+tenant's events — those of its applications, or of its users where an
+event names no application — by that tenant's own days; platform-level
+events with neither are kept. A platform admin sets any tenant's retention
+by naming it (`X-Tenant-Id`), and on `deployment_settings` the deployment's
+default, which a tenant follows until it sets its own (`DELETE
+/api/admin/audit/settings` returns it to following).
+
 Changing retention is recorded (`audit.retention_updated`).
 
 ## Where the code lives

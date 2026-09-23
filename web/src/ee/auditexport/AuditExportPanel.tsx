@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download } from "lucide-react";
 import { api } from "../../api/client";
+import { SettingsScopeNotice } from "../../consoles/admin/SettingsScopeNotice";
 import { FeatureGate } from "../../license/FeatureGate";
 import { Button, Card, Field, InlineAlert, NumberInput, Select, TextInput } from "../../ui";
 import { downloadBlob } from "../../consoles/business/blobUtils";
@@ -42,6 +43,10 @@ function Panel() {
     mutationFn: () => api.updateAuditSettings({ retention_days: retention }),
     onSuccess: (next) => { qc.setQueryData(["audit-settings"], next); setDays(null); setSaved(true); setTimeout(() => setSaved(false), 2000); },
   });
+  const inherit = useMutation({
+    mutationFn: api.clearAuditSettings,
+    onSuccess: (next) => { qc.setQueryData(["audit-settings"], next); setDays(null); },
+  });
 
   return (
     <div className="mvx-admin-stack" data-testid="audit-export" style={{ marginBottom: 16 }}>
@@ -72,6 +77,7 @@ function Panel() {
       </Card>
       <Card>
         <div style={{ fontWeight: 700, marginBottom: 4 }}>Retention</div>
+        <SettingsScopeNotice scope={settings?.scope} onInherit={() => inherit.mutate()} inheriting={inherit.isPending} />
         <p className="mvx-admin-muted" style={{ marginTop: 0 }}>
           How many days of events to keep. 0 keeps them forever; anything else is at least {floor} days. A daily sweep
           removes older events and does not archive them — export first.

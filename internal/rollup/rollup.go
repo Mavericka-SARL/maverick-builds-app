@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"time"
 )
 
 // Member is one dimension member, stripped to just what rollup arithmetic
@@ -26,7 +27,20 @@ type Member struct {
 	Code       string
 	ParentCode string
 	Properties map[string]string
+	// Time-member fields (spec §3.2), meaningful only when the owning
+	// Dimension.IsTime: the server-owned chronological ordinal and the
+	// period's date range. TimeIndex is -1 for an AGGREGATE period (H1,
+	// FY26 — a member without dates, whose value is its descendants reduced
+	// by the metric's time summary); zero values on a standard member.
+	TimeIndex   int
+	PeriodStart time.Time
+	PeriodEnd   time.Time
 }
+
+// IsLeafPeriod reports whether m is a dated leaf period of a time dimension
+// (loaders set TimeIndex to -1 for an aggregate). Meaningful only when the
+// owning dimension IsTime.
+func (m Member) IsLeafPeriod() bool { return m.TimeIndex >= 0 }
 
 // Dimension is one dimension's full member universe for a revision, already
 // hidden-member-filtered by the caller (writeguard.ExpandHidden or
@@ -40,6 +54,13 @@ type Dimension struct {
 	SourceDimensionID string
 	SourceProperty    string
 	Members           []Member
+	// IsTime marks an explicitly declared time dimension (dimension_type =
+	// 'time'). Its Members are then in time_index order and time-series
+	// formulas move along it; a standard dimension is never treated as time,
+	// whatever its name or member codes look like.
+	IsTime               bool
+	TimeGranularity      string
+	FiscalYearStartMonth int
 }
 
 // AggRule is how multiple resolved values combine into one.
@@ -127,7 +148,7 @@ func Resolve(
 	combo map[string]string,
 	fetch RawValue,
 ) (float64, bool, error) {
-	return resolve(ctx, dims, metricID, metricDimIDs, aggRule, combo, fetch, 0)
+	return resolve(ctx, dims, metricID, metricDimIDs, aggRule, "", combo, fetch, 0)
 }
 
 // LeafCombos returns the full Cartesian product of every leaf member across
@@ -215,6 +236,7 @@ func resolve(
 	metricID string,
 	metricDimIDs []string,
 	aggRule AggRule,
+	timeSummary TimeSummaryRule, // "" = combine a time dimension's children like any other (legacy Resolve)
 	combo map[string]string,
 	fetch RawValue,
 	depth int,
@@ -239,15 +261,35 @@ func resolve(
 		if len(children) == 0 {
 			continue
 		}
+		// An aggregate PERIOD (H1, FY26) reduces its children by the
+		// metric's time summary, not by agg_rule: a closing balance at H1
+		// is Q2's balance, never Q1 + Q2. Children are taken in
+		// chronological order so first/last mean what they say.
+		timeParent := dim.IsTime && timeSummary != ""
+		if timeParent {
+			if timeSummary == "none" {
+				return 0, false, nil
+			}
+			children = chronological(dim, children)
+		}
 		vals := make([]float64, 0, len(children))
 		for _, child := range children {
 			childCombo := cloneCombo(combo)
 			childCombo[dimID] = child.Code
-			v, _, err := resolve(ctx, dims, metricID, metricDimIDs, aggRule, childCombo, fetch, depth+1)
+			v, ok, err := resolve(ctx, dims, metricID, metricDimIDs, aggRule, timeSummary, childCombo, fetch, depth+1)
 			if err != nil {
 				return 0, false, err
 			}
+			if timeParent && !ok {
+				continue // an empty aggregate below: nothing to reduce
+			}
 			vals = append(vals, v)
+		}
+		if timeParent {
+			if len(vals) == 0 {
+				return 0, false, nil
+			}
+			return CombineTime(vals, timeSummary), true, nil
 		}
 		return combineAgg(vals, aggRule), true, nil
 	}
@@ -320,10 +362,42 @@ func allLeafCodes(dim *Dimension) []string {
 	}
 	var out []string
 	for _, m := range dim.Members {
-		if !hasChildren[m.Code] {
-			out = append(out, m.Code)
+		if hasChildren[m.Code] {
+			continue
 		}
+		// On a time dimension only a DATED period is a leaf; an aggregate
+		// that has no children yet is an empty grouping, not a period.
+		if dim.IsTime && !m.IsLeafPeriod() {
+			continue
+		}
+		out = append(out, m.Code)
 	}
+	return out
+}
+
+// chronological orders a time dimension's members by the first leaf period
+// beneath each (an aggregate sorts where its earliest descendant does).
+func chronological(dim *Dimension, members []Member) []Member {
+	first := map[string]int{}
+	var firstLeaf func(code string) int
+	firstLeaf = func(code string) int {
+		if v, ok := first[code]; ok {
+			return v
+		}
+		best := 1 << 30
+		if m := findMember(dim, code); m != nil && m.IsLeafPeriod() {
+			best = m.TimeIndex
+		}
+		for _, c := range childrenOf(dim, code) {
+			if v := firstLeaf(c.Code); v < best {
+				best = v
+			}
+		}
+		first[code] = best
+		return best
+	}
+	out := append([]Member(nil), members...)
+	sort.SliceStable(out, func(i, j int) bool { return firstLeaf(out[i].Code) < firstLeaf(out[j].Code) })
 	return out
 }
 
@@ -552,4 +626,119 @@ func cloneCombo(combo map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+// TimeSummaryRule is how a metric aggregates ACROSS its time dimension
+// (metric_def.time_summary); AggRule stays the rule for every other
+// dimension. See ResolveTime.
+type TimeSummaryRule string
+
+// ResolveTime is Resolve for a metric that may carry a time dimension: when
+// its time dimension is left unpinned by combo, non-time dimensions are
+// reduced first (aggRule, via Resolve at each period) and the periods are
+// then reduced by timeSummary — the order the calculation scheduler uses
+// for its own aggregate and slice rows, so a chart or an export that
+// aggregates over time reads the same number the grid shows. A time summary
+// of "none" answers ok=false: a time total is meaningless for the metric.
+// With no time dimension among metricDimIDs, or with it pinned, this is
+// exactly Resolve.
+func ResolveTime(
+	ctx context.Context,
+	dims map[string]*Dimension,
+	metricID string,
+	metricDimIDs []string,
+	aggRule AggRule,
+	timeSummary TimeSummaryRule,
+	combo map[string]string,
+	fetch RawValue,
+) (float64, bool, error) {
+	var axis *Dimension
+	for _, id := range metricDimIDs {
+		if d := dims[id]; d != nil && d.IsTime {
+			axis = d
+			break
+		}
+	}
+	if axis == nil {
+		return Resolve(ctx, dims, metricID, metricDimIDs, aggRule, combo, fetch)
+	}
+	if timeSummary == "" {
+		timeSummary = "sum"
+	}
+	if _, pinned := combo[axis.ID]; pinned {
+		// Pinned to a leaf period: a plain read. Pinned to an aggregate
+		// period: resolve's tier-1 expansion reduces its children by the
+		// time summary.
+		return resolve(ctx, dims, metricID, metricDimIDs, aggRule, timeSummary, combo, fetch, 0)
+	}
+	if timeSummary == "none" {
+		return 0, false, nil
+	}
+	var members []Member
+	for _, m := range axis.Members {
+		if m.IsLeafPeriod() {
+			members = append(members, m)
+		}
+	}
+	sort.SliceStable(members, func(i, j int) bool { return members[i].TimeIndex < members[j].TimeIndex })
+	vals := make([]float64, 0, len(members))
+	for _, m := range members {
+		c := cloneCombo(combo)
+		c[axis.ID] = m.Code
+		v, ok, err := resolve(ctx, dims, metricID, metricDimIDs, aggRule, timeSummary, c, fetch, 0)
+		if err != nil {
+			return 0, false, err
+		}
+		if !ok {
+			continue // no value at this period — an absent leaf, not a zero to average in
+		}
+		vals = append(vals, v)
+	}
+	if len(vals) == 0 {
+		return 0, false, nil
+	}
+	return CombineTime(vals, timeSummary), true, nil
+}
+
+// CombineTime reduces per-period values by a time summary rule. Mirrors
+// the calculation scheduler's TimeSummary for every rule but "none" (which
+// callers handle before combining).
+func CombineTime(vals []float64, rule TimeSummaryRule) float64 {
+	if len(vals) == 0 {
+		return 0
+	}
+	switch rule {
+	case "average":
+		var s float64
+		for _, v := range vals {
+			s += v
+		}
+		return s / float64(len(vals))
+	case "min":
+		m := vals[0]
+		for _, v := range vals[1:] {
+			if v < m {
+				m = v
+			}
+		}
+		return m
+	case "max":
+		m := vals[0]
+		for _, v := range vals[1:] {
+			if v > m {
+				m = v
+			}
+		}
+		return m
+	case "first":
+		return vals[0]
+	case "last":
+		return vals[len(vals)-1]
+	default:
+		var s float64
+		for _, v := range vals {
+			s += v
+		}
+		return s
+	}
 }

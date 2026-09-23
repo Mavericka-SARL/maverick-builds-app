@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Boxes, Users, ScrollText, Server, KeyRound, Bell, Sparkles, Fingerprint, UserPlus, BarChart3, Palette, Layers } from "lucide-react";
 import { api } from "../../api/client";
@@ -5,6 +6,7 @@ import { UsersPanel } from "../admin/UsersPanel";
 import { InfraNodesTab } from "./InfraNodesTab";
 import { LicenseTab } from "./LicenseTab";
 import { PlansTab } from "./PlansTab";
+import { SettingsScopePicker, DEPLOYMENT_SCOPE } from "./SettingsScopePicker";
 import { NotificationSettingsTab } from "../admin/NotificationSettingsTab";
 import { TenantAIKeysTab } from "../../ee/aikeys/TenantAIKeysTab";
 import { SsoTab } from "../../ee/sso/SsoTab";
@@ -15,6 +17,16 @@ import { computeAssignableRoles, canManageResourceAccess } from "../admin/roles"
 import { PageLayout, LoadingState, ErrorState } from "../../ui";
 import { tabId, localTab, sectionOf, type ConsoleSection, type SectionId, type SectionInput } from "../../router/sections";
 import { ApplicationsView, AuditView } from "./PlatformAdminConsole";
+
+/** Tabs whose content is one tenant's (or the deployment's) settings. */
+const SCOPED_TABS = new Set<string>(["notifications", "ai-keys", "sso", "scim", "branding", "audit"]);
+/** Of those, the ones with a deployment-wide row to inherit from. */
+const DEPLOYMENT_ROW_TABS = new Set<string>(["notifications", "ai-keys", "audit"]);
+
+/** Identity and branding are always one tenant's: at platform scope they wait for a choice. */
+function tenantChosen(scope: "platform" | "tenant", settingsScope: string): boolean {
+  return scope === "tenant" || settingsScope !== DEPLOYMENT_SCOPE;
+}
 
 type Tab = "applications" | "users" | "audit" | "usage" | "notifications" | "ai-keys" | "sso" | "scim" | "branding" | "plans" | "infra" | "license";
 const TAB_LABELS: Record<Tab, string> = { applications: "Applications", users: "Users", audit: "Audit Log", usage: "Usage", notifications: "Notification delivery", "ai-keys": "AI keys", sso: "Single sign-on", scim: "Provisioning (SCIM)", branding: "Branding", plans: "Plans", infra: "Infrastructure", license: "License" };
@@ -36,6 +48,9 @@ export function useAdminSection({ enabled, tab, scope }: SectionInput & { scope:
   const { data: tenants, isLoading: tenantsLoading, error: tenantsError } = useQuery({ queryKey: ["admin-tenants"], queryFn: api.getAdminTenants, enabled });
   const { data: users, isLoading: usersLoading, error: usersError } = useQuery({ queryKey: ["admin-users"], queryFn: api.getAdminUsers, enabled: enabled && local === "users" });
   const { data: audit, isLoading: auditLoading, error: auditError } = useQuery({ queryKey: ["admin-audit"], queryFn: api.getAdminAudit, enabled: enabled && local === "audit" });
+  // Whose settings the per-tenant tabs show at platform scope: a tenant, or
+  // the deployment's own row (SettingsScopePicker).
+  const [settingsScope, setSettingsScope] = useState(DEPLOYMENT_SCOPE);
 
   if (!enabled) return null;
   const t = (id: Tab) => tabId(section, id);
@@ -86,17 +101,20 @@ export function useAdminSection({ enabled, tab, scope }: SectionInput & { scope:
         <PageLayout title={TAB_LABELS[cur]} meta={meta}>
           {isLoading && <LoadingState />}
           {error && <ErrorState message={(error as Error).message} />}
-          {!isLoading && !error && cur === "applications" && tenants && <ApplicationsView tenants={tenants} isPlatformAdmin={isPlatformAdmin} isTenantAdmin={isTenantAdmin} />}
+          {!isLoading && !error && cur === "applications" && tenants && <ApplicationsView tenants={tenants} isPlatformAdmin={isPlatformAdmin} canTransferModels={isTenantAdmin || isPlatformAdmin} />}
           {!isLoading && !error && cur === "users" && users && (
             <UsersPanel users={users} tenants={tenants ?? []} assignableRoles={computeAssignableRoles(roles)} canManageResourceAccess={canManageResourceAccess(roles)} currentUserId={me?.user_id} />
           )}
           {!isLoading && !error && cur === "audit" && audit && <AuditView events={audit} />}
+          {scope === "platform" && SCOPED_TABS.has(cur) && (
+            <SettingsScopePicker tenants={tenants ?? []} value={settingsScope} onChange={setSettingsScope} deploymentRow={DEPLOYMENT_ROW_TABS.has(cur)} />
+          )}
           {cur === "notifications" && <NotificationSettingsTab />}
           {cur === "ai-keys" && <TenantAIKeysTab />}
           {cur === "usage" && <UsageTab scope={scope} />}
-          {cur === "sso" && <SsoTab />}
-          {cur === "scim" && <ScimTab />}
-          {cur === "branding" && <BrandingTab />}
+          {cur === "sso" && tenantChosen(scope, settingsScope) && <SsoTab />}
+          {cur === "scim" && tenantChosen(scope, settingsScope) && <ScimTab />}
+          {cur === "branding" && tenantChosen(scope, settingsScope) && <BrandingTab />}
           {cur === "plans" && scope === "platform" && <PlansTab />}
           {cur === "infra" && scope === "platform" && <InfraNodesTab />}
           {cur === "license" && scope === "platform" && <LicenseTab />}

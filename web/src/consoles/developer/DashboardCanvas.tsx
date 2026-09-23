@@ -6,7 +6,7 @@ import { ChartWidgetEditor } from "../dashboard/ChartWidgetEditor";
 import { chartConfigFromDraft, isChartConfigComplete } from "../dashboard/chartTypes";
 import { DashboardWidgetGrid } from "../business/DashboardWidgets";
 import { defaultLeafCode, groupWidgetsIntoRows } from "../dashboardLayout";
-import { Toolbar, ToolbarGroup, Button, SegmentedControl, FilterChip, StatusBadge, IconButton, Field, Select, TextInput, Textarea, NumberInput, Checkbox, PropertyPanel, ConfirmDialog, UnsavedChangesBar, useUnsavedGuard } from "../../ui";
+import { Toolbar, ToolbarGroup, Button, SegmentedControl, FilterChip, StatusBadge, IconButton, Field, Select, TextInput, Textarea, NumberInput, Checkbox, PropertyPanel, ConfirmDialog, UnsavedChangesBar, useUnsavedGuard, RichText } from "../../ui";
 
 // ── Dashboard widget palette / sizing ───────────────────────────────────────
 
@@ -20,6 +20,24 @@ const WIDGET_TYPE_COLORS: Record<string, { bg: string; text: string }> = {
   metric_kpi:         { bg: "var(--color-widget-metric-bg)", text: "var(--color-widget-metric-text)" },
   import:             { bg: "var(--color-widget-import-bg)", text: "var(--color-widget-import-text)" },
 };
+/** A dashboard image is kept inline as a data URL, so it travels with the
+ *  dashboard through revision copies, exports and imports. The limit and
+ *  the accepted types mirror internal/imagedata on the server. */
+const MAX_IMAGE_BYTES = 512 * 1024;
+
+function readImageAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (file.size > MAX_IMAGE_BYTES) {
+      reject(new Error(`The image must be at most ${MAX_IMAGE_BYTES / 1024} KB; this one is ${Math.round(file.size / 1024)} KB.`));
+      return;
+    }
+    const r = new FileReader();
+    r.onerror = () => reject(new Error("That file could not be read."));
+    r.onload = () => resolve(String(r.result));
+    r.readAsDataURL(file);
+  });
+}
+
 
 const PALETTE_TYPES = [
   { type: "grid",               label: "Grid" },
@@ -29,6 +47,7 @@ const PALETTE_TYPES = [
   { type: "automation_button",  label: "Trigger" },
   { type: "integration_button", label: "Integration" },
   { type: "text",               label: "Text" },
+  { type: "image",              label: "Image" },
   { type: "import",             label: "Import" },
 ];
 
@@ -82,6 +101,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [newWidget, setNewWidget] = useState({ widget_type: "grid", ref_id: "", content: "" });
+  const [imageError, setImageError] = useState("");
   const [propsDraft, setPropsDraft] = useState<Record<string, { ref_id?: string; content?: string; title?: string | null; show_title?: boolean; widget_props?: WidgetProps | null }>>({});
 
   const [newChartDraft, setNewChartDraft] = useState<Partial<GridChartConfig>>({ chart_type: "bar", context_defaults: {} });
@@ -328,7 +348,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
   function widgetSourceLabel(w: DashboardWidget): string {
     const pd = propsDraft[w.id];
     const refId  = pd?.ref_id  !== undefined ? pd.ref_id  : w.ref_id;
-    if (w.widget_type === "text")               return "";
+    if (w.widget_type === "text" || w.widget_type === "image") return "";
     if (w.widget_type === "grid")               return (grids as GridDef[]).find(g => g.id === refId)?.name ?? refId?.slice(0, 8) ?? "—";
     if (w.widget_type === "form")               return (forms as FormDef[]).find(f => f.id === refId)?.label ?? refId?.slice(0, 8) ?? "—";
     if (w.widget_type === "automation_button")  return (rules as AutomationRule[]).find(r => r.id === refId)?.name ?? refId?.slice(0, 8) ?? "—";
@@ -377,7 +397,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
   }
 
   function addWidgetDisabled(): boolean {
-    if (newWidget.widget_type === "text") return !newWidget.content;
+    if (newWidget.widget_type === "text" || newWidget.widget_type === "image") return !newWidget.content;
     if (newWidget.widget_type === "chart") {
       if (!newWidget.ref_id) return true;
       return chartConfigFromDraft(newChartDraft) === null;
@@ -613,8 +633,28 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
               </Field>
             )}
             {newWidget.widget_type === "text" && (
-              <Field label="Content">
-                <TextInput value={newWidget.content} onChange={e => setNewWidget(w => ({ ...w, content: e.target.value }))} placeholder="Text content…" />
+              <Field label="Content" description="Markdown: # heading, **bold**, - bullets, [label](https://example.com)">
+                <Textarea value={newWidget.content} onChange={e => setNewWidget(w => ({ ...w, content: e.target.value }))} rows={4} style={{ width: "100%", resize: "vertical" }} placeholder="Text content…" />
+              </Field>
+            )}
+            {newWidget.widget_type === "image" && (
+              <Field label="Image file" description={`PNG, JPEG, SVG, WebP or GIF, up to ${MAX_IMAGE_BYTES / 1024} KB. The picture is stored with the dashboard.`}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  aria-label="Image file"
+                  onChange={async e => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    try {
+                      setImageError("");
+                      const data = await readImageAsDataURL(file);
+                      setNewWidget(w => ({ ...w, content: data }));
+                    } catch (err) { setImageError((err as Error).message); }
+                  }}
+                />
+                {imageError && <div className="mvx-admin-error">{imageError}</div>}
+                {newWidget.content?.startsWith("data:") && <img src={newWidget.content} alt="" style={{ maxWidth: "100%", maxHeight: 120, marginTop: 8, display: "block" }} />}
               </Field>
             )}
             {newWidget.widget_type === "import" && (
@@ -882,12 +922,20 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                           </div>
                         );
                       })()}
+                      {w.widget_type === "image" && (() => {
+                        const pd = propsDraft[w.id];
+                        const content = pd?.content !== undefined ? pd.content : w.content;
+                        const wp = { ...(w.widget_props ?? {}), ...(pd?.widget_props ?? {}) };
+                        return content
+                          ? <img src={content} alt={wp.alt ?? ""} style={{ width: "100%", height: "100%", objectFit: wp.image_fit ?? "contain" }} />
+                          : <span className="mvx-admin-muted">No image chosen</span>;
+                      })()}
                       {w.widget_type === "text" && (() => {
                         const pd = propsDraft[w.id];
                         const content = pd?.content !== undefined ? pd.content : w.content;
                         const wp = { ...(w.widget_props ?? {}), ...(pd?.widget_props ?? {}) };
                         return content
-                          ? <span style={{ whiteSpace: "pre-wrap", fontSize: wp.font_size ? `${wp.font_size}px` : 14, fontWeight: wp.font_weight ?? "normal", color: wp.color ?? "var(--color-text-strong)", fontFamily: wp.font_family ?? "sans-serif" }}>{content}</span>
+                          ? <RichText text={content} style={{ fontSize: wp.font_size ? `${wp.font_size}px` : 14, fontWeight: wp.font_weight ?? "normal", color: wp.color ?? "var(--color-text-strong)", fontFamily: wp.font_family ?? "sans-serif" }} />
                           : null;
                       })()}
                     </div>
@@ -1396,6 +1444,9 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
             {selectedWidget.widget_type === "text" && (
               <div style={{ marginBottom: 12 }}>
                 <div className="mvx-prop-section">Content</div>
+                <div className="mvx-admin-muted" style={{ fontSize: 12, marginBottom: 4 }}>
+                  Markdown: <code># heading</code>, <code>**bold**</code>, <code>- bullets</code>, <code>[label](https://example.com)</code>
+                </div>
                 <Textarea
                   key={selectedWidget.id}
                   defaultValue={propsDraft[selectedWidget.id]?.content ?? selectedWidget.content ?? ""}
@@ -1408,6 +1459,46 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                 />
               </div>
             )}
+
+            {/* Image: replace the picture, its alt text and how it fills the box */}
+            {selectedWidget.widget_type === "image" && (() => {
+              const wp = { ...(selectedWidget.widget_props ?? {}), ...(propsDraft[selectedWidget.id]?.widget_props ?? {}) };
+              const setWp = (patch: WidgetProps) =>
+                setPropsDraft(prev => ({ ...prev, [selectedWidget.id]: { ...prev[selectedWidget.id], widget_props: { ...wp, ...patch } } }));
+              return (
+                <div style={{ marginBottom: 12 }}>
+                  <div className="mvx-prop-section">Image</div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    aria-label="Replace the image"
+                    onChange={async e => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      try {
+                        setImageError("");
+                        const data = await readImageAsDataURL(file);
+                        setPropsDraft(prev => ({ ...prev, [selectedWidget.id]: { ...prev[selectedWidget.id], content: data } }));
+                      } catch (err) { setImageError((err as Error).message); }
+                    }}
+                  />
+                  {imageError && <div className="mvx-admin-error">{imageError}</div>}
+                  <Field label="Alternative text" description="Read aloud by screen readers, and shown if the picture cannot load.">
+                    <TextInput
+                      defaultValue={wp.alt ?? ""}
+                      onBlur={e => setWp({ alt: e.target.value })}
+                      placeholder="What the picture shows"
+                    />
+                  </Field>
+                  <Field label="Fit">
+                    <Select value={wp.image_fit ?? "contain"} onChange={e => setWp({ image_fit: e.target.value as "contain" | "cover" })}>
+                      <option value="contain">Show all of it</option>
+                      <option value="cover">Fill the box</option>
+                    </Select>
+                  </Field>
+                </div>
+              );
+            })()}
 
             {/* Text style */}
             {selectedWidget.widget_type === "text" && (() => {

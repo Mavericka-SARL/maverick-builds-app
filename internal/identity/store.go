@@ -111,7 +111,11 @@ func (s *Store) AssignRole(ctx context.Context, userID string, role commonv1.Rol
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO identity.role_assignment (user_id, role, workspace_id, assigned_by)
 		VALUES ($1, $2::identity.user_role, $3, $4)
-		ON CONFLICT (user_id, role, workspace_id) DO NOTHING
+		-- No conflict target: a platform-level grant (workspace_id NULL) is
+		-- arbitrated by the partial unique index from migration 086, which
+		-- naming the constraint's columns would exclude — turning a repeat
+		-- grant into a unique violation instead of a no-op.
+		ON CONFLICT DO NOTHING
 	`, userID, roleStr, wsID, assignedByPtr)
 	return err
 }

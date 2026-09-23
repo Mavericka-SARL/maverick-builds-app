@@ -15,6 +15,7 @@ import (
 
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
 	"github.com/mavericks-engine/mavericks/internal/aiassistant/providers"
+	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 )
 
@@ -80,7 +81,8 @@ func buildProvider(provider, apiKey string) (providers.Provider, error) {
 //
 // A key always brings its own provider with it: the key belongs to that
 // account, so using a tenant key means using the tenant's provider and model.
-func (h *handler) buildProviderForRequest(r *http.Request, userID string) (providers.Provider, string, string, error) {
+func (h *handler) buildProviderForRequest(r *http.Request, act *actor) (providers.Provider, string, string, error) {
+	userID := act.UserID
 	if h.testProvider != nil {
 		return h.testProvider, "test", "test-model", nil
 	}
@@ -90,7 +92,7 @@ func (h *handler) buildProviderForRequest(r *http.Request, userID string) (provi
 	if err != nil {
 		return nil, "", "", fmt.Errorf("load llm settings: %w", err)
 	}
-	tenant := h.tenantAIKey(ctx)
+	tenant := h.tenantAIKey(ctx, h.requestCustomerID(ctx, r, act))
 
 	var provider, model, apiKey string
 	switch {
@@ -321,7 +323,7 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build the LLM provider.
-	llmProvider, _, llmModel, err := h.buildProviderForRequest(r, a.UserID)
+	llmProvider, _, llmModel, err := h.buildProviderForRequest(r, a)
 	if err != nil {
 		jsonErr(w, err, http.StatusBadRequest)
 		return
@@ -877,6 +879,10 @@ func (h *handler) aiPromoteDraft(w http.ResponseWriter, r *http.Request) {
 
 	modelID, err := h.activateRevision(ctx, draftRevID)
 	if err != nil {
+		if metricformula.IsValidationError(err) {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		}
 		jsonErr(w, err, http.StatusNotFound)
 		return
 	}
@@ -1126,7 +1132,7 @@ func (h *handler) aiGetSettings(w http.ResponseWriter, r *http.Request) {
 	// A developer whose tenant provides the key needs to know that before
 	// wondering why their own key had no effect, so say it here rather than
 	// letting the screen imply a personal key is required.
-	tenant := h.tenantAIKey(ctx)
+	tenant := h.tenantAIKey(ctx, h.requestCustomerID(ctx, r, a))
 	jsonOK(w, aiSettingsResponse{
 		LLMSettings:    settings,
 		TenantKey:      tenant.OK,

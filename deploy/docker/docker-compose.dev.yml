@@ -129,6 +129,9 @@ services:
       KC_DB: dev-mem
     volumes:
       - ./config/keycloak:/opt/keycloak/data/import
+      # The realm asks for loginTheme "maverickbuilds"; without this mount
+      # Keycloak cannot find it and quietly serves its own login page.
+      - ./config/keycloak/themes/maverickbuilds:/opt/keycloak/themes/maverickbuilds:ro
     ports:
       - "8180:8080"
     healthcheck:

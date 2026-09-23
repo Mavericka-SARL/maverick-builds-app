@@ -49,6 +49,7 @@ func (r *Reminder) Run(ctx context.Context, interval time.Duration) {
 type dueStep struct {
 	StepID     string
 	InstanceID string
+	CustomerID string
 	StepName   string
 	Workflow   string
 	DueAt      time.Time
@@ -57,23 +58,35 @@ type dueStep struct {
 // RunOnce reminds for every step that has come due, and returns how many
 // steps were reminded about.
 func (r *Reminder) RunOnce(ctx context.Context) (int, error) {
-	settings, err := r.Store.GetSettings(ctx)
+	// Reminders are a per-tenant setting (migration 091): steps come due by
+	// their own tenant's lead time, so the query casts the widest net any
+	// tenant asks for and each step is then judged by its tenant's settings.
+	maxLead, err := r.Store.maxReminderLead(ctx)
 	if err != nil {
 		return 0, err
-	}
-	if !settings.RemindersEnabled {
-		return 0, nil
 	}
 	batch := r.Batch
 	if batch <= 0 {
 		batch = 100
 	}
-	steps, err := r.dueSteps(ctx, settings.ReminderLeadHours, batch)
+	steps, err := r.dueSteps(ctx, maxLead, batch)
 	if err != nil {
 		return 0, err
 	}
+	perTenant := map[string]Settings{}
 	reminded := 0
 	for _, st := range steps {
+		settings, ok := perTenant[st.CustomerID]
+		if !ok {
+			settings, _, err = r.Store.Effective(ctx, st.CustomerID, DeploymentDefaults)
+			if err != nil {
+				return reminded, err
+			}
+			perTenant[st.CustomerID] = settings
+		}
+		if !settings.RemindersEnabled || st.DueAt.Add(-time.Duration(settings.ReminderLeadHours)*time.Hour).After(time.Now()) {
+			continue
+		}
 		recipients, rErr := r.assignees(ctx, st.StepID)
 		if rErr != nil {
 			r.Log.Warn().Err(rErr).Str("step", st.StepID).Msg("resolving a task's assignees failed")
@@ -109,12 +122,13 @@ func (r *Reminder) RunOnce(ctx context.Context) (int, error) {
 // which must never page real people.
 func (r *Reminder) dueSteps(ctx context.Context, leadHours int32, limit int) ([]dueStep, error) {
 	rows, err := r.Store.pool.Query(ctx, `
-		SELECT ws.id::text, wi.id::text,
+		SELECT ws.id::text, wi.id::text, COALESCE(app.customer_id::text, ''),
 		       COALESCE(step_def.elem->>'name', 'Task'),
 		       wd.name, ws.due_at
 		FROM workflow.workflow_step ws
 		JOIN workflow.workflow_instance wi ON wi.id = ws.instance_id
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
+		LEFT JOIN core.application app ON app.id = wd.application_id
 		LEFT JOIN LATERAL (
 		    SELECT elem FROM jsonb_array_elements(COALESCE(wi.steps_snapshot, wd.steps)) AS elem
 		    WHERE elem->>'id' = ws.step_def_id LIMIT 1
@@ -134,7 +148,7 @@ func (r *Reminder) dueSteps(ctx context.Context, leadHours int32, limit int) ([]
 	var out []dueStep
 	for rows.Next() {
 		var st dueStep
-		if err := rows.Scan(&st.StepID, &st.InstanceID, &st.StepName, &st.Workflow, &st.DueAt); err != nil {
+		if err := rows.Scan(&st.StepID, &st.InstanceID, &st.CustomerID, &st.StepName, &st.Workflow, &st.DueAt); err != nil {
 			return nil, err
 		}
 		out = append(out, st)

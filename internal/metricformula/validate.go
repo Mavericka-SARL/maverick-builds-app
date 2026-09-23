@@ -26,11 +26,13 @@ package metricformula
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/mavericks-engine/mavericks/internal/formula"
 )
@@ -42,6 +44,12 @@ type Result struct {
 	// dimension rather than a metric are legal (formulas can test dimension
 	// membership) and simply don't produce an edge.
 	DependsOnMetricIDs []string
+	// Edges are the same dependencies with the time offsets each is read at
+	// (spec §3.4). Write them with WriteDependencies.
+	Edges []Edge
+	// UsesTimeSeries is true when the formula calls a time function and so
+	// needs the metric to be dimensioned by exactly one time dimension.
+	UsesTimeSeries bool
 }
 
 // Request describes the metric being saved.
@@ -57,33 +65,55 @@ type Request struct {
 
 // ValidationError is a rejection a user can act on: it names what is wrong
 // with the formula rather than surfacing a database or parser internal.
-type ValidationError struct{ Message string }
+// Code, when set, is one of the stable identifiers from spec §9.
+type ValidationError struct {
+	Code    string
+	Message string
+}
 
-func (e *ValidationError) Error() string { return e.Message }
+func (e *ValidationError) Error() string {
+	if e.Code != "" && !strings.HasPrefix(e.Message, e.Code) {
+		return e.Code + ": " + e.Message
+	}
+	return e.Message
+}
 
 func invalid(format string, args ...any) error {
 	return &ValidationError{Message: fmt.Sprintf(format, args...)}
 }
 
+func invalidCode(code, format string, args ...any) error {
+	return &ValidationError{Code: code, Message: fmt.Sprintf(format, args...)}
+}
+
+// Querier is what Validate needs from the database: a pool or a transaction.
+type Querier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 // Validate checks a calculated metric's formula and resolves its dependency
 // edges. An input metric (no formula) validates trivially with no edges.
-func Validate(ctx context.Context, pool *pgxpool.Pool, req Request) (*Result, error) {
+func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 	if strings.TrimSpace(req.Formula) == "" {
 		return &Result{}, nil
 	}
 
-	// 1. It must parse. Everything below depends on a real AST, and this is
-	//    the check whose absence let malformed formulas through.
-	if _, err := formula.Parse(req.Formula); err != nil {
+	// 1. It must parse and analyze. Everything below depends on a real AST,
+	//    and this is the check whose absence let malformed formulas through.
+	//    Analysis also validates time-function signatures: literal offsets,
+	//    keyword arguments, argument counts.
+	an, err := formula.Analyze(req.Formula)
+	if err != nil {
+		var ae *formula.AnalysisError
+		if errors.As(err, &ae) {
+			return nil, invalidCode(ae.Code, "%s", ae.Message)
+		}
 		return nil, invalid("formula does not parse: %v", err)
 	}
 
 	// 2. Every called function must exist.
-	calls, err := formula.ExtractCalls(req.Formula)
-	if err != nil {
-		return nil, invalid("formula does not parse: %v", err)
-	}
-	for _, call := range calls {
+	for _, call := range an.Calls {
 		if !formula.IsBuiltin(call) {
 			known := formula.BuiltinNames()
 			sort.Strings(known)
@@ -91,35 +121,38 @@ func Validate(ctx context.Context, pool *pgxpool.Pool, req Request) (*Result, er
 		}
 	}
 
-	refs, err := formula.ExtractIdents(req.Formula)
-	if err != nil {
-		return nil, invalid("formula does not parse: %v", err)
-	}
-
-	// 3. No self-reference. Checked by name, since that's how formulas
-	//    address other metrics.
-	for _, ref := range refs {
-		if strings.EqualFold(ref, req.Name) {
-			return nil, invalid("formula references the metric it defines (%q) — a metric cannot depend on itself", req.Name)
-		}
-	}
-
-	// 4. Every reference must resolve inside THIS metric's revision, as a
-	//    metric or a dimension. Metrics additionally become dependency edges.
-	edges := make([]string, 0, len(refs))
-	for _, ref := range refs {
+	// 3. Every reference must resolve inside THIS metric's revision, as a
+	//    metric or a dimension. Metrics additionally become dependency edges,
+	//    each carrying the union of the time offsets it is read at. A
+	//    self-reference is a legal edge only when time breaks it (checked in
+	//    step 4 with every other cycle).
+	var edges []Edge
+	var edgeIDs []string
+	for _, ref := range an.References {
 		var metricID string
 		err := pool.QueryRow(ctx, `
 			SELECT id::text FROM model.metric_def
 			WHERE model_id=$1::uuid AND name=$2
 			  AND (revision_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid OR revision_id IS NULL)
 			LIMIT 1
-		`, req.ModelID, ref, req.RevisionID).Scan(&metricID)
+		`, req.ModelID, ref.Name, req.RevisionID).Scan(&metricID)
 		if err == nil {
-			if metricID == req.MetricID {
-				return nil, invalid("formula references the metric it defines (%q) — a metric cannot depend on itself", ref)
+			isSelf := metricID == req.MetricID || (req.MetricID == "" && strings.EqualFold(ref.Name, req.Name))
+			if isSelf && ref.IsDirect() {
+				return nil, invalid("formula references the metric it defines (%q) — a metric can only read its own value at another period (PREVIOUS, LAG, ...)", ref.Name)
 			}
-			edges = append(edges, metricID)
+			edges = append(edges, Edge{To: metricID, MinTimeOffset: ref.MinTimeOffset, MaxTimeOffset: ref.MaxTimeOffset,
+				UnboundedPast: ref.UnboundedPast, UnboundedFuture: ref.UnboundedFuture})
+			edgeIDs = append(edgeIDs, metricID)
+			continue
+		}
+		if strings.EqualFold(ref.Name, req.Name) {
+			// A brand-new metric naming itself: no row exists yet to resolve to.
+			if ref.IsDirect() {
+				return nil, invalid("formula references the metric it defines (%q) — a metric can only read its own value at another period (PREVIOUS, LAG, ...)", ref.Name)
+			}
+			edges = append(edges, Edge{To: selfPlaceholder, MinTimeOffset: ref.MinTimeOffset, MaxTimeOffset: ref.MaxTimeOffset,
+				UnboundedPast: ref.UnboundedPast, UnboundedFuture: ref.UnboundedFuture})
 			continue
 		}
 
@@ -130,48 +163,126 @@ func Validate(ctx context.Context, pool *pgxpool.Pool, req Request) (*Result, er
 			    WHERE model_id=$1::uuid AND name=$2
 			      AND (revision_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid OR revision_id IS NULL)
 			)
-		`, req.ModelID, ref, req.RevisionID).Scan(&dimExists); dErr != nil {
+		`, req.ModelID, ref.Name, req.RevisionID).Scan(&dimExists); dErr != nil {
 			return nil, dErr
 		}
 		if !dimExists {
-			return nil, invalid("formula references unknown metric or dimension %q in this revision", ref)
+			return nil, invalid("formula references unknown metric or dimension %q in this revision", ref.Name)
 		}
 	}
 
-	// 5. No cycles. Walk the existing graph from each new dependency looking
-	//    for a path back to this metric — the scheduler would otherwise only
-	//    discover it at calculation time, long after the save.
-	if req.MetricID != "" {
-		for _, dep := range edges {
-			cyclic, err := reaches(ctx, pool, dep, req.MetricID)
-			if err != nil {
-				return nil, err
-			}
-			if cyclic {
-				var depName string
-				_ = pool.QueryRow(ctx, `SELECT name FROM model.metric_def WHERE id=$1::uuid`, dep).Scan(&depName)
-				return nil, invalid("formula would create a dependency cycle: %q already depends on %q, directly or indirectly", depName, req.Name)
-			}
+	// 4. Cycles must be causal. Load the revision's whole graph, substitute
+	//    this metric's new edges, and validate every component it touches:
+	//    an opening/closing balance pair is legal, a same-period cycle is
+	//    not, and the scheduler must never be the first to find out.
+	graph, names, err := LoadGraph(ctx, pool, req.ModelID, req.RevisionID)
+	if err != nil {
+		return nil, err
+	}
+	self := req.MetricID
+	if self == "" {
+		self = selfPlaceholder
+	}
+	names[self] = req.Name
+	own := make([]Edge, 0, len(edges))
+	for _, e := range edges {
+		if e.To == selfPlaceholder {
+			e.To = self
 		}
+		own = append(own, e)
+	}
+	graph[self] = own
+	if _, err := Plan(graph, []string{self}, names); err != nil {
+		var te *TemporalError
+		if errors.As(err, &te) {
+			return nil, invalidCode(formula.CodeTemporalCycleNotCausal, "%s", te.Detail)
+		}
+		return nil, err
 	}
 
-	return &Result{DependsOnMetricIDs: edges}, nil
+	// A self-edge on a new metric resolves once the row exists; the caller
+	// writes it with the real ID via WriteDependencies.
+	for i := range edges {
+		if edges[i].To == selfPlaceholder {
+			edges[i].To = SelfReference
+		}
+	}
+	return &Result{DependsOnMetricIDs: edgeIDs, Edges: edges, UsesTimeSeries: an.UsesTimeSeries}, nil
 }
 
-// reaches reports whether targetID is reachable from startID by following
-// calc_dependency edges (start depends on … depends on target).
-func reaches(ctx context.Context, pool *pgxpool.Pool, startID, targetID string) (bool, error) {
-	var found bool
-	err := pool.QueryRow(ctx, `
-		WITH RECURSIVE deps AS (
-			SELECT depends_on_metric_id FROM model.calc_dependency WHERE metric_id = $1::uuid
-			UNION
-			SELECT cd.depends_on_metric_id
-			FROM model.calc_dependency cd
-			JOIN deps d ON cd.metric_id = d.depends_on_metric_id
-		)
-		SELECT EXISTS (SELECT 1 FROM deps WHERE depends_on_metric_id = $2::uuid)
-		   OR $1::uuid = $2::uuid
-	`, startID, targetID).Scan(&found)
-	return found, err
+// SelfReference is the Edge.To value of a time-shifted self-reference on a
+// metric that does not exist yet (create). WriteDependencies substitutes the
+// metric's own ID.
+const SelfReference = "self"
+
+const selfPlaceholder = "\x00self"
+
+// LoadGraph loads the revision's dependency graph with offsets, plus an
+// id → name map for messages.
+func LoadGraph(ctx context.Context, q Querier, modelID, revisionID string) (Graph, map[string]string, error) {
+	rows, err := q.Query(ctx, `
+		SELECT m.id::text, m.name, d.depends_on_metric_id::text,
+		       COALESCE(d.min_time_offset,0), COALESCE(d.max_time_offset,0),
+		       COALESCE(d.unbounded_past,false), COALESCE(d.unbounded_future,false)
+		FROM model.metric_def m
+		LEFT JOIN model.calc_dependency d ON d.metric_id = m.id
+		WHERE m.model_id=$1::uuid
+		  AND (m.revision_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid OR m.revision_id IS NULL)
+	`, modelID, revisionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	g := Graph{}
+	names := map[string]string{}
+	for rows.Next() {
+		var id, name string
+		var to *string
+		var e Edge
+		if err := rows.Scan(&id, &name, &to, &e.MinTimeOffset, &e.MaxTimeOffset, &e.UnboundedPast, &e.UnboundedFuture); err != nil {
+			return nil, nil, err
+		}
+		names[id] = name
+		if _, ok := g[id]; !ok {
+			g[id] = nil
+		}
+		if to != nil {
+			e.To = *to
+			g[id] = append(g[id], e)
+		}
+	}
+	return g, names, rows.Err()
+}
+
+// Execer is what WriteDependencies needs: a transaction (preferred) or pool.
+type Execer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// WriteDependencies replaces metricID's calc_dependency rows with edges —
+// the one write path for all four save paths (developer create/update, AI
+// create_metric/update_metric), so offsets are never dropped by one of them.
+func WriteDependencies(ctx context.Context, tx Execer, metricID string, edges []Edge) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM model.calc_dependency WHERE metric_id=$1::uuid`, metricID); err != nil {
+		return err
+	}
+	for _, e := range edges {
+		to := e.To
+		if to == SelfReference {
+			to = metricID
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO model.calc_dependency
+			    (metric_id, depends_on_metric_id, min_time_offset, max_time_offset, unbounded_past, unbounded_future)
+			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)
+			ON CONFLICT (metric_id, depends_on_metric_id) DO UPDATE SET
+			    min_time_offset = LEAST(model.calc_dependency.min_time_offset, EXCLUDED.min_time_offset),
+			    max_time_offset = GREATEST(model.calc_dependency.max_time_offset, EXCLUDED.max_time_offset),
+			    unbounded_past = model.calc_dependency.unbounded_past OR EXCLUDED.unbounded_past,
+			    unbounded_future = model.calc_dependency.unbounded_future OR EXCLUDED.unbounded_future
+		`, metricID, to, e.MinTimeOffset, e.MaxTimeOffset, e.UnboundedPast, e.UnboundedFuture); err != nil {
+			return fmt.Errorf("record formula dependency: %w", err)
+		}
+	}
+	return nil
 }

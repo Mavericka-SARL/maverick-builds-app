@@ -35,12 +35,13 @@ once, in `pkg/license/features.go`, and reported by `GET /api/license`.
 | `usage_analytics` | Usage analytics per tenant | Enterprise |
 | `white_label` | Custom branding of the console | Commercial |
 | `tenant_ai_keys` | Tenant-level AI provider keys | Enterprise |
+| `deployment_settings` | Deployment-wide defaults for notification delivery, audit retention and the AI key, inherited by tenants without their own | Enterprise |
 
 A key can name extra features beyond its edition's defaults (for tailored
 contracts) and carry numeric limits (`max_users`, `max_tenants`, …). Key
 limits are transported and displayed; what a *tenant* may use is a plan
 question, enforced per tenant — see
-[`docs/PLANS_AND_TRIALS.md`](PLANS_AND_TRIALS.md).
+[`docs/PLANS_AND_SIGNUP.md`](PLANS_AND_SIGNUP.md).
 
 ## The license key
 

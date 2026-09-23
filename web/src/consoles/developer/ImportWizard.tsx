@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import * as XLSX from "xlsx";
 import { FileSpreadsheet, FileText, FolderOpen, ArrowLeft, ArrowRight, History, Pencil, Trash2, Play, Plus as PlusIcon, X as XIcon } from "lucide-react";
 import { Button, IconButton, TextInput, Select, Field, StatusBadge, Stepper, InlineAlert, FilterChip, useConfirm, type DesignTone } from "../../ui";
+import { GoogleServiceAccountPanel } from "./GoogleServiceAccountPanel";
 import {
   api,
   type IntegrationDef,
@@ -465,7 +466,7 @@ function UploadStep({
         <div className="mvx-panel" style={{ padding: 20, marginBottom: 16 }}>
           <Field
             label="Google Sheet URL"
-            description={'The sheet must be link-shared ("Anyone with the link" → Viewer). The worksheet tab in the URL (gid) is the one fetched.'}
+            description={'Link-shared ("Anyone with the link" → Viewer), or a private sheet shared with the tenant\'s Google service account (set up under Google Sheets). The worksheet tab in the URL (gid) is the one fetched.'}
           >
             <div style={{ display: "flex", gap: 8 }}>
               <TextInput
@@ -1558,11 +1559,12 @@ export function GoogleSheetsImportSection() {
           <div className="mvx-panel" style={{ marginTop: 24, padding: 16, background: "var(--color-surface-subtle)", fontSize: 13, color: "var(--color-text-muted)" }}>
             <strong style={{ color: "var(--color-text)" }}>How it works:</strong>
             <ul style={{ margin: "8px 0 0", paddingLeft: 20, lineHeight: 1.8 }}>
-              <li>The sheet must be shared as <strong>"Anyone with the link" → Viewer</strong>; no Google account is connected.</li>
+              <li>The sheet is shared as <strong>"Anyone with the link" → Viewer</strong> — or, with a Google service account stored below, a private sheet shared with that account&apos;s address.</li>
               <li>Sheet layout matches the CSV formats: for a Grid, columns named after metrics and dimensions (member codes or labels).</li>
               <li>A saved integration re-fetches the sheet on every <strong>Sync Now</strong>, so the sheet stays the source of truth.</li>
             </ul>
           </div>
+          <GoogleServiceAccountPanel />
         </>
       )}
     </div>

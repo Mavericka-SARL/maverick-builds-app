@@ -454,6 +454,20 @@ func encodeExtractFormulaRefsRequest(
 	return nil
 }
 
+func encodeGenerateDimensionPeriodsRequest(
+	req *GeneratePeriodsRequest,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
 func encodeGetChartDataRequest(
 	req OptChartRuntimeRequest,
 	r *http.Request,
@@ -546,6 +560,20 @@ func encodeImportUploadRequest(
 
 func encodeMarkNotificationReadRequest(
 	req *MarkNotificationReadRequest,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
+func encodePutGoogleConnectionRequest(
+	req *PutGoogleConnectionReq,
 	r *http.Request,
 ) error {
 	const contentType = "application/json"
@@ -748,6 +776,26 @@ func encodeSignupRequest(
 	e := new(jx.Encoder)
 	{
 		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
+func encodeStartIntegrationOAuthRequest(
+	req OptStartIntegrationOAuthReq,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	if !req.Set {
+		// Keep request with empty body if value is not set.
+		return nil
+	}
+	e := new(jx.Encoder)
+	{
+		if req.Set {
+			req.Encode(e)
+		}
 	}
 	encoded := e.Bytes()
 	ht.SetBody(r, bytes.NewReader(encoded), contentType)

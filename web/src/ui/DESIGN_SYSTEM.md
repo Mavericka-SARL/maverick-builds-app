@@ -97,7 +97,7 @@ not raise them without review.
 
 ```tsx
 <AppShell
-  productSubtitle="Developer console"
+  brand={<BrandMark />}
   navGroups={[
     { label: "Plan", items: [{ id: "dashboards", label: "Dashboards" }] },
     { label: "Build", items: [{ id: "metrics", label: "Metrics" }] },

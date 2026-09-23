@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, X, Pencil, Trash2, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp } from "lucide-react";
-import { api, type DevDimensionMember, type DevDimension, type DimProperty } from "../../api/client";
+import { api, type DevDimensionMember, type DevDimension, type DimProperty, type DimensionType, type TimeGranularity, TIME_GRANULARITIES } from "../../api/client";
 import { Button, Field, TextInput, Select, EmptyState, IconButton, StatusBadge, SearchInput, useConfirm } from "../../ui";
 
 // Tree node type — flat DevDimensionMember enriched with hierarchy metadata.
@@ -68,16 +68,32 @@ function dimMaxDepth(roots: DimMemberNode[]): number {
   return max;
 }
 
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
 export function DimensionsView({ dims, revisionId }: { dims: DevDimension[]; revisionId?: string }) {
   const qc = useQueryClient();
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState("");
   const [newParentDim, setNewParentDim] = useState("");
+  // The type is an explicit choice, never inferred from the name: a
+  // dimension called "month" stays standard unless the developer says Time.
+  const [newType, setNewType] = useState<DimensionType | "">("");
+  const [newGranularity, setNewGranularity] = useState<TimeGranularity | "">("");
+  const [newFiscalStart, setNewFiscalStart] = useState(1);
 
   const create = useMutation({
-    mutationFn: () => api.createDimension({ name: newName, revision_id: revisionId, parent_dimension_id: newParentDim || undefined }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["dev-dimensions"] }); setNewName(""); setNewParentDim(""); setShowAdd(false); },
+    mutationFn: () => api.createDimension({
+      name: newName, revision_id: revisionId,
+      parent_dimension_id: newType === "time" ? undefined : (newParentDim || undefined),
+      dimension_type: newType as DimensionType,
+      ...(newType === "time" ? { time_granularity: newGranularity as TimeGranularity, fiscal_year_start_month: newFiscalStart } : {}),
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["dev-dimensions"] });
+      setNewName(""); setNewParentDim(""); setNewType(""); setNewGranularity(""); setNewFiscalStart(1); setShowAdd(false);
+    },
   });
+  const canCreate = !!newName && !!newType && (newType !== "time" || !!newGranularity);
 
   return (
     <div>
@@ -93,23 +109,54 @@ export function DimensionsView({ dims, revisionId }: { dims: DevDimension[]; rev
           <div className="mvx-admin-inline-form" style={{ alignItems: "flex-end" }}>
             <Field label="Name">
               <TextInput value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="department"
-                style={{ width: 180 }} onKeyDown={(e) => e.key === "Enter" && newName && create.mutate()} />
+                style={{ width: 180 }} onKeyDown={(e) => e.key === "Enter" && canCreate && create.mutate()} />
             </Field>
-            <Field label="Parent dimension (optional)">
-              <Select value={newParentDim} onChange={(e) => setNewParentDim(e.target.value)} style={{ width: 180 }}>
-                <option value="">— none, top-level —</option>
-                {dims.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            <Field label="Dimension type">
+              <Select value={newType} onChange={(e) => setNewType(e.target.value as DimensionType | "")} style={{ width: 150 }} aria-label="Dimension type">
+                <option value="">— choose —</option>
+                <option value="standard">Standard</option>
+                <option value="time">Time</option>
               </Select>
             </Field>
-            <Button variant="primary" disabled={!newName} loading={create.isPending} onClick={() => create.mutate()}>Create</Button>
+            {newType === "time" ? (
+              <>
+                <Field label="Granularity">
+                  <Select value={newGranularity} onChange={(e) => setNewGranularity(e.target.value as TimeGranularity | "")} style={{ width: 130 }} aria-label="Granularity">
+                    <option value="">— choose —</option>
+                    {TIME_GRANULARITIES.map(g => <option key={g} value={g}>{g.replace("_", " ")}</option>)}
+                  </Select>
+                </Field>
+                <Field label="Fiscal year starts">
+                  <Select value={String(newFiscalStart)} onChange={(e) => setNewFiscalStart(Number(e.target.value))} style={{ width: 130 }} aria-label="Fiscal year starts">
+                    {MONTH_NAMES.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                  </Select>
+                </Field>
+              </>
+            ) : (
+              <Field label="Parent dimension (optional)">
+                <Select value={newParentDim} onChange={(e) => setNewParentDim(e.target.value)} style={{ width: 180 }}>
+                  <option value="">— none, top-level —</option>
+                  {dims.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </Select>
+              </Field>
+            )}
+            <Button variant="primary" disabled={!canCreate} loading={create.isPending} onClick={() => create.mutate()}>Create</Button>
           </div>
+        )}
+        {showAdd && newType === "time" && (
+          <p className="mvx-admin-muted" style={{ marginTop: 8, maxWidth: 640 }}>
+            The type, granularity and fiscal year are fixed once created. Only a Time dimension supports
+            time-series formulas (PREVIOUS, LAG, MOVINGSUM, CUMULATE, …); a dimension merely named “month” does not.
+          </p>
         )}
       </div>
       {dims.length === 0 ? (
         <EmptyState label="No dimensions defined yet. Create dimensions such as department, region, product, or entity." />
       ) : (
         <div className="mvx-admin-stack">
-          {dims.map((d) => <DimensionCard key={d.id} dim={d} allDims={dims} />)}
+          {dims.map((d) => d.dimension_type === "time"
+            ? <TimeDimensionCard key={d.id} dim={d} />
+            : <DimensionCard key={d.id} dim={d} allDims={dims} />)}
         </div>
       )}
     </div>
@@ -501,6 +548,253 @@ function DimensionCard({ dim, allDims }: { dim: DevDimension; allDims: DevDimens
         </Button>
       </div>
 
+      {confirmElement}
+    </div>
+  );
+}
+
+// A time dimension's members are periods. A period WITH dates is a leaf —
+// the calendar time functions move along, in chronological order (time_index,
+// never code order). A period WITHOUT dates is an aggregate (H1, FY26): a
+// grouping of the periods beneath it, shown as its leaves reduced by each
+// metric's time summary. The server validates the whole set (no overlap, no
+// gap on a regular calendar, boundaries on the granularity, a leaf never
+// under a leaf) and owns the ordinal.
+function TimeDimensionCard({ dim }: { dim: DevDimension }) {
+  const qc = useQueryClient();
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["dev-dimensions"] });
+  const { confirm, confirmElement } = useConfirm();
+  const [editDimName, setEditDimName] = useState(false);
+  const [editNameVal, setEditNameVal] = useState(dim.name);
+  const [adding, setAdding] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [genStart, setGenStart] = useState("");
+  const [genEnd, setGenEnd] = useState("");
+  const [genParent, setGenParent] = useState("");
+  const [editId, setEditId] = useState<string | null>(null);
+  const emptyDraft = { code: "", label: "", period_start: "", period_end: "", parent_member_id: "" };
+  const [draft, setDraft] = useState(emptyDraft);
+  const [error, setError] = useState<string | null>(null);
+
+  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const memberBody = () => ({
+    code: draft.code, label: draft.label,
+    ...(draft.period_start || draft.period_end ? { period_start: draft.period_start, period_end: draft.period_end } : {}),
+    parent_member_id: draft.parent_member_id || null,
+  });
+  const updateDim = useMutation({
+    mutationFn: () => api.updateDimension(dim.id, { name: editNameVal, agg_rule: dim.agg_rule }),
+    onSuccess: () => { invalidate(); setEditDimName(false); },
+  });
+  const delDim = useMutation({ mutationFn: () => api.deleteDimension(dim.id), onSuccess: invalidate });
+  const addMember = useMutation({
+    mutationFn: () => api.addDimMember(dim.id, { ...memberBody(), parent_member_id: draft.parent_member_id || undefined }),
+    onSuccess: () => { invalidate(); setAdding(false); setError(null); },
+    onError: fail,
+  });
+  const updateMember = useMutation({
+    mutationFn: () => api.updateDimMember(dim.id, editId!, memberBody()),
+    onSuccess: () => { invalidate(); setEditId(null); setError(null); },
+    onError: fail,
+  });
+  const delMember = useMutation({ mutationFn: (id: string) => api.deleteDimMember(dim.id, id), onSuccess: invalidate, onError: fail });
+  const generate = useMutation({
+    mutationFn: () => api.generateDimPeriods(dim.id, { start: genStart, end: genEnd, parent_member_id: genParent || undefined }),
+    onSuccess: () => { invalidate(); setGenerating(false); setGenStart(""); setGenEnd(""); setGenParent(""); setError(null); },
+    onError: fail,
+  });
+
+  // Tree: leaves in chronological order, aggregates placed by their first leaf.
+  const roots = React.useMemo(() => {
+    const tree = buildDimensionTree(dim.members);
+    const firstLeaf = (n: DimMemberNode): number => n.time_index ?? Math.min(Number.MAX_SAFE_INTEGER, ...n.children.map(firstLeaf));
+    const sortChrono = (nodes: DimMemberNode[]) => { nodes.sort((a, b) => firstLeaf(a) - firstLeaf(b)); for (const n of nodes) sortChrono(n.children); };
+    sortChrono(tree);
+    return tree;
+  }, [dim.members]);
+  const rows = React.useMemo(() => flattenVisible(roots, new Set(dim.members.map(m => m.id)), ""), [roots, dim.members]);
+  const leaves = dim.members.filter(m => m.period_start).sort((a, b) => (a.time_index ?? 0) - (b.time_index ?? 0));
+  const aggregates = dim.members.filter(m => !m.period_start);
+  const isAggregate = (m: DevDimensionMember) => !m.period_start;
+  const startEdit = (m: DevDimensionMember) => {
+    setEditId(m.id); setAdding(false);
+    setDraft({ code: m.code, label: m.label, period_start: m.period_start ?? "", period_end: m.period_end ?? "", parent_member_id: m.parent_member_id ?? "" });
+  };
+  const draftOk = !!draft.code && !!draft.label && (!!draft.period_start === !!draft.period_end);
+  const fiscalName = MONTH_NAMES[(dim.fiscal_year_start_month ?? 1) - 1];
+
+  const editorCells = (onSave: () => void, pending: boolean, onCancel: () => void, selfId?: string) => (
+    <>
+      <td>
+        <TextInput value={draft.label} onChange={(e) => setDraft(d => ({ ...d, label: e.target.value }))} placeholder="Label"
+          style={{ width: "100%" }} onKeyDown={(e) => e.key === "Enter" && draftOk && onSave()} autoFocus />
+      </td>
+      <td>
+        <TextInput value={draft.code} onChange={(e) => setDraft(d => ({ ...d, code: e.target.value.replace(/[^A-Za-z0-9_-]/g, "") }))}
+          placeholder="2026-01" style={{ width: 100, fontFamily: "var(--font-mono)" }} />
+      </td>
+      <td>
+        <TextInput type="date" value={draft.period_start} onChange={(e) => setDraft(d => ({ ...d, period_start: e.target.value }))}
+          aria-label="Period start" title="Leave both dates empty for an aggregate period (H1, FY26)" style={{ width: 150 }} />
+      </td>
+      <td>
+        <TextInput type="date" value={draft.period_end} onChange={(e) => setDraft(d => ({ ...d, period_end: e.target.value }))}
+          aria-label="Period end" style={{ width: 150 }} />
+      </td>
+      <td>
+        <Select value={draft.parent_member_id} onChange={(e) => setDraft(d => ({ ...d, parent_member_id: e.target.value }))} aria-label="Parent period" style={{ width: "100%" }}>
+          <option value="">— root</option>
+          {aggregates.filter(a => a.id !== selfId).map(a => <option key={a.id} value={a.id}>{a.label} ({a.code})</option>)}
+        </Select>
+      </td>
+      <td className="mvx-admin-muted" style={{ textAlign: "center" }}>—</td>
+      <td>
+        <div className="mvx-admin-inline-form" style={{ flexWrap: "nowrap" }}>
+          <Button variant="primary" size="sm" disabled={!draftOk || pending} onClick={onSave}>Save</Button>
+          <IconButton aria-label="Cancel" size={26} onClick={onCancel}><X size={13} /></IconButton>
+        </div>
+      </td>
+    </>
+  );
+
+  return (
+    <div className="mvx-admin-object">
+      <div style={{ background: "var(--color-surface-subtle)", padding: "10px 16px", borderBottom: "1px solid var(--color-border)" }}>
+        {editDimName ? (
+          <div className="mvx-admin-inline-form">
+            <TextInput value={editNameVal} onChange={(e) => setEditNameVal(e.target.value)} style={{ width: 180 }}
+              onKeyDown={(e) => e.key === "Enter" && updateDim.mutate()} />
+            <Button variant="primary" size="sm" loading={updateDim.isPending} onClick={() => updateDim.mutate()}>Save</Button>
+            <Button size="sm" onClick={() => { setEditDimName(false); setEditNameVal(dim.name); }}>Cancel</Button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <code style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text)" }}>{dim.name}</code>
+            <StatusBadge tone="brand">time · {(dim.time_granularity ?? "").replace("_", " ")}</StatusBadge>
+            <span className="mvx-admin-muted">
+              {leaves.length} period{leaves.length !== 1 ? "s" : ""}
+              {aggregates.length > 0 && ` · ${aggregates.length} aggregate${aggregates.length !== 1 ? "s" : ""}`}
+              {leaves.length > 0 && ` · ${leaves[0].period_start} → ${leaves[leaves.length - 1].period_end}`}
+              {` · fiscal year starts ${fiscalName}`}
+            </span>
+            {aggregates.length > 0 && <StatusBadge tone="success">hierarchy</StatusBadge>}
+            <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
+              <IconButton aria-label={`Edit dimension ${dim.name}`} title="Edit dimension name" size={26}
+                onClick={() => { setEditDimName(true); setEditNameVal(dim.name); }}>
+                <Pencil size={13} />
+              </IconButton>
+              <IconButton aria-label={`Delete dimension ${dim.name}`} title="Delete dimension" danger size={26}
+                onClick={() => confirm({ title: "Delete dimension?", body: `This removes "${dim.name}" and all ${dim.members.length} period${dim.members.length !== 1 ? "s" : ""}.`, confirmLabel: "Delete dimension", onConfirm: () => delDim.mutate() })}>
+                <Trash2 size={13} />
+              </IconButton>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {error && (
+        <div role="alert" style={{ padding: "8px 16px", color: "var(--color-danger-600)", borderBottom: "1px solid var(--color-border)", fontSize: 12 }}>
+          {error}
+        </div>
+      )}
+
+      <div className="mvx-table-wrap">
+        <table className="mvx-table mvx-table--compact" role="treegrid">
+          <thead>
+            <tr>
+              <th style={{ textAlign: "left" }}>Period</th>
+              <th style={{ width: 100 }}>Code</th>
+              <th style={{ width: 150 }}>Start</th>
+              <th style={{ width: 150 }}>End</th>
+              <th style={{ width: 160 }}>Parent</th>
+              <th style={{ width: 50, textAlign: "center" }} title="Chronological position of a leaf period, owned by the server">#</th>
+              <th style={{ width: 110 }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {dim.members.length === 0 && !adding && (
+              <tr>
+                <td colSpan={7} className="mvx-admin-muted" style={{ textAlign: "center", padding: "24px 16px" }}>
+                  No periods yet. Add one, or generate a range below. A period without dates is an aggregate such as H1 or FY26.
+                </td>
+              </tr>
+            )}
+            {rows.map((m) => editId === m.id ? (
+              <tr key={m.id} style={{ background: "var(--color-brand-50)" }}>
+                {editorCells(() => updateMember.mutate(), updateMember.isPending, () => setEditId(null), m.id)}
+              </tr>
+            ) : (
+              <tr key={m.id} role="row" aria-level={m.level + 1}>
+                <td style={{ paddingLeft: m.level * 24 + 8, fontWeight: isAggregate(m) ? 600 : 500, color: "var(--color-text)" }}>
+                  {m.label}{isAggregate(m) && <span className="mvx-admin-muted" style={{ marginLeft: 6, fontWeight: 400 }}>aggregate</span>}
+                </td>
+                <td className="mvx-admin-mono" style={{ fontWeight: 600, color: "var(--color-brand-600)" }}>{m.code}</td>
+                <td className="mvx-admin-mono">{m.period_start ?? <span className="mvx-admin-muted">—</span>}</td>
+                <td className="mvx-admin-mono">{m.period_end ?? <span className="mvx-admin-muted">—</span>}</td>
+                <td className="mvx-admin-muted">{m.parent_member_id ? dim.members.find(x => x.id === m.parent_member_id)?.label ?? "" : "—"}</td>
+                <td className="mvx-admin-muted" style={{ textAlign: "center" }}>{m.time_index ?? "—"}</td>
+                <td>
+                  <div style={{ display: "flex", gap: 2 }}>
+                    {isAggregate(m) && (
+                      <IconButton aria-label={`Add period under ${m.label}`} title="Add period under this aggregate" size={26}
+                        onClick={() => { setAdding(true); setEditId(null); setGenerating(false); setDraft({ ...emptyDraft, parent_member_id: m.id }); }}>
+                        <Plus size={13} />
+                      </IconButton>
+                    )}
+                    <IconButton aria-label={`Edit period ${m.label}`} title="Edit" size={26} onClick={() => startEdit(m)}>
+                      <Pencil size={13} />
+                    </IconButton>
+                    <IconButton aria-label={`Delete period ${m.label}`} title="Delete" danger size={26}
+                      onClick={() => confirm({ title: "Delete period?", body: `This removes "${m.code}"${m.descendantCount > 0 ? ` (its ${m.descendantCount} descendant${m.descendantCount !== 1 ? "s" : ""} become roots)` : ""}. Every metric on this dimension is recalculated.`, confirmLabel: "Delete period", onConfirm: () => delMember.mutate(m.id) })}>
+                      <Trash2 size={13} />
+                    </IconButton>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {adding && (
+              <tr style={{ background: "var(--color-brand-50)" }}>
+                {editorCells(() => addMember.mutate(), addMember.isPending, () => setAdding(false))}
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ padding: "8px 16px", borderTop: "1px dashed var(--color-border)", background: "var(--color-surface-subtle)", display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <Button size="sm" variant="ghost" leadingIcon={<Plus size={13} />}
+          onClick={() => { setAdding(true); setEditId(null); setGenerating(false); setDraft(emptyDraft); }}>
+          Add period
+        </Button>
+        {dim.time_granularity !== "custom" && (
+          generating ? (
+            <div className="mvx-admin-inline-form" style={{ alignItems: "flex-end" }}>
+              <Field label="From">
+                <TextInput type="date" value={genStart} onChange={(e) => setGenStart(e.target.value)} aria-label="Generate from" style={{ width: 150 }} />
+              </Field>
+              <Field label="To">
+                <TextInput type="date" value={genEnd} onChange={(e) => setGenEnd(e.target.value)} aria-label="Generate to" style={{ width: 150 }} />
+              </Field>
+              {aggregates.length > 0 && (
+                <Field label="Under">
+                  <Select value={genParent} onChange={(e) => setGenParent(e.target.value)} aria-label="Generate under" style={{ width: 160 }}>
+                    <option value="">— root</option>
+                    {aggregates.map(a => <option key={a.id} value={a.id}>{a.label} ({a.code})</option>)}
+                  </Select>
+                </Field>
+              )}
+              <Button variant="primary" size="sm" disabled={!genStart || !genEnd} loading={generate.isPending} onClick={() => generate.mutate()}>
+                Generate {(dim.time_granularity ?? "").replace("_", " ")}s
+              </Button>
+              <Button size="sm" onClick={() => setGenerating(false)}>Cancel</Button>
+            </div>
+          ) : (
+            <Button size="sm" variant="ghost" onClick={() => { setGenerating(true); setAdding(false); setEditId(null); }}>
+              Generate periods…
+            </Button>
+          )
+        )}
+      </div>
       {confirmElement}
     </div>
   );

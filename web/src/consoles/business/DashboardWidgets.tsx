@@ -1,10 +1,11 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateModelData } from "../modelDataQueries";
 import { Check as CheckIcon, Trash2, Plus as PlusIcon } from "lucide-react";
 import { api, type AutomationRule, type DashboardWidget, type DemoContext, type WidgetProps, type GridData, type IntegrationDef, type Metric, type DevDimension, type FormDef, type FormRecord, type FormField, type ChartContextDim } from "../../api/client";
 import { ContextSelectors } from "../dashboard/ChartWidget";
 import { useSelectorOwnership, useWidgetContextSync } from "../dashboardContextSync";
-import { WidgetErrorBoundary, CommandButton, InlineAlert, LoadingState, EmptyState, Select, IconButton, Button, Field, useConfirm } from "../../ui";
+import { WidgetErrorBoundary, CommandButton, InlineAlert, LoadingState, EmptyState, Select, IconButton, Button, Field, useConfirm, RichText } from "../../ui";
 import { groupWidgetsIntoRows, INTRINSIC_HEIGHT_WIDGET_TYPES } from "../dashboardLayout";
 import { DashboardContextSyncProvider } from "../DashboardContextSyncProvider";
 import { ChartWidget } from "../dashboard/ChartWidget";
@@ -103,10 +104,26 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
     inner = <PlanningGrid ctx={ctx} gridDefId={widget.ref_id} defaultView={widget.widget_props?.default_view} syncContext={widget.widget_props?.sync_context !== false} selectorsPosition={widget.widget_props?.selectors_position} title={widget.show_title && widget.title ? widget.title : undefined} />;
   } else if (widget.widget_type === "text" && widget.content) {
     const wp = widget.widget_props ?? {};
+    // Explanatory copy needs headings, emphasis, lists and links, so the
+    // text widget reads a small Markdown subset (ui/RichText). Text that
+    // uses none of it renders exactly as before.
     inner = (
-      <p style={{ fontSize: wp.font_size ?? 14, color: wp.color ?? "var(--color-text)", margin: 0, whiteSpace: "pre-wrap", lineHeight: 1.6, fontWeight: wp.font_weight ?? "normal", fontFamily: wp.font_family ?? "sans-serif" }}>
-        {widget.content}
-      </p>
+      <RichText
+        text={widget.content}
+        style={{ fontSize: wp.font_size ?? 14, color: wp.color ?? "var(--color-text)", fontWeight: wp.font_weight ?? "normal", fontFamily: wp.font_family }}
+      />
+    );
+  } else if (widget.widget_type === "image" && widget.content) {
+    // The picture IS the content: a data URL kept inline so it travels with
+    // the dashboard (internal/imagedata). Always an <img>, never inline
+    // SVG — a browser runs no script in an image element.
+    const wp = widget.widget_props ?? {};
+    inner = (
+      <img
+        src={widget.content}
+        alt={wp.alt ?? widget.title ?? ""}
+        style={{ display: "block", width: "100%", height: "100%", objectFit: wp.image_fit ?? "contain", objectPosition: "center" }}
+      />
     );
   } else if (widget.widget_type === "automation_button" && widget.ref_id) {
     inner = <AutomationButtonWidget ruleId={widget.ref_id} label={widget.content ?? "Trigger"} buttonColor={widget.widget_props?.button_color} ctx={ctx} staticContext={widget.widget_props?.context} confirmText={widget.widget_props?.confirm_text} onOpenInstance={onOpenInstance} />;
@@ -132,7 +149,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
 
   if (!inner) return null;
 
-  const isNoPad = widget.widget_type === "grid" || widget.widget_type === "form" || widget.widget_type === "chart";
+  const isNoPad = widget.widget_type === "grid" || widget.widget_type === "form" || widget.widget_type === "chart" || widget.widget_type === "image";
   const widgetLabel = widget.title || widget.widget_type.replace(/_/g, " ");
 
   if (widget.show_title && widget.title && widget.widget_type !== "grid") {
@@ -202,6 +219,10 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps }: { metricId: stri
     queryFn: () => api.getGrid(ctx.revision_id, undefined, { totalsOnly: true, ...(scope ? { scope } : {}) }),
     enabled: valueReady,
     staleTime: 0,
+    // Same cadence as the grid and chart widgets, so a change made elsewhere
+    // (another user, a form, an import) reaches the card without a reload.
+    // A same-page write reaches it sooner via invalidateModelData.
+    refetchInterval: 2000,
   });
   const g = grid as GridData | undefined;
 
@@ -231,12 +252,26 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps }: { metricId: stri
     : null;
 
   // Developer-chosen selector placement (widget_props.selectors_position).
+  // Wherever they sit, the selectors must not move the number: the label /
+  // value band is centred in the TILE (a grid row between two equal free
+  // rows, or the cross-axis centre for a side placement), so two tiles of
+  // the same height print their label and value at the same level whether
+  // one, both or neither carries a selector row. Before, the selectors were
+  // just another flex item in a centred column, which pushed the number of
+  // a tile that had them down against its neighbour's (reported live:
+  // "COST" and "HEADCOUNT" on different levels).
   const selPos = widgetProps?.selectors_position ?? "top";
   const selVertical = selPos === "left" || selPos === "right";
   return (
-    <div className={widgetProps?.background === "none" ? "mvx-kpi mvx-kpi--plain" : "mvx-kpi"} style={selVertical ? { flexDirection: selPos === "left" ? "row" : "row-reverse", alignItems: "center", gap: 16, flexWrap: "wrap", minWidth: 0, overflow: "hidden" } : undefined}>
+    <div
+      className={[
+        "mvx-kpi",
+        selVertical ? `mvx-kpi--side mvx-kpi--side-${selPos}` : "mvx-kpi--stacked",
+        widgetProps?.background === "none" ? "mvx-kpi--plain" : "",
+      ].filter(Boolean).join(" ")}
+    >
       {selectorDims.length > 0 && (
-        <div style={{ order: selPos === "bottom" ? 2 : 0, flexShrink: 0 }}>
+        <div className={`mvx-kpi__selectors mvx-kpi__selectors--${selPos}`}>
           <ContextSelectors
             dims={selectorDims as unknown as ChartContextDim[]}
             context={context}
@@ -245,7 +280,7 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps }: { metricId: stri
           />
         </div>
       )}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", minWidth: 0, flex: selVertical ? 1 : undefined }}>
+      <div className="mvx-kpi__body">
         {metric && (
           <span className="mvx-kpi__label">
             {metric.label || metric.name}{scopeLabel && <span className="mvx-kpi__scope"> · {scopeLabel}</span>}
@@ -440,7 +475,7 @@ export function FormWidgetPanel({ formId, ctx: hostCtx }: { formId: string; ctx?
     mutationFn: () => api.createRecord(formId, draft, (ctx as DemoContext | undefined)?.revision_id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["records"] });
-      qc.invalidateQueries({ queryKey: ["grid"] });
+      invalidateModelData(qc);
       setDraft({});
       setShowNewRecord(false);
     },
@@ -460,7 +495,7 @@ export function FormWidgetPanel({ formId, ctx: hostCtx }: { formId: string; ctx?
   const syncForm = useMutation({
     mutationFn: (fid: string) => api.syncForm(fid),
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["grid"] });
+      invalidateModelData(qc);
       qc.invalidateQueries({ queryKey: ["records"] });
       if (data.mappings === 0) {
         setSyncMsg("No active integrations configured for this form.");

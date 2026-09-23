@@ -158,3 +158,32 @@ sanitized messages and query-stripped attempt URLs. The gateway never
 executes connector requests; `cmd/integration` claims queued runs and is the
 only egress path (dev-only `INTEGRATION_ALLOW_INSECURE=1`/`DEV_MODE=true`
 permit loopback fixtures).
+
+Connections of auth type `oauth2_authorization_code` (added 2026-09-21; the
+flow the connector had reserved) are connected once by a developer: `POST
+/api/developer/integration-connections/{id}/oauth/start` records a pending
+authorisation (PKCE S256, 15 minutes, a row so any gateway replica can
+finish it) and answers the provider URL; the provider returns the browser
+to the public `GET /api/integrations/oauth/callback`, which exchanges the
+code with the connection's client secret — HTTP Basic, or in the body when
+`meta.token_client_auth` is `post` — seals `access_token`, `refresh_token`
+and `expires_at` next to the secret, and redirects to the console with
+`?oauth=connected` or `?oauth=error&oauth_error=…`, never with a token. The
+tokens belong to the connection: scheduled runs use them as they use a
+bearer, refreshing (and storing a rotated refresh token) when expired.
+`…/oauth/disconnect` forgets the tokens and keeps the client. Register
+`<CONSOLE_URL>/api/integrations/oauth/callback` with the provider.
+
+Google Sheets imports (`POST /api/import/sheets/fetch`, integrations of type
+`google_sheets`) read a link-shared sheet through Google's CSV export, or a
+PRIVATE sheet through the tenant's own Google service account once someone
+who builds in the application has stored its key file
+(`PUT /api/developer/integrations/google-service-account`, under
+Integrations › Google Sheets; `POST …/test` proves the key by obtaining a
+token; developers and the tenant's administrators, scoped to the tenant of
+the application in `X-App-Id`). One account per tenant, sealed in
+`core.tenant_credential` with the same mandatory encryption, AAD-bound to
+the tenant; only the address and the private key are kept. The fetch is the
+Sheets API under a JWT bearer grant scoped to `spreadsheets.readonly`; the
+sheet's owner shares it with the account's address like any collaborator.
+There is no deployment-wide account.
