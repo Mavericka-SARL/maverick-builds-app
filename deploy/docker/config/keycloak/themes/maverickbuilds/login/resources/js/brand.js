@@ -19,7 +19,7 @@
     if (!here) return;
     var icon = document.querySelector("link[rel~='icon']");
     if (!icon) return;
-    icon.href = here.replace(/\/js\/brand\.js.*$/, "/img/favicon.ico?v=5");
+    icon.href = here.replace(/\/js\/brand\.js.*$/, "/img/favicon.ico?v=6");
   } catch (e) {
     /* The stock icon is a fine fallback; never break sign-in over a picture. */
   }

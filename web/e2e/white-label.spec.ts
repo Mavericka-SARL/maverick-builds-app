@@ -16,7 +16,7 @@ test("community: default look, and the Branding tab shows the gate", async ({ pa
   await expect(page.locator(".mvx-app-shell__mark")).toBeVisible();
   // …and the tab wears the product's own icon, both links of it.
   const icons = await page.locator("link[rel~='icon']").evaluateAll((ls) => ls.map((l) => (l as HTMLLinkElement).getAttribute("href")));
-  expect(icons).toEqual(["/favicon.svg?v=2", "/favicon.ico?v=2"]);
+  expect(icons).toEqual(["/favicon.svg?v=3", "/favicon.ico?v=3"]);
   await page.getByRole("button", { name: "Branding", exact: true }).click();
   await chooseTenant(page);
   await expect(page.locator(".mvx-feature-gate")).toContainText("White-labelling");
