@@ -1,9 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width="300" height="300">
-<!-- The app icon: the M of MAVERICK, centred on a black tile. The same glyph
-     the wordmark uses (web/src/branding/ProductMark.tsx), alone, because the
-     wordmark's second line is unreadable at the size a tab icon is drawn. -->
-<rect width="300" height="300" fill="#000000"/>
-<g fill="#FFC000" transform="translate(75.957 39.502) scale(0.86942)">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<!-- The app icon: the M of MAVERICK, white on the brand yellow, drawn from
+     the same glyph as the wordmark (web/src/branding/ProductMark.tsx). The
+     letter is 269x400 in a 512 tile — 121 either side, 56 above and
+     below — the proportions of the artwork this was cut from. -->
+<rect width="512" height="512" fill="#FFC000"/>
+<g fill="#FFFFFF" transform="translate(121.376 55.094) scale(1.58077)">
 <path d="M166.512 0.573242H133.791H131.322L85.1637 159.959L39.0058 0.573242H36.5372H3.81543H0V253.615H36.5372V113.556L67.4776 220.398H67.6936H85.1637H102.634H102.85L133.791 113.556V253.615H170.328V0.573242H166.512Z"/>
 </g>
 </svg>
