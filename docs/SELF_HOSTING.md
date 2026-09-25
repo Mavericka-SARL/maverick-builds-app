@@ -22,7 +22,7 @@ use for your own internal business, and not hosting the platform for others.
 |---|---|---|
 | What runs | 8 containers: the gateway, the web console, the integration worker, PostgreSQL, Keycloak, MinIO, a nightly backup job, and Caddy for HTTPS | The full distributed topology: 15 application deployments plus PostgreSQL with continuous WAL archiving, PgBouncer, NATS, Redis, Keycloak and MinIO |
 | Good for | One organisation, a team to a few hundred users; the simplest thing to keep running | Several nodes, rolling upgrades, point-in-time recovery |
-| You need | One Linux server and Docker | A cluster with an ingress controller and cert-manager, and a container registry |
+| You need | One Linux server and Docker | A cluster with Traefik and cert-manager, and a container registry |
 | Time to first sign-in | About an hour, most of it building | Half a day |
 
 Both paths build the containers **from this repository's source**; there is
@@ -79,15 +79,16 @@ Let's Encrypt, reachable from the internet. Nothing else is published.
 ### For Kubernetes
 
 - A supported Kubernetes release. This guide was verified on 1.37.
-- **ingress-nginx**, installed in a namespace named `ingress-nginx`: the
-  Ingress uses its class and annotations, and the network policies admit
-  sign-in traffic to Keycloak from that namespace only. Be aware that the
-  upstream project was **retired in March 2026** — its repository is archived
-  and it receives no more security fixes. Its last release still works, and it
-  is what this guide was verified with; to use another controller instead,
-  change the Ingress (`ingressClassName`, annotations) in your overlay and the
+- **Traefik**, installed in a namespace named `traefik` with
+  [`deploy/k8s/bootstrap/traefik-values.yaml`](../deploy/k8s/bootstrap/traefik-values.yaml)
+  (step 1): the Ingress uses its `traefik` class, and the network policies
+  admit sign-in traffic to Keycloak from that namespace. To use another
+  controller instead, change `ingressClassName` in your overlay and the
   `keycloak` policy's namespace in
-  [`deploy/k8s/base/networkpolicy.yaml`](../deploy/k8s/base/networkpolicy.yaml).
+  [`deploy/k8s/base/networkpolicy.yaml`](../deploy/k8s/base/networkpolicy.yaml),
+  and give it an HTTP-to-HTTPS redirect that leaves cert-manager's challenge
+  path alone. (Until 2026-09 these manifests used ingress-nginx, whose
+  upstream project was retired in March 2026.)
 - **cert-manager**, for certificates (or your own TLS secrets).
 - A **StorageClass** with `ReadWriteOnce` volumes: 20 GiB for PostgreSQL,
   5 GiB for NATS and, if MinIO runs in the cluster, 20 GiB for it.
@@ -443,19 +444,25 @@ The steps below name the namespace `mavericks`, the base default.
 
 ### Step 1 — Prepare the cluster
 
-Install the ingress controller and cert-manager if the cluster has neither:
+Install Traefik and cert-manager:
 
 ```bash
-helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm install traefik oci://ghcr.io/traefik/helm/traefik --version 41.6.0 \
+  -n traefik --create-namespace -f deploy/k8s/bootstrap/traefik-values.yaml
 helm repo add jetstack https://charts.jetstack.io && helm repo update
-helm install ingress-nginx ingress-nginx/ingress-nginx -n ingress-nginx --create-namespace
 helm install cert-manager jetstack/cert-manager -n cert-manager --create-namespace --set crds.enabled=true
 ```
 
-Point both DNS names at the ingress controller's external address
-(`kubectl -n ingress-nginx get svc ingress-nginx-controller`). Then create the
-Let's Encrypt issuers, after replacing `ops@example.com` in the file with your
-address:
+The values file sets what the platform needs from its entry point: a
+`traefik` IngressClass, HTTP redirected to HTTPS except cert-manager's
+challenge path, a 300-second limit for reading a request (large imports over a
+slow link), and two replicas with a disruption budget. Your cloud's
+load-balancer settings go in a second values file; the comment in
+`service.annotations` shows Hetzner's.
+
+Point both DNS names at Traefik's external address
+(`kubectl -n traefik get svc traefik`). Then create the Let's Encrypt issuers,
+after replacing `ops@example.com` in the file with your address:
 
 ```bash
 kubectl apply -f deploy/k8s/bootstrap/cert-manager-issuer.yaml

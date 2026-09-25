@@ -24,11 +24,10 @@ const migrationLockKey = 847_291_003
 // A mismatch in checksum for an already-applied migration returns an error.
 //
 // The whole read-check-apply-record cycle is serialized across processes by
-// a Postgres advisory lock held on one dedicated connection for the
-// duration of Run: without it, two concurrent callers can both see a
-// migration as unapplied, both execute its SQL, and race on the same
-// _migrations INSERT — at best a duplicate-key error, at worst a
-// non-idempotent DDL statement silently running twice.
+// a Postgres advisory lock held for the duration of Run: without it, two
+// concurrent callers can both see a migration as unapplied, both execute its
+// SQL, and race on the same _migrations INSERT — at best a duplicate-key
+// error, at worst a non-idempotent DDL statement silently running twice.
 func Run(ctx context.Context, pool *pgxpool.Pool, migrations embed.FS, dir string) error {
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
@@ -36,20 +35,30 @@ func Run(ctx context.Context, pool *pgxpool.Pool, migrations embed.FS, dir strin
 	}
 	defer conn.Release()
 
-	// pg_advisory_lock is session-scoped, so it must be taken and released
-	// on this same connection — not through pool.Exec, which may use a
-	// different underlying connection per call.
-	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey); err != nil {
-		return fmt.Errorf("acquire migration lock: %w", err)
+	// The lock is TRANSACTION-scoped, held by a transaction that spans the
+	// run. It used to be a session-level pg_advisory_lock/unlock pair on this
+	// connection, which assumed one client connection is one server session.
+	// PgBouncer in transaction pooling — how the gateway reaches Postgres —
+	// breaks that: each statement outside a transaction may run on a
+	// different server connection, so the unlock could miss, and the lock
+	// stayed held by an idle pooled server connection for good. Every later
+	// start then waited in pg_advisory_lock until its liveness probe killed
+	// it: a rolling restart that never finishes (found rehearsing an ingress
+	// migration, 2026-09-25). A transaction keeps one server connection even
+	// through PgBouncer, and its end — rollback here, on every path, or the
+	// connection dropping — releases the lock.
+	lockTx, err := conn.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin migration lock transaction: %w", err)
 	}
 	defer func() { //nolint:contextcheck
-		// Use a fresh context: the outer ctx may already be done by the
-		// time we get here, but a lock that was actually acquired must
-		// still be released — conn.Release() only returns the underlying
-		// session to the pool for reuse, it does not end the session or
-		// implicitly drop advisory locks held on it.
-		_, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, migrationLockKey)
+		// A fresh context: the outer one may be done by now, and the lock
+		// must be released regardless.
+		_ = lockTx.Rollback(context.Background())
 	}()
+	if _, err := lockTx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, migrationLockKey); err != nil {
+		return fmt.Errorf("acquire migration lock: %w", err)
+	}
 
 	if err := ensureMigrationsTable(ctx, pool); err != nil {
 		return err

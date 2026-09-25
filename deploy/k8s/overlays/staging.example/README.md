@@ -31,8 +31,8 @@ namespace changed.
 
 ## Bringing it up
 
-1. **DNS.** A records for both hostnames pointing at the ingress-nginx load
-   balancer. Certificates cannot be issued before this resolves.
+1. **DNS.** A records for both hostnames pointing at the ingress
+   controller's load balancer (Traefik's). Certificates cannot be issued before this resolves.
 2. **Secrets, by hand.** Staging's secrets are throwaway values, so they are
    not worth sealing; the object-storage key is the one value shared with
    production. On the cluster:

@@ -1,0 +1,60 @@
+# Traefik, the ingress controller in front of maverickbuilds.app on
+# Kubernetes (docs/SELF_HOSTING.md, step 1). Install it with the chart version
+# this file was verified against:
+#
+#   helm install traefik oci://ghcr.io/traefik/helm/traefik --version 41.6.0 \
+#     -n traefik --create-namespace -f deploy/k8s/bootstrap/traefik-values.yaml
+#
+# Add your provider's LoadBalancer annotations with a second -f file (see
+# service.annotations below). The namespace matters: the network policies admit
+# sign-in traffic to Keycloak from the namespace named "traefik"
+# (deploy/k8s/base/networkpolicy.yaml).
+
+# The class base/ingress.yaml asks for. Not the cluster default: other
+# workloads' Ingresses without a class are none of this controller's business.
+ingressClass:
+  enabled: true
+  isDefaultClass: false
+  name: traefik
+
+providers:
+  kubernetesIngress:
+    enabled: true
+    # Ingress status reports the LoadBalancer's address, as ingress-nginx did.
+    publishedService:
+      enabled: true
+
+ports:
+  web:
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+          # The lowest priority, so any other router on port 80 wins. The one
+          # there is cert-manager's HTTP-01 solver, and a challenge redirected
+          # to HTTPS finds no router: its Ingress has no TLS section. At the
+          # default (highest) priority every certificate would fail to issue
+          # and, 60 days later, to renew.
+          priority: 1
+  websecure:
+    transport:
+      respondingTimeouts:
+        # Reading the request, body included: a large import over a slow
+        # link outlasts Traefik's 60 s default. (Responses have no timeout.)
+        readTimeout: 300s
+
+# Two replicas and a disruption budget: this is the one path into the
+# platform, so a node drain must never leave it with nothing.
+deployment:
+  replicas: 2
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+service:
+  # Your cloud's LoadBalancer settings, e.g. on Hetzner:
+  #   load-balancer.hetzner.cloud/location: fsn1
+  #   load-balancer.hetzner.cloud/use-private-ip: "true"
+  annotations: {}

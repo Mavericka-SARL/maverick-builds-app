@@ -221,7 +221,21 @@ func NewHandlerWithDeps(log zerolog.Logger, pool *pgxpool.Pool, jwks *identity.J
 	h.registerRoutes(mux, nil)
 	// appIDMiddleware first: tenant routing reads the application id it puts
 	// in the context; the plan guard needs the routed tenant.
-	return appIDMiddleware(h.tenantRouting(h.planGuard(mux)))
+	return limitRequestBodies(appIDMiddleware(h.tenantRouting(h.planGuard(mux))))
+}
+
+// maxRequestBodyBytes caps every request body the gateway reads. It is the
+// limit ingress-nginx enforced in front of the gateway (proxy-body-size 32m)
+// until 2026-09; neither Traefik nor the Compose stack's Caddy enforces one by
+// default, and most JSON endpoints decode the whole body into memory. Handlers
+// with tighter limits of their own (imports: 16 MB) keep them.
+const maxRequestBodyBytes = 32 << 20
+
+// limitRequestBodies makes a body larger than maxRequestBodyBytes fail when
+// it is read (the handler answers its usual error for an unreadable body), so
+// the cap no longer depends on which proxy sits in front of the gateway.
+func limitRequestBodies(next http.Handler) http.Handler {
+	return http.MaxBytesHandler(next, maxRequestBodyBytes)
 }
 
 // RouteInfo describes one endpoint registerRoutes wires up: its HTTP method

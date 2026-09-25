@@ -241,8 +241,8 @@ spec:
 # NOTE: the gateway-lb LoadBalancer Service that used to live here has moved to
 # deploy/k8s/overlays/dev/gateway-lb.yaml.
 #
-# TLS now terminates in-cluster at ingress-nginx (see base/ingress.yaml), which
-# brings its own LoadBalancer. Keeping a second one here would provision a
-# second Hetzner load balancer AND publish the API on plain port 80, bypassing
-# the TLS the Ingress exists to enforce. Dev keeps it for direct access to a
+# TLS now terminates in-cluster at the ingress controller (Traefik, see
+# base/ingress.yaml), which brings its own LoadBalancer. Keeping a second one
+# here would provision a second Hetzner load balancer AND publish the API on
+# plain port 80, bypassing the TLS the Ingress exists to enforce. Dev keeps it for direct access to a
 # cluster that has no Ingress controller or DNS.

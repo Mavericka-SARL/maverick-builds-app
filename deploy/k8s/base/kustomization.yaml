@@ -20,7 +20,7 @@ resources:
   - configmap.yaml
 
   # ── Public entry point ────────────────────────────────────────────────────
-  # Requires ingress-nginx + cert-manager; see the file header.
+  # Requires Traefik + cert-manager; see the file header.
   - ingress.yaml
 
   # ── Application services ──────────────────────────────────────────────────

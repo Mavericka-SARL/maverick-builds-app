@@ -556,13 +556,20 @@ spec:
         - podSelector: {matchLabels: {app: schema-migration}}
         - podSelector: {matchLabels: {app: workflow}}
       ports: [{protocol: TCP, port: 8080}]
-    # Browsers, via the auth.* rule in ingress.yaml. ingress-nginx runs in its
-    # own namespace, so a podSelector cannot reach it — but unlike the web and
-    # gateway rules, this stays scoped with a namespaceSelector instead of
-    # dropping `from` entirely. An unrestricted rule on port 8080 would also
-    # supersede the twelve-caller list above, silently making the whole
-    # namespace able to reach the identity provider.
+    # Browsers, via the auth.* rule in ingress.yaml. The ingress controller
+    # runs in its own namespace, so a podSelector cannot reach it — but unlike
+    # the web and gateway rules, this stays scoped with a namespaceSelector
+    # instead of dropping `from` entirely. An unrestricted rule on port 8080
+    # would also supersede the twelve-caller list above, silently making the
+    # whole namespace able to reach the identity provider.
+    #
+    # Traefik, installed in "traefik" (bootstrap/traefik-values.yaml). The
+    # "ingress-nginx" entry is for a cluster moving off that controller: both
+    # serve the same Ingress until DNS points at Traefik, and sign-in must work
+    # through either. A namespace that does not exist admits nothing.
     - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: traefik}
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: ingress-nginx}
       ports: [{protocol: TCP, port: 8080}]
@@ -607,7 +614,7 @@ spec:
   policyTypes: [Ingress, Egress]
   ingress:
     # No `from` restriction, matching the gateway rule above: this is served to
-    # the public through ingress-nginx, which runs in its own namespace. A
+    # the public through the ingress controller, in its own namespace. A
     # podSelector here would only match pods in THIS namespace and would
     # therefore block the ingress controller outright.
     - ports: [{protocol: TCP, port: 8080}]
