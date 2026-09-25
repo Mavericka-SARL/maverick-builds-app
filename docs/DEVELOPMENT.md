@@ -76,6 +76,17 @@ golangci-lint run ./...
 Gateway tests that use Testcontainers require a working Docker daemon. Package
 tests with local SQL fixtures do not all require an external `DATABASE_URL`.
 
+The object-storage tests run MinIO from an image built out of
+`deploy/docker/minio` (`internal/testobjectstore`), because no registry serves
+MinIO to anonymous pulls any more. The first run on a machine compiles MinIO
+from source — about four minutes — and later runs reuse the kept image. Build
+it on its own first, as CI does, so that time does not count against another
+package's test timeout:
+
+```bash
+go test -timeout 20m ./internal/testobjectstore/
+```
+
 ## Frontend checks
 
 ```bash

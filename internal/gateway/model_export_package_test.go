@@ -21,8 +21,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	tcminio "github.com/testcontainers/testcontainers-go/modules/minio"
-
+	"github.com/mavericks-engine/mavericks/internal/testobjectstore"
 	"github.com/mavericks-engine/mavericks/pkg/logger"
 	"github.com/mavericks-engine/mavericks/pkg/objectstore"
 )
@@ -48,16 +47,9 @@ func withObjectStore(t *testing.T, f *rollupFixture) testObjectStore {
 	t.Helper()
 	ctx := context.Background()
 
-	ctr, err := // quay.io, not Docker Hub: the minio/minio repository there was
-		// withdrawn on 2026-09-11 and every other MinIO reference in this
-		// repository already moved. A machine with the old image cached
-		// keeps passing, which is why this survived until a clean runner
-		// tried to pull it.
-		tcminio.Run(ctx, "quay.io/minio/minio:RELEASE.2024-01-16T16-07-38Z")
-	if err != nil {
-		t.Fatalf("start minio: %v", err)
-	}
-	t.Cleanup(func() { _ = ctr.Terminate(ctx) })
+	// Built from deploy/docker/minio: no registry serves MinIO to anonymous
+	// pulls any more (internal/testobjectstore says why).
+	ctr := testobjectstore.Run(t)
 	endpoint, err := ctr.ConnectionString(ctx)
 	if err != nil {
 		t.Fatalf("minio connection string: %v", err)

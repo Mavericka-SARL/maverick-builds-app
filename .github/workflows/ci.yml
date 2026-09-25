@@ -140,6 +140,15 @@ jobs:
           # read-only files already in $GOMODCACHE ("tar failed with exit
           # code 2"). Skipping it removes the noise and a pointless download.
           cache: ${{ !vars.RUNNER_LABEL }}
+      # MinIO publishes no image that can be pulled anonymously any more, so
+      # the object-storage tests run one built from deploy/docker/minio
+      # (internal/testobjectstore). Compiling MinIO from source takes minutes
+      # the first time, so it happens here, alone and under its own timeout,
+      # instead of inside whichever package's 10-minute test timeout reached it
+      # first. The image is kept: on a self-hosted runner, every run after the
+      # first is a cache hit.
+      - name: Build the MinIO test image
+        run: go test -count=1 -timeout 20m ./internal/testobjectstore/
       # -race stays: this codebase has had real concurrency bugs that only the
       # race detector caught, and it is the longest job in the workflow for a
       # good reason.
@@ -181,7 +190,8 @@ jobs:
         if: always()
         run: |
           now=$(date +%s)
-          for c in $(docker ps -aq --filter ancestor=postgres:16-alpine); do
+          for c in $(docker ps -aq --filter ancestor=postgres:16-alpine) \
+                   $(docker ps -aq --filter ancestor=mavericks-test-minio:local); do
             created=$(docker inspect -f '{{.Created}}' "$c" 2>/dev/null) || continue
             age=$(( now - $(date -d "$created" +%s) ))
             [ "$age" -gt 3600 ] && docker rm -f "$c" >/dev/null 2>&1 || true
