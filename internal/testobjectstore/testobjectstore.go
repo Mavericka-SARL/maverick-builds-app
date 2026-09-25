@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -27,11 +28,15 @@ import (
 
 	"github.com/testcontainers/testcontainers-go"
 	tcminio "github.com/testcontainers/testcontainers-go/modules/minio"
+	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 const (
 	repo = "mavericks-test-minio"
 	tag  = "local"
+
+	serverStatusHeader = "X-Minio-Server-Status"
+	serverOffline      = "offline"
 )
 
 var (
@@ -51,7 +56,20 @@ func Run(t *testing.T) *tcminio.MinioContainer {
 		t.Fatalf("build the MinIO test image: %v", buildErr)
 	}
 
-	ctr, err := tcminio.Run(ctx, repo+":"+tag)
+	ctr, err := tcminio.Run(ctx, repo+":"+tag,
+		// The module waits for /minio/health/live to answer 200, and MinIO
+		// answers 200 as soon as it listens — before its object layer is up,
+		// when every S3 call fails with "Server not initialized yet". CI hit
+		// exactly that. Until the layer is up, both health endpoints mark
+		// their 200 with x-minio-server-status: offline (cmd/healthcheck-
+		// handler.go), so wait for an answer without it.
+		testcontainers.WithAdditionalWaitStrategy(
+			wait.ForHTTP("/minio/health/ready").WithPort("9000/tcp").
+				WithResponseHeadersMatcher(func(h http.Header) bool {
+					return h.Get(serverStatusHeader) != serverOffline
+				}),
+		),
+	)
 	// Terminated per test rather than shared: CI runs with Ryuk disabled, so
 	// a container nobody terminates outlives the run.
 	testcontainers.CleanupContainer(t, ctr)

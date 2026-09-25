@@ -31,6 +31,11 @@ func TestRunServesObjectStorage(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("health: %s, want 200", resp.Status)
 	}
+	// MinIO answers 200 before it can serve requests too; this header is the
+	// difference, and Run must not return while it says so.
+	if status := resp.Header.Get("X-Minio-Server-Status"); status == "offline" {
+		t.Fatalf("Run returned before MinIO finished starting (x-minio-server-status: %s)", status)
+	}
 	if ctr.Username == "" || ctr.Password == "" {
 		t.Fatalf("no credentials reported (user %q)", ctr.Username)
 	}
