@@ -360,23 +360,6 @@ spec:
     - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
 
 ---
-# seed — one-shot Job, nothing calls it (no ingress rule needed at all;
-# omitting `ingress:` entirely with Ingress in policyTypes = deny all).
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: seed
-  namespace: mavericks
-  labels: {app: seed}
-spec:
-  podSelector: {matchLabels: {app: seed}}
-  policyTypes: [Ingress, Egress]
-  egress:
-    - to: [{podSelector: {matchLabels: {app: pgbouncer}}}]
-      ports: [{protocol: TCP, port: 5433}]
-    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
-
----
 # postgres-backup — CronJob, nothing calls it.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -487,7 +470,6 @@ spec:
         # The integration worker's durable run queue lives in Postgres — the
         # counterpart of its own egress rule (a netpol needs BOTH directions).
         - podSelector: {matchLabels: {app: integration}}
-        - podSelector: {matchLabels: {app: seed}}
       ports: [{protocol: TCP, port: 5433}]
   egress:
     - to: [{podSelector: {matchLabels: {app: postgres}}}]

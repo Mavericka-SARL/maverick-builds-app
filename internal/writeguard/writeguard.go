@@ -109,6 +109,38 @@ func HiddenAccess(ctx context.Context, pool *pgxpool.Pool, userID, memberID stri
 	return accessRule(ctx, pool, userID, "dimension_member", memberID)
 }
 
+// HiddenInChain reports whether memberID is hidden from userID, either by a
+// rule of its own or by a "hidden" rule on any ancestor (structural or
+// cross-dimension, via AncestorChain) — the single-member form of
+// ExpandHidden's read-side cascade. Use it wherever a read path resolves one
+// member at a time, so it hides exactly what the grid hides.
+func HiddenInChain(ctx context.Context, pool *pgxpool.Pool, userID, memberID string) (bool, error) {
+	access, err := HiddenAccess(ctx, pool, userID, memberID)
+	if err != nil {
+		return false, err
+	}
+	if access == "hidden" {
+		return true, nil
+	}
+	chain, err := AncestorChain(ctx, pool, memberID)
+	if err != nil {
+		return false, err
+	}
+	for _, anc := range chain {
+		if anc.ID == memberID {
+			continue
+		}
+		ancAccess, err := HiddenAccess(ctx, pool, userID, anc.ID)
+		if err != nil {
+			return false, err
+		}
+		if ancAccess == "hidden" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // MetricAccess is HiddenAccess for rule_type='metric' — used by cell
 // writeback to check whether a user is hidden/read-restricted from a
 // specific metric, with the same fail-closed-on-real-error semantics.

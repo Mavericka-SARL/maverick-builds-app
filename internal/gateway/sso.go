@@ -266,6 +266,13 @@ func (h *handler) ssoDiscover(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("too many requests"), http.StatusTooManyRequests)
 		return
 	}
+	// Public, so the sign-in page can ask on every deployment — but single
+	// sign-on is an enterprise feature: without it in the licence there is
+	// nothing to discover, whatever domains an earlier licence left behind.
+	if h.lic.Require(license.FeatureSSO) != nil {
+		jsonOK(w, map[string]any{"sso": false})
+		return
+	}
 	ctx := r.Context()
 	domains := sso.NewDomains(h.db.Control())
 	hasSSO, err := domains.Any(ctx)

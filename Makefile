@@ -2,7 +2,7 @@ SHELL := bash
 PATH  := $(shell brew --prefix 2>/dev/null || echo /usr/local)/bin:$(PATH)
 
 COMPOSE := docker compose -f deploy/docker/docker-compose.dev.yml
-SERVICES := gateway identity tenant model schema-migration policy calculation workflow import query audit notification ai-assistant integration seed
+SERVICES := gateway identity tenant model schema-migration policy calculation workflow import query audit notification ai-assistant integration
 
 .PHONY: proto oas sqlc gen build test lint clean dev-up dev-down dev-logs obs-up obs-down demo $(SERVICES:%=build-%)
 
@@ -99,11 +99,8 @@ obs-down:
 	$(COMPOSE) --profile observability stop otel-collector prometheus loki tempo grafana
 
 # ── Demo seed ──────────────────────────────────────────────────────────────────
+# Builds the reference demo through the running gateway's HTTP API, as a real
+# developer would (start it first: bash dev.sh).
 
 demo:
-	docker exec docker-postgres-1 psql -U mavericks -d postgres -c "DROP DATABASE IF EXISTS mavericks WITH (FORCE);" 2>/dev/null || true
-	docker exec docker-postgres-1 psql -U mavericks -d postgres -c "CREATE DATABASE mavericks;" 2>/dev/null || true
-	go run ./cmd/seed/
-
-demo-budget:
-	go run ./cmd/seed-budget/
+	go run ./cmd/seed-regional-planning/

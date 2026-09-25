@@ -22,16 +22,31 @@ web/.env.local
 # Compiled binaries that "go build ./cmd/<x>" drops in the repository root.
 # Anchored with a leading slash so they never shadow the source directories of
 # the same name (cmd/gateway, internal/gateway). Nine of these were tracked
-# for a year; nothing ever ran them.
+# for a year; nothing ever ran them. cmd/license is left out: on a
+# case-insensitive filesystem /license would also match LICENSE.
 /ai-assistant
+/audit
+/calculation
+/diaginstance
 /gateway
+/identity
+/import
+/integration
+/loadtest
+/model
+/notification
+/policy
 /qa-engine-test
-/seed
-/seed-budget
-/seed-capex
-/seed-payroll
-/seed-sales
+/query
+/schema-migration
+/seed-regional-planning
+/seed-sales-planning
 /seed-sandbox
+/seed-simple-budget
+/spike-arrow
+/tenant
+/verify-topology
+/workflow
 
 # macOS directory metadata.
 .DS_Store

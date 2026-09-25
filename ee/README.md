@@ -16,8 +16,10 @@ not the Sustainable Use License that covers the rest of the repository.
 - **Every entry point checks the license.** An HTTP route that belongs to a
   gated feature is registered through `handler.requireFeature(license.FeatureX, …)`
   in `internal/gateway`, which answers `403` with a message naming the feature
-  and the edition it needs. Background jobs and gRPC services call
-  `license.Manager.Require` before doing gated work. The frontend wraps gated
+  and the edition it needs; a public route that must answer everywhere checks
+  inline and answers "no" (`/api/sso/discover`). Background jobs, which the
+  gateway runs, check `license.Manager.Has` before doing gated work. Only the
+  gateway loads a licence; no gRPC service serves a gated feature. The frontend wraps gated
   UI in `<FeatureGate feature="…">` (`web/src/license/FeatureGate.tsx`) so a
   locked feature is visible but inert.
 - **Feature names are a contract.** They live in `pkg/license/features.go`

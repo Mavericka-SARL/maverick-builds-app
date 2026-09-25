@@ -11,7 +11,7 @@ a tenant admin set:
 |---|---|
 | product name | the sidebar heading, the browser tab, the sign-in page, and every place the console names the product (integration wizard copy included) |
 | tagline | the sign-in page |
-| logo, favicon | the sidebar and the sign-in page; the browser tab. Stored inline as data URLs — logo up to 256 KB, favicon up to 32 KB, PNG/JPEG/SVG/WebP/ICO — so a brand arrives in one request and needs no object store |
+| logo, favicon | the sidebar and the sign-in page; the browser tab. Stored inline as data URLs — logo up to 256 KB, favicon up to 32 KB, PNG/JPEG/SVG/WebP/GIF/ICO — so a brand arrives in one request and needs no object store |
 | brand colour | the six `--color-brand-*` tokens the design system uses: the colour itself, two darker steps for hover and active, three tints for backgrounds |
 | e-mail sender name | notifications arrive as `"Acme Planning" <relay address>` with "Notification from Acme Planning" as the fallback subject |
 | custom domain | visitors of that host see this brand before they sign in |

@@ -49,7 +49,7 @@ export default async function globalSetup() {
   await client.connect();
   try {
     // Keyed on email, not keycloak_sub: a stale row from a prior dev-mode
-    // cmd/seed run would already own this same email under the hand-picked
+    // demo seed run would already own this same email under the hand-picked
     // "demo-dept-head-001" sub — this repoints it at alex's real Keycloak
     // id instead of colliding on the email UNIQUE constraint.
     await client.query(

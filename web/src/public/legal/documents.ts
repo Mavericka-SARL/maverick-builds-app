@@ -209,7 +209,7 @@ export function privacyDocument(l: LegalInfo, product: string): LegalDocument {
       {
         heading: "6. Artificial intelligence features",
         body: [
-          "The service includes an assistant that can propose changes to a model. It is off until your organisation switches it on with its own provider key, and while it is on, the text of a request and the structure of the model it concerns are sent to that provider to answer it. Nothing it proposes takes effect until a person applies it, and no decision about any individual is made automatically.",
+          "The service includes an assistant that can propose changes to a model. It works only once a provider key is configured — by your organisation, by the developer using it, or by the operator of the deployment — and when it is used, the text of the request and the structure of the model it concerns are sent to that key's provider to answer it. Nothing it proposes takes effect until a person applies it, and no decision about any individual is made automatically.",
         ],
       },
       {
@@ -218,7 +218,7 @@ export function privacyDocument(l: LegalInfo, product: string): LegalDocument {
           [
             "Your content and account data: for as long as your workspace exists. When a workspace is deleted, or thirty days after you ask us to close it, both are deleted.",
             "Backups: rolling, kept for fourteen days, after which they are destroyed. A deletion reaches the backups within that window.",
-            "The audit record: for the period your organisation configures for its workspace, since it exists for your accountability as much as ours.",
+            "The audit record: for the period your organisation configures, or otherwise the deployment's default, since it exists for your accountability as much as ours.",
             "Request logs: kept short-term for security and operational diagnosis, then discarded.",
           ],
         ],

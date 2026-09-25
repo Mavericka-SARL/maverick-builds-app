@@ -37,6 +37,8 @@ type Query struct {
 	Category  string
 	EventType string
 	Limit     int
+
+	noHeader bool // set by StreamAll for every page after the first
 }
 
 // Format is "csv" or "jsonl".
@@ -171,8 +173,10 @@ func Stream(ctx context.Context, pool *pgxpool.Pool, q Query, format Format, w i
 	switch format {
 	case FormatCSV:
 		cw = csv.NewWriter(w)
-		if err := cw.Write(csvHeader); err != nil {
-			return Result{}, err
+		if !q.noHeader {
+			if err := cw.Write(csvHeader); err != nil {
+				return Result{}, err
+			}
 		}
 	case FormatJSONL:
 		enc = json.NewEncoder(w)
@@ -215,6 +219,22 @@ func Stream(ctx context.Context, pool *pgxpool.Pool, q Query, format Format, w i
 		}
 	}
 	return res, nil
+}
+
+// StreamAll writes every matching event — one CSV header, then page after
+// page of MaxLimit — for a person's download, which (unlike a collector) has
+// no way to follow a cursor. Its Result carries the total count and no cursor.
+func StreamAll(ctx context.Context, pool *pgxpool.Pool, q Query, format Format, w io.Writer) (Result, error) {
+	total := Result{}
+	q.Limit = MaxLimit
+	for {
+		res, err := Stream(ctx, pool, q, format, w)
+		total.Count += res.Count
+		if err != nil || res.NextCursor == "" {
+			return total, err
+		}
+		q.After, q.noHeader = res.NextCursor, true
+	}
 }
 
 // A metadata column holds "{}" for most events, but rows written with a

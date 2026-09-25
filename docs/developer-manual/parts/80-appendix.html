@@ -2,16 +2,16 @@
 <p>Stated plainly so you do not design around features that are not there. Each item is either explicitly marked as not implemented in the product's own specifications or is absent from the console.</p>
 <table>
 <tr><th style="width:22%">Area</th><th>Not supported today</th></tr>
-<tr><td>Formulas</td><td>Cell addresses, SUMIF-family conditional aggregation, XLOOKUP/INDEX/MATCH, dotted property references, PARENT/CHILDREN functions, cross-period offsets, JavaScript/Python/SQL formulas.</td></tr>
+<tr><td>Formulas</td><td>Cell addresses, SUMIF-family conditional aggregation, XLOOKUP/INDEX/MATCH, dotted property references, PARENT/CHILDREN functions, a period offset that is not a whole-number literal, JavaScript/Python/SQL formulas.</td></tr>
 <tr><td>Dimensions</td><td>Building a derived dimension from member properties in the console (schema exists, UI is partial); import preview and explicit sort/move controls in the member tree.</td></tr>
 <tr><td>Grids</td><td>Renaming a grid; a metric in more than one grid; collapsing hierarchy levels in the rendered grid (use the grid's Show level instead).</td></tr>
 <tr><td>Dashboards</td><td>Undo/redo, canvas zoom, alignment guides, layout templates, breakpoint preview; form-backed chart sources.</td></tr>
-<tr><td>Workflows</td><td>Drag-and-drop or edge drawing on the canvas (edit in the step list and panel); timeouts, escalations and reminders (SLA hours is informational); unpublish (archive instead); time-scheduled workflow starts; full BPMN.</td></tr>
-<tr><td>Triggers</td><td>Conditions or actions on the rule itself (they belong to workflow steps); scheduled rules.</td></tr>
-<tr><td>Integrations</td><td>Supabase (marked coming soon); OAuth authorization-code flows (client credentials only); Google Sheets through a Google account (link-shared only).</td></tr>
-<tr><td>AI Developer</td><td>Creating workflows, forms, triggers or integrations; a full rollback history of executed plans.</td></tr>
+<tr><td>Workflows</td><td>Drag-and-drop or edge drawing on the canvas (edit in the step list and panel); timeouts and escalations (SLA hours drives a one-time reminder to the people who can act on a step, nothing more); unpublish (archive instead); full BPMN.</td></tr>
+<tr><td>Triggers</td><td>Conditions or actions on the rule itself (they belong to workflow steps); a schedule on a workflow whose trigger is an event (schedules start manual workflows).</td></tr>
+<tr><td>Integrations</td><td>Supabase (marked coming soon); Google Sheets through a person's own Google account (use a link-shared sheet or the tenant's service account).</td></tr>
+<tr><td>AI Developer</td><td>Creating integrations; undoing a single executed step (discard the whole draft revision instead).</td></tr>
 <tr><td>Users</td><td>Granting developer or administrator roles; deciding application and model access (administrators); business roles, dashboard grants and access rules (Business Admin console).</td></tr>
-<tr><td>Revisions</td><td>Export and import of a revision package (tenant administrators only); a separate "version" axis.</td></tr>
+<tr><td>Revisions</td><td>Export and import of a revision package (tenant and platform administrators only); a separate "version" axis.</td></tr>
 <tr><td>Audit</td><td>No audit screen for the developer role.</td></tr>
 </table>
 

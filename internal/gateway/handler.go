@@ -176,7 +176,7 @@ var devPersonas = map[string]string{
 	"sales_rep": "sales-rep-001",
 	"sales_mgr": "sales-mgr-001",
 	// Payroll (Salary Budgeting) personas — platform_admin/developer reuse
-	// the OPEX seed's shared accounts (see cmd/seed-payroll/main.go)
+	// the shared demo accounts
 	"payroll_admin": "payroll-tenant-admin-001",
 	"general_mgr":   "payroll-gm-001",
 	"cc_mgr_sales":  "payroll-ccm-sales-001",

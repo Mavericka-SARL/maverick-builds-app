@@ -9,7 +9,7 @@
 //
 // Every test here drives workflow.Store.CompleteStep directly, with no HTTP
 // server involved at all — exactly the path internal/workflow/server.go's
-// gRPC WorkflowService and every cmd/seed*/main.go script use. Before this
+// gRPC WorkflowService uses. Before this
 // fix, the on-approve fact copy only ever ran from the gateway's taskAction
 // HTTP handler; every test in this file is itself proof that gap is closed.
 package workflow_test

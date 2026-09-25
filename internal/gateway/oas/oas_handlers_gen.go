@@ -16268,56 +16268,8 @@ func (s *Server) handleGetBrandingRequest(args [0]string, argsEscaped bool, w ht
 
 			s.errors.Add(ctx, 1, metric.WithAttributes(attrs...))
 		}
-		err          error
-		opErrContext = ogenerrors.OperationContext{
-			Name: GetBrandingOperation,
-			ID:   "getBranding",
-		}
+		err error
 	)
-	{
-		type bitset = [1]uint8
-		var satisfied bitset
-		{
-			sctx, ok, err := s.securityBearerAuth(ctx, GetBrandingOperation, r)
-			if err != nil {
-				err = &ogenerrors.SecurityError{
-					OperationContext: opErrContext,
-					Security:         "BearerAuth",
-					Err:              err,
-				}
-				defer recordError("Security:BearerAuth", err)
-				s.cfg.ErrorHandler(ctx, w, r, err)
-				return
-			}
-			if ok {
-				satisfied[0] |= 1 << 0
-				ctx = sctx
-			}
-		}
-
-		if ok := func() bool {
-		nextRequirement:
-			for _, requirement := range []bitset{
-				{0b00000001},
-			} {
-				for i, mask := range requirement {
-					if satisfied[i]&mask != mask {
-						continue nextRequirement
-					}
-				}
-				return true
-			}
-			return false
-		}(); !ok {
-			err = &ogenerrors.SecurityError{
-				OperationContext: opErrContext,
-				Err:              ogenerrors.ErrSecurityRequirementIsNotSatisfied,
-			}
-			defer recordError("Security", err)
-			s.cfg.ErrorHandler(ctx, w, r, err)
-			return
-		}
-	}
 
 	var rawBody []byte
 
@@ -18143,56 +18095,8 @@ func (s *Server) handleGetLegalInfoRequest(args [0]string, argsEscaped bool, w h
 
 			s.errors.Add(ctx, 1, metric.WithAttributes(attrs...))
 		}
-		err          error
-		opErrContext = ogenerrors.OperationContext{
-			Name: GetLegalInfoOperation,
-			ID:   "getLegalInfo",
-		}
+		err error
 	)
-	{
-		type bitset = [1]uint8
-		var satisfied bitset
-		{
-			sctx, ok, err := s.securityBearerAuth(ctx, GetLegalInfoOperation, r)
-			if err != nil {
-				err = &ogenerrors.SecurityError{
-					OperationContext: opErrContext,
-					Security:         "BearerAuth",
-					Err:              err,
-				}
-				defer recordError("Security:BearerAuth", err)
-				s.cfg.ErrorHandler(ctx, w, r, err)
-				return
-			}
-			if ok {
-				satisfied[0] |= 1 << 0
-				ctx = sctx
-			}
-		}
-
-		if ok := func() bool {
-		nextRequirement:
-			for _, requirement := range []bitset{
-				{0b00000001},
-			} {
-				for i, mask := range requirement {
-					if satisfied[i]&mask != mask {
-						continue nextRequirement
-					}
-				}
-				return true
-			}
-			return false
-		}(); !ok {
-			err = &ogenerrors.SecurityError{
-				OperationContext: opErrContext,
-				Err:              ogenerrors.ErrSecurityRequirementIsNotSatisfied,
-			}
-			defer recordError("Security", err)
-			s.cfg.ErrorHandler(ctx, w, r, err)
-			return
-		}
-	}
 
 	var rawBody []byte
 
@@ -19007,56 +18911,8 @@ func (s *Server) handleGetSignupOptionsRequest(args [0]string, argsEscaped bool,
 
 			s.errors.Add(ctx, 1, metric.WithAttributes(attrs...))
 		}
-		err          error
-		opErrContext = ogenerrors.OperationContext{
-			Name: GetSignupOptionsOperation,
-			ID:   "getSignupOptions",
-		}
+		err error
 	)
-	{
-		type bitset = [1]uint8
-		var satisfied bitset
-		{
-			sctx, ok, err := s.securityBearerAuth(ctx, GetSignupOptionsOperation, r)
-			if err != nil {
-				err = &ogenerrors.SecurityError{
-					OperationContext: opErrContext,
-					Security:         "BearerAuth",
-					Err:              err,
-				}
-				defer recordError("Security:BearerAuth", err)
-				s.cfg.ErrorHandler(ctx, w, r, err)
-				return
-			}
-			if ok {
-				satisfied[0] |= 1 << 0
-				ctx = sctx
-			}
-		}
-
-		if ok := func() bool {
-		nextRequirement:
-			for _, requirement := range []bitset{
-				{0b00000001},
-			} {
-				for i, mask := range requirement {
-					if satisfied[i]&mask != mask {
-						continue nextRequirement
-					}
-				}
-				return true
-			}
-			return false
-		}(); !ok {
-			err = &ogenerrors.SecurityError{
-				OperationContext: opErrContext,
-				Err:              ogenerrors.ErrSecurityRequirementIsNotSatisfied,
-			}
-			defer recordError("Security", err)
-			s.cfg.ErrorHandler(ctx, w, r, err)
-			return
-		}
-	}
 
 	var rawBody []byte
 
@@ -21915,50 +21771,6 @@ func (s *Server) handleIntegrationOAuthCallbackRequest(args [0]string, argsEscap
 			ID:   "integrationOAuthCallback",
 		}
 	)
-	{
-		type bitset = [1]uint8
-		var satisfied bitset
-		{
-			sctx, ok, err := s.securityBearerAuth(ctx, IntegrationOAuthCallbackOperation, r)
-			if err != nil {
-				err = &ogenerrors.SecurityError{
-					OperationContext: opErrContext,
-					Security:         "BearerAuth",
-					Err:              err,
-				}
-				defer recordError("Security:BearerAuth", err)
-				s.cfg.ErrorHandler(ctx, w, r, err)
-				return
-			}
-			if ok {
-				satisfied[0] |= 1 << 0
-				ctx = sctx
-			}
-		}
-
-		if ok := func() bool {
-		nextRequirement:
-			for _, requirement := range []bitset{
-				{0b00000001},
-			} {
-				for i, mask := range requirement {
-					if satisfied[i]&mask != mask {
-						continue nextRequirement
-					}
-				}
-				return true
-			}
-			return false
-		}(); !ok {
-			err = &ogenerrors.SecurityError{
-				OperationContext: opErrContext,
-				Err:              ogenerrors.ErrSecurityRequirementIsNotSatisfied,
-			}
-			defer recordError("Security", err)
-			s.cfg.ErrorHandler(ctx, w, r, err)
-			return
-		}
-	}
 	params, err := decodeIntegrationOAuthCallbackParams(args, argsEscaped, r)
 	if err != nil {
 		err = &ogenerrors.DecodeParamsError{
@@ -33812,14 +33624,14 @@ func (s *Server) handleScimCreateGroupRequest(args [0]string, argsEscaped bool, 
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			sctx, ok, err := s.securityBearerAuth(ctx, ScimCreateGroupOperation, r)
+			sctx, ok, err := s.securityScimBearer(ctx, ScimCreateGroupOperation, r)
 			if err != nil {
 				err = &ogenerrors.SecurityError{
 					OperationContext: opErrContext,
-					Security:         "BearerAuth",
+					Security:         "ScimBearer",
 					Err:              err,
 				}
-				defer recordError("Security:BearerAuth", err)
+				defer recordError("Security:ScimBearer", err)
 				s.cfg.ErrorHandler(ctx, w, r, err)
 				return
 			}
@@ -33999,14 +33811,14 @@ func (s *Server) handleScimCreateUserRequest(args [0]string, argsEscaped bool, w
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			sctx, ok, err := s.securityBearerAuth(ctx, ScimCreateUserOperation, r)
+			sctx, ok, err := s.securityScimBearer(ctx, ScimCreateUserOperation, r)
 			if err != nil {
 				err = &ogenerrors.SecurityError{
 					OperationContext: opErrContext,
-					Security:         "BearerAuth",
+					Security:         "ScimBearer",
 					Err:              err,
 				}
-				defer recordError("Security:BearerAuth", err)
+				defer recordError("Security:ScimBearer", err)
 				s.cfg.ErrorHandler(ctx, w, r, err)
 				return
 			}
@@ -34186,14 +33998,14 @@ func (s *Server) handleScimDeleteGroupRequest(args [1]string, argsEscaped bool, 
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			sctx, ok, err := s.securityBearerAuth(ctx, ScimDeleteGroupOperation, r)
+			sctx, ok, err := s.securityScimBearer(ctx, ScimDeleteGroupOperation, r)
 			if err != nil {
 				err = &ogenerrors.SecurityError{
 					OperationContext: opErrContext,
-					Security:         "BearerAuth",
+					Security:         "ScimBearer",
 					Err:              err,
 				}
-				defer recordError("Security:BearerAuth", err)
+				defer recordError("Security:ScimBearer", err)
 				s.cfg.ErrorHandler(ctx, w, r, err)
 				return
 			}
@@ -34373,14 +34185,14 @@ func (s *Server) handleScimDeleteUserRequest(args [1]string, argsEscaped bool, w
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			sctx, ok, err := s.securityBearerAuth(ctx, ScimDeleteUserOperation, r)
+			sctx, ok, err := s.securityScimBearer(ctx, ScimDeleteUserOperation, r)
 			if err != nil {
 				err = &ogenerrors.SecurityError{
 					OperationContext: opErrContext,
-					Security:         "BearerAuth",
+					Security:         "ScimBearer",
 					Err:              err,
 				}
-				defer recordError("Security:BearerAuth", err)
+				defer recordError("Security:ScimBearer", err)
 				s.cfg.ErrorHandler(ctx, w, r, err)
 				return
 			}
@@ -34560,14 +34372,14 @@ func (s *Server) handleScimGetGroupRequest(args [1]string, argsEscaped bool, w h
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			sctx, ok, err := s.securityBearerAuth(ctx, ScimGetGroupOperation, r)
+			sctx, ok, err := s.securityScimBearer(ctx, ScimGetGroupOperation, r)
 			if err != nil {
 				err = &ogenerrors.SecurityError{
 					OperationContext: opErrContext,
-					Security:         "BearerAuth",
+					Security:         "ScimBearer",
 					Err:              err,
 				}
-				defer recordError("Security:BearerAuth", err)
+				defer recordError("Security:ScimBearer", err)
 				s.cfg.ErrorHandler(ctx, w, r, err)
 				return
 			}
@@ -34747,14 +34559,14 @@ func (s *Server) handleScimGetUserRequest(args [1]string, argsEscaped bool, w ht
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			sctx, ok, err := s.securityBearerAuth(ctx, ScimGetUserOperation, r)
+			sctx, ok, err := s.securityScimBearer(ctx, ScimGetUserOperation, r)
 			if err != nil {
 				err = &ogenerrors.SecurityError{
 					OperationContext: opErrContext,
-					Security:         "BearerAuth",
+					Security:         "ScimBearer",
 					Err:              err,
 				}
-				defer recordError("Security:BearerAuth", err)
+				defer recordError("Security:ScimBearer", err)
 				s.cfg.ErrorHandler(ctx, w, r, err)
 				return
 			}
@@ -34934,14 +34746,14 @@ func (s *Server) handleScimListGroupsRequest(args [0]string, argsEscaped bool, w
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			sctx, ok, err := s.securityBearerAuth(ctx, ScimListGroupsOperation, r)
+			sctx, ok, err := s.securityScimBearer(ctx, ScimListGroupsOperation, r)
 			if err != nil {
 				err = &ogenerrors.SecurityError{
 					OperationContext: opErrContext,
-					Security:         "BearerAuth",
+					Security:         "ScimBearer",
 					Err:              err,
 				}
-				defer recordError("Security:BearerAuth", err)
+				defer recordError("Security:ScimBearer", err)
 				s.cfg.ErrorHandler(ctx, w, r, err)
 				return
 			}
@@ -35130,14 +34942,14 @@ func (s *Server) handleScimListUsersRequest(args [0]string, argsEscaped bool, w 
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			sctx, ok, err := s.securityBearerAuth(ctx, ScimListUsersOperation, r)
+			sctx, ok, err := s.securityScimBearer(ctx, ScimListUsersOperation, r)
 			if err != nil {
 				err = &ogenerrors.SecurityError{
 					OperationContext: opErrContext,
-					Security:         "BearerAuth",
+					Security:         "ScimBearer",
 					Err:              err,
 				}
-				defer recordError("Security:BearerAuth", err)
+				defer recordError("Security:ScimBearer", err)
 				s.cfg.ErrorHandler(ctx, w, r, err)
 				return
 			}
@@ -35325,14 +35137,14 @@ func (s *Server) handleScimPatchGroupRequest(args [1]string, argsEscaped bool, w
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			sctx, ok, err := s.securityBearerAuth(ctx, ScimPatchGroupOperation, r)
+			sctx, ok, err := s.securityScimBearer(ctx, ScimPatchGroupOperation, r)
 			if err != nil {
 				err = &ogenerrors.SecurityError{
 					OperationContext: opErrContext,
-					Security:         "BearerAuth",
+					Security:         "ScimBearer",
 					Err:              err,
 				}
-				defer recordError("Security:BearerAuth", err)
+				defer recordError("Security:ScimBearer", err)
 				s.cfg.ErrorHandler(ctx, w, r, err)
 				return
 			}
@@ -35528,14 +35340,14 @@ func (s *Server) handleScimPatchUserRequest(args [1]string, argsEscaped bool, w 
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			sctx, ok, err := s.securityBearerAuth(ctx, ScimPatchUserOperation, r)
+			sctx, ok, err := s.securityScimBearer(ctx, ScimPatchUserOperation, r)
 			if err != nil {
 				err = &ogenerrors.SecurityError{
 					OperationContext: opErrContext,
-					Security:         "BearerAuth",
+					Security:         "ScimBearer",
 					Err:              err,
 				}
-				defer recordError("Security:BearerAuth", err)
+				defer recordError("Security:ScimBearer", err)
 				s.cfg.ErrorHandler(ctx, w, r, err)
 				return
 			}
@@ -35730,14 +35542,14 @@ func (s *Server) handleScimReplaceGroupRequest(args [1]string, argsEscaped bool,
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			sctx, ok, err := s.securityBearerAuth(ctx, ScimReplaceGroupOperation, r)
+			sctx, ok, err := s.securityScimBearer(ctx, ScimReplaceGroupOperation, r)
 			if err != nil {
 				err = &ogenerrors.SecurityError{
 					OperationContext: opErrContext,
-					Security:         "BearerAuth",
+					Security:         "ScimBearer",
 					Err:              err,
 				}
-				defer recordError("Security:BearerAuth", err)
+				defer recordError("Security:ScimBearer", err)
 				s.cfg.ErrorHandler(ctx, w, r, err)
 				return
 			}
@@ -35932,14 +35744,14 @@ func (s *Server) handleScimReplaceUserRequest(args [1]string, argsEscaped bool, 
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			sctx, ok, err := s.securityBearerAuth(ctx, ScimReplaceUserOperation, r)
+			sctx, ok, err := s.securityScimBearer(ctx, ScimReplaceUserOperation, r)
 			if err != nil {
 				err = &ogenerrors.SecurityError{
 					OperationContext: opErrContext,
-					Security:         "BearerAuth",
+					Security:         "ScimBearer",
 					Err:              err,
 				}
-				defer recordError("Security:BearerAuth", err)
+				defer recordError("Security:ScimBearer", err)
 				s.cfg.ErrorHandler(ctx, w, r, err)
 				return
 			}
@@ -36134,14 +35946,14 @@ func (s *Server) handleScimResourceTypesRequest(args [0]string, argsEscaped bool
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			sctx, ok, err := s.securityBearerAuth(ctx, ScimResourceTypesOperation, r)
+			sctx, ok, err := s.securityScimBearer(ctx, ScimResourceTypesOperation, r)
 			if err != nil {
 				err = &ogenerrors.SecurityError{
 					OperationContext: opErrContext,
-					Security:         "BearerAuth",
+					Security:         "ScimBearer",
 					Err:              err,
 				}
-				defer recordError("Security:BearerAuth", err)
+				defer recordError("Security:ScimBearer", err)
 				s.cfg.ErrorHandler(ctx, w, r, err)
 				return
 			}
@@ -36306,14 +36118,14 @@ func (s *Server) handleScimSchemasRequest(args [0]string, argsEscaped bool, w ht
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			sctx, ok, err := s.securityBearerAuth(ctx, ScimSchemasOperation, r)
+			sctx, ok, err := s.securityScimBearer(ctx, ScimSchemasOperation, r)
 			if err != nil {
 				err = &ogenerrors.SecurityError{
 					OperationContext: opErrContext,
-					Security:         "BearerAuth",
+					Security:         "ScimBearer",
 					Err:              err,
 				}
-				defer recordError("Security:BearerAuth", err)
+				defer recordError("Security:ScimBearer", err)
 				s.cfg.ErrorHandler(ctx, w, r, err)
 				return
 			}
@@ -36478,14 +36290,14 @@ func (s *Server) handleScimServiceProviderConfigRequest(args [0]string, argsEsca
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			sctx, ok, err := s.securityBearerAuth(ctx, ScimServiceProviderConfigOperation, r)
+			sctx, ok, err := s.securityScimBearer(ctx, ScimServiceProviderConfigOperation, r)
 			if err != nil {
 				err = &ogenerrors.SecurityError{
 					OperationContext: opErrContext,
-					Security:         "BearerAuth",
+					Security:         "ScimBearer",
 					Err:              err,
 				}
-				defer recordError("Security:BearerAuth", err)
+				defer recordError("Security:ScimBearer", err)
 				s.cfg.ErrorHandler(ctx, w, r, err)
 				return
 			}
@@ -37828,50 +37640,6 @@ func (s *Server) handleSignupRequest(args [0]string, argsEscaped bool, w http.Re
 			ID:   "signup",
 		}
 	)
-	{
-		type bitset = [1]uint8
-		var satisfied bitset
-		{
-			sctx, ok, err := s.securityBearerAuth(ctx, SignupOperation, r)
-			if err != nil {
-				err = &ogenerrors.SecurityError{
-					OperationContext: opErrContext,
-					Security:         "BearerAuth",
-					Err:              err,
-				}
-				defer recordError("Security:BearerAuth", err)
-				s.cfg.ErrorHandler(ctx, w, r, err)
-				return
-			}
-			if ok {
-				satisfied[0] |= 1 << 0
-				ctx = sctx
-			}
-		}
-
-		if ok := func() bool {
-		nextRequirement:
-			for _, requirement := range []bitset{
-				{0b00000001},
-			} {
-				for i, mask := range requirement {
-					if satisfied[i]&mask != mask {
-						continue nextRequirement
-					}
-				}
-				return true
-			}
-			return false
-		}(); !ok {
-			err = &ogenerrors.SecurityError{
-				OperationContext: opErrContext,
-				Err:              ogenerrors.ErrSecurityRequirementIsNotSatisfied,
-			}
-			defer recordError("Security", err)
-			s.cfg.ErrorHandler(ctx, w, r, err)
-			return
-		}
-	}
 
 	var rawBody []byte
 	request, rawBody, close, err := s.decodeSignupRequest(r)
@@ -38016,50 +37784,6 @@ func (s *Server) handleSsoDiscoverRequest(args [0]string, argsEscaped bool, w ht
 			ID:   "ssoDiscover",
 		}
 	)
-	{
-		type bitset = [1]uint8
-		var satisfied bitset
-		{
-			sctx, ok, err := s.securityBearerAuth(ctx, SsoDiscoverOperation, r)
-			if err != nil {
-				err = &ogenerrors.SecurityError{
-					OperationContext: opErrContext,
-					Security:         "BearerAuth",
-					Err:              err,
-				}
-				defer recordError("Security:BearerAuth", err)
-				s.cfg.ErrorHandler(ctx, w, r, err)
-				return
-			}
-			if ok {
-				satisfied[0] |= 1 << 0
-				ctx = sctx
-			}
-		}
-
-		if ok := func() bool {
-		nextRequirement:
-			for _, requirement := range []bitset{
-				{0b00000001},
-			} {
-				for i, mask := range requirement {
-					if satisfied[i]&mask != mask {
-						continue nextRequirement
-					}
-				}
-				return true
-			}
-			return false
-		}(); !ok {
-			err = &ogenerrors.SecurityError{
-				OperationContext: opErrContext,
-				Err:              ogenerrors.ErrSecurityRequirementIsNotSatisfied,
-			}
-			defer recordError("Security", err)
-			s.cfg.ErrorHandler(ctx, w, r, err)
-			return
-		}
-	}
 	params, err := decodeSsoDiscoverParams(args, argsEscaped, r)
 	if err != nil {
 		err = &ogenerrors.DecodeParamsError{

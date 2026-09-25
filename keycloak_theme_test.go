@@ -24,6 +24,8 @@ func TestKeycloakThemeMatchesTheManifest(t *testing.T) {
 	for _, f := range []struct{ key, path string }{
 		{"theme.properties", "deploy/docker/config/keycloak/themes/maverickbuilds/login/theme.properties"},
 		{"brand.css", "deploy/docker/config/keycloak/themes/maverickbuilds/login/resources/css/brand.css"},
+		{"brand.js", "deploy/docker/config/keycloak/themes/maverickbuilds/login/resources/js/brand.js"},
+		{"wordmark.svg", "deploy/docker/config/keycloak/themes/maverickbuilds/login/resources/img/wordmark.svg"},
 	} {
 		source, err := os.ReadFile(f.path)
 		if err != nil {

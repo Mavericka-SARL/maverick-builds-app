@@ -704,7 +704,8 @@ closing_cash = opening_cash + net_cash_flow
 - an arbitrarily named dimension marked `time` works;
 - time configuration is required at creation and immutable later;
 - invalid, overlapping, duplicate, or gapped regular periods are rejected;
-- time members cannot have parents in Phase 1;
+- dated time members are leaves; the Q→H→FY aggregate members above them are
+  undated (migration 088);
 - a grid cannot contain two time dimensions;
 - OpenAPI, protobuf, manual gateway, generated types, and frontend clients
   serialize the same fields; and

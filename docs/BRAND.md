@@ -25,10 +25,12 @@ font server, and a self-hosted deployment should not depend on one.
   namespace (`.mvx-public`) so none of it can reach the console, and
   `web/src/public/PublicPage.tsx`, the frame they share.
 - **Keycloak's login** — `deploy/docker/config/keycloak/themes/maverickbuilds/`,
-  a CSS-only theme that inherits every template and message from the stock
-  login theme. The same file is embedded in the `keycloak-theme` ConfigMap in
-  `deploy/k8s/base/infra/keycloak.yaml`, because a ConfigMap cannot reference a
-  directory; `TestKeycloakThemeMatchesTheManifest` fails if the two drift.
+  a theme that inherits every template and message from the stock login
+  theme and adds a stylesheet (`brand.css`), a small script (`brand.js`), the
+  wordmark and a favicon. The same files are embedded in the `keycloak-theme`
+  ConfigMap in `deploy/k8s/base/infra/keycloak.yaml`, because a ConfigMap
+  cannot reference a directory; `TestKeycloakThemeMatchesTheManifest` fails if
+  the text files drift (the favicon is binary and is not compared).
 
 A realm uses the theme when its `loginTheme` is `maverickbuilds`. The realm
 import sets that for a fresh install; an existing realm is switched in the

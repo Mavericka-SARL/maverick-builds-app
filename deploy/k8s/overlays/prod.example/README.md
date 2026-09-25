@@ -24,7 +24,6 @@ secrets, the first deploy, sign-in setup, backups — is in
 | `site.yaml` | Every value that belongs to your site — each marked `CHANGE`: host names, storage class, SMTP relay, alert address; Keycloak on PostgreSQL behind its public name; nightly dumps that include Keycloak's database |
 | `networkpolicy-keycloak.yaml` | Keycloak's egress to PostgreSQL and the mail relay, which base (in-memory Keycloak) does not need |
 | `pdb-gateway.yaml` | Keeps a gateway replica through node drains |
-| `seed-remove.yaml` | Removes base's demo-data Job |
 | `minio-remove.yaml`, `networkpolicy-external-objectstore.yaml` | Listed only when object storage lives outside the cluster — where backups belong |
 
 ## Secrets

@@ -4,7 +4,7 @@ import "testing"
 
 func TestExpandHidden(t *testing.T) {
 	// region -> cost_center -> employee, three levels, mirroring the
-	// employees/cost_centers/regions shape cmd/seed-payroll seeds.
+	// employees/cost_centers/regions shape of the former salary demo.
 	edges := []MemberEdge{
 		{ID: "region-a", ParentID: ""},
 		{ID: "cc-ga", ParentID: "region-a"},

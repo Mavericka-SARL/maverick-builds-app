@@ -8,7 +8,11 @@ const EXEC_STATUS_TONE: Record<string, DesignTone> = {
   completed: "success", running: "warning", failed: "danger", cancelled: "neutral",
 };
 
-type RuleState = { name: string; description: string; trigger_type: string; workflow_name: string; workflow_def_id: string; source_form_id: string; source_grid_id: string; source_integration_id: string };
+type RuleState = { name: string; description: string; trigger_type: string; workflow_name: string; workflow_def_id: string; source_form_id: string; source_grid_id: string; source_integration_id: string; cron_expr: string; timezone: string; misfire_policy: string };
+
+// The schedule fields go to the server only for a schedule rule: a cron
+// expression in the body (re)configures scheduling.
+const ruleBody = (r: RuleState) => r.trigger_type === "schedule" ? r : { ...r, cron_expr: undefined, timezone: undefined, misfire_policy: undefined };
 
 // The workflow's trigger event (a catalog key) → the rule trigger type the
 // engine dispatches on. Per-form keys ("expense_request.submitted") and
@@ -25,7 +29,7 @@ function triggerTypeFromWorkflow(triggerEvent: string): string {
 
 export function AutomationTab() {
   const qc = useQueryClient();
-  const empty: RuleState = { name: "", description: "", trigger_type: "manual", workflow_name: "", workflow_def_id: "", source_form_id: "", source_grid_id: "", source_integration_id: "" };
+  const empty: RuleState = { name: "", description: "", trigger_type: "manual", workflow_name: "", workflow_def_id: "", source_form_id: "", source_grid_id: "", source_integration_id: "", cron_expr: "", timezone: "UTC", misfire_policy: "skip" };
   const [showCreate, setShowCreate] = useState(false);
   const [newRule, setNewRule] = useState<RuleState>(empty);
   const [editId, setEditId] = useState<string | null>(null);
@@ -48,7 +52,7 @@ export function AutomationTab() {
   });
 
   const createRule = useMutation({
-    mutationFn: () => api.createAutomationRule(newRule),
+    mutationFn: () => api.createAutomationRule(ruleBody(newRule)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["automation-rules"] });
       setNewRule(empty);
@@ -56,7 +60,7 @@ export function AutomationTab() {
     },
   });
   const updateRule = useMutation({
-    mutationFn: () => api.updateAutomationRule(editId!, editRule),
+    mutationFn: () => api.updateAutomationRule(editId!, ruleBody(editRule)),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["automation-rules"] }); setEditId(null); },
   });
   const deleteRule = useMutation({
@@ -76,7 +80,7 @@ export function AutomationTab() {
 
   const startEdit = (r: AutomationRule) => {
     setEditId(r.id);
-    setEditRule({ name: r.name, description: r.description, trigger_type: r.trigger_type, workflow_name: r.workflow_name, workflow_def_id: r.workflow_def_id ?? "", source_form_id: r.source_form_id ?? "", source_grid_id: r.source_grid_id ?? "", source_integration_id: r.source_integration_id ?? "" });
+    setEditRule({ name: r.name, description: r.description, trigger_type: r.trigger_type, workflow_name: r.workflow_name, workflow_def_id: r.workflow_def_id ?? "", source_form_id: r.source_form_id ?? "", source_grid_id: r.source_grid_id ?? "", source_integration_id: r.source_integration_id ?? "", cron_expr: r.cron_expr ?? "", timezone: r.timezone || "UTC", misfire_policy: r.misfire_policy || "skip" });
   };
 
   // Find workflow summary for a rule, matching by name (legacy) or id
@@ -101,7 +105,7 @@ export function AutomationTab() {
             <Button
               variant="primary"
               style={{ marginTop: 12 }}
-              disabled={!newRule.name || !newRule.workflow_name}
+              disabled={!newRule.name || !newRule.workflow_name || (newRule.trigger_type === "schedule" && !newRule.cron_expr)}
               loading={createRule.isPending}
               loadingLabel="Creating…"
               onClick={() => createRule.mutate()}
@@ -120,11 +124,12 @@ export function AutomationTab() {
               <div key={rule.id} className="mvx-panel" style={{ padding: 16, borderColor: "var(--color-brand-200)" }}>
                 <RuleForm rule={editRule} onChange={setEditRule} workflows={workflows} forms={forms} grids={grids} integrations={integrations} />
                 <div className="mvx-admin-inline-form" style={{ marginTop: 12 }}>
-                  <Button variant="primary" loading={updateRule.isPending} loadingLabel="Saving…" onClick={() => updateRule.mutate()}>
+                  <Button variant="primary" disabled={editRule.trigger_type === "schedule" && !editRule.cron_expr} loading={updateRule.isPending} loadingLabel="Saving…" onClick={() => updateRule.mutate()}>
                     Save
                   </Button>
                   <Button onClick={() => setEditId(null)}>Cancel</Button>
                 </div>
+                {updateRule.isError && <p className="mvx-admin-error" style={{ marginTop: 8 }}>{(updateRule.error as Error).message}</p>}
               </div>
             ) : (
               <div key={rule.id} className="mvx-admin-object" style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 16, opacity: rule.enabled ? 1 : 0.7 }}>
@@ -136,6 +141,12 @@ export function AutomationTab() {
                   <div className="mvx-admin-muted" style={{ marginTop: 2, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                     <StatusBadge>{rule.trigger_type}</StatusBadge>
                     {rule.source_form_id && (() => { const f = forms.find(x => x.id === rule.source_form_id); return f ? <StatusBadge tone="success">form: {f.label || f.name}</StatusBadge> : null; })()}
+                    {rule.trigger_type === "schedule" && rule.cron_expr && (
+                      <StatusBadge tone="info">{rule.cron_expr} ({rule.timezone || "UTC"})</StatusBadge>
+                    )}
+                    {rule.trigger_type === "schedule" && rule.next_fire_at && (
+                      <span>next {new Date(rule.next_fire_at).toLocaleString()}</span>
+                    )}
                     {rule.source_grid_id && (() => { const g = grids.find(x => x.id === rule.source_grid_id); return g ? <StatusBadge tone="info">grid: {g.name}</StatusBadge> : null; })()}
                     <span>→</span>
                     <span style={{ fontWeight: 500, color: "var(--color-text)" }}>{rule.workflow_name}</span>
@@ -255,6 +266,7 @@ function RuleForm({
   const needsForm = rule.trigger_type === "form_submit" || rule.trigger_type === "form_approval";
   const needsGrid = rule.trigger_type === "grid_change";
   const needsIntegration = rule.trigger_type === "integration_completed" || rule.trigger_type === "integration_failed";
+  const isSchedule = rule.trigger_type === "schedule";
 
   const handleWorkflowSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const wf = workflows.find(w => w.id === e.target.value);
@@ -268,7 +280,12 @@ function RuleForm({
       source_integration_id: "",
     });
   };
-  const workflowLocked = !!rule.workflow_def_id;
+  // An event workflow fixes the trigger type. A manual workflow can be
+  // started by hand or on a schedule, so the choice stays open between those.
+  const selectedWorkflow = workflows.find(w => w.id === rule.workflow_def_id);
+  const manualWorkflow = !selectedWorkflow || triggerTypeFromWorkflow(selectedWorkflow.trigger_event) === "manual";
+  const workflowLocked = !!rule.workflow_def_id && !manualWorkflow;
+  const onlyManualOrSchedule = !!rule.workflow_def_id && manualWorkflow;
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -301,21 +318,40 @@ function RuleForm({
       </Field>
       <Field
         label="Trigger type"
-        description={workflowLocked ? "Set by the workflow's trigger event." : undefined}
+        description={workflowLocked ? "Set by the workflow's trigger event." : onlyManualOrSchedule ? "A manual workflow runs by hand or on a schedule." : undefined}
       >
         <Select value={rule.trigger_type}
           onChange={(e) => onChange({ ...rule, trigger_type: e.target.value, source_form_id: "", source_grid_id: "", source_integration_id: "" })}
           disabled={workflowLocked}
           title={workflowLocked ? "Derived from the workflow's trigger event" : undefined}>
           <option value="manual">manual — trigger manually</option>
-          <option value="form_submit">form_submit — on record creation</option>
-          <option value="form_approval">form_approval — on record approved / closed</option>
-          <option value="grid_change">grid_change — on cell writeback</option>
-          <option value="integration_completed">integration_completed — an integration run finished</option>
-          <option value="integration_failed">integration_failed — an integration run failed</option>
-          <option value="api">api — external HTTP trigger</option>
+          <option value="schedule">schedule — on a cron schedule</option>
+          {!onlyManualOrSchedule && <>
+            <option value="form_submit">form_submit — on record creation</option>
+            <option value="form_approval">form_approval — on record approved / closed</option>
+            <option value="grid_change">grid_change — on cell writeback</option>
+            <option value="integration_completed">integration_completed — an integration run finished</option>
+            <option value="integration_failed">integration_failed — an integration run failed</option>
+            <option value="api">api — external HTTP trigger</option>
+          </>}
         </Select>
       </Field>
+      {isSchedule && <>
+        <Field label="Cron expression" description="minute hour day-of-month month day-of-week, e.g. 0 6 * * 1 for Mondays at 06:00">
+          <TextInput value={rule.cron_expr} placeholder="0 6 * * 1" className="mvx-admin-mono"
+            onChange={(e) => onChange({ ...rule, cron_expr: e.target.value })} />
+        </Field>
+        <Field label="Time zone" description="IANA name, e.g. Europe/Paris">
+          <TextInput value={rule.timezone} placeholder="UTC"
+            onChange={(e) => onChange({ ...rule, timezone: e.target.value })} />
+        </Field>
+        <Field label="Missed run" description="What happens to a run the scheduler was down for">
+          <Select value={rule.misfire_policy} onChange={(e) => onChange({ ...rule, misfire_policy: e.target.value })}>
+            <option value="skip">skip it and wait for the next one</option>
+            <option value="fire_now">run it once as soon as possible</option>
+          </Select>
+        </Field>
+      </>}
       {needsForm && (
         <Field label="Source form" description="optional — leave blank for any form">
           <Select value={rule.source_form_id} onChange={(e) => onChange({ ...rule, source_form_id: e.target.value })}>

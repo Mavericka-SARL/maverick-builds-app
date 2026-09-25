@@ -90,10 +90,15 @@ in detail under **Platform › License** for platform administrators.
 
 - **HTTP:** the route is registered in `internal/gateway` through
   `h.requireFeature(license.FeatureX, handler)`, inside the role guard. A
-  locked feature answers `403 {"error": "<Feature> requires the enterprise
-  edition; this deployment runs the community edition"}`.
-- **Background work and gRPC:** call `Manager.Require(feature)` before doing
-  gated work.
+  locked feature answers `403 {"error": "<Feature> requires the <edition>
+  edition; this deployment runs the community edition"}`, naming the edition
+  the feature belongs to (commercial for `white_label`, enterprise for most).
+  A public route that must answer on every deployment checks inline and says
+  "no" instead (`/api/sso/discover` answers `{"sso": false}`).
+- **Background work:** the jobs the gateway runs check `Manager.Has(feature)`
+  on every pass (audit retention, white-label domain routing, deployment
+  settings). Only the gateway loads a licence; the gRPC services serve no
+  gated feature.
 - **Frontend:** `useFeature("x")` or `<FeatureGate feature="x">…</FeatureGate>`
   from `web/src/license/`, which renders a short lock note naming the needed
   edition when the feature is off.

@@ -3,7 +3,7 @@
 > **Classification:** Current — Implementation reference for the system as built.
 
 > **Status:** Current implementation reference
-> **Last verified:** 2026-07-15
+> **Last verified:** 2026-09-25
 > **Authority:** Running code, migrations, build configuration, and tests take
 > precedence if this document drifts.
 
@@ -46,8 +46,8 @@ end-to-end tests is a modular monolith:
 
 ```text
 Browser
-  |  React/Vite, role console selected by resolved role
-  |  intended: Authorization bearer token; local: X-Dev-User in DEV_MODE
+  |  React/Vite, one console whose sections are composed from the user's roles
+  |  Authorization: Bearer <Keycloak token>; X-Dev-User only when DEV_MODE=true
   |  X-App-Id selects the active application context
   v
 cmd/gateway
@@ -86,9 +86,14 @@ The repository also builds separate gRPC binaries:
 | `audit` | `internal/audit` | none |
 | `notification` | `internal/notification` | none |
 | `ai-assistant` | `internal/aiassistant` | Anthropic for the legacy gRPC path |
+| `integration` | `internal/integration` | outbound HTTPS to connector targets (worker, not a gRPC service) |
 
 These binaries register protobuf services from `proto/*/v1` using the shared
-gRPC server helper. The Kubernetes base manifests deploy this topology together
+gRPC server helper (`pkg/grpcutil.NewServer`), and every one installs
+`grpcutil.AuthInterceptor`, which resolves a real actor per call (bearer token
+validated against the JWKS, or the dev persona in `DEV_MODE`), plus the audit
+interceptor. When the `MTLS_*` variables are set the transport additionally
+requires a CA-signed client certificate (`pkg/grpcutil/tls.go`). The Kubernetes base manifests deploy this topology together
 with PostgreSQL, PgBouncer, NATS, Redis, Keycloak, and MinIO.
 
 Query treats NATS startup as mandatory. Query and workflow always construct a
@@ -96,8 +101,9 @@ policy client, although gRPC dialing is lazy; an unreachable policy service can
 therefore surface later as request-time fail-open or fail-closed behavior.
 Import alone treats its NATS publisher as optional.
 
-The distributed topology is real buildable code, but it is not the default
-local composition: `make dev-up` starts only infrastructure, and `dev.sh` starts
+The distributed topology is deployed (see Infrastructure and operations) and
+exercised by `cmd/verify-topology`, but it is not the default local
+composition: `make dev-up` starts only infrastructure, and `dev.sh` starts
 only the HTTP gateway. The gateway's browser API remains the most complete
 product path. Several gRPC stores still use legacy, model-wide or scenario-era
 semantics and do not match current revision isolation, hierarchy fields, formula
@@ -125,9 +131,12 @@ groups are:
 - business administration: `/api/business-admin/*`; and
 - tenant/platform administration: `/api/admin/*`.
 
-The full route inventory is maintained in [docs/API.md](docs/API.md). The
-generated ogen package is built from `api/openapi.yaml`, which currently covers
-only a core subset and is not the router used by `cmd/gateway`.
+The router is self-documenting: every route is registered through
+`register()`/`BuildRoutes()`, and `route_spec_parity_test.go` fails CI when a
+route and `api/openapi.yaml` disagree, so the spec covers every operation
+(250). The generated ogen package in `internal/gateway/oas` is built from that
+spec but is not the router `cmd/gateway` serves. [docs/API.md](docs/API.md)
+is the readable overview.
 
 ### Domain packages
 
@@ -148,7 +157,9 @@ only a core subset and is not the router used by `cmd/gateway`.
 | `internal/deployment` | Standalone deployment package builder (tar.gz: entity graph via `internal/modeltransfer`, full migrations tree, provenance manifest, infra-only compose), fully in-memory — no longer a standalone binary or gRPC service, and no longer writes to local disk; retention goes through `pkg/objectstore` |
 | `internal/modeltransfer` | Model entity-graph export/import — the shared core behind both the admin JSON export/import HTTP endpoints and `internal/deployment`'s tarball builder |
 | `internal/audit` | Partitioned audit events |
-| `internal/notification` | Notification persistence and state |
+| `internal/notification` | Notification persistence, e-mail dispatch (SMTP, STARTTLS or implicit TLS) and task reminders |
+| `internal/integration` | REST API connector definitions, sealed connections, the durable run queue and the worker |
+| `internal/rollup` | Shared hierarchy rollups used by the grid, charts and the calculation scheduler |
 
 ## Data architecture
 
@@ -159,13 +170,15 @@ Migrations are embedded from `migrations/` and applied by the gateway at
 startup. PgBouncer is available locally on port 5433, while default development
 connections use PostgreSQL directly on port 5432.
 
-Migration application has no inter-process advisory lock, and an individual
-migration plus its registry insert is not wrapped as one transaction by the
-runner. Multiple gateway replicas can race startup, and a mid-step failure can
-separate schema state from recorded migration state.
+`pkg/migrate` serializes concurrent runs with a transaction-scoped Postgres
+advisory lock (`pg_advisory_xact_lock`, safe through PgBouncer), and verifies
+each applied file's checksum, so a released migration must never be edited
+(`migrations/checksums.txt`). An individual migration plus its registry insert
+is still not one transaction, so a mid-file failure can leave schema state
+ahead of the registry.
 
-The migration history currently ends at `056_full_revision_isolation.sql`.
-Eleven named schemas organize the data:
+The migration history currently ends at `095_image_widget.sql` (97 files).
+Fourteen named schemas organize the data:
 
 | Schema | Main ownership |
 |---|---|
@@ -180,18 +193,21 @@ Eleven named schemas organize the data:
 | `notification` | in-app/email/webhook notification state |
 | `deployment` | per-model auto-generated reporting-view schema migrations (`deployment.schema_migration`) |
 | `ai_assistant` | sessions, messages, settings, proposals, documents, and legacy actions |
+| `ops` | node statistics for the infrastructure view |
+| `platform` | cross-tenant directories and settings: plans, SSO and branding domains, tenant databases, user/application directories |
+| `storage` | object-store metadata (`storage.object`) for `pkg/objectstore` |
 
 Some early tables were renamed or retired. In particular, the current model
 revision table is `model.revision`; legacy `scenario`, `snapshot`, and
 `core.revision` terminology in old planning documents is not current.
 
-Three similarly named concepts must remain distinct:
+Two similarly named concepts must remain distinct:
 
-- `model.revision` isolates editable/published model definitions and facts;
-- `core.schema_version` records structural schema publication history; and
-- `model.version` is still exposed as a lockable model catalog object, but the
-  current runtime fact tables do not carry a `version_id`, so it is not a second
-  fact-isolation axis.
+- `model.revision` isolates editable/published model definitions and facts —
+  the only unit of change; and
+- `core.schema_version` records structural schema publication history.
+
+The former `model.version` catalog object was dropped by migration 057.
 
 Row-level-security policies exist on core workspace/application/model tables,
 but current services do not set the `app.user_id` session variable that activates
@@ -209,11 +225,10 @@ revision is duplicated, IDs and internal references are remapped so the copy is
 self-contained, including grid rollup sources, property-derived dimensions,
 form mappings, dashboards, workflows, and automations.
 
-Duplication is not atomic. The revision row and definition groups are copied in
-separate statements, and many later copy errors are logged as non-fatal. The
-endpoint can therefore leave an empty or partial revision and still report
-success. The remapping above describes the implemented intent and normal
-successful path, not a transactional guarantee.
+Duplication runs in one transaction (`duplicateRevision` takes a `pgx.Tx`), so
+a failed copy leaves no partial revision behind, and the copy is recalculated
+afterwards. Model export/import (`internal/modeltransfer`) applies the same
+remapping.
 
 Runtime facts use `revision_id`. `system_managed` revisions are read-only to
 interactive cell writeback and import; workflow approval actions can populate
@@ -268,20 +283,25 @@ values. Its registered functions are:
   `LOWER`, `TRIM`, `TEXT`, `SUBSTITUTE`; and
 - date: `TODAY`, `DATE`, `YEAR`, `MONTH`, `DAY`, `DAYS`, `EDATE`, `EOMONTH`.
 
+Time-series functions over an explicit time dimension live in
+`internal/formula/time.go`: `PREVIOUS`, `NEXT`, `LAG`, `LEAD`, `OFFSET`,
+`CUMULATE`, `DECUMULATE`, `MOVINGSUM`, `YEARTODATE`, `QUARTERTODATE`,
+`MONTHTODATE` and time summaries (see
+[TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md](TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md)).
 Conditional aggregations such as `SUMIF`/`SUMIFS`, lookup functions, and dotted
 property references are not implemented. Dependencies are explicit in
 `model.calc_dependency` and are cycle-checked.
 
 `internal/calculation.Scheduler.RecalcAffected` traverses transitive dependents,
-orders them topologically, evaluates affected metrics for known dimension
-combinations, and maintains partition state. The current server calculation
-path writes an aggregate calculated result. The Business Console separately
-evaluates per-cell display and cross-dimension rollups, while `chartCalc.ts`
-contains a third evaluator with a smaller function set. A formula accepted by
-the Go engine, such as a text or date function, can therefore display as zero in
-a grid or chart. Grid facts are filtered server-side; the runtime chart then
-aggregates the filtered grid payload in the browser. The separate server chart
-resolver exists but is unused by `ChartWidget`.
+orders them topologically, evaluates affected metrics for every known
+dimension combination, and persists one `calc_result` row per intersection
+(plus the aggregate, rollup and slice rows described above). A full recalc
+resolves the model's `active_revision_id`, and a combination that fails to
+evaluate is reported as an error rather than silently dropped from an
+aggregate. The grid, dashboards and charts all read these server-computed
+values: `ChartWidget` calls `POST /api/dashboard-widgets/{id}/chart-data`,
+which resolves and rolls up server-side with the viewer's access rules applied.
+There is no formula evaluator in the browser.
 
 ### Dimension relationships and rollups
 
@@ -295,26 +315,26 @@ Mavericks distinguishes:
 
 `grid_def.rollup_source_grid_id` lets a read-only grid present another grid's
 metrics at a related grain. Hidden ancestor access rules cascade to descendants
-before grid and chart facts are serialized when rule evaluation succeeds. The
-fail-open database-error defect is described under Authorization layers.
+before grid and chart facts are serialized; a rule-lookup error fails closed.
 
 ## Security architecture
 
 ### Authentication
 
-The production frontend initializes Keycloak OIDC with PKCE and stores the
-issued token in `AuthProvider`, but the shared API client does not attach that
-token to REST, streaming, or upload requests. The gateway contains a JWKS
-validation path, but `cmd/gateway` never initializes `handler.jwks`.
-`resolveActor` falls back to development actor resolution whenever that
-validator is nil, even when `DEV_MODE` is false. Production bearer
-authentication is therefore not wired end-to-end and is a release blocker.
+The browser signs in with Keycloak OIDC (PKCE) and the API client sends the
+token as `Authorization: Bearer` on every request, including streaming and
+uploads. Outside `DEV_MODE`, `cmd/gateway` builds a JWKS validator at startup
+and exits if it cannot; `resolveActor` then accepts only a valid token, and
+with no validator it refuses the request ("authentication not configured")
+rather than falling back to a persona.
 
 With `DEV_MODE=true`, `X-Dev-User` selects a seeded persona and
-`/api/dev/personas` exposes the available identities. This is the intended local
-and test behavior. Until the API client sends bearer tokens and the gateway
-injects its validator, the HTTP composition also selects this actor path
-unintentionally outside development mode.
+`/api/dev/personas` exposes the available identities. This is local and test
+behavior only.
+
+A few routes are public by design: `/healthz`, self-service sign-up and its
+options, the legal documents, branding, SSO discovery, the OAuth callback, and
+SCIM (which authenticates with its own per-tenant token).
 
 ### Authorization layers
 
@@ -330,33 +350,22 @@ Authorization is layered rather than represented by one role check:
 6. RACI rules used by policy evaluation and server-resolved workflow context;
 7. workflow locks and system-managed revision protection for mutations.
 
-The HTTP gateway applies role guards plus explicit app/model access checks.
-Direct HTTP cells and HTTP/gRPC import commits use the shared write guard. The
-query gRPC writeback follows its separate policy-service path, so transport
-parity is not complete. The shared gRPC server currently registers panic
-recovery only; it does not install authentication or audit interceptors.
-
-Several HTTP paths also have concrete scoping gaps. The developer fact-debug
-route can return recent facts without resolving an actor/model, import-job
-deletion accepts a job ID without actor/model resolution, and notification
-mark-read accepts arbitrary notification IDs. Cell writeback checks that a
-metric is input, but not that the metric belongs to the supplied model/revision;
-unknown dimension identifiers can be skipped by the guard while their raw JSON
-is stored. These routes must not be treated as tenant-safe until fixed.
-
-`writeguard.HiddenAccess` currently treats both “no access-rule row” and a SQL
-query failure as unrestricted. This fail-open behavior must be corrected before
-the guard can be treated as a production security boundary.
+The HTTP gateway applies role guards plus explicit app/model access checks,
+and checks resource ownership for IDs taken from the path and the request
+body. Direct HTTP cells, forms, imports and the gRPC writeback use the shared
+write guard. `writeguard.HiddenAccess` fails closed on a database error, and
+`HiddenInChain` / `ExpandHidden` cascade a hidden rule from any ancestor to its
+descendants. Two known gaps remain: import does not refuse a non-input
+(`is_input=false`) metric, and `/api/cells` skips unknown dimension codes
+rather than rejecting them.
 
 The gRPC policy path has additional ambiguity: query reads proceed unrestricted
 when policy evaluation fails, an empty allowed-metric list is interpreted as no
 restriction, and the query request places a model ID in the proto's
-`application_id` field. Workflow completion also proceeds when policy is
-unavailable, while no interceptor currently establishes the actor used by RACI.
+`application_id` field.
 
-Tenant-admin model export/import is intentionally narrower than generic admin
-access. Developers and platform admins do not automatically receive that
-tenant-owner operation.
+Model export/import is a tenant-admin and platform-admin operation; developers
+do not receive it.
 
 ### Audit
 
@@ -377,19 +386,20 @@ fan-out, join synchronization, required comments, role/user assignment, inbox
 and history views, and dashboard actions that start workflows.
 
 Automation rules can be triggered manually, through the API, on form submit,
-on form approval, or on grid change. Event-driven form/grid rules are dispatched
-by the HTTP gateway. A scheduler for time-based automation is not implemented.
+on form approval, on grid change, when an integration run completes or fails,
+or on a cron schedule. Event-driven rules are dispatched by the HTTP gateway;
+schedule rules are claimed and fired by `internal/workflow/scheduler.go`
+(migration 059: cron expression, IANA time zone, misfire policy, retries), and
+are created from the developer's Triggers tab for any manual workflow.
 
 Workflow definitions and automation rules are revision-scoped. Workflow
-approval can declare a generic `on_approve` fact-copy action, used by the salary
-budgeting demo to write approved scope into a system-managed revision.
+approval can declare a generic `on_approve` fact-copy action, which writes the
+approved scope into a system-managed revision.
 
-That approval copy is best-effort after the task transaction commits. Its
-source query currently chooses one row per dimensional intersection rather than
-one row per metric and intersection, so multiple input metrics at the same
-intersection can be dropped. Copy or recalculation failure does not roll back
-the approved task. The demo's single writable salary metric avoids the first
-case, but the generic workflow guarantee is weaker than the API status implies.
+The approval copy runs inside the approval's own transaction, so a failed copy
+rolls the approval back, and it selects the latest row per metric and
+intersection (`DISTINCT ON (metric_id, dim_members)`), so sibling metrics at
+the same intersection are all copied.
 
 ## Import, integration, and transfer
 
@@ -399,17 +409,16 @@ members, validated, staged, and committed through the shared write guard.
 Supported commit behavior and security validation are properties of the generic
 import service, not demo-specific endpoints.
 
-Name-based import resolution is scoped to the selected model/revision. The
-legacy direct `metric_id` UUID path does not currently verify model/revision
-ownership or `is_input`, so it can bypass that boundary and must be removed or
-validated before the import surface is production-safe. HTTP and gRPC import
-also expose different file formats, staging, and commit semantics.
+Name- and UUID-based import resolution is scoped to the selected
+model/revision. Import does not yet refuse a calculated (non-input) metric.
+HTTP and gRPC import expose different file formats, staging, and commit
+semantics.
 
 Form-to-metric mappings post approved or selected record states into planning
 facts with sum/replace-style aggregation. Integration definitions and saved
 import jobs are managed from the Developer Console.
 
-Tenant admins can export and import a revision-aware model package over the
+Tenant and platform admins can export (with or without data) and import a revision-aware model package over the
 admin HTTP API (`internal/modeltransfer`), and download a standalone
 deployment package (`GET /api/admin/models/{id}/export/package`) — a tar.gz
 containing that same entity graph, the complete `migrations/` tree, a
@@ -438,20 +447,26 @@ package's own manifest rather than silently omitted.
 
 The Developer Console AI surface is implemented inside the HTTP gateway. It has
 provider-neutral chat interfaces with OpenAI, Anthropic, Mistral, and DeepSeek
-adapters; per-user provider settings; persisted sessions and
+adapters; per-user provider settings; per-tenant keys
+(`/api/admin/ai-settings`, optionally enforced); deployment-wide
+`*_API_KEY` environment keys as the last fallback; persisted sessions and
 messages; streamed responses; PDF/XLSX/DOCX/CSV/text document context; read
 tools; validation tools; and proposal confirmation.
 
-Provider keys use AES-256-GCM only when `AI_KEY_ENCRYPTION_SECRET` is set. The
+Provider keys use AES-256-GCM (`internal/secretbox`) when
+`SECRETS_ENCRYPTION_KEY` (or the legacy `AI_KEY_ENCRYPTION_SECRET`) is set. The
 store preserves legacy plaintext behavior when it is absent, so deployed
 environments must configure that secret before accepting user keys.
 
 AI write proposals execute against an isolated draft revision. A developer must
 promote or discard that draft; the assistant does not write directly into the
-active revision. The implemented write-tool set covers core model, dimension,
-grid, dashboard, revision, and migration changes. The broader original SOW
-still contains unimplemented workflow/form tools and complete rollback-history
-UX; see `AI_ASSISTANT_SOW.md` for the tracked delta.
+active revision. The write-tool set covers model, dimension, metric, grid,
+dashboard, form, workflow, automation, business-role, revision and migration
+changes. One tool deliberately writes outside the draft:
+`set_user_access_rules` writes live `identity.user_access_rule` rows against
+the active revision. The assistant is available to the developer role only
+(`/api/ai/*`). Per-action rollback is not implemented (`RollbackAction` is a
+stub); see `AI_ASSISTANT_SOW.md`.
 
 The separate `cmd/ai-assistant` gRPC binary is an older Anthropic-oriented
 file-diff service and is not the implementation used by the current Developer
@@ -464,20 +479,16 @@ TanStack React Query 5, Recharts 3, Lucide, Tailwind 4, and CSS custom
 properties.
 
 `web/src/main.tsx` composes BrowserRouter, React Query, authentication, and
-`RoleRouter`. A role-priority rule selects one console:
+`RoleRouter`. There is one console, `UnifiedConsole`: each role contributes a
+section of sidebar groups (`web/src/router/sections.ts`) and a user with
+several roles sees the union in one sidebar — never a second console or a
+switcher. Where two roles offer the same screens the wider one wins
+(business_admin over business_user, platform_admin over tenant_admin).
 
-```text
-platform_admin -> PlatformAdminConsole
-tenant_admin   -> PlatformAdminConsole
-developer      -> DeveloperConsole
-business_admin -> BusinessAdminConsole
-business_user  -> BusinessConsole
-```
-
-The application does not define React Router routes: console navigation is
-component-local tab state, so views are not deep-linkable and browser history
-does not represent tab changes. `web/src/App.tsx` is an unused duplicate entry
-composition; `main.tsx` is authoritative.
+The application does not define React Router routes: navigation is
+component-local state, so views are not deep-linkable and browser history
+does not represent section changes. `web/src/App.tsx` is an unused duplicate
+entry composition; `main.tsx` is authoritative.
 
 Every console uses the shared `web/src/ui` design-system package and shell,
 although coverage and visible context remain uneven. Application selection is
@@ -486,24 +497,23 @@ has no current consumer, and consoles implement ad-hoc selection/reload flows.
 React Query owns server-state caching and invalidation, but some manually
 composed keys omit application or revision context.
 
-The Business Console contains planning grids, dashboards, forms, task inbox,
-history, and runtime actions. Notification endpoints exist, but there is no
-dedicated notification surface in the current Business Console. The Developer
-Console contains model definitions, revisions, grids, dashboard canvas,
+The business section contains planning grids, dashboards (whose widgets
+include forms, imports, automation buttons and images), the task inbox,
+history, and runtime actions. `NotificationCenter` sits in the console header
+for every role. The developer section contains model definitions, revisions, grids, dashboard canvas,
 workflows, automations, forms, integrations, access-aware user administration,
 and AI. Schema migration runs automatically from definition changes rather than
 through a general migrations tab; client methods and AI tools can also
 generate/apply migrations, but there is no general Developer migrations UI.
 Business Admin manages business roles and access rules. Platform/Tenant Admin
-manages hierarchy, revisions, users, grants, audit, and tenant-owned model
+manages hierarchy, revisions, users, grants, audit (with export and
+retention), SSO/SCIM, branding, AI keys, usage and tenant-owned model
 transfer.
 
 Dashboard charts are live grid views. Configuration lives in
-`dashboard_widget.widget_props`. The current `ChartWidget` fetches the
-access-filtered `/api/grid` response and computes series in
-`web/src/consoles/dashboard/chartCalc.ts` before Recharts renders them. A
-server-side `/api/dashboard-widgets/{id}/chart-data` resolver and API client
-method exist, but the runtime widget does not call them.
+`dashboard_widget.widget_props`. `ChartWidget` fetches its series from
+`POST /api/dashboard-widgets/{id}/chart-data`, resolved and rolled up on the
+server with the viewer's access rules; the browser only renders them.
 
 The Developer dashboard editor stores absolute 20 px canvas coordinates and
 stages move/resize/property changes. Business rendering clusters saved Y
@@ -530,11 +540,22 @@ The Docker development stack provides:
 The gateway initializes OpenTelemetry and continues if the collector is
 unreachable. The optional observability profile is started with `make obs-up`.
 
-Kustomize bases and dev/prod overlays exist for infrastructure and service
-binaries. They are deployment assets, not proof of a production release: image
-publishing, secrets, ingress/TLS, backups, restore testing, migrations,
-cross-service authentication, and probes must be validated for a target
-environment.
+Production runs on Kubernetes (k3s on Hetzner; see
+docs/HETZNER_DEPLOYMENT.md, and
+[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) for other operators). The
+repository carries:
+
+- a shared distroless `deploy/docker/Dockerfile` for every service, plus
+  `pg-backup` and `postgres-walg` images; CI publishes all of them to GHCR,
+  tagged `:latest` and with the commit SHA, and a `workflow_dispatch` deploy
+  job rolls the cluster onto them;
+- Kustomize bases with Traefik `ingress.yaml`, cert-manager TLS,
+  `networkpolicy.yaml` and a gateway PodDisruptionBudget; `prod.example` and
+  `staging.example` overlays show the shape (a real production overlay lives in
+  its operator's private repository);
+- PostgreSQL WAL archived by WAL-G to object storage with point-in-time
+  recovery, nightly `pg_dump` backups, and a backup watchdog; and
+- optional service-to-service mTLS.
 
 ## Build, generation, and tests
 
@@ -542,7 +563,8 @@ Three contract generators are present:
 
 - Buf generates Go protobuf and gRPC code into `gen/go`;
 - sqlc generates typed audit and tenant query code; and
-- ogen generates the partial OpenAPI package in `internal/gateway/oas`.
+- ogen generates the OpenAPI package in `internal/gateway/oas` (pinned
+  versions: `make gen`).
 
 CI runs Go lint, race-enabled tests with coverage, Go build, sqlc and ogen drift
 checks, Buf lint, frontend ESLint, TypeScript checking, Playwright smoke tests,
@@ -555,61 +577,20 @@ transfer, chart, workflow, import, and rollup behavior.
 ## Current architectural limitations
 
 - The browser runtime and distributed gRPC topology overlap rather than sharing
-  one complete, behaviorally equivalent composition path.
-- Production frontend requests do not send Keycloak bearer tokens, and the
-  gateway's JWKS validator is not initialized; actor resolution falls back to
-  development personas.
-- gRPC servers lack authentication/audit interceptors. Several gRPC policy
-  error/empty-result paths fail open, and mutation security is not
-  transport-equivalent.
-- `writeguard.HiddenAccess` fails open on database errors. Some HTTP debug,
-  import-delete, and notification routes do not resolve an actor/owner, while
-  cell/import UUID paths do not fully validate model, revision, or input-metric
-  ownership.
-- RLS and least-privilege database roles exist in schema history but are not
-  usable active boundaries for the current gateway.
-- Revision duplication and approval-copy actions are non-atomic/best-effort;
-  both can report a successful outer operation after leaving partial state.
-- The approval-copy query can drop sibling metrics that share a dimensional
-  intersection.
-- `api/openapi.yaml` documents only a subset of the manual HTTP router.
-- Chart aggregation remains client-side even though a server resolver exists;
-  confidentiality depends on `/api/grid` filtering every returned fact.
-- Formula behavior is split across three evaluators with different function
-  coverage. Server result persistence is aggregate-only, and some calculation
-  loaders remain model-wide rather than revision-filtered.
-- Time-scheduled automation is not implemented.
+  one complete, behaviorally equivalent composition path. Several gRPC policy
+  error/empty-result paths fail open.
+- RLS policies (migration 013) and least-privilege database roles exist in
+  schema history, but no service sets `app.user_id`, so they are not active
+  boundaries.
+- A migration file and its registry insert are not applied in one transaction.
+- Import accepts a non-input metric; `/api/cells` skips unknown dimension codes.
 - Standalone deployment packages omit access-control configuration and
   per-model test definitions by design (see `internal/deployment`'s
-  manifest.json known_gaps) — neither transfers meaningfully across the
-  tenant boundary the package is built to cross, and no test-definition
-  entity exists in the schema.
+  manifest.json known_gaps).
 - AI provider-key encryption is configuration-dependent, and uploaded document
-  content (extracted text, not the original file) is persisted in PostgreSQL
-  rather than transient request memory. Neither AI document upload nor
-  CSV/XLSX import retains original file bytes anywhere — both discard them
-  after parsing — so neither currently has anything to move onto
-  `pkg/objectstore` (used for generated deployment packages; see the
-  `internal/deployment` entry above); adopting it for either would be new
-  retention capability, not a storage-location change, and was deliberately
-  scoped out.
-- The Kubernetes base still has no real cluster, container registry, DNS
-  domain, or TLS authority behind it anywhere — the manifests render
-  correctly (`kubectl kustomize` succeeds on both overlays) but have never
-  been applied to anything real. No image is ever built or published (no
-  Dockerfile exists in this repo yet); there is no Ingress/TLS termination,
-  no NetworkPolicy, no PodDisruptionBudget; backup/restore is undesigned
-  (Postgres WAL archiving in `infra/postgres.yaml` writes to an ephemeral
-  `emptyDir`, not durable storage); and no test suite exercises the real
-  distributed gRPC service-to-service topology the manifests describe (the
-  HTTP gateway executes equivalent core behavior in-process and does not
-  depend on the standalone services for normal operation). Every gRPC
-  service does now have working service-to-service audit logging (each
-  installs `grpcutil.AuditInterceptor` via a dialed `pkg/clients.NewAuditClient`,
-  recording an event for every mutating RPC) but no authentication —
-  any caller that can reach a service's cluster address can call it, since
-  transport-equivalent auth depends on the TLS/cert infrastructure named
-  above.
+  content (extracted text, not the original file) is persisted in PostgreSQL.
+  Neither AI document upload nor CSV/XLSX import retains original file bytes.
+- AI proposals have no per-action rollback.
 - Console navigation has no URL routes/deep links, context selection and query
   keys are uneven, and some large console modules remain dense despite the
   shared design system.

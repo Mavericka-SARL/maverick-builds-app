@@ -174,7 +174,7 @@ export function ImportWidget({ gridDefId, ctx }: { gridDefId: string; ctx: DemoC
               <thead>
                 <tr>
                   <th>ID</th>
-                  <th>Scenario / Version</th>
+                  <th>Revision</th>
                   <th style={{ textAlign: "right" }}>Total</th>
                   <th style={{ textAlign: "right" }}>Valid</th>
                   <th style={{ textAlign: "right" }}>Errors</th>

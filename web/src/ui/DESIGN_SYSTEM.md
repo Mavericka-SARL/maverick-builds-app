@@ -1,7 +1,9 @@
 # Mavericks UI Design System
 
+> **Classification:** Current — Frontend UI authority.
+
 > **Status:** Current frontend UI authority
-> **Last verified:** 2026-07-15
+> **Last verified:** 2026-09-25
 >
 > All role consoles use the shared shell, but this is still a migration target,
 > not a claim that every screen exposes every context item or contains no local
@@ -16,8 +18,8 @@ controls, data states, tables, builder panels, and status badges.
 ## Principles
 
 - Use one shell for all roles.
-- Keep planning context visible: application, model, revision, version, role,
-  and live/draft status.
+- Keep planning context visible: application, model, revision, role, and
+  live/draft status.
 - Use dense tables, tree tables, toolbars, and property panels for operational
   work.
 - Use cards only for bounded panels, repeated summary objects, and dashboard
@@ -36,7 +38,7 @@ controls, data states, tables, builder panels, and status badges.
 - `Dialog.tsx`, `ConfirmDialog.tsx`, and `useConfirm.ts`: modal and destructive
   confirmation flows.
 - `Drawer.tsx`: right-side details/edit surface.
-- `Toast.tsx`, `ToastContext.tsx`, and `useToast.ts`: application feedback.
+- `Toast.tsx`, `ToastContext.ts`, and `useToast.ts`: application feedback.
 - `Field.tsx`, `TextInput.tsx`, `Select.tsx`, and `FormControls.tsx`: shared form
   controls.
 - `Card.tsx`, `Tabs.tsx`, and `Table.tsx`: compact base containers/navigation.
@@ -63,6 +65,12 @@ controls, data states, tables, builder panels, and status badges.
 - `Skeleton.tsx`: loading placeholder.
 - `Stepper.tsx`: wizard step indicator (Import Wizard).
 - `CommandButton.tsx`: fill-parent action button for dashboard command widgets.
+- `NotificationCenter.tsx`: the notification bell and panel in the console header.
+- `PageHeader.tsx`: a page's title row with its actions.
+- `RichText.tsx`: the small Markdown subset text widgets render, as React elements (no HTML injection).
+- `WidgetErrorBoundary.tsx`: isolates one dashboard widget's render error from the rest.
+- `useUnsavedGuard.ts`: guards unsaved edits against navigation and tab close.
+- `tableStyles.ts`: shared inline styles for tables outside `DataTable`.
 
 Shared class groups in `design-system.css` beyond component styles:
 

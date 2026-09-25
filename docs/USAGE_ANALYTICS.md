@@ -6,7 +6,8 @@
 
 An enterprise feature (`usage_analytics`). **Admin › Usage** shows every
 tenant to a platform admin and their own tenant to a tenant admin, for a
-period of 7, 30 or 90 days.
+period of 7, 30 or 90 days (the API, `?period=`, accepts any whole number of
+days from 1 to 365; default 30).
 
 ## What is counted
 

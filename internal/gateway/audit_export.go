@@ -17,8 +17,9 @@ import (
 // ee/auditexport. An export is recorded in the log it exports.
 
 // auditExport handles GET /api/admin/audit/export. format=csv downloads a
-// file; format=jsonl streams one event per line for a collector, which
-// follows the X-Next-Cursor header (or `next_cursor` is absent when done).
+// file; format=jsonl streams one event per line for a collector. Without
+// limit or after the whole matching log is streamed; with either, one page
+// is, ending in a `next_cursor` line when more remain.
 func (h *handler) auditExport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
@@ -103,7 +104,14 @@ func (h *handler) auditExport(w http.ResponseWriter, r *http.Request) {
 	// full — which we learn while streaming. A collector therefore reads the
 	// cursor from the last line instead: see below.
 	cw := &countingWriter{w: w}
-	res, err := auditexport.Stream(ctx, h.db.For(ctx), q, format, cw)
+	// A download that names neither a page size nor a cursor is a person's
+	// "export everything": stream every page. A collector passing limit or
+	// after gets one page and a cursor.
+	stream := auditexport.Stream
+	if q.Limit <= 0 && q.After == "" {
+		stream = auditexport.StreamAll
+	}
+	res, err := stream(ctx, h.db.For(ctx), q, format, cw)
 	if err != nil {
 		if cw.n == 0 {
 			// Nothing sent yet, so a real status can still go out.

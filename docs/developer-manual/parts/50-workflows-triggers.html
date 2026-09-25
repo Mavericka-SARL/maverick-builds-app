@@ -77,11 +77,12 @@
 <tr><th>Control</th><th>What it does</th></tr>
 <tr><td><b>New rule</b> / <b>Cancel</b></td><td>Opens the form.</td></tr>
 <tr><td><b>Name</b></td><td>Technical name, for example <code>budget_approval_trigger</code>.</td></tr>
-<tr><td><b>Workflow</b></td><td>Grouped into <b>Published</b> and <b>Draft / Other</b>. Choosing a workflow sets the trigger type from the workflow's own <b>Starts on</b> event and locks it.</td></tr>
-<tr><td><b>Trigger type</b></td><td><b>manual</b> (trigger manually), <b>form_submit</b> (on record creation), <b>form_approval</b> (on record approved / closed), <b>grid_change</b> (on cell writeback), <b>integration_completed</b>, <b>integration_failed</b>, <b>api</b> (external HTTP trigger).</td></tr>
+<tr><td><b>Workflow</b></td><td>Grouped into <b>Published</b> and <b>Draft / Other</b>. Choosing a workflow sets the trigger type from the workflow's own <b>Starts on</b> event and locks it — except for a <b>Manual</b> workflow, which can be started by hand or on a schedule.</td></tr>
+<tr><td><b>Trigger type</b></td><td><b>manual</b> (trigger manually), <b>schedule</b> (on a cron schedule), <b>form_submit</b> (on record creation), <b>form_approval</b> (on record approved / closed), <b>grid_change</b> (on cell writeback), <b>integration_completed</b>, <b>integration_failed</b>, <b>api</b> (external HTTP trigger).</td></tr>
 <tr><td><b>Source form</b> / <b>Source grid</b> / <b>Source integration</b></td><td>Optional narrowing for the form, grid and integration event types; blank means any.</td></tr>
 <tr><td><b>Description</b></td><td>Free text shown in the row.</td></tr>
 <tr><td><b>Create rule</b> / <b>Save</b></td><td>Needs a name and a workflow.</td></tr>
+<tr><td><b>Schedule</b></td><td>Shown for <b>schedule</b> rules: a five-field <b>Cron expression</b> (minute hour day-of-month month day-of-week; <code>0 6 1 * *</code> is 06:00 on the 1st of every month), the <b>Time zone</b> it is read in (IANA name, default UTC), and what a <b>Missed run</b> does after downtime — skip it, or run it once as soon as possible. The row shows the expression and the next run time.</td></tr>
 <tr><td>Row badges</td><td>Disabled state, trigger type, source, "→ workflow", and the workflow's status (published, draft, archived, or "workflow not found").</td></tr>
 <tr><td><b>Trigger</b> button</td><td>Manual rules only. Confirm <b>Fire this trigger?</b>: starts a real, live instance exactly as a business user's dashboard button would. Not a dry run.</td></tr>
 <tr><td>Enable / Disable icon</td><td>Disabling stops the rule from firing (button or event) until re-enabled; running instances are unaffected. Disabling asks for confirmation.</td></tr>
@@ -91,7 +92,7 @@
 <figure><img src="img/32-trigger-new-rule.png" alt="New rule form with name, workflow, trigger type and description"><figcaption>The rule form. The trigger type follows the chosen workflow's event.</figcaption></figure>
 <h3>Rules and behaviour</h3>
 <ul>
-  <li><b>A rule is event → workflow, nothing more.</b> Conditions and actions belong to the workflow's steps. Time schedules exist for integrations, not for rules.</li>
+  <li><b>A rule is event → workflow, nothing more.</b> Conditions and actions belong to the workflow's steps. A schedule is an event like any other: it starts a manual workflow at the times it names.</li>
   <li><b>Dashboard buttons</b> can only run rules that are manual and enabled. A business user sees a disabled button with the reason when that stops being true.</li>
   <li><b>A failed start</b> (for example a duplicate refused by "one active instance per scope") produces a "Workflow could not start" notification for the person who triggered it.</li>
   <li>Rules are per revision and are copied with it.</li>

@@ -219,4 +219,17 @@ func TestAuditExportAndRetention(t *testing.T) {
 	if n, _ := auditexport.Sweep(ctx, pool); n != 0 {
 		t.Errorf("a retention of 0 removed %d events", n)
 	}
+
+	// A person's download is the whole log, not the first page: more than
+	// one page of events all arrive, under a single header.
+	extra := auditexport.MaxLimit + 5
+	exec(`INSERT INTO audit.audit_event (category, event_type, actor_user_id, application_id, resource_type, resource_id, occurred_at)
+		SELECT 'admin', 'bulk.test', $1::uuid, $2::uuid, 'bulk', g::text, now() - interval '1 minute' + g * interval '1 microsecond'
+		FROM generate_series(1, $3::int) g`, adminAID, appA, extra)
+	code, _, body = get(srv, adminA, "/api/admin/audit/export?format=csv")
+	lines = strings.Split(strings.TrimSpace(string(body)), "\n")
+	if code != http.StatusOK || strings.Count(string(body), "occurred_at,category") != 1 || strings.Count(string(body), ",bulk.test,") != extra {
+		t.Errorf("full download: %d, %d lines, %d bulk rows, want all %d under one header",
+			code, len(lines), strings.Count(string(body), ",bulk.test,"), extra)
+	}
 }

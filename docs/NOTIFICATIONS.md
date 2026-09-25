@@ -85,8 +85,9 @@ policies actually change.
 
 The port decides the transport: 587 is submission with STARTTLS, which
 `net/smtp` negotiates on its own and which Resend, Postmark, SES and the
-like all serve; 465 (implicit TLS) is not supported by the gateway — the
-watchdog's `curl` handles both.
+like all serve; 465 is implicit TLS, which the gateway speaks too
+(`sendImplicitTLS` in `internal/notification/dispatch.go`), as does the
+watchdog's `curl`.
 
 **Prove it by sending.** Reading the configuration back shows only that it
 was stored; a wrong key, an unverified sending domain, or a NetworkPolicy

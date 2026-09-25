@@ -97,7 +97,7 @@
   <li><b>Values are append-only.</b> Every write adds a new fact; the latest one at an intersection is the value. Nothing is ever overwritten in place, which is what makes history and audit possible.</li>
   <li><b>Formats</b> (Number, Percentage, Currency with symbol and decimals, Boolean, Text) control display everywhere the metric appears.</li>
   <li><b>Totals</b> in grids, charts and KPIs are computed by the server from the aggregation rules, never by the browser.</li>
-  <li><b>Imports</b> run in <b>Incremental</b> mode (add or update the listed cells), <b>Sync / replace</b> mode (the file is authoritative for the cells it lists) or <b>Full reload</b> (delete all data of the revision first).</li>
+  <li><b>Imports</b> run in <b>Incremental</b> mode (each imported value is added to the cell's current value), <b>Sync / replace</b> mode (the file is authoritative for the cells it lists) or <b>Full reload</b> (delete all data of the revision first).</li>
 </ul>
 <h3>Grids, dashboards and what users see</h3>
 <ul>
@@ -124,7 +124,7 @@
 <figure><img src="img/13-account-menu.png" alt="Developer console with the account menu open showing email, roles and Sign out"><figcaption>The shell: sidebar groups on the left, the context bar at the top with Model and Revision, the notification bell and the account menu.</figcaption></figure>
 <table class="ctl">
 <tr><th>Element</th><th>What it does</th></tr>
-<tr><td>Sidebar</td><td>Groups by role: <b>Build</b> and <b>Govern</b> for a developer. The collapse icon narrows it. The heading names the console.</td></tr>
+<tr><td>Sidebar</td><td>Groups by role: <b>Build</b> and <b>Govern</b> for a developer. The collapse icon narrows it. Its top shows the product mark, or the tenant's own logo when white-labelled.</td></tr>
 <tr><td>Context bar: <b>Model</b></td><td>"application · model" of the revision you are editing.</td></tr>
 <tr><td>Context bar: <b>Revision</b></td><td>The revision name, or an orange <b>No revision selected</b>.</td></tr>
 <tr><td>Bell</td><td>Notifications with an unread count. Clicking an entry marks it read and, when it points at an object such as a workflow instance, opens it.</td></tr>

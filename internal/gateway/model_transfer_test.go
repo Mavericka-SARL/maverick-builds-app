@@ -323,7 +323,7 @@ func TestModelExportImportTenantAdminOnly(t *testing.T) {
 // def created via the older workflow.Store.CreateWorkflowDef, which doesn't
 // take a revisionID at all). An exported "self-contained" package was
 // missing its workflow entirely whenever the model used that path — as
-// cmd/seed-payroll's does. setupRollupFixture's workflow def is left
+// the former salary demo's did. setupRollupFixture's workflow def is left
 // revision-global by default (this test does NOT stamp it, unlike
 // TestModelExportImportTenantAdminOnly above, which does) — exactly
 // reproducing the shape that broke.

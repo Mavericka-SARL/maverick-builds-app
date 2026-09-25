@@ -12,7 +12,10 @@ through `pkg/auditlog.Log`; this is how the result leaves the platform.
 **Admin › Audit Log › Export**: choose a format and a date range and
 download. The scope is exactly the listing's: a tenant admin gets the
 events of their own tenant, a platform admin everything. The download is
-streamed, so it is not bound by the listing's 200 rows.
+streamed and complete: without `limit` or `after` the gateway pages through
+the whole matching log itself (100,000 events per internal page, one CSV
+header), so it is bound neither by the listing's 200 rows nor by a page
+size.
 
 - **CSV** — one row per event with a stable column order:
   `occurred_at, category, event_type, actor_name, actor_email, actor_role,
@@ -32,13 +35,15 @@ collector can pull everything and then only what is new:
 GET /api/admin/audit/export?format=jsonl&since=2026-09-01&limit=10000
 ```
 
-When a page is full, the final line is `{"next_cursor": "…"}`; pass it back
+Passing `limit` (default 10,000, at most 100,000) or `after` makes the
+request one page. When a page is full, the final line is
+`{"next_cursor": "…"}`; pass it back
 as `after=` for the next page and stop when a response ends without one.
 The cursor is the position after an event (its time and id), so it is
 stable across events with the same timestamp and across restarts. Poll on a
 schedule with the last cursor you stored; nothing is missed and nothing is
-repeated. Authenticate as an administrator (a service account with the
-`tenant_admin` role, or a personal token).
+repeated. Authenticate as an administrator: a Keycloak access token for an
+account holding the `tenant_admin` (or `platform_admin`) role.
 
 ## Retention
 

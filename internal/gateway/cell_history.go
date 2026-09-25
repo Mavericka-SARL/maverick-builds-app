@@ -80,10 +80,10 @@ func (h *handler) cellHistory(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("member %s of dimension %s not found", code, dimID), http.StatusNotFound)
 			return
 		}
-		if access, err := writeguard.HiddenAccess(ctx, h.db.For(ctx), a.UserID, memberID); err != nil {
+		if hidden, err := writeguard.HiddenInChain(ctx, h.db.For(ctx), a.UserID, memberID); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
-		} else if access == "hidden" {
+		} else if hidden {
 			jsonErr(w, fmt.Errorf("access denied"), http.StatusForbidden)
 			return
 		}

@@ -404,6 +404,12 @@ func TestSsoRegisterDiscoverAndFirstLogin(t *testing.T) {
 			t.Errorf("discover %q: display_name %v", c.email, got["display_name"])
 		}
 	}
+	// The same database under a deployment whose licence lacks SSO: the
+	// registered domain is not advertised.
+	code, body = f.do(t, f.communitySrv, http.MethodGet, "/api/sso/discover?email=someone@acme.test", nil, map[string]string{"X-Forwarded-For": "10.0.1.1"})
+	if got := decode(t, body); code != http.StatusOK || got["sso"] != false || got["alias"] != nil {
+		t.Errorf("discover without an SSO licence: %d %s", code, body)
+	}
 	// ...and it is throttled per address.
 	throttled := false
 	for i := 0; i < 15; i++ {

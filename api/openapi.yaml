@@ -3,11 +3,12 @@ openapi: "3.0.3"
 info:
   title: maverickbuilds.app API
   description: |
-    Partial contract for the original core maverickbuilds.app gateway routes.
-    It is not a complete inventory of the manual router used by cmd/gateway.
-    Bearer JWT is the intended production contract and X-Dev-User is the local
-    DEV_MODE contract; production bearer transport/validation is not yet wired
-    end to end. See docs/API.md for current routes and security exceptions.
+    Every route the maverickbuilds.app gateway registers
+    (route_spec_parity_test.go keeps the two in step). Authentication is a
+    Keycloak-issued bearer JWT, validated against the realm's JWKS; X-Dev-User
+    replaces it only when the gateway runs with DEV_MODE=true. Operations with
+    `security: []` are public; SCIM uses the tenant's own SCIM token. See
+    docs/API.md for an overview of route groups and role guards.
   version: "0.1.0"
   contact:
     name: maverickbuilds.app
@@ -45,6 +46,10 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    scimBearer:
+      type: http
+      scheme: bearer
+      description: A tenant's SCIM token (mvx_scim_…), issued under Admin › SCIM; not a user's JWT.
 
   responses:
     BadRequest:
@@ -2170,6 +2175,7 @@ paths:
   /api/sso/discover:
     get:
       operationId: ssoDiscover
+      security: []
       summary: Before sign-in, whether single sign-on exists and which provider an e-mail belongs to (public, rate-limited; answers nothing about e-mails it does not know)
       parameters:
         - in: query
@@ -2278,6 +2284,8 @@ paths:
   /api/scim/v2/ServiceProviderConfig:
     get:
       operationId: scimServiceProviderConfig
+      security:
+        - scimBearer: []
       summary: SCIM 2.0 service provider configuration (SCIM bearer token)
       responses:
         "200":
@@ -2290,6 +2298,8 @@ paths:
   /api/scim/v2/ResourceTypes:
     get:
       operationId: scimResourceTypes
+      security:
+        - scimBearer: []
       summary: SCIM 2.0 resource types (SCIM bearer token)
       responses:
         "200":
@@ -2302,6 +2312,8 @@ paths:
   /api/scim/v2/Schemas:
     get:
       operationId: scimSchemas
+      security:
+        - scimBearer: []
       summary: SCIM 2.0 schemas (SCIM bearer token)
       responses:
         "200":
@@ -2314,6 +2326,8 @@ paths:
   /api/scim/v2/Users:
     get:
       operationId: scimListUsers
+      security:
+        - scimBearer: []
       summary: List or filter this tenant's users as SCIM resources (SCIM bearer token); filter supports attr eq "value" joined by and
       parameters:
         - { in: query, name: filter, required: false, schema: { type: string } }
@@ -2329,6 +2343,8 @@ paths:
         "401": { description: Missing or invalid SCIM token }
     post:
       operationId: scimCreateUser
+      security:
+        - scimBearer: []
       summary: Create a user exactly as the console's Users screen would (SCIM bearer token)
       requestBody:
         required: true
@@ -2349,6 +2365,8 @@ paths:
   /api/scim/v2/Users/{id}:
     get:
       operationId: scimGetUser
+      security:
+        - scimBearer: []
       summary: One user (SCIM bearer token)
       parameters:
         - name: id
@@ -2365,6 +2383,8 @@ paths:
         "404": { description: Not found }
     put:
       operationId: scimReplaceUser
+      security:
+        - scimBearer: []
       summary: Replace a user's attributes (SCIM bearer token)
       parameters:
         - name: id
@@ -2387,6 +2407,8 @@ paths:
         "409": { description: userName already exists }
     patch:
       operationId: scimPatchUser
+      security:
+        - scimBearer: []
       summary: Apply PatchOp operations to a user; active=false deactivates sign-in immediately (SCIM bearer token)
       parameters:
         - name: id
@@ -2409,6 +2431,8 @@ paths:
         "404": { description: Not found }
     delete:
       operationId: scimDeleteUser
+      security:
+        - scimBearer: []
       summary: Delete the user and their identity-provider account (SCIM bearer token)
       parameters:
         - name: id
@@ -2423,6 +2447,8 @@ paths:
   /api/scim/v2/Groups:
     get:
       operationId: scimListGroups
+      security:
+        - scimBearer: []
       summary: List or filter this tenant's business roles as SCIM groups (SCIM bearer token)
       parameters:
         - { in: query, name: filter, required: false, schema: { type: string } }
@@ -2438,6 +2464,8 @@ paths:
         "401": { description: Missing or invalid SCIM token }
     post:
       operationId: scimCreateGroup
+      security:
+        - scimBearer: []
       summary: Create a business role with members (SCIM bearer token)
       requestBody:
         required: true
@@ -2457,6 +2485,8 @@ paths:
   /api/scim/v2/Groups/{id}:
     get:
       operationId: scimGetGroup
+      security:
+        - scimBearer: []
       summary: One group (SCIM bearer token)
       parameters:
         - name: id
@@ -2473,6 +2503,8 @@ paths:
         "404": { description: Not found }
     put:
       operationId: scimReplaceGroup
+      security:
+        - scimBearer: []
       summary: Replace a group's name and members (SCIM bearer token)
       parameters:
         - name: id
@@ -2495,6 +2527,8 @@ paths:
         "409": { description: displayName already exists }
     patch:
       operationId: scimPatchGroup
+      security:
+        - scimBearer: []
       summary: Add or remove members, rename (SCIM bearer token)
       parameters:
         - name: id
@@ -2517,6 +2551,8 @@ paths:
         "404": { description: Not found }
     delete:
       operationId: scimDeleteGroup
+      security:
+        - scimBearer: []
       summary: Delete the business role (SCIM bearer token)
       parameters:
         - name: id
@@ -2556,6 +2592,7 @@ paths:
   /api/branding:
     get:
       operationId: getBranding
+      security: []
       summary: The brand to apply — a signed-in caller's tenant, else the tenant registered for the request's host, else the platform's own (public)
       responses:
         "200":
@@ -2699,6 +2736,7 @@ paths:
   /api/legal:
     get:
       operationId: getLegalInfo
+      security: []
       summary: The operator's identity and the documents it publishes, for the terms of service and privacy notice a visitor reads before signing up (public; see internal/gateway/legal.go)
       responses:
         "200":
@@ -2710,6 +2748,7 @@ paths:
   /api/signup/options:
     get:
       operationId: getSignupOptions
+      security: []
       summary: Whether public self-service sign-up is open on this deployment and on what terms (public; see internal/gateway/signup.go)
       responses:
         "200":
@@ -2721,6 +2760,7 @@ paths:
   /api/signup:
     post:
       operationId: signup
+      security: []
       summary: Register a tenant from the public sign-up page — the tenant on the self-service plan, its first administrator/developer, an application with the starter model, and an invitation to set a password (public, rate-limited per address)
       requestBody:
         required: true
@@ -3851,6 +3891,7 @@ paths:
   /api/integrations/oauth/callback:
     get:
       operationId: integrationOAuthCallback
+      security: []
       summary: "Where the provider sends the browser after consent (public: the person arrives with the state only). Exchanges the code, seals the tokens into the connection, and redirects to the console with ?oauth=connected or ?oauth=error&oauth_error=…"
       parameters:
         - { name: state, in: query, required: true, schema: { type: string } }

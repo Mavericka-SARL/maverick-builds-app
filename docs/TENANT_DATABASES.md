@@ -93,7 +93,9 @@ the database that holds it.
 | `TENANT_DB_ADMIN_URL` | empty | Connection string with `CREATEDB` rights, used only to create and drop databases. Empty reuses `DATABASE_URL`'s credentials, which is right when the application role owns the server |
 | `TENANT_DB_MAX_CONNS` | `5` | Cap per tenant pool |
 
-Both the gateway and `cmd/integration` read them.
+The gateway reads all three. `cmd/integration` reads `TENANT_DB_MODE` and
+`TENANT_DB_MAX_CONNS` only: it never creates or drops a database, so it has
+no use for `TENANT_DB_ADMIN_URL`.
 
 ### PgBouncer
 

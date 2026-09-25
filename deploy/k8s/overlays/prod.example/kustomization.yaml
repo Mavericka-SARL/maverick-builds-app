@@ -53,16 +53,6 @@ patches:
     target:
       kind: StatefulSet
       name: postgres
-  - patch: |-
-      - op: replace
-        path: /spec/template/spec/containers/0/imagePullPolicy
-        value: Always
-    target:
-      kind: Job
-
-  # Demo data has no place in a deployment people use. Keep this last: a patch
-  # that targets the seed Job fails once it has been removed.
-  - path: seed-remove.yaml
 
 # Where the images come from: replace this block with the one
 # scripts/build-images.sh prints. Each name is the base manifests' own; the
@@ -111,8 +101,6 @@ images:
   - name: registry.example.com/mavericks/schema-migration
     newName: registry.example.com/mavericks/schema-migration
     newTag: "REPLACE-ME"
-  - name: registry.example.com/mavericks/seed
-    newName: registry.example.com/mavericks/seed
     newTag: "REPLACE-ME"
   - name: registry.example.com/mavericks/tenant
     newName: registry.example.com/mavericks/tenant

@@ -2,7 +2,7 @@
 
 > **Classification:** Current — Index of the documentation set.
 
-> **Last verified:** 2026-07-15
+> **Last verified:** 2026-09-25
 
 This index separates current implementation documentation from historical
 requirements and research. Code, migrations, tests, and build configuration
@@ -24,11 +24,17 @@ remain authoritative.
 | [`docs/LEGAL_AND_PRIVACY.md`](LEGAL_AND_PRIVACY.md) | current | The terms of service and privacy notice at `/terms` and `/privacy`, and the operator identity a deployment must configure |
 | [`docs/TENANT_DATABASES.md`](TENANT_DATABASES.md) | current | A database per tenant: routing, provisioning, migrations, backups |
 | [`docs/NOTIFICATIONS.md`](NOTIFICATIONS.md) | current | Notification producers, outbound e-mail and webhooks, task reminders |
+| [`docs/AI_DEVELOPER.md`](AI_DEVELOPER.md) | current | The AI assistant's read and write tools, and what stays human |
+| [`docs/AI_KEYS.md`](AI_KEYS.md) | current | Where the AI assistant's provider key comes from: user, tenant, deployment |
+| [`docs/AUDIT_EXPORT.md`](AUDIT_EXPORT.md) | current | Audit export (CSV, JSON Lines for a SIEM) and retention |
+| [`docs/CELL_HISTORY.md`](CELL_HISTORY.md) | current | Per-cell change history |
+| [`docs/SSO_SCIM.md`](SSO_SCIM.md) | current | Enterprise single sign-on and SCIM provisioning |
+| [`docs/USAGE_ANALYTICS.md`](USAGE_ANALYTICS.md) | current | Per-tenant usage counts |
+| [`docs/WHITE_LABEL.md`](WHITE_LABEL.md) | current | A tenant's own branding and domain |
+| [`ee/README.md`](../ee/README.md) | current | The enterprise source tree and its licence rule |
 | [`docs/developer-manual/`](developer-manual/) | current | Developer-role manual (PDF, built from `parts/*.html` by `build.sh`): every developer console screen plus core concepts |
 | [`web/README.md`](../web/README.md) | current | Frontend architecture and commands |
 | [`web/src/ui/DESIGN_SYSTEM.md`](../web/src/ui/DESIGN_SYSTEM.md) | current | Shared UI primitives and regression gates |
-| [`examples/budgeting-demo/README.md`](../examples/budgeting-demo/README.md) | current | Running salary-budgeting demo |
-| [`examples/budgeting-demo/model-spec.md`](../examples/budgeting-demo/model-spec.md) | current | Seeded model contract |
 
 ## Feature specifications and convergence guides
 
@@ -38,7 +44,6 @@ Their status block records current implementation and remaining gaps.
 | Document | Classification |
 |---|---|
 | [`TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md`](../TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md) | Phase 1 implemented (explicit time dimensions, 11 time-series functions, causal recurrences); §13 lists the deferred later-parity functions |
-| [`examples/budgeting-demo/BUILD_INSTRUCTIONS.md`](../examples/budgeting-demo/BUILD_INSTRUCTIONS.md) | implemented demo acceptance contract |
 
 ## UX decision history
 
@@ -61,17 +66,10 @@ repository. Do not update implementation claims by editing generated PDF bytes;
 record current decisions in Markdown and regenerate from an owned source if a
 new published PDF is required.
 
-Tracked files under root `node_modules/` are third-party package licenses and
-READMEs, not Mavericks project documentation. They are governed by their
-upstream packages and are intentionally excluded from this current-state edit;
-future repository cleanup should untrack the vendored dependency tree rather
-than rewriting those files.
-
 ## Contract documentation
 
 - `proto/*/v1/*.proto` is authoritative for gRPC message/service contracts.
-- `api/openapi.yaml` is a partial core HTTP contract and generates
-  `internal/gateway/oas`. It is not a complete inventory of the manual gateway
-  router.
+- `api/openapi.yaml` describes every gateway route (a CI parity test enforces
+  it) and generates `internal/gateway/oas`.
 - `migrations/*.sql` is authoritative for persisted schema history.
 - `.github/workflows/ci.yml` is authoritative for CI commands.

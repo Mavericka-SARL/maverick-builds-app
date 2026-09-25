@@ -2,13 +2,20 @@
 
 > **Classification:** Current — The assistant's tool surface and its limits.
 
-> **Last verified:** 2026-09-16
+> **Last verified:** 2026-09-25
 
 The AI Developer is the assistant inside the developer console. Its rule is
 parity: it can do what a developer can do through the screens, no more and
-no less. It reads through **read tools** it calls freely, and writes only by
-**proposing** an ordered plan that the developer confirms — nothing is
-written until then, and everything lands in an isolated draft revision.
+no less — with one deliberate exception below. It reads through **read tools**
+it calls freely, and writes only by **proposing** an ordered plan that the
+developer confirms — nothing is written until then, and everything else lands
+in an isolated draft revision.
+
+**The exception.** `set_user_access_rules` is a business-admin capability
+given to the assistant at the owner's direction (2026-08-26). Access rules are
+not revision-scoped, so it writes live `identity.user_access_rule` rows
+against the active revision: they take effect when the proposal is confirmed,
+not when the draft is promoted, and discarding the draft does not undo them.
 
 ## Read tools
 
@@ -36,7 +43,7 @@ Workflows and forms (added 2026-09-16, programme item 5):
 | Tool | Mirrors |
 |---|---|
 | `create_workflow_def`, `update_workflow_def`, `delete_workflow_def` | the Workflows editor: every step type and field, `context_schema`, subject, `single_active_instance`; delete is drafts-only, as in the console |
-| `create_automation_rule`, `update_automation_rule`, `delete_automation_rule` | the Triggers screen: every trigger type, sources, schedules |
+| `create_automation_rule`, `update_automation_rule`, `delete_automation_rule` | the Triggers screen: every trigger type, sources, cron schedules |
 | `create_business_role` | the Roles screen (the `baOrDev` guard) |
 | `create_form_def`, `update_form_def`, `delete_form_def` | the Forms builder |
 | `create_form_integration`, `update_form_integration`, `delete_form_integration` | the form-to-metric posting screen |

@@ -46,7 +46,8 @@ func TestCellHistory(t *testing.T) {
 	calcID := q(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input, formula, agg_rule) VALUES ($1::uuid, $2::uuid, 'double', false, '=spend*2', 'sum') RETURNING id::text`, modelID, revID)
 	dimID := q(`INSERT INTO model.dimension_def (model_id, revision_id, name) VALUES ($1::uuid, $2::uuid, 'department') RETURNING id::text`, modelID, revID)
 	salesID := q(`INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid, 'SALES', 'Sales') RETURNING id::text`, dimID)
-	exec(`INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid, 'OPS', 'Ops')`, dimID)
+	opsID := q(`INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid, 'OPS', 'Ops') RETURNING id::text`, dimID)
+	exec(`INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id) VALUES ($1::uuid, 'OPS_EU', 'Ops EU', $2::uuid)`, dimID, opsID)
 
 	user := func(sub, email string) string {
 		id := q(`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ($1,$2,$3,$4::uuid) RETURNING id::text`, sub, email, strings.Split(email, "@")[0], custID)
@@ -56,8 +57,10 @@ func TestCellHistory(t *testing.T) {
 	aliceID := user("hist-alice", "alice@histco.test")
 	bobID := user("hist-bob", "bob@histco.test")
 	_ = user("hist-carol", "carol@histco.test")
-	// Carol may not see Sales.
-	exec(`INSERT INTO identity.user_access_rule (user_id, rule_type, ref_id, access) SELECT id, 'dimension_member', $1, 'hidden' FROM identity.user WHERE keycloak_sub='hist-carol'`, salesID)
+	// Carol may not see Sales, nor Ops (and so nothing under it).
+	for _, hiddenID := range []string{salesID, opsID} {
+		exec(`INSERT INTO identity.user_access_rule (user_id, rule_type, ref_id, access) SELECT id, 'dimension_member', $1, 'hidden' FROM identity.user WHERE keycloak_sub='hist-carol'`, hiddenID)
+	}
 
 	t.Setenv("DEV_MODE", "true")
 	srv := httptest.NewServer(NewHandlerWithDeps(logger.New("test"), pool, nil, Deps{License: enterpriseManager(t)}))
@@ -147,6 +150,15 @@ func TestCellHistory(t *testing.T) {
 	// Gated exactly like the grid.
 	if code, body := do(srv, "hist-carol", http.MethodGet, path, nil); code != http.StatusForbidden {
 		t.Errorf("hidden member: %d %s", code, body)
+	}
+	// A hidden ancestor hides its descendants, as ExpandHidden does for the grid.
+	opsEU, _ := json.Marshal(map[string]string{dimID: "OPS_EU"})
+	childPath := strings.Replace(path, string(dims), string(opsEU), 1)
+	if code, body := do(srv, "hist-carol", http.MethodGet, childPath, nil); code != http.StatusForbidden {
+		t.Errorf("child of a hidden member: %d %s", code, body)
+	}
+	if code, body := do(srv, "hist-bob", http.MethodGet, childPath, nil); code != http.StatusOK {
+		t.Errorf("child visible to an unrestricted user: %d %s", code, body)
 	}
 	if code, _ := do(community, "hist-bob", http.MethodGet, path, nil); code != http.StatusForbidden {
 		t.Errorf("community edition: %d", code)

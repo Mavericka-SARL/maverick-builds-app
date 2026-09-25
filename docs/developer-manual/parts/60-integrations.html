@@ -1,6 +1,6 @@
 <h2>Integrations</h2>
 <p class="path">Sidebar: Build › Integrations</p>
-<p>Integrations bring data in and out of the model without typing: file uploads, a link-shared Google Sheet, any JSON REST API, and posting of form records into planning cells. The screen opens with one tile per source; selecting a tile shows that source's list and actions below.</p>
+<p>Integrations bring data in and out of the model without typing: file uploads, a Google Sheet (link-shared, or private through the tenant's service account), any JSON REST API, and posting of form records into planning cells. The screen opens with one tile per source; selecting a tile shows that source's list and actions below.</p>
 <figure><img src="img/09-integrations.png" alt="Integrations screen with source tiles and the Excel/CSV import section"><figcaption>Source tiles: Excel / CSV Import, Google Sheets, REST API, Supabase (coming soon), Form Records. The section under the tiles belongs to the selected source.</figcaption></figure>
 
 <h3>Excel / CSV Import</h3>
@@ -10,7 +10,7 @@
 <tr><th>Step / field</th><th>Meaning</th></tr>
 <tr><td><b>Import target type</b></td><td><b>Grid</b>, <b>Form</b> or <b>Dimension</b>, then the specific grid, form or dimension.</td></tr>
 <tr><td><b>Target revision</b></td><td>Required. The revision the data goes into; the active one is marked "(active)".</td></tr>
-<tr><td><b>Import mode</b></td><td><b>Incremental</b>: add or update rows, keep existing data. <b>Full reload</b>: delete all data for this revision, then insert.</td></tr>
+<tr><td><b>Import mode</b></td><td><b>Incremental</b>: add each imported value to the cell's current value, keep everything else. <b>Full reload</b>: delete all data for this revision, then insert.</td></tr>
 <tr><td>File</td><td>Drop or browse: .csv, .xlsx, .xls. For workbooks a <b>Sheet</b> select picks the worksheet.</td></tr>
 <tr><td><b>Map Columns</b></td><td>One row per source column with sample values and a target select: <b>(ignore)</b>, the target's fields (required ones marked *), and for dimensions <b>new property…</b> with a property name. You can name the mapping and <b>Save as draft</b> to finish later, or save it as a reusable integration.</td></tr>
 <tr><td><b>Validate</b></td><td>Counts <b>Total rows</b>, <b>Valid</b>, <b>Errors</b>, <b>Warnings</b> with a per-row issue list (for example "Empty row — will be skipped"). Choose to import valid rows only or <b>Import All Anyway</b>.</td></tr>

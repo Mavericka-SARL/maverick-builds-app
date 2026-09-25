@@ -977,6 +977,12 @@ export interface AutomationRule {
   source_integration_id?: string;
   enabled: boolean;
   created_at: string;
+  /** schedule rules: a 5-field cron expression, its IANA time zone and what a missed tick does. */
+  cron_expr?: string;
+  timezone?: string;
+  misfire_policy?: "skip" | "fire_now";
+  next_fire_at?: string;
+  last_fire_at?: string;
 }
 
 // ── Workflow Definitions ──────────────────────────────────────────────────────
@@ -1801,7 +1807,7 @@ export const api = {
 
   deleteAutomationRule: (ruleId: string) =>
     apiFetch<{ status: string }>(`/api/automation/rules/${ruleId}`, { method: "DELETE" }),
-  updateAutomationRule: (ruleId: string, body: { name?: string; description?: string; trigger_type?: string; workflow_name?: string; workflow_def_id?: string; source_form_id?: string; source_grid_id?: string; source_integration_id?: string; enabled?: boolean }) =>
+  updateAutomationRule: (ruleId: string, body: { name?: string; description?: string; trigger_type?: string; workflow_name?: string; workflow_def_id?: string; source_form_id?: string; source_grid_id?: string; source_integration_id?: string; enabled?: boolean; cron_expr?: string; timezone?: string; misfire_policy?: string }) =>
     apiFetch<AutomationRule>(`/api/automation/rules/${ruleId}`, { method: "PATCH", body: JSON.stringify(body) }),
 
   createAdminUser: (body: { email: string; first_name: string; last_name: string; role: string; workspace_id?: string }) =>
@@ -1861,7 +1867,7 @@ export const api = {
     apiFetch<{ status: string }>(`/api/admin/revisions/${id}`, { method: "DELETE" }),
 
   listAutomationRules: (revisionId?: string) => apiFetch<AutomationRule[]>(`/api/automation/rules${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
-  createAutomationRule: (body: { name: string; description: string; trigger_type: string; workflow_name: string; workflow_def_id?: string; source_form_id?: string; source_grid_id?: string; source_integration_id?: string }) =>
+  createAutomationRule: (body: { name: string; description: string; trigger_type: string; workflow_name: string; workflow_def_id?: string; source_form_id?: string; source_grid_id?: string; source_integration_id?: string; cron_expr?: string; timezone?: string; misfire_policy?: string }) =>
     apiFetch<AutomationRule>("/api/automation/rules", { method: "POST", body: JSON.stringify(body) }),
   triggerRule: (ruleId: string, payload?: Record<string, string>) =>
     apiFetch<Execution>(`/api/automation/trigger/${ruleId}`, { method: "POST", body: JSON.stringify({ payload: payload ?? {} }) }),

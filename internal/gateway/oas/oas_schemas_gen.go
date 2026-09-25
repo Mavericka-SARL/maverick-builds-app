@@ -17278,6 +17278,31 @@ func (s *ScatterPoint) SetY(val float64) {
 	s.Y = val
 }
 
+type ScimBearer struct {
+	Token string
+	Roles []string
+}
+
+// GetToken returns the value of Token.
+func (s *ScimBearer) GetToken() string {
+	return s.Token
+}
+
+// GetRoles returns the value of Roles.
+func (s *ScimBearer) GetRoles() []string {
+	return s.Roles
+}
+
+// SetToken sets the value of Token.
+func (s *ScimBearer) SetToken(val string) {
+	s.Token = val
+}
+
+// SetRoles sets the value of Roles.
+func (s *ScimBearer) SetRoles(val []string) {
+	s.Roles = val
+}
+
 // ScimCreateGroupBadRequest is response for ScimCreateGroup operation.
 type ScimCreateGroupBadRequest struct{}
 

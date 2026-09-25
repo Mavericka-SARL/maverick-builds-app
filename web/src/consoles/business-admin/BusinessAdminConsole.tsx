@@ -58,7 +58,7 @@ export function WorkflowInbox() {
               <div className="mvx-admin-object__name">{t.workflow_name}</div>
               <div className="mvx-admin-object__meta">
                 Step: <strong>{t.step_name || t.step_def_id}</strong>
-                {t.context?.revision && <span> · {t.context.revision} / {t.context.version}</span>}
+                {t.context?.revision && <span> · {t.context.revision}</span>}
               </div>
             </div>
             <StatusBadge tone="warning">Pending</StatusBadge>
@@ -204,7 +204,7 @@ export function WorkflowHistory({ focusInstanceId }: { focusInstanceId?: string 
                 <span className="mvx-admin-object__name">{inst.workflow_name}</span>
                 {inst.context?.revision && (
                   <span className="mvx-admin-muted" style={{ marginLeft: 8 }}>
-                    {inst.context.revision} / {inst.context.version}
+                    {inst.context.revision}
                   </span>
                 )}
               </div>

@@ -63,8 +63,8 @@ checkable in this repository:
 | No analytics, tracking, or third-party script | `web/index.html` loads none, and the CSP-relevant surface is the app's own bundle |
 | Sign-in stores a cookie and an in-memory token | `web/src/auth/AuthProvider.tsx` — `check-sso` with PKCE, the token in React state |
 | You can take your data out | The model, grid, form and audit export endpoints in `internal/gateway/handler.go` |
-| An audit record of who changed what | `pkg/auditlog`, with per-workspace retention |
-| AI features are off until a workspace supplies its own key | `/api/admin/ai-settings` |
+| An audit record of who changed what | `pkg/auditlog`; retention per tenant, else the deployment default (`ee/auditexport`, enterprise) |
+| The assistant runs only on a configured key — the tenant's, the developer's own, or the deployment's env key | `buildProviderForRequest` in `internal/gateway/ai_handler.go` |
 
 A sentence nobody can check is a liability, not a policy. When behaviour
 changes, the text changes with it and `LEGAL_UPDATED` moves.

@@ -37,7 +37,6 @@ resources:
   - services/policy.yaml
   - services/query.yaml
   - services/schema-migration.yaml
-  - services/seed.yaml
   - services/tenant.yaml
   - services/workflow.yaml
 

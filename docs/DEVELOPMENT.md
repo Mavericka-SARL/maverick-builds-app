@@ -13,15 +13,15 @@
 | npm dependencies | `web/package-lock.json` |
 | PostgreSQL | 16 in the Docker development stack |
 | Buf | 1.69.0 in CI |
-| sqlc | 1.31.1 in CI |
-| ogen | installed from latest in CI; generated output is drift-checked |
+| sqlc | v1.31.1, pinned in the `Makefile` (`SQLC_VERSION`) and CI |
+| ogen | v1.20.3, pinned in the `Makefile` (`OGEN_VERSION`) and CI; other versions produce drift |
 
 ## Local workflow
 
 ```bash
 make dev-up
-go run ./cmd/seed
 bash dev.sh
+make demo      # in a second terminal, once the gateway answers
 ```
 
 Then:
@@ -51,18 +51,17 @@ make dev-down
 
 ## Demo seeds
 
-| Command | Scenario |
-|---|---|
-| `go run ./cmd/seed` | Base OPEX planning demo |
-| `go run ./cmd/seed-budget` | Budget planning demo |
-| `go run ./cmd/seed-sales` | Sales Tracker CRUD/workflow demo |
-| `go run ./cmd/seed-procurement` | Procurement demo |
-| `go run ./cmd/seed-payroll` | Salary budgeting, scoped rollups, Excel import, and approval copy |
-| `go run ./cmd/seed-simple-budget` | Minimal budget-vs-actual model created and verified through the HTTP API (needs a running gateway) |
+| Command | Scenario | Writes through |
+|---|---|---|
+| `go run ./cmd/seed-regional-planning` | Regional expense planning, the current reference demo | the gateway (HTTP) |
+| `go run ./cmd/seed-sales-planning` | Sales planning with time-series functions | the gateway (HTTP) |
+| `go run ./cmd/seed-simple-budget` | Minimal budget-vs-actual model created and verified | the gateway (HTTP) |
+| `go run ./cmd/seed-sandbox` | Sandbox model | the gateway (HTTP) |
 
-Seed programs apply migrations and write deterministic configuration/data. Read
-the seed source before assuming every seed is destructive or fully idempotent;
-the salary-budgeting seed explicitly supports reset/re-run behavior.
+Every seed needs a running gateway in dev mode and drives it over HTTP as the
+roles a real application has, per the repository rule (`CLAUDE.md`); start
+new demos from `cmd/seed-regional-planning`. Read a seed's source before
+assuming it is idempotent.
 
 ## Go checks
 
@@ -113,10 +112,14 @@ bash scripts/codegen.sh
 Or separately:
 
 ```bash
-buf generate
-sqlc generate
-ogen --target internal/gateway/oas --package oas --clean api/openapi.yaml
+make proto   # buf generate
+make oas     # ogen at the pinned OGEN_VERSION
+make sqlc    # sqlc at the pinned SQLC_VERSION
+make gen     # all three
 ```
+
+Run the pinned versions through `make`: a different ogen or sqlc produces
+different output, which CI rejects as drift.
 
 Generated locations:
 
@@ -140,7 +143,14 @@ Common environment variables come from `pkg/config.BaseConfig`:
 - `REDIS_URL`
 
 Gateway-specific variables include `HTTP_PORT`,
-`OTEL_EXPORTER_OTLP_ENDPOINT`, `SERVICE_VERSION`, and `DEV_MODE`.
+`OTEL_EXPORTER_OTLP_ENDPOINT`, `SERVICE_VERSION`, and `DEV_MODE`. With
+`DEV_MODE=false` the gateway needs `KEYCLOAK_URL`, `KEYCLOAK_REALM` and
+`KEYCLOAK_ISSUER` (the issuer the tokens carry, when it differs from the URL
+the gateway fetches keys from) and exits if it cannot build its JWKS
+validator. Tenant databases, MinIO, the licence, SMTP, sign-up and the legal
+documents have their own variables; the complete list, with defaults, is the
+`mavericks-config` ConfigMap in `deploy/k8s/base/configmap.yaml` and the
+Compose `.env` described in [SELF_HOSTING.md](SELF_HOSTING.md).
 
 Frontend variables include:
 

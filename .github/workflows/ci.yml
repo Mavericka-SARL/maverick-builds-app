@@ -531,7 +531,6 @@ jobs:
           - notification
           - ai-assistant
           - integration
-          - seed
     steps:
       - uses: actions/checkout@v6
       # One persistent named builder per runner daemon instead of the

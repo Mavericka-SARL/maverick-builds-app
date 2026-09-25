@@ -2,72 +2,82 @@
 
 > **Classification:** Current — HTTP surface as served by internal/gateway.
 
-> **Last verified:** 2026-07-20
-> **Router authority:** `internal/gateway.NewHandler`
+> **Last verified:** 2026-09-25
+> **Router authority:** `internal/gateway.NewHandler` (`registerRoutes`)
 
 ## Transport and context
 
 The browser-facing API is served by `cmd/gateway` on port 8080. Development
 Vite proxies `/api` requests to that port.
 
-Intended request context:
+Request context:
 
-- `Authorization: Bearer <JWT>` in production;
-- `X-Dev-User: <persona-or-keycloak-sub>` when the gateway runs with
+- `Authorization: Bearer <Keycloak access token>` — sent by the console's API
+  client on every request, and the only accepted credential when
+  `DEV_MODE=false`: the gateway validates it against the realm's JWKS, and a
+  gateway that cannot build its validator refuses to start;
+- `X-Dev-User: <persona-or-keycloak-sub>` only when the gateway runs with
   `DEV_MODE=true`; and
 - `X-App-Id: <application UUID>` to select the current application.
 
 The server normally resolves model and active revision from the selected
-application. Most resource handlers also check explicit model, revision, grid,
-form, dashboard, or widget IDs against the actor's accessible scope. The
-exceptions listed below are current defects, not supported authorization
-semantics.
+application. Resource handlers check explicit model, revision, grid, form,
+dashboard, widget and job IDs — from the path and from the request body —
+against the actor's accessible scope.
 
-`/healthz` is unauthenticated. The development persona catalog is available
-only when `DEV_MODE=true`. Do not assume every other route resolves an actor:
-the fact-debug, import-job deletion, and notification mark-read exceptions are
-documented under Security exceptions.
-
-The production authentication contract is currently incomplete: the frontend
-API client never sends the Keycloak token held by `AuthProvider`, and
-`cmd/gateway` never initializes its JWKS validator. Because actor resolution
-falls back when that validator is nil, the current HTTP runtime uses
-development-persona resolution even with `DEV_MODE=false`.
+Public (no actor) routes: `/healthz`; `/api/signup` and
+`/api/signup/options`; `/api/legal`; `/api/branding`; `/api/sso/discover`;
+and the OAuth provider callback `GET /api/integrations/oauth/callback`.
+`/api/scim/v2/*` authenticates with the tenant's own SCIM bearer token, not a
+user. The development persona catalog (`/api/dev/personas`) answers only when
+`DEV_MODE=true`.
 
 ## Route groups
 
-The table intentionally documents route families rather than every supported
-method and suffix. Check the handler before constructing a mutation.
+The table documents route families rather than every method and suffix;
+`api/openapi.yaml` has every operation. "Authenticated" means any signed-in
+user with a role; the handler then applies the scope checks above.
 
-| Route family | Purpose | Primary authorization |
+| Route family | Purpose | Role guard |
 |---|---|---|
 | `/healthz` | process health | public |
+| `/api/signup`, `/api/signup/options` | self-service sign-up and the plan it offers | public |
+| `/api/legal`, `/api/branding`, `/api/sso/discover` | legal document values, sign-in branding, SSO discovery by e-mail domain | public |
+| `/api/scim/v2/*` | SCIM 2.0 user and group provisioning (enterprise) | SCIM token |
 | `/api/dev/personas` | development persona catalog | development mode |
-| `/api/me` | actor and role resolution without app/model context | authenticated actor |
+| `/api/me`, `/api/license` | actor and roles; the deployment's edition and features | authenticated |
 | `/api/apps` | actor-visible applications | authenticated + app grants |
 | `/api/demo` | active app/model/revision/persona context | authenticated + app/model access |
-| `/api/grid` | grid definition, visible dimensions, cells, totals, access metadata | authenticated + model/member/metric access |
-| `GET /api/grid/export` | one grid's raw input-metric values as CSV/XLSX (dimension/metric names as columns, one row per member combination); round-trips through `/api/import/upload` | authenticated + model/member/metric access, same hidden-member filtering as `/api/grid` |
-| `/api/metrics` | runtime metric summary | authenticated + model/metric access |
-| `/api/cells` | input fact writeback and recalculation | authenticated + shared write guard; incomplete cross-model ID validation |
-| `/api/formula/refs` | formula reference catalog | authenticated/model context |
+| `/api/grid`, `GET /api/grid/export` | grid definition, cells, totals, access metadata; CSV/XLSX export of input values | authenticated + model/member/metric access |
+| `/api/metrics`, `/api/dimensions`, `/api/formula/refs` | runtime metric and dimension summaries, formula reference catalog | authenticated + model access |
+| `/api/cells` | input fact writeback and recalculation | authenticated + shared write guard |
+| `GET /api/cells/history` | one input cell's change history, including archived rows (enterprise) | authenticated + metric and member access, hidden ancestors included |
 | `/api/dashboards`, `/api/folders` | role-visible dashboard runtime | authenticated + business-role assignment |
-| `/api/dashboard-widgets/{id}/chart-data` | server-resolved chart series; implemented but unused by the runtime chart widget | dashboard + member + metric access |
+| `POST /api/dashboard-widgets/{id}/chart-data` | server-resolved chart series used by every chart widget | dashboard + member + metric access |
 | `/api/tasks`, `/api/tasks/{id}` | inbox and task decisions | authenticated + task eligibility |
-| `/api/workflow/*` | submit/start, history, instance administration | mixed actor/business-admin rules |
-| `/api/notifications*` | list and mark read | list resolves actor; mark-read currently lacks ownership validation |
-| `/api/forms*`, `/api/records*` | form definition runtime and record actions | authenticated + model/form context |
-| `GET /api/forms/{id}/export` | that form's records as CSV/XLSX (field names as columns, plus `id`/`status`/`created_at`) | authenticated + model/form context |
-| `POST /api/forms/{id}/import` | bulk-creates records from an uploaded CSV/XLSX (same `{csv \| xlsx_base64}` envelope as `/api/import/upload`); columns match by field name or label; whole-file validation, applies live form-metric mappings per created record | authenticated + model/form context |
-| `/api/automation/*` | rules, manual triggers, and execution logs | authenticated; mutations validate app/revision context |
-| `/api/import/*` | CSV/XLSX stage, validate, commit, jobs | normal paths use actor/model + shared write guard; delete/legacy UUID exceptions below |
-| `/api/integrations/*` | saved integration runtime | authenticated/model context |
-| `/api/developer/*` | model, revision, metric, dimension, grid, dashboard, form, workflow, automation, integration, and migration building | `developer`, with explicitly shared admin routes where coded; debug-facts exception below |
-| `/api/ai/*` | developer AI sessions, documents, settings, proposals, draft promotion/discard | `developer`, `platform_admin`, or `tenant_admin` through the current shared guard |
-| `/api/business-admin/*` | business roles, members, dashboards, and access rules | `business_admin` |
-| `/api/admin/*` | customers/workspaces/apps/models/revisions/users/grants/audit | `platform_admin` or `tenant_admin`, with scoped exceptions |
-| `GET /api/admin/models/{id}/export` | revision-aware model export | `tenant_admin` only |
-| `POST /api/admin/models/import` | revision-aware model import | `tenant_admin` only |
+| `/api/workflow/submit`, `/api/workflow/instances`, `/api/workflow/my-history` | start, inspect and act on instances | authenticated; admin actions `business_admin` |
+| `/api/workflow/history` | all instances | `business_admin` |
+| `/api/notifications`, `…/mark-read` | list and mark read (own notifications only) | authenticated |
+| `/api/notifications/settings*` | per-tenant e-mail delivery settings and a test send | `platform_admin` or `tenant_admin` |
+| `/api/forms*`, `/api/records*` | form runtime and record actions; CSV/XLSX form export/import | authenticated + model/form context |
+| form definition create/update/delete under `/api/forms` | building forms | `developer` |
+| `/api/automation/rules*` | automation rules (list: authenticated; create/update/delete, including cron schedules) | `developer` |
+| `/api/automation/trigger/{id}`, `/api/automation/executions` | fire a manual rule, execution log | authenticated + app scope |
+| `/api/import/upload`, `/api/import/jobs*`, `/api/import/sheets/*` | CSV/XLSX/Google Sheets stage, validate, commit, jobs | authenticated + model scope + shared write guard |
+| `POST /api/import/dimension-members` | bulk member import | `developer` |
+| `/api/integrations/*` | run saved integrations | authenticated + model scope |
+| `/api/developer/applications*` | application list/create for builders | `developer`, `platform_admin` or `tenant_admin` |
+| `/api/developer/*` (everything else) | models, revisions, metrics, dimensions, grids, dashboards, folders, workflows, workflow roles and trigger events, integrations and connections, form integrations, migrations, debug facts | `developer` |
+| `/api/ai/*` | AI sessions, documents, settings, proposals, draft promotion/discard | `developer` |
+| `/api/business-admin/roles*` | business roles and their members | `business_admin` or `developer` |
+| `/api/business-admin/*` (everything else) | users, dashboards, access rules | `business_admin` |
+| `/api/admin/users*`, `/api/admin/workspaces*` | user and workspace administration | `platform_admin`, `tenant_admin` or `developer` |
+| `/api/admin/*` (everything else) | tenants, applications, models, revisions, grants, audit (listing, export, retention settings), usage, plans, branding, SSO, SCIM tokens, AI settings, infrastructure nodes | `platform_admin` or `tenant_admin` |
+| `GET /api/admin/models/{id}/export`, `…/export/package`, `POST /api/admin/models/import` | revision-aware model export (`?include_data=`), standalone package, import | `platform_admin` or `tenant_admin` |
+
+Enterprise and commercial features answer **403** with the feature name when
+the deployment's licence does not include them. A tenant whose plan has ended
+or run out of storage is read-only: mutations answer **402**.
 
 ## Access and error behavior
 
@@ -75,54 +85,32 @@ Role admission is only the first gate. Handlers also verify customer/workspace,
 application/model, dashboard, dimension-member, metric, revision, and workflow
 scope as applicable.
 
-Cell and import mutations share `internal/writeguard.CheckWrite`, which rejects:
+Cell, form and import mutations share `internal/writeguard.CheckWrite`, which
+rejects:
 
 - system-managed target revisions;
 - hidden or read-only dimension members;
 - descendants of hidden ancestors; and
 - scopes locked by running or approved workflows.
 
-That statement applies to the HTTP cell path and import commit paths. The query
-gRPC writeback uses a separate policy path. Also, the current member-rule lookup
-fails open on SQL errors; production security hardening must distinguish “no
-rule” from “could not evaluate rule.”
+The query gRPC writeback applies the same guard. A rule lookup that fails
+answers an error: the guard fails closed.
 
-HTTP errors are returned as JSON by gateway helpers. Do not depend on every
-route having the generated OpenAPI `Error` shape until it is covered by the
-contract.
+Known gaps: import does not refuse a calculated (non-input) metric, and
+`POST /api/cells` skips dimension codes it cannot resolve rather than rejecting
+them. The HTTP and gRPC import services are different implementations: HTTP
+supports the current CSV/XLSX/name-resolution flow, while gRPC retains a legacy
+CSV/UUID layout and different staging/commit semantics.
 
-## Security and integrity exceptions
-
-These are verified current gaps and should be treated as release blockers:
-
-| Route/path | Current behavior |
-|---|---|
-| `GET /api/developer/debug/facts` | resolves neither actor nor model and returns the latest facts across tenants |
-| `DELETE /api/import/jobs/{id}` | deletes by known job ID without actor/model ownership resolution |
-| `POST /api/notifications/mark-read` | updates supplied notification IDs without actor ownership resolution |
-| `POST /api/cells` | verifies `is_input` but not metric ownership by the supplied model/revision; unknown dimension identifiers can bypass guard resolution while raw JSON is stored |
-| import with direct `metric_id` UUID | does not verify model/revision ownership or `is_input`; prefer scoped name resolution until fixed |
-
-Full-reload import also deletes the target model/revision's facts after checking
-only members represented in the staged file. Import-job listing is model-scoped,
-not per-actor. The HTTP and gRPC import services are different implementations:
-HTTP supports the current CSV/XLSX/name-resolution flow, while gRPC retains a
-legacy CSV/UUID layout and different staging/commit semantics.
+HTTP errors are returned as JSON (`{"error": "..."}`) by the gateway helpers.
 
 ## OpenAPI status
 
-`api/openapi.yaml` covers the stabilized original core endpoints and generates
-`internal/gateway/oas`. It does not currently describe the full manual router,
-and `cmd/gateway` does not register the generated ogen server.
-
-When extending the HTTP API, either:
-
-1. add the route to the manual gateway and update this guide, or
-2. make the OpenAPI contract authoritative for that route and wire the
-   generated interface into the composition root.
-
-Do not imply complete OpenAPI coverage while these two routing surfaces remain
-separate.
+`api/openapi.yaml` describes every route the gateway registers (250
+operations); `route_spec_parity_test.go` fails CI when the router and the spec
+disagree. It generates `internal/gateway/oas`, but `cmd/gateway` serves the
+hand-written router, not the generated ogen server. When adding a route,
+register it and add it to the spec in the same change.
 
 ## gRPC contracts
 

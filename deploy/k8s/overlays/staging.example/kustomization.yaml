@@ -44,8 +44,6 @@ patches:
         value: Always
     target:
       kind: StatefulSet
-  # Demo data has no place here either: sign-up creates tenants.
-  #   - path: seed-remove.yaml
 
 # One of everything. Load tests measure the software, not the replica count;
 # scale the gateway up here only to test the scaled shape itself.

@@ -50,8 +50,6 @@ replicas:
     count: 1
   - name: dev-schema-migration
     count: 1
-  # seed is a Job, not a Deployment/StatefulSet/ReplicaSet — the replicas
-  # transformer doesn't apply to it, so no entry belongs here.
   - name: dev-tenant
     count: 1
   - name: dev-workflow
@@ -83,8 +81,6 @@ images:
   - name: registry.example.com/mavericks/query
     newTag: latest
   - name: registry.example.com/mavericks/schema-migration
-    newTag: latest
-  - name: registry.example.com/mavericks/seed
     newTag: latest
   - name: registry.example.com/mavericks/tenant
     newTag: latest

@@ -59,22 +59,20 @@ Start PostgreSQL and the supporting local infrastructure:
 make dev-up
 ```
 
-Seed one demo:
-
-```bash
-go run ./cmd/seed
-# or
-go run ./cmd/seed-budget
-go run ./cmd/seed-sales
-go run ./cmd/seed-procurement
-go run ./cmd/seed-payroll
-```
-
 Start the API in development-persona mode:
 
 ```bash
 bash dev.sh
 ```
+
+With the gateway running, seed the reference demo through its HTTP API, the
+way a real developer would build it:
+
+```bash
+go run ./cmd/seed-regional-planning
+```
+
+The other seeds are listed in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#demo-seeds).
 
 In a second terminal, start the web application:
 
@@ -160,4 +158,3 @@ paid editions; see [docs/LICENSING.md](docs/LICENSING.md).
 - [Notifications and reminders](docs/NOTIFICATIONS.md)
 - [Web application](web/README.md)
 - [UI design system](web/src/ui/DESIGN_SYSTEM.md)
-- [Salary budgeting demo](examples/budgeting-demo/README.md)

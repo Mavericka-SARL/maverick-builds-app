@@ -1,5 +1,5 @@
 // Tests for the generic engine work added to support the Salary Budgeting
-// demo (examples/budgeting-demo, seeded by cmd/seed-payroll) without any
+// demo (since removed with its database-direct seed) without any
 // bespoke payroll-specific endpoints or widget types: grid() exposing
 // rollup_source_grid_id / dimension_member.properties / dimension_def.
 // source_dimension_id+source_property, workflowStartInstance's RACI-scoped
@@ -177,7 +177,7 @@ func setupRollupFixture(t *testing.T) *rollupFixture {
 	// ExpandHidden on the read side — see hiddenCodesByDim/factRowHidden in
 	// handler.go — and AncestorChain on the write side, see writeguard.
 	// CheckWrite) with no staff-level rule needed. This mirrors
-	// cmd/seed-payroll's cost-center scoping after the same simplification.
+	// the former salary demo's cost-center scoping after the same simplification.
 	hide := func(userID string, memberIDs ...string) {
 		for _, id := range memberIDs {
 			exec(`INSERT INTO identity.user_access_rule (user_id, rule_type, ref_id, access) VALUES ($1::uuid, 'dimension_member', $2, 'hidden')`, userID, id)

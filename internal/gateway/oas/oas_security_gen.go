@@ -15,6 +15,9 @@ import (
 type SecurityHandler interface {
 	// HandleBearerAuth handles bearerAuth security.
 	HandleBearerAuth(ctx context.Context, operationName OperationName, t BearerAuth) (context.Context, error)
+	// HandleScimBearer handles scimBearer security.
+	// A tenant's SCIM token (mvx_scim_…), issued under Admin › SCIM; not a user's JWT.
+	HandleScimBearer(ctx context.Context, operationName OperationName, t ScimBearer) (context.Context, error)
 }
 
 func findAuthorization(h http.Header, prefix string) (string, bool) {
@@ -120,7 +123,6 @@ var operationRolesBearerAuth = map[string][]string{
 	GetAiSessionOperation:                 []string{},
 	GetAiSettingsOperation:                []string{},
 	GetAuditSettingsOperation:             []string{},
-	GetBrandingOperation:                  []string{},
 	GetBusinessDashboardOperation:         []string{},
 	GetCellHistoryOperation:               []string{},
 	GetChartDataOperation:                 []string{},
@@ -130,12 +132,10 @@ var operationRolesBearerAuth = map[string][]string{
 	GetGridOperation:                      []string{},
 	GetIntegrationOperation:               []string{},
 	GetIntegrationRunOperation:            []string{},
-	GetLegalInfoOperation:                 []string{},
 	GetLicenseOperation:                   []string{},
 	GetMeOperation:                        []string{},
 	GetMyWorkflowHistoryOperation:         []string{},
 	GetNotificationSettingsOperation:      []string{},
-	GetSignupOptionsOperation:             []string{},
 	GetSsoSettingsOperation:               []string{},
 	GetTenantAISettingsOperation:          []string{},
 	GetUsageOperation:                     []string{},
@@ -150,7 +150,6 @@ var operationRolesBearerAuth = map[string][]string{
 	ImportModelOperation:                  []string{},
 	ImportSheetFetchOperation:             []string{},
 	ImportUploadOperation:                 []string{},
-	IntegrationOAuthCallbackOperation:     []string{},
 	ListAdminApplicationsOperation:        []string{},
 	ListAdminTenantsOperation:             []string{},
 	ListAdminUsersOperation:               []string{},
@@ -215,29 +214,12 @@ var operationRolesBearerAuth = map[string][]string{
 	RevokeScimTokenOperation:              []string{},
 	RunIntegrationOperation:               []string{},
 	SaveAiSettingsOperation:               []string{},
-	ScimCreateGroupOperation:              []string{},
-	ScimCreateUserOperation:               []string{},
-	ScimDeleteGroupOperation:              []string{},
-	ScimDeleteUserOperation:               []string{},
-	ScimGetGroupOperation:                 []string{},
-	ScimGetUserOperation:                  []string{},
-	ScimListGroupsOperation:               []string{},
-	ScimListUsersOperation:                []string{},
-	ScimPatchGroupOperation:               []string{},
-	ScimPatchUserOperation:                []string{},
-	ScimReplaceGroupOperation:             []string{},
-	ScimReplaceUserOperation:              []string{},
-	ScimResourceTypesOperation:            []string{},
-	ScimSchemasOperation:                  []string{},
-	ScimServiceProviderConfigOperation:    []string{},
 	SendAiMessageOperation:                []string{},
 	SendNotificationTestMailOperation:     []string{},
 	SetActiveRevisionOperation:            []string{},
 	SetBARoleDashboardsOperation:          []string{},
 	SetDefaultModelOperation:              []string{},
 	SetUserAccessRulesOperation:           []string{},
-	SignupOperation:                       []string{},
-	SsoDiscoverOperation:                  []string{},
 	StartIntegrationOAuthOperation:        []string{},
 	StartWorkflowInstanceOperation:        []string{},
 	SubmitBudgetOperation:                 []string{},
@@ -306,6 +288,46 @@ func GetRolesForBearerAuth(operation string) []string {
 	return result
 }
 
+// operationRolesScimBearer is a private map storing roles per operation.
+var operationRolesScimBearer = map[string][]string{
+	ScimCreateGroupOperation:           []string{},
+	ScimCreateUserOperation:            []string{},
+	ScimDeleteGroupOperation:           []string{},
+	ScimDeleteUserOperation:            []string{},
+	ScimGetGroupOperation:              []string{},
+	ScimGetUserOperation:               []string{},
+	ScimListGroupsOperation:            []string{},
+	ScimListUsersOperation:             []string{},
+	ScimPatchGroupOperation:            []string{},
+	ScimPatchUserOperation:             []string{},
+	ScimReplaceGroupOperation:          []string{},
+	ScimReplaceUserOperation:           []string{},
+	ScimResourceTypesOperation:         []string{},
+	ScimSchemasOperation:               []string{},
+	ScimServiceProviderConfigOperation: []string{},
+}
+
+// GetRolesForScimBearer returns the required roles for the given operation.
+//
+// This is useful for authorization scenarios where you need to know which roles
+// are required for an operation.
+//
+// Example:
+//
+//	requiredRoles := GetRolesForScimBearer(AddPetOperation)
+//
+// Returns nil if the operation has no role requirements or if the operation is unknown.
+func GetRolesForScimBearer(operation string) []string {
+	roles, ok := operationRolesScimBearer[operation]
+	if !ok {
+		return nil
+	}
+	// Return a copy to prevent external modification
+	result := make([]string, len(roles))
+	copy(result, roles)
+	return result
+}
+
 func (s *Server) securityBearerAuth(ctx context.Context, operationName OperationName, req *http.Request) (context.Context, bool, error) {
 	var t BearerAuth
 	token, ok := findAuthorization(req.Header, "Bearer")
@@ -323,16 +345,44 @@ func (s *Server) securityBearerAuth(ctx context.Context, operationName Operation
 	return rctx, true, err
 }
 
+func (s *Server) securityScimBearer(ctx context.Context, operationName OperationName, req *http.Request) (context.Context, bool, error) {
+	var t ScimBearer
+	token, ok := findAuthorization(req.Header, "Bearer")
+	if !ok {
+		return ctx, false, nil
+	}
+	t.Token = token
+	t.Roles = operationRolesScimBearer[operationName]
+	rctx, err := s.sec.HandleScimBearer(ctx, operationName, t)
+	if errors.Is(err, ogenerrors.ErrSkipServerSecurity) {
+		return nil, false, nil
+	} else if err != nil {
+		return nil, false, err
+	}
+	return rctx, true, err
+}
+
 // SecuritySource is provider of security values (tokens, passwords, etc.).
 type SecuritySource interface {
 	// BearerAuth provides bearerAuth security value.
 	BearerAuth(ctx context.Context, operationName OperationName) (BearerAuth, error)
+	// ScimBearer provides scimBearer security value.
+	// A tenant's SCIM token (mvx_scim_…), issued under Admin › SCIM; not a user's JWT.
+	ScimBearer(ctx context.Context, operationName OperationName) (ScimBearer, error)
 }
 
 func (s *Client) securityBearerAuth(ctx context.Context, operationName OperationName, req *http.Request) error {
 	t, err := s.sec.BearerAuth(ctx, operationName)
 	if err != nil {
 		return errors.Wrap(err, "security source \"BearerAuth\"")
+	}
+	req.Header.Set("Authorization", "Bearer "+t.Token)
+	return nil
+}
+func (s *Client) securityScimBearer(ctx context.Context, operationName OperationName, req *http.Request) error {
+	t, err := s.sec.ScimBearer(ctx, operationName)
+	if err != nil {
+		return errors.Wrap(err, "security source \"ScimBearer\"")
 	}
 	req.Header.Set("Authorization", "Bearer "+t.Token)
 	return nil

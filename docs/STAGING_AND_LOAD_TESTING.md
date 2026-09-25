@@ -43,6 +43,9 @@ accounts were brought up on 2026-09-17. Two notes from doing that:
   build that moves `:latest`, which production also names. Pin production to
   the `:<git sha>` tag CI publishes alongside, as `prod.example` says, so a
   staging publish can never surprise a production pod restart.
+  Note that the `deploy` input of that dispatch defaults to `true`, and the
+  deploy job rolls **production**: to publish for staging only, untick
+  `deploy`.
 
 ## The harness
 

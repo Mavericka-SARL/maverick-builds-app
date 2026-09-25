@@ -12404,39 +12404,6 @@ func (c *Client) sendGetBranding(ctx context.Context) (res *BrandView, err error
 		return res, errors.Wrap(err, "create request")
 	}
 
-	{
-		type bitset = [1]uint8
-		var satisfied bitset
-		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, GetBrandingOperation, r); {
-			case err == nil: // if NO error
-				satisfied[0] |= 1 << 0
-			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
-				// Skip this security.
-			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
-			}
-		}
-
-		if ok := func() bool {
-		nextRequirement:
-			for _, requirement := range []bitset{
-				{0b00000001},
-			} {
-				for i, mask := range requirement {
-					if satisfied[i]&mask != mask {
-						continue nextRequirement
-					}
-				}
-				return true
-			}
-			return false
-		}(); !ok {
-			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
-		}
-	}
-
 	stage = "SendRequest"
 	resp, err := c.cfg.Client.Do(r)
 	if err != nil {
@@ -13746,39 +13713,6 @@ func (c *Client) sendGetLegalInfo(ctx context.Context) (res *LegalInfo, err erro
 		return res, errors.Wrap(err, "create request")
 	}
 
-	{
-		type bitset = [1]uint8
-		var satisfied bitset
-		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, GetLegalInfoOperation, r); {
-			case err == nil: // if NO error
-				satisfied[0] |= 1 << 0
-			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
-				// Skip this security.
-			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
-			}
-		}
-
-		if ok := func() bool {
-		nextRequirement:
-			for _, requirement := range []bitset{
-				{0b00000001},
-			} {
-				for i, mask := range requirement {
-					if satisfied[i]&mask != mask {
-						continue nextRequirement
-					}
-				}
-				return true
-			}
-			return false
-		}(); !ok {
-			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
-		}
-	}
-
 	stage = "SendRequest"
 	resp, err := c.cfg.Client.Do(r)
 	if err != nil {
@@ -14283,39 +14217,6 @@ func (c *Client) sendGetSignupOptions(ctx context.Context) (res *SignupOptions, 
 	r, err := ht.NewRequest(ctx, "GET", u)
 	if err != nil {
 		return res, errors.Wrap(err, "create request")
-	}
-
-	{
-		type bitset = [1]uint8
-		var satisfied bitset
-		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, GetSignupOptionsOperation, r); {
-			case err == nil: // if NO error
-				satisfied[0] |= 1 << 0
-			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
-				// Skip this security.
-			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
-			}
-		}
-
-		if ok := func() bool {
-		nextRequirement:
-			for _, requirement := range []bitset{
-				{0b00000001},
-			} {
-				for i, mask := range requirement {
-					if satisfied[i]&mask != mask {
-						continue nextRequirement
-					}
-				}
-				return true
-			}
-			return false
-		}(); !ok {
-			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
-		}
 	}
 
 	stage = "SendRequest"
@@ -16226,39 +16127,6 @@ func (c *Client) sendIntegrationOAuthCallback(ctx context.Context, params Integr
 	r, err := ht.NewRequest(ctx, "GET", u)
 	if err != nil {
 		return res, errors.Wrap(err, "create request")
-	}
-
-	{
-		type bitset = [1]uint8
-		var satisfied bitset
-		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, IntegrationOAuthCallbackOperation, r); {
-			case err == nil: // if NO error
-				satisfied[0] |= 1 << 0
-			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
-				// Skip this security.
-			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
-			}
-		}
-
-		if ok := func() bool {
-		nextRequirement:
-			for _, requirement := range []bitset{
-				{0b00000001},
-			} {
-				for i, mask := range requirement {
-					if satisfied[i]&mask != mask {
-						continue nextRequirement
-					}
-				}
-				return true
-			}
-			return false
-		}(); !ok {
-			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
-		}
 	}
 
 	stage = "SendRequest"
@@ -24099,14 +23967,14 @@ func (c *Client) sendScimCreateGroup(ctx context.Context, request ScimResource) 
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, ScimCreateGroupOperation, r); {
+			stage = "Security:ScimBearer"
+			switch err := c.securityScimBearer(ctx, ScimCreateGroupOperation, r); {
 			case err == nil: // if NO error
 				satisfied[0] |= 1 << 0
 			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
 				// Skip this security.
 			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
+				return res, errors.Wrap(err, "security \"ScimBearer\"")
 			}
 		}
 
@@ -24209,14 +24077,14 @@ func (c *Client) sendScimCreateUser(ctx context.Context, request ScimResource) (
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, ScimCreateUserOperation, r); {
+			stage = "Security:ScimBearer"
+			switch err := c.securityScimBearer(ctx, ScimCreateUserOperation, r); {
 			case err == nil: // if NO error
 				satisfied[0] |= 1 << 0
 			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
 				// Skip this security.
 			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
+				return res, errors.Wrap(err, "security \"ScimBearer\"")
 			}
 		}
 
@@ -24334,14 +24202,14 @@ func (c *Client) sendScimDeleteGroup(ctx context.Context, params ScimDeleteGroup
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, ScimDeleteGroupOperation, r); {
+			stage = "Security:ScimBearer"
+			switch err := c.securityScimBearer(ctx, ScimDeleteGroupOperation, r); {
 			case err == nil: // if NO error
 				satisfied[0] |= 1 << 0
 			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
 				// Skip this security.
 			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
+				return res, errors.Wrap(err, "security \"ScimBearer\"")
 			}
 		}
 
@@ -24459,14 +24327,14 @@ func (c *Client) sendScimDeleteUser(ctx context.Context, params ScimDeleteUserPa
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, ScimDeleteUserOperation, r); {
+			stage = "Security:ScimBearer"
+			switch err := c.securityScimBearer(ctx, ScimDeleteUserOperation, r); {
 			case err == nil: // if NO error
 				satisfied[0] |= 1 << 0
 			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
 				// Skip this security.
 			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
+				return res, errors.Wrap(err, "security \"ScimBearer\"")
 			}
 		}
 
@@ -24584,14 +24452,14 @@ func (c *Client) sendScimGetGroup(ctx context.Context, params ScimGetGroupParams
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, ScimGetGroupOperation, r); {
+			stage = "Security:ScimBearer"
+			switch err := c.securityScimBearer(ctx, ScimGetGroupOperation, r); {
 			case err == nil: // if NO error
 				satisfied[0] |= 1 << 0
 			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
 				// Skip this security.
 			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
+				return res, errors.Wrap(err, "security \"ScimBearer\"")
 			}
 		}
 
@@ -24709,14 +24577,14 @@ func (c *Client) sendScimGetUser(ctx context.Context, params ScimGetUserParams) 
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, ScimGetUserOperation, r); {
+			stage = "Security:ScimBearer"
+			switch err := c.securityScimBearer(ctx, ScimGetUserOperation, r); {
 			case err == nil: // if NO error
 				satisfied[0] |= 1 << 0
 			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
 				// Skip this security.
 			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
+				return res, errors.Wrap(err, "security \"ScimBearer\"")
 			}
 		}
 
@@ -24871,14 +24739,14 @@ func (c *Client) sendScimListGroups(ctx context.Context, params ScimListGroupsPa
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, ScimListGroupsOperation, r); {
+			stage = "Security:ScimBearer"
+			switch err := c.securityScimBearer(ctx, ScimListGroupsOperation, r); {
 			case err == nil: // if NO error
 				satisfied[0] |= 1 << 0
 			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
 				// Skip this security.
 			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
+				return res, errors.Wrap(err, "security \"ScimBearer\"")
 			}
 		}
 
@@ -25034,14 +24902,14 @@ func (c *Client) sendScimListUsers(ctx context.Context, params ScimListUsersPara
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, ScimListUsersOperation, r); {
+			stage = "Security:ScimBearer"
+			switch err := c.securityScimBearer(ctx, ScimListUsersOperation, r); {
 			case err == nil: // if NO error
 				satisfied[0] |= 1 << 0
 			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
 				// Skip this security.
 			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
+				return res, errors.Wrap(err, "security \"ScimBearer\"")
 			}
 		}
 
@@ -25162,14 +25030,14 @@ func (c *Client) sendScimPatchGroup(ctx context.Context, request ScimResource, p
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, ScimPatchGroupOperation, r); {
+			stage = "Security:ScimBearer"
+			switch err := c.securityScimBearer(ctx, ScimPatchGroupOperation, r); {
 			case err == nil: // if NO error
 				satisfied[0] |= 1 << 0
 			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
 				// Skip this security.
 			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
+				return res, errors.Wrap(err, "security \"ScimBearer\"")
 			}
 		}
 
@@ -25291,14 +25159,14 @@ func (c *Client) sendScimPatchUser(ctx context.Context, request ScimResource, pa
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, ScimPatchUserOperation, r); {
+			stage = "Security:ScimBearer"
+			switch err := c.securityScimBearer(ctx, ScimPatchUserOperation, r); {
 			case err == nil: // if NO error
 				satisfied[0] |= 1 << 0
 			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
 				// Skip this security.
 			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
+				return res, errors.Wrap(err, "security \"ScimBearer\"")
 			}
 		}
 
@@ -25419,14 +25287,14 @@ func (c *Client) sendScimReplaceGroup(ctx context.Context, request ScimResource,
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, ScimReplaceGroupOperation, r); {
+			stage = "Security:ScimBearer"
+			switch err := c.securityScimBearer(ctx, ScimReplaceGroupOperation, r); {
 			case err == nil: // if NO error
 				satisfied[0] |= 1 << 0
 			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
 				// Skip this security.
 			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
+				return res, errors.Wrap(err, "security \"ScimBearer\"")
 			}
 		}
 
@@ -25547,14 +25415,14 @@ func (c *Client) sendScimReplaceUser(ctx context.Context, request ScimResource, 
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, ScimReplaceUserOperation, r); {
+			stage = "Security:ScimBearer"
+			switch err := c.securityScimBearer(ctx, ScimReplaceUserOperation, r); {
 			case err == nil: // if NO error
 				satisfied[0] |= 1 << 0
 			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
 				// Skip this security.
 			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
+				return res, errors.Wrap(err, "security \"ScimBearer\"")
 			}
 		}
 
@@ -25654,14 +25522,14 @@ func (c *Client) sendScimResourceTypes(ctx context.Context) (res ScimResourceTyp
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, ScimResourceTypesOperation, r); {
+			stage = "Security:ScimBearer"
+			switch err := c.securityScimBearer(ctx, ScimResourceTypesOperation, r); {
 			case err == nil: // if NO error
 				satisfied[0] |= 1 << 0
 			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
 				// Skip this security.
 			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
+				return res, errors.Wrap(err, "security \"ScimBearer\"")
 			}
 		}
 
@@ -25761,14 +25629,14 @@ func (c *Client) sendScimSchemas(ctx context.Context) (res ScimSchemasRes, err e
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, ScimSchemasOperation, r); {
+			stage = "Security:ScimBearer"
+			switch err := c.securityScimBearer(ctx, ScimSchemasOperation, r); {
 			case err == nil: // if NO error
 				satisfied[0] |= 1 << 0
 			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
 				// Skip this security.
 			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
+				return res, errors.Wrap(err, "security \"ScimBearer\"")
 			}
 		}
 
@@ -25868,14 +25736,14 @@ func (c *Client) sendScimServiceProviderConfig(ctx context.Context) (res ScimSer
 		type bitset = [1]uint8
 		var satisfied bitset
 		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, ScimServiceProviderConfigOperation, r); {
+			stage = "Security:ScimBearer"
+			switch err := c.securityScimBearer(ctx, ScimServiceProviderConfigOperation, r); {
 			case err == nil: // if NO error
 				satisfied[0] |= 1 << 0
 			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
 				// Skip this security.
 			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
+				return res, errors.Wrap(err, "security \"ScimBearer\"")
 			}
 		}
 
@@ -26755,39 +26623,6 @@ func (c *Client) sendSignup(ctx context.Context, request *SignupRequest) (res Si
 		return res, errors.Wrap(err, "encode request")
 	}
 
-	{
-		type bitset = [1]uint8
-		var satisfied bitset
-		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, SignupOperation, r); {
-			case err == nil: // if NO error
-				satisfied[0] |= 1 << 0
-			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
-				// Skip this security.
-			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
-			}
-		}
-
-		if ok := func() bool {
-		nextRequirement:
-			for _, requirement := range []bitset{
-				{0b00000001},
-			} {
-				for i, mask := range requirement {
-					if satisfied[i]&mask != mask {
-						continue nextRequirement
-					}
-				}
-				return true
-			}
-			return false
-		}(); !ok {
-			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
-		}
-	}
-
 	stage = "SendRequest"
 	resp, err := c.cfg.Client.Do(r)
 	if err != nil {
@@ -26882,39 +26717,6 @@ func (c *Client) sendSsoDiscover(ctx context.Context, params SsoDiscoverParams) 
 	r, err := ht.NewRequest(ctx, "GET", u)
 	if err != nil {
 		return res, errors.Wrap(err, "create request")
-	}
-
-	{
-		type bitset = [1]uint8
-		var satisfied bitset
-		{
-			stage = "Security:BearerAuth"
-			switch err := c.securityBearerAuth(ctx, SsoDiscoverOperation, r); {
-			case err == nil: // if NO error
-				satisfied[0] |= 1 << 0
-			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
-				// Skip this security.
-			default:
-				return res, errors.Wrap(err, "security \"BearerAuth\"")
-			}
-		}
-
-		if ok := func() bool {
-		nextRequirement:
-			for _, requirement := range []bitset{
-				{0b00000001},
-			} {
-				for i, mask := range requirement {
-					if satisfied[i]&mask != mask {
-						continue nextRequirement
-					}
-				}
-				return true
-			}
-			return false
-		}(); !ok {
-			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
-		}
 	}
 
 	stage = "SendRequest"

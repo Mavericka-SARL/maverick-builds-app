@@ -649,12 +649,6 @@ kubectl -n mavericks delete secret mavericks-tls mavericks-auth-tls
 Then sign in at `https://mavericks.example.com` and continue with
 [first steps in the console](#step-8--first-steps-in-the-console).
 
-### The demo data job
-
-Base contains a `seed` Job that loads demo tenants. The example overlay
-removes it (`seed-remove.yaml`); keep that for any deployment people will
-use.
-
 ---
 
 ## Operating a Kubernetes deployment

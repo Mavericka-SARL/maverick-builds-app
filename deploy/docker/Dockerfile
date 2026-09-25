@@ -12,7 +12,7 @@
 # their readiness/liveness probes (see pkg/grpcutil/server.go's NewServer
 # comment) — that binary must exist *inside* the container for an exec
 # probe to find it. The couple of services that don't need it (gateway
-# uses httpGet; seed is a run-to-completion Job with no probes) still get
+# uses httpGet) still get
 # it for a few extra MB, in exchange for one shared, simpler Dockerfile.
 ARG GO_VERSION=1.26-bookworm
 FROM golang:${GO_VERSION} AS builder

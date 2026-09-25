@@ -832,7 +832,7 @@ function DimPropertiesPanel({ dimId }: { dimId: string }) {
     <div style={{ padding: "12px 16px", borderTop: "1px solid var(--color-border)", background: "var(--color-surface-subtle)" }}>
       <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10 }}>
         Dimension Properties
-        <span className="mvx-admin-muted" style={{ fontWeight: 400, marginLeft: 8 }}>usable in formulas as dim.propertyName</span>
+        <span className="mvx-admin-muted" style={{ fontWeight: 400, marginLeft: 8 }}>attributes of each member — not referenceable in formulas</span>
       </div>
 
       {(props as DimProperty[]).length === 0 && (
