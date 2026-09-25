@@ -69,7 +69,7 @@ func build(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("docker: %w", err)
 	}
-	defer provider.Close()
+	defer func() { _ = provider.Close() }()
 
 	var log bytes.Buffer
 	req := &testcontainers.ContainerRequest{
