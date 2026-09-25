@@ -86,15 +86,33 @@ log "checking ${BACKUP_BUCKET}/pg for a backup newer than ${BACKUP_MAX_AGE_HOURS
 # attempted — and `set -e` would end the run silently, which is the exact
 # failure this job exists to make noisy.
 if ! aliased="$(mc alias set backupminio "$MINIO_URL" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" 2>&1)"; then
+  # mc probes the endpoint while setting the alias, and words a connection
+  # that never opened as a credentials problem ("Unable to initialize new
+  # alias from the provided credentials ... i/o timeout"). Say which it was:
+  # a network policy that blocked this job read as rotated keys, and sent the
+  # search to the wrong place.
+  case "$aliased" in
+    *"dial tcp"* | *"i/o timeout"* | *"connection refused"* | *"no such host"*)
+      cause="Object storage could not be reached, so whether a backup exists is
+unknown."
+      hint="Check that the endpoint is right and reachable from this job: a network
+policy on either side (this job's egress, the storage's ingress) blocks it
+silently."
+      ;;
+    *)
+      cause="Object storage would not accept the credentials, so whether a backup
+exists is unknown."
+      hint="Check MINIO_ROOT_USER / MINIO_ROOT_PASSWORD in mavericks-secrets."
+      ;;
+  esac
   alert "[mavericks] backup check could not run" "\
-Object storage would not accept the credentials, so whether a backup exists is
-unknown.
+${cause}
 
   endpoint: ${MINIO_URL}
 
   ${aliased}
 
-Check MINIO_ROOT_USER / MINIO_ROOT_PASSWORD in mavericks-secrets."
+${hint}"
   exit 1
 fi
 

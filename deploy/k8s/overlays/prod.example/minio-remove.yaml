@@ -1,0 +1,42 @@
+# Removes self-hosted MinIO from the production overlay.
+#
+# Use it when object storage lives outside the cluster (site.yaml notes), so
+# these three resources would otherwise run unused — a pod and a 20 GiB volume
+# nothing connects to. The deciding reason is not cost though: with MinIO
+# in-cluster, the database backups live on the same cluster as the database,
+# which defeats the purpose of taking them.
+#
+# $patch: delete removes a resource that base contributed. Dev keeps MinIO,
+# which needs no credentials and works offline.
+---
+$patch: delete
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: mavericks
+
+---
+$patch: delete
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: mavericks
+
+---
+$patch: delete
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+  namespace: mavericks
+
+---
+# The NetworkPolicy for a pod that no longer exists.
+$patch: delete
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: minio
+  namespace: mavericks

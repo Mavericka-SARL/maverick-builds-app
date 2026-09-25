@@ -1,5 +1,8 @@
 # Everything that makes this deployment "staging" rather than production,
-# in one place. Strategic-merge patches against base.
+# in one place. Strategic-merge patches against base — so each names base's
+# namespace, mavericks: kustomize matches patches before it moves everything
+# into mavericks-staging, and a patch naming mavericks-staging matches nothing
+# (the whole overlay then fails to build).
 #
 # Hostnames: staging.example.com (console and API) and
 # auth-staging.example.com (Keycloak). The Ingress hosts, KC_HOSTNAME,
@@ -14,7 +17,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: mavericks-config
-  namespace: mavericks-staging
+  namespace: mavericks
 data:
   SIGNUP_ENABLED: "true"
   PLAN_CONTACT_URL: "https://example.com/pricing"
@@ -31,7 +34,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: mavericks-web-config
-  namespace: mavericks-staging
+  namespace: mavericks
 data:
   DEV_MODE: "false"
   KEYCLOAK_URL: "https://auth-staging.example.com"
@@ -41,7 +44,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: mavericks
-  namespace: mavericks-staging
+  namespace: mavericks
 spec:
   tls:
     - hosts: [staging.example.com]
@@ -72,7 +75,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: keycloak
-  namespace: mavericks-staging
+  namespace: mavericks
 spec:
   strategy:
     type: RollingUpdate
@@ -110,7 +113,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: postgres
-  namespace: mavericks-staging
+  namespace: mavericks
 spec:
   volumeClaimTemplates:
     - metadata:
@@ -139,14 +142,14 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: postgres-backup
-  namespace: mavericks-staging
+  namespace: mavericks
 spec:
   jobTemplate:
     spec:
       template:
         spec:
           containers:
-            - name: pg-backup
+            - name: postgres-backup
               env:
                 - name: BACKUP_BUCKET
                   value: "mavericks-backups-staging"

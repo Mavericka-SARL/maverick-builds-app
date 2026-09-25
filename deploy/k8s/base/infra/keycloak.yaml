@@ -46,15 +46,20 @@ data:
   # attacks — verified live, a rapid-fire run locked the account after two
   # counted failures rather than the full ten.
   #
-  # Hostnames are placeholders; patch redirectUris/webOrigins per environment.
+  # The console's address comes from the CONSOLE_HOST environment variable of
+  # the Keycloak Deployment below: Keycloak substitutes ${VAR} placeholders in
+  # an imported realm, so an overlay sets one variable instead of carrying a
+  # copy of this file. deploy/compose/keycloak/mavericks-realm.json is the
+  # same realm for the Compose stack; keycloak_realm_test.go keeps the two
+  # identical.
   realm.json: |
     {
       "realm": "mavericks",
       "enabled": true,
       "registrationAllowed": false,
-      "loginTheme": "keycloak",
+      "loginTheme": "maverickbuilds",
       "sslRequired": "external",
-      "displayName": "Maverick",
+      "displayName": "maverickbuilds.app",
       "bruteForceProtected": true,
       "failureFactor": 10,
       "waitIncrementSeconds": 60,
@@ -84,11 +89,11 @@ data:
           "serviceAccountsEnabled": false,
           "directAccessGrantsEnabled": false,
           "fullScopeAllowed": true,
-          "redirectUris": ["https://mavericks.example.com/*"],
-          "webOrigins": ["https://mavericks.example.com"],
+          "redirectUris": ["https://${CONSOLE_HOST}/*"],
+          "webOrigins": ["https://${CONSOLE_HOST}"],
           "attributes": {
             "pkce.code.challenge.method": "S256",
-            "post.logout.redirect.uris": "https://mavericks.example.com/*"
+            "post.logout.redirect.uris": "https://${CONSOLE_HOST}/*"
           }
         },
         {
@@ -1089,6 +1094,10 @@ spec:
             # files are a few KB on a page nobody loads in a loop.
             - name: KC_SPI_THEME_STATIC_MAX_AGE
               value: "300"
+            # The console's host name, for the realm import's redirect URIs
+            # (first boot only). Overlays set their own.
+            - name: CONSOLE_HOST
+              value: "mavericks.example.com"
           volumeMounts:
             - name: realm-config
               mountPath: /opt/keycloak/data/import

@@ -1,0 +1,36 @@
+# Egress to object storage OUTSIDE the cluster, over HTTPS. Use together with
+# minio-remove.yaml, when MINIO_URL in site.yaml points at an S3-compatible
+# service elsewhere — which is where backups belong: in-cluster MinIO keeps
+# them on the same cluster as the database they protect.
+#
+# base already lets the gateway (package export) and postgres (WAL-G) reach
+# port 443. The nightly dump and its watchdog only reach the in-cluster MinIO
+# pod, so their lists are restated here with 443 instead. Each list replaces
+# base's wholesale (no merge key), so every rule still needed is repeated.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-backup
+  namespace: mavericks
+spec:
+  egress:
+    - to: [{podSelector: {matchLabels: {app: postgres}}}]
+      ports: [{protocol: TCP, port: 5432}]
+    - to: [{ipBlock: {cidr: 0.0.0.0/0}}]
+      ports: [{protocol: TCP, port: 443}]
+    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-backup-watchdog
+  namespace: mavericks
+spec:
+  egress:
+    - to: [{ipBlock: {cidr: 0.0.0.0/0}}]
+      ports: [{protocol: TCP, port: 443}]
+    # The alert itself.
+    - to: [{ipBlock: {cidr: 0.0.0.0/0}}]
+      ports: [{protocol: TCP, port: 587}, {protocol: TCP, port: 465}]
+    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]

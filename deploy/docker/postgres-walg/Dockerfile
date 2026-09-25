@@ -24,7 +24,28 @@ ENV GOEXPERIMENT=jsonv2
 # glibc dynamic loader, not actually a missing file).
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /wal-g .
 
-FROM quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z AS mc
+# mc, built from source rather than copied out of MinIO's published image.
+# quay.io/minio/mc stopped answering anonymous pulls on 2026-09-24 — 401 on
+# every tag, the server image with it — which is the second time MinIO has
+# withdrawn a distribution channel under this repo (Docker Hub's copy
+# vanished on 2026-09-11, which is why this said quay.io at all). The source
+# is still public and MC_VERSION below is the same tag the published image
+# carried, so the binary is the one these scripts were verified against.
+# CGO_ENABLED=0 for the same reason as every other builder stage here: this
+# is glibc, the final image is musl.
+FROM golang:1.25 AS mc
+ARG MC_VERSION=RELEASE.2025-08-13T08-35-41Z
+RUN git clone --depth 1 --branch ${MC_VERSION} https://github.com/minio/mc.git /src
+WORKDIR /src
+# Stamp the version variables mc's own Makefile stamps, so `mc --version` in a
+# running container names the release instead of "DEVELOPMENT.GOGET". These
+# scripts have been caught out by a behaviour change between mc versions
+# before (see pg-backup.sh on the bucket-region warning), so being able to ask
+# the image which one it carries is worth two ldflags. -tags kqueue is what
+# upstream's own release build uses.
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -tags kqueue \
+      -ldflags="-s -w -X github.com/minio/mc/cmd.ReleaseTag=${MC_VERSION} -X github.com/minio/mc/cmd.CommitID=$(git rev-parse HEAD)" \
+      -o /usr/bin/mc .
 
 FROM postgres:16-alpine
 

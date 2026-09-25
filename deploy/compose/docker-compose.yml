@@ -1,0 +1,253 @@
+# maverickbuilds.app on one server: the complete platform behind automatic
+# HTTPS, built from this repository's source. docs/SELF_HOSTING.md is the
+# manual; in short:
+#
+#   ./setup.sh env                      # .env with generated secrets
+#   $EDITOR .env                        # host names, e-mail relay
+#   docker compose up -d --build
+#   ./setup.sh keycloak                 # sign-in service, user provisioning
+#   ./setup.sh admin you@example.com "Your Name"
+#
+# Only the proxy publishes ports (80 and 443). Everything else is reachable
+# from inside this project's network alone.
+
+name: mavericks
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+# What the gateway and the integration worker both need: the database, the
+# tenant-database mode, and the two keys tenants' stored credentials are
+# sealed under. Losing either key makes everything sealed under it unreadable.
+x-app-env: &app-env
+  DATABASE_URL: postgres://mavericks:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/mavericks?sslmode=disable
+  TENANT_DB_MODE: ${TENANT_DB_MODE:-shared}
+  INTEGRATION_CRED_KEY: ${INTEGRATION_CRED_KEY:?set INTEGRATION_CRED_KEY in .env}
+  SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:?set SECRETS_ENCRYPTION_KEY in .env}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      POSTGRES_USER: mavericks
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: mavericks
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mavericks -d mavericks"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    restart: unless-stopped
+    logging: *logging
+    command: ["start", "--import-realm"]
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD in .env}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: mavericks
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      # A bare host name on Keycloak 24, never a URL. It must equal AUTH_HOST
+      # exactly, or sign-in redirects fail in a way that looks like a realm
+      # misconfiguration.
+      KC_HOSTNAME: ${AUTH_HOST:?set AUTH_HOST in .env}
+      KC_HOSTNAME_STRICT: "true"
+      KC_HOSTNAME_STRICT_HTTPS: "true"
+      KC_PROXY: edge
+      KC_HEALTH_ENABLED: "true"
+      # Read by the realm import below, for the console's redirect URIs.
+      CONSOLE_HOST: ${CONSOLE_HOST:?set CONSOLE_HOST in .env}
+    volumes:
+      # Imported once, when the realm does not exist yet; later edits to the
+      # file change nothing (docs/SELF_HOSTING.md, "Changing host names").
+      - ./keycloak/mavericks-realm.json:/opt/keycloak/data/import/mavericks-realm.json:ro
+      - ../docker/config/keycloak/themes/maverickbuilds:/opt/keycloak/themes/maverickbuilds:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # The image has no curl; bash's /dev/tcp is enough for one request.
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/8080 &&
+          printf 'GET /health/ready HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3 &&
+          grep -q UP <&3
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        SERVICE: gateway
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      <<: *app-env
+      DEV_MODE: "false"
+      # Keys are fetched from inside the network; tokens carry the public
+      # address as their issuer.
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: mavericks
+      KEYCLOAK_ISSUER: https://${AUTH_HOST}
+      KEYCLOAK_ADMIN_CLIENT_ID: mavericks-admin
+      # Written into .env by `./setup.sh keycloak`. Until then the console
+      # cannot create users (it answers 503 and says why).
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+      CONSOLE_URL: https://${CONSOLE_HOST}
+      MINIO_URL: http://minio:9000
+      MINIO_ROOT_USER: mavericks
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      OBJECT_STORE_BUCKET: mavericks
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      MAVERICKS_LICENSE_KEY: ${MAVERICKS_LICENSE_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      SIGNUP_ENABLED: ${SIGNUP_ENABLED:-false}
+      PLAN_CONTACT_URL: ${PLAN_CONTACT_URL:-}
+      LEGAL_ENTITY: ${LEGAL_ENTITY:-}
+      LEGAL_ADDRESS: ${LEGAL_ADDRESS:-}
+      LEGAL_EMAIL: ${LEGAL_EMAIL:-}
+      LEGAL_JURISDICTION: ${LEGAL_JURISDICTION:-}
+      LEGAL_HOSTING: ${LEGAL_HOSTING:-}
+      LEGAL_UPDATED: ${LEGAL_UPDATED:-}
+      LEGAL_TERMS_URL: ${LEGAL_TERMS_URL:-}
+      LEGAL_PRIVACY_URL: ${LEGAL_PRIVACY_URL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # The gateway refuses to start without the realm's signing keys.
+      keycloak:
+        condition: service_healthy
+
+  # Runs scheduled REST API connector syncs.
+  integration:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        SERVICE: integration
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      <<: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ../../web
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      DEV_MODE: "false"
+      KEYCLOAK_URL: https://${AUTH_HOST}
+      KEYCLOAK_REALM: mavericks
+      KEYCLOAK_CLIENT_ID: mavericks-web
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # Object storage for package export and, by default, the nightly dumps.
+  minio:
+    build: ../docker/minio
+    restart: unless-stopped
+    logging: *logging
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: mavericks
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+    volumes:
+      - minio:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9000/minio/health/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # Daily pg_dump of the platform, every tenant database and Keycloak's.
+  backup:
+    build: ../docker/pg-backup
+    restart: unless-stopped
+    logging: *logging
+    entrypoint: ["/bin/sh", "/usr/local/bin/backup-schedule.sh"]
+    environment:
+      DATABASE_URL: postgres://mavericks:${POSTGRES_PASSWORD}@postgres:5432/mavericks?sslmode=disable
+      BACKUP_DATABASES: all,keycloak
+      MINIO_URL: ${BACKUP_S3_URL:-http://minio:9000}
+      MINIO_ROOT_USER: ${BACKUP_S3_ACCESS_KEY:-mavericks}
+      MINIO_ROOT_PASSWORD: ${BACKUP_S3_SECRET_KEY:?set BACKUP_S3_SECRET_KEY in .env}
+      BACKUP_BUCKET: ${BACKUP_BUCKET:-mavericks-backups}
+      BACKUP_REGION: ${BACKUP_REGION:-}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_HOUR: ${BACKUP_HOUR:-3}
+      # After each run, check it left a plausible dump and e-mail if not. A
+      # new deployment's dump is a few hundred kilobytes, hence the floor.
+      ALERT_EMAIL: ${ALERT_EMAIL:-}
+      BACKUP_MIN_SIZE: ${BACKUP_MIN_SIZE:-100KB}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+    volumes:
+      - ./backup-schedule.sh:/usr/local/bin/backup-schedule.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  proxy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    logging: *logging
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      CONSOLE_HOST: ${CONSOLE_HOST}
+      AUTH_HOST: ${AUTH_HOST}
+      CADDY_CERTS: ${CADDY_CERTS:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and the ACME account. Keep this volume: re-issuing on
+      # every recreate runs into Let's Encrypt's rate limits.
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - gateway
+      - web
+      - keycloak
+
+volumes:
+  postgres:
+  minio:
+  caddy-data:
+  caddy-config:

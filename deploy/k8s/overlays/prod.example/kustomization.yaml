@@ -1,5 +1,6 @@
-# Example production overlay. Copy this directory into a private repository
-# and edit it there; see README.md. Nothing here names a real cluster.
+# Example production overlay. Copy this directory to deploy/k8s/overlays/prod
+# (ignored by git here) and edit the copy — docs/SELF_HOSTING.md, "Install on
+# Kubernetes", walks through every value. Nothing here names a real cluster.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -7,18 +8,14 @@ namespace: mavericks
 
 resources:
   - ../../base
-  # Add your own, e.g.:
-  #   - pdb-gateway.yaml      # keep a gateway replica during node drains
-  #   - sealed-secrets.yaml   # produced by scripts/seal-secrets.sh
-  #   - sealed-smtp.yaml      # produced by scripts/seal-smtp-secret.sh: the
-  #                           # mail relay's credentials (docs/NOTIFICATIONS.md)
-  #   - sealed-integration.yaml # produced by scripts/seal-integration-secret.sh:
-  #                           # the keys tenants' credentials are sealed under
-  #   - mtls.yaml             # cert-manager CA + service cert for gRPC mTLS
-  #   - ingress.yaml          # TLS termination for the console and Keycloak
+  - pdb-gateway.yaml             # keep a gateway replica through node drains
+  # Sealed secrets, if the overlay lives in git (docs/SELF_HOSTING.md, step 4):
+  #   - sealed-secrets.yaml      # scripts/seal-secrets.sh
+  #   - sealed-integration.yaml  # scripts/seal-integration-secret.sh
+  #   - sealed-smtp.yaml         # scripts/seal-smtp-secret.sh
 
-# The gateway is the only component that needs redundancy by default; scale
-# the rest as load requires.
+# The gateway and the console are the parts people wait on; two of each ride
+# out a node drain. Scale the rest as load requires.
 replicas:
   - name: gateway
     count: 2
@@ -26,10 +23,17 @@ replicas:
     count: 2
 
 patches:
-  # Pull on every pod creation, so a rebuilt tag is never served stale from a
-  # node's cache. Deployments, Jobs and StatefulSets each need their own
-  # target: a missing StatefulSet entry once left postgres running a cached
-  # image while a rebuild appeared to have no effect.
+  # Host names, storage, the mail relay, Keycloak on Postgres: every value
+  # that belongs to this site.
+  - path: site.yaml
+  - path: networkpolicy-keycloak.yaml
+  # Object storage outside the cluster (docs/SELF_HOSTING.md, step 3):
+  #   - path: minio-remove.yaml
+  #   - path: networkpolicy-external-objectstore.yaml
+
+  # Pull on every pod start, so a tag pushed again is never served stale from
+  # a node's cache. Deployments, StatefulSets and Jobs each need their own
+  # target, and postgres's second container (the WAL-G base backup) its own.
   - patch: |-
       - op: replace
         path: /spec/template/spec/containers/0/imagePullPolicy
@@ -42,13 +46,83 @@ patches:
         value: Always
     target:
       kind: StatefulSet
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/1/imagePullPolicy
+        value: Always
+    target:
+      kind: StatefulSet
+      name: postgres
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
+    target:
+      kind: Job
 
-  # Demo data has no place in production. Keep this last: patches that target
-  # the seed Job fail once it has been removed.
-  #   - path: seed-remove.yaml
+  # Demo data has no place in a deployment people use. Keep this last: a patch
+  # that targets the seed Job fails once it has been removed.
+  - path: seed-remove.yaml
 
-# Replace the registry with your own and pin the tag to a digest or git sha
-# that CI produced. "latest" in production means nobody knows what is running.
+# Where the images come from: replace this block with the one
+# scripts/build-images.sh prints. Each name is the base manifests' own; the
+# newName and newTag are your registry's. Never "latest": a pod restarted
+# for any reason would pull whatever was pushed last.
 images:
-  - name: ghcr.io/YOUR-ORG/mavericks/gateway
-    newTag: "sha-REPLACE-ME"
+  - name: registry.example.com/mavericks/ai-assistant
+    newName: registry.example.com/mavericks/ai-assistant
+    newTag: "REPLACE-ME"
+  - name: registry.example.com/mavericks/audit
+    newName: registry.example.com/mavericks/audit
+    newTag: "REPLACE-ME"
+  - name: registry.example.com/mavericks/calculation
+    newName: registry.example.com/mavericks/calculation
+    newTag: "REPLACE-ME"
+  - name: registry.example.com/mavericks/gateway
+    newName: registry.example.com/mavericks/gateway
+    newTag: "REPLACE-ME"
+  - name: registry.example.com/mavericks/identity
+    newName: registry.example.com/mavericks/identity
+    newTag: "REPLACE-ME"
+  - name: registry.example.com/mavericks/import
+    newName: registry.example.com/mavericks/import
+    newTag: "REPLACE-ME"
+  - name: registry.example.com/mavericks/integration
+    newName: registry.example.com/mavericks/integration
+    newTag: "REPLACE-ME"
+  - name: registry.example.com/mavericks/model
+    newName: registry.example.com/mavericks/model
+    newTag: "REPLACE-ME"
+  - name: registry.example.com/mavericks/notification
+    newName: registry.example.com/mavericks/notification
+    newTag: "REPLACE-ME"
+  - name: registry.example.com/mavericks/policy
+    newName: registry.example.com/mavericks/policy
+    newTag: "REPLACE-ME"
+  - name: registry.example.com/mavericks/postgres-backup
+    newName: registry.example.com/mavericks/postgres-backup
+    newTag: "REPLACE-ME"
+  - name: registry.example.com/mavericks/postgres-walg
+    newName: registry.example.com/mavericks/postgres-walg
+    newTag: "REPLACE-ME"
+  - name: registry.example.com/mavericks/query
+    newName: registry.example.com/mavericks/query
+    newTag: "REPLACE-ME"
+  - name: registry.example.com/mavericks/schema-migration
+    newName: registry.example.com/mavericks/schema-migration
+    newTag: "REPLACE-ME"
+  - name: registry.example.com/mavericks/seed
+    newName: registry.example.com/mavericks/seed
+    newTag: "REPLACE-ME"
+  - name: registry.example.com/mavericks/tenant
+    newName: registry.example.com/mavericks/tenant
+    newTag: "REPLACE-ME"
+  - name: registry.example.com/mavericks/web
+    newName: registry.example.com/mavericks/web
+    newTag: "REPLACE-ME"
+  - name: registry.example.com/mavericks/workflow
+    newName: registry.example.com/mavericks/workflow
+    newTag: "REPLACE-ME"
+  - name: quay.io/minio/minio
+    newName: registry.example.com/mavericks/minio
+    newTag: "REPLACE-ME"

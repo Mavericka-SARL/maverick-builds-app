@@ -1,0 +1,16 @@
+# Removes the demo-data seed Job from production.
+#
+# base's seed Job creates demo tenants (Acme Corp, Meridian Industries) with
+# sample apps and users. That is useful for proving a dev deployment works and
+# is exactly wrong for an environment going into real use — it would put
+# fictional customers in the live database.
+#
+# Dev keeps it. NOTE: this patch must be listed AFTER the imagePullPolicy patch
+# that targets `kind: Job`, because kustomize applies patches in order and that
+# one errors if its target no longer exists.
+$patch: delete
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed
+  namespace: mavericks

@@ -21,6 +21,7 @@
 #                              and fails)
 #   WALG_BACKUP_RETAIN_COUNT   default: 3
 #   WALG_BACKUP_INTERVAL_SECS  default: 86400
+#   WALG_BACKUP_RETRY_SECS     after a FAILED push, default: 300
 
 set -euo pipefail
 
@@ -32,6 +33,7 @@ set -euo pipefail
 : "${WALG_S3_PREFIX:?WALG_S3_PREFIX is required}"
 WALG_BACKUP_RETAIN_COUNT="${WALG_BACKUP_RETAIN_COUNT:-3}"
 WALG_BACKUP_INTERVAL_SECS="${WALG_BACKUP_INTERVAL_SECS:-86400}"
+WALG_BACKUP_RETRY_SECS="${WALG_BACKUP_RETRY_SECS:-300}"
 
 log() { echo "[basebackup] $(date -u +%Y-%m-%dT%H:%M:%SZ) $*"; }
 
@@ -50,6 +52,16 @@ ensure_bucket() {
   fi
 }
 
+# This container starts together with postgres, which on a new volume spends
+# its first seconds in initdb and on any start refuses connections until it
+# has recovered. A push attempted then fails, and the retry used to wait the
+# whole interval: a fresh deployment had no base backup — and so no
+# point-in-time recovery at all — for its first day, found by installing from
+# scratch (docs/SELF_HOSTING.md). Wait for the server, and retry a failure
+# after minutes, not a day.
+log "waiting for postgres at ${PGHOST}:${PGPORT:-5432}"
+until pg_isready -q; do sleep 5; done
+
 while true; do
   ensure_bucket
   log "pushing base backup of ${PGDATA}"
@@ -57,8 +69,9 @@ while true; do
     log "base backup complete"
     log "pruning, retaining last ${WALG_BACKUP_RETAIN_COUNT}"
     wal-g delete retain "$WALG_BACKUP_RETAIN_COUNT" --confirm || log "prune failed (non-fatal)"
+    sleep "$WALG_BACKUP_INTERVAL_SECS"
   else
-    log "base backup FAILED, will retry next interval"
+    log "base backup FAILED, retrying in ${WALG_BACKUP_RETRY_SECS}s"
+    sleep "$WALG_BACKUP_RETRY_SECS"
   fi
-  sleep "$WALG_BACKUP_INTERVAL_SECS"
 done

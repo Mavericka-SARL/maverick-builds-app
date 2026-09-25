@@ -55,7 +55,7 @@ replicas:
   - name: web
     count: 1
 
-# Pin the same tag production is about to run.
-images:
-  - name: ghcr.io/YOUR-ORG/mavericks/gateway
-    newTag: "sha-REPLACE-ME"
+# Run what production is about to run: paste the images: block of the
+# production overlay here (scripts/build-images.sh prints it; each name must
+# be the base manifests' own, or kustomize silently leaves the image alone).
+images: []

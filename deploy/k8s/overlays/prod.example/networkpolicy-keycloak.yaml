@@ -1,0 +1,28 @@
+# Keycloak's egress once it runs on Postgres (site.yaml).
+#
+# base's keycloak policy allows DNS and nothing else, because base runs it on
+# an in-memory database. This adds the database and the mail relay Keycloak
+# sends invitations and password resets through. Base's postgres policy
+# already admits keycloak, so only this side needs a patch.
+#
+# A PATCH naming only `egress`: NetworkPolicy rule lists have no merge key, so
+# a strategic merge replaces the list it names. Leaving `ingress` out keeps
+# base's list of JWKS callers exactly as it is.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keycloak
+  namespace: mavericks
+spec:
+  egress:
+    # Direct to Postgres, not PgBouncer (see KC_DB_URL in site.yaml).
+    - to: [{podSelector: {matchLabels: {app: postgres}}}]
+      ports: [{protocol: TCP, port: 5432}]
+    # Outbound SMTP. Without it creating a user fails with "Failed to send
+    # email", which reads like a wrong password at the relay rather than a
+    # network policy. A policy cannot match a host name, so this is by port:
+    # 587 submission with STARTTLS, 465 implicit TLS.
+    - to: [{ipBlock: {cidr: 0.0.0.0/0}}]
+      ports: [{protocol: TCP, port: 587}, {protocol: TCP, port: 465}]
+    # Restated because this list replaces base's.
+    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]

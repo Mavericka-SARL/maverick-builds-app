@@ -49,3 +49,5 @@ web/test-results/
 web/playwright-report/
 # Like prod/: a real cluster's overlay, copied in from the private deployment repository at apply time.
 deploy/k8s/overlays/staging/
+# Every secret of a Compose deployment (deploy/compose/.env.example shows the shape).
+deploy/compose/.env

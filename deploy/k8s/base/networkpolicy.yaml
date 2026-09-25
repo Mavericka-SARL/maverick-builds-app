@@ -54,6 +54,14 @@ spec:
     # until the dispatch deadline and reads like a dead relay.
     - to: [{ipBlock: {cidr: 0.0.0.0/0}}]
       ports: [{protocol: TCP, port: 587}, {protocol: TCP, port: 465}]
+    # Public HTTPS. The gateway itself calls the AI providers
+    # (internal/gateway/ai_handler.go — in-process, not through the
+    # ai-assistant service), fetches Google Sheets for imports and exchanges
+    # OAuth tokens for REST connections. Without this rule every one of those
+    # times out wherever policies are enforced; the production overlay only
+    # worked because its object-storage patch restates this list with 443.
+    - to: [{ipBlock: {cidr: 0.0.0.0/0}}]
+      ports: [{protocol: TCP, port: 443}]
     - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
 
 ---
@@ -579,6 +587,10 @@ spec:
         - podSelector: {matchLabels: {app: gateway}}
         - podSelector: {matchLabels: {app: postgres-backup}}
         - podSelector: {matchLabels: {app: postgres}}
+        # The watchdog reads the same bucket the dump writes. Its own egress
+        # rule allowed this all along; without this side of it every morning's
+        # check timed out and alerted, wherever MinIO runs in the cluster.
+        - podSelector: {matchLabels: {app: postgres-backup-watchdog}}
       ports: [{protocol: TCP, port: 9000}]
   egress:
     - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]

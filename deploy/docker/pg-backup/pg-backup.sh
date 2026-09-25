@@ -22,7 +22,11 @@
 #   BACKUP_DATABASES       default: the one in DATABASE_URL. "all" also dumps
 #                          every tenant_* database (see docs/TENANT_DATABASES.md),
 #                          one object per database, so a single tenant can be
-#                          restored without touching another.
+#                          restored without touching another. Other names,
+#                          comma-separated, are dumped as well — "all,keycloak"
+#                          adds the identity provider's database, which holds
+#                          every sign-in account and is otherwise only in the
+#                          WAL-G stream.
 #
 # Usage:
 #   pg-backup.sh
@@ -80,16 +84,22 @@ dump_one() {
 control_db="$(echo "$DATABASE_URL" | sed -E 's#.*://[^/]+/([^?]*).*#\1#')"
 dump_one "$control_db"
 
-if [ "$BACKUP_DATABASES" = "all" ]; then
-  # Every tenant database, listed from the server itself so a tenant created
-  # since the last run is included without configuration.
-  tenants="$(psql -Atqc "SELECT datname FROM pg_database WHERE datname LIKE 'tenant\\_%' AND datallowconn ORDER BY datname" "$DATABASE_URL")"
-  count="$(echo "$tenants" | grep -c . || true)"
-  log "dumping ${count} tenant database(s)"
-  for db in $tenants; do
-    dump_one "$db"
-  done
-fi
+for entry in $(echo "$BACKUP_DATABASES" | tr ',' ' '); do
+  case "$entry" in
+    all)
+      # Every tenant database, listed from the server itself so a tenant
+      # created since the last run is included without configuration.
+      tenants="$(psql -Atqc "SELECT datname FROM pg_database WHERE datname LIKE 'tenant\\_%' AND datallowconn ORDER BY datname" "$DATABASE_URL")"
+      count="$(echo "$tenants" | grep -c . || true)"
+      log "dumping ${count} tenant database(s)"
+      for db in $tenants; do
+        dump_one "$db"
+      done
+      ;;
+    "$control_db") ;; # dumped above
+    *) dump_one "$entry" ;;
+  esac
+done
 
 log "pruning backups older than ${BACKUP_RETENTION_DAYS} days"
 mc find "backupminio/${BACKUP_BUCKET}/pg/" --older-than "${BACKUP_RETENTION_DAYS}d" --exec "mc rm {}" || true

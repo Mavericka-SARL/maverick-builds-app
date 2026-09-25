@@ -1,0 +1,30 @@
+# TLS termination and routing for the Compose stack (docs/SELF_HOSTING.md).
+#
+# Both sites get certificates automatically: from Let's Encrypt when
+# CADDY_CERTS is empty (the names must resolve to this server and ports 80 and
+# 443 must be reachable from the internet), or from Caddy's own local CA when
+# it is "local_certs" (private networks and trials; browsers warn).
+{
+	{$CADDY_CERTS}
+}
+
+# The console. /api goes to the gateway, everything else to the web app —
+# the same split as the Kubernetes Ingress, so the gateway is never behind
+# the web server.
+{$CONSOLE_HOST} {
+	encode zstd gzip
+
+	@api path /api /api/*
+	handle @api {
+		reverse_proxy gateway:8080
+	}
+	handle {
+		reverse_proxy web:8080
+	}
+}
+
+# Keycloak: the sign-in pages, the token endpoint the console calls, and the
+# admin console at /admin.
+{$AUTH_HOST} {
+	reverse_proxy keycloak:8080
+}

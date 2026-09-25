@@ -1,0 +1,187 @@
+# Everything that belongs to one site, in one file: host names, storage, the
+# e-mail relay and Keycloak's production settings. Strategic-merge patches
+# against base; edit every value marked CHANGE.
+#
+# Host names: mavericks.example.com (the console and its API) and
+# auth.mavericks.example.com (Keycloak). The Ingress hosts, KC_HOSTNAME,
+# KEYCLOAK_ISSUER, CONSOLE_URL, CONSOLE_HOST and the web config's KEYCLOAK_URL
+# must all agree, or sign-in redirects break. Both names need DNS records
+# pointing at the ingress controller before certificates can be issued.
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mavericks-config
+  namespace: mavericks
+data:
+  CONSOLE_URL: "https://mavericks.example.com"                  # CHANGE
+  # Tokens carry Keycloak's public address as their issuer; the gateway
+  # still fetches keys from inside the cluster (KEYCLOAK_URL in base).
+  KEYCLOAK_ISSUER: "https://auth.mavericks.example.com"         # CHANGE
+  KEYCLOAK_ADMIN_CLIENT_ID: "mavericks-admin"
+  # "dedicated" gives every tenant its own database (docs/TENANT_DATABASES.md).
+  # Decide before creating tenants.
+  TENANT_DB_MODE: "shared"
+  # The platform's own mail: notifications, reminders, the backup watchdog.
+  # The relay's credentials go in the mavericks-smtp Secret.
+  SMTP_HOST: "smtp.example.com"                                 # CHANGE
+  SMTP_PORT: "587"
+  SMTP_FROM: "no-reply@example.com"                             # CHANGE
+  # Where the backup watchdog reports a missing or undersized dump.
+  ALERT_EMAIL: "ops@example.com"                                # CHANGE
+  # The smallest dump the watchdog accepts. A new deployment's is a few
+  # hundred kilobytes; raise this as your data grows, since a truncated dump
+  # is a failure that looks like a success.
+  BACKUP_MIN_SIZE: "100KB"
+
+---
+# The console reaches Keycloak by its public name.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mavericks-web-config
+  namespace: mavericks
+data:
+  DEV_MODE: "false"
+  KEYCLOAK_URL: "https://auth.mavericks.example.com"            # CHANGE
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mavericks
+  namespace: mavericks
+  annotations:
+    # A ClusterIssuer from deploy/k8s/bootstrap/cert-manager-issuer.yaml.
+    # Start on letsencrypt-staging; switch once a certificate has been
+    # issued (docs/SELF_HOSTING.md).
+    cert-manager.io/cluster-issuer: "letsencrypt-staging"
+spec:
+  tls:
+    - hosts: [mavericks.example.com]                            # CHANGE
+      secretName: mavericks-tls
+    - hosts: [auth.mavericks.example.com]                       # CHANGE
+      secretName: mavericks-auth-tls
+  rules:
+    - host: mavericks.example.com                               # CHANGE
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: gateway, port: { number: 8080 } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: web, port: { number: 8080 } } }
+    - host: auth.mavericks.example.com                          # CHANGE
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: keycloak, port: { number: 8080 } } }
+
+---
+# Keycloak on Postgres, in production mode, behind its public name. Base runs
+# it on an in-memory database, which forgets every account on restart.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: mavericks
+spec:
+  template:
+    spec:
+      containers:
+        - name: keycloak
+          args: ["start", "--import-realm"]
+          env:
+            - name: KC_DB
+              value: "postgres"
+            # Direct to Postgres, not PgBouncer: PgBouncer is pinned to one
+            # database and pools by transaction, and Keycloak needs neither.
+            - name: KC_DB_URL
+              value: "jdbc:postgresql://postgres:5432/keycloak"
+            - name: KC_DB_USERNAME
+              value: "mavericks"
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mavericks-secrets
+                  key: POSTGRES_PASSWORD
+            # A bare host name on Keycloak 24, never a URL.
+            - name: KC_HOSTNAME
+              value: "auth.mavericks.example.com"               # CHANGE
+            - name: KC_HOSTNAME_STRICT
+              value: "true"
+            - name: KC_HOSTNAME_STRICT_HTTPS
+              value: "true"
+            # The realm import's redirect URIs, on first boot only.
+            - name: CONSOLE_HOST
+              value: "mavericks.example.com"                    # CHANGE
+
+---
+# The database volume. storageClassName is your cluster's (kubectl get
+# storageclass); size it for your data and the WAL kept between backups.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: mavericks
+spec:
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: standard                              # CHANGE
+        resources:
+          requests:
+            storage: 20Gi
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nats
+  namespace: mavericks
+spec:
+  volumeClaimTemplates:
+    - metadata:
+        name: nats-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: standard                              # CHANGE
+        resources:
+          requests:
+            storage: 5Gi
+
+---
+# In-cluster MinIO's volume. Remove this patch when you list
+# minio-remove.yaml (external object storage) in kustomization.yaml.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+  namespace: mavericks
+spec:
+  storageClassName: standard                                    # CHANGE
+
+---
+# The nightly dump covers Keycloak's database as well as the platform's and
+# every tenant's, so a restore from dumps alone brings back the sign-in
+# accounts with the data (base leaves Keycloak to WAL-G).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: mavericks
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: postgres-backup
+              env:
+                - name: BACKUP_DATABASES
+                  value: "all,keycloak"

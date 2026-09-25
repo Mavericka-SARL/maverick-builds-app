@@ -1,0 +1,57 @@
+{
+  "realm": "mavericks",
+  "enabled": true,
+  "registrationAllowed": false,
+  "loginTheme": "maverickbuilds",
+  "sslRequired": "external",
+  "displayName": "maverickbuilds.app",
+  "bruteForceProtected": true,
+  "failureFactor": 10,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "permanentLockout": false,
+  "roles": {
+    "realm": [
+      {"name": "platform_admin", "description": "Full access across all customers"},
+      {"name": "tenant_admin", "description": "Manages one customer's workspaces, apps and users"},
+      {"name": "developer", "description": "Builds models, forms and workflows"},
+      {"name": "business_admin", "description": "Administers business consoles within a workspace"},
+      {"name": "business_user", "description": "Enters and reviews data"}
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "mavericks-web",
+      "name": "Mavericks Console",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": true,
+      "redirectUris": ["https://${CONSOLE_HOST}/*"],
+      "webOrigins": ["https://${CONSOLE_HOST}"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://${CONSOLE_HOST}/*"
+      }
+    },
+    {
+      "clientId": "mavericks-admin",
+      "name": "Gateway user provisioning",
+      "description": "Service account the gateway uses to create users and send invitations. NOT for browser login.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true
+    }
+  ]
+}

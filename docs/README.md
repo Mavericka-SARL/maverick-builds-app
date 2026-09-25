@@ -14,6 +14,7 @@ remain authoritative.
 |---|---|---|
 | [`README.md`](../README.md) | current | Repository entry point and quick start |
 | [`ARCHITECTURE.md`](../ARCHITECTURE.md) | current | Implemented system architecture and known boundaries |
+| [`docs/SELF_HOSTING.md`](SELF_HOSTING.md) | current | Deploying on your own infrastructure: requirements, Docker Compose and Kubernetes installs, backups, upgrades |
 | [`docs/DEVELOPMENT.md`](DEVELOPMENT.md) | current | Local development, generation, and validation |
 | [`docs/API.md`](API.md) | current | Actual HTTP route groups and API conventions |
 | [`docs/LICENSING.md`](LICENSING.md) | current | Editions, the signed license key, and the `ee/` enterprise tree |

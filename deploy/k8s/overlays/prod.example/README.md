@@ -1,45 +1,39 @@
 # Production overlay (example)
 
-> **Classification:** Current — the shape of a production overlay; the real one belongs elsewhere.
+> **Classification:** Current — The template a Kubernetes deployment starts from; docs/SELF_HOSTING.md walks through it.
 
-A production overlay describes one cluster: its storage class, its host names,
-its image tags and its secrets. None of that belongs in this repository, so
-this directory shows the shape and leaves the specifics to you.
-
-Copy it, fill it in, and keep the result in a private repository of its own:
+A production overlay describes one cluster: its host names, storage class,
+registry, mail relay and secrets. This directory is a complete one with
+placeholder values, verified by deploying it. Copy it and fill it in:
 
 ```bash
-cp -r deploy/k8s/overlays/prod.example /path/to/your-private-deploy/prod
-# edit kustomization.yaml, add your own patches, seal your secrets
-kubectl apply -k /path/to/your-private-deploy/prod
+cp -r deploy/k8s/overlays/prod.example deploy/k8s/overlays/prod
 ```
 
-`deploy/k8s/overlays/prod/` is ignored by git here, so a working copy kept
-beside the base manifests can never be committed by accident.
+`deploy/k8s/overlays/prod/` is ignored by git in this repository, so a working
+copy beside the base manifests can never be committed by accident; keep a
+copy in a private repository of your own. The whole procedure — images,
+secrets, the first deploy, sign-in setup, backups — is in
+[docs/SELF_HOSTING.md](../../../../docs/SELF_HOSTING.md#install-on-kubernetes).
+
+## What is here
+
+| File | What it does |
+|---|---|
+| `kustomization.yaml` | Base plus everything below; replicas; pull-always patches; the `images:` block that points base's image names at your registry (paste the one `scripts/build-images.sh` prints) |
+| `site.yaml` | Every value that belongs to your site — each marked `CHANGE`: host names, storage class, SMTP relay, alert address; Keycloak on PostgreSQL behind its public name; nightly dumps that include Keycloak's database |
+| `networkpolicy-keycloak.yaml` | Keycloak's egress to PostgreSQL and the mail relay, which base (in-memory Keycloak) does not need |
+| `pdb-gateway.yaml` | Keeps a gateway replica through node drains |
+| `seed-remove.yaml` | Removes base's demo-data Job |
+| `minio-remove.yaml`, `networkpolicy-external-objectstore.yaml` | Listed only when object storage lives outside the cluster — where backups belong |
 
 ## Secrets
 
-The overlay ships no Secret, deliberately. `mavericks-secrets` once lived in
-`base/`, which meant every overlay inherited `JWT_SECRET: changeme` and a
-base64-encoded database password — encoding, not encryption, and anyone with
-the repository had the credentials.
-
-Seal your own against your cluster with `scripts/seal-secrets.sh`. Until you
-do, pods that need the secret stay in `CreateContainerConfigError`. That
-failure is the intended behaviour: the alternative was starting successfully
-with a published signing key.
-
-Sealed output is encrypted to one cluster's public key and is useless in any
-other, so it is safe to commit — to your private deployment repository.
-
-## What a real overlay adds
-
-| Concern | What to put in your overlay |
-|---|---|
-| Storage | `storageClassName` for your provider |
-| Host names | Ingress rules and the console/Keycloak origins |
-| Images | Pin every image to a digest or a git-sha tag from CI, never `latest` |
-| Secrets | A sealed secret, or an External Secrets / Vault reference |
-| Availability | Replica counts, and a PodDisruptionBudget for the gateway |
-| Transport | gRPC mTLS between services (cert-manager issues the shared cert) |
-| Demo data | Remove the seed Job |
+The overlay ships no Secret, deliberately: pods that need one stay in
+`CreateContainerConfigError` until you create it, which beats starting with a
+published signing key. Create them with `kubectl create secret` (the manual's
+step 4), or seal them for git with `scripts/seal-secrets.sh`,
+`scripts/seal-integration-secret.sh` and `scripts/seal-smtp-secret.sh` and
+list the results under `resources:`. Sealed output is encrypted to one
+cluster's key and is useless in any other, so it is safe to commit — to your
+private repository.

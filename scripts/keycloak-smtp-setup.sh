@@ -11,7 +11,9 @@
 #
 # Defaults target Resend (smtp.resend.com, username literally "resend", the
 # API key as the password). Override SMTP_HOST/SMTP_PORT/SMTP_USER for another
-# provider — nothing here is Resend-specific beyond the defaults.
+# provider — nothing here is Resend-specific beyond the defaults. A relay that
+# takes mail without authentication (an internal one on port 25, say) gets
+# SMTP_USER set to the empty string, and then needs no SMTP_PASSWORD.
 #
 #   KEYCLOAK_URL=https://auth.example.com \
 #   KEYCLOAK_ADMIN_PASSWORD=... \
@@ -33,8 +35,13 @@ ADMIN_PASS="${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD}"
 # environment, and a plain shell assignment is invisible to a child process.
 export SMTP_HOST="${SMTP_HOST:-smtp.resend.com}"
 export SMTP_PORT="${SMTP_PORT:-587}"
-export SMTP_USER="${SMTP_USER:-resend}"
-export SMTP_PASSWORD="${SMTP_PASSWORD:?set SMTP_PASSWORD (for Resend, the API key)}"
+# "-" rather than ":-": an explicitly empty SMTP_USER means no authentication.
+export SMTP_USER="${SMTP_USER-resend}"
+export SMTP_PASSWORD="${SMTP_PASSWORD:-}"
+if [ -n "$SMTP_USER" ] && [ -z "$SMTP_PASSWORD" ]; then
+  echo "set SMTP_PASSWORD (for Resend, the API key), or SMTP_USER= for a relay without authentication" >&2
+  exit 1
+fi
 export SMTP_FROM="${SMTP_FROM:?set SMTP_FROM, e.g. no-reply@example.com}"
 # Shown as the sender's name. The realm's displayName (set in the realm import)
 # is what the email BODY says — both need to agree, or an invitation arrives
@@ -42,6 +49,12 @@ export SMTP_FROM="${SMTP_FROM:?set SMTP_FROM, e.g. no-reply@example.com}"
 export SMTP_FROM_NAME="${SMTP_FROM_NAME:-Maverick}"
 
 log() { echo "  $*" >&2; }
+
+# CURL_OPTS lets the script reach a deployment whose DNS or certificate does
+# not exist yet, e.g. CURL_OPTS="--resolve auth.example.com:443:203.0.113.10 -k"
+# — the same switch keycloak-provisioning-setup.sh and
+# bootstrap-platform-admin.sh take.
+curl() { command curl ${CURL_OPTS:-} "$@"; }
 
 T="$(curl -sf --max-time 30 -X POST \
   "${KEYCLOAK_URL}/realms/master/protocol/openid-connect/token" \
@@ -66,7 +79,7 @@ realm["smtpServer"] = {
     "port": os.environ["SMTP_PORT"],
     "from": os.environ["SMTP_FROM"],
     "fromDisplayName": os.environ["SMTP_FROM_NAME"],
-    "auth": "true",
+    "auth": "true" if os.environ["SMTP_USER"] else "false",
     "user": os.environ["SMTP_USER"],
     "password": os.environ["SMTP_PASSWORD"],
     # STARTTLS on 587, implicit TLS on 465. Both encrypt; sending an API key
@@ -102,7 +115,7 @@ import json, os
 print(json.dumps({
   "host": os.environ["SMTP_HOST"], "port": os.environ["SMTP_PORT"],
   "from": os.environ["SMTP_FROM"], "fromDisplayName": os.environ["SMTP_FROM_NAME"],
-  "auth": "true", "user": os.environ["SMTP_USER"], "password": os.environ["SMTP_PASSWORD"],
+  "auth": "true" if os.environ["SMTP_USER"] else "false", "user": os.environ["SMTP_USER"], "password": os.environ["SMTP_PASSWORD"],
   "starttls": "true" if os.environ["SMTP_PORT"] == "587" else "false",
   "ssl": "true" if os.environ["SMTP_PORT"] == "465" else "false",
 }))')")

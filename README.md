@@ -34,6 +34,15 @@ and Kubernetes manifests for a distributed topology. See
 [Runtime topology](ARCHITECTURE.md#runtime-topology) before assuming that local
 development starts all service binaries.
 
+## Deploying it for real
+
+To run maverickbuilds.app on your own infrastructure — one server with Docker
+Compose, or Kubernetes — follow [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md):
+requirements, installation, backups, upgrades. The rest of this page is about
+developing the platform: the quick start below runs it in development mode,
+where anyone can act as any user, and must never face a network you do not
+trust.
+
 ## Prerequisites
 
 - Go 1.26.3, matching `go.mod`
@@ -118,7 +127,8 @@ after generation.
 | `proto/` and `gen/go/` | Protobuf contracts and generated gRPC code |
 | `api/openapi.yaml` | Partial OpenAPI contract for the stabilized core HTTP surface |
 | `web/` | React 19, TypeScript, Vite, React Query, Recharts, and Playwright application |
-| `deploy/docker/` | Local infrastructure and optional observability stack |
+| `deploy/compose/` | The self-hosted single-server stack (docs/SELF_HOSTING.md) |
+| `deploy/docker/` | Dockerfiles, local development infrastructure and optional observability stack |
 | `deploy/k8s/` | Base and overlay manifests for the distributed service topology |
 | `examples/` | Demo documentation and model references |
 | `docs/` | Current documentation index and engineering guides |
@@ -137,6 +147,7 @@ paid editions; see [docs/LICENSING.md](docs/LICENSING.md).
 ## Main documentation
 
 - [Architecture](ARCHITECTURE.md)
+- [Self-hosting: deploy on your own infrastructure](docs/SELF_HOSTING.md)
 - [Documentation index and status](docs/README.md)
 - [Development and validation](docs/DEVELOPMENT.md)
 - [HTTP API guide](docs/API.md)

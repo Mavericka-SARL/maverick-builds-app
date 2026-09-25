@@ -147,7 +147,9 @@ services:
   # ── Object Storage ────────────────────────────────────────────────────────────
 
   minio:
-    image: quay.io/minio/minio:latest
+    # Built from source: MinIO publishes no pullable image any more
+    # (deploy/docker/minio/Dockerfile says why).
+    build: ./minio
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: mavericks
@@ -158,7 +160,7 @@ services:
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9000/minio/health/live"]
       interval: 10s
       timeout: 5s
       retries: 10

@@ -1,0 +1,17 @@
+# PodDisruptionBudget for gateway only — the only Deployment anywhere
+# (app or infra) that runs more than 1 replica, and only in this prod
+# overlay (dev forces every Deployment, including gateway, to replicas: 1).
+# A minAvailable: 1 PDB on a single-replica Deployment would be actively
+# harmful, not neutral — it blocks voluntary eviction entirely since
+# there's no redundant replica to absorb it — so this lives here, not in
+# base, and no other service gets one.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gateway
+  namespace: mavericks
+  labels: {app: gateway}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: gateway}
