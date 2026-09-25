@@ -458,7 +458,10 @@ The values file sets what the platform needs from its entry point: a
 challenge path, a 300-second limit for reading a request (large imports over a
 slow link), and two replicas with a disruption budget. Your cloud's
 load-balancer settings go in a second values file; the comment in
-`service.annotations` shows Hetzner's.
+`service.annotations` shows Hetzner's. Keep its PROXY-protocol part if your
+load balancer forwards plain TCP, as most do: the gateway throttles sign-ups
+and SSO discovery per client address, and without the PROXY protocol every
+visitor arrives from the same internal one.
 
 Point both DNS names at Traefik's external address
 (`kubectl -n traefik get svc traefik`). Then create the Let's Encrypt issuers,

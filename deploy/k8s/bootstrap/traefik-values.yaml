@@ -54,7 +54,23 @@ podDisruptionBudget:
   maxUnavailable: 1
 
 service:
-  # Your cloud's LoadBalancer settings, e.g. on Hetzner:
-  #   load-balancer.hetzner.cloud/location: fsn1
-  #   load-balancer.hetzner.cloud/use-private-ip: "true"
+  # Your cloud's LoadBalancer settings, in a second values file. Hetzner's:
+  #
+  #   service:
+  #     annotations:
+  #       load-balancer.hetzner.cloud/location: fsn1
+  #       load-balancer.hetzner.cloud/use-private-ip: "true"
+  #       load-balancer.hetzner.cloud/uses-proxyprotocol: "true"
+  #   ports:
+  #     web:
+  #       proxyProtocol: {trustedIPs: ["<load balancer subnet>", "<pod network>"]}
+  #     websecure:
+  #       proxyProtocol: {trustedIPs: ["<load balancer subnet>", "<pod network>"]}
+  #
+  # The PROXY protocol carries each visitor's address past a load balancer
+  # that forwards plain TCP. The gateway throttles sign-up and SSO discovery
+  # per address; without it, every visitor arrives as one internal address.
+  # Trust the pod network too: kube-proxy's SNAT makes connections appear
+  # from it. On a running Traefik, deploy the trustedIPs before the
+  # annotation — a header that arrives first breaks every connection.
   annotations: {}
