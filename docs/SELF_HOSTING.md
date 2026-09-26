@@ -136,13 +136,14 @@ Certificates cannot be issued until they do.
 ### Step 2 — Get the code
 
 ```bash
-git clone <this repository's URL> maverickbuilds
-cd maverickbuilds/deploy/compose
-git rev-parse --short HEAD     # note the revision you are deploying
+git clone https://github.com/Mavericka-SARL/maverick-builds-app.git maverickbuilds
+cd maverickbuilds
+git checkout 2026.09.26        # a release: the newest is on the Releases page
+cd deploy/compose
 ```
 
-Keep the clone: it is what you build from, and upgrading is pulling a newer
-revision into it (see [Upgrading](#upgrading)).
+Keep the clone: it holds the Compose files and `setup.sh`, and upgrading is
+checking out a newer release in it (see [Upgrading](#upgrading)).
 
 ### Step 3 — Configure
 
@@ -182,7 +183,23 @@ that tenants' stored credentials are encrypted under. A backup restored
 without them opens, but every stored connector password and API key in it is
 unreadable.
 
-### Step 4 — Build and start
+### Step 4 — Start
+
+On an x86-64 (amd64) server, run the release's published images. Add two
+lines to `.env`:
+
+```bash
+COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml
+MAVERICKS_RELEASE=2026.09.26   # the release you checked out
+```
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+On any other architecture (an ARM server, an Apple-silicon Mac), leave those
+two lines out and build from source instead:
 
 ```bash
 docker compose up -d --build
@@ -355,15 +372,19 @@ restore.
 
 ```bash
 docker compose exec backup backup-schedule.sh now   # a restore point
-git pull                                             # or: git checkout <revision>
-docker compose up -d --build
+git fetch --tags && git checkout <new release>       # e.g. 2026.10.15
+# published images: set MAVERICKS_RELEASE=<new release> in .env, then
+docker compose pull && docker compose up -d
+# built from source instead:
+#   docker compose up -d --build
 ./setup.sh check
 ```
 
 The gateway applies database migrations when it starts. They only go
-forward: to go back, check out the previous revision **and** restore the
-backup taken before the upgrade. Old images and build cache accumulate;
-`docker image prune` and `docker builder prune` reclaim the space.
+forward: to go back, check out the previous release (and set it back in
+`.env`) **and** restore the backup taken before the upgrade. Old images and
+build cache accumulate; `docker image prune` and `docker builder prune`
+reclaim the space.
 
 ### Changing settings
 
@@ -482,10 +503,16 @@ yourself and remove the issuer annotation.
 `kubectl get clusterissuer` shows `letsencrypt-staging` and `letsencrypt-prod`
 as `READY`.
 
-### Step 2 — Build and push the images
+### Step 2 — Choose the images
 
-On a machine with Docker, of the same CPU architecture as the cluster's
-nodes, logged in to your registry (`docker login registry.example.com`):
+Every release publishes its images, built for x86-64 (amd64), at
+`ghcr.io/mavericka-sarl/mavericks/<name>:<release>`, and the example overlay
+already points at them. On amd64 nodes, skip to step 3.
+
+To run images you build yourself — ARM nodes, your own changes, or a
+registry you control — use a machine with Docker, of the same CPU
+architecture as the cluster's nodes, logged in to your registry
+(`docker login registry.example.com`):
 
 ```bash
 scripts/build-images.sh registry.example.com/mavericks 2026-09-25 --push
@@ -517,8 +544,9 @@ of your own. Then edit it:
 1. **`site.yaml`** — every line marked `CHANGE`: the two host names (they
    appear several times and must agree everywhere), the storage class, the
    SMTP relay and sender, and the address the backup watchdog alerts.
-2. **`kustomization.yaml`** — replace its `images:` block with the one
-   `build-images.sh` printed.
+2. **`kustomization.yaml`** — its `images:` block pins every image to the
+   release `2026.09.26`; set the release you deploy, or, if you built your
+   own images, replace the block with the one `build-images.sh` printed.
 3. **Object storage.** By default MinIO runs in the cluster and holds the
    backups and WAL archive. To keep them outside the cluster, as you should in
    production: set `MINIO_URL` (the endpoint, `https://`), `MINIO_ROOT_USER`
@@ -681,7 +709,7 @@ start again. `pg-restore.sh` drops the database and loads the dump into an
 empty one; `latest` is the newest dump of the database the URL names:
 
 ```bash
-IMG=registry.example.com/mavericks/postgres-backup:2026-09-25   # your image
+IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.09.26   # the one your overlay runs
 kubectl -n mavericks scale deployment --replicas=0 \
   -l 'app.kubernetes.io/component in (api-gateway,service,identity)'
 for db in mavericks keycloak; do          # and each tenant_… database, if dedicated
@@ -702,8 +730,9 @@ has the procedure.
 
 ### Upgrading and rolling back
 
-Build the new revision under a new tag (`scripts/build-images.sh … --push`),
-put the tag in the overlay's `images:` block, and apply. Take a dump first:
+Check out the new release, put its tag in the overlay's `images:` block (or
+build it under a new tag with `scripts/build-images.sh … --push`), compare
+the example overlay with yours for new settings, and apply. Take a dump first:
 the gateway migrates the database when it starts, and migrations only go
 forward. Rolling back the code is the previous tag; rolling back the data is
 a restore.

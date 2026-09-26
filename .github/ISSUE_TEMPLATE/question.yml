@@ -1,0 +1,21 @@
+name: Question
+description: Ask how to install, configure or use maverickbuilds.app.
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The [self-hosting guide](../blob/main/docs/SELF_HOSTING.md) and the [documentation index](../blob/main/docs/README.md) may already answer it.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What you are trying to do, and what you have tried so far.
+    validations:
+      required: true
+  - type: input
+    id: release
+    attributes:
+      label: Release
+      description: The release you run, if it matters.
+      placeholder: "2026.09.26"

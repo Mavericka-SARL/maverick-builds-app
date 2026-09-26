@@ -38,7 +38,9 @@ development starts all service binaries.
 
 To run maverickbuilds.app on your own infrastructure — one server with Docker
 Compose, or Kubernetes — follow [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md):
-requirements, installation, backups, upgrades. The rest of this page is about
+requirements, installation, backups, upgrades. Each release on the Releases
+page comes with ready-built images (`ghcr.io/mavericka-sarl/mavericks/*`,
+x86-64), so neither path needs a build. The rest of this page is about
 developing the platform: the quick start below runs it in development mode,
 where anyone can act as any user, and must never face a network you do not
 trust.
@@ -150,7 +152,8 @@ paid editions; see [docs/LICENSING.md](docs/LICENSING.md).
 - [Development and validation](docs/DEVELOPMENT.md)
 - [HTTP API guide](docs/API.md)
 - [Editions and licensing](docs/LICENSING.md)
-- [Contributing](CONTRIBUTING.md) and [reporting a security issue](SECURITY.md)
+- [Contributing](CONTRIBUTING.md), the [code of conduct](CODE_OF_CONDUCT.md) and
+  [reporting a security issue](SECURITY.md)
 - [Plans and self-service sign-up](docs/PLANS_AND_SIGNUP.md)
 - [Terms of service and privacy notice](docs/LEGAL_AND_PRIVACY.md)
 - [The product's look](docs/BRAND.md)

@@ -3,6 +3,11 @@ name: CI
 on:
   push:
     branches: [main, develop]
+    # A date tag (2026.09.26, or 2026.09.26.1 for a second one that day) is a
+    # release: every gate runs, every image is published under the tag, and
+    # the GitHub release is created. Tags are made on the PUBLIC repository,
+    # so its images land in the organisation's registry (docs/PUBLIC_RELEASE.md).
+    tags: ['[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]*']
   pull_request:
     branches: [main, develop]
   # Image publishing is manual. It was 18 jobs and ~40 billable minutes on
@@ -493,7 +498,7 @@ jobs:
   docker-publish:
     name: Publish image (${{ matrix.service }})
     needs: [go-lint, go-test, go-build]
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_images
+    if: (github.event_name == 'workflow_dispatch' && inputs.publish_images) || startsWith(github.ref, 'refs/tags/')
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 30
     permissions:
@@ -577,13 +582,16 @@ jobs:
           tags: |
             ${{ steps.image.outputs.prefix }}/${{ matrix.service }}:latest
             ${{ steps.image.outputs.prefix }}/${{ matrix.service }}:${{ github.sha }}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}:{2}', steps.image.outputs.prefix, matrix.service, github.ref_name) || '' }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
   docker-publish-backup:
     name: Publish image (postgres-backup)
     needs: [go-lint, go-test, go-build]
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_images
+    if: (github.event_name == 'workflow_dispatch' && inputs.publish_images) || startsWith(github.ref, 'refs/tags/')
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 30
     permissions:
@@ -631,13 +639,16 @@ jobs:
           tags: |
             ${{ steps.image.outputs.prefix }}/postgres-backup:latest
             ${{ steps.image.outputs.prefix }}/postgres-backup:${{ github.sha }}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}:{2}', steps.image.outputs.prefix, 'postgres-backup', github.ref_name) || '' }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           cache-from: type=gha,scope=postgres-backup
           cache-to: type=gha,mode=max,scope=postgres-backup
 
   docker-publish-postgres-walg:
     name: Publish image (postgres-walg)
     needs: [go-lint, go-test, go-build]
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_images
+    if: (github.event_name == 'workflow_dispatch' && inputs.publish_images) || startsWith(github.ref, 'refs/tags/')
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 30
     permissions:
@@ -684,6 +695,9 @@ jobs:
           tags: |
             ${{ steps.image.outputs.prefix }}/postgres-walg:latest
             ${{ steps.image.outputs.prefix }}/postgres-walg:${{ github.sha }}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}:{2}', steps.image.outputs.prefix, 'postgres-walg', github.ref_name) || '' }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           cache-from: type=gha,scope=postgres-walg
           cache-to: type=gha,mode=max,scope=postgres-walg
 
@@ -694,7 +708,7 @@ jobs:
     # it regardless. Without this job the console had no deployable artifact at
     # all — CI built web/dist and uploaded it as an artifact nothing consumed.
     needs: [web-lint, web-typecheck, web-build, web-e2e, web-e2e-keycloak]
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_images
+    if: (github.event_name == 'workflow_dispatch' && inputs.publish_images) || startsWith(github.ref, 'refs/tags/')
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 30
     permissions:
@@ -739,8 +753,90 @@ jobs:
           tags: |
             ${{ steps.image.outputs.prefix }}/web:latest
             ${{ steps.image.outputs.prefix }}/web:${{ github.sha }}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}:{2}', steps.image.outputs.prefix, 'web', github.ref_name) || '' }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
+
+  docker-publish-minio:
+    name: Publish image (minio)
+    # Releases only. MinIO withdrew its pullable images (deploy/docker/minio/
+    # Dockerfile says when), so a self-hoster following a release needs this
+    # one from us; the hosted cluster keeps the image it already runs, and a
+    # from-source MinIO build is too heavy to repeat on every manual publish.
+    needs: [go-lint, go-test, go-build]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+        with:
+          name: mvx-ci-${{ runner.name }}
+          keep-state: true
+          buildkitd-config-inline: |
+            [worker.oci]
+              gc = true
+              gckeepstorage = "15GB"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compute image name prefix
+        id: image
+        run: echo "prefix=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/mavericks" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: deploy/docker/minio
+          file: deploy/docker/minio/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.image.outputs.prefix }}/minio:latest
+            ${{ steps.image.outputs.prefix }}/minio:${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=minio
+          cache-to: type=gha,mode=max,scope=minio
+
+  # ── Release ───────────────────────────────────────────────────────────────────
+  # Once every image of a date tag is published, the tag becomes a GitHub
+  # release listing them. Re-running a finished release changes nothing.
+  release:
+    name: GitHub release
+    needs: [docker-publish, docker-publish-backup, docker-publish-postgres-walg, docker-publish-web, docker-publish-minio]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          SERVER: ${{ github.server_url }}
+        run: |
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "release $TAG already exists"; exit 0
+          fi
+          prefix="ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/mavericks"
+          {
+            echo "Container images of this release (linux/amd64), each tagged \`$TAG\`:"
+            echo
+            for n in gateway identity tenant model schema-migration policy calculation workflow import query audit notification ai-assistant integration web postgres-backup postgres-walg minio; do
+              echo "- \`$prefix/$n:$TAG\`"
+            done
+            echo
+            echo "Deploy them with the [self-hosting guide]($SERVER/$REPO/blob/$TAG/docs/SELF_HOSTING.md)."
+            echo "Database migrations only run forward: take a backup before you upgrade."
+          } > notes.md
+          gh release create "$TAG" --repo "$REPO" --verify-tag --title "$TAG" --notes-file notes.md
 
   # ── Deploy ────────────────────────────────────────────────────────────────────
   # Rolls every app deployment onto the images this same run just published,

@@ -54,63 +54,64 @@ patches:
       kind: StatefulSet
       name: postgres
 
-# Where the images come from: replace this block with the one
-# scripts/build-images.sh prints. Each name is the base manifests' own; the
-# newName and newTag are your registry's. Never "latest": a pod restarted
-# for any reason would pull whatever was pushed last.
+# Where the images come from: the published release images of
+# ghcr.io/mavericka-sarl/mavericks (one tag per release, listed on the
+# repository's Releases page). To run images you built yourself, replace this
+# block with the one scripts/build-images.sh prints. Each name is the base
+# manifests' own; newName and newTag say where to pull it. Never "latest": a
+# pod restarted for any reason would pull whatever was pushed last.
 images:
   - name: registry.example.com/mavericks/ai-assistant
-    newName: registry.example.com/mavericks/ai-assistant
-    newTag: "REPLACE-ME"
+    newName: ghcr.io/mavericka-sarl/mavericks/ai-assistant
+    newTag: "2026.09.26"
   - name: registry.example.com/mavericks/audit
-    newName: registry.example.com/mavericks/audit
-    newTag: "REPLACE-ME"
+    newName: ghcr.io/mavericka-sarl/mavericks/audit
+    newTag: "2026.09.26"
   - name: registry.example.com/mavericks/calculation
-    newName: registry.example.com/mavericks/calculation
-    newTag: "REPLACE-ME"
+    newName: ghcr.io/mavericka-sarl/mavericks/calculation
+    newTag: "2026.09.26"
   - name: registry.example.com/mavericks/gateway
-    newName: registry.example.com/mavericks/gateway
-    newTag: "REPLACE-ME"
+    newName: ghcr.io/mavericka-sarl/mavericks/gateway
+    newTag: "2026.09.26"
   - name: registry.example.com/mavericks/identity
-    newName: registry.example.com/mavericks/identity
-    newTag: "REPLACE-ME"
+    newName: ghcr.io/mavericka-sarl/mavericks/identity
+    newTag: "2026.09.26"
   - name: registry.example.com/mavericks/import
-    newName: registry.example.com/mavericks/import
-    newTag: "REPLACE-ME"
+    newName: ghcr.io/mavericka-sarl/mavericks/import
+    newTag: "2026.09.26"
   - name: registry.example.com/mavericks/integration
-    newName: registry.example.com/mavericks/integration
-    newTag: "REPLACE-ME"
+    newName: ghcr.io/mavericka-sarl/mavericks/integration
+    newTag: "2026.09.26"
   - name: registry.example.com/mavericks/model
-    newName: registry.example.com/mavericks/model
-    newTag: "REPLACE-ME"
+    newName: ghcr.io/mavericka-sarl/mavericks/model
+    newTag: "2026.09.26"
   - name: registry.example.com/mavericks/notification
-    newName: registry.example.com/mavericks/notification
-    newTag: "REPLACE-ME"
+    newName: ghcr.io/mavericka-sarl/mavericks/notification
+    newTag: "2026.09.26"
   - name: registry.example.com/mavericks/policy
-    newName: registry.example.com/mavericks/policy
-    newTag: "REPLACE-ME"
+    newName: ghcr.io/mavericka-sarl/mavericks/policy
+    newTag: "2026.09.26"
   - name: registry.example.com/mavericks/postgres-backup
-    newName: registry.example.com/mavericks/postgres-backup
-    newTag: "REPLACE-ME"
+    newName: ghcr.io/mavericka-sarl/mavericks/postgres-backup
+    newTag: "2026.09.26"
   - name: registry.example.com/mavericks/postgres-walg
-    newName: registry.example.com/mavericks/postgres-walg
-    newTag: "REPLACE-ME"
+    newName: ghcr.io/mavericka-sarl/mavericks/postgres-walg
+    newTag: "2026.09.26"
   - name: registry.example.com/mavericks/query
-    newName: registry.example.com/mavericks/query
-    newTag: "REPLACE-ME"
+    newName: ghcr.io/mavericka-sarl/mavericks/query
+    newTag: "2026.09.26"
   - name: registry.example.com/mavericks/schema-migration
-    newName: registry.example.com/mavericks/schema-migration
-    newTag: "REPLACE-ME"
-    newTag: "REPLACE-ME"
+    newName: ghcr.io/mavericka-sarl/mavericks/schema-migration
+    newTag: "2026.09.26"
   - name: registry.example.com/mavericks/tenant
-    newName: registry.example.com/mavericks/tenant
-    newTag: "REPLACE-ME"
+    newName: ghcr.io/mavericka-sarl/mavericks/tenant
+    newTag: "2026.09.26"
   - name: registry.example.com/mavericks/web
-    newName: registry.example.com/mavericks/web
-    newTag: "REPLACE-ME"
+    newName: ghcr.io/mavericka-sarl/mavericks/web
+    newTag: "2026.09.26"
   - name: registry.example.com/mavericks/workflow
-    newName: registry.example.com/mavericks/workflow
-    newTag: "REPLACE-ME"
+    newName: ghcr.io/mavericka-sarl/mavericks/workflow
+    newTag: "2026.09.26"
   - name: quay.io/minio/minio
-    newName: registry.example.com/mavericks/minio
-    newTag: "REPLACE-ME"
+    newName: ghcr.io/mavericka-sarl/mavericks/minio
+    newTag: "2026.09.26"

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/Mavericka-SARL/maverick-builds-app/security/advisories/new
+    about: Privately, never in a public issue. See SECURITY.md.
+  - name: Self-hosting guide
+    url: https://github.com/Mavericka-SARL/maverick-builds-app/blob/main/docs/SELF_HOSTING.md
+    about: Installing, upgrading, backups and troubleshooting.
+  - name: Commercial and enterprise licences
+    url: https://github.com/Mavericka-SARL/maverick-builds-app/blob/main/docs/LICENSING.md
+    about: Building for clients, or the enterprise features.

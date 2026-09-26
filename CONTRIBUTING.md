@@ -2,7 +2,8 @@
 
 > **Classification:** Current — How to take part in maverickbuilds.app from outside the team.
 
-Thank you for looking. This repository is published as **snapshots**: the
+Thank you for looking. Everyone taking part follows the
+[code of conduct](CODE_OF_CONDUCT.md). This repository is published as **snapshots**: the
 product is developed in a separate repository, and every commit here
 (`Snapshot <id> (<date>)`) replaces the whole tree with the state of one
 commit there. That shapes what you can send us.

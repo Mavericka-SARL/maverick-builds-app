@@ -1,0 +1,29 @@
+# Run the published release images instead of building from source.
+#
+# Turn it on in .env:
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml
+#   MAVERICKS_RELEASE=2026.09.26
+#
+# then `docker compose pull && docker compose up -d`. Every release is listed
+# on the repository's Releases page; upgrading is changing MAVERICKS_RELEASE
+# and running the same two commands (docs/SELF_HOSTING.md, "Upgrading").
+#
+# The images are built for linux/amd64. On another architecture leave this
+# file out and let Compose build from source, which is the default.
+services:
+  gateway:
+    image: ghcr.io/mavericka-sarl/mavericks/gateway:${MAVERICKS_RELEASE:-2026.09.26}
+    build: !reset null
+  integration:
+    image: ghcr.io/mavericka-sarl/mavericks/integration:${MAVERICKS_RELEASE:-2026.09.26}
+    build: !reset null
+  web:
+    image: ghcr.io/mavericka-sarl/mavericks/web:${MAVERICKS_RELEASE:-2026.09.26}
+    build: !reset null
+  minio:
+    image: ghcr.io/mavericka-sarl/mavericks/minio:${MAVERICKS_RELEASE:-2026.09.26}
+    build: !reset null
+  backup:
+    image: ghcr.io/mavericka-sarl/mavericks/postgres-backup:${MAVERICKS_RELEASE:-2026.09.26}
+    build: !reset null

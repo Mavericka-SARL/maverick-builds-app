@@ -1,0 +1,66 @@
+name: Bug report
+description: Something does not work the way the documentation says it does.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting it. A security problem is not a bug report: follow [SECURITY.md](../blob/main/SECURITY.md) instead.
+        Remove passwords, tokens and licence keys from anything you paste.
+  - type: input
+    id: release
+    attributes:
+      label: Release
+      description: The release you run (e.g. 2026.09.26), or the commit if you built from main.
+      placeholder: "2026.09.26"
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How it is deployed
+      options:
+        - Docker Compose, published images
+        - Docker Compose, built from source
+        - Kubernetes
+        - Local development (dev.sh)
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Grids, metrics and calculations
+        - Forms
+        - Dashboards
+        - Workflows and automation
+        - AI assistant
+        - Imports and integrations
+        - Users, roles and sign-in
+        - Installation, upgrades and backups
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Sign in as a developer
+        2. Open ...
+        3. ...
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: The relevant lines of `docker compose logs gateway` or `kubectl logs`.
+      render: shell
