@@ -670,10 +670,9 @@ Two mechanisms, both writing to the object storage configured in step 3:
   kubectl -n mavericks logs -f job/backup-now      # ends with "backup complete"
   ```
 
-The `postgres-backup-watchdog` CronJob checks every morning that a dump newer
-than 26 hours and larger than `BACKUP_MIN_SIZE` (100 KB in the example
-overlay; raise it as your data grows) exists, and e-mails `ALERT_EMAIL` when
-it does not. Prove it once:
+The `postgres-backup-watchdog` CronJob checks every morning that a dump of the
+control database newer than 26 hours exists and that `pg_restore` reads it
+through to the end, and e-mails `ALERT_EMAIL` when either is not so. Prove it once:
 `kubectl -n mavericks create job --from=cronjob/postgres-backup-watchdog watchdog-now`,
 then `kubectl -n mavericks logs job/watchdog-now` ends with `ok:`.
 

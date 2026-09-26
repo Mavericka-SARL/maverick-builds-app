@@ -30,9 +30,9 @@ data:
   SMTP_FROM: "no-reply@example.com"                             # CHANGE
   # Where the backup watchdog reports a missing or undersized dump.
   ALERT_EMAIL: "ops@example.com"                                # CHANGE
-  # The smallest dump the watchdog accepts. A new deployment's is a few
-  # hundred kilobytes; raise this as your data grows, since a truncated dump
-  # is a failure that looks like a success.
+  # The smallest dump the watchdog accepts — a floor against empty objects
+  # only. It also reads the newest dump through with pg_restore, which is
+  # what catches a truncated one, so this need not grow with your data.
   BACKUP_MIN_SIZE: "100KB"
 
 ---

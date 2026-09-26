@@ -21,8 +21,17 @@
 #   BACKUP_MAX_AGE_HOURS    default: 26. A daily backup plus two hours of
 #                           slack, so an ordinary slow night is not an alert
 #                           and a missed night always is.
-#   BACKUP_MIN_SIZE         default: 1MB. A zero-length or truncated object
-#                           is a failure that looks like a success.
+#   BACKUP_DB               default: mavericks. The control database, whose
+#                           dump (backup-<db>-<time>.dump) is what must exist:
+#                           a tenant or Keycloak dump alone does not count.
+#   BACKUP_MIN_SIZE         default: 64KB. Catches an empty or near-empty
+#                           object only. Size cannot tell a small real
+#                           database from an empty one — a dump of the schema
+#                           with no data is already ~290 KiB, and production
+#                           after its 2026-09-21 reset dumped to 406 KiB, which
+#                           the former 1MB floor reported as "no backup" every
+#                           night. Completeness is proven by reading the dump
+#                           (below), not by its size.
 #   ALERT_EMAIL             where to report. Unset means nobody is told —
 #                           the job still fails loudly, which is all it can do.
 #   SMTP_HOST/SMTP_PORT/SMTP_USERNAME/SMTP_PASSWORD/SMTP_FROM
@@ -38,7 +47,8 @@ set -euo pipefail
 : "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
 BACKUP_BUCKET="${BACKUP_BUCKET:-mavericks-backups}"
 BACKUP_MAX_AGE_HOURS="${BACKUP_MAX_AGE_HOURS:-26}"
-BACKUP_MIN_SIZE="${BACKUP_MIN_SIZE:-1MB}"
+BACKUP_DB="${BACKUP_DB:-mavericks}"
+BACKUP_MIN_SIZE="${BACKUP_MIN_SIZE:-64KB}"
 ALERT_EMAIL="${ALERT_EMAIL:-}"
 
 log() { echo "[backup-watchdog] $(date -u +%Y-%m-%dT%H:%M:%SZ) $*"; }
@@ -81,7 +91,7 @@ alert() {
   rm -f "$message"
 }
 
-log "checking ${BACKUP_BUCKET}/pg for a backup newer than ${BACKUP_MAX_AGE_HOURS}h and larger than ${BACKUP_MIN_SIZE}"
+log "checking ${BACKUP_BUCKET}/pg for a ${BACKUP_DB} backup newer than ${BACKUP_MAX_AGE_HOURS}h and larger than ${BACKUP_MIN_SIZE}"
 # Rotated credentials fail here, at `alias set`, before any listing is
 # attempted — and `set -e` would end the run silently, which is the exact
 # failure this job exists to make noisy.
@@ -147,21 +157,23 @@ next successful run of the postgres-backup CronJob creates it."
   exit 1
 fi
 
-listing="$(mc find "backupminio/${BACKUP_BUCKET}/pg/" --newer-than "${BACKUP_MAX_AGE_HOURS}h" --larger "${BACKUP_MIN_SIZE}" 2>/dev/null || true)"
-count="$(printf '%s' "$listing" | grep -c . || true)"
-if [ "$count" -gt 0 ]; then
-  log "ok: ${count} backup object(s) within the window"
-  printf '%s\n' "$listing" | sed 's/^/  /'
-  exit 0
-fi
+# Newest first by the timestamp in the name (backup-<db>-YYYYMMDDTHHMMSSZ.dump
+# sorts chronologically); `mc ls` alone lists by name, which put a four-day-old
+# tenant dump at the top of an alert as if it were the latest.
+recent_objects() {
+  mc ls "backupminio/${BACKUP_BUCKET}/pg/" 2>/dev/null | sort | tail -5 || true
+}
 
-newest="$(mc ls "backupminio/${BACKUP_BUCKET}/pg/" 2>/dev/null | tail -3 || true)"
-alert "[mavericks] no database backup in the last ${BACKUP_MAX_AGE_HOURS} hours" "\
-No object in ${BACKUP_BUCKET}/pg is newer than ${BACKUP_MAX_AGE_HOURS} hours and
+listing="$(mc find "backupminio/${BACKUP_BUCKET}/pg/" --name "backup-${BACKUP_DB}-*.dump" \
+  --newer-than "${BACKUP_MAX_AGE_HOURS}h" --larger "${BACKUP_MIN_SIZE}" 2>/dev/null | sort || true)"
+count="$(printf '%s' "$listing" | grep -c . || true)"
+if [ "$count" -eq 0 ]; then
+  alert "[mavericks] no database backup in the last ${BACKUP_MAX_AGE_HOURS} hours" "\
+No ${BACKUP_DB} dump in ${BACKUP_BUCKET}/pg is newer than ${BACKUP_MAX_AGE_HOURS} hours and
 larger than ${BACKUP_MIN_SIZE}. Either the nightly dump failed, or it did not run.
 
 The most recent objects in the bucket:
-${newest:-  (the prefix is empty)}
+$(recent_objects)
 
 Check the job:
   kubectl -n mavericks get cronjob postgres-backup
@@ -170,4 +182,29 @@ Check the job:
 
 Run one by hand:
   kubectl -n mavericks create job --from=cronjob/postgres-backup backup-manual-\$(date +%s)"
-exit 1
+  exit 1
+fi
+
+# A present, non-empty object can still be a truncated or corrupt archive.
+# Read the newest one end to end, streamed (nothing lands on disk): pg_restore
+# walks every entry and fails on an archive that ends early.
+latest="$(printf '%s\n' "$listing" | tail -1)"
+if ! verified="$( { mc cat "$latest" | pg_restore --file=/dev/null; } 2>&1)"; then
+  alert "[mavericks] the latest database backup cannot be read" "\
+The newest ${BACKUP_DB} dump exists but pg_restore cannot read it through,
+so it would not restore.
+
+  ${latest}
+
+  ${verified}
+
+The most recent objects in the bucket:
+$(recent_objects)
+
+Run a fresh backup by hand and check its log:
+  kubectl -n mavericks create job --from=cronjob/postgres-backup backup-manual-\$(date +%s)"
+  exit 1
+fi
+log "ok: ${count} ${BACKUP_DB} backup(s) within the window; the newest reads through"
+printf '%s\n' "$listing" | sed 's/^/  /'
+exit 0
