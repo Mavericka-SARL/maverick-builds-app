@@ -550,9 +550,16 @@ jobs:
       # neighbours (seen live: "graceful_stop" killed 2 of 14 publishes).
       # A runner executes one job at a time, so its own builder is never
       # touched concurrently. Each caps its cache via buildkitd GC.
+      # A builder name allows only letters, digits and ._- ; GitHub's hosted
+      # runners are named like "GitHub Actions 1000000234" (the public
+      # repository's releases run there), so the name is sanitised first.
+      # Self-hosted runner names come through unchanged.
+      - name: Name the builder after the runner
+        id: builder
+        run: echo "name=mvx-ci-$(printf '%s' "$RUNNER_NAME" | tr -c 'A-Za-z0-9._-' '-')" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
         with:
-          name: mvx-ci-${{ runner.name }}
+          name: ${{ steps.builder.outputs.name }}
           keep-state: true
           buildkitd-config-inline: |
             [worker.oci]
@@ -615,9 +622,16 @@ jobs:
       # neighbours (seen live: "graceful_stop" killed 2 of 14 publishes).
       # A runner executes one job at a time, so its own builder is never
       # touched concurrently. Each caps its cache via buildkitd GC.
+      # A builder name allows only letters, digits and ._- ; GitHub's hosted
+      # runners are named like "GitHub Actions 1000000234" (the public
+      # repository's releases run there), so the name is sanitised first.
+      # Self-hosted runner names come through unchanged.
+      - name: Name the builder after the runner
+        id: builder
+        run: echo "name=mvx-ci-$(printf '%s' "$RUNNER_NAME" | tr -c 'A-Za-z0-9._-' '-')" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
         with:
-          name: mvx-ci-${{ runner.name }}
+          name: ${{ steps.builder.outputs.name }}
           keep-state: true
           buildkitd-config-inline: |
             [worker.oci]
@@ -671,9 +685,16 @@ jobs:
       # neighbours (seen live: "graceful_stop" killed 2 of 14 publishes).
       # A runner executes one job at a time, so its own builder is never
       # touched concurrently. Each caps its cache via buildkitd GC.
+      # A builder name allows only letters, digits and ._- ; GitHub's hosted
+      # runners are named like "GitHub Actions 1000000234" (the public
+      # repository's releases run there), so the name is sanitised first.
+      # Self-hosted runner names come through unchanged.
+      - name: Name the builder after the runner
+        id: builder
+        run: echo "name=mvx-ci-$(printf '%s' "$RUNNER_NAME" | tr -c 'A-Za-z0-9._-' '-')" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
         with:
-          name: mvx-ci-${{ runner.name }}
+          name: ${{ steps.builder.outputs.name }}
           keep-state: true
           buildkitd-config-inline: |
             [worker.oci]
@@ -727,9 +748,16 @@ jobs:
       # neighbours (seen live: "graceful_stop" killed 2 of 14 publishes).
       # A runner executes one job at a time, so its own builder is never
       # touched concurrently. Each caps its cache via buildkitd GC.
+      # A builder name allows only letters, digits and ._- ; GitHub's hosted
+      # runners are named like "GitHub Actions 1000000234" (the public
+      # repository's releases run there), so the name is sanitised first.
+      # Self-hosted runner names come through unchanged.
+      - name: Name the builder after the runner
+        id: builder
+        run: echo "name=mvx-ci-$(printf '%s' "$RUNNER_NAME" | tr -c 'A-Za-z0-9._-' '-')" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
         with:
-          name: mvx-ci-${{ runner.name }}
+          name: ${{ steps.builder.outputs.name }}
           keep-state: true
           buildkitd-config-inline: |
             [worker.oci]
@@ -774,9 +802,16 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v6
+      # A builder name allows only letters, digits and ._- ; GitHub's hosted
+      # runners are named like "GitHub Actions 1000000234" (the public
+      # repository's releases run there), so the name is sanitised first.
+      # Self-hosted runner names come through unchanged.
+      - name: Name the builder after the runner
+        id: builder
+        run: echo "name=mvx-ci-$(printf '%s' "$RUNNER_NAME" | tr -c 'A-Za-z0-9._-' '-')" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
         with:
-          name: mvx-ci-${{ runner.name }}
+          name: ${{ steps.builder.outputs.name }}
           keep-state: true
           buildkitd-config-inline: |
             [worker.oci]
