@@ -9,7 +9,7 @@ A tenant is on one **plan**. The plan says how much the tenant may use
 bounds how much, never for how long: **there is no trial** (migration 090
 removed the concept). Plans are rows the platform administrators — the
 operator's own people, with reach over every tenant — edit in the console,
-not constants in code: tuning the test workspace is an edit, not a release.
+not constants in code: tuning the basic workspace is an edit, not a release.
 
 This is a community feature: a deployment with no license key has plans too,
 because a sign-up funnel is not an enterprise capability. The license key
@@ -20,7 +20,7 @@ keys sent by e-mail on request; a plan decides how much *one tenant* may use.
 On the hosted service the two never meet: sign-up hands out the test
 workspace, whose only limit is its size, and a sign-up account is never a
 platform administrator — that role is the operator's, and whoever they
-delegate it to. Everything beyond the test workspace is a licence key and
+delegate it to. Everything beyond the basic workspace is a licence key and
 running the platform yourself.
 
 ## The catalog
@@ -43,18 +43,18 @@ running the platform yourself.
 
 0 means unlimited. Migration 085 seeds `starter`, `standard` and
 `enterprise` without limits, so that every tenant that already existed keeps
-working exactly as before. Migration 089 adds `test` ("Test workspace") —
+working exactly as before. Migration 089 adds `test` ("Test workspace", renamed "Basic workspace" by 096) —
 no end date, `max_storage_mb: 100` plus the two daily caps — and makes it
 the self-service plan. Migration 090 drops the fourteen-day `trial` plan 085
 had seeded, together with `trial_days` and `core.customer.trial_ends_at`;
-a tenant that had been put on it by hand moves to the test workspace.
+a tenant that had been put on it by hand moves to the basic workspace.
 Sign-up offers the first `self_service` plan by `sort_order`.
 
 **Where to go from here** is data too: `limit_note`. Every refusal ends with
 it — the 402 body, the read-only reason in the banner, the terms of service
 — in place of the engine's default "Change the plan to add more." A
 deployment whose answer to a full workspace is another plan leaves it empty;
-the test workspace's note says to run the platform on your own
+the basic workspace's note says to run the platform on your own
 infrastructure (free and unlimited for non-commercial use, under a
 commercial licence otherwise) or to get the enterprise edition. The console
 shows the plan's `contact_url` link as "Learn more" when a note is set and
@@ -79,7 +79,7 @@ application holding it) does: since migration 089 the archive skips facts
 whose model is being deleted and drops the model's earlier history — history
 no screen could show once the model is gone. That is what "read-only,
 except for deleting" means for a storage-bounded plan, and it was proven
-live: a test workspace at 128 MB, application deleted by its own tenant
+live: a basic workspace at 128 MB, application deleted by its own tenant
 administrator while read-only, back to 33 MB and writable at the next sweep.
 The residual is PostgreSQL free space the tenant's next writes reuse. A tenant that names a plan with no row is treated
 as unlimited and shown as "(no such plan)": a catalog gap must never lock a

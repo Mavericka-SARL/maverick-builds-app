@@ -323,12 +323,12 @@ const adminAudit = [
 
 const noLimits = { max_users: 0, max_applications: 0, max_models: 0, max_metrics_per_model: 0, max_members_per_dimension: 0, max_fact_rows_per_model: 0, max_ai_messages_per_day: 0, max_integration_runs_per_day: 0, max_storage_mb: 0 };
 const testLimits = { ...noLimits, max_storage_mb: 100, max_ai_messages_per_day: 100, max_integration_runs_per_day: 50 };
-const testNote = "A test workspace holds up to 100 MB. To go further, run the platform on your own infrastructure — free of charge and without limits for non-commercial use, under a commercial licence otherwise — or get the enterprise edition.";
+const testNote = "A basic workspace holds up to 100 MB. To go further, run the platform on your own infrastructure — free of charge and without limits for non-commercial use, under a commercial licence otherwise — or get the enterprise edition.";
 const smallLimits = { ...noLimits, max_users: 5, max_applications: 2, max_models: 3, max_metrics_per_model: 50, max_members_per_dimension: 500, max_fact_rows_per_model: 100000, max_ai_messages_per_day: 100, max_integration_runs_per_day: 50 };
 
 /** GET /api/admin/plans as the seeded catalog answers it. */
 export const adminPlans = [
-  { key: "test", name: "Test workspace", description: "Try the platform for as long as you like, with up to 100 MB of data.", self_service: true, limits: testLimits, limit_note: testNote, sort_order: 5, updated_at: "2026-09-19T00:00:00Z" },
+  { key: "test", name: "Basic workspace", description: "Use the platform for as long as you like, with up to 100 MB of data.", self_service: true, limits: testLimits, limit_note: testNote, sort_order: 5, updated_at: "2026-09-19T00:00:00Z" },
   { key: "small", name: "Small", description: "A handful of everything.", self_service: false, limits: smallLimits, limit_note: "", sort_order: 10, updated_at: "2026-09-17T00:00:00Z" },
   { key: "starter", name: "Starter", description: "", self_service: false, limits: noLimits, limit_note: "", sort_order: 20, updated_at: "2026-09-17T00:00:00Z" },
   { key: "enterprise", name: "Enterprise", description: "No limits.", self_service: false, limits: noLimits, limit_note: "", sort_order: 40, updated_at: "2026-09-17T00:00:00Z" },
@@ -359,17 +359,17 @@ export const legalUnpublished = {
   entity: "", address: "", email: "", jurisdiction: "", hosting: "", updated: "",
 };
 
-/** GET /api/signup/options with sign-up open: the test workspace, as seeded. */
+/** GET /api/signup/options with sign-up open: the basic workspace, as seeded. */
 export const signupOptions = {
   enabled: true, contact_url: "https://example.test/pricing",
-  plan: { key: "test", name: "Test workspace", description: "Try the platform for as long as you like, with up to 100 MB of data.", limits: testLimits, limit_note: testNote },
+  plan: { key: "test", name: "Basic workspace", description: "Use the platform for as long as you like, with up to 100 MB of data.", limits: testLimits, limit_note: testNote },
 };
 
 /** A test-workspace tenant that has filled its 100 MB. */
 export function overStoragePlanState() {
   return {
     plan: adminPlans[0], plan_known: true, read_only: true, code: "over_limit", limit_state: "over",
-    reason: `This tenant is over its plan's limits (The Test workspace plan allows 100 MB of storage; this tenant uses 104 MB. ${testNote}). The workspace is read-only, except for deleting, until it is back within them.`,
+    reason: `This tenant is over its plan's limits (The Basic workspace plan allows 100 MB of storage; this tenant uses 104 MB. ${testNote}). The workspace is read-only, except for deleting, until it is back within them.`,
   };
 }
 

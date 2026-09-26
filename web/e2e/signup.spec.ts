@@ -13,7 +13,7 @@ test("a visitor registers and is told to check their mail", async ({ page }) => 
   await expect(form).toContainText("Create your workspace");
   // The terms come from the server's plan, never from the page.
   const terms = page.getByTestId("sign-up-terms");
-  await expect(terms).toContainText("Test workspace");
+  await expect(terms).toContainText("Basic workspace");
   await expect(terms).toContainText("Up to 100 MB of data. No card needed.");
   // The agreement names documents that exist; /terms and /privacy render them.
   const legal = page.getByTestId("sign-up-legal");

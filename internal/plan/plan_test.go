@@ -82,9 +82,13 @@ func TestCatalogChecksAndSweep(t *testing.T) {
 			test = p
 		}
 	}
-	// Sign-up offers the test workspace: no end date, bounded by storage.
+	// Sign-up offers the basic workspace: no end date, bounded by storage.
 	if test.Key == "" || !test.SelfService || test.Limits.MaxStorageMB != 100 || test.Limits.MaxModels != 0 || !strings.Contains(test.LimitNote, "own infrastructure") {
 		t.Fatalf("seeded test-workspace plan = %+v", test)
+	}
+	// 096 renamed the seeded wording; the key stays "test".
+	if test.Name != "Basic workspace" || !strings.HasPrefix(test.LimitNote, "A basic workspace holds") || !strings.HasPrefix(test.Description, "Use the platform") {
+		t.Fatalf("sign-up plan wording = %q / %q / %q", test.Name, test.Description, test.LimitNote)
 	}
 	if ss, ok, err := SelfService(ctx, pool); err != nil || !ok || ss.Key != "test" {
 		t.Fatalf("self-service plan = %+v ok=%v err=%v", ss, ok, err)

@@ -20,7 +20,7 @@ test("the terms name the operator and quote the server's plan", async ({ page })
   await expect(doc).toContainText("In force from 18 September 2026");
   // The plan clause is the plan from GET /api/signup/options: free, no
   // end date, 100 MB of data, read-only when the space is used up.
-  await expect(doc).toContainText("Test workspace plan costs nothing and has no end date");
+  await expect(doc).toContainText("Basic workspace plan costs nothing and has no end date");
   await expect(doc).toContainText("limited to 100 MB of data");
   await expect(doc).toContainText("becomes read-only");
   // …and the plan's own way forward, never "a plan is agreed".

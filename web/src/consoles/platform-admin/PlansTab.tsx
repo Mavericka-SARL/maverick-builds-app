@@ -25,7 +25,7 @@ const EMPTY_LIMITS: PlanLimits = {
  * Platform › Plans: the catalog every tenant's plan points at, kept by the
  * platform administrators for every tenant. A plan bounds how much a tenant
  * may use — never for how long: there is no trial. Limits are numbers here
- * rather than constants in code, so tuning the test workspace is an edit,
+ * rather than constants in code, so tuning the basic workspace is an edit,
  * not a release. 0 means unlimited. A change applies to every tenant on the
  * plan within a minute; the read-only verdict for a tenant already over a
  * new limit follows at the next usage sweep.
@@ -39,7 +39,7 @@ export function PlansTab() {
       <p className="mvx-admin-muted" style={{ marginTop: 0 }}>
         Plans apply to every tenant of this deployment; each tenant is on one (Applications › tenant › Change plan). A plan
         bounds how much a tenant may use, never for how long. A limit of 0 means unlimited. The first self-service plan is
-        the one public sign-up assigns — the test workspace. Editions (community, commercial, enterprise) are a licence
+        the one public sign-up assigns — the basic workspace. Editions (community, commercial, enterprise) are a licence
         key, not a plan.
       </p>
       {(data ?? []).map((p) => <PlanCard key={p.key} plan={p} />)}
