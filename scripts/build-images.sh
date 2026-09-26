@@ -34,11 +34,13 @@ while [ $# -gt 0 ]; do
 done
 
 BASE=deploy/k8s/base
-# The prefix the base manifests name their own images under, e.g.
-# ghcr.io/<owner>/mavericks — what the overlay's images: entries must match.
-BASE_PREFIX="$(grep -rhoE 'ghcr\.io/[^/ ]+/mavericks/' "$BASE" | sort -u | head -1)"
+# The placeholder prefix the base manifests name their own images under
+# (registry.example.com/mavericks) — what the overlay's images: entries must
+# match. Exactly one, or the printed images: block would miss some.
+BASE_PREFIX="$(grep -rhoE 'image: *[^ /]+/mavericks/' "$BASE" | sed 's/^image: *//' | sort -u)"
+[ -n "$BASE_PREFIX" ] && [ "$(printf '%s\n' "$BASE_PREFIX" | wc -l)" -eq 1 ] \
+  || { echo "expected one <registry>/mavericks/ image prefix under $BASE, found: ${BASE_PREFIX:-none}" >&2; exit 1; }
 BASE_PREFIX="${BASE_PREFIX%/}"
-[ -n "$BASE_PREFIX" ] || { echo "no ghcr.io/<owner>/mavericks images found under $BASE" >&2; exit 1; }
 NAMES="$(grep -rhoE "${BASE_PREFIX//./\\.}/[a-z0-9-]+" "$BASE" | sed 's#.*/##' | sort -u)"
 MINIO_REF="$(grep -rhoE 'quay\.io/minio/minio:[A-Za-z0-9._-]+' "$BASE" | sort -u | head -1 || true)"
 

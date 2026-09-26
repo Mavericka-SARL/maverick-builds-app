@@ -482,7 +482,8 @@ jobs:
 
   # ── Docker publish ────────────────────────────────────────────────────────────
   # Builds + pushes an image per cmd/* service referenced by
-  # deploy/k8s/base/services/*.yaml (ghcr.io/mavericks-engine/mavericks/<name>),
+  # deploy/k8s/base/services/*.yaml (ghcr.io/<owner>/mavericks/<name>; the base
+  # names them registry.example.com/mavericks/<name> and overlays map them),
   # using deploy/docker/Dockerfile's generic --build-arg SERVICE=<name> build.
   # Gated behind the Go gates above (needs:) and restricted to pushes on main
   # (not PRs, not develop) — this is the only job in the workflow that has
