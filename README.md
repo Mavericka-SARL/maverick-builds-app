@@ -150,6 +150,7 @@ paid editions; see [docs/LICENSING.md](docs/LICENSING.md).
 - [Development and validation](docs/DEVELOPMENT.md)
 - [HTTP API guide](docs/API.md)
 - [Editions and licensing](docs/LICENSING.md)
+- [Contributing](CONTRIBUTING.md) and [reporting a security issue](SECURITY.md)
 - [Plans and self-service sign-up](docs/PLANS_AND_SIGNUP.md)
 - [Terms of service and privacy notice](docs/LEGAL_AND_PRIVACY.md)
 - [The product's look](docs/BRAND.md)

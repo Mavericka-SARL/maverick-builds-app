@@ -39,10 +39,8 @@ web/.env.local
 /qa-engine-test
 /query
 /schema-migration
-/seed-regional-planning
-/seed-sales-planning
-/seed-sandbox
-/seed-simple-budget
+/seed
+/seed-*
 /spike-arrow
 /tenant
 /verify-topology
