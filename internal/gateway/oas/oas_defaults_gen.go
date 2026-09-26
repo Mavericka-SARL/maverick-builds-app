@@ -8,10 +8,6 @@ func (s *AiSaveSettingsRequest) setDefaults() {
 		val := string("openai")
 		s.Provider.SetTo(val)
 	}
-	{
-		val := string("gpt-4o-mini")
-		s.Model.SetTo(val)
-	}
 }
 
 // setDefaults set default value of fields.

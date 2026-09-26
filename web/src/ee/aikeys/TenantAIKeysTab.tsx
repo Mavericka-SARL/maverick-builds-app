@@ -11,6 +11,7 @@ import { Button, Card, Checkbox, Field, InlineAlert, LoadingState, Select, TextI
 const PROVIDERS = [
   { value: "openai", label: "OpenAI" },
   { value: "anthropic", label: "Anthropic" },
+  { value: "google", label: "Google (Gemini)" },
   { value: "mistral", label: "Mistral" },
   { value: "deepseek", label: "DeepSeek" },
 ];

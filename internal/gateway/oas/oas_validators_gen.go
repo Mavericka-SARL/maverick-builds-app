@@ -4033,6 +4033,8 @@ func (s TenantAISettingsProvider) Validate() error {
 		return nil
 	case "anthropic":
 		return nil
+	case "google":
+		return nil
 	case "mistral":
 		return nil
 	case "deepseek":

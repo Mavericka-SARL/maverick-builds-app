@@ -10,31 +10,25 @@ import {
   FilterChip, InlineAlert, SectionHeader, useConfirm, type DesignTone,
 } from "../../ui";
 
-// ── Suggested models per provider (user can also type any model name freely) ──
-
-const PROVIDER_MODELS: Record<string, string[]> = {
-  openai:    ["gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o", "gpt-4o-mini", "o3", "o4-mini"],
-  anthropic: ["claude-opus-4-8", "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-4-5"],
-  mistral:   ["mistral-large-latest", "mistral-small-latest", "codestral-latest"],
-  deepseek:  ["deepseek-chat", "deepseek-coder"],
-};
-
 // ── Settings panel ────────────────────────────────────────────────────────────
+// The model is free text, with no suggestion list: providers ship new models
+// faster than a list here could follow. Blank means the gateway's default for
+// the provider (providerDefaultModels in internal/gateway/ai_handler.go).
 
 function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; initialSettings?: AISettings }) {
   const qc = useQueryClient();
 
   // Initialize from already-loaded settings passed from parent — no sync effect needed.
   const [provider, setProvider] = useState(initialSettings?.provider ?? "openai");
-  const [model, setModel]       = useState(initialSettings?.model ?? "gpt-4o-mini");
+  const [model, setModel]       = useState(initialSettings?.model ?? "");
   const [apiKey, setApiKey]     = useState("");
   const [saved, setSaved]       = useState(false);
 
-  // Reset model when provider changes — done inline in the handler, not in an effect.
+  // A model name belongs to one provider, so switching provider clears it
+  // (blank = that provider's default) — inline in the handler, not an effect.
   const handleProviderChange = (newProvider: string) => {
     setProvider(newProvider);
-    const models = PROVIDER_MODELS[newProvider] ?? [];
-    if (models.length > 0 && !models.includes(model)) setModel(models[0]);
+    setModel("");
   };
 
   const save = useMutation({
@@ -75,27 +69,23 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
         ) : null}
 
         <Field label="LLM Provider">
-          <Select value={provider} onChange={e => handleProviderChange(e.target.value)}>
+          <Select value={provider} onChange={e => handleProviderChange(e.target.value)} aria-label="LLM provider">
             <option value="openai">OpenAI</option>
             <option value="anthropic">Anthropic (Claude)</option>
+            <option value="google">Google (Gemini)</option>
             <option value="mistral">Mistral</option>
             <option value="deepseek">DeepSeek</option>
           </Select>
         </Field>
 
-        <Field label="Model">
+        <Field label="Model" description="Any model ID your provider offers, including ones released after this screen was built.">
           <TextInput
-            list={`models-${provider}`}
             value={model}
             onChange={e => setModel(e.target.value)}
-            placeholder="e.g. gpt-4.1-mini"
+            placeholder="Leave blank for the provider's default"
+            aria-label="Model"
             autoComplete="off"
           />
-          <datalist id={`models-${provider}`}>
-            {(PROVIDER_MODELS[provider] ?? []).map(m => (
-              <option key={m} value={m} />
-            ))}
-          </datalist>
         </Field>
 
         <Field

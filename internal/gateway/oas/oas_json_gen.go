@@ -42741,6 +42741,8 @@ func (s *TenantAISettingsProvider) Decode(d *jx.Decoder) error {
 		*s = TenantAISettingsProviderOpenai
 	case TenantAISettingsProviderAnthropic:
 		*s = TenantAISettingsProviderAnthropic
+	case TenantAISettingsProviderGoogle:
+		*s = TenantAISettingsProviderGoogle
 	case TenantAISettingsProviderMistral:
 		*s = TenantAISettingsProviderMistral
 	case TenantAISettingsProviderDeepseek:

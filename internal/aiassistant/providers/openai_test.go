@@ -270,3 +270,39 @@ func TestOpenAIProvider_ChatStream_ErrorWrappedWithLabel(t *testing.T) {
 		t.Fatalf("expected error prefixed with provider label 'mistral:', got: %v", err)
 	}
 }
+
+// Gemini's OpenAI-compatible API sits under a path prefix
+// (…/v1beta/openai), unlike Mistral and DeepSeek. The request must keep the
+// prefix, carry the key as a bearer token, and a tool call must come back.
+func TestOpenAICompatible_BaseURLWithPathPrefix(t *testing.T) {
+	var path, auth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path, auth = r.URL.Path, r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id": "c1", "object": "chat.completion", "created": 1, "model": "gemini-3.8-flash",
+			"choices": [{"index": 0, "finish_reason": "tool_calls", "message": {"role": "assistant", "content": "",
+				"tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "list_models", "arguments": "{}"}}]}}]
+		}`))
+	}))
+	defer server.Close()
+
+	p := NewOpenAICompatible("gemini-key", server.URL+"/v1beta/openai", "google")
+	resp, err := p.Chat(t.Context(), ChatRequest{
+		Model:    "gemini-3.8-flash",
+		Messages: []Message{{Role: "user", Content: "list my models"}},
+		Tools:    []ToolDef{{Name: "list_models", Description: "List models", Parameters: json.RawMessage(`{"type":"object","properties":{}}`)}},
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if path != "/v1beta/openai/chat/completions" {
+		t.Fatalf("request path = %q, want /v1beta/openai/chat/completions", path)
+	}
+	if auth != "Bearer gemini-key" {
+		t.Fatalf("Authorization = %q", auth)
+	}
+	if len(resp.Message.ToolCalls) != 1 || resp.Message.ToolCalls[0].Name != "list_models" {
+		t.Fatalf("tool calls = %+v", resp.Message.ToolCalls)
+	}
+}

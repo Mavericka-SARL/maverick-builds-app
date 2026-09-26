@@ -1540,8 +1540,10 @@ func (s *AiProposalWithSummaryStatus) UnmarshalText(data []byte) error {
 
 // Ref: #/components/schemas/AiSaveSettingsRequest
 type AiSaveSettingsRequest struct {
+	// Openai, anthropic, google, mistral or deepseek; anything else is refused.
 	Provider OptString `json:"provider"`
-	Model    OptString `json:"model"`
+	// Any model ID the provider offers; empty means the provider's default model.
+	Model OptString `json:"model"`
 	// Omit to keep the existing stored key.
 	APIKey OptString `json:"api_key"`
 }
@@ -19047,6 +19049,7 @@ type TenantAISettingsProvider string
 const (
 	TenantAISettingsProviderOpenai    TenantAISettingsProvider = "openai"
 	TenantAISettingsProviderAnthropic TenantAISettingsProvider = "anthropic"
+	TenantAISettingsProviderGoogle    TenantAISettingsProvider = "google"
 	TenantAISettingsProviderMistral   TenantAISettingsProvider = "mistral"
 	TenantAISettingsProviderDeepseek  TenantAISettingsProvider = "deepseek"
 )
@@ -19056,6 +19059,7 @@ func (TenantAISettingsProvider) AllValues() []TenantAISettingsProvider {
 	return []TenantAISettingsProvider{
 		TenantAISettingsProviderOpenai,
 		TenantAISettingsProviderAnthropic,
+		TenantAISettingsProviderGoogle,
 		TenantAISettingsProviderMistral,
 		TenantAISettingsProviderDeepseek,
 	}
@@ -19067,6 +19071,8 @@ func (s TenantAISettingsProvider) MarshalText() ([]byte, error) {
 	case TenantAISettingsProviderOpenai:
 		return []byte(s), nil
 	case TenantAISettingsProviderAnthropic:
+		return []byte(s), nil
+	case TenantAISettingsProviderGoogle:
 		return []byte(s), nil
 	case TenantAISettingsProviderMistral:
 		return []byte(s), nil
@@ -19085,6 +19091,9 @@ func (s *TenantAISettingsProvider) UnmarshalText(data []byte) error {
 		return nil
 	case TenantAISettingsProviderAnthropic:
 		*s = TenantAISettingsProviderAnthropic
+		return nil
+	case TenantAISettingsProviderGoogle:
+		*s = TenantAISettingsProviderGoogle
 		return nil
 	case TenantAISettingsProviderMistral:
 		*s = TenantAISettingsProviderMistral

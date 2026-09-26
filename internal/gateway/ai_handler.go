@@ -32,14 +32,21 @@ var providerEnvKeys = map[string]string{
 	"anthropic": "ANTHROPIC_API_KEY",
 	"mistral":   "MISTRAL_API_KEY",
 	"deepseek":  "DEEPSEEK_API_KEY",
+	"google":    "GEMINI_API_KEY",
 }
 
-// providerDefaultModels is used when settings carry an empty model name.
+// GeminiOpenAIBaseURL is Google's OpenAI-compatible Gemini API.
+const GeminiOpenAIBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
+
+// providerDefaultModels is used when settings carry an empty model name. The
+// model itself is free text in both settings screens — providers ship new
+// models faster than a list here could follow — so these are only defaults.
 var providerDefaultModels = map[string]string{
 	"openai":    "gpt-4o-mini",
 	"anthropic": "claude-opus-4-8",
 	"mistral":   "mistral-large-latest",
 	"deepseek":  "deepseek-chat",
+	"google":    "gemini-3.8-flash",
 }
 
 // LLM call caps (SOW Phase 4). Each Chat() invocation counts as one call,
@@ -62,8 +69,11 @@ func buildProvider(provider, apiKey string) (providers.Provider, error) {
 		return providers.NewOpenAICompatible(apiKey, "https://api.mistral.ai/v1", "mistral"), nil
 	case "deepseek":
 		return providers.NewOpenAICompatible(apiKey, "https://api.deepseek.com/v1", "deepseek"), nil
+	case "google":
+		// Gemini's OpenAI-compatible endpoint: chat completions with tools.
+		return providers.NewOpenAICompatible(apiKey, GeminiOpenAIBaseURL, "google"), nil
 	default:
-		return nil, fmt.Errorf("unknown provider %q — use openai, anthropic, mistral, or deepseek", provider)
+		return nil, fmt.Errorf("unknown provider %q — use openai, anthropic, google, mistral, or deepseek", provider)
 	}
 }
 
@@ -1188,8 +1198,12 @@ func (h *handler) aiSaveSettings(w http.ResponseWriter, r *http.Request) {
 	if req.Provider == "" {
 		req.Provider = "openai"
 	}
-	if req.Model == "" {
-		req.Model = "gpt-4o-mini"
+	// A blank model stays blank: the provider's default is applied when the
+	// key is used (providerDefaultModels). Filling in an OpenAI model here gave
+	// every other provider a model it does not have.
+	if _, err := buildProvider(req.Provider, "probe"); err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
+		return
 	}
 	if err := h.aiChatStore(ctx).SaveSettings(ctx, a.UserID, req.Provider, req.Model, req.APIKey); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)

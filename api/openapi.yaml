@@ -147,7 +147,7 @@ components:
         scope: { $ref: "#/components/schemas/SettingsScope" }
         provider:
           type: string
-          enum: [openai, anthropic, mistral, deepseek]
+          enum: [openai, anthropic, google, mistral, deepseek]
         model:
           type: string
           description: Empty means the provider's default model.
@@ -1594,8 +1594,8 @@ components:
     AiSaveSettingsRequest:
       type: object
       properties:
-        provider: { type: string, default: openai }
-        model:    { type: string, default: gpt-4o-mini }
+        provider: { type: string, default: openai, description: "openai, anthropic, google, mistral or deepseek; anything else is refused" }
+        model:    { type: string, description: "Any model ID the provider offers; empty means the provider's default model" }
         api_key:  { type: string, description: "Omit to keep the existing stored key" }
 
     AiTestSettingsRequest:
