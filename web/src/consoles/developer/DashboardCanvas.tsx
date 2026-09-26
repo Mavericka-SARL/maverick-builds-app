@@ -943,7 +943,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
 
                   {/* Resize size tooltip */}
                   {isActive && interRef.current?.kind === "resize" && (
-                    <div style={{ position: "absolute", bottom: HANDLE_SIZE + 2, left: 6, fontSize: 10, color: "var(--color-brand-600)", background: "rgba(255,255,255,0.92)", borderRadius: 3, padding: "1px 4px", pointerEvents: "none" }}>
+                    <div style={{ position: "absolute", bottom: HANDLE_SIZE + 2, left: 6, fontSize: 10, color: "var(--color-brand-600)", background: "color-mix(in srgb, var(--color-surface) 92%, transparent)", borderRadius: 3, padding: "1px 4px", pointerEvents: "none" }}>
                       {r.w} × {r.h}
                     </div>
                   )}

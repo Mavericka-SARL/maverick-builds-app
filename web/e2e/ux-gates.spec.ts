@@ -173,8 +173,10 @@ const HEX_BUDGETS: Record<string, number> = {
   "consoles/business-admin/BusinessAdminConsole.tsx": 0,
   "consoles/platform-admin/PlatformAdminConsole.tsx": 0,
   "consoles/admin/UsersPanel.tsx": 0,
-  "consoles/dashboard/chartTypes.ts": 10, // approved data-viz palette
-  "consoles/dashboard/ChartWidgetEditor.tsx": 6,
+  // The series palette is design tokens (--color-chart-N) so it follows the
+  // light/dark theme.
+  "consoles/dashboard/chartTypes.ts": 0,
+  "consoles/dashboard/ChartWidgetEditor.tsx": 0,
   "consoles/dashboard/ChartWidget.tsx": 0,
 };
 const DEFAULT_BUDGET = 5; // any console file not listed above

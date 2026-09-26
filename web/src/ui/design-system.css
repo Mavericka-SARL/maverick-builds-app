@@ -1,4 +1,8 @@
 :root {
+  /* Native controls, scrollbars and form widgets follow the theme; the dark
+     block below switches this to dark. */
+  color-scheme: light;
+
   /* Brand */
   --color-brand-50: #eef2ff;
   --color-brand-100: #e0e7ff;
@@ -6,6 +10,12 @@
   --color-brand-500: #6366f1;
   --color-brand-600: #4f46e5;
   --color-brand-700: #4338ca;
+  /* A solid brand fill under inverse text (primary buttons, active pills).
+     Separate from 600/700 because in the dark theme those become light
+     shades for brand-coloured text, which white text cannot sit on. Tenant
+     branding (branding/brand.ts) sets the dark values alongside its own. */
+  --color-brand-solid: var(--color-brand-600);
+  --color-brand-solid-hover: var(--color-brand-700);
 
   /* Neutral */
   --color-page: #f7f8fb;
@@ -19,6 +29,7 @@
   --color-border-muted: #d1d5db;
   --color-border-strong: #cbd5e1;
   --color-focus: #2563eb;
+  --color-focus-ring: rgba(37, 99, 235, 0.12);
   --color-text: #111827;
   --color-text-strong: #374151;
   --color-text-muted: #64748b;
@@ -37,6 +48,16 @@
   --color-danger-bg: #fef2f2;
   --color-danger-border: #fecaca;
   --color-danger-accent: #ef4444;
+  /* Status text on its own tint (e.g. the unsaved-changes bar), and solid
+     status fills under inverse text — same split as --color-brand-solid. */
+  --color-danger-text: #b91c1c;
+  --color-warning-text: #92400e;
+  --color-danger-solid: var(--color-danger);
+  --color-danger-solid-hover: #b91c1c;
+  --color-success-solid: var(--color-success);
+  --color-info-solid: var(--color-info);
+  /* A neutral dark fill under inverse text (the workflow editor's idle Save). */
+  --color-neutral-solid: var(--color-text);
   --color-info: #0284c7;
   --color-info-bg: #f0f9ff;
   --color-info-border: #bae6fd;
@@ -67,16 +88,17 @@
   --color-widget-metric-text: #065f46;
   --color-widget-import-bg: #fff7ed;
   --color-widget-import-text: #9a3412;
-  --color-chart-1: #2563eb;
+  /* Chart series, in order (ChartWidget via CHART_COLORS). */
+  --color-chart-1: #4f46e5;
   --color-chart-2: #0891b2;
   --color-chart-3: #059669;
-  --color-chart-4: #ca8a04;
+  --color-chart-4: #d97706;
   --color-chart-5: #dc2626;
   --color-chart-6: #7c3aed;
   --color-chart-7: #db2777;
-  --color-chart-8: #0f766e;
-  --color-chart-9: #ea580c;
-  --color-chart-10: #475569;
+  --color-chart-8: #0284c7;
+  --color-chart-9: #16a34a;
+  --color-chart-10: #ea580c;
   /* Business console planning-grid pivot column-header accent family —
      deliberately not reusing the developer-console diagram/widget tokens
      above even where hex values happen to bit-match; those are scoped to
@@ -145,6 +167,9 @@
   --shadow-popover: 0 12px 32px rgba(15, 23, 42, 0.16);
   --shadow-modal: 0 24px 56px rgba(15, 23, 42, 0.22);
 
+  --color-skeleton-base: #f1f5f9;
+  --color-skeleton-shine: #e2e8f0;
+
   /* Typography */
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -159,6 +184,148 @@
   /* Motion */
   --motion-fast: 120ms ease;
   --motion-normal: 180ms ease;
+}
+
+/* ── Dark theme ────────────────────────────────────────────────────────────────
+   Chosen per person in the account menu (theme/theme.ts), which sets
+   data-theme on <html>; index.html sets it before first paint so a dark
+   page never flashes white. Only colour tokens change — every component
+   reads these, so nothing else needs a dark variant. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Brand: 50–200 are background tints, so they darken; 600/700 are used as
+     brand-coloured text and borders, so they lighten. Solid fills keep a
+     mid tone that white text still reads on. */
+  --color-brand-50: #1d2343;
+  --color-brand-100: #232953;
+  --color-brand-200: #2e336e;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #8a8cf4;
+  --color-brand-700: #a9abf7;
+  --color-brand-solid: #4f46e5;
+  --color-brand-solid-hover: #6366f1;
+
+  /* Neutral */
+  --color-page: #0b1120;
+  --color-surface: #111827;
+  --color-surface-subtle: #151e2e;
+  --color-surface-muted: #1f2937;
+  --color-surface-faint: #131c2b;
+  --color-surface-raised: #1a2332;
+  --color-overlay: rgba(0, 0, 0, 0.6);
+  --color-border: #263142;
+  --color-border-muted: #334155;
+  --color-border-strong: #3f4b5e;
+  --color-focus: #60a5fa;
+  --color-focus-ring: rgba(96, 165, 250, 0.25);
+  --color-text: #e5e7eb;
+  --color-text-strong: #cbd5e1;
+  --color-text-muted: #94a3b8;
+  --color-text-subtle: #6f7d92;
+  --color-text-quiet: #9ca3af;
+  --color-text-inverse: #ffffff;
+
+  /* Status */
+  --color-success: #4ade80;
+  --color-success-bg: #0f2a1c;
+  --color-success-border: #1f5134;
+  --color-warning: #fbbf24;
+  --color-warning-bg: #2a200b;
+  --color-warning-border: #5c4411;
+  --color-danger: #f87171;
+  --color-danger-bg: #2d1416;
+  --color-danger-border: #6b2327;
+  --color-danger-accent: #f87171;
+  --color-danger-text: #fca5a5;
+  --color-warning-text: #fcd34d;
+  --color-danger-solid: #dc2626;
+  --color-danger-solid-hover: #ef4444;
+  --color-success-solid: #16a34a;
+  --color-info-solid: #0284c7;
+  --color-neutral-solid: #374151;
+  --color-info: #38bdf8;
+  --color-info-bg: #0c2536;
+  --color-info-border: #164e6e;
+  --color-live: #4ade80;
+  --color-draft: #fbbf24;
+  --color-disabled: #6b7280;
+
+  /* Data visualization */
+  --color-diagram-input-bg: #172a46;
+  --color-diagram-input-border: #2f5f9e;
+  --color-diagram-calc-bg: #0f2a1c;
+  --color-diagram-calc-border: #2a6b45;
+  --color-widget-grid-text: #93c5fd;
+  --color-widget-chart-bg: #3a1328;
+  --color-widget-chart-text: #f9a8d4;
+  --color-widget-form-bg: #33260a;
+  --color-widget-form-text: #fcd34d;
+  --color-widget-integration-bg: #261b47;
+  --color-widget-integration-text: #c4b5fd;
+  --color-widget-metric-bg: #0c2a20;
+  --color-widget-metric-text: #6ee7b7;
+  --color-widget-import-bg: #2e1a0b;
+  --color-widget-import-text: #fdba74;
+  --color-chart-1: #818cf8;
+  --color-chart-2: #22d3ee;
+  --color-chart-3: #34d399;
+  --color-chart-4: #fbbf24;
+  --color-chart-5: #f87171;
+  --color-chart-6: #a78bfa;
+  --color-chart-7: #f472b6;
+  --color-chart-8: #38bdf8;
+  --color-chart-9: #4ade80;
+  --color-chart-10: #fb923c;
+  --color-grid-col-header-bg: #0e2a21;
+  --color-grid-col-header-border: #1f5a43;
+  --color-grid-col-header-text: #6ee7b7;
+  --color-grid-col-header-bg-soft: #0d241c;
+  --color-grid-col-header-border-soft: #1a4234;
+  --color-grid-calc-text: #93c5fd;
+  --color-grid-row-alt-bg: #141d2b;
+  --color-grid-input-bg: #13213a;
+  --color-grid-input-border: #2b4470;
+  --color-grid-input-hover-border: #5b86d6;
+  --color-selected: #60a5fa;
+  --color-selected-bg: #152542;
+  --color-warning-accent: #fbbf24;
+  --color-success-chip-bg: #0f2e1c;
+  --color-success-chip-text: #86efac;
+
+  /* Shadows: a dark page needs more opacity to show any lift at all. */
+  --shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --shadow-modal: 0 24px 56px rgba(0, 0, 0, 0.6);
+
+  --color-skeleton-base: #1a2332;
+  --color-skeleton-shine: #263142;
+}
+
+/* Recharts paints a few things in fixed light-theme colours: an inline white
+   tooltip whose text inherits (light-on-white in the dark theme), grey axis
+   ticks, a #ccc hover band and white line dots. Dark theme only, so the light
+   theme's charts are exactly as they were. */
+:root[data-theme="dark"] .recharts-default-tooltip {
+  background: var(--color-surface-raised) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-text);
+}
+:root[data-theme="dark"] .recharts-cartesian-axis-tick-value {
+  fill: var(--color-text-muted);
+}
+:root[data-theme="dark"] .recharts-cartesian-axis-line,
+:root[data-theme="dark"] .recharts-cartesian-axis-tick-line {
+  stroke: var(--color-border-strong);
+}
+:root[data-theme="dark"] .recharts-rectangle.recharts-tooltip-cursor {
+  fill: var(--color-surface-muted);
+}
+:root[data-theme="dark"] .recharts-curve.recharts-tooltip-cursor {
+  stroke: var(--color-border-strong);
+}
+:root[data-theme="dark"] .recharts-dot {
+  fill: var(--color-surface);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -227,14 +394,14 @@
 }
 
 .mvx-button--primary {
-  background: var(--color-brand-600);
-  border-color: var(--color-brand-600);
+  background: var(--color-brand-solid);
+  border-color: var(--color-brand-solid);
   color: var(--color-text-inverse);
 }
 
 .mvx-button--primary:hover:not(:disabled) {
-  background: var(--color-brand-700);
-  border-color: var(--color-brand-700);
+  background: var(--color-brand-solid-hover);
+  border-color: var(--color-brand-solid-hover);
 }
 
 .mvx-button--secondary {
@@ -260,14 +427,14 @@
 }
 
 .mvx-button--danger {
-  background: var(--color-danger);
-  border-color: var(--color-danger);
+  background: var(--color-danger-solid);
+  border-color: var(--color-danger-solid);
   color: var(--color-text-inverse);
 }
 
 .mvx-button--danger:hover:not(:disabled) {
-  background: #b91c1c;
-  border-color: #b91c1c;
+  background: var(--color-danger-solid-hover);
+  border-color: var(--color-danger-solid-hover);
 }
 
 .mvx-button--dangerSecondary {
@@ -363,7 +530,7 @@
 .mvx-select:focus,
 .mvx-textarea:focus {
   border-color: var(--color-focus);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  box-shadow: 0 0 0 3px var(--color-focus-ring);
   outline: none;
 }
 
@@ -998,7 +1165,7 @@
 }
 
 .mvx-tabs__count--active {
-  background: var(--color-brand-600);
+  background: var(--color-brand-solid);
   color: var(--color-text-inverse);
 }
 
@@ -1202,7 +1369,7 @@
 }
 
 .mvx-switch--checked {
-  background: var(--color-brand-600);
+  background: var(--color-brand-solid);
 }
 
 .mvx-switch__thumb {
@@ -1294,7 +1461,7 @@
 }
 
 .mvx-admin-avatar--tenant {
-  background: var(--color-brand-700);
+  background: var(--color-brand-solid-hover);
 }
 
 .mvx-admin-model {
@@ -1475,7 +1642,7 @@
 }
 
 .mvx-stepper__dot--done {
-  background: var(--color-brand-600);
+  background: var(--color-brand-solid);
   color: var(--color-text-inverse);
 }
 
@@ -1502,7 +1669,7 @@
 }
 
 .mvx-stepper__bar--done {
-  background: var(--color-brand-600);
+  background: var(--color-brand-solid);
 }
 
 /* Import wizard drop zone */
@@ -1552,7 +1719,7 @@
 
 .mvx-chat-bubble--user {
   border-radius: 14px 14px 4px 14px;
-  background: var(--color-brand-600);
+  background: var(--color-brand-solid);
   color: var(--color-text-inverse);
 }
 
@@ -1595,7 +1762,7 @@
   font-weight: 600;
   font-family: inherit;
   color: var(--color-text-inverse);
-  background: var(--color-brand-600);
+  background: var(--color-brand-solid);
   border-radius: var(--radius-card);
 }
 
@@ -2151,7 +2318,7 @@
 .mvx-skeleton {
   display: block;
   border-radius: var(--radius-button);
-  background: linear-gradient(90deg, #f1f5f9 0%, #e2e8f0 45%, #f1f5f9 90%);
+  background: linear-gradient(90deg, var(--color-skeleton-base) 0%, var(--color-skeleton-shine) 45%, var(--color-skeleton-base) 90%);
   background-size: 200% 100%;
   animation: mvx-skeleton 1.2s ease-in-out infinite;
 }
@@ -2303,6 +2470,23 @@
   color: var(--color-text-muted);
 }
 
+.mvx-user-menu__theme {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 6px;
+}
+.mvx-user-menu__theme-label {
+  font-size: 13px;
+  color: var(--color-text);
+}
+.mvx-user-menu__theme .mvx-segmented__button {
+  padding-left: 7px;
+  padding-right: 7px;
+}
 .mvx-user-menu__action {
   width: 100%;
   display: flex;

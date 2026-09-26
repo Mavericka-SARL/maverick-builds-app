@@ -29,6 +29,25 @@ controls, data states, tables, builder panels, and status badges.
 - Use Lucide icons for common actions.
 - Prefer shared primitives over raw `button`, `input`, `select`, or `textarea`.
 
+## Light and dark themes
+
+Each person picks Light, Dark or System in the account menu
+(`src/theme/theme.ts`; stored in the browser, Light by default). The choice
+sets `data-theme` on `<html>`, and `:root[data-theme="dark"]` in
+`design-system.css` redefines the colour tokens. That is the only place a dark
+colour lives, so:
+
+- Colour comes from a `--color-*` token, never a literal. A hex, `#fff` or
+  `white` in a component stays light in the dark theme.
+- A fill under `--color-text-inverse` uses a `*-solid` token
+  (`--color-brand-solid`, `--color-danger-solid`, `--color-success-solid`,
+  `--color-info-solid`, `--color-neutral-solid`), not `--color-brand-600` or
+  a status colour. In the dark theme those become light shades for text, and
+  white text on them is unreadable.
+- Status text on its own tint uses `--color-danger-text` /
+  `--color-warning-text`.
+- A tenant brand colour gets both sets derived in `branding/brand.ts`.
+
 ## Files
 
 - `design-system.css`: tokens and shared classes.
@@ -95,8 +114,8 @@ flow, shared grid cell state classes, import stepper/dropzone, selected AI
 states, and per-file hard-coded-color budgets. These mocked dev-mode checks do
 not cover every console tab, real Keycloak, or full database workflows.
 
-`chartTypes.ts` has an explicit data-visualization palette exception. Existing
-console files also have temporary numerical color budgets so the gate prevents
+Chart series colours are the `--color-chart-1..10` tokens (`chartTypes.ts`),
+so they follow the theme like everything else. Existing console files also have temporary numerical color budgets so the gate prevents
 regression while legacy styles are migrated; a passing budget does not make
 those colors design-system tokens. Lower budgets as files are cleaned and do
 not raise them without review.

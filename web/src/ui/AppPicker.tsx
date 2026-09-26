@@ -38,16 +38,16 @@ export function AppPicker() {
       style={{
         marginBottom: 4,
         padding: "8px 10px",
-        background: "#f3f4f6",
+        background: "var(--color-surface-muted)",
         borderRadius: 6,
-        border: "1px solid #e5e7eb",
+        border: "1px solid var(--color-border)",
       }}
     >
       <div
         style={{
           fontSize: 10,
           fontWeight: 700,
-          color: "#9ca3af",
+          color: "var(--color-text-subtle)",
           textTransform: "uppercase",
           letterSpacing: "0.05em",
           marginBottom: 4,
@@ -62,11 +62,11 @@ export function AppPicker() {
           width: "100%",
           fontSize: 12,
           padding: "3px 6px",
-          border: "1px solid #d1d5db",
+          border: "1px solid var(--color-border-muted)",
           borderRadius: 4,
-          background: "#fff",
+          background: "var(--color-surface)",
           cursor: "pointer",
-          color: "#111827",
+          color: "var(--color-text)",
         }}
       >
         {!currentId && <option value="">— select app —</option>}
@@ -77,7 +77,7 @@ export function AppPicker() {
         ))}
       </select>
       {current && (
-        <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 3 }}>
+        <div style={{ fontSize: 10, color: "var(--color-text-subtle)", marginTop: 3 }}>
           {current.workspace_name}
         </div>
       )}

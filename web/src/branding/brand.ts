@@ -36,7 +36,9 @@ export function useBrandRefresh(identity: string | undefined) {
 // ── colour derivation ─────────────────────────────────────────────────────────
 // One brand colour becomes the six tokens the design system uses: the colour
 // itself as 500, two darker steps for hover/active, three tints for
-// backgrounds. Kept in sRGB for predictability.
+// backgrounds. Kept in sRGB for predictability. The dark theme gets its own
+// set (brandDarkTokens): tints over the dark surface, lighter 600/700 for
+// brand-coloured text, and a mid-tone solid fill for white text to sit on.
 
 function hexToRgb(hex: string): [number, number, number] | null {
   const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
@@ -48,6 +50,9 @@ const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
 const toHex = (rgb: [number, number, number]) => "#" + rgb.map((c) => clamp(c).toString(16).padStart(2, "0")).join("");
 const mixWhite = (rgb: [number, number, number], t: number): [number, number, number] => [rgb[0] + (255 - rgb[0]) * t, rgb[1] + (255 - rgb[1]) * t, rgb[2] + (255 - rgb[2]) * t];
 const darken = (rgb: [number, number, number], f: number): [number, number, number] => [rgb[0] * f, rgb[1] * f, rgb[2] * f];
+/** --color-surface in the dark theme (design-system.css). */
+const DARK_SURFACE: [number, number, number] = [0x11, 0x18, 0x27];
+const tintOver = (rgb: [number, number, number], base: [number, number, number], t: number): [number, number, number] => [base[0] + (rgb[0] - base[0]) * t, base[1] + (rgb[1] - base[1]) * t, base[2] + (rgb[2] - base[2]) * t];
 
 /** The token values for one brand colour; exported for tests. */
 export function brandTokens(hex: string): Record<string, string> | null {
@@ -63,7 +68,27 @@ export function brandTokens(hex: string): Record<string, string> | null {
   };
 }
 
-const TOKEN_NAMES = ["--color-brand-50", "--color-brand-100", "--color-brand-200", "--color-brand-500", "--color-brand-600", "--color-brand-700"];
+/** The dark-theme token values for one brand colour; exported for tests. */
+export function brandDarkTokens(hex: string): Record<string, string> | null {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return null;
+  return {
+    "--color-brand-50": toHex(tintOver(rgb, DARK_SURFACE, 0.14)),
+    "--color-brand-100": toHex(tintOver(rgb, DARK_SURFACE, 0.22)),
+    "--color-brand-200": toHex(tintOver(rgb, DARK_SURFACE, 0.35)),
+    "--color-brand-500": toHex(rgb),
+    "--color-brand-600": toHex(mixWhite(rgb, 0.25)),
+    "--color-brand-700": toHex(mixWhite(rgb, 0.45)),
+    "--color-brand-solid": toHex(darken(rgb, 0.85)),
+    "--color-brand-solid-hover": toHex(rgb),
+  };
+}
+
+/** Brand tokens go in a stylesheet rather than inline on <html>: an inline
+ *  value would beat the dark theme's, and each theme needs its own. The
+ *  doubled :root outranks design-system.css's :root / :root[data-theme]. */
+const BRAND_STYLE_ID = "mvx-brand-tokens";
+const declarations = (tokens: Record<string, string>) => Object.entries(tokens).map(([k, v]) => `${k}: ${v};`).join(" ");
 
 /** The icon links as the document was served with them (index.html), read
  *  once at load — before any brand has been applied. */
@@ -75,11 +100,18 @@ const DEFAULT_ICONS = Array.from(document.querySelectorAll<HTMLLinkElement>("lin
 
 /** Applies a brand to the document: title, favicon, colour tokens. */
 export function applyBrand(b: BrandView) {
-  const root = document.documentElement;
-  const tokens = b.configured && b.brand_color ? brandTokens(b.brand_color) : null;
-  for (const name of TOKEN_NAMES) {
-    if (tokens) root.style.setProperty(name, tokens[name]);
-    else root.style.removeProperty(name);
+  const light = b.configured && b.brand_color ? brandTokens(b.brand_color) : null;
+  const dark = b.configured && b.brand_color ? brandDarkTokens(b.brand_color) : null;
+  let style = document.getElementById(BRAND_STYLE_ID);
+  if (light && dark) {
+    if (!style) {
+      style = document.createElement("style");
+      style.id = BRAND_STYLE_ID;
+      document.head.appendChild(style);
+    }
+    style.textContent = `:root:root { ${declarations(light)} }\n:root:root[data-theme="dark"] { ${declarations(dark)} }`;
+  } else {
+    style?.remove();
   }
   document.title = b.configured && b.product_name ? b.product_name : "maverickbuilds.app";
   // Every icon link, not just the first: index.html declares an SVG and an

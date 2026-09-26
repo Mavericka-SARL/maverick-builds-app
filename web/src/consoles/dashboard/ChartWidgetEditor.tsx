@@ -6,11 +6,11 @@ import { defaultLeafCode } from "../dashboardLayout";
 import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
 
 const inputS: React.CSSProperties = {
-  border: "1px solid #d1d5db", borderRadius: 4, padding: "4px 8px",
-  fontSize: 12, width: "100%", background: "#fff",
+  border: "1px solid var(--color-border-muted)", borderRadius: 4, padding: "4px 8px",
+  fontSize: 12, width: "100%", background: "var(--color-surface)", color: "var(--color-text)",
 };
 const lbl: React.CSSProperties = {
-  display: "block", fontSize: 10, color: "#9ca3af", marginBottom: 2, fontWeight: 600,
+  display: "block", fontSize: 10, color: "var(--color-text-subtle)", marginBottom: 2, fontWeight: 600,
 };
 
 type ChartDraft = Partial<GridChartConfig>;
@@ -106,11 +106,11 @@ export function ChartWidgetEditor({ gridDefId, draft, ctx, onChange }: ChartWidg
   }
 
   if (!gridDefId) {
-    return <p style={{ fontSize: 12, color: "#9ca3af" }}>Select a grid source first.</p>;
+    return <p style={{ fontSize: 12, color: "var(--color-text-subtle)" }}>Select a grid source first.</p>;
   }
 
   if (!gridData) {
-    return <p style={{ fontSize: 12, color: "#9ca3af" }}>Loading grid…</p>;
+    return <p style={{ fontSize: 12, color: "var(--color-text-subtle)" }}>Loading grid…</p>;
   }
 
   return (
@@ -207,7 +207,7 @@ export function ChartWidgetEditor({ gridDefId, draft, ctx, onChange }: ChartWidg
               const currentCode = contextDefaults[dim.id] ?? defaultLeafCode(dim) ?? "";
               return (
                 <div key={dim.id}>
-                  <label style={{ display: "block", fontSize: 10, color: "#6b7280", marginBottom: 2 }}>{dim.name}</label>
+                  <label style={{ display: "block", fontSize: 10, color: "var(--color-text-quiet)", marginBottom: 2 }}>{dim.name}</label>
                   <HierarchicalMemberSelect
                     ariaLabel={dim.name}
                     members={dim.members}

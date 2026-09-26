@@ -6,6 +6,13 @@ import { RoleBadge } from "../ui";
 import { useAuth } from "../auth/useAuth";
 import { api } from "../api/client";
 import { EDITION_LABELS, useLicense } from "../license/useLicense";
+import { useThemePreference, type ThemePreference } from "../theme/theme";
+
+const THEMES: { id: ThemePreference; label: string }[] = [
+  { id: "light", label: "Light" },
+  { id: "dark", label: "Dark" },
+  { id: "system", label: "System" },
+];
 
 /**
  * The account control in the top-right corner, beside the notification bell.
@@ -26,6 +33,9 @@ import { EDITION_LABELS, useLicense } from "../license/useLicense";
  * Playwright, but document.elementFromPoint over it returned the page behind:
  * every click went straight through. The bell escapes this by using Drawer,
  * which is its own overlay.
+ *
+ * The theme switch lives here too: it is a per-person setting, and this is
+ * the one menu every role opens.
  */
 function initialsOf(name: string, email: string): string {
   const source = name.trim() || email.trim();
@@ -39,6 +49,7 @@ export function UserMenu() {
   const { logout } = useAuth();
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: api.getMe });
   const license = useLicense();
+  const [theme, setTheme] = useThemePreference();
   const [open, setOpen] = useState(false);
   const [style, setStyle] = useState<React.CSSProperties>({});
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -122,6 +133,25 @@ export function UserMenu() {
               </div>
             </div>
           )}
+          {/* Styled as the SegmentedControl, but as menu radio items: this
+              panel is a role="menu", whose items must be menu items. */}
+          <div className="mvx-user-menu__theme">
+            <span className="mvx-user-menu__theme-label" id="mvx-user-menu-theme">Theme</span>
+            <div className="mvx-segmented" role="group" aria-labelledby="mvx-user-menu-theme">
+              {THEMES.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={theme === t.id}
+                  className={["mvx-segmented__button", theme === t.id ? "mvx-segmented__button--active" : ""].filter(Boolean).join(" ")}
+                  onClick={() => setTheme(t.id)}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <button
             type="button"
             role="menuitem"

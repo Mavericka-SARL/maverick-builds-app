@@ -280,7 +280,7 @@ function WorkflowList({ applicationId, revisionId, onOpen }: ListProps) {
             <button
               onClick={() => deleteMutation.mutate(confirmDelete!)}
               disabled={deleteMutation.isPending}
-              style={{ ...btnPrimary, background: "var(--color-danger)" }}>
+              style={{ ...btnPrimary, background: "var(--color-danger-solid)" }}>
               Delete
             </button>
           </div>

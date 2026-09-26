@@ -57,7 +57,7 @@ export const inputStyle: React.CSSProperties = {
 };
 
 export const btnPrimary: React.CSSProperties = {
-  padding: "7px 14px", borderRadius: "var(--radius-button)", border: "none", background: "var(--color-brand-600)",
+  padding: "7px 14px", borderRadius: "var(--radius-button)", border: "none", background: "var(--color-brand-solid)",
   color: "var(--color-text-inverse)", fontSize: 13, cursor: "pointer", fontWeight: 600,
 };
 

@@ -20,13 +20,13 @@ export function UnsavedChangesBar({ onSave, onCancel, saveLabel = "Save", saving
       alignItems: "center",
       justifyContent: "space-between",
       padding: "10px 16px",
-      background: error ? "#fef2f2" : "#fffbeb",
-      border: error ? "1px solid #fecaca" : "1px solid #fde68a",
+      background: error ? "var(--color-danger-bg)" : "var(--color-warning-bg)",
+      border: error ? "1px solid var(--color-danger-border)" : "1px solid var(--color-warning-border)",
       borderRadius: "var(--radius-button)",
       marginBottom: 16,
       gap: 12,
     }}>
-      <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: error ? "#b91c1c" : "#92400e", fontWeight: 500 }}>
+      <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: error ? "var(--color-danger-text)" : "var(--color-warning-text)", fontWeight: 500 }}>
         <AlertCircle size={14} />
         {error ?? "Unsaved changes"}
       </span>

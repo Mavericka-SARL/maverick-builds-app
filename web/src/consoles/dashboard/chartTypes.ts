@@ -1,9 +1,7 @@
 import type { GridChartConfig, GridChartType } from "../../api/client";
 
-export const CHART_COLORS = [
-  "#4f46e5", "#0891b2", "#059669", "#d97706", "#dc2626",
-  "#7c3aed", "#db2777", "#0284c7", "#16a34a", "#ea580c",
-];
+// Series colours are design tokens so they follow the light/dark theme.
+export const CHART_COLORS = Array.from({ length: 10 }, (_, i) => `var(--color-chart-${i + 1})`);
 
 // currencySymbol is a literal prefix (e.g. "$", "€"), not an ISO 4217 code —
 // metric_def.format_currency stores whatever symbol a developer typed in

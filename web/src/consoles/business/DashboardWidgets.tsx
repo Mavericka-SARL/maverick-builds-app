@@ -325,7 +325,7 @@ export function IntegrationButtonWidget({ integrationId, label, buttonColor }: {
     <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%" }}>
       <input ref={fileRef} type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={handleFile} />
       <CommandButton
-        color={run.isSuccess ? "var(--color-info)" : buttonColor}
+        color={run.isSuccess ? "var(--color-info-solid)" : buttonColor}
         onClick={() => {
           setResult(null);
           if (isSheets) run.mutate(undefined);
@@ -406,7 +406,7 @@ export function AutomationButtonWidget({ ruleId, label, buttonColor, ctx, static
   return (
     <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", gap: 4 }}>
       <CommandButton
-        color={trigger.isSuccess ? "var(--color-success)" : (buttonColor ?? "var(--color-success)")}
+        color={trigger.isSuccess ? "var(--color-success-solid)" : (buttonColor ?? "var(--color-success-solid)")}
         onClick={run}
         disabled={trigger.isPending || rulesLoading}
       >

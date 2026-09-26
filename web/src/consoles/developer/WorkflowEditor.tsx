@@ -290,7 +290,7 @@ export function WorkflowEditor({ defId, applicationId, revisionId, onBack }: Edi
         <button
           onClick={() => effective && saveMutation.mutate(effective)}
           disabled={saveMutation.isPending || !isDirty}
-          style={{ ...btnPrimary, background: saveState === "saved" ? "var(--color-success)" : saveState === "error" ? "var(--color-danger)" : "var(--color-text)" }}>
+          style={{ ...btnPrimary, background: saveState === "saved" ? "var(--color-success-solid)" : saveState === "error" ? "var(--color-danger-solid)" : "var(--color-neutral-solid)" }}>
           {saveLabel}
         </button>
         {effective.status !== "published" && (
@@ -298,7 +298,7 @@ export function WorkflowEditor({ defId, applicationId, revisionId, onBack }: Edi
             onClick={() => publishMutation.mutate()}
             disabled={publishMutation.isPending || isDirty}
             title={isDirty ? "Save first" : "Publish"}
-            style={{ ...btnPrimary, background: "var(--color-success)", opacity: isDirty ? 0.5 : 1 }}>
+            style={{ ...btnPrimary, background: "var(--color-success-solid)", opacity: isDirty ? 0.5 : 1 }}>
             Publish
           </button>
         )}
