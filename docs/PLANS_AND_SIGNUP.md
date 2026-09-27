@@ -119,7 +119,9 @@ minute (the per-tenant state is cached for 60 seconds).
 changes the plan. A request that belongs to no tenant (a platform-level
 developer, an admin acting across tenants) has no plan applied. The tenant of
 a request is the routed tenant in dedicated-database mode, else the
-application named by `X-App-Id`, else the caller's own tenant.
+application named by `X-App-Id`, else the caller's own tenant. A person's own
+display preferences (`PATCH /api/me/preferences`, e.g. the console theme) are
+never refused: they are not tenant data.
 
 Every refusal carries `contact_url` (`PLAN_CONTACT_URL`), which the console
 shows as "Change plan": a pricing page, or a `mailto:`.

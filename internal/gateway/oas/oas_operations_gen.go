@@ -245,6 +245,7 @@ const (
 	UpdateIntegrationConfigOperation      OperationName = "UpdateIntegrationConfig"
 	UpdateIntegrationConnectionOperation  OperationName = "UpdateIntegrationConnection"
 	UpdateMetricOperation                 OperationName = "UpdateMetric"
+	UpdateMyPreferencesOperation          OperationName = "UpdateMyPreferences"
 	UpdateNotificationSettingsOperation   OperationName = "UpdateNotificationSettings"
 	UpdateSsoSettingsOperation            OperationName = "UpdateSsoSettings"
 	UpdateTenantOperation                 OperationName = "UpdateTenant"

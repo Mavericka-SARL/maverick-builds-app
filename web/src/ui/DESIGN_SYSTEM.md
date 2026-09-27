@@ -32,8 +32,11 @@ controls, data states, tables, builder panels, and status badges.
 ## Light and dark themes
 
 Each person picks Light, Dark or System in the account menu
-(`src/theme/theme.ts`; stored in the browser, Light by default). The choice
-sets `data-theme` on `<html>`, and `:root[data-theme="dark"]` in
+(`src/theme/theme.ts`; Light by default). The choice is saved on their
+account (`PATCH /api/me/preferences`, read back in `/api/me`), so it follows
+them across devices; the browser keeps a copy only so `index.html` can apply
+it before first paint, and the account's value wins once `/api/me` loads. The
+choice sets `data-theme` on `<html>`, and `:root[data-theme="dark"]` in
 `design-system.css` redefines the colour tokens. That is the only place a dark
 colour lives, so:
 

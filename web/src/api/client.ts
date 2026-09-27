@@ -288,6 +288,14 @@ export interface Me {
   customer_id?: string;
   plan?: PlanState;
   contact_url?: string;
+  /** The person's own display choices, kept on their account. An absent key
+   *  means the console default; null means they could not be read (unknown,
+   *  not "nothing chosen"). */
+  preferences?: Preferences | null;
+}
+
+export interface Preferences {
+  theme?: "light" | "dark" | "system";
 }
 
 export interface LegalInfo {
@@ -1610,6 +1618,9 @@ export const api = {
 
   getAdminMe: () => apiFetch<{ user_id: string; email: string; display_name: string; roles: string[] }>("/api/admin/me"),
   getMe: () => apiFetch<Me>("/api/me"),
+  /** A partial update of the caller's own preferences; null resets a key. */
+  updateMyPreferences: (patch: { [K in keyof Preferences]?: Preferences[K] | null }) =>
+    apiFetch<{ preferences: Preferences }>("/api/me/preferences", { method: "PATCH", body: JSON.stringify(patch) }),
   // Public: no account yet. The sign-up page reads the terms, then registers.
   signupOptions: () => apiFetch<SignupOptions>("/api/signup/options"),
   /** Public: who operates this deployment and which documents it publishes. */

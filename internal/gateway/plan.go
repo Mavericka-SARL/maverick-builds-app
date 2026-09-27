@@ -152,11 +152,14 @@ func isMutation(method string) bool {
 // planGuard refuses mutating requests from a read-only tenant. Paths that
 // have no signed-in actor (sign-up, SCIM's token auth) pass through: their
 // handlers authenticate themselves, and SCIM's user creation meets the
-// user limit inside the service.
+// user limit inside the service. A person's own display preferences pass
+// too: they are not tenant data, and a tenant that has run out of room
+// should still be able to switch its console to dark.
 func (h *handler) planGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if h.plans == nil || !isMutation(r.Method) || !strings.HasPrefix(r.URL.Path, "/api/") ||
-			strings.HasPrefix(r.URL.Path, "/api/signup") || strings.HasPrefix(r.URL.Path, "/api/scim/") {
+			strings.HasPrefix(r.URL.Path, "/api/signup") || strings.HasPrefix(r.URL.Path, "/api/scim/") ||
+			(r.Method == http.MethodPatch && r.URL.Path == "/api/me/preferences") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -226,6 +229,10 @@ type meResponse struct {
 	*actor
 	Plan       *plan.State `json:"plan,omitempty"`
 	ContactURL string      `json:"contact_url,omitempty"`
+	// The person's own display choices (preferences.go); null when they
+	// could not be read, {} when none are chosen — no omitempty, which would
+	// erase that difference.
+	Preferences map[string]json.RawMessage `json:"preferences"`
 }
 
 // ── administration ───────────────────────────────────────────────────────────

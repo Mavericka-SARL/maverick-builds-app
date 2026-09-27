@@ -2266,6 +2266,15 @@ func (UnimplementedHandler) UpdateMetric(ctx context.Context, req *UpdateMetricR
 	return r, ht.ErrNotImplemented
 }
 
+// UpdateMyPreferences implements updateMyPreferences operation.
+//
+// Update the caller's own display preferences (any signed-in role; only their own account).
+//
+// PATCH /api/me/preferences
+func (UnimplementedHandler) UpdateMyPreferences(ctx context.Context, req *PreferencesUpdate) (r UpdateMyPreferencesRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // UpdateNotificationSettings implements updateNotificationSettings operation.
 //
 // Update the outbound notification settings (administrators).

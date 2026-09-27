@@ -77,7 +77,8 @@ user with a role; the handler then applies the scope checks above.
 
 Enterprise and commercial features answer **403** with the feature name when
 the deployment's licence does not include them. A tenant whose plan has ended
-or run out of storage is read-only: mutations answer **402**.
+or run out of storage is read-only: mutations answer **402** (except a
+person's own display preferences, `PATCH /api/me/preferences`).
 
 ## Access and error behavior
 

@@ -72,7 +72,7 @@ var (
 	rn205AllowedHeaders = map[string]string{
 		"GET": "Authorization",
 	}
-	rn279AllowedHeaders = map[string]string{
+	rn280AllowedHeaders = map[string]string{
 		"PUT": "Authorization,Content-Type",
 	}
 	rn46AllowedHeaders = map[string]string{
@@ -151,7 +151,7 @@ var (
 	rn117AllowedHeaders = map[string]string{
 		"POST": "Authorization",
 	}
-	rn277AllowedHeaders = map[string]string{
+	rn278AllowedHeaders = map[string]string{
 		"POST": "Authorization,Content-Type",
 	}
 	rn92AllowedHeaders = map[string]string{
@@ -225,7 +225,7 @@ var (
 		"GET": "Authorization",
 		"PUT": "Authorization,Content-Type",
 	}
-	rn282AllowedHeaders = map[string]string{
+	rn283AllowedHeaders = map[string]string{
 		"POST": "Authorization,Content-Type",
 	}
 	rn144AllowedHeaders = map[string]string{
@@ -388,7 +388,7 @@ var (
 	rn265AllowedHeaders = map[string]string{
 		"POST": "Authorization",
 	}
-	rn280AllowedHeaders = map[string]string{
+	rn281AllowedHeaders = map[string]string{
 		"POST": "Authorization",
 	}
 	rn75AllowedHeaders = map[string]string{
@@ -456,7 +456,7 @@ var (
 	rn167AllowedHeaders = map[string]string{
 		"GET": "Authorization",
 	}
-	rn281AllowedHeaders = map[string]string{
+	rn282AllowedHeaders = map[string]string{
 		"POST": "Authorization,Content-Type",
 	}
 	rn206AllowedHeaders = map[string]string{
@@ -521,6 +521,9 @@ var (
 	}
 	rn156AllowedHeaders = map[string]string{
 		"GET": "Authorization",
+	}
+	rn275AllowedHeaders = map[string]string{
+		"PATCH": "Authorization,Content-Type",
 	}
 	rn203AllowedHeaders = map[string]string{
 		"GET": "Authorization",
@@ -590,7 +593,7 @@ var (
 	rn260AllowedHeaders = map[string]string{
 		"POST": "Authorization,Content-Type",
 	}
-	rn276AllowedHeaders = map[string]string{
+	rn277AllowedHeaders = map[string]string{
 		"PATCH": "Authorization,Content-Type",
 	}
 	rn157AllowedHeaders = map[string]string{
@@ -1290,7 +1293,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 									default:
 										s.notAllowed(w, r, notAllowedParams{
 											allowedMethods: "PUT",
-											allowedHeaders: rn279AllowedHeaders,
+											allowedHeaders: rn280AllowedHeaders,
 											acceptPost:     "",
 											acceptPatch:    "",
 										})
@@ -2071,7 +2074,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 												default:
 													s.notAllowed(w, r, notAllowedParams{
 														allowedMethods: "POST",
-														allowedHeaders: rn277AllowedHeaders,
+														allowedHeaders: rn278AllowedHeaders,
 														acceptPost:     "multipart/form-data",
 														acceptPatch:    "",
 													})
@@ -2897,7 +2900,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						default:
 							s.notAllowed(w, r, notAllowedParams{
 								allowedMethods: "POST",
-								allowedHeaders: rn282AllowedHeaders,
+								allowedHeaders: rn283AllowedHeaders,
 								acceptPost:     "application/json",
 								acceptPatch:    "",
 							})
@@ -4588,7 +4591,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 														default:
 															s.notAllowed(w, r, notAllowedParams{
 																allowedMethods: "POST",
-																allowedHeaders: rn280AllowedHeaders,
+																allowedHeaders: rn281AllowedHeaders,
 																acceptPost:     "",
 																acceptPatch:    "",
 															})
@@ -5281,7 +5284,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 														default:
 															s.notAllowed(w, r, notAllowedParams{
 																allowedMethods: "POST",
-																allowedHeaders: rn281AllowedHeaders,
+																allowedHeaders: rn282AllowedHeaders,
 																acceptPost:     "application/json",
 																acceptPatch:    "",
 															})
@@ -6015,6 +6018,31 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						return
 					}
 					switch elem[0] {
+					case '/': // Prefix: "/preferences"
+
+						if l := len("/preferences"); len(elem) >= l && elem[0:l] == "/preferences" {
+							elem = elem[l:]
+						} else {
+							break
+						}
+
+						if len(elem) == 0 {
+							// Leaf node.
+							switch r.Method {
+							case "PATCH":
+								s.handleUpdateMyPreferencesRequest([0]string{}, elemIsEscaped, w, r)
+							default:
+								s.notAllowed(w, r, notAllowedParams{
+									allowedMethods: "PATCH",
+									allowedHeaders: rn275AllowedHeaders,
+									acceptPost:     "",
+									acceptPatch:    "application/json",
+								})
+							}
+
+							return
+						}
+
 					case 't': // Prefix: "trics"
 
 						if l := len("trics"); len(elem) >= l && elem[0:l] == "trics" {
@@ -6736,7 +6764,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 								default:
 									s.notAllowed(w, r, notAllowedParams{
 										allowedMethods: "PATCH",
-										allowedHeaders: rn276AllowedHeaders,
+										allowedHeaders: rn277AllowedHeaders,
 										acceptPost:     "",
 										acceptPatch:    "application/json",
 									})
@@ -12468,6 +12496,31 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 						}
 					}
 					switch elem[0] {
+					case '/': // Prefix: "/preferences"
+
+						if l := len("/preferences"); len(elem) >= l && elem[0:l] == "/preferences" {
+							elem = elem[l:]
+						} else {
+							break
+						}
+
+						if len(elem) == 0 {
+							// Leaf node.
+							switch method {
+							case "PATCH":
+								r.name = UpdateMyPreferencesOperation
+								r.summary = "Update the caller's own display preferences (any signed-in role; only their own account)"
+								r.operationID = "updateMyPreferences"
+								r.operationGroup = ""
+								r.pathPattern = "/api/me/preferences"
+								r.args = args
+								r.count = 0
+								return r, true
+							default:
+								return
+							}
+						}
+
 					case 't': // Prefix: "trics"
 
 						if l := len("trics"); len(elem) >= l && elem[0:l] == "trics" {

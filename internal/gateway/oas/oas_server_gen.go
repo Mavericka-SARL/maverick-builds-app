@@ -1545,6 +1545,12 @@ type Handler interface {
 	//
 	// PATCH /api/developer/metrics/{id}
 	UpdateMetric(ctx context.Context, req *UpdateMetricRequest, params UpdateMetricParams) (UpdateMetricRes, error)
+	// UpdateMyPreferences implements updateMyPreferences operation.
+	//
+	// Update the caller's own display preferences (any signed-in role; only their own account).
+	//
+	// PATCH /api/me/preferences
+	UpdateMyPreferences(ctx context.Context, req *PreferencesUpdate) (UpdateMyPreferencesRes, error)
 	// UpdateNotificationSettings implements updateNotificationSettings operation.
 	//
 	// Update the outbound notification settings (administrators).

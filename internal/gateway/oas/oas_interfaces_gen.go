@@ -649,6 +649,10 @@ type UpdateMetricRes interface {
 	updateMetricRes()
 }
 
+type UpdateMyPreferencesRes interface {
+	updateMyPreferencesRes()
+}
+
 type UpdateNotificationSettingsRes interface {
 	updateNotificationSettingsRes()
 }

@@ -304,6 +304,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/apps", "any", cors(h.userApps))
 	register("GET", "/api/demo", "any", cors(h.demo))
 	register("GET", "/api/me", "any", cors(h.me))
+	register("PATCH", "/api/me/preferences", "any", cors(h.updateMyPreferences))
 	register("GET", "/api/license", "any", cors(h.licenseInfo))
 	// Self-service sign-up (public; signup.go) and the plan catalog
 	// (plan.go). Both handlers guard themselves.
@@ -1464,7 +1465,7 @@ func (h *handler) me(w http.ResponseWriter, r *http.Request) {
 	if !act.hasRole("platform_admin") {
 		cid = h.requestCustomerID(ctx, r, act)
 	}
-	jsonOK(w, meResponse{actor: act, Plan: h.planStateFor(ctx, cid), ContactURL: h.signupCfg.ContactURL})
+	jsonOK(w, meResponse{actor: act, Plan: h.planStateFor(ctx, cid), ContactURL: h.signupCfg.ContactURL, Preferences: h.preferencesFor(ctx, act.UserID)})
 }
 
 func (h *handler) demo(w http.ResponseWriter, r *http.Request) {

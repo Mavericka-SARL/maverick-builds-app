@@ -45,13 +45,14 @@ func (s *ActiveRevisionRequest) SetRevisionName(val string) {
 
 // Ref: #/components/schemas/Actor
 type Actor struct {
-	UserID      uuid.UUID    `json:"user_id"`
-	Email       string       `json:"email"`
-	DisplayName string       `json:"display_name"`
-	Roles       []string     `json:"roles"`
-	CustomerID  OptUUID      `json:"customer_id"`
-	Plan        OptPlanState `json:"plan"`
-	ContactURL  OptString    `json:"contact_url"`
+	UserID      uuid.UUID         `json:"user_id"`
+	Email       string            `json:"email"`
+	DisplayName string            `json:"display_name"`
+	Roles       []string          `json:"roles"`
+	CustomerID  OptUUID           `json:"customer_id"`
+	Plan        OptPlanState      `json:"plan"`
+	ContactURL  OptString         `json:"contact_url"`
+	Preferences OptNilPreferences `json:"preferences"`
 }
 
 // GetUserID returns the value of UserID.
@@ -89,6 +90,11 @@ func (s *Actor) GetContactURL() OptString {
 	return s.ContactURL
 }
 
+// GetPreferences returns the value of Preferences.
+func (s *Actor) GetPreferences() OptNilPreferences {
+	return s.Preferences
+}
+
 // SetUserID sets the value of UserID.
 func (s *Actor) SetUserID(val uuid.UUID) {
 	s.UserID = val
@@ -122,6 +128,11 @@ func (s *Actor) SetPlan(val OptPlanState) {
 // SetContactURL sets the value of ContactURL.
 func (s *Actor) SetContactURL(val OptString) {
 	s.ContactURL = val
+}
+
+// SetPreferences sets the value of Preferences.
+func (s *Actor) SetPreferences(val OptNilPreferences) {
+	s.Preferences = val
 }
 
 func (*Actor) getMeRes() {}
@@ -14663,6 +14674,132 @@ func (o OptNilInt) Or(d int) int {
 	return d
 }
 
+// NewOptNilPreferences returns new OptNilPreferences with value set to v.
+func NewOptNilPreferences(v Preferences) OptNilPreferences {
+	return OptNilPreferences{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptNilPreferences is optional nullable Preferences.
+type OptNilPreferences struct {
+	Value Preferences
+	Set   bool
+	Null  bool
+}
+
+// IsSet returns true if OptNilPreferences was set.
+func (o OptNilPreferences) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptNilPreferences) Reset() {
+	var v Preferences
+	o.Value = v
+	o.Set = false
+	o.Null = false
+}
+
+// SetTo sets value to v.
+func (o *OptNilPreferences) SetTo(v Preferences) {
+	o.Set = true
+	o.Null = false
+	o.Value = v
+}
+
+// IsNull returns true if value is Null.
+func (o OptNilPreferences) IsNull() bool { return o.Null }
+
+// SetToNull sets value to null.
+func (o *OptNilPreferences) SetToNull() {
+	o.Set = true
+	o.Null = true
+	var v Preferences
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptNilPreferences) Get() (v Preferences, ok bool) {
+	if o.Null {
+		return v, false
+	}
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptNilPreferences) Or(d Preferences) Preferences {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptNilPreferencesUpdateTheme returns new OptNilPreferencesUpdateTheme with value set to v.
+func NewOptNilPreferencesUpdateTheme(v PreferencesUpdateTheme) OptNilPreferencesUpdateTheme {
+	return OptNilPreferencesUpdateTheme{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptNilPreferencesUpdateTheme is optional nullable PreferencesUpdateTheme.
+type OptNilPreferencesUpdateTheme struct {
+	Value PreferencesUpdateTheme
+	Set   bool
+	Null  bool
+}
+
+// IsSet returns true if OptNilPreferencesUpdateTheme was set.
+func (o OptNilPreferencesUpdateTheme) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptNilPreferencesUpdateTheme) Reset() {
+	var v PreferencesUpdateTheme
+	o.Value = v
+	o.Set = false
+	o.Null = false
+}
+
+// SetTo sets value to v.
+func (o *OptNilPreferencesUpdateTheme) SetTo(v PreferencesUpdateTheme) {
+	o.Set = true
+	o.Null = false
+	o.Value = v
+}
+
+// IsNull returns true if value is Null.
+func (o OptNilPreferencesUpdateTheme) IsNull() bool { return o.Null }
+
+// SetToNull sets value to null.
+func (o *OptNilPreferencesUpdateTheme) SetToNull() {
+	o.Set = true
+	o.Null = true
+	var v PreferencesUpdateTheme
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptNilPreferencesUpdateTheme) Get() (v PreferencesUpdateTheme, ok bool) {
+	if o.Null {
+		return v, false
+	}
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptNilPreferencesUpdateTheme) Or(d PreferencesUpdateTheme) PreferencesUpdateTheme {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptNilString returns new OptNilString with value set to v.
 func NewOptNilString(v string) OptNilString {
 	return OptNilString{
@@ -14967,6 +15104,52 @@ func (o OptPlanStateCode) Get() (v PlanStateCode, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptPlanStateCode) Or(d PlanStateCode) PlanStateCode {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptPreferencesTheme returns new OptPreferencesTheme with value set to v.
+func NewOptPreferencesTheme(v PreferencesTheme) OptPreferencesTheme {
+	return OptPreferencesTheme{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptPreferencesTheme is optional PreferencesTheme.
+type OptPreferencesTheme struct {
+	Value PreferencesTheme
+	Set   bool
+}
+
+// IsSet returns true if OptPreferencesTheme was set.
+func (o OptPreferencesTheme) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptPreferencesTheme) Reset() {
+	var v PreferencesTheme
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptPreferencesTheme) SetTo(v PreferencesTheme) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptPreferencesTheme) Get() (v PreferencesTheme, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptPreferencesTheme) Or(d PreferencesTheme) PreferencesTheme {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -16603,6 +16786,149 @@ func (s *PlanStateLimitState) UnmarshalText(data []byte) error {
 		return nil
 	case PlanStateLimitStateOver:
 		*s = PlanStateLimitStateOver
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// Ref: #/components/schemas/Preferences
+type Preferences struct {
+	Theme OptPreferencesTheme `json:"theme"`
+}
+
+// GetTheme returns the value of Theme.
+func (s *Preferences) GetTheme() OptPreferencesTheme {
+	return s.Theme
+}
+
+// SetTheme sets the value of Theme.
+func (s *Preferences) SetTheme(val OptPreferencesTheme) {
+	s.Theme = val
+}
+
+// Ref: #/components/schemas/PreferencesResponse
+type PreferencesResponse struct {
+	Preferences Preferences `json:"preferences"`
+}
+
+// GetPreferences returns the value of Preferences.
+func (s *PreferencesResponse) GetPreferences() Preferences {
+	return s.Preferences
+}
+
+// SetPreferences sets the value of Preferences.
+func (s *PreferencesResponse) SetPreferences(val Preferences) {
+	s.Preferences = val
+}
+
+func (*PreferencesResponse) updateMyPreferencesRes() {}
+
+type PreferencesTheme string
+
+const (
+	PreferencesThemeLight  PreferencesTheme = "light"
+	PreferencesThemeDark   PreferencesTheme = "dark"
+	PreferencesThemeSystem PreferencesTheme = "system"
+)
+
+// AllValues returns all PreferencesTheme values.
+func (PreferencesTheme) AllValues() []PreferencesTheme {
+	return []PreferencesTheme{
+		PreferencesThemeLight,
+		PreferencesThemeDark,
+		PreferencesThemeSystem,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s PreferencesTheme) MarshalText() ([]byte, error) {
+	switch s {
+	case PreferencesThemeLight:
+		return []byte(s), nil
+	case PreferencesThemeDark:
+		return []byte(s), nil
+	case PreferencesThemeSystem:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *PreferencesTheme) UnmarshalText(data []byte) error {
+	switch PreferencesTheme(data) {
+	case PreferencesThemeLight:
+		*s = PreferencesThemeLight
+		return nil
+	case PreferencesThemeDark:
+		*s = PreferencesThemeDark
+		return nil
+	case PreferencesThemeSystem:
+		*s = PreferencesThemeSystem
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// Ref: #/components/schemas/PreferencesUpdate
+type PreferencesUpdate struct {
+	Theme OptNilPreferencesUpdateTheme `json:"theme"`
+}
+
+// GetTheme returns the value of Theme.
+func (s *PreferencesUpdate) GetTheme() OptNilPreferencesUpdateTheme {
+	return s.Theme
+}
+
+// SetTheme sets the value of Theme.
+func (s *PreferencesUpdate) SetTheme(val OptNilPreferencesUpdateTheme) {
+	s.Theme = val
+}
+
+type PreferencesUpdateTheme string
+
+const (
+	PreferencesUpdateThemeLight  PreferencesUpdateTheme = "light"
+	PreferencesUpdateThemeDark   PreferencesUpdateTheme = "dark"
+	PreferencesUpdateThemeSystem PreferencesUpdateTheme = "system"
+)
+
+// AllValues returns all PreferencesUpdateTheme values.
+func (PreferencesUpdateTheme) AllValues() []PreferencesUpdateTheme {
+	return []PreferencesUpdateTheme{
+		PreferencesUpdateThemeLight,
+		PreferencesUpdateThemeDark,
+		PreferencesUpdateThemeSystem,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s PreferencesUpdateTheme) MarshalText() ([]byte, error) {
+	switch s {
+	case PreferencesUpdateThemeLight:
+		return []byte(s), nil
+	case PreferencesUpdateThemeDark:
+		return []byte(s), nil
+	case PreferencesUpdateThemeSystem:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *PreferencesUpdateTheme) UnmarshalText(data []byte) error {
+	switch PreferencesUpdateTheme(data) {
+	case PreferencesUpdateThemeLight:
+		*s = PreferencesUpdateThemeLight
+		return nil
+	case PreferencesUpdateThemeDark:
+		*s = PreferencesUpdateThemeDark
+		return nil
+	case PreferencesUpdateThemeSystem:
+		*s = PreferencesUpdateThemeSystem
 		return nil
 	default:
 		return errors.Errorf("invalid value: %q", data)
@@ -20709,6 +21035,21 @@ func (s *UpdateMetricRequestTimeSummary) UnmarshalText(data []byte) error {
 		return errors.Errorf("invalid value: %q", data)
 	}
 }
+
+// UpdateMyPreferencesBadRequest is response for UpdateMyPreferences operation.
+type UpdateMyPreferencesBadRequest struct{}
+
+func (*UpdateMyPreferencesBadRequest) updateMyPreferencesRes() {}
+
+// UpdateMyPreferencesNotFound is response for UpdateMyPreferences operation.
+type UpdateMyPreferencesNotFound struct{}
+
+func (*UpdateMyPreferencesNotFound) updateMyPreferencesRes() {}
+
+// UpdateMyPreferencesUnauthorized is response for UpdateMyPreferences operation.
+type UpdateMyPreferencesUnauthorized struct{}
+
+func (*UpdateMyPreferencesUnauthorized) updateMyPreferencesRes() {}
 
 // UpdateNotificationSettingsForbidden is response for UpdateNotificationSettings operation.
 type UpdateNotificationSettingsForbidden struct{}

@@ -254,6 +254,7 @@ var operationRolesBearerAuth = map[string][]string{
 	UpdateIntegrationConfigOperation:      []string{},
 	UpdateIntegrationConnectionOperation:  []string{},
 	UpdateMetricOperation:                 []string{},
+	UpdateMyPreferencesOperation:          []string{},
 	UpdateNotificationSettingsOperation:   []string{},
 	UpdateSsoSettingsOperation:            []string{},
 	UpdateTenantOperation:                 []string{},

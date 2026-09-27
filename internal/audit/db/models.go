@@ -1297,6 +1297,7 @@ type IdentityUser struct {
 	ExternalID  *string            `json:"external_id"`
 	ScimManaged bool               `json:"scim_managed"`
 	LastSeenAt  pgtype.Timestamptz `json:"last_seen_at"`
+	Preferences json.RawMessage    `json:"preferences"`
 }
 
 type IdentityUserAccessRule struct {

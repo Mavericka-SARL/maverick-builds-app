@@ -387,6 +387,31 @@ components:
         # "change the plan" leads.
         plan:         { $ref: "#/components/schemas/PlanState" }
         contact_url:  { type: string }
+        # /api/me only: the person's own display choices; null when they
+        # could not be read (not the same as {}, nothing chosen).
+        preferences:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Preferences" }]
+
+    # A person's own display choices, kept on their account. Only these keys
+    # are stored; an absent key means the console default.
+    Preferences:
+      type: object
+      properties:
+        theme: { type: string, enum: [light, dark, system] }
+
+    # A partial update: keys left out are unchanged, null resets a key to
+    # the console default, an unknown key or value is refused (400).
+    PreferencesUpdate:
+      type: object
+      properties:
+        theme: { type: string, enum: [light, dark, system, null], nullable: true }
+
+    PreferencesResponse:
+      type: object
+      required: [preferences]
+      properties:
+        preferences: { $ref: "#/components/schemas/Preferences" }
 
     PlanLimits:
       type: object
@@ -1979,6 +2004,25 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Actor" }
         "401": { description: Unauthorized }
+
+  /api/me/preferences:
+    patch:
+      operationId: updateMyPreferences
+      summary: Update the caller's own display preferences (any signed-in role; only their own account)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PreferencesUpdate" }
+      responses:
+        "200":
+          description: The preferences as now stored
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PreferencesResponse" }
+        "400": { description: Unknown preference or value }
+        "401": { description: Unauthorized }
+        "404": { description: Account not found }
 
   /api/notifications/settings:
     get:
