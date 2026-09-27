@@ -72,6 +72,17 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
   });
   const { confirm, confirmElement } = useConfirm();
 
+  // A grid matches by its own name or by a metric or dimension it holds;
+  // the open one stays in view.
+  const [search, setSearch] = useState("");
+  const q = search.trim().toLowerCase();
+  const metricName = new Map((model?.metrics ?? []).map(m => [m.id, `${m.name} ${m.label}`.toLowerCase()]));
+  const dimName = new Map((dims as DevDimension[]).map(d => [d.id, d.name.toLowerCase()]));
+  const shownGrids = (grids as GridDef[]).filter(g => !q || g.id === expandedGrid
+    || g.name.toLowerCase().includes(q)
+    || g.metric_ids.some(id => metricName.get(id)?.includes(q))
+    || g.dimension_ids.some(id => dimName.get(id)?.includes(q)));
+
   return (
     <div>
       <Toolbar className="mvx-toolbar--spaced">
@@ -81,6 +92,8 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
           </span>
         </ToolbarGroup>
         <ToolbarGroup align="end">
+          <SearchInput value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search grids, metrics, dimensions…" width={300} />
           <Button leadingIcon={showCreate ? undefined : <Plus size={14} />} onClick={() => setShowCreate((v) => !v)}>
             {showCreate ? "Cancel" : "New grid"}
           </Button>
@@ -100,9 +113,11 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
 
       {(grids as GridDef[]).length === 0 ? (
         <EmptyState label="No grids yet. Create one above." />
+      ) : shownGrids.length === 0 ? (
+        <EmptyState label={`No grids match "${search.trim()}".`} />
       ) : (
         <div className="mvx-admin-stack">
-          {(grids as GridDef[]).map((g) => (
+          {shownGrids.map((g) => (
             <div key={g.id} className="mvx-admin-object">
               <div className="mvx-admin-object__header" style={expandedGrid === g.id ? undefined : { borderBottom: "none" }}>
                 <div className="mvx-admin-object__title">

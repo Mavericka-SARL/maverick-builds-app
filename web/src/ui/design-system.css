@@ -797,6 +797,46 @@
   color: var(--color-text);
 }
 
+/* Drag handle on the sidebar's right edge (AppShell): wider than the line
+   it shows so it is easy to grab; the line appears on hover, on keyboard
+   focus and while dragging. The collapsed rail has no handle. */
+.mvx-app-shell__resize {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 2;
+}
+
+.mvx-app-shell__resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background var(--motion-fast);
+}
+
+.mvx-app-shell__resize:hover::after,
+.mvx-app-shell__resize:focus-visible::after,
+.mvx-app-shell--resizing .mvx-app-shell__resize::after {
+  background: var(--color-brand-500);
+}
+
+.mvx-app-shell__resize:focus-visible {
+  outline: none;
+}
+
+.mvx-app-shell--resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
 /* ── Collapsed sidebar (icon rail) ─────────────────────────────────────────
    ChatGPT-style toggle: the sidebar narrows to an icon-only rail; nav items
    keep working via their icons (each carries its label as a title tooltip,
@@ -1122,6 +1162,14 @@
   background: var(--color-brand-50);
   border-color: var(--color-brand-200);
   color: var(--color-brand-700);
+}
+
+/* TagInput: removable tag chips followed by the "Add tag…" field. */
+.mvx-tag-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
 }
 
 .mvx-tabs {
@@ -2360,6 +2408,11 @@
     width: 100%;
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+
+  /* A full-width top bar has no width to drag. */
+  .mvx-app-shell__resize {
+    display: none;
   }
 
   /* Below 900px the sidebar becomes a full-width top bar — an icon rail

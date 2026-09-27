@@ -249,6 +249,15 @@ field supplies each dimension's member — the field must be a "dimension" field
 in a metric dimensioned by department and period therefore needs a dimension field for each, mapped here.
 update_form_integration {"form_integration_id", ...} and delete_form_integration {"form_integration_id"}.
 
+## Tags
+Metrics, dimensions and dashboards carry free-form tags, which the console filters its lists by (list_metrics,
+list_dimensions and list_dashboards show them). Give them at creation — "tags": ["finance", "headcount"] on
+create_metric, create_dimension or create_dashboard — or on update_metric (left out, the tags stay as they are).
+To change the tags of anything that already exists use set_tags {"kind": "metric" | "dimension" | "dashboard",
+"id": "<its id, exact name, or created in step N>", "tags": [...]}: it REPLACES the whole list, so to add one
+tag send the existing ones too, and [] clears them. Tags are stored lower case with spaces as hyphens
+("Cost Centre" becomes "cost-centre").
+
 ## propose_actions format
 Never put more than 50 steps in one propose_actions call — the server rejects larger
 proposals. For a bulk job (say, moving hundreds of members), propose the first batch of
@@ -256,7 +265,7 @@ up to 50, tell the developer how many remain, and continue with the next batch a
 they confirm.
 
 Call propose_actions with an ordered "steps" list. Each step needs:
-- tool: one of create_metric | update_metric | delete_metric | create_dimension | add_dimension_member | update_dimension_member | create_grid | add_grid_metric | add_grid_dimension | create_dashboard | add_dashboard_widget | create_revision | create_workflow_def | update_workflow_def | delete_workflow_def | create_form_def | update_form_def | delete_form_def | create_automation_rule | update_automation_rule | delete_automation_rule | create_business_role | create_form_integration | update_form_integration | delete_form_integration | set_user_access_rules
+- tool: one of create_metric | update_metric | delete_metric | create_dimension | add_dimension_member | update_dimension_member | create_grid | add_grid_metric | add_grid_dimension | create_dashboard | add_dashboard_widget | set_tags | create_revision | create_workflow_def | update_workflow_def | delete_workflow_def | create_form_def | update_form_def | delete_form_def | create_automation_rule | update_automation_rule | delete_automation_rule | create_business_role | create_form_integration | update_form_integration | delete_form_integration | set_user_access_rules
 - description: one plain-English line shown to the developer
 - params: all fields the tool requires
 

@@ -19,6 +19,7 @@ export interface DevMetric {
   depends_on: string[];
   depended_by: string[];
   calc_error?: string;
+  tags?: string[];
 }
 
 export type DimensionType = "standard" | "time";
@@ -496,6 +497,7 @@ export interface DevDimension {
   dimension_type: DimensionType;       // explicit and immutable after creation
   time_granularity?: TimeGranularity;  // time dimensions only
   fiscal_year_start_month?: number;    // time dimensions only
+  tags?: string[];                     // omitted when empty
   members: DevDimensionMember[];       // time members in chronological order
 }
 
@@ -1589,7 +1591,7 @@ export const api = {
   getDevDimensions: (revisionId?: string) =>
     apiFetch<DevDimension[]>(`/api/developer/dimensions${revisionId ? `?revision_id=${revisionId}` : ""}`),
 
-  addMetric: (body: { name: string; is_input: boolean; formula: string; revision_id?: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary }) =>
+  addMetric: (body: { name: string; is_input: boolean; formula: string; revision_id?: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[] }) =>
     apiFetch<{ id: string; status: string }>("/api/developer/metrics", {
       method: "POST",
       body: JSON.stringify(body),
@@ -1785,13 +1787,14 @@ export const api = {
 
   deleteMetric: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/metrics/${id}`, { method: "DELETE" }),
-  updateMetric: (id: string, body: { name: string; formula: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary }) =>
+  updateMetric: (id: string, body: { name: string; formula: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[] }) =>
     apiFetch<{ status: string; recalc: Array<{ revision: string; metric: string; value: number | null }> }>(
       `/api/developer/metrics/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 
-  createDimension: (body: { name: string; agg_rule?: string; revision_id?: string; parent_dimension_id?: string | null; dimension_type: DimensionType; time_granularity?: TimeGranularity; fiscal_year_start_month?: number }) =>
+  createDimension: (body: { name: string; agg_rule?: string; revision_id?: string; parent_dimension_id?: string | null; dimension_type: DimensionType; time_granularity?: TimeGranularity; fiscal_year_start_month?: number; tags?: string[] }) =>
     apiFetch<{ id: string; status: string }>("/api/developer/dimensions", { method: "POST", body: JSON.stringify(body) }),
-  updateDimension: (id: string, body: { name: string; agg_rule?: string; parent_dimension_id?: string | null }) =>
+  // A partial update: a field left out keeps its value; parent_dimension_id: null detaches.
+  updateDimension: (id: string, body: { name?: string; agg_rule?: string; parent_dimension_id?: string | null; tags?: string[] }) =>
     apiFetch<{ status: string }>(`/api/developer/dimensions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteDimension: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/dimensions/${id}`, { method: "DELETE" }),

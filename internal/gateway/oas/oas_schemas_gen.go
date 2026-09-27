@@ -4662,6 +4662,7 @@ type CreateDimensionRequest struct {
 	RevisionID OptUUID   `json:"revision_id"`
 	// Not allowed on a time dimension.
 	ParentDimensionID OptNilUUID `json:"parent_dimension_id"`
+	Tags              []string   `json:"tags"`
 	// Omitted defaults to standard. Only a dimension created as time supports time-series formulas; the
 	// name never implies it. Immutable after creation.
 	DimensionType OptCreateDimensionRequestDimensionType `json:"dimension_type"`
@@ -4689,6 +4690,11 @@ func (s *CreateDimensionRequest) GetRevisionID() OptUUID {
 // GetParentDimensionID returns the value of ParentDimensionID.
 func (s *CreateDimensionRequest) GetParentDimensionID() OptNilUUID {
 	return s.ParentDimensionID
+}
+
+// GetTags returns the value of Tags.
+func (s *CreateDimensionRequest) GetTags() []string {
+	return s.Tags
 }
 
 // GetDimensionType returns the value of DimensionType.
@@ -4724,6 +4730,11 @@ func (s *CreateDimensionRequest) SetRevisionID(val OptUUID) {
 // SetParentDimensionID sets the value of ParentDimensionID.
 func (s *CreateDimensionRequest) SetParentDimensionID(val OptNilUUID) {
 	s.ParentDimensionID = val
+}
+
+// SetTags sets the value of Tags.
+func (s *CreateDimensionRequest) SetTags(val []string) {
+	s.Tags = val
 }
 
 // SetDimensionType sets the value of DimensionType.
@@ -5320,6 +5331,7 @@ type CreateMetricRequest struct {
 	Format         OptString `json:"format"`
 	FormatDecimals OptInt    `json:"format_decimals"`
 	FormatCurrency OptString `json:"format_currency"`
+	Tags           []string  `json:"tags"`
 	// How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
 	// dimension): sum for flows, last for a closing balance, first for an opening balance, none when a
 	// time total is meaningless.
@@ -5366,6 +5378,11 @@ func (s *CreateMetricRequest) GetFormatCurrency() OptString {
 	return s.FormatCurrency
 }
 
+// GetTags returns the value of Tags.
+func (s *CreateMetricRequest) GetTags() []string {
+	return s.Tags
+}
+
 // GetTimeSummary returns the value of TimeSummary.
 func (s *CreateMetricRequest) GetTimeSummary() OptCreateMetricRequestTimeSummary {
 	return s.TimeSummary
@@ -5409,6 +5426,11 @@ func (s *CreateMetricRequest) SetFormatDecimals(val OptInt) {
 // SetFormatCurrency sets the value of FormatCurrency.
 func (s *CreateMetricRequest) SetFormatCurrency(val OptString) {
 	s.FormatCurrency = val
+}
+
+// SetTags sets the value of Tags.
+func (s *CreateMetricRequest) SetTags(val []string) {
+	s.Tags = val
 }
 
 // SetTimeSummary sets the value of TimeSummary.
@@ -6915,6 +6937,8 @@ type Dimension struct {
 	TimeGranularity OptDimensionTimeGranularity `json:"time_granularity"`
 	// Time dimensions only.
 	FiscalYearStartMonth OptInt `json:"fiscal_year_start_month"`
+	// Free-form labels the developer console filters by; omitted when empty.
+	Tags []string `json:"tags"`
 	// Time members in chronological order.
 	Members []DimensionMember `json:"members"`
 }
@@ -6952,6 +6976,11 @@ func (s *Dimension) GetTimeGranularity() OptDimensionTimeGranularity {
 // GetFiscalYearStartMonth returns the value of FiscalYearStartMonth.
 func (s *Dimension) GetFiscalYearStartMonth() OptInt {
 	return s.FiscalYearStartMonth
+}
+
+// GetTags returns the value of Tags.
+func (s *Dimension) GetTags() []string {
+	return s.Tags
 }
 
 // GetMembers returns the value of Members.
@@ -6992,6 +7021,11 @@ func (s *Dimension) SetTimeGranularity(val OptDimensionTimeGranularity) {
 // SetFiscalYearStartMonth sets the value of FiscalYearStartMonth.
 func (s *Dimension) SetFiscalYearStartMonth(val OptInt) {
 	s.FiscalYearStartMonth = val
+}
+
+// SetTags sets the value of Tags.
+func (s *Dimension) SetTags(val []string) {
+	s.Tags = val
 }
 
 // SetMembers sets the value of Members.
@@ -11595,6 +11629,8 @@ type MetricDef struct {
 	DependsOn []string `json:"depends_on"`
 	// Names of metrics whose formula references this one.
 	DependedBy []string `json:"depended_by"`
+	// Free-form labels the developer console filters by.
+	Tags []string `json:"tags"`
 }
 
 // GetID returns the value of ID.
@@ -11657,6 +11693,11 @@ func (s *MetricDef) GetDependedBy() []string {
 	return s.DependedBy
 }
 
+// GetTags returns the value of Tags.
+func (s *MetricDef) GetTags() []string {
+	return s.Tags
+}
+
 // SetID sets the value of ID.
 func (s *MetricDef) SetID(val uuid.UUID) {
 	s.ID = val
@@ -11715,6 +11756,11 @@ func (s *MetricDef) SetDependsOn(val []string) {
 // SetDependedBy sets the value of DependedBy.
 func (s *MetricDef) SetDependedBy(val []string) {
 	s.DependedBy = val
+}
+
+// SetTags sets the value of Tags.
+func (s *MetricDef) SetTags(val []string) {
+	s.Tags = val
 }
 
 // How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
@@ -20452,11 +20498,14 @@ func (s *UpdateDimensionPropertyOK) SetStatus(val OptString) {
 	s.Status = val
 }
 
+// A partial update: a field left out keeps its value.
 // Ref: #/components/schemas/UpdateDimensionRequest
 type UpdateDimensionRequest struct {
-	Name              OptString  `json:"name"`
-	AggRule           OptString  `json:"agg_rule"`
+	Name    OptString `json:"name"`
+	AggRule OptString `json:"agg_rule"`
+	// Send null to detach the dimension from its parent.
 	ParentDimensionID OptNilUUID `json:"parent_dimension_id"`
+	Tags              []string   `json:"tags"`
 }
 
 // GetName returns the value of Name.
@@ -20474,6 +20523,11 @@ func (s *UpdateDimensionRequest) GetParentDimensionID() OptNilUUID {
 	return s.ParentDimensionID
 }
 
+// GetTags returns the value of Tags.
+func (s *UpdateDimensionRequest) GetTags() []string {
+	return s.Tags
+}
+
 // SetName sets the value of Name.
 func (s *UpdateDimensionRequest) SetName(val OptString) {
 	s.Name = val
@@ -20487,6 +20541,11 @@ func (s *UpdateDimensionRequest) SetAggRule(val OptString) {
 // SetParentDimensionID sets the value of ParentDimensionID.
 func (s *UpdateDimensionRequest) SetParentDimensionID(val OptNilUUID) {
 	s.ParentDimensionID = val
+}
+
+// SetTags sets the value of Tags.
+func (s *UpdateDimensionRequest) SetTags(val []string) {
+	s.Tags = val
 }
 
 type UpdateFolderOK struct {
@@ -20875,7 +20934,9 @@ func (s *UpdateMetricOKRecalcItem) SetValue(val OptNilFloat64) {
 
 // Ref: #/components/schemas/UpdateMetricRequest
 type UpdateMetricRequest struct {
-	Name           OptString `json:"name"`
+	Name OptString `json:"name"`
+	// Omitted keeps the metric's tags.
+	Tags           []string  `json:"tags"`
 	Formula        OptString `json:"formula"`
 	AggRule        OptString `json:"agg_rule"`
 	Format         OptString `json:"format"`
@@ -20890,6 +20951,11 @@ type UpdateMetricRequest struct {
 // GetName returns the value of Name.
 func (s *UpdateMetricRequest) GetName() OptString {
 	return s.Name
+}
+
+// GetTags returns the value of Tags.
+func (s *UpdateMetricRequest) GetTags() []string {
+	return s.Tags
 }
 
 // GetFormula returns the value of Formula.
@@ -20925,6 +20991,11 @@ func (s *UpdateMetricRequest) GetTimeSummary() OptUpdateMetricRequestTimeSummary
 // SetName sets the value of Name.
 func (s *UpdateMetricRequest) SetName(val OptString) {
 	s.Name = val
+}
+
+// SetTags sets the value of Tags.
+func (s *UpdateMetricRequest) SetTags(val []string) {
+	s.Tags = val
 }
 
 // SetFormula sets the value of Formula.

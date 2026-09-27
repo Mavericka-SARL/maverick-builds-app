@@ -27,13 +27,14 @@
 <figure><img src="img/12-users.png" alt="Users screen with the user table and the Invite user button"><figcaption>Users of the tenant with their roles and workspace assignments.</figcaption></figure>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
+<tr><td><b>Search name, e-mail, role, workspace…</b></td><td>Keeps the people whose name or e-mail matches, or who hold a matching role, or a role in a matching workspace or tenant ("n of m users"). The person being edited stays in view.</td></tr>
 <tr><td><b>Invite user</b></td><td><b>Email</b>, <b>First name</b>, <b>Last name</b>, <b>Initial Role</b>, <b>Workspace</b>. The person receives an invitation to set up their account; the email is the sign-in identity and cannot be changed later.</td></tr>
 <tr><td>Role controls</td><td>A developer can grant and revoke <b>business_admin</b> and <b>business_user</b> only. Developer, tenant admin and platform admin roles are granted by administrators.</td></tr>
 <tr><td><b>Workspace roles</b></td><td>Place a person into a workspace with a business role. The <b>Resource access</b> section (which applications and models a person may open) is shown to administrators only.</td></tr>
 <tr><td>Delete user</td><td>Confirm <b>Delete user?</b>: removes the person and revokes all their access. You cannot delete your own account.</td></tr>
 </table>
 <h3>Where the rest of access is configured</h3>
-<p>Three things decide what a business user sees and may change. All three live in the <b>Business Admin</b> console (sidebar group <b>Admin</b>), which a developer sees only when they also hold the business_admin role or ask a business admin:</p>
+<p>Three things decide what a business user sees and may change. All three live in the <b>Business Admin</b> console (sidebar group <b>Business Admin</b>), which a developer sees only when they also hold the business_admin role or ask a business admin:</p>
 <ul>
   <li><b>Roles.</b> Named business roles ("Budget Approvers", "Regional Managers") with members. Workflow tasks and approvals are assigned to these roles or to the platform roles.</li>
   <li><b>Dashboard access.</b> Per role, tick the dashboards its members may open (<b>Save dashboard access</b>). A dashboard on no role is invisible to business users.</li>

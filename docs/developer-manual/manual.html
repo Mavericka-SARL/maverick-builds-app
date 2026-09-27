@@ -79,7 +79,7 @@
 <tr><td>CRUD</td><td>Forms, form-to-metric posting, imports, integrations</td><td>Submit and manage records that feed the plan</td></tr>
 <tr><td>Execution</td><td>Workflows, triggers, notifications</td><td>Start approvals, act on tasks in their inbox, get notified</td></tr>
 </table>
-<p>The console is one application with one sidebar. Roles are additive: each role adds groups to the sidebar, never a second console. A developer sees the <b>Build</b> group (Models, Metrics, Dimensions, Forms, Grids, Dashboards, Workflows, Triggers, Integrations, Dependency Graph, AI Developer) and the <b>Govern</b> group (Users). A developer who also holds business_admin sees the business <b>Plan</b> and <b>Admin</b> groups as well; a tenant or platform administrator sees the administration groups.</p>
+<p>The console is one application with one sidebar. Roles are additive: each role adds groups to the sidebar, never a second console. A developer sees the <b>Build</b> group (Models, Metrics, Dimensions, Forms, Grids, Dashboards, Workflows, Triggers, Integrations, Dependency Graph, AI Developer) and the <b>Govern</b> group (Users). A developer who also holds business_admin sees the business <b>Run</b> and <b>Business Admin</b> groups as well; a tenant or platform administrator sees the administration groups.</p>
 <h3>The five roles</h3>
 <table>
 <tr><th style="width:18%">Role</th><th>What it does</th><th style="width:34%">Relation to the developer</th></tr>
@@ -220,12 +220,13 @@
 <h3>The list</h3>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
-<tr><td><b>Search metrics…</b></td><td>Filters by name or label; the footer reads "n results of m metrics".</td></tr>
+<tr><td><b>Search metrics…</b></td><td>Filters by name, label, formula or tag; the footer reads "n results of m metrics".</td></tr>
+<tr><td>Tag chips</td><td>One chip per tag used on a metric, beside the search. Choosing one shows only the metrics carrying it; choosing it again, or a tag on a row, clears or switches the filter.</td></tr>
 <tr><td>Header line</td><td>App and model name and the model's short id, so you can confirm what you are editing.</td></tr>
 <tr><td><b>Used by</b></td><td>The calculated metrics whose formulas reference this row. This is the dependency graph in table form.</td></tr>
 <tr><td>Edit icon</td><td>Turns the row into an inline editor (below).</td></tr>
 <tr><td>Delete icon</td><td>Confirm <b>Delete metric?</b>: "This removes the metric from all formulas that reference it." Dependents are recalculated afterwards.</td></tr>
-<tr><td><b>Add metric</b> / <b>Cancel</b></td><td>Opens the add form under the list.</td></tr>
+<tr><td><b>Add metric</b> / <b>Cancel</b></td><td>Opens the add form under the list. Its last field, <b>Tags</b>, takes free-form labels: type one and press Enter or comma. Tags are stored lower case with spaces as hyphens, and the row editor has the same field.</td></tr>
 </table>
 <h3>The add form</h3>
 <figure><img src="img/20-metric-add-form.png" alt="Add metric form with name, type, format, formula and aggregation rule"><figcaption>Adding a calculated metric. Formula references are checked as you type; the button stays disabled while a reference is unknown.</figcaption></figure>
@@ -255,12 +256,14 @@
 <h3>Controls</h3>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
-<tr><td><b>New dimension</b> / <b>Cancel</b></td><td>Opens the form: <b>Name</b> (placeholder <code>department</code>), <b>Dimension type</b> (Standard or Time — required), then either <b>Parent dimension (optional)</b> for Standard, or <b>Granularity</b> (day, week, month, quarter, half year, year, custom) and <b>Fiscal year starts</b> (a month) for Time. <b>Create</b>. The type, granularity and fiscal year cannot be changed later; create a new dimension instead.</td></tr>
+<tr><td><b>New dimension</b> / <b>Cancel</b></td><td>Opens the form: <b>Name</b> (placeholder <code>department</code>), <b>Dimension type</b> (Standard or Time — required), then either <b>Parent dimension (optional)</b> for Standard, or <b>Granularity</b> (day, week, month, quarter, half year, year, custom) and <b>Fiscal year starts</b> (a month) for Time, and <b>Tags</b>. <b>Create</b>. The type, granularity and fiscal year cannot be changed later; create a new dimension instead.</td></tr>
+<tr><td><b>Search dimensions, members, properties…</b></td><td>Keeps the cards that match. A match on the dimension's name, a tag or a property name shows the whole card; a match on a member's code or label, or on a property value, shows the card with its member tree narrowed to those members ("n results for …").</td></tr>
+<tr><td>Tag chips</td><td>One chip per tag used on a dimension, beside the search; choosing one shows only the dimensions carrying it. A card's own tags sit next to its name and filter the same way.</td></tr>
 <tr><td>Time dimension card</td><td>Badge "time · quarter" and "n periods · n aggregates · first → last · fiscal year starts January". The table is a tree in chronological order — <b>Period</b> (label, "aggregate" marker), <b>Code</b>, <b>Start</b>, <b>End</b>, <b>Parent</b>, <b>#</b> (the server-assigned position of a leaf period; aggregates have none) — with Edit, Delete and, on an aggregate, <b>Add period under this aggregate</b>. A period <i>with</i> dates is a leaf the time functions move along; a period <i>without</i> dates is an aggregate (H1, FY26) that groups the periods beneath it and shows each metric's leaves reduced by its Time summary. No member properties.</td></tr>
 <tr><td><b>Add period</b></td><td>Inline row: label, code, start date, end date (leave both empty for an aggregate), <b>Parent</b> (an aggregate period, or root), <b>Save</b>. The whole dimension is checked on save: leaf dates must sit on the granularity's boundaries (a month runs 1st to last day), leaves may not overlap, a regular calendar may not leave gaps, a leaf cannot sit under a leaf, and an aggregate with children cannot be given dates. A rejected period explains why (INVALID_TIME_MEMBER …).</td></tr>
 <tr><td><b>Generate periods…</b></td><td><b>From</b> and <b>To</b> dates, optionally <b>Under</b> an aggregate, then <b>Generate months</b> (or quarters, years, …): creates every leaf period of the granularity in the range through the same checks, skipping codes that already exist. Not offered for custom granularity.</td></tr>
 <tr><td>Parent dimension</td><td>Makes this a child dimension of another one: the card shows "child of &lt;parent&gt;", the add button reads <b>Add member</b> and each member's parent is picked from the parent dimension's members ("— unassigned" when none). Use it for a second level that is defined separately, for example Cost Centre under Department.</td></tr>
-<tr><td>Card header</td><td>"n members · n roots · rollup: sum". <b>Props</b> / <b>Hide props</b> toggles the property columns. Expand-all and collapse-all icons. Edit-name icon. Delete icon: confirm <b>Delete dimension?</b> "This removes the dimension and all its n members."</td></tr>
+<tr><td>Card header</td><td>"n members · n roots · rollup: sum". <b>Props</b> / <b>Hide props</b> toggles the property columns. Expand-all and collapse-all icons. Edit icon: the dimension's name and its tags. Delete icon: confirm <b>Delete dimension?</b> "This removes the dimension and all its n members."</td></tr>
 <tr><td><b>Search members…</b></td><td>Filters the tree.</td></tr>
 <tr><td>Member row</td><td>Label (indented per level, chevron to expand), <b>Code</b>, <b>Children</b> count, actions: <b>Add child</b> (+), <b>Edit</b>, <b>Delete</b> (confirm <b>Delete member?</b>, mentions descendants).</td></tr>
 <tr><td><b>Add root member</b></td><td>Inline row: <b>CODE</b> (monospace), <b>Label</b>, then <b>Save</b>. Adding a child pre-sets the parent.</td></tr>
@@ -295,6 +298,7 @@
 <h3>Controls</h3>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
+<tr><td><b>Search forms and fields…</b></td><td>Keeps the forms whose name, label, or any field's name or label matches. The form being edited stays in view.</td></tr>
 <tr><td><b>New form</b> / <b>Cancel</b></td><td>Opens or closes the create panel. Closing resets it to one blank text field.</td></tr>
 <tr><td><b>Form name</b></td><td>Technical name, snake_case. Typing is coerced: lowercase, any character other than a–z, 0–9 and underscore becomes an underscore. Example placeholder: <code>purchase_request</code>.</td></tr>
 <tr><td><b>Display label</b></td><td>What users see, free text.</td></tr>
@@ -323,6 +327,7 @@
 <h3>Controls</h3>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
+<tr><td><b>Search grids, metrics, dimensions…</b></td><td>Keeps the grids whose name matches, or that hold a matching metric or dimension. The open grid stays in view.</td></tr>
 <tr><td><b>New grid</b> / <b>Cancel</b></td><td>Shows the create row. <b>Grid name</b> is free text (placeholder <code>OPEX Budget</code>); <b>Create</b> is enabled once it is filled.</td></tr>
 <tr><td>Card header</td><td>Name and "n metrics · n dimensions".</td></tr>
 <tr><td><b>Configure</b> / <b>Done</b></td><td>Expands one grid at a time. Done just collapses; nothing is pending.</td></tr>
@@ -635,13 +640,14 @@
 <figure><img src="img/12-users.png" alt="Users screen with the user table and the Invite user button"><figcaption>Users of the tenant with their roles and workspace assignments.</figcaption></figure>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
+<tr><td><b>Search name, e-mail, role, workspace…</b></td><td>Keeps the people whose name or e-mail matches, or who hold a matching role, or a role in a matching workspace or tenant ("n of m users"). The person being edited stays in view.</td></tr>
 <tr><td><b>Invite user</b></td><td><b>Email</b>, <b>First name</b>, <b>Last name</b>, <b>Initial Role</b>, <b>Workspace</b>. The person receives an invitation to set up their account; the email is the sign-in identity and cannot be changed later.</td></tr>
 <tr><td>Role controls</td><td>A developer can grant and revoke <b>business_admin</b> and <b>business_user</b> only. Developer, tenant admin and platform admin roles are granted by administrators.</td></tr>
 <tr><td><b>Workspace roles</b></td><td>Place a person into a workspace with a business role. The <b>Resource access</b> section (which applications and models a person may open) is shown to administrators only.</td></tr>
 <tr><td>Delete user</td><td>Confirm <b>Delete user?</b>: removes the person and revokes all their access. You cannot delete your own account.</td></tr>
 </table>
 <h3>Where the rest of access is configured</h3>
-<p>Three things decide what a business user sees and may change. All three live in the <b>Business Admin</b> console (sidebar group <b>Admin</b>), which a developer sees only when they also hold the business_admin role or ask a business admin:</p>
+<p>Three things decide what a business user sees and may change. All three live in the <b>Business Admin</b> console (sidebar group <b>Business Admin</b>), which a developer sees only when they also hold the business_admin role or ask a business admin:</p>
 <ul>
   <li><b>Roles.</b> Named business roles ("Budget Approvers", "Regional Managers") with members. Workflow tasks and approvals are assigned to these roles or to the platform roles.</li>
   <li><b>Dashboard access.</b> Per role, tick the dashboards its members may open (<b>Save dashboard access</b>). A dashboard on no role is invisible to business users.</li>

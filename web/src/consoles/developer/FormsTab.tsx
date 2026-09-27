@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Trash2, Plus, Pencil, Check } from "lucide-react";
 import { api, type FormField, type DevDimension, type DevMetric, type FormDef } from "../../api/client";
-import { TextInput, Select, Checkbox, IconButton, Button, Toolbar, ToolbarGroup, Field, EmptyState, LoadingState, useConfirm } from "../../ui";
+import { TextInput, Select, Checkbox, IconButton, Button, Toolbar, ToolbarGroup, Field, EmptyState, LoadingState, SearchInput, useConfirm } from "../../ui";
 
 function FormFieldsEditor({
   fields, onChange, dims, metrics,
@@ -113,6 +113,7 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
   const [editLabel, setEditLabel] = useState("");
   const [editFields, setEditFields] = useState<FormField[]>([]);
   const [savedOk, setSavedOk] = useState(false);
+  const [search, setSearch] = useState("");
 
   const { data: forms = [], isLoading } = useQuery({ queryKey: ["forms", revisionId], queryFn: () => api.listForms(revisionId) });
   const { data: dimsRaw = [] } = useQuery({ queryKey: ["dev-dimensions-all", revisionId], queryFn: () => api.getDevDimensions(revisionId) });
@@ -150,6 +151,12 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
 
   const startEdit = (f: FormDef) => { setEditId(f.id); setEditName(f.name); setEditLabel(f.label); setEditFields([...(f.fields ?? [])]); };
 
+  // A form matches by its name, its label or any field's name or label; the
+  // one being edited stays in view whatever its name becomes.
+  const q = search.trim().toLowerCase();
+  const shownForms = (forms as FormDef[]).filter(f => !q || f.id === editId
+    || [f.name, f.label, ...(f.fields ?? []).flatMap(ff => [ff.name, ff.label])].some(v => v?.toLowerCase().includes(q)));
+
   if (isLoading) return <LoadingState />;
 
   return (
@@ -161,6 +168,8 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
           </span>
         </ToolbarGroup>
         <ToolbarGroup align="end">
+          <SearchInput value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search forms and fields…" width={220} />
           <Button leadingIcon={showCreate ? undefined : <Plus size={14} />}
             onClick={() => { setShowCreate(v => !v); setNewName(""); setNewLabel(""); setNewFields([{ name: "", label: "", type: "text", required: false }]); }}>
             {showCreate ? "Cancel" : "New form"}
@@ -194,9 +203,11 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
 
       {(forms as FormDef[]).length === 0 ? (
         <EmptyState label="No forms yet. Use the button above to build your first form." />
+      ) : shownForms.length === 0 ? (
+        <EmptyState label={`No forms match "${search.trim()}".`} />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {(forms as FormDef[]).map(f => (
+          {shownForms.map(f => (
             <div key={f.id} className="mvx-admin-object">
               {editId === f.id ? (
                 <div className="mvx-admin-object__body">

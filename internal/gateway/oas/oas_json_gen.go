@@ -11648,6 +11648,16 @@ func (s *CreateDimensionRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.Tags != nil {
+			e.FieldStart("tags")
+			e.ArrStart()
+			for _, elem := range s.Tags {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
 		if s.DimensionType.Set {
 			e.FieldStart("dimension_type")
 			s.DimensionType.Encode(e)
@@ -11667,14 +11677,15 @@ func (s *CreateDimensionRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfCreateDimensionRequest = [7]string{
+var jsonFieldsNameOfCreateDimensionRequest = [8]string{
 	0: "name",
 	1: "agg_rule",
 	2: "revision_id",
 	3: "parent_dimension_id",
-	4: "dimension_type",
-	5: "time_granularity",
-	6: "fiscal_year_start_month",
+	4: "tags",
+	5: "dimension_type",
+	6: "time_granularity",
+	7: "fiscal_year_start_month",
 }
 
 // Decode decodes CreateDimensionRequest from json.
@@ -11728,6 +11739,25 @@ func (s *CreateDimensionRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"parent_dimension_id\"")
+			}
+		case "tags":
+			if err := func() error {
+				s.Tags = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Tags = append(s.Tags, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"tags\"")
 			}
 		case "dimension_type":
 			if err := func() error {
@@ -13585,6 +13615,16 @@ func (s *CreateMetricRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.Tags != nil {
+			e.FieldStart("tags")
+			e.ArrStart()
+			for _, elem := range s.Tags {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
 		if s.TimeSummary.Set {
 			e.FieldStart("time_summary")
 			s.TimeSummary.Encode(e)
@@ -13592,7 +13632,7 @@ func (s *CreateMetricRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfCreateMetricRequest = [9]string{
+var jsonFieldsNameOfCreateMetricRequest = [10]string{
 	0: "name",
 	1: "is_input",
 	2: "formula",
@@ -13601,7 +13641,8 @@ var jsonFieldsNameOfCreateMetricRequest = [9]string{
 	5: "format",
 	6: "format_decimals",
 	7: "format_currency",
-	8: "time_summary",
+	8: "tags",
+	9: "time_summary",
 }
 
 // Decode decodes CreateMetricRequest from json.
@@ -13697,6 +13738,25 @@ func (s *CreateMetricRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"format_currency\"")
+			}
+		case "tags":
+			if err := func() error {
+				s.Tags = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Tags = append(s.Tags, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"tags\"")
 			}
 		case "time_summary":
 			if err := func() error {
@@ -18593,6 +18653,16 @@ func (s *Dimension) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.Tags != nil {
+			e.FieldStart("tags")
+			e.ArrStart()
+			for _, elem := range s.Tags {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
 		e.FieldStart("members")
 		e.ArrStart()
 		for _, elem := range s.Members {
@@ -18602,7 +18672,7 @@ func (s *Dimension) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfDimension = [8]string{
+var jsonFieldsNameOfDimension = [9]string{
 	0: "id",
 	1: "name",
 	2: "agg_rule",
@@ -18610,7 +18680,8 @@ var jsonFieldsNameOfDimension = [8]string{
 	4: "dimension_type",
 	5: "time_granularity",
 	6: "fiscal_year_start_month",
-	7: "members",
+	7: "tags",
+	8: "members",
 }
 
 // Decode decodes Dimension from json.
@@ -18618,7 +18689,7 @@ func (s *Dimension) Decode(d *jx.Decoder) error {
 	if s == nil {
 		return errors.New("invalid: unable to decode Dimension to nil")
 	}
-	var requiredBitSet [1]uint8
+	var requiredBitSet [2]uint8
 
 	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
 		switch string(k) {
@@ -18698,8 +18769,27 @@ func (s *Dimension) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"fiscal_year_start_month\"")
 			}
+		case "tags":
+			if err := func() error {
+				s.Tags = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Tags = append(s.Tags, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"tags\"")
+			}
 		case "members":
-			requiredBitSet[0] |= 1 << 7
+			requiredBitSet[1] |= 1 << 0
 			if err := func() error {
 				s.Members = make([]DimensionMember, 0)
 				if err := d.Arr(func(d *jx.Decoder) error {
@@ -18725,8 +18815,9 @@ func (s *Dimension) Decode(d *jx.Decoder) error {
 	}
 	// Validate required fields.
 	var failures []validate.FieldError
-	for i, mask := range [1]uint8{
-		0b10010111,
+	for i, mask := range [2]uint8{
+		0b00010111,
+		0b00000001,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -30335,9 +30426,19 @@ func (s *MetricDef) encodeFields(e *jx.Encoder) {
 		}
 		e.ArrEnd()
 	}
+	{
+		if s.Tags != nil {
+			e.FieldStart("tags")
+			e.ArrStart()
+			for _, elem := range s.Tags {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
 }
 
-var jsonFieldsNameOfMetricDef = [12]string{
+var jsonFieldsNameOfMetricDef = [13]string{
 	0:  "id",
 	1:  "name",
 	2:  "label",
@@ -30350,6 +30451,7 @@ var jsonFieldsNameOfMetricDef = [12]string{
 	9:  "time_summary",
 	10: "depends_on",
 	11: "depended_by",
+	12: "tags",
 }
 
 // Decode decodes MetricDef from json.
@@ -30517,6 +30619,25 @@ func (s *MetricDef) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"depended_by\"")
+			}
+		case "tags":
+			if err := func() error {
+				s.Tags = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Tags = append(s.Tags, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"tags\"")
 			}
 		default:
 			return d.Skip()
@@ -46050,12 +46171,23 @@ func (s *UpdateDimensionRequest) encodeFields(e *jx.Encoder) {
 			s.ParentDimensionID.Encode(e)
 		}
 	}
+	{
+		if s.Tags != nil {
+			e.FieldStart("tags")
+			e.ArrStart()
+			for _, elem := range s.Tags {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
 }
 
-var jsonFieldsNameOfUpdateDimensionRequest = [3]string{
+var jsonFieldsNameOfUpdateDimensionRequest = [4]string{
 	0: "name",
 	1: "agg_rule",
 	2: "parent_dimension_id",
+	3: "tags",
 }
 
 // Decode decodes UpdateDimensionRequest from json.
@@ -46095,6 +46227,25 @@ func (s *UpdateDimensionRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"parent_dimension_id\"")
+			}
+		case "tags":
+			if err := func() error {
+				s.Tags = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Tags = append(s.Tags, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"tags\"")
 			}
 		default:
 			return d.Skip()
@@ -47622,6 +47773,16 @@ func (s *UpdateMetricRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.Tags != nil {
+			e.FieldStart("tags")
+			e.ArrStart()
+			for _, elem := range s.Tags {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
 		if s.Formula.Set {
 			e.FieldStart("formula")
 			s.Formula.Encode(e)
@@ -47659,14 +47820,15 @@ func (s *UpdateMetricRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfUpdateMetricRequest = [7]string{
+var jsonFieldsNameOfUpdateMetricRequest = [8]string{
 	0: "name",
-	1: "formula",
-	2: "agg_rule",
-	3: "format",
-	4: "format_decimals",
-	5: "format_currency",
-	6: "time_summary",
+	1: "tags",
+	2: "formula",
+	3: "agg_rule",
+	4: "format",
+	5: "format_decimals",
+	6: "format_currency",
+	7: "time_summary",
 }
 
 // Decode decodes UpdateMetricRequest from json.
@@ -47687,6 +47849,25 @@ func (s *UpdateMetricRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"name\"")
+			}
+		case "tags":
+			if err := func() error {
+				s.Tags = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Tags = append(s.Tags, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"tags\"")
 			}
 		case "formula":
 			if err := func() error {

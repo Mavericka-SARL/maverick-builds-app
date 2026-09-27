@@ -1420,6 +1420,7 @@ type ModelDimensionDef struct {
 	DimensionType        string          `json:"dimension_type"`
 	TimeGranularity      *string         `json:"time_granularity"`
 	FiscalYearStartMonth *int16          `json:"fiscal_year_start_month"`
+	Tags                 []string        `json:"tags"`
 }
 
 type ModelDimensionMember struct {
@@ -1622,6 +1623,7 @@ type ModelMetricDef struct {
 	AggNumeratorMetricID   pgtype.UUID     `json:"agg_numerator_metric_id"`
 	AggDenominatorMetricID pgtype.UUID     `json:"agg_denominator_metric_id"`
 	TimeSummary            string          `json:"time_summary"`
+	Tags                   []string        `json:"tags"`
 }
 
 type ModelRevision struct {

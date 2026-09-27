@@ -122,7 +122,7 @@ var proposeActionsTool = providers.ToolDef{
 				"items": {
 					"type": "object",
 					"properties": {
-						"tool":        {"type": "string",  "description": "Write tool name: create_metric | update_metric | delete_metric | create_dimension | add_dimension_member | update_dimension_member | create_grid | add_grid_metric | add_grid_dimension | create_dashboard | add_dashboard_widget | create_revision | create_workflow_def | update_workflow_def | delete_workflow_def | create_form_def | update_form_def | delete_form_def | create_automation_rule | update_automation_rule | delete_automation_rule | create_business_role | create_form_integration | update_form_integration | delete_form_integration | generate_migration | apply_migration | set_user_access_rules"},
+						"tool":        {"type": "string",  "description": "Write tool name: create_metric | update_metric | delete_metric | create_dimension | add_dimension_member | update_dimension_member | create_grid | add_grid_metric | add_grid_dimension | create_dashboard | add_dashboard_widget | set_tags | create_revision | create_workflow_def | update_workflow_def | delete_workflow_def | create_form_def | update_form_def | delete_form_def | create_automation_rule | update_automation_rule | delete_automation_rule | create_business_role | create_form_integration | update_form_integration | delete_form_integration | generate_migration | apply_migration | set_user_access_rules"},
 						"description": {"type": "string",  "description": "One-line human-readable description of this step shown to the developer"},
 						"params":      {"type": "object",  "description": "Parameters for the tool (must match the tool's required fields)"}
 					},
@@ -239,9 +239,18 @@ func (e *ToolExecutor) modelSummary(ctx context.Context) (string, error) {
 	), nil
 }
 
+// tagSuffix renders a definition's tags for the listings (", tags: a, b"),
+// or nothing when it has none.
+func tagSuffix(tagList []string) string {
+	if len(tagList) == 0 {
+		return ""
+	}
+	return ", tags: " + strings.Join(tagList, ", ")
+}
+
 func (e *ToolExecutor) listMetrics(ctx context.Context) (string, error) {
 	rows, err := e.pool.Query(ctx, `
-		SELECT name, is_input, COALESCE(formula,''), format, agg_rule
+		SELECT name, is_input, COALESCE(formula,''), format, agg_rule, tags
 		FROM model.metric_def
 		WHERE model_id=$1::uuid AND revision_id=$2::uuid
 		ORDER BY is_input DESC, name`, e.modelID, e.revID)
@@ -255,11 +264,12 @@ func (e *ToolExecutor) listMetrics(ctx context.Context) (string, error) {
 	for rows.Next() {
 		var name, formula, format, agg string
 		var isInput bool
-		_ = rows.Scan(&name, &isInput, &formula, &format, &agg)
+		var tagList []string
+		_ = rows.Scan(&name, &isInput, &formula, &format, &agg, &tagList)
 		if isInput {
-			fmt.Fprintf(&sb, "  [INPUT]  %s  (format:%s, agg:%s)\n", name, format, agg)
+			fmt.Fprintf(&sb, "  [INPUT]  %s  (format:%s, agg:%s%s)\n", name, format, agg, tagSuffix(tagList))
 		} else {
-			fmt.Fprintf(&sb, "  [CALC]   %s = %s  (format:%s, agg:%s)\n", name, formula, format, agg)
+			fmt.Fprintf(&sb, "  [CALC]   %s = %s  (format:%s, agg:%s%s)\n", name, formula, format, agg, tagSuffix(tagList))
 		}
 	}
 	return sb.String(), rows.Err()
@@ -271,7 +281,7 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 		SELECT d.name, pd.name
 		FROM model.dimension_def d
 		JOIN model.dimension_def pd ON pd.id = d.parent_dimension_id
-		WHERE d.model_id = $1::uuid`, e.modelID)
+		WHERE d.model_id = $1::uuid AND ($2 = '' OR d.revision_id::text = $2 OR d.revision_id IS NULL)`, e.modelID, e.revID)
 	if pdErr == nil {
 		for pdRows.Next() {
 			var name, parentName string
@@ -282,16 +292,19 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 		pdRows.Close()
 	}
 
+	// The working revision's dimensions only: every revision holds its own
+	// copy, and reading them all listed each member once per revision. A
+	// LEFT JOIN, so a dimension with no members yet is still listed.
 	rows, err := e.pool.Query(ctx, `
-		SELECT d.name, m.code, m.label, COALESCE(pm.code,'') AS parent_code,
+		SELECT d.name, COALESCE(m.code,''), COALESCE(m.label,''), COALESCE(pm.code,'') AS parent_code,
 		       COALESCE(m.properties,'{}'::jsonb)::text,
 		       d.dimension_type, COALESCE(d.time_granularity,''), COALESCE(d.fiscal_year_start_month,0),
-		       COALESCE(m.period_start::text,''), COALESCE(m.period_end::text,'')
+		       COALESCE(m.period_start::text,''), COALESCE(m.period_end::text,''), d.tags
 		FROM model.dimension_def d
-		JOIN model.dimension_member m ON m.dimension_id = d.id
+		LEFT JOIN model.dimension_member m ON m.dimension_id = d.id
 		LEFT JOIN model.dimension_member pm ON pm.id = m.parent_member_id
-		WHERE d.model_id = $1::uuid
-		ORDER BY d.name, m.time_index NULLS LAST, m.sort_order`, e.modelID)
+		WHERE d.model_id = $1::uuid AND ($2 = '' OR d.revision_id::text = $2 OR d.revision_id IS NULL)
+		ORDER BY d.name, m.time_index NULLS LAST, m.sort_order`, e.modelID, e.revID)
 	if err != nil {
 		return "", err
 	}
@@ -300,11 +313,16 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 	type member struct{ code, label, parent, props, period string }
 	dims := map[string][]member{}
 	timeBadge := map[string]string{}
+	dimTags := map[string]string{}
 	var order []string
 	for rows.Next() {
 		var dname, code, label, parent, propsRaw, dimType, granularity, pStart, pEnd string
 		var fiscalStart int
-		_ = rows.Scan(&dname, &code, &label, &parent, &propsRaw, &dimType, &granularity, &fiscalStart, &pStart, &pEnd)
+		var tagList []string
+		_ = rows.Scan(&dname, &code, &label, &parent, &propsRaw, &dimType, &granularity, &fiscalStart, &pStart, &pEnd, &tagList)
+		if len(tagList) > 0 {
+			dimTags[dname] = " [" + strings.TrimPrefix(tagSuffix(tagList), ", ") + "]"
+		}
 		period := ""
 		if dimType == "time" {
 			timeBadge[dname] = fmt.Sprintf(" [time · %s, fiscal year starts month %d]", granularity, fiscalStart)
@@ -333,8 +351,11 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 		}
 		if _, ok := dims[dname]; !ok {
 			order = append(order, dname)
+			dims[dname] = nil
 		}
-		dims[dname] = append(dims[dname], member{code, label, parent, props, period})
+		if code != "" {
+			dims[dname] = append(dims[dname], member{code, label, parent, props, period})
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return "", err
@@ -343,9 +364,12 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 	var sb strings.Builder
 	for _, d := range order {
 		if parentName, ok := parentDimByName[d]; ok {
-			fmt.Fprintf(&sb, "Dimension: %s (child of: %s — members below roll up to a %s member via parent)\n", d, parentName, parentName)
+			fmt.Fprintf(&sb, "Dimension: %s (child of: %s — members below roll up to a %s member via parent)%s\n", d, parentName, parentName, dimTags[d])
 		} else {
-			fmt.Fprintf(&sb, "Dimension: %s%s\n", d, timeBadge[d])
+			fmt.Fprintf(&sb, "Dimension: %s%s%s\n", d, timeBadge[d], dimTags[d])
+		}
+		if len(dims[d]) == 0 {
+			sb.WriteString("  (no members yet)\n")
 		}
 		for _, m := range dims[d] {
 			if m.parent != "" {
@@ -384,7 +408,7 @@ func (e *ToolExecutor) listGrids(ctx context.Context) (string, error) {
 
 func (e *ToolExecutor) listDashboards(ctx context.Context) (string, error) {
 	rows, err := e.pool.Query(ctx, `
-		SELECT d.id::text, d.name,
+		SELECT d.id::text, d.name, d.tags,
 		       COUNT(w.id) AS widget_count
 		FROM model.dashboard_def d
 		LEFT JOIN model.dashboard_widget w ON w.dashboard_id = d.id
@@ -400,9 +424,10 @@ func (e *ToolExecutor) listDashboards(ctx context.Context) (string, error) {
 	sb.WriteString("Dashboards:\n")
 	for rows.Next() {
 		var id, name string
+		var tagList []string
 		var wc int
-		_ = rows.Scan(&id, &name, &wc)
-		fmt.Fprintf(&sb, "  %s (id:%s) — %d widget(s)\n", name, id, wc)
+		_ = rows.Scan(&id, &name, &tagList, &wc)
+		fmt.Fprintf(&sb, "  %s (id:%s) — %d widget(s)%s\n", name, id, wc, tagSuffix(tagList))
 	}
 	return sb.String(), rows.Err()
 }

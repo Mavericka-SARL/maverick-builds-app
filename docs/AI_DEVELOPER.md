@@ -35,8 +35,14 @@ not when the draft is promoted, and discarding the draft does not undo them.
 Model: `create_metric`, `update_metric`, `delete_metric`, `create_dimension`,
 `add_dimension_member`, `update_dimension_member`, `create_grid`,
 `add_grid_metric`, `add_grid_dimension`, `create_dashboard`,
-`add_dashboard_widget`, `create_revision`, `generate_migration`,
+`add_dashboard_widget`, `set_tags`, `create_revision`, `generate_migration`,
 `apply_migration`, `set_user_access_rules`.
+
+Tags mirror the console's tag editors: `create_metric`, `update_metric`,
+`create_dimension` and `create_dashboard` take `tags`, and `set_tags`
+(`kind`: metric, dimension or dashboard; `id`: id or exact name; `tags`)
+replaces the tags of one that already exists. `list_metrics`,
+`list_dimensions` and `list_dashboards` show them.
 
 Workflows and forms (added 2026-09-16, programme item 5):
 

@@ -65,7 +65,7 @@ test("platform_admin + developer: Build and Platform groups in one sidebar, User
   await expect(nav(page, "Users")).toHaveCount(1);
 });
 
-test("business_user + business_admin: the admin Plan group supersedes the user one", async ({ page }) => {
+test("business_user + business_admin: the admin Run group supersedes the user one", async ({ page }) => {
   await signInAs(page, ["business_user", "business_admin"]);
   await page.goto("/");
   await expect(mark(page)).toBeVisible({ timeout: 15_000 });

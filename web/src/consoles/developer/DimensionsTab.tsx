@@ -1,8 +1,8 @@
-import React, { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import React, { useMemo, useState } from "react";
+import { useQueries, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, X, Pencil, Trash2, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp } from "lucide-react";
 import { api, type DevDimensionMember, type DevDimension, type DimProperty, type DimensionType, type TimeGranularity, TIME_GRANULARITIES } from "../../api/client";
-import { Button, Field, TextInput, Select, EmptyState, IconButton, StatusBadge, SearchInput, useConfirm } from "../../ui";
+import { Button, Field, TextInput, Select, EmptyState, IconButton, StatusBadge, SearchInput, FilterChip, TagInput, TagFilter, Toolbar, ToolbarGroup, useConfirm } from "../../ui";
 
 // Tree node type — flat DevDimensionMember enriched with hierarchy metadata.
 interface DimMemberNode extends DevDimensionMember {
@@ -44,7 +44,9 @@ function flattenVisible(roots: DimMemberNode[], expanded: Set<string>, search: s
   if (search) {
     const q = search.toLowerCase();
     function hasMatch(n: DimMemberNode): boolean {
-      return n.code.toLowerCase().includes(q) || n.label.toLowerCase().includes(q) || n.children.some(hasMatch);
+      return n.code.toLowerCase().includes(q) || n.label.toLowerCase().includes(q)
+        || Object.values(n.properties ?? {}).some(v => v.toLowerCase().includes(q))
+        || n.children.some(hasMatch);
     }
     function collect(n: DimMemberNode): DimMemberNode[] {
       if (!hasMatch(n)) return [];
@@ -80,17 +82,47 @@ export function DimensionsView({ dims, revisionId }: { dims: DevDimension[]; rev
   const [newType, setNewType] = useState<DimensionType | "">("");
   const [newGranularity, setNewGranularity] = useState<TimeGranularity | "">("");
   const [newFiscalStart, setNewFiscalStart] = useState(1);
+  const [newTags, setNewTags] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
+  const [filterTag, setFilterTag] = useState<string | null>(null);
+
+  // Declared property names, which a search matches even before any member
+  // has a value. Same query keys as each card's own, so nothing is fetched twice.
+  const propQueries = useQueries({
+    queries: dims.map(d => ({ queryKey: ["dim-props", d.id], queryFn: () => api.listDimProperties(d.id) })),
+  });
+  const allTags = useMemo(() => [...new Set(dims.flatMap(d => d.tags ?? []))].sort(), [dims]);
+
+  // How a dimension answers the search: "all" shows the whole card (its
+  // name, a tag or a property name matched), "members" narrows its member
+  // tree to the members whose code, label or a property value matched, and
+  // null hides it.
+  const q = search.trim().toLowerCase();
+  const has = (s?: string) => !!s && s.toLowerCase().includes(q);
+  const matchOf = (d: DevDimension, i: number): "all" | "members" | null => {
+    if (filterTag && !(d.tags ?? []).includes(filterTag)) return null;
+    if (!q || has(d.name) || (d.tags ?? []).some(has)) return "all";
+    const propNames = [...(propQueries[i]?.data ?? []).map(p => p.name), ...d.members.flatMap(m => Object.keys(m.properties ?? {}))];
+    if (propNames.some(has)) return "all";
+    if (d.members.some(m => has(m.code) || has(m.label) || Object.values(m.properties ?? {}).some(has))) return "members";
+    return null;
+  };
+  const shown = dims.flatMap((d, i) => {
+    const match = matchOf(d, i);
+    return match ? [{ d, match }] : [];
+  });
+  const toggleTag = (t: string) => setFilterTag(cur => cur === t ? null : t);
 
   const create = useMutation({
     mutationFn: () => api.createDimension({
-      name: newName, revision_id: revisionId,
+      name: newName, revision_id: revisionId, tags: newTags,
       parent_dimension_id: newType === "time" ? undefined : (newParentDim || undefined),
       dimension_type: newType as DimensionType,
       ...(newType === "time" ? { time_granularity: newGranularity as TimeGranularity, fiscal_year_start_month: newFiscalStart } : {}),
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["dev-dimensions"] });
-      setNewName(""); setNewParentDim(""); setNewType(""); setNewGranularity(""); setNewFiscalStart(1); setShowAdd(false);
+      setNewName(""); setNewParentDim(""); setNewType(""); setNewGranularity(""); setNewFiscalStart(1); setNewTags([]); setShowAdd(false);
     },
   });
   const canCreate = !!newName && !!newType && (newType !== "time" || !!newGranularity);
@@ -140,6 +172,9 @@ export function DimensionsView({ dims, revisionId }: { dims: DevDimension[]; rev
                 </Select>
               </Field>
             )}
+            <Field label="Tags">
+              <TagInput value={newTags} onChange={setNewTags} />
+            </Field>
             <Button variant="primary" disabled={!canCreate} loading={create.isPending} onClick={() => create.mutate()}>Create</Button>
           </div>
         )}
@@ -150,13 +185,30 @@ export function DimensionsView({ dims, revisionId }: { dims: DevDimension[]; rev
           </p>
         )}
       </div>
+      {dims.length > 0 && (
+        <Toolbar className="mvx-toolbar--spaced">
+          <ToolbarGroup>
+            <SearchInput value={search} onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search dimensions, members, properties…" width={340} />
+            <TagFilter tags={allTags} active={filterTag} onChange={setFilterTag} />
+          </ToolbarGroup>
+          {(q || filterTag) && (
+            <ToolbarGroup align="end">
+              <span className="mvx-admin-muted">{shown.length} of {dims.length} dimensions</span>
+            </ToolbarGroup>
+          )}
+        </Toolbar>
+      )}
       {dims.length === 0 ? (
         <EmptyState label="No dimensions defined yet. Create dimensions such as department, region, product, or entity." />
+      ) : shown.length === 0 ? (
+        <EmptyState label={q ? `No dimension, member or property matches "${search.trim()}".` : "No dimension has this tag."} />
       ) : (
         <div className="mvx-admin-stack">
-          {dims.map((d) => d.dimension_type === "time"
-            ? <TimeDimensionCard key={d.id} dim={d} />
-            : <DimensionCard key={d.id} dim={d} allDims={dims} />)}
+          {shown.map(({ d, match }) => d.dimension_type === "time"
+            ? <TimeDimensionCard key={d.id} dim={d} activeTag={filterTag} onTagClick={toggleTag} />
+            : <DimensionCard key={d.id} dim={d} allDims={dims} activeTag={filterTag} onTagClick={toggleTag}
+                memberSearch={match === "members" ? q : ""} />)}
         </div>
       )}
     </div>
@@ -209,7 +261,55 @@ function DimInlineRow({
   );
 }
 
-function DimensionCard({ dim, allDims }: { dim: DevDimension; allDims: DevDimension[] }) {
+// The header's edit mode, shared by both card kinds: the name and the tags.
+function DimHeaderEditor({ dim, onClose }: { dim: DevDimension; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [name, setName] = useState(dim.name);
+  const [tags, setTags] = useState<string[]>(dim.tags ?? []);
+  const save = useMutation({
+    mutationFn: () => api.updateDimension(dim.id, { name, tags }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["dev-dimensions"] }); onClose(); },
+  });
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div className="mvx-admin-inline-form">
+        <TextInput value={name} onChange={(e) => setName(e.target.value)} style={{ width: 180 }} aria-label="Dimension name"
+          onKeyDown={(e) => e.key === "Enter" && name && save.mutate()} />
+        <Button variant="primary" size="sm" disabled={!name} loading={save.isPending} onClick={() => save.mutate()}>Save</Button>
+        <Button size="sm" onClick={onClose}>Cancel</Button>
+      </div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <span className="mvx-admin-muted">Tags:</span>
+        <TagInput value={tags} onChange={setTags} inputWidth={110} />
+      </div>
+      {save.isError && <p className="mvx-admin-error">{(save.error as Error).message}</p>}
+    </div>
+  );
+}
+
+function DimTagChips({ tags, active, onClick }: { tags?: string[]; active?: string | null; onClick?: (tag: string) => void }) {
+  return (
+    <>
+      {(tags ?? []).map(t => (
+        <FilterChip key={t} active={t === active} onClick={() => onClick?.(t)} title={t === active ? "Clear tag filter" : "Filter by this tag"}>
+          {t}
+        </FilterChip>
+      ))}
+    </>
+  );
+}
+
+interface DimCardTagProps {
+  activeTag?: string | null;
+  onTagClick?: (tag: string) => void;
+}
+
+function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "" }: DimCardTagProps & {
+  dim: DevDimension;
+  allDims: DevDimension[];
+  /** The page-level search, when this dimension matched it through its members. */
+  memberSearch?: string;
+}) {
   const qc = useQueryClient();
   const roots = React.useMemo(() => buildDimensionTree(dim.members), [dim.members]);
   const maxDepth = dimMaxDepth(roots);
@@ -230,7 +330,6 @@ function DimensionCard({ dim, allDims }: { dim: DevDimension; allDims: DevDimens
 
   // UI mode state
   const [editDimName, setEditDimName] = useState(false);
-  const [editNameVal, setEditNameVal] = useState(dim.name);
   const [showProps, setShowProps] = useState(true);
   const [addingChildOf, setAddingChildOf] = useState<string | null>(null); // null = root
   const [addingRoot, setAddingRoot] = useState(false);
@@ -241,10 +340,6 @@ function DimensionCard({ dim, allDims }: { dim: DevDimension; allDims: DevDimens
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["dev-dimensions"] });
 
-  const updateDim = useMutation({
-    mutationFn: () => api.updateDimension(dim.id, { name: editNameVal }),
-    onSuccess: () => { invalidate(); setEditDimName(false); },
-  });
   const delDim = useMutation({
     mutationFn: () => api.deleteDimension(dim.id),
     onSuccess: invalidate,
@@ -293,7 +388,8 @@ function DimensionCard({ dim, allDims }: { dim: DevDimension; allDims: DevDimens
   const [editProps, setEditProps] = useState<Record<string, string>>({});
 
 
-  const visibleRows = flattenVisible(roots, expanded, search);
+  const memberQuery = search || memberSearch;
+  const visibleRows = flattenVisible(roots, expanded, memberQuery);
 
   const startEdit = (m: DevDimensionMember) => {
     setEditMId(m.id); setEditMCode(m.code); setEditMLabel(m.label); setEditMParent(m.parent_member_id ?? ""); setEditProps({ ...(m.properties ?? {}) });
@@ -306,16 +402,11 @@ function DimensionCard({ dim, allDims }: { dim: DevDimension; allDims: DevDimens
       {/* ── Header ── */}
       <div style={{ background: "var(--color-surface-subtle)", padding: "10px 16px", borderBottom: "1px solid var(--color-border)" }}>
         {editDimName ? (
-          <div className="mvx-admin-inline-form">
-            <TextInput value={editNameVal} onChange={(e) => setEditNameVal(e.target.value)}
-              style={{ width: 180 }}
-              onKeyDown={(e) => e.key === "Enter" && updateDim.mutate()} />
-            <Button variant="primary" size="sm" loading={updateDim.isPending} onClick={() => updateDim.mutate()}>Save</Button>
-            <Button size="sm" onClick={() => { setEditDimName(false); setEditNameVal(dim.name); }}>Cancel</Button>
-          </div>
+          <DimHeaderEditor dim={dim} onClose={() => setEditDimName(false)} />
         ) : (
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <code style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text)" }}>{dim.name}</code>
+            <DimTagChips tags={dim.tags} active={activeTag} onClick={onTagClick} />
             <span className="mvx-admin-muted">
               {dim.members.length} member{dim.members.length !== 1 ? "s" : ""}
               {roots.length > 0 && ` · ${roots.length} root${roots.length !== 1 ? "s" : ""}`}
@@ -334,8 +425,8 @@ function DimensionCard({ dim, allDims }: { dim: DevDimension; allDims: DevDimens
               <IconButton aria-label="Collapse all" title="Collapse all" size={26} onClick={collapseAll}>
                 <ChevronsUp size={14} />
               </IconButton>
-              <IconButton aria-label={`Edit dimension ${dim.name}`} title="Edit dimension name" size={26}
-                onClick={() => { setEditDimName(true); setEditNameVal(dim.name); }}>
+              <IconButton aria-label={`Edit dimension ${dim.name}`} title="Edit name and tags" size={26}
+                onClick={() => setEditDimName(true)}>
                 <Pencil size={13} />
               </IconButton>
               <IconButton aria-label={`Delete dimension ${dim.name}`} title="Delete dimension" danger size={26}
@@ -351,9 +442,10 @@ function DimensionCard({ dim, allDims }: { dim: DevDimension; allDims: DevDimens
           <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
             <SearchInput value={search} onChange={(e) => setSearch(e.target.value)}
               placeholder="Search members…" width={220} />
-            {search && (
+            {memberQuery && (
               <span className="mvx-admin-muted">
                 {visibleRows.length} result{visibleRows.length !== 1 ? "s" : ""}
+                {!search && ` for "${memberSearch}"`}
               </span>
             )}
           </div>
@@ -560,12 +652,11 @@ function DimensionCard({ dim, allDims }: { dim: DevDimension; allDims: DevDimens
 // metric's time summary. The server validates the whole set (no overlap, no
 // gap on a regular calendar, boundaries on the granularity, a leaf never
 // under a leaf) and owns the ordinal.
-function TimeDimensionCard({ dim }: { dim: DevDimension }) {
+function TimeDimensionCard({ dim, activeTag, onTagClick }: DimCardTagProps & { dim: DevDimension }) {
   const qc = useQueryClient();
   const invalidate = () => qc.invalidateQueries({ queryKey: ["dev-dimensions"] });
   const { confirm, confirmElement } = useConfirm();
   const [editDimName, setEditDimName] = useState(false);
-  const [editNameVal, setEditNameVal] = useState(dim.name);
   const [adding, setAdding] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [genStart, setGenStart] = useState("");
@@ -581,10 +672,6 @@ function TimeDimensionCard({ dim }: { dim: DevDimension }) {
     code: draft.code, label: draft.label,
     ...(draft.period_start || draft.period_end ? { period_start: draft.period_start, period_end: draft.period_end } : {}),
     parent_member_id: draft.parent_member_id || null,
-  });
-  const updateDim = useMutation({
-    mutationFn: () => api.updateDimension(dim.id, { name: editNameVal, agg_rule: dim.agg_rule }),
-    onSuccess: () => { invalidate(); setEditDimName(false); },
   });
   const delDim = useMutation({ mutationFn: () => api.deleteDimension(dim.id), onSuccess: invalidate });
   const addMember = useMutation({
@@ -661,15 +748,11 @@ function TimeDimensionCard({ dim }: { dim: DevDimension }) {
     <div className="mvx-admin-object">
       <div style={{ background: "var(--color-surface-subtle)", padding: "10px 16px", borderBottom: "1px solid var(--color-border)" }}>
         {editDimName ? (
-          <div className="mvx-admin-inline-form">
-            <TextInput value={editNameVal} onChange={(e) => setEditNameVal(e.target.value)} style={{ width: 180 }}
-              onKeyDown={(e) => e.key === "Enter" && updateDim.mutate()} />
-            <Button variant="primary" size="sm" loading={updateDim.isPending} onClick={() => updateDim.mutate()}>Save</Button>
-            <Button size="sm" onClick={() => { setEditDimName(false); setEditNameVal(dim.name); }}>Cancel</Button>
-          </div>
+          <DimHeaderEditor dim={dim} onClose={() => setEditDimName(false)} />
         ) : (
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <code style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text)" }}>{dim.name}</code>
+            <DimTagChips tags={dim.tags} active={activeTag} onClick={onTagClick} />
             <StatusBadge tone="brand">time · {(dim.time_granularity ?? "").replace("_", " ")}</StatusBadge>
             <span className="mvx-admin-muted">
               {leaves.length} period{leaves.length !== 1 ? "s" : ""}
@@ -679,8 +762,8 @@ function TimeDimensionCard({ dim }: { dim: DevDimension }) {
             </span>
             {aggregates.length > 0 && <StatusBadge tone="success">hierarchy</StatusBadge>}
             <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
-              <IconButton aria-label={`Edit dimension ${dim.name}`} title="Edit dimension name" size={26}
-                onClick={() => { setEditDimName(true); setEditNameVal(dim.name); }}>
+              <IconButton aria-label={`Edit dimension ${dim.name}`} title="Edit name and tags" size={26}
+                onClick={() => setEditDimName(true)}>
                 <Pencil size={13} />
               </IconButton>
               <IconButton aria-label={`Delete dimension ${dim.name}`} title="Delete dimension" danger size={26}

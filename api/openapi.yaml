@@ -752,6 +752,7 @@ components:
             none when a time total is meaningless.
         depends_on:      { type: array, items: { type: string }, description: "Names of metrics/dimensions this formula references" }
         depended_by:     { type: array, items: { type: string }, description: "Names of metrics whose formula references this one" }
+        tags:            { type: array, items: { type: string }, description: "Free-form labels the developer console filters by" }
 
     DimensionMember:
       type: object
@@ -779,6 +780,7 @@ components:
           description: "Explicit and immutable. A dimension called month is NOT a time dimension unless marked so."
         time_granularity:        { type: string, enum: [day, week, month, quarter, half_year, year, custom], description: "Time dimensions only" }
         fiscal_year_start_month: { type: integer, minimum: 1, maximum: 12, description: "Time dimensions only" }
+        tags:                 { type: array, items: { type: string }, description: "Free-form labels the developer console filters by; omitted when empty" }
         members:              { type: array, items: { $ref: "#/components/schemas/DimensionMember" }, description: "Time members in chronological order" }
 
     DimensionProperty:
@@ -812,6 +814,7 @@ components:
         format:          { type: string, default: number }
         format_decimals: { type: integer }
         format_currency: { type: string, default: "$" }
+        tags:            { type: array, items: { type: string } }
         time_summary:
           type: string
           enum: [sum, average, min, max, first, last, none]
@@ -825,6 +828,7 @@ components:
       type: object
       properties:
         name:            { type: string }
+        tags:            { type: array, items: { type: string }, description: "Omitted keeps the metric's tags" }
         formula:         { type: string }
         agg_rule:        { type: string }
         format:          { type: string }
@@ -854,6 +858,7 @@ components:
         agg_rule:             { type: string, default: sum }
         revision_id:          { type: string, format: uuid }
         parent_dimension_id:  { type: string, format: uuid, nullable: true, description: "Not allowed on a time dimension" }
+        tags:                 { type: array, items: { type: string } }
         dimension_type:
           type: string
           enum: [standard, time]
@@ -873,10 +878,12 @@ components:
 
     UpdateDimensionRequest:
       type: object
+      description: "A partial update: a field left out keeps its value."
       properties:
         name:                 { type: string }
         agg_rule:             { type: string }
-        parent_dimension_id:  { type: string, format: uuid, nullable: true }
+        parent_dimension_id:  { type: string, format: uuid, nullable: true, description: "Send null to detach the dimension from its parent" }
+        tags:                 { type: array, items: { type: string } }
 
     MemberRequest:
       type: object

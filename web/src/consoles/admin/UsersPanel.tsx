@@ -9,6 +9,7 @@ import {
   Field,
   IconButton,
   RoleBadge,
+  SearchInput,
   Select,
   StatusBadge,
   TextInput,
@@ -122,6 +123,7 @@ export function UsersPanel({
   const [newUser, setNewUser] = useState({ email: "", first_name: "", last_name: "", role: "", workspace_id: "" });
   const [editId, setEditId] = useState<string | null>(null);
   const [editUser, setEditUser] = useState({ email: "", display_name: "" });
+  const [search, setSearch] = useState("");
   const [addPlatformRole, setAddPlatformRole] = useState("");
   const [addWsRole, setAddWsRole] = useState("business_user");
   const [addWsId, setAddWsId] = useState("");
@@ -196,16 +198,27 @@ export function UsersPanel({
   // all is exactly who should be able to scope one.
   const canGrantWorkspaceRoles = canManageResourceAccess || assignableRoles.some(r => BUSINESS_ROLES.includes(r));
 
+  // A person matches by name, e-mail, a role they hold, or the workspace or
+  // tenant a role is held in; the one being edited stays in view.
+  const q = search.trim().toLowerCase();
+  const shownUsers = users.filter(u => !q || u.id === editId
+    || [u.display_name, u.email, ...(u.assignments ?? []).flatMap(a => [a.role, a.role.replace(/_/g, " "), a.workspace_name, a.customer_name])]
+      .some(v => v?.toLowerCase().includes(q)));
+
   return (
     <div>
       <div style={{ marginBottom: 16 }}>
-        <Button
-          leadingIcon={showCreate ? undefined : <Plus size={14} />}
-          onClick={() => setShowCreate((v) => !v)}
-          style={{ marginBottom: showCreate ? 16 : 0 }}
-        >
-          {showCreate ? "Cancel" : "Invite user"}
-        </Button>
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: showCreate ? 16 : 0 }}>
+          <Button
+            leadingIcon={showCreate ? undefined : <Plus size={14} />}
+            onClick={() => setShowCreate((v) => !v)}
+          >
+            {showCreate ? "Cancel" : "Invite user"}
+          </Button>
+          <SearchInput value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name, e-mail, role, workspace…" width={320} />
+          {q && <span className="mvx-admin-muted">{shownUsers.length} of {users.length} users</span>}
+        </div>
         {showCreate && (
           <div className="mvx-panel" style={{ padding: 16, maxWidth: 640 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
@@ -289,7 +302,10 @@ export function UsersPanel({
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => editId === u.id ? (
+            {q && shownUsers.length === 0 && (
+              <tr><td colSpan={6} style={{ padding: 20, textAlign: "center" }} className="mvx-admin-muted">No users match "{search.trim()}"</td></tr>
+            )}
+            {shownUsers.map((u) => editId === u.id ? (
               <tr key={u.id}>
                 <td colSpan={6} style={{ padding: "16px 20px", background: "var(--color-surface-subtle)" }}>
                   <div className="mvx-admin-inline-form" style={{ marginBottom: 16 }}>

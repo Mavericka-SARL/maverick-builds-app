@@ -129,7 +129,7 @@ not raise them without review.
 <AppShell
   brand={<BrandMark />}
   navGroups={[
-    { label: "Plan", items: [{ id: "dashboards", label: "Dashboards" }] },
+    { label: "Run", items: [{ id: "dashboards", label: "Dashboards" }] },
     { label: "Build", items: [{ id: "metrics", label: "Metrics" }] },
   ]}
   activeNavId="dashboards"

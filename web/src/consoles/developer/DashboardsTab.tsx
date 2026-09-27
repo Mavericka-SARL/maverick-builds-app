@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, LayoutDashboard, Trash2, FolderPlus, Folder } from "lucide-react";
 import { api, type DashboardDef, type DashboardFolder } from "../../api/client";
-import { Toolbar, ToolbarGroup, SearchInput, FilterChip, Button, Field, TextInput, Select, EmptyState, IconButton, useConfirm } from "../../ui";
+import { Toolbar, ToolbarGroup, SearchInput, FilterChip, TagInput, TagFilter, Button, Field, TextInput, Select, EmptyState, IconButton, useConfirm } from "../../ui";
 import { DashboardCanvas } from "./DashboardCanvas";
 import { flattenFolders, UNFILED_LABEL, type FolderNode } from "./folderTree";
 
@@ -21,13 +21,11 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
   const [filterFolder, setFilterFolder] = useState("");
   const [showDashCreate, setShowDashCreate] = useState(false);
   const [newDashName, setNewDashName] = useState("");
-  const [newDashTagInput, setNewDashTagInput] = useState("");
   const [newDashTags, setNewDashTags] = useState<string[]>([]);
   const [newDashFolder, setNewDashFolder] = useState(ROOT_OPTION);
   const [editingDashId, setEditingDashId] = useState<string | null>(null);
   const [editDashName, setEditDashName] = useState("");
   const [editDashTags, setEditDashTags] = useState<string[]>([]);
-  const [editTagInput, setEditTagInput] = useState("");
   const [showFolderCreate, setShowFolderCreate] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [newFolderParent, setNewFolderParent] = useState(ROOT_OPTION);
@@ -99,7 +97,7 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["dev-dashboards"] });
-      setNewDashName(""); setNewDashTags([]); setNewDashTagInput(""); setNewDashFolder(ROOT_OPTION); setShowDashCreate(false);
+      setNewDashName(""); setNewDashTags([]); setNewDashFolder(ROOT_OPTION); setShowDashCreate(false);
     },
   });
   const saveDashboard = useMutation({
@@ -137,13 +135,6 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
     },
   });
   const { confirm, confirmElement } = useConfirm();
-
-  const addTag = (tag: string, list: string[], setList: (t: string[]) => void) => {
-    const t = tag.trim().toLowerCase().replace(/\s+/g, "-");
-    if (t && !list.includes(t)) setList([...list, t]);
-  };
-  const removeTag = (tag: string, list: string[], setList: (t: string[]) => void) =>
-    setList(list.filter(t => t !== tag));
 
   // With no folders in this revision every folder control collapses to the
   // single choice "Unfiled": the group header says what the count line above
@@ -187,16 +178,7 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
               ))}
             </Select>
           )}
-          {allTags.map(t => (
-            <FilterChip
-              key={t}
-              active={filterTag === t}
-              onClick={() => setFilterTag(t === filterTag ? null : t)}
-              onClear={filterTag === t ? () => setFilterTag(null) : undefined}
-            >
-              {t}
-            </FilterChip>
-          ))}
+          <TagFilter tags={allTags} active={filterTag} onChange={setFilterTag} />
         </ToolbarGroup>
         <ToolbarGroup align="end">
           <Button
@@ -207,7 +189,7 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
           </Button>
           <Button
             leadingIcon={showDashCreate ? undefined : <Plus size={14} />}
-            onClick={() => { setShowDashCreate(v => !v); setNewDashName(""); setNewDashTags([]); setNewDashTagInput(""); setNewDashFolder(filterFolder && filterFolder !== ROOT_OPTION ? filterFolder : ROOT_OPTION); }}
+            onClick={() => { setShowDashCreate(v => !v); setNewDashName(""); setNewDashTags([]); setNewDashFolder(filterFolder && filterFolder !== ROOT_OPTION ? filterFolder : ROOT_OPTION); }}
           >
             {showDashCreate ? "Cancel" : "New dashboard"}
           </Button>
@@ -252,16 +234,7 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
               </Field>
             )}
             <Field label="Tags">
-              <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
-                {newDashTags.map(t => (
-                  <FilterChip key={t} onClear={() => removeTag(t, newDashTags, setNewDashTags)}>
-                    {t}
-                  </FilterChip>
-                ))}
-                <TextInput value={newDashTagInput} onChange={e => setNewDashTagInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter" || e.key === ",") { addTag(newDashTagInput, newDashTags, setNewDashTags); setNewDashTagInput(""); e.preventDefault(); } }}
-                  placeholder="Add tag…" style={{ width: 120 }} />
-              </div>
+              <TagInput value={newDashTags} onChange={setNewDashTags} />
             </Field>
             <Button variant="primary" disabled={!newDashName} loading={createDashboard.isPending} onClick={() => createDashboard.mutate()}>
               Create
@@ -329,14 +302,7 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
                       </div>
                       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                         <span className="mvx-admin-muted">Tags:</span>
-                        {editDashTags.map(t => (
-                          <FilterChip key={t} onClear={() => removeTag(t, editDashTags, setEditDashTags)}>
-                            {t}
-                          </FilterChip>
-                        ))}
-                        <TextInput value={editTagInput} onChange={e => setEditTagInput(e.target.value)}
-                          onKeyDown={e => { if (e.key === "Enter" || e.key === ",") { addTag(editTagInput, editDashTags, setEditDashTags); setEditTagInput(""); e.preventDefault(); } }}
-                          placeholder="Add tag…" style={{ width: 110 }} />
+                        <TagInput value={editDashTags} onChange={setEditDashTags} inputWidth={110} />
                       </div>
                     </div>
                   ) : (
@@ -345,7 +311,7 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
                         type="button"
                         title="Click to rename"
                         className="mvx-rename-target"
-                        onClick={() => { setEditingDashId(dash.id); setEditDashName(dash.name); setEditDashTags([...(dash.tags ?? [])]); setEditTagInput(""); }}
+                        onClick={() => { setEditingDashId(dash.id); setEditDashName(dash.name); setEditDashTags([...(dash.tags ?? [])]); }}
                       >{dash.name}</button>
                       {(dash.tags ?? []).map(t => (
                         <FilterChip key={t} active={t === filterTag} onClick={() => setFilterTag(t === filterTag ? null : t)}>

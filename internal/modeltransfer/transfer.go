@@ -77,21 +77,23 @@ type Dimension struct {
 	DimensionType   string        `json:"dimension_type,omitempty"`
 	TimeGranularity *string       `json:"time_granularity,omitempty"`
 	FiscalYearStart *int          `json:"fiscal_year_start_month,omitempty"`
+	Tags            []string      `json:"tags,omitempty"`
 	Members         []Member      `json:"members"`
 	TypedProperties []DimProperty `json:"typed_properties,omitempty"`
 }
 
 type Metric struct {
-	ID             string  `json:"id"`
-	Name           string  `json:"name"`
-	Formula        *string `json:"formula,omitempty"`
-	StorageType    string  `json:"storage_type"`
-	IsInput        bool    `json:"is_input"`
-	AggRule        string  `json:"agg_rule"`
-	Format         string  `json:"format"`
-	FormatDecimals int     `json:"format_decimals"`
-	FormatCurrency string  `json:"format_currency"`
-	TimeSummary    string  `json:"time_summary,omitempty"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Formula        *string  `json:"formula,omitempty"`
+	StorageType    string   `json:"storage_type"`
+	IsInput        bool     `json:"is_input"`
+	AggRule        string   `json:"agg_rule"`
+	Format         string   `json:"format"`
+	FormatDecimals int      `json:"format_decimals"`
+	FormatCurrency string   `json:"format_currency"`
+	TimeSummary    string   `json:"time_summary,omitempty"`
+	Tags           []string `json:"tags,omitempty"`
 }
 
 type Dependency struct {
@@ -331,7 +333,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	// Dimensions + members + typed properties.
 	rows, err := q.Query(ctx, `
 		SELECT id::text, name, agg_rule, properties, parent_dimension_id::text, source_dimension_id::text, source_property,
-		       dimension_type, time_granularity, fiscal_year_start_month
+		       dimension_type, time_granularity, fiscal_year_start_month, tags
 		FROM model.dimension_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -340,7 +342,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for rows.Next() {
 		var d Dimension
 		if err := rows.Scan(&d.ID, &d.Name, &d.AggRule, &d.Properties, &d.ParentDimensionID, &d.SourceDimensionID, &d.SourceProperty,
-			&d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart); err != nil {
+			&d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart, &d.Tags); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -395,7 +397,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	// Metrics + dependencies.
 	rows, err = q.Query(ctx, `
 		SELECT id::text, name, formula, storage_type::text, is_input, agg_rule,
-		       COALESCE(format,''), COALESCE(format_decimals,0), COALESCE(format_currency,''), time_summary
+		       COALESCE(format,''), COALESCE(format_decimals,0), COALESCE(format_currency,''), time_summary, tags
 		FROM model.metric_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -403,7 +405,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 	for rows.Next() {
 		var m Metric
-		if err := rows.Scan(&m.ID, &m.Name, &m.Formula, &m.StorageType, &m.IsInput, &m.AggRule, &m.Format, &m.FormatDecimals, &m.FormatCurrency, &m.TimeSummary); err != nil {
+		if err := rows.Scan(&m.ID, &m.Name, &m.Formula, &m.StorageType, &m.IsInput, &m.AggRule, &m.Format, &m.FormatDecimals, &m.FormatCurrency, &m.TimeSummary, &m.Tags); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -935,11 +937,11 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 		}
 		if err = tx.QueryRow(ctx, `
 			INSERT INTO model.dimension_def (model_id, revision_id, name, agg_rule, properties, source_property,
-			                                 dimension_type, time_granularity, fiscal_year_start_month)
-			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE($5::jsonb,'[]'::jsonb), $6, $7, $8, $9)
+			                                 dimension_type, time_granularity, fiscal_year_start_month, tags)
+			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE($5::jsonb,'[]'::jsonb), $6, $7, $8, $9, COALESCE($10::text[],'{}'))
 			RETURNING id::text`,
 			modelID, revisionID, d.Name, d.AggRule, []byte(d.Properties), d.SourceProperty,
-			dimType, d.TimeGranularity, d.FiscalYearStart).Scan(&newID); err != nil {
+			dimType, d.TimeGranularity, d.FiscalYearStart, d.Tags).Scan(&newID); err != nil {
 			return "", "", fmt.Errorf("dimension %q: %w", d.Name, err)
 		}
 		dimMap[d.ID] = newID
@@ -1004,10 +1006,10 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			timeSummary = "sum"
 		}
 		if err = tx.QueryRow(ctx, `
-			INSERT INTO model.metric_def (model_id, revision_id, name, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary)
-			VALUES ($1::uuid, $2::uuid, $3, $4, $5::core.storage_type, $6, $7, $8, $9, $10, $11)
+			INSERT INTO model.metric_def (model_id, revision_id, name, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags)
+			VALUES ($1::uuid, $2::uuid, $3, $4, $5::core.storage_type, $6, $7, $8, $9, $10, $11, COALESCE($12::text[],'{}'))
 			RETURNING id::text`,
-			modelID, revisionID, m.Name, m.Formula, m.StorageType, m.IsInput, m.AggRule, m.Format, m.FormatDecimals, m.FormatCurrency, timeSummary).Scan(&newID); err != nil {
+			modelID, revisionID, m.Name, m.Formula, m.StorageType, m.IsInput, m.AggRule, m.Format, m.FormatDecimals, m.FormatCurrency, timeSummary, m.Tags).Scan(&newID); err != nil {
 			return "", "", fmt.Errorf("metric %q: %w", m.Name, err)
 		}
 		metricMap[m.ID] = newID

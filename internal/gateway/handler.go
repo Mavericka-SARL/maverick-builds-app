@@ -40,6 +40,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/query"
 	"github.com/mavericks-engine/mavericks/internal/rollup"
 	"github.com/mavericks-engine/mavericks/internal/schemamigration"
+	"github.com/mavericks-engine/mavericks/internal/tags"
 	"github.com/mavericks-engine/mavericks/internal/timedim"
 	"github.com/mavericks-engine/mavericks/internal/workflow"
 	"github.com/mavericks-engine/mavericks/internal/writeguard"
@@ -4281,8 +4282,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		-- 1. Copy metrics; capture old→new ID mapping via name join
 		new_metrics AS (
 			INSERT INTO model.metric_def
-			  (model_id, name, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, revision_id)
-			SELECT model_id, name, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, $2::uuid
+			  (model_id, name, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, revision_id)
+			SELECT model_id, name, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, $2::uuid
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 			RETURNING id AS new_id, name
 		),
@@ -4306,9 +4307,9 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		new_dims AS (
 			INSERT INTO model.dimension_def
 			  (model_id, name, agg_rule, properties, revision_id, source_property,
-			   dimension_type, time_granularity, fiscal_year_start_month)
+			   dimension_type, time_granularity, fiscal_year_start_month, tags)
 			SELECT model_id, name, agg_rule, properties, $2::uuid, source_property,
-			       dimension_type, time_granularity, fiscal_year_start_month
+			       dimension_type, time_granularity, fiscal_year_start_month, tags
 			FROM model.dimension_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 			RETURNING id AS new_id, name
 		),
@@ -5122,6 +5123,15 @@ func (h *handler) developerRevisionAction(w http.ResponseWriter, r *http.Request
 
 // ── /api/developer/model ─────────────────────────────────────────────────────
 
+// optionalTags is tags.Clean for a PATCH field: nil (tags not sent) stays nil
+// so `tags = COALESCE($n, tags)` keeps what the row has.
+func optionalTags(in *[]string) []string {
+	if in == nil {
+		return nil
+	}
+	return tags.Clean(*in)
+}
+
 type devMetric struct {
 	ID             string  `json:"id"`
 	Name           string  `json:"name"`
@@ -5141,6 +5151,8 @@ type devMetric struct {
 	AggDenominatorMetricID string   `json:"agg_denominator_metric_id,omitempty"`
 	DependsOn              []string `json:"depends_on"`
 	DependedBy             []string `json:"depended_by"`
+	// Tags: free-form labels the developer console filters by.
+	Tags []string `json:"tags"`
 	// CalcError is set when this metric's most recent calculation attempt
 	// failed (runtime.metric_partition_state.status='error') — e.g. a
 	// formula referencing an identifier that no longer resolves after a
@@ -5187,7 +5199,7 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.Query(ctx, `
 		SELECT m.id::text, m.name, m.is_input, m.formula, m.agg_rule,
 		       COALESCE(m.agg_numerator_metric_id::text,''), COALESCE(m.agg_denominator_metric_id::text,''),
-		       m.format, m.format_decimals, m.format_currency, m.time_summary,
+		       m.format, m.format_decimals, m.format_currency, m.time_summary, m.tags,
 		       COALESCE(
 		           (SELECT string_agg(dep.name, ',')
 		            FROM model.calc_dependency cd
@@ -5219,11 +5231,14 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 		var dependsOnCSV, dependedByCSV string
 		if err := rows.Scan(&dm.ID, &dm.Name, &dm.IsInput, &dm.Formula, &dm.AggRule,
 			&dm.AggNumeratorMetricID, &dm.AggDenominatorMetricID,
-			&dm.Format, &dm.FormatDecimals, &dm.FormatCurrency, &dm.TimeSummary, &dependsOnCSV, &dependedByCSV, &dm.CalcError); err != nil {
+			&dm.Format, &dm.FormatDecimals, &dm.FormatCurrency, &dm.TimeSummary, &dm.Tags, &dependsOnCSV, &dependedByCSV, &dm.CalcError); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
 		dm.Label = toLabel(dm.Name)
+		if dm.Tags == nil {
+			dm.Tags = []string{}
+		}
 		if dependsOnCSV != "" {
 			dm.DependsOn = strings.Split(dependsOnCSV, ",")
 		} else {
@@ -5270,7 +5285,8 @@ type addMetricReq struct {
 	FormatCurrency         string `json:"format_currency"`
 	// TimeSummary: aggregation across a time dimension (spec §3.3). Empty
 	// defaults to sum.
-	TimeSummary string `json:"time_summary"`
+	TimeSummary string   `json:"time_summary"`
+	Tags        []string `json:"tags"`
 }
 
 func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
@@ -5298,6 +5314,9 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 	modelID, err := h.resolveDemoModelID(ctx, r)
 	if err != nil {
 		jsonAccessErr(w, err, "resolve model")
+		return
+	}
+	if !h.requireRevisionInModel(w, r, req.RevisionID, modelID) {
 		return
 	}
 
@@ -5377,19 +5396,19 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 	if req.RevisionID != "" {
 		metricInsertErr = tx.QueryRow(ctx, `
 			INSERT INTO model.metric_def (model_id, name, formula, is_input, revision_id, agg_rule, format, format_decimals, format_currency,
-			                              agg_numerator_metric_id, agg_denominator_metric_id, time_summary)
-			VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6, $7, $8, $9, NULLIF($10,'')::uuid, NULLIF($11,'')::uuid, $12)
+			                              agg_numerator_metric_id, agg_denominator_metric_id, time_summary, tags)
+			VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6, $7, $8, $9, NULLIF($10,'')::uuid, NULLIF($11,'')::uuid, $12, $13)
 			RETURNING id::text
 		`, modelID, req.Name, formulaVal, req.IsInput, req.RevisionID, req.AggRule, req.Format, req.FormatDecimals, req.FormatCurrency,
-			req.AggNumeratorMetricID, req.AggDenominatorMetricID, req.TimeSummary).Scan(&newID)
+			req.AggNumeratorMetricID, req.AggDenominatorMetricID, req.TimeSummary, tags.Clean(req.Tags)).Scan(&newID)
 	} else {
 		metricInsertErr = tx.QueryRow(ctx, `
 			INSERT INTO model.metric_def (model_id, name, formula, is_input, agg_rule, format, format_decimals, format_currency,
-			                              agg_numerator_metric_id, agg_denominator_metric_id, time_summary)
-			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, NULLIF($9,'')::uuid, NULLIF($10,'')::uuid, $11)
+			                              agg_numerator_metric_id, agg_denominator_metric_id, time_summary, tags)
+			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, NULLIF($9,'')::uuid, NULLIF($10,'')::uuid, $11, $12)
 			RETURNING id::text
 		`, modelID, req.Name, formulaVal, req.IsInput, req.AggRule, req.Format, req.FormatDecimals, req.FormatCurrency,
-			req.AggNumeratorMetricID, req.AggDenominatorMetricID, req.TimeSummary).Scan(&newID)
+			req.AggNumeratorMetricID, req.AggDenominatorMetricID, req.TimeSummary, tags.Clean(req.Tags)).Scan(&newID)
 	}
 	if metricInsertErr != nil {
 		jsonErr(w, fmt.Errorf("insert metric: %w", metricInsertErr), http.StatusInternalServerError)
@@ -5940,6 +5959,7 @@ type devDimension struct {
 	DimensionType     string      `json:"dimension_type"` // "standard" | "time" — explicit, immutable
 	TimeGranularity   *string     `json:"time_granularity,omitempty"`
 	FiscalYearStart   *int        `json:"fiscal_year_start_month,omitempty"`
+	Tags              []string    `json:"tags,omitempty"` // developer endpoint only
 	Members           []devMember `json:"members"`
 }
 
@@ -5962,9 +5982,10 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 			ParentDimensionID *string `json:"parent_dimension_id"`
 			// Time dimension marker (spec §4.1). Omitted = standard; a
 			// name like "month" never implies time.
-			DimensionType   string `json:"dimension_type"`
-			TimeGranularity string `json:"time_granularity"`
-			FiscalYearStart int    `json:"fiscal_year_start_month"`
+			DimensionType   string   `json:"dimension_type"`
+			TimeGranularity string   `json:"time_granularity"`
+			FiscalYearStart int      `json:"fiscal_year_start_month"`
+			Tags            []string `json:"tags"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -5972,6 +5993,9 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.Name == "" {
 			jsonErr(w, fmt.Errorf("name required"), http.StatusBadRequest)
+			return
+		}
+		if !h.requireRevisionInModel(w, r, body.RevisionID, modelID) {
 			return
 		}
 		if body.AggRule == "" {
@@ -6006,14 +6030,14 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.RevisionID != "" {
 			dimInsertErr = h.db.QueryRow(ctx, `
-				INSERT INTO model.dimension_def (model_id, name, agg_rule, revision_id, parent_dimension_id, dimension_type, time_granularity, fiscal_year_start_month)
-				VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, $7, $8) RETURNING id::text
-			`, modelID, body.Name, body.AggRule, body.RevisionID, body.ParentDimensionID, timeCfg.Type, granularity, fiscalStart).Scan(&newID)
+				INSERT INTO model.dimension_def (model_id, name, agg_rule, revision_id, parent_dimension_id, dimension_type, time_granularity, fiscal_year_start_month, tags)
+				VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, $7, $8, $9) RETURNING id::text
+			`, modelID, body.Name, body.AggRule, body.RevisionID, body.ParentDimensionID, timeCfg.Type, granularity, fiscalStart, tags.Clean(body.Tags)).Scan(&newID)
 		} else {
 			dimInsertErr = h.db.QueryRow(ctx, `
-				INSERT INTO model.dimension_def (model_id, name, agg_rule, parent_dimension_id, dimension_type, time_granularity, fiscal_year_start_month)
-				VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7) RETURNING id::text
-			`, modelID, body.Name, body.AggRule, body.ParentDimensionID, timeCfg.Type, granularity, fiscalStart).Scan(&newID)
+				INSERT INTO model.dimension_def (model_id, name, agg_rule, parent_dimension_id, dimension_type, time_granularity, fiscal_year_start_month, tags)
+				VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7, $8) RETURNING id::text
+			`, modelID, body.Name, body.AggRule, body.ParentDimensionID, timeCfg.Type, granularity, fiscalStart, tags.Clean(body.Tags)).Scan(&newID)
 		}
 		if dimInsertErr != nil {
 			jsonErr(w, fmt.Errorf("insert dimension: %w", dimInsertErr), http.StatusInternalServerError)
@@ -6048,7 +6072,7 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 		dimArgs = []any{modelID, revisionID}
 	}
 	dimRows, err := h.db.Query(ctx,
-		`SELECT id::text, name, agg_rule, parent_dimension_id::text, dimension_type, time_granularity, fiscal_year_start_month
+		`SELECT id::text, name, agg_rule, parent_dimension_id::text, dimension_type, time_granularity, fiscal_year_start_month, tags
 		 FROM model.dimension_def WHERE model_id=$1::uuid AND `+dimFilter+` ORDER BY created_at`,
 		dimArgs...)
 	if err != nil {
@@ -6060,7 +6084,7 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 	var dims []devDimension
 	for dimRows.Next() {
 		var d devDimension
-		if err := dimRows.Scan(&d.ID, &d.Name, &d.AggRule, &d.ParentDimensionID, &d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart); err != nil {
+		if err := dimRows.Scan(&d.ID, &d.Name, &d.AggRule, &d.ParentDimensionID, &d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart, &d.Tags); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -9183,18 +9207,32 @@ func (h *handler) appIDFromFormID(ctx context.Context, formID string) (string, e
 // endpoints (workflows, automation rules): explicit ?revision_id wins, else
 // the active revision of the app's model. Returns "" (revision-global) when
 // the app has no revisions yet.
-func (h *handler) resolveAppRevisionID(ctx context.Context, r *http.Request, appID string) string {
+func (h *handler) resolveAppRevisionID(ctx context.Context, r *http.Request, appID string) (string, error) {
+	// A caller-named revision must be one of this application's own: it is
+	// stored on the workflow definitions and automation rules created here,
+	// and used to be taken verbatim, so a revision of another application's
+	// model could be written into this one's rows.
 	if rev := r.URL.Query().Get("revision_id"); rev != "" {
-		return rev
+		var found bool
+		if err := h.db.QueryRow(ctx, `
+			SELECT EXISTS(SELECT 1 FROM model.revision rv JOIN core.model m ON m.id = rv.model_id
+			              WHERE rv.id::text = $1 AND m.application_id = $2::uuid)`, rev, appID,
+		).Scan(&found); err != nil {
+			return "", fmt.Errorf("resolve revision: %w", err)
+		}
+		if !found {
+			return "", errRevisionNotInModel
+		}
+		return rev, nil
 	}
 	var modelID string
 	if err := h.db.QueryRow(ctx,
 		`SELECT id::text FROM core.model WHERE application_id=$1::uuid ORDER BY created_at ASC LIMIT 1`, appID,
 	).Scan(&modelID); err != nil {
-		return ""
+		return "", nil
 	}
 	revID, _, _ := h.resolveRevisionCtx(ctx, "", modelID)
-	return revID
+	return revID, nil
 }
 
 // revisionIDFromFormID returns the revision a form belongs to ("" for
@@ -10142,7 +10180,13 @@ func (h *handler) automationRules(w http.ResponseWriter, r *http.Request) {
 		jsonAccessErr(w, err, "resolve app")
 		return
 	}
-	revisionID := h.resolveAppRevisionID(ctx, r, appID)
+	revisionID, revErr := h.resolveAppRevisionID(ctx, r, appID)
+	if rejectForeignRevision(w, revErr) {
+		return
+	} else if revErr != nil {
+		jsonErr(w, revErr, http.StatusInternalServerError)
+		return
+	}
 
 	if r.Method == http.MethodPost {
 		var body struct {
@@ -10340,6 +10384,8 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			FormatDecimals         int    `json:"format_decimals"`
 			FormatCurrency         string `json:"format_currency"`
 			TimeSummary            string `json:"time_summary"`
+			// Omitted leaves the metric's tags as they are.
+			Tags *[]string `json:"tags"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -10422,10 +10468,10 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			UPDATE model.metric_def
 			SET name=$2, formula=$3, agg_rule=$4, format=$5, format_decimals=$6, format_currency=$7,
 			    agg_numerator_metric_id=NULLIF($8,'')::uuid, agg_denominator_metric_id=NULLIF($9,'')::uuid,
-			    time_summary=$10
+			    time_summary=$10, tags=COALESCE($11, tags)
 			WHERE id=$1::uuid`,
 			metricID, body.Name, formulaPtr, body.AggRule, body.Format, body.FormatDecimals, body.FormatCurrency,
-			body.AggNumeratorMetricID, body.AggDenominatorMetricID, body.TimeSummary); err != nil {
+			body.AggNumeratorMetricID, body.AggDenominatorMetricID, body.TimeSummary, optionalTags(body.Tags)); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -10624,19 +10670,34 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 	if len(parts) == 1 {
 		switch r.Method {
 		case http.MethodPatch:
+			// A partial update: a field left out keeps its value. The rename
+			// form sends only the name, and this used to reset agg_rule to
+			// "sum" and detach the dimension from its parent dimension.
+			// parent_dimension_id is cleared only by sending it as null.
 			var body struct {
-				Name              string  `json:"name"`
-				AggRule           string  `json:"agg_rule"`
-				ParentDimensionID *string `json:"parent_dimension_id"`
+				Name              string    `json:"name"`
+				AggRule           string    `json:"agg_rule"`
+				ParentDimensionID *string   `json:"parent_dimension_id"`
+				Tags              *[]string `json:"tags"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			var sent map[string]json.RawMessage
+			raw, err := io.ReadAll(r.Body)
+			if err != nil || json.Unmarshal(raw, &body) != nil || json.Unmarshal(raw, &sent) != nil {
 				jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
 				return
 			}
-			if body.AggRule == "" {
-				body.AggRule = "sum"
-			}
+			_, parentSent := sent["parent_dimension_id"]
 			if body.ParentDimensionID != nil {
+				var parentModelID, ownModelID string
+				if err := h.db.QueryRow(ctx, `SELECT p.model_id::text, d.model_id::text FROM model.dimension_def p, model.dimension_def d
+					WHERE p.id=$1::uuid AND d.id=$2::uuid`, *body.ParentDimensionID, dimID).Scan(&parentModelID, &ownModelID); err != nil {
+					jsonErr(w, fmt.Errorf("parent dimension not found"), http.StatusBadRequest)
+					return
+				}
+				if parentModelID != ownModelID {
+					jsonErr(w, fmt.Errorf("parent dimension must belong to the same model"), http.StatusBadRequest)
+					return
+				}
 				if *body.ParentDimensionID == dimID {
 					jsonErr(w, fmt.Errorf("a dimension cannot be its own parent"), http.StatusBadRequest)
 					return
@@ -10653,8 +10714,13 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 			// dimension_type / time_granularity / fiscal_year_start_month are
 			// deliberately not updatable: they are immutable after creation
 			// (a DB trigger enforces it too).
-			if _, err := h.db.Exec(ctx, `UPDATE model.dimension_def SET name=$2, agg_rule=$3, parent_dimension_id=$4::uuid WHERE id=$1::uuid`,
-				dimID, body.Name, body.AggRule, body.ParentDimensionID); err != nil {
+			if _, err := h.db.Exec(ctx, `
+				UPDATE model.dimension_def
+				SET name=COALESCE(NULLIF($2,''), name), agg_rule=COALESCE(NULLIF($3,''), agg_rule),
+				    parent_dimension_id=CASE WHEN $5::boolean THEN $4::uuid ELSE parent_dimension_id END,
+				    tags=COALESCE($6, tags)
+				WHERE id=$1::uuid`,
+				dimID, body.Name, body.AggRule, body.ParentDimensionID, parentSent, optionalTags(body.Tags)); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -13081,6 +13147,9 @@ func (h *handler) developerDashboards(w http.ResponseWriter, r *http.Request) {
 		if body.Tags == nil {
 			body.Tags = []string{}
 		}
+		if !h.requireRevisionInModel(w, r, body.RevisionID, modelID) {
+			return
+		}
 		// Fall back to model's active revision when not specified
 		if body.RevisionID == "" {
 			_ = h.db.QueryRow(ctx,
@@ -15189,7 +15258,20 @@ func (h *handler) developerWorkflows(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("application_id required"), http.StatusBadRequest)
 		return
 	}
-	revisionID := h.resolveAppRevisionID(ctx, r, appID)
+	// The application comes from the query string, so it is checked here as
+	// its siblings (trigger events, roles) check it. Without this a developer
+	// of one tenant listed — and created — workflow definitions in another
+	// tenant's application.
+	if !h.requireResourceAccess(w, r, "application", appID) {
+		return
+	}
+	revisionID, revErr := h.resolveAppRevisionID(ctx, r, appID)
+	if rejectForeignRevision(w, revErr) {
+		return
+	} else if revErr != nil {
+		jsonErr(w, revErr, http.StatusInternalServerError)
+		return
+	}
 
 	ws := workflow.NewStore(h.db.For(ctx))
 
@@ -15825,7 +15907,14 @@ func (h *handler) developerWorkflowTriggerEvents(w http.ResponseWriter, r *http.
 		}
 	}
 
-	catalog, err := buildWorkflowTriggerEventCatalog(ctx, h.db.For(ctx), appID, h.resolveAppRevisionID(ctx, r, appID))
+	revisionID, revErr := h.resolveAppRevisionID(ctx, r, appID)
+	if rejectForeignRevision(w, revErr) {
+		return
+	} else if revErr != nil {
+		jsonErr(w, revErr, http.StatusInternalServerError)
+		return
+	}
+	catalog, err := buildWorkflowTriggerEventCatalog(ctx, h.db.For(ctx), appID, revisionID)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return

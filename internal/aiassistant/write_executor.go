@@ -15,6 +15,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/modeltransfer"
+	"github.com/mavericks-engine/mavericks/internal/tags"
 	"github.com/mavericks-engine/mavericks/internal/timedim"
 	"github.com/mavericks-engine/mavericks/internal/workflow"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
@@ -278,6 +279,8 @@ func (e *WriteExecutor) Execute(ctx context.Context, tool string, params json.Ra
 		return e.addGridDimension(ctx, params)
 	case "create_dashboard":
 		return e.createDashboard(ctx, params)
+	case "set_tags":
+		return e.setTags(ctx, params)
 	case "add_dashboard_widget":
 		return e.addDashboardWidget(ctx, params)
 	case "create_revision":
@@ -337,7 +340,8 @@ type createMetricParams struct {
 	AggDenominatorMetricID string `json:"agg_denominator_metric_id"`
 	// TimeSummary: aggregation across a time dimension (sum | average | min
 	// | max | first | last | none). Empty = sum.
-	TimeSummary string `json:"time_summary"`
+	TimeSummary string   `json:"time_summary"`
+	Tags        []string `json:"tags"`
 }
 
 func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -407,19 +411,19 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 	if revID != "" {
 		err = e.pool.QueryRow(ctx, `
 			INSERT INTO model.metric_def (model_id, name, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule,
-			                              agg_numerator_metric_id, agg_denominator_metric_id, time_summary)
-			VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6, $7, $8, $9, NULLIF($10,'')::uuid, NULLIF($11,'')::uuid, $12)
+			                              agg_numerator_metric_id, agg_denominator_metric_id, time_summary, tags)
+			VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6, $7, $8, $9, NULLIF($10,'')::uuid, NULLIF($11,'')::uuid, $12, $13)
 			RETURNING id::text
 		`, e.modelID, p.Name, formulaPtr, p.IsInput, revID, p.Format, p.FormatDecimals, p.FormatCurrency, p.AggRule,
-			p.AggNumeratorMetricID, p.AggDenominatorMetricID, p.TimeSummary).Scan(&newID)
+			p.AggNumeratorMetricID, p.AggDenominatorMetricID, p.TimeSummary, tags.Clean(p.Tags)).Scan(&newID)
 	} else {
 		err = e.pool.QueryRow(ctx, `
 			INSERT INTO model.metric_def (model_id, name, formula, is_input, format, format_decimals, format_currency, agg_rule,
-			                              agg_numerator_metric_id, agg_denominator_metric_id, time_summary)
-			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, NULLIF($9,'')::uuid, NULLIF($10,'')::uuid, $11)
+			                              agg_numerator_metric_id, agg_denominator_metric_id, time_summary, tags)
+			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, NULLIF($9,'')::uuid, NULLIF($10,'')::uuid, $11, $12)
 			RETURNING id::text
 		`, e.modelID, p.Name, formulaPtr, p.IsInput, p.Format, p.FormatDecimals, p.FormatCurrency, p.AggRule,
-			p.AggNumeratorMetricID, p.AggDenominatorMetricID, p.TimeSummary).Scan(&newID)
+			p.AggNumeratorMetricID, p.AggDenominatorMetricID, p.TimeSummary, tags.Clean(p.Tags)).Scan(&newID)
 	}
 	if err != nil {
 		return "", "", fmt.Errorf("insert metric: %w", err)
@@ -450,6 +454,8 @@ type updateMetricParams struct {
 	AggNumeratorMetricID   string `json:"agg_numerator_metric_id"`
 	AggDenominatorMetricID string `json:"agg_denominator_metric_id"`
 	TimeSummary            string `json:"time_summary"`
+	// Left out keeps the metric's tags; a list (even empty) replaces them.
+	Tags *[]string `json:"tags"`
 }
 
 func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -524,10 +530,10 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 		UPDATE model.metric_def
 		SET name=$2, formula=$3, agg_rule=$4, format=$5, format_decimals=$6, format_currency=$7,
 		    agg_numerator_metric_id=NULLIF($8,'')::uuid, agg_denominator_metric_id=NULLIF($9,'')::uuid,
-		    time_summary=$10
+		    time_summary=$10, tags=COALESCE($11, tags)
 		WHERE id=$1::uuid
 	`, p.MetricID, p.Name, formulaPtr, p.AggRule, p.Format, p.FormatDecimals, p.FormatCurrency,
-		p.AggNumeratorMetricID, p.AggDenominatorMetricID, p.TimeSummary); err != nil {
+		p.AggNumeratorMetricID, p.AggDenominatorMetricID, p.TimeSummary, optionalTags(p.Tags)); err != nil {
 		return "", "", fmt.Errorf("update metric: %w", err)
 	}
 	// Re-wire dependencies when the formula changed.
@@ -574,9 +580,10 @@ type createDimensionParams struct {
 	// Time dimension marker (spec §4.1): "standard" (default) or "time".
 	// A time dimension needs time_granularity and fiscal_year_start_month,
 	// and its members carry period_start/period_end instead of parents.
-	DimensionType   string `json:"dimension_type"`
-	TimeGranularity string `json:"time_granularity"`
-	FiscalYearStart int    `json:"fiscal_year_start_month"`
+	DimensionType   string   `json:"dimension_type"`
+	TimeGranularity string   `json:"time_granularity"`
+	FiscalYearStart int      `json:"fiscal_year_start_month"`
+	Tags            []string `json:"tags"`
 	Members         []struct {
 		Code        string `json:"code"`
 		Label       string `json:"label"`
@@ -626,14 +633,14 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 	}
 	if revID != "" {
 		err = e.pool.QueryRow(ctx, `
-			INSERT INTO model.dimension_def (model_id, name, agg_rule, revision_id, parent_dimension_id, dimension_type, time_granularity, fiscal_year_start_month)
-			VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, $7, $8) RETURNING id::text
-		`, e.modelID, p.Name, p.AggRule, revID, parentDimID, timeCfg.Type, granularity, fiscalStart).Scan(&newID)
+			INSERT INTO model.dimension_def (model_id, name, agg_rule, revision_id, parent_dimension_id, dimension_type, time_granularity, fiscal_year_start_month, tags)
+			VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, $7, $8, $9) RETURNING id::text
+		`, e.modelID, p.Name, p.AggRule, revID, parentDimID, timeCfg.Type, granularity, fiscalStart, tags.Clean(p.Tags)).Scan(&newID)
 	} else {
 		err = e.pool.QueryRow(ctx, `
-			INSERT INTO model.dimension_def (model_id, name, agg_rule, parent_dimension_id, dimension_type, time_granularity, fiscal_year_start_month)
-			VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7) RETURNING id::text
-		`, e.modelID, p.Name, p.AggRule, parentDimID, timeCfg.Type, granularity, fiscalStart).Scan(&newID)
+			INSERT INTO model.dimension_def (model_id, name, agg_rule, parent_dimension_id, dimension_type, time_granularity, fiscal_year_start_month, tags)
+			VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7, $8) RETURNING id::text
+		`, e.modelID, p.Name, p.AggRule, parentDimID, timeCfg.Type, granularity, fiscalStart, tags.Clean(p.Tags)).Scan(&newID)
 	}
 	if err != nil {
 		return "", "", fmt.Errorf("insert dimension: %w", err)
@@ -1189,6 +1196,60 @@ func (e *WriteExecutor) addGridDimension(ctx context.Context, raw json.RawMessag
 	return "Dimension added to grid", "", nil
 }
 
+// ── set_tags ──────────────────────────────────────────────────────────────────
+
+// tagTables are the definitions that carry tags, keyed by the kind name
+// requireInModel resolves (by id, or by exact name in the working revision).
+var tagTables = map[string]string{
+	"metric":    "model.metric_def",
+	"dimension": "model.dimension_def",
+	"dashboard": "model.dashboard_def",
+}
+
+// optionalTags is tags.Clean for an optional field: nil (not sent) stays nil
+// so `tags = COALESCE($n, tags)` keeps what the row has.
+func optionalTags(in *[]string) []string {
+	if in == nil {
+		return nil
+	}
+	return tags.Clean(*in)
+}
+
+// setTags replaces the tags on an existing metric, dimension or dashboard —
+// the tag editor the console has on each. An empty list clears them.
+func (e *WriteExecutor) setTags(ctx context.Context, raw json.RawMessage) (string, string, error) {
+	var p struct {
+		Kind string    `json:"kind"`
+		ID   string    `json:"id"`
+		Tags *[]string `json:"tags"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return "", "", fmt.Errorf("invalid params: %w", err)
+	}
+	table, ok := tagTables[p.Kind]
+	if !ok {
+		return "", "", fmt.Errorf(`kind must be "metric", "dimension" or "dashboard"`)
+	}
+	if p.ID == "" {
+		return "", "", fmt.Errorf("id is required (the %s's id or exact name)", p.Kind)
+	}
+	if p.Tags == nil {
+		return "", "", fmt.Errorf("tags is required — send [] to clear them")
+	}
+	id, err := e.requireInModel(ctx, p.Kind, p.ID)
+	if err != nil {
+		return "", "", err
+	}
+	clean := tags.Clean(*p.Tags)
+	if _, err := e.pool.Exec(ctx, `UPDATE `+table+` SET tags=$2 WHERE id=$1::uuid`, id, clean); err != nil {
+		return "", "", fmt.Errorf("set tags: %w", err)
+	}
+	if len(clean) == 0 {
+		return fmt.Sprintf("Tags cleared on %s %s", p.Kind, p.ID), "", nil
+	}
+	return fmt.Sprintf("Tags on %s %s set to %s", p.Kind, p.ID, strings.Join(clean, ", ")), "", nil
+}
+
 // ── create_dashboard ──────────────────────────────────────────────────────────
 
 func (e *WriteExecutor) createDashboard(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -1200,9 +1261,7 @@ func (e *WriteExecutor) createDashboard(ctx context.Context, raw json.RawMessage
 	if err := json.Unmarshal(raw, &p); err != nil || p.Name == "" {
 		return "", "", fmt.Errorf("name is required")
 	}
-	if p.Tags == nil {
-		p.Tags = []string{}
-	}
+	p.Tags = tags.Clean(p.Tags)
 	revID := e.effectiveRevision(p.RevisionID)
 	if revID == "" {
 		_ = e.pool.QueryRow(ctx, `SELECT COALESCE(active_revision_id::text,'') FROM core.model WHERE id=$1::uuid`, e.modelID).Scan(&revID)
@@ -1342,8 +1401,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 	if srcID != "" {
 		// Copy metrics
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO model.metric_def (model_id, name, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule, time_summary)
-			SELECT model_id, name, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule, time_summary
+			INSERT INTO model.metric_def (model_id, name, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule, time_summary, tags)
+			SELECT model_id, name, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule, time_summary, tags
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 		`, e.modelID, newID, srcID); err != nil {
 			return "", "", fmt.Errorf("copy metrics into new revision: %w", err)
@@ -1417,9 +1476,9 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			WITH
 			new_dims AS (
 				INSERT INTO model.dimension_def (model_id, name, agg_rule, properties, revision_id, source_property,
-				                                 dimension_type, time_granularity, fiscal_year_start_month)
+				                                 dimension_type, time_granularity, fiscal_year_start_month, tags)
 				SELECT model_id, name, agg_rule, properties, $2::uuid, source_property,
-				       dimension_type, time_granularity, fiscal_year_start_month
+				       dimension_type, time_granularity, fiscal_year_start_month, tags
 				FROM model.dimension_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 				RETURNING id AS new_id, name
 			),

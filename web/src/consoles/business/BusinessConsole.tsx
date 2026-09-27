@@ -43,7 +43,7 @@ export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSe
   return {
     id: SECTION,
     navGroups: [{
-      label: "Plan",
+      label: "Run",
       items: [
         { id: t("dashboards"), label: "Dashboards", icon: <LayoutDashboard size={16} /> },
         { id: t("inbox"), label: "Workflow Inbox", icon: <Inbox size={16} /> },

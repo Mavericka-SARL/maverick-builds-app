@@ -50,6 +50,7 @@ export type { PageLayoutProps, PageWidth, SectionHeaderProps } from "./PageLayou
 export { Toolbar, ToolbarGroup, FilterBar, FilterBarGroup, FilterChip } from "./Toolbar";
 export type { ToolbarGroupProps, ToolbarProps } from "./Toolbar";
 export { SearchInput } from "./SearchInput";
+export { TagInput, TagFilter } from "./TagInput";
 export { SegmentedControl } from "./SegmentedControl";
 export type { Segment, SegmentedControlProps } from "./SegmentedControl";
 export { StatusBadge, RoleBadge, RevisionBadge } from "./StatusBadge";

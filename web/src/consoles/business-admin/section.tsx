@@ -39,7 +39,7 @@ export function useBusinessAdminSection({ enabled, setTab }: SectionInput): Cons
     id: SECTION,
     navGroups: [
       {
-        label: "Plan",
+        label: "Run",
         items: [
           { id: t("dashboards"), label: "Dashboards", icon: <LayoutDashboard size={16} /> },
           { id: t("inbox"), label: "Workflow Inbox", icon: <Inbox size={16} /> },
@@ -47,7 +47,7 @@ export function useBusinessAdminSection({ enabled, setTab }: SectionInput): Cons
         ],
       },
       {
-        label: "Admin",
+        label: "Business Admin",
         items: [
           { id: t("history"), label: "History", icon: <History size={16} /> },
           { id: t("roles"), label: "Roles", icon: <Shield size={16} /> },

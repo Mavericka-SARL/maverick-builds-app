@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invalidateModelData } from "../modelDataQueries";
 import { Plus, X, Pencil, Trash2, Check, AlertTriangle } from "lucide-react";
 import { api, type DevModel, type DevMetric, type TimeSummary, TIME_SUMMARIES } from "../../api/client";
-import { Toolbar, ToolbarGroup, SearchInput, Button, TextInput, Select, NumberInput, StatusBadge, IconButton, useConfirm, Field, SegmentedControl } from "../../ui";
+import { Toolbar, ToolbarGroup, SearchInput, Button, TextInput, Select, NumberInput, StatusBadge, IconButton, useConfirm, Field, SegmentedControl, FilterChip, TagInput, TagFilter } from "../../ui";
 
 // Time summary (how a metric totals ACROSS its time dimension) is only
 // meaningful for a metric on a grid that carries a time dimension, so the
@@ -93,13 +93,19 @@ export function MetricsTab({ model, revisionId }: { model: DevModel; revisionId?
   const timeMetrics = useTimeDimensionedMetrics(revisionId);
   const [showAdd, setShowAdd] = useState(false);
   const [search, setSearch] = useState("");
+  const [filterTag, setFilterTag] = useState<string | null>(null);
+  const allTags = useMemo(() => [...new Set(model.metrics.flatMap(m => m.tags ?? []))].sort(), [model.metrics]);
+  const toggleTag = (t: string) => setFilterTag(cur => cur === t ? null : t);
 
-  const q = search.toLowerCase();
+  const q = search.trim().toLowerCase();
   const match = (m: DevMetric) =>
-    !q ||
-    m.name.toLowerCase().includes(q) ||
-    m.label?.toLowerCase().includes(q) ||
-    m.formula?.toLowerCase().includes(q);
+    (!filterTag || (m.tags ?? []).includes(filterTag)) && (
+      !q ||
+      m.name.toLowerCase().includes(q) ||
+      m.label?.toLowerCase().includes(q) ||
+      m.formula?.toLowerCase().includes(q) ||
+      (m.tags ?? []).some(t => t.includes(q)));
+  const filtering = !!q || !!filterTag;
 
   const inputs = model.metrics.filter((m) => m.is_input && match(m));
   const calcs = model.metrics.filter((m) => !m.is_input && match(m));
@@ -116,6 +122,7 @@ export function MetricsTab({ model, revisionId }: { model: DevModel; revisionId?
           </span>
         </ToolbarGroup>
         <ToolbarGroup align="end">
+          <TagFilter tags={allTags} active={filterTag} onChange={setFilterTag} />
           <SearchInput
             placeholder="Search metrics…"
             value={search}
@@ -138,20 +145,22 @@ export function MetricsTab({ model, revisionId }: { model: DevModel; revisionId?
             </tr>
           </thead>
           <tbody>
-            {inputs.map((m) => <MetricRow key={m.id} m={m} allMetrics={model.metrics} onTimeGrid={timeMetrics.has(m.id)} />)}
+            {inputs.map((m) => <MetricRow key={m.id} m={m} allMetrics={model.metrics} onTimeGrid={timeMetrics.has(m.id)} activeTag={filterTag} onTagClick={toggleTag} />)}
             {inputs.length > 0 && calcs.length > 0 && (
               <tr><td colSpan={6} className="mvx-table__group-row">Calculated</td></tr>
             )}
-            {calcs.map((m) => <MetricRow key={m.id} m={m} allMetrics={model.metrics} onTimeGrid={timeMetrics.has(m.id)} />)}
-            {inputs.length === 0 && calcs.length === 0 && q && (
-              <tr><td colSpan={6} style={{ padding: 20, textAlign: "center" }} className="mvx-admin-muted">No metrics match "{search}"</td></tr>
+            {calcs.map((m) => <MetricRow key={m.id} m={m} allMetrics={model.metrics} onTimeGrid={timeMetrics.has(m.id)} activeTag={filterTag} onTagClick={toggleTag} />)}
+            {inputs.length === 0 && calcs.length === 0 && filtering && (
+              <tr><td colSpan={6} style={{ padding: 20, textAlign: "center" }} className="mvx-admin-muted">
+                {q ? `No metrics match "${search.trim()}"${filterTag ? ` with tag "${filterTag}"` : ""}` : `No metrics have tag "${filterTag}"`}
+              </td></tr>
             )}
           </tbody>
         </table>
       </div>
 
       <div className="mvx-admin-muted" style={{ marginTop: 12 }}>
-        {q
+        {filtering
           ? `${inputs.length + calcs.length} result${inputs.length + calcs.length !== 1 ? "s" : ""} of ${allInputs.length + allCalcs.length} metrics`
           : `${allInputs.length} input metrics · ${allCalcs.length} calculated metrics`
         }
@@ -177,7 +186,13 @@ export function MetricsTab({ model, revisionId }: { model: DevModel; revisionId?
 
 type RecalcRow = { revision: string; metric: string; value: number | null };
 
-function MetricRow({ m, allMetrics, onTimeGrid }: { m: DevMetric; allMetrics: DevMetric[]; onTimeGrid: boolean }) {
+function MetricRow({ m, allMetrics, onTimeGrid, activeTag, onTagClick }: {
+  m: DevMetric;
+  allMetrics: DevMetric[];
+  onTimeGrid: boolean;
+  activeTag: string | null;
+  onTagClick: (tag: string) => void;
+}) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(m.name);
@@ -189,6 +204,7 @@ function MetricRow({ m, allMetrics, onTimeGrid }: { m: DevMetric; allMetrics: De
   const [format, setFormat] = useState(m.format ?? "number");
   const [formatDecimals, setFormatDecimals] = useState(m.format_decimals ?? 0);
   const [formatCurrency, setFormatCurrency] = useState(m.format_currency ?? "$");
+  const [tags, setTags] = useState<string[]>(m.tags ?? []);
   const [recalcResults, setRecalcResults] = useState<RecalcRow[] | null>(null);
 
   // Validate formula refs via backend parser (handles both =ident and {ident} syntax).
@@ -208,7 +224,7 @@ function MetricRow({ m, allMetrics, onTimeGrid }: { m: DevMetric; allMetrics: De
       agg_numerator_metric_id: aggRule === "rate" ? numeratorId : "",
       agg_denominator_metric_id: aggRule === "rate" ? denominatorId : "",
       format, format_decimals: formatDecimals, format_currency: formatCurrency,
-      time_summary: timeSummary,
+      time_summary: timeSummary, tags,
     }),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["dev-model"] });
@@ -305,6 +321,10 @@ function MetricRow({ m, allMetrics, onTimeGrid }: { m: DevMetric; allMetrics: De
               </Button>
               <Button size="sm" onClick={() => { setEditing(false); setRecalcResults(null); }}>Cancel</Button>
             </div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+              <span className="mvx-admin-muted">Tags:</span>
+              <TagInput value={tags} onChange={setTags} inputWidth={110} />
+            </div>
             {invalidRefs.length > 0 && (
               <p className="mvx-admin-error" style={{ marginTop: 4 }}>
                 Unknown or invalid references: {invalidRefs.map(r => `{${r}}`).join(", ")}
@@ -321,7 +341,18 @@ function MetricRow({ m, allMetrics, onTimeGrid }: { m: DevMetric; allMetrics: De
     <>
       <tr>
         <td className="mvx-admin-mono">{m.name}</td>
-        <td>{m.label}</td>
+        <td>
+          <div>{m.label}</div>
+          {(m.tags ?? []).length > 0 && (
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
+              {(m.tags ?? []).map(t => (
+                <FilterChip key={t} active={t === activeTag} onClick={() => onTagClick(t)} title={t === activeTag ? "Clear tag filter" : "Filter by this tag"}>
+                  {t}
+                </FilterChip>
+              ))}
+            </div>
+          )}
+        </td>
         <td>
           <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-start" }}>
             <StatusBadge tone={m.is_input ? "info" : "success"}>{m.is_input ? "Input" : "Calc"}</StatusBadge>
@@ -350,7 +381,7 @@ function MetricRow({ m, allMetrics, onTimeGrid }: { m: DevMetric; allMetrics: De
         <td>
           <div style={{ display: "flex", gap: 4 }}>
             <IconButton aria-label={`Edit metric ${m.name}`} title="Edit" size={26}
-              onClick={() => { setEditing(true); setRecalcResults(null); }}>
+              onClick={() => { setEditing(true); setRecalcResults(null); setTags(m.tags ?? []); }}>
               <Pencil size={13} />
             </IconButton>
             <IconButton aria-label={`Delete metric ${m.name}`} title="Delete" danger size={26} disabled={del.isPending}
@@ -382,6 +413,7 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
   const [aggRule, setAggRule] = useState("sum");
   const [numeratorId, setNumeratorId] = useState("");
   const [denominatorId, setDenominatorId] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
 
   const add = useMutation({
     mutationFn: () => api.addMetric({
@@ -391,11 +423,11 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
       agg_numerator_metric_id: aggRule === "rate" ? numeratorId : "",
       agg_denominator_metric_id: aggRule === "rate" ? denominatorId : "",
       format, format_decimals: formatDecimals, format_currency: formatCurrency,
-      time_summary: timeSummary,
+      time_summary: timeSummary, tags,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["dev-model"] });
-      setName(""); setFormula(""); setNumeratorId(""); setDenominatorId(""); setTimeSummary("sum");
+      setName(""); setFormula(""); setNumeratorId(""); setDenominatorId(""); setTimeSummary("sum"); setTags([]);
       onSuccess?.();
     },
   });
@@ -508,6 +540,10 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
             <TimeSummarySelect value={timeSummary} onChange={setTimeSummary} width={160} />
           </Field>
         )}
+
+        <Field label="Tags">
+          <TagInput value={tags} onChange={setTags} />
+        </Field>
 
         <Button
           variant="primary"

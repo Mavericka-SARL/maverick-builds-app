@@ -194,7 +194,7 @@ const TOOL_LABELS: Record<string, string> = {
   create_dimension: "Create dimension", add_dimension_member: "Add dimension member",
   update_dimension_member: "Update dimension member",
   create_grid: "Create grid", add_grid_metric: "Add grid metric", add_grid_dimension: "Add grid dimension",
-  create_dashboard: "Create dashboard", add_dashboard_widget: "Add dashboard widget",
+  create_dashboard: "Create dashboard", add_dashboard_widget: "Add dashboard widget", set_tags: "Set tags",
   create_revision: "Create revision", generate_migration: "Generate migration", apply_migration: "Apply migration",
   create_workflow_def: "Create workflow", update_workflow_def: "Update workflow", delete_workflow_def: "Delete workflow",
   create_form_def: "Create form", update_form_def: "Update form", delete_form_def: "Delete form",
