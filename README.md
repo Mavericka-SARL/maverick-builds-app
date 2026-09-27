@@ -47,7 +47,7 @@ trust.
 
 ## Prerequisites
 
-- Go 1.26.3, matching `go.mod`
+- Go 1.26.8, matching `go.mod`
 - Node.js 24, matching CI
 - Docker with Compose v2
 - npm

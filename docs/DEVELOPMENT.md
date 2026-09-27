@@ -8,7 +8,7 @@
 
 | Tool | Version/source |
 |---|---|
-| Go | `go 1.26.3` in `go.mod` |
+| Go | `go 1.26.8` in `go.mod` |
 | Node.js | 24 in CI |
 | npm dependencies | `web/package-lock.json` |
 | PostgreSQL | 16 in the Docker development stack |
