@@ -1,6 +1,7 @@
 package formula
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 )
@@ -28,6 +29,11 @@ const (
 	tokGte
 	tokAmpersand
 	tokSemicolon
+	// tokDotted is dim.property: an identifier, one dot, and a second
+	// identifier starting with a letter or _. Val is the whole text.
+	tokDotted
+	// tokError is a lexically malformed token; Val is the message.
+	tokError
 )
 
 type Token struct {
@@ -169,12 +175,44 @@ func (l *lexer) readNumber(start int) Token {
 	return Token{Type: tokNumber, Val: string(l.src[start:l.pos]), Pos: start}
 }
 
-func (l *lexer) readIdent(start int) Token {
-	for l.pos < len(l.src) && (unicode.IsLetter(l.peek()) || unicode.IsDigit(l.peek()) || l.peek() == '_') {
+func isIdentRune(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' }
+
+func (l *lexer) readWord() {
+	for l.pos < len(l.src) && isIdentRune(l.peek()) {
 		l.advance()
 	}
-	val := string(l.src[start:l.pos])
-	return Token{Type: tokIdent, Val: val, Pos: start}
+}
+
+// readIdent reads an identifier, or a dim.property reference when the
+// identifier is directly followed by a dot and a letter or _. Exactly one
+// dot is allowed, and a digit after the dot is an error: x.5 and
+// region.2026 are never property references.
+func (l *lexer) readIdent(start int) Token {
+	l.readWord()
+	if l.peek() != '.' || l.pos+1 >= len(l.src) {
+		return Token{Type: tokIdent, Val: string(l.src[start:l.pos]), Pos: start}
+	}
+	after := l.src[l.pos+1]
+	switch {
+	case unicode.IsLetter(after) || after == '_':
+		l.advance() // the dot
+		l.readWord()
+		if l.peek() == '.' && l.pos+1 < len(l.src) && isIdentRune(l.src[l.pos+1]) {
+			for l.peek() == '.' && l.pos+1 < len(l.src) && isIdentRune(l.src[l.pos+1]) {
+				l.advance()
+				l.readWord()
+			}
+			return Token{Type: tokError, Pos: start,
+				Val: fmt.Sprintf("%s: a property reference has exactly one dot (dimension.property)", string(l.src[start:l.pos]))}
+		}
+		return Token{Type: tokDotted, Val: string(l.src[start:l.pos]), Pos: start}
+	case unicode.IsDigit(after):
+		l.advance() // the dot
+		l.readWord()
+		return Token{Type: tokError, Pos: start,
+			Val: fmt.Sprintf("%s: a property name must start with a letter or _", string(l.src[start:l.pos]))}
+	}
+	return Token{Type: tokIdent, Val: string(l.src[start:l.pos]), Pos: start}
 }
 
 // readBraceIdent handles legacy {metric_name} syntax

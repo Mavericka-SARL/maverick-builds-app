@@ -47,7 +47,7 @@ func (UnimplementedHandler) AddBARoleMember(ctx context.Context, req *AddRoleMem
 // Add a dimension to a grid.
 //
 // POST /api/developer/grids/{id}/dimensions/{dimId}
-func (UnimplementedHandler) AddGridDimension(ctx context.Context, params AddGridDimensionParams) (r *AddGridDimensionOK, _ error) {
+func (UnimplementedHandler) AddGridDimension(ctx context.Context, params AddGridDimensionParams) (r AddGridDimensionRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -274,7 +274,7 @@ func (UnimplementedHandler) CreateDimensionMember(ctx context.Context, req *Memb
 // Define a new typed property on a dimension.
 //
 // POST /api/developer/dimensions/{dimId}/properties
-func (UnimplementedHandler) CreateDimensionProperty(ctx context.Context, req *PropertyRequest, params CreateDimensionPropertyParams) (r *CreateDimensionPropertyOK, _ error) {
+func (UnimplementedHandler) CreateDimensionProperty(ctx context.Context, req *PropertyRequest, params CreateDimensionPropertyParams) (r CreateDimensionPropertyRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -515,7 +515,7 @@ func (UnimplementedHandler) DeleteDashboardWidget(ctx context.Context, params De
 // Delete a dimension.
 //
 // DELETE /api/developer/dimensions/{dimId}
-func (UnimplementedHandler) DeleteDimension(ctx context.Context, params DeleteDimensionParams) (r *DeleteDimensionOK, _ error) {
+func (UnimplementedHandler) DeleteDimension(ctx context.Context, params DeleteDimensionParams) (r DeleteDimensionRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -524,7 +524,7 @@ func (UnimplementedHandler) DeleteDimension(ctx context.Context, params DeleteDi
 // Delete a dimension member.
 //
 // DELETE /api/developer/dimensions/{dimId}/members/{memberId}
-func (UnimplementedHandler) DeleteDimensionMember(ctx context.Context, params DeleteDimensionMemberParams) (r *DeleteDimensionMemberOK, _ error) {
+func (UnimplementedHandler) DeleteDimensionMember(ctx context.Context, params DeleteDimensionMemberParams) (r DeleteDimensionMemberRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -533,7 +533,7 @@ func (UnimplementedHandler) DeleteDimensionMember(ctx context.Context, params De
 // Delete a dimension property.
 //
 // DELETE /api/developer/dimensions/{dimId}/properties/{propId}
-func (UnimplementedHandler) DeleteDimensionProperty(ctx context.Context, params DeleteDimensionPropertyParams) (r *DeleteDimensionPropertyOK, _ error) {
+func (UnimplementedHandler) DeleteDimensionProperty(ctx context.Context, params DeleteDimensionPropertyParams) (r DeleteDimensionPropertyRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1622,7 +1622,7 @@ func (UnimplementedHandler) RemoveBranding(ctx context.Context) (r RemoveBrandin
 // Remove a dimension from a grid.
 //
 // DELETE /api/developer/grids/{id}/dimensions/{dimId}
-func (UnimplementedHandler) RemoveGridDimension(ctx context.Context, params RemoveGridDimensionParams) (r *RemoveGridDimensionOK, _ error) {
+func (UnimplementedHandler) RemoveGridDimension(ctx context.Context, params RemoveGridDimensionParams) (r RemoveGridDimensionRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -2171,7 +2171,7 @@ func (UnimplementedHandler) UpdateDimensionMember(ctx context.Context, req *Memb
 // Update a dimension property.
 //
 // PATCH /api/developer/dimensions/{dimId}/properties/{propId}
-func (UnimplementedHandler) UpdateDimensionProperty(ctx context.Context, req *PropertyRequest, params UpdateDimensionPropertyParams) (r *UpdateDimensionPropertyOK, _ error) {
+func (UnimplementedHandler) UpdateDimensionProperty(ctx context.Context, req *PropertyRequest, params UpdateDimensionPropertyParams) (r UpdateDimensionPropertyRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 

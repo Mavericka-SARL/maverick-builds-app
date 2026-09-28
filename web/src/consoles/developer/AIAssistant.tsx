@@ -160,8 +160,12 @@ function ToolIcon({ tool }: { tool: string }) {
     case "update_metric":        return <Pencil {...props} />;
     case "delete_metric":        return <Trash2 {...props} />;
     case "create_dimension":     return <ListTree {...props} />;
-    case "add_dimension_member": return <Plus {...props} />;
-    case "update_dimension_member": return <Pencil {...props} />;
+    case "add_dimension_member":
+    case "add_dimension_property": return <Plus {...props} />;
+    case "update_dimension":
+    case "update_dimension_member":
+    case "update_dimension_property": return <Pencil {...props} />;
+    case "delete_dimension_property": return <Trash2 {...props} />;
     case "create_grid":
     case "add_grid_metric":
     case "add_grid_dimension":   return <Table2 {...props} />;
@@ -191,8 +195,9 @@ const STEP_STATUS_TONE: Record<string, DesignTone> = { success: "success", faile
 
 const TOOL_LABELS: Record<string, string> = {
   create_metric: "Create metric", update_metric: "Update metric", delete_metric: "Delete metric",
-  create_dimension: "Create dimension", add_dimension_member: "Add dimension member",
-  update_dimension_member: "Update dimension member",
+  create_dimension: "Create dimension", update_dimension: "Update dimension", add_dimension_member: "Add dimension member",
+  update_dimension_member: "Update dimension member", add_dimension_property: "Add dimension property",
+  update_dimension_property: "Update dimension property", delete_dimension_property: "Delete dimension property",
   create_grid: "Create grid", add_grid_metric: "Add grid metric", add_grid_dimension: "Add grid dimension",
   create_dashboard: "Create dashboard", add_dashboard_widget: "Add dashboard widget", set_tags: "Set tags",
   create_revision: "Create revision", generate_migration: "Generate migration", apply_migration: "Apply migration",

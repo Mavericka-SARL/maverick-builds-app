@@ -75,6 +75,16 @@ export interface GridData {
   departments: Department[];       // = first dim members (compat)
   cells: Record<string, number>;   // "metricId:code1[:code2...]" composite key, keyed per each metric's OWN grid dims
   totals: Record<string, number>;  // "metricId" -> aggregate
+  /**
+   * Cells the server refuses to show this viewer because computing them reads
+   * a member the viewer cannot see (fail-closed, FORMULA_CALCULATION_INSTRUCTIONS
+   * C7). Keys use the `cells` format ("metricId:code1[:code2...]", in the
+   * metric's own dimension order); a withheld total is the bare metric id, the
+   * key `totals` uses. Omitted when nothing is withheld. A withheld cell is
+   * absent from `cells`/`totals` and must render blank, never 0 — and nothing
+   * built from it (a parent, a total) may be shown as a partial sum.
+   */
+  withheld?: string[];
   access_rules: {
     dim_members: Record<string, string>; // memberID → "write"|"read"|"hidden"
     metrics:     Record<string, string>; // metricID  → "write"|"read"|"hidden"
@@ -395,6 +405,11 @@ export interface Metric {
   value: number | null;
   readonly?: boolean;   // true = "read" access rule — visible but not editable
   dimension_ids?: string[]; // this metric's OWN grid's dimension IDs, ordered (populated by /api/metrics and /api/grid's all_metrics)
+  // /api/grid only: above the leaves this calculated metric is its formula
+  // evaluated AT the aggregate (agg_rule formula or rate, or a pure-ratio
+  // average), as the scheduler computes it — never a combination of the
+  // cells below, so its parents are read from the server's rows.
+  aggregate_evaluated?: boolean;
 }
 
 export interface Task {
@@ -498,6 +513,10 @@ export interface DevDimension {
   time_granularity?: TimeGranularity;  // time dimensions only
   fiscal_year_start_month?: number;    // time dimensions only
   tags?: string[];                     // omitted when empty
+  // A property grouping: members group source_dimension_id's members by
+  // their value of the declared property source_property.
+  source_dimension_id?: string;
+  source_property?: string;
   members: DevDimensionMember[];       // time members in chronological order
 }
 
@@ -1791,11 +1810,14 @@ export const api = {
     apiFetch<{ status: string; recalc: Array<{ revision: string; metric: string; value: number | null }> }>(
       `/api/developer/metrics/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 
-  createDimension: (body: { name: string; agg_rule?: string; revision_id?: string; parent_dimension_id?: string | null; dimension_type: DimensionType; time_granularity?: TimeGranularity; fiscal_year_start_month?: number; tags?: string[] }) =>
-    apiFetch<{ id: string; status: string }>("/api/developer/dimensions", { method: "POST", body: JSON.stringify(body) }),
-  // A partial update: a field left out keeps its value; parent_dimension_id: null detaches.
-  updateDimension: (id: string, body: { name?: string; agg_rule?: string; parent_dimension_id?: string | null; tags?: string[] }) =>
-    apiFetch<{ status: string }>(`/api/developer/dimensions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  createDimension: (body: { name: string; agg_rule?: string; revision_id?: string; parent_dimension_id?: string | null; dimension_type: DimensionType; time_granularity?: TimeGranularity; fiscal_year_start_month?: number; tags?: string[];
+    source_dimension_id?: string; source_property?: string; derive_members?: boolean }) =>
+    apiFetch<{ id: string; status: string; derived_members?: string[] }>("/api/developer/dimensions", { method: "POST", body: JSON.stringify(body) }),
+  // A partial update: a field left out keeps its value; parent_dimension_id: null detaches,
+  // source_dimension_id: null clears a property grouping.
+  updateDimension: (id: string, body: { name?: string; agg_rule?: string; parent_dimension_id?: string | null; tags?: string[];
+    source_dimension_id?: string | null; source_property?: string; derive_members?: boolean }) =>
+    apiFetch<{ status: string; derived_members?: string[] }>(`/api/developer/dimensions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteDimension: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/dimensions/${id}`, { method: "DELETE" }),
   addDimMember: (dimId: string, body: { code: string; label: string; parent_member_id?: string; period_start?: string; period_end?: string }) =>

@@ -226,13 +226,15 @@ func ymd(t time.Time) string { return t.Format("2006-01-02") }
 
 // Interval identifies the calendar interval a period belongs to at one of
 // the period-to-date functions' levels, as a comparable key. Two periods
-// with the same key are in the same month/quarter/year.
+// with the same key are in the same month/quarter/half-year/year. Mirrored
+// by internal/formula's intervalLevel; keep the two in sync.
 type IntervalLevel int
 
 const (
 	LevelMonth IntervalLevel = iota
 	LevelQuarter
 	LevelYear
+	LevelHalfYear
 )
 
 // IntervalKey returns the key of the interval containing p at level, and
@@ -256,6 +258,9 @@ func intervalKeyAt(level IntervalLevel, fiscalStart int, t time.Time) (string, b
 	case LevelQuarter:
 		fy, offset := fiscalYearAndOffset(t, fiscalStart)
 		return fmt.Sprintf("FY%04d-Q%d", fy, offset/3+1), true
+	case LevelHalfYear:
+		fy, offset := fiscalYearAndOffset(t, fiscalStart)
+		return fmt.Sprintf("FY%04d-H%d", fy, offset/6+1), true
 	case LevelYear:
 		fy, _ := fiscalYearAndOffset(t, fiscalStart)
 		return fmt.Sprintf("FY%04d", fy), true
@@ -280,13 +285,16 @@ func fiscalYearAndOffset(t time.Time, fiscalStart int) (int, int) {
 
 // GranularityFitsLevel reports whether a source granularity is fine enough
 // for a period-to-date function at level (spec §5.4): MONTHTODATE needs
-// days; QUARTERTODATE days/weeks/months; YEARTODATE anything below a year.
+// days; QUARTERTODATE days/weeks/months; HALFYEARTODATE anything below a
+// half year; YEARTODATE anything below a year.
 func GranularityFitsLevel(level IntervalLevel, gran string) bool {
 	switch level {
 	case LevelMonth:
 		return gran == GranDay
 	case LevelQuarter:
 		return gran == GranDay || gran == GranWeek || gran == GranMonth
+	case LevelHalfYear:
+		return gran == GranDay || gran == GranWeek || gran == GranMonth || gran == GranQuarter
 	case LevelYear:
 		return gran == GranDay || gran == GranWeek || gran == GranMonth || gran == GranQuarter || gran == GranHalfYear
 	}

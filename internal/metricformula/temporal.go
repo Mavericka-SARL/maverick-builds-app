@@ -33,8 +33,57 @@ type Edge struct {
 	UnboundedFuture bool
 }
 
-// Graph maps a metric ID to its outgoing dependency edges.
-type Graph map[string][]Edge
+// Graph is the revision's metric dependency graph: each metric's outgoing
+// edges, plus the per-metric fact Plan needs beyond edges.
+type Graph struct {
+	// Edges maps a metric ID to its outgoing dependency edges.
+	Edges map[string][]Edge
+	// Dimensional maps a metric ID to the first LOOKUP or conditional
+	// aggregation (SUMIFS, COUNTIF, ...) its formula calls; a metric that
+	// calls none is absent. Such a metric reads other cells along a
+	// dimension, so it may not belong to a recurrence (contract C4) — even
+	// when the call has no source edge (COUNTIFS) or reads a metric outside
+	// the cycle.
+	Dimensional map[string]string
+}
+
+// NewGraph returns an empty graph ready to fill.
+func NewGraph() Graph {
+	return Graph{Edges: map[string][]Edge{}, Dimensional: map[string]string{}}
+}
+
+// SetMetric records id's edges and, from its formula text, whether it
+// calls a dimensional function. A formula that does not parse is recorded
+// as non-dimensional: save-time validation reports it, and the scheduler
+// fails it at evaluation.
+func (g Graph) SetMetric(id string, edges []Edge, formulaText string) {
+	g.Edges[id] = edges
+	if fn := DimensionalFunction(formulaText); fn != "" {
+		g.Dimensional[id] = fn
+	} else {
+		delete(g.Dimensional, id)
+	}
+}
+
+// DimensionalFunction returns the first LOOKUP or conditional aggregation
+// the formula calls, or "" when it calls none (or does not parse).
+func DimensionalFunction(formulaText string) string {
+	if strings.TrimSpace(formulaText) == "" {
+		return ""
+	}
+	an, err := formula.Analyze(formulaText)
+	if err != nil {
+		return ""
+	}
+	return dimensionalFunctionOf(an)
+}
+
+func dimensionalFunctionOf(an *formula.Analysis) string {
+	if an == nil || len(an.DimensionalCalls) == 0 {
+		return ""
+	}
+	return an.DimensionalCalls[0].Func
+}
 
 // Direction is the period order a recurrence component is evaluated in.
 type Direction int
@@ -85,7 +134,7 @@ func Plan(g Graph, ids []string, names map[string]string) ([]Component, error) {
 	for len(stack) > 0 {
 		n := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
-		for _, e := range g[n] {
+		for _, e := range g.Edges[n] {
 			if !nodes[e.To] {
 				nodes[e.To] = true
 				stack = append(stack, e.To)
@@ -110,8 +159,8 @@ func Plan(g Graph, ids []string, names map[string]string) ([]Component, error) {
 // ValidateGraph checks every component of the graph and returns the first
 // non-causal one as a TemporalError.
 func ValidateGraph(g Graph, names map[string]string) error {
-	ids := make([]string, 0, len(g))
-	for id := range g {
+	ids := make([]string, 0, len(g.Edges))
+	for id := range g.Edges {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
@@ -133,7 +182,7 @@ func validateComponent(g Graph, scc []string, names map[string]string) (Componen
 	}
 	selfLoop := false
 	for _, id := range scc {
-		for _, e := range g[id] {
+		for _, e := range g.Edges[id] {
 			if e.To == id {
 				selfLoop = true
 			}
@@ -143,12 +192,25 @@ func validateComponent(g Graph, scc []string, names map[string]string) (Componen
 		return Component{Members: scc}, nil
 	}
 
+	// LOOKUP and the conditional aggregations read other cells along a
+	// dimension, which a period-by-period recurrence cannot order causally
+	// (contract C4) — whatever metric they read, in the cycle or outside it.
+	sorted := append([]string(nil), scc...)
+	sort.Strings(sorted)
+	for _, id := range sorted {
+		if fn := g.Dimensional[id]; fn != "" {
+			return Component{}, &TemporalError{Members: scc, Detail: fmt.Sprintf(
+				"%s calls %s, which reads other cells along a dimension, so it cannot be part of a dependency cycle broken by time (cycle: %s); LOOKUP and the conditional aggregations (SUMIFS, COUNTIFS, ...) are not allowed in such a cycle",
+				label(names, id), fn, strings.Join(memberNames(sorted, names), ", "))}
+		}
+	}
+
 	// Decompose each internal edge into its zero / past / future parts.
 	zero := map[string][]string{}
 	var past, future []string
 	var offending []string
 	for _, id := range scc {
-		for _, e := range g[id] {
+		for _, e := range g.Edges[id] {
 			if !in[e.To] {
 				continue
 			}
@@ -175,7 +237,7 @@ func validateComponent(g Graph, scc []string, names map[string]string) (Componen
 			"dependency cycle mixes past and future references, so no period order can resolve it: %s",
 			strings.Join(offending, "; "))}
 	}
-	order, err := zeroTopo(zero, scc)
+	order, err := zeroTopo(zero, scc, names)
 	if err != nil {
 		return Component{}, &TemporalError{Members: scc, Detail: fmt.Sprintf(
 			"dependency cycle is not broken by time (%s); every cycle needs a PREVIOUS/LAG (or NEXT/LEAD) step: %s",
@@ -190,7 +252,7 @@ func validateComponent(g Graph, scc []string, names map[string]string) (Componen
 
 // zeroTopo orders scc members so every zero-offset dependency precedes its
 // dependent, failing on a zero-offset cycle.
-func zeroTopo(zero map[string][]string, scc []string) ([]string, error) {
+func zeroTopo(zero map[string][]string, scc []string, names map[string]string) ([]string, error) {
 	const (
 		unvisited = iota
 		inStack
@@ -204,7 +266,7 @@ func zeroTopo(zero map[string][]string, scc []string) ([]string, error) {
 		case done:
 			return nil
 		case inStack:
-			return fmt.Errorf("same-period cycle through %s", n)
+			return fmt.Errorf("same-period cycle through %s", label(names, n))
 		}
 		state[n] = inStack
 		deps := append([]string(nil), zero[n]...)
@@ -245,7 +307,7 @@ func tarjan(g Graph, nodes map[string]bool) [][]string {
 		index++
 		stack = append(stack, v)
 		onStack[v] = true
-		for _, e := range g[v] {
+		for _, e := range g.Edges[v] {
 			w := e.To
 			if !nodes[w] {
 				continue

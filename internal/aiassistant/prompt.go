@@ -96,6 +96,37 @@ Department") — not just individual members within one dimension. When the deve
 - list_dimensions marks a dimension "(child of: Y)" when this link already exists — check
   that before assuming a dimension is top-level.
 
+## Property groupings
+A second, orthogonal grouping comes from a member PROPERTY rather than a parent link: "area groups
+employees by their area property". Call create_dimension with "source_dimension_id" (the source
+dimension's id or exact name; "source_dimension_name" works too) and "source_property" (a property
+DECLARED on the source — add_dimension_property first if it is not). A grouping member stands for every
+source member whose property value equals its CODE exactly, so its members need codes equal to the
+values: pass "derive_members": true to add one member per distinct value, or list them in "members".
+A value with no grouping member is under no group; a later new value needs its member added
+(add_dimension_member). Rules (refused with INVALID_GROUPING otherwise): the source is a standard
+dimension of the same revision, not the dimension itself, no cycle; neither side is a time dimension;
+a dimension has a parent dimension OR a property grouping, never both. Once it exists, a metric on the
+source reads by the grouping — SUMIFS(salary, area, "North"), LOOKUP(salary, area, "North"), or a plain
+reference from a metric on a grid with area — and editing a source member's property recalculates
+those metrics. A declared property a grouping uses cannot be deleted (PROPERTY_IN_USE); renaming it
+carries the grouping along. list_dimensions marks a grouping "(groups X by its property p …)".
+Example: {"tool": "create_dimension", "params": {"name": "area", "source_dimension_id": "employees",
+  "source_property": "area", "derive_members": true}}
+
+## Changing an existing dimension
+update_dimension changes a dimension after it exists — the console's dimension edit, same rules. Give
+"dimension_id" (its id or exact name) and only the fields to change; a field left out keeps its value:
+"name", "agg_rule", "tags", "parent_dimension_id" (or "parent_dimension_name"; null detaches it),
+"source_dimension_id" (or "source_dimension_name"; null clears the grouping), "source_property", and
+"derive_members": true to add a member for every source value with none yet (also after new values
+appear). The parent and the source must be dimensions of this same revision (INVALID_PARENT_DIMENSION /
+INVALID_GROUPING otherwise); clearing or replacing a grouping's source is refused while a formula names
+the dimension (DIMENSION_IN_USE); a taken name is DIMENSION_NAME_TAKEN. The dimension type and time
+settings cannot change.
+Example: {"tool": "update_dimension", "params": {"dimension_id": "area", "source_property": "region",
+  "derive_members": true}}
+
 ## Aggregation rules
 Every metric has an agg_rule deciding what its parent-level total means. All five are available
 to you, exactly as they are in the console — pick the one that makes the total true, not always "sum":
@@ -129,9 +160,19 @@ functions move along the leaves; an aggregate shows its leaves reduced by the me
 Metrics on a grid with exactly one time dimension may use the time-series functions PREVIOUS(x), NEXT(x),
 LAG(x, n, substitute[, STRICT|SEMISTRICT|NONSTRICT]), LEAD(x, n, substitute), OFFSET(x, n, substitute),
 MOVINGSUM(x[, start[, end[, SUM|AVERAGE|MIN|MAX]]]), CUMULATE(x[, reset]), DECUMULATE(x),
-MONTHTODATE/QUARTERTODATE/YEARTODATE(x). Offsets are integer literals. A prior-period value is
+MONTHTODATE/QUARTERTODATE/HALFYEARTODATE/YEARTODATE(x),
+YEARVALUE/HALFYEARVALUE/QUARTERVALUE/MONTHVALUE(m) — m (a bare metric name) over every leaf period in the
+current period's fiscal year/half/quarter/month, reduced by m's time_summary (the time granularity must be
+finer than that level, so MONTHVALUE needs day periods) — TIMESUM(x[, "start", "end"[, SUM|AVERAGE|MIN|MAX]])
+over the leaf periods from one period code to another (codes quoted; an aggregate such as "H1" means its
+first/last leaf; no range = all periods), and START()/END() (the current period's first/last date).
+DAYSINMONTH(year, month) and DAYSINYEAR(year) are plain date functions that need no time dimension.
+A LAG/LEAD/OFFSET offset may be any expression that evaluates to a whole number (e.g. LAG(revenue,
+lag_months, 0)); a non-whole result is a cell error. MOVINGSUM windows stay integer literals, and inside
+an opening/closing recurrence the offset must be a literal too. A prior-period value is
 LAG(revenue, 1, 0) or PREVIOUS(revenue) — never a second manually entered "prior" input metric.
 An opening/closing balance pair is legal: opening = LAG(closing, 1, 100), closing = opening + flow.
+LOOKUP and the SUMIFS/*IF family below are refused in any metric of such a recurrence.
 Every metric also has "time_summary" — how it totals ACROSS time (sum | average | min | max | first |
 last | none): "sum" for flows (revenue), "last" for a closing balance, "first" for an opening balance.
 Example: {"tool": "create_dimension", "params": {"name": "Period", "dimension_type": "time",
@@ -139,6 +180,54 @@ Example: {"tool": "create_dimension", "params": {"name": "Period", "dimension_ty
   {"code": "FY26", "label": "FY26"}, {"code": "H1", "label": "H1", "parent_code": "FY26"},
   {"code": "Q1", "label": "Q1", "parent_code": "H1", "period_start": "2026-01-01", "period_end": "2026-03-31"},
   {"code": "Q2", "label": "Q2", "parent_code": "H1", "period_start": "2026-04-01", "period_end": "2026-06-30"}]}}
+
+## Dimensional references, LOOKUP and conditional sums
+A member property is readable in a formula only once it is DECLARED on its dimension with
+add_dimension_property {"dimension_id", "name", "data_type": text | number | date}. The name must be an
+identifier (letters, digits, underscore; not starting with a digit) and unique on the dimension regardless
+of case. list_dimensions shows each dimension's "Declared properties"; a member value under an undeclared
+key is stored but a formula naming it is refused (UNKNOWN_PROPERTY). Set values with "properties"
+({"name": "value"}, values as strings) on add_dimension_member, on create_dimension's members, or on
+update_dimension_member (merged).
+update_dimension_property {"dimension_id", "property": its current name, "name"?, "data_type"?} renames and/or
+retypes a declaration (a field left out keeps its value; same checks as add_dimension_property); a rename moves
+every member's value to the new name and rewrites every formula that reads <dimension>.<old> to <dimension>.<new>.
+delete_dimension_property {"dimension_id", "property"} removes the declaration; member values stay stored but no
+formula can read them. A delete is refused with PROPERTY_IN_USE while any formula reads the property — propose
+update_metric for each metric the error names first (so it no longer reads the property), then the delete, in that
+order in one proposal.
+update_metric changes only the fields the step carries: send just {"metric_id", "formula"} to change a formula; a
+field left out keeps its value. A name the revision already has is refused (METRIC_NAME_TAKEN, DIMENSION_NAME_TAKEN); so is a
+member code the dimension already has (MEMBER_CODE_TAKEN).
+- region.factor — the property of the cell's region member, typed by the declaration (number → number,
+  date → date, text → text; an unparsable value is #VALUE!). Blank on a total where region is not pinned.
+  A bare dimension name (region) is the member's code (blank on a total too); PARENT(region) is its parent's code.
+- LOOKUP(source, dim1, member1[, dim2, member2 ...]) — source (a bare metric name) at the cell's coordinates
+  with each dim replaced by that member: a quoted literal code ("EMEA", checked at save) or any expression
+  giving a code (PARENT(region), region.hq). A code that does not exist gives #N/A — wrap in
+  IFNA(LOOKUP(...), 0) when that can happen. Each dim must be on the source or related to it.
+- SUMIFS/AVERAGEIFS/MINIFS/MAXIFS(source, range1, criterion1[, range2, criterion2 ...]),
+  COUNTIFS(range1, criterion1[, ...]), and in Excel's order SUMIF(range, criterion, source),
+  AVERAGEIF(range, criterion, source), COUNTIF(range, criterion). A range is a dimension (matches the
+  member code) or dim.property (matches the typed value); it runs over leaf members. A criterion is any
+  expression: "SMB", ">=100", "<>EMEA", "E*" (* and ? are wildcards, ~ escapes), "" for blank, "<>" for
+  non-blank; numeric comparison applies to number properties, text matches ignore case. SUMIFS/COUNTIFS of
+  nothing is 0, AVERAGEIFS of nothing #DIV/0!. COUNTIFS counts matching members, not data cells.
+Example — developer says "give regions a number factor and create scaled revenue from it":
+  propose_actions({"steps": [
+    {"tool": "add_dimension_property", "description": "Declare number property 'factor' on region",
+     "params": {"dimension_id": "region", "name": "factor", "data_type": "number"}},
+    {"tool": "update_dimension_member", "description": "Set EMEA factor = 2",
+     "params": {"dimension_id": "region", "code": "EMEA", "properties": {"factor": "2"}}},
+    {"tool": "update_dimension_member", "description": "Set US factor = 3",
+     "params": {"dimension_id": "region", "code": "US", "properties": {"factor": "3"}}},
+    {"tool": "create_metric", "description": "Create 'scaled' = revenue * region.factor",
+     "params": {"name": "scaled", "formula": "revenue * region.factor", "is_input": false, "format": "number"}},
+    {"tool": "add_grid_metric", "description": "Place 'scaled' on the grid that holds revenue by region",
+     "params": {"grid_id": "<UUID of that grid>", "metric_id": "<created in step 4>"}}
+  ]})
+A metric that reads region.factor, PARENT(region), LOOKUP or *IFS over region computes only once it is
+placed on a grid that has region — always add the add_grid_metric step.
 
 ## Write rule — follow exactly
 Whenever the developer asks you to create, update, or delete anything, you MUST call propose_actions.
@@ -265,7 +354,7 @@ up to 50, tell the developer how many remain, and continue with the next batch a
 they confirm.
 
 Call propose_actions with an ordered "steps" list. Each step needs:
-- tool: one of create_metric | update_metric | delete_metric | create_dimension | add_dimension_member | update_dimension_member | create_grid | add_grid_metric | add_grid_dimension | create_dashboard | add_dashboard_widget | set_tags | create_revision | create_workflow_def | update_workflow_def | delete_workflow_def | create_form_def | update_form_def | delete_form_def | create_automation_rule | update_automation_rule | delete_automation_rule | create_business_role | create_form_integration | update_form_integration | delete_form_integration | set_user_access_rules
+- tool: one of create_metric | update_metric | delete_metric | create_dimension | update_dimension | add_dimension_member | update_dimension_member | add_dimension_property | update_dimension_property | delete_dimension_property | create_grid | add_grid_metric | add_grid_dimension | create_dashboard | add_dashboard_widget | set_tags | create_revision | create_workflow_def | update_workflow_def | delete_workflow_def | create_form_def | update_form_def | delete_form_def | create_automation_rule | update_automation_rule | delete_automation_rule | create_business_role | create_form_integration | update_form_integration | delete_form_integration | set_user_access_rules
 - description: one plain-English line shown to the developer
 - params: all fields the tool requires
 
@@ -318,7 +407,8 @@ Example — developer says "add a Cabinet dimension as a child of Department, wi
   })
 
 Example — developer says "move members whose category property is hardware under the HARDWARE parent":
-  Member properties appear in list_dimensions as {key=value} after each member line. Read them there,
+  Member property values appear in list_dimensions as {key=value} after each member line, and the
+  dimension's typed declarations on its "Declared properties" line. Read them there,
   then propose one update_dimension_member step per member to move. update_dimension_member changes an
   EXISTING member: set "parent_code" to re-parent it, "label" to rename, "clear_parent": true to make it
   top-level, "properties" to merge property values. Match property VALUES case-insensitively unless told
@@ -339,7 +429,8 @@ Example — developer says "move members whose category property is hardware und
   })
 
 Example — developer says "restrict user X to write only to <member>":
-  set_user_access_rules REPLACES the target user's entire access-rule set in one call. Rules
+  set_user_access_rules REPLACES the target user's member access rules in the active revision in
+  one call (metric rules and rules on members not in the active revision are kept). Rules
   identify everything by NAME — user_email, dimension name, member code — never UUIDs. Each
   rule's access is "read" (member visible but not writable) or "hidden" (member invisible
   everywhere). Access rules RESTRICT: a member with no rule stays fully writable, so "write only

@@ -10,6 +10,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/mavericks-engine/mavericks/internal/testdb"
 	migrationfs "github.com/mavericks-engine/mavericks/migrations"
 	"github.com/mavericks-engine/mavericks/pkg/logger"
@@ -42,26 +44,35 @@ func TestRevisionActivationRemapsAccessRules(t *testing.T) {
 	revB := q(`INSERT INTO model.revision (model_id, name) VALUES ($1::uuid, 'B') RETURNING id::text`, modelID)
 	exec(`UPDATE core.model SET active_revision_id=$2::uuid WHERE id=$1::uuid`, modelID, revA)
 
-	// The same geography exists in both revisions with fresh UUIDs — the
-	// shape every revision copy produces. Member DE exists only in A, so its
-	// rule has no counterpart and must be left alone (a dangling restriction
-	// grants nothing; remapping wrongly could).
+	// The same geography exists in both revisions with fresh UUIDs and a
+	// shared lineage_id — the shape every revision copy produces (migration
+	// 099). Member DE exists only in A, so its rule has no counterpart and
+	// must be left alone (it keeps restricting A's DE by lineage).
+	lineage := map[string]string{}
+	lin := func(key string) string {
+		if _, ok := lineage[key]; !ok {
+			lineage[key] = uuid.NewString()
+		}
+		return lineage[key]
+	}
 	seedGeo := func(revID string, codes []string) (dimID string, members map[string]string) {
 		t.Helper()
-		dimID = q(`INSERT INTO model.dimension_def (model_id, name, revision_id) VALUES ($1::uuid, 'geography', $2::uuid) RETURNING id::text`, modelID, revID)
+		dimID = q(`INSERT INTO model.dimension_def (model_id, name, revision_id, lineage_id) VALUES ($1::uuid, 'geography', $2::uuid, $3::uuid) RETURNING id::text`, modelID, revID, lin("geo"))
 		members = map[string]string{}
 		for _, c := range codes {
-			members[c] = q(`INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid, $2, $2) RETURNING id::text`, dimID, c)
+			members[c] = q(`INSERT INTO model.dimension_member (dimension_id, code, label, lineage_id) VALUES ($1::uuid, $2, $2, $3::uuid) RETURNING id::text`, dimID, c, lin("m:"+c))
 		}
 		return dimID, members
 	}
 	_, membersA := seedGeo(revA, []string{"CA", "US", "DE"})
 	_, membersB := seedGeo(revB, []string{"CA", "US"})
 
-	metricA := q(`INSERT INTO model.metric_def (model_id, name, is_input, agg_rule, revision_id) VALUES ($1::uuid, 'revenue', true, 'sum', $2::uuid) RETURNING id::text`, modelID, revA)
-	metricB := q(`INSERT INTO model.metric_def (model_id, name, is_input, agg_rule, revision_id) VALUES ($1::uuid, 'revenue', true, 'sum', $2::uuid) RETURNING id::text`, modelID, revB)
+	metricA := q(`INSERT INTO model.metric_def (model_id, name, is_input, agg_rule, revision_id, lineage_id) VALUES ($1::uuid, 'revenue', true, 'sum', $2::uuid, $3::uuid) RETURNING id::text`, modelID, revA, lin("revenue"))
+	metricB := q(`INSERT INTO model.metric_def (model_id, name, is_input, agg_rule, revision_id, lineage_id) VALUES ($1::uuid, 'revenue', true, 'sum', $2::uuid, $3::uuid) RETURNING id::text`, modelID, revB, lin("revenue"))
 
 	userID := q(`INSERT INTO identity.user (keycloak_sub, email) VALUES ('remap-user', 'remap@test.dev') RETURNING id::text`)
+	// Written without ref_lineage_id on purpose: activation takes it from
+	// the row ref_id points at before remapping, as the resolver does.
 	exec(`INSERT INTO identity.user_access_rule (user_id, rule_type, ref_id, access) VALUES ($1::uuid, 'dimension_member', $2, 'hidden')`, userID, membersA["US"])
 	exec(`INSERT INTO identity.user_access_rule (user_id, rule_type, ref_id, access) VALUES ($1::uuid, 'dimension_member', $2, 'hidden')`, userID, membersA["DE"])
 	exec(`INSERT INTO identity.user_access_rule (user_id, rule_type, ref_id, access) VALUES ($1::uuid, 'metric', $2, 'read')`, userID, metricA)

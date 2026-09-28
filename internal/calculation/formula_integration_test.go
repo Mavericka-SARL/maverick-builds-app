@@ -450,6 +450,63 @@ func TestFormulaAggRuleTotalsFromAggregatedInputs(t *testing.T) {
 	assertCalc(t, store, ctx, model, rev, formulaID, map[string]string{}, 25)
 }
 
+// A bare dimension name reads blank where its dimension is not pinned, as
+// dim.property and PARENT do. Before, it was an unbound identifier there:
+// the total of an agg_rule=formula metric testing the member failed with
+// #NAME? and the whole partition was marked in error.
+func TestFormulaAggRuleTotalWithBareDimension(t *testing.T) {
+	store, cleanup := setupDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	const (
+		model = "00000000-0000-0000-0000-0000000000f1"
+		rev   = "00000000-0000-0000-00f1-0000000000f1"
+	)
+
+	dimID := insertDim(t, store, ctx, model, "region")
+	insertMember(t, store, ctx, dimID, "EMEA", "EMEA")
+	insertMember(t, store, ctx, dimID, "AMER", "Americas")
+
+	revenueID := insertMetric(t, store, ctx, model, rev, "revenue", "", true)
+	emeaID := insertMetricAgg(t, store, ctx, model, rev, "emea_revenue", `=IF(region = "EMEA", revenue, 0)`, false, "formula")
+	insertDep(t, store, ctx, emeaID, revenueID)
+	insertGridSetup(t, store, ctx, model, []string{dimID}, []string{revenueID, emeaID})
+
+	insertFact(t, store, ctx, model, rev, revenueID, `{"`+dimID+`": "EMEA"}`, 400)
+	insertFact(t, store, ctx, model, rev, revenueID, `{"`+dimID+`": "AMER"}`, 600)
+
+	runRecalc(t, store, ctx, model, rev, []string{revenueID})
+
+	// The members are unchanged by the fix.
+	assertCalc(t, store, ctx, model, rev, emeaID, map[string]string{dimID: "EMEA"}, 400)
+	assertCalc(t, store, ctx, model, rev, emeaID, map[string]string{dimID: "AMER"}, 0)
+
+	// The total now computes: region is blank there, so the test is false.
+	var totals int
+	if err := store.Pool().QueryRow(ctx, `
+		SELECT count(*) FROM runtime.calc_result
+		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid AND dim_members='{}'::jsonb
+	`, model, rev, emeaID).Scan(&totals); err != nil {
+		t.Fatalf("count total rows: %v", err)
+	}
+	if totals == 0 {
+		t.Fatal("no total row for emea_revenue: the total failed instead of computing")
+	}
+	assertCalc(t, store, ctx, model, rev, emeaID, map[string]string{}, 0)
+
+	var failed int
+	if err := store.Pool().QueryRow(ctx, `
+		SELECT count(*) FROM runtime.metric_partition_state
+		WHERE partition_key LIKE $1 AND status = 'error'
+	`, model+":rev:"+rev+":"+emeaID+":%").Scan(&failed); err != nil {
+		t.Fatalf("partition state: %v", err)
+	}
+	if failed != 0 {
+		t.Errorf("emea_revenue has %d partition(s) in error, want none", failed)
+	}
+}
+
 // insertMetricRate creates a metric whose total is numerator ÷ denominator —
 // agg_rule 'rate', Anaplan's Ratio summary.
 func insertMetricRate(t *testing.T, store *calculation.Store, ctx context.Context, modelID, revisionID, name, f string, isInput bool, numID, denID string) string {

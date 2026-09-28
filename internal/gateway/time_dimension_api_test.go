@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mavericks-engine/mavericks/internal/calculation"
+	"github.com/mavericks-engine/mavericks/internal/readset"
 	"github.com/mavericks-engine/mavericks/internal/rollup"
 )
 
@@ -196,16 +198,20 @@ func TestTimeDimensionAPI(t *testing.T) {
 	}
 
 	// A time-series formula saves (syntax/reference analysis) with its
-	// dependency window recorded; dynamic offsets are refused.
+	// dependency window recorded; a literal offset that is not a whole
+	// number is refused (a dynamic offset is allowed, contract C5).
 	status, out = post("/api/developer/metrics", map[string]any{"name": "sales", "is_input": true, "revision_id": f.workingRevID})
 	if status != http.StatusOK {
 		t.Fatalf("create sales: %d %v", status, out)
 	}
 	salesID := out["id"].(string)
-	if status, raw := doAs(t, f, "POST", "/api/developer/metrics", dev, f.appID, map[string]any{"name": "bad", "is_input": false, "formula": "LAG(sales, sales, 0)", "revision_id": f.workingRevID}); status != http.StatusBadRequest || !strings.Contains(raw, "DYNAMIC_TIME_OFFSET_UNSUPPORTED") {
-		t.Errorf("dynamic offset must be 400 DYNAMIC_TIME_OFFSET_UNSUPPORTED: %d %s", status, raw)
+	if status, raw := doAs(t, f, "POST", "/api/developer/metrics", dev, f.appID, map[string]any{"name": "bad", "is_input": false, "formula": "LAG(sales, 1.5, 0)", "revision_id": f.workingRevID}); status != http.StatusBadRequest || !strings.Contains(raw, "TIME_OFFSET_NOT_INTEGER") {
+		t.Errorf("a non-integer literal offset must be 400 TIME_OFFSET_NOT_INTEGER: %d %s", status, raw)
 	}
-	if status, raw := doAs(t, f, "POST", "/api/developer/metrics", dev, f.appID, map[string]any{"name": "bad", "is_input": false, "formula": "TIMESUM(sales)", "revision_id": f.workingRevID}); status != http.StatusBadRequest {
+	if status, raw := doAs(t, f, "POST", "/api/developer/metrics", dev, f.appID, map[string]any{"name": "bad", "is_input": false, "formula": "MOVINGSUM(sales, 0 - 2, 0)", "revision_id": f.workingRevID}); status != http.StatusBadRequest || !strings.Contains(raw, "MOVING_WINDOW_NOT_LITERAL") {
+		t.Errorf("a non-literal MOVINGSUM window must be 400 MOVING_WINDOW_NOT_LITERAL: %d %s", status, raw)
+	}
+	if status, raw := doAs(t, f, "POST", "/api/developer/metrics", dev, f.appID, map[string]any{"name": "bad", "is_input": false, "formula": "WEEKVALUE(sales)", "revision_id": f.workingRevID}); status != http.StatusBadRequest {
 		t.Errorf("later-parity function must stay unknown: %d %s", status, raw)
 	}
 	status, out = post("/api/developer/metrics", map[string]any{"name": "mov3", "is_input": false, "formula": "MOVINGSUM(sales, -2, 0, AVERAGE)", "revision_id": f.workingRevID, "time_summary": "last"})
@@ -412,30 +418,84 @@ func TestTimeDimensionPackageRoundTrip(t *testing.T) {
 	}
 }
 
-// TestScopedSeriesSuppressesHiddenWindow (spec §10): on a scoped read a
-// time-series metric is served from persisted rows, and any cell whose
-// source window reaches a period hidden from the caller is withheld — the
-// hidden value is neither shown nor "omitted from the arithmetic".
+// TestScopedSeriesSuppressesHiddenWindow (spec §10, contract C7): on a
+// scoped read a time-series metric is served from persisted rows, and any
+// cell whose source window reaches a period hidden from the caller is
+// withheld — neither shown nor recomputed over the visible periods — along
+// with every aggregate period and total whose lattice holds it. The period
+// hierarchy is built exactly as grid() builds it: aggregate members carry no
+// time_index, and the scheduler persists their own rows ({t:Q1}), which
+// must never be summed back into Q1.
 func TestScopedSeriesSuppressesHiddenWindow(t *testing.T) {
 	timeID := "t"
-	periods := []string{"2026-01", "2026-02", "2026-03", "2026-04"}
-	// The caller's lattice already lacks the hidden February.
-	dims := map[string]*rollup.Dimension{timeID: {ID: timeID, IsTime: true, Members: []rollup.Member{
-		{Code: "2026-01", TimeIndex: 0}, {Code: "2026-03", TimeIndex: 2}, {Code: "2026-04", TimeIndex: 3},
-	}}}
-	rows := map[string]float64{}
-	for i, code := range periods {
-		b, _ := json.Marshal(map[string]string{timeID: code})
-		rows[string(b)] = float64(10 * (i + 1))
+	all := []rollup.Member{
+		{Code: "2026-01", ParentCode: "Q1", TimeIndex: 0}, {Code: "2026-02", ParentCode: "Q1", TimeIndex: 1},
+		{Code: "2026-03", ParentCode: "Q1", TimeIndex: 2}, {Code: "2026-04", ParentCode: "Q2", TimeIndex: 3},
+		{Code: "Q1", ParentCode: "H1", TimeIndex: -1}, {Code: "Q2", ParentCode: "H1", TimeIndex: -1}, {Code: "H1", TimeIndex: -1},
 	}
-	// PREVIOUS(x): window [-1, -1].
-	prev := &scopedSeries{TimeDimID: timeID, TimeSummary: "sum", Periods: periods, Hidden: map[string]bool{"2026-02": true},
-		Rows: rows, MinOffset: -1, MaxOffset: -1}
-	universe := []metricRow{{ID: "m", Name: "prev", Formula: strPtr("PREVIOUS(x)"), AggRule: "sum"}}
-	cells, totals := scopeCalcCells(context.Background(), dims, map[string][]string{"m": {timeID}}, map[string]string{timeID: "t"},
-		universe, map[string]float64{}, map[string]*scopedSeries{"m": prev})
-	if _, ok := cells["m:2026-03"]; ok {
-		t.Error("March reads the hidden February through PREVIOUS and must be suppressed")
+	lattice := func(hidden ...string) map[string]*rollup.Dimension {
+		h := map[string]bool{}
+		for _, c := range hidden {
+			h[c] = true
+		}
+		var kept []rollup.Member
+		for _, m := range all {
+			if !h[m.Code] {
+				kept = append(kept, m)
+			}
+		}
+		return map[string]*rollup.Dimension{timeID: {ID: timeID, IsTime: true, TimeGranularity: "month", Members: kept}}
+	}
+	unfiltered := lattice()
+	names := map[string]string{timeID: "period"}
+	key := func(code string) string { return comboKey(map[string]string{timeID: code}) }
+	// Persisted rows of x itself: leaves 10, 20, 30, 40 and the scheduler's
+	// aggregate-period rows (sum).
+	rows := map[string]float64{key("2026-01"): 10, key("2026-02"): 20, key("2026-03"): 30, key("2026-04"): 40,
+		key("Q1"): 60, key("Q2"): 40, key("H1"): 100}
+	universe := []metricRow{
+		{ID: "x", Name: "x", IsInput: true, AggRule: "sum", TimeSummary: "sum"},
+		{ID: "m", Name: "prev", Formula: strPtr("PREVIOUS(x)"), AggRule: "sum", TimeSummary: "sum"},
+	}
+	metricDims := map[string][]string{"x": {timeID}, "m": {timeID}}
+	read := func(formulaText, summary string, hidden ...string) (map[string]float64, map[string]float64, []string) {
+		t.Helper()
+		universe[1].Formula = strPtr(formulaText)
+		universe[1].TimeSummary = summary
+		sr := &scopedReads{Served: map[string]*servedMetric{"m": {Rows: rows}}, Meta: calculation.NewDimMetadata(unfiltered, names, nil)}
+		if len(hidden) > 0 {
+			h := map[string]map[string]bool{timeID: {}}
+			for _, c := range hidden {
+				h[timeID][c] = true
+			}
+			var rm []readset.Metric
+			for _, m := range universe {
+				f := ""
+				if m.Formula != nil {
+					f = *m.Formula
+				}
+				rm = append(rm, readset.Metric{ID: m.ID, Name: m.Name, IsInput: m.IsInput, Formula: f, Dims: metricDims[m.ID]})
+			}
+			sr.Reads = readset.New(unfiltered, names, sr.Meta, rm, h)
+		}
+		return scopeCalcCells(context.Background(), lattice(hidden...), metricDims, names, universe, map[string]float64{}, sr)
+	}
+	has := func(list []string, k string) bool {
+		for _, x := range list {
+			if x == k {
+				return true
+			}
+		}
+		return false
+	}
+
+	// PREVIOUS(x), February hidden: March reads it and is withheld; January
+	// (window = December) and April (reads March) are served; Q1 and H1 hold
+	// the withheld March, so they are withheld, and so is the total. Q2 is
+	// April alone.
+	cells, totals, withheld := read("PREVIOUS(x)", "sum", "2026-02")
+	if _, ok := cells["m:2026-03"]; ok || !has(withheld, "m:2026-03") {
+		t.Errorf("March reads the hidden February through PREVIOUS and must be withheld: cells=%v withheld=%v", cells, withheld)
 	}
 	if v, ok := cells["m:2026-01"]; !ok || v != 10 {
 		t.Errorf("January's window (December) touches nothing hidden: got %v ok=%v", v, ok)
@@ -443,25 +503,52 @@ func TestScopedSeriesSuppressesHiddenWindow(t *testing.T) {
 	if v, ok := cells["m:2026-04"]; !ok || v != 40 {
 		t.Errorf("April reads March, visible: got %v ok=%v", v, ok)
 	}
-	if totals["m"] != 50 {
-		t.Errorf("total over the served cells (Jan + Apr) = %v, want 50", totals["m"])
+	for _, k := range []string{"m:Q1", "m:H1", "m"} {
+		if !has(withheld, k) {
+			t.Errorf("%s holds the withheld March and must be withheld: %v", k, withheld)
+		}
 	}
+	if _, ok := totals["m"]; ok {
+		t.Errorf("no partial totals: got total %v", totals["m"])
+	}
+	if cells["m:Q2"] != 40 {
+		t.Errorf("Q2 = April = 40, got %v", cells["m:Q2"])
+	}
+
+	// The fixed leak: January hidden. Aggregate members used to sit between
+	// the leaves in the period order, so February's PREVIOUS checked Q2's
+	// slot instead of January's and was served.
+	cells, _, withheld = read("PREVIOUS(x)", "sum", "2026-01")
+	if _, ok := cells["m:2026-02"]; ok || !has(withheld, "m:2026-02") {
+		t.Errorf("February reads the hidden January and must be withheld: cells=%v withheld=%v", cells, withheld)
+	}
+
 	// CUMULATE(x): unbounded past — everything after the hidden period goes.
-	cum := &scopedSeries{TimeDimID: timeID, TimeSummary: "last", Periods: periods, Hidden: map[string]bool{"2026-02": true}, Rows: rows, UnbPast: true}
-	cells, totals = scopeCalcCells(context.Background(), dims, map[string][]string{"m": {timeID}}, map[string]string{timeID: "t"},
-		universe, map[string]float64{}, map[string]*scopedSeries{"m": cum})
-	if len(cells) != 1 || cells["m:2026-01"] != 10 || totals["m"] != 10 {
+	// January reads nothing hidden; Q1, H1, Q2 and the total hold withheld
+	// cells.
+	cells, totals, _ = read("CUMULATE(x)", "last", "2026-02")
+	if len(cells) != 1 || cells["m:2026-01"] != 10 || len(totals) != 0 {
 		t.Errorf("unbounded-past series after a hidden period must be withheld: cells=%v totals=%v", cells, totals)
 	}
-	// No hidden period: everything is served and the time summary applies.
-	open := &scopedSeries{TimeDimID: timeID, TimeSummary: "last", Periods: periods, Rows: rows, MinOffset: -1, MaxOffset: -1}
-	full := map[string]*rollup.Dimension{timeID: {ID: timeID, IsTime: true, Members: []rollup.Member{
-		{Code: "2026-01", TimeIndex: 0}, {Code: "2026-02", TimeIndex: 1}, {Code: "2026-03", TimeIndex: 2}, {Code: "2026-04", TimeIndex: 3},
-	}}}
-	cells, totals = scopeCalcCells(context.Background(), full, map[string][]string{"m": {timeID}}, map[string]string{timeID: "t"},
-		universe, map[string]float64{}, map[string]*scopedSeries{"m": open})
-	if len(cells) != 4 || totals["m"] != 40 {
-		t.Errorf("unhidden series: cells=%v totals=%v (want 4 cells, last=40)", cells, totals)
+
+	// No hidden period (a scope pin only): every cell exactly as persisted,
+	// the aggregate periods from the LEAF rows only — Q1 = 60, not 120 with
+	// the persisted Q1 row summed back in — and the time summary applies.
+	cells, totals, withheld = read("PREVIOUS(x)", "sum")
+	if len(withheld) != 0 {
+		t.Errorf("nothing hidden, nothing withheld: %v", withheld)
+	}
+	for code, want := range map[string]float64{"2026-01": 10, "2026-02": 20, "2026-03": 30, "2026-04": 40, "Q1": 60, "Q2": 40, "H1": 100} {
+		if got, ok := cells["m:"+code]; !ok || got != want {
+			t.Errorf("unhidden m:%s = %v (ok=%v), want %v", code, got, ok, want)
+		}
+	}
+	if totals["m"] != 100 {
+		t.Errorf("unhidden total = %v, want 100", totals["m"])
+	}
+	_, totals, _ = read("PREVIOUS(x)", "last")
+	if totals["m"] != 40 {
+		t.Errorf("unhidden total with time_summary last = %v, want 40", totals["m"])
 	}
 }
 

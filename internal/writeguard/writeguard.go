@@ -88,12 +88,43 @@ func IsLeafMember(ctx context.Context, pool *pgxpool.Pool, memberID string) (boo
 // write). Only a genuine absence of any matching rule (pgx.ErrNoRows) means
 // unrestricted; any other query error is propagated so callers fail closed
 // instead of silently treating a DB failure as "nothing to restrict."
+//
+// refID is matched by LINEAGE, not only by id: a rule whose ref_lineage_id
+// is the lineage of refID's row (migration 099) applies, because a rule's
+// stored ref_id lives in whichever revision was active when it was last
+// written or remapped — or has since been deleted — while refID may belong
+// to any revision being read or written, under any name. A rule stored
+// without a lineage takes the lineage of the row its ref_id points at, as
+// in RulesForRevision. When several rules match, the stricter access wins.
 func accessRule(ctx context.Context, pool *pgxpool.Pool, userID, ruleType, refID string) (string, error) {
 	var access string
-	err := pool.QueryRow(ctx,
-		`SELECT access FROM identity.user_access_rule WHERE user_id=$1::uuid AND rule_type=$2 AND ref_id=$3`,
-		userID, ruleType, refID,
-	).Scan(&access)
+	var err error
+	switch {
+	case (ruleType == "dimension_member" || ruleType == "metric") && uuidRE.MatchString(refID):
+		err = pool.QueryRow(ctx, `
+			SELECT r.access
+			FROM identity.user_access_rule r
+			WHERE r.user_id = $1::uuid AND r.rule_type = $2::text
+			  AND (r.ref_id = $3::text
+			       OR COALESCE(r.ref_lineage_id, CASE $2::text
+			            WHEN 'dimension_member' THEN (SELECT lineage_id FROM model.dimension_member
+			                 WHERE id = CASE WHEN r.ref_id ~* `+uuidPattern+` THEN r.ref_id::uuid END)
+			            WHEN 'metric' THEN (SELECT lineage_id FROM model.metric_def
+			                 WHERE id = CASE WHEN r.ref_id ~* `+uuidPattern+` THEN r.ref_id::uuid END)
+			          END) = CASE $2::text
+			            WHEN 'dimension_member' THEN (SELECT lineage_id FROM model.dimension_member WHERE id = $4::uuid)
+			            WHEN 'metric' THEN (SELECT lineage_id FROM model.metric_def WHERE id = $4::uuid)
+			          END)
+			ORDER BY CASE r.access WHEN 'hidden' THEN 0 WHEN 'read' THEN 1 ELSE 2 END
+			LIMIT 1`,
+			userID, ruleType, refID, refID,
+		).Scan(&access)
+	default:
+		err = pool.QueryRow(ctx,
+			`SELECT access FROM identity.user_access_rule WHERE user_id=$1::uuid AND rule_type=$2 AND ref_id=$3`,
+			userID, ruleType, refID,
+		).Scan(&access)
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}

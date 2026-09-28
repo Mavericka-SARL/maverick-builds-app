@@ -13,6 +13,10 @@ type AddBARoleMemberRes interface {
 	addBARoleMemberRes()
 }
 
+type AddGridDimensionRes interface {
+	addGridDimensionRes()
+}
+
 type AddGridMetricRes interface {
 	addGridMetricRes()
 }
@@ -79,6 +83,10 @@ type CreateDashboardWidgetRes interface {
 
 type CreateDimensionMemberRes interface {
 	createDimensionMemberRes()
+}
+
+type CreateDimensionPropertyRes interface {
+	createDimensionPropertyRes()
 }
 
 type CreateDimensionRes interface {
@@ -151,6 +159,18 @@ type DeleteAiDocumentRes interface {
 
 type DeleteAiSessionRes interface {
 	deleteAiSessionRes()
+}
+
+type DeleteDimensionMemberRes interface {
+	deleteDimensionMemberRes()
+}
+
+type DeleteDimensionPropertyRes interface {
+	deleteDimensionPropertyRes()
+}
+
+type DeleteDimensionRes interface {
+	deleteDimensionRes()
 }
 
 type DeleteFormRecordRes interface {
@@ -417,6 +437,10 @@ type RemoveBrandingRes interface {
 	removeBrandingRes()
 }
 
+type RemoveGridDimensionRes interface {
+	removeGridDimensionRes()
+}
+
 type RemoveSsoRes interface {
 	removeSsoRes()
 }
@@ -607,6 +631,10 @@ type UpdateDashboardWidgetRes interface {
 
 type UpdateDimensionMemberRes interface {
 	updateDimensionMemberRes()
+}
+
+type UpdateDimensionPropertyRes interface {
+	updateDimensionPropertyRes()
 }
 
 type UpdateDimensionRes interface {

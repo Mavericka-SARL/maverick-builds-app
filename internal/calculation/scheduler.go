@@ -3,14 +3,17 @@ package calculation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog"
 
+	"github.com/mavericks-engine/mavericks/internal/formula"
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/rollup"
 )
@@ -202,14 +205,17 @@ func (s *Scheduler) recalcMetricIDs(ctx context.Context, modelID, revisionID str
 	// members are evaluated together. Plan rejects any cycle that time does
 	// not break; save-time validation already refused it, so reaching that
 	// here means the graph was written around the validator.
-	graph := make(metricformula.Graph, len(affectedIDs))
+	// The graph also carries which metrics call LOOKUP or a conditional
+	// aggregation (re-analysed from the formula), so Plan refuses them in a
+	// recurrence exactly as save-time validation does (contract C4).
+	graph := metricformula.NewGraph()
 	names := make(map[string]string, len(defs))
 	for id, def := range defs {
 		names[id] = def.Name
 	}
 	for _, id := range affectedIDs {
 		if def, ok := defs[id]; ok {
-			graph[id] = def.DependsOn
+			graph.SetMetric(id, def.DependsOn, def.Formula)
 		}
 	}
 	components, err := metricformula.Plan(graph, affectedIDs, names)
@@ -238,10 +244,20 @@ func (s *Scheduler) recalcMetricIDs(ctx context.Context, modelID, revisionID str
 	if err != nil {
 		return fmt.Errorf("load metric dimension ids: %w", err)
 	}
+	// Member metadata for dim.property, PARENT, LOOKUP and the conditional
+	// aggregations, over the same unfiltered dimensions. Without the
+	// property declarations every dim.property fails UNKNOWN_PROPERTY
+	// (loudly, per cell) while every other formula still computes.
+	schema, err := s.store.LoadDimensionSchema(ctx, modelID, revisionID)
+	if err != nil {
+		s.log.Warn().Err(err).Msg("load dimension property declarations")
+		schema = nil
+	}
+	meta := NewDimMetadata(allDims, dimIDToName, schema)
 
 	for _, comp := range components {
 		if comp.Recurrence {
-			s.runRecurrence(ctx, comp, modelID, revisionID, timePartition, allDims, metricDimIDs, dimIDToName, defs)
+			s.runRecurrence(ctx, comp, modelID, revisionID, timePartition, allDims, metricDimIDs, dimIDToName, meta, defs)
 			continue
 		}
 		metricID := comp.Members[0]
@@ -264,7 +280,7 @@ func (s *Scheduler) recalcMetricIDs(ctx context.Context, modelID, revisionID str
 			continue
 		}
 
-		calcErr := s.executePartition(ctx, def, modelID, revisionID, pk, allDims, metricDimIDs, dimIDToName, defs)
+		calcErr := s.executePartition(ctx, def, modelID, revisionID, pk, allDims, metricDimIDs, dimIDToName, meta, defs)
 		if calcErr != nil {
 			s.log.Error().Err(calcErr).Str("metric", def.Name).Msg("calculation failed")
 			s.store.MarkError(ctx, pk, calcErr.Error()) //nolint:errcheck
@@ -279,7 +295,7 @@ func (s *Scheduler) recalcMetricIDs(ctx context.Context, modelID, revisionID str
 // as one unit, and marks all members clean or all in error together.
 func (s *Scheduler) runRecurrence(
 	ctx context.Context, comp metricformula.Component, modelID, revisionID, timePartition string,
-	allDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string, defs map[string]*MetricDef,
+	allDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string, meta *DimMetadata, defs map[string]*MetricDef,
 ) {
 	keys := make([]string, 0, len(comp.Members))
 	for _, id := range comp.Members {
@@ -298,7 +314,7 @@ func (s *Scheduler) runRecurrence(
 		}
 		keys = append(keys, pk)
 	}
-	calcErr := s.executeRecurrence(ctx, comp, modelID, revisionID, BuildPartitionKey(modelID, revisionID, comp.Members[0], timePartition), allDims, metricDimIDs, dimIDToName, defs)
+	calcErr := s.executeRecurrence(ctx, comp, modelID, revisionID, BuildPartitionKey(modelID, revisionID, comp.Members[0], timePartition), allDims, metricDimIDs, dimIDToName, meta, defs)
 	for _, pk := range keys {
 		if calcErr != nil {
 			s.store.MarkError(ctx, pk, calcErr.Error()) //nolint:errcheck
@@ -311,6 +327,14 @@ func (s *Scheduler) runRecurrence(
 	}
 }
 
+// ErrBlankResult is an evaluation whose result is blank: no value at that
+// coordinate, so no row (skipped like an intersection with no data), never
+// a persisted 0 — and, from EvaluateWithDimContext, no cell and no chart
+// point, never a 0 entering a total.
+var ErrBlankResult = errors.New("the formula's result is blank")
+
+var errBlankResult = ErrBlankResult
+
 // executePartition resolves all dependency values and evaluates the formula
 // once per declared leaf-level dimensional intersection of def's own
 // dimensions (config-driven — grid_metric ⋈ grid_dimension, enumerated via
@@ -319,7 +343,7 @@ func (s *Scheduler) runRecurrence(
 // to the existing '{}' aggregate row every other consumer already reads.
 func (s *Scheduler) executePartition(
 	ctx context.Context, def *MetricDef, modelID, revisionID, partitionKey string,
-	allDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string, allDefs map[string]*MetricDef,
+	allDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string, meta *DimMetadata, allDefs map[string]*MetricDef,
 ) error {
 	// A time-series formula (PREVIOUS, LAG, MOVINGSUM, ...) on a declared
 	// time dimension takes the time-series path: one evaluation per leaf
@@ -334,75 +358,13 @@ func (s *Scheduler) executePartition(
 		return err
 	}
 	if axis != nil && usesTimeSeries(def.Formula) {
-		return s.executeTimeSeries(ctx, def, modelID, revisionID, partitionKey, axis, allDims, metricDimIDs, dimIDToName, allDefs)
+		return s.executeTimeSeries(ctx, def, modelID, revisionID, partitionKey, axis, allDims, metricDimIDs, dimIDToName, meta, allDefs)
 	}
 
-	// Bulk-prefetch each dependency's recorded values ONCE (not once per
-	// leaf combo) — this is what makes full leaf-combo enumeration viable
-	// instead of the old fact-driven "only combos that already have data"
-	// shortcut. RawValue's ok=false ⇒ value=0 contract (satisfied naturally
-	// here: a map miss returns the zero value) is what lets rollup.Resolve's
-	// aggregation tiers sum/average/count a genuinely-missing dependency as
-	// 0 without any special-casing in this function.
-	fetch := make(map[string]rollup.RawValue, len(def.DependsOnID))
-	for _, depID := range def.DependsOnID {
-		depDef, ok := allDefs[depID]
-		if !ok {
-			return fmt.Errorf("dependency %s not found in model", depID)
-		}
-		var valueMap map[string]float64
-		var err error
-		if depDef.IsInput {
-			valueMap, err = s.store.LoadInputValueMap(ctx, modelID, revisionID, depID)
-		} else {
-			valueMap, err = s.store.LoadCalcValueMap(ctx, modelID, revisionID, depID)
-		}
-		if err != nil {
-			return fmt.Errorf("load values for %s: %w", depDef.Name, err)
-		}
-		fetch[depID] = func(_ context.Context, _ string, combo map[string]string) (float64, bool, error) {
-			v, ok := valueMap[dimKey(combo)]
-			return v, ok, nil
-		}
-	}
-
-	// evalOne's second return is only meaningful alongside an error: true
-	// means the formula failed while EVERY referenced metric resolved to
-	// zero at this combo — the signature of an intersection that simply has
-	// no data (absence resolves to 0, and calc dependencies persist literal
-	// 0 rows at empty intersections, so absence cannot be told from zero
-	// here and doesn't need to be). The caller skips such combos instead of
-	// recording them as calculation failures.
-	evalOne := func(combo map[string]string) (float64, bool, error) {
-		values := make(map[string]float64, len(def.DependsOnID))
-		for _, depID := range def.DependsOnID {
-			depDef := allDefs[depID]
-			v, _, err := rollup.ResolveTime(ctx, allDims, depID, metricDimIDs[depID], rollup.AggRule(depDef.AggRule),
-				rollup.TimeSummaryRule(depDef.TimeSummary), combo, fetch[depID])
-			if err != nil {
-				return 0, false, fmt.Errorf("resolve %s: %w", depDef.Name, err)
-			}
-			values[depDef.Name] = v // bind unconditionally: preserves "0 on miss" formula-variable semantics
-		}
-		// Translate stored {dim_id: member_code} into named vars for the formula.
-		namedDims := make(map[string]string, len(combo))
-		for dimID, memberCode := range combo {
-			if name, ok := dimIDToName[dimID]; ok {
-				namedDims[name] = memberCode
-			}
-		}
-		v, err := EvaluateWithDims(def.Formula, values, namedDims)
-		if err != nil {
-			noData := len(def.DependsOnID) > 0
-			for _, dv := range values {
-				if dv != 0 {
-					noData = false
-					break
-				}
-			}
-			return 0, noData, err
-		}
-		return v, false, nil
+	env := newEvalEnv(s, modelID, revisionID, allDims, metricDimIDs, dimIDToName, meta, allDefs)
+	evalOne, err := env.cellEvaluator(ctx, def)
+	if err != nil {
+		return err
 	}
 
 	leafCombos := rollup.LeafCombos(allDims, metricDimIDs[def.ID])
@@ -416,12 +378,14 @@ func (s *Scheduler) executePartition(
 	// the formula is itself dimension-conditional and must run per combo,
 	// in which case per-combo results are legitimately distinct and are
 	// averaged below as usual.
+	collapsed := false
 	if def.AggRule == "average" && len(leafCombos) > 1 && !FormulaReferencesDims(def.Formula, dimIDToName) {
 		leafCombos = []map[string]string{{}}
+		collapsed = true
 	}
 
 	results := make([]CalcResultRow, 0, len(leafCombos))
-	var failures, skipped int
+	var failures, skipped, memberNA int
 	var firstErr error
 	for _, combo := range leafCombos {
 		v, noData, err := evalOne(combo)
@@ -441,6 +405,9 @@ func (s *Scheduler) executePartition(
 				continue
 			}
 			failures++
+			if formula.IsMemberNotAvailable(err) {
+				memberNA++
+			}
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -492,10 +459,22 @@ func (s *Scheduler) executePartition(
 			// data must go, or every reader keeps serving values whose
 			// inputs no longer exist. Real failures below deliberately do
 			// NOT clear: an erroring metric keeps its last good rows.
-			if err := s.store.ClearPerComboResults(ctx, modelID, revisionID, def.ID); err != nil {
-				return fmt.Errorf("clear stale per-combo results: %w", err)
+			// The '{}' total goes with them: a share-of-total metric must
+			// not keep saying 100% after all its data was deleted.
+			if err := s.store.ClearAllResults(ctx, modelID, revisionID, def.ID); err != nil {
+				return fmt.Errorf("clear stale results: %w", err)
 			}
 			return nil
+		}
+		if memberNA == failures {
+			// Every cell names a member that does not exist (a LOOKUP of a
+			// deleted member): the last rows were read from that member's
+			// data, which is gone. Keeping them would serve numbers nobody
+			// can recompute; the cells render "—" and the error names the
+			// member.
+			if err := s.store.ClearAllResults(ctx, modelID, revisionID, def.ID); err != nil {
+				return fmt.Errorf("clear stale results: %w", err)
+			}
 		}
 		return fmt.Errorf("%d/%d combos failed to evaluate for metric %s (first error: %w)", failures, len(leafCombos), def.Name, firstErr)
 	}
@@ -524,18 +503,28 @@ func (s *Scheduler) executePartition(
 	// other dimension (Anaplan's Formula summary), so a margin percentage
 	// stays total_margin / total_revenue rather than a sum of quarterly
 	// percentages.
-	if axis != nil && def.AggRule != string(rollup.AggFormula) && def.AggRule != string(rollup.AggRate) {
+	//
+	// A collapsed pure ratio is the exception: its one result is evalOne({})
+	// — the formula at the aggregate, across time too — so it already is the
+	// total (the scoped read's collapsed evalCombo gives the same number).
+	// summarizeOverTime would look for periods in it, find none and write
+	// no total at all.
+	if axis != nil && !collapsed && def.AggRule != string(rollup.AggFormula) && def.AggRule != string(rollup.AggRate) {
 		aggregate, writeAggregate = summarizeOverTime(results, axis, def.AggRule, def.TimeSummary, nil)
 	}
 	if def.AggRule == string(rollup.AggFormula) {
 		total, _, totalErr := evalOne(map[string]string{})
-		if totalErr != nil {
+		switch {
+		case errors.Is(totalErr, errBlankResult):
+			writeAggregate = false // blank at the total: no total row
+		case totalErr != nil:
 			// Falling back to the combined value would quietly publish the very
 			// number this rule exists to avoid, so the metric gets no fresh row
 			// instead — the same stance the all-combos-failed branch takes.
 			return fmt.Errorf("total-level evaluation failed for metric %s (agg_rule=formula): %w", def.Name, totalErr)
+		default:
+			aggregate = total
 		}
-		aggregate = total
 	}
 	if def.AggRule == string(rollup.AggRate) {
 		total, rateErr := s.rateTotal(ctx, def, modelID, revisionID, allDims, metricDimIDs, allDefs)
@@ -544,19 +533,9 @@ func (s *Scheduler) executePartition(
 		}
 		aggregate = total
 	}
-	// Write the aggregate FIRST: every existing external reader (/api/metrics,
-	// grid()'s totals) depends only on this '{}' row, so if a per-combo write
-	// below fails partway through, the one row everything else already reads
-	// is safely persisted regardless. (time_summary 'none' writes no total.)
-	if writeAggregate {
-		if err := s.store.WriteCalcResult(ctx, modelID, revisionID, def.ID, partitionKey, map[string]string{}, aggregate); err != nil {
-			return fmt.Errorf("write aggregate: %w", err)
-		}
-	}
-
 	// The single-combo case (leafCombos collapsed to just {} above, or the
 	// metric has no declared dims at all) is already fully covered by the
-	// aggregate write above and must not be double-written.
+	// aggregate row and must not be double-written.
 	var perComboRows []CalcResultRow
 	for _, r := range results {
 		if len(r.DimMembers) > 0 {
@@ -572,15 +551,34 @@ func (s *Scheduler) executePartition(
 	dimConditional := FormulaReferencesDims(def.Formula, dimIDToName)
 	perComboRows = append(perComboRows, oneDimSliceRows(def.AggRule, dimConditional, metricDimIDs[def.ID], allDims, results, evalOne, axis, def.TimeSummary)...)
 	perComboRows = append(perComboRows, aggregatePeriodRows(def.AggRule, metricDimIDs[def.ID], results, axis, def.TimeSummary)...)
-	// This recompute's per-combo set is authoritative: clear the previous
-	// set first, or intersections that lost their data since the last run
-	// (skipped above, so absent from perComboRows) would keep serving their
-	// old values forever.
-	if err := s.store.ClearPerComboResults(ctx, modelID, revisionID, def.ID); err != nil {
-		return fmt.Errorf("clear stale per-combo results: %w", err)
-	}
-	if err := s.store.WriteCalcResults(ctx, modelID, revisionID, def.ID, partitionKey, perComboRows); err != nil {
-		return fmt.Errorf("write per-intersection results: %w", err)
+
+	// Replace the metric's result set in ONE transaction: the '{}' total
+	// (or the clear of a stale one — time_summary 'none', a blank total),
+	// the clear of the previous per-combo set and the new one. The new set
+	// is authoritative — intersections that lost their data since the last
+	// run (skipped above, absent from perComboRows) must stop serving their
+	// old values — but a reader between a clear and a write used to see the
+	// metric with no cells at all; inside one transaction it sees the old
+	// set or the new one, and a failed write keeps the last good rows.
+	if err := s.store.InTx(ctx, func(tx pgx.Tx) error {
+		if writeAggregate {
+			if err := s.store.WriteCalcResultTx(ctx, tx, modelID, revisionID, def.ID, partitionKey, map[string]string{}, aggregate); err != nil {
+				return fmt.Errorf("write aggregate: %w", err)
+			}
+		} else if err := s.store.ClearAggregateResultTx(ctx, tx, modelID, revisionID, def.ID); err != nil {
+			// No total this pass: an earlier pass's total must not keep
+			// answering for it.
+			return fmt.Errorf("clear stale aggregate: %w", err)
+		}
+		if err := s.store.ClearPerComboResultsTx(ctx, tx, modelID, revisionID, def.ID); err != nil {
+			return fmt.Errorf("clear stale per-combo results: %w", err)
+		}
+		if err := s.store.WriteCalcResultsTx(ctx, tx, modelID, revisionID, def.ID, partitionKey, perComboRows); err != nil {
+			return fmt.Errorf("write per-intersection results: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	if failures > 0 {
@@ -785,22 +783,41 @@ func (s *Scheduler) rateTotal(
 	return num / den, nil
 }
 
-// FormulaReferencesDims reports whether expr's formula text references any
-// of the given dimension names as a bare identifier — used to decide whether
-// a pure-ratio (agg_rule "average") metric's formula is itself
-// dimension-conditional and must be evaluated per leaf combo, or whether it
-// collapses to one revision-wide ratio-of-sums evaluation. Exported so
-// internal/gateway's scopeCalcCells (the hidden-member-restricted grid path)
-// can apply the exact same collapse rule executePartition does below —
-// duplicating this logic there previously caused the two paths to disagree
-// on a metric's value for a restricted vs. unrestricted caller.
+// FormulaReferencesDims reports whether expr's value depends on the cell's
+// members — used to decide whether a pure-ratio (agg_rule "average")
+// metric's formula is itself dimension-conditional and must be evaluated per
+// leaf combo, or whether it collapses to one revision-wide ratio-of-sums
+// evaluation. Exported so internal/gateway's scopeCalcCells (the
+// hidden-member-restricted grid path) can apply the exact same collapse rule
+// executePartition does below — duplicating this logic there previously
+// caused the two paths to disagree on a metric's value for a restricted vs.
+// unrestricted caller.
+//
+// A formula is dimension-conditional when it names one of the dimensions
+// as a bare identifier, reads a dim.property, names a dimension as an
+// argument (PARENT, LOOKUP, a criteria range), or calls LOOKUP or a
+// conditional aggregation — every one of which answers differently per
+// cell. Dimension names match case-insensitively (contract C1): REGION.weight
+// is region.weight. A formula that does not analyse falls back to a
+// case-insensitive scan of its words.
 func FormulaReferencesDims(expr string, dimIDToName map[string]string) bool {
 	if len(dimIDToName) == 0 {
 		return false
 	}
 	names := make(map[string]bool, len(dimIDToName))
 	for _, n := range dimIDToName {
-		names[n] = true
+		names[strings.ToUpper(n)] = true
+	}
+	if an, err := formula.Analyze(expr); err == nil {
+		if len(an.PropertyRefs) > 0 || len(an.DimensionArgs) > 0 || len(an.DimensionalCalls) > 0 {
+			return true
+		}
+		for _, ref := range an.References {
+			if names[strings.ToUpper(ref.Name)] {
+				return true
+			}
+		}
+		return false
 	}
 	isWord := func(r byte) bool {
 		return r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
@@ -814,7 +831,7 @@ func FormulaReferencesDims(expr string, dimIDToName map[string]string) bool {
 		for j < len(expr) && isWord(expr[j]) {
 			j++
 		}
-		if names[expr[i:j]] {
+		if names[strings.ToUpper(expr[i:j])] {
 			return true
 		}
 		i = j

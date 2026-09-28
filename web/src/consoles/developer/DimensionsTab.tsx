@@ -83,6 +83,16 @@ export function DimensionsView({ dims, revisionId }: { dims: DevDimension[]; rev
   const [newGranularity, setNewGranularity] = useState<TimeGranularity | "">("");
   const [newFiscalStart, setNewFiscalStart] = useState(1);
   const [newTags, setNewTags] = useState<string[]>([]);
+  // A property grouping: members group another dimension's members by the
+  // value of one of its declared properties (derive = one member per value).
+  const [newSourceDim, setNewSourceDim] = useState("");
+  const [newSourceProp, setNewSourceProp] = useState("");
+  const [newDerive, setNewDerive] = useState(true);
+  const sourceProps = useQuery({
+    queryKey: ["dim-props", newSourceDim],
+    queryFn: () => api.listDimProperties(newSourceDim),
+    enabled: !!newSourceDim,
+  });
   const [search, setSearch] = useState("");
   const [filterTag, setFilterTag] = useState<string | null>(null);
 
@@ -119,13 +129,16 @@ export function DimensionsView({ dims, revisionId }: { dims: DevDimension[]; rev
       parent_dimension_id: newType === "time" ? undefined : (newParentDim || undefined),
       dimension_type: newType as DimensionType,
       ...(newType === "time" ? { time_granularity: newGranularity as TimeGranularity, fiscal_year_start_month: newFiscalStart } : {}),
+      ...(newType === "standard" && newSourceDim
+        ? { source_dimension_id: newSourceDim, source_property: newSourceProp, derive_members: newDerive } : {}),
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["dev-dimensions"] });
-      setNewName(""); setNewParentDim(""); setNewType(""); setNewGranularity(""); setNewFiscalStart(1); setNewTags([]); setShowAdd(false);
+      setNewName(""); setNewParentDim(""); setNewType(""); setNewGranularity(""); setNewFiscalStart(1); setNewTags([]);
+      setNewSourceDim(""); setNewSourceProp(""); setNewDerive(true); setShowAdd(false);
     },
   });
-  const canCreate = !!newName && !!newType && (newType !== "time" || !!newGranularity);
+  const canCreate = !!newName && !!newType && (newType !== "time" || !!newGranularity) && (!newSourceDim || !!newSourceProp);
 
   return (
     <div>
@@ -165,12 +178,35 @@ export function DimensionsView({ dims, revisionId }: { dims: DevDimension[]; rev
                 </Field>
               </>
             ) : (
-              <Field label="Parent dimension (optional)">
-                <Select value={newParentDim} onChange={(e) => setNewParentDim(e.target.value)} style={{ width: 180 }}>
-                  <option value="">— none, top-level —</option>
-                  {dims.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </Select>
-              </Field>
+              <>
+                <Field label="Parent dimension (optional)">
+                  <Select value={newParentDim} disabled={!!newSourceDim} onChange={(e) => setNewParentDim(e.target.value)} style={{ width: 180 }}>
+                    <option value="">— none, top-level —</option>
+                    {dims.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </Select>
+                </Field>
+                <Field label="Group members of (optional)">
+                  <Select value={newSourceDim} disabled={!!newParentDim} aria-label="Group members of"
+                    onChange={(e) => { setNewSourceDim(e.target.value); setNewSourceProp(""); }} style={{ width: 180 }}>
+                    <option value="">— no grouping —</option>
+                    {dims.filter(d => d.dimension_type !== "time").map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </Select>
+                </Field>
+                {newSourceDim && (
+                  <>
+                    <Field label="By property">
+                      <Select value={newSourceProp} onChange={(e) => setNewSourceProp(e.target.value)} style={{ width: 150 }} aria-label="By property">
+                        <option value="">— choose —</option>
+                        {(sourceProps.data ?? []).map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                      </Select>
+                    </Field>
+                    <label className="mvx-admin-muted" style={{ display: "flex", gap: 6, alignItems: "center", paddingBottom: 8 }}>
+                      <input type="checkbox" checked={newDerive} onChange={(e) => setNewDerive(e.target.checked)} />
+                      one member per value
+                    </label>
+                  </>
+                )}
+              </>
             )}
             <Field label="Tags">
               <TagInput value={newTags} onChange={setNewTags} />
@@ -178,10 +214,20 @@ export function DimensionsView({ dims, revisionId }: { dims: DevDimension[]; rev
             <Button variant="primary" disabled={!canCreate} loading={create.isPending} onClick={() => create.mutate()}>Create</Button>
           </div>
         )}
+        {create.error && (
+          <p role="alert" style={{ color: "var(--color-danger)", marginTop: 8 }}>{(create.error as Error).message}</p>
+        )}
+        {showAdd && newType === "standard" && newSourceDim && (
+          <p className="mvx-admin-muted" style={{ marginTop: 8, maxWidth: 640 }}>
+            A member of this dimension stands for every member of the chosen dimension whose property value equals
+            its code, so metrics on that dimension total by it (in a grid, SUMIFS and LOOKUP). Only declared properties
+            are offered; a value without a member here is under no group.
+          </p>
+        )}
         {showAdd && newType === "time" && (
           <p className="mvx-admin-muted" style={{ marginTop: 8, maxWidth: 640 }}>
             The type, granularity and fiscal year are fixed once created. Only a Time dimension supports
-            time-series formulas (PREVIOUS, LAG, MOVINGSUM, CUMULATE, …); a dimension merely named “month” does not.
+            time-series formulas (PREVIOUS, LAG, MOVINGSUM, CUMULATE, YEARTODATE, YEARVALUE, TIMESUM, START, …); a dimension merely named “month” does not.
           </p>
         )}
       </div>
@@ -321,6 +367,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "" 
   // validateMemberParent in handler.go).
   const parentDim = dim.parent_dimension_id ? allDims.find(d => d.id === dim.parent_dimension_id) : undefined;
   const parentPickerMembers = parentDim ? parentDim.members : dim.members;
+  const sourceDim = dim.source_dimension_id ? allDims.find(d => d.id === dim.source_dimension_id) : undefined;
   const parentLabelOf = (parentMemberId?: string | null) =>
     parentMemberId ? parentPickerMembers.find(m => m.id === parentMemberId)?.label : undefined;
 
@@ -339,15 +386,28 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "" 
   const [editMParent, setEditMParent] = useState("");
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["dev-dimensions"] });
+  // A refused delete (409 DIMENSION_IN_USE / MEMBER_IN_USE) names the
+  // metrics whose formulas to change first; show it rather than drop it.
+  const [error, setError] = useState<string | null>(null);
+  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+
+  // A grouping's members for property values that have none yet.
+  const derive = useMutation({
+    mutationFn: () => api.updateDimension(dim.id, { derive_members: true }),
+    onSuccess: () => { invalidate(); setError(null); },
+    onError: fail,
+  });
 
   const delDim = useMutation({
     mutationFn: () => api.deleteDimension(dim.id),
-    onSuccess: invalidate,
+    onSuccess: () => { invalidate(); setError(null); },
+    onError: fail,
   });
   const addMember = useMutation({
     mutationFn: ({ code, label, parentId }: { code: string; label: string; parentId: string }) =>
       api.addDimMember(dim.id, { code, label, parent_member_id: parentId || undefined }),
     onSuccess: () => { invalidate(); setAddingChildOf(null); setAddingRoot(false); },
+    onError: fail,
   });
   const updateMember = useMutation({
     mutationFn: () => api.updateDimMember(dim.id, editMId!, {
@@ -355,10 +415,12 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "" 
       ...(Object.keys(editProps).length ? { properties: editProps } : {}),
     }),
     onSuccess: () => { invalidate(); setEditMId(null); setEditProps({}); },
+    onError: fail,
   });
   const delMember = useMutation({
     mutationFn: (id: string) => api.deleteDimMember(dim.id, id),
-    onSuccess: invalidate,
+    onSuccess: () => { invalidate(); setError(null); },
+    onError: fail,
   });
   const { confirm, confirmElement } = useConfirm();
 
@@ -415,6 +477,13 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "" 
             </span>
             {isHierarchy && <StatusBadge tone="success">hierarchy</StatusBadge>}
             {parentDim && <StatusBadge tone="brand">child of {parentDim.name}</StatusBadge>}
+            {sourceDim && <StatusBadge tone="brand">groups {sourceDim.name} by {dim.source_property}</StatusBadge>}
+            {sourceDim && (
+              <Button size="sm" variant="ghost" loading={derive.isPending} onClick={() => derive.mutate()}
+                title={`Add a member for every ${dim.source_property} value of ${sourceDim.name} that has none yet`}>
+                Derive members
+              </Button>
+            )}
             <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
               <Button size="sm" variant="ghost" onClick={() => setShowProps(v => !v)}>
                 {showProps ? "Hide props" : "Props"}
@@ -456,6 +525,12 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "" 
           visible before the data (reported live). Toggled with the members'
           property columns by the same "Props/Hide props" control. */}
       {showProps && <DimPropertiesPanel dimId={dim.id} />}
+
+      {error && (
+        <div role="alert" style={{ padding: "8px 16px", color: "var(--color-danger-600)", borderBottom: "1px solid var(--color-border)", fontSize: 12 }}>
+          {error}
+        </div>
+      )}
 
       {/* ── Tree table ── */}
       <div className="mvx-table-wrap">
@@ -915,7 +990,7 @@ function DimPropertiesPanel({ dimId }: { dimId: string }) {
     <div style={{ padding: "12px 16px", borderTop: "1px solid var(--color-border)", background: "var(--color-surface-subtle)" }}>
       <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10 }}>
         Dimension Properties
-        <span className="mvx-admin-muted" style={{ fontWeight: 400, marginLeft: 8 }}>attributes of each member — not referenceable in formulas</span>
+        <span className="mvx-admin-muted" style={{ fontWeight: 400, marginLeft: 8 }}>attributes of each member — use in formulas as {"<dimension>.<property>"}, e.g. as a SUMIFS criterion or a LOOKUP member</span>
       </div>
 
       {(props as DimProperty[]).length === 0 && (
@@ -958,6 +1033,14 @@ function DimPropertiesPanel({ dimId }: { dimId: string }) {
           Add
         </Button>
       </div>
+      {/* The server refuses names that cannot be written as dim.property
+          (letters, digits and _, not starting with a digit) and unknown
+          types; show why instead of failing silently. */}
+      {(add.error ?? update.error ?? del.error) && (
+        <p className="mvx-admin-error" style={{ marginTop: 6 }}>
+          {((add.error ?? update.error ?? del.error) as Error).message}
+        </p>
+      )}
     </div>
   );
 }

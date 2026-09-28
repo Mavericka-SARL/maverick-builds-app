@@ -19,6 +19,10 @@ const (
 type FormulaError struct {
 	Code    string
 	Message string
+
+	// memberNotAvailable marks the #N/A of a blank member or a member its
+	// dimension does not have (MemberNotAvailable, IsMemberNotAvailable).
+	memberNotAvailable bool
 }
 
 func (e *FormulaError) Error() string {

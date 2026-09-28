@@ -26,6 +26,7 @@ remain authoritative.
 | [`docs/NOTIFICATIONS.md`](NOTIFICATIONS.md) | current | Notification producers, outbound e-mail and webhooks, task reminders |
 | [`docs/AI_DEVELOPER.md`](AI_DEVELOPER.md) | current | The AI assistant's read and write tools, and what stays human |
 | [`docs/AI_KEYS.md`](AI_KEYS.md) | current | Where the AI assistant's provider key comes from: user, tenant, deployment |
+| [`docs/OBSERVATIONS.md`](OBSERVATIONS.md) | current | Things noticed and not fixed yet — dependency blind spots, drift, risks — with how to check each and what closes it |
 | [`docs/AUDIT_EXPORT.md`](AUDIT_EXPORT.md) | current | Audit export (CSV, JSON Lines for a SIEM) and retention |
 | [`docs/CELL_HISTORY.md`](CELL_HISTORY.md) | current | Per-cell change history |
 | [`docs/SSO_SCIM.md`](SSO_SCIM.md) | current | Enterprise single sign-on and SCIM provisioning |
@@ -43,7 +44,7 @@ Their status block records current implementation and remaining gaps.
 
 | Document | Classification |
 |---|---|
-| [`TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md`](../TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md) | Phase 1 implemented (explicit time dimensions, 11 time-series functions, causal recurrences); §13 lists the deferred later-parity functions |
+| [`TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md`](../TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md) | Phase 1 and the time additions implemented (explicit time dimensions, 19 time-series functions incl. dynamic offsets, `*VALUE`, `TIMESUM`, `START`/`END`; causal recurrences); §13 lists what is still deferred (`POST`, `SPREAD`, `PROFILE`, `WEEKVALUE`) |
 
 ## UX decision history
 

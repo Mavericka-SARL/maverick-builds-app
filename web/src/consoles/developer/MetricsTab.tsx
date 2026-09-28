@@ -91,6 +91,9 @@ function RatioOperands({
 
 export function MetricsTab({ model, revisionId }: { model: DevModel; revisionId?: string }) {
   const timeMetrics = useTimeDimensionedMetrics(revisionId);
+  // Same query key as useTimeDimensionedMetrics, so this reads the cache.
+  const { data: revisionDims = [] } = useQuery({ queryKey: ["dev-dimensions", revisionId], queryFn: () => api.getDevDimensions(revisionId) });
+  const dimNames = revisionDims.map(d => d.name);
   const [showAdd, setShowAdd] = useState(false);
   const [search, setSearch] = useState("");
   const [filterTag, setFilterTag] = useState<string | null>(null);
@@ -145,11 +148,11 @@ export function MetricsTab({ model, revisionId }: { model: DevModel; revisionId?
             </tr>
           </thead>
           <tbody>
-            {inputs.map((m) => <MetricRow key={m.id} m={m} allMetrics={model.metrics} onTimeGrid={timeMetrics.has(m.id)} activeTag={filterTag} onTagClick={toggleTag} />)}
+            {inputs.map((m) => <MetricRow key={m.id} m={m} allMetrics={model.metrics} dimNames={dimNames} onTimeGrid={timeMetrics.has(m.id)} activeTag={filterTag} onTagClick={toggleTag} />)}
             {inputs.length > 0 && calcs.length > 0 && (
               <tr><td colSpan={6} className="mvx-table__group-row">Calculated</td></tr>
             )}
-            {calcs.map((m) => <MetricRow key={m.id} m={m} allMetrics={model.metrics} onTimeGrid={timeMetrics.has(m.id)} activeTag={filterTag} onTagClick={toggleTag} />)}
+            {calcs.map((m) => <MetricRow key={m.id} m={m} allMetrics={model.metrics} dimNames={dimNames} onTimeGrid={timeMetrics.has(m.id)} activeTag={filterTag} onTagClick={toggleTag} />)}
             {inputs.length === 0 && calcs.length === 0 && filtering && (
               <tr><td colSpan={6} style={{ padding: 20, textAlign: "center" }} className="mvx-admin-muted">
                 {q ? `No metrics match "${search.trim()}"${filterTag ? ` with tag "${filterTag}"` : ""}` : `No metrics have tag "${filterTag}"`}
@@ -186,9 +189,10 @@ export function MetricsTab({ model, revisionId }: { model: DevModel; revisionId?
 
 type RecalcRow = { revision: string; metric: string; value: number | null };
 
-function MetricRow({ m, allMetrics, onTimeGrid, activeTag, onTagClick }: {
+function MetricRow({ m, allMetrics, dimNames, onTimeGrid, activeTag, onTagClick }: {
   m: DevMetric;
   allMetrics: DevMetric[];
+  dimNames: string[];
   onTimeGrid: boolean;
   activeTag: string | null;
   onTagClick: (tag: string) => void;
@@ -214,9 +218,15 @@ function MetricRow({ m, allMetrics, onTimeGrid, activeTag, onTagClick }: {
     enabled: !m.is_input && formula.trim() !== "",
     staleTime: Infinity,
   });
+  // A formula may name metrics and dimensions (`region = "EMEA"`, LOOKUP's
+  // dimension arguments), case-insensitively. Anything else is only a hint:
+  // the server validates on save and its 400 message is shown below, so the
+  // hint never blocks Save — it used to, which made every formula that
+  // mentions a dimension impossible to edit.
   const formulaRefs = formulaRefsData?.refs ?? [];
-  const invalidRefs = formulaRefs.filter(ref => !allMetrics.some(x => x.name === ref));
-  const canSave = name.trim() !== "" && (m.is_input || (formula.trim() !== "" && invalidRefs.length === 0));
+  const knownNames = new Set([...allMetrics.map(x => x.name), ...dimNames].map(n => n.toLowerCase()));
+  const invalidRefs = formulaRefs.filter(ref => !knownNames.has(ref.toLowerCase()));
+  const canSave = name.trim() !== "" && (m.is_input || formula.trim() !== "");
 
   const update = useMutation({
     mutationFn: () => api.updateMetric(m.id, {
@@ -326,8 +336,8 @@ function MetricRow({ m, allMetrics, onTimeGrid, activeTag, onTagClick }: {
               <TagInput value={tags} onChange={setTags} inputWidth={110} />
             </div>
             {invalidRefs.length > 0 && (
-              <p className="mvx-admin-error" style={{ marginTop: 4 }}>
-                Unknown or invalid references: {invalidRefs.map(r => `{${r}}`).join(", ")}
+              <p className="mvx-admin-muted" style={{ marginTop: 4 }}>
+                Not a metric or dimension in this revision: {invalidRefs.join(", ")}
               </p>
             )}
             {update.isError && <p className="mvx-admin-error" style={{ marginTop: 4 }}>{(update.error as Error).message}</p>}

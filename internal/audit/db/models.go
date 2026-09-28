@@ -1301,12 +1301,13 @@ type IdentityUser struct {
 }
 
 type IdentityUserAccessRule struct {
-	ID        uuid.UUID `json:"id"`
-	UserID    uuid.UUID `json:"user_id"`
-	RuleType  string    `json:"rule_type"`
-	RefID     string    `json:"ref_id"`
-	Access    string    `json:"access"`
-	CreatedAt time.Time `json:"created_at"`
+	ID           uuid.UUID   `json:"id"`
+	UserID       uuid.UUID   `json:"user_id"`
+	RuleType     string      `json:"rule_type"`
+	RefID        string      `json:"ref_id"`
+	Access       string      `json:"access"`
+	CreatedAt    time.Time   `json:"created_at"`
+	RefLineageID pgtype.UUID `json:"ref_lineage_id"`
 }
 
 type IdentityUserAppAccess struct {
@@ -1421,6 +1422,7 @@ type ModelDimensionDef struct {
 	TimeGranularity      *string         `json:"time_granularity"`
 	FiscalYearStartMonth *int16          `json:"fiscal_year_start_month"`
 	Tags                 []string        `json:"tags"`
+	LineageID            uuid.UUID       `json:"lineage_id"`
 }
 
 type ModelDimensionMember struct {
@@ -1436,6 +1438,7 @@ type ModelDimensionMember struct {
 	PeriodStart    pgtype.Date     `json:"period_start"`
 	PeriodEnd      pgtype.Date     `json:"period_end"`
 	TimeIndex      *int32          `json:"time_index"`
+	LineageID      uuid.UUID       `json:"lineage_id"`
 }
 
 type ModelDimensionProperty struct {
@@ -1624,6 +1627,7 @@ type ModelMetricDef struct {
 	AggDenominatorMetricID pgtype.UUID     `json:"agg_denominator_metric_id"`
 	TimeSummary            string          `json:"time_summary"`
 	Tags                   []string        `json:"tags"`
+	LineageID              uuid.UUID       `json:"lineage_id"`
 }
 
 type ModelRevision struct {

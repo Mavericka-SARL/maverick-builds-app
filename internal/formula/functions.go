@@ -10,10 +10,12 @@ import (
 
 // builtins maps UPPER-CASE function names to implementations.
 // Lazy functions receive unevaluated []Node; eager helpers call evalArgs.
-var builtins map[string]CustomFunc
+// It is initialised at declaration so every file's init can add to it,
+// whatever order the files' init functions run in.
+var builtins = map[string]CustomFunc{}
 
 func init() {
-	builtins = map[string]CustomFunc{
+	for name, fn := range map[string]CustomFunc{
 		// Logic — lazy
 		"IF":      fnIF,
 		"IFS":     fnIFS,
@@ -58,14 +60,18 @@ func init() {
 		"SUBSTITUTE": fnSUBSTITUTE,
 
 		// Date
-		"TODAY":   fnTODAY,
-		"DATE":    fnDATE,
-		"YEAR":    fnYEAR,
-		"MONTH":   fnMONTH,
-		"DAY":     fnDAY,
-		"DAYS":    fnDAYS,
-		"EDATE":   fnEDATE,
-		"EOMONTH": fnEOMONTH,
+		"TODAY":       fnTODAY,
+		"DATE":        fnDATE,
+		"YEAR":        fnYEAR,
+		"MONTH":       fnMONTH,
+		"DAY":         fnDAY,
+		"DAYS":        fnDAYS,
+		"EDATE":       fnEDATE,
+		"EOMONTH":     fnEOMONTH,
+		"DAYSINMONTH": fnDAYSINMONTH,
+		"DAYSINYEAR":  fnDAYSINYEAR,
+	} {
+		builtins[name] = fn
 	}
 }
 
@@ -924,4 +930,47 @@ func fnEOMONTH(ctx *EvalContext, args []Node) Value {
 	t = t.AddDate(0, int(months)+1, 0)
 	t = time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -1)
 	return NumberVal(timeToSerial(t))
+}
+
+// fnDAYSINMONTH implements DAYSINMONTH(year, month): the number of days in
+// that calendar month. Year and month truncate to whole numbers like DATE;
+// a month outside 1-12 is #NUM!.
+func fnDAYSINMONTH(ctx *EvalContext, args []Node) Value {
+	if ferr := requireArgCount("DAYSINMONTH", args, 2, 2); ferr != nil {
+		return ErrorVal(ferr)
+	}
+	vals, errv := ctx.evalArgs(args)
+	if errv.IsError() {
+		return errv
+	}
+	y, ok1 := vals[0].Number()
+	m, ok2 := vals[1].Number()
+	if !ok1 || !ok2 {
+		return ErrorVal(ErrValue)
+	}
+	month := int(m)
+	if month < 1 || month > 12 {
+		return ErrorVal(&FormulaError{Code: ErrNum.Code, Message: fmt.Sprintf("DAYSINMONTH: month must be 1-12, got %v", m)})
+	}
+	return NumberVal(float64(time.Date(int(y), time.Month(month)+1, 0, 0, 0, 0, 0, time.UTC).Day()))
+}
+
+// fnDAYSINYEAR implements DAYSINYEAR(year): 366 in a leap year, else 365.
+func fnDAYSINYEAR(ctx *EvalContext, args []Node) Value {
+	if ferr := requireArgCount("DAYSINYEAR", args, 1, 1); ferr != nil {
+		return ErrorVal(ferr)
+	}
+	vals, errv := ctx.evalArgs(args)
+	if errv.IsError() {
+		return errv
+	}
+	y, ok := vals[0].Number()
+	if !ok {
+		return ErrorVal(ErrValue)
+	}
+	year := int(y)
+	if time.Date(year, time.December, 31, 0, 0, 0, 0, time.UTC).YearDay() == 366 {
+		return NumberVal(366)
+	}
+	return NumberVal(365)
 }

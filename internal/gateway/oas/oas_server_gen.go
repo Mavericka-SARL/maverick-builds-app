@@ -34,7 +34,7 @@ type Handler interface {
 	// Add a dimension to a grid.
 	//
 	// POST /api/developer/grids/{id}/dimensions/{dimId}
-	AddGridDimension(ctx context.Context, params AddGridDimensionParams) (*AddGridDimensionOK, error)
+	AddGridDimension(ctx context.Context, params AddGridDimensionParams) (AddGridDimensionRes, error)
 	// AddGridMetric implements addGridMetric operation.
 	//
 	// Add a metric to a grid (a metric may belong to only one grid at a time).
@@ -189,7 +189,7 @@ type Handler interface {
 	// Define a new typed property on a dimension.
 	//
 	// POST /api/developer/dimensions/{dimId}/properties
-	CreateDimensionProperty(ctx context.Context, req *PropertyRequest, params CreateDimensionPropertyParams) (*CreateDimensionPropertyOK, error)
+	CreateDimensionProperty(ctx context.Context, req *PropertyRequest, params CreateDimensionPropertyParams) (CreateDimensionPropertyRes, error)
 	// CreateFolder implements createFolder operation.
 	//
 	// Create a dashboard folder.
@@ -352,19 +352,19 @@ type Handler interface {
 	// Delete a dimension.
 	//
 	// DELETE /api/developer/dimensions/{dimId}
-	DeleteDimension(ctx context.Context, params DeleteDimensionParams) (*DeleteDimensionOK, error)
+	DeleteDimension(ctx context.Context, params DeleteDimensionParams) (DeleteDimensionRes, error)
 	// DeleteDimensionMember implements deleteDimensionMember operation.
 	//
 	// Delete a dimension member.
 	//
 	// DELETE /api/developer/dimensions/{dimId}/members/{memberId}
-	DeleteDimensionMember(ctx context.Context, params DeleteDimensionMemberParams) (*DeleteDimensionMemberOK, error)
+	DeleteDimensionMember(ctx context.Context, params DeleteDimensionMemberParams) (DeleteDimensionMemberRes, error)
 	// DeleteDimensionProperty implements deleteDimensionProperty operation.
 	//
 	// Delete a dimension property.
 	//
 	// DELETE /api/developer/dimensions/{dimId}/properties/{propId}
-	DeleteDimensionProperty(ctx context.Context, params DeleteDimensionPropertyParams) (*DeleteDimensionPropertyOK, error)
+	DeleteDimensionProperty(ctx context.Context, params DeleteDimensionPropertyParams) (DeleteDimensionPropertyRes, error)
 	// DeleteFolder implements deleteFolder operation.
 	//
 	// Delete a dashboard folder.
@@ -1105,7 +1105,7 @@ type Handler interface {
 	// Remove a dimension from a grid.
 	//
 	// DELETE /api/developer/grids/{id}/dimensions/{dimId}
-	RemoveGridDimension(ctx context.Context, params RemoveGridDimensionParams) (*RemoveGridDimensionOK, error)
+	RemoveGridDimension(ctx context.Context, params RemoveGridDimensionParams) (RemoveGridDimensionRes, error)
 	// RemoveGridMetric implements removeGridMetric operation.
 	//
 	// Remove a metric from a grid.
@@ -1483,7 +1483,7 @@ type Handler interface {
 	// Update a dimension property.
 	//
 	// PATCH /api/developer/dimensions/{dimId}/properties/{propId}
-	UpdateDimensionProperty(ctx context.Context, req *PropertyRequest, params UpdateDimensionPropertyParams) (*UpdateDimensionPropertyOK, error)
+	UpdateDimensionProperty(ctx context.Context, req *PropertyRequest, params UpdateDimensionPropertyParams) (UpdateDimensionPropertyRes, error)
 	// UpdateFolder implements updateFolder operation.
 	//
 	// Rename or reparent a dashboard folder.

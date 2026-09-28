@@ -72,6 +72,23 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    FormulaRejected:
+      description: >-
+        The formula, or the model it would leave, is refused (internal/metricformula). The error string
+        starts with a stable code when there is one: #NAME? (unknown function), #VALUE! (wrong argument
+        count or shape), SOURCE_MUST_BE_METRIC (LOOKUP, a conditional aggregation or a *VALUE function
+        given a dimension as its source), DIMENSION_ARGUMENT_REQUIRED (PARENT, LOOKUP, a criteria range
+        or dimension.property naming something that is not a dimension of the revision), UNKNOWN_PROPERTY
+        (dimension.property not declared on that dimension), UNKNOWN_MEMBER (a literal member code the
+        dimension does not have), DIMENSION_NOT_ON_SOURCE (a LOOKUP or criteria dimension that is not,
+        and is not related to, one of the source metric's dimensions), CONFLICTING_DIMENSION_ARGUMENTS
+        (two arguments selecting members of the same dimension of the source), TIME_OFFSET_NOT_INTEGER,
+        MOVING_WINDOW_NOT_LITERAL, TEMPORAL_CYCLE_NOT_CAUSAL, MULTIPLE_TIME_DIMENSIONS,
+        TIME_DIMENSION_REQUIRED, TIME_DIMENSION_MISMATCH, INVALID_TIME_MEMBER. A refusal without a code
+        (unknown metric, dependency cycle, parse error) is plain text.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
 
   schemas:
     Error:
@@ -79,7 +96,11 @@ components:
       description: >-
         The shape every gateway error response actually has (internal/gateway's
         jsonErr helper) — a single "error" string, not the {code, message}
-        pair this schema previously (and incorrectly) documented.
+        pair this schema previously (and incorrectly) documented. A refusal the
+        caller can act on (internal/metricformula.ValidationError) starts the
+        string with a stable upper-case code and a colon, e.g.
+        "PROPERTY_IN_USE: Customer.region is read by Revenue; change those formulas first, then delete the property"; clients
+        match on that prefix, never on the rest of the text.
       required: [error]
       properties:
         error: { type: string }
@@ -536,6 +557,14 @@ components:
         label:    { type: string }
         formula:  { type: string, nullable: true }
         is_input: { type: boolean }
+        value:
+          type: number
+          nullable: true
+          description: >-
+            GET /api/metrics only: the model-wide total (an input metric's latest whole-model entry, a
+            calculated metric's persisted whole-model result). Null when there is none, and always null for a
+            calculated metric when the caller has any hidden dimension member — that total includes values
+            the caller cannot see.
 
     Department:
       type: object
@@ -586,6 +615,14 @@ components:
           type: object
           description: "metricId to its aggregate across the grid"
           additionalProperties: { type: number }
+        withheld:
+          type: array
+          items: { type: string }
+          description: >-
+            Calculated values withheld from this caller because they read a dimension member
+            the caller cannot see: cell keys in the cells format, and bare metric IDs for totals.
+            They are absent from cells and totals; a client must not rebuild a parent value from
+            children when any of them is withheld. Omitted when nothing is withheld.
         access_rules: { $ref: "#/components/schemas/GridAccessRules" }
         rollup_source_grid_id:
           type: string
@@ -781,6 +818,8 @@ components:
         time_granularity:        { type: string, enum: [day, week, month, quarter, half_year, year, custom], description: "Time dimensions only" }
         fiscal_year_start_month: { type: integer, minimum: 1, maximum: 12, description: "Time dimensions only" }
         tags:                 { type: array, items: { type: string }, description: "Free-form labels the developer console filters by; omitted when empty" }
+        source_dimension_id:  { type: string, format: uuid, description: "A property grouping: this dimension's members group this dimension's members by their source_property value (developer endpoint; omitted when none)" }
+        source_property:      { type: string, description: "The declared property of source_dimension_id whose value names the group (a member's code)" }
         members:              { type: array, items: { $ref: "#/components/schemas/DimensionMember" }, description: "Time members in chronological order" }
 
     DimensionProperty:
@@ -859,6 +898,17 @@ components:
         revision_id:          { type: string, format: uuid }
         parent_dimension_id:  { type: string, format: uuid, nullable: true, description: "Not allowed on a time dimension" }
         tags:                 { type: array, items: { type: string } }
+        source_dimension_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            A property grouping: this dimension's members group the members of this standard dimension
+            (same model and revision) by their value of source_property. A grouping member stands for every
+            source member whose value equals its code. Not with parent_dimension_id, not on a time dimension;
+            refused with INVALID_GROUPING otherwise.
+        source_property:      { type: string, description: "A property DECLARED on source_dimension_id (any case; stored as declared)" }
+        derive_members:       { type: boolean, default: false, description: "Also add one member (code = label = the value) per distinct non-blank value of the property" }
         dimension_type:
           type: string
           enum: [standard, time]
@@ -884,6 +934,15 @@ components:
         agg_rule:             { type: string }
         parent_dimension_id:  { type: string, format: uuid, nullable: true, description: "Send null to detach the dimension from its parent" }
         tags:                 { type: array, items: { type: string } }
+        source_dimension_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            Set or replace the property grouping (same rules as on create); null clears it. Clearing or replacing
+            the source is refused with 409 DIMENSION_IN_USE while a formula names the dimension.
+        source_property:      { type: string, description: "Change the grouping's property; recalculates the metrics reading through it" }
+        derive_members:       { type: boolean, description: "Add a member for every value of the property that has none yet (e.g. after a new value appears)" }
 
     MemberRequest:
       type: object
@@ -3010,6 +3069,7 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/Metric" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /api/tasks:
     get:
@@ -3330,6 +3390,7 @@ paths:
                 type: object
                 properties:
                   status: { type: string }
+        "400": { $ref: "#/components/responses/FormulaRejected" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /api/developer/metrics:
@@ -3352,7 +3413,13 @@ paths:
                 properties:
                   id:     { type: string, format: uuid }
                   status: { type: string }
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/FormulaRejected" }
+        "409":
+          description: >-
+            METRIC_NAME_TAKEN: the revision already has a metric with this name.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/developer/metrics/{id}:
     patch:
@@ -3386,8 +3453,14 @@ paths:
                         revision_id: { type: string, format: uuid }
                         metric:      { type: string }
                         value:       { type: number, nullable: true }
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/FormulaRejected" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: >-
+            METRIC_NAME_TAKEN: the revision already has a metric with this name.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
     delete:
       operationId: deleteMetric
       tags: [Developer Console]
@@ -3443,7 +3516,24 @@ paths:
                 properties:
                   id:     { type: string, format: uuid }
                   status: { type: string }
-        "400": { $ref: "#/components/responses/BadRequest" }
+                  derived_members: { type: array, items: { type: string }, description: "A property grouping only: the member codes derive_members added" }
+        "400":
+          description: >-
+            INVALID_GROUPING: source_dimension_id / source_property / derive_members do not form a
+            valid property grouping (see CreateDimensionRequest.source_dimension_id).
+            INVALID_PARENT_DIMENSION: parent_dimension_id is not a dimension of the same model
+            and revision, is the dimension itself, would form a cycle, or is set on a time
+            dimension (a time dimension has no parent dimension). Other malformed bodies are
+            plain text.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: >-
+            DIMENSION_NAME_TAKEN: the revision already has a dimension with this name.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/developer/dimensions/{dimId}:
     patch:
@@ -3469,7 +3559,25 @@ paths:
                 type: object
                 properties:
                   status: { type: string }
-        "400": { $ref: "#/components/responses/BadRequest" }
+                  derived_members: { type: array, items: { type: string }, description: "When the grouping was sent: the member codes derive_members added" }
+        "400":
+          description: >-
+            INVALID_GROUPING: source_dimension_id / source_property / derive_members do not form a
+            valid property grouping (see CreateDimensionRequest.source_dimension_id).
+            INVALID_PARENT_DIMENSION: parent_dimension_id is not a dimension of the same model
+            and revision, is the dimension itself, would form a cycle, or is set on a time
+            dimension (a time dimension has no parent dimension). Other malformed bodies are
+            plain text.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: >-
+            DIMENSION_NAME_TAKEN: the revision already has a dimension with this name.
+            DIMENSION_IN_USE: the grouping's source cannot be cleared or replaced while formulas read through it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
     delete:
       operationId: deleteDimension
       tags: [Developer Console]
@@ -3488,6 +3596,13 @@ paths:
                 type: object
                 properties:
                   status: { type: string }
+        "409":
+          description: >-
+            DIMENSION_IN_USE: formulas name the dimension (the error lists the metrics), or a property
+            grouping groups its members; change those formulas or clear that grouping first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/developer/dimensions/{dimId}/members:
     post:
@@ -3514,6 +3629,12 @@ paths:
                 properties:
                   id: { type: string, format: uuid }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "409":
+          description: >-
+            MEMBER_CODE_TAKEN: the dimension already has a member with this code.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/developer/dimensions/{dimId}/members/generate:
     post:
@@ -3570,6 +3691,13 @@ paths:
                 properties:
                   status: { type: string }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: >-
+            MEMBER_CODE_TAKEN: the dimension already has a member with the new code.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
     delete:
       operationId: deleteDimensionMember
       tags: [Developer Console]
@@ -3592,6 +3720,14 @@ paths:
                 type: object
                 properties:
                   status: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: >-
+            MEMBER_IN_USE: formulas name the member's code (a literal LOOKUP member, a TIMESUM period, an
+            equality criterion or a comparison); the error lists the metrics. Change those formulas first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/developer/dimensions/{dimId}/properties:
     get:
@@ -3634,6 +3770,15 @@ paths:
                 type: object
                 properties:
                   id: { type: string, format: uuid }
+        "400":
+          description: >-
+            INVALID_PROPERTY_NAME (not letters, digits and underscores starting with a letter or
+            underscore, so a formula can read it as dimension.name), INVALID_PROPERTY_TYPE (not one of
+            the property data types), PROPERTY_NAME_TAKEN (the dimension already has a property of that
+            name, compared case-insensitively). Other malformed bodies are plain text.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/developer/dimensions/{dimId}/properties/{propId}:
     patch:
@@ -3663,6 +3808,16 @@ paths:
                 type: object
                 properties:
                   status: { type: string }
+        "400":
+          description: >-
+            INVALID_PROPERTY_NAME (not letters, digits and underscores starting with a letter or
+            underscore, so a formula can read it as dimension.name), INVALID_PROPERTY_TYPE (not one of
+            the property data types), PROPERTY_NAME_TAKEN (the dimension already has a property of that
+            name, compared case-insensitively). Other malformed bodies are plain text.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
     delete:
       operationId: deleteDimensionProperty
       tags: [Developer Console]
@@ -3685,6 +3840,14 @@ paths:
                 type: object
                 properties:
                   status: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: >-
+            PROPERTY_IN_USE: formulas read the property as dimension.property (the error lists the metrics);
+            change those formulas first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/developer/migration/generate:
     post:
@@ -3786,6 +3949,14 @@ paths:
                     value:          { type: number, description: "dim_members mode only" }
                     calc_at:        { type: string, description: "dim_members mode only" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403":
+          description: >-
+            With dim_members: the caller has a hidden dimension member. Persisted rows are unrestricted
+            values (a parent row aggregates hidden members; a LOOKUP or time-window row can read one), so
+            none of them is served.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /api/developer/integrations/{id}/duplicate:
@@ -4050,7 +4221,7 @@ paths:
           content:
             application/json:
               schema: { type: object, properties: { status: { type: string } } }
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/FormulaRejected" }
         "409":
           description: Metric already belongs to a different grid
           content:
@@ -4096,6 +4267,7 @@ paths:
           content:
             application/json:
               schema: { type: object, properties: { status: { type: string } } }
+        "400": { $ref: "#/components/responses/FormulaRejected" }
     patch:
       operationId: updateGridDimension
       tags: [Developer Console]
@@ -4139,6 +4311,7 @@ paths:
           content:
             application/json:
               schema: { type: object, properties: { status: { type: string } } }
+        "400": { $ref: "#/components/responses/FormulaRejected" }
 
   /api/developer/folders:
     get:
@@ -6032,6 +6205,7 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/BAAvailableItem" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /api/ai/sessions:
     get:
@@ -6611,6 +6785,7 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/Dimension" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /api/forms:
     get:

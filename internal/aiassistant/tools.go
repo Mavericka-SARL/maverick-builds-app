@@ -30,7 +30,7 @@ func ReadTools() []providers.ToolDef {
 		},
 		{
 			Name:        "list_dimensions",
-			Description: "Returns every dimension and its members: code, label, parent hierarchy, and each member's properties as {key=value} — use these to group or re-parent members by a property (e.g. category). A time dimension is marked [time · granularity] and lists its leaf periods in chronological order with their dates and its aggregate periods (H1, FY26) as such; only such a dimension supports time-series formulas (PREVIOUS, LAG, MOVINGSUM, CUMULATE, ...).",
+			Description: "Returns every dimension and its members: code, label, parent hierarchy, the dimension's DECLARED properties with their data types (text | number | date — only a declared property can be read in a formula as dimension.property), and each member's property values as {key=value} — use these to group or re-parent members by a property (e.g. category). A time dimension is marked [time · granularity] and lists its leaf periods in chronological order with their dates and its aggregate periods (H1, FY26) as such; only such a dimension supports time-series formulas (PREVIOUS, LAG, LEAD, OFFSET, MOVINGSUM, CUMULATE, the *TODATE family incl. HALFYEARTODATE, YEARVALUE/HALFYEARVALUE/QUARTERVALUE/MONTHVALUE, TIMESUM, START, END, ...).",
 			Parameters:  noParams,
 		},
 		{
@@ -90,7 +90,7 @@ func ReadTools() []providers.ToolDef {
 		},
 		{
 			Name:        "list_users",
-			Description: "Returns the users of this application's workspaces: email, display name, roles, and their current access rules (dimension/member=level). Use before proposing set_user_access_rules.",
+			Description: "Returns the users of this application's workspaces: email, display name, roles, and their current access rules: member rules in the active revision (dimension/member=level) — the set set_user_access_rules replaces — plus metric rules and a count of member rules on members not in the active revision, which it keeps. Use before proposing set_user_access_rules.",
 			Parameters:  noParams,
 		},
 		{
@@ -122,9 +122,9 @@ var proposeActionsTool = providers.ToolDef{
 				"items": {
 					"type": "object",
 					"properties": {
-						"tool":        {"type": "string",  "description": "Write tool name: create_metric | update_metric | delete_metric | create_dimension | add_dimension_member | update_dimension_member | create_grid | add_grid_metric | add_grid_dimension | create_dashboard | add_dashboard_widget | set_tags | create_revision | create_workflow_def | update_workflow_def | delete_workflow_def | create_form_def | update_form_def | delete_form_def | create_automation_rule | update_automation_rule | delete_automation_rule | create_business_role | create_form_integration | update_form_integration | delete_form_integration | generate_migration | apply_migration | set_user_access_rules"},
+						"tool":        {"type": "string",  "description": "Write tool name: create_metric | update_metric | delete_metric | create_dimension | update_dimension | add_dimension_member | update_dimension_member | add_dimension_property | update_dimension_property | delete_dimension_property | create_grid | add_grid_metric | add_grid_dimension | create_dashboard | add_dashboard_widget | set_tags | create_revision | create_workflow_def | update_workflow_def | delete_workflow_def | create_form_def | update_form_def | delete_form_def | create_automation_rule | update_automation_rule | delete_automation_rule | create_business_role | create_form_integration | update_form_integration | delete_form_integration | generate_migration | apply_migration | set_user_access_rules"},
 						"description": {"type": "string",  "description": "One-line human-readable description of this step shown to the developer"},
-						"params":      {"type": "object",  "description": "Parameters for the tool (must match the tool's required fields)"}
+						"params":      {"type": "object",  "description": "Parameters for the tool (must match the tool's required fields). create_dimension takes name, and optionally agg_rule, parent_dimension_name, dimension_type/time_granularity/fiscal_year_start_month, tags, members, and for a property grouping source_dimension_id (id or name) + source_property (declared on the source) + derive_members"}
 					},
 					"required": ["tool", "description", "params"]
 				}
@@ -292,6 +292,45 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 		pdRows.Close()
 	}
 
+	// Property groupings: "area groups employees by area".
+	groupingByName := map[string]string{}
+	gRows, gErr := e.pool.Query(ctx, `
+		SELECT d.name, sd.name, COALESCE(d.source_property,'')
+		FROM model.dimension_def d
+		JOIN model.dimension_def sd ON sd.id = d.source_dimension_id
+		WHERE d.model_id = $1::uuid AND ($2 = '' OR d.revision_id::text = $2 OR d.revision_id IS NULL)`, e.modelID, e.revID)
+	if gErr == nil {
+		for gRows.Next() {
+			var name, sourceName, prop string
+			if gRows.Scan(&name, &sourceName, &prop) == nil {
+				groupingByName[name] = fmt.Sprintf(" (groups %s by its property %s — a member stands for every %s member whose %s equals its code)",
+					sourceName, prop, sourceName, prop)
+			}
+		}
+		gRows.Close()
+	}
+
+	// The declared properties (model.dimension_property), which are what a
+	// formula can read as dimension.property, typed by data_type. Member
+	// values alone do not say that: a key no declaration names is stored but
+	// refused in a formula (UNKNOWN_PROPERTY).
+	declaredProps := map[string][]string{}
+	dpRows, dpErr := e.pool.Query(ctx, `
+		SELECT d.name, p.name, p.data_type
+		FROM model.dimension_property p
+		JOIN model.dimension_def d ON d.id = p.dimension_id
+		WHERE d.model_id = $1::uuid AND ($2 = '' OR d.revision_id::text = $2 OR d.revision_id IS NULL)
+		ORDER BY d.name, lower(p.name)`, e.modelID, e.revID)
+	if dpErr == nil {
+		for dpRows.Next() {
+			var dname, pname, ptype string
+			if dpRows.Scan(&dname, &pname, &ptype) == nil {
+				declaredProps[dname] = append(declaredProps[dname], pname+" ("+ptype+")")
+			}
+		}
+		dpRows.Close()
+	}
+
 	// The working revision's dimensions only: every revision holds its own
 	// copy, and reading them all listed each member once per revision. A
 	// LEFT JOIN, so a dimension with no members yet is still listed.
@@ -366,7 +405,12 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 		if parentName, ok := parentDimByName[d]; ok {
 			fmt.Fprintf(&sb, "Dimension: %s (child of: %s — members below roll up to a %s member via parent)%s\n", d, parentName, parentName, dimTags[d])
 		} else {
-			fmt.Fprintf(&sb, "Dimension: %s%s%s\n", d, timeBadge[d], dimTags[d])
+			fmt.Fprintf(&sb, "Dimension: %s%s%s%s\n", d, timeBadge[d], groupingByName[d], dimTags[d])
+		}
+		if props := declaredProps[d]; len(props) > 0 {
+			fmt.Fprintf(&sb, "  Declared properties: %s\n", strings.Join(props, ", "))
+		} else {
+			sb.WriteString("  Declared properties: none\n")
 		}
 		if len(dims[d]) == 0 {
 			sb.WriteString("  (no members yet)\n")
@@ -535,7 +579,7 @@ func (e *ToolExecutor) listForms(ctx context.Context) (string, error) {
 // runs pre-flight (model-scoped, not revision-scoped).
 func (e *ToolExecutor) validateFormulas(ctx context.Context) (string, error) {
 	rows, err := e.pool.Query(ctx, `
-		SELECT name, formula FROM model.metric_def
+		SELECT id::text, name, formula FROM model.metric_def
 		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND is_input=false AND formula IS NOT NULL
 		ORDER BY name`, e.modelID, e.revID)
 	if err != nil {
@@ -550,11 +594,11 @@ func (e *ToolExecutor) validateFormulas(ctx context.Context) (string, error) {
 	// Collect first, then validate: metricformula queries the same pool, and
 	// running those queries while this cursor is open would deadlock on a
 	// single-connection pool.
-	type metricRow struct{ name, formula string }
+	type metricRow struct{ id, name, formula string }
 	var found []metricRow
 	for rows.Next() {
 		var m metricRow
-		if rows.Scan(&m.name, &m.formula) != nil {
+		if rows.Scan(&m.id, &m.name, &m.formula) != nil {
 			continue
 		}
 		found = append(found, m)
@@ -573,9 +617,11 @@ func (e *ToolExecutor) validateFormulas(ctx context.Context) (string, error) {
 		// unresolved names. Splitting the formula on operators and treating
 		// each piece as a metric name, which this used to do, called every
 		// function name and every legacy {reference} a missing metric, so a
-		// healthy model reported as broken.
+		// healthy model reported as broken. MetricID makes the check see the
+		// metric's own place in the graph — the recurrence it belongs to
+		// (contract C4) and its own grid placement.
 		if _, vErr := metricformula.Validate(ctx, e.pool, metricformula.Request{
-			ModelID: e.modelID, RevisionID: e.revID, Name: m.name, Formula: m.formula,
+			ModelID: e.modelID, RevisionID: e.revID, MetricID: m.id, Name: m.name, Formula: m.formula,
 		}); vErr != nil {
 			var invalid *metricformula.ValidationError
 			if !errors.As(vErr, &invalid) {
@@ -659,19 +705,45 @@ func (e *ToolExecutor) checkGridCompleteness(ctx context.Context) (string, error
 // workspaces): email, display name, roles, and each user's current access
 // rules with the dimension/member they point at spelled out by name — the
 // shape set_user_access_rules consumes, so the model can read the current
-// state and propose a replacement without ever handling a UUID.
+// state and propose a replacement without ever handling a UUID. Member rules
+// are shown as they resolve (by lineage) in the active revision — the slice
+// set_user_access_rules replaces; metric rules and member rules on rows not
+// in the active revision are shown too, as rules that tool keeps.
 func (e *ToolExecutor) listUsers(ctx context.Context) (string, error) {
 	rows, err := e.pool.Query(ctx, `
 		SELECT u.email, u.display_name,
-		       COALESCE(string_agg(DISTINCT ra.role, ','), ''),
+		       COALESCE(string_agg(DISTINCT ra.role::text, ','), ''),
 		       COALESCE((
-		           SELECT string_agg(d.name || '/' || m.code || '=' || r.access, ', ' ORDER BY d.name || '/' || m.code)
+		           SELECT string_agg(DISTINCT d.name || '/' || m.code || '=' || r.access, ', ')
 		           FROM identity.user_access_rule r
-		           JOIN model.dimension_member m ON m.id::text = r.ref_id
+		           JOIN model.dimension_member m ON (m.lineage_id = r.ref_lineage_id OR m.id::text = r.ref_id)
 		           JOIN model.dimension_def d ON d.id = m.dimension_id
 		           WHERE r.user_id = u.id AND r.rule_type = 'dimension_member'
-		       ), '')
+		             AND d.model_id = $1::uuid
+		             AND (d.revision_id = act.rev OR d.revision_id IS NULL)
+		       ), ''),
+		       COALESCE((
+		           SELECT string_agg(DISTINCT md.name || '=' || r.access, ', ')
+		           FROM identity.user_access_rule r
+		           JOIN model.metric_def md ON (md.lineage_id = r.ref_lineage_id OR md.id::text = r.ref_id)
+		           WHERE r.user_id = u.id AND r.rule_type = 'metric'
+		             AND md.model_id = $1::uuid
+		             AND (md.revision_id = act.rev OR md.revision_id IS NULL)
+		       ), ''),
+		       (SELECT count(*) FROM identity.user_access_rule r
+		        WHERE r.user_id = u.id AND r.rule_type = 'dimension_member'
+		          AND NOT EXISTS (
+		              SELECT 1 FROM model.dimension_member m
+		              JOIN model.dimension_def d ON d.id = m.dimension_id
+		              WHERE d.model_id = $1::uuid
+		                AND (d.revision_id = act.rev OR d.revision_id IS NULL)
+		                AND (m.lineage_id = r.ref_lineage_id OR m.id::text = r.ref_id)))
 		FROM identity.user u
+		CROSS JOIN (
+		    SELECT COALESCE(mo.active_revision_id,
+		           (SELECT id FROM model.revision WHERE model_id = mo.id ORDER BY created_at LIMIT 1)) AS rev
+		    FROM core.model mo WHERE mo.id = $1::uuid
+		) act
 		JOIN identity.role_assignment ra ON ra.user_id = u.id
 		JOIN core.workspace w ON w.id = ra.workspace_id
 		WHERE w.customer_id = (
@@ -681,7 +753,7 @@ func (e *ToolExecutor) listUsers(ctx context.Context) (string, error) {
 		    LEFT JOIN core.workspace ws ON ws.id = a.workspace_id
 		    WHERE mo.id = $1::uuid
 		)
-		GROUP BY u.id, u.email, u.display_name
+		GROUP BY u.id, u.email, u.display_name, act.rev
 		ORDER BY u.email
 	`, e.modelID)
 	if err != nil {
@@ -692,15 +764,23 @@ func (e *ToolExecutor) listUsers(ctx context.Context) (string, error) {
 	b.WriteString("Users in this application's workspaces:\n")
 	n := 0
 	for rows.Next() {
-		var email, name, roles, rules string
-		if err := rows.Scan(&email, &name, &roles, &rules); err != nil {
+		var email, name, roles, rules, metricRules string
+		var otherMemberRules int64
+		if err := rows.Scan(&email, &name, &roles, &rules, &metricRules, &otherMemberRules); err != nil {
 			return "", err
 		}
 		n++
 		if rules == "" {
-			rules = "none (full access)"
+			rules = "none"
 		}
-		fmt.Fprintf(&b, "- %s (%s) — roles: %s — access rules: %s\n", email, name, roles, rules)
+		fmt.Fprintf(&b, "- %s (%s) — roles: %s — member access rules (active revision): %s", email, name, roles, rules)
+		if metricRules != "" {
+			fmt.Fprintf(&b, " — metric access rules (kept by set_user_access_rules; business admin console manages them): %s", metricRules)
+		}
+		if otherMemberRules > 0 {
+			fmt.Fprintf(&b, " — %d other member rule(s) on members not in this model's active revision (kept by set_user_access_rules)", otherMemberRules)
+		}
+		b.WriteString("\n")
 	}
 	if n == 0 {
 		return "No users found for this application's customer.", nil

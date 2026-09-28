@@ -53,7 +53,7 @@ type Invoker interface {
 	// Add a dimension to a grid.
 	//
 	// POST /api/developer/grids/{id}/dimensions/{dimId}
-	AddGridDimension(ctx context.Context, params AddGridDimensionParams) (*AddGridDimensionOK, error)
+	AddGridDimension(ctx context.Context, params AddGridDimensionParams) (AddGridDimensionRes, error)
 	// AddGridMetric invokes addGridMetric operation.
 	//
 	// Add a metric to a grid (a metric may belong to only one grid at a time).
@@ -208,7 +208,7 @@ type Invoker interface {
 	// Define a new typed property on a dimension.
 	//
 	// POST /api/developer/dimensions/{dimId}/properties
-	CreateDimensionProperty(ctx context.Context, request *PropertyRequest, params CreateDimensionPropertyParams) (*CreateDimensionPropertyOK, error)
+	CreateDimensionProperty(ctx context.Context, request *PropertyRequest, params CreateDimensionPropertyParams) (CreateDimensionPropertyRes, error)
 	// CreateFolder invokes createFolder operation.
 	//
 	// Create a dashboard folder.
@@ -371,19 +371,19 @@ type Invoker interface {
 	// Delete a dimension.
 	//
 	// DELETE /api/developer/dimensions/{dimId}
-	DeleteDimension(ctx context.Context, params DeleteDimensionParams) (*DeleteDimensionOK, error)
+	DeleteDimension(ctx context.Context, params DeleteDimensionParams) (DeleteDimensionRes, error)
 	// DeleteDimensionMember invokes deleteDimensionMember operation.
 	//
 	// Delete a dimension member.
 	//
 	// DELETE /api/developer/dimensions/{dimId}/members/{memberId}
-	DeleteDimensionMember(ctx context.Context, params DeleteDimensionMemberParams) (*DeleteDimensionMemberOK, error)
+	DeleteDimensionMember(ctx context.Context, params DeleteDimensionMemberParams) (DeleteDimensionMemberRes, error)
 	// DeleteDimensionProperty invokes deleteDimensionProperty operation.
 	//
 	// Delete a dimension property.
 	//
 	// DELETE /api/developer/dimensions/{dimId}/properties/{propId}
-	DeleteDimensionProperty(ctx context.Context, params DeleteDimensionPropertyParams) (*DeleteDimensionPropertyOK, error)
+	DeleteDimensionProperty(ctx context.Context, params DeleteDimensionPropertyParams) (DeleteDimensionPropertyRes, error)
 	// DeleteFolder invokes deleteFolder operation.
 	//
 	// Delete a dashboard folder.
@@ -1124,7 +1124,7 @@ type Invoker interface {
 	// Remove a dimension from a grid.
 	//
 	// DELETE /api/developer/grids/{id}/dimensions/{dimId}
-	RemoveGridDimension(ctx context.Context, params RemoveGridDimensionParams) (*RemoveGridDimensionOK, error)
+	RemoveGridDimension(ctx context.Context, params RemoveGridDimensionParams) (RemoveGridDimensionRes, error)
 	// RemoveGridMetric invokes removeGridMetric operation.
 	//
 	// Remove a metric from a grid.
@@ -1502,7 +1502,7 @@ type Invoker interface {
 	// Update a dimension property.
 	//
 	// PATCH /api/developer/dimensions/{dimId}/properties/{propId}
-	UpdateDimensionProperty(ctx context.Context, request *PropertyRequest, params UpdateDimensionPropertyParams) (*UpdateDimensionPropertyOK, error)
+	UpdateDimensionProperty(ctx context.Context, request *PropertyRequest, params UpdateDimensionPropertyParams) (UpdateDimensionPropertyRes, error)
 	// UpdateFolder invokes updateFolder operation.
 	//
 	// Rename or reparent a dashboard folder.
@@ -2072,12 +2072,12 @@ func (c *Client) sendAddBARoleMember(ctx context.Context, request *AddRoleMember
 // Add a dimension to a grid.
 //
 // POST /api/developer/grids/{id}/dimensions/{dimId}
-func (c *Client) AddGridDimension(ctx context.Context, params AddGridDimensionParams) (*AddGridDimensionOK, error) {
+func (c *Client) AddGridDimension(ctx context.Context, params AddGridDimensionParams) (AddGridDimensionRes, error) {
 	res, err := c.sendAddGridDimension(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendAddGridDimension(ctx context.Context, params AddGridDimensionParams) (res *AddGridDimensionOK, err error) {
+func (c *Client) sendAddGridDimension(ctx context.Context, params AddGridDimensionParams) (res AddGridDimensionRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("addGridDimension"),
 		semconv.HTTPRequestMethodKey.String("POST"),
@@ -4916,12 +4916,12 @@ func (c *Client) sendCreateDimensionMember(ctx context.Context, request *MemberR
 // Define a new typed property on a dimension.
 //
 // POST /api/developer/dimensions/{dimId}/properties
-func (c *Client) CreateDimensionProperty(ctx context.Context, request *PropertyRequest, params CreateDimensionPropertyParams) (*CreateDimensionPropertyOK, error) {
+func (c *Client) CreateDimensionProperty(ctx context.Context, request *PropertyRequest, params CreateDimensionPropertyParams) (CreateDimensionPropertyRes, error) {
 	res, err := c.sendCreateDimensionProperty(ctx, request, params)
 	return res, err
 }
 
-func (c *Client) sendCreateDimensionProperty(ctx context.Context, request *PropertyRequest, params CreateDimensionPropertyParams) (res *CreateDimensionPropertyOK, err error) {
+func (c *Client) sendCreateDimensionProperty(ctx context.Context, request *PropertyRequest, params CreateDimensionPropertyParams) (res CreateDimensionPropertyRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("createDimensionProperty"),
 		semconv.HTTPRequestMethodKey.String("POST"),
@@ -8059,12 +8059,12 @@ func (c *Client) sendDeleteDashboardWidget(ctx context.Context, params DeleteDas
 // Delete a dimension.
 //
 // DELETE /api/developer/dimensions/{dimId}
-func (c *Client) DeleteDimension(ctx context.Context, params DeleteDimensionParams) (*DeleteDimensionOK, error) {
+func (c *Client) DeleteDimension(ctx context.Context, params DeleteDimensionParams) (DeleteDimensionRes, error) {
 	res, err := c.sendDeleteDimension(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendDeleteDimension(ctx context.Context, params DeleteDimensionParams) (res *DeleteDimensionOK, err error) {
+func (c *Client) sendDeleteDimension(ctx context.Context, params DeleteDimensionParams) (res DeleteDimensionRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("deleteDimension"),
 		semconv.HTTPRequestMethodKey.String("DELETE"),
@@ -8184,12 +8184,12 @@ func (c *Client) sendDeleteDimension(ctx context.Context, params DeleteDimension
 // Delete a dimension member.
 //
 // DELETE /api/developer/dimensions/{dimId}/members/{memberId}
-func (c *Client) DeleteDimensionMember(ctx context.Context, params DeleteDimensionMemberParams) (*DeleteDimensionMemberOK, error) {
+func (c *Client) DeleteDimensionMember(ctx context.Context, params DeleteDimensionMemberParams) (DeleteDimensionMemberRes, error) {
 	res, err := c.sendDeleteDimensionMember(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendDeleteDimensionMember(ctx context.Context, params DeleteDimensionMemberParams) (res *DeleteDimensionMemberOK, err error) {
+func (c *Client) sendDeleteDimensionMember(ctx context.Context, params DeleteDimensionMemberParams) (res DeleteDimensionMemberRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("deleteDimensionMember"),
 		semconv.HTTPRequestMethodKey.String("DELETE"),
@@ -8328,12 +8328,12 @@ func (c *Client) sendDeleteDimensionMember(ctx context.Context, params DeleteDim
 // Delete a dimension property.
 //
 // DELETE /api/developer/dimensions/{dimId}/properties/{propId}
-func (c *Client) DeleteDimensionProperty(ctx context.Context, params DeleteDimensionPropertyParams) (*DeleteDimensionPropertyOK, error) {
+func (c *Client) DeleteDimensionProperty(ctx context.Context, params DeleteDimensionPropertyParams) (DeleteDimensionPropertyRes, error) {
 	res, err := c.sendDeleteDimensionProperty(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendDeleteDimensionProperty(ctx context.Context, params DeleteDimensionPropertyParams) (res *DeleteDimensionPropertyOK, err error) {
+func (c *Client) sendDeleteDimensionProperty(ctx context.Context, params DeleteDimensionPropertyParams) (res DeleteDimensionPropertyRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("deleteDimensionProperty"),
 		semconv.HTTPRequestMethodKey.String("DELETE"),
@@ -22482,12 +22482,12 @@ func (c *Client) sendRemoveBranding(ctx context.Context) (res RemoveBrandingRes,
 // Remove a dimension from a grid.
 //
 // DELETE /api/developer/grids/{id}/dimensions/{dimId}
-func (c *Client) RemoveGridDimension(ctx context.Context, params RemoveGridDimensionParams) (*RemoveGridDimensionOK, error) {
+func (c *Client) RemoveGridDimension(ctx context.Context, params RemoveGridDimensionParams) (RemoveGridDimensionRes, error) {
 	res, err := c.sendRemoveGridDimension(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendRemoveGridDimension(ctx context.Context, params RemoveGridDimensionParams) (res *RemoveGridDimensionOK, err error) {
+func (c *Client) sendRemoveGridDimension(ctx context.Context, params RemoveGridDimensionParams) (res RemoveGridDimensionRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("removeGridDimension"),
 		semconv.HTTPRequestMethodKey.String("DELETE"),
@@ -29633,12 +29633,12 @@ func (c *Client) sendUpdateDimensionMember(ctx context.Context, request *MemberR
 // Update a dimension property.
 //
 // PATCH /api/developer/dimensions/{dimId}/properties/{propId}
-func (c *Client) UpdateDimensionProperty(ctx context.Context, request *PropertyRequest, params UpdateDimensionPropertyParams) (*UpdateDimensionPropertyOK, error) {
+func (c *Client) UpdateDimensionProperty(ctx context.Context, request *PropertyRequest, params UpdateDimensionPropertyParams) (UpdateDimensionPropertyRes, error) {
 	res, err := c.sendUpdateDimensionProperty(ctx, request, params)
 	return res, err
 }
 
-func (c *Client) sendUpdateDimensionProperty(ctx context.Context, request *PropertyRequest, params UpdateDimensionPropertyParams) (res *UpdateDimensionPropertyOK, err error) {
+func (c *Client) sendUpdateDimensionProperty(ctx context.Context, request *PropertyRequest, params UpdateDimensionPropertyParams) (res UpdateDimensionPropertyRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("updateDimensionProperty"),
 		semconv.HTTPRequestMethodKey.String("PATCH"),

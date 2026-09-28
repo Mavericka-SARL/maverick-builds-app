@@ -195,14 +195,24 @@ func TestEvalWithContextKeepsTime(t *testing.T) {
 	}
 }
 
+// TestDynamicOffsetsRejected keeps the static refusals that survive dynamic
+// offsets: a non-whole LITERAL offset, and any non-literal MOVINGSUM window.
+// Dynamic LAG/LEAD/OFFSET offsets are covered by TestDynamicOffsets.
 func TestDynamicOffsetsRejected(t *testing.T) {
-	for _, f := range []string{"LAG(sales, sales, 0)", "LAG(sales, 1.5, 0)", "MOVINGSUM(sales, -1 - 1, 0)", "LEAD(sales, 1+1, 0)"} {
+	for f, code := range map[string]string{
+		"LAG(sales, 1.5, 0)":          CodeTimeOffsetNotInteger,
+		"LAG(sales, -2.5, 0)":         CodeTimeOffsetNotInteger,
+		"MOVINGSUM(sales, 1.5)":       CodeTimeOffsetNotInteger,
+		"MOVINGSUM(sales, -1 - 1, 0)": CodeMovingWindowNotLiteral,
+		"MOVINGSUM(sales, sales)":     CodeMovingWindowNotLiteral,
+		"MOVINGSUM(sales, 0, sales)":  CodeMovingWindowNotLiteral,
+	} {
 		vals := evalSeries(t, f, []float64{1, 2})
-		if !vals[0].IsError() || vals[0].Err().Code != CodeDynamicTimeOffset {
-			t.Errorf("%s: want %s, got %v", f, CodeDynamicTimeOffset, vals[0])
+		if !vals[0].IsError() || vals[0].Err().Code != code {
+			t.Errorf("%s: want %s, got %v", f, code, vals[0])
 		}
-		if _, err := Analyze(f); err == nil || !strings.Contains(err.Error(), CodeDynamicTimeOffset) {
-			t.Errorf("Analyze(%s): want %s, got %v", f, CodeDynamicTimeOffset, err)
+		if _, err := Analyze(f); err == nil || !strings.Contains(err.Error(), code) {
+			t.Errorf("Analyze(%s): want %s, got %v", f, code, err)
 		}
 	}
 	if _, err := Analyze("LAG(sales, 1, 0, LOOSE)"); err == nil {
@@ -295,7 +305,7 @@ func TestAnalyzeWindows(t *testing.T) {
 }
 
 func TestLaterParityNamesStayUnknown(t *testing.T) {
-	for _, name := range []string{"POST", "SPREAD", "PROFILE", "TIMESUM", "WEEKVALUE", "MONTHVALUE", "QUARTERVALUE", "HALFYEARVALUE", "YEARVALUE"} {
+	for _, name := range []string{"POST", "SPREAD", "PROFILE", "WEEKVALUE"} {
 		if IsBuiltin(name) {
 			t.Errorf("%s must stay unregistered until fully implemented", name)
 		}

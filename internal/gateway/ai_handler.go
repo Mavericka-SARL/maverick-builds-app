@@ -911,6 +911,11 @@ func (h *handler) aiPromoteDraft(w http.ResponseWriter, r *http.Request) {
 	// tool-call inside aiConfirmProposal against draft data nothing can
 	// query yet.
 	go h.autoMigrate(context.Background(), modelID) //nolint:contextcheck
+	// The assistant's member, property and formula writes landed on the
+	// draft, where nothing recalculated them (write_executor has no
+	// scheduler); activateRevision above recomputes every calculated metric
+	// of the promoted revision, so what the draft changed is what the live
+	// model shows (contract C8).
 
 	if err := h.aiChatStore(ctx).SetDraftRevisionID(ctx, sessionID, ""); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)

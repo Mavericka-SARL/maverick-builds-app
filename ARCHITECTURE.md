@@ -3,7 +3,7 @@
 > **Classification:** Current — Implementation reference for the system as built.
 
 > **Status:** Current implementation reference
-> **Last verified:** 2026-09-25
+> **Last verified:** 2026-09-25 (formula paragraph 2026-09-28)
 > **Authority:** Running code, migrations, build configuration, and tests take
 > precedence if this document drifts.
 
@@ -281,16 +281,28 @@ values. Its registered functions are:
 - aggregation: `SUM`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`;
 - text: `CONCAT`, `TEXTJOIN`, `LEN`, `LEFT`, `RIGHT`, `MID`, `UPPER`,
   `LOWER`, `TRIM`, `TEXT`, `SUBSTITUTE`; and
-- date: `TODAY`, `DATE`, `YEAR`, `MONTH`, `DAY`, `DAYS`, `EDATE`, `EOMONTH`.
+- date: `TODAY`, `DATE`, `YEAR`, `MONTH`, `DAY`, `DAYS`, `EDATE`, `EOMONTH`,
+  `DAYSINMONTH`, `DAYSINYEAR`.
 
 Time-series functions over an explicit time dimension live in
-`internal/formula/time.go`: `PREVIOUS`, `NEXT`, `LAG`, `LEAD`, `OFFSET`,
-`CUMULATE`, `DECUMULATE`, `MOVINGSUM`, `YEARTODATE`, `QUARTERTODATE`,
-`MONTHTODATE` and time summaries (see
+`internal/formula/time.go`: `PREVIOUS`, `NEXT`, `LAG`, `LEAD`, `OFFSET` (with
+literal or dynamic offsets), `CUMULATE`, `DECUMULATE`, `MOVINGSUM`,
+`MONTHTODATE`, `QUARTERTODATE`, `HALFYEARTODATE`, `YEARTODATE`, `MONTHVALUE`,
+`QUARTERVALUE`, `HALFYEARVALUE`, `YEARVALUE`, `TIMESUM`, `START`, `END` and
+time summaries (see
 [TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md](TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md)).
-Conditional aggregations such as `SUMIF`/`SUMIFS`, lookup functions, and dotted
-property references are not implemented. Dependencies are explicit in
-`model.calc_dependency` and are cycle-checked.
+Dimensional functions live in `internal/formula/dimension.go`: the cell's
+member (`dim`), typed member properties (`dim.property`), `PARENT(dim)`,
+`LOOKUP(source, dim, member …)` and conditional aggregation (`SUMIFS`,
+`AVERAGEIFS`, `MINIFS`, `MAXIFS`, `COUNTIFS`, `SUMIF`, `AVERAGEIF`,
+`COUNTIF`); the scheduler supplies their member context and source reads
+(`internal/calculation/dimcontext.go`, resolved through `internal/rollup`).
+Metrics that read other cells (time series, lookups, conditional aggregation)
+are served from persisted rows on scoped reads, and cells whose read set
+touches a hidden member are withheld from that viewer (`internal/readset`).
+The rules are in
+FORMULA_CALCULATION_INSTRUCTIONS.md.
+Dependencies are explicit in `model.calc_dependency` and are cycle-checked.
 
 `internal/calculation.Scheduler.RecalcAffected` traverses transitive dependents,
 orders them topologically, evaluates affected metrics for every known

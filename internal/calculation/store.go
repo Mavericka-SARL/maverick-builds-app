@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -258,17 +259,6 @@ func (s *Store) GetCalcValue(ctx context.Context, modelID, revisionID, metricID 
 	return *value, err
 }
 
-// WriteCalcResult stores a calculated value for a metric partition.
-func (s *Store) WriteCalcResult(ctx context.Context, modelID, revisionID, metricID, partitionKey string, dimMembers map[string]string, value float64) error {
-	dimJSON, _ := json.Marshal(dimMembers)
-	_, err := s.pool.Exec(ctx, `
-		INSERT INTO runtime.calc_result
-		    (model_id, revision_id, dim_members, metric_id, value, partition_key)
-		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6)
-	`, modelID, revisionID, dimJSON, metricID, value, partitionKey)
-	return err
-}
-
 // ── Dependency graph (mirrors model.graph but reads from DB) ──────────────────
 
 func (s *Store) LoadDependencyGraph(ctx context.Context, modelID, revisionID string) (map[string][]string, error) {
@@ -328,6 +318,68 @@ func (s *Store) LoadDimIDToName(ctx context.Context, modelID, revisionID string)
 // rollup.LeafCombos, not whatever dim_members happen to already exist in
 // fact_input (the old ListDistinctDimCombos*, removed: a department with no
 // fact yet is still a real, zero-valued intersection, not an absent one).
+
+// PropertyDecl is one declared member property of a dimension
+// (model.dimension_property): its name as declared and its data_type.
+type PropertyDecl struct {
+	Name     string
+	DataType string
+}
+
+// DimensionSchema is the declared shape of a revision's dimensions beyond
+// what rollup.Dimension carries: each dimension's property declarations,
+// and which dimension rows belong to the revision itself.
+type DimensionSchema struct {
+	// Properties maps dimension ID -> UPPER-CASE property name -> its
+	// declaration. Property names match case-insensitively (contract C1).
+	Properties map[string]map[string]PropertyDecl
+	// RevisionOwned holds the IDs of dimension rows whose revision_id is the
+	// revision itself. A revision-less legacy row may share a name with one
+	// of them; a formula's dimension name then means the revision's own row.
+	RevisionOwned map[string]bool
+}
+
+// LoadDimensionSchema loads the property declarations of every dimension in
+// scope for the revision, scoped exactly like LoadAllDimensions (the
+// revision's own rows and revision-less ones). Loaded once per
+// recalculation pass.
+func (s *Store) LoadDimensionSchema(ctx context.Context, modelID, revisionID string) (*DimensionSchema, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT d.id::text, d.revision_id IS NOT NULL, COALESCE(p.name,''), COALESCE(p.data_type,'')
+		FROM model.dimension_def d
+		LEFT JOIN model.dimension_property p ON p.dimension_id = d.id
+		WHERE d.model_id = $1::uuid AND (d.revision_id = $2::uuid OR d.revision_id IS NULL)
+		ORDER BY d.id, p.name
+	`, modelID, revisionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	schema := &DimensionSchema{Properties: map[string]map[string]PropertyDecl{}, RevisionOwned: map[string]bool{}}
+	for rows.Next() {
+		var dimID, name, dataType string
+		var owned bool
+		if err := rows.Scan(&dimID, &owned, &name, &dataType); err != nil {
+			return nil, err
+		}
+		if owned {
+			schema.RevisionOwned[dimID] = true
+		}
+		if name == "" {
+			continue
+		}
+		props := schema.Properties[dimID]
+		if props == nil {
+			props = map[string]PropertyDecl{}
+			schema.Properties[dimID] = props
+		}
+		key := strings.ToUpper(name)
+		if _, dup := props[key]; !dup { // names differing only in case: the first (sorted) declaration wins
+			props[key] = PropertyDecl{Name: name, DataType: dataType}
+		}
+	}
+	return schema, rows.Err()
+}
 
 // LoadAllDimensions loads every dimension in the revision (regardless of
 // grid), in the shape rollup.Resolve/rollup.LeafCombos need. Unlike
@@ -629,19 +681,18 @@ type CalcResultRow struct {
 	Value      float64
 }
 
-// WriteCalcResults persists one calc_result row per entry in rows, in a
-// single round trip via a batch. WriteCalcResult (singular, unchanged)
-// remains what writes the '{}' aggregate row — this is purely additive.
-// ClearPerComboResults deletes a metric's per-intersection calc_result rows
+// ClearPerComboResultsTx deletes a metric's per-intersection calc_result rows
 // (never the '{}' aggregate row), making each recompute's per-combo set
 // authoritative. Without this, an intersection whose underlying facts were
 // deleted (full_reload, member removal) kept serving its LAST computed
 // value forever: the recompute skips the now-empty combo, the skip writes
 // nothing, and nothing else ever garbage-collects the stale row — found
 // live when a business user's junk test-writes (revenue 4, cost 3) kept
-// showing margin_pct=25 at an intersection whose facts had been wiped.
-func (s *Store) ClearPerComboResults(ctx context.Context, modelID, revisionID, metricID string) error {
-	_, err := s.pool.Exec(ctx, `
+// showing margin_pct=25 at an intersection whose facts had been wiped. It
+// runs in the same transaction as the write of the new set (Store.InTx), so
+// no reader sees the metric with no rows in between.
+func (s *Store) ClearPerComboResultsTx(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID string) error {
+	_, err := tx.Exec(ctx, `
 		DELETE FROM runtime.calc_result
 		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid
 		  AND dim_members::text <> '{}'
@@ -649,8 +700,51 @@ func (s *Store) ClearPerComboResults(ctx context.Context, modelID, revisionID, m
 	return err
 }
 
-func (s *Store) WriteCalcResults(ctx context.Context, modelID, revisionID, metricID, partitionKey string, rows []CalcResultRow) error {
-	return writeCalcResults(ctx, s.pool, modelID, revisionID, metricID, partitionKey, rows)
+// ClearAllResults deletes every calc_result row of a metric, the '{}'
+// total included: the state of a metric whose every intersection has no
+// data (all of it deleted) — absent, never its last total.
+func (s *Store) ClearAllResults(ctx context.Context, modelID, revisionID, metricID string) error {
+	return clearResults(ctx, s.pool, modelID, revisionID, metricID, "")
+}
+
+// ClearAllResultsTx is ClearAllResults inside tx.
+func (s *Store) ClearAllResultsTx(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID string) error {
+	return clearResults(ctx, tx, modelID, revisionID, metricID, "")
+}
+
+// ClearAggregateResultTx deletes a metric's '{}' total rows: a pass that
+// computes no total (time_summary 'none', a blank total) must not leave an
+// earlier pass's total answering for it.
+func (s *Store) ClearAggregateResultTx(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID string) error {
+	return clearResults(ctx, tx, modelID, revisionID, metricID, `AND dim_members::text = '{}'`)
+}
+
+// clearResults deletes a metric's calc_result rows, narrowed by extra (a
+// fixed SQL fragment, never user input).
+func clearResults(ctx context.Context, w resultWriter, modelID, revisionID, metricID, extra string) error {
+	_, err := w.Exec(ctx, `
+		DELETE FROM runtime.calc_result
+		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid `+extra,
+		modelID, revisionID, metricID)
+	return err
+}
+
+// InTx runs fn in one transaction, committed when fn returns nil and
+// rolled back otherwise. A metric's result set (its '{}' total, the clear
+// of its previous per-combo rows and the new ones) is replaced through it,
+// so a concurrent reader sees either the previous set or the new one —
+// never the empty moment between the clear and the write — and a failed
+// write keeps the last good rows.
+func (s *Store) InTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // a no-op after Commit
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // resultWriter is the subset of pgx shared by a pool and a transaction, so
@@ -661,10 +755,12 @@ type resultWriter interface {
 	SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults
 }
 
-// WriteCalcResultTx / ClearPerComboResultsTx / WriteCalcResultsTx are the
-// transaction-scoped forms of the pool methods above. A recurrence (an
-// opening/closing balance pair) is persisted as one unit: a failure at a
-// later period must never leave a half-updated chain behind.
+// WriteCalcResultTx / WriteCalcResultsTx write a metric's calc_result rows
+// (the '{}' total; one row per entry, batched in one round trip) inside tx:
+// a metric's result set is replaced as one unit (Store.InTx), and a
+// recurrence (an opening/closing balance pair) as one unit across its
+// metrics — a failure at a later period must never leave a half-updated
+// chain behind.
 func (s *Store) WriteCalcResultTx(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID, partitionKey string, dimMembers map[string]string, value float64) error {
 	dimJSON, _ := json.Marshal(dimMembers)
 	_, err := tx.Exec(ctx, `
@@ -672,15 +768,6 @@ func (s *Store) WriteCalcResultTx(ctx context.Context, tx pgx.Tx, modelID, revis
 		    (model_id, revision_id, dim_members, metric_id, value, partition_key)
 		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6)
 	`, modelID, revisionID, dimJSON, metricID, value, partitionKey)
-	return err
-}
-
-func (s *Store) ClearPerComboResultsTx(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID string) error {
-	_, err := tx.Exec(ctx, `
-		DELETE FROM runtime.calc_result
-		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid
-		  AND dim_members::text <> '{}'
-	`, modelID, revisionID, metricID)
 	return err
 }
 

@@ -57,6 +57,10 @@ func (s *CreateDimensionRequest) setDefaults() {
 		s.AggRule.SetTo(val)
 	}
 	{
+		val := bool(false)
+		s.DeriveMembers.SetTo(val)
+	}
+	{
 		val := CreateDimensionRequestDimensionType("standard")
 		s.DimensionType.SetTo(val)
 	}

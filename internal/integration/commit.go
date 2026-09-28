@@ -42,7 +42,19 @@ func (c *DBCommitter) CommitPull(ctx context.Context, def *Definition, header []
 	case TargetGrid:
 		return c.commitGrid(ctx, def, header, rows, dryRun, runBy)
 	case TargetDimension:
-		return c.commitDimension(ctx, def, header, rows, dryRun)
+		written, skipped, err = c.commitDimension(ctx, def, header, rows, dryRun)
+		if err == nil && written > 0 && !dryRun {
+			// Member codes, parents and properties are what LOOKUP, PARENT
+			// and dim.property read; those references have no
+			// calc_dependency edges, so recompute the metrics that make
+			// them explicitly (contract C8), as the gateway's CSV import
+			// does.
+			sched := calculation.NewScheduler(c.Log, calculation.NewStore(c.Pool), nil)
+			if rerr := sched.RecalcDimensionDependents(ctx, def.Config.TargetID); rerr != nil {
+				c.Log.Warn().Err(rerr).Msg("recalc after connector dimension import")
+			}
+		}
+		return written, skipped, err
 	case TargetForm:
 		return c.commitForm(ctx, def, header, rows, dryRun, runBy)
 	}

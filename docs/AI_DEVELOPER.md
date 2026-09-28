@@ -16,6 +16,9 @@ given to the assistant at the owner's direction (2026-08-26). Access rules are
 not revision-scoped, so it writes live `identity.user_access_rule` rows
 against the active revision: they take effect when the proposal is confirmed,
 not when the draft is promoted, and discarding the draft does not undo them.
+It replaces only the user's member rules that resolve in the active revision;
+metric and button rules, and rules on members no longer in the active revision
+(which still restrict older revisions), are kept.
 
 ## Read tools
 
@@ -33,10 +36,71 @@ not when the draft is promoted, and discarding the draft does not undo them.
 ## Write tools (through `propose_actions`)
 
 Model: `create_metric`, `update_metric`, `delete_metric`, `create_dimension`,
-`add_dimension_member`, `update_dimension_member`, `create_grid`,
-`add_grid_metric`, `add_grid_dimension`, `create_dashboard`,
+`update_dimension`, `add_dimension_member`, `update_dimension_member`, `add_dimension_property`,
+`update_dimension_property`, `delete_dimension_property`, `create_grid`, `add_grid_metric`, `add_grid_dimension`, `create_dashboard`,
 `add_dashboard_widget`, `set_tags`, `create_revision`, `generate_migration`,
 `apply_migration`, `set_user_access_rules`.
+
+`update_metric` changes only the fields the step carries (a field left out
+keeps its value, as the developer's `PATCH /api/developer/metrics/{id}`). A
+name the revision already uses is refused on `create_metric`,
+`update_metric`, `create_dimension` and `update_dimension` with `METRIC_NAME_TAKEN` /
+`DIMENSION_NAME_TAKEN`, and a code the dimension already has on
+`add_dimension_member` with `MEMBER_CODE_TAKEN`. The assistant has no tool that deletes a dimension
+member; a developer deleting one a formula names gets `MEMBER_IN_USE`.
+
+`add_dimension_property` declares a typed member property (`dimension_id`,
+`name`, `data_type`: text, number or date) under the same rules as the
+developer's Dimension Properties panel — an identifier name, unique in the
+dimension regardless of case — so a formula can then read it as
+`dimension.property`. `update_dimension_property` (`dimension_id`, `property`
+— its current name or id — and `name` and/or `data_type`) renames or retypes a
+declaration like the panel's edit: a field left out keeps its value, and a
+rename moves every member's value, any dimension grouped by the property and
+every formula that reads it to the new name. `delete_dimension_property`
+(`dimension_id`, `property`) removes the declaration; member values stay stored
+but no formula can read them. The delete is refused with `PROPERTY_IN_USE` while
+a formula still reads the property, and the error names the metrics to change
+first. Both act only on the assistant's draft revision
+and refuse a property of another dimension or model. A property id from
+another revision (the active one, listed before a draft exists) is matched to
+the draft's same-named property only while the draft's declarations on that
+dimension are still the copied ones, and keeps that match for the rest of the
+proposal; otherwise it is refused with a request for the current name. Promoting the draft
+recomputes every calculated metric of the revision. The assistant's formulas use the same validation as the
+console, including `dim.property`, `PARENT`, `LOOKUP`, the `SUMIFS` family and
+the time additions (see
+`FORMULA_CALCULATION_INSTRUCTIONS.md`).
+
+`create_dimension` also creates a property grouping, as the developer's
+**Group members of / By property**: `source_dimension_id` (the grouped
+dimension's id or exact name; `source_dimension_name` also works) and
+`source_property` (declared on it), with `derive_members: true` to add one
+member per distinct value. The developer endpoint's validator
+(`metricformula.ValidateGrouping`) refuses a bad one with `INVALID_GROUPING`:
+a source of another revision, the dimension itself, an undeclared property,
+a time dimension on either side, or a grouping together with
+`parent_dimension_name`. `list_dimensions` marks a grouping "(groups X by its
+property p …)". A parent dimension (`parent_dimension_name` or
+`parent_dimension_id`) resolves within the draft revision and is checked by
+the developer endpoint's `metricformula.ValidateParentDimension`: another
+revision's dimension, the dimension itself, a hierarchy cycle or a time
+dimension is refused with `INVALID_PARENT_DIMENSION`.
+
+`update_dimension` is the developer's `PATCH /api/developer/dimensions/{id}`:
+`dimension_id` (id or exact name) and only the fields to change — `name`,
+`agg_rule`, `tags`, `parent_dimension_id` or `parent_dimension_name` (null
+detaches), `source_dimension_id` or `source_dimension_name` (null clears the
+grouping), `source_property`, and `derive_members: true` to add a member for
+every source value with none yet (also on its own, after new values appear).
+It shares the PATCH's rules (`metricformula.ValidateParentDimension`,
+`metricformula.PlanGroupingPatch`): `INVALID_PARENT_DIMENSION`,
+`INVALID_GROUPING`, `DIMENSION_IN_USE` when clearing or replacing a grouping's
+source while a formula names the dimension, and `DIMENSION_NAME_TAKEN`. The
+dimension type and time settings cannot change. It acts only on the draft
+revision's dimensions and refuses another model's; where the PATCH
+recalculates the metrics reading a changed grouping, promoting the draft
+recomputes every calculated metric of the revision.
 
 Tags mirror the console's tag editors: `create_metric`, `update_metric`,
 `create_dimension` and `create_dashboard` take `tags`, and `set_tags`

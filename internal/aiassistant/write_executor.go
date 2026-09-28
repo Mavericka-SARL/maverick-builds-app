@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,9 +16,11 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/modeltransfer"
+	"github.com/mavericks-engine/mavericks/internal/rollup"
 	"github.com/mavericks-engine/mavericks/internal/tags"
 	"github.com/mavericks-engine/mavericks/internal/timedim"
 	"github.com/mavericks-engine/mavericks/internal/workflow"
+	"github.com/mavericks-engine/mavericks/internal/writeguard"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 )
 
@@ -48,6 +51,12 @@ type WriteExecutor struct {
 	modelID string
 	revID   string
 	userID  string
+	// propCounterparts remembers, for this executor's lifetime (one
+	// confirmed proposal), which working-revision property a property id
+	// from another revision was matched to. Matching is by name, so once a
+	// step renames that property, a later step passing the same id must
+	// keep reaching it rather than whatever now carries the old name.
+	propCounterparts map[string]string
 }
 
 func NewWriteExecutor(pool *pgxpool.Pool, modelID, revID string) *WriteExecutor {
@@ -267,10 +276,18 @@ func (e *WriteExecutor) Execute(ctx context.Context, tool string, params json.Ra
 		return e.deleteMetric(ctx, params)
 	case "create_dimension":
 		return e.createDimension(ctx, params)
+	case "update_dimension":
+		return e.updateDimension(ctx, params)
 	case "add_dimension_member":
 		return e.addDimensionMember(ctx, params)
 	case "update_dimension_member":
 		return e.updateDimensionMember(ctx, params)
+	case "add_dimension_property":
+		return e.addDimensionProperty(ctx, params)
+	case "update_dimension_property":
+		return e.updateDimensionProperty(ctx, params)
+	case "delete_dimension_property":
+		return e.deleteDimensionProperty(ctx, params)
 	case "create_grid":
 		return e.createGrid(ctx, params)
 	case "add_grid_metric":
@@ -426,6 +443,9 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 			p.AggNumeratorMetricID, p.AggDenominatorMetricID, p.TimeSummary, tags.Clean(p.Tags)).Scan(&newID)
 	}
 	if err != nil {
+		if metricformula.IsUniqueViolation(err) {
+			return "", "", metricformula.MetricNameTaken(err, p.Name)
+		}
 		return "", "", fmt.Errorf("insert metric: %w", err)
 	}
 
@@ -471,8 +491,64 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 		return "", "", err
 	}
 	p.MetricID = mappedMetricID
+	// A partial update, as the developer's PATCH: a key left out keeps the
+	// stored value (left out, the name was once written as "" and every
+	// other setting reset). A key sent empty takes its default.
+	var sent map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &sent)
+	has := func(k string) bool { _, ok := sent[k]; return ok }
+
+	// The metric's own revision is needed before validating, not after: refs
+	// resolve within it, and passing MetricID is what lets the validator
+	// reject a formula that references the metric being edited, directly or
+	// through a cycle. is_input is the stored one: update_metric does not
+	// carry the flag, and ValidateAggRule needs it to reject "formula" on an
+	// input metric.
+	var metricRev, storedName string
+	var metricIsInput bool
+	var st updateMetricParams
+	if err := e.pool.QueryRow(ctx, `
+		SELECT COALESCE(revision_id::text,''), is_input, name, COALESCE(formula,''), COALESCE(agg_rule,''),
+		       COALESCE(format,''), COALESCE(format_decimals,0), COALESCE(format_currency,''),
+		       COALESCE(agg_numerator_metric_id::text,''), COALESCE(agg_denominator_metric_id::text,''), COALESCE(time_summary,'')
+		FROM model.metric_def WHERE id=$1::uuid`, p.MetricID).Scan(&metricRev, &metricIsInput, &storedName,
+		&st.Formula, &st.AggRule, &st.Format, &st.FormatDecimals, &st.FormatCurrency,
+		&st.AggNumeratorMetricID, &st.AggDenominatorMetricID, &st.TimeSummary); err != nil {
+		return "", "", fmt.Errorf("load metric: %w", err)
+	}
+	if p.Name == "" {
+		p.Name = storedName
+	}
+	formulaSent := has("formula") && p.Formula != ""
+	for _, k := range []struct {
+		key      string
+		dst, src *string
+	}{
+		{"formula", &p.Formula, &st.Formula}, {"agg_rule", &p.AggRule, &st.AggRule},
+		{"format", &p.Format, &st.Format}, {"format_currency", &p.FormatCurrency, &st.FormatCurrency},
+		{"agg_numerator_metric_id", &p.AggNumeratorMetricID, &st.AggNumeratorMetricID},
+		{"agg_denominator_metric_id", &p.AggDenominatorMetricID, &st.AggDenominatorMetricID},
+		{"time_summary", &p.TimeSummary, &st.TimeSummary},
+	} {
+		if !has(k.key) {
+			*k.dst = *k.src
+		}
+	}
+	if !has("format_decimals") {
+		p.FormatDecimals = st.FormatDecimals
+	}
 	if p.AggRule == "" {
 		p.AggRule = "sum"
+	}
+	if p.AggRule != string(rollup.AggRate) {
+		// Operands belong to a ratio only: moving off it drops them unless
+		// the step sets them.
+		if !has("agg_numerator_metric_id") {
+			p.AggNumeratorMetricID = ""
+		}
+		if !has("agg_denominator_metric_id") {
+			p.AggDenominatorMetricID = ""
+		}
 	}
 	if p.TimeSummary == "" {
 		p.TimeSummary = "sum"
@@ -486,24 +562,6 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 	if p.FormatCurrency == "" {
 		p.FormatCurrency = "$"
 	}
-	// The metric's own revision is needed before validating, not after: refs
-	// resolve within it, and passing MetricID is what lets the validator
-	// reject a formula that references the metric being edited, directly or
-	// through a cycle.
-	var metricRev string
-	if err := e.pool.QueryRow(ctx,
-		`SELECT COALESCE(revision_id::text,'') FROM model.metric_def WHERE id=$1::uuid`,
-		p.MetricID).Scan(&metricRev); err != nil {
-		return "", "", fmt.Errorf("load metric: %w", err)
-	}
-
-	// is_input is the stored one: update_metric does not carry the flag, and
-	// ValidateAggRule needs it to reject "formula" on an input metric.
-	var metricIsInput bool
-	if err := e.pool.QueryRow(ctx,
-		`SELECT is_input FROM model.metric_def WHERE id=$1::uuid`, p.MetricID).Scan(&metricIsInput); err != nil {
-		return "", "", fmt.Errorf("load metric: %w", err)
-	}
 	if err := metricformula.ValidateAggRule(p.AggRule, metricIsInput,
 		p.AggNumeratorMetricID, p.AggDenominatorMetricID, p.MetricID); err != nil {
 		return "", "", err
@@ -514,12 +572,14 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 	}
 
 	var formulaPtr *string
-	var formulaEdges []metricformula.Edge
 	if p.Formula != "" {
 		formulaPtr = &p.Formula
+	}
+	var formulaEdges []metricformula.Edge
+	if formulaSent {
 		res, vErr := metricformula.Validate(ctx, e.pool, metricformula.Request{
 			ModelID: e.modelID, RevisionID: metricRev, MetricID: p.MetricID,
-			Name: p.Name, Formula: p.Formula,
+			Name: validationName(p.Name, storedName), Formula: p.Formula,
 		})
 		if vErr != nil {
 			return "", "", vErr
@@ -534,10 +594,13 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 		WHERE id=$1::uuid
 	`, p.MetricID, p.Name, formulaPtr, p.AggRule, p.Format, p.FormatDecimals, p.FormatCurrency,
 		p.AggNumeratorMetricID, p.AggDenominatorMetricID, p.TimeSummary, optionalTags(p.Tags)); err != nil {
+		if metricformula.IsUniqueViolation(err) {
+			return "", "", metricformula.MetricNameTaken(err, p.Name)
+		}
 		return "", "", fmt.Errorf("update metric: %w", err)
 	}
 	// Re-wire dependencies when the formula changed.
-	if formulaPtr != nil {
+	if formulaSent {
 		if er := metricformula.WriteDependencies(ctx, e.pool, p.MetricID, formulaEdges); er != nil {
 			return "", "", fmt.Errorf("wire formula dependencies: %w", er)
 		}
@@ -577,6 +640,7 @@ type createDimensionParams struct {
 	AggRule             string `json:"agg_rule"`
 	RevisionID          string `json:"revision_id"`
 	ParentDimensionName string `json:"parent_dimension_name"` // if set, this dimension is a child of that one — members' parent_code resolves against the PARENT dimension's members
+	ParentDimensionID   string `json:"parent_dimension_id"`   // the same, by id (either field)
 	// Time dimension marker (spec §4.1): "standard" (default) or "time".
 	// A time dimension needs time_granularity and fiscal_year_start_month,
 	// and its members carry period_start/period_end instead of parents.
@@ -584,13 +648,36 @@ type createDimensionParams struct {
 	TimeGranularity string   `json:"time_granularity"`
 	FiscalYearStart int      `json:"fiscal_year_start_month"`
 	Tags            []string `json:"tags"`
-	Members         []struct {
+	// A property grouping (metricformula.ValidateGrouping, the developer
+	// console's rules): this dimension's members group the source
+	// dimension's members by their value of the declared property
+	// source_property. The source is named by id or name (either field);
+	// derive_members adds one member per distinct value.
+	SourceDimensionID   string `json:"source_dimension_id"`
+	SourceDimensionName string `json:"source_dimension_name"`
+	SourceProperty      string `json:"source_property"`
+	DeriveMembers       bool   `json:"derive_members"`
+	Members             []struct {
 		Code        string `json:"code"`
 		Label       string `json:"label"`
 		ParentCode  string `json:"parent_code"`
 		PeriodStart string `json:"period_start"`
 		PeriodEnd   string `json:"period_end"`
+		// Properties are the member's property values, stored as the
+		// developer console's member PATCH stores them.
+		Properties map[string]string `json:"properties"`
 	} `json:"members"`
+}
+
+// memberPropertyKeys is every property name any listed member carries.
+func (p *createDimensionParams) memberPropertyKeys() map[string]string {
+	keys := map[string]string{}
+	for _, m := range p.Members {
+		for k := range m.Properties {
+			keys[k] = ""
+		}
+	}
+	return keys
 }
 
 func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -608,24 +695,32 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 	if err := timedim.ValidateConfig(&timeCfg); err != nil {
 		return "", "", err
 	}
-	if timeCfg.Type == timedim.TypeTime && p.ParentDimensionName != "" {
-		return "", "", fmt.Errorf("a time dimension cannot have a parent dimension")
-	}
 	revID := e.effectiveRevision(p.RevisionID)
 
+	// The parent resolves within the working revision (by name or id) and
+	// passes the developer console's rules (metricformula.
+	// ValidateParentDimension): same model and revision, not a time
+	// dimension.
 	var parentDimID *string
-	if p.ParentDimensionName != "" {
-		var pdID string
-		if err := e.pool.QueryRow(ctx, `
-			SELECT id::text FROM model.dimension_def WHERE model_id=$1::uuid AND name=$2
-		`, e.modelID, p.ParentDimensionName).Scan(&pdID); err != nil {
-			return "", "", fmt.Errorf("parent dimension %q not found: %w", p.ParentDimensionName, err)
+	if ref := firstNonEmpty(p.ParentDimensionID, p.ParentDimensionName); ref != "" {
+		pdID, err := e.resolveDimensionRef(ctx, ref, revID)
+		if err != nil {
+			return "", "", fmt.Errorf("%s: parent dimension: %w", metricformula.CodeInvalidParentDimension, err)
+		}
+		if err := metricformula.ValidateParentDimension(ctx, e.pool, metricformula.ParentDimension{
+			ModelID: e.modelID, RevisionID: revID, DimensionType: timeCfg.Type, ParentDimensionID: pdID,
+		}); err != nil {
+			return "", "", err
 		}
 		parentDimID = &pdID
 	}
 
+	sourceDimID, sourceProp, err := e.resolveGrouping(ctx, &p, revID, timeCfg.Type, parentDimID != nil)
+	if err != nil {
+		return "", "", err
+	}
+
 	var newID string
-	var err error
 	var granularity *string
 	var fiscalStart *int
 	if timeCfg.Type == timedim.TypeTime {
@@ -633,16 +728,23 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 	}
 	if revID != "" {
 		err = e.pool.QueryRow(ctx, `
-			INSERT INTO model.dimension_def (model_id, name, agg_rule, revision_id, parent_dimension_id, dimension_type, time_granularity, fiscal_year_start_month, tags)
-			VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, $7, $8, $9) RETURNING id::text
-		`, e.modelID, p.Name, p.AggRule, revID, parentDimID, timeCfg.Type, granularity, fiscalStart, tags.Clean(p.Tags)).Scan(&newID)
+			INSERT INTO model.dimension_def (model_id, name, agg_rule, revision_id, parent_dimension_id, dimension_type, time_granularity, fiscal_year_start_month, tags,
+			                                 source_dimension_id, source_property)
+			VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, $7, $8, $9, $10::uuid, $11) RETURNING id::text
+		`, e.modelID, p.Name, p.AggRule, revID, parentDimID, timeCfg.Type, granularity, fiscalStart, tags.Clean(p.Tags),
+			sourceDimID, sourceProp).Scan(&newID)
 	} else {
 		err = e.pool.QueryRow(ctx, `
-			INSERT INTO model.dimension_def (model_id, name, agg_rule, parent_dimension_id, dimension_type, time_granularity, fiscal_year_start_month, tags)
-			VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7, $8) RETURNING id::text
-		`, e.modelID, p.Name, p.AggRule, parentDimID, timeCfg.Type, granularity, fiscalStart, tags.Clean(p.Tags)).Scan(&newID)
+			INSERT INTO model.dimension_def (model_id, name, agg_rule, parent_dimension_id, dimension_type, time_granularity, fiscal_year_start_month, tags,
+			                                 source_dimension_id, source_property)
+			VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7, $8, $9::uuid, $10) RETURNING id::text
+		`, e.modelID, p.Name, p.AggRule, parentDimID, timeCfg.Type, granularity, fiscalStart, tags.Clean(p.Tags),
+			sourceDimID, sourceProp).Scan(&newID)
 	}
 	if err != nil {
+		if metricformula.IsUniqueViolation(err) {
+			return "", "", metricformula.DimensionNameTaken(err, p.Name)
+		}
 		return "", "", fmt.Errorf("insert dimension: %w", err)
 	}
 	if timeCfg.Type == timedim.TypeTime {
@@ -680,9 +782,9 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 			}
 			var memID string
 			if err := tx.QueryRow(ctx, `
-				INSERT INTO model.dimension_member (dimension_id, code, label, period_start, period_end, time_index, parent_member_id)
-				VALUES ($1::uuid, $2, $3, $4::date, $5::date, $6, $7::uuid) RETURNING id::text
-			`, newID, m.Code, m.Label, start, end, idx, parentID).Scan(&memID); err != nil {
+				INSERT INTO model.dimension_member (dimension_id, code, label, period_start, period_end, time_index, parent_member_id, properties)
+				VALUES ($1::uuid, $2, $3, $4::date, $5::date, $6, $7::uuid, $8::jsonb) RETURNING id::text
+			`, newID, m.Code, m.Label, start, end, idx, parentID, memberPropertiesJSON(m.Properties)).Scan(&memID); err != nil {
 				return "", "", fmt.Errorf("insert time member %q: %w", m.Code, err)
 			}
 			codeToID[m.Code] = memID
@@ -697,7 +799,7 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 		if len(p.Members) > 0 {
 			msg += fmt.Sprintf(" with %d period(s)", len(p.Members))
 		}
-		return msg, newID, nil
+		return msg + e.undeclaredPropertyNote(ctx, newID, p.memberPropertyKeys()), newID, nil
 	}
 
 	// When members are children of a declared parent dimension, parent_code must
@@ -727,11 +829,11 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 		}
 		var memID string
 		er := e.pool.QueryRow(ctx, `
-			INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id, sort_order)
+			INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id, sort_order, properties)
 			VALUES ($1::uuid, $2, $3, $4::uuid, (
 				SELECT COALESCE(MAX(sort_order),0)+1 FROM model.dimension_member WHERE dimension_id=$1::uuid
-			)) RETURNING id::text
-		`, newID, m.Code, m.Label, parentID).Scan(&memID)
+			), $5::jsonb) RETURNING id::text
+		`, newID, m.Code, m.Label, parentID, memberPropertiesJSON(m.Properties)).Scan(&memID)
 		if er == nil && parentDimID == nil {
 			// Same-dimension hierarchy: later members in this same call may reference
 			// an earlier one as their parent.
@@ -743,7 +845,56 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 	if len(p.Members) > 0 {
 		msg += fmt.Sprintf(" with %d member(s)", len(p.Members))
 	}
-	return msg, newID, nil
+	if sourceDimID != nil {
+		msg += fmt.Sprintf(", grouping the source dimension's members by %s", *sourceProp)
+		if p.DeriveMembers {
+			missing, err := metricformula.MissingGroupingMembers(ctx, e.pool, newID, *sourceDimID, *sourceProp)
+			if err == nil {
+				var added []string
+				if added, err = metricformula.DeriveGroupingMembers(ctx, e.pool, newID, missing); err == nil {
+					msg += fmt.Sprintf("; derived %d member(s) from its values: %s", len(added), strings.Join(added, ", "))
+				}
+			}
+			if err != nil {
+				return "", "", fmt.Errorf("derive grouping members: %w", err)
+			}
+		}
+	}
+	return msg + e.undeclaredPropertyNote(ctx, newID, p.memberPropertyKeys()), newID, nil
+}
+
+// resolveGrouping validates create_dimension's property grouping with the
+// developer console's validator (metricformula.ValidateGrouping), the
+// source resolved into the working revision by id or name. It returns nil
+// pointers when no grouping was asked for.
+func (e *WriteExecutor) resolveGrouping(ctx context.Context, p *createDimensionParams, revID, dimType string, hasParent bool) (*string, *string, error) {
+	ref := p.SourceDimensionID
+	if ref == "" {
+		ref = p.SourceDimensionName
+	}
+	if ref == "" && strings.TrimSpace(p.SourceProperty) == "" {
+		if p.DeriveMembers {
+			return nil, nil, fmt.Errorf("%s: derive_members needs source_dimension_id (or source_dimension_name) and source_property",
+				metricformula.CodeInvalidGrouping)
+		}
+		return nil, nil, nil
+	}
+	var sourceID string
+	if ref != "" {
+		mapped, err := e.resolveDimensionRef(ctx, ref, revID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: source dimension: %w", metricformula.CodeInvalidGrouping, err)
+		}
+		sourceID = mapped
+	}
+	declared, err := metricformula.ValidateGrouping(ctx, e.pool, metricformula.Grouping{
+		ModelID: e.modelID, RevisionID: revID, DimensionType: dimType, HasParentDimension: hasParent,
+		SourceDimensionID: sourceID, SourceProperty: p.SourceProperty,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return &sourceID, &declared, nil
 }
 
 // ── add_dimension_member ──────────────────────────────────────────────────────
@@ -756,6 +907,9 @@ func (e *WriteExecutor) addDimensionMember(ctx context.Context, raw json.RawMess
 		ParentCode  string `json:"parent_code"`
 		PeriodStart string `json:"period_start"`
 		PeriodEnd   string `json:"period_end"`
+		// Properties are the member's property values, stored as the
+		// developer console's member PATCH stores them.
+		Properties map[string]string `json:"properties"`
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
@@ -768,6 +922,8 @@ func (e *WriteExecutor) addDimensionMember(ctx context.Context, raw json.RawMess
 		return "", "", err
 	}
 	p.DimensionID = mappedDimID
+	propsJSON := memberPropertiesJSON(p.Properties)
+	propNote := e.undeclaredPropertyNote(ctx, p.DimensionID, p.Properties)
 
 	// A time dimension's member is a period: dates instead of a parent,
 	// validated and indexed with the rest of the dimension in one
@@ -807,9 +963,12 @@ func (e *WriteExecutor) addDimensionMember(ctx context.Context, raw json.RawMess
 		defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
 		var newID string
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO model.dimension_member (dimension_id, code, label, period_start, period_end, time_index, parent_member_id)
-			VALUES ($1::uuid, $2, $3, $4::date, $5::date, $6, $7::uuid) RETURNING id::text
-		`, p.DimensionID, p.Code, p.Label, start, end, idx, parentID).Scan(&newID); err != nil {
+			INSERT INTO model.dimension_member (dimension_id, code, label, period_start, period_end, time_index, parent_member_id, properties)
+			VALUES ($1::uuid, $2, $3, $4::date, $5::date, $6, $7::uuid, $8::jsonb) RETURNING id::text
+		`, p.DimensionID, p.Code, p.Label, start, end, idx, parentID, propsJSON).Scan(&newID); err != nil {
+			if metricformula.IsMemberCodeTaken(err) {
+				return "", "", metricformula.MemberCodeTaken(err, p.Code)
+			}
 			return "", "", fmt.Errorf("insert time member: %w", err)
 		}
 		if err := timedim.ValidateAndReindex(ctx, tx, p.DimensionID); err != nil {
@@ -819,9 +978,9 @@ func (e *WriteExecutor) addDimensionMember(ctx context.Context, raw json.RawMess
 			return "", "", err
 		}
 		if start == nil {
-			return fmt.Sprintf("Aggregate period '%s' (%s) added (id: %s)", p.Label, p.Code, newID), newID, nil
+			return fmt.Sprintf("Aggregate period '%s' (%s) added (id: %s)%s", p.Label, p.Code, newID, propNote), newID, nil
 		}
-		return fmt.Sprintf("Period '%s' (%s, %s..%s) added (id: %s)", p.Label, p.Code, p.PeriodStart, p.PeriodEnd, newID), newID, nil
+		return fmt.Sprintf("Period '%s' (%s, %s..%s) added (id: %s)%s", p.Label, p.Code, p.PeriodStart, p.PeriodEnd, newID, propNote), newID, nil
 	}
 	if p.PeriodStart != "" || p.PeriodEnd != "" {
 		return "", "", fmt.Errorf("period_start/period_end apply only to a time dimension's members")
@@ -876,19 +1035,22 @@ func (e *WriteExecutor) addDimensionMember(ctx context.Context, raw json.RawMess
 
 	var newID string
 	err = e.pool.QueryRow(ctx, `
-		INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id, sort_order)
+		INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id, sort_order, properties)
 		VALUES ($1::uuid, $2, $3, $4::uuid, (
 			SELECT COALESCE(MAX(sort_order),0)+1 FROM model.dimension_member WHERE dimension_id=$1::uuid
-		)) RETURNING id::text
-	`, p.DimensionID, p.Code, p.Label, parentID).Scan(&newID)
+		), $5::jsonb) RETURNING id::text
+	`, p.DimensionID, p.Code, p.Label, parentID, propsJSON).Scan(&newID)
 	if err != nil {
+		if metricformula.IsMemberCodeTaken(err) {
+			return "", "", metricformula.MemberCodeTaken(err, p.Code)
+		}
 		return "", "", fmt.Errorf("insert dimension member: %w", err)
 	}
 	result := fmt.Sprintf("Dimension member '%s' (%s) added (id: %s)", p.Label, p.Code, newID)
 	if autoCreatedParent {
 		result += fmt.Sprintf(" — parent '%s' didn't exist yet, created it as a top-level member", p.ParentCode)
 	}
-	return result, newID, nil
+	return result + propNote, newID, nil
 }
 
 // ── update_dimension_member ───────────────────────────────────────────────────
@@ -990,13 +1152,338 @@ func (e *WriteExecutor) updateDimensionMember(ctx context.Context, raw json.RawM
 		`, memberID, string(propJSON)); err != nil {
 			return "", "", fmt.Errorf("merge properties: %w", err)
 		}
-		changed = append(changed, fmt.Sprintf("properties merged (%d)", len(p.Properties)))
+		changed = append(changed, fmt.Sprintf("properties merged (%d)%s", len(p.Properties),
+			e.undeclaredPropertyNote(ctx, p.DimensionID, p.Properties)))
 	}
 
 	if len(changed) == 0 {
 		return "", "", fmt.Errorf("nothing to change: provide label, parent_code, clear_parent, or properties")
 	}
 	return fmt.Sprintf("Dimension member '%s' updated: %s", p.Code, strings.Join(changed, "; ")), memberID, nil
+}
+
+// ── add_dimension_property ────────────────────────────────────────────────────
+
+// addDimensionProperty declares a typed member property on a dimension — the
+// AI Developer's twin of the developer console's POST
+// /api/developer/dimensions/{id}/properties. Only a declared property can be
+// read by a formula as dimension.property, typed by data_type, so without
+// this the assistant could set member values it could never make usable.
+// The declaration goes through the same validator as the developer
+// endpoint, so the two paths cannot drift.
+func (e *WriteExecutor) addDimensionProperty(ctx context.Context, raw json.RawMessage) (string, string, error) {
+	var p struct {
+		DimensionID string `json:"dimension_id"`
+		Name        string `json:"name"`
+		DataType    string `json:"data_type"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return "", "", fmt.Errorf("invalid params: %w", err)
+	}
+	if p.DimensionID == "" {
+		return "", "", fmt.Errorf("dimension_id is required")
+	}
+	mappedDimID, err := e.requireInModel(ctx, "dimension", p.DimensionID)
+	if err != nil {
+		return "", "", err
+	}
+	p.Name = strings.TrimSpace(p.Name)
+	if p.DataType == "" {
+		p.DataType = "text" // the developer endpoint's default
+	}
+	if err := metricformula.ValidatePropertyDeclaration(ctx, e.pool, mappedDimID, "", p.Name, p.DataType); err != nil {
+		return "", "", err
+	}
+	var newID string
+	if err := e.pool.QueryRow(ctx, `
+		INSERT INTO model.dimension_property (dimension_id, name, data_type)
+		VALUES ($1::uuid, $2, $3) RETURNING id::text
+	`, mappedDimID, p.Name, p.DataType).Scan(&newID); err != nil {
+		return "", "", fmt.Errorf("insert dimension property: %w", err)
+	}
+	return fmt.Sprintf("Property '%s' (%s) declared (id: %s) — formulas can now read it as <dimension>.%s",
+		p.Name, p.DataType, newID, p.Name), newID, nil
+}
+
+// ── update_dimension_property / delete_dimension_property ────────────────────
+
+// dimensionPropertyRef is a declared property resolved within the working
+// revision: the dimension it is declared on and its current declaration.
+type dimensionPropertyRef struct {
+	dimID, id, name, dataType string
+	// matchedByName: the caller passed a property id from another
+	// revision, mapped to its working-revision counterpart.
+	matchedByName bool
+}
+
+// resolveDimensionProperty finds the property the model named — by its
+// current name (case-insensitively, as formulas read it) or by id — on the
+// dimension it named, both scoped to the executor's model and revision.
+// A property id of another dimension, or of another model's dimension, is
+// refused; an id from another revision of the same dimension goes through
+// crossRevisionProperty.
+func (e *WriteExecutor) resolveDimensionProperty(ctx context.Context, dimensionRef, propertyRef string) (dimensionPropertyRef, error) {
+	var r dimensionPropertyRef
+	if dimensionRef == "" {
+		return r, fmt.Errorf("dimension_id is required")
+	}
+	propertyRef = strings.TrimSpace(propertyRef)
+	if propertyRef == "" {
+		return r, fmt.Errorf("property is required: the property's current name or id")
+	}
+	dimID, err := e.requireInModel(ctx, "dimension", dimensionRef)
+	if err != nil {
+		return r, err
+	}
+	r.dimID = dimID
+	if !uuidShaped(propertyRef) {
+		if err := e.pool.QueryRow(ctx, `
+			SELECT id::text, name, data_type FROM model.dimension_property
+			WHERE dimension_id=$1::uuid AND lower(name)=lower($2)
+		`, dimID, propertyRef).Scan(&r.id, &r.name, &r.dataType); err != nil {
+			return r, fmt.Errorf("property %q is not declared on this dimension — list_dimensions shows its declared properties", propertyRef)
+		}
+		return r, nil
+	}
+	var ownerDim, name string
+	if err := e.pool.QueryRow(ctx,
+		`SELECT dimension_id::text, name FROM model.dimension_property WHERE id=$1::uuid`, propertyRef,
+	).Scan(&ownerDim, &name); err != nil {
+		return r, fmt.Errorf("property %s not found", propertyRef)
+	}
+	mappedOwner, err := e.requireInModel(ctx, "dimension", ownerDim)
+	if err != nil {
+		return r, fmt.Errorf("property %s: %w", propertyRef, err)
+	}
+	if mappedOwner != dimID {
+		return r, fmt.Errorf("property %s is declared on a different dimension", propertyRef)
+	}
+	if ownerDim == dimID {
+		r.id = propertyRef
+		if err := e.pool.QueryRow(ctx,
+			`SELECT name, data_type FROM model.dimension_property WHERE id=$1::uuid`, propertyRef,
+		).Scan(&r.name, &r.dataType); err != nil {
+			return r, fmt.Errorf("property %s not found", propertyRef)
+		}
+		return r, nil
+	}
+	return e.crossRevisionProperty(ctx, r, propertyRef, ownerDim, name)
+}
+
+// crossRevisionProperty maps a property id from another revision (typically
+// the active one, whose ids the read tools list before a draft exists) to
+// its counterpart in the working revision. There is no lineage column, so
+// the counterpart is found by name, as requireInModel does for the
+// dimension itself — but only while that name still identifies the same
+// declaration:
+//
+//   - an id already matched by an earlier step of this proposal keeps its
+//     match, so a rename by that earlier step does not re-point it;
+//   - otherwise the working revision's same-named property must have been
+//     copied with the revision (not declared since), and the dimension's
+//     declared names must still be the ones of the id's revision (no
+//     rename or delete since the copy). A mismatch is refused with a
+//     request for the current name, rather than landing on a different
+//     property — a developer PATCH/DELETE addresses the exact id and
+//     cannot hit this either.
+func (e *WriteExecutor) crossRevisionProperty(ctx context.Context, r dimensionPropertyRef, propertyRef, ownerDim, name string) (dimensionPropertyRef, error) {
+	if prev, ok := e.propCounterparts[propertyRef]; ok {
+		if err := e.pool.QueryRow(ctx, `
+			SELECT name, data_type FROM model.dimension_property WHERE id=$1::uuid AND dimension_id=$2::uuid
+		`, prev, r.dimID).Scan(&r.name, &r.dataType); err != nil {
+			return r, fmt.Errorf("property %s (matched earlier in this proposal to the working revision's property %s) no longer exists — it was deleted", propertyRef, prev)
+		}
+		r.id = prev
+		r.matchedByName = true
+		return r, nil
+	}
+	refuse := fmt.Errorf("property %s belongs to another revision, and the working revision's declarations on this dimension have changed since it was copied, so the id cannot be matched safely — pass the property's current name (list_dimensions shows it)", propertyRef)
+	var copied, sameNames bool
+	err := e.pool.QueryRow(ctx, `
+		SELECT p.id::text, p.name, p.data_type,
+		       p.created_at <= rv.created_at,
+		       (SELECT array_agg(lower(x.name) ORDER BY lower(x.name)) FROM model.dimension_property x WHERE x.dimension_id=$1::uuid)
+		         IS NOT DISTINCT FROM
+		       (SELECT array_agg(lower(y.name) ORDER BY lower(y.name)) FROM model.dimension_property y WHERE y.dimension_id=$3::uuid)
+		FROM model.dimension_property p
+		JOIN model.dimension_def d ON d.id = p.dimension_id
+		JOIN model.revision rv ON rv.id = d.revision_id
+		WHERE p.dimension_id=$1::uuid AND lower(p.name)=lower($2)
+	`, r.dimID, name, ownerDim).Scan(&r.id, &r.name, &r.dataType, &copied, &sameNames)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return r, refuse
+	}
+	if err != nil {
+		return r, fmt.Errorf("resolve property %s: %w", propertyRef, err)
+	}
+	if !copied || !sameNames {
+		return r, refuse
+	}
+	if e.propCounterparts == nil {
+		e.propCounterparts = map[string]string{}
+	}
+	e.propCounterparts[propertyRef] = r.id
+	r.matchedByName = true
+	return r, nil
+}
+
+// matchNote is appended to a step result when the property was given as an
+// id from another revision, so the matched declaration is visible.
+func (r dimensionPropertyRef) matchNote() string {
+	if !r.matchedByName {
+		return ""
+	}
+	return fmt.Sprintf(" (the id given is from another revision; matched to this revision's property %s)", r.id)
+}
+
+// updateDimensionProperty renames and/or retypes a declared property — the
+// AI Developer's twin of the developer console's PATCH
+// /api/developer/dimensions/{id}/properties/{propId}: a partial update (a
+// field left out keeps its value), checked by the same validator, and a
+// rename carried through every member's value and any dimension grouped by
+// the property (metricformula.RenamePropertyValues) in one transaction.
+// The developer path then recalculates the metrics reading the dimension;
+// here the write lands in the AI's draft, and promoting the draft
+// recomputes every calculated metric of the revision (activateRevision).
+func (e *WriteExecutor) updateDimensionProperty(ctx context.Context, raw json.RawMessage) (string, string, error) {
+	var p struct {
+		DimensionID string `json:"dimension_id"`
+		Property    string `json:"property"`
+		Name        string `json:"name"`
+		DataType    string `json:"data_type"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return "", "", fmt.Errorf("invalid params: %w", err)
+	}
+	prop, err := e.resolveDimensionProperty(ctx, p.DimensionID, p.Property)
+	if err != nil {
+		return "", "", err
+	}
+	name, dataType := strings.TrimSpace(p.Name), strings.TrimSpace(p.DataType)
+	if name == "" && dataType == "" {
+		return "", "", fmt.Errorf("nothing to change: provide name, data_type, or both")
+	}
+	if name == "" {
+		name = prop.name
+	}
+	if dataType == "" {
+		dataType = prop.dataType
+	}
+	if err := metricformula.ValidatePropertyDeclaration(ctx, e.pool, prop.dimID, prop.id, name, dataType); err != nil {
+		return "", "", err
+	}
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+	if _, err := tx.Exec(ctx, `UPDATE model.dimension_property SET name=$2, data_type=$3 WHERE id=$1::uuid`,
+		prop.id, name, dataType); err != nil {
+		return "", "", fmt.Errorf("update dimension property: %w", err)
+	}
+	if err := metricformula.RenamePropertyValues(ctx, tx, prop.dimID, prop.name, name); err != nil {
+		return "", "", fmt.Errorf("rename member values: %w", err)
+	}
+	// Formulas reading the old name are rewritten in the same transaction,
+	// exactly as the developer rename does.
+	rewritten, err := metricformula.RenamePropertyInFormulas(ctx, tx, prop.dimID, prop.name, name)
+	if err != nil {
+		return "", "", fmt.Errorf("rename property in formulas: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", "", err
+	}
+	var changed []string
+	switch {
+	case name == prop.name:
+	case strings.EqualFold(name, prop.name):
+		changed = append(changed, fmt.Sprintf("renamed to '%s' (case only — formulas read property names regardless of case)", name))
+	default:
+		changed = append(changed, fmt.Sprintf("renamed to '%s' (member values moved with it; %d formula(s) rewritten to the new name)", name, len(rewritten)))
+	}
+	if dataType != prop.dataType {
+		changed = append(changed, fmt.Sprintf("type %s → %s", prop.dataType, dataType))
+	}
+	if len(changed) == 0 {
+		changed = append(changed, "unchanged")
+	}
+	return fmt.Sprintf("Property '%s' updated: %s%s", prop.name, strings.Join(changed, "; "), prop.matchNote()), prop.id, nil
+}
+
+// deleteDimensionProperty removes a property declaration — the AI
+// Developer's twin of the developer console's DELETE
+// /api/developer/dimensions/{id}/properties/{propId}. As there, member
+// values stored under the name stay (undeclared, unreadable by formulas),
+// and the delete is refused with PROPERTY_IN_USE while a formula of the
+// draft still reads the property.
+func (e *WriteExecutor) deleteDimensionProperty(ctx context.Context, raw json.RawMessage) (string, string, error) {
+	var p struct {
+		DimensionID string `json:"dimension_id"`
+		Property    string `json:"property"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return "", "", fmt.Errorf("invalid params: %w", err)
+	}
+	prop, err := e.resolveDimensionProperty(ctx, p.DimensionID, p.Property)
+	if err != nil {
+		return "", "", err
+	}
+	if err := metricformula.CheckPropertyNotInUse(ctx, e.pool, prop.dimID, prop.name); err != nil {
+		return "", "", err
+	}
+	tag, err := e.pool.Exec(ctx, `DELETE FROM model.dimension_property WHERE id=$1::uuid AND dimension_id=$2::uuid`, prop.id, prop.dimID)
+	if err != nil {
+		return "", "", fmt.Errorf("delete dimension property: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return "", "", fmt.Errorf("property %q not found", prop.name)
+	}
+	return fmt.Sprintf("Property '%s' deleted%s", prop.name, prop.matchNote()), "", nil
+}
+
+// memberPropertiesJSON is the JSONB a new member's "properties" are stored
+// as, in the shape the developer console's member PATCH merges in: a flat
+// {name: string value} object. Nil or empty gives the column default {}.
+func memberPropertiesJSON(props map[string]string) string {
+	if len(props) == 0 {
+		return "{}"
+	}
+	b, _ := json.Marshal(props)
+	return string(b)
+}
+
+// undeclaredPropertyNote names the given property keys that the dimension
+// has not declared. The value is stored either way, exactly as the
+// developer console stores it, but a formula cannot read it as
+// dimension.property until it is declared — the note tells the model so.
+func (e *WriteExecutor) undeclaredPropertyNote(ctx context.Context, dimensionID string, props map[string]string) string {
+	if len(props) == 0 {
+		return ""
+	}
+	declared := map[string]bool{}
+	rows, err := e.pool.Query(ctx, `SELECT lower(name) FROM model.dimension_property WHERE dimension_id=$1::uuid`, dimensionID)
+	if err != nil {
+		return ""
+	}
+	for rows.Next() {
+		var n string
+		if rows.Scan(&n) == nil {
+			declared[n] = true
+		}
+	}
+	rows.Close()
+	var missing []string
+	for k := range props {
+		if !declared[strings.ToLower(k)] {
+			missing = append(missing, k)
+		}
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+	sort.Strings(missing)
+	return fmt.Sprintf(" — note: %s not declared on this dimension; propose add_dimension_property to let formulas read it",
+		strings.Join(missing, ", "))
 }
 
 // ── create_grid ───────────────────────────────────────────────────────────────
@@ -1401,8 +1888,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 	if srcID != "" {
 		// Copy metrics
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO model.metric_def (model_id, name, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule, time_summary, tags)
-			SELECT model_id, name, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule, time_summary, tags
+			INSERT INTO model.metric_def (model_id, name, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id)
+			SELECT model_id, name, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 		`, e.modelID, newID, srcID); err != nil {
 			return "", "", fmt.Errorf("copy metrics into new revision: %w", err)
@@ -1476,9 +1963,9 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			WITH
 			new_dims AS (
 				INSERT INTO model.dimension_def (model_id, name, agg_rule, properties, revision_id, source_property,
-				                                 dimension_type, time_granularity, fiscal_year_start_month, tags)
+				                                 dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id)
 				SELECT model_id, name, agg_rule, properties, $2::uuid, source_property,
-				       dimension_type, time_granularity, fiscal_year_start_month, tags
+				       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id
 				FROM model.dimension_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 				RETURNING id AS new_id, name
 			),
@@ -1489,8 +1976,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 				WHERE o.model_id=$1::uuid AND o.revision_id=$3::uuid
 			),
 			new_members AS (
-				INSERT INTO model.dimension_member (dimension_id, code, label, properties, sort_order, period_start, period_end, time_index)
-				SELECT dm.new_id, m.code, m.label, m.properties, m.sort_order, m.period_start, m.period_end, m.time_index
+				INSERT INTO model.dimension_member (dimension_id, code, label, properties, sort_order, period_start, period_end, time_index, lineage_id)
+				SELECT dm.new_id, m.code, m.label, m.properties, m.sort_order, m.period_start, m.period_end, m.time_index, m.lineage_id
 				FROM model.dimension_member m
 				JOIN dim_map dm ON dm.old_id = m.dimension_id
 				RETURNING id
@@ -2323,9 +2810,13 @@ type setUserAccessRulesParams struct {
 	} `json:"rules"`
 }
 
-// setUserAccessRules replaces the target user's entire access-rule set,
-// mirroring the business-admin console's PUT /access-rules (delete-then-
-// insert) — this is a business-admin capability deliberately extended to the
+// setUserAccessRules replaces the target user's member rules in the active
+// revision — the rules it can name — mirroring the business-admin console's
+// PUT /access-rules for that slice (writeguard.ReplaceUserMemberRulesInRevision).
+// Metric and button rules, rules on members gone from the active revision
+// (which still restrict old revisions' copies) and rules on other models'
+// members are kept: the tool cannot express them, so it must not wipe them.
+// This is a business-admin capability deliberately extended to the
 // AI Developer at the owner's direction (2026-08-26), the first AI tool that
 // reaches outside the developer role's own powers.
 //
@@ -2408,17 +2899,12 @@ func (e *WriteExecutor) setUserAccessRules(ctx context.Context, raw json.RawMess
 		return "", "", fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx,
-		`DELETE FROM identity.user_access_rule WHERE user_id=$1::uuid`, targetID); err != nil {
-		return "", "", fmt.Errorf("clear existing rules: %w", err)
+	inputs := make([]writeguard.RuleInput, len(rules))
+	for i, r := range rules {
+		inputs[i] = writeguard.RuleInput{Type: "dimension_member", RefID: r.memberID, Access: r.access}
 	}
-	for _, r := range rules {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO identity.user_access_rule (user_id, rule_type, ref_id, access)
-			VALUES ($1::uuid, 'dimension_member', $2, $3)
-		`, targetID, r.memberID, r.access); err != nil {
-			return "", "", fmt.Errorf("insert rule for %s: %w", r.label, err)
-		}
+	if err := writeguard.ReplaceUserMemberRulesInRevision(ctx, tx, targetID, activeRev, inputs); err != nil {
+		return "", "", fmt.Errorf("set rules: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", "", fmt.Errorf("commit rules: %w", err)
@@ -2437,6 +2923,15 @@ func (e *WriteExecutor) setUserAccessRules(ctx context.Context, raw json.RawMess
 	for i, r := range rules {
 		parts[i] = r.label + "=" + r.access
 	}
-	return fmt.Sprintf("Access rules for %s replaced: %s (all previous rules removed; unlisted members stay fully accessible)",
+	return fmt.Sprintf("Member access rules for %s in the active revision replaced: %s (previous member rules there removed; unlisted members stay fully accessible; metric rules and rules on members not in the active revision are kept)",
 		p.UserEmail, strings.Join(parts, ", ")), "", nil
+}
+
+// validationName is the metric name validation messages name: the new
+// name when the update renames the metric, else the stored one.
+func validationName(requested, stored string) string {
+	if requested != "" {
+		return requested
+	}
+	return stored
 }

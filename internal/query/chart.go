@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -11,7 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/mavericks-engine/mavericks/internal/formula"
+	"github.com/mavericks-engine/mavericks/internal/calculation"
+	"github.com/mavericks-engine/mavericks/internal/readset"
 	"github.com/mavericks-engine/mavericks/internal/rollup"
 	"github.com/mavericks-engine/mavericks/internal/writeguard"
 )
@@ -220,7 +222,7 @@ func (r *ChartResolver) Resolve(
 	}
 
 	// Load access rules for this user
-	dimRules, metricRules, err := r.loadAccessRules(ctx, userID)
+	dimRules, metricRules, err := r.loadAccessRules(ctx, userID, revisionID)
 	if err != nil {
 		return nil, fmt.Errorf("load access rules: %w", err)
 	}
@@ -348,17 +350,21 @@ func (r *ChartResolver) Resolve(
 	if err != nil {
 		return nil, fmt.Errorf("load all dimensions: %w", err)
 	}
+	cc, err := r.loadChartCalc(ctx, modelID, revisionID, dimRules)
+	if err != nil {
+		return nil, fmt.Errorf("load calculated metrics: %w", err)
+	}
 
 	contextDims := buildContextDims(gridDims, dimNames, cfg.DimensionID)
 	asOf := time.Now().UTC().Format(time.RFC3339)
 
 	switch cfg.ChartType {
 	case ChartBar, ChartLine, ChartPie:
-		return r.resolveCategoryChart(ctx, cfg, plottedMembers, allowedMetrics, effectiveCtx, modelID, revisionID, allDims, contextDims, asOf)
+		return r.resolveCategoryChart(ctx, cfg, plottedMembers, allowedMetrics, effectiveCtx, modelID, revisionID, allDims, cc, contextDims, asOf)
 	case ChartScatter:
-		return r.resolveScatterChart(ctx, cfg, plottedMembers, allowedMetrics, effectiveCtx, modelID, revisionID, allDims, contextDims, asOf)
+		return r.resolveScatterChart(ctx, cfg, plottedMembers, allowedMetrics, effectiveCtx, modelID, revisionID, allDims, cc, contextDims, asOf)
 	case ChartHistogram:
-		return r.resolveHistogramChart(ctx, cfg, plottedMembers, allowedMetrics, effectiveCtx, modelID, revisionID, allDims, contextDims, asOf)
+		return r.resolveHistogramChart(ctx, cfg, plottedMembers, allowedMetrics, effectiveCtx, modelID, revisionID, allDims, cc, contextDims, asOf)
 	default:
 		return nil, fmt.Errorf("unsupported chart type: %s", cfg.ChartType)
 	}
@@ -438,6 +444,7 @@ func (r *ChartResolver) resolveCategoryChart(
 	effectiveCtx map[string]string,
 	modelID, revisionID string,
 	allDims map[string]*rollup.Dimension,
+	cc *chartCalc,
 	contextDims []ChartContextDim,
 	asOf string,
 ) (*CategoryChartData, error) {
@@ -453,7 +460,7 @@ func (r *ChartResolver) resolveCategoryChart(
 		if !ok {
 			return nil, fmt.Errorf("metric %s not accessible or not in grid", metricID)
 		}
-		values, err := r.resolveMetricPerMember(ctx, m, plottedMembers, effectiveCtx, cfg.DimensionID, modelID, revisionID, allDims)
+		values, err := r.resolveMetricPerMember(ctx, m, plottedMembers, effectiveCtx, cfg.DimensionID, modelID, revisionID, allDims, cc)
 		if err != nil {
 			return nil, fmt.Errorf("resolve metric %s: %w", m.Name, err)
 		}
@@ -492,6 +499,7 @@ func (r *ChartResolver) resolveScatterChart(
 	effectiveCtx map[string]string,
 	modelID, revisionID string,
 	allDims map[string]*rollup.Dimension,
+	cc *chartCalc,
 	contextDims []ChartContextDim,
 	asOf string,
 ) (*ScatterChartData, error) {
@@ -510,11 +518,11 @@ func (r *ChartResolver) resolveScatterChart(
 		return nil, fmt.Errorf("scatter X and Y metrics must be different")
 	}
 
-	xVals, err := r.resolveMetricPerMember(ctx, xM, plottedMembers, effectiveCtx, cfg.DimensionID, modelID, revisionID, allDims)
+	xVals, err := r.resolveMetricPerMember(ctx, xM, plottedMembers, effectiveCtx, cfg.DimensionID, modelID, revisionID, allDims, cc)
 	if err != nil {
 		return nil, err
 	}
-	yVals, err := r.resolveMetricPerMember(ctx, yM, plottedMembers, effectiveCtx, cfg.DimensionID, modelID, revisionID, allDims)
+	yVals, err := r.resolveMetricPerMember(ctx, yM, plottedMembers, effectiveCtx, cfg.DimensionID, modelID, revisionID, allDims, cc)
 	if err != nil {
 		return nil, err
 	}
@@ -550,6 +558,7 @@ func (r *ChartResolver) resolveHistogramChart(
 	effectiveCtx map[string]string,
 	modelID, revisionID string,
 	allDims map[string]*rollup.Dimension,
+	cc *chartCalc,
 	contextDims []ChartContextDim,
 	asOf string,
 ) (*HistogramChartData, error) {
@@ -558,7 +567,7 @@ func (r *ChartResolver) resolveHistogramChart(
 		return nil, fmt.Errorf("metric not accessible")
 	}
 
-	vals, err := r.resolveMetricPerMember(ctx, m, plottedMembers, effectiveCtx, cfg.DimensionID, modelID, revisionID, allDims)
+	vals, err := r.resolveMetricPerMember(ctx, m, plottedMembers, effectiveCtx, cfg.DimensionID, modelID, revisionID, allDims, cc)
 	if err != nil {
 		return nil, err
 	}
@@ -631,7 +640,9 @@ func buildHistogramBins(obs []float64, binCount int) []HistogramBin {
 
 // resolveMetricPerMember returns one value per plotted dimension member.
 // For input metrics: reads from fact_input with the full dimension context.
-// For calculated metrics: evaluates the formula with dependency values.
+// For calculated metrics: served metrics from their persisted rows (a
+// withheld point is nil), every other one by evaluating its formula. A
+// point that cannot be computed is nil, never a guessed 0.
 func (r *ChartResolver) resolveMetricPerMember(
 	ctx context.Context,
 	m *metricDef,
@@ -640,6 +651,7 @@ func (r *ChartResolver) resolveMetricPerMember(
 	plottedDimID string,
 	modelID, revisionID string,
 	allDims map[string]*rollup.Dimension,
+	cc *chartCalc,
 ) ([]*float64, error) {
 	results := make([]*float64, len(members))
 
@@ -658,20 +670,14 @@ func (r *ChartResolver) resolveMetricPerMember(
 		return results, nil
 	}
 
-	// Calculated metric: use pre-computed calc_result where available, otherwise
-	// fall back to formula re-evaluation so the chart works even before a full recalc.
-	allDefs, err := r.loadAllMetricDefs(ctx, modelID, revisionID)
-	if err != nil {
-		return nil, err
-	}
-
 	for i, member := range members {
 		combo := buildDimMembers(effectiveCtx, plottedDimID, member.Code)
-		val, err := r.evalCalcMetric(ctx, m, combo, modelID, revisionID, allDefs, allDims)
-		if err != nil {
+		val, ok, err := r.evalCalcMetric(ctx, m, combo, allDims, cc)
+		if err != nil || !ok {
 			continue
 		}
-		results[i] = &val
+		v := val
+		results[i] = &v
 	}
 	return results, nil
 }
@@ -883,79 +889,297 @@ func (r *ChartResolver) evalCalcMetric(
 	ctx context.Context,
 	m *metricDef,
 	dimMembers map[string]string,
-	modelID, revisionID string,
-	allDefs map[string]*fullMetricDef,
 	allDims map[string]*rollup.Dimension,
-) (float64, error) {
-	return r.evalCalcMetricVisited(ctx, m.ID, dimMembers, modelID, revisionID, allDefs, allDims, make(map[string]bool))
+	cc *chartCalc,
+) (float64, bool, error) {
+	return r.evalCalcMetricVisited(ctx, m.ID, dimMembers, allDims, cc, make(map[string]bool))
 }
 
-// evalCalcMetricVisited recursively evaluates a calculated metric's formula,
-// resolving input dependencies (via rollup.Resolve, using each dependency's
-// own dimensions) and calculated dependencies by recursion. visited guards
+// evalCalcMetricVisited computes a calculated metric at dimMembers. ok is
+// false when there is no value there (a served metric with no persisted
+// row, a blank result). visited guards
 // against formula cycles.
+//
+//   - A SERVED metric (time functions, LOOKUP, the *IFS/*IF family, TIMESUM,
+//     the *VALUE family; contract C6) is never re-evaluated at one
+//     coordinate: its value depends on other periods and members. It is its
+//     persisted rows, rolled up across non-time dimensions by its agg_rule
+//     and across time by its time_summary — the number the grid shows;
+//     with agg_rule formula or rate, or a pure-ratio average (see
+//     leafWise), the persisted row at the point itself (the scheduler's own
+//     rollup, slice or '{}' row), never a combination of children. A
+//     row withheld from the viewer (contract C7: its read set touches a
+//     hidden member) fails the read, so any point built on it is missing.
+//   - Every other metric evaluates its formula over its dependencies, with
+//     the dimension members bound and the UNFILTERED member-metadata
+//     context (dim.property, PARENT), like the scheduler. A dependency that
+//     fails fails the point; one with no value reads as 0, as in the
+//     scheduler. A blank result is no point, never a 0. With agg_rule sum
+//     or count, or an average whose formula depends on the members (see
+//     leafWise), the formula is evaluated at each leaf under the point and
+//     the leaves combined flat (not level by level) by agg_rule and
+//     time_summary, leaves with no value left out — the scheduler's own
+//     leaves and totals. With formula, rate or a pure-ratio average it is
+//     evaluated once at the point, over aggregated inputs, as the
+//     scheduler evaluates it at an aggregate.
+//   - An input metric, a served metric and every dependency are read with
+//     rollup.ResolveTime, which combines average and count flat over the
+//     leaves with a recorded value, as the scheduler's totals do.
 func (r *ChartResolver) evalCalcMetricVisited(
 	ctx context.Context,
 	metricID string,
 	dimMembers map[string]string,
-	modelID, revisionID string,
-	allDefs map[string]*fullMetricDef,
 	allDims map[string]*rollup.Dimension,
+	cc *chartCalc,
 	visited map[string]bool,
-) (float64, error) {
+) (float64, bool, error) {
 	if visited[metricID] {
-		return 0, fmt.Errorf("cycle detected")
+		return 0, false, fmt.Errorf("cycle detected")
 	}
-	def, ok := allDefs[metricID]
+	def, ok := cc.defs[metricID]
 	if !ok {
-		return 0, fmt.Errorf("metric def not found")
+		return 0, false, fmt.Errorf("metric def not found")
 	}
 
 	visited[metricID] = true
 	defer func() { delete(visited, metricID) }()
 
-	// A time-series metric (PREVIOUS, LAG, MOVINGSUM, ...) cannot be
-	// re-evaluated at one coordinate: its value depends on other periods.
-	// It is served from the scheduler's persisted leaf rows, rolled up
-	// across non-time dimensions by its agg_rule and across time by its
-	// time_summary — the same number the grid and the API show (spec §1.7).
-	if an, aerr := formula.Analyze(def.Formula); aerr == nil && an.UsesTimeSeries {
-		v, ok, err := rollup.ResolveTime(ctx, allDims, metricID, def.DimensionIDs, rollup.AggRule(def.AggRule),
-			rollup.TimeSummaryRule(def.TimeSummary), dimMembers, r.fetchCalc(modelID, revisionID))
-		if err != nil {
-			return 0, err
+	dimConditional := calculation.FormulaReferencesDims(def.Formula, cc.dimNames)
+	if readset.Served(def.Formula) {
+		if !leafWise(def.AggRule, dimConditional) {
+			// The scheduler re-evaluates these rules (formula, rate, and a
+			// pure-ratio average — tsEvaluator.finish's useEval) AT the
+			// aggregate and persists that row (rollup combos for formula and
+			// rate, one-dimension slices, the '{}' total); combining the
+			// children (a mean of ratios, or of PREVIOUS values) would be a
+			// number it never computed. The point is the persisted row at
+			// its coordinates on the metric's own dimensions, or none — the
+			// scoped reads' persistedTotal.
+			// A pin on a dimension's sole root constrains nothing and is
+			// dropped, as the grid's scope does: World × Feb is the
+			// scheduler's {period: Feb} slice row (a pure-ratio average
+			// persists no two-dimension rollup rows).
+			own := make(map[string]string, len(def.DimensionIDs))
+			for _, d := range def.DimensionIDs {
+				if code, ok := dimMembers[d]; ok && !soleRoot(allDims[d], code) {
+					own[d] = code
+				}
+			}
+			return cc.servedFetch()(ctx, metricID, own)
 		}
-		if !ok {
-			return 0, fmt.Errorf("no persisted value for time-series metric %s at this coordinate", def.Name)
-		}
-		return v, nil
+		return rollup.ResolveTime(ctx, allDims, metricID, def.DimensionIDs, rollup.AggRule(def.AggRule),
+			rollup.TimeSummaryRule(def.TimeSummary), dimMembers, cc.servedFetch())
 	}
 
-	fetch := r.fetchInput(modelID, revisionID)
+	if leafWise(def.AggRule, dimConditional) {
+		// The scheduler evaluates such a metric at each LEAF and combines
+		// the leaf rows by agg_rule (time by time_summary) for every
+		// aggregate — its total, slice and scoped rows — so does the point.
+		// A formula reading member metadata (dim.property, PARENT, a bare
+		// dimension) has its value only at the leaves: a parent member's
+		// own property is not its children's. A sum of leaf values is not
+		// the formula at summed inputs unless the formula is linear in
+		// sums (revenue * 2 over an average input is not); a count is the
+		// number of leaves with a (non-zero) value. A leaf with no value
+		// (blank, or failing there) is left out, as the scheduler writes no
+		// row.
+		leaf := func(ctx context.Context, _ string, combo map[string]string) (float64, bool, error) {
+			point := make(map[string]string, len(dimMembers)+len(combo))
+			for k, v := range dimMembers {
+				point[k] = v
+			}
+			for k, v := range combo {
+				point[k] = v
+			}
+			v, ok, err := r.evalFormulaPoint(ctx, def, point, allDims, cc, visited)
+			switch {
+			case errors.Is(err, errWithheld):
+				return 0, false, err
+			case err != nil, !ok:
+				return 0, false, rollup.ErrNoValue
+			}
+			return v, true, nil
+		}
+		// Combined FLAT over the distinct leaves, as the scheduler does:
+		// an average two levels up is the mean of its leaves, never the mean
+		// of its children's means (ResolveTime does that too). The Flat
+		// variant also sums each leaf once when the point pins a parent of
+		// a dimension the metric does not carry, where the scheduler, which
+		// evaluates only the metric's own leaves, has nothing to multiply.
+		return rollup.ResolveTimeFlat(ctx, allDims, metricID, def.DimensionIDs, rollup.AggRule(def.AggRule),
+			rollup.TimeSummaryRule(def.TimeSummary), dimMembers, leaf)
+	}
+	return r.evalFormulaPoint(ctx, def, dimMembers, allDims, cc, visited)
+}
+
+// soleRoot reports whether code is the only top-level member of dim, so a
+// pin on it covers every member.
+func soleRoot(dim *rollup.Dimension, code string) bool {
+	if dim == nil {
+		return false
+	}
+	found := false
+	for _, m := range dim.Members {
+		if m.ParentCode != "" {
+			continue
+		}
+		if m.Code != code {
+			return false
+		}
+		found = true
+	}
+	return found
+}
+
+// leafWise reports whether a non-served calculated metric's value at an
+// aggregate is its leaf values combined (sum, count, and an average whose
+// formula depends on the members) rather than its formula evaluated once
+// at aggregated inputs (formula, rate, and a pure-ratio average) — the
+// scheduler's own split (executePartition's collapse, oneDimSliceRows'
+// useEval), so a point and the grid's rows are the same number.
+func leafWise(aggRule string, dimConditional bool) bool {
+	switch aggRule {
+	case string(rollup.AggFormula), string(rollup.AggRate):
+		return false
+	case string(rollup.AggAverage):
+		return dimConditional
+	}
+	return true
+}
+
+// evalFormulaPoint evaluates a non-served metric's formula at dimMembers
+// over its dependencies (see evalCalcMetricVisited). A blank result is no
+// value (ok=false), never a 0.
+func (r *ChartResolver) evalFormulaPoint(
+	ctx context.Context,
+	def *fullMetricDef,
+	dimMembers map[string]string,
+	allDims map[string]*rollup.Dimension,
+	cc *chartCalc,
+	visited map[string]bool,
+) (float64, bool, error) {
 	varValues := make(map[string]float64, len(def.DependsOnID))
 	for _, depID := range def.DependsOnID {
-		depDef, ok := allDefs[depID]
+		depDef, ok := cc.defs[depID]
 		if !ok {
 			continue
 		}
 		var val float64
 		if depDef.IsInput {
-			v, ok, err := rollup.ResolveTime(ctx, allDims, depID, depDef.DimensionIDs, rollup.AggRule(depDef.AggRule), rollup.TimeSummaryRule(depDef.TimeSummary), dimMembers, fetch)
-			if err == nil && ok {
+			v, ok, err := rollup.ResolveTime(ctx, allDims, depID, depDef.DimensionIDs, rollup.AggRule(depDef.AggRule), rollup.TimeSummaryRule(depDef.TimeSummary), dimMembers, cc.fetchInput)
+			if err != nil {
+				return 0, false, fmt.Errorf("resolve %s: %w", depDef.Name, err)
+			}
+			if ok {
 				val = v
 			}
 		} else {
-			// Recursively evaluate calculated dependencies — calc_result only stores
-			// aggregate (dim_members='{}') values, not per-dimension values.
-			v, err := r.evalCalcMetricVisited(ctx, depID, dimMembers, modelID, revisionID, allDefs, allDims, visited)
-			if err == nil {
+			v, ok, err := r.evalCalcMetricVisited(ctx, depID, dimMembers, allDims, cc, visited)
+			if err != nil {
+				return 0, false, fmt.Errorf("resolve %s: %w", depDef.Name, err)
+			}
+			if ok {
 				val = v
 			}
 		}
 		varValues[depDef.Name] = val
 	}
+	namedDims := make(map[string]string, len(dimMembers))
+	for dimID, code := range dimMembers {
+		if name, ok := cc.dimNames[dimID]; ok {
+			namedDims[name] = code
+		}
+	}
+	if def.Formula == "" {
+		return 0, false, fmt.Errorf("empty formula")
+	}
+	v, err := calculation.EvaluateWithDimContext(def.Formula, varValues, namedDims, cc.meta.CellContext(dimMembers))
+	if errors.Is(err, calculation.ErrBlankResult) {
+		return 0, false, nil // no value there: no point, never a plotted 0
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return v, true, nil
+}
 
-	return evaluateFormulaChart(def.Formula, varValues, nil)
+// errWithheld is a read of a persisted row withheld from the viewer.
+var errWithheld = errors.New("the value reads a member hidden from the viewer")
+
+// chartCalc is what computing calculated metrics for one chart request
+// needs, loaded once per request.
+type chartCalc struct {
+	defs     map[string]*fullMetricDef
+	dimNames map[string]string // dimension ID -> name
+	// meta is the UNFILTERED member metadata (dim.property, PARENT).
+	meta *calculation.DimMetadata
+	// reads decides withheld rows; nil withholds nothing (the viewer has
+	// no hidden member).
+	reads      *readset.Set
+	fetchCalc  rollup.RawValue
+	fetchInput rollup.RawValue
+}
+
+// servedFetch reads a served metric's persisted rows, refusing any row
+// withheld from the viewer.
+func (cc *chartCalc) servedFetch() rollup.RawValue {
+	return func(ctx context.Context, metricID string, combo map[string]string) (float64, bool, error) {
+		if cc.reads.Withheld(metricID, combo) {
+			return 0, false, errWithheld
+		}
+		return cc.fetchCalc(ctx, metricID, combo)
+	}
+}
+
+// loadChartCalc loads the revision's metric definitions, its UNFILTERED
+// dimensions and member metadata, and — when dimRules hides any member —
+// the read sets deciding what is withheld (the same rule the grid applies:
+// hidden codes of EVERY dimension, not only the chart's).
+func (r *ChartResolver) loadChartCalc(ctx context.Context, modelID, revisionID string, dimRules map[string]string) (*chartCalc, error) {
+	defs, err := r.loadAllMetricDefs(ctx, modelID, revisionID)
+	if err != nil {
+		return nil, err
+	}
+	unfiltered, err := r.loadAllDimensions(ctx, modelID, revisionID, nil)
+	if err != nil {
+		return nil, err
+	}
+	store := calculation.NewStore(r.pool)
+	names, err := store.LoadDimIDToName(ctx, modelID, revisionID)
+	if err != nil {
+		return nil, err
+	}
+	schema, err := store.LoadDimensionSchema(ctx, modelID, revisionID)
+	if err != nil {
+		return nil, err
+	}
+	meta := calculation.NewDimMetadata(unfiltered, names, schema)
+	cc := &chartCalc{
+		defs: defs, dimNames: names, meta: meta,
+		fetchCalc:  r.fetchCalc(modelID, revisionID),
+		fetchInput: r.fetchInput(modelID, revisionID),
+	}
+	hidden := map[string]map[string]bool{}
+	for dimID, d := range unfiltered {
+		for _, m := range d.Members {
+			if dimRules[m.ID] != "hidden" {
+				continue
+			}
+			if hidden[dimID] == nil {
+				hidden[dimID] = map[string]bool{}
+			}
+			hidden[dimID][m.Code] = true
+		}
+	}
+	if len(hidden) > 0 {
+		metrics := make([]readset.Metric, 0, len(defs))
+		for _, d := range defs {
+			metrics = append(metrics, readset.Metric{ID: d.ID, Name: d.Name, IsInput: d.IsInput, Formula: d.Formula, Dims: d.DimensionIDs})
+		}
+		sort.Slice(metrics, func(i, j int) bool { return metrics[i].ID < metrics[j].ID })
+		cc.reads = readset.New(unfiltered, names, meta, metrics, hidden)
+	}
+	return cc, nil
 }
 
 // ── Database loaders ──────────────────────────────────────────────────────────
@@ -1133,31 +1357,15 @@ func (r *ChartResolver) loadMemberEdges(ctx context.Context, modelID, revisionID
 	return edges, rows.Err()
 }
 
-func (r *ChartResolver) loadAccessRules(ctx context.Context, userID string) (dimRules, metricRules map[string]string, err error) {
-	dimRules = make(map[string]string)
-	metricRules = make(map[string]string)
+// loadAccessRules loads userID's rules resolved by lineage against
+// revisionID (writeguard.RulesForRevision): a member or metric hidden in the
+// active revision stays hidden when an older revision is charted. Any error
+// — query, scan or iteration — is returned so the chart fails closed.
+func (r *ChartResolver) loadAccessRules(ctx context.Context, userID, revisionID string) (dimRules, metricRules map[string]string, err error) {
 	if userID == "" {
-		return
+		return map[string]string{}, map[string]string{}, nil
 	}
-	rows, err := r.pool.Query(ctx, `
-		SELECT rule_type, ref_id, access FROM identity.user_access_rule WHERE user_id=$1::uuid
-	`, userID)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var ruleType, refID, access string
-		if rows.Scan(&ruleType, &refID, &access) == nil {
-			switch ruleType {
-			case "dimension_member":
-				dimRules[refID] = access
-			case "metric":
-				metricRules[refID] = access
-			}
-		}
-	}
-	return dimRules, metricRules, rows.Err()
+	return writeguard.RuleMaps(ctx, r.pool, userID, revisionID)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1171,31 +1379,4 @@ func toLabel(name string) string {
 		}
 	}
 	return strings.Join(parts, " ")
-}
-
-// evaluateFormulaChart evaluates a formula string with metric values, returning a float64.
-// Uses the formula package directly; supports IF(dim="code",…) via string-valued vars.
-func evaluateFormulaChart(formulaStr string, metricValues map[string]float64, namedDims map[string]string) (float64, error) {
-	if formulaStr == "" {
-		return 0, fmt.Errorf("empty formula")
-	}
-	vars := make(map[string]formula.Value, len(metricValues)+len(namedDims))
-	for k, v := range metricValues {
-		vars[k] = formula.NumberVal(v)
-	}
-	for k, v := range namedDims {
-		vars[k] = formula.StringVal(v)
-	}
-	result, err := formula.EvalWithContext(formulaStr, &formula.EvalContext{Vars: vars})
-	if err != nil {
-		return 0, err
-	}
-	if result.IsError() {
-		return 0, result.Err()
-	}
-	n, ok := result.Number()
-	if !ok {
-		return 0, formula.ErrValue
-	}
-	return n, nil
 }

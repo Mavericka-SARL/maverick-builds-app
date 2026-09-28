@@ -352,7 +352,7 @@ func (s *Store) CommitImport(ctx context.Context, jobID, modelID, revisionID, us
 		// here would leave the form records that produced them with nothing
 		// on the grid. An unrestricted caller still gets a true full reload
 		// of every direct-entry fact.
-		restrictedMembers, rErr := restrictedMemberIDs(ctx, s.pool, modelID, userID)
+		restrictedMembers, restrictedMetrics, rErr := restrictedIDs(ctx, s.pool, modelID, revisionID, userID)
 		if rErr != nil {
 			return nil, fmt.Errorf("resolve restricted members: %w", rErr)
 		}
@@ -364,13 +364,7 @@ func (s *Store) CommitImport(ctx context.Context, jobID, modelID, revisionID, us
 			WHERE fi.model_id = $1::uuid
 			  AND fi.revision_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid
 			  AND fi.source_ref IS NULL
-			  AND NOT EXISTS (
-			      SELECT 1 FROM identity.user_access_rule r
-			      WHERE r.user_id = $3::uuid
-			        AND r.rule_type = 'metric'
-			        AND r.ref_id = fi.metric_id::text
-			        AND r.access IN ('hidden', 'read')
-			  )
+			  AND NOT (fi.metric_id::text = ANY($3::text[]))
 			  AND NOT EXISTS (
 			      SELECT 1
 			      FROM jsonb_each_text(fi.dim_members) AS dm(dim_id, code)
@@ -378,7 +372,7 @@ func (s *Store) CommitImport(ctx context.Context, jobID, modelID, revisionID, us
 			        ON m.dimension_id = dm.dim_id::uuid AND m.code = dm.code
 			      WHERE m.id::text = ANY($4)
 			  )
-		`, modelID, revisionID, userID, restrictedMembers)
+		`, modelID, revisionID, restrictedMetrics, restrictedMembers)
 		if err != nil {
 			return nil, fmt.Errorf("full reload delete: %w", err)
 		}
@@ -564,42 +558,42 @@ func importStatusFromString(s string) importpkgv1.ImportStatus {
 	}
 }
 
-// restrictedMemberIDs returns every dimension member of this model/revision
-// the user may not write — their own hidden/read rules plus everything those
-// cascade onto down the parent_member_id chain, the same expansion the grid
-// and chart read paths apply. Returns an empty slice for an unrestricted
-// user, which makes the ANY($4) clause a no-op.
-func restrictedMemberIDs(ctx context.Context, pool *pgxpool.Pool, modelID, userID string) ([]string, error) {
+// restrictedIDs returns every dimension member and every metric of this
+// model/revision the user may not write — their own hidden/read rules plus,
+// for members, everything those cascade onto down the parent_member_id
+// chain, the same expansion the grid and chart read paths apply. The rules
+// resolve by lineage against revisionID (writeguard.RulesForRevision), so
+// a full reload into an older revision spares what the active one
+// protects. Returns empty slices for an unrestricted user, which makes the
+// ANY() clauses no-ops.
+func restrictedIDs(ctx context.Context, pool *pgxpool.Pool, modelID, revisionID, userID string) (members, metrics []string, err error) {
 	out := []string{}
+	metrics = []string{}
 	if userID == "" {
-		return out, nil
+		return out, metrics, nil
 	}
 
-	rules := map[string]string{}
-	ruleRows, err := pool.Query(ctx, `
-		SELECT ref_id, access FROM identity.user_access_rule
-		WHERE user_id=$1::uuid AND rule_type='dimension_member' AND access IN ('hidden','read')
-	`, userID)
+	all, err := writeguard.RulesForRevision(ctx, pool, userID, revisionID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	for ruleRows.Next() {
-		var refID, access string
-		if err := ruleRows.Scan(&refID, &access); err != nil {
-			ruleRows.Close()
-			return nil, err
+	rules := map[string]string{}
+	for _, ar := range all {
+		if ar.Access != "hidden" && ar.Access != "read" {
+			continue
 		}
-		// ExpandHidden cascades on the literal "hidden" marker; read-only
-		// members are equally undeletable, so they enter the same expansion.
-		rules[refID] = "hidden"
-		_ = access
-	}
-	ruleRows.Close()
-	if err := ruleRows.Err(); err != nil {
-		return nil, err
+		switch ar.Type {
+		case "dimension_member":
+			// ExpandHidden cascades on the literal "hidden" marker; read-only
+			// members are equally undeletable, so they enter the same
+			// expansion.
+			rules[ar.RefID] = "hidden"
+		case "metric":
+			metrics = append(metrics, ar.RefID)
+		}
 	}
 	if len(rules) == 0 {
-		return out, nil
+		return out, metrics, nil
 	}
 
 	// Every member of the model, across revisions: rules name specific member
@@ -613,20 +607,20 @@ func restrictedMemberIDs(ctx context.Context, pool *pgxpool.Pool, modelID, userI
 		WHERE d.model_id=$1::uuid
 	`, modelID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var edges []writeguard.MemberEdge
 	for edgeRows.Next() {
 		var e writeguard.MemberEdge
 		if err := edgeRows.Scan(&e.ID, &e.ParentID); err != nil {
 			edgeRows.Close()
-			return nil, err
+			return nil, nil, err
 		}
 		edges = append(edges, e)
 	}
 	edgeRows.Close()
 	if err := edgeRows.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	for id := range writeguard.ExpandHidden(edges, rules) {
@@ -635,5 +629,5 @@ func restrictedMemberIDs(ctx context.Context, pool *pgxpool.Pool, modelID, userI
 	for id := range rules {
 		out = append(out, id)
 	}
-	return out, nil
+	return out, metrics, nil
 }

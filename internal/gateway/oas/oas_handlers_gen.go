@@ -759,7 +759,7 @@ func (s *Server) handleAddGridDimensionRequest(args [2]string, argsEscaped bool,
 
 	var rawBody []byte
 
-	var response *AddGridDimensionOK
+	var response AddGridDimensionRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -784,7 +784,7 @@ func (s *Server) handleAddGridDimensionRequest(args [2]string, argsEscaped bool,
 		type (
 			Request  = struct{}
 			Params   = AddGridDimensionParams
-			Response = *AddGridDimensionOK
+			Response = AddGridDimensionRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -5255,7 +5255,7 @@ func (s *Server) handleCreateDimensionPropertyRequest(args [1]string, argsEscape
 		}
 	}()
 
-	var response *CreateDimensionPropertyOK
+	var response CreateDimensionPropertyRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -5276,7 +5276,7 @@ func (s *Server) handleCreateDimensionPropertyRequest(args [1]string, argsEscape
 		type (
 			Request  = *PropertyRequest
 			Params   = CreateDimensionPropertyParams
-			Response = *CreateDimensionPropertyOK
+			Response = CreateDimensionPropertyRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -10151,7 +10151,7 @@ func (s *Server) handleDeleteDimensionRequest(args [1]string, argsEscaped bool, 
 
 	var rawBody []byte
 
-	var response *DeleteDimensionOK
+	var response DeleteDimensionRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -10172,7 +10172,7 @@ func (s *Server) handleDeleteDimensionRequest(args [1]string, argsEscaped bool, 
 		type (
 			Request  = struct{}
 			Params   = DeleteDimensionParams
-			Response = *DeleteDimensionOK
+			Response = DeleteDimensionRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -10338,7 +10338,7 @@ func (s *Server) handleDeleteDimensionMemberRequest(args [2]string, argsEscaped 
 
 	var rawBody []byte
 
-	var response *DeleteDimensionMemberOK
+	var response DeleteDimensionMemberRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -10363,7 +10363,7 @@ func (s *Server) handleDeleteDimensionMemberRequest(args [2]string, argsEscaped 
 		type (
 			Request  = struct{}
 			Params   = DeleteDimensionMemberParams
-			Response = *DeleteDimensionMemberOK
+			Response = DeleteDimensionMemberRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -10529,7 +10529,7 @@ func (s *Server) handleDeleteDimensionPropertyRequest(args [2]string, argsEscape
 
 	var rawBody []byte
 
-	var response *DeleteDimensionPropertyOK
+	var response DeleteDimensionPropertyRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -10554,7 +10554,7 @@ func (s *Server) handleDeleteDimensionPropertyRequest(args [2]string, argsEscape
 		type (
 			Request  = struct{}
 			Params   = DeleteDimensionPropertyParams
-			Response = *DeleteDimensionPropertyOK
+			Response = DeleteDimensionPropertyRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -31584,7 +31584,7 @@ func (s *Server) handleRemoveGridDimensionRequest(args [2]string, argsEscaped bo
 
 	var rawBody []byte
 
-	var response *RemoveGridDimensionOK
+	var response RemoveGridDimensionRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -31609,7 +31609,7 @@ func (s *Server) handleRemoveGridDimensionRequest(args [2]string, argsEscaped bo
 		type (
 			Request  = struct{}
 			Params   = RemoveGridDimensionParams
-			Response = *RemoveGridDimensionOK
+			Response = RemoveGridDimensionRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -42498,7 +42498,7 @@ func (s *Server) handleUpdateDimensionPropertyRequest(args [2]string, argsEscape
 		}
 	}()
 
-	var response *UpdateDimensionPropertyOK
+	var response UpdateDimensionPropertyRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -42523,7 +42523,7 @@ func (s *Server) handleUpdateDimensionPropertyRequest(args [2]string, argsEscape
 		type (
 			Request  = *PropertyRequest
 			Params   = UpdateDimensionPropertyParams
-			Response = *UpdateDimensionPropertyOK
+			Response = UpdateDimensionPropertyRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,

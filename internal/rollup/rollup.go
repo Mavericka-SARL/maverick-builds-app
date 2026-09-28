@@ -15,7 +15,9 @@ package rollup
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -106,6 +108,22 @@ type RawValue func(ctx context.Context, metricID string, combo map[string]string
 // hierarchy, so it is surfaced rather than silently resolved as 0.
 var ErrDepthExceeded = errors.New("rollup: hierarchy depth exceeded")
 
+// ErrNoValue, returned by a RawValue, marks a coordinate with no value that
+// must stay out of an aggregate entirely — not enter it as 0 the way an
+// ok=false read does. A caller that computes leaves on demand (a formula
+// whose result is blank there, or fails there) returns it so a parent's
+// average is the mean of the leaves that have a value, as the scheduler
+// totals only the rows it wrote. Resolve and ResolveTime never return it:
+// an aggregate over nothing but such coordinates answers ok=false.
+var ErrNoValue = errors.New("rollup: no value at this coordinate")
+
+// ErrConflictingOverrides is returned (wrapped, naming the dimensions) by
+// NormalizeCombo when two overrides select members of dimensions related
+// to the same own dimension of the source — a read no single combo can
+// express. The calculation package reports it as the formula error
+// CONFLICTING_DIMENSION_ARGUMENTS.
+var ErrConflictingOverrides = errors.New("rollup: overrides on dimensions related to the same source dimension")
+
 const maxDepth = 10
 
 // Resolve resolves metricID's value at combo, which may pin any set of
@@ -113,15 +131,14 @@ const maxDepth = 10
 // context selectors, or eventually a grid's full row/col/context combo) —
 // combo's dimensions need not match metricDimIDs at all.
 //
-// Two mechanisms compose to do this, checked in order at every level of
-// recursion:
+// Two mechanisms compose to find the LEAF coordinates under combo, checked
+// in order at every level of recursion:
 //
 //  1. Same-dimension rollup: if any dimension currently pinned in combo (not
 //     only metricDimIDs — a plotted axis showing a rollup member rolls up
 //     every metric shown against it, related to that axis or not) is pinned
 //     to a member with children in its own hierarchy, recurse into each
-//     child and combine via aggRule. Mirrors BusinessConsole.tsx's
-//     resolveCell.
+//     child. Mirrors BusinessConsole.tsx's resolveCell.
 //  2. Cross-dimension resolution: once no pinned dimension has children left
 //     to expand, relate each of metricDimIDs to combo — directly if pinned
 //     (already guaranteed leaf by step 1), else via a structural parent/
@@ -130,6 +147,24 @@ const maxDepth = 10
 //     leaf set (an axis this combo doesn't slice by at all). Mirrors
 //     resolveCrossDimensionValue/resolveAxisCodes.
 //
+// How the leaves combine depends on aggRule:
+//
+//   - average and count combine FLAT, once over the distinct leaf
+//     coordinates under combo that have a recorded value (fetch ok, not
+//     ErrNoValue) — never level by level. World averaged is the mean of
+//     every country with a value, not mean(EMEA mean, AMER mean); World
+//     counted is the number of countries with a (non-zero) value, not the
+//     number of regions. That is the calculation scheduler's rule for its
+//     totals and slice rows (CombineAgg over the leaf rows), so every reader
+//     answers a parent with the same number. A leaf with no recorded value
+//     is left out, never a 0 entering the mean.
+//   - sum (and any unrecognised rule) sums level by level, a leaf with no
+//     value contributing 0; flat and level-by-level sums agree.
+//   - formula and rate combine each level's children by their mean — an
+//     approximation for callers without an evaluator; the scheduler
+//     re-evaluates these at the aggregate and persists that row (see
+//     AggFormula).
+//
 // When every one of metricDimIDs is already pinned directly in combo (the
 // common case — a metric plotted straight against its own dimensions, no
 // rollup or cross-dimension relation needed), Resolve fetches once and
@@ -137,8 +172,9 @@ const maxDepth = 10
 // stays ok=false rather than being defaulted to a misleading 0. Every other
 // path (rollup or cross-dimension resolution actually ran) returns ok=true:
 // an aggregate over a possibly-empty or partially-missing set is itself a
-// well-defined value, never "missing" — a genuinely absent dependency just
-// contributes 0 to the aggregate, the same way a spreadsheet SUM does.
+// well-defined value, never "missing" — the sum or count of nothing is 0,
+// the same way a spreadsheet SUM does — unless every leaf read answered
+// ErrNoValue, which answers ok=false.
 func Resolve(
 	ctx context.Context,
 	dims map[string]*Dimension,
@@ -148,7 +184,120 @@ func Resolve(
 	combo map[string]string,
 	fetch RawValue,
 ) (float64, bool, error) {
-	return resolve(ctx, dims, metricID, metricDimIDs, aggRule, "", combo, fetch, 0)
+	if flatRule(aggRule, false) {
+		v, ok, _, err := resolveFlat(ctx, dims, metricID, metricDimIDs, aggRule, combo, fetch, false)
+		return v, ok, err
+	}
+	return noValue(resolve(ctx, dims, metricID, metricDimIDs, aggRule, "", combo, fetch, 0))
+}
+
+// flatRule reports whether aggRule combines its leaves flat (resolveFlat)
+// rather than level by level (resolve): average and count always; sum too
+// when flatSum (ResolveTimeFlat); formula and rate never.
+func flatRule(aggRule AggRule, flatSum bool) bool {
+	switch aggRule {
+	case AggAverage, AggCount:
+		return true
+	case AggFormula, AggRate:
+		return false
+	case AggSum:
+		return flatSum
+	}
+	return flatSum
+}
+
+// trivialCombo reports whether resolve would answer combo with ONE direct
+// fetch: no pinned dimension has children to expand and every one of
+// metricDimIDs is pinned.
+func trivialCombo(dims map[string]*Dimension, metricDimIDs []string, combo map[string]string) bool {
+	for dimID, code := range combo {
+		if d, ok := dims[dimID]; ok && len(childrenOf(d, code)) > 0 {
+			return false
+		}
+	}
+	for _, id := range metricDimIDs {
+		if _, ok := combo[id]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// resolveFlat combines the distinct leaf coordinates resolve reads under
+// combo ONCE by aggRule, those with a recorded value only. The traversal is
+// resolve's own — the leaves it would fetch are collected, not combined
+// level by level — so a flat and a level-by-level reader never disagree on
+// WHICH leaves are under a coordinate. A leaf reached twice (through an
+// unrelated pinned parent's children) counts once.
+//
+// ok follows Resolve's contract: a trivial combo answers fetch's own ok; any
+// other is ok=true unless every leaf read answered ErrNoValue. recorded
+// reports whether at least one leaf had a recorded value — a period with
+// none is skipped by a time reduction. A fetch error other than ErrNoValue
+// (a withheld read, a failing dependency) fails the read.
+//
+// inReduction marks one period of a time reduction: a trivial combo's leaf
+// is then combined like any other set of leaves (a count of one recorded
+// leaf is 1, not its value), as the scheduler reduces each period's leaf
+// rows by CombineAgg before reducing the periods.
+func resolveFlat(
+	ctx context.Context,
+	dims map[string]*Dimension,
+	metricID string,
+	metricDimIDs []string,
+	aggRule AggRule,
+	combo map[string]string,
+	fetch RawValue,
+	inReduction bool,
+) (value float64, ok, recorded bool, err error) {
+	if len(metricDimIDs) == 0 || trivialCombo(dims, metricDimIDs, combo) {
+		exact := make(map[string]string, len(metricDimIDs))
+		for _, id := range metricDimIDs {
+			exact[id] = combo[id]
+		}
+		v, ok, err := noValue(fetch(ctx, metricID, exact))
+		if ok && inReduction {
+			v = combineAgg([]float64{v}, aggRule)
+		}
+		return v, ok, ok, err
+	}
+	seen := map[string]error{}
+	var vals []float64
+	collect := func(ctx context.Context, id string, leaf map[string]string) (float64, bool, error) {
+		key := comboKey(leaf)
+		if prev, dup := seen[key]; dup {
+			return 0, false, prev // counted once; ErrNoValue stays ErrNoValue
+		}
+		v, ok, err := fetch(ctx, id, leaf)
+		if errors.Is(err, ErrNoValue) {
+			seen[key] = ErrNoValue
+			return 0, false, ErrNoValue
+		}
+		if err != nil {
+			return 0, false, err
+		}
+		seen[key] = nil
+		if ok {
+			vals = append(vals, v)
+		}
+		return 0, false, nil
+	}
+	_, _, err = resolve(ctx, dims, metricID, metricDimIDs, AggSum, "", combo, collect, 0)
+	if errors.Is(err, ErrNoValue) {
+		return 0, false, false, nil // every leaf read has no value
+	}
+	if err != nil {
+		return 0, false, false, err
+	}
+	return combineAgg(vals, aggRule), true, len(vals) > 0, nil
+}
+
+// noValue turns an ErrNoValue from the aggregation into "no value".
+func noValue(v float64, ok bool, err error) (float64, bool, error) {
+	if errors.Is(err, ErrNoValue) {
+		return 0, false, nil
+	}
+	return v, ok, err
 }
 
 // LeafCombos returns the full Cartesian product of every leaf member across
@@ -263,27 +412,52 @@ func resolve(
 		}
 		// An aggregate PERIOD (H1, FY26) reduces its children by the
 		// metric's time summary, not by agg_rule: a closing balance at H1
-		// is Q2's balance, never Q1 + Q2. Children are taken in
+		// is Q2's balance, never Q1 + Q2. Its leaf periods are taken in
 		// chronological order so first/last mean what they say.
 		timeParent := dim.IsTime && timeSummary != ""
 		if timeParent {
 			if timeSummary == "none" {
 				return 0, false, nil
 			}
-			children = chronological(dim, children)
+			// The period's recorded LEAF periods reduce once, flat — never
+			// level by level: FY26 averaged is the mean of its recorded
+			// months, not a mean of quarter means (which weighs a quarter
+			// with one recorded month like one with three). For sum, min,
+			// max, first and last the two agree; for average only the flat
+			// reduction is the period's own value, and it is the one the
+			// scheduler persists for the period's row and the *VALUE family
+			// computes.
+			children = leafPeriods(dim, combo[dimID])
 		}
 		vals := make([]float64, 0, len(children))
 		for _, child := range children {
 			childCombo := cloneCombo(combo)
 			childCombo[dimID] = child.Code
-			v, ok, err := resolve(ctx, dims, metricID, metricDimIDs, aggRule, timeSummary, childCombo, fetch, depth+1)
+			if timeParent {
+				// A period with no recorded value under the other pins
+				// (EMEA in a month nobody in EMEA recorded) is skipped, as
+				// at a leaf member — never a 0 entering an average or
+				// answering as the last balance.
+				v, ok, err := noValue(resolveRecorded(ctx, dims, metricID, metricDimIDs, aggRule, timeSummary, childCombo, fetch, depth+1))
+				if err != nil {
+					return 0, false, err
+				}
+				if ok {
+					vals = append(vals, v)
+				}
+				continue
+			}
+			v, _, err := resolve(ctx, dims, metricID, metricDimIDs, aggRule, timeSummary, childCombo, fetch, depth+1)
+			if errors.Is(err, ErrNoValue) {
+				continue // no value anywhere below: left out, not a 0
+			}
 			if err != nil {
 				return 0, false, err
 			}
-			if timeParent && !ok {
-				continue // an empty aggregate below: nothing to reduce
-			}
 			vals = append(vals, v)
+		}
+		if !timeParent && len(vals) == 0 {
+			return 0, false, ErrNoValue
 		}
 		if timeParent {
 			if len(vals) == 0 {
@@ -326,12 +500,78 @@ func resolve(
 	vals := make([]float64, 0, len(combos))
 	for _, c := range combos {
 		v, _, err := fetch(ctx, metricID, c)
+		if errors.Is(err, ErrNoValue) {
+			continue // no value: left out, not a 0
+		}
 		if err != nil {
 			return 0, false, err
 		}
 		vals = append(vals, v)
 	}
+	if len(vals) == 0 {
+		return 0, false, ErrNoValue
+	}
 	return combineAgg(vals, aggRule), true, nil
+}
+
+// resolveRecorded is resolve for one period of a time reduction: ok=false
+// when no leaf read beneath combo had a recorded value, so the caller skips
+// the period instead of reducing a 0 that an aggregate over nothing
+// produced. With something recorded it is resolve's own answer.
+func resolveRecorded(
+	ctx context.Context,
+	dims map[string]*Dimension,
+	metricID string,
+	metricDimIDs []string,
+	aggRule AggRule,
+	timeSummary TimeSummaryRule,
+	combo map[string]string,
+	fetch RawValue,
+	depth int,
+) (float64, bool, error) {
+	recorded := false
+	tracked := func(ctx context.Context, id string, c map[string]string) (float64, bool, error) {
+		v, ok, err := fetch(ctx, id, c)
+		if ok {
+			recorded = true
+		}
+		return v, ok, err
+	}
+	v, ok, err := resolve(ctx, dims, metricID, metricDimIDs, aggRule, timeSummary, combo, tracked, depth)
+	if err != nil || !ok || !recorded {
+		return 0, false, err
+	}
+	return v, true, nil
+}
+
+// ResolveTimeRecorded is ResolveTime answering ok=false when no leaf read
+// beneath combo returned a recorded value — a parent member or aggregate
+// whose every leaf is empty, where ResolveTime still answers ok=true with
+// the aggregate of nothing. A reduction over periods uses it to skip the
+// periods nothing was recorded in.
+func ResolveTimeRecorded(
+	ctx context.Context,
+	dims map[string]*Dimension,
+	metricID string,
+	metricDimIDs []string,
+	aggRule AggRule,
+	timeSummary TimeSummaryRule,
+	combo map[string]string,
+	fetch RawValue,
+) (float64, bool, error) {
+	recorded := false
+	tracked := func(ctx context.Context, id string, c map[string]string) (float64, bool, error) {
+		v, ok, err := fetch(ctx, id, c)
+		if ok {
+			recorded = true
+		}
+		return v, ok, err
+	}
+	v, ok, err := ResolveTime(ctx, dims, metricID, metricDimIDs, aggRule, timeSummary, combo, tracked)
+	if err != nil || !ok || !recorded {
+		return 0, false, err
+	}
+	return v, true, nil
 }
 
 // childrenOf returns dim's members whose ParentCode is parentCode.
@@ -375,30 +615,80 @@ func allLeafCodes(dim *Dimension) []string {
 	return out
 }
 
-// chronological orders a time dimension's members by the first leaf period
-// beneath each (an aggregate sorts where its earliest descendant does).
-func chronological(dim *Dimension, members []Member) []Member {
-	first := map[string]int{}
-	var firstLeaf func(code string) int
-	firstLeaf = func(code string) int {
-		if v, ok := first[code]; ok {
-			return v
-		}
-		best := 1 << 30
-		if m := findMember(dim, code); m != nil && m.IsLeafPeriod() {
-			best = m.TimeIndex
-		}
-		for _, c := range childrenOf(dim, code) {
-			if v := firstLeaf(c.Code); v < best {
-				best = v
-			}
-		}
-		first[code] = best
-		return best
+// leafPeriods returns the dated leaf periods at or under code in a time
+// dimension, in chronological order.
+func leafPeriods(dim *Dimension, code string) []Member {
+	codes := LeafDescendants(dim, code)
+	in := make(map[string]bool, len(codes))
+	for _, c := range codes {
+		in[c] = true
 	}
-	out := append([]Member(nil), members...)
-	sort.SliceStable(out, func(i, j int) bool { return firstLeaf(out[i].Code) < firstLeaf(out[j].Code) })
+	out := make([]Member, 0, len(codes))
+	for _, m := range dim.Members {
+		if in[m.Code] {
+			in[m.Code] = false // a duplicated code counts once
+			out = append(out, m)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].TimeIndex < out[j].TimeIndex })
 	return out
+}
+
+// relationKind is how one dimension relates to a metric's own dimension.
+type relationKind int
+
+const (
+	relationNone relationKind = iota
+	// relationChildChain: the own dimension descends structurally from the
+	// other (employees under a cost_centers member).
+	relationChildChain
+	// relationParentChain: the other dimension descends structurally from
+	// the own one (a metric on cost_centers broadcast to an employee).
+	relationParentChain
+	// relationProperty: the other dimension groups the own dimension's
+	// members by a property value (regions <- employees.region).
+	relationProperty
+)
+
+// relation reports how otherDimID relates to ownDimID — the ONE rule both
+// Relates (save time) and relate (run time) use — with the structural
+// chain when there is one. Checked in relate's historical order: child
+// chain, parent chain, property grouping. A dimension never relates to
+// itself here; Relates handles identity.
+func relation(dims map[string]*Dimension, ownDimID, otherDimID string) (relationKind, []string) {
+	if ownDimID == otherDimID {
+		return relationNone, nil
+	}
+	if chain := dimensionChainTo(dims, ownDimID, otherDimID, 0); len(chain) > 1 {
+		return relationChildChain, chain
+	}
+	if chain := dimensionChainTo(dims, otherDimID, ownDimID, 0); len(chain) > 1 {
+		return relationParentChain, chain
+	}
+	if other, ok := dims[otherDimID]; ok && other.SourceDimensionID == ownDimID && other.SourceProperty != "" {
+		return relationProperty, nil
+	}
+	return relationNone, nil
+}
+
+// Relates reports whether otherDimID is ownDimID itself or relates to it
+// by the relation rollup resolves through: a structural parent/child
+// dimension chain in either direction, or a source_property grouping of
+// ownDimID's members. The reverse property direction and multi-hop
+// compositions do not relate. A dimension missing from dims relates only
+// to itself.
+func Relates(dims map[string]*Dimension, ownDimID, otherDimID string) bool {
+	if ownDimID == otherDimID {
+		return true
+	}
+	if _, ok := dims[ownDimID]; !ok {
+		return false
+	}
+	if _, ok := dims[otherDimID]; !ok {
+		return false
+	}
+	kind, _ := relation(dims, ownDimID, otherDimID)
+	return kind != relationNone
 }
 
 // relate finds the resolved code-set for ownDimID against whichever of
@@ -426,44 +716,39 @@ func relate(dims map[string]*Dimension, ownDimID string, combo map[string]string
 			continue
 		}
 
-		// Structural child chain: ownDim is a descendant of pinnedDim
-		// (e.g. employees rolling up under a plotted cost_centers member).
-		// A found chain commits to "this relation exists" unconditionally —
-		// descendantsInChain legitimately returning zero codes (e.g. every
-		// child is currently hidden) must still mean "zero", not fall
-		// through to relate's own nil-means-"no relation" sentinel below,
-		// which would wrongly trigger the full-leaf-aggregate fallback and
-		// silently leak every OTHER branch's values into this one.
-		if chain := dimensionChainTo(dims, ownDimID, pinnedDimID, 0); len(chain) > 1 {
+		kind, chain := relation(dims, ownDimID, pinnedDimID)
+		switch kind {
+		case relationChildChain:
+			// A found chain commits to "this relation exists"
+			// unconditionally — descendantsInChain legitimately returning
+			// zero codes (e.g. every child is currently hidden) must still
+			// mean "zero", not fall through to relate's own
+			// nil-means-"no relation" sentinel below, which would wrongly
+			// trigger the full-leaf-aggregate fallback and silently leak
+			// every OTHER branch's values into this one.
 			codes := descendantsInChain(dims, chain, *pinnedMember)
 			if codes == nil {
 				codes = []string{}
 			}
 			return codes
-		}
-		// Structural parent chain: pinnedDim is a descendant of ownDim
-		// (e.g. a metric on cost_centers, broadcast down to a plotted
-		// employees member's ancestor cost center).
-		if chain := dimensionChainTo(dims, pinnedDimID, ownDimID, 0); len(chain) > 1 {
+		case relationParentChain:
 			code := ancestorCodeInChain(dims, chain, *pinnedMember)
 			if code == "" {
 				return []string{}
 			}
 			return []string{code}
-		}
-		// Property-derived grouping: pinnedDim's members group ownDim's
-		// members by a property value (e.g. regions <- employees.region).
-		// Starts non-nil for the same reason as the child-chain branch
-		// above — a real match against zero currently-visible members must
-		// stay "zero", not be reinterpreted as "no relation found".
-		if pinnedDim.SourceDimensionID == ownDimID && pinnedDim.SourceProperty != "" {
+		case relationProperty:
+			// Starts non-nil for the same reason as the child-chain branch
+			// above — a real match against zero currently-visible members
+			// must stay "zero", not be reinterpreted as "no relation found".
 			codes := []string{}
 			for _, m := range ownDim.Members {
-				if m.Properties[pinnedDim.SourceProperty] == pinnedCode {
+				if PropertyValue(m.Properties, pinnedDim.SourceProperty) == pinnedCode {
 					codes = append(codes, m.Code)
 				}
 			}
 			return codes
+		case relationNone:
 		}
 	}
 	return nil
@@ -634,14 +919,20 @@ func cloneCombo(combo map[string]string) map[string]string {
 type TimeSummaryRule string
 
 // ResolveTime is Resolve for a metric that may carry a time dimension: when
-// its time dimension is left unpinned by combo, non-time dimensions are
-// reduced first (aggRule, via Resolve at each period) and the periods are
-// then reduced by timeSummary — the order the calculation scheduler uses
-// for its own aggregate and slice rows, so a chart or an export that
-// aggregates over time reads the same number the grid shows. A time summary
-// of "none" answers ok=false: a time total is meaningless for the metric.
-// With no time dimension among metricDimIDs, or with it pinned, this is
-// exactly Resolve.
+// its time dimension is left unpinned by combo, or pinned to an AGGREGATE
+// period (H1, FY26), the non-time dimensions are reduced first, per leaf
+// period (aggRule, as Resolve does — flat for average and count), and the
+// leaf periods are then reduced by timeSummary, a period with nothing
+// recorded under combo skipped — the order the calculation scheduler uses
+// for its own aggregate and slice rows (summarizeOverTime), so a chart or an
+// export that aggregates over time reads the same number the grid shows,
+// whichever dimension ID happens to sort first. A time summary of "none"
+// answers ok=false: a time total is meaningless for the metric. With no
+// time dimension among metricDimIDs, or with it pinned to a leaf period,
+// this is exactly Resolve.
+//
+// agg_rule formula and rate keep resolve's own expansion at an aggregate
+// period (see Resolve): the scheduler re-evaluates them at the aggregate.
 func ResolveTime(
 	ctx context.Context,
 	dims map[string]*Dimension,
@@ -652,6 +943,42 @@ func ResolveTime(
 	combo map[string]string,
 	fetch RawValue,
 ) (float64, bool, error) {
+	return resolveTime(ctx, dims, metricID, metricDimIDs, aggRule, timeSummary, combo, fetch, false)
+}
+
+// resolveTime is ResolveTime and ResolveTimeFlat; flatSum makes sum combine
+// flat too (distinct leaves, each once).
+func resolveTime(
+	ctx context.Context,
+	dims map[string]*Dimension,
+	metricID string,
+	metricDimIDs []string,
+	aggRule AggRule,
+	timeSummary TimeSummaryRule,
+	combo map[string]string,
+	fetch RawValue,
+	flatSum bool,
+) (float64, bool, error) {
+	flat := flatRule(aggRule, flatSum)
+	// one resolves combo with its time dimension (if any) at a leaf period
+	// or absent; recorded reports whether a leaf read had a recorded value.
+	// inReduction: c is one period of a time reduction.
+	one := func(c map[string]string, ts TimeSummaryRule, inReduction bool) (float64, bool, bool, error) {
+		if flat {
+			return resolveFlat(ctx, dims, metricID, metricDimIDs, aggRule, c, fetch, inReduction)
+		}
+		recorded := false
+		tracked := func(ctx context.Context, id string, leaf map[string]string) (float64, bool, error) {
+			v, ok, err := fetch(ctx, id, leaf)
+			if ok {
+				recorded = true
+			}
+			return v, ok, err
+		}
+		v, ok, err := noValue(resolve(ctx, dims, metricID, metricDimIDs, aggRule, ts, c, tracked, 0))
+		return v, ok, recorded, err
+	}
+
 	var axis *Dimension
 	for _, id := range metricDimIDs {
 		if d := dims[id]; d != nil && d.IsTime {
@@ -660,39 +987,54 @@ func ResolveTime(
 		}
 	}
 	if axis == nil {
-		return Resolve(ctx, dims, metricID, metricDimIDs, aggRule, combo, fetch)
+		v, ok, _, err := one(combo, "", false)
+		return v, ok, err
 	}
 	if timeSummary == "" {
 		timeSummary = "sum"
 	}
-	if _, pinned := combo[axis.ID]; pinned {
-		// Pinned to a leaf period: a plain read. Pinned to an aggregate
-		// period: resolve's tier-1 expansion reduces its children by the
-		// time summary.
-		return resolve(ctx, dims, metricID, metricDimIDs, aggRule, timeSummary, combo, fetch, 0)
+	var periods []Member
+	if code, pinned := combo[axis.ID]; pinned {
+		m := findMember(axis, code)
+		if m == nil || len(childrenOf(axis, code)) == 0 {
+			// A leaf period (or an unknown code): a plain read, no time
+			// reduction. An undated aggregate with no children yet has no
+			// period under it and reads as such.
+			v, ok, _, err := one(combo, timeSummary, false)
+			return v, ok, err
+		}
+		if aggRule == AggFormula || aggRule == AggRate {
+			// resolve's tier-1 expansion reduces the aggregate period by the
+			// time summary.
+			return noValue(resolve(ctx, dims, metricID, metricDimIDs, aggRule, timeSummary, combo, fetch, 0))
+		}
+		periods = leafPeriods(axis, code)
+	} else {
+		for _, m := range axis.Members {
+			if m.IsLeafPeriod() {
+				periods = append(periods, m)
+			}
+		}
+		sort.SliceStable(periods, func(i, j int) bool { return periods[i].TimeIndex < periods[j].TimeIndex })
 	}
 	if timeSummary == "none" {
 		return 0, false, nil
 	}
-	var members []Member
-	for _, m := range axis.Members {
-		if m.IsLeafPeriod() {
-			members = append(members, m)
-		}
-	}
-	sort.SliceStable(members, func(i, j int) bool { return members[i].TimeIndex < members[j].TimeIndex })
-	vals := make([]float64, 0, len(members))
-	for _, m := range members {
+	// The period's recorded LEAF periods reduce once, flat — never level by
+	// level: FY26 averaged is the mean of its recorded months, not a mean of
+	// quarter means (which weighs a quarter with one recorded month like one
+	// with three).
+	vals := make([]float64, 0, len(periods))
+	for _, p := range periods {
 		c := cloneCombo(combo)
-		c[axis.ID] = m.Code
-		v, ok, err := resolve(ctx, dims, metricID, metricDimIDs, aggRule, timeSummary, c, fetch, 0)
+		c[axis.ID] = p.Code
+		v, ok, recorded, err := one(c, timeSummary, true)
 		if err != nil {
 			return 0, false, err
 		}
-		if !ok {
-			continue // no value at this period — an absent leaf, not a zero to average in
+		if ok && recorded {
+			vals = append(vals, v) // a period nothing under combo recorded is skipped, never a 0
 		}
-		vals = append(vals, v)
 	}
 	if len(vals) == 0 {
 		return 0, false, nil
@@ -741,4 +1083,190 @@ func CombineTime(vals []float64, rule TimeSummaryRule) float64 {
 		}
 		return s
 	}
+}
+
+// ResolveTimeFlat is ResolveTime with sum combined flat as well: each
+// distinct leaf coordinate under combo counts once, so a leaf reached twice
+// through a pinned parent of a dimension the metric does not carry (a
+// region-only metric at {currency: ALL}) is not summed once per child the
+// way Resolve's level-by-level sum does. For average and count it is exactly
+// ResolveTime (both combine those flat). A caller computing leaves on demand
+// (a formula reading member metadata, whose value exists only at leaves)
+// uses it; ok=false when every leaf under combo answered ErrNoValue, and a
+// fetch error other than ErrNoValue fails the whole read.
+func ResolveTimeFlat(
+	ctx context.Context,
+	dims map[string]*Dimension,
+	metricID string,
+	metricDimIDs []string,
+	aggRule AggRule,
+	timeSummary TimeSummaryRule,
+	combo map[string]string,
+	fetch RawValue,
+) (float64, bool, error) {
+	return resolveTime(ctx, dims, metricID, metricDimIDs, aggRule, timeSummary, combo, fetch, true)
+}
+
+// comboKey is a canonical string for a combo.
+func comboKey(combo map[string]string) string {
+	var b []byte
+	for _, k := range sortedKeys(combo) {
+		b = append(b, k...)
+		b = append(b, '=')
+		b = append(b, combo[k]...)
+		b = append(b, 0)
+	}
+	return string(b)
+}
+
+// FindMember returns dim's member with exactly code, or nil.
+func FindMember(dim *Dimension, code string) *Member {
+	if dim == nil {
+		return nil
+	}
+	return findMember(dim, code)
+}
+
+// LeafCodes returns every leaf member's code in dim, in dim.Members order.
+// On a time dimension only dated leaf periods count: an aggregate with no
+// children yet is an empty grouping, not a period.
+func LeafCodes(dim *Dimension) []string {
+	return allLeafCodes(dim)
+}
+
+// SubtreeCodes returns code and the code of every member below it in dim's
+// hierarchy, in dim.Members order (code itself first); nil when code is not
+// a member. A malformed cyclic hierarchy terminates.
+func SubtreeCodes(dim *Dimension, code string) []string {
+	if FindMember(dim, code) == nil {
+		return nil
+	}
+	in := map[string]bool{code: true}
+	for grew := true; grew; {
+		grew = false
+		for _, m := range dim.Members {
+			if !in[m.Code] && m.ParentCode != "" && in[m.ParentCode] {
+				in[m.Code] = true
+				grew = true
+			}
+		}
+	}
+	out := []string{code}
+	for _, m := range dim.Members {
+		if m.Code != code && in[m.Code] {
+			out = append(out, m.Code)
+		}
+	}
+	return out
+}
+
+// LeafDescendants returns the leaf members at or under code in dim — code
+// itself when it is a leaf — in dim.Members order. On a time dimension only
+// dated leaf periods count. nil when code is not a member; empty (non-nil)
+// for an aggregate with no leaf below it.
+func LeafDescendants(dim *Dimension, code string) []string {
+	subtree := SubtreeCodes(dim, code)
+	if subtree == nil {
+		return nil
+	}
+	in := make(map[string]bool, len(subtree))
+	for _, c := range subtree {
+		in[c] = true
+	}
+	out := []string{}
+	for _, c := range allLeafCodes(dim) {
+		if in[c] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// NormalizeCombo prepares a cell's combo for reading a source metric at
+// other members (LOOKUP and the conditional aggregations, contract C2),
+// returning the combo to pass to ResolveTime with the source's dimensions:
+//
+//  1. keep pins on the source's own dimensions and on dimensions related
+//     to one of them (Relates);
+//  2. drop pins on dimensions unrelated to the source — so a source that
+//     does not carry a dimension is never rolled up along it (fx_rate
+//     [currency] at a region parent reads the one rate, not the rate times
+//     the region's children);
+//  3. for each override, drop the other pins related to the same own
+//     dimension, then pin the override.
+//
+// Overrides map dimension IDs to member codes; an override on a dimension
+// unrelated to the source is dropped like any other unrelated pin (save-time
+// validation refuses it: DIMENSION_NOT_ON_SOURCE). Neither input is
+// modified.
+//
+// Two overrides on different dimensions that relate to the SAME own
+// dimension of the source (employees and region on a source keyed by
+// employees, or region and segment) would ask for the intersection of two
+// member sets, which one combo cannot express: ResolveTime would honour one
+// pin and silently ignore the other. That shape is refused with an error
+// wrapping ErrConflictingOverrides instead of returning a wrong number.
+func NormalizeCombo(dims map[string]*Dimension, sourceDimIDs []string, combo, overrides map[string]string) (map[string]string, error) {
+	relatedOwn := func(dimID string) []string {
+		var owns []string
+		for _, own := range sourceDimIDs {
+			if Relates(dims, own, dimID) {
+				owns = append(owns, own)
+			}
+		}
+		return owns
+	}
+	claimedBy := make(map[string]string, len(overrides)) // own dimension -> first override on it
+	for _, dimID := range sortedKeys(overrides) {
+		claims := relatedOwn(dimID)
+		for _, own := range sourceDimIDs {
+			if own == dimID {
+				claims = []string{dimID} // an exact own pin selects only itself
+				break
+			}
+		}
+		for _, own := range claims {
+			if prev, ok := claimedBy[own]; ok {
+				return nil, fmt.Errorf("%w: %s and %s both select members of %s",
+					ErrConflictingOverrides, prev, dimID, own)
+			}
+			claimedBy[own] = dimID
+		}
+	}
+	out := make(map[string]string, len(combo)+len(overrides))
+	for dimID, code := range combo {
+		if len(relatedOwn(dimID)) > 0 {
+			out[dimID] = code
+		}
+	}
+	for _, dimID := range sortedKeys(overrides) {
+		for _, own := range relatedOwn(dimID) {
+			for pinned := range out {
+				if pinned != dimID && Relates(dims, own, pinned) {
+					delete(out, pinned)
+				}
+			}
+		}
+	}
+	for dimID, code := range overrides {
+		if len(relatedOwn(dimID)) > 0 {
+			out[dimID] = code
+		}
+	}
+	return out, nil
+}
+
+// PropertyValue is a member's value of property name, the key matched
+// case-insensitively as formulas read dim.property: a grouping by the
+// declared "area" still sees a value stored under "Area".
+func PropertyValue(props map[string]string, name string) string {
+	if v, ok := props[name]; ok {
+		return v
+	}
+	for k, v := range props {
+		if strings.EqualFold(k, name) {
+			return v
+		}
+	}
+	return ""
 }

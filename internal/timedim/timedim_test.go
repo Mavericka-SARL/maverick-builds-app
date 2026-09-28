@@ -119,6 +119,31 @@ func TestIntervalKeys(t *testing.T) {
 	}
 }
 
+func TestHalfYearIntervalKeys(t *testing.T) {
+	jun := Period{"2026-06", d("2026-06-01"), d("2026-06-30")}
+	jul := Period{"2026-07", d("2026-07-01"), d("2026-07-31")}
+	jan27 := Period{"2027-01", d("2027-01-01"), d("2027-01-31")}
+	h1, ok := IntervalKey(LevelHalfYear, 1, jun)
+	h2, _ := IntervalKey(LevelHalfYear, 1, jul)
+	if !ok || h1 != "FY2026-H1" || h2 != "FY2026-H2" {
+		t.Errorf("calendar halves: %s %s", h1, h2)
+	}
+	// April fiscal year: Jul is in H1 of FY26, Jan 2027 in H2 of FY26.
+	a, _ := IntervalKey(LevelHalfYear, 4, jul)
+	b, _ := IntervalKey(LevelHalfYear, 4, jan27)
+	if a != "FY2026-H1" || b != "FY2026-H2" {
+		t.Errorf("April fiscal halves: %s %s", a, b)
+	}
+	if _, ok := IntervalKey(LevelHalfYear, 1, Period{"x", d("2026-06-15"), d("2026-07-14")}); ok {
+		t.Error("a period straddling a half-year boundary must be reported")
+	}
+	for gran, want := range map[string]bool{GranDay: true, GranWeek: true, GranMonth: true, GranQuarter: true, GranHalfYear: false, GranYear: false} {
+		if got := GranularityFitsLevel(LevelHalfYear, gran); got != want {
+			t.Errorf("GranularityFitsLevel(half year, %s) = %v, want %v", gran, got, want)
+		}
+	}
+}
+
 func TestGeneratePeriods(t *testing.T) {
 	ps, err := GeneratePeriods(Config{Type: TypeTime, Granularity: GranMonth, FiscalYearStartMonth: 1}, d("2026-01-01"), d("2026-04-30"))
 	if err != nil || len(ps) != 4 || ps[3].Code != "2026-04" || !ps[3].End.Equal(d("2026-04-30")) {

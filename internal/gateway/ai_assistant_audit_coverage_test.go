@@ -232,3 +232,96 @@ func TestAIAssistantMutationsAreAudited(t *testing.T) {
 	}
 	f.latestAuditEvent(t, "ai_settings.tested")
 }
+
+// TestAIDimensionPropertyToolsAreAudited: the property write tools —
+// declare, rename/retype and delete — run through the same propose ->
+// confirm door as every other AI write, so their confirmation is recorded
+// as ai_proposal.confirmed against the draft revision they landed in.
+func TestAIDimensionPropertyToolsAreAudited(t *testing.T) {
+	f := setupAIAuditFixture(t)
+	ctx := context.Background()
+	sessionID := f.createSession(t)
+
+	dimParams, _ := json.Marshal(map[string]string{"name": "region"})
+	propParams, _ := json.Marshal(map[string]string{"dimension_id": "<created in step 1>", "name": "fact", "data_type": "text"})
+	tierParams, _ := json.Marshal(map[string]string{"dimension_id": "<created in step 1>", "name": "tier", "data_type": "text"})
+	renameParams, _ := json.Marshal(map[string]string{"dimension_id": "region", "property": "fact", "name": "factor", "data_type": "number"})
+	deleteParams, _ := json.Marshal(map[string]string{"dimension_id": "region", "property": "tier"})
+	proposal, err := aiassistant.NewProposalStore(f.pool).CreateProposal(ctx, sessionID, []aiassistant.ProposalStep{
+		{Tool: "create_dimension", Description: "Create dimension 'region'", Params: dimParams},
+		{Tool: "add_dimension_property", Description: "Declare text property 'fact'", Params: propParams},
+		{Tool: "add_dimension_property", Description: "Declare text property 'tier'", Params: tierParams},
+		{Tool: "update_dimension_property", Description: "Rename 'fact' to 'factor', typed number", Params: renameParams},
+		{Tool: "delete_dimension_property", Description: "Delete property 'tier'", Params: deleteParams},
+	})
+	if err != nil {
+		t.Fatalf("create proposal: %v", err)
+	}
+	status, body := f.do(t, "POST", "/api/ai/sessions/"+sessionID+"/proposals/"+proposal.ID+"/confirm", nil)
+	if status != http.StatusOK {
+		t.Fatalf("confirm proposal: status=%d body=%v", status, body)
+	}
+	confirmed, err := aiassistant.NewProposalStore(f.pool).GetProposal(ctx, proposal.ID)
+	if err != nil || confirmed.Status != "executed" {
+		t.Fatalf("proposal status %q (err %v), steps %+v", confirmed.Status, err, confirmed.Steps)
+	}
+	sess, err := aiassistant.NewChatStore(f.pool).GetSession(ctx, sessionID)
+	if err != nil || sess.DraftRevisionID == "" {
+		t.Fatalf("no draft revision after confirm (err %v)", err)
+	}
+	row := f.latestAuditEvent(t, "ai_proposal.confirmed")
+	if row.resourceID != proposal.ID || row.category != "ai_assistant" || row.revisionID == nil || *row.revisionID != sess.DraftRevisionID {
+		t.Errorf("ai_proposal.confirmed row = %+v, want resource_id=%s category=ai_assistant revision_id=%s", row, proposal.ID, sess.DraftRevisionID)
+	}
+	var declared string
+	if err := f.pool.QueryRow(ctx, `
+		SELECT string_agg(p.name || ':' || p.data_type, ',' ORDER BY p.name) FROM model.dimension_property p
+		JOIN model.dimension_def d ON d.id = p.dimension_id
+		WHERE d.revision_id=$1::uuid AND d.name='region'`, sess.DraftRevisionID).Scan(&declared); err != nil || declared != "factor:number" {
+		t.Errorf("declared in the draft: %q (err %v), want factor:number", declared, err)
+	}
+}
+
+// TestAIUpdateDimensionIsAudited: update_dimension runs through the same
+// propose -> confirm door as every other AI write, so its confirmation is
+// recorded as ai_proposal.confirmed against the draft revision it changed.
+func TestAIUpdateDimensionIsAudited(t *testing.T) {
+	f := setupAIAuditFixture(t)
+	ctx := context.Background()
+	sessionID := f.createSession(t)
+
+	regionParams, _ := json.Marshal(map[string]string{"name": "region"})
+	cityParams, _ := json.Marshal(map[string]string{"name": "city"})
+	updateParams, _ := json.Marshal(map[string]string{"dimension_id": "city", "name": "town", "agg_rule": "average",
+		"parent_dimension_name": "region"})
+	proposal, err := aiassistant.NewProposalStore(f.pool).CreateProposal(ctx, sessionID, []aiassistant.ProposalStep{
+		{Tool: "create_dimension", Description: "Create dimension 'region'", Params: regionParams},
+		{Tool: "create_dimension", Description: "Create dimension 'city'", Params: cityParams},
+		{Tool: "update_dimension", Description: "Rename 'city' to 'town', average it, under region", Params: updateParams},
+	})
+	if err != nil {
+		t.Fatalf("create proposal: %v", err)
+	}
+	status, body := f.do(t, "POST", "/api/ai/sessions/"+sessionID+"/proposals/"+proposal.ID+"/confirm", nil)
+	if status != http.StatusOK {
+		t.Fatalf("confirm proposal: status=%d body=%v", status, body)
+	}
+	confirmed, err := aiassistant.NewProposalStore(f.pool).GetProposal(ctx, proposal.ID)
+	if err != nil || confirmed.Status != "executed" {
+		t.Fatalf("proposal status %q (err %v), steps %+v", confirmed.Status, err, confirmed.Steps)
+	}
+	sess, err := aiassistant.NewChatStore(f.pool).GetSession(ctx, sessionID)
+	if err != nil || sess.DraftRevisionID == "" {
+		t.Fatalf("no draft revision after confirm (err %v)", err)
+	}
+	row := f.latestAuditEvent(t, "ai_proposal.confirmed")
+	if row.resourceID != proposal.ID || row.category != "ai_assistant" || row.revisionID == nil || *row.revisionID != sess.DraftRevisionID {
+		t.Errorf("ai_proposal.confirmed row = %+v, want resource_id=%s category=ai_assistant revision_id=%s", row, proposal.ID, sess.DraftRevisionID)
+	}
+	var agg, parent string
+	if err := f.pool.QueryRow(ctx, `
+		SELECT d.agg_rule, p.name FROM model.dimension_def d JOIN model.dimension_def p ON p.id = d.parent_dimension_id
+		WHERE d.revision_id=$1::uuid AND d.name='town'`, sess.DraftRevisionID).Scan(&agg, &parent); err != nil || agg != "average" || parent != "region" {
+		t.Errorf("updated in the draft: agg=%q parent=%q (err %v), want average under region", agg, parent, err)
+	}
+}

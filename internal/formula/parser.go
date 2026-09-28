@@ -59,7 +59,7 @@ func (p *parser) expect(tt TokenType) (Token, error) {
 // mulDiv     → power (("*" | "/") power)*
 // power      → unary ("^" unary)*
 // unary      → ("-" | "+") unary | primary
-// primary    → NUMBER | STRING | BOOL | IDENT | call | "(" expr ")"
+// primary    → NUMBER | STRING | BOOL | IDENT | DIM.PROPERTY | call | "(" expr ")"
 
 func (p *parser) parseExpr() (Node, error) {
 	return p.parseComparison()
@@ -220,6 +220,17 @@ func (p *parser) parsePrimary() (Node, error) {
 		}
 		p.advance()
 		return &Ident{Name: t.Val}, nil
+
+	case tokDotted:
+		if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Type == tokLParen {
+			return nil, fmt.Errorf("%s: a function name cannot contain a dot", t.Val)
+		}
+		p.advance()
+		dot := strings.IndexByte(t.Val, '.')
+		return &DimProperty{Dim: t.Val[:dot], Property: t.Val[dot+1:]}, nil
+
+	case tokError:
+		return nil, fmt.Errorf("%s", t.Val)
 
 	case tokLParen:
 		p.advance()

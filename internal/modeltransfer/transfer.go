@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/mavericks-engine/mavericks/internal/timedim"
@@ -47,7 +48,12 @@ type Queryer interface {
 }
 
 type Member struct {
-	ID             string          `json:"id"`
+	ID string `json:"id"`
+	// LineageID is the identity this row shares with its copies in every
+	// revision (migration 099) — what access rules resolve by. Kept on
+	// import so an imported revision lines up with the source model's
+	// other revisions; absent in packages exported before it existed.
+	LineageID      string          `json:"lineage_id,omitempty"`
 	Code           string          `json:"code"`
 	Label          string          `json:"label"`
 	ParentMemberID *string         `json:"parent_member_id,omitempty"`
@@ -65,7 +71,12 @@ type DimProperty struct {
 }
 
 type Dimension struct {
-	ID                string          `json:"id"`
+	ID string `json:"id"`
+	// LineageID is the identity this row shares with its copies in every
+	// revision (migration 099) — what access rules resolve by. Kept on
+	// import so an imported revision lines up with the source model's
+	// other revisions; absent in packages exported before it existed.
+	LineageID         string          `json:"lineage_id,omitempty"`
 	Name              string          `json:"name"`
 	AggRule           string          `json:"agg_rule"`
 	Properties        json.RawMessage `json:"properties,omitempty"`
@@ -83,7 +94,12 @@ type Dimension struct {
 }
 
 type Metric struct {
-	ID             string   `json:"id"`
+	ID string `json:"id"`
+	// LineageID is the identity this row shares with its copies in every
+	// revision (migration 099) — what access rules resolve by. Kept on
+	// import so an imported revision lines up with the source model's
+	// other revisions; absent in packages exported before it existed.
+	LineageID      string   `json:"lineage_id,omitempty"`
 	Name           string   `json:"name"`
 	Formula        *string  `json:"formula,omitempty"`
 	StorageType    string   `json:"storage_type"`
@@ -333,7 +349,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	// Dimensions + members + typed properties.
 	rows, err := q.Query(ctx, `
 		SELECT id::text, name, agg_rule, properties, parent_dimension_id::text, source_dimension_id::text, source_property,
-		       dimension_type, time_granularity, fiscal_year_start_month, tags
+		       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id::text
 		FROM model.dimension_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -342,7 +358,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for rows.Next() {
 		var d Dimension
 		if err := rows.Scan(&d.ID, &d.Name, &d.AggRule, &d.Properties, &d.ParentDimensionID, &d.SourceDimensionID, &d.SourceProperty,
-			&d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart, &d.Tags); err != nil {
+			&d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart, &d.Tags, &d.LineageID); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -356,7 +372,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for i := range pkg.Dimensions {
 		mrows, err := q.Query(ctx, `
 			SELECT id::text, code, label, parent_member_id::text, properties, sort_order,
-			       period_start::text, period_end::text, time_index
+			       period_start::text, period_end::text, time_index, lineage_id::text
 			FROM model.dimension_member WHERE dimension_id=$1::uuid ORDER BY time_index NULLS LAST, sort_order, code`,
 			pkg.Dimensions[i].ID)
 		if err != nil {
@@ -364,7 +380,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 		}
 		for mrows.Next() {
 			var m Member
-			if err := mrows.Scan(&m.ID, &m.Code, &m.Label, &m.ParentMemberID, &m.Properties, &m.SortOrder, &m.PeriodStart, &m.PeriodEnd, &m.TimeIndex); err != nil {
+			if err := mrows.Scan(&m.ID, &m.Code, &m.Label, &m.ParentMemberID, &m.Properties, &m.SortOrder, &m.PeriodStart, &m.PeriodEnd, &m.TimeIndex, &m.LineageID); err != nil {
 				mrows.Close()
 				return nil, err
 			}
@@ -397,7 +413,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	// Metrics + dependencies.
 	rows, err = q.Query(ctx, `
 		SELECT id::text, name, formula, storage_type::text, is_input, agg_rule,
-		       COALESCE(format,''), COALESCE(format_decimals,0), COALESCE(format_currency,''), time_summary, tags
+		       COALESCE(format,''), COALESCE(format_decimals,0), COALESCE(format_currency,''), time_summary, tags, lineage_id::text
 		FROM model.metric_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -405,7 +421,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 	for rows.Next() {
 		var m Metric
-		if err := rows.Scan(&m.ID, &m.Name, &m.Formula, &m.StorageType, &m.IsInput, &m.AggRule, &m.Format, &m.FormatDecimals, &m.FormatCurrency, &m.TimeSummary, &m.Tags); err != nil {
+		if err := rows.Scan(&m.ID, &m.Name, &m.Formula, &m.StorageType, &m.IsInput, &m.AggRule, &m.Format, &m.FormatDecimals, &m.FormatCurrency, &m.TimeSummary, &m.Tags, &m.LineageID); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -790,6 +806,82 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 
 // ── Import ────────────────────────────────────────────────────────────────────
 
+// importLineages decides the lineage_id each imported dimension, member and
+// metric gets, as a function from the package's lineage to the one to
+// store (nil = generate a fresh one). A package lineage is kept, so an
+// imported revision still lines up with its source model's revisions — the
+// identity access rules resolve by (migration 099). Two exceptions get a
+// fresh lineage instead:
+//
+//   - a missing or malformed lineage (a package from before migration 099,
+//     or a hand-edited one);
+//   - a lineage some row in this database already carries. Import always
+//     creates a NEW model, so such a row belongs to another model — most
+//     often the very model the package was exported from, re-imported as a
+//     copy in the same tenant. A lineage is one model's identity: shared
+//     across models, a rule on one model's member would also restrict its
+//     twin in the other.
+//
+// A re-minted lineage is re-minted consistently: every row of the package
+// that carried it gets the same new value.
+func importLineages(ctx context.Context, tx pgx.Tx, pkg *Package) (func(string) *string, error) {
+	var ids []string
+	for _, d := range pkg.Dimensions {
+		ids = append(ids, d.LineageID)
+		for _, m := range d.Members {
+			ids = append(ids, m.LineageID)
+		}
+	}
+	for _, m := range pkg.Metrics {
+		ids = append(ids, m.LineageID)
+	}
+	keep := map[string]string{}
+	var valid []string
+	for _, id := range ids {
+		u, err := uuid.Parse(id)
+		if err != nil {
+			continue
+		}
+		if _, seen := keep[id]; !seen {
+			keep[id] = u.String()
+			valid = append(valid, u.String())
+		}
+	}
+	if len(valid) > 0 {
+		rows, err := tx.Query(ctx, `
+			SELECT lineage_id::text FROM model.dimension_def WHERE lineage_id = ANY($1::uuid[])
+			UNION SELECT lineage_id::text FROM model.dimension_member WHERE lineage_id = ANY($1::uuid[])
+			UNION SELECT lineage_id::text FROM model.metric_def WHERE lineage_id = ANY($1::uuid[])`, valid)
+		if err != nil {
+			return nil, fmt.Errorf("check package lineages: %w", err)
+		}
+		taken := map[string]bool{}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("check package lineages: %w", err)
+			}
+			taken[id] = true
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("check package lineages: %w", err)
+		}
+		for raw, canon := range keep {
+			if taken[canon] {
+				keep[raw] = uuid.NewString()
+			}
+		}
+	}
+	return func(pkgLineage string) *string {
+		if v, ok := keep[pkgLineage]; ok {
+			return &v
+		}
+		return nil
+	}, nil
+}
+
 type ImportRequest struct {
 	ApplicationID string  `json:"application_id"`
 	ModelName     string  `json:"model_name,omitempty"`    // override; defaults to package's
@@ -925,6 +1017,11 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 		return "", "", fmt.Errorf("create revision: %w", err)
 	}
 
+	lineage, err := importLineages(ctx, tx, pkg)
+	if err != nil {
+		return "", "", err
+	}
+
 	// Dimensions (parents/sources remapped after all rows exist), members,
 	// typed properties.
 	dimMap := make(map[string]string, len(pkg.Dimensions))
@@ -937,21 +1034,23 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 		}
 		if err = tx.QueryRow(ctx, `
 			INSERT INTO model.dimension_def (model_id, revision_id, name, agg_rule, properties, source_property,
-			                                 dimension_type, time_granularity, fiscal_year_start_month, tags)
-			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE($5::jsonb,'[]'::jsonb), $6, $7, $8, $9, COALESCE($10::text[],'{}'))
+			                                 dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id)
+			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE($5::jsonb,'[]'::jsonb), $6, $7, $8, $9, COALESCE($10::text[],'{}'),
+			        COALESCE($11::uuid, gen_random_uuid()))
 			RETURNING id::text`,
 			modelID, revisionID, d.Name, d.AggRule, []byte(d.Properties), d.SourceProperty,
-			dimType, d.TimeGranularity, d.FiscalYearStart, d.Tags).Scan(&newID); err != nil {
+			dimType, d.TimeGranularity, d.FiscalYearStart, d.Tags, lineage(d.LineageID)).Scan(&newID); err != nil {
 			return "", "", fmt.Errorf("dimension %q: %w", d.Name, err)
 		}
 		dimMap[d.ID] = newID
 		for _, m := range d.Members {
 			var newMemberID string
 			if err = tx.QueryRow(ctx, `
-				INSERT INTO model.dimension_member (dimension_id, code, label, properties, sort_order, period_start, period_end, time_index)
-				VALUES ($1::uuid, $2, $3, COALESCE($4::jsonb,'{}'::jsonb), $5, $6::date, $7::date, $8)
+				INSERT INTO model.dimension_member (dimension_id, code, label, properties, sort_order, period_start, period_end, time_index, lineage_id)
+				VALUES ($1::uuid, $2, $3, COALESCE($4::jsonb,'{}'::jsonb), $5, $6::date, $7::date, $8, COALESCE($9::uuid, gen_random_uuid()))
 				RETURNING id::text`,
-				newID, m.Code, m.Label, []byte(m.Properties), m.SortOrder, m.PeriodStart, m.PeriodEnd, m.TimeIndex).Scan(&newMemberID); err != nil {
+				newID, m.Code, m.Label, []byte(m.Properties), m.SortOrder, m.PeriodStart, m.PeriodEnd, m.TimeIndex,
+				lineage(m.LineageID)).Scan(&newMemberID); err != nil {
 				return "", "", fmt.Errorf("member %q of %q: %w", m.Code, d.Name, err)
 			}
 			memberMap[m.ID] = newMemberID
@@ -1006,10 +1105,11 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			timeSummary = "sum"
 		}
 		if err = tx.QueryRow(ctx, `
-			INSERT INTO model.metric_def (model_id, revision_id, name, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags)
-			VALUES ($1::uuid, $2::uuid, $3, $4, $5::core.storage_type, $6, $7, $8, $9, $10, $11, COALESCE($12::text[],'{}'))
+			INSERT INTO model.metric_def (model_id, revision_id, name, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, lineage_id)
+			VALUES ($1::uuid, $2::uuid, $3, $4, $5::core.storage_type, $6, $7, $8, $9, $10, $11, COALESCE($12::text[],'{}'), COALESCE($13::uuid, gen_random_uuid()))
 			RETURNING id::text`,
-			modelID, revisionID, m.Name, m.Formula, m.StorageType, m.IsInput, m.AggRule, m.Format, m.FormatDecimals, m.FormatCurrency, timeSummary, m.Tags).Scan(&newID); err != nil {
+			modelID, revisionID, m.Name, m.Formula, m.StorageType, m.IsInput, m.AggRule, m.Format, m.FormatDecimals, m.FormatCurrency, timeSummary, m.Tags,
+			lineage(m.LineageID)).Scan(&newID); err != nil {
 			return "", "", fmt.Errorf("metric %q: %w", m.Name, err)
 		}
 		metricMap[m.ID] = newID

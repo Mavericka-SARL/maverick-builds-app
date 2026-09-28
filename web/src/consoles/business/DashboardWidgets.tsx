@@ -230,8 +230,10 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps }: { metricId: stri
   // has no value (the scheduler writes no row where the formula can't
   // evaluate), and rendering 0 for it would fabricate a number. Keep the
   // value undefined and show "—" below — the same display contract the grid
-  // follows.
-  const value: number | undefined = g?.totals?.[metricId];
+  // follows. A total the server WITHHOLDS from this viewer (its computation
+  // reads a member they cannot see — GridData.withheld, keyed by the bare
+  // metric id) is blank too, never 0, even if a value were ever sent with it.
+  const value: number | undefined = g?.withheld?.includes(metricId) ? undefined : g?.totals?.[metricId];
   const fmt = metric?.format ?? "number";
 
   const formatted = value === undefined

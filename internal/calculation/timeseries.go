@@ -2,6 +2,7 @@ package calculation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -212,7 +213,10 @@ type tsEvaluator struct {
 	dimIDToName map[string]string
 	allDefs     map[string]*MetricDef
 	fetch       map[string]rollup.RawValue
-	memo        map[memoKey]formula.Value
+	// rows: persisted rows of formula/rate calculated dependencies
+	// (exactRows); a recurrence peer has none.
+	rows map[string]*exactSource
+	memo map[memoKey]formula.Value
 	// varsMemo caches the resolved dependency values per coordinate. It is
 	// nil for a recurrence member: vars binds EVERY dependency eagerly, so
 	// caching would freeze a peer's value at a coordinate before the peer
@@ -220,6 +224,20 @@ type tsEvaluator struct {
 	// only ever reading it at t-1). A pinned-leaf Resolve is one map lookup,
 	// so the recurrence path simply re-resolves.
 	varsMemo map[string]map[string]float64
+	// plain holds the UPPER-CASE names the formula reads as plain values;
+	// a dependency read only as a LOOKUP / *IFS / *VALUE source is never
+	// bound. nil (a formula that does not parse) binds every dependency.
+	plain map[string]bool
+	// reads fulfils the dimensional context's Resolve and records whether
+	// any value read through it (or through Summarize) was non-zero.
+	reads *dimReads
+	// hasConditional: the formula reads through the dimensional context
+	// (LOOKUP, the conditional aggregations) or Summarize (the *VALUE
+	// family) — reads a memo hit (the conditional memo, or EvalAt's) skips,
+	// so "nothing read" must be re-checked without the memos.
+	hasConditional bool
+	// noMemo disables both memos for one evaluation (the no-data recheck).
+	noMemo bool
 }
 
 // overlay holds a recurrence component's own results as they are computed,
@@ -230,7 +248,7 @@ type overlay map[string]map[string]float64
 func (s *Scheduler) newTSEvaluator(
 	ctx context.Context, def *MetricDef, modelID, revisionID string, axis *timeAxis,
 	allDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string,
-	allDefs map[string]*MetricDef, ov overlay,
+	meta *DimMetadata, allDefs map[string]*MetricDef, ov overlay,
 ) (*tsEvaluator, error) {
 	node, err := formula.Parse(def.Formula)
 	if err != nil {
@@ -240,8 +258,10 @@ func (s *Scheduler) newTSEvaluator(
 		s: s, ctx: ctx, def: def, node: node, modelID: modelID, revisionID: revisionID, axis: axis,
 		allDims: allDims, metricDims: metricDimIDs, dimIDToName: dimIDToName, allDefs: allDefs,
 		fetch: make(map[string]rollup.RawValue, len(def.DependsOnID)),
+		rows:  map[string]*exactSource{},
 		memo:  map[memoKey]formula.Value{}, varsMemo: map[string]map[string]float64{},
 	}
+	env := newEvalEnv(s, modelID, revisionID, allDims, metricDimIDs, dimIDToName, meta, allDefs)
 	for _, depID := range def.DependsOnID {
 		depDef, ok := allDefs[depID]
 		if !ok {
@@ -270,7 +290,27 @@ func (s *Scheduler) newTSEvaluator(
 			v, ok := valueMap[dimKey(combo)]
 			return v, ok, nil
 		}
+		if src := env.exactSource(ctx, depDef, valueMap); src != nil {
+			e.rows[depID] = src
+		}
 	}
+	e.plain = map[string]bool{}
+	plainReferences(node, e.plain)
+	if an, anErr := formula.Analyze(def.Formula); anErr == nil {
+		e.hasConditional = len(an.DimensionalCalls) > 0
+		for _, fn := range an.Calls {
+			switch strings.ToUpper(fn) {
+			case "YEARVALUE", "HALFYEARVALUE", "QUARTERVALUE", "MONTHVALUE":
+				e.hasConditional = true
+			}
+		}
+	}
+	// The conditional-aggregation memo is off for a recurrence member
+	// (varsMemo == nil): its peers' values appear during the pass, so a
+	// memoised read could freeze one before it was computed. The scheduler
+	// refuses dimensional functions in a recurrence anyway
+	// (executeRecurrence); this is the second guard.
+	e.reads = newDimReads(ctx, meta, def, allDefs, metricDimIDs, e.fetch, e.rows, e.varsMemo != nil)
 	return e, nil
 }
 
@@ -283,8 +323,10 @@ func (e *tsEvaluator) vars(combo map[string]string) (map[string]formula.Value, m
 		values = make(map[string]float64, len(e.def.DependsOnID))
 		for _, depID := range e.def.DependsOnID {
 			depDef := e.allDefs[depID]
-			v, _, err := rollup.ResolveTime(e.ctx, e.allDims, depID, e.metricDims[depID], rollup.AggRule(depDef.AggRule),
-				rollup.TimeSummaryRule(depDef.TimeSummary), combo, e.fetch[depID])
+			if e.plain != nil && !e.plain[strings.ToUpper(depDef.Name)] {
+				continue // read only through LOOKUP / *IFS / *VALUE
+			}
+			v, _, err := resolveDependency(e.ctx, e.allDims, depDef, e.metricDims[depID], combo, e.fetch[depID], e.rows[depID])
 			if err != nil {
 				return nil, nil, fmt.Errorf("resolve %s: %w", depDef.Name, err)
 			}
@@ -324,21 +366,114 @@ func (e *tsEvaluator) evalCtx(combo map[string]string, pos int, parent *formula.
 	} else {
 		tc = parent.Child(pos)
 	}
-	nonTimeKey := dimKey(e.nonTimeCombo(shifted))
+	nonTime := e.nonTimeCombo(shifted)
+	nonTimeKey := dimKey(nonTime)
 	tc.EvalAt = func(node formula.Node, position int) formula.Value {
 		k := memoKey{node: node, pos: position, nonTime: nonTimeKey}
-		if v, ok := e.memo[k]; ok {
-			return v
+		if !e.noMemo {
+			if v, ok := e.memo[k]; ok {
+				return v
+			}
 		}
 		child, _, cerr := e.evalCtx(shifted, position, tc)
 		if cerr != nil {
 			return formula.ErrorVal(&formula.FormulaError{Code: "#REF!", Message: cerr.Error()})
 		}
 		v := formula.EvalNode(child, node)
-		e.memo[k] = v
+		if !e.noMemo {
+			e.memo[k] = v
+		}
 		return v
 	}
-	return &formula.EvalContext{Vars: vars, Time: tc}, raw, nil
+	tc.Summarize = func(metric string, positions []int) (float64, bool, *formula.FormulaError) {
+		return e.summarize(nonTime, metric, positions)
+	}
+	tc.Span = e.span
+	// The dimensional context of THIS (shifted) cell: dim.property on the
+	// time dimension and PARENT of a leaf period see the period evaluated,
+	// and a LOOKUP inside LAG reads at the lagged period.
+	dim := e.reads.context(shifted, !e.noMemo)
+	return &formula.EvalContext{Vars: vars, Time: tc, Dim: dim}, raw, nil
+}
+
+// summarize fulfils TimeEvalContext.Summarize (YEARVALUE and its
+// siblings): the bare source metric at each given leaf position with the
+// non-time coordinates of the cell held, periods with no recorded value
+// skipped, reduced by the source's own time_summary. 'none' is blank.
+func (e *tsEvaluator) summarize(nonTime map[string]string, metric string, positions []int) (float64, bool, *formula.FormulaError) {
+	depID, ferr := e.reads.source(metric)
+	if ferr != nil {
+		return 0, false, ferr
+	}
+	src := e.allDefs[depID]
+	srcDims := e.metricDims[depID]
+	onAxis := false
+	for _, id := range srcDims {
+		if id == e.axis.dim.ID {
+			onAxis = true
+			break
+		}
+	}
+	if !onAxis {
+		return 0, false, &formula.FormulaError{Code: formula.CodeTimeDimensionMismatch,
+			Message: fmt.Sprintf("%s is not dimensioned by the time dimension, so it has no value per period to summarise", metric)}
+	}
+	if src.TimeSummary == "none" {
+		return 0, false, nil
+	}
+	// Pins on dimensions unrelated to the source are dropped, as for LOOKUP:
+	// a source that does not carry a dimension is never rolled up along it.
+	base, err := rollup.NormalizeCombo(e.allDims, srcDims, nonTime, nil)
+	if err != nil {
+		return 0, false, &formula.FormulaError{Code: formula.ErrRef.Code, Message: fmt.Sprintf("reading %s: %v", metric, err)}
+	}
+	vals := make([]float64, 0, len(positions))
+	for _, pos := range positions {
+		if pos < 0 || pos >= len(e.axis.periods) {
+			continue
+		}
+		c := make(map[string]string, len(base)+1)
+		for k, v := range base {
+			c[k] = v
+		}
+		c[e.axis.dim.ID] = e.axis.periods[pos].Code
+		var v float64
+		var ok bool
+		var err error
+		if exact := e.rows[depID]; exact != nil {
+			v, ok, err = resolveDependency(e.ctx, e.allDims, src, srcDims, c, e.fetch[depID], exact)
+		} else {
+			// At a parent member (EMEA), ResolveTime answers the sum of
+			// nothing for a month no leaf recorded; that period is skipped
+			// like an empty month at a leaf.
+			v, ok, err = rollup.ResolveTimeRecorded(e.ctx, e.allDims, depID, srcDims, rollup.AggRule(src.AggRule),
+				rollup.TimeSummaryRule(src.TimeSummary), c, e.fetch[depID])
+		}
+		if err != nil {
+			return 0, false, &formula.FormulaError{Code: formula.ErrRef.Code, Message: fmt.Sprintf("reading %s: %v", metric, err)}
+		}
+		if !ok {
+			continue // no recorded value: skipped, never a zero to average in
+		}
+		if v != 0 {
+			e.reads.data = true
+		}
+		vals = append(vals, v)
+	}
+	if len(vals) == 0 {
+		return 0, false, nil
+	}
+	return rollup.CombineTime(vals, rollup.TimeSummaryRule(src.TimeSummary)), true, nil
+}
+
+// span fulfils TimeEvalContext.Span (TIMESUM): a period code — leaf or
+// aggregate — to the first and last leaf positions it covers.
+func (e *tsEvaluator) span(code string) (int, int, bool) {
+	positions := e.axis.leafPositions(code)
+	if len(positions) == 0 {
+		return 0, 0, false
+	}
+	return positions[0], positions[len(positions)-1], true
 }
 
 func (e *tsEvaluator) nonTimeCombo(combo map[string]string) map[string]string {
@@ -355,13 +490,30 @@ func (e *tsEvaluator) nonTimeCombo(combo map[string]string) map[string]string {
 // period pos. The second return mirrors executePartition's evalOne: true
 // alongside an error means every dependency resolved to zero (no data).
 func (e *tsEvaluator) evalAt(combo map[string]string, pos int) (float64, bool, error) {
+	v, noData, err := e.evalAtOnce(combo, pos)
+	if err != nil && noData && e.hasConditional && !e.noMemo && !errors.Is(err, errBlankResult) {
+		// A memo hit reads nothing, so "nothing read" may only mean "memo
+		// hit": decide no-data from an evaluation that really reads.
+		e.noMemo = true
+		_, noData, _ = e.evalAtOnce(combo, pos)
+		e.noMemo = false
+	}
+	return v, noData, err
+}
+
+// evalAtOnce is one evaluation of evalAt. noData (alongside an error) means
+// every plain reference at the cell and every value read through the
+// dimensional context or Summarize was zero or absent.
+func (e *tsEvaluator) evalAtOnce(combo map[string]string, pos int) (float64, bool, error) {
+	e.reads.data = false
 	ctx, raw, err := e.evalCtx(combo, pos, nil)
 	if err != nil {
 		return 0, false, err
 	}
 	v := formula.EvalNode(ctx, e.node)
 	if v.IsError() {
-		noData := len(e.def.DependsOnID) > 0
+		// A blank or unknown member is never "no data" (see evalCell).
+		noData := len(e.def.DependsOnID) > 0 && !e.reads.data && !formula.IsMemberNotAvailable(v.Err())
 		for _, dv := range raw {
 			if dv != 0 {
 				noData = false
@@ -369,6 +521,9 @@ func (e *tsEvaluator) evalAt(combo map[string]string, pos int) (float64, bool, e
 			}
 		}
 		return 0, noData, v.Err()
+	}
+	if v.IsBlank() {
+		return 0, true, errBlankResult // no value: no row, never a 0
 	}
 	n, ok := v.Number()
 	if !ok {
@@ -395,10 +550,16 @@ func (e *tsEvaluator) evalCombo(combo map[string]string) (float64, bool, error) 
 	vals := make([]float64, 0, len(positions))
 	for _, pos := range positions {
 		v, _, err := e.evalAt(e.nonTimeCombo(combo), pos)
+		if errors.Is(err, errBlankResult) {
+			continue // a blank period has no value to reduce
+		}
 		if err != nil {
 			return 0, false, err
 		}
 		vals = append(vals, v)
+	}
+	if len(vals) == 0 {
+		return 0, true, errBlankResult
 	}
 	v, ok := TimeSummary(e.def.TimeSummary, vals)
 	if !ok {
@@ -413,6 +574,7 @@ type tsResults struct {
 	aggregate *float64
 	rows      []CalcResultRow // per-combo rows: leaves, rollups, slices
 	failures  int
+	memberNA  int // failures naming a member that does not exist
 	skipped   int
 	firstErr  error
 }
@@ -440,6 +602,9 @@ func (e *tsEvaluator) evalLeaves(order []int, ov overlay, res *tsResults) {
 					continue
 				}
 				res.failures++
+				if formula.IsMemberNotAvailable(err) {
+					res.memberNA++
+				}
 				if res.firstErr == nil {
 					res.firstErr = err
 				}
@@ -619,12 +784,12 @@ func (a *timeAxis) order(dir metricformula.Direction) []int {
 // the same write sequence executePartition uses.
 func (s *Scheduler) executeTimeSeries(
 	ctx context.Context, def *MetricDef, modelID, revisionID, partitionKey string, axis *timeAxis,
-	allDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string, allDefs map[string]*MetricDef,
+	allDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string, meta *DimMetadata, allDefs map[string]*MetricDef,
 ) error {
 	if len(axis.periods) == 0 {
 		return fmt.Errorf("%s: time dimension has no periods", formula.CodeInvalidTimeMember)
 	}
-	e, err := s.newTSEvaluator(ctx, def, modelID, revisionID, axis, allDims, metricDimIDs, dimIDToName, allDefs, nil)
+	e, err := s.newTSEvaluator(ctx, def, modelID, revisionID, axis, allDims, metricDimIDs, dimIDToName, meta, allDefs, nil)
 	if err != nil {
 		return err
 	}
@@ -632,12 +797,24 @@ func (s *Scheduler) executeTimeSeries(
 	e.evalLeaves(axis.order(metricformula.DirectionForward), nil, &res)
 	if len(res.leaf) == 0 {
 		if res.failures == 0 {
-			return s.store.ClearPerComboResults(ctx, modelID, revisionID, def.ID)
+			// No data anywhere: every row goes, the '{}' total included.
+			return s.store.ClearAllResults(ctx, modelID, revisionID, def.ID)
+		}
+		if res.memberNA == res.failures {
+			// Every cell names a member that does not exist: the last
+			// rows were read from that member's data (see executePartition).
+			if err := s.store.ClearAllResults(ctx, modelID, revisionID, def.ID); err != nil {
+				return fmt.Errorf("clear stale results: %w", err)
+			}
 		}
 		return fmt.Errorf("%d combos failed to evaluate for metric %s (first error: %w)", res.failures, def.Name, res.firstErr)
 	}
 	e.finish(&res)
-	if err := s.persistTimeSeries(ctx, nil, def, modelID, revisionID, partitionKey, &res); err != nil {
+	// One transaction, as the scalar path: a reader never sees the metric
+	// between the clear of its rows and the write of the new ones.
+	if err := s.store.InTx(ctx, func(tx pgx.Tx) error {
+		return s.persistTimeSeries(ctx, tx, def, modelID, revisionID, partitionKey, &res)
+	}); err != nil {
 		return err
 	}
 	if res.failures > 0 {
@@ -646,35 +823,24 @@ func (s *Scheduler) executeTimeSeries(
 	return nil
 }
 
-// persistTimeSeries writes one metric's results, through tx when given.
+// persistTimeSeries replaces one metric's results inside tx: its '{}'
+// total (or the clear of a stale one), the clear of its previous per-combo
+// rows and the new ones.
 func (s *Scheduler) persistTimeSeries(ctx context.Context, tx pgx.Tx, def *MetricDef, modelID, revisionID, partitionKey string, res *tsResults) error {
 	if res.aggregate != nil {
-		var err error
-		if tx != nil {
-			err = s.store.WriteCalcResultTx(ctx, tx, modelID, revisionID, def.ID, partitionKey, map[string]string{}, *res.aggregate)
-		} else {
-			err = s.store.WriteCalcResult(ctx, modelID, revisionID, def.ID, partitionKey, map[string]string{}, *res.aggregate)
-		}
-		if err != nil {
+		if err := s.store.WriteCalcResultTx(ctx, tx, modelID, revisionID, def.ID, partitionKey, map[string]string{}, *res.aggregate); err != nil {
 			return fmt.Errorf("write aggregate: %w", err)
 		}
+	} else if err := s.store.ClearAggregateResultTx(ctx, tx, modelID, revisionID, def.ID); err != nil {
+		// No total this pass (time_summary 'none', no period with a value):
+		// an earlier pass's total must not keep answering for it.
+		return fmt.Errorf("clear stale aggregate: %w", err)
 	}
-	var clearErr, writeErr error
-	if tx != nil {
-		clearErr = s.store.ClearPerComboResultsTx(ctx, tx, modelID, revisionID, def.ID)
-	} else {
-		clearErr = s.store.ClearPerComboResults(ctx, modelID, revisionID, def.ID)
+	if err := s.store.ClearPerComboResultsTx(ctx, tx, modelID, revisionID, def.ID); err != nil {
+		return fmt.Errorf("clear stale per-combo results: %w", err)
 	}
-	if clearErr != nil {
-		return fmt.Errorf("clear stale per-combo results: %w", clearErr)
-	}
-	if tx != nil {
-		writeErr = s.store.WriteCalcResultsTx(ctx, tx, modelID, revisionID, def.ID, partitionKey, res.rows)
-	} else {
-		writeErr = s.store.WriteCalcResults(ctx, modelID, revisionID, def.ID, partitionKey, res.rows)
-	}
-	if writeErr != nil {
-		return fmt.Errorf("write per-intersection results: %w", writeErr)
+	if err := s.store.WriteCalcResultsTx(ctx, tx, modelID, revisionID, def.ID, partitionKey, res.rows); err != nil {
+		return fmt.Errorf("write per-intersection results: %w", err)
 	}
 	return nil
 }
@@ -686,7 +852,7 @@ func (s *Scheduler) persistTimeSeries(ctx context.Context, tx pgx.Tx, def *Metri
 // in one transaction.
 func (s *Scheduler) executeRecurrence(
 	ctx context.Context, comp metricformula.Component, modelID, revisionID, partitionKey string,
-	allDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string, allDefs map[string]*MetricDef,
+	allDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string, meta *DimMetadata, allDefs map[string]*MetricDef,
 ) error {
 	var axis *timeAxis
 	ov := overlay{}
@@ -709,13 +875,21 @@ func (s *Scheduler) executeRecurrence(
 			return fmt.Errorf("%s: %s and %s are in one recurrence but use different time dimensions",
 				formula.CodeTimeDimensionMismatch, allDefs[comp.Members[0]].Name, def.Name)
 		}
+		// Runtime guard (contract C4; metricformula.Plan refuses this at
+		// save): LOOKUP and the conditional aggregations read other cells
+		// along a dimension, which a period-by-period recurrence cannot
+		// order causally.
+		if an, anErr := formula.Analyze(def.Formula); anErr == nil && len(an.DimensionalCalls) > 0 {
+			return fmt.Errorf("%s: %s is part of a recurrence (a cycle broken by time) and calls %s, which reads other cells along a dimension; that is not allowed in a recurrence",
+				formula.CodeTemporalCycleNotCausal, def.Name, an.DimensionalCalls[0].Func)
+		}
 		ov[id] = map[string]float64{}
 	}
 	if len(axis.periods) == 0 {
 		return fmt.Errorf("%s: time dimension has no periods", formula.CodeInvalidTimeMember)
 	}
 	for _, id := range comp.Members {
-		e, err := s.newTSEvaluator(ctx, allDefs[id], modelID, revisionID, axis, allDims, metricDimIDs, dimIDToName, allDefs, ov)
+		e, err := s.newTSEvaluator(ctx, allDefs[id], modelID, revisionID, axis, allDims, metricDimIDs, dimIDToName, meta, allDefs, ov)
 		if err != nil {
 			return err
 		}
@@ -742,7 +916,7 @@ func (s *Scheduler) executeRecurrence(
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
 	for i, e := range evals {
 		if len(results[i].leaf) == 0 {
-			if err := s.store.ClearPerComboResultsTx(ctx, tx, modelID, revisionID, e.def.ID); err != nil {
+			if err := s.store.ClearAllResultsTx(ctx, tx, modelID, revisionID, e.def.ID); err != nil {
 				return err
 			}
 			continue

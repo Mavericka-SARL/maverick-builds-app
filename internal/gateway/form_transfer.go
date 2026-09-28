@@ -289,25 +289,20 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 // use rather than partially redacting one field within an otherwise
 // visible record.
 func (h *handler) filterFormRecords(ctx context.Context, act *actor, form *crudapp.FormDef, records []*crudapp.FormRecord) ([]*crudapp.FormRecord, error) {
-	dimRules := map[string]string{}
-	metricRules := map[string]string{}
-	arRows, err := h.db.Query(ctx,
-		`SELECT rule_type, ref_id, access FROM identity.user_access_rule WHERE user_id=$1::uuid`, act.UserID)
+	// The form's field bindings point at its own revision's dimensions and
+	// metrics, so the rules resolve by lineage against that revision (a
+	// form of an older revision hides what the active one does). Fails
+	// closed.
+	var formRevision string
+	if err := h.db.QueryRow(ctx,
+		`SELECT COALESCE(revision_id::text, '') FROM model.form_def WHERE id=$1::uuid`, form.ID,
+	).Scan(&formRevision); err != nil {
+		return nil, fmt.Errorf("resolve form revision: %w", err)
+	}
+	dimRules, metricRules, err := loadUserAccessRules(ctx, h.db, act.UserID, formRevision)
 	if err != nil {
 		return nil, err
 	}
-	for arRows.Next() {
-		var ruleType, refID, access string
-		if arRows.Scan(&ruleType, &refID, &access) == nil {
-			switch ruleType {
-			case "dimension_member":
-				dimRules[refID] = access
-			case "metric":
-				metricRules[refID] = access
-			}
-		}
-	}
-	arRows.Close()
 	if len(dimRules) == 0 && len(metricRules) == 0 {
 		return records, nil
 	}
@@ -344,10 +339,12 @@ func (h *handler) filterFormRecords(ctx context.Context, act *actor, form *cruda
 		edges := make([]writeguard.MemberEdge, 0, 256)
 		for memRows.Next() {
 			var mr memberRow
-			if memRows.Scan(&mr.id, &mr.dimID, &mr.code, &mr.parentID) == nil {
-				members = append(members, mr)
-				edges = append(edges, writeguard.MemberEdge{ID: mr.id, ParentID: mr.parentID, DimID: mr.dimID})
+			if sErr := memRows.Scan(&mr.id, &mr.dimID, &mr.code, &mr.parentID); sErr != nil {
+				memRows.Close()
+				return nil, sErr
 			}
+			members = append(members, mr)
+			edges = append(edges, writeguard.MemberEdge{ID: mr.id, ParentID: mr.parentID, DimID: mr.dimID})
 		}
 		memRows.Close()
 		if err := memRows.Err(); err != nil {

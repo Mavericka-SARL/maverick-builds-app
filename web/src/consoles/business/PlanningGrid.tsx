@@ -307,7 +307,7 @@ function leafDescendantCodes(dim: DimInfo, code: string): string[] {
 
 // Every leaf code in `dim` — used when a referenced metric has a dimension
 // that isn't sliced by the referencing grid/chart at all (see
-// resolveCrossDimensionValue): rather than fail the whole resolution, that
+// crossDimensionSources): rather than fail the whole resolution, that
 // axis is aggregated over in full, exactly like a plain SUM with no filter.
 function allLeafCodes(dim: DimInfo): string[] {
   const hasChildren = new Set(dim.members.filter(m => m.parent_code !== undefined).map(m => m.parent_code as string));
@@ -315,7 +315,7 @@ function allLeafCodes(dim: DimInfo): string[] {
 }
 
 // Resolves the set of metricDim member codes that correspond to gridDim's
-// current member `gridMember` — one axis of resolveCrossDimensionValue's
+// current member `gridMember` — one axis of crossDimensionSources'
 // per-metric-dimension resolution. undefined when metricDim has no
 // relationship to gridDim at all (exact, structural, or property-based).
 function resolveAxisCodes(
@@ -346,49 +346,57 @@ function resolveAxisCodes(
   // Property relation — gridDim's members are a grouping of metricDim's
   // members by a property value (e.g. regions <- employees.properties.region).
   if (gridDim.source_dimension_id === metricDim.id && gridDim.source_property) {
-    const prop = gridDim.source_property;
+    // The key matches case-insensitively, as the engine's rollup does.
+    const prop = gridDim.source_property.toLowerCase();
+    const valueOf = (props?: Record<string, string>) =>
+      props ? Object.entries(props).find(([k]) => k.toLowerCase() === prop)?.[1] : undefined;
     return metricDim.members
-      .filter(mm => mm.properties?.[prop] === gridMember.code)
+      .filter(mm => valueOf(mm.properties) === gridMember.code)
       .map(mm => mm.code);
   }
 
   return undefined;
 }
 
-// Resolves metric `m`'s value for the current grid's `combo`, rolling up
-// (or broadcasting down) each of m's own dimensions against whichever of the
-// current grid's `dims` it relates to (exactly, structurally, or by
-// property) — e.g. a target grid dimensioned by [departments] correctly
-// sums a metric dimensioned by the child [staff] under the current
-// department (structural roll-up), or repeats a metric dimensioned by the
-// parent [departments] across every [staff] row (structural broadcast).
-// Metrics assigned to more than one dimension (e.g. salary: [employees,
-// months]) are resolved by combining each dimension's resolved code-set via
-// Cartesian product before summing — e.g. a cost_centers x months grid rolls
-// employees up (structural) while holding months fixed (exact match).
+// The cells metric `m`'s value for the current grid's `combo` is read from,
+// rolling up (or broadcasting down) each of m's own dimensions against
+// whichever of the current grid's `dims` it relates to (exactly,
+// structurally, or by property) — e.g. a target grid dimensioned by
+// [departments] reads every [staff] cell under the current department
+// (structural roll-up), or the one parent [departments] cell for every
+// [staff] row (structural broadcast). Metrics assigned to more than one
+// dimension (e.g. salary: [employees, months]) combine each dimension's
+// resolved code-set via Cartesian product — e.g. a cost_centers x months
+// grid rolls employees up (structural) while holding months fixed (exact
+// match).
 //
 // A dimension of m's that has NO relationship to any of the current grid's
 // dims at all (the grid doesn't slice by it in any way — e.g. a `months`
-// axis on a metric referenced from a plain department-only grid) is
-// aggregated over in full (allLeafCodes) rather than aborting the whole
-// resolution — "months" isn't a filter here, it just isn't broken out, so
-// referencing the metric should sum across all of it, the same way it would
-// if the grid had no dimensions at all. Returns undefined only when m has no
-// dimensions of its own to relate (falls through to resolveCell/getVal's own
-// broadcast-total fallback, grid.totals[m.id]).
-function resolveCrossDimensionValue(
+// axis on a metric referenced from a plain department-only grid) is read in
+// full (allLeafCodes) rather than aborting the whole resolution — "months"
+// isn't a filter here, it just isn't broken out. Returns undefined only when
+// m has no dimensions of its own to relate (the caller falls back to its own
+// cell or the broadcast total, grid.totals[m.id]).
+//
+// Each source maps its cell key to the code of its leaf period on m's time
+// dimension (undefined when m has none), so a caller can reduce the periods
+// by the metric's time_summary. An empty axis (e.g. a cost center with no
+// employees yet) gives no sources at all.
+function crossDimensionSources(
   grid: GridData,
   m: Metric,
   dims: DimInfo[],
   combo: DimMember[],
-): number | undefined {
+): Map<string, string | undefined> | undefined {
   const ownDimIds = m.dimension_ids ?? [];
   if (ownDimIds.length === 0) return undefined;
 
   const axisCodeSets: string[][] = [];
-  for (const ownDimId of ownDimIds) {
+  let timeAxis = -1;
+  for (const [j, ownDimId] of ownDimIds.entries()) {
     const ownDim = dimensionById(grid, ownDimId);
     if (!ownDim) return undefined;
+    if (ownDim.dimension_type === "time" && timeAxis < 0) timeAxis = j;
 
     let resolved: string[] | undefined;
     for (let i = 0; i < dims.length; i++) {
@@ -398,16 +406,13 @@ function resolveCrossDimensionValue(
       if (resolved !== undefined) break;
     }
     // No relationship to any of the current grid's dims — not a failure,
-    // just an axis this view doesn't slice by. Sum over all of it.
+    // just an axis this view doesn't slice by. Read all of it.
     if (resolved === undefined) resolved = allLeafCodes(ownDim);
     axisCodeSets.push(resolved);
   }
 
   // Cartesian product across all resolved axes, in m.dimension_ids order —
-  // matching how the backend keys grid.cells for this metric. An empty axis
-  // (e.g. a cost center with no employees yet) collapses the whole product
-  // to zero cells, which correctly sums to 0 rather than falling through to
-  // an unrelated broadcast total.
+  // matching how the backend keys grid.cells for this metric.
   let combos: string[][] = [[]];
   for (const codes of axisCodeSets) {
     const next: string[][] = [];
@@ -416,12 +421,40 @@ function resolveCrossDimensionValue(
     }
     combos = next;
   }
+  return new Map(combos.map(codes => [cellKey(m.id, codes), timeAxis >= 0 ? codes[timeAxis] : undefined]));
+}
 
-  const dvals = combos.map(codes => grid.cells[cellKey(m.id, codes)] ?? 0);
-  switch (m.agg_rule) {
-    case "average": return dvals.length ? dvals.reduce((a, b) => a + b, 0) / dvals.length : 0;
-    case "count":   return dvals.filter(v => v !== 0).length;
-    default:        return dvals.reduce((a, b) => a + b, 0);
+// Combines the recorded values under one coordinate by a metric's agg_rule,
+// FLAT — once over the leaves, never level by level, as the calculation
+// scheduler's totals and rollup.ResolveTimeFlat do: sum adds them (a leaf
+// with no value adds nothing), average is the mean of the leaves that have
+// a value (a missing leaf is left out, not counted as 0; undefined when
+// none has one), count is the number of leaves whose value is not 0.
+function combineFlat(vals: number[], aggRule: string): number | undefined {
+  switch (aggRule) {
+    case "average": return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : undefined;
+    // The leaves with a non-zero value, as the server's rollup.CombineAgg
+    // counts them: a calculated metric has a (0) row at every intersection
+    // its formula saw no inputs at, so counting every present cell would
+    // count those too, and the grid would disagree with the scheduler's
+    // totals, the KPIs and chart-data.
+    case "count":   return vals.filter(v => v !== 0).length;
+    default:        return vals.reduce((a, b) => a + b, 0);
+  }
+}
+
+// Reduces a set of periods' values (in chronological order) by a metric's
+// time_summary, as calculation.TimeSummary does; undefined for "none" or
+// when no period has a value.
+function combineTime(vals: number[], summary: string): number | undefined {
+  if (vals.length === 0 || summary === "none") return undefined;
+  switch (summary) {
+    case "average": return vals.reduce((a, b) => a + b, 0) / vals.length;
+    case "min":     return Math.min(...vals);
+    case "max":     return Math.max(...vals);
+    case "first":   return vals[0];
+    case "last":    return vals[vals.length - 1];
+    default:        return vals.reduce((a, b) => a + b, 0);
   }
 }
 
@@ -514,6 +547,10 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
     if (!gridMeta) return undefined;
     return { ...gridMeta, cells: { ...(cellsData?.cells ?? {}), ...pending }, totals: cellsData?.totals ?? {} };
   }, [gridMeta, cellsData, pending]);
+  // Cells (and totals, by bare metric id) the server withholds from this
+  // viewer — fail-closed, see GridData.withheld. Everything that would be
+  // built from one renders blank.
+  const withheld = useMemo(() => new Set(cellsData?.withheld ?? []), [cellsData]);
   const isLoading = metaLoading;
   const error = metaError ?? cellsError;
 
@@ -674,6 +711,18 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
     });
   }
 
+  // The grid's time dimension (a revision allows one per grid), and the
+  // chronological position of a period code, for time_summary's first/last.
+  const timeDimIdx = dims.findIndex(d => d.dimension_type === "time");
+  const periodIndex = new Map<string, number>();
+  for (const d of g.all_dimensions ?? g.dimensions ?? []) {
+    if (d.dimension_type !== "time") continue;
+    d.members.forEach((m, i) => { if (!periodIndex.has(m.code)) periodIndex.set(m.code, m.time_index ?? i); });
+  }
+  function periodOrder(code: string | undefined): number {
+    return code === undefined ? -1 : (periodIndex.get(code) ?? Number.MAX_SAFE_INTEGER);
+  }
+
   function getKey(metricId: string, fc: DimMember[]): string {
     return dims.length === 0 ? metricId : cellKey(metricId, fc.map(m => m.code));
   }
@@ -684,20 +733,29 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
   }
 
   // Recursively resolves a cell value for any metric (INPUT or CALC) at any combo.
-  // For parent dimension members, aggregates children using the metric's agg_rule.
+  // For parent dimension members, reduces the leaves under them flat by the
+  // metric's agg_rule (flatValue).
   // For leaf combos, reads grid.cells directly — the server now populates it
   // with calc-metric values (from runtime.calc_result) exactly like it always
   // has for input values, so no client-side formula evaluation is needed here.
   // All-metrics lookup carries dimension_ids (see backend grid() comment on
-  // all_metrics) — g.metrics entries don't, so resolveCrossDimensionValue
+  // all_metrics) — g.metrics entries don't, so crossDimensionSources
   // (which needs a metric's own dims to roll up) must look up here.
   function fullMetric(metricId: string): Metric | undefined {
     return (g.all_metrics ?? g.metrics).find(m => m.id === metricId);
   }
 
-  function resolveCell(metricId: string, fc: DimMember[], depth = 0): number | undefined {
-    if (depth > 10) return 0;
-    if (dims.length === 0) return g.totals[metricId] ?? 0;
+  // Return values: a number; undefined = no value (rendered "—"); null = the
+  // server WITHHELD this cell or something it is built from (rendered "—"
+  // too, and — unlike undefined — never counted as 0 by a parent or total:
+  // a restricted viewer must not see a partial sum of what they can see).
+  function resolveCell(metricId: string, fc: DimMember[]): number | null | undefined {
+    if (dims.length === 0) return withheld.has(metricId) ? null : (g.totals[metricId] ?? 0);
+    if (withheld.has(getKey(metricId, fc))) return null;
+    // The grand total (every dimension at its root) is what the server's
+    // `totals` answers; if the server withheld it, no client rollup of the
+    // visible children may stand in for it.
+    if (withheld.has(metricId) && dims.every((dim, i) => isAggNode(dim, fc[i]) && !fc[i].parent_code)) return null;
     const metric = g.metrics.find(m => m.id === metricId);
     const aggRule = metric?.agg_rule ?? "sum";
 
@@ -717,7 +775,16 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
     // published for these rules, which is the aggregate this grid actually
     // renders; an intermediate rollup in a deeper hierarchy has no
     // server-side value to read and is left blank rather than invented.
-    if (aggRule === "formula" || aggRule === "rate") {
+    //
+    // A pure-ratio average (aggregate_evaluated with agg_rule average) is
+    // the same above a NON-TIME parent: the scheduler evaluates its formula
+    // at the aggregate (tsEvaluator.finish's useEval), so the mean of the
+    // leaf cells is a number no server reader gives. Over time alone (a
+    // leaf member at Q1) it is its leaf periods reduced by time_summary,
+    // which flatValue below does.
+    const evaluatedAvg = aggRule === "average" && !!metric?.aggregate_evaluated &&
+      dims.some((dim, i) => i !== timeDimIdx && isAggNode(dim, fc[i]));
+    if (aggRule === "formula" || aggRule === "rate" || evaluatedAvg) {
       const serverCell = g.cells[getKey(metricId, fc)];
       if (serverCell !== undefined) return serverCell;
       // g.totals is the server's aggregate over the WHOLE grid — it knows
@@ -735,40 +802,111 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
       // was fixed, the World rollup column showed the all-periods total
       // under a Q1 context — "these mistakes must never happen".
       const allRoots = dims.every((dim, i) => isAggNode(dim, fc[i]) && !fc[i].parent_code);
-      return allRoots ? (g.totals[metricId] ?? 0) : undefined;
+      if (!allRoots) return undefined;
+      if (withheld.has(metricId)) return null;
+      return g.totals[metricId] ?? (evaluatedAvg ? undefined : 0);
     }
 
+    // A parent combo reduces FLAT over every leaf combo under it (see
+    // flatValue); a leaf is its own cell, or — when this grid mirrors a
+    // metric whose native dims differ from its own (a rollup grid, see
+    // rollup_source_grid_id) and no direct cell will ever exist here — the
+    // cells it relates to. A leaf with nothing to read is 0 here (getVal
+    // shows it as "—").
+    //
+    // A leaf's own cell is its value as it is: running it through
+    // flatValue would combine one value by agg_rule, and a count of one
+    // leaf is 1, not the leaf's value.
+    if (!comboIsAgg(fc)) {
+      const direct = g.cells[getKey(metricId, fc)];
+      if (direct !== undefined) return direct;
+      if (!leafSources(metricId, fc).mirrored) return 0;
+      return flatValue(metricId, [fc], aggRule) ?? 0;
+    }
+    return flatValue(metricId, [fc], aggRule);
+  }
+
+  // The cells a LEAF combo's value is read from, each mapped to its leaf
+  // period on a time dimension (undefined without one): the combo's own cell
+  // when the server sent (or withheld) it, otherwise the cells a rollup grid
+  // mirrors from the metric's native dimensions (crossDimensionSources),
+  // otherwise the own cell with no value. `mirrored` is true for the second.
+  function leafSources(metricId: string, fc: DimMember[]): { sources: Map<string, string | undefined>; mirrored: boolean } {
+    const key = getKey(metricId, fc);
+    const own = () => new Map([[key, timeDimIdx >= 0 ? fc[timeDimIdx]?.code : undefined]]);
+    if (g.cells[key] !== undefined || withheld.has(key)) return { sources: own(), mirrored: false };
+    const full = fullMetric(metricId);
+    const mirrored = full ? crossDimensionSources(g, full, dims, fc) : undefined;
+    return mirrored ? { sources: mirrored, mirrored: true } : { sources: own(), mirrored: false };
+  }
+
+  // Every distinct leaf cell under the combos, collected into `out`. A combo
+  // is expanded through each dimension whose member has children, so a
+  // parent two levels up reaches its leaves directly. Returns true when a
+  // time dimension was expanded (an aggregate period such as Q1 or FY26).
+  function collectLeafSources(metricId: string, fc: DimMember[], out: Map<string, string | undefined>, depth = 0): boolean {
+    if (depth > 20) return false;
+    // A withheld intermediate parent blanks everything above it, as before.
+    const key = getKey(metricId, fc);
+    if (withheld.has(key)) { out.set(key, undefined); return false; }
     for (let i = 0; i < dims.length; i++) {
-      const dim = dims[i];
-      const member = fc[i];
-      const children = dim.members.filter(m => m.parent_code === member.code);
+      const children = dims[i].members.filter(m => m.parent_code === fc[i]?.code);
       if (children.length === 0) continue;
-      const childVals = children.map(child => {
+      let aggPeriod = i === timeDimIdx;
+      for (const child of children) {
         const childFc = [...fc];
         childFc[i] = child;
-        // The formula/rate branch above returns before this loop, so a
-        // child resolving to undefined can only mean a nested formula/rate
-        // — which never recurses here; ?? 0 is for the type, not a case.
-        return resolveCell(metricId, childFc, depth + 1) ?? 0;
-      });
-      switch (aggRule) {
-        case "average": return childVals.length ? childVals.reduce((a, b) => a + b, 0) / childVals.length : 0;
-        case "count":   return childVals.filter(v => v !== 0).length;
-        default:        return childVals.reduce((a, b) => a + b, 0);
+        if (collectLeafSources(metricId, childFc, out, depth + 1)) aggPeriod = true;
       }
+      return aggPeriod;
     }
-    // Leaf combo — direct fact lookup first; if this grid mirrors a metric whose native
-    // dims differ from its own (a rollup grid — see rollup_source_grid_id),
-    // no direct cell will ever exist here, so fall back to the same
-    // cross-dimension resolver formulas use.
-    const direct = g.cells[getKey(metricId, fc)];
-    if (direct !== undefined) return direct;
-    const full = fullMetric(metricId);
-    if (full) {
-      const crossDim = resolveCrossDimensionValue(g, full, dims, fc);
-      if (crossDim !== undefined) return crossDim;
+    for (const [k, p] of leafSources(metricId, fc).sources) out.set(k, p);
+    return false;
+  }
+
+  // The value of a sum/average/count metric over the leaves under `combos`,
+  // reduced FLAT, as the server's totals and scoped reads reduce them:
+  //   - null when any of those cells is withheld — never a partial result;
+  //   - within one period, the recorded leaf values combine ONCE by agg_rule
+  //     (combineFlat): an average two levels up is the mean of its leaves,
+  //     not the mean of its children's means, and a count is the number of
+  //     leaves with a value;
+  //   - over an aggregate period (the leaves span more than one period of a
+  //     time dimension), each leaf period is combined that way first and the
+  //     periods are then reduced by the metric's time_summary — the
+  //     scheduler's summarizeOverTime order;
+  //   - with no recorded value at all, sum and count are 0 and average has
+  //     no value (undefined).
+  // Pending (unsaved) edits are in g.cells, so they flow in like any value.
+  function flatValue(metricId: string, combos: DimMember[][], aggRule: string): number | null | undefined {
+    const sources = new Map<string, string | undefined>();
+    let aggPeriod = false;
+    for (const fc of combos) {
+      if (collectLeafSources(metricId, fc, sources)) aggPeriod = true;
     }
-    return 0;
+    const perPeriod = new Map<string | undefined, number[]>();
+    for (const [key, period] of sources) {
+      if (withheld.has(key)) return null;
+      const v = g.cells[key];
+      if (v === undefined) continue;
+      const vals = perPeriod.get(period);
+      if (vals) vals.push(v); else perPeriod.set(period, [v]);
+    }
+    const periods = new Set(sources.values());
+    periods.delete(undefined);
+    if (!aggPeriod && periods.size <= 1) {
+      const all = [...perPeriod.values()].flat();
+      return combineFlat(all, aggRule);
+    }
+    const ordered = [...perPeriod.keys()].sort((a, b) => periodOrder(a) - periodOrder(b));
+    const vals: number[] = [];
+    for (const p of ordered) {
+      const v = combineFlat(perPeriod.get(p) ?? [], aggRule);
+      if (v !== undefined) vals.push(v);
+    }
+    const summary = fullMetric(metricId)?.time_summary ?? g.metrics.find(m => m.id === metricId)?.time_summary ?? "sum";
+    if (summary === "none") return undefined;
+    return vals.length ? combineTime(vals, summary) : combineFlat([], aggRule);
   }
 
   // Is any member in this combo a parent (agg node)?
@@ -776,18 +914,22 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
     return dims.some((dim, i) => isAggNode(dim, fc[i]));
   }
 
-  function getVal(metricId: string, fc: DimMember[]): number | undefined {
-    if (dims.length === 0) return g.totals[metricId];
+  // Same return contract as resolveCell: null = withheld (blank, and blanks
+  // any total built from it).
+  function getVal(metricId: string, fc: DimMember[]): number | null | undefined {
+    if (dims.length === 0) return withheld.has(metricId) ? null : g.totals[metricId];
     // Parent combos always aggregate from children — stored direct values are stale and ignored
     if (comboIsAgg(fc)) return resolveCell(metricId, fc);
-    const direct = g.cells[getKey(metricId, fc)];
+    const key = getKey(metricId, fc);
+    if (withheld.has(key)) return null;
+    const direct = g.cells[key];
     if (direct !== undefined) return direct;
-    const full = fullMetric(metricId);
-    if (full) {
-      const crossDim = resolveCrossDimensionValue(g, full, dims, fc);
-      if (crossDim !== undefined) return crossDim;
-    }
-    return undefined;
+    // A rollup grid's leaf: the mirrored cells, reduced flat.
+    if (!leafSources(metricId, fc).mirrored) return undefined;
+    const aggRule = g.metrics.find(m => m.id === metricId)?.agg_rule ?? "sum";
+    // A formula/rate metric is never recombined; a mirrored cell (a
+    // broadcast from a parent dimension) is read as it is.
+    return flatValue(metricId, [fc], aggRule === "formula" || aggRule === "rate" ? "sum" : aggRule);
   }
 
   function commitCell(metric: Metric, fc: DimMember[]) {
@@ -905,8 +1047,42 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
   const hasRowDims = rowDims.length > 0;
   const numMetrics = gridMetrics.length;
 
-  function colTotal(metricId: string, cc: DimMember[]): number {
-    return rowCombos.reduce((sum, rc) => sum + (getVal(metricId, fullCombo(rc, cc)) ?? 0), 0);
+  // The Total row of one column. Same return contract as resolveCell:
+  // null = withheld, undefined = no value ("—").
+  //   - Never a partial sum: null when any row's value is withheld, and
+  //     null when this total IS the grid's grand total (no column or
+  //     context dimension pins a member) and the server withheld it.
+  //   - agg_rule formula / rate is never a sum of the rows (a sum of
+  //     ratios): it is the server's value with every row dimension at its
+  //     root — resolveCell's formula/rate branch — or "—" when the server
+  //     has none there.
+  function colTotal(metricId: string, cc: DimMember[]): number | null | undefined {
+    const spansGrid = ctxDims.length === 0 &&
+      colDims.every((dim, i) => cc[i] !== undefined && isAggNode(dim, cc[i]) && !cc[i].parent_code);
+    if (spansGrid && withheld.has(metricId)) return null;
+    const metric = g.metrics.find(m => m.id === metricId);
+    const aggRule = metric?.agg_rule ?? "sum";
+    // A pure-ratio average totalled across a non-time dimension is its
+    // formula at the aggregate too (see resolveCell).
+    const evaluatedAvg = aggRule === "average" && !!metric?.aggregate_evaluated &&
+      rowDims.some(dim => dim.dimension_type !== "time");
+    if (aggRule === "formula" || aggRule === "rate" || evaluatedAvg) {
+      const roots = rowDims.map(dim => dim.members.filter(m => !m.parent_code));
+      if (roots.every((r, i) => r.length === 1 && isAggNode(rowDims[i], r[0]))) {
+        return resolveCell(metricId, fullCombo(roots.map(r => r[0]), cc));
+      }
+      // Flat (or multi-rooted) row dimensions have no member standing for
+      // all rows; only the grand total itself is known.
+      return spansGrid ? g.totals[metricId] : undefined;
+    }
+    // sum / average / count: the rows' leaves reduced FLAT, once (flatValue)
+    // — the same number the server's totals give: an average is the mean of
+    // every leaf with a value, not the mean of the rows, and a leaf reached
+    // from two rows (a parent row beside its own children in a multi-
+    // dimension row zone) counts once.
+    const combos = rowCombos.map(rc => fullCombo(rc, cc));
+    if (combos.some(fc => withheld.has(getKey(metricId, fc)))) return null;
+    return flatValue(metricId, combos, aggRule);
   }
 
   // Rows for "metrics in rows" mode: dim combos as group headers, metrics as sub-rows

@@ -125,10 +125,23 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 	//    metric or a dimension. Metrics additionally become dependency edges,
 	//    each carrying the union of the time offsets it is read at. A
 	//    self-reference is a legal edge only when time breaks it (checked in
-	//    step 4 with every other cycle).
+	//    step 4 with every other cycle). The source of LOOKUP, the *IFS/*IF
+	//    family and the *VALUE family must be a metric; when the call
+	//    overrides or ranges over a time dimension the source is read at
+	//    other periods, so its edge is unbounded past and future.
+	rd, err := loadRevisionDims(ctx, pool, req.ModelID, req.RevisionID)
+	if err != nil {
+		return nil, err
+	}
+	sourceIDs := map[string]string{} // UPPER-CASE referenced name -> metric ID
 	var edges []Edge
 	var edgeIDs []string
 	for _, ref := range an.References {
+		edge := Edge{MinTimeOffset: ref.MinTimeOffset, MaxTimeOffset: ref.MaxTimeOffset,
+			UnboundedPast: ref.UnboundedPast, UnboundedFuture: ref.UnboundedFuture}
+		if ref.Dimensional && overriddenTimeDim(ref, rd) {
+			edge.UnboundedPast, edge.UnboundedFuture = true, true
+		}
 		var metricID string
 		err := pool.QueryRow(ctx, `
 			SELECT id::text FROM model.metric_def
@@ -138,21 +151,28 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 		`, req.ModelID, ref.Name, req.RevisionID).Scan(&metricID)
 		if err == nil {
 			isSelf := metricID == req.MetricID || (req.MetricID == "" && strings.EqualFold(ref.Name, req.Name))
+			if isSelf && ref.Dimensional {
+				return nil, invalid("%s", dimensionalSelfMessage(an, ref.Name))
+			}
 			if isSelf && ref.IsDirect() {
 				return nil, invalid("formula references the metric it defines (%q) — a metric can only read its own value at another period (PREVIOUS, LAG, ...)", ref.Name)
 			}
-			edges = append(edges, Edge{To: metricID, MinTimeOffset: ref.MinTimeOffset, MaxTimeOffset: ref.MaxTimeOffset,
-				UnboundedPast: ref.UnboundedPast, UnboundedFuture: ref.UnboundedFuture})
+			edge.To = metricID
+			edges = append(edges, edge)
 			edgeIDs = append(edgeIDs, metricID)
+			sourceIDs[strings.ToUpper(ref.Name)] = metricID
 			continue
 		}
 		if strings.EqualFold(ref.Name, req.Name) {
 			// A brand-new metric naming itself: no row exists yet to resolve to.
+			if ref.Dimensional {
+				return nil, invalid("%s", dimensionalSelfMessage(an, ref.Name))
+			}
 			if ref.IsDirect() {
 				return nil, invalid("formula references the metric it defines (%q) — a metric can only read its own value at another period (PREVIOUS, LAG, ...)", ref.Name)
 			}
-			edges = append(edges, Edge{To: selfPlaceholder, MinTimeOffset: ref.MinTimeOffset, MaxTimeOffset: ref.MaxTimeOffset,
-				UnboundedPast: ref.UnboundedPast, UnboundedFuture: ref.UnboundedFuture})
+			edge.To = selfPlaceholder
+			edges = append(edges, edge)
 			continue
 		}
 
@@ -166,15 +186,57 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 		`, req.ModelID, ref.Name, req.RevisionID).Scan(&dimExists); dErr != nil {
 			return nil, dErr
 		}
-		if !dimExists {
+		if ref.Dimensional && (dimExists || rd.lookup(ref.Name) != nil) {
+			return nil, invalidCode(formula.CodeSourceMustBeMetric,
+				"%s is a dimension, but LOOKUP, the conditional aggregations (SUMIFS, ...) and the *VALUE functions read a metric as their source", ref.Name)
+		}
+		// Dimension names match case-insensitively (rd.lookup), as they do
+		// for PARENT, dim.property and criteria ranges, and as the runtime
+		// binds them.
+		if !dimExists && rd.lookup(ref.Name) == nil {
 			return nil, invalid("formula references unknown metric or dimension %q in this revision", ref.Name)
+		}
+	}
+
+	// 3b. Dimension-shaped arguments: dim.property, PARENT/LOOKUP/criteria
+	//     dimensions and literal LOOKUP members (contract C1–C3, C10).
+	isMetric := func(name string) bool {
+		var ok bool
+		_ = pool.QueryRow(ctx, `
+			SELECT EXISTS (SELECT 1 FROM model.metric_def
+			               WHERE model_id=$1::uuid AND lower(name)=lower($2)
+			                 AND (revision_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid OR revision_id IS NULL))
+		`, req.ModelID, name, req.RevisionID).Scan(&ok)
+		return ok
+	}
+	if err := checkDimensionNames(ctx, pool, an, rd, isMetric); err != nil {
+		return nil, err
+	}
+
+	// 3c. Where the dimensions are known — a source placed on a grid, this
+	//     metric's own time axis — check them now, with the same rules the
+	//     placement and activation checks apply.
+	if len(an.DimensionalCalls) > 0 || len(an.TimeSums) > 0 {
+		metricDims, err := loadMetricGridDims(ctx, pool, req.ModelID, req.RevisionID)
+		if err != nil {
+			return nil, err
+		}
+		sourceID := func(name string) string { return sourceIDs[strings.ToUpper(name)] }
+		if err := checkSourceDimensions(req.Name, an, rd, sourceID, metricDims); err != nil {
+			return nil, err
+		}
+		if own, placed := metricDims[req.MetricID]; req.MetricID != "" && placed {
+			if err := checkTimeSumCodes(ctx, pool, req.Name, an, rd, timeAxisOf(rd, own)); err != nil {
+				return nil, err
+			}
 		}
 	}
 
 	// 4. Cycles must be causal. Load the revision's whole graph, substitute
 	//    this metric's new edges, and validate every component it touches:
 	//    an opening/closing balance pair is legal, a same-period cycle is
-	//    not, and the scheduler must never be the first to find out.
+	//    not, a recurrence may not call LOOKUP or a conditional aggregation,
+	//    and the scheduler must never be the first to find out.
 	graph, names, err := LoadGraph(ctx, pool, req.ModelID, req.RevisionID)
 	if err != nil {
 		return nil, err
@@ -191,7 +253,12 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 		}
 		own = append(own, e)
 	}
-	graph[self] = own
+	graph.Edges[self] = own
+	if fn := dimensionalFunctionOf(an); fn != "" {
+		graph.Dimensional[self] = fn
+	} else {
+		delete(graph.Dimensional, self)
+	}
 	if _, err := Plan(graph, []string{self}, names); err != nil {
 		var te *TemporalError
 		if errors.As(err, &te) {
@@ -218,10 +285,12 @@ const SelfReference = "self"
 const selfPlaceholder = "\x00self"
 
 // LoadGraph loads the revision's dependency graph with offsets, plus an
-// id → name map for messages.
+// id → name map for messages. Each metric's formula is re-analysed to mark
+// the ones calling LOOKUP or a conditional aggregation (Graph.Dimensional),
+// so no schema column is needed for Plan's recurrence rule.
 func LoadGraph(ctx context.Context, q Querier, modelID, revisionID string) (Graph, map[string]string, error) {
 	rows, err := q.Query(ctx, `
-		SELECT m.id::text, m.name, d.depends_on_metric_id::text,
+		SELECT m.id::text, m.name, COALESCE(m.formula,''), d.depends_on_metric_id::text,
 		       COALESCE(d.min_time_offset,0), COALESCE(d.max_time_offset,0),
 		       COALESCE(d.unbounded_past,false), COALESCE(d.unbounded_future,false)
 		FROM model.metric_def m
@@ -230,28 +299,38 @@ func LoadGraph(ctx context.Context, q Querier, modelID, revisionID string) (Grap
 		  AND (m.revision_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid OR m.revision_id IS NULL)
 	`, modelID, revisionID)
 	if err != nil {
-		return nil, nil, err
+		return Graph{}, nil, err
 	}
 	defer rows.Close()
-	g := Graph{}
+	g := NewGraph()
 	names := map[string]string{}
+	formulas := map[string]string{}
 	for rows.Next() {
-		var id, name string
+		var id, name, text string
 		var to *string
 		var e Edge
-		if err := rows.Scan(&id, &name, &to, &e.MinTimeOffset, &e.MaxTimeOffset, &e.UnboundedPast, &e.UnboundedFuture); err != nil {
-			return nil, nil, err
+		if err := rows.Scan(&id, &name, &text, &to, &e.MinTimeOffset, &e.MaxTimeOffset, &e.UnboundedPast, &e.UnboundedFuture); err != nil {
+			return Graph{}, nil, err
 		}
 		names[id] = name
-		if _, ok := g[id]; !ok {
-			g[id] = nil
+		formulas[id] = text
+		if _, ok := g.Edges[id]; !ok {
+			g.Edges[id] = nil
 		}
 		if to != nil {
 			e.To = *to
-			g[id] = append(g[id], e)
+			g.Edges[id] = append(g.Edges[id], e)
 		}
 	}
-	return g, names, rows.Err()
+	if err := rows.Err(); err != nil {
+		return Graph{}, nil, err
+	}
+	for id, text := range formulas {
+		if fn := DimensionalFunction(text); fn != "" {
+			g.Dimensional[id] = fn
+		}
+	}
+	return g, names, nil
 }
 
 // Execer is what WriteDependencies needs: a transaction (preferred) or pool.

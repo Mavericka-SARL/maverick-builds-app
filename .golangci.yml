@@ -16,6 +16,9 @@ linters:
   settings:
     exhaustive:
       default-signifies-exhaustive: true  # a default: case satisfies exhaustiveness
+    misspell:
+      ignore-rules:
+        - averageifs  # the Excel function AVERAGEIFS, not a misspelling of "averages"
     govet:
       disable:
         - inline   # pedantic reflect.Ptr deprecation check, fires in node_modules we can't modify

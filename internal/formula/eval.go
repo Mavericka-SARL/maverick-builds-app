@@ -20,6 +20,14 @@ type EvalContext struct {
 	// time-dimensioned metric. nil for scalar evaluation: time functions then
 	// return TIME_CONTEXT_REQUIRED rather than a silent zero.
 	Time *TimeEvalContext
+	// Dim is the member-metadata and dimensional-read context of the cell
+	// (contract C1-C3): dim.property, PARENT, LOOKUP and the *IFS/*IF
+	// family read through it. nil for an evaluator that has none: those
+	// functions then return DIM_CONTEXT_REQUIRED rather than a silent zero.
+	// A time-shifted child evaluation (TimeEvalContext.EvalAt) builds its
+	// own EvalContext and must set Dim again, rebuilt for the SHIFTED
+	// combo, sharing the parent's Dim.Memo.
+	Dim *DimEvalContext
 }
 
 func (ctx *EvalContext) lookup(name string) (Value, bool) {
@@ -28,6 +36,30 @@ func (ctx *EvalContext) lookup(name string) (Value, bool) {
 	}
 	v, ok := ctx.Vars[strings.ToUpper(name)]
 	return v, ok
+}
+
+// unboundDimension resolves a bare identifier that no variable binds but
+// the cell's Dim context knows as a DIMENSION: blank when the dimension is
+// not pinned in the cell (a total, or a rollup/slice row that leaves it
+// open) — as dim.property and PARENT read there — and the member code when
+// it is pinned but the caller did not bind it. ok is false without a Dim
+// context or for a name that is not a dimension: that stays #NAME?.
+// Variables are looked up first, so where a metric shares a dimension's
+// name the metric is read only where the dimension is UNPINNED: every
+// evaluator binds a pinned dimension's member code into Vars after the
+// metric values, so at a pinned cell the bare name is the member code.
+func (ctx *EvalContext) unboundDimension(name string) (Value, bool) {
+	if ctx == nil || ctx.Dim == nil || ctx.Dim.Current == nil {
+		return BlankVal(), false
+	}
+	code, pinned, err := ctx.Dim.Current(name)
+	if err != nil {
+		return BlankVal(), false
+	}
+	if !pinned {
+		return BlankVal(), true
+	}
+	return StringVal(code), true
 }
 
 // eval evaluates a node within a context.
@@ -43,7 +75,13 @@ func (ctx *EvalContext) eval(node Node) Value {
 		if v, ok := ctx.lookup(n.Name); ok {
 			return v
 		}
+		if v, ok := ctx.unboundDimension(n.Name); ok {
+			return v
+		}
 		return ErrorVal(errName(n.Name))
+
+	case *DimProperty:
+		return ctx.evalDimProperty(n)
 
 	case *UnaryExpr:
 		v := ctx.eval(n.Expr)

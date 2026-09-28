@@ -12,6 +12,14 @@ import (
 	ht "github.com/ogen-go/ogen/http"
 )
 
+type ActivateRevisionBadRequest Error
+
+func (*ActivateRevisionBadRequest) activateRevisionRes() {}
+
+type ActivateRevisionNotFound Error
+
+func (*ActivateRevisionNotFound) activateRevisionRes() {}
+
 type ActivateRevisionOK struct {
 	Status OptString `json:"status"`
 }
@@ -190,6 +198,8 @@ func (s *AddGridDimensionOK) GetStatus() OptString {
 func (s *AddGridDimensionOK) SetStatus(val OptString) {
 	s.Status = val
 }
+
+func (*AddGridDimensionOK) addGridDimensionRes() {}
 
 type AddGridMetricBadRequest Error
 
@@ -4598,6 +4608,22 @@ func (s *CreateDashboardWidgetOK) SetStatus(val OptString) {
 
 func (*CreateDashboardWidgetOK) createDashboardWidgetRes() {}
 
+type CreateDimensionBadRequest Error
+
+func (*CreateDimensionBadRequest) createDimensionRes() {}
+
+type CreateDimensionConflict Error
+
+func (*CreateDimensionConflict) createDimensionRes() {}
+
+type CreateDimensionMemberBadRequest Error
+
+func (*CreateDimensionMemberBadRequest) createDimensionMemberRes() {}
+
+type CreateDimensionMemberConflict Error
+
+func (*CreateDimensionMemberConflict) createDimensionMemberRes() {}
+
 type CreateDimensionMemberOK struct {
 	ID OptUUID `json:"id"`
 }
@@ -4617,6 +4643,8 @@ func (*CreateDimensionMemberOK) createDimensionMemberRes() {}
 type CreateDimensionOK struct {
 	ID     OptUUID   `json:"id"`
 	Status OptString `json:"status"`
+	// A property grouping only: the member codes derive_members added.
+	DerivedMembers []string `json:"derived_members"`
 }
 
 // GetID returns the value of ID.
@@ -4629,6 +4657,11 @@ func (s *CreateDimensionOK) GetStatus() OptString {
 	return s.Status
 }
 
+// GetDerivedMembers returns the value of DerivedMembers.
+func (s *CreateDimensionOK) GetDerivedMembers() []string {
+	return s.DerivedMembers
+}
+
 // SetID sets the value of ID.
 func (s *CreateDimensionOK) SetID(val OptUUID) {
 	s.ID = val
@@ -4637,6 +4670,11 @@ func (s *CreateDimensionOK) SetID(val OptUUID) {
 // SetStatus sets the value of Status.
 func (s *CreateDimensionOK) SetStatus(val OptString) {
 	s.Status = val
+}
+
+// SetDerivedMembers sets the value of DerivedMembers.
+func (s *CreateDimensionOK) SetDerivedMembers(val []string) {
+	s.DerivedMembers = val
 }
 
 func (*CreateDimensionOK) createDimensionRes() {}
@@ -4655,6 +4693,8 @@ func (s *CreateDimensionPropertyOK) SetID(val OptUUID) {
 	s.ID = val
 }
 
+func (*CreateDimensionPropertyOK) createDimensionPropertyRes() {}
+
 // Ref: #/components/schemas/CreateDimensionRequest
 type CreateDimensionRequest struct {
 	Name       string    `json:"name"`
@@ -4663,6 +4703,15 @@ type CreateDimensionRequest struct {
 	// Not allowed on a time dimension.
 	ParentDimensionID OptNilUUID `json:"parent_dimension_id"`
 	Tags              []string   `json:"tags"`
+	// A property grouping: this dimension's members group the members of this standard dimension (same
+	// model and revision) by their value of source_property. A grouping member stands for every source
+	// member whose value equals its code. Not with parent_dimension_id, not on a time dimension; refused
+	// with INVALID_GROUPING otherwise.
+	SourceDimensionID OptNilUUID `json:"source_dimension_id"`
+	// A property DECLARED on source_dimension_id (any case; stored as declared).
+	SourceProperty OptString `json:"source_property"`
+	// Also add one member (code = label = the value) per distinct non-blank value of the property.
+	DeriveMembers OptBool `json:"derive_members"`
 	// Omitted defaults to standard. Only a dimension created as time supports time-series formulas; the
 	// name never implies it. Immutable after creation.
 	DimensionType OptCreateDimensionRequestDimensionType `json:"dimension_type"`
@@ -4695,6 +4744,21 @@ func (s *CreateDimensionRequest) GetParentDimensionID() OptNilUUID {
 // GetTags returns the value of Tags.
 func (s *CreateDimensionRequest) GetTags() []string {
 	return s.Tags
+}
+
+// GetSourceDimensionID returns the value of SourceDimensionID.
+func (s *CreateDimensionRequest) GetSourceDimensionID() OptNilUUID {
+	return s.SourceDimensionID
+}
+
+// GetSourceProperty returns the value of SourceProperty.
+func (s *CreateDimensionRequest) GetSourceProperty() OptString {
+	return s.SourceProperty
+}
+
+// GetDeriveMembers returns the value of DeriveMembers.
+func (s *CreateDimensionRequest) GetDeriveMembers() OptBool {
+	return s.DeriveMembers
 }
 
 // GetDimensionType returns the value of DimensionType.
@@ -4735,6 +4799,21 @@ func (s *CreateDimensionRequest) SetParentDimensionID(val OptNilUUID) {
 // SetTags sets the value of Tags.
 func (s *CreateDimensionRequest) SetTags(val []string) {
 	s.Tags = val
+}
+
+// SetSourceDimensionID sets the value of SourceDimensionID.
+func (s *CreateDimensionRequest) SetSourceDimensionID(val OptNilUUID) {
+	s.SourceDimensionID = val
+}
+
+// SetSourceProperty sets the value of SourceProperty.
+func (s *CreateDimensionRequest) SetSourceProperty(val OptString) {
+	s.SourceProperty = val
+}
+
+// SetDeriveMembers sets the value of DeriveMembers.
+func (s *CreateDimensionRequest) SetDeriveMembers(val OptBool) {
+	s.DeriveMembers = val
 }
 
 // SetDimensionType sets the value of DimensionType.
@@ -5292,6 +5371,14 @@ func (s *CreateIntegrationRequest) SetTargetType(val OptString) {
 func (s *CreateIntegrationRequest) SetTargetID(val OptUUID) {
 	s.TargetID = val
 }
+
+type CreateMetricBadRequest Error
+
+func (*CreateMetricBadRequest) createMetricRes() {}
+
+type CreateMetricConflict Error
+
+func (*CreateMetricConflict) createMetricRes() {}
 
 type CreateMetricOK struct {
 	ID     OptUUID   `json:"id"`
@@ -6139,6 +6226,10 @@ type DebugCalcBadRequest Error
 
 func (*DebugCalcBadRequest) debugCalcRes() {}
 
+type DebugCalcForbidden Error
+
+func (*DebugCalcForbidden) debugCalcRes() {}
+
 type DebugCalcNotFound Error
 
 func (*DebugCalcNotFound) debugCalcRes() {}
@@ -6471,6 +6562,14 @@ func (s *DeleteDashboardWidgetOK) SetStatus(val OptString) {
 	s.Status = val
 }
 
+type DeleteDimensionMemberConflict Error
+
+func (*DeleteDimensionMemberConflict) deleteDimensionMemberRes() {}
+
+type DeleteDimensionMemberNotFound Error
+
+func (*DeleteDimensionMemberNotFound) deleteDimensionMemberRes() {}
+
 type DeleteDimensionMemberOK struct {
 	Status OptString `json:"status"`
 }
@@ -6484,6 +6583,8 @@ func (s *DeleteDimensionMemberOK) GetStatus() OptString {
 func (s *DeleteDimensionMemberOK) SetStatus(val OptString) {
 	s.Status = val
 }
+
+func (*DeleteDimensionMemberOK) deleteDimensionMemberRes() {}
 
 type DeleteDimensionOK struct {
 	Status OptString `json:"status"`
@@ -6499,6 +6600,16 @@ func (s *DeleteDimensionOK) SetStatus(val OptString) {
 	s.Status = val
 }
 
+func (*DeleteDimensionOK) deleteDimensionRes() {}
+
+type DeleteDimensionPropertyConflict Error
+
+func (*DeleteDimensionPropertyConflict) deleteDimensionPropertyRes() {}
+
+type DeleteDimensionPropertyNotFound Error
+
+func (*DeleteDimensionPropertyNotFound) deleteDimensionPropertyRes() {}
+
 type DeleteDimensionPropertyOK struct {
 	Status OptString `json:"status"`
 }
@@ -6512,6 +6623,8 @@ func (s *DeleteDimensionPropertyOK) GetStatus() OptString {
 func (s *DeleteDimensionPropertyOK) SetStatus(val OptString) {
 	s.Status = val
 }
+
+func (*DeleteDimensionPropertyOK) deleteDimensionPropertyRes() {}
 
 type DeleteFolderOK struct {
 	Status OptString `json:"status"`
@@ -6939,6 +7052,11 @@ type Dimension struct {
 	FiscalYearStartMonth OptInt `json:"fiscal_year_start_month"`
 	// Free-form labels the developer console filters by; omitted when empty.
 	Tags []string `json:"tags"`
+	// A property grouping: this dimension's members group this dimension's members by their
+	// source_property value (developer endpoint; omitted when none).
+	SourceDimensionID OptUUID `json:"source_dimension_id"`
+	// The declared property of source_dimension_id whose value names the group (a member's code).
+	SourceProperty OptString `json:"source_property"`
 	// Time members in chronological order.
 	Members []DimensionMember `json:"members"`
 }
@@ -6981,6 +7099,16 @@ func (s *Dimension) GetFiscalYearStartMonth() OptInt {
 // GetTags returns the value of Tags.
 func (s *Dimension) GetTags() []string {
 	return s.Tags
+}
+
+// GetSourceDimensionID returns the value of SourceDimensionID.
+func (s *Dimension) GetSourceDimensionID() OptUUID {
+	return s.SourceDimensionID
+}
+
+// GetSourceProperty returns the value of SourceProperty.
+func (s *Dimension) GetSourceProperty() OptString {
+	return s.SourceProperty
 }
 
 // GetMembers returns the value of Members.
@@ -7026,6 +7154,16 @@ func (s *Dimension) SetFiscalYearStartMonth(val OptInt) {
 // SetTags sets the value of Tags.
 func (s *Dimension) SetTags(val []string) {
 	s.Tags = val
+}
+
+// SetSourceDimensionID sets the value of SourceDimensionID.
+func (s *Dimension) SetSourceDimensionID(val OptUUID) {
+	s.SourceDimensionID = val
+}
+
+// SetSourceProperty sets the value of SourceProperty.
+func (s *Dimension) SetSourceProperty(val OptString) {
+	s.SourceProperty = val
 }
 
 // SetMembers sets the value of Members.
@@ -7409,7 +7547,10 @@ func (s *DuplicateWorkflowRequest) SetName(val OptString) {
 
 // The shape every gateway error response actually has (internal/gateway's jsonErr helper) — a
 // single "error" string, not the {code, message} pair this schema previously (and incorrectly)
-// documented.
+// documented. A refusal the caller can act on (internal/metricformula.ValidationError) starts the
+// string with a stable upper-case code and a colon, e.g. "PROPERTY_IN_USE: Customer.region is read
+// by Revenue; change those formulas first, then delete the property"; clients match on that prefix,
+// never on the rest of the text.
 // Ref: #/components/schemas/Error
 type Error struct {
 	Error string `json:"error"`
@@ -7425,8 +7566,8 @@ func (s *Error) SetError(val string) {
 	s.Error = val
 }
 
-func (*Error) activateRevisionRes()            {}
 func (*Error) addBARoleMemberRes()             {}
+func (*Error) addGridDimensionRes()            {}
 func (*Error) createAdminApplicationRes()      {}
 func (*Error) createAdminModelRes()            {}
 func (*Error) createAdminRevisionRes()         {}
@@ -7434,16 +7575,15 @@ func (*Error) createAutomationRuleRes()        {}
 func (*Error) createBARoleRes()                {}
 func (*Error) createDashboardRes()             {}
 func (*Error) createDashboardWidgetRes()       {}
-func (*Error) createDimensionMemberRes()       {}
-func (*Error) createDimensionRes()             {}
+func (*Error) createDimensionPropertyRes()     {}
 func (*Error) createFormRes()                  {}
 func (*Error) createIntegrationConnectionRes() {}
-func (*Error) createMetricRes()                {}
 func (*Error) createRevisionRes()              {}
 func (*Error) createWorkflowRes()              {}
 func (*Error) debugFactsRes()                  {}
 func (*Error) deleteAiDocumentRes()            {}
 func (*Error) deleteAiSessionRes()             {}
+func (*Error) deleteDimensionRes()             {}
 func (*Error) deleteFormRecordRes()            {}
 func (*Error) deleteImportJobRes()             {}
 func (*Error) deleteRevisionRes()              {}
@@ -7463,7 +7603,6 @@ func (*Error) grantAdminUserModelAccessRes()   {}
 func (*Error) importDimensionMembersRes()      {}
 func (*Error) listAiProposalsRes()             {}
 func (*Error) listAuditEventsRes()             {}
-func (*Error) listBAAvailableRes()             {}
 func (*Error) listBusinessFoldersRes()         {}
 func (*Error) listBusinessIntegrationsRes()    {}
 func (*Error) listDevPersonasRes()             {}
@@ -7473,12 +7612,11 @@ func (*Error) listFormMappingsRes()            {}
 func (*Error) listFormsRes()                   {}
 func (*Error) listGridsRes()                   {}
 func (*Error) listIntegrationRunsRes()         {}
-func (*Error) listMetricsRes()                 {}
 func (*Error) listPlansRes()                   {}
-func (*Error) listPublicDimensionsRes()        {}
 func (*Error) listWorkflowRolesRes()           {}
 func (*Error) listWorkflowsRes()               {}
 func (*Error) removeAdminUserRoleRes()         {}
+func (*Error) removeGridDimensionRes()         {}
 func (*Error) renameAiSessionRes()             {}
 func (*Error) restoreWorkflowRes()             {}
 func (*Error) revokeAdminUserAppAccessRes()    {}
@@ -7493,8 +7631,6 @@ func (*Error) updateAutomationRuleRes()        {}
 func (*Error) updateBARoleRes()                {}
 func (*Error) updateDashboardRes()             {}
 func (*Error) updateDashboardWidgetRes()       {}
-func (*Error) updateDimensionMemberRes()       {}
-func (*Error) updateDimensionRes()             {}
 func (*Error) updateFolderRes()                {}
 func (*Error) updateFormMappingRes()           {}
 func (*Error) updateFormRecordRes()            {}
@@ -9171,7 +9307,12 @@ type GridData struct {
 	// dimensions in order — not a single dimension code.
 	Cells GridDataCells `json:"cells"`
 	// MetricId to its aggregate across the grid.
-	Totals      GridDataTotals     `json:"totals"`
+	Totals GridDataTotals `json:"totals"`
+	// Calculated values withheld from this caller because they read a dimension member the caller cannot
+	// see: cell keys in the cells format, and bare metric IDs for totals. They are absent from cells and
+	// totals; a client must not rebuild a parent value from children when any of them is withheld.
+	// Omitted when nothing is withheld.
+	Withheld    []string           `json:"withheld"`
 	AccessRules OptGridAccessRules `json:"access_rules"`
 	// Set when this grid mirrors another grid's metrics by rollup; its cells are read-only.
 	RollupSourceGridID OptNilUUID `json:"rollup_source_grid_id"`
@@ -9215,6 +9356,11 @@ func (s *GridData) GetCells() GridDataCells {
 // GetTotals returns the value of Totals.
 func (s *GridData) GetTotals() GridDataTotals {
 	return s.Totals
+}
+
+// GetWithheld returns the value of Withheld.
+func (s *GridData) GetWithheld() []string {
+	return s.Withheld
 }
 
 // GetAccessRules returns the value of AccessRules.
@@ -9265,6 +9411,11 @@ func (s *GridData) SetCells(val GridDataCells) {
 // SetTotals sets the value of Totals.
 func (s *GridData) SetTotals(val GridDataTotals) {
 	s.Totals = val
+}
+
+// SetWithheld sets the value of Withheld.
+func (s *GridData) SetWithheld(val []string) {
+	s.Withheld = val
 }
 
 // SetAccessRules sets the value of AccessRules.
@@ -11092,6 +11243,14 @@ type ListAuditEventsOKApplicationJSON []AuditEvent
 
 func (*ListAuditEventsOKApplicationJSON) listAuditEventsRes() {}
 
+type ListBAAvailableBadRequest Error
+
+func (*ListBAAvailableBadRequest) listBAAvailableRes() {}
+
+type ListBAAvailableInternalServerError Error
+
+func (*ListBAAvailableInternalServerError) listBAAvailableRes() {}
+
 type ListBAAvailableOKApplicationJSON []BAAvailableItem
 
 func (*ListBAAvailableOKApplicationJSON) listBAAvailableRes() {}
@@ -11310,6 +11469,14 @@ func (s *ListIntegrationRunsOKItemStatus) UnmarshalText(data []byte) error {
 	}
 }
 
+type ListMetricsInternalServerError Error
+
+func (*ListMetricsInternalServerError) listMetricsRes() {}
+
+type ListMetricsNotFound Error
+
+func (*ListMetricsNotFound) listMetricsRes() {}
+
 type ListMetricsOKApplicationJSON []Metric
 
 func (*ListMetricsOKApplicationJSON) listMetricsRes() {}
@@ -11322,6 +11489,14 @@ func (*ListPlansOKApplicationJSON) listPlansRes() {}
 type ListPlansUnauthorized struct{}
 
 func (*ListPlansUnauthorized) listPlansRes() {}
+
+type ListPublicDimensionsInternalServerError Error
+
+func (*ListPublicDimensionsInternalServerError) listPublicDimensionsRes() {}
+
+type ListPublicDimensionsNotFound Error
+
+func (*ListPublicDimensionsNotFound) listPublicDimensionsRes() {}
 
 type ListPublicDimensionsOKApplicationJSON []Dimension
 
@@ -11558,6 +11733,11 @@ type Metric struct {
 	Label   string       `json:"label"`
 	Formula OptNilString `json:"formula"`
 	IsInput bool         `json:"is_input"`
+	// GET /api/metrics only: the model-wide total (an input metric's latest whole-model entry, a
+	// calculated metric's persisted whole-model result). Null when there is none, and always null for a
+	// calculated metric when the caller has any hidden dimension member — that total includes values
+	// the caller cannot see.
+	Value OptNilFloat64 `json:"value"`
 }
 
 // GetID returns the value of ID.
@@ -11585,6 +11765,11 @@ func (s *Metric) GetIsInput() bool {
 	return s.IsInput
 }
 
+// GetValue returns the value of Value.
+func (s *Metric) GetValue() OptNilFloat64 {
+	return s.Value
+}
+
 // SetID sets the value of ID.
 func (s *Metric) SetID(val uuid.UUID) {
 	s.ID = val
@@ -11608,6 +11793,11 @@ func (s *Metric) SetFormula(val OptNilString) {
 // SetIsInput sets the value of IsInput.
 func (s *Metric) SetIsInput(val bool) {
 	s.IsInput = val
+}
+
+// SetValue sets the value of Value.
+func (s *Metric) SetValue(val OptNilFloat64) {
+	s.Value = val
 }
 
 // Ref: #/components/schemas/MetricDef
@@ -17268,6 +17458,8 @@ func (s *RemoveGridDimensionOK) SetStatus(val OptString) {
 	s.Status = val
 }
 
+func (*RemoveGridDimensionOK) removeGridDimensionRes() {}
+
 type RemoveGridMetricOK struct {
 	Status OptString `json:"status"`
 }
@@ -20452,6 +20644,26 @@ func (s *UpdateDashboardWidgetOK) SetStatus(val OptString) {
 
 func (*UpdateDashboardWidgetOK) updateDashboardWidgetRes() {}
 
+type UpdateDimensionBadRequest Error
+
+func (*UpdateDimensionBadRequest) updateDimensionRes() {}
+
+type UpdateDimensionConflict Error
+
+func (*UpdateDimensionConflict) updateDimensionRes() {}
+
+type UpdateDimensionMemberBadRequest Error
+
+func (*UpdateDimensionMemberBadRequest) updateDimensionMemberRes() {}
+
+type UpdateDimensionMemberConflict Error
+
+func (*UpdateDimensionMemberConflict) updateDimensionMemberRes() {}
+
+type UpdateDimensionMemberNotFound Error
+
+func (*UpdateDimensionMemberNotFound) updateDimensionMemberRes() {}
+
 type UpdateDimensionMemberOK struct {
 	Status OptString `json:"status"`
 }
@@ -20470,6 +20682,8 @@ func (*UpdateDimensionMemberOK) updateDimensionMemberRes() {}
 
 type UpdateDimensionOK struct {
 	Status OptString `json:"status"`
+	// When the grouping was sent: the member codes derive_members added.
+	DerivedMembers []string `json:"derived_members"`
 }
 
 // GetStatus returns the value of Status.
@@ -20477,12 +20691,30 @@ func (s *UpdateDimensionOK) GetStatus() OptString {
 	return s.Status
 }
 
+// GetDerivedMembers returns the value of DerivedMembers.
+func (s *UpdateDimensionOK) GetDerivedMembers() []string {
+	return s.DerivedMembers
+}
+
 // SetStatus sets the value of Status.
 func (s *UpdateDimensionOK) SetStatus(val OptString) {
 	s.Status = val
 }
 
+// SetDerivedMembers sets the value of DerivedMembers.
+func (s *UpdateDimensionOK) SetDerivedMembers(val []string) {
+	s.DerivedMembers = val
+}
+
 func (*UpdateDimensionOK) updateDimensionRes() {}
+
+type UpdateDimensionPropertyBadRequest Error
+
+func (*UpdateDimensionPropertyBadRequest) updateDimensionPropertyRes() {}
+
+type UpdateDimensionPropertyNotFound Error
+
+func (*UpdateDimensionPropertyNotFound) updateDimensionPropertyRes() {}
 
 type UpdateDimensionPropertyOK struct {
 	Status OptString `json:"status"`
@@ -20498,6 +20730,8 @@ func (s *UpdateDimensionPropertyOK) SetStatus(val OptString) {
 	s.Status = val
 }
 
+func (*UpdateDimensionPropertyOK) updateDimensionPropertyRes() {}
+
 // A partial update: a field left out keeps its value.
 // Ref: #/components/schemas/UpdateDimensionRequest
 type UpdateDimensionRequest struct {
@@ -20506,6 +20740,13 @@ type UpdateDimensionRequest struct {
 	// Send null to detach the dimension from its parent.
 	ParentDimensionID OptNilUUID `json:"parent_dimension_id"`
 	Tags              []string   `json:"tags"`
+	// Set or replace the property grouping (same rules as on create); null clears it. Clearing or
+	// replacing the source is refused with 409 DIMENSION_IN_USE while a formula names the dimension.
+	SourceDimensionID OptNilUUID `json:"source_dimension_id"`
+	// Change the grouping's property; recalculates the metrics reading through it.
+	SourceProperty OptString `json:"source_property"`
+	// Add a member for every value of the property that has none yet (e.g. after a new value appears).
+	DeriveMembers OptBool `json:"derive_members"`
 }
 
 // GetName returns the value of Name.
@@ -20528,6 +20769,21 @@ func (s *UpdateDimensionRequest) GetTags() []string {
 	return s.Tags
 }
 
+// GetSourceDimensionID returns the value of SourceDimensionID.
+func (s *UpdateDimensionRequest) GetSourceDimensionID() OptNilUUID {
+	return s.SourceDimensionID
+}
+
+// GetSourceProperty returns the value of SourceProperty.
+func (s *UpdateDimensionRequest) GetSourceProperty() OptString {
+	return s.SourceProperty
+}
+
+// GetDeriveMembers returns the value of DeriveMembers.
+func (s *UpdateDimensionRequest) GetDeriveMembers() OptBool {
+	return s.DeriveMembers
+}
+
 // SetName sets the value of Name.
 func (s *UpdateDimensionRequest) SetName(val OptString) {
 	s.Name = val
@@ -20546,6 +20802,21 @@ func (s *UpdateDimensionRequest) SetParentDimensionID(val OptNilUUID) {
 // SetTags sets the value of Tags.
 func (s *UpdateDimensionRequest) SetTags(val []string) {
 	s.Tags = val
+}
+
+// SetSourceDimensionID sets the value of SourceDimensionID.
+func (s *UpdateDimensionRequest) SetSourceDimensionID(val OptNilUUID) {
+	s.SourceDimensionID = val
+}
+
+// SetSourceProperty sets the value of SourceProperty.
+func (s *UpdateDimensionRequest) SetSourceProperty(val OptString) {
+	s.SourceProperty = val
+}
+
+// SetDeriveMembers sets the value of DeriveMembers.
+func (s *UpdateDimensionRequest) SetDeriveMembers(val OptBool) {
+	s.DeriveMembers = val
 }
 
 type UpdateFolderOK struct {
@@ -20864,6 +21135,10 @@ func (s *UpdateIntegrationRequest) SetTargetID(val OptUUID) {
 type UpdateMetricBadRequest Error
 
 func (*UpdateMetricBadRequest) updateMetricRes() {}
+
+type UpdateMetricConflict Error
+
+func (*UpdateMetricConflict) updateMetricRes() {}
 
 type UpdateMetricNotFound Error
 

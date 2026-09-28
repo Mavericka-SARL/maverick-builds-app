@@ -272,25 +272,12 @@ func (h *handler) gridExport(w http.ResponseWriter, r *http.Request) {
 // rule_type='metric' rows — so an export (or any other caller) can never
 // surface a fact, or a metric's own column, /api/grid itself would hide.
 func (h *handler) hiddenMemberFilter(ctx context.Context, act *actor, modelID, revisionID string) (hiddenByDim map[string]map[string]bool, metricRules map[string]string, err error) {
-	dimRules := map[string]string{}
-	metricRules = map[string]string{}
-	arRows, err := h.db.Query(ctx,
-		`SELECT rule_type, ref_id, access FROM identity.user_access_rule WHERE user_id=$1::uuid`, act.UserID)
+	// Rules resolve by lineage against revisionID (an older revision
+	// hides what the active one does) and fail closed.
+	dimRules, metricRules, err := loadUserAccessRules(ctx, h.db, act.UserID, revisionID)
 	if err != nil {
 		return nil, nil, err
 	}
-	for arRows.Next() {
-		var ruleType, refID, access string
-		if arRows.Scan(&ruleType, &refID, &access) == nil {
-			switch ruleType {
-			case "dimension_member":
-				dimRules[refID] = access
-			case "metric":
-				metricRules[refID] = access
-			}
-		}
-	}
-	arRows.Close()
 	if len(dimRules) == 0 {
 		return nil, metricRules, nil
 	}

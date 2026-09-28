@@ -1,6 +1,6 @@
 # Time-Series Formula Functions — Implementation Instructions
 
-> **Classification:** Current — Phase 1 implemented; contract and acceptance
+> **Classification:** Current — Phase 1 and the 2026-09-28 time additions implemented; contract and acceptance
 > reference.
 >
 > **Status:** Implemented 2026-09-19 (Phase 1, plus time hierarchies — see
@@ -11,6 +11,21 @@
 > `internal/gateway/time_dimension_api_test.go`; the Sales Planning demo now
 > reads its prior quarter with `LAG`/`PREVIOUS` on a declared time dimension.
 > §13 remains the list of functions that are still rejected.
+>
+> **Time additions (2026-09-28, beyond Phase 1 as written):** dynamic
+> `LAG`/`LEAD`/`OFFSET` offsets, `MONTHVALUE`/`QUARTERVALUE`/`HALFYEARVALUE`/
+> `YEARVALUE`, `HALFYEARTODATE`, `TIMESUM`, `START`/`END` and the plain date
+> functions `DAYSINMONTH`/`DAYSINYEAR` are implemented, together with the
+> dimensional functions (`dim.property`, `PARENT`, `LOOKUP`, the `SUMIFS`
+> family) that can also read along the time dimension. Their rules — and the
+> withheld-cell rule that now covers every time-series metric for restricted
+> viewers (§10) — are the reference sections of
+> `FORMULA_CALCULATION_INSTRUCTIONS.md`
+> ("Time additions", "Recurrences", "Restricted viewers: withheld cells").
+> Acceptance values are asserted by `internal/formula/timeadd_test.go` and
+> `internal/calculation/dimensional_integration_test.go`. §5, §9, §10 and §13
+> below are updated for them; the rest of this document is the Phase 1
+> contract as delivered.
 >
 > Implementation map: migration `087_time_dimensions.sql`; `internal/timedim`
 > (period validation, chronological `time_index`); `internal/formula/time.go`
@@ -45,7 +60,7 @@
 > `FY26 › H1/H2 › Q1..Q4` period dimension. Migration `088_time_hierarchy.sql`
 > lifts 087's flat-only constraint.
 >
-> **Last verified against the repository:** 2026-09-19.
+> **Last verified against the repository:** 2026-09-28.
 >
 > **Primary code areas:** `internal/formula`, `internal/metricformula`,
 > `internal/calculation`, `internal/gateway`, `internal/modeltransfer`,
@@ -344,10 +359,28 @@ All names and keywords are case-insensitive. Phase 1 values persisted in
 `runtime.calc_result` remain numeric. Boolean expressions are allowed where a
 function explicitly requests one, such as the reset argument to `CUMULATE`.
 
-Offset arguments must be integer literals in Phase 1. Reject decimals,
-references, and calculated offset expressions with
-`DYNAMIC_TIME_OFFSET_UNSUPPORTED`. This restriction makes dependency ranges
-and recurrence direction statically knowable.
+A literal offset must be a whole number; a decimal literal is refused at save
+with `TIME_OFFSET_NOT_INTEGER`. `LAG`, `LEAD` and `OFFSET` also accept any
+expression as the offset (a metric, a property, an `IF`): it is evaluated at
+the current period, must be a whole number (otherwise the cell gets the same
+`TIME_OFFSET_NOT_INTEGER`), and a target outside the range returns the
+substitute as with a literal. `MOVINGSUM` window bounds stay integer literals;
+a non-literal bound is refused at save with `MOVING_WINDOW_NOT_LITERAL`.
+
+These two codes replaced `DYNAMIC_TIME_OFFSET_UNSUPPORTED` on 2026-09-28:
+dynamic offsets are now supported, so the old name no longer described what
+it refused. An API client matching `DYNAMIC_TIME_OFFSET_UNSUPPORTED` must
+switch to `TIME_OFFSET_NOT_INTEGER` and `MOVING_WINDOW_NOT_LITERAL`.
+
+The literal-offset rule now matters only for recurrences: a literal offset
+makes the dependency range and the recurrence direction statically knowable,
+so a metric in an opening/closing cycle (§8.2) must use one when it reads a
+metric of its own cycle. A non-literal offset records the source dependency as
+unbounded past and future; a recurrence refuses such an edge to a metric of its
+own cycle with `TEMPORAL_CYCLE_NOT_CAUSAL`. A dynamic offset (or another
+unbounded time read) on a metric outside the cycle is allowed, as it is
+outside a recurrence. `LOOKUP` and the `*IFS`/`*IF` family are refused
+anywhere in a recurrence.
 
 ### 5.1 Position functions
 
@@ -436,6 +469,7 @@ The optional Anaplan list argument is not in Phase 1.
 ```text
 MONTHTODATE(source)
 QUARTERTODATE(source)
+HALFYEARTODATE(source)
 YEARTODATE(source)
 ```
 
@@ -446,9 +480,37 @@ boundaries from `period_start`, `period_end`, granularity, and
 
 - `MONTHTODATE` requires a day-granularity source.
 - `QUARTERTODATE` accepts day, week, or month sources.
+- `HALFYEARTODATE` (a time addition) accepts day, week, month, or quarter
+  sources; halves follow `fiscal_year_start_month`.
 - `YEARTODATE` accepts day, week, month, quarter, or half-year sources.
 - A period that crosses one of the requested boundaries makes the dimension
   invalid for that function; do not prorate it silently.
+
+### 5.5 Time additions
+
+```text
+MONTHVALUE(metric)   QUARTERVALUE(metric)   HALFYEARVALUE(metric)   YEARVALUE(metric)
+TIMESUM(x [, start_code, end_code [, SUM | AVERAGE | MIN | MAX]])
+START()   END()
+```
+
+- The `*VALUE` functions return a bare metric over every leaf period of the
+  current month, quarter, half or fiscal year, reduced by that metric's
+  `time_summary` (blank for `none`). They use the same boundaries and
+  granularity rule as the period-to-date functions.
+- `TIMESUM` reduces any expression over a range given by period **codes**
+  (an aggregate period stands for its first to last leaf), or over every leaf
+  period without a range; an unknown code is `#N/A` at run time and
+  `UNKNOWN_MEMBER` at save, placement or activation.
+- `START()` and `END()` are the current leaf period's first and last day as
+  date serials.
+- The `*VALUE` functions and `TIMESUM` read an unbounded time window, so
+  they are refused on an edge inside a recurrence (§8.2). Like every time
+  function, all of them are served from persisted rows on scoped reads (§10).
+
+The full rules are in
+`FORMULA_CALCULATION_INSTRUCTIONS.md`,
+"Time additions".
 
 ## 6. Required evaluator design
 
@@ -528,7 +590,9 @@ The analyzer must understand argument roles:
 - substitute and reset expressions stay at offset zero;
 - `SUM`, `AVERAGE`, `MIN`, `MAX`, `STRICT`, `SEMISTRICT`, and `NONSTRICT` in
   their defined positions are keywords, not metric references;
-- literal offsets are validated and converted to source-relative offsets; and
+- literal offsets are validated and converted to source-relative offsets;
+  a non-literal (dynamic) offset records the source as unbounded past and
+  future; and
 - nested time functions compose offsets. For example,
   `PREVIOUS(LAG(x, 2, 0))` references `x` at `-3`.
 
@@ -613,19 +677,32 @@ These rules must be consistent in the grid, chart, export, and API:
 - A source/target time-dimension mismatch is a validation error. Phase 1 does
   not map months to quarters or one calendar to another.
 - Empty `MOVINGSUM` ranges return zero. `AVERAGE`, `MIN`, or `MAX` over an empty
-  effective range also return zero for Phase 1 numeric compatibility.
+  effective range also return zero for Phase 1 numeric compatibility. An
+  empty `TIMESUM` range (start after end) gives the same result.
+- The `*VALUE` functions skip periods with no recorded value; a source whose
+  `time_summary` is `none` gives blank, and a blank result persists no row.
+- An unknown or blank period code in `TIMESUM` is `#N/A`, a formula failure,
+  never "no data".
 
-Use actionable error identifiers and messages:
+Error identifiers (the console shows each message verbatim):
 
 ```text
 TIME_DIMENSION_REQUIRED
 MULTIPLE_TIME_DIMENSIONS
-TIME_DIMENSION_MISMATCH
+TIME_DIMENSION_MISMATCH           also: a *VALUE source not dimensioned by the cell's time dimension
 INVALID_TIME_MEMBER
-DYNAMIC_TIME_OFFSET_UNSUPPORTED
+TIME_OFFSET_NOT_INTEGER           save: a decimal literal offset or window bound;
+                                  runtime: a dynamic LAG/LEAD/OFFSET offset is not a whole number
+MOVING_WINDOW_NOT_LITERAL         save: a MOVINGSUM window bound that is not an integer literal
 TIME_CONTEXT_REQUIRED
-TEMPORAL_CYCLE_NOT_CAUSAL
+TEMPORAL_CYCLE_NOT_CAUSAL         also: LOOKUP, the *IFS family or an unbounded read in a recurrence
+UNKNOWN_MEMBER                    save/placement/activation: a literal TIMESUM period code does not exist
 ```
+
+The dimensional codes (`SOURCE_MUST_BE_METRIC`, `DIMENSION_NOT_ON_SOURCE` and
+the others) are listed in
+`FORMULA_CALCULATION_INSTRUCTIONS.md`,
+"Error codes".
 
 ## 10. Security and revision isolation
 
@@ -634,11 +711,26 @@ TEMPORAL_CYCLE_NOT_CAUSAL
 - A time-series calculation is a model result and is persisted independently
   of the viewing user. Existing member access rules still determine which
   period cells a user may request.
-- Before release, test whether a visible derived value can reveal a hidden
-  period through `LAG`, `CUMULATE`, or `MOVINGSUM`. If dimension-member hiding
-  is a confidentiality boundary, the safe Phase 1 behavior is to suppress a
-  result whose required time window includes a hidden period. Do not simply
-  omit the hidden source from the arithmetic, because that changes the model.
+- **Served from rows.** A scoped read — a grid read by a viewer with hidden
+  members or with a scope pin, and dashboard chart-data — never re-evaluates a
+  time-series metric, nor any metric using `LOOKUP`, the `*IFS` family, a
+  dynamic offset, the `*VALUE` family or `TIMESUM`: it serves the persisted
+  rows, because a scoped input set cannot reproduce reads outside the scope.
+- **Withheld, never recomputed.** For a viewer with hidden members, a served
+  cell whose read set touches a hidden member is withheld — in the grid
+  (absent from `cells`, listed in `withheld`, shown as "—") and in chart-data
+  (a `null` point). For the time dimension the read set is the cell's window:
+  its leaf-period positions plus the offsets composed along the dependency
+  chain (unbounded for `CUMULATE`, the `*VALUE` family, `TIMESUM` and dynamic
+  offsets; a literal `TIMESUM` range reads exactly that range). A total or
+  aggregate period built from a withheld cell is withheld too; there are no
+  partial totals. The hidden source is never simply omitted from the
+  arithmetic, because that would change the model. The full rule is
+  "Restricted viewers: withheld cells" in
+  `FORMULA_CALCULATION_INSTRUCTIONS.md`.
+- **Recurrences** read in one direction: an opening/closing pair built on
+  `LAG(…, 1, …)` widens its window only into the past, so hiding a later
+  period does not withhold earlier cells.
 - Revision cloning, publication, package export/import, and tenant migration
   must preserve the time marker and chronological metadata exactly.
 
@@ -695,7 +787,8 @@ closing_cash = opening_cash + net_cash_flow
 - nested offsets and composed dependency ranges;
 - keyword identifiers excluded from dependency references;
 - `EvalWithContext` retaining the time context;
-- integer-literal enforcement; and
+- whole-number enforcement (decimal literals at save, dynamic offsets at
+  run time); and
 - error propagation through and around `IFERROR`.
 
 ### API and schema tests
@@ -739,21 +832,22 @@ The browser must not contain a second implementation of time arithmetic.
 
 ## 13. Later Anaplan parity — reject until complete
 
-The following are intentionally outside Phase 1:
+The following remain unimplemented:
 
-- dynamic or metric-driven offsets;
-- list/dimension arguments that make time functions operate over arbitrary
-  standard dimensions;
 - `POST`, `SPREAD`, and `PROFILE`, which distribute one source into one or many
   target periods and require reverse accumulation rather than contextual reads;
-- `TIMESUM` with absolute time-period literals and targets without a time
-  dimension;
-- `WEEKVALUE`, `MONTHVALUE`, `QUARTERVALUE`, `HALFYEARVALUE`, and `YEARVALUE`;
+- `WEEKVALUE`;
+- dynamic `MOVINGSUM` windows (the bounds stay integer literals);
 - cross-calendar and cross-timescale mapping;
 - non-numeric time-series persistence.
 
-Time hierarchies with parent period members, originally listed here, are
-implemented as aggregate periods (see the status block).
+Implemented since, and removed from this list: time hierarchies with parent
+period members (as aggregate periods, see the status block); dynamic
+`LAG`/`LEAD`/`OFFSET` offsets; `TIMESUM` over period codes;
+`MONTHVALUE`/`QUARTERVALUE`/`HALFYEARVALUE`/`YEARVALUE`; and reading along
+arbitrary standard dimensions, which `LOOKUP` and the `SUMIFS` family now
+cover (a `TIMESUM` on a metric without a time dimension is still
+`TIME_DIMENSION_REQUIRED`).
 
 These names must fail formula validation as unknown/unsupported until their
 engine, dependency, summary, security, and consumer-parity tests are present.

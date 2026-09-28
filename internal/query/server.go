@@ -111,7 +111,7 @@ func (s *Server) Query(ctx context.Context, req *queryv1.QueryRequest) (*queryv1
 			s.log.Error().Err(err).Msg("check metric access")
 			return nil, status.Error(codes.Internal, "check metric access")
 		}
-		allowedDimCodes, err = visibleDimCodes(ctx, s.store.Pool(), req.ModelId, req.UserId)
+		allowedDimCodes, err = visibleDimCodes(ctx, s.store.Pool(), req.ModelId, req.RevisionId, req.UserId)
 		if err != nil {
 			s.log.Error().Err(err).Msg("check dimension access")
 			return nil, status.Error(codes.Internal, "check dimension access")
@@ -199,27 +199,18 @@ func filterMetricsByAccess(ctx context.Context, pool *pgxpool.Pool, userID strin
 	return kept, nil
 }
 
-// visibleDimCodes returns every dimension_member CODE in modelID that
-// userID is NOT hidden from (cascading a hidden rule down the hierarchy
-// exactly like writeguard.CheckWrite does, via writeguard.ExpandHidden),
-// or nil if the user has no dimension_member rules at all —
-// dimMembersAllowed treats a nil/empty list as "no restriction", matching
-// the allow-everything default here too.
-func visibleDimCodes(ctx context.Context, pool *pgxpool.Pool, modelID, userID string) ([]string, error) {
-	dimRules := map[string]string{}
-	arRows, err := pool.Query(ctx,
-		`SELECT ref_id, access FROM identity.user_access_rule WHERE user_id=$1::uuid AND rule_type='dimension_member'`, userID)
+// visibleDimCodes returns every dimension_member CODE of revisionID (and of
+// any revision-less dimension) in modelID that userID is NOT hidden from
+// (cascading a hidden rule down the hierarchy exactly like
+// writeguard.CheckWrite does, via writeguard.ExpandHidden), or nil if the
+// user has no dimension_member rules at all — dimMembersAllowed treats a
+// nil/empty list as "no restriction", matching the allow-everything default
+// here too. The rules resolve by lineage against revisionID
+// (writeguard.RulesForRevision), so an older revision hides what the
+// active one does. revisionID "" keeps the model-wide member universe.
+func visibleDimCodes(ctx context.Context, pool *pgxpool.Pool, modelID, revisionID, userID string) ([]string, error) {
+	dimRules, _, err := writeguard.RuleMaps(ctx, pool, userID, revisionID)
 	if err != nil {
-		return nil, err
-	}
-	for arRows.Next() {
-		var refID, access string
-		if arRows.Scan(&refID, &access) == nil {
-			dimRules[refID] = access
-		}
-	}
-	arRows.Close()
-	if err := arRows.Err(); err != nil {
 		return nil, err
 	}
 	if len(dimRules) == 0 {
@@ -229,7 +220,8 @@ func visibleDimCodes(ctx context.Context, pool *pgxpool.Pool, modelID, userID st
 	rows, err := pool.Query(ctx, `
 		SELECT m.id::text, m.code, COALESCE(m.parent_member_id::text,''), m.dimension_id::text
 		FROM model.dimension_member m JOIN model.dimension_def d ON d.id = m.dimension_id
-		WHERE d.model_id = $1::uuid`, modelID)
+		WHERE d.model_id = $1::uuid
+		  AND ($2 = '' OR d.revision_id IS NULL OR d.revision_id::text = $2)`, modelID, revisionID)
 	if err != nil {
 		return nil, err
 	}
@@ -239,10 +231,11 @@ func visibleDimCodes(ctx context.Context, pool *pgxpool.Pool, modelID, userID st
 	edges := make([]writeguard.MemberEdge, 0, 256)
 	for rows.Next() {
 		var mr memberRow
-		if rows.Scan(&mr.id, &mr.code, &mr.parentID, &mr.dimID) == nil {
-			members = append(members, mr)
-			edges = append(edges, writeguard.MemberEdge{ID: mr.id, ParentID: mr.parentID, DimID: mr.dimID})
+		if err := rows.Scan(&mr.id, &mr.code, &mr.parentID, &mr.dimID); err != nil {
+			return nil, err
 		}
+		members = append(members, mr)
+		edges = append(edges, writeguard.MemberEdge{ID: mr.id, ParentID: mr.parentID, DimID: mr.dimID})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -259,6 +252,12 @@ func visibleDimCodes(ctx context.Context, pool *pgxpool.Pool, modelID, userID st
 		if !hiddenIDs[mr.id] {
 			visible = append(visible, mr.code)
 		}
+	}
+	if len(visible) == 0 && len(hiddenIDs) > 0 {
+		// Everything is hidden: an empty list would read as "no
+		// restriction" in dimMembersAllowed, so return one code no member
+		// carries (codes are never empty) — nothing matches it.
+		return []string{""}, nil
 	}
 	return visible, nil
 }

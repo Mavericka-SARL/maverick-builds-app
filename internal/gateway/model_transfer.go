@@ -243,3 +243,34 @@ func (h *handler) recalcRevisionFromInputs(ctx context.Context, modelID, revisio
 	sched := calculation.NewScheduler(h.log, calculation.NewStore(h.db.For(ctx)), nil)
 	return sched.RecalcAffected(ctx, modelID, revisionID, inputIDs)
 }
+
+// recalcRevisionCalculated recomputes every calculated metric of one
+// revision, in dependency order — the whole-revision case of
+// RecalcSpecific, for a revision whose members, properties and formulas
+// changed where no recalculation followed (a revision being activated).
+// Unlike recalcRevisionFromInputs it also reaches metrics that read only
+// dimensions or dependency-free metrics.
+func (h *handler) recalcRevisionCalculated(ctx context.Context, modelID, revisionID string) {
+	rows, err := h.db.Query(ctx,
+		`SELECT id::text FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid AND NOT is_input`,
+		modelID, revisionID)
+	if err != nil {
+		h.log.Warn().Err(err).Str("revision", revisionID).Msg("recalc revision: load metrics")
+		return
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	if len(ids) == 0 {
+		return
+	}
+	sched := calculation.NewScheduler(h.log, calculation.NewStore(h.db.For(ctx)), nil)
+	if err := sched.RecalcSpecific(ctx, modelID, revisionID, ids); err != nil {
+		h.log.Warn().Err(err).Str("revision", revisionID).Msg("recalc revision failed")
+	}
+}
