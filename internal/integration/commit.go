@@ -38,6 +38,10 @@ func (c *DBCommitter) CommitPull(ctx context.Context, def *Definition, header []
 		// scheduled runs the developer who enabled the schedule.
 		return 0, 0, fmt.Errorf("run has no acting principal")
 	}
+	// The last line before a write: never write into another model's row.
+	if err := checkDefinitionOwnership(ctx, c.Pool, def); err != nil {
+		return 0, 0, err
+	}
 	switch def.Config.TargetType {
 	case TargetGrid:
 		return c.commitGrid(ctx, def, header, rows, dryRun, runBy)
@@ -322,6 +326,11 @@ func (c *DBCommitter) commitForm(ctx context.Context, def *Definition, header []
 //   - grid: one wide row per dim-combo over the mapped metrics, reading the
 //     grid's deterministic latest-wins facts.
 func (c *DBCommitter) LoadPushRows(ctx context.Context, def *Definition) ([]map[string]string, error) {
+	// The last line before a read that leaves the process: never push
+	// another model's rows.
+	if err := checkDefinitionOwnership(ctx, c.Pool, def); err != nil {
+		return nil, err
+	}
 	switch def.Config.TargetType {
 	case TargetDimension:
 		return c.loadDimensionRows(ctx, def)

@@ -21,16 +21,20 @@ export function StepTypeIcon({ type, size = 14 }: { type: StepType; size?: numbe
 
 export function TriggerEventSelect({
   applicationId,
+  revisionId,
   value,
   onChange,
   showPayload = false,
 }: {
   applicationId: string;
+  // The Build working revision: its forms and integrations are the ones
+  // listed, and the ones a trigger made from the workflow is scoped to.
+  revisionId?: string;
   value: string;
   onChange: (key: string) => void;
   showPayload?: boolean;
 }) {
-  const { data, isError } = useTriggerEvents(applicationId);
+  const { data, isError } = useTriggerEvents(applicationId, revisionId);
   const events = data ?? TRIGGER_FALLBACK;
 
   const grouped = TRIGGER_CATEGORY_ORDER.reduce<Record<string, TriggerEventCatalogItem[]>>((acc, cat) => {

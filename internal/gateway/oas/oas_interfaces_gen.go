@@ -101,6 +101,10 @@ type CreateFormMappingRes interface {
 	createFormMappingRes()
 }
 
+type CreateFormRecordRes interface {
+	createFormRecordRes()
+}
+
 type CreateFormRes interface {
 	createFormRes()
 }
@@ -161,6 +165,10 @@ type DeleteAiSessionRes interface {
 	deleteAiSessionRes()
 }
 
+type DeleteBARoleRes interface {
+	deleteBARoleRes()
+}
+
 type DeleteDimensionMemberRes interface {
 	deleteDimensionMemberRes()
 }
@@ -175,6 +183,10 @@ type DeleteDimensionRes interface {
 
 type DeleteFormRecordRes interface {
 	deleteFormRecordRes()
+}
+
+type DeleteFormRes interface {
+	deleteFormRes()
 }
 
 type DeleteGoogleConnectionRes interface {
@@ -265,6 +277,10 @@ type GetDemoRes interface {
 	getDemoRes()
 }
 
+type GetFormRecordRes interface {
+	getFormRecordRes()
+}
+
 type GetGoogleConnectionRes interface {
 	getGoogleConnectionRes()
 }
@@ -345,8 +361,28 @@ type ListAuditEventsRes interface {
 	listAuditEventsRes()
 }
 
+type ListAutomationRulesRes interface {
+	listAutomationRulesRes()
+}
+
 type ListBAAvailableRes interface {
 	listBAAvailableRes()
+}
+
+type ListBARoleDashboardsRes interface {
+	listBARoleDashboardsRes()
+}
+
+type ListBARoleMembersRes interface {
+	listBARoleMembersRes()
+}
+
+type ListBARolesRes interface {
+	listBARolesRes()
+}
+
+type ListBAUsersRes interface {
+	listBAUsersRes()
 }
 
 type ListBusinessFoldersRes interface {
@@ -371,6 +407,10 @@ type ListDeveloperIntegrationsRes interface {
 
 type ListFormMappingsRes interface {
 	listFormMappingsRes()
+}
+
+type ListFormRecordsRes interface {
+	listFormRecordsRes()
 }
 
 type ListFormsRes interface {
@@ -401,12 +441,20 @@ type ListScimTokensRes interface {
 	listScimTokensRes()
 }
 
+type ListUserAccessRulesRes interface {
+	listUserAccessRulesRes()
+}
+
 type ListWorkflowDefinitionsRes interface {
 	listWorkflowDefinitionsRes()
 }
 
 type ListWorkflowRolesRes interface {
 	listWorkflowRolesRes()
+}
+
+type ListWorkflowTriggerEventsRes interface {
+	listWorkflowTriggerEventsRes()
 }
 
 type ListWorkflowsRes interface {
@@ -433,6 +481,10 @@ type RemoveAdminUserRoleRes interface {
 	removeAdminUserRoleRes()
 }
 
+type RemoveBARoleMemberRes interface {
+	removeBARoleMemberRes()
+}
+
 type RemoveBrandingRes interface {
 	removeBrandingRes()
 }
@@ -447,6 +499,10 @@ type RemoveSsoRes interface {
 
 type RenameAiSessionRes interface {
 	renameAiSessionRes()
+}
+
+type ReorderDimensionMembersRes interface {
+	reorderDimensionMembersRes()
 }
 
 type ResendAdminUserInvitationRes interface {
@@ -575,6 +631,10 @@ type StartWorkflowInstanceRes interface {
 
 type SubmitBudgetRes interface {
 	submitBudgetRes()
+}
+
+type SyncFormMappingsRes interface {
+	syncFormMappingsRes()
 }
 
 type TestGoogleConnectionRes interface {

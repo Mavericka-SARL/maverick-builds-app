@@ -446,9 +446,9 @@ export function IntegrationsTab({ revisionId }: { revisionId?: string } = {}) {
       </div>
 
       {/* Source content */}
-      {activeSource === "csv" && <ExcelImportSection />}
+      {activeSource === "csv" && <ExcelImportSection revisionId={revisionId} />}
 
-      {activeSource === "google_sheets" && <GoogleSheetsImportSection />}
+      {activeSource === "google_sheets" && <GoogleSheetsImportSection revisionId={revisionId} />}
 
       {activeSource === "rest_api" && <ApiIntegrationSection revisionId={revisionId} />}
 

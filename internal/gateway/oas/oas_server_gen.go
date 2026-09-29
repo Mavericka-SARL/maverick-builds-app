@@ -4,8 +4,6 @@ package oas
 
 import (
 	"context"
-
-	"github.com/google/uuid"
 )
 
 // Handler handles operations described by OpenAPI v3 specification.
@@ -152,7 +150,7 @@ type Handler interface {
 	// Create an automation rule (a workflow_def_id must point at a published workflow).
 	//
 	// POST /api/automation/rules
-	CreateAutomationRule(ctx context.Context, req *AutomationRuleRequest) (CreateAutomationRuleRes, error)
+	CreateAutomationRule(ctx context.Context, req *AutomationRuleRequest, params CreateAutomationRuleParams) (CreateAutomationRuleRes, error)
 	// CreateBARole implements createBARole operation.
 	//
 	// Create a business role in the caller's workspace.
@@ -195,13 +193,13 @@ type Handler interface {
 	// Create a dashboard folder.
 	//
 	// POST /api/developer/folders
-	CreateFolder(ctx context.Context, req *FolderRequest) (CreateFolderRes, error)
+	CreateFolder(ctx context.Context, req *FolderRequest, params CreateFolderParams) (CreateFolderRes, error)
 	// CreateForm implements createForm operation.
 	//
 	// Create a CRUD form.
 	//
 	// POST /api/forms
-	CreateForm(ctx context.Context, req *CreateFormRequest) (CreateFormRes, error)
+	CreateForm(ctx context.Context, req *CreateFormRequest, params CreateFormParams) (CreateFormRes, error)
 	// CreateFormMapping implements createFormMapping operation.
 	//
 	// Create a form-to-metric mapping (posts submitted form field values into a metric's facts).
@@ -210,23 +208,24 @@ type Handler interface {
 	CreateFormMapping(ctx context.Context, req *CreateFormMappingRequest) (CreateFormMappingRes, error)
 	// CreateFormRecord implements createFormRecord operation.
 	//
-	// Submit a new record to a form (posts to any live form-metric mappings and dispatches form_submit
-	// automation rules).
+	// For a caller who reaches the form's application (404 otherwise). The caller becomes the record's
+	// creator. A record created submitted dispatches form_submit rules, one created approved (by an
+	// administrator) form_approval rules.
 	//
 	// POST /api/forms/{id}/records
-	CreateFormRecord(ctx context.Context, req *CreateRecordRequest, params CreateFormRecordParams) (*FormRecord, error)
+	CreateFormRecord(ctx context.Context, req *CreateRecordRequest, params CreateFormRecordParams) (CreateFormRecordRes, error)
 	// CreateGrid implements createGrid operation.
 	//
 	// Create a new grid definition.
 	//
 	// POST /api/developer/grids
-	CreateGrid(ctx context.Context, req *CreateGridRequest) (CreateGridRes, error)
+	CreateGrid(ctx context.Context, req *CreateGridRequest, params CreateGridParams) (CreateGridRes, error)
 	// CreateIntegration implements createIntegration operation.
 	//
 	// Create an integration definition.
 	//
 	// POST /api/developer/integrations
-	CreateIntegration(ctx context.Context, req *CreateIntegrationRequest) (CreateIntegrationRes, error)
+	CreateIntegration(ctx context.Context, req *CreateIntegrationRequest, params CreateIntegrationParams) (CreateIntegrationRes, error)
 	// CreateIntegrationConnection implements createIntegrationConnection operation.
 	//
 	// Create a connection; the secret document is sealed with mandatory AEAD and never returned.
@@ -241,11 +240,13 @@ type Handler interface {
 	CreateMetric(ctx context.Context, req *CreateMetricRequest) (CreateMetricRes, error)
 	// CreateRevision implements createRevision operation.
 	//
-	// Duplicate a revision (deep-copies metrics, dimensions, grids, dashboards, forms, workflows, and
-	// facts).
+	// The new revision is made in the model of source_revision_id when the body names one, else in
+	// model_id, else in the model the request resolves (X-Model-Id within the X-App-Id application, else
+	// the application's default model). A source revision must be one the caller may open, of a model in
+	// the X-App-Id application when the request names one.
 	//
 	// POST /api/developer/revisions
-	CreateRevision(ctx context.Context, req *CreateRevisionRequest) (CreateRevisionRes, error)
+	CreateRevision(ctx context.Context, req *CreateRevisionRequest, params CreateRevisionParams) (CreateRevisionRes, error)
 	// CreateScimToken implements createScimToken operation.
 	//
 	// Issue a SCIM bearer token; the plaintext is returned once (administrators; enterprise).
@@ -284,7 +285,7 @@ type Handler interface {
 	// List the 50 most recently entered raw fact_input rows for a model (debugging aid).
 	//
 	// GET /api/developer/debug/facts
-	DebugFacts(ctx context.Context) (DebugFactsRes, error)
+	DebugFacts(ctx context.Context, params DebugFactsParams) (DebugFactsRes, error)
 	// DeleteAdminApplication implements deleteAdminApplication operation.
 	//
 	// Delete an application.
@@ -334,7 +335,7 @@ type Handler interface {
 	// Delete a business role.
 	//
 	// DELETE /api/business-admin/roles/{id}
-	DeleteBARole(ctx context.Context, params DeleteBARoleParams) (*DeleteBARoleOK, error)
+	DeleteBARole(ctx context.Context, params DeleteBARoleParams) (DeleteBARoleRes, error)
 	// DeleteDashboard implements deleteDashboard operation.
 	//
 	// Delete a dashboard.
@@ -373,10 +374,11 @@ type Handler interface {
 	DeleteFolder(ctx context.Context, params DeleteFolderParams) (*DeleteFolderOK, error)
 	// DeleteForm implements deleteForm operation.
 	//
-	// Delete a form.
+	// Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
+	// Deletes every record of the form with it.
 	//
 	// DELETE /api/forms/{id}
-	DeleteForm(ctx context.Context, params DeleteFormParams) (*DeleteFormOK, error)
+	DeleteForm(ctx context.Context, params DeleteFormParams) (DeleteFormRes, error)
 	// DeleteFormMapping implements deleteFormMapping operation.
 	//
 	// Delete a form-to-metric mapping.
@@ -385,7 +387,8 @@ type Handler interface {
 	DeleteFormMapping(ctx context.Context, params DeleteFormMappingParams) (*DeleteFormMappingOK, error)
 	// DeleteFormRecord implements deleteFormRecord operation.
 	//
-	// Delete a form record.
+	// 404 for a caller who does not reach the record, 403 for one whose permissions do not include
+	// delete, 409 when the record changed status since it was read.
 	//
 	// DELETE /api/records/{id}
 	DeleteFormRecord(ctx context.Context, params DeleteFormRecordParams) (DeleteFormRecordRes, error)
@@ -478,7 +481,8 @@ type Handler interface {
 	ExportAudit(ctx context.Context, params ExportAuditParams) (ExportAuditRes, error)
 	// ExportFormRecords implements exportFormRecords operation.
 	//
-	// Export a form's records as CSV or XLSX.
+	// For a caller who reaches the form's application (404 otherwise); records the caller's access rules
+	// withhold are left out.
 	//
 	// GET /api/forms/{id}/export
 	ExportFormRecords(ctx context.Context, params ExportFormRecordsParams) (ExportFormRecordsRes, error)
@@ -591,6 +595,14 @@ type Handler interface {
 	//
 	// GET /api/developer/model
 	GetDeveloperModel(ctx context.Context, params GetDeveloperModelParams) (*GetDeveloperModelOK, error)
+	// GetFormRecord implements getFormRecord operation.
+	//
+	// For a caller who reaches the record's form's application the way the business console opens it and
+	// whose access rules do not withhold the record; anyone else gets 404, as for a record that does not
+	// exist.
+	//
+	// GET /api/records/{id}
+	GetFormRecord(ctx context.Context, params GetFormRecordParams) (GetFormRecordRes, error)
 	// GetGoogleConnection implements getGoogleConnection operation.
 	//
 	// The tenant's Google service account, public half only — the address to share sheets with
@@ -685,7 +697,13 @@ type Handler interface {
 	GetWorkflow(ctx context.Context, params GetWorkflowParams) (GetWorkflowRes, error)
 	// GetWorkflowHistory implements getWorkflowHistory operation.
 	//
-	// List the 50 most recent workflow instances across the whole platform (business_admin only).
+	// Newest first. Only instances of workflows of applications the caller administers: an application
+	// in a workspace where the caller holds business_admin, or one kept under a tenant with no workspace
+	// when the caller holds business_admin in any workspace of that tenant, narrowed by the caller's
+	// per-application grants when they have any. A caller who is also tenant_admin covers the
+	// applications of its tenants; a platform_admin or platform-level developer covers every application.
+	//  When X-App-Id names an application, only that application's instances are listed. A developer's
+	// test runs are never listed.
 	//
 	// GET /api/workflow/history
 	GetWorkflowHistory(ctx context.Context) ([]WorkflowInstance, error)
@@ -730,8 +748,9 @@ type Handler interface {
 	ImportDimensionMembers(ctx context.Context, req *ImportDimensionMembersReq) (ImportDimensionMembersRes, error)
 	// ImportFormRecords implements importFormRecords operation.
 	//
-	// Bulk-create form records from an uploaded CSV or XLSX (atomic — any row failing validation
-	// rejects the whole file).
+	// For a caller who reaches the form's application (404 otherwise), who becomes each record's creator.
+	//  A row's optional status column sets its status; a row whose status the caller may not create
+	// (approved or rejected, unless the caller administers the application) fails validation.
 	//
 	// POST /api/forms/{id}/import
 	ImportFormRecords(ctx context.Context, req *FormImportRequest, params ImportFormRecordsParams) (ImportFormRecordsRes, error)
@@ -831,7 +850,7 @@ type Handler interface {
 	// List automation rules for the current application/revision.
 	//
 	// GET /api/automation/rules
-	ListAutomationRules(ctx context.Context) ([]AutomationRule, error)
+	ListAutomationRules(ctx context.Context, params ListAutomationRulesParams) (ListAutomationRulesRes, error)
 	// ListBAAvailable implements listBAAvailable operation.
 	//
 	// List dashboards, metrics, dimensions, or dimension members available for role/access configuration.
@@ -843,25 +862,25 @@ type Handler interface {
 	// List the dashboard IDs assigned to a business role.
 	//
 	// GET /api/business-admin/roles/{id}/dashboards
-	ListBARoleDashboards(ctx context.Context, params ListBARoleDashboardsParams) ([]uuid.UUID, error)
+	ListBARoleDashboards(ctx context.Context, params ListBARoleDashboardsParams) (ListBARoleDashboardsRes, error)
 	// ListBARoleMembers implements listBARoleMembers operation.
 	//
 	// List the users assigned to a business role.
 	//
 	// GET /api/business-admin/roles/{id}/members
-	ListBARoleMembers(ctx context.Context, params ListBARoleMembersParams) ([]BARoleMember, error)
+	ListBARoleMembers(ctx context.Context, params ListBARoleMembersParams) (ListBARoleMembersRes, error)
 	// ListBARoles implements listBARoles operation.
 	//
 	// List business roles in the caller's workspace.
 	//
 	// GET /api/business-admin/roles
-	ListBARoles(ctx context.Context) ([]BARole, error)
+	ListBARoles(ctx context.Context) (ListBARolesRes, error)
 	// ListBAUsers implements listBAUsers operation.
 	//
 	// List business_user-role members of the caller's workspace.
 	//
 	// GET /api/business-admin/users
-	ListBAUsers(ctx context.Context) ([]BAUser, error)
+	ListBAUsers(ctx context.Context) (ListBAUsersRes, error)
 	// ListBusinessDashboards implements listBusinessDashboards operation.
 	//
 	// Scoped by business-role dashboard assignment: a dashboard is visible if the caller has a business
@@ -926,10 +945,12 @@ type Handler interface {
 	ListFormMappings(ctx context.Context, params ListFormMappingsParams) (ListFormMappingsRes, error)
 	// ListFormRecords implements listFormRecords operation.
 	//
-	// List the 100 most recent records submitted to a form.
+	// For a caller who reaches the form's application the way the business console opens it; anyone else
+	// gets 404, as for a form that does not exist. Records the caller's access rules withhold are left
+	// out. Each record carries the caller's permissions on it.
 	//
 	// GET /api/forms/{id}/records
-	ListFormRecords(ctx context.Context, params ListFormRecordsParams) ([]FormRecord, error)
+	ListFormRecords(ctx context.Context, params ListFormRecordsParams) (ListFormRecordsRes, error)
 	// ListForms implements listForms operation.
 	//
 	// List CRUD forms for the current model's revision.
@@ -965,7 +986,7 @@ type Handler interface {
 	// List all metrics for the demo model.
 	//
 	// GET /api/metrics
-	ListMetrics(ctx context.Context) (ListMetricsRes, error)
+	ListMetrics(ctx context.Context, params ListMetricsParams) (ListMetricsRes, error)
 	// ListNotifications implements listNotifications operation.
 	//
 	// List the 50 most recent notifications for the current user.
@@ -1008,7 +1029,7 @@ type Handler interface {
 	// List a user's dimension/metric access rules.
 	//
 	// GET /api/business-admin/users/{id}/access-rules
-	ListUserAccessRules(ctx context.Context, params ListUserAccessRulesParams) ([]UserAccessRule, error)
+	ListUserAccessRules(ctx context.Context, params ListUserAccessRulesParams) (ListUserAccessRulesRes, error)
 	// ListUserApps implements listUserApps operation.
 	//
 	// List applications accessible to the current user, scoped by tenant/workspace membership and
@@ -1035,7 +1056,7 @@ type Handler interface {
 	// List the catalog of events (system, form-submit, integration-import) that can trigger a workflow.
 	//
 	// GET /api/developer/workflow-trigger-events
-	ListWorkflowTriggerEvents(ctx context.Context, params ListWorkflowTriggerEventsParams) ([]TriggerEventCatalogItem, error)
+	ListWorkflowTriggerEvents(ctx context.Context, params ListWorkflowTriggerEventsParams) (ListWorkflowTriggerEventsRes, error)
 	// ListWorkflows implements listWorkflows operation.
 	//
 	// List workflow definitions for an application.
@@ -1093,7 +1114,7 @@ type Handler interface {
 	// Remove a user from a business role.
 	//
 	// DELETE /api/business-admin/roles/{id}/members/{userId}
-	RemoveBARoleMember(ctx context.Context, params RemoveBARoleMemberParams) (*RemoveBARoleMemberOK, error)
+	RemoveBARoleMember(ctx context.Context, params RemoveBARoleMemberParams) (RemoveBARoleMemberRes, error)
 	// RemoveBranding implements removeBranding operation.
 	//
 	// Return the tenant to the platform's own look (administrators; feature white_label).
@@ -1125,6 +1146,15 @@ type Handler interface {
 	//
 	// PATCH /api/ai/sessions/{id}
 	RenameAiSession(ctx context.Context, req *RenameAiSessionReq, params RenameAiSessionParams) (RenameAiSessionRes, error)
+	// ReorderDimensionMembers implements reorderDimensionMembers operation.
+	//
+	// Member_ids must be exactly the current children of parent_member_id in this dimension (null for
+	// the top-level members), each once, in the wanted order. The whole dimension is then renumbered in
+	// tree order (each member followed by its children), which is the order grids, pickers and charts
+	// show. Audited as dimension.members_reordered. A dimension outside the caller's scope answers 404.
+	//
+	// PUT /api/developer/dimensions/{dimId}/members/order
+	ReorderDimensionMembers(ctx context.Context, req *ReorderDimensionMembersReq, params ReorderDimensionMembersParams) (ReorderDimensionMembersRes, error)
 	// ResendAdminUserInvitation implements resendAdminUserInvitation operation.
 	//
 	// Invitations expire and mail gets lost; without this the only recovery is deleting and re-creating
@@ -1292,7 +1322,12 @@ type Handler interface {
 	SetActiveRevision(ctx context.Context, req *ActiveRevisionRequest, params SetActiveRevisionParams) (SetActiveRevisionRes, error)
 	// SetBARoleDashboards implements setBARoleDashboards operation.
 	//
-	// Replace the full set of dashboards assigned to a business role.
+	// Dashboard_ids is the role's full set of dashboards within one revision: those of revision_id when
+	// given, else of the active revision of the model the admin is working in (X-Model-Id when it is a
+	// model of the application, else the application's default model). A grant the list leaves out is
+	// removed only among that revision's dashboards; the role's grants on other models' or other
+	// revisions' dashboards are kept. Every listed id is granted and must be a dashboard of the role's
+	// workspace.
 	//
 	// PUT /api/business-admin/roles/{id}/dashboards
 	SetBARoleDashboards(ctx context.Context, req *SetRoleDashboardsRequest, params SetBARoleDashboardsParams) (SetBARoleDashboardsRes, error)
@@ -1310,9 +1345,9 @@ type Handler interface {
 	SetUserAccessRules(ctx context.Context, req *SetUserAccessRulesRequest, params SetUserAccessRulesParams) (SetUserAccessRulesRes, error)
 	// Signup implements signup operation.
 	//
-	// Register a tenant from the public sign-up page — the tenant on the self-service plan, its first
-	// administrator/developer, an application with the starter model, and an invitation to set a
-	// password (public, rate-limited per address).
+	// The application gets four starter models in one transaction, all of them or none: the "Learn the
+	// platform" tour, which is made the application's default model (the one business consoles open),
+	// and a developer, a business admin and a tenant admin guide. model_id in the result is the tour's.
 	//
 	// POST /api/signup
 	Signup(ctx context.Context, req *SignupRequest) (SignupRes, error)
@@ -1345,10 +1380,13 @@ type Handler interface {
 	SubmitBudget(ctx context.Context, req *SubmitBudgetRequest) (SubmitBudgetRes, error)
 	// SyncFormMappings implements syncFormMappings operation.
 	//
-	// Re-apply every live form-metric mapping against all of a form's existing records.
+	// For an administrator of the form's application (a business_admin of its workspace, a developer or
+	// tenant admin within their scope, a platform admin): a sync re-posts every record of the form,
+	// other people's included. 403 for a caller who reaches the form without administering it, 404 for
+	// anyone else. A record whose re-post the caller's write guard refuses keeps the posting it has.
 	//
 	// POST /api/forms/{id}/sync
-	SyncFormMappings(ctx context.Context, params SyncFormMappingsParams) (*SyncFormMappingsOK, error)
+	SyncFormMappings(ctx context.Context, params SyncFormMappingsParams) (SyncFormMappingsRes, error)
 	// TestAiSettings implements testAiSettings operation.
 	//
 	// Always responds 200 with {ok, ...} — even on failure — so the frontend can render the result
@@ -1492,7 +1530,7 @@ type Handler interface {
 	UpdateFolder(ctx context.Context, req *FolderRequest, params UpdateFolderParams) (UpdateFolderRes, error)
 	// UpdateForm implements updateForm operation.
 	//
-	// Update a form's name, label, or fields.
+	// Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
 	//
 	// PATCH /api/forms/{id}
 	UpdateForm(ctx context.Context, req *CreateFormRequest, params UpdateFormParams) (UpdateFormRes, error)
@@ -1504,8 +1542,10 @@ type Handler interface {
 	UpdateFormMapping(ctx context.Context, req *UpdateFormMappingRequest, params UpdateFormMappingParams) (UpdateFormMappingRes, error)
 	// UpdateFormRecord implements updateFormRecord operation.
 	//
-	// Update a form record's data and/or status (dispatches form_submit/form_approval automation rules
-	// on status transitions).
+	// A caller who does not reach the record gets 404 (see getFormRecord). One who does may make the
+	// change its permissions allow (RecordPermissions: edit, and set_status for a new status) and gets
+	// 403 for anything else. The write applies only while the record is still in the status the check
+	// was made against: 409 when it changed in the meantime.
 	//
 	// PUT /api/records/{id}
 	UpdateFormRecord(ctx context.Context, req *UpdateRecordRequest, params UpdateFormRecordParams) (UpdateFormRecordRes, error)
@@ -1529,7 +1569,9 @@ type Handler interface {
 	UpdateIntegration(ctx context.Context, req *UpdateIntegrationRequest, params UpdateIntegrationParams) (UpdateIntegrationRes, error)
 	// UpdateIntegrationConfig implements updateIntegrationConfig operation.
 	//
-	// Replace an integration's type-specific config blob.
+	// A rest_api integration's config takes the same typed path as its create and update: 400 when the
+	// body is not a valid REST API config, or when a target it names (grid, form, dimension, dashboard)
+	// is not a row of the integration's own model.
 	//
 	// PATCH /api/developer/integrations/{id}/config
 	UpdateIntegrationConfig(ctx context.Context, req *UpdateIntegrationConfigRequest, params UpdateIntegrationConfigParams) (UpdateIntegrationConfigRes, error)
@@ -1584,7 +1626,9 @@ type Handler interface {
 	UpdateWorkflow(ctx context.Context, req *UpdateWorkflowRequest, params UpdateWorkflowParams) (UpdateWorkflowRes, error)
 	// UpdateWorkflowInstance implements updateWorkflowInstance operation.
 	//
-	// Admin override of a workflow instance's status (business_admin only).
+	// Only an instance GET /api/workflow/history could list for the caller: a workflow of an application
+	// the caller administers, and not a developer's test run. Any other instance answers 404, the same
+	// as an id that does not exist, and nothing is changed.
 	//
 	// PATCH /api/workflow/instances/{id}
 	UpdateWorkflowInstance(ctx context.Context, req *UpdateWorkflowInstanceRequest, params UpdateWorkflowInstanceParams) (UpdateWorkflowInstanceRes, error)

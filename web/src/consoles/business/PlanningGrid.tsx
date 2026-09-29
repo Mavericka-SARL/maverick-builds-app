@@ -122,6 +122,10 @@ interface MemberTreeNode {
   colCount: number;  // 1 for true leaves, else 1 (this node's own trailing Total column) + sum of children's colCount
 }
 
+// Siblings keep the order the API sends members in — the dimension's own
+// order (time period, then sort_order, then code), which a
+// flat axis already shows. Re-sorting by code here put a hierarchical axis in
+// alphabetical order instead.
 function buildMemberTree(members: DimMember[]): MemberTreeNode[] {
   const byCode = new Map<string, MemberTreeNode>();
   for (const m of members) {
@@ -134,7 +138,6 @@ function buildMemberTree(members: DimMember[]): MemberTreeNode[] {
     else roots.push(node);
   }
   function init(nodes: MemberTreeNode[], level: number) {
-    nodes.sort((a, b) => a.member.code.localeCompare(b.member.code));
     for (const n of nodes) {
       n.level = level;
       init(n.children, level + 1);
@@ -142,7 +145,6 @@ function buildMemberTree(members: DimMember[]): MemberTreeNode[] {
       n.colCount = n.children.length === 0 ? 1 : 1 + n.children.reduce((s, c) => s + c.colCount, 0);
     }
   }
-  roots.sort((a, b) => a.member.code.localeCompare(b.member.code));
   init(roots, 0);
   return roots;
 }

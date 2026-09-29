@@ -127,10 +127,13 @@ func TestFormPostingRejectsHiddenMemberWrite(t *testing.T) {
 		  (model_id, revision_id, form_id, grid_id, name, source_field, target_metric_id,
 		   aggregation, posting_statuses, dimension_mappings, live_posting)
 		VALUES ($1::uuid, $2::uuid, $3::uuid, NULL, 'access mapping', 'amount', $4::uuid,
-		        'sum', ARRAY['approved'], $5::jsonb, true)
+		        'sum', ARRAY['submitted'], $5::jsonb, true)
 		RETURNING id::text`, f.modelID, f.workingRevID, formID, f.amountMetricID, dimMappingsJSON)
 
-	submitAndApprove := func(t *testing.T, persona, staffCode string, amount float64) string {
+	// The mapping posts on submission: the write guard checks the user who
+	// makes the eligible transition, and a business user may submit their
+	// own record but not approve it (crudapp.RecordAccess).
+	submitRecord := func(t *testing.T, persona, staffCode string, amount float64) string {
 		t.Helper()
 		status, body := f.do(t, "POST", "/api/forms/"+formID+"/records", persona, map[string]any{
 			"data": map[string]any{"amount": amount, "staff_code": staffCode},
@@ -143,10 +146,10 @@ func TestFormPostingRejectsHiddenMemberWrite(t *testing.T) {
 			t.Fatalf("create record as %s: no id in response %v", persona, body)
 		}
 		status, body = f.do(t, "PUT", "/api/records/"+recID, persona, map[string]any{
-			"data": map[string]any{"amount": amount, "staff_code": staffCode}, "status": "approved",
+			"data": map[string]any{"amount": amount, "staff_code": staffCode}, "status": "submitted",
 		})
 		if status != 200 {
-			t.Fatalf("approve record as %s: status=%d body=%v", persona, status, body)
+			t.Fatalf("submit record as %s: status=%d body=%v", persona, status, body)
 		}
 		return recID
 	}
@@ -167,7 +170,7 @@ func TestFormPostingRejectsHiddenMemberWrite(t *testing.T) {
 	// proves cells() enforces. Posting a form record against STAFF_B1 must
 	// be silently withheld: the record itself still saves (record-saving
 	// and metric-posting are decoupled), but no posting/fact row appears.
-	submitAndApprove(t, "rollup-test-manager", "STAFF_B1", 999)
+	submitRecord(t, "rollup-test-manager", "STAFF_B1", 999)
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -189,7 +192,7 @@ func TestFormPostingRejectsHiddenMemberWrite(t *testing.T) {
 	// rollup-test-manager-b CAN see DEPT_B/STAFF_B1 (hidden from DEPT_A
 	// instead) — the identical submission from them must succeed, proving
 	// the guard blocks the specific restricted user, not everyone.
-	submitAndApprove(t, "rollup-test-manager-b", "STAFF_B1", 123)
+	submitRecord(t, "rollup-test-manager-b", "STAFF_B1", 123)
 
 	deadline = time.Now().Add(5 * time.Second)
 	for {
@@ -254,10 +257,13 @@ func TestFormPostingRejectsHiddenMetricWrite(t *testing.T) {
 		  (model_id, revision_id, form_id, grid_id, name, source_field, target_metric_id,
 		   aggregation, posting_statuses, dimension_mappings, live_posting)
 		VALUES ($1::uuid, $2::uuid, $3::uuid, NULL, 'metric access mapping', 'amount', $4::uuid,
-		        'sum', ARRAY['approved'], '{}'::jsonb, true)
+		        'sum', ARRAY['submitted'], '{}'::jsonb, true)
 		RETURNING id::text`, f.modelID, f.workingRevID, formID, targetMetricID)
 
-	submitAndApprove := func(t *testing.T, persona string, amount float64) {
+	// The mapping posts on submission: the write guard checks the user who
+	// makes the eligible transition, and a business user may submit their
+	// own record but not approve it (crudapp.RecordAccess).
+	submitRecord := func(t *testing.T, persona string, amount float64) {
 		t.Helper()
 		status, body := f.do(t, "POST", "/api/forms/"+formID+"/records", persona, map[string]any{
 			"data": map[string]any{"amount": amount},
@@ -267,14 +273,14 @@ func TestFormPostingRejectsHiddenMetricWrite(t *testing.T) {
 		}
 		recID, _ := body["id"].(string)
 		status, body = f.do(t, "PUT", "/api/records/"+recID, persona, map[string]any{
-			"data": map[string]any{"amount": amount}, "status": "approved",
+			"data": map[string]any{"amount": amount}, "status": "submitted",
 		})
 		if status != 200 {
-			t.Fatalf("approve record as %s: status=%d body=%v", persona, status, body)
+			t.Fatalf("submit record as %s: status=%d body=%v", persona, status, body)
 		}
 	}
 
-	submitAndApprove(t, "rollup-test-metric-hidden", 999)
+	submitRecord(t, "rollup-test-metric-hidden", 999)
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -291,7 +297,7 @@ func TestFormPostingRejectsHiddenMetricWrite(t *testing.T) {
 	}
 
 	// Unrestricted persona: identical submission must succeed.
-	submitAndApprove(t, "rollup-test-approver", 456)
+	submitRecord(t, "rollup-test-approver", 456)
 	deadline = time.Now().Add(5 * time.Second)
 	for {
 		if err := f.pool.QueryRow(ctx,

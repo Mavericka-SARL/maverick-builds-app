@@ -92,7 +92,8 @@ func TestFormMappingConcurrentPostingsConverge(t *testing.T) {
 		wg.Add(1)
 		go func(recID string, amount float64) {
 			defer wg.Done()
-			status, body := f.do(t, "PUT", "/api/records/"+recID, "rollup-test-manager-concurrency", map[string]any{
+			// Approving is the business admin's (crudapp.RecordAccess).
+			status, body := f.do(t, "PUT", "/api/records/"+recID, "rollup-test-approver", map[string]any{
 				"data":   map[string]any{"amount": amount},
 				"status": "approved",
 			})
@@ -216,7 +217,8 @@ func TestFormMappingRecalculatesItsOwnRevisionNotTheModelsActiveOne(t *testing.T
 	if recordID == "" {
 		t.Fatalf("create record: no id in response %v", body)
 	}
-	if status, body := f.do(t, "PUT", "/api/records/"+recordID, "rollup-test-manager-annual", map[string]any{
+	// Approving and rejecting are the business admin's (crudapp.RecordAccess).
+	if status, body := f.do(t, "PUT", "/api/records/"+recordID, "rollup-test-approver", map[string]any{
 		"data": map[string]any{"amount": 25.0}, "status": "approved",
 	}); status != 200 {
 		t.Fatalf("approve record: status=%d body=%v", status, body)
@@ -261,7 +263,7 @@ func TestFormMappingRecalculatesItsOwnRevisionNotTheModelsActiveOne(t *testing.T
 	// Retraction branch: moving the record OUT of an eligible status must
 	// also recalc against the mapping's own revision — this branch never
 	// tracked itself for recalc at all before the fix, old or new.
-	if status, body := f.do(t, "PUT", "/api/records/"+recordID, "rollup-test-manager-annual", map[string]any{
+	if status, body := f.do(t, "PUT", "/api/records/"+recordID, "rollup-test-approver", map[string]any{
 		"data": map[string]any{"amount": 25.0}, "status": "rejected",
 	}); status != 200 {
 		t.Fatalf("reject record: status=%d body=%v", status, body)

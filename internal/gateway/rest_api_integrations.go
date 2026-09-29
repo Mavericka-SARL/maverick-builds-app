@@ -54,41 +54,61 @@ func (h *handler) resolveIntegrationApp(w http.ResponseWriter, r *http.Request, 
 }
 
 // checkRestAPITargets validates that the config's target and connection
-// belong to the same model/application — run at save and re-run by the
-// worker at execution.
-func (h *handler) checkRestAPITargets(r *http.Request, modelID, appID string, cfg *integration.Config, connectionID string) error {
-	ctx := r.Context()
-	var table string
-	switch cfg.TargetType {
-	case integration.TargetGrid:
-		table = "model.grid_def"
-	case integration.TargetForm:
-		table = "model.form_def"
-	case integration.TargetDimension:
-		table = "model.dimension_def"
-	default:
-		return fmt.Errorf("unknown target type")
+// belong to the integration's own model/application. Every path that
+// stores or uses a config runs it: create (any status), validate, and each
+// enqueue (/test, dry-run, run); PATCH, the legacy config PATCH and
+// duplicate run it through checkIntegrationSave. The worker runs the same
+// integration.CheckOwnership again immediately before it reads or writes.
+// A nil config or an empty target or connection is a draft still being
+// filled in, and passes.
+func (h *handler) checkRestAPITargets(r *http.Request, modelID string, cfg *integration.Config, connectionID string) error {
+	var targetType, targetID string
+	if cfg != nil {
+		targetType, targetID = string(cfg.TargetType), cfg.TargetID
 	}
-	var owner string
-	if err := h.db.QueryRow(ctx,
-		"SELECT model_id::text FROM "+table+" WHERE id=$1::uuid", cfg.TargetID).Scan(&owner); err != nil {
-		return fmt.Errorf("target %s not found", cfg.TargetType)
+	return integration.CheckOwnership(r.Context(), h.db, modelID, targetType, targetID, connectionID)
+}
+
+// checkIntegrationTarget is the same check for a legacy csv_import /
+// google_sheets row, whose target lives in the target_type/target_id
+// columns rather than in a typed config.
+func (h *handler) checkIntegrationTarget(ctx context.Context, modelID, targetType, targetID string) error {
+	return integration.CheckOwnership(ctx, h.db, modelID, targetType, targetID, "")
+}
+
+// integrationRefs are the ids an integration row stores: its target and
+// its connection.
+type integrationRefs struct{ TargetType, TargetID, ConnectionID string }
+
+// refsOf reads the refs out of a typed definition's config and connection.
+func refsOf(cfg *integration.Config, connectionID string) integrationRefs {
+	refs := integrationRefs{ConnectionID: connectionID}
+	if cfg != nil {
+		refs.TargetType, refs.TargetID = string(cfg.TargetType), cfg.TargetID
 	}
-	if owner != modelID {
-		return fmt.Errorf("target belongs to a different model")
-	}
-	if connectionID != "" {
-		var connApp string
-		if err := h.db.QueryRow(ctx, `
-			SELECT application_id::text FROM model.integration_connection WHERE id=$1::uuid
-		`, connectionID).Scan(&connApp); err != nil {
-			return fmt.Errorf("connection not found")
+	return refs
+}
+
+// checkIntegrationSave is the ownership rule for a save of an existing row
+// (an update or a copy). A target or connection the save sets or changes
+// must be a row of the model (the connection, of its application), exactly
+// as at create. One it keeps as stored is refused only when it is another
+// model's or application's: nothing clears a target when its grid, form or
+// dimension is deleted, and that must not block a rename, a tag, a
+// connection change or a copy. Every use re-checks and fails on it anyway.
+// Activation is strict for both: an active integration must be runnable.
+func (h *handler) checkIntegrationSave(ctx context.Context, modelID string, stored, next integrationRefs, activating bool) error {
+	kept := func(changed bool, err error) error {
+		if err == nil || changed || activating || integration.IsForeign(err) {
+			return err
 		}
-		if connApp != appID {
-			return fmt.Errorf("connection belongs to a different application")
-		}
+		return nil
 	}
-	return nil
+	targetChanged := stored.TargetType != next.TargetType || stored.TargetID != next.TargetID
+	if err := kept(targetChanged, integration.CheckOwnership(ctx, h.db, modelID, next.TargetType, next.TargetID, "")); err != nil {
+		return err
+	}
+	return kept(stored.ConnectionID != next.ConnectionID, integration.CheckOwnership(ctx, h.db, modelID, "", "", next.ConnectionID))
 }
 
 // restAPIDetail is the typed GET/PATCH response: definition + schedule.
@@ -139,11 +159,11 @@ func (h *handler) restAPICreate(w http.ResponseWriter, r *http.Request, modelID,
 	if status == "" {
 		status = "draft"
 	}
-	if status == "active" || body.Config != nil {
-		if err := h.checkRestAPITargets(r, modelID, appID, body.Config, connID); err != nil && status == "active" {
-			jsonErr(w, err, http.StatusBadRequest)
-			return
-		}
+	// A draft is refused a foreign target too: a draft can be tested and
+	// dry-run, and it can be activated later.
+	if err := h.checkRestAPITargets(r, modelID, body.Config, connID); err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
+		return
 	}
 	desc := ""
 	if body.Description != nil {
@@ -178,22 +198,61 @@ func (h *handler) restAPICreate(w http.ResponseWriter, r *http.Request, modelID,
 // restAPIUpdate handles PATCH for a rest_api integration: atomic metadata +
 // config + schedule.
 func (h *handler) restAPIUpdate(w http.ResponseWriter, r *http.Request, modelID, id string) {
-	ctx := r.Context()
 	var body restAPICreateBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
 		return
 	}
+	if h.restAPIApplyUpdate(w, r, modelID, id, &body) {
+		h.restAPIRespond(w, r, modelID, id)
+	}
+}
+
+// restAPIConfigPatch is PATCH /api/developer/integrations/{id}/config for a
+// rest_api integration. It used to fall through to the legacy handler,
+// which wrote the body verbatim, so no target check ran and the typed
+// columns went stale. It now takes the typed path and keeps the legacy
+// response shape.
+func (h *handler) restAPIConfigPatch(w http.ResponseWriter, r *http.Request, modelID, id string) {
+	var body struct {
+		Config *integration.Config `json:"config"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Config == nil {
+		jsonErr(w, fmt.Errorf("config required"), http.StatusBadRequest)
+		return
+	}
+	if h.restAPIApplyUpdate(w, r, modelID, id, &restAPICreateBody{Config: body.Config}) {
+		jsonOK(w, map[string]string{"status": "ok"})
+	}
+}
+
+// restAPIApplyUpdate applies a typed PATCH. It writes the error response
+// and returns false on failure.
+func (h *handler) restAPIApplyUpdate(w http.ResponseWriter, r *http.Request, modelID, id string, body *restAPICreateBody) bool {
+	ctx := r.Context()
 	var appID string
 	_ = h.db.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, modelID).Scan(&appID)
-	if body.Config != nil {
-		connID := ""
+	// Check the state the PATCH leaves behind whenever it sends a config
+	// or connection, or activates (checkIntegrationSave): a changed target
+	// or connection must be the model's own, a kept one must not be
+	// another model's, and activation re-checks a stored config that may
+	// predate this check.
+	if body.Config != nil || body.ConnectionID != nil || body.Status == "active" {
+		cur, err := h.intStore(ctx).GetDefinition(ctx, modelID, id)
+		if err != nil {
+			jsonErr(w, fmt.Errorf("integration not found"), http.StatusNotFound)
+			return false
+		}
+		cfg, connID := cur.Config, cur.ConnectionID
+		if body.Config != nil {
+			cfg = body.Config
+		}
 		if body.ConnectionID != nil {
 			connID = *body.ConnectionID
 		}
-		if err := h.checkRestAPITargets(r, modelID, appID, body.Config, connID); err != nil {
+		if err := h.checkIntegrationSave(ctx, modelID, refsOf(cur.Config, cur.ConnectionID), refsOf(cfg, connID), body.Status == "active"); err != nil {
 			jsonErr(w, err, http.StatusBadRequest)
-			return
+			return false
 		}
 	}
 	var namePtr, statusPtr *string
@@ -206,7 +265,7 @@ func (h *handler) restAPIUpdate(w http.ResponseWriter, r *http.Request, modelID,
 	if body.Enabled != nil {
 		if _, err := h.db.Exec(ctx, `UPDATE model.integration_def SET enabled=$2 WHERE id=$1::uuid AND model_id=$3::uuid`, id, *body.Enabled, modelID); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
-			return
+			return false
 		}
 	}
 	if _, err := h.intStore(ctx).UpdateDefinition(ctx, modelID, id, namePtr, body.Description, body.Tags, statusPtr, body.ConnectionID, body.Config, h.integrationAllowInsecure()); err != nil {
@@ -215,7 +274,7 @@ func (h *handler) restAPIUpdate(w http.ResponseWriter, r *http.Request, modelID,
 			code = http.StatusNotFound
 		}
 		jsonErr(w, err, code)
-		return
+		return false
 	}
 	if body.Schedule != nil {
 		body.Schedule.IntegrationID = id
@@ -224,11 +283,11 @@ func (h *handler) restAPIUpdate(w http.ResponseWriter, r *http.Request, modelID,
 		}
 		if err := h.intStore(ctx).UpsertSchedule(ctx, body.Schedule); err != nil {
 			jsonErr(w, fmt.Errorf("schedule: %w", err), http.StatusBadRequest)
-			return
+			return false
 		}
 	}
 	h.auditIntegrationEvent(r, appID, id, auditlog.EventIntegrationUpdated, map[string]string{"type": "rest_api"})
-	h.restAPIRespond(w, r, modelID, id)
+	return true
 }
 
 func (h *handler) auditIntegrationEvent(r *http.Request, appID, id string, event auditlog.EventType, meta map[string]string) {
@@ -250,6 +309,14 @@ func (h *handler) restAPIDuplicate(w http.ResponseWriter, r *http.Request, model
 	src, err := st.GetDefinition(ctx, modelID, id)
 	if err != nil {
 		jsonErr(w, fmt.Errorf("integration not found"), http.StatusNotFound)
+		return
+	}
+	// The copy stores the source's target and connection again: another
+	// model's is refused (a stored row may predate the check), a deleted
+	// one is kept for the copy to be retargeted.
+	refs := refsOf(src.Config, src.ConnectionID)
+	if terr := h.checkIntegrationSave(ctx, modelID, refs, refs, false); terr != nil {
+		jsonErr(w, terr, http.StatusBadRequest)
 		return
 	}
 	dup, err := st.CreateDefinition(ctx, modelID, src.RevisionID, src.Name+" (copy)", src.Description, src.Tags, "draft", src.ConnectionID, src.Config, h.integrationAllowInsecure())
@@ -282,9 +349,7 @@ func (h *handler) restAPIValidate(w http.ResponseWriter, r *http.Request, modelI
 	if verr := def.Config.Validate(h.integrationAllowInsecure()); verr != nil {
 		errs = append(errs, verr.Error())
 	}
-	var appID string
-	_ = h.db.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, modelID).Scan(&appID)
-	if terr := h.checkRestAPITargets(r, modelID, appID, def.Config, def.ConnectionID); terr != nil {
+	if terr := h.checkRestAPITargets(r, modelID, def.Config, def.ConnectionID); terr != nil {
 		errs = append(errs, terr.Error())
 	}
 	if len(errs) == 0 {
@@ -308,6 +373,13 @@ func (h *handler) restAPIEnqueue(w http.ResponseWriter, r *http.Request, modelID
 	}
 	if verr := def.Config.Validate(h.integrationAllowInsecure()); verr != nil {
 		jsonErr(w, verr, http.StatusBadRequest)
+		return
+	}
+	// /test, dry-run and run all read or write the target: a stored config
+	// may predate the save-time check, so it is re-checked before queueing
+	// (and the worker checks once more before it reads or writes).
+	if terr := h.checkRestAPITargets(r, modelID, def.Config, def.ConnectionID); terr != nil {
+		jsonErr(w, terr, http.StatusBadRequest)
 		return
 	}
 	// Mutation-method tests require the explicit acknowledgement (spec §4).

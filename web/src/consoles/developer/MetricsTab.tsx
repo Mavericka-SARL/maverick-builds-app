@@ -148,11 +148,11 @@ export function MetricsTab({ model, revisionId }: { model: DevModel; revisionId?
             </tr>
           </thead>
           <tbody>
-            {inputs.map((m) => <MetricRow key={m.id} m={m} allMetrics={model.metrics} dimNames={dimNames} onTimeGrid={timeMetrics.has(m.id)} activeTag={filterTag} onTagClick={toggleTag} />)}
+            {inputs.map((m) => <MetricRow key={m.id} m={m} modelId={model.model_id} allMetrics={model.metrics} dimNames={dimNames} onTimeGrid={timeMetrics.has(m.id)} activeTag={filterTag} onTagClick={toggleTag} />)}
             {inputs.length > 0 && calcs.length > 0 && (
               <tr><td colSpan={6} className="mvx-table__group-row">Calculated</td></tr>
             )}
-            {calcs.map((m) => <MetricRow key={m.id} m={m} allMetrics={model.metrics} dimNames={dimNames} onTimeGrid={timeMetrics.has(m.id)} activeTag={filterTag} onTagClick={toggleTag} />)}
+            {calcs.map((m) => <MetricRow key={m.id} m={m} modelId={model.model_id} allMetrics={model.metrics} dimNames={dimNames} onTimeGrid={timeMetrics.has(m.id)} activeTag={filterTag} onTagClick={toggleTag} />)}
             {inputs.length === 0 && calcs.length === 0 && filtering && (
               <tr><td colSpan={6} style={{ padding: 20, textAlign: "center" }} className="mvx-admin-muted">
                 {q ? `No metrics match "${search.trim()}"${filterTag ? ` with tag "${filterTag}"` : ""}` : `No metrics have tag "${filterTag}"`}
@@ -187,7 +187,7 @@ export function MetricsTab({ model, revisionId }: { model: DevModel; revisionId?
   );
 }
 
-type RecalcRow = { revision: string; metric: string; value: number | null };
+type RecalcRow = { revision_id: string; metric: string; value: number | null };
 
 // useUnknownFormulaNames lists the names in a formula that are neither a
 // metric nor a dimension of the revision, from the server's own parser
@@ -208,8 +208,9 @@ function useUnknownFormulaNames(formula: string, metricNames: string[], dimNames
   return (data?.refs ?? []).filter(ref => !known.has(ref.toLowerCase()));
 }
 
-function MetricRow({ m, allMetrics, dimNames, onTimeGrid, activeTag, onTagClick }: {
+function MetricRow({ m, modelId, allMetrics, dimNames, onTimeGrid, activeTag, onTagClick }: {
   m: DevMetric;
+  modelId: string;
   allMetrics: DevMetric[];
   dimNames: string[];
   onTimeGrid: boolean;
@@ -229,6 +230,14 @@ function MetricRow({ m, allMetrics, dimNames, onTimeGrid, activeTag, onTagClick 
   const [formatCurrency, setFormatCurrency] = useState(m.format_currency ?? "$");
   const [tags, setTags] = useState<string[]>(m.tags ?? []);
   const [recalcResults, setRecalcResults] = useState<RecalcRow[] | null>(null);
+  // The recalc reports revision ids; the banner names them. Fetched only
+  // while a banner is showing, for this metric's own model.
+  const { data: modelRevisions = [] } = useQuery({
+    queryKey: ["dev-revisions", modelId],
+    queryFn: () => api.getDevRevisions(modelId),
+    enabled: !!recalcResults && !!modelId,
+  });
+  const revisionLabel = (id: string) => modelRevisions.find(r => r.id === id)?.name ?? id.slice(0, 8);
 
   const invalidRefs = useUnknownFormulaNames(formula, allMetrics.map(x => x.name), dimNames, !m.is_input);
   const canSave = name.trim() !== "" && (m.is_input || formula.trim() !== "");
@@ -262,7 +271,7 @@ function MetricRow({ m, allMetrics, dimNames, onTimeGrid, activeTag, onTagClick 
           <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
             {recalcResults.map((r, i) => (
               <span key={i} className="mvx-admin-mono">
-                {r.revision} → <strong>{r.metric}</strong> = {r.value != null ? r.value.toLocaleString() : "—"}
+                {revisionLabel(r.revision_id)} → <strong>{r.metric}</strong> = {r.value != null ? r.value.toLocaleString() : "—"}
               </span>
             ))}
           </div>

@@ -178,6 +178,14 @@ func (rn *Runner) execute(ctx context.Context, run *Run) (res RunResult) {
 		res.ErrorCode, res.Message = ErrCodeInvalidData, "configuration invalid: "+verr.Error()
 		return res
 	}
+	// Ownership: the target and connection must be this model's own. A
+	// stored row can predate the save-time check (or have been written by a
+	// path that skipped it), so a foreign target fails the run here, before
+	// any request is made or any row is read or written.
+	if oerr := checkDefinitionOwnership(ctx, rn.Store.pool, def); oerr != nil {
+		res.ErrorCode, res.Message = ErrCodeInvalidData, "configuration invalid: "+oerr.Error()
+		return res
+	}
 	res.Meta["host"] = SanitizedHost(cfg.Request.URL)
 
 	// Credential.

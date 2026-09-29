@@ -309,6 +309,7 @@ function UploadStep({
   grids,
   forms,
   dims,
+  workingRevisionId,
   onNext,
   onConfigChange,
 }: {
@@ -316,10 +317,24 @@ function UploadStep({
   grids: GridDef[];
   forms: FormDef[];
   dims: DevDimension[];
+  workingRevisionId?: string;
   onNext: (file: ParsedFile) => void;
   onConfigChange: (c: WizardConfig) => void;
 }) {
-  const { data: revisions = [] } = useQuery({ queryKey: ["dev-revisions"], queryFn: () => api.getDevRevisions() });
+  // The target-revision choices are the revisions of the working revision's
+  // model. Unnamed, the server resolved a model of its own (X-Model-Id or
+  // the default), so building another model listed the wrong revisions.
+  const { data: workingModel } = useQuery({
+    queryKey: ["dev-model", workingRevisionId],
+    queryFn: () => api.getDevModel(workingRevisionId),
+    enabled: !!workingRevisionId,
+  });
+  const workingModelId = (workingModel as DevModel | undefined)?.model_id;
+  const { data: revisions = [] } = useQuery({
+    queryKey: ["dev-revisions", workingModelId],
+    queryFn: () => api.getDevRevisions(workingModelId),
+    enabled: !workingRevisionId || !!workingModelId,
+  });
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -389,7 +404,7 @@ function UploadStep({
         <Field label="Import target type">
           <Select
             value={config.targetType}
-            onChange={e => onConfigChange({ ...config, targetType: e.target.value as TargetType, targetId: "", targetLabel: "", revisionId: "", revisionName: "" })}
+            onChange={e => onConfigChange({ ...config, targetType: e.target.value as TargetType, targetId: "", targetLabel: "", revisionId: workingRevisionId ?? "", revisionName: "" })}
           >
             <option value="grid">Grid</option>
             <option value="form">Form</option>
@@ -575,7 +590,16 @@ function UploadStep({
 
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <Button variant="primary" trailingIcon={<ArrowRight size={14} />} disabled={!canProceed}
-          onClick={() => parsedFile && onNext(parsedFile)}>
+          onClick={() => {
+            if (!parsedFile) return;
+            // A target revision taken from the working revision was never
+            // picked in the list, so its name (shown on Review) is filled here.
+            if (config.revisionId && !config.revisionName) {
+              const rev = (revisions as DevRevision[]).find(r => r.id === config.revisionId);
+              if (rev) onConfigChange({ ...config, revisionName: rev.name });
+            }
+            onNext(parsedFile);
+          }}>
           Next: Map Columns
         </Button>
       </div>
@@ -1103,18 +1127,23 @@ function ImportHistory() {
 
 function ImportWizard({
   initialConfig,
+  workingRevisionId,
   onClose,
 }: {
   initialConfig?: Partial<WizardConfig>;
+  workingRevisionId?: string;
   onClose: () => void;
 }) {
   const qc = useQueryClient();
   const [step, setStep] = useState<WizardStep>("upload");
+  // The target revision starts as the working revision: that is the one
+  // being built, and the one the target lists below come from.
   const [config, setConfig] = useState<WizardConfig>({
     targetType: "grid",
     targetId: "",
     targetLabel: "",
     importMode: "incremental",
+    ...(workingRevisionId ? { revisionId: workingRevisionId } : {}),
     ...initialConfig,
   });
   const [parsedFile, setParsedFile] = useState<ParsedFile | null>(null);
@@ -1122,9 +1151,13 @@ function ImportWizard({
   const [errors, setErrors] = useState<ValError[]>([]);
   const [importValidOnly, setImportValidOnly] = useState(false);
 
-  const { data: grids = [] } = useQuery({ queryKey: ["dev-grids"], queryFn: () => api.listGrids() });
-  const { data: forms = [] } = useQuery({ queryKey: ["forms"], queryFn: () => api.listForms() });
-  const { data: dims = [] } = useQuery({ queryKey: ["dev-dimensions"], queryFn: () => api.getDevDimensions() });
+  // Targets, and the dimensions labels are resolved against, come from the
+  // working revision. Unnamed, the server answered from X-Model-Id or the
+  // default model, so building another model mixed that model's grids and
+  // dimensions with the working model's revisions and metrics.
+  const { data: grids = [] } = useQuery({ queryKey: ["dev-grids", workingRevisionId], queryFn: () => api.listGrids(workingRevisionId) });
+  const { data: forms = [] } = useQuery({ queryKey: ["forms", workingRevisionId], queryFn: () => api.listForms(workingRevisionId) });
+  const { data: dims = [] } = useQuery({ queryKey: ["dev-dimensions", workingRevisionId], queryFn: () => api.getDevDimensions(workingRevisionId) });
   // Scope metrics to the selected revision so name→UUID resolution uses the right IDs.
   const { data: model } = useQuery({
     queryKey: ["dev-model", config.revisionId],
@@ -1188,7 +1221,7 @@ function ImportWizard({
         target_type: config.targetType,
         target_id: config.targetId,
         status: asDraft ? "draft" : "active",
-      }).then(res =>
+      }, workingRevisionId).then(res =>
         api.updateIntegrationConfig(res.id, {
           column_map: Object.fromEntries(mappings.filter(m => m.targetField).map(m => [m.sourceCol, m.targetField])),
           // A google_sheets integration stores its source and mode so a run
@@ -1218,6 +1251,7 @@ function ImportWizard({
           grids={grids as GridDef[]}
           forms={forms as FormDef[]}
           dims={dims as DevDimension[]}
+          workingRevisionId={workingRevisionId}
           onNext={handleFileReady}
           onConfigChange={setConfig}
         />
@@ -1266,13 +1300,17 @@ function ImportWizard({
 
 function SavedIntegrationsList({
   sourceType,
+  revisionId,
   onRun,
 }: {
   sourceType: "csv_import" | "google_sheets";
+  revisionId?: string;
   onRun: (cfg: Partial<WizardConfig>) => void;
 }) {
   const qc = useQueryClient();
-  const { data: integrations = [] } = useQuery({ queryKey: ["dev-integrations"], queryFn: () => api.listDevIntegrations() });
+  // The working revision's integrations — the ones "Save as integration"
+  // creates there.
+  const { data: integrations = [] } = useQuery({ queryKey: ["dev-integrations", revisionId], queryFn: () => api.listDevIntegrations(revisionId) });
   const [syncMsg, setSyncMsg] = useState<Record<string, string>>({});
 
   const del = useMutation({
@@ -1489,7 +1527,8 @@ function IntegrationRunHistory({ integrationId }: { integrationId: string }) {
 
 // ── Main Export ────────────────────────────────────────────────────────────────
 
-export function ExcelImportSection() {
+// revisionId: the Build working revision (Integrations passes it).
+export function ExcelImportSection({ revisionId }: { revisionId?: string } = {}) {
   const [wizardConfig, setWizardConfig] = useState<Partial<WizardConfig> | null>(null);
 
   const openWizard = (cfg?: Partial<WizardConfig>) => setWizardConfig(cfg ?? {});
@@ -1498,7 +1537,7 @@ export function ExcelImportSection() {
   return (
     <div>
       {wizardConfig !== null ? (
-        <ImportWizard initialConfig={wizardConfig} onClose={closeWizard} />
+        <ImportWizard initialConfig={wizardConfig} workingRevisionId={revisionId} onClose={closeWizard} />
       ) : (
         <>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 20 }}>
@@ -1510,7 +1549,7 @@ export function ExcelImportSection() {
             </Button>
           </div>
 
-          <SavedIntegrationsList sourceType="csv_import" onRun={cfg => openWizard(cfg)} />
+          <SavedIntegrationsList sourceType="csv_import" revisionId={revisionId} onRun={cfg => openWizard(cfg)} />
           <ImportHistory />
 
           <div className="mvx-panel" style={{ marginTop: 24, padding: 16, background: "var(--color-surface-subtle)", fontSize: 13, color: "var(--color-text-muted)" }}>
@@ -1527,7 +1566,7 @@ export function ExcelImportSection() {
   );
 }
 
-export function GoogleSheetsImportSection() {
+export function GoogleSheetsImportSection({ revisionId }: { revisionId?: string } = {}) {
   const [wizardConfig, setWizardConfig] = useState<Partial<WizardConfig> | null>(null);
 
   // "replace" is the sheet default on purpose: a sheet import is re-run
@@ -1540,7 +1579,7 @@ export function GoogleSheetsImportSection() {
   return (
     <div>
       {wizardConfig !== null ? (
-        <ImportWizard initialConfig={wizardConfig} onClose={closeWizard} />
+        <ImportWizard initialConfig={wizardConfig} workingRevisionId={revisionId} onClose={closeWizard} />
       ) : (
         <>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 20 }}>
@@ -1553,7 +1592,7 @@ export function GoogleSheetsImportSection() {
             </Button>
           </div>
 
-          <SavedIntegrationsList sourceType="google_sheets" onRun={cfg => openWizard(cfg)} />
+          <SavedIntegrationsList sourceType="google_sheets" revisionId={revisionId} onRun={cfg => openWizard(cfg)} />
           <ImportHistory />
 
           <div className="mvx-panel" style={{ marginTop: 24, padding: 16, background: "var(--color-surface-subtle)", fontSize: 13, color: "var(--color-text-muted)" }}>

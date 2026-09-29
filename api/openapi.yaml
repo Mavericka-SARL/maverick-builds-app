@@ -26,7 +26,13 @@ tags:
   - name: Admin
     description: Platform/tenant administration — tenants, applications, models, revisions, users, workspaces, audit.
   - name: Business Admin
-    description: Workspace-scoped role/user administration for business users — roles, dashboard assignment, access rules.
+    description: >-
+      Workspace-scoped role/user administration for business users — roles, dashboard assignment, access
+      rules. The workspace is the X-App-Id application's (a tenant-level application resolves to a
+      workspace of its tenant). Past the route's role guard, the caller must administer that workspace:
+      business_admin held in it, tenant admin of its tenant, platform admin or, on the /roles routes,
+      a developer of its tenant. Anyone else answers 403, a business admin of another workspace of the
+      same tenant included.
   - name: AI Assistant
     description: Developer-facing chat assistant — sessions, streaming chat, write proposals, documents, LLM provider settings.
   - name: Import & Integrations
@@ -535,7 +541,7 @@ components:
         email:          { type: string }
         tenant_id:      { type: string, format: uuid }
         application_id: { type: string, format: uuid }
-        model_id:       { type: string, format: uuid }
+        model_id:       { type: string, format: uuid, description: "The tour model, the application's default; the three guide models are not returned" }
         plan:           { type: string }
         dev_persona:    { type: string, description: Dev stack only — the persona the new account is reachable as }
 
@@ -652,8 +658,10 @@ components:
       required: [model_id, metric_id, value]
       description: >-
         Identify the cell with `dim_codes` (one member code per dimension). `dim_code` is the
-        older single-dimension form and is still accepted. There is no `revision` field —
-        the revision is named by `revision_id`, and defaults to the model's active revision.
+        older single-code form, still accepted: it writes to the one dimension of the request's
+        revision that has a member with that code among the metric's own dimensions, and answers
+        400 when none or several have it. There is no `revision` field — the revision is named
+        by `revision_id`, and defaults to the model's active revision.
       properties:
         model_id:    { type: string, format: uuid }
         revision_id: { type: string, format: uuid, description: "Defaults to the model's active revision" }
@@ -664,7 +672,10 @@ components:
           additionalProperties: { type: string }
         dim_code:
           type: string
-          description: "Legacy single-dimension member code, used when dim_codes is absent"
+          description: >-
+            Older single-code form, used when dim_codes is absent: writes to the one dimension of
+            the request's revision that has a member with this code among the metric's own
+            dimensions; 400 when none or several have it.
         value:       { type: number }
 
     SubmitBudgetRequest:
@@ -887,7 +898,7 @@ components:
       required: [name]
       properties:
         name:                { type: string }
-        source_revision_id:  { type: string, format: uuid, description: "Revision to duplicate from; defaults to the model's active revision" }
+        source_revision_id:  { type: string, format: uuid, description: "Revision to duplicate from, in its own model; defaults to the model's active revision" }
 
     CreateDimensionRequest:
       type: object
@@ -1773,6 +1784,34 @@ components:
         fields:     { type: array, items: { $ref: "#/components/schemas/FormField" } }
         created_at: { type: string, format: date-time }
 
+    ListedForm:
+      description: A form as GET /api/forms lists it — its definition and what the caller may do with its records.
+      allOf:
+        - $ref: "#/components/schemas/FormDef"
+        - type: object
+          required: [permissions]
+          properties:
+            permissions: { $ref: "#/components/schemas/FormPermissions" }
+
+    FormPermissions:
+      type: object
+      description: >-
+        What the caller the form is listed to may do with its records as a whole, decided by the same
+        scope the record routes decide by, so the interface offers only what the server accepts. A
+        caller who reaches the form's application may create records as draft or submitted; an
+        administrator of the application (a business_admin of its workspace, a developer or
+        tenant_admin within their scope, a platform_admin) may also create them in any status and
+        sync the form.
+      required: [sync, create_statuses]
+      properties:
+        sync:
+          type: boolean
+          description: The caller may re-post the form's records into their metrics (POST /api/forms/{id}/sync).
+        create_statuses:
+          type: array
+          description: The statuses the caller may create a record in, in lifecycle order; empty when none.
+          items: { type: string, enum: [draft, submitted, approved, rejected] }
+
     CreateFormRequest:
       type: object
       properties:
@@ -1782,26 +1821,63 @@ components:
 
     FormRecord:
       type: object
-      required: [id, form_id, data, status, created_by, created_at, updated_at]
+      required: [id, form_id, data, status, created_by, created_at, updated_at, permissions]
       properties:
         id:         { type: string, format: uuid }
         form_id:    { type: string, format: uuid }
         data:       { type: object, additionalProperties: {} }
         status:     { type: string, enum: [draft, submitted, approved, rejected] }
-        created_by: { type: string, format: uuid }
+        created_by:
+          type: string
+          format: uuid
+          nullable: true
+          description: The user who created the record; null for a legacy record whose creator was not recorded or was deleted.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        permissions: { $ref: "#/components/schemas/RecordPermissions" }
+
+    RecordPermissions:
+      type: object
+      description: >-
+        What the caller the record is served to may do to it, computed by the same rule the record's
+        update and delete check ("submitter + admins"). An administrator of the form's application (a
+        business_admin of its workspace, a developer or tenant_admin within their scope, a
+        platform_admin) may edit any record, set any status and delete it. The record's creator may
+        edit and delete it while it is draft or submitted, and move it only between draft and
+        submitted. Anyone else who reaches the form may only read it.
+      required: [edit, delete, set_status]
+      properties:
+        edit:   { type: boolean, description: The caller may change the record's fields. }
+        delete: { type: boolean, description: The caller may delete the record. }
+        set_status:
+          type: array
+          description: The statuses the caller may move the record to; never its current status; empty when none.
+          items: { type: string, enum: [draft, submitted, approved, rejected] }
 
     CreateRecordRequest:
       type: object
       properties:
         data: { type: object, additionalProperties: {} }
+        status:
+          type: string
+          enum: [draft, submitted, approved, rejected]
+          default: draft
+          description: >-
+            The new record's status. Anyone who reaches the form may create a draft or a submitted
+            record; approved and rejected are for an administrator of the form's application (403
+            otherwise).
 
     UpdateRecordRequest:
       type: object
       properties:
-        data:   { type: object, additionalProperties: {} }
-        status: { type: string, enum: [draft, submitted, approved, rejected], default: draft }
+        data:
+          type: object
+          additionalProperties: {}
+          description: The record's new fields; omitted, the record keeps its fields.
+        status:
+          type: string
+          enum: [draft, submitted, approved, rejected]
+          description: The record's new status; omitted, the record keeps its status.
 
     FormImportRequest:
       type: object
@@ -2871,7 +2947,11 @@ paths:
     post:
       operationId: signup
       security: []
-      summary: Register a tenant from the public sign-up page — the tenant on the self-service plan, its first administrator/developer, an application with the starter model, and an invitation to set a password (public, rate-limited per address)
+      summary: Register a tenant from the public sign-up page — the tenant on the self-service plan, its first administrator/developer, an application with the starter models, and an invitation to set a password (public, rate-limited per address)
+      description: >-
+        The application gets four starter models in one transaction, all of them or none: the "Learn the
+        platform" tour, which is made the application's default model (the one business consoles open),
+        and a developer, a business admin and a tenant admin guide. model_id in the result is the tour's.
       requestBody:
         required: true
         content:
@@ -3060,6 +3140,13 @@ paths:
     get:
       operationId: listMetrics
       summary: List all metrics for the demo model
+      parameters:
+        - name: revision_id
+          in: query
+          schema: { type: string, format: uuid }
+          description: >-
+            The revision whose metrics are listed; it must be a revision of the model (404 otherwise).
+            Omitted, the model's active revision.
       responses:
         "200":
           description: Metric list
@@ -3137,7 +3224,15 @@ paths:
     get:
       operationId: getWorkflowHistory
       tags: [Workflow]
-      summary: List the 50 most recent workflow instances across the whole platform (business_admin only)
+      summary: List the 50 most recent workflow instances of the applications the caller administers (business_admin)
+      description: >-
+        Newest first. Only instances of workflows of applications the caller administers: an application
+        in a workspace where the caller holds business_admin, or one kept under a tenant with no workspace
+        when the caller holds business_admin in any workspace of that tenant, narrowed by the caller's
+        per-application grants when they have any. A caller who is also tenant_admin covers the
+        applications of its tenants; a platform_admin or platform-level developer covers every
+        application. When X-App-Id names an application, only that application's instances are listed.
+        A developer's test runs are never listed.
       responses:
         "200":
           description: Workflow history
@@ -3231,7 +3326,11 @@ paths:
     patch:
       operationId: updateWorkflowInstance
       tags: [Workflow]
-      summary: Admin override of a workflow instance's status (business_admin only)
+      summary: Admin override of a workflow instance's status (business_admin)
+      description: >-
+        Only an instance GET /api/workflow/history could list for the caller: a workflow of an
+        application the caller administers, and not a developer's test run. Any other instance answers
+        404, the same as an id that does not exist, and nothing is changed.
       parameters:
         - name: id
           in: path
@@ -3249,6 +3348,13 @@ paths:
             application/json:
               schema: { type: object, properties: { status: { type: string } } }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "404":
+          description: >-
+            No such instance within the caller's scope: unknown or malformed id, an instance of an
+            application the caller does not administer, or a test run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/notifications:
     get:
@@ -3330,6 +3436,18 @@ paths:
       operationId: createRevision
       tags: [Developer Console]
       summary: Duplicate a revision (deep-copies metrics, dimensions, grids, dashboards, forms, workflows, and facts)
+      description: >-
+        The new revision is made in the model of source_revision_id when the body names one, else in
+        model_id, else in the model the request resolves (X-Model-Id within the X-App-Id application,
+        else the application's default model). A source revision must be one the caller may open, of a
+        model in the X-App-Id application when the request names one.
+      parameters:
+        - name: model_id
+          in: query
+          schema: { type: string, format: uuid }
+          description: >-
+            The model to create the revision in. With source_revision_id, it must be that revision's
+            model (400 otherwise).
       requestBody:
         required: true
         content:
@@ -3344,7 +3462,19 @@ paths:
                 type: object
                 properties:
                   id: { type: string, format: uuid }
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400":
+          description: name is missing, or source_revision_id is a revision of another model than model_id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: >-
+            source_revision_id does not exist, or is a revision the caller may not open (another
+            application than X-App-Id, or a model outside the caller's access)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/developer/revisions/{id}:
     delete:
@@ -3662,6 +3792,58 @@ paths:
                   created: { type: integer }
         "400": { $ref: "#/components/responses/BadRequest" }
 
+  /api/developer/dimensions/{dimId}/members/order:
+    put:
+      operationId: reorderDimensionMembers
+      tags: [Developer Console]
+      summary: Set the order of one level of a dimension's members (developer only; not on a time dimension)
+      description: >-
+        member_ids must be exactly the current children of parent_member_id in this dimension (null for the
+        top-level members), each once, in the wanted order. The whole dimension is then renumbered in tree
+        order (each member followed by its children), which is the order grids, pickers and charts show.
+        Audited as dimension.members_reordered. A dimension outside the caller's scope answers 404.
+      parameters:
+        - name: dimId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [member_ids]
+              properties:
+                parent_member_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: The level's parent member; null for the top-level members.
+                member_ids:
+                  type: array
+                  items: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Members reordered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+        "400":
+          description: >-
+            member_ids is not exactly the level's members (one missing, listed twice, not a member of the
+            dimension or not a child of the parent), the parent is neither a member of the dimension, nor the
+            parent of members here, nor a member of its parent dimension, or the dimension is a time dimension
+            ("time periods keep calendar order").
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/developer/dimensions/{dimId}/members/{memberId}:
     patch:
       operationId: updateDimensionMember
@@ -3899,6 +4081,15 @@ paths:
       operationId: debugFacts
       tags: [Developer Console]
       summary: List the 50 most recently entered raw fact_input rows for a model (debugging aid)
+      parameters:
+        - name: revision_id
+          in: query
+          schema: { type: string, format: uuid }
+          description: >-
+            Rows of every revision of the model are listed, each filtered by its own revision's access
+            rules. This revision's rules also filter the rows that carry no revision, and a metric it
+            hides is hidden in every row of that metric. It must be a revision of the model (404
+            otherwise); omitted, the model's active revision.
       responses:
         "200":
           description: Recent fact rows
@@ -4132,6 +4323,10 @@ paths:
         - name: revision_id
           in: query
           schema: { type: string, format: uuid }
+          description: >-
+            Only this revision's grids. The request works in this revision's model when that model is
+            in the X-App-Id application and open to the caller; any other revision answers 404.
+            Omitted, the grids of every revision of the resolved model are listed.
       responses:
         "200":
           description: Grid list
@@ -4140,11 +4335,23 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/GridDef" }
-        "404": { $ref: "#/components/responses/NotFound" }
+        "404":
+          description: revision_id is not a revision of the model, or is not a valid id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
     post:
       operationId: createGrid
       tags: [Developer Console]
       summary: Create a new grid definition
+      parameters:
+        - name: revision_id
+          in: query
+          schema: { type: string, format: uuid }
+          description: >-
+            The revision to create the grid in when the body names none. It must be a revision of the
+            model the request resolves, which is this revision's own when that model is in the X-App-Id
+            application and open to the caller (404 otherwise).
       requestBody:
         required: true
         content:
@@ -4161,7 +4368,13 @@ paths:
                   id:     { type: string, format: uuid }
                   status: { type: string }
         "400": { $ref: "#/components/responses/BadRequest" }
-        "404": { $ref: "#/components/responses/NotFound" }
+        "404":
+          description: >-
+            The query's revision_id (a malformed one included) or the body's well-formed revision_id is
+            not a revision of the model
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/developer/grids/{id}:
     patch:
@@ -4335,6 +4548,13 @@ paths:
       operationId: createFolder
       tags: [Developer Console]
       summary: Create a dashboard folder
+      parameters:
+        - name: revision_id
+          in: query
+          schema: { type: string, format: uuid }
+          description: >-
+            The revision the folder belongs to; it must be a revision of the model (404 otherwise).
+            Omitted, the model's active revision.
       requestBody:
         required: true
         content:
@@ -4598,6 +4818,13 @@ paths:
       operationId: createIntegration
       tags: [Developer Console]
       summary: Create an integration definition
+      parameters:
+        - name: revision_id
+          in: query
+          schema: { type: string, format: uuid }
+          description: >-
+            The revision the integration belongs to; it must be a revision of the model (404 otherwise).
+            Omitted, the model's active revision.
       requestBody:
         required: true
         content:
@@ -4701,6 +4928,11 @@ paths:
       operationId: updateIntegrationConfig
       tags: [Developer Console]
       summary: Replace an integration's type-specific config blob
+      description: >-
+        A rest_api integration's config takes the same typed path as its
+        create and update: 400 when the body is not a valid REST API config,
+        or when a target it names (grid, form, dimension, dashboard) is not a
+        row of the integration's own model.
       parameters:
         - name: id
           in: path
@@ -4847,6 +5079,12 @@ paths:
           in: query
           required: true
           schema: { type: string, format: uuid }
+        - name: revision_id
+          in: query
+          schema: { type: string, format: uuid }
+          description: >-
+            The revision to work in (a developer's working revision); it must be a revision of a model of
+            the application (404 otherwise). Omitted, the active revision of the application's oldest model.
       responses:
         "200":
           description: Workflow list
@@ -4856,6 +5094,11 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/WorkflowDefSummary" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "404":
+          description: revision_id is not a revision of a model of the application
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
     post:
       operationId: createWorkflow
       tags: [Developer Console]
@@ -4865,6 +5108,12 @@ paths:
           in: query
           required: true
           schema: { type: string, format: uuid }
+        - name: revision_id
+          in: query
+          schema: { type: string, format: uuid }
+          description: >-
+            The revision the workflow belongs to (a developer's working revision); it must be a revision of a model of
+            the application (404 otherwise). Omitted, the active revision of the application's oldest model.
       requestBody:
         required: true
         content:
@@ -4877,6 +5126,11 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/WorkflowDefFull" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "404":
+          description: revision_id is not a revision of a model of the application
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/developer/workflows/{id}:
     get:
@@ -5124,6 +5378,13 @@ paths:
           in: query
           schema: { type: string, format: uuid }
           description: Defaults to the demo/current application for the caller's context.
+        - name: revision_id
+          in: query
+          schema: { type: string, format: uuid }
+          description: >-
+            The revision whose forms and integrations the catalog lists (a developer's working revision),
+            in that revision's own model; it must be a revision of a model of the application (404
+            otherwise). Omitted, the active revision of the application's oldest model.
       responses:
         "200":
           description: Trigger event catalog
@@ -5132,6 +5393,11 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/TriggerEventCatalogItem" }
+        "404":
+          description: revision_id is not a revision of a model of the application
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/developer/workflow-roles:
     get:
@@ -5978,6 +6244,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/BARole" }
+        "403": { $ref: "#/components/responses/Forbidden" }
     post:
       operationId: createBARole
       tags: [Business Admin]
@@ -5994,6 +6261,7 @@ paths:
             application/json:
               schema: { type: object, properties: { id: { type: string, format: uuid } } }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/business-admin/roles/{id}:
     patch:
@@ -6017,6 +6285,8 @@ paths:
             application/json:
               schema: { type: object, properties: { status: { type: string } } }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
     delete:
       operationId: deleteBARole
       tags: [Business Admin]
@@ -6032,6 +6302,8 @@ paths:
           content:
             application/json:
               schema: { type: object, properties: { status: { type: string } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/business-admin/roles/{id}/dashboards:
     get:
@@ -6049,15 +6321,31 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { type: string, format: uuid } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
     put:
       operationId: setBARoleDashboards
       tags: [Business Admin]
-      summary: Replace the full set of dashboards assigned to a business role
+      summary: Set the dashboards assigned to a business role among one revision's dashboards
+      description: >-
+        dashboard_ids is the role's full set of dashboards within one revision: those of revision_id
+        when given, else of the active revision of the model the admin is working in (X-Model-Id when it
+        is a model of the application, else the application's default model). A grant the list leaves
+        out is removed only among that revision's dashboards; the role's grants on other models' or
+        other revisions' dashboards are kept. Every listed id is granted and must be a dashboard of the
+        role's workspace.
       parameters:
         - name: id
           in: path
           required: true
           schema: { type: string, format: uuid }
+        - name: revision_id
+          in: query
+          schema: { type: string, format: uuid }
+          description: >-
+            The revision whose dashboards the list covers (a developer's working revision). The request
+            works in this revision's model when that model is in the X-App-Id application and open to
+            the caller; any other revision answers 404.
       requestBody:
         required: true
         content:
@@ -6070,6 +6358,18 @@ paths:
             application/json:
               schema: { type: object, properties: { status: { type: string } } }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403":
+          description: >-
+            The caller does not administer the workspace, the role is outside it, or a listed dashboard is
+            not in the role's workspace
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No such business role, or revision_id is not a revision of the model
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/business-admin/roles/{id}/members:
     get:
@@ -6089,6 +6389,8 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/BARoleMember" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
     post:
       operationId: addBARoleMember
       tags: [Business Admin]
@@ -6110,6 +6412,8 @@ paths:
             application/json:
               schema: { type: object, properties: { status: { type: string } } }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/business-admin/roles/{id}/members/{userId}:
     delete:
@@ -6131,6 +6435,8 @@ paths:
           content:
             application/json:
               schema: { type: object, properties: { status: { type: string } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/business-admin/users:
     get:
@@ -6145,6 +6451,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/BAUser" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/business-admin/users/{id}/access-rules:
     get:
@@ -6164,6 +6471,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/UserAccessRule" }
+        "403": { $ref: "#/components/responses/Forbidden" }
     put:
       operationId: setUserAccessRules
       tags: [Business Admin]
@@ -6185,6 +6493,7 @@ paths:
             application/json:
               schema: { type: object, properties: { status: { type: string } } }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/business-admin/available:
     get:
@@ -6205,6 +6514,7 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/BAAvailableItem" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "500": { $ref: "#/components/responses/InternalError" }
 
   /api/ai/sessions:
@@ -6798,17 +7108,24 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "200":
-          description: Form list
+          description: Form list, each form with the caller's permissions on its records
           content:
             application/json:
               schema:
                 type: array
-                items: { $ref: "#/components/schemas/FormDef" }
+                items: { $ref: "#/components/schemas/ListedForm" }
         "404": { $ref: "#/components/responses/NotFound" }
     post:
       operationId: createForm
       tags: [CRUD Forms]
       summary: Create a CRUD form
+      parameters:
+        - name: revision_id
+          in: query
+          schema: { type: string, format: uuid }
+          description: >-
+            The revision the form belongs to; it must be a revision of the model (404 otherwise, a
+            malformed id included). Omitted, the model's active revision.
       requestBody:
         required: true
         content:
@@ -6827,6 +7144,7 @@ paths:
       operationId: updateForm
       tags: [CRUD Forms]
       summary: Update a form's name, label, or fields
+      description: Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
       parameters:
         - name: id
           in: path
@@ -6844,10 +7162,15 @@ paths:
             application/json:
               schema: { type: object, properties: { status: { type: string } } }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
     delete:
       operationId: deleteForm
       tags: [CRUD Forms]
       summary: Delete a form
+      description: >-
+        Within the caller's builder scope (403 for a form outside it, 404 for
+        one that does not exist). Deletes every record of the form with it.
       parameters:
         - name: id
           in: path
@@ -6859,12 +7182,18 @@ paths:
           content:
             application/json:
               schema: { type: object, properties: { status: { type: string } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/forms/{id}/records:
     get:
       operationId: listFormRecords
       tags: [CRUD Forms]
       summary: List the 100 most recent records submitted to a form
+      description: >-
+        For a caller who reaches the form's application the way the business console opens it; anyone
+        else gets 404, as for a form that does not exist. Records the caller's access rules withhold are
+        left out. Each record carries the caller's permissions on it.
       parameters:
         - name: id
           in: path
@@ -6878,10 +7207,15 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/FormRecord" }
+        "404": { $ref: "#/components/responses/NotFound" }
     post:
       operationId: createFormRecord
       tags: [CRUD Forms]
       summary: Submit a new record to a form (posts to any live form-metric mappings and dispatches form_submit automation rules)
+      description: >-
+        For a caller who reaches the form's application (404 otherwise). The caller becomes the record's
+        creator. A record created submitted dispatches form_submit rules, one created approved (by an
+        administrator) form_approval rules.
       parameters:
         - name: id
           in: path
@@ -6898,12 +7232,18 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/FormRecord" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/forms/{id}/export:
     get:
       operationId: exportFormRecords
       tags: [CRUD Forms]
       summary: Export a form's records as CSV or XLSX
+      description: >-
+        For a caller who reaches the form's application (404 otherwise); records the caller's access
+        rules withhold are left out.
       parameters:
         - name: id
           in: path
@@ -6928,6 +7268,10 @@ paths:
       operationId: importFormRecords
       tags: [CRUD Forms]
       summary: Bulk-create form records from an uploaded CSV or XLSX (atomic — any row failing validation rejects the whole file)
+      description: >-
+        For a caller who reaches the form's application (404 otherwise), who becomes each record's
+        creator. A row's optional status column sets its status; a row whose status the caller may not
+        create (approved or rejected, unless the caller administers the application) fails validation.
       parameters:
         - name: id
           in: path
@@ -6973,6 +7317,13 @@ paths:
       operationId: syncFormMappings
       tags: [CRUD Forms]
       summary: Re-apply every live form-metric mapping against all of a form's existing records
+      description: >-
+        For an administrator of the form's application (a business_admin of
+        its workspace, a developer or tenant admin within their scope, a
+        platform admin): a sync re-posts every record of the form, other
+        people's included. 403 for a caller who reaches the form without
+        administering it, 404 for anyone else. A record whose re-post the
+        caller's write guard refuses keeps the posting it has.
       parameters:
         - name: id
           in: path
@@ -6989,12 +7340,39 @@ paths:
                   status:            { type: string }
                   mappings:          { type: integer }
                   records_processed: { type: integer }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/records/{id}:
+    get:
+      operationId: getFormRecord
+      tags: [CRUD Forms]
+      summary: Read one form record, with the caller's permissions on it
+      description: >-
+        For a caller who reaches the record's form's application the way the business console opens it
+        and whose access rules do not withhold the record; anyone else gets 404, as for a record that
+        does not exist.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The record
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FormRecord" }
+        "404": { $ref: "#/components/responses/NotFound" }
     put:
       operationId: updateFormRecord
       tags: [CRUD Forms]
       summary: Update a form record's data and/or status (dispatches form_submit/form_approval automation rules on status transitions)
+      description: >-
+        A caller who does not reach the record gets 404 (see getFormRecord). One who does may make the
+        change its permissions allow (RecordPermissions: edit, and set_status for a new status) and gets
+        403 for anything else. The write applies only while the record is still in the status the check
+        was made against: 409 when it changed in the meantime.
       parameters:
         - name: id
           in: path
@@ -7010,12 +7388,26 @@ paths:
           description: Record updated
           content:
             application/json:
-              schema: { type: object, properties: { status: { type: string } } }
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  record: { $ref: "#/components/schemas/FormRecord" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The record changed since it was read; nothing was written
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
     delete:
       operationId: deleteFormRecord
       tags: [CRUD Forms]
       summary: Delete a form record
+      description: >-
+        404 for a caller who does not reach the record, 403 for one whose permissions do not include
+        delete, 409 when the record changed status since it was read.
       parameters:
         - name: id
           in: path
@@ -7027,13 +7419,26 @@ paths:
           content:
             application/json:
               schema: { type: object, properties: { status: { type: string } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The record changed since it was read; nothing was deleted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/automation/rules:
     get:
       operationId: listAutomationRules
       tags: [Automation]
       summary: List automation rules for the current application/revision
+      parameters:
+        - name: revision_id
+          in: query
+          schema: { type: string, format: uuid }
+          description: >-
+            The revision to work in (a developer's working revision); it must be a revision of a model of
+            the application (404 otherwise). Omitted, the active revision of the application's oldest model.
       responses:
         "200":
           description: Rule list
@@ -7042,10 +7447,22 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/AutomationRule" }
+        "404":
+          description: revision_id is not a revision of a model of the application
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
     post:
       operationId: createAutomationRule
       tags: [Automation]
       summary: Create an automation rule (a workflow_def_id must point at a published workflow)
+      parameters:
+        - name: revision_id
+          in: query
+          schema: { type: string, format: uuid }
+          description: >-
+            The revision the rule belongs to (a developer's working revision); it must be a revision of a model of
+            the application (404 otherwise). Omitted, the active revision of the application's oldest model.
       requestBody:
         required: true
         content:
@@ -7058,6 +7475,11 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AutomationRule" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "404":
+          description: revision_id is not a revision of a model of the application
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/automation/rules/{id}:
     patch:

@@ -5,7 +5,6 @@ package oas
 import (
 	"context"
 
-	"github.com/google/uuid"
 	ht "github.com/ogen-go/ogen/http"
 )
 
@@ -219,7 +218,7 @@ func (UnimplementedHandler) CreateAiSession(ctx context.Context) (r *AiSession, 
 // Create an automation rule (a workflow_def_id must point at a published workflow).
 //
 // POST /api/automation/rules
-func (UnimplementedHandler) CreateAutomationRule(ctx context.Context, req *AutomationRuleRequest) (r CreateAutomationRuleRes, _ error) {
+func (UnimplementedHandler) CreateAutomationRule(ctx context.Context, req *AutomationRuleRequest, params CreateAutomationRuleParams) (r CreateAutomationRuleRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -283,7 +282,7 @@ func (UnimplementedHandler) CreateDimensionProperty(ctx context.Context, req *Pr
 // Create a dashboard folder.
 //
 // POST /api/developer/folders
-func (UnimplementedHandler) CreateFolder(ctx context.Context, req *FolderRequest) (r CreateFolderRes, _ error) {
+func (UnimplementedHandler) CreateFolder(ctx context.Context, req *FolderRequest, params CreateFolderParams) (r CreateFolderRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -292,7 +291,7 @@ func (UnimplementedHandler) CreateFolder(ctx context.Context, req *FolderRequest
 // Create a CRUD form.
 //
 // POST /api/forms
-func (UnimplementedHandler) CreateForm(ctx context.Context, req *CreateFormRequest) (r CreateFormRes, _ error) {
+func (UnimplementedHandler) CreateForm(ctx context.Context, req *CreateFormRequest, params CreateFormParams) (r CreateFormRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -307,11 +306,12 @@ func (UnimplementedHandler) CreateFormMapping(ctx context.Context, req *CreateFo
 
 // CreateFormRecord implements createFormRecord operation.
 //
-// Submit a new record to a form (posts to any live form-metric mappings and dispatches form_submit
-// automation rules).
+// For a caller who reaches the form's application (404 otherwise). The caller becomes the record's
+// creator. A record created submitted dispatches form_submit rules, one created approved (by an
+// administrator) form_approval rules.
 //
 // POST /api/forms/{id}/records
-func (UnimplementedHandler) CreateFormRecord(ctx context.Context, req *CreateRecordRequest, params CreateFormRecordParams) (r *FormRecord, _ error) {
+func (UnimplementedHandler) CreateFormRecord(ctx context.Context, req *CreateRecordRequest, params CreateFormRecordParams) (r CreateFormRecordRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -320,7 +320,7 @@ func (UnimplementedHandler) CreateFormRecord(ctx context.Context, req *CreateRec
 // Create a new grid definition.
 //
 // POST /api/developer/grids
-func (UnimplementedHandler) CreateGrid(ctx context.Context, req *CreateGridRequest) (r CreateGridRes, _ error) {
+func (UnimplementedHandler) CreateGrid(ctx context.Context, req *CreateGridRequest, params CreateGridParams) (r CreateGridRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -329,7 +329,7 @@ func (UnimplementedHandler) CreateGrid(ctx context.Context, req *CreateGridReque
 // Create an integration definition.
 //
 // POST /api/developer/integrations
-func (UnimplementedHandler) CreateIntegration(ctx context.Context, req *CreateIntegrationRequest) (r CreateIntegrationRes, _ error) {
+func (UnimplementedHandler) CreateIntegration(ctx context.Context, req *CreateIntegrationRequest, params CreateIntegrationParams) (r CreateIntegrationRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -353,11 +353,13 @@ func (UnimplementedHandler) CreateMetric(ctx context.Context, req *CreateMetricR
 
 // CreateRevision implements createRevision operation.
 //
-// Duplicate a revision (deep-copies metrics, dimensions, grids, dashboards, forms, workflows, and
-// facts).
+// The new revision is made in the model of source_revision_id when the body names one, else in
+// model_id, else in the model the request resolves (X-Model-Id within the X-App-Id application, else
+// the application's default model). A source revision must be one the caller may open, of a model in
+// the X-App-Id application when the request names one.
 //
 // POST /api/developer/revisions
-func (UnimplementedHandler) CreateRevision(ctx context.Context, req *CreateRevisionRequest) (r CreateRevisionRes, _ error) {
+func (UnimplementedHandler) CreateRevision(ctx context.Context, req *CreateRevisionRequest, params CreateRevisionParams) (r CreateRevisionRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -414,7 +416,7 @@ func (UnimplementedHandler) DebugCalc(ctx context.Context, params DebugCalcParam
 // List the 50 most recently entered raw fact_input rows for a model (debugging aid).
 //
 // GET /api/developer/debug/facts
-func (UnimplementedHandler) DebugFacts(ctx context.Context) (r DebugFactsRes, _ error) {
+func (UnimplementedHandler) DebugFacts(ctx context.Context, params DebugFactsParams) (r DebugFactsRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -488,7 +490,7 @@ func (UnimplementedHandler) DeleteAutomationRule(ctx context.Context, params Del
 // Delete a business role.
 //
 // DELETE /api/business-admin/roles/{id}
-func (UnimplementedHandler) DeleteBARole(ctx context.Context, params DeleteBARoleParams) (r *DeleteBARoleOK, _ error) {
+func (UnimplementedHandler) DeleteBARole(ctx context.Context, params DeleteBARoleParams) (r DeleteBARoleRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -548,10 +550,11 @@ func (UnimplementedHandler) DeleteFolder(ctx context.Context, params DeleteFolde
 
 // DeleteForm implements deleteForm operation.
 //
-// Delete a form.
+// Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
+// Deletes every record of the form with it.
 //
 // DELETE /api/forms/{id}
-func (UnimplementedHandler) DeleteForm(ctx context.Context, params DeleteFormParams) (r *DeleteFormOK, _ error) {
+func (UnimplementedHandler) DeleteForm(ctx context.Context, params DeleteFormParams) (r DeleteFormRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -566,7 +569,8 @@ func (UnimplementedHandler) DeleteFormMapping(ctx context.Context, params Delete
 
 // DeleteFormRecord implements deleteFormRecord operation.
 //
-// Delete a form record.
+// 404 for a caller who does not reach the record, 403 for one whose permissions do not include
+// delete, 409 when the record changed status since it was read.
 //
 // DELETE /api/records/{id}
 func (UnimplementedHandler) DeleteFormRecord(ctx context.Context, params DeleteFormRecordParams) (r DeleteFormRecordRes, _ error) {
@@ -704,7 +708,8 @@ func (UnimplementedHandler) ExportAudit(ctx context.Context, params ExportAuditP
 
 // ExportFormRecords implements exportFormRecords operation.
 //
-// Export a form's records as CSV or XLSX.
+// For a caller who reaches the form's application (404 otherwise); records the caller's access rules
+// withhold are left out.
 //
 // GET /api/forms/{id}/export
 func (UnimplementedHandler) ExportFormRecords(ctx context.Context, params ExportFormRecordsParams) (r ExportFormRecordsRes, _ error) {
@@ -871,6 +876,17 @@ func (UnimplementedHandler) GetDeveloperModel(ctx context.Context, params GetDev
 	return r, ht.ErrNotImplemented
 }
 
+// GetFormRecord implements getFormRecord operation.
+//
+// For a caller who reaches the record's form's application the way the business console opens it and
+// whose access rules do not withhold the record; anyone else gets 404, as for a record that does not
+// exist.
+//
+// GET /api/records/{id}
+func (UnimplementedHandler) GetFormRecord(ctx context.Context, params GetFormRecordParams) (r GetFormRecordRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // GetGoogleConnection implements getGoogleConnection operation.
 //
 // The tenant's Google service account, public half only — the address to share sheets with
@@ -1007,7 +1023,15 @@ func (UnimplementedHandler) GetWorkflow(ctx context.Context, params GetWorkflowP
 
 // GetWorkflowHistory implements getWorkflowHistory operation.
 //
-// List the 50 most recent workflow instances across the whole platform (business_admin only).
+// Newest first. Only instances of workflows of applications the caller administers: an application
+// in a workspace where the caller holds business_admin, or one kept under a tenant with no workspace
+// when the caller holds business_admin in any workspace of that tenant, narrowed by the caller's
+// per-application grants when they have any. A caller who is also tenant_admin covers the
+// applications of its tenants; a platform_admin or platform-level developer covers every application.
+//
+//	When X-App-Id names an application, only that application's instances are listed. A developer's
+//
+// test runs are never listed.
 //
 // GET /api/workflow/history
 func (UnimplementedHandler) GetWorkflowHistory(ctx context.Context) (r []WorkflowInstance, _ error) {
@@ -1073,8 +1097,11 @@ func (UnimplementedHandler) ImportDimensionMembers(ctx context.Context, req *Imp
 
 // ImportFormRecords implements importFormRecords operation.
 //
-// Bulk-create form records from an uploaded CSV or XLSX (atomic — any row failing validation
-// rejects the whole file).
+// For a caller who reaches the form's application (404 otherwise), who becomes each record's creator.
+//
+//	A row's optional status column sets its status; a row whose status the caller may not create
+//
+// (approved or rejected, unless the caller administers the application) fails validation.
 //
 // POST /api/forms/{id}/import
 func (UnimplementedHandler) ImportFormRecords(ctx context.Context, req *FormImportRequest, params ImportFormRecordsParams) (r ImportFormRecordsRes, _ error) {
@@ -1216,7 +1243,7 @@ func (UnimplementedHandler) ListAutomationExecutions(ctx context.Context) (r []A
 // List automation rules for the current application/revision.
 //
 // GET /api/automation/rules
-func (UnimplementedHandler) ListAutomationRules(ctx context.Context) (r []AutomationRule, _ error) {
+func (UnimplementedHandler) ListAutomationRules(ctx context.Context, params ListAutomationRulesParams) (r ListAutomationRulesRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1234,7 +1261,7 @@ func (UnimplementedHandler) ListBAAvailable(ctx context.Context, params ListBAAv
 // List the dashboard IDs assigned to a business role.
 //
 // GET /api/business-admin/roles/{id}/dashboards
-func (UnimplementedHandler) ListBARoleDashboards(ctx context.Context, params ListBARoleDashboardsParams) (r []uuid.UUID, _ error) {
+func (UnimplementedHandler) ListBARoleDashboards(ctx context.Context, params ListBARoleDashboardsParams) (r ListBARoleDashboardsRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1243,7 +1270,7 @@ func (UnimplementedHandler) ListBARoleDashboards(ctx context.Context, params Lis
 // List the users assigned to a business role.
 //
 // GET /api/business-admin/roles/{id}/members
-func (UnimplementedHandler) ListBARoleMembers(ctx context.Context, params ListBARoleMembersParams) (r []BARoleMember, _ error) {
+func (UnimplementedHandler) ListBARoleMembers(ctx context.Context, params ListBARoleMembersParams) (r ListBARoleMembersRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1252,7 +1279,7 @@ func (UnimplementedHandler) ListBARoleMembers(ctx context.Context, params ListBA
 // List business roles in the caller's workspace.
 //
 // GET /api/business-admin/roles
-func (UnimplementedHandler) ListBARoles(ctx context.Context) (r []BARole, _ error) {
+func (UnimplementedHandler) ListBARoles(ctx context.Context) (r ListBARolesRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1261,7 +1288,7 @@ func (UnimplementedHandler) ListBARoles(ctx context.Context) (r []BARole, _ erro
 // List business_user-role members of the caller's workspace.
 //
 // GET /api/business-admin/users
-func (UnimplementedHandler) ListBAUsers(ctx context.Context) (r []BAUser, _ error) {
+func (UnimplementedHandler) ListBAUsers(ctx context.Context) (r ListBAUsersRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1359,10 +1386,12 @@ func (UnimplementedHandler) ListFormMappings(ctx context.Context, params ListFor
 
 // ListFormRecords implements listFormRecords operation.
 //
-// List the 100 most recent records submitted to a form.
+// For a caller who reaches the form's application the way the business console opens it; anyone else
+// gets 404, as for a form that does not exist. Records the caller's access rules withhold are left
+// out. Each record carries the caller's permissions on it.
 //
 // GET /api/forms/{id}/records
-func (UnimplementedHandler) ListFormRecords(ctx context.Context, params ListFormRecordsParams) (r []FormRecord, _ error) {
+func (UnimplementedHandler) ListFormRecords(ctx context.Context, params ListFormRecordsParams) (r ListFormRecordsRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1416,7 +1445,7 @@ func (UnimplementedHandler) ListIntegrationRuns(ctx context.Context, params List
 // List all metrics for the demo model.
 //
 // GET /api/metrics
-func (UnimplementedHandler) ListMetrics(ctx context.Context) (r ListMetricsRes, _ error) {
+func (UnimplementedHandler) ListMetrics(ctx context.Context, params ListMetricsParams) (r ListMetricsRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1480,7 +1509,7 @@ func (UnimplementedHandler) ListTasks(ctx context.Context) (r []Task, _ error) {
 // List a user's dimension/metric access rules.
 //
 // GET /api/business-admin/users/{id}/access-rules
-func (UnimplementedHandler) ListUserAccessRules(ctx context.Context, params ListUserAccessRulesParams) (r []UserAccessRule, _ error) {
+func (UnimplementedHandler) ListUserAccessRules(ctx context.Context, params ListUserAccessRulesParams) (r ListUserAccessRulesRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1519,7 +1548,7 @@ func (UnimplementedHandler) ListWorkflowRoles(ctx context.Context, params ListWo
 // List the catalog of events (system, form-submit, integration-import) that can trigger a workflow.
 //
 // GET /api/developer/workflow-trigger-events
-func (UnimplementedHandler) ListWorkflowTriggerEvents(ctx context.Context, params ListWorkflowTriggerEventsParams) (r []TriggerEventCatalogItem, _ error) {
+func (UnimplementedHandler) ListWorkflowTriggerEvents(ctx context.Context, params ListWorkflowTriggerEventsParams) (r ListWorkflowTriggerEventsRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1604,7 +1633,7 @@ func (UnimplementedHandler) RemoveAdminUserRole(ctx context.Context, params Remo
 // Remove a user from a business role.
 //
 // DELETE /api/business-admin/roles/{id}/members/{userId}
-func (UnimplementedHandler) RemoveBARoleMember(ctx context.Context, params RemoveBARoleMemberParams) (r *RemoveBARoleMemberOK, _ error) {
+func (UnimplementedHandler) RemoveBARoleMember(ctx context.Context, params RemoveBARoleMemberParams) (r RemoveBARoleMemberRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1651,6 +1680,18 @@ func (UnimplementedHandler) RemoveSso(ctx context.Context) (r RemoveSsoRes, _ er
 //
 // PATCH /api/ai/sessions/{id}
 func (UnimplementedHandler) RenameAiSession(ctx context.Context, req *RenameAiSessionReq, params RenameAiSessionParams) (r RenameAiSessionRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// ReorderDimensionMembers implements reorderDimensionMembers operation.
+//
+// Member_ids must be exactly the current children of parent_member_id in this dimension (null for
+// the top-level members), each once, in the wanted order. The whole dimension is then renumbered in
+// tree order (each member followed by its children), which is the order grids, pickers and charts
+// show. Audited as dimension.members_reordered. A dimension outside the caller's scope answers 404.
+//
+// PUT /api/developer/dimensions/{dimId}/members/order
+func (UnimplementedHandler) ReorderDimensionMembers(ctx context.Context, req *ReorderDimensionMembersReq, params ReorderDimensionMembersParams) (r ReorderDimensionMembersRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1896,7 +1937,12 @@ func (UnimplementedHandler) SetActiveRevision(ctx context.Context, req *ActiveRe
 
 // SetBARoleDashboards implements setBARoleDashboards operation.
 //
-// Replace the full set of dashboards assigned to a business role.
+// Dashboard_ids is the role's full set of dashboards within one revision: those of revision_id when
+// given, else of the active revision of the model the admin is working in (X-Model-Id when it is a
+// model of the application, else the application's default model). A grant the list leaves out is
+// removed only among that revision's dashboards; the role's grants on other models' or other
+// revisions' dashboards are kept. Every listed id is granted and must be a dashboard of the role's
+// workspace.
 //
 // PUT /api/business-admin/roles/{id}/dashboards
 func (UnimplementedHandler) SetBARoleDashboards(ctx context.Context, req *SetRoleDashboardsRequest, params SetBARoleDashboardsParams) (r SetBARoleDashboardsRes, _ error) {
@@ -1923,9 +1969,9 @@ func (UnimplementedHandler) SetUserAccessRules(ctx context.Context, req *SetUser
 
 // Signup implements signup operation.
 //
-// Register a tenant from the public sign-up page — the tenant on the self-service plan, its first
-// administrator/developer, an application with the starter model, and an invitation to set a
-// password (public, rate-limited per address).
+// The application gets four starter models in one transaction, all of them or none: the "Learn the
+// platform" tour, which is made the application's default model (the one business consoles open),
+// and a developer, a business admin and a tenant admin guide. model_id in the result is the tour's.
 //
 // POST /api/signup
 func (UnimplementedHandler) Signup(ctx context.Context, req *SignupRequest) (r SignupRes, _ error) {
@@ -1973,10 +2019,13 @@ func (UnimplementedHandler) SubmitBudget(ctx context.Context, req *SubmitBudgetR
 
 // SyncFormMappings implements syncFormMappings operation.
 //
-// Re-apply every live form-metric mapping against all of a form's existing records.
+// For an administrator of the form's application (a business_admin of its workspace, a developer or
+// tenant admin within their scope, a platform admin): a sync re-posts every record of the form,
+// other people's included. 403 for a caller who reaches the form without administering it, 404 for
+// anyone else. A record whose re-post the caller's write guard refuses keeps the posting it has.
 //
 // POST /api/forms/{id}/sync
-func (UnimplementedHandler) SyncFormMappings(ctx context.Context, params SyncFormMappingsParams) (r *SyncFormMappingsOK, _ error) {
+func (UnimplementedHandler) SyncFormMappings(ctx context.Context, params SyncFormMappingsParams) (r SyncFormMappingsRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -2186,7 +2235,7 @@ func (UnimplementedHandler) UpdateFolder(ctx context.Context, req *FolderRequest
 
 // UpdateForm implements updateForm operation.
 //
-// Update a form's name, label, or fields.
+// Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
 //
 // PATCH /api/forms/{id}
 func (UnimplementedHandler) UpdateForm(ctx context.Context, req *CreateFormRequest, params UpdateFormParams) (r UpdateFormRes, _ error) {
@@ -2204,8 +2253,10 @@ func (UnimplementedHandler) UpdateFormMapping(ctx context.Context, req *UpdateFo
 
 // UpdateFormRecord implements updateFormRecord operation.
 //
-// Update a form record's data and/or status (dispatches form_submit/form_approval automation rules
-// on status transitions).
+// A caller who does not reach the record gets 404 (see getFormRecord). One who does may make the
+// change its permissions allow (RecordPermissions: edit, and set_status for a new status) and gets
+// 403 for anything else. The write applies only while the record is still in the status the check
+// was made against: 409 when it changed in the meantime.
 //
 // PUT /api/records/{id}
 func (UnimplementedHandler) UpdateFormRecord(ctx context.Context, req *UpdateRecordRequest, params UpdateFormRecordParams) (r UpdateFormRecordRes, _ error) {
@@ -2241,7 +2292,9 @@ func (UnimplementedHandler) UpdateIntegration(ctx context.Context, req *UpdateIn
 
 // UpdateIntegrationConfig implements updateIntegrationConfig operation.
 //
-// Replace an integration's type-specific config blob.
+// A rest_api integration's config takes the same typed path as its create and update: 400 when the
+// body is not a valid REST API config, or when a target it names (grid, form, dimension, dashboard)
+// is not a row of the integration's own model.
 //
 // PATCH /api/developer/integrations/{id}/config
 func (UnimplementedHandler) UpdateIntegrationConfig(ctx context.Context, req *UpdateIntegrationConfigRequest, params UpdateIntegrationConfigParams) (r UpdateIntegrationConfigRes, _ error) {
@@ -2323,7 +2376,9 @@ func (UnimplementedHandler) UpdateWorkflow(ctx context.Context, req *UpdateWorkf
 
 // UpdateWorkflowInstance implements updateWorkflowInstance operation.
 //
-// Admin override of a workflow instance's status (business_admin only).
+// Only an instance GET /api/workflow/history could list for the caller: a workflow of an application
+// the caller administers, and not a developer's test run. Any other instance answers 404, the same
+// as an id that does not exist, and nothing is changed.
 //
 // PATCH /api/workflow/instances/{id}
 func (UnimplementedHandler) UpdateWorkflowInstance(ctx context.Context, req *UpdateWorkflowInstanceRequest, params UpdateWorkflowInstanceParams) (r UpdateWorkflowInstanceRes, _ error) {

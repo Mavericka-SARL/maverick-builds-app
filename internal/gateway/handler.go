@@ -45,6 +45,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/tags"
 	"github.com/mavericks-engine/mavericks/internal/timedim"
 	"github.com/mavericks-engine/mavericks/internal/workflow"
+	"github.com/mavericks-engine/mavericks/internal/workflow/assignee"
 	"github.com/mavericks-engine/mavericks/internal/writeguard"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 	"github.com/mavericks-engine/mavericks/pkg/keycloak"
@@ -280,8 +281,16 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	}
 
 	// Helpers used below
-	dev := func(fn http.HandlerFunc) http.HandlerFunc { return cors(h.guard(fn, "developer")) }
-	adm := func(fn http.HandlerFunc) http.HandlerFunc { return cors(h.guard(fn, "platform_admin", "tenant_admin")) }
+	// The builder and administrator wrappers (dev, adm, devOrAdm, userAdm,
+	// tenantAdm) mark their requests builderRoute: there a business role the
+	// caller also holds opens no application (builderRouteKey). dev marks
+	// its requests developerRoute as well: there only developer reach opens
+	// an application, and the caller's admin scope counts only in the
+	// tenants its developer grants reach (developerRouteKey).
+	dev := func(fn http.HandlerFunc) http.HandlerFunc { return cors(h.guard(developerRoute(fn), "developer")) }
+	adm := func(fn http.HandlerFunc) http.HandlerFunc {
+		return cors(h.guard(builderRoute(fn), "platform_admin", "tenant_admin"))
+	}
 	ba := func(fn http.HandlerFunc) http.HandlerFunc { return cors(h.guard(fn, "business_admin")) }
 	// baOrDev: named business roles (identity.business_role) are referenced
 	// by workflow step assignee_roles, which a developer configures in the
@@ -292,10 +301,10 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	// business_admin-only) so this doesn't widen access beyond what's needed.
 	baOrDev := func(fn http.HandlerFunc) http.HandlerFunc { return cors(h.guard(fn, "business_admin", "developer")) }
 	devOrAdm := func(fn http.HandlerFunc) http.HandlerFunc {
-		return cors(h.guard(fn, "developer", "platform_admin", "tenant_admin"))
+		return cors(h.guard(builderRoute(fn), "developer", "platform_admin", "tenant_admin"))
 	}
 	userAdm := func(fn http.HandlerFunc) http.HandlerFunc {
-		return cors(h.guard(fn, "developer", "platform_admin", "tenant_admin"))
+		return cors(h.guard(builderRoute(fn), "developer", "platform_admin", "tenant_admin"))
 	}
 
 	// ── Core/misc + grid/cells/tasks/metrics ──────────────────────────────
@@ -348,6 +357,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("POST", "/api/developer/dimensions/{dimId}/members/generate", "developer", dev(h.developerDimensionAction))
 	register("PATCH", "/api/developer/dimensions/{dimId}/members/{memberId}", "developer", dev(h.developerDimensionAction))
 	register("DELETE", "/api/developer/dimensions/{dimId}/members/{memberId}", "developer", dev(h.developerDimensionAction))
+	register("PUT", "/api/developer/dimensions/{dimId}/members/order", "developer", dev(h.reorderDimensionMembers))
 	register("GET", "/api/developer/dimensions/{dimId}/properties", "developer", dev(h.developerDimensionAction))
 	register("POST", "/api/developer/dimensions/{dimId}/properties", "developer", dev(h.developerDimensionAction))
 	register("PATCH", "/api/developer/dimensions/{dimId}/properties/{propId}", "developer", dev(h.developerDimensionAction))
@@ -479,7 +489,9 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	// administrator (who has every tenant's capabilities, decided
 	// 2026-09-20), never a developer — moving whole models across tenants
 	// is an owner action.
-	tenantAdm := func(fn http.HandlerFunc) http.HandlerFunc { return cors(h.guard(fn, "tenant_admin", "platform_admin")) }
+	tenantAdm := func(fn http.HandlerFunc) http.HandlerFunc {
+		return cors(h.guard(builderRoute(fn), "tenant_admin", "platform_admin"))
+	}
 	register("GET", "/api/admin/models/{id}/export", "admin", tenantAdm(h.adminModelExport))
 	register("GET", "/api/admin/models/{id}/export/package", "admin", tenantAdm(h.adminModelExportPackage))
 	register("POST", "/api/admin/models/import", "admin", tenantAdm(h.adminModelImport))
@@ -610,6 +622,9 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("POST", "/api/forms/{id}/records", "any", cors(h.formsRouter))
 	register("PATCH", "/api/forms/{id}", "developer", dev(h.formsRouter))
 	register("DELETE", "/api/forms/{id}", "developer", dev(h.formsRouter))
+	// Every signed-in user reaches these routes; recordAction decides, per
+	// record, who reaches it and who may change it (form_record_access.go).
+	register("GET", "/api/records/{id}", "any", cors(h.recordAction))
 	register("PUT", "/api/records/{id}", "any", cors(h.recordAction))
 	register("DELETE", "/api/records/{id}", "any", cors(h.recordAction))
 	// Rule *management* is developer-only, matching the Developer
@@ -962,6 +977,13 @@ func (h *handler) adminScopeCustomerIDs(ctx context.Context, a *actor) (all bool
 	}
 	rows, err := h.db.Query(ctx, `
 		SELECT DISTINCT customer_id FROM (
+		    -- An UNSCOPED (NULL workspace) tenant_admin/developer grant —
+		    -- which the Users panel offers as a "platform role" — means
+		    -- "admin of the tenant I belong to": the account's own tenant.
+		    -- A workspace-scoped grant is the next arm's; it used to count
+		    -- here too, so a developer role held in another tenant's
+		    -- workspace made its holder admin of their own tenant, where
+		    -- they might hold no role above business_user.
 		    SELECT u.customer_id::text AS customer_id
 		    FROM identity.user u
 		    WHERE u.id=$1::uuid
@@ -969,32 +991,39 @@ func (h *handler) adminScopeCustomerIDs(ctx context.Context, a *actor) (all bool
 		      AND EXISTS (
 		          SELECT 1 FROM identity.role_assignment ra
 		          WHERE ra.user_id=u.id AND ra.role IN ('tenant_admin', 'developer')
+		            AND ra.workspace_id IS NULL
 		      )
 		    UNION
 		    -- A workspace-scoped tenant_admin/developer grant scopes to that
-		    -- workspace's tenant. An UNSCOPED (NULL workspace) tenant_admin/
-		    -- developer grant — which the Users panel offers as a "platform
-		    -- role" — means "admin of the tenants I belong to", and for an
-		    -- admin-created user with no customer_id of their own, membership
-		    -- is their OTHER workspace roles (same definition as
-		    -- adminCanAccessUser and the users list: own customer_id, a
-		    -- workspace role in the tenant, or an explicit app/model grant).
-		    -- Ignoring those roles left such a user — tenant_admin without a
-		    -- workspace plus business_admin in their tenant's workspace —
-		    -- with NO tenant at all: empty Applications view, no model
-		    -- export/import (found live in production, 2026-09-10).
+		    -- workspace's tenant.
 		    SELECT w.customer_id::text AS customer_id
 		    FROM identity.role_assignment ra
 		    JOIN core.workspace w ON w.id=ra.workspace_id
 		    WHERE ra.user_id=$1::uuid
-		      AND (
-		          ra.role IN ('tenant_admin', 'developer')
-		          OR EXISTS (
-		              SELECT 1 FROM identity.role_assignment ra2
-		              WHERE ra2.user_id=$1::uuid
-		                AND ra2.role IN ('tenant_admin', 'developer')
-		                AND ra2.workspace_id IS NULL
-		          )
+		      AND ra.role IN ('tenant_admin', 'developer')
+		    UNION
+		    -- An unscoped grant held by an admin-created user with NO tenant
+		    -- of their own: their membership is their other workspace roles
+		    -- (same definition as adminCanAccessUser and the users list: own
+		    -- customer_id, a workspace role in the tenant, or an explicit
+		    -- app/model grant). Ignoring those roles left such a user —
+		    -- tenant_admin without a workspace plus business_admin in their
+		    -- tenant's workspace — with NO tenant at all: empty Applications
+		    -- view, no model export/import (found live in production,
+		    -- 2026-09-10). An account that HAS a tenant never reads it this
+		    -- way: an unscoped grant made in tenant A plus a plain
+		    -- business_user role in tenant B used to make it admin of B.
+		    SELECT w.customer_id::text AS customer_id
+		    FROM identity.role_assignment ra
+		    JOIN core.workspace w ON w.id=ra.workspace_id
+		    JOIN identity.user u ON u.id=ra.user_id
+		    WHERE ra.user_id=$1::uuid
+		      AND u.customer_id IS NULL
+		      AND EXISTS (
+		          SELECT 1 FROM identity.role_assignment ra2
+		          WHERE ra2.user_id=$1::uuid
+		            AND ra2.role IN ('tenant_admin', 'developer')
+		            AND ra2.workspace_id IS NULL
 		      )
 		    UNION
 		    -- Explicit app/model access grants also confer tenant scope: a
@@ -1166,12 +1195,226 @@ func (h *handler) isGlobalBuilder(ctx context.Context, a *actor) bool {
 	return ok
 }
 
+// roleReachesAppSQL is a SQL predicate, true when the user whose id is the
+// query parameter userParam holds a role that opens application app — a
+// core.application alias — whose own workspace appWS is LEFT JOINed (NULL
+// for a tenant-level application).
+//
+// Business roles (business_admin, business_user) are workspace-scoped: one
+// opens the applications of the workspace it is held in, and the
+// tenant-level applications (workspace_id NULL, the shape POST
+// /api/admin/applications creates) of that workspace's tenant, which belong
+// to every workspace of it — the boundary workflowAdminScopeSQL draws for
+// workflow history. A developer is a tenant-wide builder: a developer role
+// in any workspace of the tenant, or an UNSCOPED developer grant held by an
+// account that belongs to the tenant (adminScopeCustomerIDs' first arm),
+// opens every application of it. A developer role held in another tenant's
+// workspace makes its holder a builder there, not in its own tenant. (Tenant
+// and platform admins are decided before this predicate, by their admin
+// scope.)
+//
+// builder narrows it to the developer arms: on a builder or administrator
+// route (onBuilderRoute) a business role opens nothing, so a developer who
+// is a business user in another tenant's workspace does not edit that
+// tenant's model through the developer routes.
+//
+// It used to match a role held in ANY workspace of the application's
+// tenant, so a business admin of one workspace could send another
+// workspace's application as X-App-Id and list and rename that workspace's
+// business roles, users and access rules (baWorkspaceModel then adopted the
+// application's workspace).
+func roleReachesAppSQL(app, appWS, userParam string, builder bool) string {
+	cond := `(reach_ws.id = %[1]s.workspace_id
+		             OR (%[1]s.workspace_id IS NULL AND reach_ws.customer_id = %[1]s.customer_id)
+		             OR (reach_ra.role = 'developer' AND reach_ws.customer_id = COALESCE(%[1]s.customer_id, %[2]s.customer_id)))`
+	if builder {
+		cond = `(reach_ra.role = 'developer' AND reach_ws.customer_id = COALESCE(%[1]s.customer_id, %[2]s.customer_id))`
+	}
+	return fmt.Sprintf(`(EXISTS (
+		      SELECT 1 FROM identity.role_assignment reach_ra
+		      JOIN core.workspace reach_ws ON reach_ws.id = reach_ra.workspace_id
+		      WHERE reach_ra.user_id = %[3]s::uuid
+		        AND `+cond+`
+		  ) OR EXISTS (
+		      SELECT 1 FROM identity."user" reach_u
+		      JOIN identity.role_assignment reach_dra ON reach_dra.user_id = reach_u.id
+		           AND reach_dra.role = 'developer' AND reach_dra.workspace_id IS NULL
+		      WHERE reach_u.id = %[3]s::uuid AND reach_u.customer_id = COALESCE(%[1]s.customer_id, %[2]s.customer_id)
+		  ))`, app, appWS, userParam)
+}
+
+// reachSQL is roleReachesAppSQL for the route a request arrived through.
+func reachSQL(ctx context.Context, app, appWS, userParam string) string {
+	return roleReachesAppSQL(app, appWS, userParam, onBuilderRoute(ctx))
+}
+
+// builderRouteKey marks a request that arrived through a builder or
+// administrator route — dev, adm, devOrAdm, userAdm, tenantAdm (Handler) —
+// or that requireResourceAccess authorizes. There the caller acts as a
+// developer or an administrator, so only those roles open an application:
+// the admin scope (adminScopeCustomerIDs) and the developer arms of
+// roleReachesAppSQL. A business role opens applications on the business
+// routes only. Without this, a tenant admin or developer who also holds a
+// business_user role in another tenant renamed that tenant's application,
+// created and deleted its revisions, and edited its model: the resource
+// checks behind those routes asked "does any role open this application?".
+type builderRouteKey struct{}
+
+func withBuilderRoute(ctx context.Context) context.Context {
+	return context.WithValue(ctx, builderRouteKey{}, true)
+}
+
+func onBuilderRoute(ctx context.Context) bool {
+	v, _ := ctx.Value(builderRouteKey{}).(bool)
+	return v
+}
+
+// builderRoute marks fn's requests as arriving through a builder or
+// administrator route (builderRouteKey).
+func builderRoute(fn http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		fn(w, r.WithContext(withBuilderRoute(r.Context())))
+	}
+}
+
+// developerRouteKey marks a request that arrived through a developer-only
+// route (dev, Handler); such a request is a builder route too
+// (builderRouteKey). There the caller acts as a developer and nothing else,
+// so only developer reach opens an application: a developer grant in the
+// application's tenant, an unscoped developer grant of an account that
+// belongs to it (roleReachesAppSQL's builder arms, narrowed by the
+// account's user_app_access/user_model_access grants), a global builder and
+// a platform admin. A tenant_admin grant adds reach only in a tenant the
+// account's developer grants reach too (builderAdminScope). Without this,
+// the dev guard (which only asks whether the account holds developer in
+// SOME scope) let the admin scope decide: an account that is a developer in
+// tenant A and tenant_admin in tenant B built in all of B, where it holds no
+// developer role. The developer-or-administrator routes (devOrAdm, userAdm)
+// do not set it: there the admin scope is the point.
+type developerRouteKey struct{}
+
+func withDeveloperRoute(ctx context.Context) context.Context {
+	return context.WithValue(withBuilderRoute(ctx), developerRouteKey{}, true)
+}
+
+func onDeveloperRoute(ctx context.Context) bool {
+	v, _ := ctx.Value(developerRouteKey{}).(bool)
+	return v
+}
+
+// developerRoute marks fn's requests as arriving through a developer-only
+// route (developerRouteKey), and so a builder route.
+func developerRoute(fn http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		fn(w, r.WithContext(withDeveloperRoute(r.Context())))
+	}
+}
+
+// adminScopeOnly reports whether a tenant admin opens its admin scope and
+// nothing else on the route ctx arrived through: a builder or administrator
+// route (builderRouteKey) that is not developer-only. On a developer-only
+// route (developerRouteKey) the developer arms still decide what the
+// narrowed admin scope (builderAdminScope) leaves out; on a business route,
+// a workspace role held elsewhere does.
+func adminScopeOnly(ctx context.Context, a *actor) bool {
+	return a.hasRole("tenant_admin") && onBuilderRoute(ctx) && !onDeveloperRoute(ctx)
+}
+
+// builderAdminScope is a's admin scope (adminScopeCustomerIDs) as it counts
+// on the route ctx arrived through. On a developer-only route
+// (developerRouteKey) it keeps only the tenants a's developer grants also
+// reach — roleReachesAppSQL's builder arms, over the tenant alone: a
+// developer grant in a workspace of it, or an unscoped developer grant of an
+// account that belongs to it. So a tenant_admin grant gives no builder reach
+// in a tenant where the account is no developer, while a tenant admin that
+// is a developer of the same tenant (the sign-up owner) keeps what its admin
+// grant opens there: applications with no model (an execution-mode
+// application never gets one) and applications outside its
+// user_app_access/user_model_access grants, which narrow the developer arms
+// and never narrowed the admin one.
+func (h *handler) builderAdminScope(ctx context.Context, a *actor) (all bool, customerIDs []string, err error) {
+	all, customerIDs, err = h.adminScopeCustomerIDs(ctx, a)
+	if err != nil || all || !onDeveloperRoute(ctx) || len(customerIDs) == 0 {
+		return all, customerIDs, err
+	}
+	rows, err := h.db.Query(ctx, `
+		SELECT t.customer_id::text
+		FROM (SELECT c::uuid AS customer_id FROM unnest($2::text[]) c) t
+		WHERE `+roleReachesAppSQL("t", "t", "$1", true)+`
+		ORDER BY 1
+	`, a.UserID, customerIDs)
+	if err != nil {
+		return false, nil, err
+	}
+	defer rows.Close()
+	var reached []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return false, nil, err
+		}
+		reached = append(reached, id)
+	}
+	return false, reached, rows.Err()
+}
+
+// builderAdminReachesApp reports whether a's admin scope (builderAdminScope
+// on a developer-only route, adminCanAccessApp elsewhere) opens appID.
+func (h *handler) builderAdminReachesApp(ctx context.Context, a *actor, appID string) (bool, error) {
+	if !onDeveloperRoute(ctx) {
+		return h.adminCanAccessApp(ctx, a, appID)
+	}
+	all, customerIDs, err := h.builderAdminScope(ctx, a)
+	if err != nil || all || len(customerIDs) == 0 {
+		return all, err
+	}
+	var ok bool
+	err = h.db.QueryRow(ctx, `
+		SELECT EXISTS (
+		    SELECT 1 FROM core.application
+		    WHERE id=$1::uuid AND customer_id::text = ANY($2)
+		)
+	`, appID, customerIDs).Scan(&ok)
+	return ok, err
+}
+
+// builderAdminReachesModel is builderAdminReachesApp for a model.
+func (h *handler) builderAdminReachesModel(ctx context.Context, a *actor, modelID string) (bool, error) {
+	if !onDeveloperRoute(ctx) {
+		return h.adminCanAccessModel(ctx, a, modelID)
+	}
+	all, customerIDs, err := h.builderAdminScope(ctx, a)
+	if err != nil || all || len(customerIDs) == 0 {
+		return all, err
+	}
+	var ok bool
+	err = h.db.QueryRow(ctx, `
+		SELECT EXISTS (
+		    SELECT 1
+		    FROM core.model m
+		    JOIN core.application app ON app.id=m.application_id
+		    WHERE m.id=$1::uuid AND app.customer_id::text = ANY($2)
+		)
+	`, modelID, customerIDs).Scan(&ok)
+	return ok, err
+}
+
 func (h *handler) actorCanAccessApp(ctx context.Context, a *actor, appID string) (bool, error) {
 	if a.hasRole("platform_admin") || h.isGlobalBuilder(ctx, a) {
 		return true, nil
 	}
 	if a.hasRole("tenant_admin") {
-		return h.adminCanAccessApp(ctx, a, appID)
+		// A tenant admin opens every application of its tenants. On a
+		// builder or administrator route that is all it opens. On a business
+		// route, a workspace role it holds in another tenant still opens
+		// what that role opens for anyone (below) — and adds no admin reach
+		// there, since the admin routes never get this far. On a
+		// developer-only route the admin scope counts only in the tenants
+		// the account's developer grants reach (builderAdminScope), and the
+		// developer arms below decide the rest (developerRouteKey).
+		if ok, err := h.builderAdminReachesApp(ctx, a, appID); err != nil || ok || adminScopeOnly(ctx, a) {
+			return ok, err
+		}
 	}
 	var ok bool
 	err := h.db.QueryRow(ctx, `
@@ -1180,12 +1423,7 @@ func (h *handler) actorCanAccessApp(ctx context.Context, a *actor, appID string)
 		    FROM core.application app
 		    LEFT JOIN core.workspace aw ON aw.id = app.workspace_id
 		    WHERE app.id=$1::uuid
-		      AND (EXISTS (
-		              SELECT 1 FROM core.workspace w
-		              JOIN identity.role_assignment ra ON ra.workspace_id=w.id
-		              WHERE (w.id=app.workspace_id OR w.customer_id=app.customer_id) AND ra.user_id=$2::uuid
-		           ) OR EXISTS (SELECT 1 FROM identity."user" u JOIN identity.role_assignment dra ON dra.user_id = u.id AND dra.role = 'developer'
-				             WHERE u.id=$2::uuid AND u.customer_id = COALESCE(app.customer_id, aw.customer_id)))
+		      AND `+reachSQL(ctx, "app", "aw", "$2")+`
 		      AND (
 		          NOT EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$2::uuid)
 		          OR EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$2::uuid AND application_id=app.id)
@@ -1209,7 +1447,13 @@ func (h *handler) actorCanAccessModel(ctx context.Context, a *actor, modelID str
 		return true, nil
 	}
 	if a.hasRole("tenant_admin") {
-		return h.adminCanAccessModel(ctx, a, modelID)
+		// As in actorCanAccessApp: the admin scope, and on a business route
+		// whatever a workspace role held elsewhere opens; on a
+		// developer-only route, the admin scope where the developer grants
+		// reach (builderAdminScope), else the developer arms below.
+		if ok, err := h.builderAdminReachesModel(ctx, a, modelID); err != nil || ok || adminScopeOnly(ctx, a) {
+			return ok, err
+		}
 	}
 	var ok bool
 	err := h.db.QueryRow(ctx, `
@@ -1219,12 +1463,7 @@ func (h *handler) actorCanAccessModel(ctx context.Context, a *actor, modelID str
 		    JOIN core.application app ON app.id=m.application_id
 		    LEFT JOIN core.workspace aw ON aw.id = app.workspace_id
 		    WHERE m.id=$1::uuid
-		      AND (EXISTS (
-		              SELECT 1 FROM core.workspace w
-		              JOIN identity.role_assignment ra ON ra.workspace_id=w.id
-		              WHERE (w.id=app.workspace_id OR w.customer_id=app.customer_id) AND ra.user_id=$2::uuid
-		           ) OR EXISTS (SELECT 1 FROM identity."user" u JOIN identity.role_assignment dra ON dra.user_id = u.id AND dra.role = 'developer'
-				             WHERE u.id=$2::uuid AND u.customer_id = COALESCE(app.customer_id, aw.customer_id)))
+		      AND `+reachSQL(ctx, "app", "aw", "$2")+`
 		      AND (
 		          NOT EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$2::uuid)
 		          OR EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$2::uuid AND application_id=app.id)
@@ -1249,7 +1488,10 @@ func (h *handler) actorCanAccessModel(ctx context.Context, a *actor, modelID str
 // existing actorCanAccessModel/actorCanAccessApp, which already encode every
 // per-role rule — platform_admin, tenant_admin customer scoping,
 // developer tenant breadth, and the identity.user_app_access /
-// user_model_access per-user restrictions.
+// user_model_access per-user restrictions. Every caller sits behind a
+// developer or administrator route, so the check is always the builder one
+// (builderRouteKey): a business role the caller also holds opens nothing
+// here, even if a future caller forgets the route wrapper.
 //
 // Add a row here rather than hand-rolling a check in a handler: a per-handler
 // query is exactly how the surface drifted apart in the first place.
@@ -1287,7 +1529,7 @@ var appScopedResourceSQL = map[string]string{
 // matching the wording developerRevisions and baRoleAction already use.
 // Callers use it as a guard: `if !h.requireResourceAccess(w, r, "grid", id) { return }`.
 func (h *handler) requireResourceAccess(w http.ResponseWriter, r *http.Request, kind, id string) bool {
-	ctx := r.Context()
+	ctx := withBuilderRoute(r.Context())
 	act, err := h.resolveActor(ctx, r)
 	if err != nil {
 		jsonErr(w, err, http.StatusUnauthorized)
@@ -1401,9 +1643,11 @@ func (h *handler) requireRevisionInModel(w http.ResponseWriter, r *http.Request,
 	if revisionID == "" {
 		return true
 	}
+	// Compared as text, not cast: a malformed id is a revision that is not
+	// in this model (404, as for ?revision_id=), not a failed query (500).
 	var found bool
 	if err := h.db.QueryRow(r.Context(),
-		`SELECT EXISTS(SELECT 1 FROM model.revision WHERE id=$1::uuid AND model_id=$2::uuid)`,
+		`SELECT EXISTS(SELECT 1 FROM model.revision WHERE id::text=$1 AND model_id::text=$2)`,
 		revisionID, modelID,
 	).Scan(&found); err != nil {
 		jsonErr(w, fmt.Errorf("resolve revision: %w", err), http.StatusInternalServerError)
@@ -1421,8 +1665,13 @@ func (h *handler) requireRevisionInModel(w http.ResponseWriter, r *http.Request,
 // Falls back to the most-recently-created revision if no active revision is set.
 func (h *handler) resolveRevisionCtx(ctx context.Context, revisionID, modelID string) (revID, name string, err error) {
 	if revisionID != "" {
+		// A malformed id is a revision not in the model, like any other:
+		// cast in SQL it failed the statement, and the callers that reject
+		// only errRevisionNotInModel went on with no revision at all — a
+		// form created with ?revision_id=garbage became revision-global.
 		err = h.db.QueryRow(ctx,
-			`SELECT id::text, name FROM model.revision WHERE id=$1::uuid AND model_id=$2::uuid`,
+			`SELECT id::text, name FROM model.revision
+			 WHERE id = CASE WHEN $1 ~* `+writeguard.UUIDPatternSQL+` THEN $1::uuid END AND model_id=$2::uuid`,
 			revisionID, modelID,
 		).Scan(&revID, &name)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -1784,17 +2033,14 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve dim_codes (preferred) or legacy dim_code into a {dimID: code} map.
+	// The legacy form names no dimension, so it goes to the one dimension of
+	// this revision that has a member with that code (among the metric's own grid
+	// dimensions when it has any) — never to one chosen by its name.
 	resolvedDims := req.DimCodes
 	if len(resolvedDims) == 0 && req.DimCode != "" {
-		var dimID string
-		err = h.db.QueryRow(ctx, `
-			SELECT id::text FROM model.dimension_def
-			WHERE model_id = $1::uuid
-			ORDER BY (name = 'department') DESC, name
-			LIMIT 1
-		`, req.ModelID).Scan(&dimID)
-		if err != nil {
-			jsonErr(w, fmt.Errorf("resolve dimension: %w", err), http.StatusInternalServerError)
+		dimID, status, rErr := h.resolveLegacyDimCode(ctx, req.ModelID, req.RevisionID, req.MetricID, req.DimCode)
+		if rErr != nil {
+			jsonErr(w, rErr, status)
 			return
 		}
 		resolvedDims = map[string]string{dimID: req.DimCode}
@@ -2074,6 +2320,20 @@ type taskRow struct {
 	ContextDisplay []taskContextEntry `json:"context_display,omitempty"`
 }
 
+// taskAssigneeSQL is true when user $1 is an assignee of the workflow step
+// whose definition is step_def.elem, in application app. It is the one
+// definition of that boundary (internal/workflow/assignee, which documents
+// the rule), shared with workflow.Store.IsAssigneeEligible — and so with the
+// gRPC CompleteStep — and with notification and reminder recipients, so no
+// surface can drift from another.
+//
+// The gateway used to keep a copy of its own. Before that copy was scoped it
+// matched a role held in any workspace of the task's tenant, and an unscoped
+// role in every tenant; and even once scoped it matched a business role named
+// like a platform role (a business admin may call one "developer") as that
+// platform role, listing other workspaces' steps to the role's members.
+var taskAssigneeSQL = assignee.SQL("app.id", "step_def.elem->'assignee_roles'", "$1::uuid")
+
 func (h *handler) tasks(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -2083,11 +2343,10 @@ func (h *handler) tasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only return steps whose assignee_roles intersect with the current user's
-	// roles. assignee_roles may hold platform role enum values (seed-created
-	// workflows) or identity.business_role names (what the Developer Console
-	// workflow designer writes), so both are matched. Steps with no
-	// assignee_roles defined are visible to everyone.
+	// Only return steps whose assignee_roles name a role the current user
+	// holds for the task's application (taskAssigneeSQL). Steps with no
+	// assignee_roles defined are visible to everyone who reaches the
+	// application.
 	rows, err := h.db.Query(ctx, `
 		SELECT ws.id::text, ws.step_def_id, ws.status::text,
 		       wd.name, ws.instance_id::text,
@@ -2109,6 +2368,8 @@ func (h *handler) tasks(w http.ResponseWriter, r *http.Request) {
 		FROM workflow.workflow_step ws
 		JOIN workflow.workflow_instance wi ON wi.id = ws.instance_id
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
+		JOIN core.application app ON app.id = wd.application_id
+		LEFT JOIN core.workspace appws ON appws.id = app.workspace_id
 		LEFT JOIN identity.user u ON u.id = wi.started_by
 		CROSS JOIN LATERAL (
 			SELECT elem
@@ -2121,38 +2382,7 @@ func (h *handler) tasks(w http.ResponseWriter, r *http.Request) {
 		  -- land in anyone's real inbox (found live 2026-09-13: a business
 		  -- user approved a test-run step and its notification was "skipped").
 		  AND wi.test_run = false
-		  AND (
-		    (step_def.elem->'assignee_roles') IS NULL
-		    OR (step_def.elem->'assignee_roles') = '[]'::jsonb
-		    OR EXISTS (
-		        -- Platform-role match, scoped to the task's application:
-		        -- a role held in another workspace/customer must not grant
-		        -- visibility here (NULL workspace = platform-wide role).
-		        SELECT 1
-		        FROM identity.role_assignment ra
-		        LEFT JOIN core.workspace rws ON rws.id = ra.workspace_id
-		        JOIN core.application app ON app.id = wd.application_id
-		        WHERE ra.user_id = $1::uuid
-		          AND ra.role::text IN (
-		              SELECT jsonb_array_elements_text(step_def.elem->'assignee_roles')
-		          )
-		          AND (ra.workspace_id IS NULL
-		               OR app.workspace_id = rws.id
-		               OR app.customer_id = rws.customer_id)
-		    )
-		    OR EXISTS (
-		        SELECT 1
-		        FROM identity.business_role_member brm
-		        JOIN identity.business_role br ON br.id = brm.role_id
-		        JOIN core.workspace bws ON bws.id = br.workspace_id
-		        JOIN core.application app ON app.id = wd.application_id
-		             AND (app.workspace_id = bws.id OR app.customer_id = bws.customer_id)
-		        WHERE brm.user_id = $1::uuid
-		          AND br.name IN (
-		              SELECT jsonb_array_elements_text(step_def.elem->'assignee_roles')
-		          )
-		    )
-		  )
+		  AND `+taskAssigneeSQL+`
 		ORDER BY ws.due_at ASC NULLS LAST, ws.created_at DESC
 	`, a.UserID)
 	if err != nil {
@@ -2233,13 +2463,31 @@ func (h *handler) taskAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Re-check assignee_roles — the single shared implementation also used
-	// by the gRPC WorkflowService.CompleteStep, so the two surfaces can't
-	// drift onto different eligibility rules again.
-	if eligible, err := workflow.NewStore(h.db.For(ctx)).IsAssigneeEligible(ctx, stepID, a.UserID); err != nil || !eligible {
+	// The inbox's boundary (taskAssigneeSQL) holds for deciding a step as
+	// well: a role held in another workspace or tenant must not decide it,
+	// whether or not the step ever showed in this user's inbox. It is the
+	// same predicate workflow.Store.IsAssigneeEligible — the gRPC
+	// CompleteStep — applies.
+	var isAssignee bool
+	if err := h.db.QueryRow(ctx, `
+		SELECT EXISTS (
+		    SELECT 1
+		    FROM workflow.workflow_step ws
+		    JOIN workflow.workflow_instance wi ON wi.id = ws.instance_id
+		    JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
+		    JOIN core.application app ON app.id = wd.application_id
+		    LEFT JOIN core.workspace appws ON appws.id = app.workspace_id
+		    CROSS JOIN LATERAL (
+		        SELECT elem FROM jsonb_array_elements(COALESCE(wi.steps_snapshot, wd.steps)) AS elem
+		        WHERE elem->>'id' = ws.step_def_id LIMIT 1
+		    ) step_def
+		    WHERE ws.id = $2::uuid AND `+taskAssigneeSQL+`
+		)
+	`, a.UserID, stepID).Scan(&isAssignee); err != nil || !isAssignee {
 		jsonErr(w, fmt.Errorf("forbidden"), http.StatusForbidden)
 		return
 	}
+
 	var instCtx map[string]string
 	if json.Unmarshal(instCtxJSON, &instCtx) == nil {
 		taskRevisionID = instCtx["revision_id"]
@@ -2672,7 +2920,8 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		// touches the ACTIVE revision's rows, so a user restricted to Canada
 		// was served the stale copies' UK/DE/US members intact (found live
 		// via a restricted user's own payload). NULL revision_id rows are
-		// pre-revision legacy and stay visible.
+		// pre-revision legacy and stay visible. Dimensions order by name
+		// alone, the grid-definition branch's rule: no name is special.
 		dimQuery = `
 			SELECT d.id::text, d.name, NULL::int AS display_level, d.parent_dimension_id::text,
 			       d.source_dimension_id::text, d.source_property,
@@ -2685,7 +2934,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			LEFT JOIN model.dimension_member pm ON pm.id = m.parent_member_id
 			WHERE d.model_id = $1::uuid
 			  AND (d.revision_id IS NULL OR d.revision_id::text = $2)
-			ORDER BY (d.name='department') DESC, d.name, m.time_index NULLS LAST, m.sort_order, m.code`
+			ORDER BY d.name, m.time_index NULLS LAST, m.sort_order, m.code`
 		dimParam = modelID
 	}
 	dimArgs := []any{dimParam}
@@ -3792,6 +4041,34 @@ func (h *handler) developerRevisions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// A copy of a named revision is made in that revision's own model.
+		// The model otherwise resolved here is the selected or default one,
+		// and duplicateRevision, finding the source outside it, used to copy
+		// that model's live revision instead — a copy of another model's
+		// working revision came out as a copy of the default model.
+		if body.SourceRevisionID != "" {
+			srcModel, err := h.revisionModelForCaller(ctx, act, body.SourceRevisionID)
+			if err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			if srcModel == "" {
+				jsonErr(w, fmt.Errorf("source revision not found"), http.StatusNotFound)
+				return
+			}
+			if srcModel != modelID {
+				if r.URL.Query().Get("model_id") != "" {
+					jsonErr(w, fmt.Errorf("source_revision_id is a revision of another model than model_id"), http.StatusBadRequest)
+					return
+				}
+				modelID = srcModel
+				activeRevName, activeRevID = nil, nil
+				_ = h.db.QueryRow(ctx,
+					`SELECT active_revision_name, active_revision_id::text FROM core.model WHERE id=$1::uuid`, modelID,
+				).Scan(&activeRevName, &activeRevID)
+			}
+		}
+
 		tx, err := h.db.Begin(ctx)
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
@@ -3860,6 +4137,34 @@ func (h *handler) developerRevisions(w http.ResponseWriter, r *http.Request) {
 		revisions = []devRevision{}
 	}
 	jsonOK(w, revisions)
+}
+
+// revisionModelForCaller returns the model of revision revID when the caller
+// may open that model — a model of the application the request names
+// (X-App-Id), when it names one — else "", the same for a revision that
+// does not exist, so the answer does not confirm another tenant's.
+func (h *handler) revisionModelForCaller(ctx context.Context, act *actor, revID string) (string, error) {
+	var modelID, modelAppID string
+	if err := h.db.QueryRow(ctx, `
+		SELECT rv.model_id::text, COALESCE(m.application_id::text, '')
+		FROM model.revision rv JOIN core.model m ON m.id = rv.model_id
+		WHERE rv.id::text = $1`, revID).Scan(&modelID, &modelAppID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("resolve revision: %w", err)
+	}
+	if appID, _ := ctx.Value(appIDCtxKey).(string); appID != "" && appID != modelAppID {
+		return "", nil
+	}
+	ok, err := h.actorCanAccessModel(ctx, act, modelID)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", nil
+	}
+	return modelID, nil
 }
 
 // duplicateRevision deep-copies all revision-scoped data (metrics,
@@ -4331,23 +4636,57 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		return "", fmt.Errorf("revision dashboard-folder remap failed: %w", err)
 	}
 
-	// Step G: copy integrations, remapping the target to the new
-	// revision's copy of the grid/dashboard/form it points at.
+	// Step G: copy integrations. A connector names its target twice — the
+	// target_id column and config.target_id, the copy its runs read and
+	// write (integration.Config.TargetID) — and both are pointed at the new
+	// revision's copy of the row, of whichever kind: grid, form, dashboard,
+	// dimension or metric, matched by name as the steps above match them
+	// (idmap). Every other top-level *_id field of the config goes through
+	// the same map; the rest of the config is the external system's. Copied
+	// verbatim, a connector in the new revision wrote into the source one.
+	// A target in another revision of the model — what a copy made before
+	// this remap still holds — is pointed at this revision's copy too, as
+	// the model export does (resolveSiblingRefs); an ID naming no such row
+	// is left as it is. The connector's own settings (direction, connection,
+	// status, tags, description, test state) travel with it.
+	// internal/aiassistant's createRevision runs the same statement.
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO model.integration_def (model_id, name, type, target_type, target_id, config, revision_id)
-		SELECT i.model_id, i.name, i.type, i.target_type,
-			COALESCE(
-				(SELECT ng.id FROM model.grid_def og
-				 JOIN model.grid_def ng ON ng.model_id = og.model_id AND ng.name = og.name AND ng.revision_id = $2::uuid
-				 WHERE og.id = i.target_id AND i.target_type = 'grid'),
-				(SELECT ndd.id FROM model.dashboard_def odd
-				 JOIN model.dashboard_def ndd ON ndd.model_id = odd.model_id AND ndd.name = odd.name AND ndd.revision_id = $2::uuid
-				 WHERE odd.id = i.target_id AND i.target_type = 'dashboard'),
-				(SELECT nf.id FROM model.form_def ofd
-				 JOIN model.form_def nf ON nf.model_id = ofd.model_id AND nf.name = ofd.name AND nf.revision_id = $2::uuid
-				 WHERE ofd.id = i.target_id AND i.target_type = 'form'),
-				i.target_id),
-			i.config, $2::uuid
+		WITH idmap(kind, old_id, new_id) AS (
+			          SELECT 'grid', o.id, n.id FROM model.grid_def o
+			            JOIN model.grid_def n ON n.model_id = o.model_id AND n.name = o.name AND n.revision_id = $2::uuid
+			           WHERE o.model_id = $1::uuid AND o.revision_id <> $2::uuid
+			UNION ALL SELECT 'form', o.id, n.id FROM model.form_def o
+			            JOIN model.form_def n ON n.model_id = o.model_id AND n.name = o.name AND n.revision_id = $2::uuid
+			           WHERE o.model_id = $1::uuid AND o.revision_id <> $2::uuid
+			UNION ALL SELECT 'dashboard', o.id, n.id FROM model.dashboard_def o
+			            JOIN model.dashboard_def n ON n.model_id = o.model_id AND n.name = o.name AND n.revision_id = $2::uuid
+			           WHERE o.model_id = $1::uuid AND o.revision_id <> $2::uuid
+			UNION ALL SELECT 'dimension', o.id, n.id FROM model.dimension_def o
+			            JOIN model.dimension_def n ON n.model_id = o.model_id AND n.name = o.name AND n.revision_id = $2::uuid
+			           WHERE o.model_id = $1::uuid AND o.revision_id <> $2::uuid
+			UNION ALL SELECT 'metric', o.id, n.id FROM model.metric_def o
+			            JOIN model.metric_def n ON n.model_id = o.model_id AND n.name = o.name AND n.revision_id = $2::uuid
+			           WHERE o.model_id = $1::uuid AND o.revision_id <> $2::uuid
+		)
+		INSERT INTO model.integration_def (model_id, revision_id, name, description, type, target_type, target_id, config,
+		                                   status, tags, direction, enabled, connection_id, config_version,
+		                                   last_tested_hash, last_tested_at)
+		SELECT i.model_id, $2::uuid, i.name, i.description, i.type, i.target_type,
+			COALESCE((SELECT m.new_id FROM idmap m WHERE m.old_id = i.target_id
+			          ORDER BY m.kind = COALESCE(NULLIF(i.target_type,''), 'grid') DESC LIMIT 1), i.target_id),
+			CASE WHEN jsonb_typeof(i.config) = 'object' THEN COALESCE((
+				SELECT jsonb_object_agg(e.key, COALESCE((
+					SELECT to_jsonb(m.new_id::text) FROM idmap m
+					 WHERE e.key LIKE '%\_id' AND jsonb_typeof(e.value) = 'string'
+					   AND replace(m.old_id::text, '-', '') = lower(regexp_replace(btrim(e.value #>> '{}'), '^urn:uuid:|[{}-]', '', 'gi'))
+					 ORDER BY m.kind = CASE WHEN e.key = 'target_id'
+					                        THEN COALESCE(NULLIF(i.config->>'target_type',''), NULLIF(i.target_type,''), 'grid')
+					                        ELSE regexp_replace(e.key, '^(.*_)?([^_]+)_id$', '\2') END DESC
+					 LIMIT 1), e.value))
+				FROM jsonb_each(i.config) e), i.config)
+			ELSE i.config END,
+			i.status, i.tags, i.direction, i.enabled, i.connection_id, i.config_version,
+			i.last_tested_hash, i.last_tested_at
 		FROM model.integration_def i
 		WHERE i.model_id=$1::uuid AND i.revision_id=$3::uuid
 	`, srcArgs...); err != nil {
@@ -4357,8 +4696,18 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 	// Step H: copy workflow definitions and automation rules (application-
 	// scoped, resolved through this model's application). context_schema
 	// entries binding a context variable to a dimension are remapped to
-	// the new revision's dimension; rules' workflow/form/grid refs are
-	// remapped the same way.
+	// the new revision's dimension; rules' workflow/form/grid/integration
+	// refs are remapped the same way. A rule scoped to one connector
+	// (source_integration_id) points at the copy of it Step G made: left
+	// NULL it fired on EVERY connector's run. Connector names are not
+	// unique, so a ref with no single same-named copy keeps its value: it
+	// stays scoped rather than widening to "any" or failing the copy. A
+	// schedule rule carries its cron settings (a schedule rule without
+	// cron_expr fails automation_rule_schedule_cron_chk, which failed the
+	// whole duplication); next_fire_at stays NULL, so the copy is not
+	// armed — the scheduler fires rules of every revision, and the source
+	// rule keeps its own schedule. Saving the copy's schedule arms it.
+	// internal/aiassistant's createRevision runs the same statement.
 	if _, err := tx.Exec(ctx, `
 		WITH
 		dim_map AS (
@@ -4411,7 +4760,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		new_rules AS (
 			INSERT INTO workflow.automation_rule
 			  (application_id, name, description, trigger_type, workflow_name, enabled,
-			   workflow_def_id, source_form_id, source_grid_id, revision_id)
+			   workflow_def_id, source_form_id, source_grid_id, source_integration_id,
+			   cron_expr, timezone, misfire_policy, max_retries, retry_backoff_seconds, revision_id)
 			SELECT ar.application_id, ar.name, ar.description, ar.trigger_type, ar.workflow_name, ar.enabled,
 				wm.new_id,
 				(SELECT nf.id FROM model.form_def ofd
@@ -4420,6 +4770,11 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 				(SELECT ng.id FROM model.grid_def og
 				 JOIN model.grid_def ng ON ng.model_id = og.model_id AND ng.name = og.name AND ng.revision_id = $2::uuid
 				 WHERE og.id = ar.source_grid_id),
+				COALESCE((SELECT min(ni.id::text)::uuid FROM model.integration_def oi
+				          JOIN model.integration_def ni ON ni.model_id = oi.model_id AND ni.name = oi.name AND ni.revision_id = $2::uuid
+				          WHERE oi.id = ar.source_integration_id AND oi.model_id = $1::uuid
+				          HAVING count(*) = 1), ar.source_integration_id),
+				ar.cron_expr, ar.timezone, ar.misfire_policy, ar.max_retries, ar.retry_backoff_seconds,
 				$2::uuid
 			FROM workflow.automation_rule ar
 			LEFT JOIN wf_map wm ON wm.old_id = ar.workflow_def_id
@@ -5160,8 +5515,84 @@ type historyInstance struct {
 	ContextDisplay []taskContextEntry `json:"context_display,omitempty"`
 }
 
+// workflowAdminScope is the set of applications whose workflow instances a
+// business admin lists (GET /api/workflow/history) and overrides (PATCH
+// /api/workflow/instances/{id}). Business administration is scoped to a
+// workspace, as in baWorkspaceModel: an application kept in a workspace
+// belongs to the business admins of that workspace; one created under a
+// tenant with no workspace (POST /api/admin/applications) to the business
+// admins of any workspace of that tenant. A business_admin grant with no
+// workspace covers nothing (isBusinessRole: a NULL-workspace business grant
+// is inert) — reading it as "the tenants the user belongs to" let a grant
+// made in one tenant reach every tenant where the user held any workspace
+// role. user_app_access narrows the scope as it narrows actorCanAccessApp. A tenant admin covers its tenants and a
+// platform admin or platform-level developer every application — the
+// boundary adminCanAccessApp and actorCanAccessApp draw for them.
+type workflowAdminScope struct {
+	userID      string
+	all         bool
+	customerIDs []string
+}
+
+func (h *handler) resolveWorkflowAdminScope(ctx context.Context, act *actor) (workflowAdminScope, error) {
+	scope := workflowAdminScope{userID: act.UserID, customerIDs: []string{}}
+	if act.hasRole("platform_admin") || h.isGlobalBuilder(ctx, act) {
+		scope.all = true
+		return scope, nil
+	}
+	if act.hasRole("tenant_admin") {
+		all, customerIDs, err := h.adminScopeCustomerIDs(ctx, act)
+		if err != nil {
+			return scope, err
+		}
+		scope.all = all
+		if customerIDs != nil {
+			scope.customerIDs = customerIDs
+		}
+	}
+	return scope, nil
+}
+
+// args are workflowAdminScopeSQL's $1..$3, then extra.
+func (s workflowAdminScope) args(extra ...any) []any {
+	return append([]any{s.userID, s.all, s.customerIDs}, extra...)
+}
+
+// workflowAdminScopeSQL is true when application "app" (a core.application
+// row in the query) is inside a workflowAdminScope: $1 the user, $2 all,
+// $3 the tenant admin's customer ids.
+const workflowAdminScopeSQL = `(
+	$2::bool
+	OR app.customer_id::text = ANY($3::text[])
+	OR (EXISTS (
+	        SELECT 1 FROM identity.role_assignment ra
+	        JOIN core.workspace rws ON rws.id = ra.workspace_id
+	        WHERE ra.user_id = $1::uuid AND ra.role = 'business_admin'
+	          AND (rws.id = app.workspace_id
+	               OR (app.workspace_id IS NULL AND rws.customer_id = app.customer_id))
+	    )
+	    AND (NOT EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id = $1::uuid)
+	         OR EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id = $1::uuid AND application_id = app.id)))
+)`
+
+// workflowHistory serves GET /api/workflow/history: the latest instances of
+// the workflows this business admin administers (workflowAdminScopeSQL) —
+// of the application the console has open when it names one — without a
+// developer's test runs, which are dry runs (as /api/tasks leaves them out).
+// It used to list the latest 50 instances of every tenant.
 func (h *handler) workflowHistory(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	act, err := h.resolveActor(ctx, r)
+	if err != nil {
+		jsonErr(w, err, http.StatusUnauthorized)
+		return
+	}
+	scope, err := h.resolveWorkflowAdminScope(ctx, act)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	appID, _ := ctx.Value(appIDCtxKey).(string)
 
 	rows, err := h.db.Query(ctx, `
 		SELECT wi.id::text, wd.name, wi.status::text, wi.context,
@@ -5170,9 +5601,13 @@ func (h *handler) workflowHistory(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(wi.context_schema_snapshot, wd.context_schema)
 		FROM workflow.workflow_instance wi
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
+		JOIN core.application app ON app.id = wd.application_id
+		WHERE wi.test_run = false
+		  AND ($4 = '' OR app.id::text = $4)
+		  AND `+workflowAdminScopeSQL+`
 		ORDER BY wi.started_at DESC
 		LIMIT 50
-	`)
+	`, scope.args(appID)...)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -5517,11 +5952,35 @@ func (h *handler) workflowInstanceAction(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Only an instance this admin administers (workflowAdminScopeSQL), and
+	// not a developer's test run — the ones GET /api/workflow/history lists.
+	// Anything else answers 404, the same as an id that does not exist, so
+	// the answer does not confirm another tenant's instance. The override
+	// used to update any instance whose id the caller named.
+	act, err := h.resolveActor(ctx, r)
+	if err != nil {
+		jsonErr(w, err, http.StatusUnauthorized)
+		return
+	}
+	scope, err := h.resolveWorkflowAdminScope(ctx, act)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
 	var appID string
-	_ = h.db.QueryRow(ctx, `
-		SELECT wd.application_id::text FROM workflow.workflow_instance wi
+	if err := h.db.QueryRow(ctx, `
+		SELECT app.id::text FROM workflow.workflow_instance wi
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
-		WHERE wi.id = $1::uuid`, instanceID).Scan(&appID)
+		JOIN core.application app ON app.id = wd.application_id
+		WHERE wi.id::text = $4 AND wi.test_run = false
+		  AND `+workflowAdminScopeSQL, scope.args(instanceID)...).Scan(&appID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			jsonErr(w, fmt.Errorf("workflow instance not found"), http.StatusNotFound)
+			return
+		}
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
 
 	tx, err := h.db.Begin(ctx)
 	if err != nil {
@@ -6245,20 +6704,28 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 			if isDeveloper {
 				mRows, _ = h.db.Query(ctx, `
 						SELECT id::text, name, storage_type::text, COALESCE(active_revision_name,''),
-						       m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)
+						       (m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) IS TRUE
 						FROM core.model m
 						WHERE m.application_id=$1::uuid
 						  AND (
 						      NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$2::uuid)
 						      OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$2::uuid AND model_id=m.id)
 						  )
-						ORDER BY m.created_at
+						ORDER BY m.created_at,
+						         (m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) IS TRUE DESC,
+						         m.name, m.id
 					`, ap.ID, act.UserID)
 			} else {
+				// Models created in one transaction (sign-up's starter models) share a
+				// created_at; the application's default goes first among
+				// them, then name and id, so the list does not reshuffle.
 				mRows, _ = h.db.Query(ctx,
 					`SELECT id::text, name, storage_type::text, COALESCE(active_revision_name,''),
-					        id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)
-					 FROM core.model WHERE application_id=$1::uuid ORDER BY created_at`, ap.ID)
+					        (id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) IS TRUE
+					 FROM core.model WHERE application_id=$1::uuid
+					 ORDER BY created_at,
+					          (id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) IS TRUE DESC,
+					          name, id`, ap.ID)
 			}
 			if mRows != nil {
 				for mRows.Next() {
@@ -7315,8 +7782,11 @@ func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID str
 			continue
 		}
 		_, err = h.db.Exec(ctx,
-			`INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id, properties)
-			 VALUES ($1::uuid, $2, $3, NULLIF($4,'')::uuid, $5::jsonb)
+			// A new member is appended (MAX+1, as the connector and AI
+			// paths do); a re-imported one keeps its place.
+			`INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id, properties, sort_order)
+			 VALUES ($1::uuid, $2, $3, NULLIF($4,'')::uuid, $5::jsonb,
+			         (SELECT COALESCE(MAX(sort_order),0)+1 FROM model.dimension_member WHERE dimension_id=$1::uuid))
 			 ON CONFLICT (dimension_id, code) DO UPDATE SET
 			   label = EXCLUDED.label,
 			   parent_member_id = COALESCE(EXCLUDED.parent_member_id, model.dimension_member.parent_member_id),
@@ -7411,6 +7881,23 @@ func (h *handler) autoMemberCode(ctx context.Context, dimensionID, label string)
 	return "", fmt.Errorf("could not derive a unique code for label %q", label)
 }
 
+// setApplicationDefaultModel makes modelID its application's business default
+// and returns that application's id; any error, pgx.ErrNoRows included, means
+// there is no such model. It is the one statement for the setting: a
+// developer's choice (developerSetDefaultModel) and sign-up, which names the
+// tour inside its provisioning transaction, both run it — q is the tenant
+// handle for the one and the transaction for the other.
+func setApplicationDefaultModel(ctx context.Context, q interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}, modelID string) (string, error) {
+	var appID string
+	err := q.QueryRow(ctx, `
+		UPDATE core.application SET default_model_id = $1::uuid
+		WHERE id = (SELECT application_id FROM core.model WHERE id = $1::uuid)
+		RETURNING id::text`, modelID).Scan(&appID)
+	return appID, err
+}
+
 // developerSetDefaultModel serves POST /api/developer/models/{id}/set-default
 // — marks the model as its application's business default: what every
 // business console resolves when nothing pins another model. Without an
@@ -7441,16 +7928,11 @@ func (h *handler) developerSetDefaultModel(w http.ResponseWriter, r *http.Reques
 		jsonErr(w, fmt.Errorf("forbidden: model is outside your access scope"), http.StatusForbidden)
 		return
 	}
-	tag, err := h.db.Exec(ctx, `
-		UPDATE core.application SET default_model_id = $1::uuid
-		WHERE id = (SELECT application_id FROM core.model WHERE id = $1::uuid)
-	`, modelID)
-	if err != nil || tag.RowsAffected() == 0 {
+	appID, err := setApplicationDefaultModel(ctx, h.db, modelID)
+	if err != nil {
 		jsonErr(w, fmt.Errorf("model not found"), http.StatusNotFound)
 		return
 	}
-	var appID string
-	_ = h.db.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, modelID).Scan(&appID)
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 		Category: auditlog.CategoryModelChange, EventType: auditlog.EventApplicationUpdated,
 		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
@@ -7508,6 +7990,11 @@ func (h *handler) developerIntegrations(w http.ResponseWriter, r *http.Request) 
 		}
 		if body.Tags == nil {
 			body.Tags = []string{}
+		}
+		// The target must be this model's own: a run writes into it.
+		if err := h.checkIntegrationTarget(ctx, modelID, body.TargetType, body.TargetID); err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
 		}
 		var newID string
 		if err := h.db.QueryRow(ctx,
@@ -7593,6 +8080,11 @@ func (h *handler) developerIntegrationAction(w http.ResponseWriter, r *http.Requ
 		case subPath == "" && r.Method == http.MethodPatch:
 			h.restAPIUpdate(w, r, restModelID, intID)
 			return
+		case subPath == "config" && r.Method == http.MethodPatch:
+			// The typed path, not the verbatim legacy write: the config
+			// names the target the worker reads and writes.
+			h.restAPIConfigPatch(w, r, restModelID, intID)
+			return
 		}
 		// DELETE falls through to the shared legacy path (cascade + audit).
 	}
@@ -7674,6 +8166,18 @@ func (h *handler) developerIntegrationAction(w http.ResponseWriter, r *http.Requ
 		}
 		if body.Status != nil && *body.Status != "draft" && *body.Status != "active" {
 			jsonErr(w, fmt.Errorf("status must be draft or active"), http.StatusBadRequest)
+			return
+		}
+		// A new target must be the integration's own model's: a run
+		// writes into it. A target resent unchanged (rename, tags) is
+		// refused only if it is another model's — one deleted since it
+		// was chosen must not block a rename (checkIntegrationSave).
+		var intModelID string
+		var stored integrationRefs
+		_ = h.db.QueryRow(ctx, `SELECT model_id::text, target_type, COALESCE(target_id::text,'') FROM model.integration_def WHERE id=$1::uuid`, intID).Scan(&intModelID, &stored.TargetType, &stored.TargetID)
+		next := integrationRefs{TargetType: body.TargetType, TargetID: body.TargetID}
+		if err := h.checkIntegrationSave(ctx, intModelID, stored, next, body.Status != nil && *body.Status == "active"); err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
 		if _, err := h.db.Exec(ctx,
@@ -7804,10 +8308,15 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusUnauthorized)
 		return
 	}
-	var appID string
+	// The integration's own model and revision: a run writes there, never
+	// into whatever model the request's X-App-Id resolves to.
+	var appID, intModelID, intRevisionID string
 	if err := h.db.QueryRow(ctx, `
-		SELECT m.application_id::text FROM model.integration_def i
-		JOIN core.model m ON m.id = i.model_id WHERE i.id=$1::uuid`, intID).Scan(&appID); err != nil {
+		SELECT m.application_id::text, m.id::text,
+		       COALESCE(i.revision_id::text, m.active_revision_id::text,
+		                (SELECT id::text FROM model.revision WHERE model_id = m.id ORDER BY created_at LIMIT 1), '')
+		FROM model.integration_def i
+		JOIN core.model m ON m.id = i.model_id WHERE i.id=$1::uuid`, intID).Scan(&appID, &intModelID, &intRevisionID); err != nil {
 		jsonErr(w, fmt.Errorf("integration not found"), http.StatusNotFound)
 		return
 	}
@@ -7829,6 +8338,15 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 	// never makes external requests). 202 + run id; poll the run endpoint.
 	if intg.Type == "rest_api" {
 		h.restAPIRunEnqueue(w, r, intID)
+		return
+	}
+	// A legacy row's target must be its own model's, checked here before
+	// anything is fetched, read or written: a row saved before the
+	// save-time check existed (or copied from one by revision duplication)
+	// can name another tenant's form or dimension. Refused like a rest_api
+	// run of a foreign target — 400, no run recorded.
+	if err := h.checkIntegrationTarget(ctx, intModelID, intg.TargetType, intg.TargetID); err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
 		return
 	}
 
@@ -7944,19 +8462,10 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			// The legacy path below stages raw metric_id cell values, so it
 			// requires UUIDs; a sheet a business team maintains holds metric
 			// and member names. Route through ResolveRows instead.
-			h.runSheetsGridImport(w, r, act, cfg.ColumnMap, cfg.ImportMode, csvText)
+			h.runSheetsGridImport(w, r, act, intModelID, intRevisionID, cfg.ColumnMap, cfg.ImportMode, csvText)
 			return
 		}
-		modelID, err := h.resolveDemoModelID(ctx, r)
-		if err != nil {
-			jsonAccessErr(w, err, "resolve model")
-			return
-		}
-		var intRevisionID string
-		_ = h.db.QueryRow(ctx, `
-			SELECT COALESCE(active_revision_id::text, (SELECT id::text FROM model.revision WHERE model_id = m.id ORDER BY created_at LIMIT 1), '')
-			FROM core.model m WHERE m.id = $1::uuid
-		`, modelID).Scan(&intRevisionID)
+		modelID := intModelID
 
 		metricCol, hasMetric := colIdx["metric_id"]
 		valueCol, hasValue := colIdx["value"]
@@ -8438,27 +8947,12 @@ func (h *handler) applyFormMappings(ctx context.Context, recordID, formID, statu
 			).Scan(&revisionID)
 		}
 
-		// Always remove old posting first (retraction on status change).
-		_, _ = h.db.Exec(ctx,
-			`DELETE FROM runtime.form_record_posting WHERE mapping_id=$1::uuid AND form_record_id=$2::uuid`,
-			m.id, recordID)
-
-		if !eligible {
-			// Status is not eligible — delete any fact_input row this mapping produced
-			// and re-aggregate remaining postings for this intersection.
-			h.recomputeFactInput(ctx, m.id, m.targetMetricID, m.aggregation, m.modelID, revisionID, userID)
-			affected = append(affected, struct{ RevisionID, MetricID string }{revisionID, m.targetMetricID})
-			affectedModelID = m.modelID
-			continue
-		}
-
-		// Resolve source value
-		raw, ok := data[m.sourceField]
-		if !ok || raw == nil {
-			continue
-		}
+		// Resolve source value. A record with no numeric value in the
+		// source field contributes nothing, like one whose status is not
+		// eligible.
 		var val float64
-		switch v := raw.(type) {
+		hasValue := true
+		switch v := data[m.sourceField].(type) {
 		case float64:
 			val = v
 		case json.Number:
@@ -8466,6 +8960,20 @@ func (h *handler) applyFormMappings(ctx context.Context, recordID, formID, statu
 		case int:
 			val = float64(v)
 		default:
+			hasValue = false
+		}
+
+		if !eligible || !hasValue {
+			// Retract this record's posting and re-aggregate the postings
+			// that remain. A missing value used to retract without
+			// re-aggregating, leaving the old value in the metric until
+			// something else recomputed it.
+			_, _ = h.db.Exec(ctx,
+				`DELETE FROM runtime.form_record_posting WHERE mapping_id=$1::uuid AND form_record_id=$2::uuid`,
+				m.id, recordID)
+			h.recomputeFactInput(ctx, m.id, m.targetMetricID, m.aggregation, m.modelID, revisionID, userID)
+			affected = append(affected, struct{ RevisionID, MetricID string }{revisionID, m.targetMetricID})
+			affectedModelID = m.modelID
 			continue
 		}
 
@@ -8486,9 +8994,15 @@ func (h *handler) applyFormMappings(ctx context.Context, recordID, formID, statu
 		// writing the cell directly. Skip-and-log rather than surface an
 		// error: this runs from a detached goroutine after the HTTP
 		// response has already returned (the record itself always saves;
-		// only this mapping's derived posting is withheld), matching the
-		// existing skip-and-continue handling a few lines up for a missing
-		// source value.
+		// only this mapping's derived posting is withheld).
+		//
+		// A refused re-post leaves the record's existing posting as it is:
+		// the checks run before anything is retracted, and the upsert below
+		// replaces the posting in place. The posting used to be deleted
+		// first, so a caller the guard refuses — a restricted user's own
+		// edit, or a restricted administrator's form sync re-posting other
+		// people's records — withdrew the contribution without writing
+		// anything, and the next recompute dropped it from the metric.
 		// A transient error here is NOT a denial, but both used to `continue`
 		// and drop the posting for good. Retry the read; only give up — and
 		// say so at error level — once it keeps failing.
@@ -8987,14 +9501,26 @@ func (h *handler) resolveAppRevisionID(ctx context.Context, r *http.Request, app
 		return rev, nil
 	}
 	var modelID string
-	if err := h.db.QueryRow(ctx,
-		`SELECT id::text FROM core.model WHERE application_id=$1::uuid ORDER BY created_at ASC LIMIT 1`, appID,
-	).Scan(&modelID); err != nil {
+	if err := h.db.QueryRow(ctx, appWorkingModelQuery, appID).Scan(&modelID); err != nil {
 		return "", nil
 	}
 	revID, _, _ := h.resolveRevisionCtx(ctx, "", modelID)
 	return revID, nil
 }
+
+// appWorkingModelQuery picks the model whose active revision an
+// application's own rows (automation rules, workflow definitions, the
+// trigger-event catalog) are kept against when the request names no
+// revision: the oldest, which is where every existing application's rules
+// already are. Models created in one transaction share a created_at
+// (sign-up's starter models), so among those the application's default goes
+// first, then name and id. $1 is the application.
+const appWorkingModelQuery = `
+	SELECT id::text FROM core.model WHERE application_id=$1::uuid
+	ORDER BY created_at ASC,
+	         (id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) IS TRUE DESC,
+	         name, id
+	LIMIT 1`
 
 // revisionIDFromFormID returns the revision a form belongs to ("" for
 // revision-global forms), so form events only fire that revision's rules.
@@ -9051,36 +9577,52 @@ func (h *handler) userApps(w http.ResponseWriter, r *http.Request) {
 		Close()
 	}
 
-	if a.hasRole("platform_admin") || h.isGlobalBuilder(ctx, a) {
+	platformWide := a.hasRole("platform_admin") || h.isGlobalBuilder(ctx, a)
+	var customerIDs []string
+	if !platformWide && a.hasRole("tenant_admin") {
+		_, ids, scopeErr := h.adminScopeCustomerIDs(ctx, a)
+		if scopeErr != nil {
+			jsonErr(w, scopeErr, http.StatusInternalServerError)
+			return
+		}
+		customerIDs = ids
+	}
+	if platformWide {
 		rows, err = h.db.Query(ctx, `
 			SELECT a.id::text, a.name, COALESCE(a.mode, 'planning'), w.name,
-			       COALESCE((SELECT name FROM core.model WHERE application_id = a.id LIMIT 1), ''),
-			       COALESCE((SELECT active_revision_name FROM core.model WHERE application_id = a.id LIMIT 1), '')
+			       COALESCE((SELECT name FROM core.model WHERE application_id = a.id ORDER BY (id = a.default_model_id) IS TRUE DESC, created_at DESC, name, id LIMIT 1), ''),
+			       COALESCE((SELECT active_revision_name FROM core.model WHERE application_id = a.id ORDER BY (id = a.default_model_id) IS TRUE DESC, created_at DESC, name, id LIMIT 1), '')
 			FROM core.application a
 			JOIN core.workspace w ON w.id = COALESCE(a.workspace_id,
 			    (SELECT w2.id FROM core.workspace w2 WHERE w2.customer_id = a.customer_id ORDER BY w2.created_at LIMIT 1))
 			ORDER BY w.name, a.name
 		`)
-	} else if a.hasRole("tenant_admin") {
-		_, customerIDs, scopeErr := h.adminScopeCustomerIDs(ctx, a)
-		if scopeErr != nil {
-			jsonErr(w, scopeErr, http.StatusInternalServerError)
-			return
-		}
-		if len(customerIDs) == 0 {
-			jsonOK(w, []appInfo{})
-			return
-		}
+	} else if len(customerIDs) > 0 {
+		// A tenant admin's tenants, plus whatever a workspace role held in
+		// another tenant opens for it (actorCanAccessApp).
 		rows, err = h.db.Query(ctx, `
 			SELECT a.id::text, a.name, COALESCE(a.mode, 'planning'), w.name,
-			       COALESCE((SELECT name FROM core.model WHERE application_id = a.id LIMIT 1), ''),
-			       COALESCE((SELECT active_revision_name FROM core.model WHERE application_id = a.id LIMIT 1), '')
+			       COALESCE((SELECT name FROM core.model WHERE application_id = a.id ORDER BY (id = a.default_model_id) IS TRUE DESC, created_at DESC, name, id LIMIT 1), ''),
+			       COALESCE((SELECT active_revision_name FROM core.model WHERE application_id = a.id ORDER BY (id = a.default_model_id) IS TRUE DESC, created_at DESC, name, id LIMIT 1), '')
 			FROM core.application a
 			JOIN core.workspace w ON w.id = COALESCE(a.workspace_id,
 			    (SELECT w2.id FROM core.workspace w2 WHERE w2.customer_id = a.customer_id ORDER BY w2.created_at LIMIT 1))
 			WHERE a.customer_id::text = ANY($1)
+			   OR (`+reachSQL(ctx, "a", "w", "$2")+`
+			       AND (
+			           NOT EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id = $2::uuid)
+			           OR EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id = $2::uuid AND application_id = a.id)
+			       )
+			       AND EXISTS (
+			           SELECT 1 FROM core.model m
+			           WHERE m.application_id = a.id
+			             AND (
+			                 NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id = $2::uuid)
+			                 OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id = $2::uuid AND model_id = m.id)
+			             )
+			       ))
 			ORDER BY w.name, a.name
-		`, customerIDs)
+		`, customerIDs, a.UserID)
 	} else {
 		rows, err = h.db.Query(ctx, `
 			SELECT DISTINCT a.id::text, a.name, COALESCE(a.mode, 'planning'), w.name,
@@ -9091,6 +9633,7 @@ func (h *handler) userApps(w http.ResponseWriter, r *http.Request) {
 			                 NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id = $1::uuid)
 			                 OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id = $1::uuid AND model_id = m.id)
 			             )
+			           ORDER BY (m.id = a.default_model_id) IS TRUE DESC, m.created_at DESC, m.name, m.id
 			           LIMIT 1
 			       ), ''),
 			       COALESCE((
@@ -9100,18 +9643,13 @@ func (h *handler) userApps(w http.ResponseWriter, r *http.Request) {
 			                 NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id = $1::uuid)
 			                 OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id = $1::uuid AND model_id = m.id)
 			             )
+			           ORDER BY (m.id = a.default_model_id) IS TRUE DESC, m.created_at DESC, m.name, m.id
 			           LIMIT 1
 			       ), '')
 			FROM core.application a
 			JOIN core.workspace w ON w.id = COALESCE(a.workspace_id,
 			    (SELECT w2.id FROM core.workspace w2 WHERE w2.customer_id = a.customer_id ORDER BY w2.created_at LIMIT 1))
-			WHERE (EXISTS (
-			      SELECT 1 FROM identity.role_assignment ra
-			      JOIN core.workspace rw ON rw.id = ra.workspace_id
-			      WHERE ra.user_id = $1::uuid
-			        AND (rw.id = a.workspace_id OR rw.customer_id = a.customer_id)
-			  ) OR EXISTS (SELECT 1 FROM identity."user" u JOIN identity.role_assignment dra ON dra.user_id = u.id AND dra.role = 'developer'
-				             WHERE u.id=$1::uuid AND u.customer_id = COALESCE(a.customer_id, w.customer_id)))
+			WHERE `+reachSQL(ctx, "a", "w", "$1")+`
 			  AND (
 			      NOT EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id = $1::uuid)
 			      OR EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id = $1::uuid AND application_id = a.id)
@@ -9143,10 +9681,14 @@ func (h *handler) userApps(w http.ResponseWriter, r *http.Request) {
 		apps = append(apps, app)
 	}
 	// Per-app accessible models (default first) for the model switcher.
+	// is_default is "IS TRUE": with no default set the comparison is NULL,
+	// which does not scan into a bool, and a row that fails to scan is
+	// skipped — an application whose default had been cleared (its default
+	// model deleted) listed no models at all.
 	for i := range apps {
 		mRows, mErr := h.db.Query(ctx, `
 			SELECT m.id::text, m.name,
-			       m.id = (SELECT default_model_id FROM core.application WHERE id = $1::uuid),
+			       (m.id = (SELECT default_model_id FROM core.application WHERE id = $1::uuid)) IS TRUE,
 			       COALESCE(m.active_revision_name, '')
 			FROM core.model m
 			WHERE m.application_id = $1::uuid
@@ -9154,7 +9696,7 @@ func (h *handler) userApps(w http.ResponseWriter, r *http.Request) {
 			      NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id = $2::uuid)
 			      OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id = $2::uuid AND model_id = m.id)
 			  )
-			ORDER BY (m.id = (SELECT default_model_id FROM core.application WHERE id = $1::uuid)) DESC, m.created_at
+			ORDER BY (m.id = (SELECT default_model_id FROM core.application WHERE id = $1::uuid)) IS TRUE DESC, m.created_at DESC, m.name, m.id
 		`, apps[i].ID, a.UserID)
 		if mErr != nil {
 			continue
@@ -9217,62 +9759,70 @@ func (h *handler) resolveDemoModelID(ctx context.Context, r *http.Request) (stri
 	}
 	if appID, _ := ctx.Value(appIDCtxKey).(string); appID != "" {
 		var modelID string
+		// Every branch orders the same way: the application's default model,
+		// else the newest, else — for models created in one transaction,
+		// which share a created_at (sign-up's starter models) — name then id, so the
+		// same request never resolves two different models.
 		if act.hasRole("platform_admin") || h.isGlobalBuilder(ctx, act) {
 			err = h.db.QueryRow(ctx, `
 				SELECT m.id::text FROM core.model m
 				WHERE m.application_id = $1::uuid
-				ORDER BY (m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) DESC, m.created_at DESC LIMIT 1
+				ORDER BY (m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) DESC, m.created_at DESC, m.name, m.id LIMIT 1
 			`, appID).Scan(&modelID)
-		} else if act.hasRole("tenant_admin") {
-			all, customerIDs, scopeErr := h.adminScopeCustomerIDs(ctx, act)
-			if scopeErr != nil {
-				return "", scopeErr
+		} else {
+			// A tenant admin's scope first; outside it on a business route
+			// (or for anyone else), the roles the caller holds —
+			// roleReachesAppSQL.
+			scoped := false
+			// On a developer-only route the admin scope counts only in the
+			// tenants the developer grants reach (builderAdminScope); the
+			// developer arms below decide the rest (developerRouteKey).
+			if act.hasRole("tenant_admin") {
+				all, customerIDs, scopeErr := h.builderAdminScope(ctx, act)
+				if scopeErr != nil {
+					return "", scopeErr
+				}
+				if all {
+					err = h.db.QueryRow(ctx, `
+						SELECT m.id::text FROM core.model m
+						WHERE m.application_id = $1::uuid
+						ORDER BY (m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) DESC, m.created_at DESC, m.name, m.id LIMIT 1
+					`, appID).Scan(&modelID)
+					scoped = true
+				} else if len(customerIDs) > 0 {
+					err = h.db.QueryRow(ctx, `
+						SELECT m.id::text
+						FROM core.model m
+						JOIN core.application app ON app.id=m.application_id
+						WHERE app.id=$1::uuid AND app.customer_id::text = ANY($2)
+						ORDER BY (m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) DESC, m.created_at DESC, m.name, m.id LIMIT 1
+					`, appID, customerIDs).Scan(&modelID)
+					scoped = err == nil
+				}
 			}
-			if all {
-				err = h.db.QueryRow(ctx, `
-					SELECT m.id::text FROM core.model m
-					WHERE m.application_id = $1::uuid
-					ORDER BY (m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) DESC, m.created_at DESC LIMIT 1
-				`, appID).Scan(&modelID)
-			} else if len(customerIDs) > 0 {
-				err = h.db.QueryRow(ctx, `
-					SELECT m.id::text
-					FROM core.model m
-					JOIN core.application app ON app.id=m.application_id
-					WHERE app.id=$1::uuid AND app.customer_id::text = ANY($2)
-					ORDER BY (m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) DESC, m.created_at DESC LIMIT 1
-				`, appID, customerIDs).Scan(&modelID)
-			} else {
+			if !scoped && adminScopeOnly(ctx, act) {
+				// On a builder or administrator route that is not developer-only
+				// a tenant admin opens its admin scope only (adminScopeOnly).
 				return "", errAccessDenied
 			}
-		} else {
-			// developer is a tenant-wide trusted role — the same breadth
-			// adminTenants already grants it when LISTING apps ("any workspace
-			// of this customer"). Matching only the app's own workspace here
-			// made a workspace-scoped app (customer_id NULL, the common case)
-			// visible in the Developer Console's app list but unopenable for
-			// any developer whose role_assignment lives in a different
-			// workspace of the same customer. business_user/business_admin
-			// stay workspace-scoped — that boundary between workspaces of one
-			// corporate tenant is intentional for operational roles.
-			err = h.db.QueryRow(ctx, `
+			if !scoped {
+				// developer is a tenant-wide trusted role — the same breadth
+				// adminTenants already grants it when LISTING apps ("any
+				// workspace of this customer"). Matching only the app's own
+				// workspace here made a workspace-scoped app (customer_id
+				// NULL, the common case) visible in the Developer Console's
+				// app list but unopenable for any developer whose
+				// role_assignment lives in a different workspace of the same
+				// customer. business_user/business_admin stay
+				// workspace-scoped — that boundary between workspaces of one
+				// corporate tenant is intentional for operational roles.
+				err = h.db.QueryRow(ctx, `
 				SELECT m.id::text
 				FROM core.model m
 				JOIN core.application app ON app.id=m.application_id
 				LEFT JOIN core.workspace appws ON appws.id = app.workspace_id
 				WHERE app.id=$1::uuid
-				  AND (EXISTS (
-				      SELECT 1 FROM identity.role_assignment ra
-				      JOIN core.workspace rw ON rw.id = ra.workspace_id
-				      WHERE ra.user_id=$2::uuid
-				        AND rw.customer_id = COALESCE(app.customer_id, appws.customer_id)
-				        AND (
-				            ra.role::text = 'developer'
-				            OR app.workspace_id IS NULL
-				            OR ra.workspace_id = app.workspace_id
-				        )
-				  ) OR EXISTS (SELECT 1 FROM identity."user" u JOIN identity.role_assignment dra ON dra.user_id = u.id AND dra.role = 'developer'
-				             WHERE u.id=$2::uuid AND u.customer_id = COALESCE(app.customer_id, appws.customer_id)))
+				  AND `+reachSQL(ctx, "app", "appws", "$2")+`
 				  AND (
 				      NOT EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$2::uuid)
 				      OR EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$2::uuid AND application_id=app.id)
@@ -9281,8 +9831,9 @@ func (h *handler) resolveDemoModelID(ctx context.Context, r *http.Request) (stri
 				      NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$2::uuid)
 				      OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$2::uuid AND model_id=m.id)
 				  )
-				ORDER BY (m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) DESC, m.created_at DESC LIMIT 1
+				ORDER BY (m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) DESC, m.created_at DESC, m.name, m.id LIMIT 1
 			`, appID, act.UserID).Scan(&modelID)
+			}
 		}
 		if err != nil {
 			return "", errAccessDenied
@@ -9301,24 +9852,20 @@ func (h *handler) resolveDemoModelID(ctx context.Context, r *http.Request) (stri
 		// caller's user_model_access — a foreign or inaccessible model id
 		// changes nothing. The revision pin below still wins when a request
 		// names a revision (the developer console's more specific signal).
-		if hdrModel := r.Header.Get("X-Model-Id"); hdrModel != "" && hdrModel != modelID {
-			var ok bool
-			if err := h.db.QueryRow(ctx, `
-				SELECT EXISTS (
-					SELECT 1 FROM core.model m
-					WHERE m.id::text = $1 AND m.application_id = $2::uuid
-					  AND (
-					      NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$3::uuid)
-					      OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$3::uuid AND model_id=m.id)
-					  )
-				)
-			`, hdrModel, appID, act.UserID).Scan(&ok); err == nil && ok {
-				modelID = hdrModel
-			}
+		if hdrModel := h.headerModelInApp(ctx, r, appID, act.UserID); hdrModel != "" {
+			modelID = hdrModel
 		}
 		modelID = h.pinModelForRevision(ctx, act.UserID, appID, modelID, r.URL.Query().Get("revision_id"))
 		return modelID, nil
 	}
+	// No application named: a request that has not chosen an application
+	// yet (the console's first load, before AppPicker stores one). A caller
+	// scoped to its own tenant gets an application's default model first —
+	// sign-up makes its tour the default — then the largest model, the
+	// newest application, name and id. Platform-wide callers keep the
+	// largest model first: every signed-up tenant has a default, so there it
+	// would open an arbitrary tenant's tour. resolveDemoAppID orders by the
+	// same keys, so the application and the model agree.
 	var modelID string
 	if act.hasRole("platform_admin") || h.isGlobalBuilder(ctx, act) {
 		err = h.db.QueryRow(ctx, `
@@ -9326,55 +9873,55 @@ func (h *handler) resolveDemoModelID(ctx context.Context, r *http.Request) (stri
 			FROM core.application a
 			JOIN core.model m ON m.application_id = a.id
 			ORDER BY (SELECT COUNT(*) FROM model.metric_def WHERE model_id = m.id) DESC,
-			         a.created_at DESC
+			         a.created_at DESC,
+			         (m.id = a.default_model_id) IS TRUE DESC, m.name, m.id
 			LIMIT 1
 		`).Scan(&modelID)
-	} else if act.hasRole("tenant_admin") {
-		all, customerIDs, scopeErr := h.adminScopeCustomerIDs(ctx, act)
-		if scopeErr != nil {
-			return "", scopeErr
+	} else {
+		scoped := false
+		if act.hasRole("tenant_admin") { // narrowed on a developer-only route (builderAdminScope)
+			all, customerIDs, scopeErr := h.builderAdminScope(ctx, act)
+			if scopeErr != nil {
+				return "", scopeErr
+			}
+			if all {
+				err = h.db.QueryRow(ctx, `
+					SELECT m.id::text
+					FROM core.application a
+					JOIN core.model m ON m.application_id = a.id
+					ORDER BY (SELECT COUNT(*) FROM model.metric_def WHERE model_id = m.id) DESC,
+					         a.created_at DESC,
+					         (m.id = a.default_model_id) IS TRUE DESC, m.name, m.id
+					LIMIT 1
+				`).Scan(&modelID)
+				scoped = true
+			} else if len(customerIDs) > 0 {
+				err = h.db.QueryRow(ctx, `
+					SELECT m.id::text
+					FROM core.application a
+					JOIN core.model m ON m.application_id = a.id
+					WHERE a.customer_id::text = ANY($1)
+					ORDER BY (m.id = a.default_model_id) IS TRUE DESC,
+					         (SELECT COUNT(*) FROM model.metric_def WHERE model_id = m.id) DESC,
+					         a.created_at DESC, m.name, m.id
+					LIMIT 1
+				`, customerIDs).Scan(&modelID)
+				scoped = err == nil
+			}
 		}
-		if all {
-			err = h.db.QueryRow(ctx, `
-				SELECT m.id::text
-				FROM core.application a
-				JOIN core.model m ON m.application_id = a.id
-				ORDER BY (SELECT COUNT(*) FROM model.metric_def WHERE model_id = m.id) DESC,
-				         a.created_at DESC
-				LIMIT 1
-			`).Scan(&modelID)
-		} else if len(customerIDs) > 0 {
-			err = h.db.QueryRow(ctx, `
-				SELECT m.id::text
-				FROM core.application a
-				JOIN core.model m ON m.application_id = a.id
-				WHERE a.customer_id::text = ANY($1)
-				ORDER BY (SELECT COUNT(*) FROM model.metric_def WHERE model_id = m.id) DESC,
-				         a.created_at DESC
-				LIMIT 1
-			`, customerIDs).Scan(&modelID)
-		} else {
+		if !scoped && adminScopeOnly(ctx, act) {
+			// On a builder or administrator route that is not developer-only
+			// a tenant admin opens its admin scope only (adminScopeOnly).
 			return "", errAccessDenied
 		}
-	} else {
-		// Same developer/customer-wide broadening as the appID branch above.
-		err = h.db.QueryRow(ctx, `
+		if !scoped {
+			// Same developer/customer-wide broadening as the appID branch above.
+			err = h.db.QueryRow(ctx, `
 			SELECT m.id::text
 			FROM core.application a
 			JOIN core.model m ON m.application_id = a.id
 			LEFT JOIN core.workspace aws ON aws.id = a.workspace_id
-			WHERE (EXISTS (
-			      SELECT 1 FROM identity.role_assignment ra
-			      JOIN core.workspace rw ON rw.id = ra.workspace_id
-			      WHERE ra.user_id=$1::uuid
-			        AND rw.customer_id = COALESCE(a.customer_id, aws.customer_id)
-			        AND (
-			            ra.role::text = 'developer'
-			            OR a.workspace_id IS NULL
-			            OR ra.workspace_id = a.workspace_id
-			        )
-			  ) OR EXISTS (SELECT 1 FROM identity."user" u JOIN identity.role_assignment dra ON dra.user_id = u.id AND dra.role = 'developer'
-				             WHERE u.id=$1::uuid AND u.customer_id = COALESCE(a.customer_id, aws.customer_id)))
+			WHERE `+reachSQL(ctx, "a", "aws", "$1")+`
 			  AND (
 			      NOT EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$1::uuid)
 			      OR EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$1::uuid AND application_id=a.id)
@@ -9383,10 +9930,12 @@ func (h *handler) resolveDemoModelID(ctx context.Context, r *http.Request) (stri
 			      NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$1::uuid)
 			      OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$1::uuid AND model_id=m.id)
 			  )
-			ORDER BY (SELECT COUNT(*) FROM model.metric_def WHERE model_id = m.id) DESC,
-			         a.created_at DESC
+			ORDER BY (m.id = a.default_model_id) IS TRUE DESC,
+			         (SELECT COUNT(*) FROM model.metric_def WHERE model_id = m.id) DESC,
+			         a.created_at DESC, m.name, m.id
 			LIMIT 1
 		`, act.UserID).Scan(&modelID)
+		}
 	}
 	if err != nil {
 		return "", errAccessDenied
@@ -9394,6 +9943,34 @@ func (h *handler) resolveDemoModelID(ctx context.Context, r *http.Request) (stri
 	return modelID, nil
 }
 
+// headerModelInApp returns the model the request's X-Model-Id names (the
+// model switcher's choice) when it is a model of appID the user may open,
+// else "" — a foreign or inaccessible id changes nothing. The caller has
+// already authorized appID.
+func (h *handler) headerModelInApp(ctx context.Context, r *http.Request, appID, userID string) string {
+	hdrModel := r.Header.Get("X-Model-Id")
+	if hdrModel == "" {
+		return ""
+	}
+	var ok bool
+	if err := h.db.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM core.model m
+			WHERE m.id::text = $1 AND m.application_id = $2::uuid
+			  AND (
+			      NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$3::uuid)
+			      OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$3::uuid AND model_id=m.id)
+			  )
+		)
+	`, hdrModel, appID, userID).Scan(&ok); err != nil || !ok {
+		return ""
+	}
+	return hdrModel
+}
+
+// resolveDemoAppID resolves the application for a request, the one whose
+// model resolveDemoModelID opens: with no application named, every branch
+// orders by the same keys as resolveDemoModelID's, so the two agree.
 func (h *handler) resolveDemoAppID(ctx context.Context, r *http.Request) (string, error) {
 	act, err := h.resolveActor(ctx, r)
 	if err != nil {
@@ -9416,44 +9993,57 @@ func (h *handler) resolveDemoAppID(ctx context.Context, r *http.Request) (string
 			FROM core.application a
 			JOIN core.model m ON m.application_id = a.id
 			ORDER BY (SELECT COUNT(*) FROM model.metric_def WHERE model_id = m.id) DESC,
-			         a.created_at DESC
+			         a.created_at DESC,
+			         (m.id = a.default_model_id) IS TRUE DESC, m.name, m.id
 			LIMIT 1
 		`).Scan(&appID)
-	} else if act.hasRole("tenant_admin") {
-		all, customerIDs, scopeErr := h.adminScopeCustomerIDs(ctx, act)
-		if scopeErr != nil {
-			return "", scopeErr
+	} else {
+		scoped := false
+		if act.hasRole("tenant_admin") { // narrowed on a developer-only route (builderAdminScope)
+			all, customerIDs, scopeErr := h.builderAdminScope(ctx, act)
+			if scopeErr != nil {
+				return "", scopeErr
+			}
+			if all {
+				err = h.db.QueryRow(ctx, `
+					SELECT a.id::text
+					FROM core.application a
+					JOIN core.model m ON m.application_id = a.id
+					ORDER BY (SELECT COUNT(*) FROM model.metric_def WHERE model_id = m.id) DESC,
+					         a.created_at DESC,
+					         (m.id = a.default_model_id) IS TRUE DESC, m.name, m.id
+					LIMIT 1
+				`).Scan(&appID)
+				scoped = true
+			} else if len(customerIDs) > 0 {
+				err = h.db.QueryRow(ctx, `
+					SELECT a.id::text
+					FROM core.application a
+					JOIN core.model m ON m.application_id = a.id
+					WHERE a.customer_id::text = ANY($1)
+					ORDER BY (m.id = a.default_model_id) IS TRUE DESC,
+					         (SELECT COUNT(*) FROM model.metric_def WHERE model_id = m.id) DESC,
+					         a.created_at DESC, m.name, m.id
+					LIMIT 1
+				`, customerIDs).Scan(&appID)
+				scoped = err == nil
+			}
 		}
-		if all {
-			err = h.db.QueryRow(ctx, `
-				SELECT a.id::text
-				FROM core.application a
-				JOIN core.model m ON m.application_id = a.id
-				ORDER BY (SELECT COUNT(*) FROM model.metric_def WHERE model_id = m.id) DESC,
-				         a.created_at DESC
-				LIMIT 1
-			`).Scan(&appID)
-		} else if len(customerIDs) > 0 {
-			err = h.db.QueryRow(ctx, `
-				SELECT a.id::text
-				FROM core.application a
-				JOIN core.model m ON m.application_id = a.id
-				WHERE a.customer_id::text = ANY($1)
-				ORDER BY (SELECT COUNT(*) FROM model.metric_def WHERE model_id = m.id) DESC,
-				         a.created_at DESC
-				LIMIT 1
-			`, customerIDs).Scan(&appID)
-		} else {
+		if !scoped && adminScopeOnly(ctx, act) {
+			// On a builder or administrator route that is not developer-only
+			// a tenant admin opens its admin scope only (adminScopeOnly).
 			return "", errAccessDenied
 		}
-	} else {
-		err = h.db.QueryRow(ctx, `
+		if !scoped {
+			// The applications the caller's roles open (roleReachesAppSQL,
+			// as resolveDemoModelID): a business role's own workspace, not
+			// every workspace of its tenant.
+			err = h.db.QueryRow(ctx, `
 			SELECT a.id::text
 			FROM core.application a
 			JOIN core.model m ON m.application_id = a.id
-			JOIN core.workspace w ON (w.id=a.workspace_id OR w.customer_id=a.customer_id)
-			JOIN identity.role_assignment ra ON ra.workspace_id=w.id
-			WHERE ra.user_id=$1::uuid
+			LEFT JOIN core.workspace aws ON aws.id = a.workspace_id
+			WHERE `+reachSQL(ctx, "a", "aws", "$1")+`
 			  AND (
 			      NOT EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$1::uuid)
 			      OR EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$1::uuid AND application_id=a.id)
@@ -9462,10 +10052,12 @@ func (h *handler) resolveDemoAppID(ctx context.Context, r *http.Request) (string
 			      NOT EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$1::uuid)
 			      OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$1::uuid AND model_id=m.id)
 			  )
-			ORDER BY (SELECT COUNT(*) FROM model.metric_def WHERE model_id = m.id) DESC,
-			         a.created_at DESC
+			ORDER BY (m.id = a.default_model_id) IS TRUE DESC,
+			         (SELECT COUNT(*) FROM model.metric_def WHERE model_id = m.id) DESC,
+			         a.created_at DESC, m.name, m.id
 			LIMIT 1
 		`, act.UserID).Scan(&appID)
+		}
 	}
 	if err != nil {
 		return "", errAccessDenied
@@ -9523,11 +10115,19 @@ func (h *handler) forms(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
-	if forms == nil {
-		jsonOK(w, []any{})
+	// Every form carries what this caller may do with its records (sync,
+	// the statuses a create may take), decided by the scope the record
+	// routes decide by, so the interface offers only what they accept.
+	act, err := h.resolveActor(ctx, r)
+	if err != nil {
+		act = nil
+	}
+	served, err := h.withFormPermissions(ctx, act, forms)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
-	jsonOK(w, forms)
+	jsonOK(w, served)
 }
 
 // publicDimensions serves GET /api/dimensions — returns all dimensions with
@@ -9577,9 +10177,12 @@ func (h *handler) publicDimensions(w http.ResponseWriter, r *http.Request) {
 	dimRows.Close()
 
 	for i, d := range dims {
+		// The same member order as the grid, chart and developer endpoints
+		// (period first on a time dimension), so a form field or an inbox
+		// picker lists JAN..DEC as the grid does, not alphabetically.
 		mRows, err := h.db.Query(ctx,
 			`SELECT id::text, code, label, parent_member_id::text FROM model.dimension_member
-			 WHERE dimension_id=$1::uuid ORDER BY sort_order, code`,
+			 WHERE dimension_id=$1::uuid ORDER BY time_index NULLS LAST, sort_order, code`,
 			d.ID)
 		if err != nil {
 			continue
@@ -9666,7 +10269,30 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 
 	// /api/forms/{id}/sync — re-apply all live mappings for every record in this form
 	if len(parts) == 2 && parts[1] == "sync" && r.Method == http.MethodPost {
-		userID := h.resolveUserID(r)
+		// A sync re-posts every record of the form, other people's
+		// included, so it is an administrator's (resolveFormRecordScope's
+		// admin): a caller who reaches the form but may not change others'
+		// records gets 403, anyone else the 404 a missing form gets. It was
+		// open to every caller who reached the form, and a reader's sync
+		// withdrew the postings their own write guard refused.
+		act, err := h.resolveActor(ctx, r)
+		if err != nil {
+			jsonErr(w, err, http.StatusUnauthorized)
+			return
+		}
+		scope, err := h.resolveFormRecordScope(ctx, act, formID)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		if !scope.reach {
+			jsonRecordErr(w, errRecordNotReached, "form")
+			return
+		}
+		if !scope.admin {
+			jsonErr(w, fmt.Errorf("forbidden: only an administrator of this application syncs a form's records"), http.StatusForbidden)
+			return
+		}
 
 		// Find all live mappings for this form
 		mrows, err := h.db.Query(ctx, `
@@ -9687,33 +10313,48 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 
 		totalProcessed := 0
 		for _, mid := range mappingIDs {
-			n, err := h.backfillFormMapping(ctx, mid, h.resolveUserID(r))
+			n, err := h.backfillFormMapping(ctx, mid, act.UserID)
 			if err != nil {
 				h.log.Warn().Err(err).Str("mapping_id", mid).Msg("form sync: backfill failed")
 				continue
 			}
 			totalProcessed += n
 		}
-		_ = userID
-		if a, e := h.resolveActor(ctx, r); e == nil {
-			appID, _ := h.appIDFromFormID(ctx, formID)
-			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
-				Category: auditlog.CategoryDataChange, EventType: auditlog.EventFormSynced,
-				ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
-				ApplicationID: appID, ResourceType: "form", ResourceID: formID,
-				Metadata: map[string]string{"mappings": strconv.Itoa(len(mappingIDs)), "records_processed": strconv.Itoa(totalProcessed)},
-			})
-		}
+		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+			Category: auditlog.CategoryDataChange, EventType: auditlog.EventFormSynced,
+			ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
+			ApplicationID: scope.appID, ResourceType: "form", ResourceID: formID,
+			Metadata: map[string]string{"mappings": strconv.Itoa(len(mappingIDs)), "records_processed": strconv.Itoa(totalProcessed)},
+		})
 		jsonOK(w, map[string]any{"status": "ok", "mappings": len(mappingIDs), "records_processed": totalProcessed})
 		return
 	}
 
 	// /api/forms/{id}/records
 	if len(parts) == 2 && parts[1] == "records" {
-		userID := h.resolveUserID(r)
+		// Records are reached through their form's application
+		// (resolveFormRecordScope): anyone else gets the 404 a missing form
+		// gets, and every record returned carries what this caller may do
+		// to it.
+		act, err := h.resolveActor(ctx, r)
+		if err != nil {
+			jsonErr(w, err, http.StatusUnauthorized)
+			return
+		}
+		scope, err := h.resolveFormRecordScope(ctx, act, formID)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		if !scope.reach {
+			jsonRecordErr(w, errRecordNotReached, "form")
+			return
+		}
+		userID := act.UserID
 		if r.Method == http.MethodPost {
 			var body struct {
 				Data       map[string]any `json:"data"`
+				Status     string         `json:"status"`
 				RevisionID string         `json:"revision_id"`
 				Revision   string         `json:"revision"`
 				Version    string         `json:"version"`
@@ -9722,42 +10363,51 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
 				return
 			}
-			rec, err := store.CreateRecord(ctx, formID, userID, body.Data)
+			if body.Status == "" {
+				body.Status = crudapp.StatusDraft
+			}
+			if !crudapp.ValidRecordStatus(body.Status) {
+				jsonErr(w, fmt.Errorf("status must be one of draft, submitted, approved, rejected"), http.StatusBadRequest)
+				return
+			}
+			// Anyone who reaches the form creates drafts and submissions;
+			// a decided record is an administrator's.
+			if !scope.createAccess().CanCreate(body.Status) {
+				jsonErr(w, fmt.Errorf("forbidden: only an administrator of this application creates a record as %s", body.Status), http.StatusForbidden)
+				return
+			}
+			rec, err := store.CreateRecordWithStatus(ctx, formID, userID, body.Status, body.Data)
 			if err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
+			scope.permit(rec)
 			bgCtx := context.WithoutCancel(ctx)
+			appID, revisionID := scope.appID, scope.revisionID
 			// Apply form-metric mappings (status-based posting rules).
 			go func() { _ = h.applyFormMappings(bgCtx, rec.ID, formID, rec.Status, body.Data, userID) }()
-			// Dispatch form_submit automation rules.
+			// Dispatch form_submit automation rules (DispatchEventRules
+			// fires them for a submitted record only), and form_approval
+			// for a record an administrator creates approved.
 			go func() {
-				appID, _ := h.appIDFromFormID(bgCtx, formID)
-				if appID != "" {
-					payload := map[string]string{"form_id": formID, "record_id": rec.ID, "status": rec.Status}
-					workflow.NewStore(h.db.For(ctx)).DispatchEventRules(bgCtx, appID, h.revisionIDFromFormID(bgCtx, formID), "form_submit", formID, userID, payload)
+				payload := map[string]string{"form_id": formID, "record_id": rec.ID, "status": rec.Status}
+				workflow.NewStore(h.db.For(ctx)).DispatchEventRules(bgCtx, appID, revisionID, "form_submit", formID, userID, payload)
+				if rec.Status == crudapp.StatusApproved {
+					workflow.NewStore(h.db.For(ctx)).DispatchEventRules(bgCtx, appID, revisionID, "form_approval", formID, userID, payload)
 				}
 			}()
-			if a, e := h.resolveActor(ctx, r); e == nil {
-				appID, _ := h.appIDFromFormID(ctx, formID)
-				auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
-					Category: auditlog.CategoryDataChange, EventType: auditlog.EventFormRecordCreated,
-					ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
-					ApplicationID: appID, ResourceType: "form_record", ResourceID: rec.ID,
-					Metadata: map[string]string{"form_id": formID, "status": rec.Status},
-				})
-			}
+			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+				Category: auditlog.CategoryDataChange, EventType: auditlog.EventFormRecordCreated,
+				ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
+				ApplicationID: appID, ResourceType: "form_record", ResourceID: rec.ID,
+				Metadata: map[string]string{"form_id": formID, "status": rec.Status},
+			})
 			jsonOK(w, rec)
 			return
 		}
 		records, err := store.ListRecords(ctx, formID, 100)
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
-			return
-		}
-		act, err := h.resolveActor(ctx, r)
-		if err != nil {
-			jsonErr(w, err, http.StatusUnauthorized)
 			return
 		}
 		form, err := store.GetForm(ctx, formID)
@@ -9774,11 +10424,21 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			jsonOK(w, []any{})
 			return
 		}
+		for _, rec := range records {
+			scope.permit(rec)
+		}
 		jsonOK(w, records)
 		return
 	}
 
-	// /api/forms/{id} — PATCH or DELETE
+	// /api/forms/{id} — PATCH or DELETE, a builder's change to the form
+	// itself: only within the caller's builder scope (requireResourceAccess).
+	// dev() checks only that the caller holds a developer role somewhere, so
+	// a developer of any tenant renamed, re-fielded or deleted another
+	// tenant's form by id — and a delete cascades to every record of it.
+	if (r.Method == http.MethodPatch || r.Method == http.MethodDelete) && !h.requireResourceAccess(w, r, "form", formID) {
+		return
+	}
 	switch r.Method {
 	case http.MethodPatch:
 		var body struct {
@@ -9823,91 +10483,141 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// recordAction handles /api/records/{recordId} (PUT, DELETE)
+// recordAction handles /api/records/{recordId} (GET, PUT, DELETE).
+//
+// A record is reached through its form's application (reachRecord): a
+// caller who does not reach it gets the 404 a missing record gets. What a
+// caller who does may do is crudapp.RecordAccess's rule ("submitter +
+// admins") — the same access that fills the record's "permissions" — and
+// anything else is a 403. The write is conditional on the status the check
+// was made against, so a record decided in the meantime is not overwritten
+// (409).
 func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	recordID := strings.TrimPrefix(r.URL.Path, "/api/records/")
 	store := crudapp.NewStore(h.db.For(ctx))
 
+	act, err := h.resolveActor(ctx, r)
+	if err != nil {
+		jsonErr(w, err, http.StatusUnauthorized)
+		return
+	}
+
 	switch r.Method {
+	case http.MethodGet:
+		rec, _, _, err := h.reachRecord(ctx, act, store, recordID)
+		if err != nil {
+			jsonRecordErr(w, err, "record")
+			return
+		}
+		jsonOK(w, rec)
+
 	case http.MethodPut:
 		var body struct {
-			Data   map[string]any `json:"data"`
-			Status string         `json:"status"`
+			// Omitted, the record keeps its fields.
+			Data map[string]any `json:"data"`
+			// Omitted, the record keeps its status.
+			Status string `json:"status"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
 			return
 		}
-		if body.Status == "" {
-			body.Status = "draft"
+		rec, scope, access, err := h.reachRecord(ctx, act, store, recordID)
+		if err != nil {
+			jsonRecordErr(w, err, "record")
+			return
 		}
-		// Capture the pre-update status so event rules fire on transitions,
-		// not on every save of a record already in that status.
-		var formID, oldStatus string
-		_ = h.db.QueryRow(ctx, `SELECT form_id::text, status FROM runtime.form_record WHERE id=$1::uuid`, recordID).Scan(&formID, &oldStatus)
-		if err := store.UpdateRecord(ctx, recordID, body.Status, body.Data); err != nil {
+		formID, oldStatus := rec.FormID, rec.Status
+		newStatus := body.Status
+		if newStatus == "" {
+			newStatus = oldStatus
+		}
+		if !crudapp.ValidRecordStatus(newStatus) {
+			jsonErr(w, fmt.Errorf("status must be one of draft, submitted, approved, rejected"), http.StatusBadRequest)
+			return
+		}
+		if !access.CanUpdate(oldStatus, newStatus) {
+			if newStatus != oldStatus && rec.Permissions.Edit {
+				jsonErr(w, fmt.Errorf("forbidden: you may not move this record from %s to %s", oldStatus, newStatus), http.StatusForbidden)
+			} else {
+				jsonErr(w, fmt.Errorf("forbidden: you may not change this record"), http.StatusForbidden)
+			}
+			return
+		}
+		data := body.Data
+		if data == nil {
+			data = rec.Data
+		}
+		if err := store.UpdateRecordFrom(ctx, recordID, oldStatus, newStatus, data); errors.Is(err, crudapp.ErrRecordChanged) {
+			jsonErr(w, fmt.Errorf("the record changed since it was read; reload it and try again"), http.StatusConflict)
+			return
+		} else if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
-		userID := h.resolveUserID(r)
-		if formID != "" {
-			bgCtx := context.WithoutCancel(ctx)
-			go func() { _ = h.applyFormMappings(bgCtx, recordID, formID, body.Status, body.Data, userID) }()
-			statusChanged := body.Status != oldStatus
-			// form_submit fires when the record transitions INTO submitted.
-			if statusChanged && body.Status == "submitted" {
-				go func() {
-					appID, _ := h.appIDFromFormID(bgCtx, formID)
-					if appID != "" {
-						payload := map[string]string{"form_id": formID, "record_id": recordID, "status": body.Status}
-						workflow.NewStore(h.db.For(ctx)).DispatchEventRules(bgCtx, appID, h.revisionIDFromFormID(bgCtx, formID), "form_submit", formID, userID, payload)
-					}
-				}()
-			}
-			// Dispatch form_approval when record reaches an approval terminal state.
-			if statusChanged && (body.Status == "approved" || body.Status == "closed" || body.Status == "completed") {
-				go func() {
-					appID, _ := h.appIDFromFormID(bgCtx, formID)
-					if appID != "" {
-						payload := map[string]string{"form_id": formID, "record_id": recordID, "status": body.Status}
-						workflow.NewStore(h.db.For(ctx)).DispatchEventRules(bgCtx, appID, h.revisionIDFromFormID(bgCtx, formID), "form_approval", formID, userID, payload)
-					}
-				}()
-			}
+		userID := act.UserID
+		appID, revisionID := scope.appID, scope.revisionID
+		bgCtx := context.WithoutCancel(ctx)
+		go func() { _ = h.applyFormMappings(bgCtx, recordID, formID, newStatus, data, userID) }()
+		statusChanged := newStatus != oldStatus
+		payload := map[string]string{"form_id": formID, "record_id": recordID, "status": newStatus}
+		// form_submit fires when the record transitions INTO submitted.
+		if statusChanged && newStatus == crudapp.StatusSubmitted {
+			go workflow.NewStore(h.db.For(ctx)).DispatchEventRules(bgCtx, appID, revisionID, "form_submit", formID, userID, payload)
 		}
-		if a, e := h.resolveActor(ctx, r); e == nil {
-			var appID string
-			if formID != "" {
-				appID, _ = h.appIDFromFormID(ctx, formID)
-			}
-			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
-				Category: auditlog.CategoryDataChange, EventType: auditlog.EventRecordUpdated,
-				ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
-				ApplicationID: appID, ResourceType: "form_record", ResourceID: recordID,
-				Metadata: map[string]string{"form_id": formID, "status": body.Status},
-			})
+		// form_approval fires when the record transitions INTO approved.
+		if statusChanged && newStatus == crudapp.StatusApproved {
+			go workflow.NewStore(h.db.For(ctx)).DispatchEventRules(bgCtx, appID, revisionID, "form_approval", formID, userID, payload)
 		}
-		jsonOK(w, map[string]string{"status": "ok"})
+		meta := map[string]string{"form_id": formID, "status": newStatus, "fields_changed": strconv.FormatBool(body.Data != nil)}
+		if statusChanged {
+			meta["previous_status"] = oldStatus
+		}
+		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+			Category: auditlog.CategoryDataChange, EventType: auditlog.EventRecordUpdated,
+			ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
+			ApplicationID: appID, ResourceType: "form_record", ResourceID: recordID,
+			Metadata: meta,
+		})
+		rec.Data, rec.Status = data, newStatus
+		scope.permit(rec)
+		jsonOK(w, map[string]any{"status": "ok", "record": rec})
 
 	case http.MethodDelete:
-		var recFormID, appID string
-		_ = h.db.QueryRow(ctx, `SELECT form_id::text FROM runtime.form_record WHERE id=$1::uuid`, recordID).Scan(&recFormID)
-		if recFormID != "" {
-			appID, _ = h.appIDFromFormID(ctx, recFormID)
-		}
-		if err := store.DeleteRecord(ctx, recordID); err != nil {
-			jsonErr(w, err, http.StatusNotFound)
+		rec, scope, access, err := h.reachRecord(ctx, act, store, recordID)
+		if err != nil {
+			jsonRecordErr(w, err, "record")
 			return
 		}
-		if a, e := h.resolveActor(ctx, r); e == nil {
-			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
-				Category: auditlog.CategoryDataChange, EventType: auditlog.EventRecordDeleted,
-				ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
-				ApplicationID: appID, ResourceType: "form_record", ResourceID: recordID,
-				Metadata: map[string]string{"form_id": recFormID},
-			})
+		if !access.CanDelete(rec.Status) {
+			jsonErr(w, fmt.Errorf("forbidden: you may not delete this record"), http.StatusForbidden)
+			return
 		}
+		// What the record posted into metrics, taken back out once it is
+		// gone (retractPostings).
+		postings, err := h.recordPostings(ctx, recordID)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		if err := store.DeleteRecordFrom(ctx, recordID, rec.Status); errors.Is(err, crudapp.ErrRecordChanged) {
+			jsonErr(w, fmt.Errorf("the record changed since it was read; reload it and try again"), http.StatusConflict)
+			return
+		} else if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		if len(postings) > 0 {
+			bgCtx, userID := context.WithoutCancel(ctx), act.UserID
+			go h.retractPostings(bgCtx, postings, userID)
+		}
+		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+			Category: auditlog.CategoryDataChange, EventType: auditlog.EventRecordDeleted,
+			ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
+			ApplicationID: scope.appID, ResourceType: "form_record", ResourceID: recordID,
+			Metadata: map[string]string{"form_id": rec.FormID, "status": rec.Status},
+		})
 		jsonOK(w, map[string]string{"status": "deleted"})
 
 	default:
@@ -10480,6 +11190,99 @@ func (h *handler) auditDimensionUpdated(ctx context.Context, r *http.Request, di
 	})
 }
 
+// ── PUT /api/developer/dimensions/{id}/members/order ─────────────────────────
+
+// reorderDimensionMembers sets the order of one level of a dimension's
+// members: {parent_member_id (null = the top level), member_ids (exactly that
+// level's members, in the wanted order)}. The edit itself is
+// modeledit.ReorderMembers, which the AI Developer's
+// reorder_dimension_members runs too: it renumbers the whole dimension in
+// tree order, so every reader that sorts by sort_order shows the new order
+// (until a member is added or re-parented, which appends — see there).
+//
+// Developer only (the route's dev guard), in a model the caller may build in:
+// the check requireResourceAccess makes for the other member edits, except
+// that a dimension outside the caller's scope answers 404 like an unknown
+// one, so the route cannot tell another tenant's dimension ids from missing
+// ones. No recalculation: only a time dimension's order feeds a value
+// (time_index, LAST/FIRST over periods), and a time dimension is refused.
+func (h *handler) reorderDimensionMembers(w http.ResponseWriter, r *http.Request) {
+	dimID := r.PathValue("dimId")
+	ctx := withBuilderRoute(r.Context())
+	act, err := h.resolveActor(ctx, r)
+	if err != nil {
+		jsonErr(w, err, http.StatusUnauthorized)
+		return
+	}
+	var modelID string
+	if err := h.db.QueryRow(ctx, modelScopedResourceSQL["dimension"], dimID).Scan(&modelID); err != nil {
+		jsonErr(w, fmt.Errorf("dimension not found"), http.StatusNotFound)
+		return
+	}
+	allowed, err := h.actorCanAccessModel(ctx, act, modelID)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	if !allowed {
+		jsonErr(w, fmt.Errorf("dimension not found"), http.StatusNotFound)
+		return
+	}
+
+	var body struct {
+		ParentMemberID *string  `json:"parent_member_id"`
+		MemberIDs      []string `json:"member_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
+		return
+	}
+	if body.MemberIDs == nil {
+		jsonErr(w, fmt.Errorf("member_ids is required: the members of one level, in the wanted order"), http.StatusBadRequest)
+		return
+	}
+	if body.ParentMemberID != nil && strings.TrimSpace(*body.ParentMemberID) == "" {
+		body.ParentMemberID = nil
+	}
+
+	res, err := modeledit.ReorderMembers(ctx, h.db, dimID, body.ParentMemberID, body.MemberIDs)
+	if err != nil {
+		var re *modeledit.ReorderError
+		switch {
+		case errors.As(err, &re):
+			jsonErr(w, err, http.StatusBadRequest)
+		case errors.Is(err, pgx.ErrNoRows):
+			jsonErr(w, fmt.Errorf("dimension not found"), http.StatusNotFound)
+		default:
+			jsonErr(w, fmt.Errorf("reorder members: %w", err), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	_, revisionID, appID := h.dimensionScope(ctx, dimID)
+	parent := ""
+	if body.ParentMemberID != nil {
+		parent = strings.ToLower(strings.TrimSpace(*body.ParentMemberID))
+	}
+	ids := make([]string, len(body.MemberIDs))
+	for i, id := range body.MemberIDs {
+		ids[i] = strings.ToLower(strings.TrimSpace(id))
+	}
+	codes, _ := json.Marshal(res.Codes)
+	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+		Category: auditlog.CategoryModelChange, EventType: auditlog.EventDimensionMembersReordered,
+		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
+		ApplicationID: appID, ResourceType: "dimension", ResourceID: dimID, RevisionID: revisionID,
+		Metadata: map[string]string{
+			"parent_member_id": parent,
+			"parent_code":      res.ParentCode,
+			"member_ids":       strings.Join(ids, ","),
+			"codes":            string(codes),
+		},
+	})
+	jsonOK(w, map[string]string{"status": "ok"})
+}
+
 // ── /api/developer/dimensions/{id}[/members|/properties[/{subId}]] ───────────
 
 func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Request) {
@@ -10681,9 +11484,15 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				// bad boundary, a leaf under a leaf) rolls the insert back.
 				newID, err = h.writeTimeMember(ctx, dimID, "", body.Code, body.Label, period, dated, body.ParentMemberID)
 			} else {
+				// Appended after the dimension's members, as every other
+				// create path (connector, AI, grouping) does: sort_order is
+				// the member order grids and pickers show, and 0 put a
+				// hand-added member ahead of all of them.
 				err = h.db.QueryRow(ctx, `
-					INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id)
-					VALUES ($1::uuid, $2, $3, $4::uuid) RETURNING id::text
+					INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id, sort_order)
+					VALUES ($1::uuid, $2, $3, $4::uuid,
+					        (SELECT COALESCE(MAX(sort_order),0)+1 FROM model.dimension_member WHERE dimension_id=$1::uuid))
+					RETURNING id::text
 				`, dimID, body.Code, body.Label, body.ParentMemberID).Scan(&newID)
 			}
 			if err != nil {
@@ -12505,7 +13314,26 @@ func (h *handler) developerGrids(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A named revision must be one of the resolved model's (which
+	// resolveDemoModelID already pinned to the revision's model when it is
+	// in the application). It used to be taken verbatim: a malformed id
+	// answered 500, and a create with no revision in its body stored a grid
+	// of the caller's model tagged with whatever revision the query named.
+	// With none named, the list keeps listing every revision's grids.
 	revisionID := r.URL.Query().Get("revision_id")
+	if revisionID != "" {
+		var inModel bool
+		if err := h.db.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM model.revision WHERE id::text = $1 AND model_id = $2::uuid)`,
+			revisionID, modelID).Scan(&inModel); err != nil {
+			jsonErr(w, fmt.Errorf("resolve revision: %w", err), http.StatusInternalServerError)
+			return
+		}
+		if !inModel {
+			rejectForeignRevision(w, errRevisionNotInModel)
+			return
+		}
+	}
 
 	switch r.Method {
 	case http.MethodGet:
@@ -14191,13 +15019,32 @@ func (h *handler) splitParentFactData(ctx context.Context, dimID, parentMemberID
 
 // ── Business-Admin: helpers ────────────────────────────────────────────────────
 
-// baWorkspaceModel resolves (workspaceID, modelID) for the acting business admin.
+// baWorkspaceModel resolves (workspaceID, modelID) for the acting business
+// admin, on the business_admin-only routes (users, access rules, pickers).
 func (h *handler) baWorkspaceModel(ctx context.Context, r *http.Request) (wsID, modelID string, err error) {
+	return h.baWorkspaceModelFor(ctx, r, false)
+}
+
+// baOrDevWorkspaceModel is baWorkspaceModel for the business-role routes a
+// developer shares (baOrDev): a developer's tenant-wide reach counts there.
+func (h *handler) baOrDevWorkspaceModel(ctx context.Context, r *http.Request) (wsID, modelID string, err error) {
+	return h.baWorkspaceModelFor(ctx, r, true)
+}
+
+// baWorkspaceModelFor resolves the workspace whose business roles, users and
+// access rules the caller administers, and the model it has open, and
+// refuses (errAccessDenied) a caller who may not administer that workspace
+// (canAdministerWorkspace). Opening the application is not enough: a
+// business_user role, or a business_admin role held in another workspace,
+// opens nothing to administer here.
+func (h *handler) baWorkspaceModelFor(ctx context.Context, r *http.Request, allowDeveloper bool) (wsID, modelID string, err error) {
 	act, err := h.resolveActor(ctx, r)
 	if err != nil {
 		return "", "", err
 	}
 	if appID, _ := ctx.Value(appIDCtxKey).(string); appID != "" {
+		// actorCanAccessApp keeps user_app_access/user_model_access
+		// narrowing a business admin to some applications.
 		canAccessApp, err := h.actorCanAccessApp(ctx, act, appID)
 		if err != nil {
 			return "", "", err
@@ -14205,37 +15052,56 @@ func (h *handler) baWorkspaceModel(ctx context.Context, r *http.Request) (wsID, 
 		if !canAccessApp {
 			return "", "", errAccessDenied
 		}
+		// The model is the one the admin has open: the switcher's choice
+		// (X-Model-Id) when it is this application's, else the model
+		// resolveDemoModelID opens — the default, the newest, name, id.
 		var appWorkspaceID *string
 		var customerID string
 		if err := h.db.QueryRow(ctx, `
 			SELECT app.workspace_id::text, app.customer_id::text, m.id::text
 			FROM core.application app
 			JOIN core.model m ON m.application_id = app.id
-			WHERE app.id = $1::uuid LIMIT 1
+			WHERE app.id = $1::uuid
+			ORDER BY (m.id = app.default_model_id) IS TRUE DESC, m.created_at DESC, m.name, m.id
+			LIMIT 1
 		`, appID).Scan(&appWorkspaceID, &customerID, &modelID); err != nil {
 			return "", "", err
 		}
-		if appWorkspaceID != nil {
-			return *appWorkspaceID, modelID, nil
+		if hdrModel := h.headerModelInApp(ctx, r, appID, act.UserID); hdrModel != "" {
+			modelID = hdrModel
 		}
-		// App has no legacy workspace_id — it was created via
-		// POST /api/admin/applications, which scopes an app directly to a
-		// customer (migration 030_flatten_hierarchy.sql), not a workspace.
-		// identity.business_role/role_assignment are still workspace-scoped,
-		// so resolve one via the customer instead: prefer a workspace the
-		// actor already holds a role in, else the customer's oldest
-		// ("Default", auto-created at tenant creation) workspace.
-		if err := h.db.QueryRow(ctx, `
-			SELECT ws.id::text FROM core.workspace ws
-			JOIN identity.role_assignment ra ON ra.workspace_id = ws.id
-			WHERE ws.customer_id = $1::uuid AND ra.user_id = $2::uuid
-			ORDER BY ws.created_at LIMIT 1
-		`, customerID, act.UserID).Scan(&wsID); err != nil {
+		if appWorkspaceID != nil {
+			wsID = *appWorkspaceID
+		} else {
+			// App has no legacy workspace_id — it was created via
+			// POST /api/admin/applications, which scopes an app directly to
+			// a customer (migration 030_flatten_hierarchy.sql), not a
+			// workspace. Such an application belongs to every workspace of
+			// its tenant (roleReachesAppSQL, workflowAdminScopeSQL), while
+			// identity.business_role/role_assignment are still
+			// workspace-scoped, so resolve one via the customer instead:
+			// the workspace where the actor is business admin, else one
+			// where they hold any role, else the customer's oldest
+			// ("Default", auto-created at tenant creation) workspace.
 			if err := h.db.QueryRow(ctx, `
-				SELECT id::text FROM core.workspace WHERE customer_id=$1::uuid ORDER BY created_at LIMIT 1
-			`, customerID).Scan(&wsID); err != nil {
-				return "", modelID, fmt.Errorf("no workspace for customer: %w", err)
+				SELECT ws.id::text FROM core.workspace ws
+				JOIN identity.role_assignment ra ON ra.workspace_id = ws.id
+				WHERE ws.customer_id = $1::uuid AND ra.user_id = $2::uuid
+				ORDER BY (ra.role = 'business_admin') DESC, ws.created_at, ws.id LIMIT 1
+			`, customerID, act.UserID).Scan(&wsID); err != nil {
+				if err := h.db.QueryRow(ctx, `
+					SELECT id::text FROM core.workspace WHERE customer_id=$1::uuid ORDER BY created_at LIMIT 1
+				`, customerID).Scan(&wsID); err != nil {
+					return "", modelID, fmt.Errorf("no workspace for customer: %w", err)
+				}
 			}
+		}
+		ok, err := h.canAdministerWorkspace(ctx, act, wsID, allowDeveloper)
+		if err != nil {
+			return "", "", err
+		}
+		if !ok {
+			return "", "", errAccessDenied
 		}
 		return wsID, modelID, nil
 	}
@@ -14256,15 +15122,70 @@ func (h *handler) baWorkspaceModel(ctx context.Context, r *http.Request) (wsID, 
 			return "", "", fmt.Errorf("no workspace for actor: %w", err)
 		}
 	}
+	// The fallback can land on a workspace where the caller is only a
+	// business user — with an unscoped (inert) business_admin grant, say.
+	if ok, err := h.canAdministerWorkspace(ctx, act, wsID, allowDeveloper); err != nil {
+		return "", "", err
+	} else if !ok {
+		return "", "", errAccessDenied
+	}
 	err = h.db.QueryRow(ctx,
 		`SELECT m.id::text FROM core.model m
 		 JOIN core.application app ON app.id = m.application_id
-		 WHERE app.workspace_id=$1::uuid LIMIT 1`, wsID,
+		 WHERE app.workspace_id=$1::uuid
+		 ORDER BY (m.id = app.default_model_id) IS TRUE DESC, m.created_at DESC, m.name, m.id
+		 LIMIT 1`, wsID,
 	).Scan(&modelID)
 	if err != nil {
 		return wsID, "", fmt.Errorf("no model for workspace: %w", err)
 	}
 	return wsID, modelID, nil
+}
+
+// canAdministerWorkspace reports whether act may administer the business
+// roles, users and access rules of workspace wsID. Business roles are
+// workspace-scoped (see resolveDemoModelID): a business admin administers
+// the workspace it holds business_admin in, and no other — not another
+// workspace of the same tenant, not one where it is only a business user,
+// and not through an unscoped business_admin grant (isBusinessRole: inert).
+// A tenant admin administers every workspace of its tenants
+// (adminCanAccessWorkspace), a platform admin or platform-level developer
+// every workspace. On the routes a developer shares (allowDeveloper, the
+// baOrDev roles routes), a developer — a tenant-wide builder — administers
+// every workspace of a tenant it builds in: a developer role in one of its
+// workspaces, or an unscoped developer grant held by an account that belongs
+// to it (roleReachesAppSQL). A developer role held in another tenant's
+// workspace does not make its holder a builder of its own tenant.
+func (h *handler) canAdministerWorkspace(ctx context.Context, act *actor, wsID string, allowDeveloper bool) (bool, error) {
+	if act.hasRole("platform_admin") || h.isGlobalBuilder(ctx, act) {
+		return true, nil
+	}
+	if act.hasRole("tenant_admin") {
+		if ok, err := h.adminCanAccessWorkspace(ctx, act, wsID); err != nil || ok {
+			return ok, err
+		}
+	}
+	var ok bool
+	err := h.db.QueryRow(ctx, `
+		SELECT EXISTS (
+		    SELECT 1 FROM identity.role_assignment ra
+		    WHERE ra.user_id = $1::uuid AND ra.role = 'business_admin' AND ra.workspace_id = $2::uuid
+		) OR ($3::bool AND (
+		    EXISTS (
+		        SELECT 1 FROM identity.role_assignment ra
+		        JOIN core.workspace rw ON rw.id = ra.workspace_id
+		        JOIN core.workspace tw ON tw.id = $2::uuid
+		        WHERE ra.user_id = $1::uuid AND ra.role = 'developer' AND rw.customer_id = tw.customer_id
+		    ) OR EXISTS (
+		        SELECT 1 FROM identity."user" u
+		        JOIN identity.role_assignment dra ON dra.user_id = u.id
+		             AND dra.role = 'developer' AND dra.workspace_id IS NULL
+		        JOIN core.workspace tw ON tw.id = $2::uuid
+		        WHERE u.id = $1::uuid AND u.customer_id = tw.customer_id
+		    )
+		))
+	`, act.UserID, wsID, allowDeveloper).Scan(&ok)
+	return ok, err
 }
 
 // ── Business-Admin: GET /api/business-admin/available ─────────────────────────
@@ -14344,7 +15265,7 @@ func (h *handler) baAvailable(w http.ResponseWriter, r *http.Request) {
 			JOIN core.model m ON m.id = dd.model_id
 			WHERE dd.model_id=$1::uuid
 			  AND dd.revision_id = m.active_revision_id
-			ORDER BY dd.name, dm.sort_order, dm.label
+			ORDER BY dd.name, dm.time_index NULLS LAST, dm.sort_order, dm.code
 		`, modelID)
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
@@ -14457,7 +15378,7 @@ type baRoleRow struct {
 
 func (h *handler) baRoles(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	wsID, _, err := h.baWorkspaceModel(ctx, r)
+	wsID, _, err := h.baOrDevWorkspaceModel(ctx, r)
 	if err != nil {
 		jsonAccessErr(w, err, "resolve workspace model")
 		return
@@ -14546,7 +15467,7 @@ func (h *handler) baRoleAction(w http.ResponseWriter, r *http.Request) {
 	// belongs to the caller's workspace, letting a business_admin in one
 	// workspace read/rewrite another workspace's business roles by
 	// guessing a UUID.
-	wsID, _, err := h.baWorkspaceModel(ctx, r)
+	wsID, modelID, err := h.baOrDevWorkspaceModel(ctx, r)
 	if err != nil {
 		jsonAccessErr(w, err, "resolve workspace model")
 		return
@@ -14631,7 +15552,17 @@ func (h *handler) baRoleAction(w http.ResponseWriter, r *http.Request) {
 			jsonOK(w, ids)
 
 		case http.MethodPut:
-			// Replace full dashboard list
+			// The list is the role's dashboards. A grant it leaves out is
+			// removed only among the dashboards the picker offers — those
+			// of the revision being edited: ?revision_id= (the developer's
+			// working revision; it pins the model inside the authorized
+			// application), else the active revision of the model the
+			// admin is working in (X-Model-Id, else the application's
+			// default). A role's grants on another model's or revision's
+			// dashboards are left alone: with several models in one
+			// application, saving the grants for one of them used to wipe
+			// every other model's, and unticking a working-revision
+			// dashboard must not be a no-op that survives activation.
 			var body struct {
 				DashboardIDs []string `json:"dashboard_ids"`
 			}
@@ -14639,14 +15570,39 @@ func (h *handler) baRoleAction(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
 				return
 			}
+			if body.DashboardIDs == nil {
+				body.DashboardIDs = []string{}
+			}
+			revID := r.URL.Query().Get("revision_id")
+			if revID != "" {
+				modelID = h.pinModelForBodyRevision(ctx, r, modelID, revID)
+				var inModel bool
+				if err := h.db.QueryRow(ctx,
+					`SELECT EXISTS (SELECT 1 FROM model.revision WHERE id::text = $1 AND model_id = $2::uuid)`,
+					revID, modelID).Scan(&inModel); err != nil {
+					jsonErr(w, err, http.StatusInternalServerError)
+					return
+				}
+				if !inModel {
+					jsonErr(w, fmt.Errorf("revision not found"), http.StatusNotFound)
+					return
+				}
+			}
 			tx, err := h.db.Begin(ctx)
 			if err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
 			defer tx.Rollback(ctx) //nolint:errcheck
-			if _, err := tx.Exec(ctx,
-				`DELETE FROM identity.business_role_dashboard WHERE role_id=$1::uuid`, roleID); err != nil {
+			if _, err := tx.Exec(ctx, `
+				DELETE FROM identity.business_role_dashboard brd
+				USING model.dashboard_def d
+				JOIN core.model m ON m.id = d.model_id
+				WHERE brd.role_id = $1::uuid AND d.id = brd.dashboard_id
+				  AND d.model_id = $2::uuid
+				  AND d.revision_id IS NOT DISTINCT FROM COALESCE(NULLIF($4, '')::uuid, m.active_revision_id)
+				  AND NOT (brd.dashboard_id::text = ANY($3::text[]))`,
+				roleID, modelID, body.DashboardIDs, revID); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -14859,7 +15815,7 @@ func (h *handler) baUserAction(w http.ResponseWriter, r *http.Request) {
 	// target user even belongs to the caller's workspace, letting a
 	// business_admin in one workspace read/overwrite another workspace's
 	// user access rules by guessing a UUID.
-	wsID, _, err := h.baWorkspaceModel(ctx, r)
+	wsID, modelID, err := h.baWorkspaceModel(ctx, r)
 	if err != nil {
 		jsonAccessErr(w, err, "resolve workspace model")
 		return
@@ -14923,9 +15879,27 @@ func (h *handler) baUserAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer tx.Rollback(ctx) //nolint:errcheck
-		inputs := make([]writeguard.RuleInput, len(body.Rules))
-		for i, rule := range body.Rules {
-			inputs[i] = writeguard.RuleInput{Type: rule.RuleType, RefID: rule.RefID, Access: rule.Access}
+		inputs := make([]writeguard.RuleInput, 0, len(body.Rules))
+		listed := make(map[[2]string]bool, len(body.Rules))
+		for _, rule := range body.Rules {
+			inputs = append(inputs, writeguard.RuleInput{Type: rule.RuleType, RefID: rule.RefID, Access: rule.Access})
+			listed[[2]string{rule.RuleType, rule.RefID}] = true
+		}
+		// The list is the user's rules on the model the admin is working in
+		// (X-Model-Id, else the application's default) — the members and
+		// metrics its pickers offer. A rule on another model's member or
+		// metric is kept as stored unless the list names it: with several
+		// models in one application, saving one model's rules used to
+		// delete every other model's.
+		kept, err := accessRulesOnOtherModels(ctx, tx, userID, modelID)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		for _, rule := range kept {
+			if !listed[[2]string{rule.Type, rule.RefID}] {
+				inputs = append(inputs, rule)
+			}
 		}
 		if err := writeguard.ReplaceUserRules(ctx, tx, userID, inputs); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
@@ -14947,6 +15921,48 @@ func (h *handler) baUserAction(w http.ResponseWriter, r *http.Request) {
 	default:
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
 	}
+}
+
+// accessRulesOnOtherModels returns userID's stored member and metric rules
+// that point only at rows of models other than modelID — by the row the
+// rule names or by its lineage, in any revision. A rule that resolves to
+// nothing (its row deleted everywhere, or a 'button' rule) belongs to no
+// other model and is not returned.
+func accessRulesOnOtherModels(ctx context.Context, q interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}, userID, modelID string) ([]writeguard.RuleInput, error) {
+	rows, err := q.Query(ctx, `
+		SELECT r.rule_type, r.ref_id, r.access
+		FROM identity.user_access_rule r
+		CROSS JOIN LATERAL (
+		    SELECT d.model_id
+		    FROM model.dimension_member m JOIN model.dimension_def d ON d.id = m.dimension_id
+		    WHERE r.rule_type = 'dimension_member'
+		      AND (m.id = CASE WHEN r.ref_id ~* `+writeguard.UUIDPatternSQL+` THEN r.ref_id::uuid END
+		           OR m.lineage_id = r.ref_lineage_id)
+		    UNION
+		    SELECT md.model_id
+		    FROM model.metric_def md
+		    WHERE r.rule_type = 'metric'
+		      AND (md.id = CASE WHEN r.ref_id ~* `+writeguard.UUIDPatternSQL+` THEN r.ref_id::uuid END
+		           OR md.lineage_id = r.ref_lineage_id)
+		) owner
+		WHERE r.user_id = $1::uuid AND r.rule_type IN ('dimension_member', 'metric')
+		GROUP BY r.rule_type, r.ref_id, r.access
+		HAVING bool_and(owner.model_id <> $2::uuid)`, userID, modelID)
+	if err != nil {
+		return nil, fmt.Errorf("load other models' access rules: %w", err)
+	}
+	defer rows.Close()
+	var out []writeguard.RuleInput
+	for rows.Next() {
+		var rule writeguard.RuleInput
+		if err := rows.Scan(&rule.Type, &rule.RefID, &rule.Access); err != nil {
+			return nil, err
+		}
+		out = append(out, rule)
+	}
+	return out, rows.Err()
 }
 
 // ── Developer Workflows ───────────────────────────────────────────────────────
@@ -15402,13 +16418,25 @@ func toEventKey(name string) string {
 // derived events read from the database. revisionID (when non-empty) limits
 // form/integration events to that revision plus revision-global rows.
 func buildWorkflowTriggerEventCatalog(ctx context.Context, pool *pgxpool.Pool, appID, revisionID string) ([]TriggerEventCatalogItem, error) {
-	// Resolve model (may be absent for brand-new applications).
+	// The model is the revision's own: picked separately, it could name
+	// another model of a multi-model application, and the form and
+	// integration queries below would then match nothing. With no revision,
+	// the model resolveAppRevisionID would have picked (may be absent for
+	// brand-new applications). Only "no such row" means "no model": any
+	// other error is returned, not read as an empty catalog.
 	var modelID string
-	_ = pool.QueryRow(ctx, `
-		SELECT m.id::text FROM core.model m WHERE m.application_id = $1::uuid
-		ORDER BY (SELECT COUNT(*) FROM model.metric_def WHERE model_id = m.id) DESC,
-		         m.created_at DESC LIMIT 1
-	`, appID).Scan(&modelID)
+	if revisionID != "" {
+		if err := pool.QueryRow(ctx, `
+			SELECT rv.model_id::text FROM model.revision rv JOIN core.model m ON m.id = rv.model_id
+			WHERE rv.id::text = $1 AND m.application_id = $2::uuid`, revisionID, appID).Scan(&modelID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("resolve revision model: %w", err)
+		}
+	}
+	if modelID == "" {
+		if err := pool.QueryRow(ctx, appWorkingModelQuery, appID).Scan(&modelID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("resolve application model: %w", err)
+		}
+	}
 
 	catalog := []TriggerEventCatalogItem{
 		{

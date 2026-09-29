@@ -67,7 +67,7 @@ later is a backup and a restore.
 | Memory | 4 GB | 8 GB |
 | Disk | 30 GB | 60 GB or more, depending on your data |
 | OS | 64-bit Linux, x86-64 or arm64 | a current Ubuntu or Debian LTS release |
-| Software | Docker Engine with the Compose v2 plugin (`docker compose version`) | |
+| Software | Docker Engine with the Compose v2 plugin, 2.24 or later (`docker compose version`) | |
 
 The running platform idles at about 1 GB of memory, three quarters of it
 Keycloak. Building needs more: the Go and Node.js compilers want 3–4 GB free
@@ -295,7 +295,12 @@ As the platform administrator:
 
 The developer signs in, finds the model under **Models**, creates its first
 revision and starts building. The console's screens are described in the
-[developer manual](developer-manual/).
+[developer manual](developer-manual/), and the formula language in the
+[formulas manual](formulas-manual/). Your deployment serves both itself, at
+`https://<console host>/docs/developer-manual/manual.html` and
+`/docs/formulas-manual/manual.html`: the web image carries them. A web image
+built by hand needs `--build-context docs=docs` (see `web/Dockerfile`);
+`scripts/build-images.sh` and Compose pass it for you.
 
 Create people through the console, not in Keycloak's own admin console: the
 platform keeps its own record of every user and their roles, and only the

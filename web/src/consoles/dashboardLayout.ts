@@ -13,9 +13,10 @@ const SNAP = 20;
 export const INTRINSIC_HEIGHT_WIDGET_TYPES = new Set([
   "automation_button",
   "integration_button",
-  // metric_kpi used to be here: a designed KPI height is now exact, like a
-  // grid's or chart's, so a row of tiles keeps the heights Design shows
-  // (a tile with selectors no longer towers over its neighbours).
+  // metric_kpi used to be here: a KPI tile now stretches to its row and
+  // takes its designed size_h as a minimum (DashboardWidgets.tsx), so a row
+  // of tiles stays aligned as in Design and a tile carrying selectors grows
+  // instead of clipping its value.
   "text",
 ]);
 
@@ -23,12 +24,10 @@ export const INTRINSIC_HEIGHT_WIDGET_TYPES = new Set([
 //
 // Shared by PlanningGrid (business/BusinessConsole.tsx) and ChartWidget's
 // context selectors so both pick the SAME default member for a dimension.
-// Picking dim.members[0] directly would sort alphabetically across the
-// whole flat member list, ignoring hierarchy — e.g. for a period dimension
-// with Q1-Q4 parents and JAN-DEC children, "APR" sorts before "FEB"
-// alphabetically even though FEB (a Q1 leaf) is chronologically/
-// hierarchically first. Walking the tree depth-first and taking the first
-// LEAF respects that hierarchy instead.
+// Picking dim.members[0] directly would ignore hierarchy — it can be a
+// parent (Q1), or a leaf of a later group. Walking the tree depth-first, in
+// the dimension's own order, and taking the first LEAF respects the
+// hierarchy instead.
 
 // LeafCodeMember is the minimal shape defaultLeafCode's tree-walk needs —
 // just code/parent_code — so it works equally for a full DimMember (the
@@ -46,6 +45,9 @@ export interface MemberTreeNode<T extends LeafCodeMember> {
   children: MemberTreeNode<T>[];
 }
 
+// Siblings keep the order the API sends members in — the dimension's own
+// order (time period, then sort_order, then code). Sorting
+// them by code here showed selectors and default contexts alphabetically.
 export function buildMemberTree<T extends LeafCodeMember>(members: T[]): MemberTreeNode<T>[] {
   const byCode = new Map<string, MemberTreeNode<T>>();
   for (const m of members) {
@@ -57,11 +59,10 @@ export function buildMemberTree<T extends LeafCodeMember>(members: T[]): MemberT
     if (parent) parent.children.push(node);
     else roots.push(node);
   }
-  function sortRec(nodes: MemberTreeNode<T>[], level: number) {
-    nodes.sort((a, b) => a.member.code.localeCompare(b.member.code));
-    nodes.forEach(n => { n.level = level; sortRec(n.children, level + 1); });
+  function setLevels(nodes: MemberTreeNode<T>[], level: number) {
+    nodes.forEach(n => { n.level = level; setLevels(n.children, level + 1); });
   }
-  sortRec(roots, 0);
+  setLevels(roots, 0);
   return roots;
 }
 

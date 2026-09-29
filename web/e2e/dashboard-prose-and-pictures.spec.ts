@@ -58,3 +58,53 @@ test("markdown that is really a script stays text", async ({ page }) => {
   await expect(page.locator("script#nope")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "go" })).toHaveCount(0);
 });
+
+test("a same-origin link opens in a new tab; protocol-relative links are refused", async ({ page }) => {
+  await mockApi(page);
+  await page.route("**/api/dashboards/dash-5", (route) =>
+    route.fulfill({
+      json: {
+        id: "dash-5", name: "Explainer", tags: ["guide"], folder_id: null,
+        widgets: [{
+          id: "w5", widget_type: "text", ref_id: null, sort_order: 0, col_start: 1, col_span: 12,
+          pos_x: 0, pos_y: 0, size_w: 600, size_h: 200,
+          content: [
+            "Read [the formulas manual](/docs/formulas-manual/manual.html#totals).",
+            "Or [a path](/somewhere/else), or [a fragment](#totals).",
+            "Not [evil one](//evil.example/x) nor [evil two](/\\evil.example/x).",
+          ].join("\n\n"),
+        }],
+      },
+    }));
+  await loadAs(page, "business_admin");
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Dashboards" }).click();
+  await page.getByRole("button", { name: "Explainer" }).first().click();
+
+  // The console has no path routes: following either in place would unload it.
+  const manual = page.getByRole("link", { name: "the formulas manual" });
+  await expect(manual).toHaveAttribute("href", "/docs/formulas-manual/manual.html#totals");
+  await expect(manual).toHaveAttribute("target", "_blank");
+  await expect(manual).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(page.getByRole("link", { name: "a path" })).toHaveAttribute("target", "_blank");
+  await expect(page.getByRole("link", { name: "a fragment" })).not.toHaveAttribute("target", /.+/);
+  // "//host" and "/\host" leave the site while looking like a path on it.
+  await expect(page.getByText("evil one", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "evil one" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "evil two" })).toHaveCount(0);
+});
+
+test("the dev server serves the bundled manuals, and a missing document is a 404", async ({ request }) => {
+  // Same paths web/Dockerfile ships and web/nginx.conf serves; under
+  // `npm run dev` they come from docs/ through vite.config.ts.
+  for (const [path, type] of [
+    ["/docs/formulas-manual/manual.html", "text/html"],
+    ["/docs/developer-manual/manual.html", "text/html"],
+    ["/docs/developer-manual/img/20-metric-add-form.png", "image/png"],
+  ] as const) {
+    const res = await request.get(path);
+    expect(res.status(), path).toBe(200);
+    expect(res.headers()["content-type"], path).toContain(type);
+  }
+  expect((await request.get("/docs/nope.html")).status()).toBe(404);
+  expect((await request.get("/docs/developer-manual/parts/00-head.html")).status()).toBe(404);
+});

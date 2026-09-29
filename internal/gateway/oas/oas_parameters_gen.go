@@ -824,6 +824,73 @@ func decodeConfirmAiProposalParams(args [2]string, argsEscaped bool, r *http.Req
 	return params, nil
 }
 
+// CreateAutomationRuleParams is parameters of createAutomationRule operation.
+type CreateAutomationRuleParams struct {
+	// The revision the rule belongs to (a developer's working revision); it must be a revision of a
+	// model of the application (404 otherwise). Omitted, the active revision of the application's oldest
+	// model.
+	RevisionID OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackCreateAutomationRuleParams(packed middleware.Parameters) (params CreateAutomationRuleParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeCreateAutomationRuleParams(args [0]string, argsEscaped bool, r *http.Request) (params CreateAutomationRuleParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // CreateDashboardWidgetParams is parameters of createDashboardWidget operation.
 type CreateDashboardWidgetParams struct {
 	ID uuid.UUID
@@ -1019,6 +1086,138 @@ func decodeCreateDimensionPropertyParams(args [1]string, argsEscaped bool, r *ht
 	return params, nil
 }
 
+// CreateFolderParams is parameters of createFolder operation.
+type CreateFolderParams struct {
+	// The revision the folder belongs to; it must be a revision of the model (404 otherwise). Omitted,
+	// the model's active revision.
+	RevisionID OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackCreateFolderParams(packed middleware.Parameters) (params CreateFolderParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeCreateFolderParams(args [0]string, argsEscaped bool, r *http.Request) (params CreateFolderParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// CreateFormParams is parameters of createForm operation.
+type CreateFormParams struct {
+	// The revision the form belongs to; it must be a revision of the model (404 otherwise, a malformed
+	// id included). Omitted, the model's active revision.
+	RevisionID OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackCreateFormParams(packed middleware.Parameters) (params CreateFormParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeCreateFormParams(args [0]string, argsEscaped bool, r *http.Request) (params CreateFormParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // CreateFormRecordParams is parameters of createFormRecord operation.
 type CreateFormRecordParams struct {
 	ID uuid.UUID
@@ -1084,9 +1283,212 @@ func decodeCreateFormRecordParams(args [1]string, argsEscaped bool, r *http.Requ
 	return params, nil
 }
 
+// CreateGridParams is parameters of createGrid operation.
+type CreateGridParams struct {
+	// The revision to create the grid in when the body names none. It must be a revision of the model
+	// the request resolves, which is this revision's own when that model is in the X-App-Id application
+	// and open to the caller (404 otherwise).
+	RevisionID OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackCreateGridParams(packed middleware.Parameters) (params CreateGridParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeCreateGridParams(args [0]string, argsEscaped bool, r *http.Request) (params CreateGridParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// CreateIntegrationParams is parameters of createIntegration operation.
+type CreateIntegrationParams struct {
+	// The revision the integration belongs to; it must be a revision of the model (404 otherwise).
+	// Omitted, the model's active revision.
+	RevisionID OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackCreateIntegrationParams(packed middleware.Parameters) (params CreateIntegrationParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeCreateIntegrationParams(args [0]string, argsEscaped bool, r *http.Request) (params CreateIntegrationParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// CreateRevisionParams is parameters of createRevision operation.
+type CreateRevisionParams struct {
+	// The model to create the revision in. With source_revision_id, it must be that revision's model
+	// (400 otherwise).
+	ModelID OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackCreateRevisionParams(packed middleware.Parameters) (params CreateRevisionParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "model_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.ModelID = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeCreateRevisionParams(args [0]string, argsEscaped bool, r *http.Request) (params CreateRevisionParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: model_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "model_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotModelIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotModelIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.ModelID.SetTo(paramsDotModelIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "model_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // CreateWorkflowParams is parameters of createWorkflow operation.
 type CreateWorkflowParams struct {
 	ApplicationID uuid.UUID
+	// The revision the workflow belongs to (a developer's working revision); it must be a revision of a
+	// model of the application (404 otherwise). Omitted, the active revision of the application's oldest
+	// model.
+	RevisionID OptUUID `json:",omitempty,omitzero"`
 }
 
 func unpackCreateWorkflowParams(packed middleware.Parameters) (params CreateWorkflowParams) {
@@ -1096,6 +1498,15 @@ func unpackCreateWorkflowParams(packed middleware.Parameters) (params CreateWork
 			In:   "query",
 		}
 		params.ApplicationID = packed[key].(uuid.UUID)
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
 	}
 	return params
 }
@@ -1134,6 +1545,47 @@ func decodeCreateWorkflowParams(args [0]string, argsEscaped bool, r *http.Reques
 	}(); err != nil {
 		return params, &ogenerrors.DecodeParamError{
 			Name: "application_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
 			In:   "query",
 			Err:  err,
 		}
@@ -1250,6 +1702,74 @@ func decodeDebugCalcParams(args [0]string, argsEscaped bool, r *http.Request) (p
 	}(); err != nil {
 		return params, &ogenerrors.DecodeParamError{
 			Name: "dim_members",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// DebugFactsParams is parameters of debugFacts operation.
+type DebugFactsParams struct {
+	// Rows of every revision of the model are listed, each filtered by its own revision's access rules.
+	// This revision's rules also filter the rows that carry no revision, and a metric it hides is hidden
+	// in every row of that metric. It must be a revision of the model (404 otherwise); omitted, the
+	// model's active revision.
+	RevisionID OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackDebugFactsParams(packed middleware.Parameters) (params DebugFactsParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeDebugFactsParams(args [0]string, argsEscaped bool, r *http.Request) (params DebugFactsParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
 			In:   "query",
 			Err:  err,
 		}
@@ -4991,6 +5511,71 @@ func decodeGetDeveloperModelParams(args [0]string, argsEscaped bool, r *http.Req
 	return params, nil
 }
 
+// GetFormRecordParams is parameters of getFormRecord operation.
+type GetFormRecordParams struct {
+	ID uuid.UUID
+}
+
+func unpackGetFormRecordParams(packed middleware.Parameters) (params GetFormRecordParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeGetFormRecordParams(args [1]string, argsEscaped bool, r *http.Request) (params GetFormRecordParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // GetGridParams is parameters of getGrid operation.
 type GetGridParams struct {
 	// Revision to read; omitted resolves the caller's ambient revision (X-Revision-Id header, else the
@@ -6263,6 +6848,72 @@ func decodeListAiProposalsParams(args [1]string, argsEscaped bool, r *http.Reque
 	return params, nil
 }
 
+// ListAutomationRulesParams is parameters of listAutomationRules operation.
+type ListAutomationRulesParams struct {
+	// The revision to work in (a developer's working revision); it must be a revision of a model of the
+	// application (404 otherwise). Omitted, the active revision of the application's oldest model.
+	RevisionID OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackListAutomationRulesParams(packed middleware.Parameters) (params ListAutomationRulesParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeListAutomationRulesParams(args [0]string, argsEscaped bool, r *http.Request) (params ListAutomationRulesParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // ListBAAvailableParams is parameters of listBAAvailable operation.
 type ListBAAvailableParams struct {
 	Type ListBAAvailableType
@@ -7102,6 +7753,9 @@ func decodeListFormsParams(args [0]string, argsEscaped bool, r *http.Request) (p
 
 // ListGridsParams is parameters of listGrids operation.
 type ListGridsParams struct {
+	// Only this revision's grids. The request works in this revision's model when that model is in the
+	// X-App-Id application and open to the caller; any other revision answers 404. Omitted, the grids of
+	// every revision of the resolved model are listed.
 	RevisionID OptUUID `json:",omitempty,omitzero"`
 }
 
@@ -7223,6 +7877,72 @@ func decodeListIntegrationRunsParams(args [1]string, argsEscaped bool, r *http.R
 		return params, &ogenerrors.DecodeParamError{
 			Name: "id",
 			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// ListMetricsParams is parameters of listMetrics operation.
+type ListMetricsParams struct {
+	// The revision whose metrics are listed; it must be a revision of the model (404 otherwise). Omitted,
+	//  the model's active revision.
+	RevisionID OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackListMetricsParams(packed middleware.Parameters) (params ListMetricsParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeListMetricsParams(args [0]string, argsEscaped bool, r *http.Request) (params ListMetricsParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
 			Err:  err,
 		}
 	}
@@ -7484,6 +8204,10 @@ func decodeListWorkflowRolesParams(args [0]string, argsEscaped bool, r *http.Req
 type ListWorkflowTriggerEventsParams struct {
 	// Defaults to the demo/current application for the caller's context.
 	ApplicationID OptUUID `json:",omitempty,omitzero"`
+	// The revision whose forms and integrations the catalog lists (a developer's working revision), in
+	// that revision's own model; it must be a revision of a model of the application (404 otherwise).
+	// Omitted, the active revision of the application's oldest model.
+	RevisionID OptUUID `json:",omitempty,omitzero"`
 }
 
 func unpackListWorkflowTriggerEventsParams(packed middleware.Parameters) (params ListWorkflowTriggerEventsParams) {
@@ -7494,6 +8218,15 @@ func unpackListWorkflowTriggerEventsParams(packed middleware.Parameters) (params
 		}
 		if v, ok := packed[key]; ok {
 			params.ApplicationID = v.(OptUUID)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
 		}
 	}
 	return params
@@ -7542,12 +8275,56 @@ func decodeListWorkflowTriggerEventsParams(args [0]string, argsEscaped bool, r *
 			Err:  err,
 		}
 	}
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
 	return params, nil
 }
 
 // ListWorkflowsParams is parameters of listWorkflows operation.
 type ListWorkflowsParams struct {
 	ApplicationID uuid.UUID
+	// The revision to work in (a developer's working revision); it must be a revision of a model of the
+	// application (404 otherwise). Omitted, the active revision of the application's oldest model.
+	RevisionID OptUUID `json:",omitempty,omitzero"`
 }
 
 func unpackListWorkflowsParams(packed middleware.Parameters) (params ListWorkflowsParams) {
@@ -7557,6 +8334,15 @@ func unpackListWorkflowsParams(packed middleware.Parameters) (params ListWorkflo
 			In:   "query",
 		}
 		params.ApplicationID = packed[key].(uuid.UUID)
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
 	}
 	return params
 }
@@ -7595,6 +8381,47 @@ func decodeListWorkflowsParams(args [0]string, argsEscaped bool, r *http.Request
 	}(); err != nil {
 		return params, &ogenerrors.DecodeParamError{
 			Name: "application_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
 			In:   "query",
 			Err:  err,
 		}
@@ -8498,6 +9325,71 @@ func decodeRenameAiSessionParams(args [1]string, argsEscaped bool, r *http.Reque
 	}(); err != nil {
 		return params, &ogenerrors.DecodeParamError{
 			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// ReorderDimensionMembersParams is parameters of reorderDimensionMembers operation.
+type ReorderDimensionMembersParams struct {
+	DimId uuid.UUID
+}
+
+func unpackReorderDimensionMembersParams(packed middleware.Parameters) (params ReorderDimensionMembersParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "dimId",
+			In:   "path",
+		}
+		params.DimId = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeReorderDimensionMembersParams(args [1]string, argsEscaped bool, r *http.Request) (params ReorderDimensionMembersParams, _ error) {
+	// Decode path: dimId.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "dimId",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.DimId = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "dimId",
 			In:   "path",
 			Err:  err,
 		}
@@ -10039,6 +10931,10 @@ func decodeSetActiveRevisionParams(args [1]string, argsEscaped bool, r *http.Req
 // SetBARoleDashboardsParams is parameters of setBARoleDashboards operation.
 type SetBARoleDashboardsParams struct {
 	ID uuid.UUID
+	// The revision whose dashboards the list covers (a developer's working revision). The request works
+	// in this revision's model when that model is in the X-App-Id application and open to the caller;
+	// any other revision answers 404.
+	RevisionID OptUUID `json:",omitempty,omitzero"`
 }
 
 func unpackSetBARoleDashboardsParams(packed middleware.Parameters) (params SetBARoleDashboardsParams) {
@@ -10049,10 +10945,20 @@ func unpackSetBARoleDashboardsParams(packed middleware.Parameters) (params SetBA
 		}
 		params.ID = packed[key].(uuid.UUID)
 	}
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
+	}
 	return params
 }
 
 func decodeSetBARoleDashboardsParams(args [1]string, argsEscaped bool, r *http.Request) (params SetBARoleDashboardsParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]
@@ -10095,6 +11001,47 @@ func decodeSetBARoleDashboardsParams(args [1]string, argsEscaped bool, r *http.R
 		return params, &ogenerrors.DecodeParamError{
 			Name: "id",
 			In:   "path",
+			Err:  err,
+		}
+	}
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
 			Err:  err,
 		}
 	}

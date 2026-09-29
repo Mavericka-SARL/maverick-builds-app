@@ -111,9 +111,11 @@ func (s *Server) ListWorkflowInstances(ctx context.Context, req *workflowv1.List
 	return &workflowv1.ListWorkflowInstancesResponse{Instances: instances}, nil
 }
 
-// CompleteStep authorizes via Store.IsAssigneeEligible — the same
-// assignee_roles check the HTTP task-inbox completion path
-// (internal/gateway/handler.go's taskAction) uses. This used to authorize
+// CompleteStep authorizes via Store.IsAssigneeEligible — the workspace
+// boundary of workflow assignment (package assignee) that the HTTP
+// task-inbox completion path (internal/gateway/handler.go's taskAction)
+// also draws, through taskAssigneeSQL, which is built from the same
+// predicate. This used to authorize
 // via the Policy service's CheckRACIPermission instead, which turned out to
 // be structurally broken for this purpose (found by a synchronization
 // audit): CheckRACIPermission unconditionally allows any actor whose role

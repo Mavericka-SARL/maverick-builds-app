@@ -35,14 +35,28 @@ type FormDef struct {
 }
 
 type FormRecord struct {
-	ID        string         `json:"id"`
-	FormID    string         `json:"form_id"`
-	Data      map[string]any `json:"data"`
-	Status    string         `json:"status"`
-	CreatedBy string         `json:"created_by"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
+	ID     string         `json:"id"`
+	FormID string         `json:"form_id"`
+	Data   map[string]any `json:"data"`
+	Status string         `json:"status"`
+	// CreatedBy is the user who created the record; nil for a legacy row
+	// whose creator was never recorded or has been deleted.
+	CreatedBy *string   `json:"created_by"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	// Permissions is what the caller the record is served to may do to it
+	// (RecordAccess.Permissions). The gateway sets it on every record it
+	// returns; the store never does.
+	Permissions *RecordPermissions `json:"permissions,omitempty"`
 }
+
+// ErrRecordNotFound is returned when a record does not exist.
+var ErrRecordNotFound = errors.New("record not found")
+
+// ErrRecordChanged is returned by the conditional writes (UpdateRecordFrom,
+// DeleteRecordFrom) when the record is gone or no longer in the status the
+// caller decided on.
+var ErrRecordChanged = errors.New("record changed since it was read")
 
 type Store struct {
 	pool *pgxpool.Pool
@@ -161,7 +175,14 @@ func (s *Store) DeleteForm(ctx context.Context, formID string) error {
 	return err
 }
 
+// CreateRecord creates a draft record.
 func (s *Store) CreateRecord(ctx context.Context, formID, userID string, data map[string]any) (*FormRecord, error) {
+	return s.CreateRecordWithStatus(ctx, formID, userID, StatusDraft, data)
+}
+
+// CreateRecordWithStatus creates a record in status. Who may create a
+// record in which status is RecordAccess.CanCreate's, decided by the caller.
+func (s *Store) CreateRecordWithStatus(ctx context.Context, formID, userID, status string, data map[string]any) (*FormRecord, error) {
 	dataJSON, err := json.Marshal(data)
 	if err != nil {
 		return nil, err
@@ -170,20 +191,21 @@ func (s *Store) CreateRecord(ctx context.Context, formID, userID string, data ma
 	var id string
 	var createdAt, updatedAt time.Time
 	err = s.pool.QueryRow(ctx, `
-		INSERT INTO runtime.form_record (form_id, data, created_by)
-		VALUES ($1::uuid, $2, $3::uuid)
+		INSERT INTO runtime.form_record (form_id, data, status, created_by)
+		VALUES ($1::uuid, $2, $3::runtime.record_status, $4::uuid)
 		RETURNING id::text, created_at, updated_at
-	`, formID, dataJSON, userID).Scan(&id, &createdAt, &updatedAt)
+	`, formID, dataJSON, status, userID).Scan(&id, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("create record: %w", err)
 	}
 
+	createdBy := userID
 	return &FormRecord{
 		ID:        id,
 		FormID:    formID,
 		Data:      data,
-		Status:    "draft",
-		CreatedBy: userID,
+		Status:    status,
+		CreatedBy: &createdBy,
 		CreatedAt: createdAt,
 		UpdatedAt: updatedAt,
 	}, nil
@@ -191,7 +213,7 @@ func (s *Store) CreateRecord(ctx context.Context, formID, userID string, data ma
 
 func (s *Store) ListRecords(ctx context.Context, formID string, limit int) ([]*FormRecord, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id::text, form_id::text, data, status::text, COALESCE(created_by::text, ''), created_at, updated_at
+		SELECT id::text, form_id::text, data, status::text, created_by::text, created_at, updated_at
 		FROM runtime.form_record WHERE form_id = $1::uuid
 		ORDER BY created_at DESC LIMIT $2
 	`, formID, limit)
@@ -215,11 +237,11 @@ func (s *Store) GetRecord(ctx context.Context, recordID string) (*FormRecord, er
 	var r FormRecord
 	var dataJSON []byte
 	err := s.pool.QueryRow(ctx, `
-		SELECT id::text, form_id::text, data, status::text, COALESCE(created_by::text, ''), created_at, updated_at
+		SELECT id::text, form_id::text, data, status::text, created_by::text, created_at, updated_at
 		FROM runtime.form_record WHERE id = $1::uuid
 	`, recordID).Scan(&r.ID, &r.FormID, &dataJSON, &r.Status, &r.CreatedBy, &r.CreatedAt, &r.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, fmt.Errorf("record %s not found", recordID)
+		return nil, fmt.Errorf("record %s: %w", recordID, ErrRecordNotFound)
 	}
 	if err != nil {
 		return nil, err
@@ -244,6 +266,48 @@ func (s *Store) UpdateRecord(ctx context.Context, recordID, status string, data 
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("record %s not found", recordID)
+	}
+	return nil
+}
+
+// UpdateRecordFrom saves a record's data and status only while it is still
+// in fromStatus, the status its caller's permission check was made against:
+// a record decided in the meantime (an administrator approved it while its
+// creator was saving) is not overwritten. ErrRecordChanged otherwise. A nil
+// data saves an empty object.
+func (s *Store) UpdateRecordFrom(ctx context.Context, recordID, fromStatus, status string, data map[string]any) error {
+	if data == nil {
+		data = map[string]any{}
+	}
+	dataJSON, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE runtime.form_record
+		SET data = $2, status = $3::runtime.record_status, updated_at = now()
+		WHERE id = $1::uuid AND status = $4::runtime.record_status
+	`, recordID, dataJSON, status, fromStatus)
+	if err != nil {
+		return fmt.Errorf("update record: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrRecordChanged
+	}
+	return nil
+}
+
+// DeleteRecordFrom deletes a record only while it is still in fromStatus
+// (UpdateRecordFrom's guard). ErrRecordChanged otherwise.
+func (s *Store) DeleteRecordFrom(ctx context.Context, recordID, fromStatus string) error {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM runtime.form_record WHERE id = $1::uuid AND status = $2::runtime.record_status`,
+		recordID, fromStatus)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrRecordChanged
 	}
 	return nil
 }

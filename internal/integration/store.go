@@ -330,6 +330,11 @@ func (s *Store) UpdateDefinition(ctx context.Context, modelID, id string, name, 
 		next.ConnectionID = *connectionID
 	}
 	if cfg != nil {
+		// As at create: a config of another kind would read back as no
+		// config at all (GetDefinition keeps only this kind).
+		if cfg.Kind != ConfigKind {
+			return nil, fmt.Errorf("config kind must be %s", ConfigKind)
+		}
 		next.Config = cfg
 		next.ConfigVersion = cur.ConfigVersion + 1
 	}

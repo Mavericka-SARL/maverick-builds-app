@@ -6,14 +6,20 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/mavericks-engine/mavericks/internal/modeltransfer"
 	"github.com/mavericks-engine/mavericks/internal/starter"
 	"github.com/mavericks-engine/mavericks/internal/testdb"
 	migrationfs "github.com/mavericks-engine/mavericks/migrations"
 	"github.com/mavericks-engine/mavericks/pkg/logger"
+	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
 )
 
 // callJSON performs one JSON request as a persona and decodes the body.
@@ -111,6 +117,44 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 	if code != 200 || len(apps) != 1 || apps[0]["name"] != signupAppName {
 		t.Fatalf("apps: %d %v", code, apps)
 	}
+	// Every starter package is a model of that one application: the tour
+	// first — it is the application's default, so the model switcher lists
+	// it first and the application card names it — then the guides.
+	// Expectations come from starter.Packages() itself, so the guides'
+	// contents can change without this test knowing them.
+	pkgs := starter.Packages()
+	appModels, _ := apps[0]["models"].([]any)
+	if len(appModels) != len(pkgs) || apps[0]["model_name"] != pkgs[0].ModelName {
+		t.Fatalf("app models: %d of %d, card names %v: %v", len(appModels), len(pkgs), apps[0]["model_name"], appModels)
+	}
+	modelIDByName := make(map[string]string, len(appModels))
+	for i, raw := range appModels {
+		m, _ := raw.(map[string]any)
+		name, _ := m["name"].(string)
+		id, _ := m["id"].(string)
+		modelIDByName[name] = id
+		if wantDefault := i == 0; m["is_default"] != wantDefault {
+			t.Fatalf("model %d (%s) is_default = %v, want %v", i, name, m["is_default"], wantDefault)
+		}
+	}
+	if first, _ := appModels[0].(map[string]any); first["id"] != modelID || first["name"] != pkgs[0].ModelName {
+		t.Fatalf("first model = %v, want the tour %s (%s)", first, pkgs[0].ModelName, modelID)
+	}
+	guideIDs := make([]string, 0, len(pkgs)-1)
+	for i, p := range pkgs {
+		id := modelIDByName[p.ModelName]
+		if id == "" {
+			t.Fatalf("package %q has no model (models: %v)", p.ModelName, modelIDByName)
+		}
+		if i > 0 {
+			guideIDs = append(guideIDs, id)
+		}
+	}
+	var defaultModel string
+	_ = pool.QueryRow(ctx, `SELECT COALESCE(default_model_id::text,'') FROM core.application WHERE id=$1::uuid`, appID(apps)).Scan(&defaultModel)
+	if defaultModel != modelID {
+		t.Fatalf("application default model = %q, want the tour %s", defaultModel, modelID)
+	}
 	// The account is its tenant's developer, not a platform-level one: with
 	// another tenant's larger model in the database, the console's first
 	// screen (no application chosen yet) must still land on its own model,
@@ -123,9 +167,18 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		q(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input, agg_rule) VALUES ($1::uuid, $2::uuid, $3, true, 'sum') RETURNING id::text`, otherModel, otherRev, "m"+strconv.Itoa(i))
 	}
+	// With no application chosen yet the resolution picks among the
+	// tenant's own models only, never the other tenant's larger one. The
+	// console then chooses the application (AppPicker) and every request
+	// carries it: that is where the default decides, and it is the tour.
 	code, demo := callJSON(t, srv, "signup-ann@acme.test", http.MethodGet, "/api/demo", nil)
+	resolved, _ := demo["model_id"].(string)
+	if ownModel := resolved == modelID || slices.Contains(guideIDs, resolved); code != 200 || !ownModel || demo["revision"] != starter.RevisionName {
+		t.Fatalf("first screen resolved model %v (%v), want one of the tenant's own models", demo["model_id"], demo["revision"])
+	}
+	code, demo = callJSON(t, srv, "signup-ann@acme.test", http.MethodGet, "/api/demo", nil, "X-App-Id", appID(apps))
 	if code != 200 || demo["model_id"] != modelID || demo["revision"] != starter.RevisionName {
-		t.Fatalf("first screen resolved model %v (%v), want the starter model %s", demo["model_id"], demo["revision"], modelID)
+		t.Fatalf("application's model resolved %v (%v), want the tour %s", demo["model_id"], demo["revision"], modelID)
 	}
 	code, tenantsSeen := callJSONList(t, srv, "signup-ann@acme.test", "/api/admin/tenants")
 	if code != 200 || len(tenantsSeen) != 1 || tenantsSeen[0]["id"] != tenantID {
@@ -139,6 +192,47 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 		}
 		t.Fatalf("developer dashboards: %d %v", code, names)
 	}
+	// Each guide is what the developer and the business consoles show when
+	// the model switcher names it: all of its dashboards, and only its own.
+	for _, p := range pkgs[1:] {
+		want := make([]string, 0, len(p.Dashboards))
+		for _, d := range p.Dashboards {
+			want = append(want, d.Name)
+		}
+		slices.Sort(want)
+		for _, path := range []string{"/api/developer/dashboards", "/api/dashboards"} {
+			code, got := callJSONList(t, srv, "signup-ann@acme.test", path, "X-App-Id", appID(apps), "X-Model-Id", modelIDByName[p.ModelName])
+			names := make([]string, 0, len(got))
+			for _, d := range got {
+				name, _ := d["name"].(string)
+				names = append(names, name)
+			}
+			slices.Sort(names)
+			if code != 200 || !slices.Equal(names, want) {
+				t.Fatalf("%s for %q: %d %v, want %v", path, p.ModelName, code, names, want)
+			}
+		}
+	}
+	// Every calculated metric of every model has its numbers worked out at
+	// sign-up, including one that reads no input metric (a guide showing a
+	// property or a COUNTIFS): a first look must not find an empty cell.
+	for _, p := range pkgs {
+		for _, m := range p.Metrics {
+			if m.IsInput || m.Formula == nil || strings.TrimSpace(*m.Formula) == "" {
+				continue
+			}
+			var rows int
+			var errs string
+			_ = pool.QueryRow(ctx, `SELECT count(*) FROM runtime.calc_result cr JOIN model.metric_def md ON md.id = cr.metric_id
+				WHERE cr.model_id=$1::uuid AND md.name=$2`, modelIDByName[p.ModelName], m.Name).Scan(&rows)
+			_ = pool.QueryRow(ctx, `SELECT COALESCE(string_agg(ps.error, '; '), '') FROM runtime.metric_partition_state ps
+				JOIN model.metric_def md ON md.id::text = ps.metric_id::text
+				WHERE ps.model_id::text=$1 AND md.name=$2 AND ps.status='error'`, modelIDByName[p.ModelName], m.Name).Scan(&errs)
+			if rows == 0 {
+				t.Errorf("%q: calculated metric %q has no calc_result rows (calculation errors: %q)", p.ModelName, m.Name, errs)
+			}
+		}
+	}
 	var metrics, members, facts, calc, audit int
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM model.metric_def WHERE model_id=$1::uuid`, modelID).Scan(&metrics)
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM model.dimension_member m JOIN model.dimension_def d ON d.id=m.dimension_id WHERE d.model_id=$1::uuid`, modelID).Scan(&members)
@@ -147,6 +241,16 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit.audit_event WHERE event_type='tenant.signed_up' AND resource_id=$1`, tenantID).Scan(&audit)
 	if metrics != 3 || members != 8 || facts != 16 || calc == 0 || audit != 1 {
 		t.Fatalf("starter model: metrics=%d members=%d facts=%d calc=%d audit=%d", metrics, members, facts, calc, audit)
+	}
+	// The sign-up's audit record names the tour as its model and lists the
+	// guides beside it.
+	var auditModel, auditGuides string
+	if err := pool.QueryRow(ctx, `SELECT metadata->>'model_id', COALESCE(metadata->>'guide_model_ids','') FROM audit.audit_event
+		WHERE event_type='tenant.signed_up' AND resource_id=$1`, tenantID).Scan(&auditModel, &auditGuides); err != nil {
+		t.Fatal(err)
+	}
+	if auditModel != modelID || auditGuides != strings.Join(guideIDs, ",") {
+		t.Fatalf("audit metadata: model_id=%q guide_model_ids=%q, want %q and %q", auditModel, auditGuides, modelID, strings.Join(guideIDs, ","))
 	}
 	// The tour's calculated metric is worked out from its own figures, not
 	// left blank: the first screen has to show a real number.
@@ -158,6 +262,89 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 	}
 	if cost != 48000 { // 4 people at 12,000
 		t.Fatalf("cost Q1/SALES = %v, want 48000", cost)
+	}
+	// The tour's two cards show what their titles say, read the way a card
+	// reads them (MetricKpiWidget: GET /api/grid?totals_only=1, plus the
+	// card's pinned member as scope). The cards and their pins come from the
+	// package; the figures are the tour's own. Total cost for the year is
+	// Sales 4+4+5+5 at 12,000 plus Engineering 6+6+7+8 at 15,000 = 621,000;
+	// headcount at the end of Q4 is 5 + 8 = 13.
+	tour := pkgs[0]
+	tourRevID := q(`SELECT active_revision_id::text FROM core.model WHERE id=$1::uuid`, modelID)
+	// The package names things by placeholder id; the database by its own.
+	tourIDs, byName := map[string]string{}, map[string]string{}
+	metricNames := map[string]string{}
+	for _, m := range tour.Metrics {
+		tourIDs[m.ID] = q(`SELECT id::text FROM model.metric_def WHERE revision_id=$1::uuid AND name=$2`, tourRevID, m.Name)
+		byName[m.Name], metricNames[m.ID] = tourIDs[m.ID], m.Name
+	}
+	for _, d := range tour.Dimensions {
+		tourIDs[d.ID] = q(`SELECT id::text FROM model.dimension_def WHERE revision_id=$1::uuid AND name=$2`, tourRevID, d.Name)
+		byName[d.Name] = tourIDs[d.ID]
+	}
+	tourTotals := func(scope map[string]string) map[string]any {
+		t.Helper()
+		path := "/api/grid?totals_only=1&revision_id=" + tourRevID
+		if len(scope) > 0 {
+			b, _ := json.Marshal(scope)
+			path += "&scope=" + url.QueryEscape(string(b))
+		}
+		code, body := callJSON(t, srv, "signup-ann@acme.test", http.MethodGet, path, nil, "X-App-Id", appID(apps))
+		totals, _ := body["totals"].(map[string]any)
+		if code != 200 || totals == nil {
+			t.Fatalf("tour totals %v: %d %v", scope, code, body)
+		}
+		return totals
+	}
+	wantCard := map[string]float64{"cost": 621000, "headcount": 13}
+	cards := 0
+	for _, d := range tour.Dashboards {
+		for _, w := range d.Widgets {
+			if w.WidgetType != "metric_kpi" || w.RefID == nil {
+				continue
+			}
+			var props struct {
+				Mode  string `json:"kpi_context_mode"`
+				Scope *struct {
+					DimensionID string `json:"dimension_id"`
+					MemberCode  string `json:"member_code"`
+				} `json:"kpi_scope"`
+			}
+			if err := json.Unmarshal(w.Props, &props); err != nil {
+				t.Fatalf("card props on %q: %v", d.Name, err)
+			}
+			var scope map[string]string
+			if props.Mode == "pin" && props.Scope != nil {
+				scope = map[string]string{tourIDs[props.Scope.DimensionID]: props.Scope.MemberCode}
+			}
+			name := metricNames[*w.RefID]
+			want, ok := wantCard[name]
+			if !ok {
+				t.Errorf("tour card on %q (%s) has no expected figure", name, d.Name)
+				continue
+			}
+			cards++
+			if got := tourTotals(scope)[tourIDs[*w.RefID]]; got != want {
+				t.Errorf("tour card %q (%s, scope %v) = %v, want %v", name, props.Mode, scope, got, want)
+			}
+		}
+	}
+	if cards != len(wantCard) {
+		t.Errorf("the tour has %d cards with an expected figure, want %d", cards, len(wantCard))
+	}
+	// The totals the tour's prose explains: over the year, headcount shows
+	// its last quarter (13), not the sum of four; cost per head is averaged
+	// (12,000 and 15,000 give 13,500). And the pin is applied at all: Q1's
+	// headcount is 4 + 6 = 10.
+	year := tourTotals(nil)
+	if got := year[byName["headcount"]]; got != float64(13) {
+		t.Errorf("headcount for the year = %v, want 13 (its last quarter)", got)
+	}
+	if got := year[byName["cost_per_head"]]; got != float64(13500) {
+		t.Errorf("cost per head for the year = %v, want 13500 (averaged)", got)
+	}
+	if got := tourTotals(map[string]string{byName["quarter"]: "Q1"})[byName["headcount"]]; got != float64(10) {
+		t.Errorf("headcount pinned to Q1 = %v, want 10", got)
 	}
 
 	// The platform admin's tenant list carries the plan state.
@@ -177,6 +364,126 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("new tenant not listed")
+	}
+
+	// Application-scoped screens work on the model the console opens. A form
+	// built on the tour (the Developer guide has one built) is offered as a
+	// workflow trigger: the catalog reads the model of the revision it is
+	// handed rather than picking one of the four again.
+	const persona = "signup-ann@acme.test"
+	tourApp := appID(apps)
+	code, form := callJSON(t, srv, persona, http.MethodPost, "/api/forms", map[string]any{
+		"name": "requests", "label": "Requests",
+		"fields": []map[string]any{{"name": "amount", "label": "Amount", "type": "number"}},
+	}, "X-App-Id", tourApp)
+	formID, _ := form["id"].(string)
+	if code != 200 || formID == "" {
+		t.Fatalf("create a form on the tour: %d %v", code, form)
+	}
+	code, events := callJSONList(t, srv, persona, "/api/developer/workflow-trigger-events?application_id="+tourApp)
+	if code != 200 || !slices.ContainsFunc(events, func(e map[string]any) bool { return e["source_id"] == formID }) {
+		t.Fatalf("trigger events: %d, no event for the tour's form %s in %v", code, formID, events)
+	}
+	// Business Admin › Access Rules offers the dashboards of the model the
+	// admin has open: the switcher's choice, else the default.
+	for i, p := range pkgs {
+		headers := []string{"X-App-Id", tourApp}
+		if i > 0 {
+			headers = append(headers, "X-Model-Id", modelIDByName[p.ModelName])
+		}
+		want := make([]string, 0, len(p.Dashboards))
+		for _, d := range p.Dashboards {
+			want = append(want, d.Name)
+		}
+		code, got := callJSONList(t, srv, persona, "/api/business-admin/available?type=dashboards", headers...)
+		names := make([]string, 0, len(got))
+		for _, d := range got {
+			name, _ := d["name"].(string)
+			names = append(names, name)
+		}
+		slices.Sort(want)
+		slices.Sort(names)
+		if code != 200 || !slices.Equal(names, want) {
+			t.Fatalf("access-rule dashboards for %q: %d %v, want %v", p.ModelName, code, names, want)
+		}
+	}
+	// With no application chosen yet, the application and the model resolve
+	// alike. A second application of the tenant, larger than any starter
+	// model, loses to the tour for both, so an automation-rules request that
+	// names the tour's revision is not refused as another application's.
+	tourWs := q(`SELECT workspace_id::text FROM core.application WHERE id=$1::uuid`, tourApp)
+	tourRev := q(`SELECT active_revision_id::text FROM core.model WHERE id=$1::uuid`, modelID)
+	bigApp := q(`INSERT INTO core.application (customer_id, workspace_id, name, mode) VALUES ($1::uuid, $2::uuid, 'Larger', 'planning') RETURNING id::text`, tenantID, tourWs)
+	bigModel := q(`INSERT INTO core.model (application_id, name) VALUES ($1::uuid, 'Larger') RETURNING id::text`, bigApp)
+	bigRev := q(`INSERT INTO model.revision (model_id, name) VALUES ($1::uuid, 'Working') RETURNING id::text`, bigModel)
+	for i := 0; i < 12; i++ {
+		q(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input, agg_rule) VALUES ($1::uuid, $2::uuid, $3, true, 'sum') RETURNING id::text`, bigModel, bigRev, "m"+strconv.Itoa(i))
+	}
+	if code, demo := callJSON(t, srv, persona, http.MethodGet, "/api/demo", nil); code != 200 || demo["model_id"] != modelID {
+		t.Fatalf("no application chosen, beside a larger one: resolved %v, want the tour %s", demo["model_id"], modelID)
+	}
+	if code, _ := callJSONList(t, srv, persona, "/api/automation/rules?revision_id="+tourRev); code != 200 {
+		t.Fatalf("automation rules on the tour's revision, no application chosen: %d", code)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM core.application WHERE id=$1::uuid`, bigApp); err != nil {
+		t.Fatal(err)
+	}
+
+	// The default stays an ordinary setting: Build › Models › "Set as
+	// business default" moves it to a guide (the same statement sign-up
+	// ran), and back.
+	if len(guideIDs) > 0 {
+		for _, target := range []string{guideIDs[0], modelID} {
+			if code, body := callJSON(t, srv, "signup-ann@acme.test", http.MethodPost, "/api/developer/models/"+target+"/set-default", nil); code != 200 {
+				t.Fatalf("set default to %s: %d %v", target, code, body)
+			}
+			_, apps := callJSONList(t, srv, "signup-ann@acme.test", "/api/apps")
+			listed, _ := apps[0]["models"].([]any)
+			first, _ := listed[0].(map[string]any)
+			_, demo := callJSON(t, srv, "signup-ann@acme.test", http.MethodGet, "/api/demo", nil, "X-App-Id", appID(apps))
+			if first["id"] != target || first["is_default"] != true || demo["model_id"] != target {
+				t.Fatalf("after setting the default to %s: first listed %v, resolved %v", target, first, demo["model_id"])
+			}
+		}
+	}
+
+	// The tour ends by suggesting its model be deleted. The default then
+	// clears, and models created in one transaction tie on created_at: the
+	// listing and the resolution must still come out the same every time —
+	// by name — and no model may drop out of the switcher.
+	if code, body := callJSON(t, srv, "signup-ann@acme.test", http.MethodDelete, "/api/admin/models/"+modelID, nil); code != 200 {
+		t.Fatalf("delete the tour: %d %v", code, body)
+	}
+	guideNames := make([]string, 0, len(pkgs)-1)
+	for _, p := range pkgs[1:] {
+		guideNames = append(guideNames, p.ModelName)
+	}
+	slices.Sort(guideNames)
+	for attempt := 0; attempt < 3; attempt++ {
+		code, apps := callJSONList(t, srv, "signup-ann@acme.test", "/api/apps")
+		if code != 200 || len(apps) != 1 {
+			t.Fatalf("apps after deleting the tour: %d %v", code, apps)
+		}
+		listed, _ := apps[0]["models"].([]any)
+		names := make([]string, 0, len(listed))
+		for _, raw := range listed {
+			m, _ := raw.(map[string]any)
+			name, _ := m["name"].(string)
+			names = append(names, name)
+			if m["is_default"] != false {
+				t.Fatalf("with no default set, %q reports is_default=%v", name, m["is_default"])
+			}
+		}
+		if !slices.Equal(names, guideNames) {
+			t.Fatalf("models after deleting the tour: %v, want %v", names, guideNames)
+		}
+		if len(guideNames) == 0 {
+			break
+		}
+		code, demo := callJSON(t, srv, "signup-ann@acme.test", http.MethodGet, "/api/demo", nil, "X-App-Id", appID(apps))
+		if code != 200 || demo["model_id"] != modelIDByName[guideNames[0]] {
+			t.Fatalf("with no default, the application resolved %v, want %q (%s)", demo["model_id"], guideNames[0], modelIDByName[guideNames[0]])
+		}
 	}
 
 	// 3rd: the same address again is refused. 4th: the throttle closes.
@@ -244,6 +551,17 @@ func TestSignupWithIdentityProviderAndRollback(t *testing.T) {
 	if code != 200 || out["status"] != "invited" || out["invited"] != true || out["dev_persona"] != nil {
 		t.Fatalf("signup: %d %v", code, out)
 	}
+	countModels := func() int {
+		t.Helper()
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM core.model`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := countModels(); n != len(starter.Packages()) {
+		t.Fatalf("models after one sign-up: %d, want %d", n, len(starter.Packages()))
+	}
 	var sub string
 	if err := pool.QueryRow(ctx, `SELECT keycloak_sub FROM identity.user WHERE email='bo@brokered.test'`).Scan(&sub); err != nil {
 		t.Fatal(err)
@@ -276,5 +594,132 @@ func TestSignupWithIdentityProviderAndRollback(t *testing.T) {
 	broker.mu.Unlock()
 	if customers != 0 || users != 0 || deleted != 1 || stillThere {
 		t.Fatalf("rollback: customers=%d users=%d deletedAtProvider=%d stillThere=%v", customers, users, deleted, stillThere)
+	}
+	// Every one of the undone sign-up's models went with it: only the first
+	// sign-up's remain.
+	if n := countModels(); n != len(starter.Packages()) {
+		t.Fatalf("models after the rollback: %d, want %d (the first sign-up's only)", n, len(starter.Packages()))
+	}
+}
+
+// Sign-up imports its starter packages and then recalculates each one with
+// recalcRevisionCalculated rather than recalcRevisionFromInputs. This pins
+// why, on a package the guides could plausibly contain: a metric that reads
+// only a dimension (COUNTIFS) and a metric that reads it, with no input
+// metric anywhere. The input-driven pass leaves both empty; the one sign-up
+// uses computes both. It also checks the import side of the same path: a
+// grid widget's saved layout (default_view) names dimensions by id, and
+// has to name the imported model's dimension, not the package's.
+func TestSignupRecalcReachesMetricsWithoutInputs(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.New(t, migrationfs.FS, ".")
+	h := &handler{log: logger.New("test"), db: tenantdb.NewHandle(pool, nil), devMode: true}
+
+	var custID, wsID, appID, userID string
+	for _, step := range []struct {
+		sql  string
+		args []any
+		out  *string
+	}{
+		{`INSERT INTO core.customer (name, plan) VALUES ('Counts Co', 'starter') RETURNING id::text`, nil, &custID},
+		{`INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'Default') RETURNING id::text`, []any{&custID}, &wsID},
+		{`INSERT INTO core.application (customer_id, workspace_id, name, mode) VALUES ($1::uuid, $2::uuid, 'Counts', 'planning') RETURNING id::text`, []any{&custID, &wsID}, &appID},
+		{`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ('counts', 'c@counts.test', 'C', $1::uuid) RETURNING id::text`, []any{&custID}, &userID},
+	} {
+		args := make([]any, len(step.args))
+		for i, a := range step.args {
+			args[i] = *(a.(*string))
+		}
+		if err := pool.QueryRow(ctx, step.sql, args...).Scan(step.out); err != nil {
+			t.Fatalf("%s: %v", step.sql, err)
+		}
+	}
+
+	formula := func(s string) *string { return &s }
+	at := func(n int) *int { return &n }
+	region := modeltransfer.Dimension{ID: "dim-region", Name: "region", AggRule: "sum", Members: []modeltransfer.Member{
+		{ID: "r-emea", Code: "EMEA", Label: "EMEA", SortOrder: 0},
+		{ID: "r-us", Code: "US", Label: "US", SortOrder: 1},
+	}}
+	layout, _ := json.Marshal(map[string]any{"default_view": map[string]any{
+		"rows": []string{"__metrics__"}, "cols": []string{"dim-region"}, "context": []string{},
+		"filter_sel": map[string]string{"dim-region": "US"},
+	}})
+	grid := "grid-counts"
+	pkg := modeltransfer.Package{
+		Format: modeltransfer.PackageFormat, Version: modeltransfer.PackageVersion,
+		ModelName: "Counts", StorageType: "oltp", RevisionName: starter.RevisionName, IncludeData: true,
+		Dimensions: []modeltransfer.Dimension{region},
+		Metrics: []modeltransfer.Metric{
+			{ID: "m-n", Name: "n_regions", Formula: formula(`COUNTIFS(region, "*")`), StorageType: "oltp", AggRule: "sum", Format: "number"},
+			{ID: "m-2n", Name: "doubled", Formula: formula(`n_regions * 2`), StorageType: "oltp", AggRule: "sum", Format: "number"},
+		},
+		Dependencies: []modeltransfer.Dependency{{MetricID: "m-2n", DependsOn: "m-n"}},
+		Grids: []modeltransfer.Grid{{ID: grid, Name: "Counts", Metrics: []modeltransfer.GridMetric{{MetricID: "m-n"}, {MetricID: "m-2n", SortOrder: 1}},
+			Dimensions: []modeltransfer.GridDimension{{DimensionID: "dim-region"}}}},
+		// Tags and positions set: modeltransfer.Import writes a nil dashboard
+		// Tags or widget position as NULL, which the tables refuse — not what
+		// this test is about; docs/OBSERVATIONS.md, "A package without
+		// dashboard tags or widget positions cannot be imported".
+		Dashboards: []modeltransfer.Dashboard{{ID: "dash-counts", Name: "Counts", Tags: []string{"guide"}, Widgets: []modeltransfer.Widget{
+			{WidgetType: "grid", RefID: &grid, PosX: at(0), PosY: at(0), SizeW: at(600), SizeH: at(300), Props: layout},
+		}}},
+	}
+	var modelID, revisionID string
+	if err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		var err error
+		modelID, revisionID, err = modeltransfer.Import(ctx, tx, modeltransfer.ImportRequest{ApplicationID: appID, Package: pkg}, userID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var regionID, props string
+	if err := pool.QueryRow(ctx, `SELECT id::text FROM model.dimension_def WHERE model_id=$1::uuid AND name='region'`, modelID).Scan(&regionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT w.widget_props::text FROM model.dashboard_widget w JOIN model.dashboard_def d ON d.id=w.dashboard_id
+		WHERE d.model_id=$1::uuid AND w.widget_type='grid'`, modelID).Scan(&props); err != nil {
+		t.Fatal(err)
+	}
+	var saved struct {
+		DefaultView struct {
+			Rows      []string          `json:"rows"`
+			Cols      []string          `json:"cols"`
+			FilterSel map[string]string `json:"filter_sel"`
+		} `json:"default_view"`
+	}
+	if err := json.Unmarshal([]byte(props), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if dv := saved.DefaultView; !slices.Equal(dv.Rows, []string{"__metrics__"}) || !slices.Equal(dv.Cols, []string{regionID}) || dv.FilterSel[regionID] != "US" || len(dv.FilterSel) != 1 {
+		t.Fatalf("imported grid layout %s, want its columns and filter on the imported region %s", props, regionID)
+	}
+
+	rowsFor := func(name string) int {
+		t.Helper()
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM runtime.calc_result cr JOIN model.metric_def m ON m.id=cr.metric_id
+			WHERE cr.model_id=$1::uuid AND m.name=$2`, modelID, name).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if err := h.recalcRevisionFromInputs(ctx, modelID, revisionID); err != nil {
+		t.Fatal(err)
+	}
+	if n, d := rowsFor("n_regions"), rowsFor("doubled"); n != 0 || d != 0 {
+		t.Fatalf("the input-driven pass computed n_regions=%d doubled=%d rows; this test assumes it reaches neither", n, d)
+	}
+	h.recalcRevisionCalculated(ctx, modelID, revisionID)
+	for name, want := range map[string]float64{"n_regions": 2, "doubled": 4} {
+		var v float64
+		if err := pool.QueryRow(ctx, `SELECT cr.value FROM runtime.calc_result cr JOIN model.metric_def m ON m.id=cr.metric_id
+			WHERE cr.model_id=$1::uuid AND m.name=$2 AND cr.dim_members->>$3='US' LIMIT 1`, modelID, name, regionID).Scan(&v); err != nil {
+			t.Fatalf("%s after the sign-up recalculation: %v", name, err)
+		}
+		if v != want {
+			t.Errorf("%s = %v, want %v", name, v, want)
+		}
 	}
 }

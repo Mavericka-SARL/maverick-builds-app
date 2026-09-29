@@ -169,6 +169,18 @@ func (s *AddAdminUserRoleOK) SetStatus(val OptString) {
 
 func (*AddAdminUserRoleOK) addAdminUserRoleRes() {}
 
+type AddBARoleMemberBadRequest Error
+
+func (*AddBARoleMemberBadRequest) addBARoleMemberRes() {}
+
+type AddBARoleMemberForbidden Error
+
+func (*AddBARoleMemberForbidden) addBARoleMemberRes() {}
+
+type AddBARoleMemberNotFound Error
+
+func (*AddBARoleMemberNotFound) addBARoleMemberRes() {}
+
 type AddBARoleMemberOK struct {
 	Status OptString `json:"status"`
 }
@@ -4488,6 +4500,22 @@ func (s *CreateApplicationRequestMode) UnmarshalText(data []byte) error {
 	}
 }
 
+type CreateAutomationRuleBadRequest Error
+
+func (*CreateAutomationRuleBadRequest) createAutomationRuleRes() {}
+
+type CreateAutomationRuleNotFound Error
+
+func (*CreateAutomationRuleNotFound) createAutomationRuleRes() {}
+
+type CreateBARoleBadRequest Error
+
+func (*CreateBARoleBadRequest) createBARoleRes() {}
+
+type CreateBARoleForbidden Error
+
+func (*CreateBARoleForbidden) createBARoleRes() {}
+
 type CreateBARoleOK struct {
 	ID OptUUID `json:"id"`
 }
@@ -5136,6 +5164,18 @@ func (s *CreateFormMappingRequestDimensionMappings) init() CreateFormMappingRequ
 	return m
 }
 
+type CreateFormRecordBadRequest Error
+
+func (*CreateFormRecordBadRequest) createFormRecordRes() {}
+
+type CreateFormRecordForbidden Error
+
+func (*CreateFormRecordForbidden) createFormRecordRes() {}
+
+type CreateFormRecordNotFound Error
+
+func (*CreateFormRecordNotFound) createFormRecordRes() {}
+
 // Ref: #/components/schemas/CreateFormRequest
 type CreateFormRequest struct {
 	Name   OptString   `json:"name"`
@@ -5607,6 +5647,9 @@ func (s *CreateMetricRequestTimeSummary) UnmarshalText(data []byte) error {
 // Ref: #/components/schemas/CreateRecordRequest
 type CreateRecordRequest struct {
 	Data OptCreateRecordRequestData `json:"data"`
+	// The new record's status. Anyone who reaches the form may create a draft or a submitted record;
+	// approved and rejected are for an administrator of the form's application (403 otherwise).
+	Status OptCreateRecordRequestStatus `json:"status"`
 }
 
 // GetData returns the value of Data.
@@ -5614,9 +5657,19 @@ func (s *CreateRecordRequest) GetData() OptCreateRecordRequestData {
 	return s.Data
 }
 
+// GetStatus returns the value of Status.
+func (s *CreateRecordRequest) GetStatus() OptCreateRecordRequestStatus {
+	return s.Status
+}
+
 // SetData sets the value of Data.
 func (s *CreateRecordRequest) SetData(val OptCreateRecordRequestData) {
 	s.Data = val
+}
+
+// SetStatus sets the value of Status.
+func (s *CreateRecordRequest) SetStatus(val OptCreateRecordRequestStatus) {
+	s.Status = val
 }
 
 type CreateRecordRequestData map[string]jx.Raw
@@ -5629,6 +5682,75 @@ func (s *CreateRecordRequestData) init() CreateRecordRequestData {
 	}
 	return m
 }
+
+// The new record's status. Anyone who reaches the form may create a draft or a submitted record;
+// approved and rejected are for an administrator of the form's application (403 otherwise).
+type CreateRecordRequestStatus string
+
+const (
+	CreateRecordRequestStatusDraft     CreateRecordRequestStatus = "draft"
+	CreateRecordRequestStatusSubmitted CreateRecordRequestStatus = "submitted"
+	CreateRecordRequestStatusApproved  CreateRecordRequestStatus = "approved"
+	CreateRecordRequestStatusRejected  CreateRecordRequestStatus = "rejected"
+)
+
+// AllValues returns all CreateRecordRequestStatus values.
+func (CreateRecordRequestStatus) AllValues() []CreateRecordRequestStatus {
+	return []CreateRecordRequestStatus{
+		CreateRecordRequestStatusDraft,
+		CreateRecordRequestStatusSubmitted,
+		CreateRecordRequestStatusApproved,
+		CreateRecordRequestStatusRejected,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CreateRecordRequestStatus) MarshalText() ([]byte, error) {
+	switch s {
+	case CreateRecordRequestStatusDraft:
+		return []byte(s), nil
+	case CreateRecordRequestStatusSubmitted:
+		return []byte(s), nil
+	case CreateRecordRequestStatusApproved:
+		return []byte(s), nil
+	case CreateRecordRequestStatusRejected:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CreateRecordRequestStatus) UnmarshalText(data []byte) error {
+	switch CreateRecordRequestStatus(data) {
+	case CreateRecordRequestStatusDraft:
+		*s = CreateRecordRequestStatusDraft
+		return nil
+	case CreateRecordRequestStatusSubmitted:
+		*s = CreateRecordRequestStatusSubmitted
+		return nil
+	case CreateRecordRequestStatusApproved:
+		*s = CreateRecordRequestStatusApproved
+		return nil
+	case CreateRecordRequestStatusRejected:
+		*s = CreateRecordRequestStatusRejected
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type CreateRevisionBadRequest Error
+
+func (*CreateRevisionBadRequest) createRevisionRes() {}
+
+type CreateRevisionForbidden Error
+
+func (*CreateRevisionForbidden) createRevisionRes() {}
+
+type CreateRevisionNotFound Error
+
+func (*CreateRevisionNotFound) createRevisionRes() {}
 
 type CreateRevisionOK struct {
 	ID OptUUID `json:"id"`
@@ -5649,7 +5771,7 @@ func (*CreateRevisionOK) createRevisionRes() {}
 // Ref: #/components/schemas/CreateRevisionRequest
 type CreateRevisionRequest struct {
 	Name string `json:"name"`
-	// Revision to duplicate from; defaults to the model's active revision.
+	// Revision to duplicate from, in its own model; defaults to the model's active revision.
 	SourceRevisionID OptUUID `json:"source_revision_id"`
 }
 
@@ -5916,6 +6038,14 @@ func (s *CreateWidgetRequestWidgetProps) init() CreateWidgetRequestWidgetProps {
 	}
 	return m
 }
+
+type CreateWorkflowBadRequest Error
+
+func (*CreateWorkflowBadRequest) createWorkflowRes() {}
+
+type CreateWorkflowNotFound Error
+
+func (*CreateWorkflowNotFound) createWorkflowRes() {}
 
 // Ref: #/components/schemas/CreateWorkflowRequest
 type CreateWorkflowRequest struct {
@@ -6520,6 +6650,14 @@ func (s *DeleteAutomationRuleOK) SetStatus(val OptString) {
 	s.Status = val
 }
 
+type DeleteBARoleForbidden Error
+
+func (*DeleteBARoleForbidden) deleteBARoleRes() {}
+
+type DeleteBARoleNotFound Error
+
+func (*DeleteBARoleNotFound) deleteBARoleRes() {}
+
 type DeleteBARoleOK struct {
 	Status OptString `json:"status"`
 }
@@ -6533,6 +6671,8 @@ func (s *DeleteBARoleOK) GetStatus() OptString {
 func (s *DeleteBARoleOK) SetStatus(val OptString) {
 	s.Status = val
 }
+
+func (*DeleteBARoleOK) deleteBARoleRes() {}
 
 type DeleteDashboardOK struct {
 	Status OptString `json:"status"`
@@ -6640,6 +6780,10 @@ func (s *DeleteFolderOK) SetStatus(val OptString) {
 	s.Status = val
 }
 
+type DeleteFormForbidden Error
+
+func (*DeleteFormForbidden) deleteFormRes() {}
+
 type DeleteFormMappingOK struct {
 	Status OptString `json:"status"`
 }
@@ -6654,6 +6798,10 @@ func (s *DeleteFormMappingOK) SetStatus(val OptString) {
 	s.Status = val
 }
 
+type DeleteFormNotFound Error
+
+func (*DeleteFormNotFound) deleteFormRes() {}
+
 type DeleteFormOK struct {
 	Status OptString `json:"status"`
 }
@@ -6667,6 +6815,20 @@ func (s *DeleteFormOK) GetStatus() OptString {
 func (s *DeleteFormOK) SetStatus(val OptString) {
 	s.Status = val
 }
+
+func (*DeleteFormOK) deleteFormRes() {}
+
+type DeleteFormRecordConflict Error
+
+func (*DeleteFormRecordConflict) deleteFormRecordRes() {}
+
+type DeleteFormRecordForbidden Error
+
+func (*DeleteFormRecordForbidden) deleteFormRecordRes() {}
+
+type DeleteFormRecordNotFound Error
+
+func (*DeleteFormRecordNotFound) deleteFormRecordRes() {}
 
 type DeleteFormRecordOK struct {
 	Status OptString `json:"status"`
@@ -7566,25 +7728,19 @@ func (s *Error) SetError(val string) {
 	s.Error = val
 }
 
-func (*Error) addBARoleMemberRes()             {}
 func (*Error) addGridDimensionRes()            {}
 func (*Error) createAdminApplicationRes()      {}
 func (*Error) createAdminModelRes()            {}
 func (*Error) createAdminRevisionRes()         {}
-func (*Error) createAutomationRuleRes()        {}
-func (*Error) createBARoleRes()                {}
 func (*Error) createDashboardRes()             {}
 func (*Error) createDashboardWidgetRes()       {}
 func (*Error) createDimensionPropertyRes()     {}
 func (*Error) createFormRes()                  {}
 func (*Error) createIntegrationConnectionRes() {}
-func (*Error) createRevisionRes()              {}
-func (*Error) createWorkflowRes()              {}
 func (*Error) debugFactsRes()                  {}
 func (*Error) deleteAiDocumentRes()            {}
 func (*Error) deleteAiSessionRes()             {}
 func (*Error) deleteDimensionRes()             {}
-func (*Error) deleteFormRecordRes()            {}
 func (*Error) deleteImportJobRes()             {}
 func (*Error) deleteRevisionRes()              {}
 func (*Error) deleteTenantRes()                {}
@@ -7595,6 +7751,7 @@ func (*Error) generateDimensionPeriodsRes()    {}
 func (*Error) getAiSessionRes()                {}
 func (*Error) getBusinessDashboardRes()        {}
 func (*Error) getDemoRes()                     {}
+func (*Error) getFormRecordRes()               {}
 func (*Error) getIntegrationRes()              {}
 func (*Error) getIntegrationRunRes()           {}
 func (*Error) getWorkflowRes()                 {}
@@ -7603,18 +7760,23 @@ func (*Error) grantAdminUserModelAccessRes()   {}
 func (*Error) importDimensionMembersRes()      {}
 func (*Error) listAiProposalsRes()             {}
 func (*Error) listAuditEventsRes()             {}
+func (*Error) listAutomationRulesRes()         {}
+func (*Error) listBARolesRes()                 {}
+func (*Error) listBAUsersRes()                 {}
 func (*Error) listBusinessFoldersRes()         {}
 func (*Error) listBusinessIntegrationsRes()    {}
 func (*Error) listDevPersonasRes()             {}
 func (*Error) listDeveloperFoldersRes()        {}
 func (*Error) listDeveloperIntegrationsRes()   {}
 func (*Error) listFormMappingsRes()            {}
+func (*Error) listFormRecordsRes()             {}
 func (*Error) listFormsRes()                   {}
 func (*Error) listGridsRes()                   {}
 func (*Error) listIntegrationRunsRes()         {}
 func (*Error) listPlansRes()                   {}
+func (*Error) listUserAccessRulesRes()         {}
 func (*Error) listWorkflowRolesRes()           {}
-func (*Error) listWorkflowsRes()               {}
+func (*Error) listWorkflowTriggerEventsRes()   {}
 func (*Error) removeAdminUserRoleRes()         {}
 func (*Error) removeGridDimensionRes()         {}
 func (*Error) renameAiSessionRes()             {}
@@ -7622,19 +7784,14 @@ func (*Error) restoreWorkflowRes()             {}
 func (*Error) revokeAdminUserAppAccessRes()    {}
 func (*Error) revokeAdminUserModelAccessRes()  {}
 func (*Error) setActiveRevisionRes()           {}
-func (*Error) setBARoleDashboardsRes()         {}
 func (*Error) setDefaultModelRes()             {}
-func (*Error) setUserAccessRulesRes()          {}
 func (*Error) startIntegrationOAuthRes()       {}
 func (*Error) testIntegrationConnectionRes()   {}
 func (*Error) updateAutomationRuleRes()        {}
-func (*Error) updateBARoleRes()                {}
 func (*Error) updateDashboardRes()             {}
 func (*Error) updateDashboardWidgetRes()       {}
 func (*Error) updateFolderRes()                {}
 func (*Error) updateFormMappingRes()           {}
-func (*Error) updateFormRecordRes()            {}
-func (*Error) updateFormRes()                  {}
 func (*Error) updateGridRes()                  {}
 func (*Error) updateIntegrationConfigRes()     {}
 func (*Error) updateIntegrationConnectionRes() {}
@@ -7642,7 +7799,6 @@ func (*Error) updateIntegrationRes()           {}
 func (*Error) updateNotificationSettingsRes()  {}
 func (*Error) updateTenantAISettingsRes()      {}
 func (*Error) updateTenantRes()                {}
-func (*Error) updateWorkflowInstanceRes()      {}
 func (*Error) updateWorkflowRes()              {}
 func (*Error) upsertPlanRes()                  {}
 func (*Error) validateIntegrationRes()         {}
@@ -8398,15 +8554,108 @@ func (s *FormMetricMappingDimensionMappings) init() FormMetricMappingDimensionMa
 	return m
 }
 
+// What the caller the form is listed to may do with its records as a whole, decided by the same
+// scope the record routes decide by, so the interface offers only what the server accepts. A caller
+// who reaches the form's application may create records as draft or submitted; an administrator of
+// the application (a business_admin of its workspace, a developer or tenant_admin within their scope,
+//
+//	a platform_admin) may also create them in any status and sync the form.
+//
+// Ref: #/components/schemas/FormPermissions
+type FormPermissions struct {
+	// The caller may re-post the form's records into their metrics (POST /api/forms/{id}/sync).
+	Sync bool `json:"sync"`
+	// The statuses the caller may create a record in, in lifecycle order; empty when none.
+	CreateStatuses []FormPermissionsCreateStatusesItem `json:"create_statuses"`
+}
+
+// GetSync returns the value of Sync.
+func (s *FormPermissions) GetSync() bool {
+	return s.Sync
+}
+
+// GetCreateStatuses returns the value of CreateStatuses.
+func (s *FormPermissions) GetCreateStatuses() []FormPermissionsCreateStatusesItem {
+	return s.CreateStatuses
+}
+
+// SetSync sets the value of Sync.
+func (s *FormPermissions) SetSync(val bool) {
+	s.Sync = val
+}
+
+// SetCreateStatuses sets the value of CreateStatuses.
+func (s *FormPermissions) SetCreateStatuses(val []FormPermissionsCreateStatusesItem) {
+	s.CreateStatuses = val
+}
+
+type FormPermissionsCreateStatusesItem string
+
+const (
+	FormPermissionsCreateStatusesItemDraft     FormPermissionsCreateStatusesItem = "draft"
+	FormPermissionsCreateStatusesItemSubmitted FormPermissionsCreateStatusesItem = "submitted"
+	FormPermissionsCreateStatusesItemApproved  FormPermissionsCreateStatusesItem = "approved"
+	FormPermissionsCreateStatusesItemRejected  FormPermissionsCreateStatusesItem = "rejected"
+)
+
+// AllValues returns all FormPermissionsCreateStatusesItem values.
+func (FormPermissionsCreateStatusesItem) AllValues() []FormPermissionsCreateStatusesItem {
+	return []FormPermissionsCreateStatusesItem{
+		FormPermissionsCreateStatusesItemDraft,
+		FormPermissionsCreateStatusesItemSubmitted,
+		FormPermissionsCreateStatusesItemApproved,
+		FormPermissionsCreateStatusesItemRejected,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s FormPermissionsCreateStatusesItem) MarshalText() ([]byte, error) {
+	switch s {
+	case FormPermissionsCreateStatusesItemDraft:
+		return []byte(s), nil
+	case FormPermissionsCreateStatusesItemSubmitted:
+		return []byte(s), nil
+	case FormPermissionsCreateStatusesItemApproved:
+		return []byte(s), nil
+	case FormPermissionsCreateStatusesItemRejected:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *FormPermissionsCreateStatusesItem) UnmarshalText(data []byte) error {
+	switch FormPermissionsCreateStatusesItem(data) {
+	case FormPermissionsCreateStatusesItemDraft:
+		*s = FormPermissionsCreateStatusesItemDraft
+		return nil
+	case FormPermissionsCreateStatusesItemSubmitted:
+		*s = FormPermissionsCreateStatusesItemSubmitted
+		return nil
+	case FormPermissionsCreateStatusesItemApproved:
+		*s = FormPermissionsCreateStatusesItemApproved
+		return nil
+	case FormPermissionsCreateStatusesItemRejected:
+		*s = FormPermissionsCreateStatusesItemRejected
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
 // Ref: #/components/schemas/FormRecord
 type FormRecord struct {
-	ID        uuid.UUID        `json:"id"`
-	FormID    uuid.UUID        `json:"form_id"`
-	Data      FormRecordData   `json:"data"`
-	Status    FormRecordStatus `json:"status"`
-	CreatedBy uuid.UUID        `json:"created_by"`
-	CreatedAt time.Time        `json:"created_at"`
-	UpdatedAt time.Time        `json:"updated_at"`
+	ID     uuid.UUID        `json:"id"`
+	FormID uuid.UUID        `json:"form_id"`
+	Data   FormRecordData   `json:"data"`
+	Status FormRecordStatus `json:"status"`
+	// The user who created the record; null for a legacy record whose creator was not recorded or was
+	// deleted.
+	CreatedBy   NilUUID           `json:"created_by"`
+	CreatedAt   time.Time         `json:"created_at"`
+	UpdatedAt   time.Time         `json:"updated_at"`
+	Permissions RecordPermissions `json:"permissions"`
 }
 
 // GetID returns the value of ID.
@@ -8430,7 +8679,7 @@ func (s *FormRecord) GetStatus() FormRecordStatus {
 }
 
 // GetCreatedBy returns the value of CreatedBy.
-func (s *FormRecord) GetCreatedBy() uuid.UUID {
+func (s *FormRecord) GetCreatedBy() NilUUID {
 	return s.CreatedBy
 }
 
@@ -8442,6 +8691,11 @@ func (s *FormRecord) GetCreatedAt() time.Time {
 // GetUpdatedAt returns the value of UpdatedAt.
 func (s *FormRecord) GetUpdatedAt() time.Time {
 	return s.UpdatedAt
+}
+
+// GetPermissions returns the value of Permissions.
+func (s *FormRecord) GetPermissions() RecordPermissions {
+	return s.Permissions
 }
 
 // SetID sets the value of ID.
@@ -8465,7 +8719,7 @@ func (s *FormRecord) SetStatus(val FormRecordStatus) {
 }
 
 // SetCreatedBy sets the value of CreatedBy.
-func (s *FormRecord) SetCreatedBy(val uuid.UUID) {
+func (s *FormRecord) SetCreatedBy(val NilUUID) {
 	s.CreatedBy = val
 }
 
@@ -8478,6 +8732,14 @@ func (s *FormRecord) SetCreatedAt(val time.Time) {
 func (s *FormRecord) SetUpdatedAt(val time.Time) {
 	s.UpdatedAt = val
 }
+
+// SetPermissions sets the value of Permissions.
+func (s *FormRecord) SetPermissions(val RecordPermissions) {
+	s.Permissions = val
+}
+
+func (*FormRecord) createFormRecordRes() {}
+func (*FormRecord) getFormRecordRes()    {}
 
 type FormRecordData map[string]jx.Raw
 
@@ -11243,9 +11505,17 @@ type ListAuditEventsOKApplicationJSON []AuditEvent
 
 func (*ListAuditEventsOKApplicationJSON) listAuditEventsRes() {}
 
+type ListAutomationRulesOKApplicationJSON []AutomationRule
+
+func (*ListAutomationRulesOKApplicationJSON) listAutomationRulesRes() {}
+
 type ListBAAvailableBadRequest Error
 
 func (*ListBAAvailableBadRequest) listBAAvailableRes() {}
+
+type ListBAAvailableForbidden Error
+
+func (*ListBAAvailableForbidden) listBAAvailableRes() {}
 
 type ListBAAvailableInternalServerError Error
 
@@ -11310,6 +11580,38 @@ func (s *ListBAAvailableType) UnmarshalText(data []byte) error {
 	}
 }
 
+type ListBARoleDashboardsForbidden Error
+
+func (*ListBARoleDashboardsForbidden) listBARoleDashboardsRes() {}
+
+type ListBARoleDashboardsNotFound Error
+
+func (*ListBARoleDashboardsNotFound) listBARoleDashboardsRes() {}
+
+type ListBARoleDashboardsOKApplicationJSON []uuid.UUID
+
+func (*ListBARoleDashboardsOKApplicationJSON) listBARoleDashboardsRes() {}
+
+type ListBARoleMembersForbidden Error
+
+func (*ListBARoleMembersForbidden) listBARoleMembersRes() {}
+
+type ListBARoleMembersNotFound Error
+
+func (*ListBARoleMembersNotFound) listBARoleMembersRes() {}
+
+type ListBARoleMembersOKApplicationJSON []BARoleMember
+
+func (*ListBARoleMembersOKApplicationJSON) listBARoleMembersRes() {}
+
+type ListBARolesOKApplicationJSON []BARole
+
+func (*ListBARolesOKApplicationJSON) listBARolesRes() {}
+
+type ListBAUsersOKApplicationJSON []BAUser
+
+func (*ListBAUsersOKApplicationJSON) listBAUsersRes() {}
+
 type ListBusinessFoldersOKApplicationJSON []DashboardFolder
 
 func (*ListBusinessFoldersOKApplicationJSON) listBusinessFoldersRes() {}
@@ -11334,7 +11636,11 @@ type ListFormMappingsOKApplicationJSON []FormMetricMapping
 
 func (*ListFormMappingsOKApplicationJSON) listFormMappingsRes() {}
 
-type ListFormsOKApplicationJSON []FormDef
+type ListFormRecordsOKApplicationJSON []FormRecord
+
+func (*ListFormRecordsOKApplicationJSON) listFormRecordsRes() {}
+
+type ListFormsOKApplicationJSON []ListedForm
 
 func (*ListFormsOKApplicationJSON) listFormsRes() {}
 
@@ -11512,6 +11818,10 @@ type ListScimTokensOK struct{}
 
 func (*ListScimTokensOK) listScimTokensRes() {}
 
+type ListUserAccessRulesOKApplicationJSON []UserAccessRule
+
+func (*ListUserAccessRulesOKApplicationJSON) listUserAccessRulesRes() {}
+
 type ListWorkflowDefinitionsOKApplicationJSON []ListWorkflowDefinitionsOKItem
 
 func (*ListWorkflowDefinitionsOKApplicationJSON) listWorkflowDefinitionsRes() {}
@@ -11630,9 +11940,103 @@ type ListWorkflowRolesOKApplicationJSON []WorkflowRoleRef
 
 func (*ListWorkflowRolesOKApplicationJSON) listWorkflowRolesRes() {}
 
+type ListWorkflowTriggerEventsOKApplicationJSON []TriggerEventCatalogItem
+
+func (*ListWorkflowTriggerEventsOKApplicationJSON) listWorkflowTriggerEventsRes() {}
+
+type ListWorkflowsBadRequest Error
+
+func (*ListWorkflowsBadRequest) listWorkflowsRes() {}
+
+type ListWorkflowsNotFound Error
+
+func (*ListWorkflowsNotFound) listWorkflowsRes() {}
+
 type ListWorkflowsOKApplicationJSON []WorkflowDefSummary
 
 func (*ListWorkflowsOKApplicationJSON) listWorkflowsRes() {}
+
+// Merged schema.
+// Ref: #/components/schemas/ListedForm
+type ListedForm struct {
+	ID          uuid.UUID       `json:"id"`
+	ModelID     uuid.UUID       `json:"model_id"`
+	Name        string          `json:"name"`
+	Label       string          `json:"label"`
+	Fields      []FormField     `json:"fields"`
+	CreatedAt   time.Time       `json:"created_at"`
+	Permissions FormPermissions `json:"permissions"`
+}
+
+// GetID returns the value of ID.
+func (s *ListedForm) GetID() uuid.UUID {
+	return s.ID
+}
+
+// GetModelID returns the value of ModelID.
+func (s *ListedForm) GetModelID() uuid.UUID {
+	return s.ModelID
+}
+
+// GetName returns the value of Name.
+func (s *ListedForm) GetName() string {
+	return s.Name
+}
+
+// GetLabel returns the value of Label.
+func (s *ListedForm) GetLabel() string {
+	return s.Label
+}
+
+// GetFields returns the value of Fields.
+func (s *ListedForm) GetFields() []FormField {
+	return s.Fields
+}
+
+// GetCreatedAt returns the value of CreatedAt.
+func (s *ListedForm) GetCreatedAt() time.Time {
+	return s.CreatedAt
+}
+
+// GetPermissions returns the value of Permissions.
+func (s *ListedForm) GetPermissions() FormPermissions {
+	return s.Permissions
+}
+
+// SetID sets the value of ID.
+func (s *ListedForm) SetID(val uuid.UUID) {
+	s.ID = val
+}
+
+// SetModelID sets the value of ModelID.
+func (s *ListedForm) SetModelID(val uuid.UUID) {
+	s.ModelID = val
+}
+
+// SetName sets the value of Name.
+func (s *ListedForm) SetName(val string) {
+	s.Name = val
+}
+
+// SetLabel sets the value of Label.
+func (s *ListedForm) SetLabel(val string) {
+	s.Label = val
+}
+
+// SetFields sets the value of Fields.
+func (s *ListedForm) SetFields(val []FormField) {
+	s.Fields = val
+}
+
+// SetCreatedAt sets the value of CreatedAt.
+func (s *ListedForm) SetCreatedAt(val time.Time) {
+	s.CreatedAt = val
+}
+
+// SetPermissions sets the value of Permissions.
+func (s *ListedForm) SetPermissions(val FormPermissions) {
+	s.Permissions = val
+}
 
 type MarkNotificationReadOK struct {
 	Updated OptInt `json:"updated"`
@@ -12602,6 +13006,51 @@ func (o NilString) Get() (v string, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o NilString) Or(d string) string {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewNilUUID returns new NilUUID with value set to v.
+func NewNilUUID(v uuid.UUID) NilUUID {
+	return NilUUID{
+		Value: v,
+	}
+}
+
+// NilUUID is nullable uuid.UUID.
+type NilUUID struct {
+	Value uuid.UUID
+	Null  bool
+}
+
+// SetTo sets value to v.
+func (o *NilUUID) SetTo(v uuid.UUID) {
+	o.Null = false
+	o.Value = v
+}
+
+// IsNull returns true if value is Null.
+func (o NilUUID) IsNull() bool { return o.Null }
+
+// SetToNull sets value to null.
+func (o *NilUUID) SetToNull() {
+	o.Null = true
+	var v uuid.UUID
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o NilUUID) Get() (v uuid.UUID, ok bool) {
+	if o.Null {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o NilUUID) Or(d uuid.UUID) uuid.UUID {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -13675,6 +14124,52 @@ func (o OptCreateRecordRequestData) Or(d CreateRecordRequestData) CreateRecordRe
 	return d
 }
 
+// NewOptCreateRecordRequestStatus returns new OptCreateRecordRequestStatus with value set to v.
+func NewOptCreateRecordRequestStatus(v CreateRecordRequestStatus) OptCreateRecordRequestStatus {
+	return OptCreateRecordRequestStatus{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateRecordRequestStatus is optional CreateRecordRequestStatus.
+type OptCreateRecordRequestStatus struct {
+	Value CreateRecordRequestStatus
+	Set   bool
+}
+
+// IsSet returns true if OptCreateRecordRequestStatus was set.
+func (o OptCreateRecordRequestStatus) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateRecordRequestStatus) Reset() {
+	var v CreateRecordRequestStatus
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateRecordRequestStatus) SetTo(v CreateRecordRequestStatus) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateRecordRequestStatus) Get() (v CreateRecordRequestStatus, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateRecordRequestStatus) Or(d CreateRecordRequestStatus) CreateRecordRequestStatus {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptCreateWidgetRequestWidgetProps returns new OptCreateWidgetRequestWidgetProps with value set to v.
 func NewOptCreateWidgetRequestWidgetProps(v CreateWidgetRequestWidgetProps) OptCreateWidgetRequestWidgetProps {
 	return OptCreateWidgetRequestWidgetProps{
@@ -14083,6 +14578,52 @@ func (o OptFloat64) Get() (v float64, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptFloat64) Or(d float64) float64 {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptFormRecord returns new OptFormRecord with value set to v.
+func NewOptFormRecord(v FormRecord) OptFormRecord {
+	return OptFormRecord{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptFormRecord is optional FormRecord.
+type OptFormRecord struct {
+	Value FormRecord
+	Set   bool
+}
+
+// IsSet returns true if OptFormRecord was set.
+func (o OptFormRecord) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptFormRecord) Reset() {
+	var v FormRecord
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptFormRecord) SetTo(v FormRecord) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptFormRecord) Get() (v FormRecord, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptFormRecord) Or(d FormRecord) FormRecord {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -17374,6 +17915,107 @@ type PutGoogleConnectionServiceUnavailable struct{}
 
 func (*PutGoogleConnectionServiceUnavailable) putGoogleConnectionRes() {}
 
+// What the caller the record is served to may do to it, computed by the same rule the record's
+// update and delete check ("submitter + admins"). An administrator of the form's application (a
+// business_admin of its workspace, a developer or tenant_admin within their scope, a platform_admin)
+// may edit any record, set any status and delete it. The record's creator may edit and delete it
+// while it is draft or submitted, and move it only between draft and submitted. Anyone else who
+// reaches the form may only read it.
+// Ref: #/components/schemas/RecordPermissions
+type RecordPermissions struct {
+	// The caller may change the record's fields.
+	Edit bool `json:"edit"`
+	// The caller may delete the record.
+	Delete bool `json:"delete"`
+	// The statuses the caller may move the record to; never its current status; empty when none.
+	SetStatus []RecordPermissionsSetStatusItem `json:"set_status"`
+}
+
+// GetEdit returns the value of Edit.
+func (s *RecordPermissions) GetEdit() bool {
+	return s.Edit
+}
+
+// GetDelete returns the value of Delete.
+func (s *RecordPermissions) GetDelete() bool {
+	return s.Delete
+}
+
+// GetSetStatus returns the value of SetStatus.
+func (s *RecordPermissions) GetSetStatus() []RecordPermissionsSetStatusItem {
+	return s.SetStatus
+}
+
+// SetEdit sets the value of Edit.
+func (s *RecordPermissions) SetEdit(val bool) {
+	s.Edit = val
+}
+
+// SetDelete sets the value of Delete.
+func (s *RecordPermissions) SetDelete(val bool) {
+	s.Delete = val
+}
+
+// SetSetStatus sets the value of SetStatus.
+func (s *RecordPermissions) SetSetStatus(val []RecordPermissionsSetStatusItem) {
+	s.SetStatus = val
+}
+
+type RecordPermissionsSetStatusItem string
+
+const (
+	RecordPermissionsSetStatusItemDraft     RecordPermissionsSetStatusItem = "draft"
+	RecordPermissionsSetStatusItemSubmitted RecordPermissionsSetStatusItem = "submitted"
+	RecordPermissionsSetStatusItemApproved  RecordPermissionsSetStatusItem = "approved"
+	RecordPermissionsSetStatusItemRejected  RecordPermissionsSetStatusItem = "rejected"
+)
+
+// AllValues returns all RecordPermissionsSetStatusItem values.
+func (RecordPermissionsSetStatusItem) AllValues() []RecordPermissionsSetStatusItem {
+	return []RecordPermissionsSetStatusItem{
+		RecordPermissionsSetStatusItemDraft,
+		RecordPermissionsSetStatusItemSubmitted,
+		RecordPermissionsSetStatusItemApproved,
+		RecordPermissionsSetStatusItemRejected,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s RecordPermissionsSetStatusItem) MarshalText() ([]byte, error) {
+	switch s {
+	case RecordPermissionsSetStatusItemDraft:
+		return []byte(s), nil
+	case RecordPermissionsSetStatusItemSubmitted:
+		return []byte(s), nil
+	case RecordPermissionsSetStatusItemApproved:
+		return []byte(s), nil
+	case RecordPermissionsSetStatusItemRejected:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *RecordPermissionsSetStatusItem) UnmarshalText(data []byte) error {
+	switch RecordPermissionsSetStatusItem(data) {
+	case RecordPermissionsSetStatusItemDraft:
+		*s = RecordPermissionsSetStatusItemDraft
+		return nil
+	case RecordPermissionsSetStatusItemSubmitted:
+		*s = RecordPermissionsSetStatusItemSubmitted
+		return nil
+	case RecordPermissionsSetStatusItemApproved:
+		*s = RecordPermissionsSetStatusItemApproved
+		return nil
+	case RecordPermissionsSetStatusItemRejected:
+		*s = RecordPermissionsSetStatusItemRejected
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
 type RejectAiProposalConflict Error
 
 func (*RejectAiProposalConflict) rejectAiProposalRes() {}
@@ -17425,6 +18067,14 @@ func (s *RemoveAdminUserRoleOK) SetStatus(val OptString) {
 
 func (*RemoveAdminUserRoleOK) removeAdminUserRoleRes() {}
 
+type RemoveBARoleMemberForbidden Error
+
+func (*RemoveBARoleMemberForbidden) removeBARoleMemberRes() {}
+
+type RemoveBARoleMemberNotFound Error
+
+func (*RemoveBARoleMemberNotFound) removeBARoleMemberRes() {}
+
 type RemoveBARoleMemberOK struct {
 	Status OptString `json:"status"`
 }
@@ -17438,6 +18088,8 @@ func (s *RemoveBARoleMemberOK) GetStatus() OptString {
 func (s *RemoveBARoleMemberOK) SetStatus(val OptString) {
 	s.Status = val
 }
+
+func (*RemoveBARoleMemberOK) removeBARoleMemberRes() {}
 
 // RemoveBrandingForbidden is response for RemoveBranding operation.
 type RemoveBrandingForbidden struct{}
@@ -17518,6 +18170,60 @@ func (s *RenameAiSessionReq) GetTitle() string {
 // SetTitle sets the value of Title.
 func (s *RenameAiSessionReq) SetTitle(val string) {
 	s.Title = val
+}
+
+type ReorderDimensionMembersBadRequest Error
+
+func (*ReorderDimensionMembersBadRequest) reorderDimensionMembersRes() {}
+
+type ReorderDimensionMembersForbidden Error
+
+func (*ReorderDimensionMembersForbidden) reorderDimensionMembersRes() {}
+
+type ReorderDimensionMembersNotFound Error
+
+func (*ReorderDimensionMembersNotFound) reorderDimensionMembersRes() {}
+
+type ReorderDimensionMembersOK struct {
+	Status OptString `json:"status"`
+}
+
+// GetStatus returns the value of Status.
+func (s *ReorderDimensionMembersOK) GetStatus() OptString {
+	return s.Status
+}
+
+// SetStatus sets the value of Status.
+func (s *ReorderDimensionMembersOK) SetStatus(val OptString) {
+	s.Status = val
+}
+
+func (*ReorderDimensionMembersOK) reorderDimensionMembersRes() {}
+
+type ReorderDimensionMembersReq struct {
+	// The level's parent member; null for the top-level members.
+	ParentMemberID OptNilUUID  `json:"parent_member_id"`
+	MemberIds      []uuid.UUID `json:"member_ids"`
+}
+
+// GetParentMemberID returns the value of ParentMemberID.
+func (s *ReorderDimensionMembersReq) GetParentMemberID() OptNilUUID {
+	return s.ParentMemberID
+}
+
+// GetMemberIds returns the value of MemberIds.
+func (s *ReorderDimensionMembersReq) GetMemberIds() []uuid.UUID {
+	return s.MemberIds
+}
+
+// SetParentMemberID sets the value of ParentMemberID.
+func (s *ReorderDimensionMembersReq) SetParentMemberID(val OptNilUUID) {
+	s.ParentMemberID = val
+}
+
+// SetMemberIds sets the value of MemberIds.
+func (s *ReorderDimensionMembersReq) SetMemberIds(val []uuid.UUID) {
+	s.MemberIds = val
 }
 
 type ResendAdminUserInvitationBadGateway Error
@@ -18305,6 +19011,18 @@ func (s *SetActiveRevisionOK) SetStatus(val OptString) {
 
 func (*SetActiveRevisionOK) setActiveRevisionRes() {}
 
+type SetBARoleDashboardsBadRequest Error
+
+func (*SetBARoleDashboardsBadRequest) setBARoleDashboardsRes() {}
+
+type SetBARoleDashboardsForbidden Error
+
+func (*SetBARoleDashboardsForbidden) setBARoleDashboardsRes() {}
+
+type SetBARoleDashboardsNotFound Error
+
+func (*SetBARoleDashboardsNotFound) setBARoleDashboardsRes() {}
+
 type SetBARoleDashboardsOK struct {
 	Status OptString `json:"status"`
 }
@@ -18351,6 +19069,14 @@ func (s *SetRoleDashboardsRequest) GetDashboardIds() []uuid.UUID {
 func (s *SetRoleDashboardsRequest) SetDashboardIds(val []uuid.UUID) {
 	s.DashboardIds = val
 }
+
+type SetUserAccessRulesBadRequest Error
+
+func (*SetUserAccessRulesBadRequest) setUserAccessRulesRes() {}
+
+type SetUserAccessRulesForbidden Error
+
+func (*SetUserAccessRulesForbidden) setUserAccessRulesRes() {}
 
 type SetUserAccessRulesOK struct {
 	Status OptString `json:"status"`
@@ -18652,8 +19378,9 @@ type SignupResult struct {
 	Email         string             `json:"email"`
 	TenantID      uuid.UUID          `json:"tenant_id"`
 	ApplicationID uuid.UUID          `json:"application_id"`
-	ModelID       uuid.UUID          `json:"model_id"`
-	Plan          string             `json:"plan"`
+	// The tour model, the application's default; the three guide models are not returned.
+	ModelID uuid.UUID `json:"model_id"`
+	Plan    string    `json:"plan"`
 	// Dev stack only — the persona the new account is reachable as.
 	DevPersona OptString `json:"dev_persona"`
 }
@@ -19274,6 +20001,14 @@ func (s *SubmitBudgetRequest) SetRevisionID(val OptUUID) {
 	s.RevisionID = val
 }
 
+type SyncFormMappingsForbidden Error
+
+func (*SyncFormMappingsForbidden) syncFormMappingsRes() {}
+
+type SyncFormMappingsNotFound Error
+
+func (*SyncFormMappingsNotFound) syncFormMappingsRes() {}
+
 type SyncFormMappingsOK struct {
 	Status           OptString `json:"status"`
 	Mappings         OptInt    `json:"mappings"`
@@ -19309,6 +20044,8 @@ func (s *SyncFormMappingsOK) SetMappings(val OptInt) {
 func (s *SyncFormMappingsOK) SetRecordsProcessed(val OptInt) {
 	s.RecordsProcessed = val
 }
+
+func (*SyncFormMappingsOK) syncFormMappingsRes() {}
 
 // Ref: #/components/schemas/Task
 type Task struct {
@@ -20547,6 +21284,18 @@ type UpdateAuditSettingsForbidden struct{}
 
 func (*UpdateAuditSettingsForbidden) updateAuditSettingsRes() {}
 
+type UpdateBARoleBadRequest Error
+
+func (*UpdateBARoleBadRequest) updateBARoleRes() {}
+
+type UpdateBARoleForbidden Error
+
+func (*UpdateBARoleForbidden) updateBARoleRes() {}
+
+type UpdateBARoleNotFound Error
+
+func (*UpdateBARoleNotFound) updateBARoleRes() {}
+
 type UpdateBARoleOK struct {
 	Status OptString `json:"status"`
 }
@@ -20835,6 +21584,14 @@ func (s *UpdateFolderOK) SetStatus(val OptString) {
 
 func (*UpdateFolderOK) updateFolderRes() {}
 
+type UpdateFormBadRequest Error
+
+func (*UpdateFormBadRequest) updateFormRes() {}
+
+type UpdateFormForbidden Error
+
+func (*UpdateFormForbidden) updateFormRes() {}
+
 type UpdateFormMappingOK struct {
 	Status OptString `json:"status"`
 }
@@ -20954,6 +21711,10 @@ func (s *UpdateFormMappingRequestDimensionMappings) init() UpdateFormMappingRequ
 	return m
 }
 
+type UpdateFormNotFound Error
+
+func (*UpdateFormNotFound) updateFormRes() {}
+
 type UpdateFormOK struct {
 	Status OptString `json:"status"`
 }
@@ -20970,8 +21731,25 @@ func (s *UpdateFormOK) SetStatus(val OptString) {
 
 func (*UpdateFormOK) updateFormRes() {}
 
+type UpdateFormRecordBadRequest Error
+
+func (*UpdateFormRecordBadRequest) updateFormRecordRes() {}
+
+type UpdateFormRecordConflict Error
+
+func (*UpdateFormRecordConflict) updateFormRecordRes() {}
+
+type UpdateFormRecordForbidden Error
+
+func (*UpdateFormRecordForbidden) updateFormRecordRes() {}
+
+type UpdateFormRecordNotFound Error
+
+func (*UpdateFormRecordNotFound) updateFormRecordRes() {}
+
 type UpdateFormRecordOK struct {
-	Status OptString `json:"status"`
+	Status OptString     `json:"status"`
+	Record OptFormRecord `json:"record"`
 }
 
 // GetStatus returns the value of Status.
@@ -20979,9 +21757,19 @@ func (s *UpdateFormRecordOK) GetStatus() OptString {
 	return s.Status
 }
 
+// GetRecord returns the value of Record.
+func (s *UpdateFormRecordOK) GetRecord() OptFormRecord {
+	return s.Record
+}
+
 // SetStatus sets the value of Status.
 func (s *UpdateFormRecordOK) SetStatus(val OptString) {
 	s.Status = val
+}
+
+// SetRecord sets the value of Record.
+func (s *UpdateFormRecordOK) SetRecord(val OptFormRecord) {
+	s.Record = val
 }
 
 func (*UpdateFormRecordOK) updateFormRecordRes() {}
@@ -21404,7 +22192,9 @@ func (*UpdateNotificationSettingsForbidden) updateNotificationSettingsRes() {}
 
 // Ref: #/components/schemas/UpdateRecordRequest
 type UpdateRecordRequest struct {
-	Data   OptUpdateRecordRequestData   `json:"data"`
+	// The record's new fields; omitted, the record keeps its fields.
+	Data OptUpdateRecordRequestData `json:"data"`
+	// The record's new status; omitted, the record keeps its status.
 	Status OptUpdateRecordRequestStatus `json:"status"`
 }
 
@@ -21428,6 +22218,7 @@ func (s *UpdateRecordRequest) SetStatus(val OptUpdateRecordRequestStatus) {
 	s.Status = val
 }
 
+// The record's new fields; omitted, the record keeps its fields.
 type UpdateRecordRequestData map[string]jx.Raw
 
 func (s *UpdateRecordRequestData) init() UpdateRecordRequestData {
@@ -21439,6 +22230,7 @@ func (s *UpdateRecordRequestData) init() UpdateRecordRequestData {
 	return m
 }
 
+// The record's new status; omitted, the record keeps its status.
 type UpdateRecordRequestStatus string
 
 const (
@@ -21671,6 +22463,14 @@ func (s *UpdateWidgetRequestWidgetProps) init() UpdateWidgetRequestWidgetProps {
 	}
 	return m
 }
+
+type UpdateWorkflowInstanceBadRequest Error
+
+func (*UpdateWorkflowInstanceBadRequest) updateWorkflowInstanceRes() {}
+
+type UpdateWorkflowInstanceNotFound Error
+
+func (*UpdateWorkflowInstanceNotFound) updateWorkflowInstanceRes() {}
 
 type UpdateWorkflowInstanceOK struct {
 	Status OptString `json:"status"`
@@ -23172,8 +23972,10 @@ func (s *WritebackOK) SetOk(val OptBool) {
 func (*WritebackOK) writebackRes() {}
 
 // Identify the cell with `dim_codes` (one member code per dimension). `dim_code` is the older
-// single-dimension form and is still accepted. There is no `revision` field — the revision is
-// named by `revision_id`, and defaults to the model's active revision.
+// single-code form, still accepted: it writes to the one dimension of the request's revision that
+// has a member with that code among the metric's own dimensions, and answers 400 when none or
+// several have it. There is no `revision` field — the revision is named by `revision_id`, and
+// defaults to the model's active revision.
 // Ref: #/components/schemas/WritebackRequest
 type WritebackRequest struct {
 	ModelID uuid.UUID `json:"model_id"`
@@ -23182,7 +23984,9 @@ type WritebackRequest struct {
 	MetricID   uuid.UUID `json:"metric_id"`
 	// DimensionId to member code — the preferred, N-dimensional form.
 	DimCodes OptWritebackRequestDimCodes `json:"dim_codes"`
-	// Legacy single-dimension member code, used when dim_codes is absent.
+	// Older single-code form, used when dim_codes is absent: writes to the one dimension of the
+	// request's revision that has a member with this code among the metric's own dimensions; 400 when
+	// none or several have it.
 	DimCode OptString `json:"dim_code"`
 	Value   float64   `json:"value"`
 }

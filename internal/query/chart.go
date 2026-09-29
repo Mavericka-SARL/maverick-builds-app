@@ -393,23 +393,46 @@ func leafMembersOnly(members []dimMember) []dimMember {
 	return out
 }
 
-// defaultVisibleCode mirrors the frontend's defaultLeafCode: the first
-// member that is nobody's parent, else the first member — "" when the
-// viewer can see no member of the dimension at all.
+// defaultVisibleCode mirrors the frontend's defaultLeafCode
+// (web/src/consoles/dashboardLayout.ts): the first leaf of the member tree
+// walked depth-first — roots in the order members come, each node's
+// children in that order too — else the first member; "" when the viewer
+// can see no member of the dimension at all. A member whose parent is not
+// among members is a root, as in the client's buildMemberTree.
+//
+// Taking the first leaf of the flat list instead picked a different member
+// whenever the order is not depth-first — ALL > {EU > PARIS, US > NYC} with
+// every sort_order 0 comes back EU, NYC, PARIS, US (code order): the flat
+// list's first leaf is NYC, the tree's PARIS.
 func defaultVisibleCode(members []dimMember) string {
 	if len(members) == 0 {
 		return ""
 	}
-	hasChild := make(map[string]bool, len(members))
+	present := make(map[string]bool, len(members))
 	for _, m := range members {
-		if m.ParentCode != "" {
-			hasChild[m.ParentCode] = true
+		present[m.Code] = true
+	}
+	children := make(map[string][]string, len(members))
+	var roots []string
+	seen := make(map[string]bool, len(members))
+	for _, m := range members {
+		if seen[m.Code] {
+			continue
+		}
+		seen[m.Code] = true
+		if m.ParentCode != "" && present[m.ParentCode] {
+			children[m.ParentCode] = append(children[m.ParentCode], m.Code)
+		} else {
+			roots = append(roots, m.Code)
 		}
 	}
-	for _, m := range members {
-		if !hasChild[m.Code] {
-			return m.Code
+	// Below a root every member has exactly one parent, so the walk cannot
+	// meet a cycle (a cycle has no root) and always ends at a leaf.
+	for _, code := range roots {
+		for len(children[code]) > 0 {
+			code = children[code][0]
 		}
+		return code
 	}
 	return members[0].Code
 }
@@ -1219,6 +1242,9 @@ func (r *ChartResolver) loadGridMetrics(ctx context.Context, gridDefID, revision
 }
 
 func (r *ChartResolver) loadGridDimensions(ctx context.Context, gridDefID string) (map[string][]dimMember, map[string]string, error) {
+	// Members come in the grid's order — period first on a time dimension
+	// (time_index), then sort_order, then code — so the plotted axis, the
+	// context selector and defaultVisibleCode see the order the grid shows.
 	rows, err := r.pool.Query(ctx, `
 		SELECT d.id::text, d.name, m.id::text, m.code, m.label, m.sort_order,
 		       COALESCE(pm.code,'') AS parent_code
@@ -1227,7 +1253,7 @@ func (r *ChartResolver) loadGridDimensions(ctx context.Context, gridDefID string
 		JOIN model.dimension_member m ON m.dimension_id = d.id
 		LEFT JOIN model.dimension_member pm ON pm.id = m.parent_member_id
 		WHERE gd.grid_id = $1::uuid
-		ORDER BY d.name, m.sort_order, m.code
+		ORDER BY d.name, m.time_index NULLS LAST, m.sort_order, m.code
 	`, gridDefID)
 	if err != nil {
 		return nil, nil, err

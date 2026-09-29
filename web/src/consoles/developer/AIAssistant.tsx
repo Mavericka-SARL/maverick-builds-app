@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Archive, Bot, Bookmark, Check, ClipboardList, FileText, History, LayoutDashboard, Link2, ListTree, Paperclip,
+  Archive, ArrowUpDown, Bot, Bookmark, Check, ClipboardList, FileText, History, LayoutDashboard, Link2, ListTree, Paperclip,
   Pencil, Plus, Puzzle, Rocket, Ruler, Search, Settings, Table2, Trash2, Users, Workflow, Wrench, X, Zap,
 } from "lucide-react";
 import { api, type AISession, type AIMessage, type AISettings, type AIProposal, type AIProposalStep, type AIProposalWithSummary, type AIDocument } from "../../api/client";
@@ -171,6 +171,7 @@ function ToolIcon({ tool }: { tool: string }) {
     case "update_dashboard_widget":
     case "update_dashboard_folder":
     case "update_business_role": return <Pencil {...props} />;
+    case "reorder_dimension_members": return <ArrowUpDown {...props} />;
     case "create_grid":
     case "add_grid_metric":
     case "add_grid_dimension":   return <Table2 {...props} />;
@@ -216,7 +217,8 @@ const STEP_STATUS_TONE: Record<string, DesignTone> = { success: "success", faile
 const TOOL_LABELS: Record<string, string> = {
   create_metric: "Create metric", update_metric: "Update metric", delete_metric: "Delete metric",
   create_dimension: "Create dimension", update_dimension: "Update dimension", add_dimension_member: "Add dimension member",
-  update_dimension_member: "Update dimension member", add_dimension_property: "Add dimension property",
+  update_dimension_member: "Update dimension member", reorder_dimension_members: "Reorder dimension members",
+  add_dimension_property: "Add dimension property",
   update_dimension_property: "Update dimension property", delete_dimension_property: "Delete dimension property",
   create_grid: "Create grid", add_grid_metric: "Add grid metric", add_grid_dimension: "Add grid dimension",
   create_dashboard: "Create dashboard", add_dashboard_widget: "Add dashboard widget", set_tags: "Set tags",

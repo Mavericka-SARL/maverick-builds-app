@@ -286,7 +286,9 @@ steps carefully.
   stored values, results and dashboard settings over to it. A top-level member placed under a parent that had no
   children takes over that parent's values, as in the console. delete_dimension_member {"dimension_id", "code"} —
   refused while a formula names the code (MEMBER_IN_USE); the member's input values move to history and its children
-  become top-level.
+  become top-level. reorder_dimension_members {"dimension_id", "parent_code" (leave out for the top-level members),
+  "codes": every member of that one level, each once, in the wanted order} — the order grids, pickers and charts show;
+  refused on a time dimension (periods keep calendar order). One step per level.
 - Grids: update_grid {"grid_id", "name"}; delete_grid {"grid_id"} also removes the dashboard widgets that show it;
   remove_grid_metric {"grid_id", "metric_id"}; remove_grid_dimension {"grid_id", "dimension_id"} — refused while a
   metric on the grid reads that dimension; update_grid_dimension {"grid_id", "dimension_id", "display_level": a level

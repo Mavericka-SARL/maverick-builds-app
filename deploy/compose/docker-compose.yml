@@ -162,6 +162,10 @@ services:
   web:
     build:
       context: ../../web
+      # The manuals the console serves at /docs/ (web/Dockerfile). Needs
+      # Compose 2.17 or later.
+      additional_contexts:
+        docs: ../../docs
     restart: unless-stopped
     logging: *logging
     environment:

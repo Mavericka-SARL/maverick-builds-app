@@ -107,6 +107,14 @@ func (s *CreateMetricRequest) setDefaults() {
 }
 
 // setDefaults set default value of fields.
+func (s *CreateRecordRequest) setDefaults() {
+	{
+		val := CreateRecordRequestStatus("draft")
+		s.Status.SetTo(val)
+	}
+}
+
+// setDefaults set default value of fields.
 func (s *CreateTenantRequest) setDefaults() {
 	{
 		val := string("standard")
@@ -159,13 +167,5 @@ func (s *UpdateMetricRequest) setDefaults() {
 	{
 		val := UpdateMetricRequestTimeSummary("sum")
 		s.TimeSummary.SetTo(val)
-	}
-}
-
-// setDefaults set default value of fields.
-func (s *UpdateRecordRequest) setDefaults() {
-	{
-		val := UpdateRecordRequestStatus("draft")
-		s.Status.SetTo(val)
 	}
 }

@@ -125,20 +125,10 @@ func applySheetColumnMap(header []string, rows []importpkg.RawRow, columnMap map
 // and non-negative validation as /api/import/upload — because a sheet a
 // business team maintains holds metric and member names, never UUIDs.
 // The response keeps integrationRun's lenient contract: valid rows commit,
-// invalid rows are counted and detailed.
-func (h *handler) runSheetsGridImport(w http.ResponseWriter, r *http.Request, act *actor, columnMap map[string]string, importMode, csvText string) {
+// invalid rows are counted and detailed. modelID/revisionID are the
+// integration's own, never the request's X-App-Id default model.
+func (h *handler) runSheetsGridImport(w http.ResponseWriter, r *http.Request, act *actor, modelID, revisionID string, columnMap map[string]string, importMode, csvText string) {
 	ctx := r.Context()
-	modelID, err := h.resolveDemoModelID(ctx, r)
-	if err != nil {
-		jsonAccessErr(w, err, "resolve model")
-		return
-	}
-	var revisionID string
-	_ = h.db.QueryRow(ctx, `
-		SELECT COALESCE(active_revision_id::text, (SELECT id::text FROM model.revision WHERE model_id = m.id ORDER BY created_at LIMIT 1), '')
-		FROM core.model m WHERE m.id = $1::uuid
-	`, modelID).Scan(&revisionID)
-
 	header, rawRows, err := importpkg.ParseCSVRows([]byte(csvText))
 	if err != nil {
 		jsonErr(w, fmt.Errorf("parse sheet: %w", err), http.StatusBadRequest)

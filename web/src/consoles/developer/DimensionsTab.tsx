@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from "react";
-import { useQueries, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, X, Pencil, Trash2, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp } from "lucide-react";
+import { useQueries, useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { Plus, X, Pencil, Trash2, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, ArrowUp, ArrowDown } from "lucide-react";
 import { api, type DevDimensionMember, type DevDimension, type DimProperty, type DimensionType, type TimeGranularity, TIME_GRANULARITIES } from "../../api/client";
 import { Button, Field, TextInput, Select, EmptyState, IconButton, StatusBadge, SearchInput, FilterChip, TagInput, TagFilter, Toolbar, ToolbarGroup, useConfirm } from "../../ui";
+import { invalidateModelData } from "../modelDataQueries";
 
 // Tree node type — flat DevDimensionMember enriched with hierarchy metadata.
 interface DimMemberNode extends DevDimensionMember {
@@ -31,12 +32,9 @@ function buildDimensionTree(members: DevDimensionMember[]): DimMemberNode[] {
       n.descendantCount = n.children.reduce((s, c) => s + 1 + c.descendantCount, 0);
     }
   }
+  // Siblings keep the API's order — time period, then sort_order, then code —
+  // the same order grids and member selectors show in Run.
   assign(roots, 0);
-  function sortSiblings(nodes: DimMemberNode[]) {
-    nodes.sort((a, b) => a.code.localeCompare(b.code));
-    for (const n of nodes) sortSiblings(n.children);
-  }
-  sortSiblings(roots);
   return roots;
 }
 
@@ -68,6 +66,21 @@ function dimMaxDepth(roots: DimMemberNode[]): number {
   function walk(n: DimMemberNode) { if (n.level > max) max = n.level; for (const c of n.children) walk(c); }
   for (const r of roots) walk(r);
   return max;
+}
+
+// Every query that carries a dimension's members in their order, besides the
+// grids and charts (invalidateModelData's shared list): Build's other member
+// lists, the Run console's dimensions, grid previews and the Business Admin
+// access-rule picker.
+const MEMBER_LIST_QUERY_KEYS = new Set(["dev-dimensions-all", "dimensions", "public-dims", "grid-preview",
+  "ba-available-dimension-members"]);
+// Resolves once Build's own member list has refetched, so the move controls
+// stay busy until the new order is on screen; a second move built from the
+// old list would quietly undo the first. Everything else refreshes behind it.
+function refreshMemberOrder(qc: QueryClient): Promise<void> {
+  void qc.invalidateQueries({ predicate: (q) => MEMBER_LIST_QUERY_KEYS.has(String(q.queryKey[0])) });
+  void invalidateModelData(qc);
+  return qc.invalidateQueries({ queryKey: ["dev-dimensions"] });
 }
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -254,7 +267,7 @@ export function DimensionsView({ dims, revisionId }: { dims: DevDimension[]; rev
           {shown.map(({ d, match }) => d.dimension_type === "time"
             ? <TimeDimensionCard key={d.id} dim={d} activeTag={filterTag} onTagClick={toggleTag} />
             : <DimensionCard key={d.id} dim={d} allDims={dims} activeTag={filterTag} onTagClick={toggleTag}
-                memberSearch={match === "members" ? q : ""} />)}
+                memberSearch={match === "members" ? q : ""} revisionId={revisionId} />)}
         </div>
       )}
     </div>
@@ -350,11 +363,13 @@ interface DimCardTagProps {
   onTagClick?: (tag: string) => void;
 }
 
-function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "" }: DimCardTagProps & {
+function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "", revisionId }: DimCardTagProps & {
   dim: DevDimension;
   allDims: DevDimension[];
   /** The page-level search, when this dimension matched it through its members. */
   memberSearch?: string;
+  /** The working revision, sent with a reorder. */
+  revisionId?: string;
 }) {
   const qc = useQueryClient();
   const roots = React.useMemo(() => buildDimensionTree(dim.members), [dim.members]);
@@ -422,6 +437,63 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "" 
     onSuccess: () => { invalidate(); setError(null); },
     onError: fail,
   });
+
+  // Member order. Siblings are the members sharing a parent_member_id (none =
+  // the roots), in the API's order; that is the unit the server reorders. When
+  // this dimension's members hang off another dimension's members, the shared
+  // parent sits in that other dimension. A move sends the parent's whole new
+  // child order; the server renumbers the dimension in tree order, which every
+  // grid, selector and chart then shows.
+  const siblingIds = React.useMemo(() => {
+    const groups = new Map<string, string[]>();
+    for (const m of dim.members) {
+      const key = m.parent_member_id ?? "";
+      const ids = groups.get(key);
+      if (ids) ids.push(m.id); else groups.set(key, [m.id]);
+    }
+    return groups;
+  }, [dim.members]);
+  const reorder = useMutation({
+    mutationFn: ({ parentId, ids }: { parentId: string | null; ids: string[] }) =>
+      api.reorderDimensionMembers(dim.id, parentId, ids, revisionId),
+    // Returned, so the move stays pending until the new order is on screen.
+    onSuccess: () => { setError(null); return refreshMemberOrder(qc); },
+    // A refusal often means the children changed underneath (another
+    // developer, the AI Developer): refetch, so the next move is built from
+    // the current children rather than refused the same way again.
+    onError: (e) => { fail(e); return qc.invalidateQueries({ queryKey: ["dev-dimensions"] }); },
+  });
+  // The move button pressed last, to put keyboard focus back on once the
+  // re-rendered rows land (the row may have been moved in the DOM, which
+  // drops focus to the page).
+  const cardRef = React.useRef<HTMLDivElement>(null);
+  const refocus = React.useRef<{ id: string; dir: "up" | "down" } | null>(null);
+  const move = (m: DevDimensionMember, delta: -1 | 1) => {
+    // While a move is in flight the list on screen is the old one; a second
+    // move built from it would undo the first.
+    if (reorder.isPending) return;
+    const ids = [...(siblingIds.get(m.parent_member_id ?? "") ?? [])];
+    const from = ids.indexOf(m.id), to = from + delta;
+    if (from < 0 || to < 0 || to >= ids.length) return;
+    [ids[from], ids[to]] = [ids[to], ids[from]];
+    refocus.current = { id: m.id, dir: delta < 0 ? "up" : "down" };
+    reorder.mutate({ parentId: m.parent_member_id ?? null, ids });
+  };
+  React.useEffect(() => {
+    const want = refocus.current;
+    const card = cardRef.current;
+    if (!want || reorder.isPending || !card) return;
+    refocus.current = null;
+    // Only when the move took focus away, or it is still on a move control;
+    // never pull it back from somewhere the user has gone since.
+    const active = document.activeElement;
+    if (active && active !== document.body && !(card.contains(active) && active.hasAttribute("data-move"))) return;
+    const button = (dir: string) =>
+      card.querySelector<HTMLButtonElement>(`button[data-move="${dir}"][data-member-id="${CSS.escape(want.id)}"]`);
+    // At an end the pressed arrow is now disabled: the opposite one takes focus.
+    const target = [button(want.dir), button(want.dir === "up" ? "down" : "up")].find((b) => b && !b.disabled);
+    target?.focus();
+  }, [reorder.isPending, dim.members]);
   const { confirm, confirmElement } = useConfirm();
 
   const toggle = (id: string) => setExpanded(prev => {
@@ -450,8 +522,21 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "" 
   const [editProps, setEditProps] = useState<Record<string, string>>({});
 
 
+  // A dimension whose members hang off another dimension's members lists them
+  // grouped by that parent (in the parent dimension's order, unassigned last),
+  // so the rows beside each other on screen are the siblings the arrows move
+  // among. Within a group they keep the API's order.
+  const displayRoots = React.useMemo(() => {
+    if (!parentDim) return roots;
+    const rank = new Map(parentDim.members.map((m, i) => [m.id, i]));
+    const at = (n: DimMemberNode) => rank.get(n.parent_member_id ?? "") ?? rank.size;
+    const key = (n: DimMemberNode) => n.parent_member_id ?? "";
+    return [...roots].sort((a, b) => at(a) - at(b) || (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+  }, [roots, parentDim]);
+
   const memberQuery = search || memberSearch;
-  const visibleRows = flattenVisible(roots, expanded, memberQuery);
+  const visibleRows = flattenVisible(displayRoots, expanded, memberQuery);
+  const colCount = 4 + (showProps ? propKeys.length : 0);
 
   const startEdit = (m: DevDimensionMember) => {
     setEditMId(m.id); setEditMCode(m.code); setEditMLabel(m.label); setEditMParent(m.parent_member_id ?? ""); setEditProps({ ...(m.properties ?? {}) });
@@ -459,7 +544,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "" 
   };
 
   return (
-    <div className="mvx-admin-object">
+    <div className="mvx-admin-object" ref={cardRef}>
 
       {/* ── Header ── */}
       <div style={{ background: "var(--color-surface-subtle)", padding: "10px 16px", borderBottom: "1px solid var(--color-border)" }}>
@@ -505,6 +590,11 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "" 
             </div>
           </div>
         )}
+        {!editDimName && parentDim && dim.members.length > 1 && (
+          <p className="mvx-admin-muted" style={{ margin: "6px 0 0" }}>
+            Members are listed by their {parentDim.name}; the arrows move a member within its {parentDim.name}.
+          </p>
+        )}
 
         {/* Search */}
         {!editDimName && dim.members.length > 3 && (
@@ -515,6 +605,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "" 
               <span className="mvx-admin-muted">
                 {visibleRows.length} result{visibleRows.length !== 1 ? "s" : ""}
                 {!search && ` for "${memberSearch}"`}
+                {" · clear the search to reorder"}
               </span>
             )}
           </div>
@@ -534,7 +625,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "" 
 
       {/* ── Tree table ── */}
       <div className="mvx-table-wrap">
-      <table className="mvx-table mvx-table--compact" role="treegrid">
+      <table className="mvx-table mvx-table--compact" role="treegrid" aria-busy={reorder.isPending || undefined}>
         <thead>
           <tr>
             <th style={{ textAlign: "left" }}>Member</th>
@@ -543,24 +634,36 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "" 
               <th key={k} style={{ textAlign: "left", whiteSpace: "nowrap", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }} title={k}>{k}</th>
             ))}
             <th style={{ width: 64, textAlign: "center" }}>Children</th>
-            <th style={{ width: 110 }}>Actions</th>
+            <th style={{ width: 166 }}>Actions</th>
           </tr>
         </thead>
         <tbody>
           {dim.members.length === 0 && (
             <tr>
-              <td colSpan={4 + (showProps ? propKeys.length : 0)} className="mvx-admin-muted" style={{ textAlign: "center", padding: "24px 16px" }}>
+              <td colSpan={colCount} className="mvx-admin-muted" style={{ textAlign: "center", padding: "24px 16px" }}>
                 No members yet. Add a root member below.
               </td>
             </tr>
           )}
 
-          {visibleRows.map((node) => {
+          {visibleRows.map((node, i) => {
             const indent = node.level * 24;
             const isEditing = editMId === node.id;
+            const siblings = siblingIds.get(node.parent_member_id ?? "") ?? [];
+            const position = siblings.indexOf(node.id);
 
             return (
               <React.Fragment key={node.id}>
+                {/* Group heading: a child-of-another-dimension card, where
+                    each parent's members are the siblings the arrows move among. */}
+                {parentDim && (i === 0 || visibleRows[i - 1].parent_member_id !== node.parent_member_id) && (
+                  <tr>
+                    <td colSpan={colCount} className="mvx-admin-muted"
+                      style={{ fontSize: 11, fontWeight: 600, background: "var(--color-surface-subtle)" }}>
+                      {parentDim.name}: {parentLabelOf(node.parent_member_id) ?? "unassigned"}
+                    </td>
+                  </tr>
+                )}
                 {/* Member row */}
                 <tr role="row" aria-level={node.level + 1} aria-expanded={node.childCount > 0 ? expanded.has(node.id) : undefined}
                   style={isEditing ? { background: "var(--color-brand-50)" } : undefined}>
@@ -667,6 +770,22 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "" 
                             <Plus size={13} />
                           </IconButton>
                         )}
+                        {/* Disabled only at the ends and while searching (the
+                            search hides siblings the arrows would swap with).
+                            While a move is in flight they are aria-disabled
+                            instead, so a keyboard user keeps focus. */}
+                        <IconButton aria-label={`Move member ${node.label} up`} title={memberQuery ? "Clear the search to reorder" : "Move up"} size={26}
+                          data-move="up" data-member-id={node.id}
+                          disabled={!!memberQuery || position <= 0} aria-disabled={reorder.isPending || undefined}
+                          style={reorder.isPending ? { cursor: "progress" } : undefined} onClick={() => move(node, -1)}>
+                          <ArrowUp size={13} />
+                        </IconButton>
+                        <IconButton aria-label={`Move member ${node.label} down`} title={memberQuery ? "Clear the search to reorder" : "Move down"} size={26}
+                          data-move="down" data-member-id={node.id}
+                          disabled={!!memberQuery || position < 0 || position >= siblings.length - 1} aria-disabled={reorder.isPending || undefined}
+                          style={reorder.isPending ? { cursor: "progress" } : undefined} onClick={() => move(node, 1)}>
+                          <ArrowDown size={13} />
+                        </IconButton>
                         <IconButton aria-label={`Edit member ${node.label}`} title="Edit" size={26} onClick={() => startEdit(node)}>
                           <Pencil size={13} />
                         </IconButton>
@@ -847,6 +966,13 @@ function TimeDimensionCard({ dim, activeTag, onTagClick }: DimCardTagProps & { d
               </IconButton>
             </div>
           </div>
+        )}
+        {/* No move controls here: the server refuses to reorder a time
+            dimension, whose order is the calendar. */}
+        {!editDimName && (
+          <p className="mvx-admin-muted" style={{ margin: "6px 0 0" }}>
+            Periods keep calendar order: leaf periods by their dates, aggregates by their first period. To move a period, change its dates.
+          </p>
         )}
       </div>
 

@@ -69,7 +69,7 @@ export function DashboardsView({ ctx, onOpenInstance }: { ctx: DemoContext; onOp
   if (isLoading) return <LoadingState label="Loading dashboards…" />;
 
   if (allDashboards.length === 0) {
-    return <EmptyState label="No dashboards available. Ask a Developer to create dashboards in the Developer Console." />;
+    return <EmptyState label="No dashboards are available to you yet. A developer builds them under Build › Dashboards, and a business admin decides which roles see them." />;
   }
 
   return (

@@ -2263,31 +2263,6 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			return "", "", fmt.Errorf("copy facts into new revision: %w", err)
 		}
 
-		// Copy integrations, remapping the target to the new revision's
-		// copy of the grid/dashboard/form it points at. Mirrors Step G of
-		// the developer-console duplicate-revision handler — this
-		// AI-draft path never copied integrations at all before.
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO model.integration_def (model_id, name, type, target_type, target_id, config, revision_id)
-			SELECT i.model_id, i.name, i.type, i.target_type,
-				COALESCE(
-					(SELECT ng.id FROM model.grid_def og
-					 JOIN model.grid_def ng ON ng.model_id = og.model_id AND ng.name = og.name AND ng.revision_id = $2::uuid
-					 WHERE og.id = i.target_id AND i.target_type = 'grid'),
-					(SELECT ndd.id FROM model.dashboard_def odd
-					 JOIN model.dashboard_def ndd ON ndd.model_id = odd.model_id AND ndd.name = odd.name AND ndd.revision_id = $2::uuid
-					 WHERE odd.id = i.target_id AND i.target_type = 'dashboard'),
-					(SELECT nf.id FROM model.form_def ofd
-					 JOIN model.form_def nf ON nf.model_id = ofd.model_id AND nf.name = ofd.name AND nf.revision_id = $2::uuid
-					 WHERE ofd.id = i.target_id AND i.target_type = 'form'),
-					i.target_id),
-				i.config, $2::uuid
-			FROM model.integration_def i
-			WHERE i.model_id=$1::uuid AND i.revision_id=$3::uuid
-		`, e.modelID, newID, srcID); err != nil {
-			return "", "", fmt.Errorf("copy integrations into new revision: %w", err)
-		}
-
 		// Copy forms, their records, and form-metric mappings. Field
 		// definitions embed dimension_id/metric_id refs and mapping rows embed
 		// form/grid/metric/dimension refs — all remapped by name join against
@@ -2450,14 +2425,71 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			}
 		}
 
-		// Copy workflow definitions and automation rules (application-scoped,
-		// resolved through this model's application). context_schema entries
-		// binding a context variable to a dimension are remapped to the new
-		// revision's dimension; rules' workflow/form/grid refs are remapped
-		// the same way. Mirrors Step H of the developer-console
-		// duplicate-revision handler verbatim — an AI-created workflow needs
-		// an automation rule to ever fire, and update_workflow_def can only
-		// find a pre-session workflow if this copy step exists.
+		// Copy integrations — the same statement as the developer-console
+		// duplicateRevision's Step G (internal/gateway/handler.go), which
+		// says what it remaps and why: a connector names its target in the
+		// target_id column and again in config.target_id (the copy its runs
+		// read and write), and both are pointed at the new revision's copy of
+		// the grid, form, dashboard, dimension or metric. It runs here, after
+		// forms and dashboards are copied: run before them, as it used to, a
+		// form or dashboard target found no copy and kept naming the source
+		// revision's row. It runs before the automation rules, whose
+		// source_integration_id is pointed at these copies, and before the
+		// widget ref_id remap, which resolves integration_button widgets
+		// against them.
+		if _, err := tx.Exec(ctx, `
+			WITH idmap(kind, old_id, new_id) AS (
+				          SELECT 'grid', o.id, n.id FROM model.grid_def o
+				            JOIN model.grid_def n ON n.model_id = o.model_id AND n.name = o.name AND n.revision_id = $2::uuid
+				           WHERE o.model_id = $1::uuid AND o.revision_id <> $2::uuid
+				UNION ALL SELECT 'form', o.id, n.id FROM model.form_def o
+				            JOIN model.form_def n ON n.model_id = o.model_id AND n.name = o.name AND n.revision_id = $2::uuid
+				           WHERE o.model_id = $1::uuid AND o.revision_id <> $2::uuid
+				UNION ALL SELECT 'dashboard', o.id, n.id FROM model.dashboard_def o
+				            JOIN model.dashboard_def n ON n.model_id = o.model_id AND n.name = o.name AND n.revision_id = $2::uuid
+				           WHERE o.model_id = $1::uuid AND o.revision_id <> $2::uuid
+				UNION ALL SELECT 'dimension', o.id, n.id FROM model.dimension_def o
+				            JOIN model.dimension_def n ON n.model_id = o.model_id AND n.name = o.name AND n.revision_id = $2::uuid
+				           WHERE o.model_id = $1::uuid AND o.revision_id <> $2::uuid
+				UNION ALL SELECT 'metric', o.id, n.id FROM model.metric_def o
+				            JOIN model.metric_def n ON n.model_id = o.model_id AND n.name = o.name AND n.revision_id = $2::uuid
+				           WHERE o.model_id = $1::uuid AND o.revision_id <> $2::uuid
+			)
+			INSERT INTO model.integration_def (model_id, revision_id, name, description, type, target_type, target_id, config,
+			                                   status, tags, direction, enabled, connection_id, config_version,
+			                                   last_tested_hash, last_tested_at)
+			SELECT i.model_id, $2::uuid, i.name, i.description, i.type, i.target_type,
+				COALESCE((SELECT m.new_id FROM idmap m WHERE m.old_id = i.target_id
+				          ORDER BY m.kind = COALESCE(NULLIF(i.target_type,''), 'grid') DESC LIMIT 1), i.target_id),
+				CASE WHEN jsonb_typeof(i.config) = 'object' THEN COALESCE((
+					SELECT jsonb_object_agg(e.key, COALESCE((
+						SELECT to_jsonb(m.new_id::text) FROM idmap m
+						 WHERE e.key LIKE '%\_id' AND jsonb_typeof(e.value) = 'string'
+						   AND replace(m.old_id::text, '-', '') = lower(regexp_replace(btrim(e.value #>> '{}'), '^urn:uuid:|[{}-]', '', 'gi'))
+						 ORDER BY m.kind = CASE WHEN e.key = 'target_id'
+						                        THEN COALESCE(NULLIF(i.config->>'target_type',''), NULLIF(i.target_type,''), 'grid')
+						                        ELSE regexp_replace(e.key, '^(.*_)?([^_]+)_id$', '\2') END DESC
+						 LIMIT 1), e.value))
+					FROM jsonb_each(i.config) e), i.config)
+				ELSE i.config END,
+				i.status, i.tags, i.direction, i.enabled, i.connection_id, i.config_version,
+				i.last_tested_hash, i.last_tested_at
+			FROM model.integration_def i
+			WHERE i.model_id=$1::uuid AND i.revision_id=$3::uuid
+		`, e.modelID, newID, srcID); err != nil {
+			return "", "", fmt.Errorf("copy integrations into new revision: %w", err)
+		}
+
+		// Copy workflow definitions and automation rules — the same
+		// statement as Step H of the developer-console duplicateRevision
+		// (internal/gateway/handler.go), which says what it remaps and why:
+		// a workflow's subject_config and context_schema, and a rule's
+		// workflow, form, grid and connector refs, are pointed at this
+		// revision's copies, and a schedule rule keeps its cron settings
+		// (without them the copy failed automation_rule_schedule_cron_chk).
+		// An AI-created workflow needs an automation rule to ever fire, and
+		// update_workflow_def can only find a pre-session workflow if this
+		// copy step exists.
 		if _, err := tx.Exec(ctx, `
 			WITH
 			dim_map AS (
@@ -2471,7 +2503,21 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 				INSERT INTO workflow.workflow_def
 				  (application_id, name, description, trigger_event, subject_type, subject_config, steps,
 				   status, created_by, updated_by, published_at, archived_at, context_schema, revision_id)
-				SELECT wd.application_id, wd.name, wd.description, wd.trigger_event, wd.subject_type, wd.subject_config, wd.steps,
+				SELECT wd.application_id, wd.name, wd.description, wd.trigger_event, wd.subject_type,
+					-- subject_config binds the workflow to a form ({"form_id"}) or a
+					-- grid metric ({"grid_id","metric_id"}) of THIS revision; copied
+					-- verbatim it kept pointing at the source revision's objects.
+					COALESCE(wd.subject_config, '{}'::jsonb)
+					|| COALESCE((SELECT jsonb_build_object('form_id', nfd.id::text) FROM model.form_def ofd
+					             JOIN model.form_def nfd ON nfd.model_id = ofd.model_id AND nfd.name = ofd.name AND nfd.revision_id = $2::uuid
+					             WHERE ofd.id::text = wd.subject_config->>'form_id'), '{}'::jsonb)
+					|| COALESCE((SELECT jsonb_build_object('grid_id', ngd.id::text) FROM model.grid_def ogd
+					             JOIN model.grid_def ngd ON ngd.model_id = ogd.model_id AND ngd.name = ogd.name AND ngd.revision_id = $2::uuid
+					             WHERE ogd.id::text = wd.subject_config->>'grid_id'), '{}'::jsonb)
+					|| COALESCE((SELECT jsonb_build_object('metric_id', nmd.id::text) FROM model.metric_def omd
+					             JOIN model.metric_def nmd ON nmd.model_id = omd.model_id AND nmd.name = omd.name AND nmd.revision_id = $2::uuid
+					             WHERE omd.id::text = wd.subject_config->>'metric_id'), '{}'::jsonb),
+					wd.steps,
 					wd.status, wd.created_by, wd.updated_by, wd.published_at, wd.archived_at,
 					COALESCE((
 						SELECT jsonb_agg(
@@ -2496,7 +2542,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			new_rules AS (
 				INSERT INTO workflow.automation_rule
 				  (application_id, name, description, trigger_type, workflow_name, enabled,
-				   workflow_def_id, source_form_id, source_grid_id, revision_id)
+				   workflow_def_id, source_form_id, source_grid_id, source_integration_id,
+				   cron_expr, timezone, misfire_policy, max_retries, retry_backoff_seconds, revision_id)
 				SELECT ar.application_id, ar.name, ar.description, ar.trigger_type, ar.workflow_name, ar.enabled,
 					wm.new_id,
 					(SELECT nf.id FROM model.form_def ofd
@@ -2505,6 +2552,11 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 					(SELECT ng.id FROM model.grid_def og
 					 JOIN model.grid_def ng ON ng.model_id = og.model_id AND ng.name = og.name AND ng.revision_id = $2::uuid
 					 WHERE og.id = ar.source_grid_id),
+					COALESCE((SELECT min(ni.id::text)::uuid FROM model.integration_def oi
+					          JOIN model.integration_def ni ON ni.model_id = oi.model_id AND ni.name = oi.name AND ni.revision_id = $2::uuid
+					          WHERE oi.id = ar.source_integration_id AND oi.model_id = $1::uuid
+					          HAVING count(*) = 1), ar.source_integration_id),
+					ar.cron_expr, ar.timezone, ar.misfire_policy, ar.max_retries, ar.retry_backoff_seconds,
 					$2::uuid
 				FROM workflow.automation_rule ar
 				LEFT JOIN wf_map wm ON wm.old_id = ar.workflow_def_id

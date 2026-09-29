@@ -107,6 +107,12 @@ const (
 	EventMetricDeleted    EventType = "metric.deleted"
 	EventDimensionUpdated EventType = "dimension.updated"
 	EventDimensionDeleted EventType = "dimension.deleted"
+	// EventDimensionMembersReordered: a developer set the order of one
+	// level of a dimension's members (PUT .../members/order). Its own type,
+	// not a dimension.updated sub-action: the metadata carries the parent
+	// and the whole new order, which no other member edit has.
+	EventDimensionMembersReordered EventType = "dimension.members_reordered"
+
 	EventGridCreated      EventType = "grid.created"
 	EventGridUpdated      EventType = "grid.updated"
 	EventGridDeleted      EventType = "grid.deleted"

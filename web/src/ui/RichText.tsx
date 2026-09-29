@@ -11,7 +11,10 @@ import type { ReactNode } from "react";
  * Understood, because it is what explanatory copy needs:
  *   # ## ###   headings
  *   **bold**  *italic*  `code`
- *   [label](https://example.com) and [label](/console/path)
+ *   [label](https://example.com) and [label](/docs/formulas-manual/manual.html)
+ *     — an http(s) link, or any same-origin path, opens in a new tab: the
+ *     console has no path routes, so following one in place would unload the
+ *     console and lose its state. A bare #fragment stays in place.
  *   - bullets, 1. numbers
  *   > quote
  *   ---        rule
@@ -24,10 +27,18 @@ const INLINE = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\([^)\s]+\))/g;
 /** Only schemes a browser may follow from a tenant's own text. */
 function safeHref(raw: string): string | null {
   const href = raw.trim();
+  // "//host" and "/\host" (browsers read "\" as "/") are protocol-relative:
+  // they leave the site while looking like a path on it.
+  if (/^\/[/\\]/.test(href)) return null;
   if (href.startsWith("/") || href.startsWith("#")) return href;
   if (/^https?:\/\//i.test(href)) return href;
   if (/^mailto:/i.test(href)) return href;
   return null;
+}
+
+/** Links that leave the console open behind them. */
+function opensInNewTab(href: string): boolean {
+  return /^https?:\/\//i.test(href) || href.startsWith("/");
 }
 
 function inline(text: string, keyPrefix: string): ReactNode[] {
@@ -43,7 +54,7 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
       const label = part.slice(1, close);
       const href = safeHref(part.slice(close + 2, -1));
       out.push(href
-        ? <a key={key} href={href} target={href.startsWith("http") ? "_blank" : undefined} rel="noopener noreferrer" style={{ color: "var(--color-primary)" }}>{label}</a>
+        ? <a key={key} href={href} target={opensInNewTab(href) ? "_blank" : undefined} rel="noopener noreferrer" style={{ color: "var(--color-brand-600)", textDecoration: "underline", textUnderlineOffset: 2 }}>{label}</a>
         : <span key={key}>{label}</span>);
     } else out.push(part);
   });

@@ -1,8 +1,9 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Pause, Play, Pencil, Trash2 } from "lucide-react";
-import { api, type AutomationRule, type Execution, type FormDef, type GridDef, type WorkflowDefSummary , type IntegrationDef } from "../../api/client";
+import { api, type AutomationRule, type Execution, type FormDef, type GridDef, type WorkflowDefSummary , type IntegrationDef, type TriggerEventCatalogItem } from "../../api/client";
 import { SectionHeader, Button, EmptyState, StatusBadge, IconButton, Field, TextInput, Select, useConfirm, type DesignTone } from "../../ui";
+import { triggerTypeFromWorkflow, ruleTriggerFromWorkflow, useTriggerEvents } from "./workflowConstants";
 
 const EXEC_STATUS_TONE: Record<string, DesignTone> = {
   completed: "success", running: "warning", failed: "danger", cancelled: "neutral",
@@ -14,20 +15,7 @@ type RuleState = { name: string; description: string; trigger_type: string; work
 // expression in the body (re)configures scheduling.
 const ruleBody = (r: RuleState) => r.trigger_type === "schedule" ? r : { ...r, cron_expr: undefined, timezone: undefined, misfire_policy: undefined };
 
-// The workflow's trigger event (a catalog key) → the rule trigger type the
-// engine dispatches on. Per-form keys ("expense_request.submitted") and
-// per-integration keys ("actuals_csv.import.completed") used to fall
-// through to "manual", so a rule created from such a workflow never fired
-// on the event it was designed for.
-function triggerTypeFromWorkflow(triggerEvent: string): string {
-  if (triggerEvent === "form.submit" || triggerEvent.endsWith(".submitted")) return "form_submit";
-  if (triggerEvent === "api.workflow.start") return "api";
-  if (triggerEvent.endsWith(".import.completed")) return "integration_completed";
-  if (triggerEvent.endsWith(".import.failed")) return "integration_failed";
-  return "manual";
-}
-
-export function AutomationTab() {
+export function AutomationTab({ revisionId }: { revisionId?: string } = {}) {
   const qc = useQueryClient();
   const empty: RuleState = { name: "", description: "", trigger_type: "manual", workflow_name: "", workflow_def_id: "", source_form_id: "", source_grid_id: "", source_integration_id: "", cron_expr: "", timezone: "UTC", misfire_policy: "skip" };
   const [showCreate, setShowCreate] = useState(false);
@@ -38,21 +26,27 @@ export function AutomationTab() {
   const { data: demoCtx } = useQuery({ queryKey: ["demo"], queryFn: api.getDemo, staleTime: 60_000 });
   const appId = demoCtx?.app_id ?? "";
 
-  const { data: rules = [] } = useQuery({ queryKey: ["automation-rules"], queryFn: () => api.listAutomationRules() });
+  // Everything here belongs to the working revision, like the other Build
+  // tabs: without it the server fell back to the default model's live
+  // revision, so rules (and the workflows, forms, grids and integrations a
+  // rule can point at) came from a different model than the one being built.
+  const { data: rules = [] } = useQuery({ queryKey: ["automation-rules", revisionId], queryFn: () => api.listAutomationRules(revisionId) });
   const { data: workflows = [] } = useQuery({
-    queryKey: ["dev-workflows", appId],
-    queryFn: () => api.listWorkflowDefs(appId),
+    queryKey: ["dev-workflows", appId, revisionId],
+    queryFn: () => api.listWorkflowDefs(appId, revisionId),
     enabled: !!appId,
   });
-  const { data: forms = [] } = useQuery({ queryKey: ["forms"], queryFn: () => api.listForms() });
-  const { data: grids = [] } = useQuery({ queryKey: ["dev-grids", undefined], queryFn: () => api.listGrids() });
-  const { data: integrations = [] } = useQuery({ queryKey: ["integrations", undefined], queryFn: () => api.listIntegrations() });
+  const { data: forms = [] } = useQuery({ queryKey: ["forms", revisionId], queryFn: () => api.listForms(revisionId) });
+  const { data: grids = [] } = useQuery({ queryKey: ["dev-grids", revisionId], queryFn: () => api.listGrids(revisionId) });
+  const { data: integrations = [] } = useQuery({ queryKey: ["integrations", revisionId], queryFn: () => api.listIntegrations(revisionId) });
+  // Names the one form or integration a per-source workflow starts on.
+  const { data: triggerCatalog } = useTriggerEvents(appId, revisionId);
   const { data: executions = [] } = useQuery({
     queryKey: ["executions"], queryFn: api.listExecutions, refetchInterval: 8_000,
   });
 
   const createRule = useMutation({
-    mutationFn: () => api.createAutomationRule(ruleBody(newRule)),
+    mutationFn: () => api.createAutomationRule(ruleBody(newRule), revisionId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["automation-rules"] });
       setNewRule(empty);
@@ -101,7 +95,7 @@ export function AutomationTab() {
 
         {showCreate && (
           <div className="mvx-panel" style={{ padding: 20, marginBottom: 16 }}>
-            <RuleForm rule={newRule} onChange={setNewRule} workflows={workflows} forms={forms} grids={grids} integrations={integrations} />
+            <RuleForm rule={newRule} onChange={setNewRule} workflows={workflows} forms={forms} grids={grids} integrations={integrations} catalog={triggerCatalog} />
             <Button
               variant="primary"
               style={{ marginTop: 12 }}
@@ -122,7 +116,7 @@ export function AutomationTab() {
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {(rules as AutomationRule[]).map((rule) => editId === rule.id ? (
               <div key={rule.id} className="mvx-panel" style={{ padding: 16, borderColor: "var(--color-brand-200)" }}>
-                <RuleForm rule={editRule} onChange={setEditRule} workflows={workflows} forms={forms} grids={grids} integrations={integrations} />
+                <RuleForm rule={editRule} onChange={setEditRule} workflows={workflows} forms={forms} grids={grids} integrations={integrations} catalog={triggerCatalog} />
                 <div className="mvx-admin-inline-form" style={{ marginTop: 12 }}>
                   <Button variant="primary" disabled={editRule.trigger_type === "schedule" && !editRule.cron_expr} loading={updateRule.isPending} loadingLabel="Saving…" onClick={() => updateRule.mutate()}>
                     Save
@@ -253,13 +247,14 @@ export function AutomationTab() {
 }
 
 function RuleForm({
-  rule, onChange, workflows, forms, grids, integrations }: {
+  rule, onChange, workflows, forms, grids, integrations, catalog }: {
   rule: RuleState;
   onChange: (r: RuleState) => void;
   workflows: WorkflowDefSummary[];
   forms: FormDef[];
   grids: GridDef[];
   integrations: IntegrationDef[];
+  catalog?: TriggerEventCatalogItem[];
 }) {
   const published = workflows.filter(w => w.status === "published");
   const others = workflows.filter(w => w.status !== "published");
@@ -270,14 +265,17 @@ function RuleForm({
 
   const handleWorkflowSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const wf = workflows.find(w => w.id === e.target.value);
+    // A per-form or per-integration workflow also fixes the source it
+    // starts on; left empty, the rule would fire for every form or import.
+    const derived = wf ? ruleTriggerFromWorkflow(wf.trigger_event, catalog) : undefined;
     onChange({
       ...rule,
       workflow_def_id: e.target.value,
       workflow_name: wf?.name ?? "",
-      trigger_type: wf ? triggerTypeFromWorkflow(wf.trigger_event) : rule.trigger_type,
-      source_form_id: "",
+      trigger_type: derived ? derived.trigger_type : rule.trigger_type,
+      source_form_id: derived?.source_form_id ?? "",
       source_grid_id: "",
-      source_integration_id: "",
+      source_integration_id: derived?.source_integration_id ?? "",
     });
   };
   // An event workflow fixes the trigger type. A manual workflow can be

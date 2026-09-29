@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+
+	"github.com/mavericks-engine/mavericks/internal/workflow/assignee"
 )
 
 // Task reminders.
@@ -156,9 +158,14 @@ func (r *Reminder) dueSteps(ctx context.Context, leadHours int32, limit int) ([]
 	return out, rows.Err()
 }
 
-// assignees lists the users who may act on a step: the same platform-role and
-// named-business-role matching the inbox and IsAssigneeEligible use, so a
-// reminder reaches exactly the people who see the task.
+// assignees lists the users who may act on a step that names assignee roles:
+// the workspace boundary of workflow assignment (assignee.SQL) that the inbox
+// and IsAssigneeEligible draw, so a reminder reaches the people who see the
+// task and no one else. A step naming no role reminds nobody.
+//
+// It used to match a named platform role held anywhere — every tenant's
+// holders of it were reminded, with the workflow's and the step's names —
+// and a named business role of any workspace of the application's tenant.
 func (r *Reminder) assignees(ctx context.Context, stepID string) ([]string, error) {
 	var rolesJSON []byte
 	var appID string
@@ -182,22 +189,10 @@ func (r *Reminder) assignees(ctx context.Context, stepID string) ([]string, erro
 		return nil, nil
 	}
 	rows, err := r.Store.pool.Query(ctx, `
-		SELECT DISTINCT u.id::text
+		SELECT u.id::text
 		FROM identity.user u
-		WHERE EXISTS (
-		        SELECT 1 FROM identity.role_assignment ra
-		        WHERE ra.user_id = u.id AND ra.role::text = ANY($1)
-		    )
-		   OR EXISTS (
-		        SELECT 1
-		        FROM identity.business_role_member brm
-		        JOIN identity.business_role br ON br.id = brm.role_id
-		        JOIN core.workspace bws ON bws.id = br.workspace_id
-		        JOIN core.application app ON app.id = $2::uuid
-		             AND (app.workspace_id = bws.id OR app.customer_id = bws.customer_id)
-		        WHERE brm.user_id = u.id AND br.name = ANY($1)
-		    )
-	`, roles, appID)
+		WHERE `+assignee.SQL("$2::uuid", "to_jsonb($1::text[])", "u.id"),
+		roles, appID)
 	if err != nil {
 		return nil, err
 	}

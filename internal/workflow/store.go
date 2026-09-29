@@ -21,6 +21,7 @@ import (
 	workflowv1 "github.com/mavericks-engine/mavericks/gen/go/workflow/v1"
 	"github.com/mavericks-engine/mavericks/internal/calculation"
 	"github.com/mavericks-engine/mavericks/internal/notification"
+	"github.com/mavericks-engine/mavericks/internal/workflow/assignee"
 	"github.com/mavericks-engine/mavericks/internal/writeguard"
 )
 
@@ -311,17 +312,19 @@ func (s *Store) ListWorkflowInstances(ctx context.Context, applicationID string,
 	return instances, rows.Err()
 }
 
-// IsAssigneeEligible reports whether userID is an eligible assignee for
-// stepID's step_def.assignee_roles — a step with no assignee_roles (or an
-// empty list) is completable by anyone. Checks both a direct platform-role
-// assignment (identity.role_assignment) and business-role membership
-// (identity.business_role_member) scoped to the step's own application's
-// workspace/customer. This is the single shared implementation of the real
-// business rule for step-completion eligibility — both the HTTP task-inbox
-// path (internal/gateway/handler.go's taskAction) and this package's own
-// gRPC Server.CompleteStep call it, after a synchronization audit found the
-// two surfaces had drifted onto entirely different (and, on the gRPC side,
-// structurally broken) checks.
+// IsAssigneeEligible reports whether userID is an assignee of stepID, an
+// in-progress step, within the workspace boundary of workflow assignment
+// (assignee.SQL): a role the step names counts only when it is held for the
+// step's application, and a step naming no role is open to those who reach
+// the application. It is the whole check behind the gRPC
+// WorkflowService.CompleteStep (Server.CompleteStep); the HTTP task inbox and
+// completion (internal/gateway/handler.go's taskAssigneeSQL) apply the same
+// predicate in their own queries. A disabled account is never eligible.
+//
+// It used to match a named platform role held in any workspace of any
+// tenant (or in none), and a named business role of any workspace of the
+// application's tenant, so over gRPC a business admin of another tenant
+// could decide the step.
 func (s *Store) IsAssigneeEligible(ctx context.Context, stepID, userID string) (bool, error) {
 	var eligible bool
 	err := s.pool.QueryRow(ctx, `
@@ -335,29 +338,7 @@ func (s *Store) IsAssigneeEligible(ctx context.Context, stepID, userID string) (
 		        WHERE elem->>'id' = ws.step_def_id LIMIT 1
 		    ) step_def
 		    WHERE ws.status = 'in_progress'
-		      AND (
-		          (step_def.elem->'assignee_roles') IS NULL
-		          OR (step_def.elem->'assignee_roles') = '[]'::jsonb
-		          OR EXISTS (
-		              SELECT 1 FROM identity.role_assignment ra
-		              WHERE ra.user_id = $2::uuid
-		                AND ra.role::text IN (
-		                    SELECT jsonb_array_elements_text(step_def.elem->'assignee_roles')
-		                )
-		          )
-		          OR EXISTS (
-		              SELECT 1
-		              FROM identity.business_role_member brm
-		              JOIN identity.business_role br ON br.id = brm.role_id
-		              JOIN core.workspace bws ON bws.id = br.workspace_id
-		              JOIN core.application app ON app.id = wd.application_id
-		                   AND (app.workspace_id = bws.id OR app.customer_id = bws.customer_id)
-		              WHERE brm.user_id = $2::uuid
-		                AND br.name IN (
-		                    SELECT jsonb_array_elements_text(step_def.elem->'assignee_roles')
-		                )
-		          )
-		      )
+		      AND `+assignee.SQL("wd.application_id", "step_def.elem->'assignee_roles'", "$2::uuid")+`
 		)
 	`, stepID, userID).Scan(&eligible)
 	return eligible, err
@@ -1417,10 +1398,10 @@ func (s *Store) dispatchStepNotification(ctx context.Context, instanceID string,
 
 // resolveNotificationRecipients turns a notification step's configured
 // target into concrete user IDs. "requester" is the instance's starter;
-// "role" matches assignee_roles' own dual scheme (see /api/tasks in
-// internal/gateway/handler.go) — a platform identity.user_role value via
-// role_assignment, or an identity.business_role name via
-// business_role_member, scoped to the workflow's application.
+// "role" is everyone a step naming that role is assigned to (assignee.SQL):
+// a platform identity.user_role value via role_assignment, or an
+// identity.business_role name via business_role_member, held for the
+// workflow's application.
 func (s *Store) resolveNotificationRecipients(ctx context.Context, appID, startedBy string, cfg *stepNotificationConfig) []string {
 	if cfg.RecipientType == "requester" {
 		if startedBy == "" {
@@ -1432,34 +1413,16 @@ func (s *Store) resolveNotificationRecipients(ctx context.Context, appID, starte
 		return nil
 	}
 
-	// Platform-role matches are scoped to the workflow's application: a
-	// role_assignment counts only when its workspace belongs to the same
-	// workspace/customer (NULL workspace = platform-wide assignment). Without
-	// this, any user holding the same role at ANOTHER customer received this
-	// tenant's notifications.
+	// The recipients are the step's assignees had it named this role, so
+	// they stay inside the application's workspace boundary. This used to
+	// match the role in every workspace of the application's tenant, and an
+	// unscoped holder of it in every tenant — who received this workflow's
+	// name and message.
 	rows, err := s.pool.Query(ctx, `
-		SELECT DISTINCT u.id::text
+		SELECT u.id::text
 		FROM identity.user u
-		WHERE EXISTS (
-		    SELECT 1
-		    FROM identity.role_assignment ra
-		    LEFT JOIN core.workspace rws ON rws.id = ra.workspace_id
-		    JOIN core.application app ON app.id = $1::uuid
-		    WHERE ra.user_id = u.id AND ra.role::text = $2
-		      AND (ra.workspace_id IS NULL
-		           OR app.workspace_id = rws.id
-		           OR app.customer_id = rws.customer_id)
-		)
-		OR EXISTS (
-		    SELECT 1
-		    FROM identity.business_role_member brm
-		    JOIN identity.business_role br ON br.id = brm.role_id
-		    JOIN core.workspace bws ON bws.id = br.workspace_id
-		    JOIN core.application app ON app.id = $1::uuid
-		         AND (app.workspace_id = bws.id OR app.customer_id = bws.customer_id)
-		    WHERE brm.user_id = u.id AND br.name = $2
-		)
-	`, appID, cfg.RecipientRole)
+		WHERE `+assignee.SQL("$1::uuid", "jsonb_build_array($2::text)", "u.id"),
+		appID, cfg.RecipientRole)
 	if err != nil {
 		return nil
 	}

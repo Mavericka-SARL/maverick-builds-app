@@ -41,7 +41,7 @@ user with a role; the handler then applies the scope checks above.
 | Route family | Purpose | Role guard |
 |---|---|---|
 | `/healthz` | process health | public |
-| `/api/signup`, `/api/signup/options` | self-service sign-up and the plan it offers | public |
+| `/api/signup`, `/api/signup/options` | self-service sign-up and the plan it offers; creates the tour (the application's default model) and three role guides | public |
 | `/api/legal`, `/api/branding`, `/api/sso/discover` | legal document values, sign-in branding, SSO discovery by e-mail domain | public |
 | `/api/scim/v2/*` | SCIM 2.0 user and group provisioning (enterprise) | SCIM token |
 | `/api/dev/personas` | development persona catalog | development mode |
@@ -55,11 +55,11 @@ user with a role; the handler then applies the scope checks above.
 | `/api/dashboards`, `/api/folders` | role-visible dashboard runtime | authenticated + business-role assignment |
 | `POST /api/dashboard-widgets/{id}/chart-data` | server-resolved chart series used by every chart widget | dashboard + member + metric access |
 | `/api/tasks`, `/api/tasks/{id}` | inbox and task decisions | authenticated + task eligibility |
-| `/api/workflow/submit`, `/api/workflow/instances`, `/api/workflow/my-history` | start, inspect and act on instances | authenticated; admin actions `business_admin` |
-| `/api/workflow/history` | all instances | `business_admin` |
+| `/api/workflow/submit`, `/api/workflow/instances`, `/api/workflow/my-history` | start, inspect and act on instances | authenticated; admin status override `business_admin`, on instances `/api/workflow/history` lists (otherwise 404) |
+| `/api/workflow/history` | latest instances of the applications the caller administers (its business_admin workspaces; `X-App-Id` narrows to one application), without test runs | `business_admin` |
 | `/api/notifications`, `…/mark-read` | list and mark read (own notifications only) | authenticated |
 | `/api/notifications/settings*` | per-tenant e-mail delivery settings and a test send | `platform_admin` or `tenant_admin` |
-| `/api/forms*`, `/api/records*` | form runtime and record actions; CSV/XLSX form export/import | authenticated + model/form context |
+| `/api/forms*`, `/api/records*` | form runtime and record actions; CSV/XLSX form export/import | reach of the form's application, plus per-record permissions: the creator edits and deletes their own draft or submitted records and moves them only between draft and submitted; business admins of the workspace, developers and tenant admins within their scope, and platform admins do everything; `POST /api/forms/{id}/sync` is admin-only |
 | form definition create/update/delete under `/api/forms` | building forms | `developer` |
 | `/api/automation/rules*` | automation rules (list: authenticated; create/update/delete, including cron schedules) | `developer` |
 | `/api/automation/trigger/{id}`, `/api/automation/executions` | fire a manual rule, execution log | authenticated + app scope |
@@ -69,8 +69,8 @@ user with a role; the handler then applies the scope checks above.
 | `/api/developer/applications*` | application list/create for builders | `developer`, `platform_admin` or `tenant_admin` |
 | `/api/developer/*` (everything else) | models, revisions, metrics, dimensions, grids, dashboards, folders, workflows, workflow roles and trigger events, integrations and connections, form integrations, migrations, debug facts | `developer` |
 | `/api/ai/*` | AI sessions, documents, settings, proposals, draft promotion/discard | `developer` |
-| `/api/business-admin/roles*` | business roles and their members | `business_admin` or `developer` |
-| `/api/business-admin/*` (everything else) | users, dashboards, access rules | `business_admin` |
+| `/api/business-admin/roles*` | business roles and their members | `business_admin` of the application's workspace, or a `developer` of its tenant |
+| `/api/business-admin/*` (everything else) | users, dashboards, access rules | `business_admin` of the application's workspace |
 | `/api/admin/users*`, `/api/admin/workspaces*` | user and workspace administration | `platform_admin`, `tenant_admin` or `developer` |
 | `/api/admin/*` (everything else) | tenants, applications, models, revisions, grants, audit (listing, export, retention settings), usage, plans, branding, SSO, SCIM tokens, AI settings, infrastructure nodes | `platform_admin` or `tenant_admin` |
 | `GET /api/admin/models/{id}/export`, `…/export/package`, `POST /api/admin/models/import` | revision-aware model export (`?include_data=`), standalone package, import | `platform_admin` or `tenant_admin` |
@@ -84,7 +84,19 @@ person's own display preferences, `PATCH /api/me/preferences`).
 
 Role admission is only the first gate. Handlers also verify customer/workspace,
 application/model, dashboard, dimension-member, metric, revision, and workflow
-scope as applicable.
+scope as applicable. A `revision_id` that is not a revision of the model the
+request works in — another model's or another tenant's — answers **404**. A
+malformed `?revision_id=` query parameter answers **404** as well; a
+`revision_id` in a request body must be a well-formed id. With `X-App-Id`, a
+revision of another model of that application the caller may open selects that
+model.
+
+Business roles (`business_admin`, `business_user`) are workspace-scoped: one
+opens the applications of the workspace it is held in, and the tenant-level
+applications (no workspace) of that workspace's tenant. A `developer` role
+reaches every application of its tenant. A business admin of one workspace
+answers **403** on another workspace's `/api/business-admin/*` routes, even
+within the same tenant.
 
 Cell, form and import mutations share `internal/writeguard.CheckWrite`, which
 rejects:
@@ -97,9 +109,20 @@ rejects:
 The query gRPC writeback applies the same guard. A rule lookup that fails
 answers an error: the guard fails closed.
 
+`POST /api/cells` names the cell with `dim_codes`, one member code per
+dimension (`{dimension_id: code}`). The older single `dim_code` field is still
+accepted: it writes to the one dimension of the revision that has a member
+with that code, looking only at the metric's own dimensions (those of the
+grids it belongs to) when it has any, and at every dimension of the model when
+it has none. When no dimension has that code, or more than one does, the write
+answers **400** and asks for `dim_codes`. No dimension name is
+treated specially, here or in `GET /api/grid`: without a `grid_def_id`, the
+grid lists the revision's dimensions ordered by name, as a grid definition's
+dimensions are. Members order by time index, then sort order, then code.
+
 Known gaps: import does not refuse a calculated (non-input) metric, and
-`POST /api/cells` skips dimension codes it cannot resolve rather than rejecting
-them. The HTTP and gRPC import services are different implementations: HTTP
+`POST /api/cells` skips `dim_codes` member codes it cannot resolve rather than
+rejecting them. The HTTP and gRPC import services are different implementations: HTTP
 supports the current CSV/XLSX/name-resolution flow, while gRPC retains a legacy
 CSV/UUID layout and different staging/commit semantics.
 
@@ -107,7 +130,7 @@ HTTP errors are returned as JSON (`{"error": "..."}`) by the gateway helpers.
 
 ## OpenAPI status
 
-`api/openapi.yaml` describes every route the gateway registers (250
+`api/openapi.yaml` describes every route the gateway registers (251
 operations); `route_spec_parity_test.go` fails CI when the router and the spec
 disagree. It generates `internal/gateway/oas`, but `cmd/gateway` serves the
 hand-written router, not the generated ogen server. When adding a route,

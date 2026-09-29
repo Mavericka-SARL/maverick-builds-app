@@ -112,3 +112,30 @@ func TestDocsLinksResolve(t *testing.T) {
 		}
 	}
 }
+
+// The manuals' manual.html is generated (build.sh concatenates parts/*.html)
+// and ships inside the web image at /docs/<manual>/manual.html, so an edit to
+// a part that nobody rebuilt would reach every deployment as the old text.
+func TestManualsMatchTheirParts(t *testing.T) {
+	for _, dir := range []string{"docs/formulas-manual", "docs/developer-manual"} {
+		parts, err := filepath.Glob(filepath.Join(dir, "parts", "*.html"))
+		if err != nil || len(parts) == 0 {
+			t.Fatalf("%s: no parts (%v)", dir, err)
+		}
+		var want strings.Builder
+		for _, p := range parts { // Glob sorts, as the shell's parts/*.html does
+			b, err := os.ReadFile(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want.Write(b)
+		}
+		got, err := os.ReadFile(filepath.Join(dir, "manual.html"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != want.String() {
+			t.Errorf("%s/manual.html is not parts/*.html concatenated; run bash %s/build.sh", dir, dir)
+		}
+	}
+}

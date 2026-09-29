@@ -1037,11 +1037,13 @@ func TestSalesDemoFormImportAndGridSync(t *testing.T) {
 		if recID == "" {
 			t.Fatalf("no record id in %v", rec)
 		}
-		status := "draft"
+		status, by := "draft", d.westRep
 		if approve {
-			status = "approved"
+			// Approving is the business admin's, not the rep's own
+			// (crudapp.RecordAccess).
+			status, by = "approved", d.admin
 		}
-		d.call("PUT", "/api/records/"+recID, d.westRep, map[string]any{"data": data, "status": status})
+		d.call("PUT", "/api/records/"+recID, by, map[string]any{"data": data, "status": status})
 	}
 
 	// Deliberately a cell nobody has typed into. A form mapping posting to a
@@ -1135,7 +1137,7 @@ func TestSalesDemoFormImportAndGridSync(t *testing.T) {
 			if data["product"] != "MONITOR" {
 				continue
 			}
-			d.call("PUT", "/api/records/"+r.id, d.westRep, map[string]any{"data": data, "status": "approved"})
+			d.call("PUT", "/api/records/"+r.id, d.admin, map[string]any{"data": data, "status": "approved"})
 			approved++
 		}
 		if approved != 2 {

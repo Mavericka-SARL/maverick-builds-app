@@ -22,6 +22,14 @@ const GRID_ID = "sync-smoke-grid";
 // sync. "dept" is flat and lands in Cols by default (PlanningGrid's own
 // fallback: first dim -> Cols, rest -> Context), leaving "period" as the
 // one and only context selector each grid widget renders.
+//
+// Member order is the array order. /api/grid sends each dimension's members
+// already ordered (the server sorts by time_index, sort_order, code and sends
+// no sort field), so the array order here stands for that server order — Q1,
+// then January, then February — and the grid keeps it; it does not re-sort
+// by code. Codes sort
+// the other way on purpose ("FEB" < "JAN"), so every default below also pins
+// that the API order wins over alphabetical-by-code.
 const dimensions = [
   {
     id: "dept", name: "Department",
@@ -106,28 +114,27 @@ test("dashboard context sync: synced widgets stay in lockstep, unsynced widgets 
   // selector must never appear once per widget (reported live).
   const periodTriggers = page.getByLabel("Period context");
   await expect(periodTriggers).toHaveCount(2);
-  // Hierarchy-aware default leaf: within Q1's children, "FEB" sorts before
-  // "JAN" alphabetically by code (matching PlanningGrid's own pre-existing,
-  // deliberately-alphabetical-not-chronological tree sort) — same default
-  // everywhere before any interaction.
-  await expect(periodTriggers.nth(0)).toHaveText("February");
-  await expect(periodTriggers.nth(1)).toHaveText("February");
-  const cellOf = (widgetIdx: number) => page.locator("table").nth(widgetIdx).locator("tbody input").first();
-  await expect(cellOf(0)).toHaveValue("200");
-  await expect(cellOf(1)).toHaveValue("200");
-  await expect(cellOf(2)).toHaveValue("200");
-
-  // Change the shared selector (owned by A) to January.
-  await periodTriggers.nth(0).click();
-  await page.getByRole("listbox").getByRole("option", { name: "January" }).click();
-
-  // Widget B has NO selector of its own but follows the shared context —
-  // its data flips to January's value; opted-out C stays on February.
+  // Hierarchy-aware default leaf: the first leaf in the dimension's order
+  // (Q1's first child, January — although "FEB" sorts before "JAN" by
+  // code) — same default everywhere before any interaction.
   await expect(periodTriggers.nth(0)).toHaveText("January");
-  await expect(periodTriggers.nth(1)).toHaveText("February");
+  await expect(periodTriggers.nth(1)).toHaveText("January");
+  const cellOf = (widgetIdx: number) => page.locator("table").nth(widgetIdx).locator("tbody input").first();
   await expect(cellOf(0)).toHaveValue("100");
   await expect(cellOf(1)).toHaveValue("100");
-  await expect(cellOf(2)).toHaveValue("200");
+  await expect(cellOf(2)).toHaveValue("100");
+
+  // Change the shared selector (owned by A) to February.
+  await periodTriggers.nth(0).click();
+  await page.getByRole("listbox").getByRole("option", { name: "February" }).click();
+
+  // Widget B has NO selector of its own but follows the shared context —
+  // its data flips to February's value; opted-out C stays on January.
+  await expect(periodTriggers.nth(0)).toHaveText("February");
+  await expect(periodTriggers.nth(1)).toHaveText("January");
+  await expect(cellOf(0)).toHaveValue("200");
+  await expect(cellOf(1)).toHaveValue("200");
+  await expect(cellOf(2)).toHaveValue("100");
 });
 
 test("HierarchicalMemberSelect search filters the tree while keeping ancestors visible", async ({ page }) => {
@@ -158,18 +165,18 @@ test("HierarchicalMemberSelect supports keyboard navigation", async ({ page }) =
   await expect(page.getByText("Context Sync Smoke Dashboard")).toBeVisible({ timeout: 15_000 });
 
   const trigger = page.getByLabel("Period context").first();
-  await expect(trigger).toHaveText("February"); // default: "FEB" sorts before "JAN" (alphabetical by code)
+  await expect(trigger).toHaveText("January"); // default: the first leaf in the order the API sends
   await trigger.click();
 
-  // Tree order: Q1, February, January — activeCode starts on the current
-  // value (February); ArrowDown once moves to January.
-  await expect(page.locator(".mvx-hier-select__option--active")).toHaveText("February");
-  await page.keyboard.press("ArrowDown");
+  // Tree order is the API order: Q1, January, February — activeCode starts
+  // on the current value (January); ArrowDown once moves to February.
   await expect(page.locator(".mvx-hier-select__option--active")).toHaveText("January");
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator(".mvx-hier-select__option--active")).toHaveText("February");
   await page.keyboard.press("Enter");
 
   await expect(page.getByRole("listbox")).not.toBeVisible();
-  await expect(trigger).toHaveText("January");
+  await expect(trigger).toHaveText("February");
 });
 
 // Click-to-select: a member label on a row/column axis of one synced widget
@@ -183,21 +190,21 @@ test("clicking a column member label in a synced grid moves the shared selector"
   await expect(page.getByText("Context Sync Smoke Dashboard")).toBeVisible({ timeout: 15_000 });
 
   const periodTriggers = page.getByLabel("Period context");
-  await expect(periodTriggers.nth(0)).toHaveText("February");
+  await expect(periodTriggers.nth(0)).toHaveText("January");
   const cellOf = (widgetIdx: number) => page.locator("table").nth(widgetIdx).locator("tbody input").first();
-  await expect(cellOf(0)).toHaveValue("200");
+  await expect(cellOf(0)).toHaveValue("100");
 
-  // Widget D's "January" column header carries the pickable affordance…
-  const january = page.locator("table").nth(3).locator("th.mvx-header-cell--pickable", { hasText: "January" });
-  await expect(january).toHaveAttribute("title", /Set Period to January/);
-  await january.click();
+  // Widget D's "February" column header carries the pickable affordance…
+  const february = page.locator("table").nth(3).locator("th.mvx-header-cell--pickable", { hasText: "February" });
+  await expect(february).toHaveAttribute("title", /Set Period to February/);
+  await february.click();
 
   // …and the synced pair follows; opted-out C does not.
-  await expect(periodTriggers.nth(0)).toHaveText("January");
-  await expect(periodTriggers.nth(1)).toHaveText("February");
-  await expect(cellOf(0)).toHaveValue("100");
-  await expect(cellOf(1)).toHaveValue("100");
-  await expect(cellOf(2)).toHaveValue("200");
+  await expect(periodTriggers.nth(0)).toHaveText("February");
+  await expect(periodTriggers.nth(1)).toHaveText("January");
+  await expect(cellOf(0)).toHaveValue("200");
+  await expect(cellOf(1)).toHaveValue("200");
+  await expect(cellOf(2)).toHaveValue("100");
 });
 
 // Editable cells must be recognisable at a glance (Anaplan/Pigment/Board
@@ -224,9 +231,9 @@ test("a click in an UNSYNCED widget still moves the shared selector", async ({ p
   await loadAs(page, "dept_head");
   await expect(page.getByText("Context Sync Smoke Dashboard")).toBeVisible({ timeout: 15_000 });
   const periodTriggers = page.getByLabel("Period context");
-  await expect(periodTriggers.nth(0)).toHaveText("February");
-  const january = page.locator("table").nth(4).locator("th.mvx-header-cell--pickable", { hasText: "January" });
-  await january.click();
   await expect(periodTriggers.nth(0)).toHaveText("January");
-  await expect(page.locator("table").nth(0).locator("tbody input").first()).toHaveValue("100");
+  const february = page.locator("table").nth(4).locator("th.mvx-header-cell--pickable", { hasText: "February" });
+  await february.click();
+  await expect(periodTriggers.nth(0)).toHaveText("February");
+  await expect(page.locator("table").nth(0).locator("tbody input").first()).toHaveValue("200");
 });

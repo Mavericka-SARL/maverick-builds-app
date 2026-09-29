@@ -2,14 +2,15 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invalidateModelData } from "../modelDataQueries";
 import { Check as CheckIcon, Trash2, Plus as PlusIcon } from "lucide-react";
-import { api, type AutomationRule, type DashboardWidget, type DemoContext, type WidgetProps, type GridData, type IntegrationDef, type Metric, type DevDimension, type FormDef, type FormRecord, type FormField, type ChartContextDim } from "../../api/client";
+import { api, type AutomationRule, type DashboardWidget, type DemoContext, type WidgetProps, type GridData, type IntegrationDef, type Metric, type DevDimension, type FormDef, type FormRecord, type FormField, type ChartContextDim, recordStatusOptions } from "../../api/client";
 import { ContextSelectors } from "../dashboard/ChartWidget";
 import { useSelectorOwnership, useWidgetContextSync } from "../dashboardContextSync";
 import { WidgetErrorBoundary, CommandButton, InlineAlert, LoadingState, EmptyState, Select, IconButton, Button, Field, useConfirm, RichText } from "../../ui";
 import { groupWidgetsIntoRows, INTRINSIC_HEIGHT_WIDGET_TYPES } from "../dashboardLayout";
 import { DashboardContextSyncProvider } from "../DashboardContextSyncProvider";
 import { ChartWidget } from "../dashboard/ChartWidget";
-import { FormFieldInput } from "./FormsTab";
+import { FormFieldInput, RecordStatusBadge } from "./FormsTab";
+import { canSyncForm, createStatusesOf, createStatusFor, syncFailure, syncRefused, type SyncMessage } from "./formPermissions";
 import { ImportWidget } from "./ImportWidget";
 import { PlanningGrid } from "./PlanningGrid";
 
@@ -443,7 +444,13 @@ export function FormWidgetPanel({ formId, ctx: hostCtx }: { formId: string; ctx?
   const qc = useQueryClient();
   const [showNewRecord, setShowNewRecord] = useState(false);
   const [draft, setDraft] = useState<Record<string, unknown>>({});
-  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  // The status the user picked for the new record; null until they pick.
+  const [newStatusPick, setNewStatusPick] = useState<string | null>(null);
+  const [syncMsg, setSyncMsg] = useState<SyncMessage | null>(null);
+  // The latest failed record action and the record it was on. Starting
+  // another action clears it, a later failure replaces it, and it is not
+  // shown once that record has left the list.
+  const [recordError, setRecordError] = useState<{ recordId: string; message: string } | null>(null);
   const { confirm, confirmElement } = useConfirm();
 
   // Forms of the dashboard's revision (hostCtx) — "Form not found" appeared
@@ -466,6 +473,10 @@ export function FormWidgetPanel({ formId, ctx: hostCtx }: { formId: string; ctx?
   });
   const metrics = metricsRaw as Metric[];
   const form = (formsRaw as FormDef[]).find((f) => f.id === formId);
+  // What the server lets this caller do with the form's records as a whole.
+  const canSync = canSyncForm(form);
+  const createStatuses = createStatusesOf(form);
+  const newStatus = createStatusFor(form, newStatusPick);
 
   const { data: records = [], isLoading: recLoading } = useQuery({
     queryKey: ["records", formId],
@@ -474,25 +485,36 @@ export function FormWidgetPanel({ formId, ctx: hostCtx }: { formId: string; ctx?
   });
 
   const createRecord = useMutation({
-    mutationFn: () => api.createRecord(formId, draft, (ctx as DemoContext | undefined)?.revision_id),
+    mutationFn: () => api.createRecord(formId, draft, (ctx as DemoContext | undefined)?.revision_id, newStatus),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["records"] });
       invalidateModelData(qc);
       setDraft({});
+      setNewStatusPick(null);
       setShowNewRecord(false);
     },
   });
 
+  // A status change sends the status alone: the server keeps the fields as
+  // it has them, so it cannot undo an edit made after this list was read.
+  // It can post the record into metrics, so the figures beside it refresh.
   const updateStatus = useMutation({
-    mutationFn: ({ id, status, data }: { id: string; status: string; data: Record<string, unknown> }) =>
-      api.updateRecord(id, status, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["records"] }),
+    mutationFn: ({ id, status }: { id: string; status: string }) => api.updateRecord(id, { status }),
+    onMutate: () => setRecordError(null),
+    onError: (err: Error, { id }) => setRecordError({ recordId: id, message: `Status not changed — ${err.message}` }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["records"] });
+      invalidateModelData(qc);
+    },
   });
 
   const deleteRec = useMutation({
     mutationFn: (id: string) => api.deleteRecord(id),
+    onMutate: () => setRecordError(null),
+    onError: (err: Error, id) => setRecordError({ recordId: id, message: `Record not deleted — ${err.message}` }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["records"] }),
   });
+  const shownRecordError = recordError && (records as FormRecord[]).some((r) => r.id === recordError.recordId) ? recordError.message : null;
 
   const syncForm = useMutation({
     mutationFn: (fid: string) => api.syncForm(fid),
@@ -500,14 +522,16 @@ export function FormWidgetPanel({ formId, ctx: hostCtx }: { formId: string; ctx?
       invalidateModelData(qc);
       qc.invalidateQueries({ queryKey: ["records"] });
       if (data.mappings === 0) {
-        setSyncMsg("No active integrations configured for this form.");
+        setSyncMsg({ tone: "success", text: "No active integrations configured for this form." });
       } else {
-        setSyncMsg(`Synced — ${data.records_processed} record(s) across ${data.mappings} integration(s).`);
+        setSyncMsg({ tone: "success", text: `Synced — ${data.records_processed} record(s) across ${data.mappings} integration(s).` });
       }
       setTimeout(() => setSyncMsg(null), 5000);
     },
     onError: (err: Error) => {
-      setSyncMsg(`Sync failed: ${err.message}`);
+      setSyncMsg(syncFailure(err));
+      // The list's permissions said sync; reload them so the button follows the server.
+      if (syncRefused(err)) qc.invalidateQueries({ queryKey: ["forms"] });
       setTimeout(() => setSyncMsg(null), 6000);
     },
   });
@@ -519,18 +543,20 @@ export function FormWidgetPanel({ formId, ctx: hostCtx }: { formId: string; ctx?
       <div style={{ borderBottom: "1px solid var(--color-border)" }}>
         <div style={{ padding: "12px 16px", background: "var(--color-surface-subtle)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontWeight: 600, fontSize: 14 }}>{form.label}</span>
-          <Button
-            size="sm"
-            loading={syncForm.isPending}
-            loadingLabel="Syncing…"
-            onClick={() => { setSyncMsg(null); syncForm.mutate(formId); }}
-          >
-            Sync to grid
-          </Button>
+          {canSync && (
+            <Button
+              size="sm"
+              loading={syncForm.isPending}
+              loadingLabel="Syncing…"
+              onClick={() => { setSyncMsg(null); syncForm.mutate(formId); }}
+            >
+              Sync to grid
+            </Button>
+          )}
         </div>
         {syncMsg && (
-          <InlineAlert tone={syncMsg.startsWith("Sync failed") ? "danger" : "success"}>
-            {syncMsg}
+          <InlineAlert tone={syncMsg.tone}>
+            {syncMsg.text}
           </InlineAlert>
         )}
       </div>
@@ -549,33 +575,44 @@ export function FormWidgetPanel({ formId, ctx: hostCtx }: { formId: string; ctx?
               </tr>
             </thead>
             <tbody>
-              {(records as FormRecord[]).map((rec) => (
-                <tr key={rec.id}>
-                  {form.fields.map((f) => (
-                    <td key={f.name}>{String(rec.data[f.name] ?? "—")}</td>
-                  ))}
-                  <td>
-                    <Select
-                      value={rec.status}
-                      onChange={(e) => updateStatus.mutate({ id: rec.id, status: e.target.value, data: rec.data })}
-                      aria-label="Record status"
-                    >
-                      {["draft", "submitted", "approved", "rejected"].map((s) => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
-                    </Select>
-                  </td>
-                  <td className="mvx-admin-muted">
-                    {new Date(rec.created_at).toLocaleDateString()}
-                  </td>
-                  <td>
-                    <IconButton aria-label="Delete record" title="Delete" danger size={26}
-                      onClick={() => confirm({ title: "Delete record?", body: "This record will be permanently removed.", confirmLabel: "Delete", onConfirm: () => deleteRec.mutate(rec.id) })}>
-                      <Trash2 size={13} />
-                    </IconButton>
-                  </td>
-                </tr>
-              ))}
+              {(records as FormRecord[]).map((rec) => {
+                // The server says what this caller may do with each record;
+                // none of it is offered when it says nothing (an older server).
+                const statuses = recordStatusOptions(rec);
+                return (
+                  <tr key={rec.id}>
+                    {form.fields.map((f) => (
+                      <td key={f.name}>{String(rec.data[f.name] ?? "—")}</td>
+                    ))}
+                    <td>
+                      {statuses.changeable ? (
+                        <Select
+                          value={rec.status}
+                          onChange={(e) => updateStatus.mutate({ id: rec.id, status: e.target.value })}
+                          aria-label="Record status"
+                        >
+                          {statuses.options.map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </Select>
+                      ) : (
+                        <RecordStatusBadge status={rec.status} />
+                      )}
+                    </td>
+                    <td className="mvx-admin-muted">
+                      {new Date(rec.created_at).toLocaleDateString()}
+                    </td>
+                    <td>
+                      {rec.permissions?.delete && (
+                        <IconButton aria-label="Delete record" title="Delete" danger size={26}
+                          onClick={() => confirm({ title: "Delete record?", body: "This record will be permanently removed.", confirmLabel: "Delete", onConfirm: () => deleteRec.mutate(rec.id) })}>
+                          <Trash2 size={13} />
+                        </IconButton>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
               {(records as FormRecord[]).length === 0 && (
                 <tr><td colSpan={form.fields.length + 3} className="mvx-admin-muted" style={{ textAlign: "center", padding: 24 }}>
                   No records yet.
@@ -586,16 +623,23 @@ export function FormWidgetPanel({ formId, ctx: hostCtx }: { formId: string; ctx?
           {confirmElement}
         </div>
       )}
+      {shownRecordError && (
+        <InlineAlert tone="danger" className="mvx-toolbar--spaced">
+          {shownRecordError}
+        </InlineAlert>
+      )}
 
-      {/* New record form */}
-      <Button
-        leadingIcon={showNewRecord ? undefined : <PlusIcon size={14} />}
-        onClick={() => setShowNewRecord((v) => !v)}
-      >
-        {showNewRecord ? "Cancel" : "New record"}
-      </Button>
+      {/* New record form: offered when the server lets this caller create */}
+      {createStatuses.length > 0 && (
+        <Button
+          leadingIcon={showNewRecord ? undefined : <PlusIcon size={14} />}
+          onClick={() => setShowNewRecord((v) => !v)}
+        >
+          {showNewRecord ? "Cancel" : "New record"}
+        </Button>
+      )}
 
-      {showNewRecord && (
+      {showNewRecord && createStatuses.length > 0 && (
         <div className="mvx-panel" style={{ marginTop: 16, maxWidth: 560, padding: 20 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {form.fields.map((f: FormField) => (
@@ -603,6 +647,16 @@ export function FormWidgetPanel({ formId, ctx: hostCtx }: { formId: string; ctx?
                 <FormFieldInput f={f} value={draft[f.name]} onChange={v => setDraft(d => ({ ...d, [f.name]: v }))} dims={dims} metrics={metrics} />
               </Field>
             ))}
+            {/* The statuses the server accepts for this caller; no choice when there is one. */}
+            {createStatuses.length > 1 && (
+              <Field label="Status">
+                <Select value={newStatus} onChange={(e) => setNewStatusPick(e.target.value)} style={{ alignSelf: "flex-start" }}>
+                  {createStatuses.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </Select>
+              </Field>
+            )}
             <Button variant="primary" style={{ alignSelf: "flex-start" }} loading={createRecord.isPending} loadingLabel="Saving…" onClick={() => createRecord.mutate()}>
               Save
             </Button>

@@ -55,8 +55,8 @@ function InstancesSection({ workflow }: { workflow: WorkflowDef }) {
 /** What the trigger event hands over at start, read-only, in the one place
     context is defined — it used to sit under the trigger picker in
     Properties while the variables lived here, two overlapping lists. */
-function TriggerPayloadFields({ applicationId, triggerEvent }: { applicationId: string; triggerEvent: string }) {
-  const { data: events = TRIGGER_FALLBACK } = useTriggerEvents(applicationId);
+function TriggerPayloadFields({ applicationId, revisionId, triggerEvent }: { applicationId: string; revisionId?: string; triggerEvent: string }) {
+  const { data: events = TRIGGER_FALLBACK } = useTriggerEvents(applicationId, revisionId);
   const selected = events.find(e => e.key === triggerEvent);
   if (!selected || selected.payload_schema.length === 0) return null;
   return (
@@ -75,7 +75,7 @@ function TriggerPayloadFields({ applicationId, triggerEvent }: { applicationId: 
   );
 }
 
-function UsageSection({ workflow, usage }: { workflow: WorkflowDef; usage: WorkflowDefUsage[] }) {
+function UsageSection({ workflow, usage, revisionId }: { workflow: WorkflowDef; usage: WorkflowDefUsage[]; revisionId?: string }) {
   const [showCreate, setShowCreate] = useState(false);
   return (
     <div>
@@ -97,7 +97,7 @@ function UsageSection({ workflow, usage }: { workflow: WorkflowDef; usage: Workf
       <button onClick={() => setShowCreate(true)} style={{ ...btnSecondary, fontSize: 12, padding: "6px 12px" }}>
         + Create Trigger
       </button>
-      {showCreate && <CreateAutomationModal workflow={workflow} onClose={() => setShowCreate(false)} />}
+      {showCreate && <CreateAutomationModal workflow={workflow} revisionId={revisionId} onClose={() => setShowCreate(false)} />}
     </div>
   );
 }
@@ -279,6 +279,7 @@ export function WorkflowPropertiesPanel({ workflow, usage, onChange, application
             <Field label="Starts on">
               <TriggerEventSelect
                 applicationId={applicationId}
+                revisionId={revisionId}
                 value={workflow.trigger_event}
                 onChange={v => onChange({ trigger_event: v })}
               />
@@ -297,7 +298,7 @@ export function WorkflowPropertiesPanel({ workflow, usage, onChange, application
 
         {activeSection === "context" && (
           <div>
-            <TriggerPayloadFields applicationId={applicationId} triggerEvent={workflow.trigger_event} />
+            <TriggerPayloadFields applicationId={applicationId} revisionId={revisionId} triggerEvent={workflow.trigger_event} />
             <p style={{ fontSize: 12, color: "var(--color-text-quiet)", margin: "0 0 12px" }}>
               Variables this workflow needs beyond what the trigger provides — conditions read them, notifications and the inbox show them.
             </p>
@@ -352,7 +353,7 @@ export function WorkflowPropertiesPanel({ workflow, usage, onChange, application
         )}
 
         {activeSection === "usage" && (
-          <UsageSection workflow={workflow} usage={usage} />
+          <UsageSection workflow={workflow} usage={usage} revisionId={revisionId} />
         )}
         {activeSection === "instances" && (
           <InstancesSection workflow={workflow} />

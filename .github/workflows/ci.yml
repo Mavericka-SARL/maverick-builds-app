@@ -85,13 +85,17 @@ jobs:
 
           # The Go gates cover more than *.go: sqlc reads migrations, ogen reads
           # the OpenAPI spec, and both fail the drift check if their source
-          # moves without the generated output following.
-          if echo "$files" | grep -qE '^(cmd/|internal/|pkg/|migrations/|api/|proto/|deploy/docker/)|(^|/)(go\.mod|go\.sum)$|\.go$'; then
+          # moves without the generated output following. Go tests also read the
+          # docs (docs_test.go: TestManualsMatchTheirParts, TestDocsLinksResolve;
+          # TestFormulasManualIndexMatchesEngine), so a docs-only edit runs them.
+          if echo "$files" | grep -qE '^(cmd/|internal/|pkg/|migrations/|api/|proto/|deploy/docker/|docs/)|(^|/)(go\.mod|go\.sum)$|\.(go|md)$'; then
             echo "go=true" >> "$GITHUB_OUTPUT"
           else
             echo "go=false" >> "$GITHUB_OUTPUT"
           fi
-          if echo "$files" | grep -qE '^web/'; then
+          # The e2e suite fetches the manuals through the dev server
+          # (web/vite.config.ts serves them from docs/).
+          if echo "$files" | grep -qE '^(web/|docs/(formulas|developer)-manual/)'; then
             echo "web=true" >> "$GITHUB_OUTPUT"
           else
             echo "web=false" >> "$GITHUB_OUTPUT"
@@ -774,8 +778,11 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           # Context is web/, not the repo root — the image needs only the
-          # frontend, and a root context would ship the whole Go tree.
+          # frontend, and a root context would ship the whole Go tree. The
+          # manuals it serves at /docs/ come from docs/ as a named context;
+          # web/Dockerfile fails the build if it is missing.
           context: web
+          build-contexts: docs=docs
           file: web/Dockerfile
           push: true
           tags: |

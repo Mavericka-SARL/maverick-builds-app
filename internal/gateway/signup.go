@@ -18,9 +18,11 @@ import (
 
 // Self-service sign-up: a visitor with a company name and a work address
 // gets a tenant on the self-service plan, an application holding the
-// starter model, and an invitation to set their password. They arrive as
-// the tenant's administrator, developer and business administrator, which
-// is everything a trial needs to be evaluated by one person.
+// starter models (starter.Packages: the "Learn the platform" tour, which is
+// the application's default, and one guide per role), and an invitation to
+// set their password. They arrive as the tenant's administrator, developer
+// and business administrator, which is everything a trial needs to be
+// evaluated by one person.
 //
 // Public by nature (nobody is signed in yet), so it is rate-limited per
 // address, refuses an address that already has an account, and creates
@@ -200,9 +202,11 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. The person, the application and the starter model, in one
-	//    transaction on the tenant's database.
-	var userID, appID, modelID, revisionID string
+	// 3. The person, the application and the starter models, in one
+	//    transaction on the tenant's database: all of them or none.
+	type imported struct{ modelID, revisionID string }
+	var userID, appID string
+	var models []imported // starter.Packages order: the tour first
 	err = pgx.BeginFunc(tctx, h.db.For(tctx), func(tx pgx.Tx) error {
 		if err := tx.QueryRow(tctx, `
 			INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id)
@@ -224,9 +228,22 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 			customerID, workspaceID, signupAppName).Scan(&appID); err != nil {
 			return fmt.Errorf("create application: %w", err)
 		}
-		modelID, revisionID, err = modeltransfer.Import(tctx, tx, modeltransfer.ImportRequest{ApplicationID: appID, Package: starter.Package()}, userID)
-		if err != nil {
-			return fmt.Errorf("starter model: %w", err)
+		for _, pkg := range starter.Packages() {
+			mID, rID, err := modeltransfer.Import(tctx, tx, modeltransfer.ImportRequest{ApplicationID: appID, Package: pkg}, userID)
+			if err != nil {
+				return fmt.Errorf("starter model %q: %w", pkg.ModelName, err)
+			}
+			models = append(models, imported{mID, rID})
+		}
+		if len(models) == 0 {
+			return fmt.Errorf("no starter models to import")
+		}
+		// They share one created_at (the transaction's), so "newest
+		// model" cannot pick the one to land on: name the tour as the
+		// application's default, the same setting a developer changes later
+		// under Build › Models.
+		if _, err := setApplicationDefaultModel(tctx, tx, models[0].modelID); err != nil {
+			return fmt.Errorf("set default model: %w", err)
 		}
 		return nil
 	})
@@ -234,10 +251,21 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 		fail(http.StatusInternalServerError, err)
 		return
 	}
+	modelID := models[0].modelID
+	guideIDs := make([]string, 0, len(models)-1)
+	for _, m := range models[1:] {
+		guideIDs = append(guideIDs, m.modelID)
+	}
 	h.noteUser(tctx, sub, req.Email)
 	h.noteApplication(tctx, appID)
-	if err := h.recalcRevisionFromInputs(tctx, modelID, revisionID); err != nil {
-		h.log.Warn().Err(err).Str("model_id", modelID).Msg("starter model recalc failed")
+	// Every calculated metric of every model, not only those an input
+	// reaches: recalcRevisionFromInputs skips a model with no input metric,
+	// and misses the dependents of a metric that reads only dimensions or
+	// properties (docs/OBSERVATIONS.md). recalcRevisionCalculated recomputes
+	// the whole set in dependency order and logs its own failures, which,
+	// like any recalculation failure here, leave the sign-up standing.
+	for _, m := range models {
+		h.recalcRevisionCalculated(tctx, m.modelID, m.revisionID)
 	}
 
 	// 4. The invitation, which is what makes the account usable. Without
@@ -252,7 +280,8 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 		invited = true
 	}
 
-	meta := map[string]string{"email": req.Email, "company": req.Company, "plan": p.Key, "ip": ip, "application_id": appID, "model_id": modelID}
+	meta := map[string]string{"email": req.Email, "company": req.Company, "plan": p.Key, "ip": ip, "application_id": appID,
+		"model_id": modelID, "guide_model_ids": strings.Join(guideIDs, ",")}
 	auditlog.Log(tctx, h.db.For(tctx), h.log, auditlog.Fields{
 		Category: auditlog.CategoryAdmin, EventType: auditlog.EventTenantSignedUp,
 		ActorUserID: userID, ActorRole: "signup",

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/go-faster/errors"
-	"github.com/google/uuid"
 	ht "github.com/ogen-go/ogen/http"
 	"github.com/ogen-go/ogen/middleware"
 	"github.com/ogen-go/ogen/ogenerrors"
@@ -4074,6 +4073,16 @@ func (s *Server) handleCreateAutomationRuleRequest(args [0]string, argsEscaped b
 			return
 		}
 	}
+	params, err := decodeCreateAutomationRuleParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
 
 	var rawBody []byte
 	request, rawBody, close, err := s.decodeCreateAutomationRuleRequest(r)
@@ -4101,13 +4110,18 @@ func (s *Server) handleCreateAutomationRuleRequest(args [0]string, argsEscaped b
 			OperationID:      "createAutomationRule",
 			Body:             request,
 			RawBody:          rawBody,
-			Params:           middleware.Parameters{},
-			Raw:              r,
+			Params: middleware.Parameters{
+				{
+					Name: "revision_id",
+					In:   "query",
+				}: params.RevisionID,
+			},
+			Raw: r,
 		}
 
 		type (
 			Request  = *AutomationRuleRequest
-			Params   = struct{}
+			Params   = CreateAutomationRuleParams
 			Response = CreateAutomationRuleRes
 		)
 		response, err = middleware.HookMiddleware[
@@ -4117,14 +4131,14 @@ func (s *Server) handleCreateAutomationRuleRequest(args [0]string, argsEscaped b
 		](
 			m,
 			mreq,
-			nil,
+			unpackCreateAutomationRuleParams,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.CreateAutomationRule(ctx, request)
+				response, err = s.h.CreateAutomationRule(ctx, request, params)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.CreateAutomationRule(ctx, request)
+		response, err = s.h.CreateAutomationRule(ctx, request, params)
 	}
 	if err != nil {
 		defer recordError("Internal", err)
@@ -5429,6 +5443,16 @@ func (s *Server) handleCreateFolderRequest(args [0]string, argsEscaped bool, w h
 			return
 		}
 	}
+	params, err := decodeCreateFolderParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
 
 	var rawBody []byte
 	request, rawBody, close, err := s.decodeCreateFolderRequest(r)
@@ -5456,13 +5480,18 @@ func (s *Server) handleCreateFolderRequest(args [0]string, argsEscaped bool, w h
 			OperationID:      "createFolder",
 			Body:             request,
 			RawBody:          rawBody,
-			Params:           middleware.Parameters{},
-			Raw:              r,
+			Params: middleware.Parameters{
+				{
+					Name: "revision_id",
+					In:   "query",
+				}: params.RevisionID,
+			},
+			Raw: r,
 		}
 
 		type (
 			Request  = *FolderRequest
-			Params   = struct{}
+			Params   = CreateFolderParams
 			Response = CreateFolderRes
 		)
 		response, err = middleware.HookMiddleware[
@@ -5472,14 +5501,14 @@ func (s *Server) handleCreateFolderRequest(args [0]string, argsEscaped bool, w h
 		](
 			m,
 			mreq,
-			nil,
+			unpackCreateFolderParams,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.CreateFolder(ctx, request)
+				response, err = s.h.CreateFolder(ctx, request, params)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.CreateFolder(ctx, request)
+		response, err = s.h.CreateFolder(ctx, request, params)
 	}
 	if err != nil {
 		defer recordError("Internal", err)
@@ -5616,6 +5645,16 @@ func (s *Server) handleCreateFormRequest(args [0]string, argsEscaped bool, w htt
 			return
 		}
 	}
+	params, err := decodeCreateFormParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
 
 	var rawBody []byte
 	request, rawBody, close, err := s.decodeCreateFormRequest(r)
@@ -5643,13 +5682,18 @@ func (s *Server) handleCreateFormRequest(args [0]string, argsEscaped bool, w htt
 			OperationID:      "createForm",
 			Body:             request,
 			RawBody:          rawBody,
-			Params:           middleware.Parameters{},
-			Raw:              r,
+			Params: middleware.Parameters{
+				{
+					Name: "revision_id",
+					In:   "query",
+				}: params.RevisionID,
+			},
+			Raw: r,
 		}
 
 		type (
 			Request  = *CreateFormRequest
-			Params   = struct{}
+			Params   = CreateFormParams
 			Response = CreateFormRes
 		)
 		response, err = middleware.HookMiddleware[
@@ -5659,14 +5703,14 @@ func (s *Server) handleCreateFormRequest(args [0]string, argsEscaped bool, w htt
 		](
 			m,
 			mreq,
-			nil,
+			unpackCreateFormParams,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.CreateForm(ctx, request)
+				response, err = s.h.CreateForm(ctx, request, params)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.CreateForm(ctx, request)
+		response, err = s.h.CreateForm(ctx, request, params)
 	}
 	if err != nil {
 		defer recordError("Internal", err)
@@ -5872,8 +5916,9 @@ func (s *Server) handleCreateFormMappingRequest(args [0]string, argsEscaped bool
 
 // handleCreateFormRecordRequest handles createFormRecord operation.
 //
-// Submit a new record to a form (posts to any live form-metric mappings and dispatches form_submit
-// automation rules).
+// For a caller who reaches the form's application (404 otherwise). The caller becomes the record's
+// creator. A record created submitted dispatches form_submit rules, one created approved (by an
+// administrator) form_approval rules.
 //
 // POST /api/forms/{id}/records
 func (s *Server) handleCreateFormRecordRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -6019,7 +6064,7 @@ func (s *Server) handleCreateFormRecordRequest(args [1]string, argsEscaped bool,
 		}
 	}()
 
-	var response *FormRecord
+	var response CreateFormRecordRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -6040,7 +6085,7 @@ func (s *Server) handleCreateFormRecordRequest(args [1]string, argsEscaped bool,
 		type (
 			Request  = *CreateRecordRequest
 			Params   = CreateFormRecordParams
-			Response = *FormRecord
+			Response = CreateFormRecordRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -6193,6 +6238,16 @@ func (s *Server) handleCreateGridRequest(args [0]string, argsEscaped bool, w htt
 			return
 		}
 	}
+	params, err := decodeCreateGridParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
 
 	var rawBody []byte
 	request, rawBody, close, err := s.decodeCreateGridRequest(r)
@@ -6220,13 +6275,18 @@ func (s *Server) handleCreateGridRequest(args [0]string, argsEscaped bool, w htt
 			OperationID:      "createGrid",
 			Body:             request,
 			RawBody:          rawBody,
-			Params:           middleware.Parameters{},
-			Raw:              r,
+			Params: middleware.Parameters{
+				{
+					Name: "revision_id",
+					In:   "query",
+				}: params.RevisionID,
+			},
+			Raw: r,
 		}
 
 		type (
 			Request  = *CreateGridRequest
-			Params   = struct{}
+			Params   = CreateGridParams
 			Response = CreateGridRes
 		)
 		response, err = middleware.HookMiddleware[
@@ -6236,14 +6296,14 @@ func (s *Server) handleCreateGridRequest(args [0]string, argsEscaped bool, w htt
 		](
 			m,
 			mreq,
-			nil,
+			unpackCreateGridParams,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.CreateGrid(ctx, request)
+				response, err = s.h.CreateGrid(ctx, request, params)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.CreateGrid(ctx, request)
+		response, err = s.h.CreateGrid(ctx, request, params)
 	}
 	if err != nil {
 		defer recordError("Internal", err)
@@ -6380,6 +6440,16 @@ func (s *Server) handleCreateIntegrationRequest(args [0]string, argsEscaped bool
 			return
 		}
 	}
+	params, err := decodeCreateIntegrationParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
 
 	var rawBody []byte
 	request, rawBody, close, err := s.decodeCreateIntegrationRequest(r)
@@ -6407,13 +6477,18 @@ func (s *Server) handleCreateIntegrationRequest(args [0]string, argsEscaped bool
 			OperationID:      "createIntegration",
 			Body:             request,
 			RawBody:          rawBody,
-			Params:           middleware.Parameters{},
-			Raw:              r,
+			Params: middleware.Parameters{
+				{
+					Name: "revision_id",
+					In:   "query",
+				}: params.RevisionID,
+			},
+			Raw: r,
 		}
 
 		type (
 			Request  = *CreateIntegrationRequest
-			Params   = struct{}
+			Params   = CreateIntegrationParams
 			Response = CreateIntegrationRes
 		)
 		response, err = middleware.HookMiddleware[
@@ -6423,14 +6498,14 @@ func (s *Server) handleCreateIntegrationRequest(args [0]string, argsEscaped bool
 		](
 			m,
 			mreq,
-			nil,
+			unpackCreateIntegrationParams,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.CreateIntegration(ctx, request)
+				response, err = s.h.CreateIntegration(ctx, request, params)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.CreateIntegration(ctx, request)
+		response, err = s.h.CreateIntegration(ctx, request, params)
 	}
 	if err != nil {
 		defer recordError("Internal", err)
@@ -6823,8 +6898,10 @@ func (s *Server) handleCreateMetricRequest(args [0]string, argsEscaped bool, w h
 
 // handleCreateRevisionRequest handles createRevision operation.
 //
-// Duplicate a revision (deep-copies metrics, dimensions, grids, dashboards, forms, workflows, and
-// facts).
+// The new revision is made in the model of source_revision_id when the body names one, else in
+// model_id, else in the model the request resolves (X-Model-Id within the X-App-Id application, else
+// the application's default model). A source revision must be one the caller may open, of a model in
+// the X-App-Id application when the request names one.
 //
 // POST /api/developer/revisions
 func (s *Server) handleCreateRevisionRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -6942,6 +7019,16 @@ func (s *Server) handleCreateRevisionRequest(args [0]string, argsEscaped bool, w
 			return
 		}
 	}
+	params, err := decodeCreateRevisionParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
 
 	var rawBody []byte
 	request, rawBody, close, err := s.decodeCreateRevisionRequest(r)
@@ -6969,13 +7056,18 @@ func (s *Server) handleCreateRevisionRequest(args [0]string, argsEscaped bool, w
 			OperationID:      "createRevision",
 			Body:             request,
 			RawBody:          rawBody,
-			Params:           middleware.Parameters{},
-			Raw:              r,
+			Params: middleware.Parameters{
+				{
+					Name: "model_id",
+					In:   "query",
+				}: params.ModelID,
+			},
+			Raw: r,
 		}
 
 		type (
 			Request  = *CreateRevisionRequest
-			Params   = struct{}
+			Params   = CreateRevisionParams
 			Response = CreateRevisionRes
 		)
 		response, err = middleware.HookMiddleware[
@@ -6985,14 +7077,14 @@ func (s *Server) handleCreateRevisionRequest(args [0]string, argsEscaped bool, w
 		](
 			m,
 			mreq,
-			nil,
+			unpackCreateRevisionParams,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.CreateRevision(ctx, request)
+				response, err = s.h.CreateRevision(ctx, request, params)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.CreateRevision(ctx, request)
+		response, err = s.h.CreateRevision(ctx, request, params)
 	}
 	if err != nil {
 		defer recordError("Internal", err)
@@ -7734,6 +7826,10 @@ func (s *Server) handleCreateWorkflowRequest(args [0]string, argsEscaped bool, w
 					Name: "application_id",
 					In:   "query",
 				}: params.ApplicationID,
+				{
+					Name: "revision_id",
+					In:   "query",
+				}: params.RevisionID,
 			},
 			Raw: r,
 		}
@@ -8086,6 +8182,16 @@ func (s *Server) handleDebugFactsRequest(args [0]string, argsEscaped bool, w htt
 			return
 		}
 	}
+	params, err := decodeDebugFactsParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
 
 	var rawBody []byte
 
@@ -8098,13 +8204,18 @@ func (s *Server) handleDebugFactsRequest(args [0]string, argsEscaped bool, w htt
 			OperationID:      "debugFacts",
 			Body:             nil,
 			RawBody:          rawBody,
-			Params:           middleware.Parameters{},
-			Raw:              r,
+			Params: middleware.Parameters{
+				{
+					Name: "revision_id",
+					In:   "query",
+				}: params.RevisionID,
+			},
+			Raw: r,
 		}
 
 		type (
 			Request  = struct{}
-			Params   = struct{}
+			Params   = DebugFactsParams
 			Response = DebugFactsRes
 		)
 		response, err = middleware.HookMiddleware[
@@ -8114,14 +8225,14 @@ func (s *Server) handleDebugFactsRequest(args [0]string, argsEscaped bool, w htt
 		](
 			m,
 			mreq,
-			nil,
+			unpackDebugFactsParams,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.DebugFacts(ctx)
+				response, err = s.h.DebugFacts(ctx, params)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.DebugFacts(ctx)
+		response, err = s.h.DebugFacts(ctx, params)
 	}
 	if err != nil {
 		defer recordError("Internal", err)
@@ -9586,7 +9697,7 @@ func (s *Server) handleDeleteBARoleRequest(args [1]string, argsEscaped bool, w h
 
 	var rawBody []byte
 
-	var response *DeleteBARoleOK
+	var response DeleteBARoleRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -9607,7 +9718,7 @@ func (s *Server) handleDeleteBARoleRequest(args [1]string, argsEscaped bool, w h
 		type (
 			Request  = struct{}
 			Params   = DeleteBARoleParams
-			Response = *DeleteBARoleOK
+			Response = DeleteBARoleRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -10776,7 +10887,8 @@ func (s *Server) handleDeleteFolderRequest(args [1]string, argsEscaped bool, w h
 
 // handleDeleteFormRequest handles deleteForm operation.
 //
-// Delete a form.
+// Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
+// Deletes every record of the form with it.
 //
 // DELETE /api/forms/{id}
 func (s *Server) handleDeleteFormRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -10907,7 +11019,7 @@ func (s *Server) handleDeleteFormRequest(args [1]string, argsEscaped bool, w htt
 
 	var rawBody []byte
 
-	var response *DeleteFormOK
+	var response DeleteFormRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -10928,7 +11040,7 @@ func (s *Server) handleDeleteFormRequest(args [1]string, argsEscaped bool, w htt
 		type (
 			Request  = struct{}
 			Params   = DeleteFormParams
-			Response = *DeleteFormOK
+			Response = DeleteFormRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -11150,7 +11262,8 @@ func (s *Server) handleDeleteFormMappingRequest(args [1]string, argsEscaped bool
 
 // handleDeleteFormRecordRequest handles deleteFormRecord operation.
 //
-// Delete a form record.
+// 404 for a caller who does not reach the record, 403 for one whose permissions do not include
+// delete, 409 when the record changed status since it was read.
 //
 // DELETE /api/records/{id}
 func (s *Server) handleDeleteFormRecordRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -13982,7 +14095,8 @@ func (s *Server) handleExportAuditRequest(args [0]string, argsEscaped bool, w ht
 
 // handleExportFormRecordsRequest handles exportFormRecords operation.
 //
-// Export a form's records as CSV or XLSX.
+// For a caller who reaches the form's application (404 otherwise); records the caller's access rules
+// withhold are left out.
 //
 // GET /api/forms/{id}/export
 func (s *Server) handleExportFormRecordsRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -17274,6 +17388,195 @@ func (s *Server) handleGetDeveloperModelRequest(args [0]string, argsEscaped bool
 	}
 }
 
+// handleGetFormRecordRequest handles getFormRecord operation.
+//
+// For a caller who reaches the record's form's application the way the business console opens it and
+// whose access rules do not withhold the record; anyone else gets 404, as for a record that does not
+// exist.
+//
+// GET /api/records/{id}
+func (s *Server) handleGetFormRecordRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
+	statusWriter := &codeRecorder{ResponseWriter: w}
+	w = statusWriter
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getFormRecord"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.HTTPRouteKey.String("/api/records/{id}"),
+	}
+	// Add attributes from config.
+	otelAttrs = append(otelAttrs, s.cfg.Attributes...)
+
+	// Start a span for this request.
+	ctx, span := s.cfg.Tracer.Start(r.Context(), GetFormRecordOperation,
+		trace.WithAttributes(otelAttrs...),
+		serverSpanKind,
+	)
+	defer span.End()
+
+	// Add Labeler to context.
+	labeler := &Labeler{attrs: otelAttrs}
+	ctx = contextWithLabeler(ctx, labeler)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		elapsedDuration := time.Since(startTime)
+
+		attrSet := labeler.AttributeSet()
+		attrs := attrSet.ToSlice()
+		code := statusWriter.status
+		if code != 0 {
+			codeAttr := semconv.HTTPResponseStatusCode(code)
+			attrs = append(attrs, codeAttr)
+			span.SetAttributes(codeAttr)
+		}
+		attrOpt := metric.WithAttributes(attrs...)
+
+		// Increment request counter.
+		s.requests.Add(ctx, 1, attrOpt)
+
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		s.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), attrOpt)
+	}()
+
+	var (
+		recordError = func(stage string, err error) {
+			span.RecordError(err)
+
+			// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#status
+			// Span Status MUST be left unset if HTTP status code was in the 1xx, 2xx or 3xx ranges,
+			// unless there was another error (e.g., network error receiving the response body; or 3xx codes with
+			// max redirects exceeded), in which case status MUST be set to Error.
+			code := statusWriter.status
+			if code < 100 || code >= 500 {
+				span.SetStatus(codes.Error, stage)
+			}
+
+			attrSet := labeler.AttributeSet()
+			attrs := attrSet.ToSlice()
+			if code != 0 {
+				attrs = append(attrs, semconv.HTTPResponseStatusCode(code))
+			}
+
+			s.errors.Add(ctx, 1, metric.WithAttributes(attrs...))
+		}
+		err          error
+		opErrContext = ogenerrors.OperationContext{
+			Name: GetFormRecordOperation,
+			ID:   "getFormRecord",
+		}
+	)
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			sctx, ok, err := s.securityBearerAuth(ctx, GetFormRecordOperation, r)
+			if err != nil {
+				err = &ogenerrors.SecurityError{
+					OperationContext: opErrContext,
+					Security:         "BearerAuth",
+					Err:              err,
+				}
+				defer recordError("Security:BearerAuth", err)
+				s.cfg.ErrorHandler(ctx, w, r, err)
+				return
+			}
+			if ok {
+				satisfied[0] |= 1 << 0
+				ctx = sctx
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			err = &ogenerrors.SecurityError{
+				OperationContext: opErrContext,
+				Err:              ogenerrors.ErrSecurityRequirementIsNotSatisfied,
+			}
+			defer recordError("Security", err)
+			s.cfg.ErrorHandler(ctx, w, r, err)
+			return
+		}
+	}
+	params, err := decodeGetFormRecordParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	var rawBody []byte
+
+	var response GetFormRecordRes
+	if m := s.cfg.Middleware; m != nil {
+		mreq := middleware.Request{
+			Context:          ctx,
+			OperationName:    GetFormRecordOperation,
+			OperationSummary: "Read one form record, with the caller's permissions on it",
+			OperationID:      "getFormRecord",
+			Body:             nil,
+			RawBody:          rawBody,
+			Params: middleware.Parameters{
+				{
+					Name: "id",
+					In:   "path",
+				}: params.ID,
+			},
+			Raw: r,
+		}
+
+		type (
+			Request  = struct{}
+			Params   = GetFormRecordParams
+			Response = GetFormRecordRes
+		)
+		response, err = middleware.HookMiddleware[
+			Request,
+			Params,
+			Response,
+		](
+			m,
+			mreq,
+			unpackGetFormRecordParams,
+			func(ctx context.Context, request Request, params Params) (response Response, err error) {
+				response, err = s.h.GetFormRecord(ctx, params)
+				return response, err
+			},
+		)
+	} else {
+		response, err = s.h.GetFormRecord(ctx, params)
+	}
+	if err != nil {
+		defer recordError("Internal", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	if err := encodeGetFormRecordResponse(response, w, span); err != nil {
+		defer recordError("EncodeResponse", err)
+		if !errors.Is(err, ht.ErrInternalServerErrorResponse) {
+			s.cfg.ErrorHandler(ctx, w, r, err)
+		}
+		return
+	}
+}
+
 // handleGetGoogleConnectionRequest handles getGoogleConnection operation.
 //
 // The tenant's Google service account, public half only — the address to share sheets with
@@ -19687,7 +19990,15 @@ func (s *Server) handleGetWorkflowRequest(args [1]string, argsEscaped bool, w ht
 
 // handleGetWorkflowHistoryRequest handles getWorkflowHistory operation.
 //
-// List the 50 most recent workflow instances across the whole platform (business_admin only).
+// Newest first. Only instances of workflows of applications the caller administers: an application
+// in a workspace where the caller holds business_admin, or one kept under a tenant with no workspace
+// when the caller holds business_admin in any workspace of that tenant, narrowed by the caller's
+// per-application grants when they have any. A caller who is also tenant_admin covers the
+// applications of its tenants; a platform_admin or platform-level developer covers every application.
+//
+//	When X-App-Id names an application, only that application's instances are listed. A developer's
+//
+// test runs are never listed.
 //
 // GET /api/workflow/history
 func (s *Server) handleGetWorkflowHistoryRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -19813,7 +20124,7 @@ func (s *Server) handleGetWorkflowHistoryRequest(args [0]string, argsEscaped boo
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    GetWorkflowHistoryOperation,
-			OperationSummary: "List the 50 most recent workflow instances across the whole platform (business_admin only)",
+			OperationSummary: "List the 50 most recent workflow instances of the applications the caller administers (business_admin)",
 			OperationID:      "getWorkflowHistory",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -20929,8 +21240,11 @@ func (s *Server) handleImportDimensionMembersRequest(args [0]string, argsEscaped
 
 // handleImportFormRecordsRequest handles importFormRecords operation.
 //
-// Bulk-create form records from an uploaded CSV or XLSX (atomic — any row failing validation
-// rejects the whole file).
+// For a caller who reaches the form's application (404 otherwise), who becomes each record's creator.
+//
+//	A row's optional status column sets its status; a row whose status the caller may not create
+//
+// (approved or rejected, unless the caller administers the application) fails validation.
 //
 // POST /api/forms/{id}/import
 func (s *Server) handleImportFormRecordsRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -23542,10 +23856,20 @@ func (s *Server) handleListAutomationRulesRequest(args [0]string, argsEscaped bo
 			return
 		}
 	}
+	params, err := decodeListAutomationRulesParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
 
 	var rawBody []byte
 
-	var response []AutomationRule
+	var response ListAutomationRulesRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -23554,14 +23878,19 @@ func (s *Server) handleListAutomationRulesRequest(args [0]string, argsEscaped bo
 			OperationID:      "listAutomationRules",
 			Body:             nil,
 			RawBody:          rawBody,
-			Params:           middleware.Parameters{},
-			Raw:              r,
+			Params: middleware.Parameters{
+				{
+					Name: "revision_id",
+					In:   "query",
+				}: params.RevisionID,
+			},
+			Raw: r,
 		}
 
 		type (
 			Request  = struct{}
-			Params   = struct{}
-			Response = []AutomationRule
+			Params   = ListAutomationRulesParams
+			Response = ListAutomationRulesRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -23570,14 +23899,14 @@ func (s *Server) handleListAutomationRulesRequest(args [0]string, argsEscaped bo
 		](
 			m,
 			mreq,
-			nil,
+			unpackListAutomationRulesParams,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.ListAutomationRules(ctx)
+				response, err = s.h.ListAutomationRules(ctx, params)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.ListAutomationRules(ctx)
+		response, err = s.h.ListAutomationRules(ctx, params)
 	}
 	if err != nil {
 		defer recordError("Internal", err)
@@ -23914,7 +24243,7 @@ func (s *Server) handleListBARoleDashboardsRequest(args [1]string, argsEscaped b
 
 	var rawBody []byte
 
-	var response []uuid.UUID
+	var response ListBARoleDashboardsRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -23935,7 +24264,7 @@ func (s *Server) handleListBARoleDashboardsRequest(args [1]string, argsEscaped b
 		type (
 			Request  = struct{}
 			Params   = ListBARoleDashboardsParams
-			Response = []uuid.UUID
+			Response = ListBARoleDashboardsRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -24101,7 +24430,7 @@ func (s *Server) handleListBARoleMembersRequest(args [1]string, argsEscaped bool
 
 	var rawBody []byte
 
-	var response []BARoleMember
+	var response ListBARoleMembersRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -24122,7 +24451,7 @@ func (s *Server) handleListBARoleMembersRequest(args [1]string, argsEscaped bool
 		type (
 			Request  = struct{}
 			Params   = ListBARoleMembersParams
-			Response = []BARoleMember
+			Response = ListBARoleMembersRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -24278,7 +24607,7 @@ func (s *Server) handleListBARolesRequest(args [0]string, argsEscaped bool, w ht
 
 	var rawBody []byte
 
-	var response []BARole
+	var response ListBARolesRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -24294,7 +24623,7 @@ func (s *Server) handleListBARolesRequest(args [0]string, argsEscaped bool, w ht
 		type (
 			Request  = struct{}
 			Params   = struct{}
-			Response = []BARole
+			Response = ListBARolesRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -24450,7 +24779,7 @@ func (s *Server) handleListBAUsersRequest(args [0]string, argsEscaped bool, w ht
 
 	var rawBody []byte
 
-	var response []BAUser
+	var response ListBAUsersRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -24466,7 +24795,7 @@ func (s *Server) handleListBAUsersRequest(args [0]string, argsEscaped bool, w ht
 		type (
 			Request  = struct{}
 			Params   = struct{}
-			Response = []BAUser
+			Response = ListBAUsersRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -26343,7 +26672,9 @@ func (s *Server) handleListFormMappingsRequest(args [0]string, argsEscaped bool,
 
 // handleListFormRecordsRequest handles listFormRecords operation.
 //
-// List the 100 most recent records submitted to a form.
+// For a caller who reaches the form's application the way the business console opens it; anyone else
+// gets 404, as for a form that does not exist. Records the caller's access rules withhold are left
+// out. Each record carries the caller's permissions on it.
 //
 // GET /api/forms/{id}/records
 func (s *Server) handleListFormRecordsRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -26474,7 +26805,7 @@ func (s *Server) handleListFormRecordsRequest(args [1]string, argsEscaped bool, 
 
 	var rawBody []byte
 
-	var response []FormRecord
+	var response ListFormRecordsRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -26495,7 +26826,7 @@ func (s *Server) handleListFormRecordsRequest(args [1]string, argsEscaped bool, 
 		type (
 			Request  = struct{}
 			Params   = ListFormRecordsParams
-			Response = []FormRecord
+			Response = ListFormRecordsRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -27553,6 +27884,16 @@ func (s *Server) handleListMetricsRequest(args [0]string, argsEscaped bool, w ht
 			return
 		}
 	}
+	params, err := decodeListMetricsParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
 
 	var rawBody []byte
 
@@ -27565,13 +27906,18 @@ func (s *Server) handleListMetricsRequest(args [0]string, argsEscaped bool, w ht
 			OperationID:      "listMetrics",
 			Body:             nil,
 			RawBody:          rawBody,
-			Params:           middleware.Parameters{},
-			Raw:              r,
+			Params: middleware.Parameters{
+				{
+					Name: "revision_id",
+					In:   "query",
+				}: params.RevisionID,
+			},
+			Raw: r,
 		}
 
 		type (
 			Request  = struct{}
-			Params   = struct{}
+			Params   = ListMetricsParams
 			Response = ListMetricsRes
 		)
 		response, err = middleware.HookMiddleware[
@@ -27581,14 +27927,14 @@ func (s *Server) handleListMetricsRequest(args [0]string, argsEscaped bool, w ht
 		](
 			m,
 			mreq,
-			nil,
+			unpackListMetricsParams,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.ListMetrics(ctx)
+				response, err = s.h.ListMetrics(ctx, params)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.ListMetrics(ctx)
+		response, err = s.h.ListMetrics(ctx, params)
 	}
 	if err != nil {
 		defer recordError("Internal", err)
@@ -28801,7 +29147,7 @@ func (s *Server) handleListUserAccessRulesRequest(args [1]string, argsEscaped bo
 
 	var rawBody []byte
 
-	var response []UserAccessRule
+	var response ListUserAccessRulesRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -28822,7 +29168,7 @@ func (s *Server) handleListUserAccessRulesRequest(args [1]string, argsEscaped bo
 		type (
 			Request  = struct{}
 			Params   = ListUserAccessRulesParams
-			Response = []UserAccessRule
+			Response = ListUserAccessRulesRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -29522,7 +29868,7 @@ func (s *Server) handleListWorkflowTriggerEventsRequest(args [0]string, argsEsca
 
 	var rawBody []byte
 
-	var response []TriggerEventCatalogItem
+	var response ListWorkflowTriggerEventsRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -29536,6 +29882,10 @@ func (s *Server) handleListWorkflowTriggerEventsRequest(args [0]string, argsEsca
 					Name: "application_id",
 					In:   "query",
 				}: params.ApplicationID,
+				{
+					Name: "revision_id",
+					In:   "query",
+				}: params.RevisionID,
 			},
 			Raw: r,
 		}
@@ -29543,7 +29893,7 @@ func (s *Server) handleListWorkflowTriggerEventsRequest(args [0]string, argsEsca
 		type (
 			Request  = struct{}
 			Params   = ListWorkflowTriggerEventsParams
-			Response = []TriggerEventCatalogItem
+			Response = ListWorkflowTriggerEventsRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -29723,6 +30073,10 @@ func (s *Server) handleListWorkflowsRequest(args [0]string, argsEscaped bool, w 
 					Name: "application_id",
 					In:   "query",
 				}: params.ApplicationID,
+				{
+					Name: "revision_id",
+					In:   "query",
+				}: params.RevisionID,
 			},
 			Raw: r,
 		}
@@ -31221,7 +31575,7 @@ func (s *Server) handleRemoveBARoleMemberRequest(args [2]string, argsEscaped boo
 
 	var rawBody []byte
 
-	var response *RemoveBARoleMemberOK
+	var response RemoveBARoleMemberRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -31246,7 +31600,7 @@ func (s *Server) handleRemoveBARoleMemberRequest(args [2]string, argsEscaped boo
 		type (
 			Request  = struct{}
 			Params   = RemoveBARoleMemberParams
-			Response = *RemoveBARoleMemberOK
+			Response = RemoveBARoleMemberRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -32200,6 +32554,211 @@ func (s *Server) handleRenameAiSessionRequest(args [1]string, argsEscaped bool, 
 	}
 
 	if err := encodeRenameAiSessionResponse(response, w, span); err != nil {
+		defer recordError("EncodeResponse", err)
+		if !errors.Is(err, ht.ErrInternalServerErrorResponse) {
+			s.cfg.ErrorHandler(ctx, w, r, err)
+		}
+		return
+	}
+}
+
+// handleReorderDimensionMembersRequest handles reorderDimensionMembers operation.
+//
+// Member_ids must be exactly the current children of parent_member_id in this dimension (null for
+// the top-level members), each once, in the wanted order. The whole dimension is then renumbered in
+// tree order (each member followed by its children), which is the order grids, pickers and charts
+// show. Audited as dimension.members_reordered. A dimension outside the caller's scope answers 404.
+//
+// PUT /api/developer/dimensions/{dimId}/members/order
+func (s *Server) handleReorderDimensionMembersRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
+	statusWriter := &codeRecorder{ResponseWriter: w}
+	w = statusWriter
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("reorderDimensionMembers"),
+		semconv.HTTPRequestMethodKey.String("PUT"),
+		semconv.HTTPRouteKey.String("/api/developer/dimensions/{dimId}/members/order"),
+	}
+	// Add attributes from config.
+	otelAttrs = append(otelAttrs, s.cfg.Attributes...)
+
+	// Start a span for this request.
+	ctx, span := s.cfg.Tracer.Start(r.Context(), ReorderDimensionMembersOperation,
+		trace.WithAttributes(otelAttrs...),
+		serverSpanKind,
+	)
+	defer span.End()
+
+	// Add Labeler to context.
+	labeler := &Labeler{attrs: otelAttrs}
+	ctx = contextWithLabeler(ctx, labeler)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		elapsedDuration := time.Since(startTime)
+
+		attrSet := labeler.AttributeSet()
+		attrs := attrSet.ToSlice()
+		code := statusWriter.status
+		if code != 0 {
+			codeAttr := semconv.HTTPResponseStatusCode(code)
+			attrs = append(attrs, codeAttr)
+			span.SetAttributes(codeAttr)
+		}
+		attrOpt := metric.WithAttributes(attrs...)
+
+		// Increment request counter.
+		s.requests.Add(ctx, 1, attrOpt)
+
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		s.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), attrOpt)
+	}()
+
+	var (
+		recordError = func(stage string, err error) {
+			span.RecordError(err)
+
+			// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#status
+			// Span Status MUST be left unset if HTTP status code was in the 1xx, 2xx or 3xx ranges,
+			// unless there was another error (e.g., network error receiving the response body; or 3xx codes with
+			// max redirects exceeded), in which case status MUST be set to Error.
+			code := statusWriter.status
+			if code < 100 || code >= 500 {
+				span.SetStatus(codes.Error, stage)
+			}
+
+			attrSet := labeler.AttributeSet()
+			attrs := attrSet.ToSlice()
+			if code != 0 {
+				attrs = append(attrs, semconv.HTTPResponseStatusCode(code))
+			}
+
+			s.errors.Add(ctx, 1, metric.WithAttributes(attrs...))
+		}
+		err          error
+		opErrContext = ogenerrors.OperationContext{
+			Name: ReorderDimensionMembersOperation,
+			ID:   "reorderDimensionMembers",
+		}
+	)
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			sctx, ok, err := s.securityBearerAuth(ctx, ReorderDimensionMembersOperation, r)
+			if err != nil {
+				err = &ogenerrors.SecurityError{
+					OperationContext: opErrContext,
+					Security:         "BearerAuth",
+					Err:              err,
+				}
+				defer recordError("Security:BearerAuth", err)
+				s.cfg.ErrorHandler(ctx, w, r, err)
+				return
+			}
+			if ok {
+				satisfied[0] |= 1 << 0
+				ctx = sctx
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			err = &ogenerrors.SecurityError{
+				OperationContext: opErrContext,
+				Err:              ogenerrors.ErrSecurityRequirementIsNotSatisfied,
+			}
+			defer recordError("Security", err)
+			s.cfg.ErrorHandler(ctx, w, r, err)
+			return
+		}
+	}
+	params, err := decodeReorderDimensionMembersParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	var rawBody []byte
+	request, rawBody, close, err := s.decodeReorderDimensionMembersRequest(r)
+	if err != nil {
+		err = &ogenerrors.DecodeRequestError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeRequest", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+	defer func() {
+		if err := close(); err != nil {
+			recordError("CloseRequest", err)
+		}
+	}()
+
+	var response ReorderDimensionMembersRes
+	if m := s.cfg.Middleware; m != nil {
+		mreq := middleware.Request{
+			Context:          ctx,
+			OperationName:    ReorderDimensionMembersOperation,
+			OperationSummary: "Set the order of one level of a dimension's members (developer only; not on a time dimension)",
+			OperationID:      "reorderDimensionMembers",
+			Body:             request,
+			RawBody:          rawBody,
+			Params: middleware.Parameters{
+				{
+					Name: "dimId",
+					In:   "path",
+				}: params.DimId,
+			},
+			Raw: r,
+		}
+
+		type (
+			Request  = *ReorderDimensionMembersReq
+			Params   = ReorderDimensionMembersParams
+			Response = ReorderDimensionMembersRes
+		)
+		response, err = middleware.HookMiddleware[
+			Request,
+			Params,
+			Response,
+		](
+			m,
+			mreq,
+			unpackReorderDimensionMembersParams,
+			func(ctx context.Context, request Request, params Params) (response Response, err error) {
+				response, err = s.h.ReorderDimensionMembers(ctx, request, params)
+				return response, err
+			},
+		)
+	} else {
+		response, err = s.h.ReorderDimensionMembers(ctx, request, params)
+	}
+	if err != nil {
+		defer recordError("Internal", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	if err := encodeReorderDimensionMembersResponse(response, w, span); err != nil {
 		defer recordError("EncodeResponse", err)
 		if !errors.Is(err, ht.ErrInternalServerErrorResponse) {
 			s.cfg.ErrorHandler(ctx, w, r, err)
@@ -36973,7 +37532,12 @@ func (s *Server) handleSetActiveRevisionRequest(args [1]string, argsEscaped bool
 
 // handleSetBARoleDashboardsRequest handles setBARoleDashboards operation.
 //
-// Replace the full set of dashboards assigned to a business role.
+// Dashboard_ids is the role's full set of dashboards within one revision: those of revision_id when
+// given, else of the active revision of the model the admin is working in (X-Model-Id when it is a
+// model of the application, else the application's default model). A grant the list leaves out is
+// removed only among that revision's dashboards; the role's grants on other models' or other
+// revisions' dashboards are kept. Every listed id is granted and must be a dashboard of the role's
+// workspace.
 //
 // PUT /api/business-admin/roles/{id}/dashboards
 func (s *Server) handleSetBARoleDashboardsRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -37124,7 +37688,7 @@ func (s *Server) handleSetBARoleDashboardsRequest(args [1]string, argsEscaped bo
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    SetBARoleDashboardsOperation,
-			OperationSummary: "Replace the full set of dashboards assigned to a business role",
+			OperationSummary: "Set the dashboards assigned to a business role among one revision's dashboards",
 			OperationID:      "setBARoleDashboards",
 			Body:             request,
 			RawBody:          rawBody,
@@ -37133,6 +37697,10 @@ func (s *Server) handleSetBARoleDashboardsRequest(args [1]string, argsEscaped bo
 					Name: "id",
 					In:   "path",
 				}: params.ID,
+				{
+					Name: "revision_id",
+					In:   "query",
+				}: params.RevisionID,
 			},
 			Raw: r,
 		}
@@ -37564,9 +38132,9 @@ func (s *Server) handleSetUserAccessRulesRequest(args [1]string, argsEscaped boo
 
 // handleSignupRequest handles signup operation.
 //
-// Register a tenant from the public sign-up page — the tenant on the self-service plan, its first
-// administrator/developer, an application with the starter model, and an invitation to set a
-// password (public, rate-limited per address).
+// The application gets four starter models in one transaction, all of them or none: the "Learn the
+// platform" tour, which is made the application's default model (the one business consoles open),
+// and a developer, a business admin and a tenant admin guide. model_id in the result is the tour's.
 //
 // POST /api/signup
 func (s *Server) handleSignupRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -37663,7 +38231,7 @@ func (s *Server) handleSignupRequest(args [0]string, argsEscaped bool, w http.Re
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    SignupOperation,
-			OperationSummary: "Register a tenant from the public sign-up page — the tenant on the self-service plan, its first administrator/developer, an application with the starter model, and an invitation to set a password (public, rate-limited per address)",
+			OperationSummary: "Register a tenant from the public sign-up page — the tenant on the self-service plan, its first administrator/developer, an application with the starter models, and an invitation to set a password (public, rate-limited per address)",
 			OperationID:      "signup",
 			Body:             request,
 			RawBody:          rawBody,
@@ -38431,7 +38999,10 @@ func (s *Server) handleSubmitBudgetRequest(args [0]string, argsEscaped bool, w h
 
 // handleSyncFormMappingsRequest handles syncFormMappings operation.
 //
-// Re-apply every live form-metric mapping against all of a form's existing records.
+// For an administrator of the form's application (a business_admin of its workspace, a developer or
+// tenant admin within their scope, a platform admin): a sync re-posts every record of the form,
+// other people's included. 403 for a caller who reaches the form without administering it, 404 for
+// anyone else. A record whose re-post the caller's write guard refuses keeps the posting it has.
 //
 // POST /api/forms/{id}/sync
 func (s *Server) handleSyncFormMappingsRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -38562,7 +39133,7 @@ func (s *Server) handleSyncFormMappingsRequest(args [1]string, argsEscaped bool,
 
 	var rawBody []byte
 
-	var response *SyncFormMappingsOK
+	var response SyncFormMappingsRes
 	if m := s.cfg.Middleware; m != nil {
 		mreq := middleware.Request{
 			Context:          ctx,
@@ -38583,7 +39154,7 @@ func (s *Server) handleSyncFormMappingsRequest(args [1]string, argsEscaped bool,
 		type (
 			Request  = struct{}
 			Params   = SyncFormMappingsParams
-			Response = *SyncFormMappingsOK
+			Response = SyncFormMappingsRes
 		)
 		response, err = middleware.HookMiddleware[
 			Request,
@@ -42760,7 +43331,7 @@ func (s *Server) handleUpdateFolderRequest(args [1]string, argsEscaped bool, w h
 
 // handleUpdateFormRequest handles updateForm operation.
 //
-// Update a form's name, label, or fields.
+// Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
 //
 // PATCH /api/forms/{id}
 func (s *Server) handleUpdateFormRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -43164,8 +43735,10 @@ func (s *Server) handleUpdateFormMappingRequest(args [1]string, argsEscaped bool
 
 // handleUpdateFormRecordRequest handles updateFormRecord operation.
 //
-// Update a form record's data and/or status (dispatches form_submit/form_approval automation rules
-// on status transitions).
+// A caller who does not reach the record gets 404 (see getFormRecord). One who does may make the
+// change its permissions allow (RecordPermissions: edit, and set_status for a new status) and gets
+// 403 for anything else. The write applies only while the record is still in the status the check
+// was made against: 409 when it changed in the meantime.
 //
 // PUT /api/records/{id}
 func (s *Server) handleUpdateFormRecordRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -43977,7 +44550,9 @@ func (s *Server) handleUpdateIntegrationRequest(args [1]string, argsEscaped bool
 
 // handleUpdateIntegrationConfigRequest handles updateIntegrationConfig operation.
 //
-// Replace an integration's type-specific config blob.
+// A rest_api integration's config takes the same typed path as its create and update: 400 when the
+// body is not a valid REST API config, or when a target it names (grid, form, dimension, dashboard)
+// is not a row of the integration's own model.
 //
 // PATCH /api/developer/integrations/{id}/config
 func (s *Server) handleUpdateIntegrationConfigRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -45736,7 +46311,9 @@ func (s *Server) handleUpdateWorkflowRequest(args [1]string, argsEscaped bool, w
 
 // handleUpdateWorkflowInstanceRequest handles updateWorkflowInstance operation.
 //
-// Admin override of a workflow instance's status (business_admin only).
+// Only an instance GET /api/workflow/history could list for the caller: a workflow of an application
+// the caller administers, and not a developer's test run. Any other instance answers 404, the same
+// as an id that does not exist, and nothing is changed.
 //
 // PATCH /api/workflow/instances/{id}
 func (s *Server) handleUpdateWorkflowInstanceRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -45887,7 +46464,7 @@ func (s *Server) handleUpdateWorkflowInstanceRequest(args [1]string, argsEscaped
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    UpdateWorkflowInstanceOperation,
-			OperationSummary: "Admin override of a workflow instance's status (business_admin only)",
+			OperationSummary: "Admin override of a workflow instance's status (business_admin)",
 			OperationID:      "updateWorkflowInstance",
 			Body:             request,
 			RawBody:          rawBody,

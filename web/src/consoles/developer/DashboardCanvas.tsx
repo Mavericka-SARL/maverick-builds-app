@@ -235,8 +235,11 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
   }, [selectedId, mode]);
 
   const { data: grids = [] }       = useQuery({ queryKey: ["dev-grids", revisionId], queryFn: () => api.listGrids(revisionId) });
-  const { data: forms = [] }       = useQuery({ queryKey: ["forms"], queryFn: () => api.listForms() });
-  const { data: rules = [] }       = useQuery({ queryKey: ["automation-rules"], queryFn: () => api.listAutomationRules() });
+  // The pickers offer the dashboard's own revision's forms, rules and
+  // integrations — unscoped, they listed the default model's live revision,
+  // so a widget could be bound to something this revision does not have.
+  const { data: forms = [] }       = useQuery({ queryKey: ["forms", revisionId], queryFn: () => api.listForms(revisionId) });
+  const { data: rules = [] }       = useQuery({ queryKey: ["automation-rules", revisionId], queryFn: () => api.listAutomationRules(revisionId) });
   // Only a manual, enabled rule can actually run from a dashboard button.
   // Offering the rest produced buttons that looked live and failed on click:
   // an event- or schedule-triggered rule fires from its own source, and a
@@ -245,7 +248,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
     () => (rules as AutomationRule[]).filter(r => r.trigger_type === "manual" && r.enabled),
     [rules],
   );
-  const { data: integrations = [] }= useQuery({ queryKey: ["dev-integrations"], queryFn: () => api.listDevIntegrations() });
+  const { data: integrations = [] }= useQuery({ queryKey: ["dev-integrations", revisionId], queryFn: () => api.listDevIntegrations(revisionId) });
   const { data: metrics = [] }     = useQuery({ queryKey: ["metrics", revisionId], queryFn: () => revisionId ? api.getMetrics(revisionId) : Promise.resolve([]) });
   const { data: kpiScopeDims = [] } = useQuery({ queryKey: ["dev-dimensions-all", revisionId], queryFn: () => api.getDevDimensions(revisionId) });
   const { data: demoCtx }          = useQuery({ queryKey: ["demo"], queryFn: api.getDemo, staleTime: 60_000 });

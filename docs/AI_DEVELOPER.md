@@ -68,7 +68,7 @@ on it.
 |---|---|---|
 | Metrics | `create_metric`, `update_metric`, `delete_metric` | the Metrics screen |
 | Dimensions | `create_dimension`, `update_dimension`, `delete_dimension` | the Dimensions screen; delete refused with `DIMENSION_IN_USE` or while a grouping groups it |
-| Members | `add_dimension_member`, `update_dimension_member`, `delete_dimension_member`, `generate_time_members` | member add, edit (code, label, parent, period dates, properties), delete (refused with `MEMBER_IN_USE`) and **Generate periods** |
+| Members | `add_dimension_member`, `update_dimension_member`, `delete_dimension_member`, `generate_time_members`, `reorder_dimension_members` | member add, edit (code, label, parent, period dates, properties), delete (refused with `MEMBER_IN_USE`), **Generate periods**, and the order of one level of members (`PUT …/members/order`; not on a time dimension) |
 | Properties | `add_dimension_property`, `update_dimension_property`, `delete_dimension_property` | the Dimension Properties panel |
 | Grids | `create_grid`, `update_grid`, `delete_grid`, `add_grid_metric`, `remove_grid_metric`, `add_grid_dimension`, `update_grid_dimension`, `remove_grid_dimension` | the Grids screen, including a dimension's display level |
 | Dashboards | `create_dashboard_folder`, `update_dashboard_folder`, `delete_dashboard_folder`, `create_dashboard`, `update_dashboard`, `delete_dashboard`, `add_dashboard_widget`, `update_dashboard_widget`, `delete_dashboard_widget` | the Dashboards screen and its designer |

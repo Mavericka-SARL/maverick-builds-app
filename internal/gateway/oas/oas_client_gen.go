@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/go-faster/errors"
-	"github.com/google/uuid"
 	"github.com/ogen-go/ogen/conv"
 	ht "github.com/ogen-go/ogen/http"
 	"github.com/ogen-go/ogen/ogenerrors"
@@ -171,7 +170,7 @@ type Invoker interface {
 	// Create an automation rule (a workflow_def_id must point at a published workflow).
 	//
 	// POST /api/automation/rules
-	CreateAutomationRule(ctx context.Context, request *AutomationRuleRequest) (CreateAutomationRuleRes, error)
+	CreateAutomationRule(ctx context.Context, request *AutomationRuleRequest, params CreateAutomationRuleParams) (CreateAutomationRuleRes, error)
 	// CreateBARole invokes createBARole operation.
 	//
 	// Create a business role in the caller's workspace.
@@ -214,13 +213,13 @@ type Invoker interface {
 	// Create a dashboard folder.
 	//
 	// POST /api/developer/folders
-	CreateFolder(ctx context.Context, request *FolderRequest) (CreateFolderRes, error)
+	CreateFolder(ctx context.Context, request *FolderRequest, params CreateFolderParams) (CreateFolderRes, error)
 	// CreateForm invokes createForm operation.
 	//
 	// Create a CRUD form.
 	//
 	// POST /api/forms
-	CreateForm(ctx context.Context, request *CreateFormRequest) (CreateFormRes, error)
+	CreateForm(ctx context.Context, request *CreateFormRequest, params CreateFormParams) (CreateFormRes, error)
 	// CreateFormMapping invokes createFormMapping operation.
 	//
 	// Create a form-to-metric mapping (posts submitted form field values into a metric's facts).
@@ -229,23 +228,24 @@ type Invoker interface {
 	CreateFormMapping(ctx context.Context, request *CreateFormMappingRequest) (CreateFormMappingRes, error)
 	// CreateFormRecord invokes createFormRecord operation.
 	//
-	// Submit a new record to a form (posts to any live form-metric mappings and dispatches form_submit
-	// automation rules).
+	// For a caller who reaches the form's application (404 otherwise). The caller becomes the record's
+	// creator. A record created submitted dispatches form_submit rules, one created approved (by an
+	// administrator) form_approval rules.
 	//
 	// POST /api/forms/{id}/records
-	CreateFormRecord(ctx context.Context, request *CreateRecordRequest, params CreateFormRecordParams) (*FormRecord, error)
+	CreateFormRecord(ctx context.Context, request *CreateRecordRequest, params CreateFormRecordParams) (CreateFormRecordRes, error)
 	// CreateGrid invokes createGrid operation.
 	//
 	// Create a new grid definition.
 	//
 	// POST /api/developer/grids
-	CreateGrid(ctx context.Context, request *CreateGridRequest) (CreateGridRes, error)
+	CreateGrid(ctx context.Context, request *CreateGridRequest, params CreateGridParams) (CreateGridRes, error)
 	// CreateIntegration invokes createIntegration operation.
 	//
 	// Create an integration definition.
 	//
 	// POST /api/developer/integrations
-	CreateIntegration(ctx context.Context, request *CreateIntegrationRequest) (CreateIntegrationRes, error)
+	CreateIntegration(ctx context.Context, request *CreateIntegrationRequest, params CreateIntegrationParams) (CreateIntegrationRes, error)
 	// CreateIntegrationConnection invokes createIntegrationConnection operation.
 	//
 	// Create a connection; the secret document is sealed with mandatory AEAD and never returned.
@@ -260,11 +260,13 @@ type Invoker interface {
 	CreateMetric(ctx context.Context, request *CreateMetricRequest) (CreateMetricRes, error)
 	// CreateRevision invokes createRevision operation.
 	//
-	// Duplicate a revision (deep-copies metrics, dimensions, grids, dashboards, forms, workflows, and
-	// facts).
+	// The new revision is made in the model of source_revision_id when the body names one, else in
+	// model_id, else in the model the request resolves (X-Model-Id within the X-App-Id application, else
+	// the application's default model). A source revision must be one the caller may open, of a model in
+	// the X-App-Id application when the request names one.
 	//
 	// POST /api/developer/revisions
-	CreateRevision(ctx context.Context, request *CreateRevisionRequest) (CreateRevisionRes, error)
+	CreateRevision(ctx context.Context, request *CreateRevisionRequest, params CreateRevisionParams) (CreateRevisionRes, error)
 	// CreateScimToken invokes createScimToken operation.
 	//
 	// Issue a SCIM bearer token; the plaintext is returned once (administrators; enterprise).
@@ -303,7 +305,7 @@ type Invoker interface {
 	// List the 50 most recently entered raw fact_input rows for a model (debugging aid).
 	//
 	// GET /api/developer/debug/facts
-	DebugFacts(ctx context.Context) (DebugFactsRes, error)
+	DebugFacts(ctx context.Context, params DebugFactsParams) (DebugFactsRes, error)
 	// DeleteAdminApplication invokes deleteAdminApplication operation.
 	//
 	// Delete an application.
@@ -353,7 +355,7 @@ type Invoker interface {
 	// Delete a business role.
 	//
 	// DELETE /api/business-admin/roles/{id}
-	DeleteBARole(ctx context.Context, params DeleteBARoleParams) (*DeleteBARoleOK, error)
+	DeleteBARole(ctx context.Context, params DeleteBARoleParams) (DeleteBARoleRes, error)
 	// DeleteDashboard invokes deleteDashboard operation.
 	//
 	// Delete a dashboard.
@@ -392,10 +394,11 @@ type Invoker interface {
 	DeleteFolder(ctx context.Context, params DeleteFolderParams) (*DeleteFolderOK, error)
 	// DeleteForm invokes deleteForm operation.
 	//
-	// Delete a form.
+	// Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
+	// Deletes every record of the form with it.
 	//
 	// DELETE /api/forms/{id}
-	DeleteForm(ctx context.Context, params DeleteFormParams) (*DeleteFormOK, error)
+	DeleteForm(ctx context.Context, params DeleteFormParams) (DeleteFormRes, error)
 	// DeleteFormMapping invokes deleteFormMapping operation.
 	//
 	// Delete a form-to-metric mapping.
@@ -404,7 +407,8 @@ type Invoker interface {
 	DeleteFormMapping(ctx context.Context, params DeleteFormMappingParams) (*DeleteFormMappingOK, error)
 	// DeleteFormRecord invokes deleteFormRecord operation.
 	//
-	// Delete a form record.
+	// 404 for a caller who does not reach the record, 403 for one whose permissions do not include
+	// delete, 409 when the record changed status since it was read.
 	//
 	// DELETE /api/records/{id}
 	DeleteFormRecord(ctx context.Context, params DeleteFormRecordParams) (DeleteFormRecordRes, error)
@@ -497,7 +501,8 @@ type Invoker interface {
 	ExportAudit(ctx context.Context, params ExportAuditParams) (ExportAuditRes, error)
 	// ExportFormRecords invokes exportFormRecords operation.
 	//
-	// Export a form's records as CSV or XLSX.
+	// For a caller who reaches the form's application (404 otherwise); records the caller's access rules
+	// withhold are left out.
 	//
 	// GET /api/forms/{id}/export
 	ExportFormRecords(ctx context.Context, params ExportFormRecordsParams) (ExportFormRecordsRes, error)
@@ -610,6 +615,14 @@ type Invoker interface {
 	//
 	// GET /api/developer/model
 	GetDeveloperModel(ctx context.Context, params GetDeveloperModelParams) (*GetDeveloperModelOK, error)
+	// GetFormRecord invokes getFormRecord operation.
+	//
+	// For a caller who reaches the record's form's application the way the business console opens it and
+	// whose access rules do not withhold the record; anyone else gets 404, as for a record that does not
+	// exist.
+	//
+	// GET /api/records/{id}
+	GetFormRecord(ctx context.Context, params GetFormRecordParams) (GetFormRecordRes, error)
 	// GetGoogleConnection invokes getGoogleConnection operation.
 	//
 	// The tenant's Google service account, public half only — the address to share sheets with
@@ -704,7 +717,13 @@ type Invoker interface {
 	GetWorkflow(ctx context.Context, params GetWorkflowParams) (GetWorkflowRes, error)
 	// GetWorkflowHistory invokes getWorkflowHistory operation.
 	//
-	// List the 50 most recent workflow instances across the whole platform (business_admin only).
+	// Newest first. Only instances of workflows of applications the caller administers: an application
+	// in a workspace where the caller holds business_admin, or one kept under a tenant with no workspace
+	// when the caller holds business_admin in any workspace of that tenant, narrowed by the caller's
+	// per-application grants when they have any. A caller who is also tenant_admin covers the
+	// applications of its tenants; a platform_admin or platform-level developer covers every application.
+	//  When X-App-Id names an application, only that application's instances are listed. A developer's
+	// test runs are never listed.
 	//
 	// GET /api/workflow/history
 	GetWorkflowHistory(ctx context.Context) ([]WorkflowInstance, error)
@@ -749,8 +768,9 @@ type Invoker interface {
 	ImportDimensionMembers(ctx context.Context, request *ImportDimensionMembersReq) (ImportDimensionMembersRes, error)
 	// ImportFormRecords invokes importFormRecords operation.
 	//
-	// Bulk-create form records from an uploaded CSV or XLSX (atomic — any row failing validation
-	// rejects the whole file).
+	// For a caller who reaches the form's application (404 otherwise), who becomes each record's creator.
+	//  A row's optional status column sets its status; a row whose status the caller may not create
+	// (approved or rejected, unless the caller administers the application) fails validation.
 	//
 	// POST /api/forms/{id}/import
 	ImportFormRecords(ctx context.Context, request *FormImportRequest, params ImportFormRecordsParams) (ImportFormRecordsRes, error)
@@ -850,7 +870,7 @@ type Invoker interface {
 	// List automation rules for the current application/revision.
 	//
 	// GET /api/automation/rules
-	ListAutomationRules(ctx context.Context) ([]AutomationRule, error)
+	ListAutomationRules(ctx context.Context, params ListAutomationRulesParams) (ListAutomationRulesRes, error)
 	// ListBAAvailable invokes listBAAvailable operation.
 	//
 	// List dashboards, metrics, dimensions, or dimension members available for role/access configuration.
@@ -862,25 +882,25 @@ type Invoker interface {
 	// List the dashboard IDs assigned to a business role.
 	//
 	// GET /api/business-admin/roles/{id}/dashboards
-	ListBARoleDashboards(ctx context.Context, params ListBARoleDashboardsParams) ([]uuid.UUID, error)
+	ListBARoleDashboards(ctx context.Context, params ListBARoleDashboardsParams) (ListBARoleDashboardsRes, error)
 	// ListBARoleMembers invokes listBARoleMembers operation.
 	//
 	// List the users assigned to a business role.
 	//
 	// GET /api/business-admin/roles/{id}/members
-	ListBARoleMembers(ctx context.Context, params ListBARoleMembersParams) ([]BARoleMember, error)
+	ListBARoleMembers(ctx context.Context, params ListBARoleMembersParams) (ListBARoleMembersRes, error)
 	// ListBARoles invokes listBARoles operation.
 	//
 	// List business roles in the caller's workspace.
 	//
 	// GET /api/business-admin/roles
-	ListBARoles(ctx context.Context) ([]BARole, error)
+	ListBARoles(ctx context.Context) (ListBARolesRes, error)
 	// ListBAUsers invokes listBAUsers operation.
 	//
 	// List business_user-role members of the caller's workspace.
 	//
 	// GET /api/business-admin/users
-	ListBAUsers(ctx context.Context) ([]BAUser, error)
+	ListBAUsers(ctx context.Context) (ListBAUsersRes, error)
 	// ListBusinessDashboards invokes listBusinessDashboards operation.
 	//
 	// Scoped by business-role dashboard assignment: a dashboard is visible if the caller has a business
@@ -945,10 +965,12 @@ type Invoker interface {
 	ListFormMappings(ctx context.Context, params ListFormMappingsParams) (ListFormMappingsRes, error)
 	// ListFormRecords invokes listFormRecords operation.
 	//
-	// List the 100 most recent records submitted to a form.
+	// For a caller who reaches the form's application the way the business console opens it; anyone else
+	// gets 404, as for a form that does not exist. Records the caller's access rules withhold are left
+	// out. Each record carries the caller's permissions on it.
 	//
 	// GET /api/forms/{id}/records
-	ListFormRecords(ctx context.Context, params ListFormRecordsParams) ([]FormRecord, error)
+	ListFormRecords(ctx context.Context, params ListFormRecordsParams) (ListFormRecordsRes, error)
 	// ListForms invokes listForms operation.
 	//
 	// List CRUD forms for the current model's revision.
@@ -984,7 +1006,7 @@ type Invoker interface {
 	// List all metrics for the demo model.
 	//
 	// GET /api/metrics
-	ListMetrics(ctx context.Context) (ListMetricsRes, error)
+	ListMetrics(ctx context.Context, params ListMetricsParams) (ListMetricsRes, error)
 	// ListNotifications invokes listNotifications operation.
 	//
 	// List the 50 most recent notifications for the current user.
@@ -1027,7 +1049,7 @@ type Invoker interface {
 	// List a user's dimension/metric access rules.
 	//
 	// GET /api/business-admin/users/{id}/access-rules
-	ListUserAccessRules(ctx context.Context, params ListUserAccessRulesParams) ([]UserAccessRule, error)
+	ListUserAccessRules(ctx context.Context, params ListUserAccessRulesParams) (ListUserAccessRulesRes, error)
 	// ListUserApps invokes listUserApps operation.
 	//
 	// List applications accessible to the current user, scoped by tenant/workspace membership and
@@ -1054,7 +1076,7 @@ type Invoker interface {
 	// List the catalog of events (system, form-submit, integration-import) that can trigger a workflow.
 	//
 	// GET /api/developer/workflow-trigger-events
-	ListWorkflowTriggerEvents(ctx context.Context, params ListWorkflowTriggerEventsParams) ([]TriggerEventCatalogItem, error)
+	ListWorkflowTriggerEvents(ctx context.Context, params ListWorkflowTriggerEventsParams) (ListWorkflowTriggerEventsRes, error)
 	// ListWorkflows invokes listWorkflows operation.
 	//
 	// List workflow definitions for an application.
@@ -1112,7 +1134,7 @@ type Invoker interface {
 	// Remove a user from a business role.
 	//
 	// DELETE /api/business-admin/roles/{id}/members/{userId}
-	RemoveBARoleMember(ctx context.Context, params RemoveBARoleMemberParams) (*RemoveBARoleMemberOK, error)
+	RemoveBARoleMember(ctx context.Context, params RemoveBARoleMemberParams) (RemoveBARoleMemberRes, error)
 	// RemoveBranding invokes removeBranding operation.
 	//
 	// Return the tenant to the platform's own look (administrators; feature white_label).
@@ -1144,6 +1166,15 @@ type Invoker interface {
 	//
 	// PATCH /api/ai/sessions/{id}
 	RenameAiSession(ctx context.Context, request *RenameAiSessionReq, params RenameAiSessionParams) (RenameAiSessionRes, error)
+	// ReorderDimensionMembers invokes reorderDimensionMembers operation.
+	//
+	// Member_ids must be exactly the current children of parent_member_id in this dimension (null for
+	// the top-level members), each once, in the wanted order. The whole dimension is then renumbered in
+	// tree order (each member followed by its children), which is the order grids, pickers and charts
+	// show. Audited as dimension.members_reordered. A dimension outside the caller's scope answers 404.
+	//
+	// PUT /api/developer/dimensions/{dimId}/members/order
+	ReorderDimensionMembers(ctx context.Context, request *ReorderDimensionMembersReq, params ReorderDimensionMembersParams) (ReorderDimensionMembersRes, error)
 	// ResendAdminUserInvitation invokes resendAdminUserInvitation operation.
 	//
 	// Invitations expire and mail gets lost; without this the only recovery is deleting and re-creating
@@ -1311,7 +1342,12 @@ type Invoker interface {
 	SetActiveRevision(ctx context.Context, request *ActiveRevisionRequest, params SetActiveRevisionParams) (SetActiveRevisionRes, error)
 	// SetBARoleDashboards invokes setBARoleDashboards operation.
 	//
-	// Replace the full set of dashboards assigned to a business role.
+	// Dashboard_ids is the role's full set of dashboards within one revision: those of revision_id when
+	// given, else of the active revision of the model the admin is working in (X-Model-Id when it is a
+	// model of the application, else the application's default model). A grant the list leaves out is
+	// removed only among that revision's dashboards; the role's grants on other models' or other
+	// revisions' dashboards are kept. Every listed id is granted and must be a dashboard of the role's
+	// workspace.
 	//
 	// PUT /api/business-admin/roles/{id}/dashboards
 	SetBARoleDashboards(ctx context.Context, request *SetRoleDashboardsRequest, params SetBARoleDashboardsParams) (SetBARoleDashboardsRes, error)
@@ -1329,9 +1365,9 @@ type Invoker interface {
 	SetUserAccessRules(ctx context.Context, request *SetUserAccessRulesRequest, params SetUserAccessRulesParams) (SetUserAccessRulesRes, error)
 	// Signup invokes signup operation.
 	//
-	// Register a tenant from the public sign-up page — the tenant on the self-service plan, its first
-	// administrator/developer, an application with the starter model, and an invitation to set a
-	// password (public, rate-limited per address).
+	// The application gets four starter models in one transaction, all of them or none: the "Learn the
+	// platform" tour, which is made the application's default model (the one business consoles open),
+	// and a developer, a business admin and a tenant admin guide. model_id in the result is the tour's.
 	//
 	// POST /api/signup
 	Signup(ctx context.Context, request *SignupRequest) (SignupRes, error)
@@ -1364,10 +1400,13 @@ type Invoker interface {
 	SubmitBudget(ctx context.Context, request *SubmitBudgetRequest) (SubmitBudgetRes, error)
 	// SyncFormMappings invokes syncFormMappings operation.
 	//
-	// Re-apply every live form-metric mapping against all of a form's existing records.
+	// For an administrator of the form's application (a business_admin of its workspace, a developer or
+	// tenant admin within their scope, a platform admin): a sync re-posts every record of the form,
+	// other people's included. 403 for a caller who reaches the form without administering it, 404 for
+	// anyone else. A record whose re-post the caller's write guard refuses keeps the posting it has.
 	//
 	// POST /api/forms/{id}/sync
-	SyncFormMappings(ctx context.Context, params SyncFormMappingsParams) (*SyncFormMappingsOK, error)
+	SyncFormMappings(ctx context.Context, params SyncFormMappingsParams) (SyncFormMappingsRes, error)
 	// TestAiSettings invokes testAiSettings operation.
 	//
 	// Always responds 200 with {ok, ...} — even on failure — so the frontend can render the result
@@ -1511,7 +1550,7 @@ type Invoker interface {
 	UpdateFolder(ctx context.Context, request *FolderRequest, params UpdateFolderParams) (UpdateFolderRes, error)
 	// UpdateForm invokes updateForm operation.
 	//
-	// Update a form's name, label, or fields.
+	// Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
 	//
 	// PATCH /api/forms/{id}
 	UpdateForm(ctx context.Context, request *CreateFormRequest, params UpdateFormParams) (UpdateFormRes, error)
@@ -1523,8 +1562,10 @@ type Invoker interface {
 	UpdateFormMapping(ctx context.Context, request *UpdateFormMappingRequest, params UpdateFormMappingParams) (UpdateFormMappingRes, error)
 	// UpdateFormRecord invokes updateFormRecord operation.
 	//
-	// Update a form record's data and/or status (dispatches form_submit/form_approval automation rules
-	// on status transitions).
+	// A caller who does not reach the record gets 404 (see getFormRecord). One who does may make the
+	// change its permissions allow (RecordPermissions: edit, and set_status for a new status) and gets
+	// 403 for anything else. The write applies only while the record is still in the status the check
+	// was made against: 409 when it changed in the meantime.
 	//
 	// PUT /api/records/{id}
 	UpdateFormRecord(ctx context.Context, request *UpdateRecordRequest, params UpdateFormRecordParams) (UpdateFormRecordRes, error)
@@ -1548,7 +1589,9 @@ type Invoker interface {
 	UpdateIntegration(ctx context.Context, request *UpdateIntegrationRequest, params UpdateIntegrationParams) (UpdateIntegrationRes, error)
 	// UpdateIntegrationConfig invokes updateIntegrationConfig operation.
 	//
-	// Replace an integration's type-specific config blob.
+	// A rest_api integration's config takes the same typed path as its create and update: 400 when the
+	// body is not a valid REST API config, or when a target it names (grid, form, dimension, dashboard)
+	// is not a row of the integration's own model.
 	//
 	// PATCH /api/developer/integrations/{id}/config
 	UpdateIntegrationConfig(ctx context.Context, request *UpdateIntegrationConfigRequest, params UpdateIntegrationConfigParams) (UpdateIntegrationConfigRes, error)
@@ -1603,7 +1646,9 @@ type Invoker interface {
 	UpdateWorkflow(ctx context.Context, request *UpdateWorkflowRequest, params UpdateWorkflowParams) (UpdateWorkflowRes, error)
 	// UpdateWorkflowInstance invokes updateWorkflowInstance operation.
 	//
-	// Admin override of a workflow instance's status (business_admin only).
+	// Only an instance GET /api/workflow/history could list for the caller: a workflow of an application
+	// the caller administers, and not a developer's test run. Any other instance answers 404, the same
+	// as an id that does not exist, and nothing is changed.
 	//
 	// PATCH /api/workflow/instances/{id}
 	UpdateWorkflowInstance(ctx context.Context, request *UpdateWorkflowInstanceRequest, params UpdateWorkflowInstanceParams) (UpdateWorkflowInstanceRes, error)
@@ -4217,12 +4262,12 @@ func (c *Client) sendCreateAiSession(ctx context.Context) (res *AiSession, err e
 // Create an automation rule (a workflow_def_id must point at a published workflow).
 //
 // POST /api/automation/rules
-func (c *Client) CreateAutomationRule(ctx context.Context, request *AutomationRuleRequest) (CreateAutomationRuleRes, error) {
-	res, err := c.sendCreateAutomationRule(ctx, request)
+func (c *Client) CreateAutomationRule(ctx context.Context, request *AutomationRuleRequest, params CreateAutomationRuleParams) (CreateAutomationRuleRes, error) {
+	res, err := c.sendCreateAutomationRule(ctx, request, params)
 	return res, err
 }
 
-func (c *Client) sendCreateAutomationRule(ctx context.Context, request *AutomationRuleRequest) (res CreateAutomationRuleRes, err error) {
+func (c *Client) sendCreateAutomationRule(ctx context.Context, request *AutomationRuleRequest, params CreateAutomationRuleParams) (res CreateAutomationRuleRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("createAutomationRule"),
 		semconv.HTTPRequestMethodKey.String("POST"),
@@ -4262,6 +4307,27 @@ func (c *Client) sendCreateAutomationRule(ctx context.Context, request *Automati
 	var pathParts [1]string
 	pathParts[0] = "/api/automation/rules"
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "POST", u)
@@ -5045,12 +5111,12 @@ func (c *Client) sendCreateDimensionProperty(ctx context.Context, request *Prope
 // Create a dashboard folder.
 //
 // POST /api/developer/folders
-func (c *Client) CreateFolder(ctx context.Context, request *FolderRequest) (CreateFolderRes, error) {
-	res, err := c.sendCreateFolder(ctx, request)
+func (c *Client) CreateFolder(ctx context.Context, request *FolderRequest, params CreateFolderParams) (CreateFolderRes, error) {
+	res, err := c.sendCreateFolder(ctx, request, params)
 	return res, err
 }
 
-func (c *Client) sendCreateFolder(ctx context.Context, request *FolderRequest) (res CreateFolderRes, err error) {
+func (c *Client) sendCreateFolder(ctx context.Context, request *FolderRequest, params CreateFolderParams) (res CreateFolderRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("createFolder"),
 		semconv.HTTPRequestMethodKey.String("POST"),
@@ -5090,6 +5156,27 @@ func (c *Client) sendCreateFolder(ctx context.Context, request *FolderRequest) (
 	var pathParts [1]string
 	pathParts[0] = "/api/developer/folders"
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "POST", u)
@@ -5155,12 +5242,12 @@ func (c *Client) sendCreateFolder(ctx context.Context, request *FolderRequest) (
 // Create a CRUD form.
 //
 // POST /api/forms
-func (c *Client) CreateForm(ctx context.Context, request *CreateFormRequest) (CreateFormRes, error) {
-	res, err := c.sendCreateForm(ctx, request)
+func (c *Client) CreateForm(ctx context.Context, request *CreateFormRequest, params CreateFormParams) (CreateFormRes, error) {
+	res, err := c.sendCreateForm(ctx, request, params)
 	return res, err
 }
 
-func (c *Client) sendCreateForm(ctx context.Context, request *CreateFormRequest) (res CreateFormRes, err error) {
+func (c *Client) sendCreateForm(ctx context.Context, request *CreateFormRequest, params CreateFormParams) (res CreateFormRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("createForm"),
 		semconv.HTTPRequestMethodKey.String("POST"),
@@ -5200,6 +5287,27 @@ func (c *Client) sendCreateForm(ctx context.Context, request *CreateFormRequest)
 	var pathParts [1]string
 	pathParts[0] = "/api/forms"
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "POST", u)
@@ -5372,16 +5480,17 @@ func (c *Client) sendCreateFormMapping(ctx context.Context, request *CreateFormM
 
 // CreateFormRecord invokes createFormRecord operation.
 //
-// Submit a new record to a form (posts to any live form-metric mappings and dispatches form_submit
-// automation rules).
+// For a caller who reaches the form's application (404 otherwise). The caller becomes the record's
+// creator. A record created submitted dispatches form_submit rules, one created approved (by an
+// administrator) form_approval rules.
 //
 // POST /api/forms/{id}/records
-func (c *Client) CreateFormRecord(ctx context.Context, request *CreateRecordRequest, params CreateFormRecordParams) (*FormRecord, error) {
+func (c *Client) CreateFormRecord(ctx context.Context, request *CreateRecordRequest, params CreateFormRecordParams) (CreateFormRecordRes, error) {
 	res, err := c.sendCreateFormRecord(ctx, request, params)
 	return res, err
 }
 
-func (c *Client) sendCreateFormRecord(ctx context.Context, request *CreateRecordRequest, params CreateFormRecordParams) (res *FormRecord, err error) {
+func (c *Client) sendCreateFormRecord(ctx context.Context, request *CreateRecordRequest, params CreateFormRecordParams) (res CreateFormRecordRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("createFormRecord"),
 		semconv.HTTPRequestMethodKey.String("POST"),
@@ -5505,12 +5614,12 @@ func (c *Client) sendCreateFormRecord(ctx context.Context, request *CreateRecord
 // Create a new grid definition.
 //
 // POST /api/developer/grids
-func (c *Client) CreateGrid(ctx context.Context, request *CreateGridRequest) (CreateGridRes, error) {
-	res, err := c.sendCreateGrid(ctx, request)
+func (c *Client) CreateGrid(ctx context.Context, request *CreateGridRequest, params CreateGridParams) (CreateGridRes, error) {
+	res, err := c.sendCreateGrid(ctx, request, params)
 	return res, err
 }
 
-func (c *Client) sendCreateGrid(ctx context.Context, request *CreateGridRequest) (res CreateGridRes, err error) {
+func (c *Client) sendCreateGrid(ctx context.Context, request *CreateGridRequest, params CreateGridParams) (res CreateGridRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("createGrid"),
 		semconv.HTTPRequestMethodKey.String("POST"),
@@ -5550,6 +5659,27 @@ func (c *Client) sendCreateGrid(ctx context.Context, request *CreateGridRequest)
 	var pathParts [1]string
 	pathParts[0] = "/api/developer/grids"
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "POST", u)
@@ -5615,12 +5745,12 @@ func (c *Client) sendCreateGrid(ctx context.Context, request *CreateGridRequest)
 // Create an integration definition.
 //
 // POST /api/developer/integrations
-func (c *Client) CreateIntegration(ctx context.Context, request *CreateIntegrationRequest) (CreateIntegrationRes, error) {
-	res, err := c.sendCreateIntegration(ctx, request)
+func (c *Client) CreateIntegration(ctx context.Context, request *CreateIntegrationRequest, params CreateIntegrationParams) (CreateIntegrationRes, error) {
+	res, err := c.sendCreateIntegration(ctx, request, params)
 	return res, err
 }
 
-func (c *Client) sendCreateIntegration(ctx context.Context, request *CreateIntegrationRequest) (res CreateIntegrationRes, err error) {
+func (c *Client) sendCreateIntegration(ctx context.Context, request *CreateIntegrationRequest, params CreateIntegrationParams) (res CreateIntegrationRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("createIntegration"),
 		semconv.HTTPRequestMethodKey.String("POST"),
@@ -5660,6 +5790,27 @@ func (c *Client) sendCreateIntegration(ctx context.Context, request *CreateInteg
 	var pathParts [1]string
 	pathParts[0] = "/api/developer/integrations"
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "POST", u)
@@ -5942,16 +6093,18 @@ func (c *Client) sendCreateMetric(ctx context.Context, request *CreateMetricRequ
 
 // CreateRevision invokes createRevision operation.
 //
-// Duplicate a revision (deep-copies metrics, dimensions, grids, dashboards, forms, workflows, and
-// facts).
+// The new revision is made in the model of source_revision_id when the body names one, else in
+// model_id, else in the model the request resolves (X-Model-Id within the X-App-Id application, else
+// the application's default model). A source revision must be one the caller may open, of a model in
+// the X-App-Id application when the request names one.
 //
 // POST /api/developer/revisions
-func (c *Client) CreateRevision(ctx context.Context, request *CreateRevisionRequest) (CreateRevisionRes, error) {
-	res, err := c.sendCreateRevision(ctx, request)
+func (c *Client) CreateRevision(ctx context.Context, request *CreateRevisionRequest, params CreateRevisionParams) (CreateRevisionRes, error) {
+	res, err := c.sendCreateRevision(ctx, request, params)
 	return res, err
 }
 
-func (c *Client) sendCreateRevision(ctx context.Context, request *CreateRevisionRequest) (res CreateRevisionRes, err error) {
+func (c *Client) sendCreateRevision(ctx context.Context, request *CreateRevisionRequest, params CreateRevisionParams) (res CreateRevisionRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("createRevision"),
 		semconv.HTTPRequestMethodKey.String("POST"),
@@ -5991,6 +6144,27 @@ func (c *Client) sendCreateRevision(ctx context.Context, request *CreateRevision
 	var pathParts [1]string
 	pathParts[0] = "/api/developer/revisions"
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "model_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "model_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.ModelID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "POST", u)
@@ -6450,6 +6624,23 @@ func (c *Client) sendCreateWorkflow(ctx context.Context, request *CreateWorkflow
 			return res, errors.Wrap(err, "encode query")
 		}
 	}
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
 	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
@@ -6662,12 +6853,12 @@ func (c *Client) sendDebugCalc(ctx context.Context, params DebugCalcParams) (res
 // List the 50 most recently entered raw fact_input rows for a model (debugging aid).
 //
 // GET /api/developer/debug/facts
-func (c *Client) DebugFacts(ctx context.Context) (DebugFactsRes, error) {
-	res, err := c.sendDebugFacts(ctx)
+func (c *Client) DebugFacts(ctx context.Context, params DebugFactsParams) (DebugFactsRes, error) {
+	res, err := c.sendDebugFacts(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendDebugFacts(ctx context.Context) (res DebugFactsRes, err error) {
+func (c *Client) sendDebugFacts(ctx context.Context, params DebugFactsParams) (res DebugFactsRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("debugFacts"),
 		semconv.HTTPRequestMethodKey.String("GET"),
@@ -6707,6 +6898,27 @@ func (c *Client) sendDebugFacts(ctx context.Context) (res DebugFactsRes, err err
 	var pathParts [1]string
 	pathParts[0] = "/api/developer/debug/facts"
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "GET", u)
@@ -7665,12 +7877,12 @@ func (c *Client) sendDeleteAutomationRule(ctx context.Context, params DeleteAuto
 // Delete a business role.
 //
 // DELETE /api/business-admin/roles/{id}
-func (c *Client) DeleteBARole(ctx context.Context, params DeleteBARoleParams) (*DeleteBARoleOK, error) {
+func (c *Client) DeleteBARole(ctx context.Context, params DeleteBARoleParams) (DeleteBARoleRes, error) {
 	res, err := c.sendDeleteBARole(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendDeleteBARole(ctx context.Context, params DeleteBARoleParams) (res *DeleteBARoleOK, err error) {
+func (c *Client) sendDeleteBARole(ctx context.Context, params DeleteBARoleParams) (res DeleteBARoleRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("deleteBARole"),
 		semconv.HTTPRequestMethodKey.String("DELETE"),
@@ -8594,15 +8806,16 @@ func (c *Client) sendDeleteFolder(ctx context.Context, params DeleteFolderParams
 
 // DeleteForm invokes deleteForm operation.
 //
-// Delete a form.
+// Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
+// Deletes every record of the form with it.
 //
 // DELETE /api/forms/{id}
-func (c *Client) DeleteForm(ctx context.Context, params DeleteFormParams) (*DeleteFormOK, error) {
+func (c *Client) DeleteForm(ctx context.Context, params DeleteFormParams) (DeleteFormRes, error) {
 	res, err := c.sendDeleteForm(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendDeleteForm(ctx context.Context, params DeleteFormParams) (res *DeleteFormOK, err error) {
+func (c *Client) sendDeleteForm(ctx context.Context, params DeleteFormParams) (res DeleteFormRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("deleteForm"),
 		semconv.HTTPRequestMethodKey.String("DELETE"),
@@ -8844,7 +9057,8 @@ func (c *Client) sendDeleteFormMapping(ctx context.Context, params DeleteFormMap
 
 // DeleteFormRecord invokes deleteFormRecord operation.
 //
-// Delete a form record.
+// 404 for a caller who does not reach the record, 403 for one whose permissions do not include
+// delete, 409 when the record changed status since it was read.
 //
 // DELETE /api/records/{id}
 func (c *Client) DeleteFormRecord(ctx context.Context, params DeleteFormRecordParams) (DeleteFormRecordRes, error) {
@@ -10816,7 +11030,8 @@ func (c *Client) sendExportAudit(ctx context.Context, params ExportAuditParams) 
 
 // ExportFormRecords invokes exportFormRecords operation.
 //
-// Export a form's records as CSV or XLSX.
+// For a caller who reaches the form's application (404 otherwise); records the caller's access rules
+// withhold are left out.
 //
 // GET /api/forms/{id}/export
 func (c *Client) ExportFormRecords(ctx context.Context, params ExportFormRecordsParams) (ExportFormRecordsRes, error) {
@@ -13107,6 +13322,133 @@ func (c *Client) sendGetDeveloperModel(ctx context.Context, params GetDeveloperM
 	return result, nil
 }
 
+// GetFormRecord invokes getFormRecord operation.
+//
+// For a caller who reaches the record's form's application the way the business console opens it and
+// whose access rules do not withhold the record; anyone else gets 404, as for a record that does not
+// exist.
+//
+// GET /api/records/{id}
+func (c *Client) GetFormRecord(ctx context.Context, params GetFormRecordParams) (GetFormRecordRes, error) {
+	res, err := c.sendGetFormRecord(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendGetFormRecord(ctx context.Context, params GetFormRecordParams) (res GetFormRecordRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getFormRecord"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/records/{id}"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetFormRecordOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [2]string
+	pathParts[0] = "/api/records/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, GetFormRecordOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetFormRecordResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // GetGoogleConnection invokes getGoogleConnection operation.
 //
 // The tenant's Google service account, public half only — the address to share sheets with
@@ -14713,7 +15055,15 @@ func (c *Client) sendGetWorkflow(ctx context.Context, params GetWorkflowParams) 
 
 // GetWorkflowHistory invokes getWorkflowHistory operation.
 //
-// List the 50 most recent workflow instances across the whole platform (business_admin only).
+// Newest first. Only instances of workflows of applications the caller administers: an application
+// in a workspace where the caller holds business_admin, or one kept under a tenant with no workspace
+// when the caller holds business_admin in any workspace of that tenant, narrowed by the caller's
+// per-application grants when they have any. A caller who is also tenant_admin covers the
+// applications of its tenants; a platform_admin or platform-level developer covers every application.
+//
+//	When X-App-Id names an application, only that application's instances are listed. A developer's
+//
+// test runs are never listed.
 //
 // GET /api/workflow/history
 func (c *Client) GetWorkflowHistory(ctx context.Context) ([]WorkflowInstance, error) {
@@ -15547,8 +15897,11 @@ func (c *Client) sendImportDimensionMembers(ctx context.Context, request *Import
 
 // ImportFormRecords invokes importFormRecords operation.
 //
-// Bulk-create form records from an uploaded CSV or XLSX (atomic — any row failing validation
-// rejects the whole file).
+// For a caller who reaches the form's application (404 otherwise), who becomes each record's creator.
+//
+//	A row's optional status column sets its status; a row whose status the caller may not create
+//
+// (approved or rejected, unless the caller administers the application) fails validation.
 //
 // POST /api/forms/{id}/import
 func (c *Client) ImportFormRecords(ctx context.Context, request *FormImportRequest, params ImportFormRecordsParams) (ImportFormRecordsRes, error) {
@@ -17148,12 +17501,12 @@ func (c *Client) sendListAutomationExecutions(ctx context.Context) (res []Automa
 // List automation rules for the current application/revision.
 //
 // GET /api/automation/rules
-func (c *Client) ListAutomationRules(ctx context.Context) ([]AutomationRule, error) {
-	res, err := c.sendListAutomationRules(ctx)
+func (c *Client) ListAutomationRules(ctx context.Context, params ListAutomationRulesParams) (ListAutomationRulesRes, error) {
+	res, err := c.sendListAutomationRules(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendListAutomationRules(ctx context.Context) (res []AutomationRule, err error) {
+func (c *Client) sendListAutomationRules(ctx context.Context, params ListAutomationRulesParams) (res ListAutomationRulesRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("listAutomationRules"),
 		semconv.HTTPRequestMethodKey.String("GET"),
@@ -17193,6 +17546,27 @@ func (c *Client) sendListAutomationRules(ctx context.Context) (res []AutomationR
 	var pathParts [1]string
 	pathParts[0] = "/api/automation/rules"
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "GET", u)
@@ -17380,12 +17754,12 @@ func (c *Client) sendListBAAvailable(ctx context.Context, params ListBAAvailable
 // List the dashboard IDs assigned to a business role.
 //
 // GET /api/business-admin/roles/{id}/dashboards
-func (c *Client) ListBARoleDashboards(ctx context.Context, params ListBARoleDashboardsParams) ([]uuid.UUID, error) {
+func (c *Client) ListBARoleDashboards(ctx context.Context, params ListBARoleDashboardsParams) (ListBARoleDashboardsRes, error) {
 	res, err := c.sendListBARoleDashboards(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendListBARoleDashboards(ctx context.Context, params ListBARoleDashboardsParams) (res []uuid.UUID, err error) {
+func (c *Client) sendListBARoleDashboards(ctx context.Context, params ListBARoleDashboardsParams) (res ListBARoleDashboardsRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("listBARoleDashboards"),
 		semconv.HTTPRequestMethodKey.String("GET"),
@@ -17506,12 +17880,12 @@ func (c *Client) sendListBARoleDashboards(ctx context.Context, params ListBARole
 // List the users assigned to a business role.
 //
 // GET /api/business-admin/roles/{id}/members
-func (c *Client) ListBARoleMembers(ctx context.Context, params ListBARoleMembersParams) ([]BARoleMember, error) {
+func (c *Client) ListBARoleMembers(ctx context.Context, params ListBARoleMembersParams) (ListBARoleMembersRes, error) {
 	res, err := c.sendListBARoleMembers(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendListBARoleMembers(ctx context.Context, params ListBARoleMembersParams) (res []BARoleMember, err error) {
+func (c *Client) sendListBARoleMembers(ctx context.Context, params ListBARoleMembersParams) (res ListBARoleMembersRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("listBARoleMembers"),
 		semconv.HTTPRequestMethodKey.String("GET"),
@@ -17632,12 +18006,12 @@ func (c *Client) sendListBARoleMembers(ctx context.Context, params ListBARoleMem
 // List business roles in the caller's workspace.
 //
 // GET /api/business-admin/roles
-func (c *Client) ListBARoles(ctx context.Context) ([]BARole, error) {
+func (c *Client) ListBARoles(ctx context.Context) (ListBARolesRes, error) {
 	res, err := c.sendListBARoles(ctx)
 	return res, err
 }
 
-func (c *Client) sendListBARoles(ctx context.Context) (res []BARole, err error) {
+func (c *Client) sendListBARoles(ctx context.Context) (res ListBARolesRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("listBARoles"),
 		semconv.HTTPRequestMethodKey.String("GET"),
@@ -17739,12 +18113,12 @@ func (c *Client) sendListBARoles(ctx context.Context) (res []BARole, err error) 
 // List business_user-role members of the caller's workspace.
 //
 // GET /api/business-admin/users
-func (c *Client) ListBAUsers(ctx context.Context) ([]BAUser, error) {
+func (c *Client) ListBAUsers(ctx context.Context) (ListBAUsersRes, error) {
 	res, err := c.sendListBAUsers(ctx)
 	return res, err
 }
 
-func (c *Client) sendListBAUsers(ctx context.Context) (res []BAUser, err error) {
+func (c *Client) sendListBAUsers(ctx context.Context) (res ListBAUsersRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("listBAUsers"),
 		semconv.HTTPRequestMethodKey.String("GET"),
@@ -19081,15 +19455,17 @@ func (c *Client) sendListFormMappings(ctx context.Context, params ListFormMappin
 
 // ListFormRecords invokes listFormRecords operation.
 //
-// List the 100 most recent records submitted to a form.
+// For a caller who reaches the form's application the way the business console opens it; anyone else
+// gets 404, as for a form that does not exist. Records the caller's access rules withhold are left
+// out. Each record carries the caller's permissions on it.
 //
 // GET /api/forms/{id}/records
-func (c *Client) ListFormRecords(ctx context.Context, params ListFormRecordsParams) ([]FormRecord, error) {
+func (c *Client) ListFormRecords(ctx context.Context, params ListFormRecordsParams) (ListFormRecordsRes, error) {
 	res, err := c.sendListFormRecords(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendListFormRecords(ctx context.Context, params ListFormRecordsParams) (res []FormRecord, err error) {
+func (c *Client) sendListFormRecords(ctx context.Context, params ListFormRecordsParams) (res ListFormRecordsRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("listFormRecords"),
 		semconv.HTTPRequestMethodKey.String("GET"),
@@ -19806,12 +20182,12 @@ func (c *Client) sendListIntegrationRuns(ctx context.Context, params ListIntegra
 // List all metrics for the demo model.
 //
 // GET /api/metrics
-func (c *Client) ListMetrics(ctx context.Context) (ListMetricsRes, error) {
-	res, err := c.sendListMetrics(ctx)
+func (c *Client) ListMetrics(ctx context.Context, params ListMetricsParams) (ListMetricsRes, error) {
+	res, err := c.sendListMetrics(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendListMetrics(ctx context.Context) (res ListMetricsRes, err error) {
+func (c *Client) sendListMetrics(ctx context.Context, params ListMetricsParams) (res ListMetricsRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("listMetrics"),
 		semconv.HTTPRequestMethodKey.String("GET"),
@@ -19851,6 +20227,27 @@ func (c *Client) sendListMetrics(ctx context.Context) (res ListMetricsRes, err e
 	var pathParts [1]string
 	pathParts[0] = "/api/metrics"
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "GET", u)
@@ -20598,12 +20995,12 @@ func (c *Client) sendListTasks(ctx context.Context) (res []Task, err error) {
 // List a user's dimension/metric access rules.
 //
 // GET /api/business-admin/users/{id}/access-rules
-func (c *Client) ListUserAccessRules(ctx context.Context, params ListUserAccessRulesParams) ([]UserAccessRule, error) {
+func (c *Client) ListUserAccessRules(ctx context.Context, params ListUserAccessRulesParams) (ListUserAccessRulesRes, error) {
 	res, err := c.sendListUserAccessRules(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendListUserAccessRules(ctx context.Context, params ListUserAccessRulesParams) (res []UserAccessRule, err error) {
+func (c *Client) sendListUserAccessRules(ctx context.Context, params ListUserAccessRulesParams) (res ListUserAccessRulesRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("listUserAccessRules"),
 		semconv.HTTPRequestMethodKey.String("GET"),
@@ -21066,12 +21463,12 @@ func (c *Client) sendListWorkflowRoles(ctx context.Context, params ListWorkflowR
 // List the catalog of events (system, form-submit, integration-import) that can trigger a workflow.
 //
 // GET /api/developer/workflow-trigger-events
-func (c *Client) ListWorkflowTriggerEvents(ctx context.Context, params ListWorkflowTriggerEventsParams) ([]TriggerEventCatalogItem, error) {
+func (c *Client) ListWorkflowTriggerEvents(ctx context.Context, params ListWorkflowTriggerEventsParams) (ListWorkflowTriggerEventsRes, error) {
 	res, err := c.sendListWorkflowTriggerEvents(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendListWorkflowTriggerEvents(ctx context.Context, params ListWorkflowTriggerEventsParams) (res []TriggerEventCatalogItem, err error) {
+func (c *Client) sendListWorkflowTriggerEvents(ctx context.Context, params ListWorkflowTriggerEventsParams) (res ListWorkflowTriggerEventsRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("listWorkflowTriggerEvents"),
 		semconv.HTTPRequestMethodKey.String("GET"),
@@ -21124,6 +21521,23 @@ func (c *Client) sendListWorkflowTriggerEvents(ctx context.Context, params ListW
 
 		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
 			if val, ok := params.ApplicationID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
 				return e.EncodeValue(conv.UUIDToString(val))
 			}
 			return nil
@@ -21252,6 +21666,23 @@ func (c *Client) sendListWorkflows(ctx context.Context, params ListWorkflowsPara
 
 		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
 			return e.EncodeValue(conv.UUIDToString(params.ApplicationID))
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
 		}); err != nil {
 			return res, errors.Wrap(err, "encode query")
 		}
@@ -22231,12 +22662,12 @@ func (c *Client) sendRemoveAdminUserRole(ctx context.Context, params RemoveAdmin
 // Remove a user from a business role.
 //
 // DELETE /api/business-admin/roles/{id}/members/{userId}
-func (c *Client) RemoveBARoleMember(ctx context.Context, params RemoveBARoleMemberParams) (*RemoveBARoleMemberOK, error) {
+func (c *Client) RemoveBARoleMember(ctx context.Context, params RemoveBARoleMemberParams) (RemoveBARoleMemberRes, error) {
 	res, err := c.sendRemoveBARoleMember(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendRemoveBARoleMember(ctx context.Context, params RemoveBARoleMemberParams) (res *RemoveBARoleMemberOK, err error) {
+func (c *Client) sendRemoveBARoleMember(ctx context.Context, params RemoveBARoleMemberParams) (res RemoveBARoleMemberRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("removeBARoleMember"),
 		semconv.HTTPRequestMethodKey.String("DELETE"),
@@ -22994,6 +23425,138 @@ func (c *Client) sendRenameAiSession(ctx context.Context, request *RenameAiSessi
 
 	stage = "DecodeResponse"
 	result, err := decodeRenameAiSessionResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// ReorderDimensionMembers invokes reorderDimensionMembers operation.
+//
+// Member_ids must be exactly the current children of parent_member_id in this dimension (null for
+// the top-level members), each once, in the wanted order. The whole dimension is then renumbered in
+// tree order (each member followed by its children), which is the order grids, pickers and charts
+// show. Audited as dimension.members_reordered. A dimension outside the caller's scope answers 404.
+//
+// PUT /api/developer/dimensions/{dimId}/members/order
+func (c *Client) ReorderDimensionMembers(ctx context.Context, request *ReorderDimensionMembersReq, params ReorderDimensionMembersParams) (ReorderDimensionMembersRes, error) {
+	res, err := c.sendReorderDimensionMembers(ctx, request, params)
+	return res, err
+}
+
+func (c *Client) sendReorderDimensionMembers(ctx context.Context, request *ReorderDimensionMembersReq, params ReorderDimensionMembersParams) (res ReorderDimensionMembersRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("reorderDimensionMembers"),
+		semconv.HTTPRequestMethodKey.String("PUT"),
+		semconv.URLTemplateKey.String("/api/developer/dimensions/{dimId}/members/order"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ReorderDimensionMembersOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/developer/dimensions/"
+	{
+		// Encode "dimId" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "dimId",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.DimId))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/members/order"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "PUT", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeReorderDimensionMembersRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ReorderDimensionMembersOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeReorderDimensionMembersResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -26185,7 +26748,12 @@ func (c *Client) sendSetActiveRevision(ctx context.Context, request *ActiveRevis
 
 // SetBARoleDashboards invokes setBARoleDashboards operation.
 //
-// Replace the full set of dashboards assigned to a business role.
+// Dashboard_ids is the role's full set of dashboards within one revision: those of revision_id when
+// given, else of the active revision of the model the admin is working in (X-Model-Id when it is a
+// model of the application, else the application's default model). A grant the list leaves out is
+// removed only among that revision's dashboards; the role's grants on other models' or other
+// revisions' dashboards are kept. Every listed id is granted and must be a dashboard of the role's
+// workspace.
 //
 // PUT /api/business-admin/roles/{id}/dashboards
 func (c *Client) SetBARoleDashboards(ctx context.Context, request *SetRoleDashboardsRequest, params SetBARoleDashboardsParams) (SetBARoleDashboardsRes, error) {
@@ -26252,6 +26820,27 @@ func (c *Client) sendSetBARoleDashboards(ctx context.Context, request *SetRoleDa
 	}
 	pathParts[2] = "/dashboards"
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "PUT", u)
@@ -26569,9 +27158,9 @@ func (c *Client) sendSetUserAccessRules(ctx context.Context, request *SetUserAcc
 
 // Signup invokes signup operation.
 //
-// Register a tenant from the public sign-up page — the tenant on the self-service plan, its first
-// administrator/developer, an application with the starter model, and an invitation to set a
-// password (public, rate-limited per address).
+// The application gets four starter models in one transaction, all of them or none: the "Learn the
+// platform" tour, which is made the application's default model (the one business consoles open),
+// and a developer, a business admin and a tenant admin guide. model_id in the result is the tour's.
 //
 // POST /api/signup
 func (c *Client) Signup(ctx context.Context, request *SignupRequest) (SignupRes, error) {
@@ -27095,15 +27684,18 @@ func (c *Client) sendSubmitBudget(ctx context.Context, request *SubmitBudgetRequ
 
 // SyncFormMappings invokes syncFormMappings operation.
 //
-// Re-apply every live form-metric mapping against all of a form's existing records.
+// For an administrator of the form's application (a business_admin of its workspace, a developer or
+// tenant admin within their scope, a platform admin): a sync re-posts every record of the form,
+// other people's included. 403 for a caller who reaches the form without administering it, 404 for
+// anyone else. A record whose re-post the caller's write guard refuses keeps the posting it has.
 //
 // POST /api/forms/{id}/sync
-func (c *Client) SyncFormMappings(ctx context.Context, params SyncFormMappingsParams) (*SyncFormMappingsOK, error) {
+func (c *Client) SyncFormMappings(ctx context.Context, params SyncFormMappingsParams) (SyncFormMappingsRes, error) {
 	res, err := c.sendSyncFormMappings(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendSyncFormMappings(ctx context.Context, params SyncFormMappingsParams) (res *SyncFormMappingsOK, err error) {
+func (c *Client) sendSyncFormMappings(ctx context.Context, params SyncFormMappingsParams) (res SyncFormMappingsRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("syncFormMappings"),
 		semconv.HTTPRequestMethodKey.String("POST"),
@@ -29905,7 +30497,7 @@ func (c *Client) sendUpdateFolder(ctx context.Context, request *FolderRequest, p
 
 // UpdateForm invokes updateForm operation.
 //
-// Update a form's name, label, or fields.
+// Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
 //
 // PATCH /api/forms/{id}
 func (c *Client) UpdateForm(ctx context.Context, request *CreateFormRequest, params UpdateFormParams) (UpdateFormRes, error) {
@@ -30161,8 +30753,10 @@ func (c *Client) sendUpdateFormMapping(ctx context.Context, request *UpdateFormM
 
 // UpdateFormRecord invokes updateFormRecord operation.
 //
-// Update a form record's data and/or status (dispatches form_submit/form_approval automation rules
-// on status transitions).
+// A caller who does not reach the record gets 404 (see getFormRecord). One who does may make the
+// change its permissions allow (RecordPermissions: edit, and set_status for a new status) and gets
+// 403 for anything else. The write applies only while the record is still in the status the check
+// was made against: 409 when it changed in the meantime.
 //
 // PUT /api/records/{id}
 func (c *Client) UpdateFormRecord(ctx context.Context, request *UpdateRecordRequest, params UpdateFormRecordParams) (UpdateFormRecordRes, error) {
@@ -30693,7 +31287,9 @@ func (c *Client) sendUpdateIntegration(ctx context.Context, request *UpdateInteg
 
 // UpdateIntegrationConfig invokes updateIntegrationConfig operation.
 //
-// Replace an integration's type-specific config blob.
+// A rest_api integration's config takes the same typed path as its create and update: 400 when the
+// body is not a valid REST API config, or when a target it names (grid, form, dimension, dashboard)
+// is not a row of the integration's own model.
 //
 // PATCH /api/developer/integrations/{id}/config
 func (c *Client) UpdateIntegrationConfig(ctx context.Context, request *UpdateIntegrationConfigRequest, params UpdateIntegrationConfigParams) (UpdateIntegrationConfigRes, error) {
@@ -31775,7 +32371,9 @@ func (c *Client) sendUpdateWorkflow(ctx context.Context, request *UpdateWorkflow
 
 // UpdateWorkflowInstance invokes updateWorkflowInstance operation.
 //
-// Admin override of a workflow instance's status (business_admin only).
+// Only an instance GET /api/workflow/history could list for the caller: a workflow of an application
+// the caller administers, and not a developer's test run. Any other instance answers 404, the same
+// as an id that does not exist, and nothing is changed.
 //
 // PATCH /api/workflow/instances/{id}
 func (c *Client) UpdateWorkflowInstance(ctx context.Context, request *UpdateWorkflowInstanceRequest, params UpdateWorkflowInstanceParams) (UpdateWorkflowInstanceRes, error) {

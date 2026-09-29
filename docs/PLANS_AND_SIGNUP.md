@@ -156,16 +156,35 @@ a page promising something else. One request creates:
 2. the tenant (its own database in dedicated mode), on the self-service plan;
 3. in one transaction on the tenant's database: the person (with the same
    three roles, `business_admin` scoped to the default workspace), an
-   application named "Getting started", and the **starter model** —
-   `internal/starter`, a guided tour of the platform: four dashboards of
-   prose and diagrams, taught on a deliberately tiny example (two teams,
-   four quarters, three metrics of which one calculated) so that the grid,
-   the chart and the KPI cards on the tour's own pages are the working
-   screens rather than pictures of them. Created through
-   `modeltransfer.Import`, the same path a package import takes — then a
-   recalculation, so the first screen shows real numbers. Nothing about it
-   is a special tutorial mode: it is ordinary text, image, grid, chart and
-   KPI widgets, which the tenant can edit or delete like any other;
+   application named "Getting started", and the **starter models** —
+   `starter.Packages()` in `internal/starter`, four models in that one
+   application:
+   - **Learn the platform**, the guided tour: dashboards of prose and
+     diagrams taught on a deliberately tiny example (two teams, four
+     quarters, three metrics of which one calculated) so that the grid, the
+     chart and the KPI cards on the tour's own pages are the working screens
+     rather than pictures of them;
+   - **Developer guide**, **Business admin guide** and **Tenant admin
+     guide**, one per role that builds or runs the workspace, each a model
+     of its own dashboards.
+
+   The tour is made the application's **default model**
+   (`core.application.default_model_id`, the same setting as Build › Models ›
+   "Set as business default"), so it is what the console opens on; the
+   guides are reached through the model switcher (Run › Models or Business
+   Admin › Models). The four are created in one transaction and share a
+   creation time, so the default — not "newest model" — is what decides;
+   if the tour is later deleted the default clears, and listings and
+   resolution fall back to name order. The same tie-break picks the model
+   behind what an application keeps against its oldest model when a
+   request names no revision — automation rules, workflow definitions, the
+   workflow trigger events: the tour, until the default moves (what was
+   made there stays with the tour). Each model is created through
+   `modeltransfer.Import`, the same path a package import takes, and after
+   the transaction commits every calculated metric of every model is
+   recalculated, so each first screen shows real numbers. Nothing about them
+   is a special tutorial mode: they are ordinary text, image, grid, chart
+   and KPI widgets, which the tenant can edit or delete like any other;
 4. the invitation to set a password (three days).
 
 A failure after step 1 undoes everything made so far; an invitation that
@@ -174,7 +193,16 @@ rate-limited per address (three attempts, then one every five minutes), an
 address that already has an account — in the control plane, in any dedicated
 tenant's directory, or at the identity provider — is refused with 409, and
 every sign-up is an audit event (`tenant.signed_up`) with the address,
-company, plan and source address.
+company, plan and source address, the application, the tour as `model_id`
+and the guides as `guide_model_ids` (comma-separated). The response's
+`model_id` is the tour.
+
+Sign-up itself is not checked against the plan's limits, but the periodic
+sweep is: a self-service plan whose `max_models` is set below the number of
+starter models (four), or whose per-model limits are below what a starter
+model holds, puts every new tenant over its limit — and read-only — at the
+next sweep. Keep `max_models` at 0 (unlimited) or at least 4 on the plan
+flagged `self_service`.
 
 On the dev stack (no identity provider) the response carries `dev_persona`,
 and the page offers to open the console as the new account.

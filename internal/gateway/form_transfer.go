@@ -23,8 +23,6 @@ import (
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 )
 
-var validRecordStatuses = map[string]bool{"draft": true, "submitted": true, "approved": true, "rejected": true}
-
 func (h *handler) formExport(w http.ResponseWriter, r *http.Request, formID string) {
 	ctx := r.Context()
 	store := crudapp.NewStore(h.db.For(ctx))
@@ -32,6 +30,14 @@ func (h *handler) formExport(w http.ResponseWriter, r *http.Request, formID stri
 	act, err := h.resolveActor(ctx, r)
 	if err != nil {
 		jsonErr(w, err, http.StatusUnauthorized)
+		return
+	}
+	// The records of a form the caller reaches only (resolveFormRecordScope).
+	if scope, err := h.resolveFormRecordScope(ctx, act, formID); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	} else if !scope.reach {
+		jsonRecordErr(w, errRecordNotReached, "form")
 		return
 	}
 
@@ -111,6 +117,24 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<20) // 16 MB limit
 	ctx := r.Context()
 	store := crudapp.NewStore(h.db.For(ctx))
+
+	act, err := h.resolveActor(ctx, r)
+	if err != nil {
+		jsonErr(w, err, http.StatusUnauthorized)
+		return
+	}
+	// Records go into a form the caller reaches only
+	// (resolveFormRecordScope), in the statuses they may create
+	// (crudapp.RecordAccess.CanCreate), checked below per row.
+	scope, err := h.resolveFormRecordScope(ctx, act, formID)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	if !scope.reach {
+		jsonRecordErr(w, errRecordNotReached, "form")
+		return
+	}
 
 	form, err := store.GetForm(ctx, formID)
 	if err != nil {
@@ -218,8 +242,11 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 		}
 		status := "draft"
 		if s := strings.ToLower(strings.TrimSpace(row.Cells["status"])); s != "" {
-			if !validRecordStatuses[s] {
+			if !crudapp.ValidRecordStatus(s) {
 				errs = append(errs, rowErr{Row: row.RowNumber, Column: "status", Message: fmt.Sprintf("%q is not a valid status (draft, submitted, approved, rejected)", s)})
+				rowValid = false
+			} else if !scope.createAccess().CanCreate(s) {
+				errs = append(errs, rowErr{Row: row.RowNumber, Column: "status", Message: fmt.Sprintf("only an administrator of this application imports a record as %s", s)})
 				rowValid = false
 			} else {
 				status = s
@@ -246,33 +273,24 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 		return
 	}
 
-	userID := h.resolveUserID(r)
+	userID := act.UserID
 	for _, sr := range staged {
-		rec, cErr := store.CreateRecord(ctx, formID, userID, sr.data)
+		rec, cErr := store.CreateRecordWithStatus(ctx, formID, userID, sr.status, sr.data)
 		if cErr != nil {
 			jsonErr(w, fmt.Errorf("create record: %w", cErr), http.StatusInternalServerError)
 			return
-		}
-		if sr.status != "draft" {
-			if uErr := store.UpdateRecord(ctx, rec.ID, sr.status, sr.data); uErr != nil {
-				jsonErr(w, fmt.Errorf("set status: %w", uErr), http.StatusInternalServerError)
-				return
-			}
 		}
 		bgCtx := context.WithoutCancel(ctx)
 		recID, status, data := rec.ID, sr.status, sr.data
 		go func() { _ = h.applyFormMappings(bgCtx, recID, formID, status, data, userID) }()
 	}
 
-	if a, e := h.resolveActor(ctx, r); e == nil {
-		appID, _ := h.appIDFromFormID(ctx, formID)
-		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
-			Category: auditlog.CategoryDataChange, EventType: auditlog.EventFormImported,
-			ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
-			ApplicationID: appID, ResourceType: "form", ResourceID: formID,
-			Metadata: map[string]string{"records_created": strconv.Itoa(len(staged))},
-		})
-	}
+	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+		Category: auditlog.CategoryDataChange, EventType: auditlog.EventFormImported,
+		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
+		ApplicationID: scope.appID, ResourceType: "form", ResourceID: formID,
+		Metadata: map[string]string{"records_created": strconv.Itoa(len(staged))},
+	})
 	jsonOK(w, map[string]any{"status": "ok", "records_created": len(staged)})
 }
 

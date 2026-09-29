@@ -476,6 +476,20 @@
   opacity: 0.55;
 }
 
+/* aria-disabled keeps the button focusable (focus does not jump away when a
+   click starts work) while saying it will not act yet — Build › Dimensions
+   marks the member-order arrows this way while a move is in flight. Same
+   dimmed look as :disabled; the progress cursor says "wait", not "never". */
+.mvx-icon-button[aria-disabled="true"] {
+  cursor: progress;
+  opacity: 0.55;
+}
+
+.mvx-icon-button[aria-disabled="true"]:hover {
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
 /* A danger button at 55% opacity is still red, and red reads as "armed" — two
    trash icons side by side, one disabled, looked identical in practice. Drop
    the colour as well so unavailable is legible at a glance and not only on

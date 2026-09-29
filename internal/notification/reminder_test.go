@@ -2,11 +2,13 @@ package notification
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mavericks-engine/mavericks/internal/testdb"
+	"github.com/mavericks-engine/mavericks/internal/workflow/assignee/assigneetest"
 	migrationfs "github.com/mavericks-engine/mavericks/migrations"
 	"github.com/mavericks-engine/mavericks/pkg/logger"
 )
@@ -41,16 +43,19 @@ func setupReminder(t *testing.T, dueOffset string, testRun bool) reminderFixture
 		}
 		return id
 	}
-	approver := one(`INSERT INTO identity.user (keycloak_sub, email, display_name)
-	                 VALUES ('rem-approver', 'ann@example.test', 'Ann Approver') RETURNING id::text`)
-	other := one(`INSERT INTO identity.user (keycloak_sub, email, display_name)
-	              VALUES ('rem-other', 'bob@example.test', 'Bob Bystander') RETURNING id::text`)
-	ex(`INSERT INTO identity.role_assignment (user_id, role) VALUES ($1::uuid, 'business_admin')`, approver)
-	ex(`INSERT INTO identity.role_assignment (user_id, role) VALUES ($1::uuid, 'business_user')`, other)
-
 	customer := one(`INSERT INTO core.customer (name, plan) VALUES ('Reminders Inc', 'standard') RETURNING id::text`)
-	app := one(`INSERT INTO core.application (customer_id, name, mode)
-	            VALUES ($1::uuid, 'Planning', 'planning') RETURNING id::text`, customer)
+	ws := one(`INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'Finance') RETURNING id::text`, customer)
+	app := one(`INSERT INTO core.application (workspace_id, customer_id, name, mode)
+	            VALUES ($1::uuid, $2::uuid, 'Planning', 'planning') RETURNING id::text`, ws, customer)
+
+	// Business roles are held in a workspace: an unscoped one counts
+	// nowhere (TestReminderKeepsTheWorkspaceBoundary).
+	approver := one(`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id)
+	                 VALUES ('rem-approver', 'ann@example.test', 'Ann Approver', $1::uuid) RETURNING id::text`, customer)
+	other := one(`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id)
+	              VALUES ('rem-other', 'bob@example.test', 'Bob Bystander', $1::uuid) RETURNING id::text`, customer)
+	ex(`INSERT INTO identity.role_assignment (user_id, role, workspace_id) VALUES ($1::uuid, 'business_admin', $2::uuid)`, approver, ws)
+	ex(`INSERT INTO identity.role_assignment (user_id, role, workspace_id) VALUES ($1::uuid, 'business_user', $2::uuid)`, other, ws)
 	def := one(`INSERT INTO workflow.workflow_def (application_id, name, trigger_event, steps)
 	            VALUES ($1::uuid, 'Budget Approval', 'manual',
 	                    '[{"id":"s1","name":"Finance Review","type":"approval","assignee_roles":["business_admin"]}]'::jsonb)
@@ -172,6 +177,55 @@ func TestReminderRespectsSettingsDueTimeAndTestRuns(t *testing.T) {
 			t.Fatalf("a completed task was reminded (%d, %v)", n, err)
 		}
 	})
+}
+
+// A reminder goes to the step's assignees inside the workspace boundary of
+// workflow assignment (package assignee), the people who see the task. It
+// used to go to every holder of a named platform role in every tenant, and to
+// a named business role's members in every workspace of the tenant — with the
+// workflow's and the step's names. A step naming no role reminds nobody.
+func TestReminderKeepsTheWorkspaceBoundary(t *testing.T) {
+	ctx := context.Background()
+	f := assigneetest.New(t)
+	store := NewStore(f.Pool)
+	for _, cust := range []string{f.Cust1, f.Cust2} {
+		if _, err := store.UpdateSettings(ctx, cust, Settings{RemindersEnabled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := &Reminder{Store: store, Log: logger.New("test")}
+	for _, c := range assigneetest.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			step := f.Step(t, c.App(f), c.Roles...)
+			if n, err := r.RunOnce(ctx); err != nil || n != 1 {
+				t.Fatalf("reminded about %d steps (%v), want 1", n, err)
+			}
+			rows, err := f.Pool.Query(ctx, `
+				SELECT DISTINCT n.recipient_user_id::text
+				FROM notification.notification n
+				JOIN workflow.workflow_step ws ON ws.instance_id::text = n.resource_id
+				WHERE n.template_id = $1 AND ws.id = $2::uuid`, ReminderTemplate, step)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for rows.Next() {
+				var id string
+				if err := rows.Scan(&id); err != nil {
+					t.Fatal(err)
+				}
+				got = append(got, id)
+			}
+			rows.Close()
+			want := c.Want
+			if len(c.Roles) == 0 {
+				want = []string{}
+			}
+			if names := f.Names(got); !slices.Equal(names, want) {
+				t.Errorf("reminded %v, want %v", names, want)
+			}
+		})
+	}
 }
 
 // A reminder is a notification like any other, so an enabled channel carries

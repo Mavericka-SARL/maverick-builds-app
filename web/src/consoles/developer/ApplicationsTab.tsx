@@ -35,7 +35,8 @@ function DevModelRevisions({
   const create = useMutation({
     mutationFn: () => {
       localStorage.setItem("selected_app_id", appId);
-      return api.createDevRevision(newName.trim(), sourceRevId || undefined);
+      // This row's model, not whichever model the server would resolve.
+      return api.createDevRevision(model.id, newName.trim(), sourceRevId || undefined);
     },
     onSuccess: (data) => {
       inv();
@@ -156,10 +157,14 @@ function DevModelRevisions({
 export function DevApplicationsTab({
   revisionId,
   revisionName,
+  defaultRevisionPending = false,
   onSelect,
 }: {
   revisionId: string;
   revisionName: string;
+  /** The console is still asking for the default model's revisions; until it
+      answers, revisionId is "" only because the answer has not arrived. */
+  defaultRevisionPending?: boolean;
   onSelect: (id: string, name: string) => void;
 }) {
   const { data: tenants = [], isLoading } = useQuery({
@@ -178,9 +183,12 @@ export function DevApplicationsTab({
 
   const apps = tenants.flatMap((t) => t.applications ?? []);
 
-  // Auto-select the last (most recently created) revision on first load
+  // With no working revision and none in the default model, fall back to the
+  // most recently created revision. It waits for the default model's answer:
+  // deciding before it arrived picked the newest revision of ANY model, so
+  // which model Build (and Triggers) opened in depended on request timing.
   React.useEffect(() => {
-    if (revisionId || isLoading || apps.length === 0) return;
+    if (revisionId || isLoading || defaultRevisionPending || apps.length === 0) return;
     const allScenarios = apps.flatMap((a) => a.models.flatMap((m) =>
       (m.revisions ?? []).map((s) => ({ ...s, modelId: m.id, appId: a.id }))
     ));
@@ -191,7 +199,7 @@ export function DevApplicationsTab({
     localStorage.setItem("selected_app_id", last.appId);
     onSelect(last.id, last.name);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading]);
+  }, [isLoading, defaultRevisionPending]);
 
   if (isLoading) return <LoadingState />;
   if (apps.length === 0) return <EmptyState label="No applications found." />;

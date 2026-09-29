@@ -77,30 +77,70 @@ func arrow(x, y, length int) string {
 		`" stroke="` + muted + `" stroke-width="1.5"/><path d="M` + itoa(x+length) + ` ` + itoa(y) + `l-9-4v8z" fill="` + muted + `"/>`
 }
 
-// buildFlow: what a model is made of, and what it becomes.
+// arrowDown points down from (x,y) for length px.
+func arrowDown(x, y, length int) string {
+	return `<line x1="` + itoa(x) + `" y1="` + itoa(y) + `" x2="` + itoa(x) + `" y2="` + itoa(y+length-8) +
+		`" stroke="` + muted + `" stroke-width="1.5"/><path d="M` + itoa(x) + ` ` + itoa(y+length) + `l-4-9h8z" fill="` + muted + `"/>`
+}
+
+// caption writes a line of small muted text; anchor is start, middle or end.
+func caption(x, y int, anchor, s string) string {
+	return `<text x="` + itoa(x) + `" y="` + itoa(y) + `" text-anchor="` + anchor + `" font-size="12" fill="` + muted + `">` + s + `</text>`
+}
+
+// buildFlow: what a model is made of, and what you make from it. You lay
+// out the grid and the dashboard; the platform works out the numbers in them.
 func buildFlow() string {
 	s := svgHead(860, 150)
 	s += box(10, 40, 170, 70, "Dimensions", "what you slice by", false)
-	s += box(10, 40, 170, 70, "Dimensions", "what you slice by", false)
-	s += `<text x="95" y="28" text-anchor="middle" font-size="12" fill="` + muted + `">team, quarter</text>`
+	s += caption(95, 28, "middle", "team, quarter")
 	s += box(200, 40, 170, 70, "Metrics", "what you measure", false)
-	s += `<text x="285" y="28" text-anchor="middle" font-size="12" fill="` + muted + `">headcount, cost</text>`
+	s += caption(285, 28, "middle", "headcount, cost")
 	s += arrow(378, 75, 34)
 	s += box(420, 40, 170, 70, "Grid", "where numbers live", true)
 	s += arrow(598, 75, 34)
 	s += box(640, 40, 210, 70, "Dashboard", "what people look at", true)
-	s += `<text x="190" y="132" text-anchor="middle" font-size="12" fill="` + muted + `">you define these</text>`
-	s += `<text x="640" y="132" text-anchor="middle" font-size="12" fill="` + muted + `">the platform builds these from them</text>`
+	s += caption(190, 132, "middle", "you define these")
+	s += caption(635, 132, "middle", "you lay these out; the platform works out totals and calculations")
 	return s + `</svg>`
 }
 
-// oneNumber: how a single value is addressed.
-func oneNumber() string {
-	const mid = 320
-	s := svgHead(640, 230)
-	cols := []string{"Q1", "Q2", "Q3", "Q4"}
-	rows := []string{"Sales", "Engineering"}
-	x0, y0, cw, ch := 150, 60, 90, 44
+// thousands writes n with a comma between each group of three digits, the
+// way the grid shows a number.
+func thousands(n int) string {
+	s := itoa(n)
+	neg := strings.HasPrefix(s, "-")
+	s = strings.TrimPrefix(s, "-")
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	if neg {
+		return "-" + s
+	}
+	return s
+}
+
+// oneNumberWidth is the width of the oneNumber picture and of its widget.
+const oneNumberWidth = 640
+
+// oneNumber: how a single value is addressed. Its labels and the highlighted
+// value come from the example's own data, so the picture shows the number
+// the grid holds: cost for the first team in the first quarter. It returns
+// the picture's height too: the height follows the table, and the widget
+// that shows it must be the same height or the picture gains empty bands.
+func oneNumber() (svg string, height int) {
+	const mid = oneNumberWidth / 2
+	var s string
+	cols := make([]string, len(quarters))
+	for i, q := range quarters {
+		cols[i] = q.code
+	}
+	rows := make([]string, len(teams))
+	for i, t := range teams {
+		rows[i] = t.label
+	}
+	value := thousands(int(teams[0].headcount[0] * teams[0].perHead))
+	x0, y0, cw, ch := 150, 36, 90, 44
 	for i, c := range cols {
 		s += `<text x="` + itoa(x0+i*cw+cw/2) + `" y="` + itoa(y0-12) + `" text-anchor="middle" font-size="13" font-weight="600" fill="` + ink + `">` + c + `</text>`
 	}
@@ -115,43 +155,65 @@ func oneNumber() string {
 			s += `<rect x="` + itoa(x) + `" y="` + itoa(y) + `" width="` + itoa(cw) + `" height="` + itoa(ch) + `" fill="` + bg + `" stroke="` + stroke + `" stroke-width="1.5"/>`
 		}
 	}
-	s += `<text x="` + itoa(x0+cw/2) + `" y="` + itoa(y0+ch/2) + `" text-anchor="middle" dominant-baseline="middle" font-size="14" font-weight="700" fill="` + accent + `">48,000</text>`
-	s += `<line x1="` + itoa(x0+cw/2) + `" y1="` + itoa(y0+ch+6) + `" x2="` + itoa(x0+cw/2) + `" y2="166" stroke="` + accent + `" stroke-width="1.5" stroke-dasharray="4 3"/>`
-	s += `<line x1="` + itoa(x0+cw/2) + `" y1="166" x2="` + itoa(mid) + `" y2="166" stroke="` + accent + `" stroke-width="1.5" stroke-dasharray="4 3"/>`
-	s += `<text x="` + itoa(mid) + `" y="190" text-anchor="middle" font-size="13" fill="` + ink + `">team = <tspan font-weight="700">Sales</tspan> · quarter = <tspan font-weight="700">Q1</tspan> · metric = <tspan font-weight="700">cost</tspan></text>`
-	s += `<text x="` + itoa(mid) + `" y="212" text-anchor="middle" font-size="12" fill="` + muted + `">one member of each dimension, one metric, one number</text>`
-	return s + `</svg>`
+	s += `<text x="` + itoa(x0+cw/2) + `" y="` + itoa(y0+ch/2) + `" text-anchor="middle" dominant-baseline="middle" font-size="14" font-weight="700" fill="` + accent + `">` + value + `</text>`
+	// A dashed lead from the cell to the words that address it, below the table.
+	lead := y0 + len(rows)*ch + 18
+	s += `<line x1="` + itoa(x0+cw/2) + `" y1="` + itoa(y0+ch+6) + `" x2="` + itoa(x0+cw/2) + `" y2="` + itoa(lead) + `" stroke="` + accent + `" stroke-width="1.5" stroke-dasharray="4 3"/>`
+	s += `<line x1="` + itoa(x0+cw/2) + `" y1="` + itoa(lead) + `" x2="` + itoa(mid) + `" y2="` + itoa(lead) + `" stroke="` + accent + `" stroke-width="1.5" stroke-dasharray="4 3"/>`
+	s += `<text x="` + itoa(mid) + `" y="` + itoa(lead+24) + `" text-anchor="middle" font-size="13" fill="` + ink + `">team = <tspan font-weight="700">` + rows[0] + `</tspan> · quarter = <tspan font-weight="700">` + cols[0] + `</tspan> · metric = <tspan font-weight="700">cost</tspan></text>`
+	s += `<text x="` + itoa(mid) + `" y="` + itoa(lead+46) + `" text-anchor="middle" font-size="12" fill="` + muted + `">one member of each dimension, one metric, one number</text>`
+	height = lead + 64
+	return svgHead(oneNumberWidth, height) + s + `</svg>`, height
 }
 
-// revisions: the unit of change.
+// revisions: the unit of change. One revision is live; New revision makes a
+// copy to work in, and Set active makes that copy the live one.
 func revisions() string {
-	s := svgHead(620, 170)
-	s += box(20, 55, 150, 60, "Model", "Learn the platform", false)
-	s += arrow(178, 85, 32)
-	s += `<rect x="220" y="20" width="230" height="52" rx="10" fill="` + fill + `" stroke="` + accent + `" stroke-width="1.5"/>`
+	s := svgHead(760, 190)
+	s += box(20, 65, 150, 60, "Model", "Learn the platform", false)
+	// A bracket from the model to each of its revisions.
+	s += `<path d="M170 95h22M192 46v98" fill="none" stroke="` + muted + `" stroke-width="1.5"/>`
+	s += arrow(192, 46, 26)
+	s += arrow(192, 144, 26)
+	s += `<rect x="220" y="20" width="240" height="52" rx="10" fill="` + fill + `" stroke="` + accent + `" stroke-width="1.5"/>`
 	s += `<text x="240" y="46" dominant-baseline="middle" font-size="15" font-weight="600" fill="` + ink + `">First revision</text>`
-	s += `<rect x="382" y="35" width="48" height="22" rx="11" fill="#dcfce7" stroke="#16a34a"/><text x="406" y="47" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="#15803d">live</text>`
-	s += box(220, 96, 230, 52, "Next revision", "a copy you can change", false)
-	s += `<text x="466" y="50" font-size="12" fill="` + muted + `">what everyone sees</text>`
-	s += `<text x="466" y="126" font-size="12" fill="` + muted + `">safe to rework</text>`
+	s += `<rect x="392" y="35" width="48" height="22" rx="11" fill="#dcfce7" stroke="#16a34a"/><text x="416" y="47" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="#15803d">live</text>`
+	s += arrowDown(300, 76, 38)
+	s += `<text x="310" y="99" dominant-baseline="middle" font-size="12" font-weight="600" fill="` + accent + `">New revision</text>`
+	s += box(220, 118, 240, 52, "Next revision", "a copy you can change", false)
+	s += caption(478, 42, "start", "what everyone sees")
+	s += caption(478, 58, "start", "a change here shows at once")
+	s += caption(478, 140, "start", "out of everyone's way;")
+	s += caption(478, 156, "start", "Set active makes it the live one")
 	return s + `</svg>`
 }
 
-// roles: who does what.
+// roles: who does what, and which roles the sign-up account holds.
 func roles() string {
-	s := svgHead(760, 210)
-	type role struct{ name, what string }
+	s := svgHead(780, 206)
+	type role struct {
+		name, what string
+		yours      bool
+	}
 	rs := []role{
-		{"Business user", "enters numbers, reads dashboards"},
-		{"Business admin", "the above, plus who may see what"},
-		{"Developer", "builds the model: dimensions, metrics, grids"},
-		{"Tenant admin", "people, access and the workspace itself"},
+		{"Business user", "enters numbers, fills in forms, starts requests", false},
+		{"Business admin", "acts on requests; sets who sees which pages and data", true},
+		{"Developer", "builds models: metrics, grids, dashboards, forms, workflows", true},
+		{"Tenant admin", "invites people, grants roles, runs the workspace", true},
 	}
 	for i, r := range rs {
 		y := 12 + i*48
-		s += `<rect x="12" y="` + itoa(y) + `" width="200" height="38" rx="8" fill="` + fill + `" stroke="` + accent + `" stroke-width="1.5"/>`
+		stroke, bg := line, paper
+		if r.yours {
+			stroke, bg = accent, fill
+		}
+		s += `<rect x="12" y="` + itoa(y) + `" width="200" height="38" rx="8" fill="` + bg + `" stroke="` + stroke + `" stroke-width="1.5"/>`
 		s += `<text x="112" y="` + itoa(y+19) + `" text-anchor="middle" dominant-baseline="middle" font-size="14" font-weight="600" fill="` + ink + `">` + r.name + `</text>`
 		s += `<text x="232" y="` + itoa(y+19) + `" dominant-baseline="middle" font-size="13" fill="` + muted + `">` + r.what + `</text>`
+		if r.yours {
+			s += `<rect x="664" y="` + itoa(y+8) + `" width="104" height="22" rx="11" fill="` + paper + `" stroke="` + accent + `"/>`
+			s += `<text x="716" y="` + itoa(y+19) + `" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="` + accent + `">your account</text>`
+		}
 	}
 	return s + `</svg>`
 }

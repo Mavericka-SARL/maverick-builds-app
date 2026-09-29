@@ -507,7 +507,11 @@ leaves out, until it is fixed.
   `update_business_role`, `delete_business_role` and `set_role_dashboards`
   resolve roles in one workspace, as the Roles screens do.
 - **Why it matters:** in a tenant with several workspaces the assistant can
-  be shown a role it cannot then change ("not found in this workspace").
+  be shown a role it cannot then change ("not found in this workspace"). And
+  a business role counts as a step's assignee only in its own workspace's
+  applications and its tenant's tenant-level ones
+  (`internal/workflow/assignee/assignee.go:40-46`), so a step the assistant
+  assigns to another workspace's listed role is assigned to no one.
 - **How to check:** a customer with two workspaces, a role in each; the list
   shows both, `update_business_role` on the other one fails.
 - **What closes it:** the list scoped to the same workspace, or roles resolved
@@ -641,7 +645,1460 @@ leaves out, until it is fixed.
 - **What closes it:** resolve the actor first (401), and answer an unknown
   grid with 404.
 
+### A person who holds only tenant_admin cannot open the Tenant admin guide
+
+- **Noticed:** 2026-09-29, adding the getting-started guides.
+- **What:** sign-up now adds three guide models beside the tour (Developer,
+  Business admin and Tenant admin guide), each a set of dashboard pages.
+  Dashboards are read under Run or Business Admin, which only
+  `business_user` and `business_admin` switch on
+  (`web/src/router/sections.ts:33-34`). A person who holds only
+  `tenant_admin` gets the Tenant admin group, which has no dashboard screen,
+  so the guide written for them is out of their reach. The guide itself
+  tells the reader to give such a person a business role as well.
+- **Why it matters:** standing rule 2: the guide is not reachable by the
+  role it is written for without a second role.
+- **How to check:** invite a user with only `tenant_admin`, sign in as them,
+  and look for a dashboard screen.
+- **Decision:** accepted by the user on 2026-09-29: no separate dashboard
+  screen for tenant admins for now. The guide is read by the sign-up owner,
+  who holds more roles, and by anyone also given a business role.
+- **What closes it:** only if that decision changes: a read-only dashboard
+  view in the Tenant admin group, or the guide delivered some other way.
+
+### Tenants that signed up before 2026-09-29 have no guide models
+
+- **Noticed:** 2026-09-29, by decision.
+- **What:** the three guides are imported only by sign-up
+  (`internal/gateway/signup.go:231`, `starter.Packages()`). Nothing adds them
+  to an existing tenant, and they exist only as Go code (`internal/starter`),
+  not as a package file a tenant admin could import.
+- **Why it matters:** a tenant created earlier has no in-product guide for
+  any role.
+- **How to check:** list the models of an application created before this
+  change.
+- **Decision:** accepted by the user on 2026-09-29: new sign-ups only.
+- **What closes it:** only if that decision changes: a published export
+  package of each guide, imported with the tenant admin's model import.
+
+### Business users in no business role see every guide page
+
+- **Noticed:** 2026-09-29, building the tour.
+- **What:** a person who is a member of no business role sees every
+  dashboard of the model they open; role membership is what narrows it
+  (`businessDashboards`, `internal/gateway/handler.go:14131-14160`, the
+  owner's decision of 2026-08-30). An invited business user who is put in
+  no role therefore sees the tour's and the guides' pages when they pick
+  those models in the model switcher.
+- **Why it matters:** the guides are written for the tenant's builders and
+  admins; business users may be shown pages about roles and access rules.
+- **How to check:** invite a business user, put them in no role, and open
+  the Business admin guide model as them.
+- **What closes it:** a decision whether business users should see the
+  guides; if not, sign-up granting the guide dashboards to named roles, or
+  model-access restrictions.
+
+### A member added or re-parented after a reorder lists after the last subtree
+
+- **Noticed:** 2026-09-29, reviewing the member reorder.
+- **What:** a reorder renumbers the whole dimension 1..N in depth-first
+  tree order, so every flat reader (`ORDER BY time_index, sort_order, code`:
+  grid axes, `GET /api/dimensions`, chart axes, selectors) lists each member
+  right after its parent. Member create still appends `MAX(sort_order)+1`
+  (the developer member add in `internal/gateway/handler.go`,
+  `internal/integration/commit.go`, `internal/metricformula/grouping.go`,
+  the AI's `write_executor.go`), and a re-parent keeps the member's number.
+  So a child added under the first top-level member afterwards lists after
+  the last top-level member's subtree, until the next reorder of any level
+  renumbers the dimension. Order among siblings stays right: Build ›
+  Dimensions groups by parent.
+- **Why it matters:** a grid or picker that shows members flat shows the new
+  member away from its parent until someone reorders.
+- **How to check:** reorder a level, add a child under the first top-level
+  member, then `GET /api/dimensions`: the child is listed last.
+- **What closes it:** member create and re-parent placing the member after
+  its last sibling's subtree, through one shared `internal/modeledit` helper
+  used by every create path (renumbering the dimension as the reorder does).
+
+### The gRPC member create writes sort_order 0 and the old parent column
+
+- **Noticed:** 2026-09-29, when grid axes and selectors started following
+  `sort_order`; split out when the member reorder closed.
+- **What:** `ModelService.CreateDimensionMember`
+  (`internal/model/store.go:161`, `:198`) inserts without `sort_order`, so
+  the member gets 0 and lists before every appended member; every other
+  create path appends (`TestMemberCreatePathsAppend`). It also writes the
+  hierarchy to `parent_id` (migration 004), and its reads return that
+  column, while the gateway, the AI, revision copies and export read
+  `parent_member_id` (migration 018): a parent set through gRPC is invisible
+  everywhere else. Separately, the aggregate periods of a time dimension (no
+  dates, so no `time_index`) keep `sort_order` 0 and list after the leaves
+  in code order (FY26, H1, Q1, …): `modeledit.WriteTimeMember` and
+  `InsertPeriods` (`internal/modeledit/modeledit.go:104`, `:143`) insert
+  without `sort_order`, and `timedim.ValidateAndReindex`
+  (`internal/timedim/timedim.go:486`) numbers only dated leaves. A reorder
+  refuses time dimensions. Re-checked 2026-09-29: both still hold.
+- **Why it matters:** anything creating members over gRPC gets them first
+  in every list and without their parent; a time dimension's quarters,
+  halves and years list in alphabetical order.
+- **How to check:** `grep -n "INSERT INTO model.dimension_member"
+  internal/model/store.go`: neither statement names `sort_order` or
+  `parent_member_id`.
+- **What closes it:** the gRPC create appending `MAX(sort_order)+1` and
+  writing `parent_member_id`, with a test; or retiring the gRPC member create
+  if nothing calls it. For aggregate periods, an order derived from their
+  children's dates (for example each aggregate after its last leaf, or by
+  its first leaf), set where the time dimension is re-indexed.
+
+### Build groups a child dimension's members by parent; grids list them by sort_order
+
+- **Noticed:** 2026-09-29, reviewing the member reorder; re-checked after
+  the reorder began keeping each group's slots.
+- **What:** for a dimension whose members hang off another dimension's
+  members (`parent_dimension_id`), Build › Dimensions lists them grouped by
+  that parent, in the parent dimension's order
+  (`web/src/consoles/developer/DimensionsTab.tsx:524-535`), and its arrows
+  move a member within its group. Every other reader lists the members flat
+  by `sort_order`. The reorder counts such members as top-level and, when
+  one group is reordered, gives its members the slots the group held
+  (`internal/modeledit/reorder.go:218-230`), so groups that were
+  interleaved stay interleaved. Members added in the order A1 (parent P),
+  B1 (parent Q), A2 (parent P) show in Build as P: A1, A2; Q: B1, and in a
+  grid, selector or chart as A1, B1, A2, before and after any reorder.
+- **Why it matters:** the order a developer arranges in Build is not the
+  order business users see in grids.
+- **How to check:** a child dimension with members added across two
+  parents in alternating order; compare Build with `GET /api/dimensions`.
+- **What closes it:** a decision on which order is right. Either the flat
+  readers order such a dimension by its parent's order first, or the
+  renumbering places each group together in the parent dimension's order,
+  as Build shows it.
+
+### Connector names are not unique, and revision copies match connectors by name
+
+- **Noticed:** 2026-09-29, proved with a probe test (since deleted).
+- **What:** `model.integration_def` has no unique constraint on model,
+  revision and name, and no create or rename path refuses a duplicate name.
+  Revision copies map connectors to their copies by name. The dashboard-widget
+  remap for `integration_button` (`internal/gateway/handler.go:4701-4703`,
+  `internal/aiassistant/write_executor.go:2611-2613`) then fails the whole
+  copy with "more than one row returned by a subquery used as an
+  expression"; the automation-rule scope keeps the source reference instead
+  (`HAVING count(*) = 1`, `handler.go:4644`). Model export also resolves by
+  name and skips a name that matches more than one row, so the import drops
+  that reference.
+- **Why it matters:** a developer who gives two connectors the same name and
+  puts a button on one can no longer make a new revision of the model.
+- **How to check:** two connectors with one name, an integration button on
+  one of them, then Build › Models › New revision.
+- **What closes it:** open decision: connector names unique per revision (a
+  migration and a 409 on create and rename), or copies that carry old-to-new
+  ids instead of matching names.
+
+### Schedule rules fire in every revision
+
+- **Noticed:** 2026-09-29, while making revision copies carry schedule rules.
+- **What:** the scheduler fires every enabled `schedule` rule whose
+  `next_fire_at` has passed, whatever its revision
+  (`internal/workflow/scheduler.go:111`), and setting a revision active arms
+  or disarms nothing. Revision copies now carry a rule's cron settings but
+  leave `next_fire_at` NULL, so the copy is not armed
+  (`internal/gateway/handler.go:4572-4577`; the AI `create_revision` runs the
+  same statement). Once the copy is set active its schedule rules stay idle
+  until someone saves their schedule, while the old revision's rules keep
+  firing against the old revision's workflows. Connector schedules
+  (`model.integration_schedule`) are not copied at all, so a scheduled
+  connector in a new revision runs only by hand until it is scheduled again;
+  nothing documents that.
+- **Why it matters:** after go-live, scheduled work keeps running on the
+  superseded revision and not on the live one.
+- **How to check:** a schedule rule, New revision, Set active on the copy,
+  then `SELECT revision_id, next_fire_at FROM workflow.automation_rule WHERE
+  trigger_type = 'schedule'`.
+- **What closes it:** open decision: whether schedules follow the active
+  revision (arm the active revision's rules on activation and disarm the
+  rest, or have the scheduler fire active revisions only), and the same for
+  connector schedules.
+
+### Model export and import drop schedule and connector settings
+
+- **Noticed:** 2026-09-29, while fixing the same fields in revision copies.
+- **What:** the package's `AutomationRule`
+  (`internal/modeltransfer/transfer.go:241-257`) has no `cron_expr`,
+  `timezone`, `misfire_policy`, `max_retries`, `retry_backoff_seconds` or
+  `source_integration_id`, and its `Integration` (`:217-227`) only a name, a
+  type, a target and the config. Import (`:2002-2006`, `:2035-2037`)
+  therefore brings a push connector back as `pull`, with the column defaults
+  (status `active`, no tags, description, connection or `config_version`, no
+  test result), and a connector-scoped rule with no source, so it fires on
+  every connector's run. A schedule rule arrives without `cron_expr`, which
+  `automation_rule_schedule_cron_chk` refuses
+  (`migrations/059_scheduled_automation.sql:33-34`): read, not run, but a
+  package holding a schedule rule most likely cannot be imported. Kept by
+  decision (2026-09-29): a package made before 2026-09-29 whose Rate metric
+  has no operands is refused with 400 ("needs both a numerator and a
+  denominator metric"); adding `agg_numerator_metric_id` and
+  `agg_denominator_metric_id` to its JSON imports it.
+- **Why it matters:** a model moved to another tenant loses its connectors'
+  settings and its schedules.
+- **How to check:** export a revision holding a draft push connector and a
+  schedule rule, import it, and read the answer and `direction`, `status`
+  of the imported `model.integration_def`.
+- **What closes it:** carrying those fields in the package.
+  `connection_id` belongs to an application: map it by connection name in
+  the target application, or leave it empty and import the connector as a
+  draft.
+
+### Business roles may be named like platform roles
+
+- **Noticed:** 2026-09-29, while giving workflow assignment one predicate.
+- **What:** nothing refuses a business role called `developer`,
+  `tenant_admin` or any other `identity.user_role` value, on create or on
+  rename: the business-admin routes (`internal/gateway/handler.go:15077`,
+  `:15152`), the AI (`internal/aiassistant/write_executor_workflow.go:383`,
+  `write_executor_edit.go:824`) and SCIM, which names roles after the
+  identity provider's groups (`ee/scim/service.go:760`, `:797`,
+  `ee/scim/patch.go:238`). Workflow assignment now treats such a role as
+  naming nobody (`internal/workflow/assignee/assignee.go`): a step naming
+  `tenant_admin` means the platform role.
+- **Why it matters:** a business admin who creates a role called
+  `developer` sees steps assigned to it go to the platform developers, and
+  its members are never assigned, without any message.
+- **How to check:** on each deployment, `SELECT workspace_id, name FROM
+  identity.business_role WHERE name IN (SELECT
+  unnest(enum_range(NULL::identity.user_role))::text);`.
+- **What closes it:** open decision: reserve those names on create and
+  rename on all three paths, and rename the rows the query finds.
+
+### Some workflow notifications reach disabled accounts, and a failed recipient query is silent
+
+- **Noticed:** 2026-09-29, while giving workflow assignment one predicate.
+- **What:** role recipients and SLA reminders now leave out disabled
+  accounts (`assignee.SQL`). Three paths notify one known user without that
+  check: a notification step's "requester" recipient
+  (`internal/workflow/store.go:1409-1413`), the rework notice to the starter
+  (`:1004`) and `notifyStartFailure` (`:2805`). `notification.Store.Notify`
+  (`internal/notification/store.go:228`) checks nothing either, and the
+  dispatcher's `claimOutbound` (`internal/notification/dispatch.go:397`)
+  e-mails or posts rows queued before the recipient was disabled.
+  Separately, `resolveNotificationRecipients` returns no recipients when its
+  query fails (`internal/workflow/store.go:1428-1431`), so a broken query
+  notifies nobody and logs nothing.
+- **Why it matters:** a person removed from the tenant can keep receiving
+  workflow e-mails, which carry the workflow's name and message; a recipient
+  query broken by a schema change fails unseen.
+- **How to check:** disable the starter of an instance, send one of its
+  steps back for rework, and look for an e-mail row queued for them.
+- **What closes it:** `Notify` skipping a disabled recipient,
+  `claimOutbound` dropping or cancelling their pending rows, and the
+  recipient query's error logged.
+
+### An overdue step that names no role reminds nobody
+
+- **Noticed:** 2026-09-29, while giving workflow assignment one predicate.
+- **What:** a step with no `assignee_roles` sits in the inbox of everyone
+  who reaches its application, but the SLA reminder finds no recipients for
+  it (`internal/notification/reminder.go:188-190`). Kept rather than start
+  reminding a whole workspace.
+- **Why it matters:** an overdue unassigned step, such as a condition step
+  waiting for a person, is never chased.
+- **How to check:** a step with `sla_hours` and no assignee role, past its
+  due time: no reminder row is written.
+- **What closes it:** a product decision on whom such a step reminds, if
+  anyone (for example the application's business admins).
+
+### Approved numbers are released by any step after the approval
+
+- **Noticed:** 2026-09-29, writing the Business admin guide.
+- **What:** `writeguard` keeps the numbers of a finished workflow instance
+  locked only when the instance's last decided step, by completion time,
+  decided `approve` (`internal/writeguard/writeguard.go:243-249`, `:299`).
+  A notification step records `sent` or `skipped`, and every later step a
+  decision of its own, so a workflow such as "approve, then notify"
+  releases the numbers as soon as the notification step finishes. The
+  Business admin guide tells readers the lock holds only "if the approval is
+  its last step".
+- **Why it matters:** the usual shape of an approval (approve, then tell the
+  requester) does not keep the agreed figures locked.
+- **How to check:** a workflow of an approval step then a notification step
+  over some cells; approve it, then write one of those cells: 200.
+- **What closes it:** locking a finished, not cancelled instance whose last
+  approval step approved, whatever notification, task or condition steps
+  follow it; then the qualifier can leave the guide
+  (`internal/starter/business_admin.go`).
+
+### Build edits the live revision without saying so
+
+- **Noticed:** 2026-09-29, writing the Developer guide and the tour.
+- **What:** with nothing picked in Build › Models, Build works in the active
+  revision of the model the server resolves
+  (`web/src/consoles/developer/DeveloperConsole.tsx:64-69`), and the top
+  bar's revision badge has the draft tone whichever revision it names
+  (`:159`). The only revision guard is on delete. Business users see an edit
+  to the live revision at once.
+- **Why it matters:** the guides tell developers to make a new revision
+  first, but the console neither warns nor shows that they are editing the
+  live one.
+- **How to check:** on a new tenant, open Build, change a metric, and read
+  the badge; the change shows in Run.
+- **What closes it:** the badge in the live tone when the working revision
+  is the active one, and a product decision on a warning or a confirmation
+  for edits to it.
+
+### Build edits a system-managed revision's members and definitions
+
+- **Noticed:** 2026-09-29, reviewing the member reorder; read, not run.
+- **What:** a `system_managed` revision is filled only by an
+  approval-triggered copy and refuses cell writes and imports
+  (`writeguard.SystemManaged`, `internal/writeguard/writeguard.go:186`).
+  The only gateway caller outside the write guard is the fact import
+  (`internal/gateway/handler.go:7164`). The member routes (`POST`, `PATCH`,
+  `DELETE /api/developer/dimensions/{dimId}/members…` and the reorder,
+  `:356-360`) and the other definition edits in Build do not check it, and
+  a member delete or first child moves or removes that revision's facts
+  (`internal/modeledit/modeledit.go:160`, `:264`).
+- **Why it matters:** a revision meant to hold an approved copy can be
+  changed in Build, after the approval that produced it.
+- **How to check:** mark a revision `system_managed`, pick it in Build and
+  add a member: 200.
+- **What closes it:** the definition edits refusing a `system_managed`
+  revision through one shared check (the member routes, the reorder, the
+  metric, dimension, grid and form edits, and the AI Developer's tools),
+  with a test.
+
+### A developer who is also a business admin cannot grant a working revision's dashboards
+
+- **Noticed:** 2026-09-29, writing the Developer guide. Standing rule 2.
+- **What:** Build › Roles is hidden from anyone who holds `business_admin`
+  (`web/src/consoles/developer/DeveloperConsole.tsx:130`), and Business
+  Admin › Roles saves grants with no revision, so they apply to the selected
+  model's live revision
+  (`web/src/consoles/business-admin/BusinessAdminConsole.tsx:329-333`). A
+  dashboard that is new in the working revision can be granted only after
+  Set active, and until someone does, no member of any business role sees
+  it (people in no role do). A developer without `business_admin` can grant
+  it beforehand.
+- **Why it matters:** a real role cannot prepare go-live, and a new
+  dashboard is hidden from every role at the moment it goes live.
+- **How to check:** sign in with `developer` and `business_admin`, add a
+  dashboard in a working revision, and look for a way to grant it.
+- **What closes it:** a decision, since it touches the one-console rule:
+  Business Admin › Roles offering the working revision to a developer, or
+  Build › Roles shown, scoped to the working revision, when `business_admin`
+  is held too.
+
+### A new revision takes its dashboard grants from its source revision
+
+- **Noticed:** 2026-09-29, writing the Business admin guide.
+- **What:** a revision copy carries dashboard grants from its source
+  revision, matched by dashboard name (step K,
+  `internal/gateway/handler.go:4784-4799`). Build › Models › New revision now
+  copies the working revision when there is one. If a business admin changed
+  grants on the live revision after that working copy was made, a revision
+  made from the working copy carries the older grants, and setting it
+  active applies them.
+- **Why it matters:** a grant or revocation made on the live revision can be
+  undone without notice at the next go-live.
+- **How to check:** make a working copy, change a grant on the live
+  revision, make a new revision from the working copy, and compare grants.
+- **What closes it:** a decision on which grants a copy takes (for example
+  the live revision's, for the dashboards that exist there).
+
+### Two rule types cannot be attached to a workflow from Build › Triggers
+
+- **Noticed:** 2026-09-29, writing the tour. Standing rule 2.
+- **What:** a rule needs a workflow
+  (`web/src/consoles/developer/AutomationTab.tsx:102`). An event workflow
+  fixes the trigger type to the one its start event gives
+  (`triggerTypeFromWorkflow`, `workflowConstants.ts:12-18`), never
+  `form_approval` or `grid_change`, and a manual workflow limits the choice
+  to manual or schedule (`AutomationTab.tsx:283-286`, `:327-335`). The
+  start-event catalogue has no approval or grid-change event. The engine
+  dispatches both types (`internal/gateway/handler.go:2001`, `:10329`), so
+  they are reachable only through the API or the AI.
+- **Why it matters:** the Triggers screen lists two types a developer
+  cannot use.
+- **How to check:** Build › Triggers › New rule, pick any workflow, and open
+  Trigger type.
+- **What closes it:** approval and grid-change start events in the
+  catalogue, so an event workflow can carry them, or the full choice for a
+  manual workflow.
+
+### A published manual workflow shows "No rule yet" as a warning
+
+- **Noticed:** 2026-09-29, writing the Developer guide.
+- **What:** the workflow editor shows a warning-toned "No rule yet" badge
+  whenever no automation rule uses the workflow
+  (`web/src/consoles/developer/WorkflowEditor.tsx:252-253`), including a
+  published manual workflow, which people start by hand without any rule.
+- **Why it matters:** it presents a working setup as a problem.
+- **How to check:** publish a manual workflow with no rule and open it.
+- **What closes it:** no badge, or a neutral one, for a manual workflow.
+
+### A business admin who hides a row from themselves cannot undo it
+
+- **Noticed:** 2026-09-29, writing the Business admin guide.
+- **What:** Business Admin › Access Rules lists members and metrics through
+  `baAvailable`, which leaves out what is hidden from the calling admin,
+  and everything under a hidden member
+  (`internal/gateway/handler.go:14907-14988`). A business admin who sets
+  Hidden on themselves loses that row from the screen. The AI's
+  `set_user_access_rules` changes member rules only, and the access-rule
+  routes are business-admin only, so a metric hidden this way can be
+  restored only by another business admin.
+- **Why it matters:** on a new tenant the sign-up owner is the only business
+  admin: the metric stays hidden until a tenant admin invites a second one.
+  The guide warns readers off it.
+- **How to check:** as a business admin, hide a metric from yourself and
+  reopen your own rules.
+- **What closes it:** listing the caller's own hidden rows when they edit
+  their own rules, or refusing Hidden on oneself.
+
+### Access-rule changes reach an open grid only on its 30-second refresh
+
+- **Noticed:** 2026-09-29, writing the Business admin guide.
+- **What:** saving rules refreshes only the rules list
+  (`["ba-access-rules", user]`,
+  `web/src/consoles/business-admin/BusinessAdminConsole.tsx:651`). An open
+  grid picks the change up through grid-meta's 30 s stale time and refetch
+  (`web/src/consoles/business/PlanningGrid.tsx:477`, `web/src/main.tsx:13`),
+  even in the admin's own browser. The guide says "within half a minute, or
+  at once if you reload".
+- **Why it matters:** an admin who changes their own rules sees the old ones
+  for up to half a minute.
+- **How to check:** change your own rules with a grid open in another tab.
+- **What closes it:** invalidating the grid-meta and KPI queries when rules
+  are saved; other users' grids keep the 30 s refresh.
+
+### History › Pending Actions ignores required comments and completion labels
+
+- **Noticed:** 2026-09-29, writing the Business admin guide.
+- **What:** Business Admin › History offers "Add a comment (optional)" and
+  the default buttons for every open step
+  (`web/src/consoles/business-admin/BusinessAdminConsole.tsx:263-271`), where
+  the Workflow Inbox passes the step's `required_comment` and
+  `completion_label` (`:84-93`). Deciding a step that requires a comment
+  there fails with "a comment is required to complete this step".
+- **Why it matters:** the screen invites an action it then refuses.
+- **How to check:** a step with a required comment, decided from History
+  with no comment.
+- **What closes it:** History showing both, as the Inbox does (and the
+  history endpoint returning them if it does not).
+
+### Workflow History and the Workflow Inbox are scoped differently
+
+- **Noticed:** 2026-09-29.
+- **What:** History (`GET /api/workflow/history`,
+  `internal/gateway/handler.go:5451`) lists the instances the caller
+  administers, narrowed to the `X-App-Id` application when one is sent. The
+  console sends the application kept in `localStorage` (`selected_app_id`),
+  which Business Admin › Models › Open sets, but so does the developer's
+  application auto-pick. The Workflow Inbox (`/api/tasks`) does not read
+  `X-App-Id`.
+- **Why it matters:** History and the Inbox can show different sets of
+  requests, and an account that is also a developer can find History
+  narrowed to an application it never chose there.
+- **How to check:** a workspace with two applications that both have
+  running requests, one of them open.
+- **What closes it:** a decision whether History follows the selected
+  application; if it does, the screen naming it.
+
+### Tenant-level applications have no business-role workspace of their own
+
+- **Noticed:** 2026-09-29.
+- **What:** an application with no workspace (`workspace_id` NULL, the shape
+  `POST /api/admin/applications` creates) belongs to every workspace of its
+  tenant. Business Admin resolves it to the workspace where the caller holds
+  `business_admin` (`baWorkspaceModelFor`,
+  `internal/gateway/handler.go:14692`), so business admins of two workspaces
+  see different roles, users and rules for the same application, and its
+  workflow steps match named business roles of any workspace of the tenant.
+- **Why it matters:** in a tenant with several workspaces, who administers
+  such an application is not defined. A self-service sign-up has one
+  workspace and is not affected.
+- **How to check:** two workspaces with a business admin each, one
+  tenant-level application; compare their Roles screens.
+- **What closes it:** a decision: give such applications a workspace, or
+  define whose roles govern them.
+
+### A plain developer cannot build workflows on a model-less application
+
+- **Noticed:** 2026-09-29, checking the developer-route change; confirmed by
+  a throwaway gateway test (not kept).
+- **What:** a developer of the tenant gets 403 "application is outside your
+  access scope" on `GET /api/developer/workflows?application_id=` for an
+  application with no model (an execution-mode application), though the
+  developer's application list shows model-less applications. The cause is
+  the `EXISTS (SELECT 1 FROM core.model …)` clause in `actorCanAccessApp`'s
+  developer arm (`internal/gateway/handler.go:1431-1440`). Only a tenant
+  admin who is also a developer of that tenant, a platform admin or a
+  global builder can build workflows and automation rules there.
+- **Why it matters:** the role that builds workflows cannot build them on
+  the applications made to run workflows.
+- **How to check:** as mm-dev in a `setupDevRouteFixture` test, `GET
+  /api/developer/workflows?application_id=<a model-less tenant-1
+  application>`.
+- **What closes it:** the user's decision: opening model-less applications
+  to the tenant's developers widens a shared predicate. If agreed, the
+  model clause applies only when the application has a model, with a test.
+
+### The application picker offers applications the caller cannot build in
+
+- **Noticed:** 2026-09-29.
+- **What:** `/api/apps` lists every application a business role opens. A
+  developer or tenant admin whose business role is in another tenant can
+  pick that tenant's application, and the developer and admin groups then
+  answer 403 there, since their routes count builder and admin reach only.
+  The same holds in Build › Models since the developer routes were narrowed
+  (2026-09-29): `GET /api/developer/applications` (`devOrAdm`,
+  `adminTenants`, `internal/gateway/handler.go:341`) still lists the
+  applications, models and revisions of a tenant where the account is only
+  `tenant_admin`, and every Build route answers 403 for them. They are
+  reached by a click, by the newest-revision fallback
+  (`web/src/consoles/developer/ApplicationsTab.tsx:185-200`), or by a stale
+  `selected_app_id`; New revision and Set default fail there too. Only the
+  cross-tenant shape (developer in A, `tenant_admin` in B) is affected; an
+  owner is not.
+- **Why it matters:** the console offers screens that cannot work.
+- **How to check:** a developer of tenant 1 who is a business user in tenant
+  2; pick tenant 2's application and open Build. For Build › Models,
+  `internal/gateway/developer_route_scope_test.go` asserts that app3 is
+  listed to the cross accounts (`:210`), while
+  `TestDeveloperRoutesIgnoreAdminScopeElsewhere` asserts 403 on `GET
+  /api/developer/model` for app3.
+- **What closes it:** per-application capabilities in `/api/apps` and
+  `/api/developer/applications` (for example `can_build`, `can_admin`,
+  computed with the developer-route rule), `web/src/router/sections.ts`
+  hiding the groups the user cannot use there, and Build › Models hiding or
+  disabling admin-only entries and leaving them out of the fallback, with a
+  Vitest or Playwright check.
+
+### A future developer-only handler with a fresh context loses the route markers
+
+- **Noticed:** 2026-09-29, narrowing the developer routes.
+- **What:** `dev()` marks its requests with `developerRouteKey` and
+  `builderRouteKey` in the request's context
+  (`internal/gateway/handler.go:1294-1311`). The scope checks read the
+  marker from the context they are given: `requireResourceAccess`,
+  `reorderDimensionMembers`, `actorCanAccessApp`/`actorCanAccessModel` and
+  `resolveDemoModelID`/`resolveDemoAppID`. Every developer-route scope
+  check found today passes `r.Context()` or a context derived from it
+  (checked: `developerRevisions`, `developerSetDefaultModel`,
+  `developerRevisionAction` and the AI session handlers); the gateway's
+  seven `context.Background()` calls are recalculation and migration
+  goroutines that check no scope.
+- **Why it matters:** a handler that built a fresh context before calling
+  these checks would lose both markers and be judged as a business route,
+  where a role held in another tenant counts differently.
+- **How to check:** `grep -n 'context.Background()' internal/gateway/*.go`,
+  and for each hit whether an access predicate follows.
+- **What closes it:** a lint or test that fails when a handler behind
+  `dev()` calls an access predicate with a context not derived from the
+  request's; or passing the route kind explicitly.
+
+### Per-user application grants do not narrow a tenant owner's build reach
+
+- **Noticed:** 2026-09-29, decided while narrowing the developer routes.
+- **What:** on developer-only routes, an account that is `tenant_admin` and
+  also a developer of the same tenant (the sign-up owner) keeps what its
+  admin grant opens there (`builderAdminScope`,
+  `internal/gateway/handler.go:1335`): applications with no model, and
+  applications outside its `user_app_access`/`user_model_access` grants.
+  Those grants narrow only the developer arms. This is the behaviour from
+  before the change, restored on purpose and pinned by
+  `TestDeveloperRoutesKeepOwnerAdminReach`
+  (`internal/gateway/developer_route_scope_test.go:237`): ws-owner with a
+  grant to app1 only can still `PATCH` app2's metric.
+- **Why it matters:** an administrator who narrows an owner's applications
+  narrows what the owner sees in the business console, not what it builds.
+- **How to check:** run that test.
+- **What closes it:** nothing while the decision stands. If grants should
+  narrow owners too, change that test, and make `/api/apps` and
+  `/api/developer/applications` list the same set to such accounts.
+
+### Rules and workflows requested without a revision come from the oldest model
+
+- **Noticed:** 2026-09-29, fixing Triggers in a multi-model application.
+- **What:** for automation rules, workflow definitions and the trigger-event
+  catalogue, a request with no `?revision_id=` resolves the application's
+  oldest model (`resolveAppRevisionID`, `appWorkingModelQuery`,
+  `internal/gateway/handler.go:9348-9387`) and ignores `X-Model-Id`, while
+  forms, grids and integrations follow `X-Model-Id`. On a signed-up tenant
+  the oldest model is the tour. The console's Triggers and workflow screens
+  now always send the working revision; an API client that sends none gets
+  the tour's rules while it works in a guide.
+- **Why it matters:** two resources read by one request can come from
+  different models.
+- **How to check:** `GET /api/automation/rules` with `X-Model-Id` of a guide
+  model and no `revision_id`.
+- **What closes it:** a decision: honouring `X-Model-Id` there changes which
+  rules existing multi-model applications show.
+
+### The form-to-metric mapping section lists another model's items
+
+- **Noticed:** 2026-09-29, while scoping the import wizard to the working
+  revision.
+- **What:** Build › Integrations' form-to-metric mappings
+  (`FormRecordsSection`,
+  `web/src/consoles/developer/IntegrationsTab.tsx:309-312`) load forms, the
+  model, dimensions and grids with no revision, so in a multi-model
+  application they come from the `X-Model-Id` or default model rather than
+  the working revision's; and `GET /api/developer/grids` with no revision
+  lists every revision's grids (`internal/gateway/handler.go:12992`). The
+  import wizard beside it now follows the working revision.
+- **Why it matters:** a developer working in a guide is offered the tour's
+  forms and metrics.
+- **How to check:** pick a guide's revision in Build › Models and open the
+  mapping form.
+- **What closes it:** the same working-revision scoping as the import
+  wizard.
+
+### Trigger-event keys made from names can collide
+
+- **Noticed:** 2026-09-29.
+- **What:** per-form and per-integration start events are keyed by the
+  name, lower-cased with spaces and hyphens turned into underscores
+  (`toEventKey`, `internal/gateway/handler.go:16064`). An integration named
+  "integration" gives `integration.import.completed`, the system "any
+  import" event (`:16188`), which a rule reads as any source; forms named
+  "Budget request" and "budget-request" share one key.
+- **Why it matters:** a workflow meant for one source starts for others.
+- **How to check:** name an integration "integration" and read the
+  trigger-event catalogue.
+- **What closes it:** keys built from ids, or a name refused when its key is
+  taken.
+
+### A copied active connector runs without a test of its remapped configuration
+
+- **Noticed:** 2026-09-29, while making revision copies carry connector
+  settings.
+- **What:** a revision copy now keeps a connector's status and last test
+  (`internal/gateway/handler.go:4539-4559`). Its configuration is remapped
+  to the new revision's target, so `last_tested_hash` no longer matches and
+  `Definition.Tested()` is false, yet the copy stays `active`. Activation
+  requires a test of the current configuration
+  (`internal/integration/store.go:350`), but a run checks only status and
+  enabled (`internal/gateway/rest_api_integrations.go:394`). Before, the
+  copy was active with no test result at all, so this is not a regression.
+- **Why it matters:** the tested-configuration gate is not enforced for
+  copies, or for runs generally.
+- **How to check:** duplicate a revision holding an active connector and run
+  the copy.
+- **What closes it:** a decision: reset a remapped copy to draft, or accept
+  the source's test across a pure target remap; and whether runs enforce the
+  gate.
+
+### Connector targets are checked against the model, not the revision
+
+- **Noticed:** 2026-09-29.
+- **What:** `integration.CheckOwnership`
+  (`internal/integration/ownership.go:54`, the query at `:65`) requires a
+  connector's target to be a row of the connector's model, and its
+  connection to belong to the model's application. It does not look at the
+  revision. The gateway runs it on every save and enqueue, and the worker
+  before each run (`internal/integration/runner.go:185`). The web builder
+  now sends the working revision
+  (`web/src/consoles/developer/api-integrations/ApiIntegrationBuilder.tsx:83`),
+  but nothing refuses a grid, form or dimension of another revision of the
+  same model: neither a save through the API nor a revision copy whose
+  target could not be mapped, which keeps the source's `target_id` (the
+  `COALESCE` fallback, `internal/gateway/handler.go:4543-4544`). Seen by
+  reading; not yet exercised live.
+- **Why it matters:** a working revision's connector can read from or write
+  into the active revision's grid.
+- **How to check:** `POST /api/developer/integrations?revision_id=<working>`
+  with `config.target_id` set to a grid of the active revision: the save
+  succeeds, and a run writes into that grid.
+- **What closes it:** a decision to require the target in the connector's
+  own revision (or a revision-less row) on save and before each run, with
+  the copy's unmapped-target fallback cleared.
+
+### Revision copies are written twice
+
+- **Noticed:** 2026-09-29.
+- **What:** the gateway's `duplicateRevision` (`internal/gateway/handler.go`,
+  steps G to K) and the AI's `create_revision`
+  (`internal/aiassistant/write_executor.go:2458`, `:2503`, `:2543`) copy
+  connectors, workflows and rules with the same SQL written out twice. They
+  had drifted: until this change the AI copy left a workflow's
+  `subject_config` on the source revision, and copied connectors before
+  forms and dashboards existed.
+- **Why it matters:** each fix has to be made twice, and a missed one
+  reappears as a copy that points at the source revision.
+- **How to check:** compare the two statements.
+- **What closes it:** one shared helper, for example in `internal/modeledit`,
+  which both packages can import.
+
+### A saved CSV or Sheets import into a form imports nothing
+
+- **Noticed:** 2026-09-29.
+- **What:** `integrationRun`'s form branch inserts into `model.form_record`
+  (`internal/gateway/handler.go:8306`), a table no migration creates; form
+  records live in `runtime.form_record` (`migrations/017_crud_forms.sql:15`).
+  Every row fails, and the run answers 200 with `error_rows` counting them.
+- **Why it matters:** a saved csv_import or google_sheets integration with a
+  form target has never worked, and says so only in its counts.
+- **How to check:** `grep -n 'model.form_record' internal/gateway/handler.go`;
+  run such an integration: `{"error_rows":1,"rows_imported":0}`.
+- **What closes it:** writing through the path the form submit endpoint uses
+  (`runtime.form_record`, with its posting and recalculation), and a test
+  that a saved CSV-to-form run imports its rows.
+
+### Deleting a form mapping or a form leaves its posted totals in the metric
+
+- **Noticed:** 2026-09-29, reviewing record deletes; read, not run.
+- **What:** a form-to-metric mapping keeps its aggregate in
+  `runtime.fact_input` rows tagged `source_ref` = the mapping's id, which
+  have no foreign key (`migrations/035_form_metric_mapping.sql:45`).
+  `DELETE /api/developer/form-integrations/{id}` deletes the mapping
+  (`internal/gateway/handler.go:8797-8809`), and deleting a form cascades
+  to its mappings (`internal/crudapp/store.go:170-176`); the posting rows
+  go, the `fact_input` rows stay, and the grid still sums them. A `PATCH`
+  that changes a mapping's target metric leaves the old metric's rows the
+  same way: the recompute deletes only the new target's (`:9168`). A
+  record delete now takes its postings out (`retractPostings`,
+  `internal/gateway/form_record_access.go:193`, pinned by
+  `TestFormRecordRetractionTakesValueOut`).
+- **Why it matters:** a metric keeps showing money from a form or mapping
+  that no longer exists, and nothing in the console can remove it.
+- **How to check:** post records through a mapping, delete the mapping,
+  and read the metric's cell: the total is unchanged.
+- **What closes it:** the mapping delete, the form delete and a retargeting
+  `PATCH` deleting the mapping's `source_ref` rows (for the old target) and
+  recalculating the metrics that read them, in one shared helper, with a
+  test.
+
+### The posting write guard runs as whoever changed the record
+
+- **Noticed:** 2026-09-29, reviewing the form record permissions; read, not
+  run.
+- **What:** `applyFormMappings` checks `writeguard.MetricAccess` and
+  `writeguard.CheckWriteMetrics` for the `userID` it is given
+  (`internal/gateway/handler.go:9011`, `:9034`), which is the caller of the
+  request: the approver when a business admin approves a record
+  (`:10559-10562`), the administrator who runs a sync. The record's
+  submitter is not checked.
+- **Why it matters:** a submitter restricted from a member or metric can
+  have a value posted there by an approver who is not; and an approver
+  restricted there withholds a submitter's posting without saying so.
+- **How to check:** a business user with a read-only access rule on member
+  M submits a record naming M; a business admin with no rule approves it;
+  the value is posted.
+- **What closes it:** a decision whose access a posting follows (the
+  submitter's, the approver's, or both), then one rule in
+  `applyFormMappings` with a test.
+
+### Form import creates submitted and approved records without their rules
+
+- **Noticed:** 2026-09-29, reviewing the form record permissions; read, not
+  run.
+- **What:** `POST /api/forms/{id}/import` creates each record in the status
+  it is allowed (`internal/gateway/form_transfer.go:277-286`) and posts it,
+  but does not call `DispatchEventRules`. A record created or moved through
+  `POST /api/forms/{id}/records` or `PUT /api/records/{id}` fires the
+  form's `form_submit` and `form_approval` rules
+  (`internal/gateway/handler.go:10389-10396`, `:10565-10571`).
+- **Why it matters:** an automation that starts a workflow for each
+  submitted expense does not start for imported ones.
+- **How to check:** a `form_submit` rule on a form; import a CSV of two
+  submitted records; no instance starts.
+- **What closes it:** the import dispatching the same rules per record as
+  the create does, or a decision that an import is silent, said in the
+  manual.
+
+### Form record field labels are not tied to their inputs
+
+- **Noticed:** 2026-09-29, writing the form record Playwright specs.
+- **What:** `Field` clones a generated id onto its single child
+  (`web/src/ui/Field.tsx:41`), but `FormFieldInput`
+  (`web/src/consoles/business/FormsTab.tsx:33`) neither accepts nor
+  forwards `id`, so the label (for example "Vendor") is not tied to the
+  input or select it renders, in Run › Forms and in the dashboard form
+  widget (`web/src/consoles/business/DashboardWidgets.tsx`).
+- **Why it matters:** screen readers do not announce the label, and
+  `getByLabel('Vendor')` does not find the input.
+- **How to check:** open a form record editor and inspect the input: no
+  `id` matching the label's `for`.
+- **What closes it:** `FormFieldInput` taking an `id` and passing it to the
+  element it renders.
+
+### The forms list can show a form whose records the caller does not reach
+
+- **Noticed:** 2026-09-29, adding permissions to the forms list; not
+  checked either way.
+- **What:** `GET /api/forms` lists the forms of the model
+  `resolveDemoModelID` resolves (`internal/gateway/handler.go:10068`), while
+  the record routes decide by `resolveFormRecordScope`
+  (`internal/gateway/form_record_access.go:45`). Where the second says the
+  caller does not reach a listed form, the UI hides New record and the
+  records list answers 404. Whether the two decisions can differ (per-user
+  application or model grants, the application header) was not checked.
+- **Why it matters:** a user could see a form tab with no records and no
+  actions.
+- **How to check:** a test where a user's access grants exclude the model
+  but the application header still resolves it.
+- **What closes it:** the forms list leaving out forms the scope does not
+  reach, or showing them that way on purpose.
+
+### The cell write accepts a value on a parent member
+
+- **Noticed:** 2026-09-29, by the tour's reviewer; not re-run.
+- **What:** `POST /api/cells` does not check that each member is a leaf;
+  `writeguard.IsLeafMember` (`internal/writeguard/writeguard.go:77`) has no
+  callers. The import path refuses a parent member
+  (`internal/importpkg/resolve.go:238`). The reviewer reports that a value
+  stored on a parent is ignored by the grid but counted by a pinned KPI.
+- **Why it matters:** the grid and a KPI can disagree about the same total.
+- **How to check:** `POST /api/cells` with a parent member's code, then read
+  the grid and a KPI pinned to that member.
+- **What closes it:** refusing a non-leaf member in `cells()`, as the import
+  does.
+
+### The cell write stores a value for a member code that does not exist
+
+- **Noticed:** 2026-09-29, reviewing the cell write; read, not run.
+- **What:** `POST /api/cells` resolves each `dim_codes` entry to a member
+  for the write guard and skips an unknown code ("nothing to restrict
+  here", `internal/gateway/handler.go:2057`), then inserts the fact with the
+  codes as sent (`:2090-2094`). The gRPC `QueryService.Writeback` does the
+  same (`internal/query/store.go:74`, insert at `:107`), and so does a form
+  posting whose record names an unknown member
+  (`internal/gateway/handler.go:9028`). The dimension ids in `dim_codes`
+  are not checked against the revision either. The import refuses an
+  unknown code (`internal/importpkg/resolve.go:229`).
+- **Why it matters:** the fact is stored but no grid, chart or total reads
+  it, and it counts against the plan's fact rows. A member created later
+  with that code picks the value up, though no write guard checked it
+  against that member.
+- **How to check:** `POST /api/cells` with `dim_codes` naming a code the
+  dimension does not have: 200, and a `runtime.fact_input` row with that
+  code.
+- **What closes it:** one shared resolver for `cells()`, the gRPC write and
+  the form posting that refuses an unknown member code, and a dimension
+  that is not the revision's, with a 400 naming them, as the import does.
+
+### Grid layouts copied before 2026-09-29 name the source revision's dimensions
+
+- **Noticed:** 2026-09-29, while making revision copies remap widget
+  layouts.
+- **What:** until this change, revision copies, the AI copy and model import
+  copied a grid widget's saved layout (`widget_props.default_view`: rows,
+  columns, context and the `filter_sel` keys) as it was. Those widgets name
+  the source revision's dimension ids: they render with those dimensions
+  dropped from the layout and their saved filters ignored. Copies made now
+  are remapped (`modeltransfer.RemapWidgetPropsIDs`), and export resolves
+  such a reference to this revision's copy by lineage, but the stored rows
+  are unchanged.
+- **Why it matters:** revisions copied earlier show grids laid out
+  differently from their source.
+- **How to check:**
+  ```sql
+  SELECT w.id FROM model.dashboard_widget w
+  JOIN model.dashboard_def d ON d.id = w.dashboard_id
+  WHERE w.widget_props ? 'default_view' AND EXISTS (
+    SELECT 1 FROM jsonb_array_elements_text(
+        COALESCE(w.widget_props->'default_view'->'rows', '[]')
+     || COALESCE(w.widget_props->'default_view'->'cols', '[]')
+     || COALESCE(w.widget_props->'default_view'->'context', '[]')) x
+    WHERE x <> '__metrics__' AND NOT EXISTS (
+      SELECT 1 FROM model.dimension_def dd
+      WHERE dd.id::text = x AND dd.revision_id = d.revision_id));
+  ```
+  (the `COALESCE`s matter: without them a widget missing one axis is
+  skipped), and the same for the `filter_sel` keys.
+- **What closes it:** a backfill that maps revision copies through
+  `dimension_def.lineage_id` (migration 099); an imported model's layouts
+  saved again by hand.
+
+### Model import finds JSON references by field name and drops some links without a message
+
+- **Noticed:** 2026-09-29, while making import resolve every reference.
+- **What:**
+  - Row ids inside JSON documents (widget props, form fields, context,
+    connector config) are recognised only in named positions: fields ending
+    `_id`, arrays ending `_ids`, the keys of known dimension-keyed objects
+    and a saved layout's axes (`jsonRefs`,
+    `internal/modeltransfer/transfer.go:1008-1030`). A future field holding
+    a row id under another name is copied through unchanged, and nothing
+    fails when one is added. Workflow steps are not walked: today they name
+    roles and context keys only.
+  - A reference that resolves to nothing in the package is dropped without
+    a message for a dashboard's folder, a rule's workflow, source form and
+    source grid, a grid's metrics and dimensions, dependencies, a mapping's
+    form and metric, and a fact's metric and source mapping. A hand-written
+    package with a typo loses the link silently.
+  - A member of a standard dimension may name a member of another dimension
+    of the package as its parent: parents resolve across all dimensions
+    (`:1698-1707`), and `timedim.ValidateAndReindex` checks a parent's
+    dimension only for time dimensions. Read, not run.
+  - The package's `format` field and its format number (`:269-270`) are not
+    checked.
+- **Why it matters:** each is a way for an import to succeed with less, or
+  other, than the package said.
+- **How to check:** import a package with each case.
+- **What closes it:** a test that lists the known JSON keys and fails on a
+  new key holding an id (or typed schemas for these documents); warnings for
+  dropped references in the import's answer; a same-dimension parent check;
+  refusing an unknown format.
+
+### The AI Developer remaps only a widget's chart fields
+
+- **Noticed:** 2026-09-29, while making revision copies remap widget props.
+- **What:** `remapChartProps` (`internal/aiassistant/write_executor.go:205`,
+  called at `:1938` and `write_executor_edit.go:541`) resolves ids into the
+  working revision for `chart.dimension_id`, `x_metric_id`, `y_metric_id`
+  and `metric_ids` only. `kpi_scope.dimension_id`, the
+  `chart.context_defaults` keys, `default_view` and `filter_sel`, which
+  revision copies now remap (`RemapWidgetPropsIDs`), are saved as given.
+- **Why it matters:** an AI-proposed grid layout or KPI scope naming another
+  revision's ids is saved unmapped.
+- **How to check:** ask the assistant to add a KPI scoped by a dimension of
+  another revision and read the saved `widget_props`.
+- **What closes it:** `remapChartProps` resolving the same fields through
+  `requireInModel`.
+
+### Grid, KPI and chart format the same metric differently
+
+- **Noticed:** 2026-09-29, writing the Developer guide.
+- **What:** for Percentage, the grid appends "%" to the stored value
+  (`web/src/consoles/business/PlanningGrid.tsx:1477-1478`), a KPI multiplies
+  by 100 (`web/src/consoles/business/DashboardWidgets.tsx:244`) and a chart's
+  percent format uses `Intl` `percent`, which multiplies too
+  (`web/src/consoles/dashboard/chartTypes.ts:19`): 0.25 reads 0.25% in a
+  grid and 25.0% on a KPI. For Currency, a KPI shows no decimals whatever
+  `format_decimals` says (`DashboardWidgets.tsx:242`): $3.33 reads $3.
+- **Why it matters:** no formula scale reads right everywhere. The formulas
+  manual's recipes multiply by 100, which suits the grid only; the guides
+  avoid the Percentage format for this reason.
+- **How to check:** a metric with the Percentage format and value 0.25 on a
+  grid and a KPI.
+- **What closes it:** one shared formatter with one percentage convention,
+  honouring `format_decimals`.
+
+### An invitation cannot be resent from the console
+
+- **Noticed:** 2026-09-29, writing the Tenant admin guide. Standing rule 2.
+- **What:** `POST /api/admin/users/{id}/invite`
+  (`internal/gateway/handler.go:510`) exists, but nothing in `web/src` calls
+  it. An invitation expires after 72 hours (`inviteLifetime`, `:164`); after
+  that, the only way left in the console is to delete the person and invite
+  them again.
+- **Why it matters:** the capability exists but the tenant admin cannot
+  reach it.
+- **How to check:** `grep -rn "/invite" web/src`.
+- **What closes it:** a Resend invitation action on the Users screen.
+
+### A tenant cannot create a second workspace
+
+- **Noticed:** 2026-09-29, writing the Tenant admin guide.
+- **What:** sign-up creates one workspace, "Default"
+  (`internal/gateway/signup.go:195`); the API has only `GET
+  /api/admin/workspaces` (`internal/gateway/handler.go:517`), and no screen
+  creates one. Business roles, the inbox and business-admin scope are per
+  workspace, so a tenant cannot separate them.
+- **Why it matters:** the engine supports several workspaces a tenant
+  cannot reach.
+- **How to check:** look for a workspace create route in
+  `internal/gateway/handler.go`.
+- **What closes it:** a decision whether tenants manage workspaces; if so, a
+  create and rename route and screen for the tenant admin.
+
+### Storage use is shown only on Enterprise
+
+- **Noticed:** 2026-09-29, writing the Tenant admin guide.
+- **What:** the only screen that shows a tenant's storage is Usage
+  (`web/src/ee/usage/UsageTab.tsx:41`, `:76-77`), an Enterprise feature. On
+  Community and Commercial, a tenant admin on a plan with a storage limit
+  sees nothing until the read-only banner appears.
+- **Why it matters:** the first sign of the limit is hitting it.
+- **How to check:** on a Community build, look for storage figures as a
+  tenant admin.
+- **What closes it:** storage use against the limit on a screen every
+  edition has.
+
+### Dashboard pages are listed by name
+
+- **Noticed:** 2026-09-29, building the tour.
+- **What:** Run › Dashboards orders a model's dashboards by name
+  (`internal/gateway/handler.go:14177`, `:14182`). The guides number their
+  pages ("1 · Start here", …), so a guide of ten or more pages would list
+  "10 · …" before "2 · …". `TestPackagesCarryTheirGuides` checks the
+  numbering, not the count.
+- **Why it matters:** only a limit on guide length today; any app that
+  wants a page order has to encode it in names.
+- **How to check:** `grep -n "ORDER BY dd.name" internal/gateway/handler.go`.
+- **What closes it:** guides kept under ten pages, or an explicit dashboard
+  order a developer can set.
+
+### The Design canvas cuts text widgets sized for Run
+
+- **Noticed:** 2026-09-29, measured live by the tour's reviewer.
+- **What:** in Run, a text widget's `size_h` is a minimum
+  (`web/src/consoles/business/DashboardWidgets.tsx:73-78`; text is in
+  `INTRINSIC_HEIGHT_WIDGET_TYPES`). The Build › Dashboards Design canvas
+  draws every widget exactly `size_h` tall, including about 57 px of chrome
+  (border, drag header, padded body with `overflow: auto`;
+  `web/src/consoles/developer/DashboardCanvas.tsx:796-904`). A text block
+  sized to its content for Run shows a scrollbar in Design: each of the
+  tour's text blocks hides 28 to 42 px there, and the tour sends readers to
+  Design.
+- **Why it matters:** Design and Run disagree for every app's text widgets.
+- **How to check:** open Design on the tour's "1 · Start here" and compare
+  each text body's `scrollHeight` with its `clientHeight`.
+- **What closes it:** the canvas drawing a text widget `size_h` plus its
+  chrome tall, or the starter's text heights raised at the cost of blank
+  space in Run.
+
+### The bundled manuals are not ready for phones, and their screenshots are dated
+
+- **Noticed:** 2026-09-29, bundling the manuals into the web image.
+- **What:** the formulas and developer manuals now ship with the console at
+  `/docs/…/manual.html` (`web/Dockerfile:41-43`). Neither has a viewport
+  meta tag, a dark theme or ids on its headings, so phones render them at
+  desktop width and a console link cannot point at a chapter. 32 of the
+  developer manual's 33 screenshots were committed on 2026-09-15; some show
+  screens that have changed since (`13-account-menu.png` shows a "Developer
+  console" heading and a Build group without Roles) and a demo model since
+  deleted. Four images are used by neither manual but ship anyway, because
+  the Dockerfile copies the whole `img/` directory: `05-grids.png`,
+  `10-dependency-graph.png`, `14-notifications.png`, `38-users.png` (about
+  300 KB).
+- **Why it matters:** the manuals are now one click from every console.
+- **How to check:** `grep -c 'name="viewport"' docs/*-manual/manual.html`;
+  for each image in `docs/developer-manual/img`, grep its name in both
+  manuals.
+- **What closes it:** a viewport meta tag and heading ids in the parts
+  (`parts/00-head.html` and the `<h2>`s), rebuilt; the screenshots
+  recaptured with `docs/developer-manual/build.sh`; the four images used or
+  deleted.
+
+### The web image's /docs/ serving is checked only by hand
+
+- **Noticed:** 2026-09-29, bundling the manuals into the web image.
+- **What:** `TestPackagesCarryTheirGuides` proves only that the two manuals
+  exist in the repository, and the e2e job fetches them through the Vite dev
+  server. Nothing runs the built image: `web/nginx.conf`'s `/docs/` handling
+  and the Dockerfile's copies are exercised only when `docker-publish-web`
+  builds it. That job needs the web jobs only
+  (`.github/workflows/ci.yml:735`), not `go-test`, so a dispatch can push an
+  image whose manual fails `TestManualsMatchTheirParts` (deploy and release
+  do wait for `go-test`). The web nginx sends no Content-Security-Policy;
+  the manuals rely on inline `<style>`, so a policy added later needs its own
+  rule for `/docs/` (`style-src 'unsafe-inline'`).
+- **Why it matters:** a wrong nginx location would ship unnoticed.
+- **How to check:** build the image and request
+  `/docs/formulas-manual/manual.html` and `/docs/developer-manual/manual.html`.
+- **What closes it:** a CI step that runs the built image and expects 200
+  for both manuals and 404 for `/docs/nope.html`, and `go-test` among the
+  publish job's needs.
+
+### Several documents name console screens by their old labels
+
+- **Noticed:** 2026-09-29, linking the guides to the documentation.
+- **What:** `docs/AI_KEYS.md:14,18,40,70` ("Admin › AI keys", "AI Assistant ›
+  Settings"), `docs/AUDIT_EXPORT.md:12,50`, `docs/BRAND.md:53`,
+  `docs/SSO_SCIM.md:21,67`, `docs/WHITE_LABEL.md:7`, `docs/NOTIFICATIONS.md:27`
+  and `docs/USAGE_ANALYTICS.md:7` say "Admin › …". The console's labels are
+  Tenant admin › AI keys, Notification delivery, Single sign-on, Provisioning
+  (SCIM), Audit Log, Branding and Usage (Platform › … for a platform admin),
+  and the personal AI key is under Build › AI Developer › AI Settings.
+- **Why it matters:** a reader who follows a guide's link meets different
+  names.
+- **How to check:** `grep -n 'Admin ›\|AI Assistant ›' docs/*.md`.
+- **What closes it:** the current labels, and each file's Last verified date.
+
+### The OpenAPI document leaves out headers, some parameters and most error statuses
+
+- **Noticed:** 2026-09-29, bringing the spec in line with this change.
+- **What:** no operation declares `X-App-Id` or `X-Model-Id` (`grep -c "in:
+  header" api/openapi.yaml` is 0); model resolution, history narrowing and
+  the business-admin workspace depend on them and are described only in
+  prose. Several handlers read a `?revision_id=` the spec did not declare;
+  this change declared it on the endpoints it touched, but did not audit the
+  rest (for example the developer dashboards and form-integrations `POST`).
+  Most operations do not list the 401, 403 and 404 the shared helpers
+  answer. `TestRouteSpecParity` compares methods and paths only, and nothing
+  checks the operation count in `docs/API.md:122` (251, correct today).
+- **Why it matters:** a client generated from the spec cannot send the
+  headers the console relies on, or expect the errors it gets.
+- **How to check:** grep `internal/gateway/handler.go` for
+  `Query().Get("revision_id")` per handler against each operation's
+  parameters.
+- **What closes it:** the two headers as shared parameters on the operations
+  that read them; a `revision_id` audit; a parity test that also compares
+  parameters, and a docs test that counts operations.
+
+### The OpenAPI 200 of POST /api/cells does not match the response
+
+- **Noticed:** 2026-09-29, reviewing the cell write.
+- **What:** `api/openapi.yaml:3118-3137` declares the 200 body as `{ ok:
+  boolean }`; `cells()` answers `{"status":"ok"}`
+  (`internal/gateway/handler.go:2136`). The generated type `WritebackOK`
+  (`internal/gateway/oas/oas_schemas_gen.go`) has only `Ok`, so a client
+  built from the spec reads every success as `ok` absent. The operation
+  lists only 400 and 500; it also answers 401 (no actor), 402 (plan
+  limit) and 403 (model or revision outside the caller's scope, or the
+  write guard refusing), as the entry above says of most operations.
+- **Why it matters:** the write every grid makes is described wrongly.
+  Nothing in the tree uses the generated client, so nothing breaks today.
+- **How to check:** compare the two places above.
+- **What closes it:** the spec naming `status` and the 401, 402 and 403
+  responses, and the ogen code regenerated.
+
+### The web client builds member trees in three places
+
+- **Noticed:** 2026-09-29, making every member list follow `sort_order`.
+- **What:** `buildMemberTree` in `web/src/consoles/dashboardLayout.ts:51`
+  (context selectors, `HierarchicalMemberSelect`), `buildMemberTree` in
+  `web/src/consoles/business/PlanningGrid.tsx:129` (grid axes) and
+  `buildDimensionTree` in `web/src/consoles/developer/DimensionsTab.tsx:15`
+  (the Build tree) are near-duplicates; this change had to remove the code
+  sort from each one separately.
+- **Why it matters:** an ordering change made in one drifts from the others.
+- **How to check:** `grep -rn "function buildMemberTree\|function
+  buildDimensionTree" web/src`.
+- **What closes it:** one shared builder.
+
+### Reduced test schemas keep drifting from the migrations
+
+- **Noticed:** 2026-09-29, while giving workflow assignment one predicate.
+- **What:** `internal/workflow`, `internal/notification`,
+  `internal/aiassistant`, `internal/query`, `internal/crudapp`,
+  `internal/identity`, `internal/importpkg` and others test against
+  hand-written schemas in their `testdata/`. Each column a query starts to
+  read needs a matching edit there: this change added
+  `internal/workflow/testdata/014_assignee_boundary.sql` and
+  `internal/gateway/testdata/003_default_model.sql` for that reason. The
+  assignment predicate's own tests run on the real migrations
+  (`internal/workflow/assignee/assigneetest`).
+- **Why it matters:** a reduced schema can pass a query that fails against
+  the real one, or fail one that works.
+- **How to check:** `ls internal/*/testdata/*.sql`.
+- **What closes it:** those packages' test setup moved onto the real
+  migrations (`testdb` with `migrationfs`).
+
+### business_role_member has no index on user_id
+
+- **Noticed:** 2026-09-29, while giving workflow assignment one predicate.
+- **What:** `identity.business_role_member`'s only index is its primary key,
+  role then user (`migrations/020_business_roles_access.sql:19-23`). Every
+  per-user business-role check (inbox, eligibility, notification recipients,
+  reminders) filters on `user_id`, and resolving a role's recipients
+  evaluates the check once for every user.
+- **Why it matters:** slow on large tenants; not measured.
+- **How to check:** `EXPLAIN` the recipient query of
+  `resolveNotificationRecipients` on a large database.
+- **What closes it:** an index on `user_id`, in a new migration.
+
+### Loose ends in the getting-started guides
+
+- **Noticed:** 2026-09-29, reviewing the guides.
+- **What:**
+  - The tour's one-number picture prints 48,000 where the grid shows
+    $48,000 (`oneNumber`, `internal/starter/diagrams.go:142`);
+    `internal/starter/starter_test.go` looks for the bare number.
+  - The Developer guide says "People, business roles and access rules
+    belong to the whole workspace, not to a revision"
+    (`internal/starter/developer.go:227`). Business roles are per
+    workspace, but access rules are per user and name a model's members and
+    metrics: "not to a revision" holds, "the whole workspace" is loose.
+  - Picture widgets' sizes are typed by hand beside their SVG; no test
+    compares a widget's `SizeW`/`SizeH` with its SVG `viewBox` (only the
+    one-number picture returns its own height).
+  - `kpiHeight` (164) rests on a rendered height of 161 px, typed into
+    `internal/starter/kpi_height_test.go:10` from a live measurement; a
+    change to the KPI tile's CSS would not be noticed.
+- **Why it matters:** small inaccuracies in the first thing a new tenant
+  reads.
+- **How to check:** as listed.
+- **What closes it:** the currency sign in `oneNumber` and the test
+  accepting it; a precise sentence; a starter test comparing each picture's
+  aspect ratio with its `viewBox` (within about 2%); an e2e check of a
+  titled KPI's rendered height.
+
+### An AI member add that creates its parent can pass the member limit by one
+
+- **Noticed:** 2026-09-29, re-checking the AI Developer's plan-limit hooks.
+- **What:** `add_dimension_member` checks the plan for one new member
+  (`internal/aiassistant/write_executor.go:1011`). When its parent code names
+  no member of the same dimension, it then creates that parent
+  (`:1113-1118`) and inserts the member (`:1129`): two rows for a check of
+  one. Seen by reading; not yet exercised live.
+- **Why it matters:** a dimension one member below
+  `max_members_per_dimension` can end one above it. The next add is refused,
+  so the overshoot stays at one.
+- **How to check:** on a plan with a member limit, fill a dimension to one
+  below it, ask the assistant to add a member under a parent code that does
+  not exist yet, and count the members.
+- **What closes it:** a `checkMembers` for the parent before it is created,
+  with a case in `TestPlanLimitHooks`.
+
+### A docs-only edit runs the whole Go gate
+
+- **Noticed:** 2026-09-29.
+- **What:** the CI change filter (`.github/workflows/ci.yml:91`) now sets
+  `go=true` for any path under `docs/` and any `.md` file, because Go tests
+  read the documents (the three tests of `docs_test.go`, and
+  `TestFormulasManualIndexMatchesEngine` in
+  `internal/formula/catalogue_test.go:774`). So every document edit, this
+  file included, runs every job gated on `go`, Go test (about nine minutes)
+  among them. The e2e suite runs only when a manual changes (`:98`).
+- **Why it matters:** CI time for each observation or document edit. The
+  trade-off was made on purpose and is recorded nowhere else.
+- **How to check:** the change-detection step (`ci.yml:83-103`); a push that
+  touches only `docs/OBSERVATIONS.md` starts Go test.
+- **What closes it:** a docs-only change running only the tests that read
+  the documents (`go test -run 'TestDocs|TestManuals' .` and
+  `go test -run TestFormulasManualIndexMatchesEngine ./internal/formula`),
+  or a decision that the full gate is wanted.
+
+### A form widget Playwright test failed once on a cold Vite start
+
+- **Noticed:** 2026-09-29, running five spec files with three workers; the
+  failure was not kept, so the failing step is not recorded here.
+- **What:** on the first run after a cold `npm run dev`, one "dashboard
+  form widget" test (`web/e2e/form-permissions.spec.ts:85` or
+  `web/e2e/form-record-permissions.spec.ts:171`) failed and passed on the
+  rerun. Locally Playwright runs with no retries and the default worker
+  count; CI runs one worker with two retries (`web/playwright.config.ts:7-8`),
+  which would hide it. A guess, not checked: Vite compiling the console on
+  first request while three workers load it.
+- **Why it matters:** a local run can report a failure that is not one.
+- **How to check:** stop Vite, clear `web/node_modules/.vite`, and run the
+  five specs with `--workers=3`.
+- **What closes it:** a reproduction that names the step; if it is the
+  cold compile, a warm-up (a global setup that loads the console once)
+  before the tests.
+
 ## Closed
+
+### Re-sending a record's current status might count as a status change
+
+- **Noticed:** 2026-09-29, while restricting who may move a form record.
+- **What it was:** a question, checked either way: whether a client that
+  sends a record's current status with a field edit is judged as moving the
+  record, and fires its rules again.
+- **Closed:** 2026-09-29 (`6ef9219`), nothing to fix. Neither console
+  re-sends the current status: Run › Forms sends a status only when the
+  user picks a different one (`web/src/consoles/business/FormsTab.tsx:184`),
+  and the dashboard widget's status select cannot fire for the value it
+  already shows. The server treats the current status as no move
+  (`RecordAccess.CanUpdate`, `internal/crudapp/permissions.go:84-87`: `to
+  == from` needs only edit rights), and the rules fire only on a change
+  (`statusChanged`, `internal/gateway/handler.go:10563`).
+  `TestFormRecordResendingCurrentStatusIsNoChange`
+  (`internal/gateway/form_list_permissions_test.go:99`) guards it for API
+  clients.
+
+### Dimension members could not be reordered
+
+- **Noticed:** 2026-09-29, when grid axes and selectors started following
+  `sort_order`. A gap under standing rule 3, raised.
+- **What it was:** no endpoint, screen or AI tool set or changed a member's
+  `sort_order`; a member added later could only go last.
+- **Closed:** 2026-09-29 (`6ef9219`), by the user's decision to build it
+  for the developer role only. `PUT
+  /api/developer/dimensions/{id}/members/order` (the `dev` guard; another
+  tenant's or an unknown dimension answers 404) and the AI Developer's
+  `reorder_dimension_members` both run `modeledit.ReorderMembers`
+  (`internal/modeledit/reorder.go`). It takes one level: the children of a
+  parent, which may sit in the dimension or outside it, in the wanted order.
+  It refuses a time dimension, and names the wrong members in a 400. It
+  renumbers the whole dimension in tree order in one transaction, and waits
+  for a concurrent re-parent. Each reorder writes a
+  `dimension.members_reordered` audit event. Build › Dimensions has move up
+  and down controls (`web/src/consoles/developer/DimensionsTab.tsx`).
+  Revision duplication and model export/import carry `sort_order`. Proof:
+  `internal/gateway/member_reorder_test.go` (route, roles, scope parity with
+  the other member edits, parent on either side, concurrent re-parent,
+  revision copy, export/import) and `TestReorderDimensionMembers`
+  (`internal/aiassistant/reorder_members_test.go`). Still open, split out:
+  "A member added or re-parented after a reorder lists after the last
+  subtree" and "The gRPC member create writes sort_order 0 and the old
+  parent column".
+
+### The grid and the legacy cell write preferred a dimension named "department"
+
+- **Noticed:** 2026-09-29. Standing rule 1.
+- **What it was:** `grid()` ordered a model's dimensions `ORDER BY
+  (d.name='department') DESC, d.name, …` when no grid definition was named,
+  and `cells()` resolved the legacy single `dim_code` field against the
+  dimension named `department` first. A demo's dimension name was wired into
+  the engine: a model with a dimension called `department` got a different
+  axis order, and a different target for a legacy cell write, from one that
+  called it anything else.
+- **Closed:** 2026-09-29 (`6ef9219`), by the user's decision to remove it.
+  Both grid branches order dimensions by name only (then members by time
+  index, sort order, code). The legacy `dim_code` goes through
+  `resolveLegacyDimCode` (`internal/gateway/legacy_dim_code.go`): the one
+  dimension of the revision that has a member with that code, among the
+  metric's own grid dimensions when it has any, else the whole model; no
+  match or several matches answer 400 and ask for `dim_codes`. Proof:
+  `TestLegacyDimCodeAndGridOrderIgnoreDimensionNames`
+  (`internal/gateway/legacy_dim_code_test.go`), which fails on the old code.
+  `grep -rn "'department'" internal/gateway/handler.go` finds nothing.
+
+### The AI Developer's writes skipped the plan limits
+
+- **Noticed:** 2026-09-28, giving the AI `update_dimension`; kept in
+  `docs/OBSERVATIONS_PRIVATE.md` while it was open.
+- **What it was:** the developer endpoints check the tenant's plan before
+  adding rows (`plan.Enforcer.CheckMembers`, `CheckMetrics`, …), but the AI
+  Developer's write tools (`create_dimension` members and derive,
+  `add_dimension_member`, `update_dimension` derive, `create_metric`, …)
+  called no plan check, so a tenant on a limited plan could exceed
+  `max_members_per_dimension` or `max_metrics_per_model` by asking the
+  assistant.
+- **Closed:** 2026-09-29 in `8ede7fe` (released). The `WriteExecutor` takes
+  `CheckMetrics` and `CheckMembers` hooks
+  (`internal/aiassistant/write_executor.go:69-100`), which the gateway wires
+  to the plan enforcer (`internal/gateway/ai_handler.go:1693-1705`), and
+  calls them before each insert (`write_executor.go:489`, `:797`, `:931`,
+  `:1011`, `write_executor_dimension.go:232`, `write_executor_edit.go:183`).
+  Proof: `TestPlanLimitHooks` (`internal/aiassistant/edit_tools_test.go`).
+  Re-checked 2026-09-29. One residue: when `add_dimension_member` creates a
+  missing parent (`write_executor.go:1113`), the check counted one row for
+  two, so a dimension can end one member over the limit; open as "An AI
+  member add that creates its parent can pass the member limit by one".
+
+### The debug facts and calc views showed hidden members to a developer
+
+- **Noticed:** 2026-09-28, final review of the dimensional-references change;
+  kept in `docs/OBSERVATIONS_PRIVATE.md` while it was open. The gap predates
+  that change; the entry "A restricted user reads an old revision
+  unrestricted" (below) claimed the debug views enforced the rules.
+- **What it was:** `GET /api/developer/debug/calc?dim_members=` listed every
+  persisted row at a combination, filtering only metric rules: rows at a
+  hidden member's own combinations, totals above it, and values the grid
+  withholds (`LOOKUP(revenue, region, "US")` at UK). `GET
+  /api/developer/debug/facts` lists facts of every revision but filtered them
+  by the requested revision's hidden members, whose dimension IDs a fact of
+  another revision never carries. Reachable by a person holding the
+  developer role and a hidden rule.
+- **Closed:** 2026-09-28 in `8c04baa` (released). The per-combination calc
+  view answers 403 to a caller with any hidden member (persisted rows cannot
+  be told apart from values derived from hidden members); the facts view
+  filters each fact by its own revision's rules. Proof:
+  `TestDebugViewsHonourDeveloperHiddenMembers` (`internal/gateway`), which
+  fails with either fix switched off.
+
+### A restricted user reads an old revision unrestricted
+
+- **Noticed:** 2026-09-28, by the stage 3 verifier; kept in
+  `docs/OBSERVATIONS_PRIVATE.md` while it was open.
+- **What it was:** `GET /api/grid?revision_id=<old>` served a non-active
+  revision unrestricted. Activation re-points every `dimension_member` and
+  `metric` rule at the new revision's rows
+  (`remapAccessRulesToRevision`), so the old revision's members and metrics
+  matched no rule. Grid export, chart-data, `/api/metrics` and cell writes
+  into the old revision had the same gap.
+- **Closed:** 2026-09-28 in `8c04baa` (released), by the decision and fix
+  below.
+- **Decision:** rules are resolved by LINEAGE against whatever revision is
+  read. Every dimension, member and metric has a `lineage_id` it shares with
+  its copies in every revision of its model; a rule records the lineage of
+  the row it was written on (`ref_lineage_id`). A `dimension_member` rule
+  applies to the member of that lineage in the requested revision, a
+  `metric` rule to the metric of that lineage. Restricted users keep reading
+  old revisions, with the same things hidden or read-only, whatever has been
+  renamed since.
+- **Fix:** one resolver, `writeguard.RulesForRevision` / `RuleMaps`
+  (`internal/writeguard/rules.go`). It translates each rule's `ref_id` into
+  the requested revision by lineage; revision-less dimensions and metrics
+  count as part of every revision. A rule whose lineage has no row there is
+  dropped.
+  When two rules land on one row, the stricter access wins. `button` rules
+  pass through unchanged, and errors fail closed. The single-id checks
+  (`HiddenAccess`, `MetricAccess`, and through them `HiddenInChain` and
+  `CheckWrite`/`CheckWriteMetrics`) match by the same lineage.
+  Every consumer that reads rules now uses the resolver:
+  - the grid (`loadUserAccessRules`, every branch including `totals_only`,
+    `sliceFast` and `fastTotals`);
+  - grid export and the debug facts/calc views (`hiddenMemberFilter`);
+  - chart-data (`ChartResolver.loadAccessRules`, whose row-scan errors now
+    fail closed);
+  - `/api/metrics`, `/api/dimensions`, the developer dimension list and the
+    business-admin pickers;
+  - the form-record filter (resolved against the form's revision);
+  - the full-reload import delete (`importpkg.restrictedIDs`, metrics
+    included);
+  - the gRPC `Query` (`visibleDimCodes`, now scoped to the requested
+    revision; an "everything hidden" result no longer reads as "no
+    restriction");
+  - workflow-context redaction (now `HiddenInChain`, failing closed).
+- **Proof:** `TestRestrictedUserReadsOldRevisionRestricted` and
+  `TestHiddenMetricOnOldRevision` (`internal/gateway`) reproduce the entry
+  over HTTP: hide US, make DE read-only, hide a metric, then create and
+  activate a revision. They check the old revision's grid (with and without
+  a grid), `totals_only`, export, chart-data, `/api/metrics` and cell writes,
+  and the active revision alongside. With the resolver switched off, every
+  old-revision assertion fails. `TestRulesForRevisionResolvesByLineage`
+  (`internal/writeguard`) covers the dropped target, stricter-wins, the
+  revision-less dimension, a malformed `ref_id`, a rule stored without a
+  lineage and the pass-through rule type.
+- **Renames and deletes (closed in the same change):** matching by name
+  alone was reopened by two routine developer edits, both found by the
+  stage 4 verifier over HTTP. Renaming the dimension, a member code or a
+  metric in the active revision left the older revisions' copies under the
+  old name, so they matched no rule again — reads served US and cost, and a
+  write to the read-only DE in the old revision returned 200. Deleting the
+  member a rule pointed at left the rule's `ref_id` dangling with nothing to
+  match from. A first fix (a rename log, identity columns captured on the
+  rule, SECURITY DEFINER triggers) was replaced before release by lineage
+  ids, the design decided on 2026-09-28. Migration
+  `099_access_rule_identity.sql` adds `lineage_id` (NOT NULL, default
+  `gen_random_uuid()`, indexed) to `model.dimension_def`,
+  `model.dimension_member` and `model.metric_def`, backfilled so rows that
+  share an identity across a model's revisions share one lineage
+  (dimensions by `lower(name)`, members by (`lower(dimension name)`, code),
+  metrics by `lower(name)`, revision-less rows included), and
+  `identity.user_access_rule.ref_lineage_id`, backfilled from the row
+  `ref_id` points at (NULL for `button`). No triggers: application code
+  keeps both.
+  - Every definition copy carries lineage: the developer's revision create
+    (`handler.go`), the AI `create_revision`, and model export/import
+    (`internal/modeltransfer`: export writes `lineage_id`; import keeps the
+    package's, and mints fresh ones — consistently, one per package lineage
+    — when it is missing or already taken in this database, i.e. a re-import
+    next to its source; the sign-up starter goes through the same import).
+    New rows (member POST, CSV / connector upserts, AI adds) get a fresh
+    lineage; an upsert of an existing (dimension, code) keeps its own.
+  - Every rule write sets `ref_lineage_id` from the referenced row.
+    `writeguard.ReplaceUserRules`, used by the business-admin
+    `PUT .../access-rules`, updates kept rules in place and keeps a rule's
+    lineage when its row is gone, so a re-save of the listed rules (the UI
+    re-sends every listed `ref_id`) does not lose it. The AI
+    `set_user_access_rules` names members by (dimension, code) in the active
+    revision only, so it cannot name a rule whose member is gone from that
+    revision, nor any metric or button rule; it uses
+    `writeguard.ReplaceUserMemberRulesInRevision`, which replaces only the
+    user's member rules that resolve (by lineage) in the active revision and
+    keeps every other rule. Before this, an AI member-rule edit deleted the
+    rule on a deleted (or deleted and re-added) member — un-hiding the old
+    revisions' copy — and every metric rule of the user in every revision;
+    `list_users` now also shows metric rules and counts the kept member
+    rules (and it works again: it had failed on every call, since
+    `string_agg` over the `identity.user_role` enum does not exist — the
+    new test was its first caller). `remapAccessRulesToRevision` re-points
+    `ref_id` at the active revision's row of the rule's lineage, for the
+    admin's listing only — enforcement never depends on `ref_id`.
+  - Semantics: a rename never changes lineage, so it never matters. A member
+    or metric deleted and re-added is a NEW lineage: unrestricted in the
+    active revision until an admin sets a rule on it, while the old
+    revisions keep the original restricted.
+  - Proof: `TestAccessRulesSurviveRenames`,
+    `TestAccessRulesFollowRenameBeforeActivation` and
+    `TestAccessRulesAfterDeleteAndReAdd` (`internal/gateway`, HTTP),
+    `TestRevisionDuplicationCopiesLineage` and `TestModelExportImportLineage`
+    (`internal/gateway`), `TestCreateRevision_CopiesLineage`
+    (`internal/aiassistant`),
+    `TestSetUserAccessRules_KeepsRulesItCannotName` (`internal/aiassistant`:
+    delete + re-add in the active revision, then an AI re-affirm keeps the
+    old revision's member and a metric rule hidden),
+    `TestReplaceUserMemberRulesInRevisionScope` (`internal/writeguard`),
+    `TestRuleLineageSurvivesRenameAndDelete`
+    (`internal/writeguard`) and `TestBackfill099Lineage` (`migrations`,
+    applies 001–098, seeds, applies 099).
 
 ### The Add metric form screenshot shows the old `{name}` hint
 
@@ -675,7 +2132,7 @@ leaves out, until it is fixed.
 - **How to check:** `go run ./cmd/verify-formula-catalogue` (the two
   `tmp_src` checks).
 - **What closes it:** refusing the delete while the metric is read.
-- **Closed:** 2026-09-29 (uncommitted), by the user's decision: a metric used
+- **Closed:** 2026-09-29 (`8ede7fe`), by the user's decision: a metric used
   by formulas cannot be deleted until they are cleaned.
   `metricformula.CheckMetricNotInUse` refuses the delete with `METRIC_IN_USE`
   (HTTP 409) while another metric's formula reads it (parsed; an unparsable
@@ -700,7 +2157,7 @@ leaves out, until it is fixed.
   `SELECT model_id, revision_id, lower(name), count(*) FROM model.metric_def GROUP BY 1, 2, 3 HAVING count(*) > 1;`
   and the same over `model.dimension_def`.
 - **What closes it:** unique indexes on `lower(name)` where no pair exists.
-- **Closed:** 2026-09-29 (uncommitted). Checked read-only on 2026-09-29:
+- **Closed:** 2026-09-29 (`8ede7fe`). Checked read-only on 2026-09-29:
   production (shared database: 0 metrics, 0 dimensions; the tenant database:
   3 metrics, 2 dimensions) and staging (12 metrics, 6 dimensions) hold no
   pair. Migrations 100 and 101 (never released, so rewritten) now build unique
@@ -728,7 +2185,7 @@ leaves out, until it is fixed.
   `Region` beside `region` in the console (it is accepted today).
 - **What closes it:** the migration 100 pattern for `dimension_def` (a trigger
   raising 23505, which the writers already answer as `DIMENSION_NAME_TAKEN`).
-- **Closed:** 2026-09-29 (uncommitted). Migration `101_dimension_name_case.sql`
+- **Closed:** 2026-09-29 (`8ede7fe`). Migration `101_dimension_name_case.sql`
   adds the migration 100 pattern to `dimension_def` (a trigger raising 23505,
   answered as `DIMENSION_NAME_TAKEN`, whose message now says names are compared
   without regard to case). Proved by `TestDimensionNamesIgnoreCase` and live by
@@ -751,7 +2208,7 @@ leaves out, until it is fixed.
 - **What closes it:** once no deployment returns rows, a unique index on
   `(model_id, revision_id, lower(name))` (and the revision-less variant) in
   place of the trigger.
-- **Closed (the race):** 2026-09-29 (uncommitted). Both name triggers
+- **Closed (the race):** 2026-09-29 (`8ede7fe`). Both name triggers
   (migrations 100 and 101) take a transaction-scoped advisory lock on (model,
   revision, lower(name)) before checking, so a second concurrent writer waits
   for the first and is refused. `TestNameCheckSerialisesConcurrentWriters`
@@ -777,7 +2234,7 @@ leaves out, until it is fixed.
   (the case `ROUND(0.1 + 0.2, 2) = 0.3` and the manual's note).
 - **What closes it:** a decision to compare on 15 significant digits in
   `compareValues` and `criterion.matches`, with the catalogue cases moved.
-- **Closed:** 2026-09-29 (uncommitted), by decision to follow Excel.
+- **Closed:** 2026-09-29 (`8ede7fe`), by decision to follow Excel.
   `compareValues` (`=`, `<>`, orderings, `SWITCH`) and the SUMIFS family's
   criteria (`criterion.matches`, and `numberText` for criteria and member codes)
   compare numbers on their 15 significant digits: `0.1 + 0.2 = 0.3` is TRUE,
@@ -802,7 +2259,7 @@ leaves out, until it is fixed.
 - **How to check:** `grep -n 'go h.recalc\|go func() { _ = sched' internal/gateway/handler.go`.
 - **What closes it:** a wrapper for these goroutines that recovers, logs and
   marks the recalculation failed, and a deadline on the recalculation context.
-- **Closed:** 2026-09-29 (uncommitted). The scheduler recovers at its entry
+- **Closed:** 2026-09-29 (`8ede7fe`). The scheduler recovers at its entry
   points (`RecalcAffected`, `RecalcSpecific`, `RecalcDimensionDependents`,
   `recoverAsError`) and per metric and per recurrence (`guarded`: the metric is
   marked failed and the pass goes on), which covers the gateway, the
@@ -832,7 +2289,7 @@ leaves out, until it is fixed.
   appears until **Add metric**.
 - **What closes it:** the add form using the row editor's `/api/formula/refs`
   hint.
-- **Closed:** 2026-09-29 (uncommitted). The Add metric form uses the row
+- **Closed:** 2026-09-29 (`8ede7fe`). The Add metric form uses the row
   editor's check (`useUnknownFormulaNames` in `MetricsTab.tsx`: the server's
   parser, names compared regardless of case, a hint that never blocks **Add
   metric**), and suggests plain names (`e.g. revenue - cost`). Driven in the
@@ -856,7 +2313,7 @@ leaves out, until it is fixed.
 - **What closes it:** a `delete_dimension_member` tool that calls
   `metricformula.CheckMemberNotInUse` before deleting, as
   `delete_dimension_property` calls `CheckPropertyNotInUse`.
-- **Closed:** 2026-09-28 (uncommitted — the AI Developer parity audit). The
+- **Closed:** 2026-09-28 (`8ede7fe` — the AI Developer parity audit). The
   assistant has `delete_dimension_member` (refused with `MEMBER_IN_USE`
   through `metricformula.CheckMemberNotInUse`) and the rest of the
   developer's change-and-remove actions. The member delete itself, with its
@@ -880,10 +2337,10 @@ leaves out, until it is fixed.
   (`internal/gateway`) on a grid whose rows show the region hierarchy.
 - **What closes it:** one rule for "no value" in an average, applied by the
   grid client, `rollup.combineAgg` and the scheduler alike.
-- **Server side:** closed 2026-09-28 (uncommitted, the flat-parent change):
+- **Server side:** closed 2026-09-28 (`8c04baa`, the flat-parent change):
   `rollup.Resolve` leaves a missing leaf out of an average. The grid client
   (`resolveCell`) is what remains.
-- **Closed:** 2026-09-28 (uncommitted — the flat-parent change): the grid
+- **Closed:** 2026-09-28 (`8c04baa` — the flat-parent change): the grid
   client reduces a parent's leaves once (`flatValue` in `PlanningGrid.tsx`),
   leaving a leaf with no value out of an average. Tests: the Playwright cases
   "a parent two levels up averages and counts its leaves flat" and "a
@@ -935,7 +2392,7 @@ leaves out, until it is fixed.
   flat-parent change: every server reader combines `average` and `count`
   flat, including input and served metrics. `resolveCell` is what remains;
   once it reduces flat, this entry closes.
-- **Closed:** 2026-09-28 (uncommitted — the flat-parent change): the grid
+- **Closed:** 2026-09-28 (`8c04baa` — the flat-parent change): the grid
   client reduces every sum/average/count parent and the Total row flat over
   the leaf cells (`flatValue`), per leaf period and then by `time_summary`.
   A leaf is its own cell (a calculated count leaf had rendered as 1, a
@@ -960,7 +2417,7 @@ leaves out, until it is fixed.
 - **What closes it:** skipping the time reduction for the collapsed case in
   the scheduler (the value already is the total), or deciding the metric has
   no total and matching that in the scoped read.
-- **Closed:** 2026-09-28 (uncommitted — the flat-parent change):
+- **Closed:** 2026-09-28 (`8c04baa` — the flat-parent change):
   `executePartition` skips `summarizeOverTime` for the collapsed case, whose
   one `evalOne({})` result already is the total (the scoped read's collapsed
   `evalCombo` gives the same number). A developer's World-scoped total and a
@@ -981,7 +2438,7 @@ leaves out, until it is fixed.
 - **What closes it:** naming the code in the two 400 descriptions and
   regenerating `internal/gateway/oas` (left out of this change because the
   spec was being edited in parallel).
-- **Closed:** 2026-09-28 (uncommitted — this change). The 400 descriptions of
+- **Closed:** 2026-09-28 (`8c04baa` — this change). The 400 descriptions of
   `POST /api/developer/dimensions` and `PATCH /api/developer/dimensions/{dimId}`
   name `INVALID_PARENT_DIMENSION` and its four causes; `internal/gateway/oas`
   was regenerated with ogen v1.20.3 (`--target internal/gateway/oas --package
@@ -1009,7 +2466,7 @@ leaves out, until it is fixed.
 - **What closes it:** a generic `update_dimension` tool reusing the PATCH's
   rules (`metricformula.ValidateGrouping`, the parent cycle check, the
   `DIMENSION_IN_USE` refusal on clearing a grouping's source).
-- **Closed:** 2026-09-28 (uncommitted — this change). The AI Developer has an
+- **Closed:** 2026-09-28 (`8c04baa` — this change). The AI Developer has an
   `update_dimension` write tool, the twin of the PATCH: a partial update of
   name, rollup rule, tags, parent dimension (by id or name; null detaches) and
   property grouping (set, change, clear, `derive_members`), through
@@ -1036,7 +2493,7 @@ leaves out, until it is fixed.
   `parent_dimension_id` of a dimension of revision A; it is accepted.
 - **What closes it:** the same-revision check the grouping validator makes,
   and the AI resolving the parent within its working revision.
-- **Closed:** 2026-09-28 (uncommitted — this change).
+- **Closed:** 2026-09-28 (`8c04baa` — this change).
   `metricformula.ValidateParentDimension` refuses a parent of another revision
   (as well as another model, the dimension itself, a cycle or a time
   dimension) with `INVALID_PARENT_DIMENSION` (400). The developer POST and
@@ -1066,7 +2523,7 @@ leaves out, until it is fixed.
 - **What closes it:** a decision on one rule for an average above one level
   (leaf mean everywhere is the scheduler's), then `ResolveTimeFlat` in the
   served and input branches and the grid client.
-- **Closed:** 2026-09-28 (uncommitted — this change), with the product
+- **Closed:** 2026-09-28 (`8c04baa` — this change), with the product
   decision "leaf mean everywhere": `rollup.Resolve`/`ResolveTime` combine
   `average` and `count` flat over the distinct leaves with a recorded value
   (`resolveFlat`, the traversal `ResolveTimeFlat` used), per leaf period and
@@ -1096,7 +2553,7 @@ leaves out, until it is fixed.
 - **How to check:** the two `delete:` entries in `api/openapi.yaml`.
 - **What closes it:** adding the 409 responses and regenerating
   `internal/gateway/oas`.
-- **Closed:** 2026-09-28 (uncommitted — this change). `api/openapi.yaml` now
+- **Closed:** 2026-09-28 (`8c04baa` — this change). `api/openapi.yaml` now
   lists every refusal these routes answer: 409 `DIMENSION_IN_USE` on the
   dimension DELETE and PATCH (grouping source), 409 `PROPERTY_IN_USE` on the
   property DELETE, 409 `MEMBER_IN_USE` on the member DELETE, 409
@@ -1126,7 +2583,7 @@ leaves out, until it is fixed.
 - **How to check:** the matching entries in `api/openapi.yaml`.
 - **What closes it:** adding the responses and regenerating
   `internal/gateway/oas`, together with the entry above.
-- **Closed:** 2026-09-28 (uncommitted — this change), with "The OpenAPI
+- **Closed:** 2026-09-28 (`8c04baa` — this change), with "The OpenAPI
   document does not list the 409 of a dimension or property delete" above.
 
 ### The OpenAPI document does not list MEMBER_CODE_TAKEN
@@ -1143,7 +2600,7 @@ leaves out, until it is fixed.
 - **How to check:** the member paths in `api/openapi.yaml`.
 - **What closes it:** adding the response and regenerating
   `internal/gateway/oas`, together with the entry above.
-- **Closed:** 2026-09-28 (uncommitted — this change), with "The OpenAPI
+- **Closed:** 2026-09-28 (`8c04baa` — this change), with "The OpenAPI
   document does not list the 409 of a dimension or property delete" above.
 
 ### A duplicate member code answers 500 with the SQL error
@@ -1155,7 +2612,7 @@ leaves out, until it is fixed.
   answered 500 with the text of `dimension_member_dimension_id_code_key`. The
   AI's `add_dimension_member` wrapped the same violation as a generic
   "insert dimension member" error.
-- **Closed:** 2026-09-28 (uncommitted, final-review fix round).
+- **Closed:** 2026-09-28 (`8c04baa`, final-review fix round).
   `metricformula.MemberCodeTaken` maps that constraint, and only that one: a
   time dimension's `time_index` and `period_start` uniqueness is left alone.
   It returns 409 `MEMBER_CODE_TAKEN` on the developer member POST and PATCH
@@ -1171,7 +2628,7 @@ leaves out, until it is fixed.
 
 - **Noticed:** 2026-09-28, final review. `SWITCH(region, "APAC", 1, 0) * revenue`
   let APAC be deleted (200), while `IF(region = "LATAM", ...)` refused LATAM.
-- **Closed:** 2026-09-28 (uncommitted, final-review fix round).
+- **Closed:** 2026-09-28 (`8c04baa`, final-review fix round).
   `comparesMemberCode` treats each literal match value of a `SWITCH` on the
   bare dimension or `PARENT(dim)` as naming the member, but not the trailing
   default. Tests: new cases in `TestFormulaNamesMember` (four fail without the
@@ -1186,7 +2643,7 @@ leaves out, until it is fixed.
   `source_property`; such a dimension came into being only by model import or
   revision copy, and the harness could check F5 only through a
   `parent_dimension_id` relation.
-- **Closed:** 2026-09-28 (uncommitted, this change): `POST`/`PATCH
+- **Closed:** 2026-09-28 (`8c04baa`, this change): `POST`/`PATCH
   /api/developer/dimensions` and the AI's `create_dimension` take
   `source_dimension_id`, `source_property` and `derive_members`, validated by
   one `metricformula.ValidateGrouping` (`INVALID_GROUPING`); the developer
@@ -1210,7 +2667,7 @@ leaves out, until it is fixed.
   (`PROPERTY_NAME_TAKEN`).
 - **How to check:** the request above.
 - **What closes it:** a 409/400 with a `DIMENSION_NAME_TAKEN`-style code.
-- **Closed:** 2026-09-28 (uncommitted, the `MEMBER_IN_USE` change): the
+- **Closed:** 2026-09-28 (`8c04baa`, the `MEMBER_IN_USE` change): the
   developer's dimension create and rename answer 409
   `DIMENSION_NAME_TAKEN`, and metric create and rename 409
   `METRIC_NAME_TAKEN` (`metricformula.DimensionNameTaken` /
@@ -1245,7 +2702,7 @@ leaves out, until it is fixed.
   fails. Every other check passes.
 - **What closes it:** chart-data averaging the leaves under the point
   directly, the way the scheduler combines them. The check then passes.
-- **Closed:** 2026-09-28 (uncommitted, this change): the chart's leaf branch
+- **Closed:** 2026-09-28 (`8c04baa`, this change): the chart's leaf branch
   calls the new `rollup.ResolveTimeFlat`, which gathers the distinct leaves
   under the point and combines their values once by `agg_rule` (per leaf
   period, the periods then by `time_summary`), leaves with no value left
@@ -1275,7 +2732,7 @@ leaves out, until it is fixed.
   recalculates a large metric.
 - **What closes it:** clearing and writing in one transaction, as the
   time-series path does.
-- **Closed:** 2026-09-28 (uncommitted, this change): the scalar path and the
+- **Closed:** 2026-09-28 (`8c04baa`, this change): the scalar path and the
   non-recurrence time-series path replace a metric's result set (its `'{}'`
   total or the clear of a stale one, the clear of the per-combo rows, the new
   rows) in one transaction (`Store.InTx`); the time-series path had in fact
@@ -1296,7 +2753,7 @@ leaves out, until it is fixed.
   of renames (`model.definition_rename`), so names joined by any rename — in
   any revision, even a draft never activated — counted as one identity for
   good, and a rule on one could restrict the other.
-- **Closed:** 2026-09-28 (uncommitted, this change), before that design was
+- **Closed:** 2026-09-28 (`8c04baa`, this change), before that design was
   released: migration 099 was rewritten to lineage ids. Dimensions, members
   and metrics carry a `lineage_id` shared only by their copies (revision
   duplication, the AI `create_revision`, model export/import), and a rule
@@ -1324,7 +2781,7 @@ leaves out, until it is fixed.
   `delete_dimension_property` tools that reuse
   `metricformula.ValidatePropertyDeclaration` and `RenamePropertyValues`.
   This needs approval under standing rule 3.
-- **Closed:** Closed 2026-09-28 (uncommitted, this change): `update_dimension_property` and `delete_dimension_property` mirror the developer PATCH/DELETE — same validator, value migration on rename, draft- and model-scoped, audited.
+- **Closed:** Closed 2026-09-28 (`8c04baa`, this change): `update_dimension_property` and `delete_dimension_property` mirror the developer PATCH/DELETE — same validator, value migration on rename, draft- and model-scoped, audited.
 
 ### A bare dimension name reads #NAME? where dim.property reads blank
 
@@ -1342,7 +2799,7 @@ leaves out, until it is fixed.
   failure.
 - **What closes it:** a decision to bind an unpinned dimension to blank, as
   `dim.property` does. That changes how existing formulas behave at totals.
-- **Closed:** Closed 2026-09-28 (uncommitted, this change): a bare dimension name that is not pinned now reads blank in every evaluator (`formula.EvalContext.unboundDimension`); an `agg_rule = formula` total that tests the member computes instead of failing.
+- **Closed:** Closed 2026-09-28 (`8c04baa`, this change): a bare dimension name that is not pinned now reads blank in every evaluator (`formula.EvalContext.unboundDimension`); an `agg_rule = formula` total that tests the member computes instead of failing.
 
 ### DYNAMIC_TIME_OFFSET_UNSUPPORTED is now narrower than its name
 
@@ -1355,7 +2812,7 @@ leaves out, until it is fixed.
 - **How to check:** `grep -n CodeDynamicTimeOffset internal/formula`.
 - **What closes it:** a deliberate rename, noted for API clients, or leaving
   it as is and documenting what it covers.
-- **Closed:** Closed 2026-09-28 (uncommitted, this change): replaced by `TIME_OFFSET_NOT_INTEGER` (decimal literal at save, non-whole dynamic offset at run time) and `MOVING_WINDOW_NOT_LITERAL`; the time-series spec §9 records the replacement for API clients.
+- **Closed:** Closed 2026-09-28 (`8c04baa`, this change): replaced by `TIME_OFFSET_NOT_INTEGER` (decimal literal at save, non-whole dynamic offset at run time) and `MOVING_WINDOW_NOT_LITERAL`; the time-series spec §9 records the replacement for API clients.
 
 ### Production's Go standard library was current only by accident
 

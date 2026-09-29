@@ -916,6 +916,28 @@ export interface FormDef {
   label: string;
   fields: FormField[];
   created_at: string;
+  /** Served by GET /api/forms; absent from an older server, which the UI then treats as no permission. */
+  permissions?: FormPermissions;
+}
+
+// What the caller may do with a form's records as a whole, computed
+// server-side from the same scope that authorises POST /api/forms/{id}/sync
+// and POST /api/forms/{id}/records.
+export interface FormPermissions {
+  /** May re-post every record of the form into its metrics ("Sync to grid"). */
+  sync: boolean;
+  /** Statuses a new record may take, in lifecycle order; empty when none. */
+  create_statuses: string[];
+}
+
+// What the caller may do with one form record, computed server-side by the
+// same function that authorises PUT/DELETE /api/records/{id}: the person who
+// created it (while undecided) or an administrator of its application.
+export interface FormRecordPermissions {
+  edit: boolean;
+  delete: boolean;
+  /** Statuses the caller may move the record to; empty when none. */
+  set_status: string[];
 }
 
 export interface FormRecord {
@@ -923,9 +945,42 @@ export interface FormRecord {
   form_id: string;
   data: Record<string, unknown>;
   status: string;
-  created_by: string;
+  /** The creating user's id; null for records that predate it being kept. */
+  created_by: string | null;
   created_at: string;
   updated_at: string;
+  /** Absent from an older server: the UI then offers no edit or delete. */
+  permissions?: FormRecordPermissions;
+}
+
+/** Every record status, in the order a record moves through them. */
+export const RECORD_STATUSES = ["draft", "submitted", "approved", "rejected"] as const;
+
+/**
+ * The statuses to offer for a record: the current one plus the ones the
+ * server says the caller may move it to (which never include the current
+ * one), in lifecycle order whatever the record's status; a status this list
+ * does not know goes last. Empty when the caller may set none — the status
+ * control is then not shown at all. `changeable` is false when the only
+ * option is the current status.
+ */
+export function recordStatusOptions(rec: FormRecord): { options: string[]; changeable: boolean } {
+  const allowed = rec.permissions?.set_status ?? [];
+  if (allowed.length === 0) return { options: [], changeable: false };
+  const known: readonly string[] = RECORD_STATUSES;
+  const wanted = new Set([rec.status, ...allowed]);
+  const options = [...known.filter(s => wanted.has(s)), ...[...wanted].filter(s => !known.includes(s))];
+  return { options, changeable: options.some(s => s !== rec.status) };
+}
+
+/**
+ * A change to one record. A part left out is kept as the server has it: a
+ * status change alone does not resend the fields (and so cannot undo someone
+ * else's edit), and a change of fields alone does not resend the status.
+ */
+export interface FormRecordChange {
+  status?: string;
+  data?: Record<string, unknown>;
 }
 
 export interface InfraNode {
@@ -1595,8 +1650,11 @@ export const api = {
   getDevRevisions: (modelId?: string) =>
     apiFetch<DevRevision[]>(`/api/developer/revisions${modelId ? `?model_id=${modelId}` : ""}`),
 
-  createDevRevision: (name: string, sourceRevisionId?: string) =>
-    apiFetch<{ id: string }>("/api/developer/revisions", { method: "POST", body: JSON.stringify({ name, source_revision_id: sourceRevisionId }) }),
+  // The model is named explicitly: without it the server resolves the
+  // selected/default model, so "New revision" on another model's row created
+  // the revision in the wrong model.
+  createDevRevision: (modelId: string, name: string, sourceRevisionId?: string) =>
+    apiFetch<{ id: string }>(`/api/developer/revisions?model_id=${encodeURIComponent(modelId)}`, { method: "POST", body: JSON.stringify({ name, source_revision_id: sourceRevisionId }) }),
 
   deleteDevRevision: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/revisions/${id}`, { method: "DELETE" }),
@@ -1779,10 +1837,11 @@ export const api = {
   deleteForm: (id: string) =>
     apiFetch<{ status: string }>(`/api/forms/${id}`, { method: "DELETE" }),
   listRecords: (formId: string) => apiFetch<FormRecord[]>(`/api/forms/${formId}/records`),
-  createRecord: (formId: string, data: Record<string, unknown>, revisionId?: string) =>
-    apiFetch<FormRecord>(`/api/forms/${formId}/records`, { method: "POST", body: JSON.stringify({ data, revision_id: revisionId }) }),
-  updateRecord: (recordId: string, status: string, data: Record<string, unknown>) =>
-    apiFetch<{ status: string }>(`/api/records/${recordId}`, { method: "PUT", body: JSON.stringify({ data, status }) }),
+  // Without a status the server creates a draft.
+  createRecord: (formId: string, data: Record<string, unknown>, revisionId?: string, status?: string) =>
+    apiFetch<FormRecord>(`/api/forms/${formId}/records`, { method: "POST", body: JSON.stringify({ data, revision_id: revisionId, status }) }),
+  updateRecord: (recordId: string, change: FormRecordChange) =>
+    apiFetch<{ status: string }>(`/api/records/${recordId}`, { method: "PUT", body: JSON.stringify({ data: change.data, status: change.status }) }),
   syncForm: (formId: string) =>
     apiFetch<{ status: string; mappings: number; records_processed: number }>(`/api/forms/${formId}/sync`, { method: "POST" }),
   deleteRecord: (recordId: string) =>
@@ -1807,7 +1866,7 @@ export const api = {
   deleteMetric: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/metrics/${id}`, { method: "DELETE" }),
   updateMetric: (id: string, body: { name: string; formula: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[] }) =>
-    apiFetch<{ status: string; recalc: Array<{ revision: string; metric: string; value: number | null }> }>(
+    apiFetch<{ status: string; recalc: Array<{ revision_id: string; metric: string; value: number | null }> }>(
       `/api/developer/metrics/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 
   createDimension: (body: { name: string; agg_rule?: string; revision_id?: string; parent_dimension_id?: string | null; dimension_type: DimensionType; time_granularity?: TimeGranularity; fiscal_year_start_month?: number; tags?: string[];
@@ -1828,6 +1887,15 @@ export const api = {
     apiFetch<{ status: string }>(`/api/developer/dimensions/${dimId}/members/${memberId}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteDimMember: (dimId: string, memberId: string) =>
     apiFetch<{ status: string }>(`/api/developer/dimensions/${dimId}/members/${memberId}`, { method: "DELETE" }),
+  // Sets the order of one parent's children (null = the roots): memberIds must
+  // be exactly those children, each once. The server then renumbers the whole
+  // dimension's sort_order in tree order. Like the other member edits, the
+  // dimension id already fixes the revision; the working revision, when
+  // known, travels as ?revision_id= the way getDevDimensions sends it.
+  reorderDimensionMembers: (dimensionId: string, parentMemberId: string | null, memberIds: string[], revisionId?: string) =>
+    apiFetch<{ status: string }>(
+      `/api/developer/dimensions/${dimensionId}/members/order${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`,
+      { method: "PUT", body: JSON.stringify({ parent_member_id: parentMemberId, member_ids: memberIds }) }),
 
   listDimProperties: (dimId: string) =>
     apiFetch<DimProperty[]>(`/api/developer/dimensions/${dimId}/properties`),
@@ -1903,8 +1971,8 @@ export const api = {
     apiFetch<{ status: string }>(`/api/admin/revisions/${id}`, { method: "DELETE" }),
 
   listAutomationRules: (revisionId?: string) => apiFetch<AutomationRule[]>(`/api/automation/rules${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
-  createAutomationRule: (body: { name: string; description: string; trigger_type: string; workflow_name: string; workflow_def_id?: string; source_form_id?: string; source_grid_id?: string; source_integration_id?: string; cron_expr?: string; timezone?: string; misfire_policy?: string }) =>
-    apiFetch<AutomationRule>("/api/automation/rules", { method: "POST", body: JSON.stringify(body) }),
+  createAutomationRule: (body: { name: string; description: string; trigger_type: string; workflow_name: string; workflow_def_id?: string; source_form_id?: string; source_grid_id?: string; source_integration_id?: string; cron_expr?: string; timezone?: string; misfire_policy?: string }, revisionId?: string) =>
+    apiFetch<AutomationRule>(`/api/automation/rules${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, { method: "POST", body: JSON.stringify(body) }),
   triggerRule: (ruleId: string, payload?: Record<string, string>) =>
     apiFetch<Execution>(`/api/automation/trigger/${ruleId}`, { method: "POST", body: JSON.stringify({ payload: payload ?? {} }) }),
   listExecutions: () => apiFetch<Execution[]>("/api/automation/executions"),
@@ -1995,8 +2063,8 @@ export const api = {
   testIntegrationConnection: (id: string) =>
     apiFetch<{ ok: boolean; error?: string }>(`/api/developer/integration-connections/${id}/test`, { method: "POST" }),
 
-  createApiIntegration: (body: { name: string; description?: string; tags?: string[]; status?: string; connection_id?: string; config: ApiIntegrationConfig; schedule?: ApiSchedule }) =>
-    apiFetch<ApiIntegrationDetail>("/api/developer/integrations", { method: "POST", body: JSON.stringify({ ...body, type: "rest_api" }) }),
+  createApiIntegration: (body: { name: string; description?: string; tags?: string[]; status?: string; connection_id?: string; config: ApiIntegrationConfig; schedule?: ApiSchedule }, revisionId?: string) =>
+    apiFetch<ApiIntegrationDetail>(`/api/developer/integrations${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, { method: "POST", body: JSON.stringify({ ...body, type: "rest_api" }) }),
   getApiIntegration: (id: string) =>
     apiFetch<ApiIntegrationDetail>(`/api/developer/integrations/${id}`),
   updateApiIntegration: (id: string, body: { name?: string; description?: string; tags?: string[]; status?: string; enabled?: boolean; connection_id?: string; config?: ApiIntegrationConfig; schedule?: ApiSchedule }) =>
@@ -2027,8 +2095,14 @@ export const api = {
     apiFetch<{ status: string }>(`/api/business-admin/roles/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
   deleteBARole: (id: string) =>
     apiFetch<{ status: string }>(`/api/business-admin/roles/${id}`, { method: "DELETE" }),
-  setRoleDashboards: (roleId: string, dashboard_ids: string[]) =>
-    apiFetch<{ status: string }>(`/api/business-admin/roles/${roleId}/dashboards`, { method: "PUT", body: JSON.stringify({ dashboard_ids }) }),
+  // revisionId: the revision whose dashboards the list covers (the developer's
+  // working revision in Build › Roles). Omitted, the server uses the live
+  // revision of the selected model (Business Admin › Roles).
+  setRoleDashboards: (roleId: string, dashboard_ids: string[], revisionId?: string) =>
+    apiFetch<{ status: string }>(
+      `/api/business-admin/roles/${roleId}/dashboards${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`,
+      { method: "PUT", body: JSON.stringify({ dashboard_ids }) },
+    ),
   listRoleMembers: (roleId: string) =>
     apiFetch<BARoleMember[]>(`/api/business-admin/roles/${roleId}/members`),
   addRoleMember: (roleId: string, user_id: string) =>
@@ -2085,8 +2159,13 @@ export const api = {
     apiFetch<{ instance_id: string; status: string; test_run: boolean; current_step_id?: string; current_step_status?: string }>(`/api/developer/workflows/${id}/test-run`, {
       method: "POST", body: JSON.stringify({ context: context ?? {} }),
     }),
-  listWorkflowTriggerEvents: (applicationId?: string) => {
-    const qs = applicationId ? `?application_id=${encodeURIComponent(applicationId)}` : "";
+  // revisionId limits the form and integration events to that revision's
+  // forms and integrations (none: the application's working model's live one).
+  listWorkflowTriggerEvents: (applicationId?: string, revisionId?: string) => {
+    const params = new URLSearchParams();
+    if (applicationId) params.set("application_id", applicationId);
+    if (revisionId) params.set("revision_id", revisionId);
+    const qs = params.toString() ? `?${params}` : "";
     return apiFetch<TriggerEventCatalogItem[]>(`/api/developer/workflow-trigger-events${qs}`);
   },
 

@@ -116,6 +116,7 @@ var WriteToolNames = []string{
 	"create_metric", "update_metric", "delete_metric",
 	"create_dimension", "update_dimension", "delete_dimension",
 	"add_dimension_member", "update_dimension_member", "delete_dimension_member", "generate_time_members",
+	"reorder_dimension_members",
 	"add_dimension_property", "update_dimension_property", "delete_dimension_property",
 	"create_grid", "update_grid", "delete_grid",
 	"add_grid_metric", "remove_grid_metric", "add_grid_dimension", "update_grid_dimension", "remove_grid_dimension",

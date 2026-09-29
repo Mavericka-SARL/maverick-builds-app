@@ -80,7 +80,7 @@ export function ApiIntegrationBuilder({
           setError("Name and a target are required before saving.");
           return null;
         }
-        saved = await api.createApiIntegration({ ...body, status: "draft" });
+        saved = await api.createApiIntegration({ ...body, status: "draft" }, revisionId);
         setID(saved.id);
       }
       setSavedCritical(saved.config ? requestCriticalKey(saved.config) : criticalNow);

@@ -47,6 +47,29 @@ func TestRemapWidgetPropsIDs(t *testing.T) {
 			wantChanged: true,
 		},
 		{
+			// A grid widget's saved layout: axis lists keep their order and
+			// the "__metrics__" sentinel; filter_sel moves its keys, not its
+			// member-code values. Metric IDs never appear here, so a metric
+			// map entry that happens to share a dimension's old ID must not
+			// be applied.
+			name:        "grid default_view axes and filter selection",
+			in:          `{"default_view":{"rows":["__metrics__","d-old"],"cols":["ctx-old"],"context":["unmapped"],"filter_sel":{"ctx-old":"DEPT_A","unmapped":"X"}},"sync_context":true}`,
+			want:        `{"default_view":{"rows":["__metrics__","d-new"],"cols":["ctx-new"],"context":["unmapped"],"filter_sel":{"ctx-new":"DEPT_A","unmapped":"X"}},"sync_context":true}`,
+			wantChanged: true,
+		},
+		{
+			name:        "default_view with nothing to remap reports no change",
+			in:          `{"default_view":{"rows":["__metrics__"],"cols":["stranger"],"context":[],"filter_sel":{}}}`,
+			want:        `{"default_view":{"rows":["__metrics__"],"cols":["stranger"],"context":[],"filter_sel":{}}}`,
+			wantChanged: false,
+		},
+		{
+			name:        "default_view axes are matched against dimensions only",
+			in:          `{"default_view":{"rows":["m-old"],"cols":[],"context":[]}}`,
+			want:        `{"default_view":{"rows":["m-old"],"cols":[],"context":[]}}`,
+			wantChanged: false,
+		},
+		{
 			name:        "unrelated props are preserved and report no change",
 			in:          `{"font_size":14,"font_weight":"bold","button_color":"#fff","sync_context":true}`,
 			want:        `{"font_size":14,"font_weight":"bold","button_color":"#fff","sync_context":true}`,
@@ -90,7 +113,8 @@ func TestRemapWidgetPropsIDs(t *testing.T) {
 // an error — widget_props is nullable, and most widgets have no IDs in it.
 func TestRemapWidgetPropsIDsPassesThroughDegenerateInput(t *testing.T) {
 	maps := map[string]string{"a": "b"}
-	for _, in := range []string{"", "null", "{}", "not json", `{"chart":"not an object"}`} {
+	for _, in := range []string{"", "null", "{}", "not json", `{"chart":"not an object"}`,
+		`{"default_view":"not an object"}`, `{"default_view":{"rows":"a","filter_sel":["a"]}}`} {
 		got, changed := RemapWidgetPropsIDs([]byte(in), maps, maps)
 		if changed {
 			t.Errorf("input %q reported changed", in)

@@ -34,6 +34,7 @@ func (e *WriteExecutor) editTools() map[string]writeTool {
 		"delete_dimension":          e.deleteDimension,
 		"delete_dimension_member":   e.deleteDimensionMember,
 		"generate_time_members":     e.generateTimeMembers,
+		"reorder_dimension_members": e.reorderDimensionMembers,
 		"update_grid":               e.updateGrid,
 		"delete_grid":               e.deleteGrid,
 		"remove_grid_metric":        e.removeGridMetric,
@@ -132,6 +133,70 @@ func (e *WriteExecutor) deleteDimensionMember(ctx context.Context, raw json.RawM
 		msg += fmt.Sprintf("; its %d child member(s) are now top-level", children)
 	}
 	return msg, "", nil
+}
+
+// reorderDimensionMembers is PUT /api/developer/dimensions/{id}/members/order
+// by codes: codes are exactly one level's members — the children of
+// parent_code, or the top-level members when it is left out — in the wanted
+// order, and the dimension is renumbered in tree order
+// (modeledit.ReorderMembers). A time dimension is refused: its periods keep
+// calendar order.
+func (e *WriteExecutor) reorderDimensionMembers(ctx context.Context, raw json.RawMessage) (string, string, error) {
+	var p struct {
+		DimensionID string   `json:"dimension_id"`
+		ParentCode  string   `json:"parent_code"`
+		Codes       []string `json:"codes"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil || p.DimensionID == "" || p.Codes == nil {
+		return "", "", fmt.Errorf("dimension_id and codes (the level's member codes in the wanted order) are required")
+	}
+	dimID, err := e.requireInModel(ctx, "dimension", p.DimensionID)
+	if err != nil {
+		return "", "", err
+	}
+	var parentID *string
+	if p.ParentCode != "" {
+		// The parents ReorderMembers accepts, by code: a member that members
+		// of the dimension hang under (the level exists), then a member of
+		// the dimension, then one of its declared parent dimension. Which
+		// side a parent sits on follows the members, not the declared parent
+		// dimension, which can be set or cleared after they exist.
+		var pid string
+		if err := e.pool.QueryRow(ctx, `
+			SELECT p.id::text FROM model.dimension_member p
+			WHERE p.code=$2 AND (
+			      p.dimension_id=$1::uuid
+			   OR p.dimension_id=(SELECT parent_dimension_id FROM model.dimension_def WHERE id=$1::uuid)
+			   OR EXISTS (SELECT 1 FROM model.dimension_member c WHERE c.dimension_id=$1::uuid AND c.parent_member_id=p.id))
+			ORDER BY EXISTS (SELECT 1 FROM model.dimension_member c WHERE c.dimension_id=$1::uuid AND c.parent_member_id=p.id) DESC,
+			         (p.dimension_id=$1::uuid) DESC, p.id
+			LIMIT 1`, dimID, p.ParentCode).Scan(&pid); err != nil {
+			return "", "", fmt.Errorf("parent member %q not found (call list_dimensions to see codes)", p.ParentCode)
+		}
+		parentID = &pid
+	}
+	ids := make([]string, 0, len(p.Codes))
+	for _, code := range p.Codes {
+		var id string
+		if err := e.pool.QueryRow(ctx, `SELECT id::text FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2`,
+			dimID, code).Scan(&id); err != nil {
+			return "", "", fmt.Errorf("member %q not found in dimension (call list_dimensions to see codes)", code)
+		}
+		ids = append(ids, id)
+	}
+	res, err := modeledit.ReorderMembers(ctx, e.pool, dimID, parentID, ids)
+	if err != nil {
+		var re *modeledit.ReorderError
+		if errors.As(err, &re) {
+			return "", "", err
+		}
+		return "", "", fmt.Errorf("reorder members: %w", err)
+	}
+	level := "Top-level members"
+	if res.ParentCode != "" {
+		level = fmt.Sprintf("Members under '%s'", res.ParentCode)
+	}
+	return fmt.Sprintf("%s reordered: %s", level, strings.Join(res.Codes, ", ")), "", nil
 }
 
 // generateTimeMembers is POST /api/developer/dimensions/{id}/members/generate:

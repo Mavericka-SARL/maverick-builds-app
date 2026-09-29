@@ -70,7 +70,7 @@ function WorkflowList({ applicationId, revisionId, onOpen }: ListProps) {
     enabled: !!applicationId,
   });
 
-  const { data: triggerEvents = TRIGGER_FALLBACK } = useTriggerEvents(applicationId);
+  const { data: triggerEvents = TRIGGER_FALLBACK } = useTriggerEvents(applicationId, revisionId);
 
   const createMutation = useMutation({
     mutationFn: (body: { name: string; description: string; trigger_event: string }) =>
@@ -190,6 +190,7 @@ function WorkflowList({ applicationId, revisionId, onOpen }: ListProps) {
               <WorkflowRow
                 key={w.id}
                 workflow={w}
+                revisionId={revisionId}
                 onOpen={() => onOpen(w.id)}
                 onDuplicate={() => dupMutation.mutate({ id: w.id, name: `${w.name} (copy)` })}
                 onArchive={() => archiveMutation.mutate(w.id)}
@@ -227,6 +228,7 @@ function WorkflowList({ applicationId, revisionId, onOpen }: ListProps) {
             <Field label="Trigger event">
               <TriggerEventSelect
                 applicationId={applicationId}
+                revisionId={revisionId}
                 value={newTrigger}
                 onChange={setNewTrigger}
               />
@@ -290,8 +292,9 @@ function WorkflowList({ applicationId, revisionId, onOpen }: ListProps) {
   );
 }
 
-function WorkflowRow({ workflow, onOpen, onDuplicate, onArchive, onRestore, onDelete, triggerEvents }: {
+function WorkflowRow({ workflow, revisionId, onOpen, onDuplicate, onArchive, onRestore, onDelete, triggerEvents }: {
   workflow: WorkflowDefSummary;
+  revisionId?: string;
   onOpen: () => void;
   onDuplicate: () => void;
   onArchive: () => void;
@@ -370,7 +373,7 @@ function WorkflowRow({ workflow, onOpen, onDuplicate, onArchive, onRestore, onDe
         </td>
       </tr>
       {showCreateAutomation && (
-        <CreateAutomationModal workflow={workflow} onClose={() => setShowCreateAutomation(false)} />
+        <CreateAutomationModal workflow={workflow} revisionId={revisionId} onClose={() => setShowCreateAutomation(false)} />
       )}
     </>
   );
