@@ -11,6 +11,8 @@ import (
 // rules:
 //   - a string starting with =, <>, <, <=, > or >= is a comparison with
 //     the rest of the string; anything else is an equality test;
+//   - numbers compare on their 15 significant digits, as Excel does, so a
+//     computed 4.000000000000001 matches the criterion 4;
 //   - the comparison is numeric when the operand parses as a number (or an
 //     ISO yyyy-mm-dd date, compared as its date serial) and the candidate
 //     is a number; a text (non-numeric) operand never equals or orders a
@@ -84,8 +86,11 @@ func parseCriterion(v Value) criterion {
 	return c
 }
 
-// numberText renders n as text without an exponent; negative zero is "0".
+// numberText renders n as text without an exponent, on its 15 significant
+// digits (so a computed 0.30000000000000004 reads "0.3", as it compares);
+// negative zero is "0".
 func numberText(n float64) string {
+	n = significant15(n)
 	if n == 0 {
 		n = 0
 	}
@@ -139,7 +144,7 @@ func (c criterion) matches(candidate Value) bool {
 			return c.op == opNe // text never equals or orders a number
 		}
 		n, _ := candidate.Number()
-		return compareOrdered(c.op, cmpFloat(n, c.num))
+		return compareOrdered(c.op, cmpFloat(significant15(n), significant15(c.num)))
 	}
 	text, _ := memberCode(candidate)
 	switch c.op {

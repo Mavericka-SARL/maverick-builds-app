@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -120,9 +121,37 @@ func (s *Scheduler) handleMessage(ctx context.Context, msg *nats.Msg) error {
 	return s.RecalcAffected(ctx, evt.ModelID, evt.RevisionID, evt.MetricIDs)
 }
 
+// RecalcTimeout bounds a recalculation that runs after its request has
+// returned (the gateway's background recalculations, the calculation
+// service's RPCs), so a stuck one gives up its revision lock instead of
+// holding it forever.
+const RecalcTimeout = 30 * time.Minute
+
+// recoverAsError turns a panic in a recalculation entry point into its
+// returned error. Recalculations run in background goroutines — the
+// gateway's `go h.recalc…`, the calculation service's RPCs, the
+// facts.committed consumer — where an unrecovered panic stops the whole
+// process, for every tenant. Deferred directly, so recover sees the panic.
+func (s *Scheduler) recoverAsError(err *error, what string) {
+	if r := recover(); r != nil {
+		s.log.Error().Str("calculation", what).Interface("panic", r).Str("stack", string(debug.Stack())).
+			Msg("calculation panicked; recovered")
+		*err = fmt.Errorf("internal error during %s: %v", what, r)
+	}
+}
+
+// guarded runs one metric's (or one recurrence's) calculation and returns a
+// panic as its error, so that metric is marked failed — the console's
+// warning — and the rest of the pass still runs.
+func (s *Scheduler) guarded(what string, fn func() error) (err error) {
+	defer s.recoverAsError(&err, what)
+	return fn()
+}
+
 // RecalcAffected marks all transitively dependent partitions dirty and then executes them
 // in topological order (leaves → dependents).
-func (s *Scheduler) RecalcAffected(ctx context.Context, modelID, revisionID string, changedInputIDs []string) error {
+func (s *Scheduler) RecalcAffected(ctx context.Context, modelID, revisionID string, changedInputIDs []string) (err error) {
+	defer s.recoverAsError(&err, "recalculation")
 	if revisionID == "" {
 		return fmt.Errorf("revisionID is required")
 	}
@@ -156,7 +185,8 @@ func (s *Scheduler) RecalcAffected(ctx context.Context, modelID, revisionID stri
 // stale pre-deletion value. Callers are expected to have captured the
 // affected metric IDs themselves, before the deletion removed the edges
 // that would otherwise make them discoverable.
-func (s *Scheduler) RecalcSpecific(ctx context.Context, modelID, revisionID string, metricIDs []string) error {
+func (s *Scheduler) RecalcSpecific(ctx context.Context, modelID, revisionID string, metricIDs []string) (err error) {
+	defer s.recoverAsError(&err, "recalculation")
 	if revisionID == "" {
 		return fmt.Errorf("revisionID is required")
 	}
@@ -280,7 +310,9 @@ func (s *Scheduler) recalcMetricIDs(ctx context.Context, modelID, revisionID str
 			continue
 		}
 
-		calcErr := s.executePartition(ctx, def, modelID, revisionID, pk, allDims, metricDimIDs, dimIDToName, meta, defs)
+		calcErr := s.guarded(def.Name, func() error {
+			return s.executePartition(ctx, def, modelID, revisionID, pk, allDims, metricDimIDs, dimIDToName, meta, defs)
+		})
 		if calcErr != nil {
 			s.log.Error().Err(calcErr).Str("metric", def.Name).Msg("calculation failed")
 			s.store.MarkError(ctx, pk, calcErr.Error()) //nolint:errcheck
@@ -314,7 +346,9 @@ func (s *Scheduler) runRecurrence(
 		}
 		keys = append(keys, pk)
 	}
-	calcErr := s.executeRecurrence(ctx, comp, modelID, revisionID, BuildPartitionKey(modelID, revisionID, comp.Members[0], timePartition), allDims, metricDimIDs, dimIDToName, meta, defs)
+	calcErr := s.guarded("recurrence", func() error {
+		return s.executeRecurrence(ctx, comp, modelID, revisionID, BuildPartitionKey(modelID, revisionID, comp.Members[0], timePartition), allDims, metricDimIDs, dimIDToName, meta, defs)
+	})
 	for _, pk := range keys {
 		if calcErr != nil {
 			s.store.MarkError(ctx, pk, calcErr.Error()) //nolint:errcheck

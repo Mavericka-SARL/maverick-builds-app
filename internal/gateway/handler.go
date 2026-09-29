@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"slices"
 	"sort"
 	"strconv"
@@ -34,6 +35,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/imagedata"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
+	"github.com/mavericks-engine/mavericks/internal/modeledit"
 	"github.com/mavericks-engine/mavericks/internal/modeltransfer"
 	"github.com/mavericks-engine/mavericks/internal/notification"
 	"github.com/mavericks-engine/mavericks/internal/plan"
@@ -8034,7 +8036,11 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		if len(metricIDs) > 0 {
 			calcStore := calculation.NewStore(h.db.For(ctx))
 			sched := calculation.NewScheduler(h.log, calcStore, nil)
-			go func() { _ = sched.RecalcAffected(context.Background(), modelID, intRevisionID, metricIDs) }() //nolint:contextcheck
+			go func() { //nolint:contextcheck // outlives the request
+				bg, done := h.backgroundRecalc(context.Background(), "recalculation after an integration run")
+				defer done()
+				_ = sched.RecalcAffected(bg, modelID, intRevisionID, metricIDs)
+			}()
 		}
 		h.recordIntegrationRun(ctx, intID, act.UserID, totalRows-errorRows, errorRows, "success", "")
 		jsonOK(w, map[string]any{"rows_imported": totalRows - errorRows, "error_rows": errorRows})
@@ -10360,6 +10366,19 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			FROM model.metric_def md JOIN core.model m ON m.id = md.model_id
 			WHERE md.id=$1::uuid`, metricID).Scan(&modelID, &metricRevisionID, &metricAppID)
 
+		// Refused while another metric reads it — its formula, or its Rate
+		// total's operands — (409 names them), as a property, dimension or
+		// member delete is refused: those metrics would fail at every cell
+		// and keep serving their last values.
+		if err := metricformula.CheckMetricNotInUse(ctx, h.db.For(ctx), metricID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			if metricformula.IsValidationError(err) {
+				jsonErr(w, err, http.StatusConflict)
+				return
+			}
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+
 		// Capture the full transitive-dependent set BEFORE deleting: the
 		// DELETE cascades away every model.calc_dependency row pointing at
 		// this metric, so once it's gone, RecalcAffected's own graph walk
@@ -10367,7 +10386,9 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		// they'd stay silently frozen at their stale pre-deletion value
 		// forever instead of surfacing a #NAME? error. RecalcSpecific below
 		// force-recomputes exactly this captured set regardless of the
-		// (now-severed) graph.
+		// (now-severed) graph. After CheckMetricNotInUse no formula reads the
+		// metric, so this set is normally empty; it still catches an edge an
+		// unguarded path left behind.
 		var dependentIDs []string
 		if depRows, depErr := h.db.Query(ctx, `
 			WITH RECURSIVE deps AS (
@@ -10782,50 +10803,11 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 					return
 				}
 			}
-			// runtime.fact_input/calc_result store dim_members as JSONB
-			// keyed by {dimension_id: member_CODE}, not member ID —
-			// renaming a code here would otherwise silently and
-			// permanently orphan every existing row that referenced the
-			// old code (not deleted, just unreachable via any
-			// current-code-based query). Re-key both tables under the new
-			// code. Best-effort: a failure here doesn't undo the rename
-			// itself, matching this handler's existing style for
-			// non-critical side effects (e.g. the recalc trigger below).
-			if body.Code != "" && body.Code != oldCode {
-				if _, err := h.db.Exec(ctx, `
-					UPDATE runtime.fact_input
-					SET dim_members = jsonb_set(dim_members, ARRAY[$1::text], to_jsonb($2::text))
-					WHERE dim_members->>$1 = $3
-				`, dimID, body.Code, oldCode); err != nil {
-					h.log.Error().Err(err).Str("member_id", subID).Msg("re-key fact_input after member rename")
-				}
-				if _, err := h.db.Exec(ctx, `
-					UPDATE runtime.calc_result
-					SET dim_members = jsonb_set(dim_members, ARRAY[$1::text], to_jsonb($2::text))
-					WHERE dim_members->>$1 = $3
-				`, dimID, body.Code, oldCode); err != nil {
-					h.log.Error().Err(err).Str("member_id", subID).Msg("re-key calc_result after member rename")
-				}
-				// widget_props holds member CODES in three places (SYNC-02 —
-				// facts/calc re-keyed above but widgets kept the old code, so
-				// a chart's saved context or a pinned KPI silently fell back
-				// to defaults after a rename). Paths are keyed by dimension
-				// ID, so no cross-model false positives are possible.
-				for _, wq := range []struct{ q, tag string }{
-					{`UPDATE model.dashboard_widget
-					  SET widget_props = jsonb_set(widget_props, ARRAY['default_view','filter_sel',$1::text], to_jsonb($2::text))
-					  WHERE widget_props #>> ARRAY['default_view','filter_sel',$1::text] = $3`, "default_view.filter_sel"},
-					{`UPDATE model.dashboard_widget
-					  SET widget_props = jsonb_set(widget_props, ARRAY['chart','context_defaults',$1::text], to_jsonb($2::text))
-					  WHERE widget_props #>> ARRAY['chart','context_defaults',$1::text] = $3`, "chart.context_defaults"},
-					{`UPDATE model.dashboard_widget
-					  SET widget_props = jsonb_set(widget_props, ARRAY['kpi_scope','member_code'], to_jsonb($2::text))
-					  WHERE widget_props->'kpi_scope'->>'dimension_id' = $1 AND widget_props->'kpi_scope'->>'member_code' = $3`, "kpi_scope"},
-				} {
-					if _, err := h.db.Exec(ctx, wq.q, dimID, body.Code, oldCode); err != nil {
-						h.log.Error().Err(err).Str("member_id", subID).Str("path", wq.tag).Msg("re-key widget_props after member rename")
-					}
-				}
+			// Facts, calc results and widget settings file data under the
+			// member's CODE; carry a rename into them. Best-effort, as
+			// before: a failure here does not undo the rename.
+			if err := modeledit.RekeyMemberCode(ctx, h.db, dimID, oldCode, body.Code); err != nil {
+				h.log.Error().Err(err).Str("member_id", subID).Msg("re-key data after member rename")
 			}
 			if body.ParentMemberID != nil && prevParentID == nil {
 				var childCount int
@@ -12770,6 +12752,19 @@ func (h *handler) developerGridAction(w http.ResponseWriter, r *http.Request) {
 	case "dimensions":
 		switch {
 		case r.Method == http.MethodPost && subID != "":
+			// The dimension must be of the grid's own revision, as a metric
+			// must (above). Unchecked, a grid could be given another
+			// revision's — or another model's — dimension.
+			var gridRev, dimRev string
+			_ = h.db.QueryRow(ctx, `SELECT COALESCE(revision_id::text,'') FROM model.grid_def WHERE id=$1::uuid`, gridID).Scan(&gridRev)
+			if err := h.db.QueryRow(ctx, `SELECT COALESCE(revision_id::text,'') FROM model.dimension_def WHERE id=$1::uuid`, subID).Scan(&dimRev); err != nil {
+				jsonErr(w, fmt.Errorf("dimension not found"), http.StatusNotFound)
+				return
+			}
+			if gridRev != dimRev {
+				jsonErr(w, fmt.Errorf("dimension does not belong to the same revision as the grid"), http.StatusBadRequest)
+				return
+			}
 			if err := h.gridMembershipTx(ctx, gridID,
 				`INSERT INTO model.grid_dimension (grid_id, dimension_id) VALUES ($1::uuid,$2::uuid) ON CONFLICT DO NOTHING`,
 				gridID, subID); err != nil {
@@ -13311,51 +13306,10 @@ func (h *handler) dashboardModelInScope(ctx context.Context, a *actor, dashID st
 	return err == nil && ok
 }
 
-// dashboardScope resolves the revision_id/application_id a dashboard (or
-// one of its widgets) belongs to, for audit logging call sites in
-// developerDashboardAction below.
-// dropWidgetsReferencing removes dashboard widgets whose ref_id names a
-// just-deleted entity (SYNC-01). ref_id is bare TEXT with no FK, so deletes
-// of grids/metrics/forms/integrations/rules used to leave dangling widgets —
-// a chart over a deleted grid 500'd, a KPI over a deleted metric showed a
-// confident 0. Policy: cascade — a widget is cheap and re-creatable, and a
-// blocking 409 would need affordances across six delete paths. UUIDs are
-// globally unique, so matching ref_id alone cannot hit another entity.
+// dropWidgetsReferencing: see modeledit.DropWidgetsReferencing.
 func (h *handler) dropWidgetsReferencing(ctx context.Context, refID string) {
-	if refID == "" {
-		return
-	}
-	if _, err := h.db.Exec(ctx, `DELETE FROM model.dashboard_widget WHERE ref_id = $1`, refID); err != nil {
+	if err := modeledit.DropWidgetsReferencing(ctx, h.db, refID); err != nil {
 		h.log.Warn().Err(err).Str("ref_id", refID).Msg("drop widgets referencing deleted entity")
-	}
-	// A chart names its metrics inside widget_props, not in ref_id: a
-	// deleted metric left there made the whole chart fail as "metric not
-	// accessible". Drop the id from every chart's list, and the chart
-	// itself once it plots nothing.
-	// Two statements, not one CTE: Postgres will not update and delete the
-	// same row in one statement (only one of the two silently happens).
-	rows, err := h.db.Query(ctx, `
-		UPDATE model.dashboard_widget
-		SET widget_props = jsonb_set(widget_props, '{chart,metric_ids}', (widget_props->'chart'->'metric_ids') - $1::text)
-		WHERE widget_props->'chart'->'metric_ids' ? $1::text
-		RETURNING id::text, jsonb_array_length(widget_props->'chart'->'metric_ids')`, refID)
-	if err != nil {
-		h.log.Warn().Err(err).Str("ref_id", refID).Msg("drop deleted metric from chart widgets")
-		return
-	}
-	var emptied []string
-	for rows.Next() {
-		var id string
-		var left int
-		if rows.Scan(&id, &left) == nil && left == 0 {
-			emptied = append(emptied, id)
-		}
-	}
-	rows.Close()
-	if len(emptied) > 0 {
-		if _, err := h.db.Exec(ctx, `DELETE FROM model.dashboard_widget WHERE id::text = ANY($1)`, emptied); err != nil {
-			h.log.Warn().Err(err).Msg("drop charts left without metrics")
-		}
 	}
 }
 
@@ -14011,146 +13965,19 @@ func (h *handler) gridChangeTx(ctx context.Context, gridID string,
 	return tx.Commit(ctx)
 }
 
-// memberPeriod parses and checks the period fields of a member write against
-// its dimension's type. On a time dimension a member WITH dates is a leaf
-// period and a member without dates is an aggregate period (H1, FY26): a
-// grouping whose value is its descendants reduced by the metric's time
-// summary. A standard dimension's members carry no dates at all. Returns
-// the parsed period, whether the dimension is a time dimension, and whether
-// the member is a dated leaf.
+// memberPeriod: see modeledit.MemberPeriod.
 func (h *handler) memberPeriod(ctx context.Context, dimID, start, end string) (timedim.Period, bool, bool, error) {
-	cfg, err := timedim.LoadConfig(ctx, h.db.For(ctx), dimID)
-	if err != nil {
-		return timedim.Period{}, false, false, fmt.Errorf("dimension not found")
-	}
-	if cfg.Type != timedim.TypeTime {
-		if start != "" || end != "" {
-			return timedim.Period{}, false, false, &timedim.Error{Code: timedim.CodeInvalidTimeMember,
-				Message: "period_start/period_end apply only to a time dimension's members"}
-		}
-		return timedim.Period{}, false, false, nil
-	}
-	if start == "" && end == "" {
-		return timedim.Period{}, true, false, nil // aggregate period
-	}
-	if start == "" || end == "" {
-		return timedim.Period{}, true, true, &timedim.Error{Code: timedim.CodeInvalidTimeMember,
-			Message: "a leaf period needs both period_start and period_end (leave both empty for an aggregate period such as H1 or FY26)"}
-	}
-	ps, err := timedim.ParseDate(start)
-	if err != nil {
-		return timedim.Period{}, true, true, err
-	}
-	pe, err := timedim.ParseDate(end)
-	if err != nil {
-		return timedim.Period{}, true, true, err
-	}
-	p := timedim.Period{Start: ps, End: pe}
-	if err := timedim.ValidatePeriod(cfg, p); err != nil {
-		return timedim.Period{}, true, true, err
-	}
-	return p, true, true, nil
+	return modeledit.MemberPeriod(ctx, h.db.For(ctx), dimID, start, end)
 }
 
-// writeTimeMember inserts (memberID == "") or updates one time member —
-// a dated leaf period (dated=true) or an aggregate period (no dates, no
-// ordinal) — and re-validates + re-indexes the whole dimension in the same
-// transaction.
+// writeTimeMember: see modeledit.WriteTimeMember.
 func (h *handler) writeTimeMember(ctx context.Context, dimID, memberID, code, label string, p timedim.Period, dated bool, parentID *string) (string, error) {
-	tx, err := h.db.Begin(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
-	var start, end *time.Time
-	var idx *int
-	if dated {
-		start, end = &p.Start, &p.End
-		zero := 0
-		idx = &zero
-	}
-	id := memberID
-	if memberID == "" {
-		if err := tx.QueryRow(ctx, `
-			INSERT INTO model.dimension_member (dimension_id, code, label, period_start, period_end, time_index, parent_member_id)
-			VALUES ($1::uuid, $2, $3, $4::date, $5::date, $6, $7::uuid) RETURNING id::text
-		`, dimID, code, label, start, end, idx, parentID).Scan(&id); err != nil {
-			return "", err
-		}
-	} else if _, err := tx.Exec(ctx, `
-		UPDATE model.dimension_member SET code=$2, label=$3, period_start=$4::date, period_end=$5::date, time_index=$6, parent_member_id=$7::uuid
-		WHERE id=$1::uuid AND dimension_id=$8::uuid
-	`, memberID, code, label, start, end, idx, parentID, dimID); err != nil {
-		return "", err
-	}
-	if err := timedim.ValidateAndReindex(ctx, tx, dimID); err != nil {
-		return "", err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return "", err
-	}
-	return id, nil
+	return modeledit.WriteTimeMember(ctx, h.db, dimID, memberID, code, label, p, dated, parentID)
 }
 
-// deleteMemberReindexed deletes a member and, for a time dimension, closes
-// the gap in time_index so positions stay dense from zero.
+// deleteMemberReindexed: see modeledit.DeleteMember.
 func (h *handler) deleteMemberReindexed(ctx context.Context, dimID, memberID string) error {
-	tx, err := h.db.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
-	// The member's input facts go with it, kept in fact_input_history with
-	// the reason 'member_deleted' (the re-parent path does the same). Left
-	// behind, they were still served as cells for a code no row shows and
-	// counted by every reader that sums fact rows. dim_members is keyed by
-	// dimension ID and a dimension row belongs to one revision, so only the
-	// member's own revision is touched. A parent's children are not deleted
-	// (ON DELETE SET NULL), so their facts stay.
-	var code, modelID string
-	err = tx.QueryRow(ctx, `
-		SELECT m.code, d.model_id::text
-		FROM model.dimension_member m JOIN model.dimension_def d ON d.id = m.dimension_id
-		WHERE m.id=$1::uuid AND m.dimension_id=$2::uuid
-	`, memberID, dimID).Scan(&code, &modelID)
-	switch {
-	case err == nil:
-		filter, _ := json.Marshal(map[string]string{dimID: code})
-		if _, err := tx.Exec(ctx, `SET LOCAL mvx.delete_reason = 'member_deleted'`); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `
-			DELETE FROM runtime.fact_input WHERE model_id=$1::uuid AND dim_members @> $2::jsonb
-		`, modelID, string(filter)); err != nil {
-			return err
-		}
-	case !errors.Is(err, pgx.ErrNoRows):
-		return err
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM model.dimension_member WHERE id=$1::uuid AND dimension_id=$2::uuid`, memberID, dimID); err != nil {
-		return err
-	}
-	cfg, err := timedim.LoadConfig(ctx, tx, dimID)
-	if err != nil {
-		return err
-	}
-	if cfg.Type == timedim.TypeTime {
-		// Removing a period may open a gap in a regular calendar; the
-		// remaining members still reindex densely so time functions keep a
-		// consistent order. The gap itself is reported when the next member
-		// is written.
-		if _, err := tx.Exec(ctx, `
-			WITH ordered AS (
-				SELECT id, row_number() OVER (ORDER BY period_start, period_end, code) - 1 AS idx
-				FROM model.dimension_member WHERE dimension_id=$1::uuid AND period_start IS NOT NULL
-			)
-			UPDATE model.dimension_member m SET time_index = o.idx FROM ordered o
-			WHERE o.id = m.id AND m.time_index IS DISTINCT FROM o.idx
-		`, dimID); err != nil {
-			return err
-		}
-	}
-	return tx.Commit(ctx)
+	return modeledit.DeleteMember(ctx, h.db, dimID, memberID)
 }
 
 // generateTimeMembers is POST /api/developer/dimensions/{id}/members/generate
@@ -14210,21 +14037,14 @@ func (h *handler) generateTimeMembers(w http.ResponseWriter, r *http.Request, di
 		return
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
-	created := 0
-	for _, p := range periods {
-		tag, err := tx.Exec(ctx, `
-			INSERT INTO model.dimension_member (dimension_id, code, label, period_start, period_end, time_index, parent_member_id)
-			VALUES ($1::uuid, $2, $3, $4::date, $5::date, 0, $6::uuid)
-			ON CONFLICT (dimension_id, code) DO NOTHING
-		`, dimID, p.Code, periodLabel(cfg.Granularity, p), p.Start, p.End, body.ParentMemberID)
-		if err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
+	created, err := modeledit.InsertPeriods(ctx, tx, dimID, cfg.Granularity, periods, body.ParentMemberID)
+	if err != nil {
+		var te *timedim.Error
+		if errors.As(err, &te) {
+			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
-		created += int(tag.RowsAffected())
-	}
-	if err := timedim.ValidateAndReindex(ctx, tx, dimID); err != nil {
-		jsonErr(w, err, http.StatusBadRequest)
+		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -14238,18 +14058,6 @@ func (h *handler) generateTimeMembers(w http.ResponseWriter, r *http.Request, di
 	}
 	h.auditDimensionUpdated(ctx, r, dimID, "members_generated", map[string]string{"count": strconv.Itoa(created), "start": body.Start, "end": body.End})
 	jsonOK(w, map[string]any{"created": created})
-}
-
-// periodLabel is the human label of a generated period.
-func periodLabel(granularity string, p timedim.Period) string {
-	switch granularity {
-	case timedim.GranMonth:
-		return p.Start.Format("Jan 2006")
-	case timedim.GranDay, timedim.GranWeek:
-		return p.Start.Format("2 Jan 2006")
-	default:
-		return p.Code
-	}
 }
 
 // memberHasAncestor walks the parent_member_id chain starting at startID (capped at depth
@@ -14272,7 +14080,26 @@ func (h *handler) memberHasAncestor(ctx context.Context, startID, targetID strin
 
 // recalcAfterDimChange triggers RecalcAffected for every (revision, input-metric) pair that
 // was touched by a dimension-member change, ensuring calc results stay consistent.
+// backgroundRecalc guards a recalculation that runs after its request has
+// returned: it bounds it with calculation.RecalcTimeout, and the returned
+// done — deferred directly, so its recover sees a panic — cancels that
+// deadline and turns a panic into a log line. An unrecovered panic in such a
+// goroutine stops the gateway for every tenant; the scheduler recovers its
+// own, and this covers the gateway code around it.
+func (h *handler) backgroundRecalc(ctx context.Context, what string) (context.Context, func()) {
+	ctx, cancel := context.WithTimeout(ctx, calculation.RecalcTimeout)
+	return ctx, func() {
+		cancel()
+		if r := recover(); r != nil {
+			h.log.Error().Str("recalc", what).Interface("panic", r).Str("stack", string(debug.Stack())).
+				Msg("background recalculation panicked; the gateway carries on")
+		}
+	}
+}
+
 func (h *handler) recalcAfterDimChange(ctx context.Context, modelID string, affected []struct{ RevisionID, MetricID string }) {
+	ctx, done := h.backgroundRecalc(ctx, "recalculation after a dimension change")
+	defer done()
 	if len(affected) == 0 {
 		return
 	}
@@ -14297,6 +14124,8 @@ func (h *handler) recalcAfterDimChange(ctx context.Context, modelID string, affe
 // property declarations (contract C8). Callers run it in the background like
 // the other dimension-change recalcs.
 func (h *handler) recalcDimensionDependents(ctx context.Context, dimID string) {
+	ctx, done := h.backgroundRecalc(ctx, "recalculation of a dimension's dependents")
+	defer done()
 	sched := calculation.NewScheduler(h.log, calculation.NewStore(h.db.For(ctx)), nil)
 	if err := sched.RecalcDimensionDependents(ctx, dimID); err != nil {
 		h.log.Warn().Err(err).Str("dimension", dimID).Msg("recalc after dimension change failed")
@@ -14320,6 +14149,8 @@ func sameOptionalID(a, b *string) bool {
 // value without touching model.calc_dependency at all, so there's no
 // specific affected-metric list to target precisely.
 func (h *handler) recalcAllInputsAcrossRevisions(ctx context.Context, modelID string) {
+	ctx, done := h.backgroundRecalc(ctx, "recalculation of every revision")
+	defer done()
 	inputRows, _ := h.db.Query(ctx,
 		`SELECT id::text FROM model.metric_def WHERE model_id=$1::uuid AND is_input=true`, modelID)
 	var inputIDs []string
@@ -14353,74 +14184,9 @@ func (h *handler) recalcAllInputsAcrossRevisions(ctx context.Context, modelID st
 	}
 }
 
-// splitParentFactData moves existing fact_input rows from a parent member to its first child
-// when that parent gains its very first child. The parent's stored values transfer in full
-// to the sole child so the aggregate (rollup) remains identical.
-// Returns the distinct (revision_id, metric_id) pairs that were affected so the caller
-// can trigger recalculation.
+// splitParentFactData: see modeledit.SplitParentFacts.
 func (h *handler) splitParentFactData(ctx context.Context, dimID, parentMemberID, childCode, modelID string) ([]struct{ RevisionID, MetricID string }, error) {
-	var parentCode string
-	if err := h.db.QueryRow(ctx,
-		`SELECT code FROM model.dimension_member WHERE id=$1::uuid`, parentMemberID,
-	).Scan(&parentCode); err != nil {
-		return nil, err
-	}
-
-	filterBytes, _ := json.Marshal(map[string]string{dimID: parentCode})
-	parentFilter := string(filterBytes)
-
-	tx, err := h.db.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
-	_, err = tx.Exec(ctx, `
-		INSERT INTO runtime.fact_input (model_id, revision_id, metric_id, dim_members, value, entered_by)
-		SELECT model_id, revision_id, metric_id,
-		       jsonb_set(dim_members, ARRAY[$1::text], to_jsonb($2::text)),
-		       value::float8,
-		       entered_by
-		FROM (
-			SELECT DISTINCT ON (revision_id, metric_id, dim_members)
-			    model_id, revision_id, metric_id, dim_members, value, entered_by
-			FROM runtime.fact_input
-			WHERE model_id=$3::uuid AND dim_members @> $4::jsonb
-			ORDER BY revision_id, metric_id, dim_members, entered_at DESC, id DESC
-		) latest
-	`, dimID, childCode, modelID, parentFilter)
-	if err != nil {
-		return nil, err
-	}
-
-	// Collect (revision_id, metric_id) pairs before deleting so the caller can recalc.
-	affRows, err := tx.Query(ctx, `
-		SELECT DISTINCT revision_id::text, metric_id::text
-		FROM runtime.fact_input
-		WHERE model_id=$1::uuid AND dim_members @> $2::jsonb AND revision_id IS NOT NULL
-	`, modelID, parentFilter)
-	if err != nil {
-		return nil, err
-	}
-	var affected []struct{ RevisionID, MetricID string }
-	for affRows.Next() {
-		var r, m string
-		if scanErr := affRows.Scan(&r, &m); scanErr == nil {
-			affected = append(affected, struct{ RevisionID, MetricID string }{r, m})
-		}
-	}
-	affRows.Close()
-
-	_, _ = tx.Exec(ctx, `SET LOCAL mvx.delete_reason = 'member_reparented'`)
-	_, err = tx.Exec(ctx, `
-		DELETE FROM runtime.fact_input
-		WHERE model_id=$1::uuid AND dim_members @> $2::jsonb
-	`, modelID, parentFilter)
-	if err != nil {
-		return nil, err
-	}
-
-	return affected, tx.Commit(ctx)
+	return modeledit.SplitParentFacts(ctx, h.db, dimID, parentMemberID, childCode, modelID)
 }
 
 // ── Business-Admin: helpers ────────────────────────────────────────────────────

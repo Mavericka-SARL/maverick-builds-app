@@ -38,7 +38,7 @@ func DimensionNameTaken(err error, name string) error {
 		return err
 	}
 	return invalidCode(CodeDimensionNameTaken,
-		"the revision already has a dimension named %q; choose another name", name)
+		"the revision already has a dimension named %q (dimension names are compared without regard to case); choose another name", name)
 }
 
 // MetricNameTaken returns the METRIC_NAME_TAKEN refusal for name when err is
@@ -48,7 +48,7 @@ func MetricNameTaken(err error, name string) error {
 		return err
 	}
 	return invalidCode(CodeMetricNameTaken,
-		"the revision already has a metric named %q; choose another name", name)
+		"the revision already has a metric named %q (metric names are compared without regard to case); choose another name", name)
 }
 
 // IsMemberCodeTaken reports whether err is (or wraps) the unique violation

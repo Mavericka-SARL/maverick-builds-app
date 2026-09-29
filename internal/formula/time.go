@@ -148,7 +148,7 @@ func init() {
 // another package (the calculation scheduler's EvalAt) to evaluate a
 // sub-expression without duplicating the evaluator.
 func EvalNode(ctx *EvalContext, node Node) Value {
-	return ctx.eval(node)
+	return ctx.safeEval(node)
 }
 
 func timeCtx(ctx *EvalContext, fn string) (*TimeEvalContext, *FormulaError) {

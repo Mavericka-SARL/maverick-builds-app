@@ -572,10 +572,21 @@ func (e *WriteExecutor) updateFormIntegration(ctx context.Context, raw json.RawM
 	); err != nil {
 		return "", "", fmt.Errorf("update form integration: %w", err)
 	}
+	msg := fmt.Sprintf("Form integration '%s' updated", p.Name)
 	if p.Name != curName {
-		return fmt.Sprintf("Form integration '%s' updated (renamed from '%s')", p.Name, curName), "", nil
+		msg += fmt.Sprintf(" (renamed from '%s')", curName)
 	}
-	return fmt.Sprintf("Form integration '%s' updated", p.Name), "", nil
+	// The developer's update re-posts the form's records at once, so a
+	// changed aggregation or status rule takes effect on what is already
+	// saved, not only on the next submission.
+	if e.hooks.PostFormIntegration != nil {
+		if n, err := e.hooks.PostFormIntegration(ctx, p.FormIntegrationID); err != nil {
+			msg += fmt.Sprintf("; re-posting its records failed: %v", err)
+		} else {
+			msg += fmt.Sprintf("; %d record(s) re-posted", n)
+		}
+	}
+	return msg, "", nil
 }
 
 func (e *WriteExecutor) deleteFormIntegration(ctx context.Context, raw json.RawMessage) (string, string, error) {

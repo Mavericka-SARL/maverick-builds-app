@@ -286,7 +286,16 @@ export function WorkflowHistory({ focusInstanceId }: { focusInstanceId?: string 
 
 // ── Roles Tab ──────────────────────────────────────────────────────────────────
 
-export function RolesTab() {
+/**
+ * Business roles: create, rename, delete, the dashboards each may open and,
+ * for a business admin, who is in it. The developer console shows the same
+ * screen without members (`variant="developer"`): a developer creates the
+ * roles their workflow steps are assigned to, and a business admin decides who
+ * holds them. The developer's dashboard list is its working revision's; a
+ * role's grants on dashboards not listed are sent back unchanged.
+ */
+export function RolesTab({ variant = "business-admin", revisionId }: { variant?: "business-admin" | "developer"; revisionId?: string } = {}) {
+  const developer = variant === "developer";
   const qc = useQueryClient();
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -296,10 +305,12 @@ export function RolesTab() {
   const [selectedUserId, setSelectedUserId] = useState<string>("");
 
   const { data: roles = [] } = useQuery<BARole[]>({ queryKey: ["ba-roles"], queryFn: api.listBARoles });
-  const { data: allUsers = [] } = useQuery<BAUser[]>({ queryKey: ["ba-users"], queryFn: api.listBAUsers });
+  const { data: allUsers = [] } = useQuery<BAUser[]>({ queryKey: ["ba-users"], queryFn: api.listBAUsers, enabled: !developer });
   const { data: allDashboards = [] } = useQuery<BAAvailableItem[]>({
-    queryKey: ["ba-available-dashboards"],
-    queryFn: () => api.getBAAvailable("dashboards"),
+    queryKey: developer ? ["dev-role-dashboards", revisionId] : ["ba-available-dashboards"],
+    queryFn: developer
+      ? async () => (await api.listDashboards(revisionId)).map(d => ({ id: d.id, name: d.name }))
+      : () => api.getBAAvailable("dashboards"),
   });
 
   const createRole = useMutation({
@@ -422,7 +433,10 @@ export function RolesTab() {
                 <>
                   <div className="mvx-admin-object__title">
                     <span className="mvx-admin-object__name">{role.name}</span>
-                    <div className="mvx-admin-object__meta">{role.member_count} user{role.member_count !== 1 ? "s" : ""}</div>
+                    <div className="mvx-admin-object__meta">
+                      {role.member_count} user{role.member_count !== 1 ? "s" : ""}
+                      {developer && " · members are managed by a business admin"}
+                    </div>
                   </div>
                   <Button size="sm" variant="ghost" leadingIcon={<Pencil size={13} />} onClick={() => { setEditingId(role.id); setEditName(role.name); }}>
                     Rename
@@ -505,7 +519,7 @@ export function RolesTab() {
                 </div>
 
                 {/* Members */}
-                <div style={{ flex: 1 }}>
+                {!developer && <div style={{ flex: 1 }}>
                   <div className="mvx-admin-revisions__label" style={{ marginBottom: 10 }}>
                     Members
                   </div>
@@ -531,7 +545,7 @@ export function RolesTab() {
                       Add member
                     </Button>
                   )}
-                </div>
+                </div>}
               </div>
             )}
           </div>

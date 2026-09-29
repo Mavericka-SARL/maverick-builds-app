@@ -1,0 +1,69 @@
+
+<h2>15. Totals: aggregation rule and time summary</h2>
+<p>A formula computes the <b>leaf</b> cells (one member of every dimension, and a dated period on the time axis). Everything above them — EMEA, World, Q1, FY26, the grand total — comes from two settings on the metric, which you choose in the Add metric form or the row editor.</p>
+
+<h3>Aggregation rule: across ordinary dimensions</h3>
+<table>
+<tr><th style="width:14%">Rule</th><th>Value at a parent member or total</th><th style="width:30%">Use it for</th></tr>
+<tr><td><b>Sum</b></td><td>The sum of every leaf under it (a leaf with no value adds 0).</td><td>Amounts: sales, cost, margin, headcount</td></tr>
+<tr><td><b>Average</b></td><td>The mean of the leaves under it that have a value; never a mean of the children's means. If the formula does not depend on the members (no dimension, property or PARENT in it), it is instead evaluated once on the totalled inputs, like Formula.</td><td>Levels that are averaged, such as a score</td></tr>
+<tr><td><b>Count</b></td><td>The number of leaves under it whose value is recorded and not 0.</td><td>"How many regions are active"</td></tr>
+<tr><td><b>Formula</b></td><td>The metric's own formula evaluated on the totalled inputs. Calculated metrics only.</td><td>Ratios and percentages: <code>margin_pct</code> at World is total margin ÷ total sales</td></tr>
+<tr><td><b>Rate</b></td><td>The total of a <b>Numerator</b> metric divided by the total of a <b>Denominator</b> metric, both chosen in the form.</td><td>Blended rates: an average price is total revenue ÷ total units</td></tr>
+</table>
+<p>Every level combines the <b>leaves</b> directly, however many levels up it is, so a World row always equals the grand total. A cell with no result (blank, or failed) is left out.</p>
+
+<h3>Time summary: across the time dimension</h3>
+<p>On a grid with a time dimension, each metric also has a <b>Time summary</b> — how an aggregate period (Q1, H1, FY26) reduces its leaf periods: <b>sum</b> (flows such as sales), <b>last</b> (a closing balance), <b>first</b> (an opening balance), <b>average</b>, <b>min</b>, <b>max</b>, or <b>none</b> (no time total: the aggregate period stays empty). Periods with nothing recorded are skipped, never averaged in as 0.</p>
+<ul>
+  <li>For a total over time <i>and</i> other dimensions, the other dimensions are combined first (by the aggregation rule), then the periods (by the time summary).</li>
+  <li>A metric whose rule is <b>Formula</b> or <b>Rate</b> keeps that rule across time too: <code>margin_pct</code> for FY26 is the year's margin ÷ the year's sales, not a sum of monthly percentages.</li>
+  <li>A metric using a time function always reduces its periods by the time summary.</li>
+</ul>
+
+<h3>Choosing the pair</h3>
+<table>
+<tr><th style="width:36%">Metric</th><th>Aggregation rule</th><th>Time summary</th></tr>
+<tr><td><code>sales - cost</code></td><td>Sum</td><td>sum</td></tr>
+<tr><td><code>IF(sales = 0, 0, ROUND((sales - cost) / sales * 100, 1))</code></td><td>Formula</td><td>(Formula applies)</td></tr>
+<tr><td><code>revenue / units</code> (price)</td><td>Rate: revenue ÷ units</td><td>(Rate applies)</td></tr>
+<tr><td><code>LAG(closing, 1, 100)</code> (opening)</td><td>Sum</td><td>first</td></tr>
+<tr><td><code>opening + flow</code> (closing)</td><td>Sum</td><td>last</td></tr>
+<tr><td><code>headcount</code> (input)</td><td>Sum</td><td>last (or average)</td></tr>
+<tr><td><code>YEARVALUE(sales)</code></td><td>Sum</td><td>none, if a yearly figure repeated per month should not add up</td></tr>
+</table>
+
+<h3>Users who cannot see every member</h3>
+<p>A business user may have members hidden from them (Business Admin › access rules). Most metrics are then recomputed from what that user can see. A metric that reads <i>other</i> cells — a time function, LOOKUP, the SUMIFS family, TIMESUM or a *VALUE function — is shown from the stored result instead, and a cell whose result was built from a hidden member is <b>withheld</b>: blank ("—") in the grid, a missing point in a chart. A total that includes a withheld cell is withheld too. The engine never recomputes such a cell from the visible part alone, because that would show a number the model never produced.</p>
+
+<h2>16. Recipes</h2>
+<p>The formulas that read the model were computed live, cell by cell, on the example model (chapter 11) by <code>cmd/verify-formula-catalogue</code>; the one-line arithmetic ones are asserted by the function catalogue test.</p>
+<table>
+<tr><th style="width:24%">Need</th><th style="width:50%">Formula</th><th>Notes</th></tr>
+<tr><td>Margin %</td><td><code>IF(sales = 0, 0, ROUND((sales - cost) / sales * 100, 1))</code></td><td>Rule Formula, so totals are true ratios</td></tr>
+<tr><td>Unit price</td><td><code>ROUND(sales / units, 2)</code></td><td>Rule Rate (sales ÷ units) for totals</td></tr>
+<tr><td>Guarded division</td><td><code>IFERROR(sales / units, 0)</code> or <code>IF(units = 0, 0, sales / units)</code></td><td>The IF form hides only the case you expect</td></tr>
+<tr><td>Growth vs previous period</td><td><code>IF(PREVIOUS(sales) = 0, 0, ROUND(sales / PREVIOUS(sales) - 1, 4))</code></td><td>First period: 0</td></tr>
+<tr><td>Share of the parent member</td><td><code>sales / LOOKUP(sales, region, PARENT(region))</code></td><td>DE in Jan: 0.6667</td></tr>
+<tr><td>Share of all members</td><td><code>ROUND(sales / SUMIFS(sales, region, "*") * 100, 3)</code></td><td>Leaves only, so no double counting</td></tr>
+<tr><td>Share of the year</td><td><code>ROUND(sales / YEARVALUE(sales) * 100, 4)</code></td><td>Uses sales' time summary</td></tr>
+<tr><td>Currency conversion</td><td><code>ROUND(sales * LOOKUP(fx_rate, currency, region.currency), 2)</code></td><td>Rate picked by the region's own currency</td></tr>
+<tr><td>Year to date in group currency</td><td><code>YEARTODATE(sales * LOOKUP(fx_rate, currency, region.currency))</code></td><td>Time function over a lookup</td></tr>
+<tr><td>Quarter progress</td><td><code>ROUND(QUARTERTODATE(sales) / QUARTERVALUE(sales), 4)</code></td><td>1 in a quarter's last month</td></tr>
+<tr><td>Running total that restarts each quarter</td><td><code>CUMULATE(sales, MOD(MONTH(START()), 3) = 1)</code></td><td>Same as QUARTERTODATE on a January fiscal year</td></tr>
+<tr><td>Trailing three-month average</td><td><code>MOVINGSUM(sales, -2, 0, AVERAGE)</code></td><td>Averages only the months that exist at the start</td></tr>
+<tr><td>Previous period's value of a ratio</td><td><code>LAG(share_parent, 1, 0)</code></td><td>Any calculated metric can be shifted</td></tr>
+<tr><td>Previous period's segment total</td><td><code>PREVIOUS(SUMIFS(sales, region.segment, "Enterprise"))</code></td><td>Any expression can be shifted</td></tr>
+<tr><td>Lag set per member</td><td><code>LAG(sales, ROUND(region.factor, 0), 0)</code></td><td>Dynamic offset from a property</td></tr>
+<tr><td>Lag set per cell</td><td><code>LAG(sales, lag_n, -5, STRICT)</code></td><td>lag_n = 0 gives the substitute</td></tr>
+<tr><td>Average of the cell's peers</td><td><code>AVERAGEIFS(sales, region.segment, region.segment)</code></td><td>Criterion from the cell's own property</td></tr>
+<tr><td>Everyone else</td><td><code>AVERAGEIF(region, "&lt;&gt;" &amp; region, sales)</code></td><td>Built criterion</td></tr>
+<tr><td>Running total by period code</td><td><code>SUMIFS(sales, period, "&lt;=" &amp; period)</code></td><td>Codes order as text: use sortable codes (2026-01)</td></tr>
+<tr><td>Days since a date property</td><td><code>DAYS(START(), region.opened)</code></td><td>Per period</td></tr>
+<tr><td>Normalise to a 30-day month</td><td><code>ROUND(sales / DAYSINMONTH(YEAR(START()), MONTH(START())) * 30, 2)</code></td><td></td></tr>
+<tr><td>Flag the first quarter</td><td><code>IFS(START() &lt; DATE(2026, 4, 1), "Q1", END() &gt; DATE(2026, 9, 30), "Q4", TRUE, "mid") = "Q1"</code></td><td>Stores 1 or 0</td></tr>
+<tr><td>Opening / closing balance</td><td><code>opening = LAG(closing, 1, 100)</code>, <code>closing = opening + flow</code></td><td>Summaries first / last</td></tr>
+<tr><td>A band from thresholds</td><td><code>IFS(sales &gt; 250, 3, sales &gt; 150, 2, TRUE, 1)</code></td><td>End with TRUE</td></tr>
+<tr><td>Floor at zero</td><td><code>MAX(0, sales - cost - 500)</code></td><td></td></tr>
+<tr><td>Round up to a pack size</td><td><code>ROUNDUP(units / 12, 0) * 12</code> or <code>CEILING(units, 12)</code></td><td></td></tr>
+</table>

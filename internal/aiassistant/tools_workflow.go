@@ -162,10 +162,15 @@ func (e *ToolExecutor) listWorkflowRoles(ctx context.Context) (string, error) {
 	var sb strings.Builder
 	sb.WriteString("Platform roles (use the code): business_user, business_admin, developer, platform_admin\n")
 	rows, err := e.pool.Query(ctx, `
-		SELECT br.id::text, br.name, count(brm.user_id)
+		SELECT br.id::text, br.name,
+		       (SELECT count(*) FROM identity.business_role_member brm WHERE brm.role_id = br.id),
+		       COALESCE((SELECT string_agg(d.name, ', ' ORDER BY d.name)
+		                 FROM identity.business_role_dashboard brd
+		                 JOIN model.dashboard_def d ON d.id = brd.dashboard_id
+		                 WHERE brd.role_id = br.id AND d.model_id = $1::uuid
+		                   AND d.revision_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid), '')
 		FROM identity.business_role br
 		JOIN core.workspace w ON w.id = br.workspace_id
-		LEFT JOIN identity.business_role_member brm ON brm.role_id = br.id
 		WHERE w.customer_id = (
 		    SELECT COALESCE(a.customer_id, ws.customer_id)
 		    FROM core.model mo
@@ -173,8 +178,8 @@ func (e *ToolExecutor) listWorkflowRoles(ctx context.Context) (string, error) {
 		    LEFT JOIN core.workspace ws ON ws.id = a.workspace_id
 		    WHERE mo.id = $1::uuid
 		)
-		GROUP BY br.id, br.name ORDER BY br.name
-	`, e.modelID)
+		ORDER BY br.name
+	`, e.modelID, e.revID)
 	if err != nil {
 		return "", fmt.Errorf("list business roles: %w", err)
 	}
@@ -182,13 +187,16 @@ func (e *ToolExecutor) listWorkflowRoles(ctx context.Context) (string, error) {
 	n := 0
 	sb.WriteString("Business roles (use the NAME exactly as written):\n")
 	for rows.Next() {
-		var id, name string
+		var id, name, dashboards string
 		var members int
-		if rows.Scan(&id, &name, &members) != nil {
+		if rows.Scan(&id, &name, &members, &dashboards) != nil {
 			continue
 		}
 		n++
-		fmt.Fprintf(&sb, "  %s (id:%s, %d member(s))\n", name, id, members)
+		if dashboards == "" {
+			dashboards = "none"
+		}
+		fmt.Fprintf(&sb, "  %s (id:%s, %d member(s); may open dashboards of this revision: %s)\n", name, id, members, dashboards)
 	}
 	if n == 0 {
 		sb.WriteString("  none yet — create_business_role adds one; a business admin then adds its members\n")

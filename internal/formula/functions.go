@@ -3,6 +3,7 @@ package formula
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -254,8 +255,7 @@ func fnROUND(ctx *EvalContext, args []Node) Value {
 	if !ok {
 		return ErrorVal(ErrValue)
 	}
-	factor := math.Pow(10, places)
-	return NumberVal(math.Round(n*factor) / factor)
+	return NumberVal(decimalRound(n, places, roundHalfAway))
 }
 
 func fnROUNDUP(ctx *EvalContext, args []Node) Value {
@@ -274,11 +274,7 @@ func fnROUNDUP(ctx *EvalContext, args []Node) Value {
 	if !ok {
 		return ErrorVal(ErrValue)
 	}
-	factor := math.Pow(10, places)
-	if n >= 0 {
-		return NumberVal(math.Ceil(n*factor) / factor)
-	}
-	return NumberVal(math.Floor(n*factor) / factor)
+	return NumberVal(decimalRound(n, places, roundAway))
 }
 
 func fnROUNDDOWN(ctx *EvalContext, args []Node) Value {
@@ -297,11 +293,7 @@ func fnROUNDDOWN(ctx *EvalContext, args []Node) Value {
 	if !ok {
 		return ErrorVal(ErrValue)
 	}
-	factor := math.Pow(10, places)
-	if n >= 0 {
-		return NumberVal(math.Floor(n*factor) / factor)
-	}
-	return NumberVal(math.Ceil(n*factor) / factor)
+	return NumberVal(decimalRound(n, places, roundToward))
 }
 
 func fnCEILING(ctx *EvalContext, args []Node) Value {
@@ -320,7 +312,7 @@ func fnCEILING(ctx *EvalContext, args []Node) Value {
 	if !ok || sig == 0 {
 		return ErrorVal(ErrDiv0)
 	}
-	return NumberVal(math.Ceil(n/sig) * sig)
+	return NumberVal(significant15(math.Ceil(significant15(n/sig)) * sig))
 }
 
 func fnFLOOR(ctx *EvalContext, args []Node) Value {
@@ -339,7 +331,7 @@ func fnFLOOR(ctx *EvalContext, args []Node) Value {
 	if !ok || sig == 0 {
 		return ErrorVal(ErrDiv0)
 	}
-	return NumberVal(math.Floor(n/sig) * sig)
+	return NumberVal(significant15(math.Floor(significant15(n/sig)) * sig))
 }
 
 func fnMOD(ctx *EvalContext, args []Node) Value {
@@ -669,10 +661,10 @@ func fnMID(ctx *EvalContext, args []Node) Value {
 	if !ok {
 		return ErrorVal(ErrValue)
 	}
-	start := int(startNum) - 1 // Excel 1-based
-	if start < 0 {
-		start = 0
+	if startNum < 1 || numChars < 0 {
+		return ErrorVal(errValue("MID: the start must be at least 1 and the length not negative"))
 	}
+	start := int(startNum) - 1 // Excel 1-based
 	if start >= len(runes) {
 		return StringVal("")
 	}
@@ -731,27 +723,57 @@ func fnTEXT(ctx *EvalContext, args []Node) Value {
 	if !ok {
 		return StringVal(vals[0].String())
 	}
-	// Basic format support
-	upper := strings.ToUpper(fmtStr)
-	switch {
-	case upper == "0" || upper == "#":
-		return StringVal(fmt.Sprintf("%.0f", n))
-	case upper == "0.00":
-		return StringVal(fmt.Sprintf("%.2f", n))
-	case upper == "0.0":
-		return StringVal(fmt.Sprintf("%.1f", n))
-	case strings.Contains(upper, "YYYY") && strings.Contains(upper, "MM"):
-		// Date formatting from serial number — simplified
-		t := serialToTime(n)
-		result := fmtStr
-		result = strings.ReplaceAll(result, "YYYY", fmt.Sprintf("%04d", t.Year()))
-		result = strings.ReplaceAll(result, "yyyy", fmt.Sprintf("%04d", t.Year()))
-		result = strings.ReplaceAll(result, "MM", fmt.Sprintf("%02d", t.Month()))
-		result = strings.ReplaceAll(result, "DD", fmt.Sprintf("%02d", t.Day()))
-		result = strings.ReplaceAll(result, "dd", fmt.Sprintf("%02d", t.Day()))
-		return StringVal(result)
+	if decimals, ok := fixedFormat(fmtStr); ok {
+		return StringVal(strconv.FormatFloat(decimalRound(n, float64(decimals), roundHalfAway), 'f', decimals, 64))
 	}
-	return StringVal(fmt.Sprintf("%g", n))
+	if strings.Contains(strings.ToUpper(fmtStr), "YYYY") {
+		return StringVal(formatDate(serialToTime(n), fmtStr))
+	}
+	return StringVal(numberText15(n))
+}
+
+// fixedFormat recognises the number formats TEXT supports: "0" or "#" (no
+// decimals) and "0." or "#." followed by one or more 0s (that many
+// decimals).
+func fixedFormat(f string) (int, bool) {
+	if f == "" || (f[0] != '0' && f[0] != '#') {
+		return 0, false
+	}
+	if len(f) == 1 {
+		return 0, true
+	}
+	if f[1] != '.' || len(f) == 2 {
+		return 0, false
+	}
+	for _, r := range f[2:] {
+		if r != '0' {
+			return 0, false
+		}
+	}
+	return len(f) - 2, true
+}
+
+// formatDate replaces yyyy, mm and dd (any case) in layout with the year,
+// month and day of t; every other character is kept.
+func formatDate(t time.Time, layout string) string {
+	var sb strings.Builder
+	for i := 0; i < len(layout); {
+		switch {
+		case i+4 <= len(layout) && strings.EqualFold(layout[i:i+4], "yyyy"):
+			fmt.Fprintf(&sb, "%04d", t.Year())
+			i += 4
+		case i+2 <= len(layout) && strings.EqualFold(layout[i:i+2], "mm"):
+			fmt.Fprintf(&sb, "%02d", int(t.Month()))
+			i += 2
+		case i+2 <= len(layout) && strings.EqualFold(layout[i:i+2], "dd"):
+			fmt.Fprintf(&sb, "%02d", t.Day())
+			i += 2
+		default:
+			sb.WriteByte(layout[i])
+			i++
+		}
+	}
+	return sb.String()
 }
 
 func fnSUBSTITUTE(ctx *EvalContext, args []Node) Value {
@@ -768,8 +790,11 @@ func fnSUBSTITUTE(ctx *EvalContext, args []Node) Value {
 	if len(args) == 4 {
 		// Replace only the nth occurrence
 		nthNum, ok := vals[3].Number()
-		if !ok {
-			return ErrorVal(ErrValue)
+		if !ok || nthNum < 1 {
+			return ErrorVal(errValue("SUBSTITUTE: the instance must be a number of at least 1"))
+		}
+		if oldText == "" {
+			return StringVal(text)
 		}
 		nth := int(nthNum)
 		count := 0
@@ -793,6 +818,9 @@ func fnSUBSTITUTE(ctx *EvalContext, args []Node) Value {
 		}
 		return StringVal(sb.String())
 	}
+	if oldText == "" {
+		return StringVal(text) // as in Excel: nothing to find, nothing replaced
+	}
 	return StringVal(strings.ReplaceAll(text, oldText, newText))
 }
 
@@ -811,6 +839,9 @@ func serialToTime(serial float64) time.Time {
 }
 
 func fnTODAY(ctx *EvalContext, args []Node) Value {
+	if ferr := requireArgCount("TODAY", args, 0, 0); ferr != nil {
+		return ErrorVal(ferr)
+	}
 	t := time.Now().UTC().Truncate(24 * time.Hour)
 	return NumberVal(timeToSerial(t))
 }
@@ -908,8 +939,12 @@ func fnEDATE(ctx *EvalContext, args []Node) Value {
 		return ErrorVal(ErrValue)
 	}
 	t := serialToTime(serial)
-	t = t.AddDate(0, int(months), 0)
-	return NumberVal(timeToSerial(t))
+	target := time.Date(t.Year(), t.Month()+time.Month(int(months)), 1, 0, 0, 0, 0, time.UTC)
+	day := t.Day()
+	if last := target.AddDate(0, 1, -1).Day(); day > last {
+		day = last // Jan 31 + 1 month is Feb 28, as in Excel
+	}
+	return NumberVal(timeToSerial(time.Date(target.Year(), target.Month(), day, 0, 0, 0, 0, time.UTC)))
 }
 
 func fnEOMONTH(ctx *EvalContext, args []Node) Value {
@@ -926,10 +961,10 @@ func fnEOMONTH(ctx *EvalContext, args []Node) Value {
 		return ErrorVal(ErrValue)
 	}
 	t := serialToTime(serial)
-	// Move to first day of target month, then go back one day
-	t = t.AddDate(0, int(months)+1, 0)
-	t = time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -1)
-	return NumberVal(timeToSerial(t))
+	// From the first of the month, so a 31st never overflows into the month
+	// after: the first of the month after the target, less one day.
+	first := time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+	return NumberVal(timeToSerial(first.AddDate(0, int(months)+1, -1)))
 }
 
 // fnDAYSINMONTH implements DAYSINMONTH(year, month): the number of days in

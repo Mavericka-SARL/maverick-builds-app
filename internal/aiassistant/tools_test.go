@@ -58,10 +58,11 @@ func TestValidateFormulas_NoCalculatedMetrics(t *testing.T) {
 	}
 }
 
-// TestValidateFormulas_DetectsBrokenReference exercises a real gap: delete_metric
-// has no guard against deleting a metric other formulas still depend on, so a
-// formula can go broken after creation without any single write step failing.
-// validate_formulas is exactly the tool meant to catch that after the fact.
+// TestValidateFormulas_DetectsBrokenReference: delete_metric refuses to delete
+// a metric another formula reads (METRIC_IN_USE), but a formula can still
+// name a metric that is gone — a model imported without validation, or data
+// from before that guard. validate_formulas is the tool that catches it after
+// the fact.
 func TestValidateFormulas_DetectsBrokenReference(t *testing.T) {
 	pool := setupWriteExecutorDB(t)
 	modelID := seedModel(t, pool)
@@ -82,8 +83,13 @@ func TestValidateFormulas_DetectsBrokenReference(t *testing.T) {
 		t.Fatalf("create revenue_per_head: %v", err)
 	}
 
-	if _, _, err := writer.Execute(ctx, "delete_metric", mustJSON(t, map[string]any{"metric_id": headcountID})); err != nil {
-		t.Fatalf("delete headcount: %v", err)
+	if _, _, err := writer.Execute(ctx, "delete_metric", mustJSON(t, map[string]any{"metric_id": headcountID})); err == nil ||
+		!strings.Contains(err.Error(), "METRIC_IN_USE") || !strings.Contains(err.Error(), "revenue_per_head") {
+		t.Fatalf("delete headcount while revenue_per_head reads it: want METRIC_IN_USE naming revenue_per_head, got %v", err)
+	}
+	// The state an unguarded path leaves behind.
+	if _, err := pool.Exec(ctx, `DELETE FROM model.metric_def WHERE id=$1::uuid`, headcountID); err != nil {
+		t.Fatalf("remove headcount directly: %v", err)
 	}
 
 	reader := aiassistant.NewToolExecutor(pool, modelID, revID)

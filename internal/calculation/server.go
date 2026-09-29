@@ -40,7 +40,8 @@ func (s *Server) TriggerRecalc(ctx context.Context, req *calculationv1.TriggerRe
 	revisionID := req.Key.RevisionId
 
 	go func() { //nolint:contextcheck // intentional: outlives the request
-		bgCtx := context.Background()
+		bgCtx, cancel := context.WithTimeout(context.Background(), RecalcTimeout)
+		defer cancel()
 		if err := s.scheduler.RecalcAffected(bgCtx,
 			req.Key.ModelId, revisionID,
 			[]string{req.Key.MetricId},
@@ -85,7 +86,8 @@ func (s *Server) TriggerFullRecalc(ctx context.Context, req *calculationv1.Trigg
 	}
 
 	go func() { //nolint:contextcheck // intentional: outlives the request
-		bgCtx := context.Background()
+		bgCtx, cancel := context.WithTimeout(context.Background(), RecalcTimeout)
+		defer cancel()
 		if err := s.scheduler.RecalcAffected(bgCtx, req.ModelId, revisionID, inputIDs); err != nil {
 			s.log.Error().Err(err).Msg("full recalc failed")
 		}

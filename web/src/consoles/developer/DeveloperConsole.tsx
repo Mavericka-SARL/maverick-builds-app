@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Boxes, Users, Sigma, ListTree, GitBranch, Zap, FileText, Table2, LayoutDashboard, Workflow, Plug, Sparkles } from "lucide-react";
+import { Boxes, Users, UserCog, Sigma, ListTree, GitBranch, Zap, FileText, Table2, LayoutDashboard, Workflow, Plug, Sparkles } from "lucide-react";
 import { api, type AdminTenant, type AdminUser } from "../../api/client";
 import { WorkflowsTab } from "./WorkflowsTab";
 import { AIAssistant } from "./AIAssistant";
@@ -15,12 +15,13 @@ import { MetricsTab } from "./MetricsTab";
 import { DepGraph } from "./DependencyGraphTab";
 import { IntegrationsTab } from "./IntegrationsTab";
 import { DashboardsTab } from "./DashboardsTab";
+import { RolesTab } from "../business-admin/BusinessAdminConsole";
 import { PageLayout, LoadingState, ErrorState } from "../../ui";
 import { tabId, localTab, sectionOf, adminProvidesUsers, type ConsoleSection, type SectionId, type SectionInput } from "../../router/sections";
 
 // ── Section ───────────────────────────────────────────────────────────────────
 
-type Tab = "applications" | "users" | "metrics" | "dimensions" | "graph" | "automation" | "forms" | "grids" | "dashboards" | "workflows" | "integrations" | "ai";
+type Tab = "applications" | "users" | "metrics" | "dimensions" | "graph" | "automation" | "forms" | "grids" | "dashboards" | "workflows" | "roles" | "integrations" | "ai";
 
 const TAB_LABELS: Record<Tab, string> = {
   applications: "Models",
@@ -33,6 +34,7 @@ const TAB_LABELS: Record<Tab, string> = {
   grids:        "Grids",
   dashboards:   "Dashboards",
   workflows:    "Workflows",
+  roles:        "Roles",
   integrations: "Integrations",
   ai:           "AI Developer",
 };
@@ -108,7 +110,7 @@ export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInpu
   if (!enabled) return null;
   const t = (id: Tab) => tabId(SECTION, id);
 
-  const noFetch = local === "applications" || local === "users" || local === "automation" || local === "forms" || local === "grids" || local === "dashboards" || local === "integrations" || local === "workflows";
+  const noFetch = local === "applications" || local === "users" || local === "automation" || local === "forms" || local === "grids" || local === "dashboards" || local === "integrations" || local === "workflows" || local === "roles";
   const isLoading = local === "users" ? userTenantsLoading || usersLoading : local === "dimensions" ? dimsLoading : noFetch ? false : modelLoading;
   const error = local === "users" ? userTenantsError || usersError : local === "dimensions" ? dimsError : noFetch ? null : modelError;
 
@@ -123,6 +125,9 @@ export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInpu
         { id: t("grids"), label: TAB_LABELS.grids, icon: <Table2 size={16} /> },
         { id: t("dashboards"), label: TAB_LABELS.dashboards, icon: <LayoutDashboard size={16} /> },
         { id: t("workflows"), label: TAB_LABELS.workflows, icon: <Workflow size={16} /> },
+        // The roles workflow steps are assigned to. A business admin's own
+        // Roles tab (with members) already covers it for someone who holds both.
+        ...(roles.includes("business_admin") ? [] : [{ id: t("roles"), label: TAB_LABELS.roles, icon: <UserCog size={16} /> }]),
         { id: t("automation"), label: TAB_LABELS.automation, icon: <Zap size={16} /> },
         { id: t("integrations"), label: TAB_LABELS.integrations, icon: <Plug size={16} /> },
         { id: t("graph"), label: TAB_LABELS.graph, icon: <GitBranch size={16} /> },
@@ -181,6 +186,7 @@ export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInpu
           {cur === "forms" && <FormsTab revisionId={effectiveRevisionId || undefined} />}
           {cur === "grids" && <GridsTab revisionId={effectiveRevisionId || undefined} />}
           {cur === "dashboards" && <DashboardsTab revisionId={effectiveRevisionId || undefined} />}
+          {cur === "roles" && <RolesTab variant="developer" revisionId={effectiveRevisionId || undefined} />}
           {cur === "integrations" && <IntegrationsTab revisionId={effectiveRevisionId || undefined} />}
         </PageLayout>
       );

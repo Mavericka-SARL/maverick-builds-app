@@ -149,13 +149,14 @@ func (l *lexer) readString(start int) Token {
 				l.advance() // escaped quote ""
 				sb.WriteRune('"')
 			} else {
-				break
+				return Token{Type: tokString, Val: sb.String(), Pos: start}
 			}
 		} else {
 			sb.WriteRune(ch)
 		}
 	}
-	return Token{Type: tokString, Val: sb.String(), Pos: start}
+	return Token{Type: tokError, Pos: start,
+		Val: fmt.Sprintf("the text starting at position %d has no closing quote (\")", start)}
 }
 
 func (l *lexer) readNumber(start int) Token {
@@ -223,8 +224,10 @@ func (l *lexer) readBraceIdent(start int) Token {
 		l.advance()
 	}
 	val := string(l.src[inner:l.pos])
-	if l.pos < len(l.src) {
-		l.advance() // consume '}'
+	if l.pos >= len(l.src) {
+		return Token{Type: tokError, Pos: start,
+			Val: fmt.Sprintf("the name starting at position %d has no closing brace (})", start)}
 	}
+	l.advance() // consume '}'
 	return Token{Type: tokIdent, Val: val, Pos: start}
 }

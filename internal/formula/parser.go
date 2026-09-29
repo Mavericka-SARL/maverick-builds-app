@@ -156,18 +156,20 @@ func (p *parser) parseMulDiv() (Node, error) {
 	return left, nil
 }
 
+// parsePower chains ^ from left to right, as Excel does: 2^3^2 is
+// (2^3)^2 = 64.
 func (p *parser) parsePower() (Node, error) {
 	left, err := p.parseUnary()
 	if err != nil {
 		return nil, err
 	}
-	if p.peek().Type == tokCaret {
+	for p.peek().Type == tokCaret {
 		p.advance()
 		right, err := p.parseUnary()
 		if err != nil {
 			return nil, err
 		}
-		return &BinaryExpr{Op: "^", Left: left, Right: right}, nil
+		left = &BinaryExpr{Op: "^", Left: left, Right: right}
 	}
 	return left, nil
 }

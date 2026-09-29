@@ -1,6 +1,6 @@
 <h2>AI Developer</h2>
 <p class="path">Sidebar: Build › AI Developer</p>
-<p>A chat assistant that can read the model and, when you approve, build in it: metrics, dimensions and members, grids, dashboards and widgets, revisions. Every write happens in an isolated <b>AI draft</b> revision that you promote or discard, so the live model is never touched by accident.</p>
+<p>A chat assistant that can read the model and, when you approve, build, change and remove what you build on the other Build screens, under the same checks. Model changes happen in an isolated <b>AI draft</b> revision that you promote or discard, so the live model is never touched by accident. Three kinds of change are live as soon as you execute the plan, as they are on their own screens: business roles, user access rules, and form records posted through a form integration.</p>
 <figure><img src="img/11-ai-developer.png" alt="AI Developer screen with the session list, chat area and message box"><figcaption>Sessions on the left, the conversation in the middle. Settings hold the provider and key; the Activity panel lists proposals.</figcaption></figure>
 <h3>Controls</h3>
 <table class="ctl">
@@ -11,15 +11,26 @@
 <tr><td>Status line</td><td>"Thinking…" or "Calling &lt;tool&gt;…" while the assistant reads the model.</td></tr>
 <tr><td><b>Action plan</b> card</td><td>When the assistant wants to change something it proposes numbered steps (for example Create metric, Add dimension member, Create grid, Add dashboard widget). <b>Execute</b> runs them; <b>Reject</b> discards. After execution each step shows success or failure; a plan with failures is marked partial.</td></tr>
 <tr><td><b>Activity</b> panel</td><td>This session's proposal history.</td></tr>
-<tr><td>Draft banner</td><td>"Working in an isolated draft revision — changes here won't affect the live model until promoted." <b>Promote to Active</b> makes the draft the active revision; <b>Discard</b> asks <b>Discard this draft?</b> and permanently removes every change the AI made in this session.</td></tr>
+<tr><td>Draft banner</td><td>"Working in an isolated draft revision — changes here won't affect the live model until promoted." <b>Promote to Active</b> makes the draft the active revision; <b>Discard</b> asks <b>Discard this draft?</b> and permanently removes every model change the AI made in this session (business roles, access rules and posted form records are not in the draft and stay).</td></tr>
 </table>
 <h3>What it can do</h3>
 <ul>
-  <li>Read tools: describe metrics, dimensions, grids and dashboards, validate formulas, answer questions about the model and attached documents.</li>
-  <li>Write tools, always through an approved plan: create, update and delete metrics; create dimensions and change them afterwards (<code>update_dimension</code>: name, rollup rule, parent dimension, property grouping, deriving its members), add or update members and declare, rename, retype and delete typed member properties (<code>add_dimension_property</code>, <code>update_dimension_property</code>, <code>delete_dimension_property</code>); create grids and attach metrics and dimensions; create dashboards and add widgets; create revisions; generate and apply migrations.</li>
+  <li>Read tools: describe metrics, dimensions, grids (with display levels), dashboard folders, dashboards and each widget, revisions, workflows, triggers, forms, form integrations, business roles and users; validate formulas and workflows; answer questions about the model and attached documents.</li>
+  <li>Write tools, always through an approved plan:
+    <ul>
+      <li>metrics: create, update, delete;</li>
+      <li>dimensions: create, change (<code>update_dimension</code>: name, rollup rule, parent dimension, property grouping, deriving its members) and delete; members: add, change (code, label, parent, period dates, properties), delete, and generate a run of periods; typed member properties: declare, rename, retype, delete;</li>
+      <li>grids: create, rename, delete, add and remove metrics and dimensions, set a dimension's display level;</li>
+      <li>dashboards: folders, dashboards and widgets — create, change (a widget's place, size, title, what it shows) and delete;</li>
+      <li>tags, revisions, and user access rules (a business-admin capability given to the assistant on purpose);</li>
+      <li>workflows, triggers, business roles, forms and form integrations (below).</li>
+    </ul>
+    Each change is the screen's own action with the screen's checks: a dimension or member a formula still uses is refused, a new member code carries its stored values over, a leaf that gains its first child hands its values down to it.</li>
+  <li>The tenant's plan limits apply to the assistant as they apply to you.</li>
   <li>Plans are capped at 50 steps; long tasks are continued in a follow-up plan.</li>
+  <li>What stays yours: publishing and test-running a workflow, promoting or discarding the draft and deleting revisions, who is in a business role, users, data connectors (REST API and Google Sheets), entering business data, and creating applications. Database tables are migrated automatically; there is nothing to run.</li>
 </ul>
-<div class="note"><b>Workflows and forms.</b> The assistant builds the whole chain a workflow needs: the business roles its steps are assigned to, the definition with every step type the editor offers, the automation rule that starts it, and the form and form integration that feed it. It runs the same Validate check as the Workflows editor and reports the verdict with every change. Two things stay yours: <b>publishing</b> a workflow (the assistant leaves it as a draft and tells you so) and adding <b>members</b> to a role. The assistant uses the same validation as the screens, so a formula or a workflow it proposes is rejected under the same rules you would be.</div>
+<div class="note"><b>Workflows and forms.</b> The assistant builds the whole chain a workflow needs: the business roles its steps are assigned to, the definition with every step type the editor offers, the automation rule that starts it, and the form and form integration that feed it. It also archives, restores and duplicates workflows, renames and deletes roles and sets the dashboards they may open, and backfills a form integration. It runs the same Validate check as the Workflows editor and reports the verdict with every change. Two things stay yours: <b>publishing</b> a workflow (the assistant leaves it as a draft and tells you so) and adding <b>members</b> to a role. The assistant uses the same validation as the screens, so a formula or a workflow it proposes is rejected under the same rules you would be.</div>
 
 <h2>Users</h2>
 <p class="path">Sidebar: Govern › Users (hidden when an admin section already provides it)</p>
@@ -33,10 +44,21 @@
 <tr><td><b>Workspace roles</b></td><td>Place a person into a workspace with a business role. The <b>Resource access</b> section (which applications and models a person may open) is shown to administrators only.</td></tr>
 <tr><td>Delete user</td><td>Confirm <b>Delete user?</b>: removes the person and revokes all their access. You cannot delete your own account.</td></tr>
 </table>
+<h2>Roles</h2>
+<p class="path">Sidebar: Build › Roles (hidden when you also hold business_admin: the Business Admin console's Roles tab is the same screen with members)</p>
+<p>Named business roles ("Budget Approvers", "Regional Managers"). Workflow tasks and approvals are assigned to these roles by name, or to the platform roles. A developer creates the roles their workflows need and decides which dashboards each may open; who is <b>in</b> a role is decided by a business admin.</p>
+<table class="ctl">
+<tr><th>Control</th><th>What it does</th></tr>
+<tr><td><b>New role name…</b> / <b>Add role</b></td><td>Creates a role in the application's workspace.</td></tr>
+<tr><td><b>Rename</b></td><td>Renames the role. Workflow steps name roles by name: update the steps that named the old one.</td></tr>
+<tr><td><b>Configure</b></td><td>Opens <b>Visible Dashboards</b>: tick the dashboards of the revision you are working on that the role's members may open, then <b>Save dashboard access</b>. Grants on dashboards of other revisions are kept.</td></tr>
+<tr><td>Delete (bin)</td><td>Confirm <b>Delete role?</b>: removes the role, its members and its dashboard grants.</td></tr>
+</table>
+
 <h3>Where the rest of access is configured</h3>
-<p>Three things decide what a business user sees and may change. All three live in the <b>Business Admin</b> console (sidebar group <b>Business Admin</b>), which a developer sees only when they also hold the business_admin role or ask a business admin:</p>
+<p>Three things decide what a business user sees and may change. Role membership and access rules live in the <b>Business Admin</b> console (sidebar group <b>Business Admin</b>), which a developer sees only when they also hold the business_admin role or ask a business admin:</p>
 <ul>
-  <li><b>Roles.</b> Named business roles ("Budget Approvers", "Regional Managers") with members. Workflow tasks and approvals are assigned to these roles or to the platform roles.</li>
-  <li><b>Dashboard access.</b> Per role, tick the dashboards its members may open (<b>Save dashboard access</b>). A dashboard on no role is invisible to business users.</li>
+  <li><b>Roles.</b> The roles above, with their members.</li>
+  <li><b>Dashboard access.</b> Per role, the dashboards its members may open (<b>Save dashboard access</b>). A business user who holds any business role sees only the dashboards granted to their roles; one who holds none sees every dashboard.</li>
   <li><b>Access rules.</b> Per user, an <b>Access level</b> of write, read or hidden for individual dimension members and metrics (<b>Save rules</b>). Hidden members disappear from grids, charts and selectors; read makes cells read-only; rules on a parent member cascade to its descendants.</li>
 </ul>

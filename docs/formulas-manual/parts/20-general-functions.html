@@ -1,0 +1,92 @@
+
+<h2>6. Logic</h2>
+<p>These functions evaluate only what they need. The branch not taken is never computed, so it can safely contain a division that would fail.</p>
+
+<div class="fn"><h4><span class="sig">IF(condition, then [, else])</span></h4>
+<p><i>then</i> when the condition is TRUE (or a non-zero number), otherwise <i>else</i>; without <i>else</i>, FALSE (stored as 0).</p>
+<table class="ex"><tr><td>IF(revenue = 0, 0, (revenue - cost) / revenue)</td><td>margin ratio, 0 when no revenue</td><td>0.25 for 1200/900</td></tr>
+<tr><td>IF(zero = 0, 0, revenue / zero)</td><td>untaken branch never divides</td><td>0</td></tr>
+<tr><td>IF(FALSE, 1)</td><td>no else</td><td>FALSE</td></tr></table></div>
+
+<div class="fn"><h4><span class="sig">IFS(condition1, value1 [, condition2, value2 …])</span></h4>
+<p>The value of the first TRUE condition. Arguments come in pairs; end with <code>TRUE, fallback</code>, because no match is <code>#N/A</code>.</p>
+<table class="ex"><tr><td>IFS(revenue &gt; 2000, "high", revenue &gt; 1000, "mid", TRUE, "low")</td><td>band</td><td>"mid" for 1200</td></tr>
+<tr><td>IFS(FALSE, 1)</td><td>nothing matches</td><td>#N/A</td></tr></table></div>
+
+<div class="fn"><h4><span class="sig">AND(a, b, …)</span> · <span class="sig">OR(a, b, …)</span> · <span class="sig">NOT(a)</span></h4>
+<p>TRUE when all / any argument is TRUE; NOT inverts. A number counts as TRUE when non-zero. AND stops at the first FALSE, OR at the first TRUE, so <code>OR(TRUE, 1/0)</code> is TRUE (Excel gives <code>#DIV/0!</code>).</p>
+<table class="ex"><tr><td>IF(AND(units &gt; 5, OR(region = "UK", region = "US")), 10, 0)</td><td>two conditions</td><td>10 or 0</td></tr>
+<tr><td>NOT(0)</td><td></td><td>TRUE</td></tr></table></div>
+
+<div class="fn"><h4><span class="sig">IFERROR(value, fallback)</span> · <span class="sig">IFNA(value, fallback)</span></h4>
+<p>IFERROR replaces any error with <i>fallback</i>; IFNA replaces only <code>#N/A</code> and lets every other error through.</p>
+<table class="ex"><tr><td>IFERROR(revenue / units, 0)</td><td>any error</td><td>0 when units = 0</td></tr>
+<tr><td>IFNA(LOOKUP(sales, region, "XX"), -1)</td><td>missing member</td><td>-1</td></tr>
+<tr><td>IFNA(1 / 0, 7)</td><td>not #N/A</td><td>#DIV/0!</td></tr></table></div>
+
+<div class="fn"><h4><span class="sig">SWITCH(expression, match1, result1 [, match2, result2 …] [, default])</span></h4>
+<p>Compares <i>expression</i> with each match as <code>=</code> does (text ignoring case) and returns the paired result; an odd last argument is the default. No match and no default is <code>#N/A</code>. At least three arguments.</p>
+<table class="ex"><tr><td>SWITCH(region.currency, "EUR", 1.1, "USD", 1, 0)</td><td>per-currency factor</td><td>1.1 for EUR</td></tr>
+<tr><td>SWITCH(MONTH(START()), 1, 0.1, 5, 0.25, 0)</td><td>by month</td><td>0.25 in May</td></tr></table></div>
+
+<h2>7. Math and rounding</h2>
+<p>All take numbers (TRUE/FALSE count as 1/0, blank as 0); text is <code>#VALUE!</code>.</p>
+<table>
+<tr><th style="width:26%">Function</th><th>Result</th><th style="width:34%">Examples</th></tr>
+<tr><td class="sig">ABS(x)</td><td>Absolute value.</td><td><code>ABS(-3.5)</code> = 3.5</td></tr>
+<tr><td class="sig">INT(x)</td><td>Rounds down to a whole number (toward minus infinity).</td><td><code>INT(7.8)</code> = 7, <code>INT(-7.2)</code> = -8</td></tr>
+<tr><td class="sig">ROUND(x, digits)</td><td>Rounds half away from zero to <i>digits</i> decimals; negative digits round to tens, hundreds, …</td><td><code>ROUND(3.14159, 2)</code> = 3.14, <code>ROUND(-2.5, 0)</code> = -3, <code>ROUND(1234.5, -2)</code> = 1200</td></tr>
+<tr><td class="sig">ROUNDUP(x, digits)</td><td>Rounds away from zero.</td><td><code>ROUNDUP(3.111, 2)</code> = 3.12, <code>ROUNDUP(-3.111, 2)</code> = -3.12</td></tr>
+<tr><td class="sig">ROUNDDOWN(x, digits)</td><td>Rounds toward zero.</td><td><code>ROUNDDOWN(-3.199, 2)</code> = -3.19, <code>ROUNDDOWN(1299, -2)</code> = 1200</td></tr>
+<tr><td class="sig">CEILING(x, significance)</td><td>Up to the next multiple of <i>significance</i> (toward plus infinity). Significance 0 is <code>#DIV/0!</code>.</td><td><code>CEILING(22, 5)</code> = 25, <code>CEILING(-22, 5)</code> = -20</td></tr>
+<tr><td class="sig">FLOOR(x, significance)</td><td>Down to the previous multiple. Significance 0 is <code>#DIV/0!</code>.</td><td><code>FLOOR(22, 5)</code> = 20, <code>FLOOR(-22, 5)</code> = -25</td></tr>
+<tr><td class="sig">MOD(x, divisor)</td><td>Remainder with the sign of the divisor, as in Excel. Divisor 0 is <code>#DIV/0!</code>.</td><td><code>MOD(23, 5)</code> = 3, <code>MOD(-7, 3)</code> = 2, <code>MOD(7, -3)</code> = -2</td></tr>
+<tr><td class="sig">POWER(x, y)</td><td>Same as <code>x^y</code>; a result that is not a real number is <code>#NUM!</code>.</td><td><code>POWER(1.05, 2)</code> = 1.1025, <code>POWER(-8, 1/3)</code> = #NUM!</td></tr>
+<tr><td class="sig">SQRT(x)</td><td>Square root; negative is <code>#NUM!</code>.</td><td><code>SQRT(144)</code> = 12</td></tr>
+</table>
+<div class="note ok"><b>Rounding rounds the number you see.</b> ROUND, ROUNDUP, ROUNDDOWN, CEILING and FLOOR work on the number's 15 significant digits with exact decimal arithmetic, as a spreadsheet does, not on its binary approximation: <code>ROUND(1.005, 2)</code> = 1.01, <code>ROUND(2.675, 2)</code> = 2.68, <code>ROUNDUP(0.1 + 0.2, 1)</code> = 0.3, <code>ROUNDDOWN(0.7 * 3, 1)</code> = 2.1, <code>CEILING(0.1 + 0.2, 0.1)</code> = 0.3. Digits that are not whole are truncated (<code>ROUND(x, 2.7)</code> rounds to 2 decimals).</div>
+
+<h2>8. Aggregates over arguments</h2>
+<p>These combine the values you list <i>in the formula</i>, at the same cell. To add up a metric across members, use SUMIFS (chapter 13) or a total (chapter 15); across periods, use the time functions (chapter 14).</p>
+<table>
+<tr><th style="width:26%">Function</th><th>Result</th><th style="width:34%">Examples</th></tr>
+<tr><td class="sig">SUM(a, b, …)</td><td>The sum. Blanks are skipped, TRUE counts 1, text is <code>#VALUE!</code>.</td><td><code>SUM(revenue, cost)</code> = 2100</td></tr>
+<tr><td class="sig">AVERAGE(a, b, …)</td><td>The mean of the non-blank arguments; none is <code>#DIV/0!</code>.</td><td><code>AVERAGE(2, 4)</code> = 3</td></tr>
+<tr><td class="sig">MIN(…)</td><td>The smallest; none is 0.</td><td><code>MIN(3, 1, 2)</code> = 1</td></tr>
+<tr><td class="sig">MAX(…)</td><td>The largest; none is 0.</td><td><code>MAX(0, revenue - cost - 500)</code> = 0 (floors at zero)</td></tr>
+<tr><td class="sig">COUNT(…)</td><td>How many arguments are numbers or TRUE/FALSE (not text, blank or errors).</td><td><code>COUNT(1, "a", TRUE, 1/0)</code> = 2</td></tr>
+<tr><td class="sig">COUNTA(…)</td><td>How many are not blank; errors are not counted (Excel counts them).</td><td><code>COUNTA(1, "a", "", 1/0)</code> = 3</td></tr>
+</table>
+<p>A metric with no recorded value at the cell reads as 0, not blank, so <code>AVERAGE(q1_sales, q2_sales)</code> averages a missing quarter in as 0.</p>
+
+<h2>9. Text</h2>
+<p>A stored result is always a number, so text functions work inside a formula: in comparisons, criteria (chapter 13) and member codes (LOOKUP, TIMESUM). Numbers used as text read as described in chapter 4.</p>
+<table>
+<tr><th style="width:30%">Function</th><th>Result</th><th style="width:34%">Examples</th></tr>
+<tr><td class="sig">CONCAT(a, b, …)</td><td>The arguments joined, like <code>&amp;</code>.</td><td><code>CONCAT(region, "-", 2026)</code> = "DE-2026"</td></tr>
+<tr><td class="sig">TEXTJOIN(delimiter, skip_empty, a, …)</td><td>Joined with <i>delimiter</i>; with <i>skip_empty</i> TRUE, empty texts are left out.</td><td><code>TEXTJOIN("-", TRUE, "a", "", "b")</code> = "a-b"</td></tr>
+<tr><td class="sig">LEN(text)</td><td>Number of characters.</td><td><code>LEN("héllo")</code> = 5, <code>LEN(1234567)</code> = 7</td></tr>
+<tr><td class="sig">LEFT(text [, n])</td><td>The first <i>n</i> characters (default 1). Negative <i>n</i> is <code>#VALUE!</code>.</td><td><code>LEFT("abc", 2)</code> = "ab"</td></tr>
+<tr><td class="sig">RIGHT(text [, n])</td><td>The last <i>n</i> characters (default 1).</td><td><code>RIGHT(region.currency, 2)</code> = "UR" for EUR</td></tr>
+<tr><td class="sig">MID(text, start, n)</td><td><i>n</i> characters from position <i>start</i> (1 = first). Start below 1 or negative <i>n</i> is <code>#VALUE!</code>; past the end is "".</td><td><code>MID("abcdef", 2, 3)</code> = "bcd"</td></tr>
+<tr><td class="sig">UPPER(text) · LOWER(text)</td><td>Upper or lower case.</td><td><code>UPPER("aBc")</code> = "ABC"</td></tr>
+<tr><td class="sig">TRIM(text)</td><td>Removes leading and trailing spaces and collapses inner runs to one space.</td><td><code>TRIM("  a   b  ")</code> = "a b"</td></tr>
+<tr><td class="sig">TEXT(x, format)</td><td>A number as text. Formats: <code>"0"</code> or <code>"#"</code> (no decimals), <code>"0.0"</code>, <code>"0.00"</code>, <code>"0.000"</code>… (that many decimals, rounded as ROUND does), or a date layout containing <code>yyyy</code> with <code>mm</code> and <code>dd</code> (any case). Any other format gives the plain number; a text <i>x</i> is returned as is.</td><td><code>TEXT(3.14159, "0.00")</code> = "3.14", <code>TEXT(DATE(2026, 3, 5), "yyyy-mm-dd")</code> = "2026-03-05", <code>TEXT(START(), "yyyy-mm")</code> = "2026-03"</td></tr>
+<tr><td class="sig">SUBSTITUTE(text, old, new [, instance])</td><td>Replaces every <i>old</i> (case-sensitive), or only the <i>instance</i>-th one (1 or more). Empty <i>old</i> changes nothing.</td><td><code>SUBSTITUTE("a-b-c", "-", "+", 2)</code> = "a-b+c"</td></tr>
+</table>
+<p>Typical uses: <code>IF(LEFT(region, 2) = "DE", …)</code>, a wildcard criterion built from the cell's member <code>SUMIFS(sales, product, LEFT(product, 1) &amp; "*")</code>, or a member code assembled for LOOKUP <code>LOOKUP(budget, period, TEXT(START(), "yyyy") &amp; "-01")</code>.</p>
+
+<h2>10. Dates</h2>
+<p>A date is a <b>serial number</b> of days, as in Excel: 1900-03-01 is 61 and 2026-03-05 is 46086, so dates subtract to a number of days and compare as numbers. Date properties and <code>START()</code>/<code>END()</code> give serials; <code>TEXT</code> shows one as a date.</p>
+<table>
+<tr><th style="width:30%">Function</th><th>Result</th><th style="width:34%">Examples</th></tr>
+<tr><td class="sig">TODAY()</td><td>Today's date (UTC). Recomputed only when the metric recalculates.</td><td><code>YEAR(TODAY())</code></td></tr>
+<tr><td class="sig">DATE(year, month, day)</td><td>The serial of that date. Months and days outside their range roll over.</td><td><code>DATE(2026, 13, 1)</code> = 2027-01-01, <code>DATE(2026, 3, 0)</code> = 2026-02-28</td></tr>
+<tr><td class="sig">YEAR(d) · MONTH(d) · DAY(d)</td><td>The parts of a date.</td><td><code>MONTH(DATE(2026, 3, 5))</code> = 3</td></tr>
+<tr><td class="sig">DAYS(end, start)</td><td><i>end</i> − <i>start</i> in days.</td><td><code>DAYS(DATE(2026, 3, 1), DATE(2026, 2, 1))</code> = 28</td></tr>
+<tr><td class="sig">EDATE(d, months)</td><td>The same day <i>months</i> later (negative: earlier); a day the target month lacks becomes its last day.</td><td><code>EDATE(DATE(2026, 1, 31), 1)</code> = 2026-02-28</td></tr>
+<tr><td class="sig">EOMONTH(d, months)</td><td>The last day of the month <i>months</i> away.</td><td><code>EOMONTH(DATE(2026, 1, 31), 0)</code> = 2026-01-31, <code>EOMONTH(DATE(2024, 1, 31), 1)</code> = 2024-02-29</td></tr>
+<tr><td class="sig">DAYSINMONTH(year, month)</td><td>Days in that month; a month outside 1–12 is <code>#NUM!</code>.</td><td><code>DAYSINMONTH(2024, 2)</code> = 29</td></tr>
+<tr><td class="sig">DAYSINYEAR(year)</td><td>366 in a leap year, else 365.</td><td><code>DAYSINYEAR(2026)</code> = 365</td></tr>
+</table>
+<p>With a time dimension, <code>START()</code> and <code>END()</code> (chapter 14) give the current period's first and last day, so the date functions work per period: <code>DAYSINMONTH(YEAR(START()), MONTH(START()))</code> is the days in each month, <code>DAYS(START(), employees.hired)</code> is tenure in days at each period's start.</p>

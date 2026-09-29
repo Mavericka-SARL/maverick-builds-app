@@ -705,7 +705,8 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 	// updated_by directly to ::uuid with no NULLIF (see NewWriteExecutorWithActor's
 	// doc comment) — a plain NewWriteExecutor here would 500 on the very first
 	// AI-authored workflow confirmed through this real endpoint.
-	executor := aiassistant.NewWriteExecutorWithActor(h.db.For(ctx), modelID, revID, a.UserID)
+	executor := aiassistant.NewWriteExecutorWithActor(h.db.For(ctx), modelID, revID, a.UserID).
+		WithHooks(h.aiWriteHooks(modelID, a.UserID))
 	_ = pStore.SetStatus(ctx, proposalID, "confirmed")
 
 	// Execute each step, substituting "<created in step N>" placeholders with
@@ -1681,5 +1682,30 @@ func (h *handler) aiSettings(w http.ResponseWriter, r *http.Request) {
 		h.aiSaveSettings(w, r)
 	default:
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
+	}
+}
+
+// aiWriteHooks hands the AI Developer's executor the gateway operations it
+// must share with the developer endpoints rather than copy: the tenant's
+// plan limits on metrics and members, and form-record posting.
+func (h *handler) aiWriteHooks(modelID, userID string) aiassistant.Hooks {
+	return aiassistant.Hooks{
+		CheckMetrics: func(ctx context.Context, modelID string, adding int) error {
+			cid := h.customerOfModel(ctx, modelID)
+			if cid == "" || h.plans == nil {
+				return nil
+			}
+			return h.plans.CheckMetrics(ctx, h.db.For(ctx), cid, modelID, adding)
+		},
+		CheckMembers: func(ctx context.Context, dimensionID string, adding int) error {
+			cid := h.customerOfModel(ctx, modelID)
+			if cid == "" || h.plans == nil {
+				return nil
+			}
+			return h.plans.CheckMembers(ctx, h.db.For(ctx), cid, dimensionID, adding)
+		},
+		PostFormIntegration: func(ctx context.Context, integrationID string) (int, error) {
+			return h.backfillFormMapping(ctx, integrationID, userID)
+		},
 	}
 }

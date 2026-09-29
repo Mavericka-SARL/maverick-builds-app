@@ -223,7 +223,7 @@ func TestBusinessRoles_CreateAndList(t *testing.T) {
 		t.Errorf("second create: %v id=%s want %s", err, again, roleID)
 	}
 	out, _ = reader.Execute(ctx, "list_workflow_roles", nil)
-	if !strings.Contains(out, "Finance Review (id:"+roleID+", 0 member(s))") {
+	if !strings.Contains(out, "Finance Review (id:"+roleID+", 0 member(s);") {
 		t.Errorf("listing after create: %s", out)
 	}
 }

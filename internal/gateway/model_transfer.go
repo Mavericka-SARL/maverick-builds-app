@@ -251,6 +251,8 @@ func (h *handler) recalcRevisionFromInputs(ctx context.Context, modelID, revisio
 // Unlike recalcRevisionFromInputs it also reaches metrics that read only
 // dimensions or dependency-free metrics.
 func (h *handler) recalcRevisionCalculated(ctx context.Context, modelID, revisionID string) {
+	ctx, done := h.backgroundRecalc(ctx, "recalculation of a revision")
+	defer done()
 	rows, err := h.db.Query(ctx,
 		`SELECT id::text FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid AND NOT is_input`,
 		modelID, revisionID)

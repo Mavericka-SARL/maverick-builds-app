@@ -385,6 +385,15 @@ func TestGridDeleteCascadesWidgetsAndMemberRenameRekeysWidgetProps(t *testing.T)
 		VALUES ($1::uuid, 'chart', $2, '{"chart": {"metric_ids": []}}'::jsonb, 6) RETURNING id::text`, dashID, f.gridStaffID).Scan(&designedChart); err != nil {
 		t.Fatal(err)
 	}
+	// dept_total and amount are read by other formulas, and a metric is not
+	// deleted while one reads it (METRIC_IN_USE): clean those first, as the
+	// developer would (dept_total, deleted first, is amount's other reader).
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE model.metric_def SET formula='1'
+		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND NOT is_input AND id <> $3::uuid
+	`, f.modelID, f.workingRevID, f.deptTotalMetricID); err != nil {
+		t.Fatal(err)
+	}
 	if status, body = f.do(t, "DELETE", "/api/developer/metrics/"+f.deptTotalMetricID, "rollup-test-approver", nil); status != 200 {
 		t.Fatalf("metric delete: status %d %v", status, body)
 	}

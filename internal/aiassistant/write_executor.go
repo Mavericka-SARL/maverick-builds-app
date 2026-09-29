@@ -15,6 +15,7 @@ import (
 
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
+	"github.com/mavericks-engine/mavericks/internal/modeledit"
 	"github.com/mavericks-engine/mavericks/internal/modeltransfer"
 	"github.com/mavericks-engine/mavericks/internal/rollup"
 	"github.com/mavericks-engine/mavericks/internal/tags"
@@ -57,6 +58,44 @@ type WriteExecutor struct {
 	// step renames that property, a later step passing the same id must
 	// keep reaching it rather than whatever now carries the old name.
 	propCounterparts map[string]string
+	hooks            Hooks
+}
+
+// Hooks are gateway operations the executor calls rather than copies, so
+// the assistant is held to exactly what the developer endpoints do. Each is
+// optional: an executor without one (unit tests, the draft-creating
+// executor) skips the plan check or refuses the tool that needs it.
+type Hooks struct {
+	// CheckMetrics and CheckMembers refuse a creation the tenant's plan does
+	// not allow — the checks POST /api/developer/metrics and the member
+	// endpoints run. Without them the assistant could build past a limit
+	// the developer is held to.
+	CheckMetrics func(ctx context.Context, modelID string, adding int) error
+	CheckMembers func(ctx context.Context, dimensionID string, adding int) error
+	// PostFormIntegration posts every eligible record of a form integration
+	// into its metric: the developer's backfill, and what the developer's
+	// integration update runs after saving.
+	PostFormIntegration func(ctx context.Context, integrationID string) (int, error)
+}
+
+// WithHooks sets the executor's gateway hooks and returns it.
+func (e *WriteExecutor) WithHooks(h Hooks) *WriteExecutor {
+	e.hooks = h
+	return e
+}
+
+func (e *WriteExecutor) checkMetrics(ctx context.Context, adding int) error {
+	if e.hooks.CheckMetrics == nil {
+		return nil
+	}
+	return e.hooks.CheckMetrics(ctx, e.modelID, adding)
+}
+
+func (e *WriteExecutor) checkMembers(ctx context.Context, dimensionID string, adding int) error {
+	if e.hooks.CheckMembers == nil || adding <= 0 {
+		return nil
+	}
+	return e.hooks.CheckMembers(ctx, dimensionID, adding)
 }
 
 func NewWriteExecutor(pool *pgxpool.Pool, modelID, revID string) *WriteExecutor {
@@ -128,6 +167,33 @@ var modelScopedResourceSQL = map[string]struct{ lookup, counterpart string }{
 		counterpart: `SELECT m.id::text FROM model.dimension_member m
 		              JOIN model.dimension_def d ON d.id = m.dimension_id
 		              WHERE d.model_id=$1::uuid AND d.revision_id=$2::uuid AND d.name || E'\x1f' || m.code = $3`,
+	},
+	"form": {
+		lookup:      `SELECT model_id::text, COALESCE(revision_id::text,''), name FROM model.form_def WHERE id=$1::uuid`,
+		counterpart: `SELECT id::text FROM model.form_def WHERE model_id=$1::uuid AND revision_id=$2::uuid AND name=$3`,
+	},
+	"integration": {
+		lookup:      `SELECT model_id::text, COALESCE(revision_id::text,''), name FROM model.integration_def WHERE id=$1::uuid`,
+		counterpart: `SELECT id::text FROM model.integration_def WHERE model_id=$1::uuid AND revision_id=$2::uuid AND name=$3`,
+	},
+	// Folder names are not unique, so a counterpart must be the only folder
+	// of that name — otherwise the reference is refused as ambiguous.
+	"dashboard_folder": {
+		lookup: `SELECT model_id::text, COALESCE(revision_id::text,''), name FROM model.dashboard_folder WHERE id=$1::uuid`,
+		counterpart: `SELECT min(id::text) FROM model.dashboard_folder
+		              WHERE model_id=$1::uuid AND revision_id=$2::uuid AND name=$3 HAVING count(*) = 1`,
+	},
+	// A widget has no name. Its identity is its dashboard's name, its type
+	// and its place on the canvas — what a revision copy preserves — and a
+	// counterpart must be the only widget matching it.
+	"dashboard_widget": {
+		lookup: `SELECT d.model_id::text, COALESCE(d.revision_id::text,''),
+		                d.name || E'\x1f' || w.widget_type || E'\x1f' || w.pos_x || E'\x1f' || w.pos_y || E'\x1f' || w.size_w || E'\x1f' || w.size_h
+		         FROM model.dashboard_widget w JOIN model.dashboard_def d ON d.id = w.dashboard_id WHERE w.id=$1::uuid`,
+		counterpart: `SELECT min(w.id::text) FROM model.dashboard_widget w JOIN model.dashboard_def d ON d.id = w.dashboard_id
+		              WHERE d.model_id=$1::uuid AND d.revision_id=$2::uuid
+		                AND d.name || E'\x1f' || w.widget_type || E'\x1f' || w.pos_x || E'\x1f' || w.pos_y || E'\x1f' || w.size_w || E'\x1f' || w.size_h = $3
+		              HAVING count(*) = 1`,
 	},
 }
 
@@ -237,7 +303,7 @@ func (e *WriteExecutor) requireInModel(ctx context.Context, kind, id string) (st
 	// "products" — seen live); resolve non-UUID references by name within
 	// the working revision, the same identity the counterpart remap already
 	// uses. dimension_member is excluded (its identity is composite).
-	if !uuidShaped(id) && kind != "dimension_member" && e.revID != "" {
+	if !uuidShaped(id) && kind != "dimension_member" && kind != "dashboard_widget" && e.revID != "" {
 		var mapped string
 		if err := e.pool.QueryRow(ctx, q.counterpart, e.modelID, e.revID, id).Scan(&mapped); err == nil {
 			return mapped, nil
@@ -328,15 +394,13 @@ func (e *WriteExecutor) Execute(ctx context.Context, tool string, params json.Ra
 		return e.updateFormIntegration(ctx, params)
 	case "delete_form_integration":
 		return e.deleteFormIntegration(ctx, params)
-	case "generate_migration":
-		return e.generateMigration(ctx)
-	case "apply_migration":
-		return e.applyMigration(ctx, params)
 	case "set_user_access_rules":
 		return e.setUserAccessRules(ctx, params)
-	default:
-		return "", "", fmt.Errorf("unknown write tool: %s", tool)
 	}
+	if fn, ok := e.editTools()[tool]; ok {
+		return fn(ctx, params)
+	}
+	return "", "", fmt.Errorf("unknown write tool: %s", tool)
 }
 
 // ── create_metric ─────────────────────────────────────────────────────────────
@@ -421,6 +485,9 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 			return "", "", vErr
 		}
 		formulaEdges = res.Edges
+	}
+	if err := e.checkMetrics(ctx, 1); err != nil {
+		return "", "", err
 	}
 
 	var newID string
@@ -624,9 +691,17 @@ func (e *WriteExecutor) deleteMetric(ctx context.Context, raw json.RawMessage) (
 	p.MetricID = mappedMetricID
 	var name string
 	_ = e.pool.QueryRow(ctx, `SELECT name FROM model.metric_def WHERE id=$1::uuid`, p.MetricID).Scan(&name)
-	// SYNC-01 cascade: a metric_kpi widget over a deleted metric showed a
-	// confident 0 forever (ref_id has no FK).
-	_, _ = e.pool.Exec(ctx, `DELETE FROM model.dashboard_widget WHERE ref_id = $1`, p.MetricID)
+	// Refused while another metric reads it (METRIC_IN_USE names them), as
+	// the developer's delete is.
+	if err := metricformula.CheckMetricNotInUse(ctx, e.pool, p.MetricID); err != nil {
+		return "", "", err
+	}
+	// The same widget cleanup as the developer's delete: KPI tiles over the
+	// metric go, and the metric leaves every chart's series (a chart left
+	// plotting nothing goes too).
+	if err := modeledit.DropWidgetsReferencing(ctx, e.pool, p.MetricID); err != nil {
+		return "", "", err
+	}
 	if _, err := e.pool.Exec(ctx, `DELETE FROM model.metric_def WHERE id=$1::uuid`, p.MetricID); err != nil {
 		return "", "", fmt.Errorf("delete metric: %w", err)
 	}
@@ -717,6 +792,9 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 
 	sourceDimID, sourceProp, err := e.resolveGrouping(ctx, &p, revID, timeCfg.Type, parentDimID != nil)
 	if err != nil {
+		return "", "", err
+	}
+	if err := e.checkMembers(ctx, "", len(p.Members)); err != nil {
 		return "", "", err
 	}
 
@@ -850,6 +928,12 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 		if p.DeriveMembers {
 			missing, err := metricformula.MissingGroupingMembers(ctx, e.pool, newID, *sourceDimID, *sourceProp)
 			if err == nil {
+				if err = e.checkMembers(ctx, newID, len(missing)); err != nil {
+					// The developer's create checks before the dimension
+					// exists; this path only knows the count afterwards.
+					_, _ = e.pool.Exec(ctx, `DELETE FROM model.dimension_def WHERE id=$1::uuid`, newID)
+					return "", "", err
+				}
 				var added []string
 				if added, err = metricformula.DeriveGroupingMembers(ctx, e.pool, newID, missing); err == nil {
 					msg += fmt.Sprintf("; derived %d member(s) from its values: %s", len(added), strings.Join(added, ", "))
@@ -924,6 +1008,9 @@ func (e *WriteExecutor) addDimensionMember(ctx context.Context, raw json.RawMess
 	p.DimensionID = mappedDimID
 	propsJSON := memberPropertiesJSON(p.Properties)
 	propNote := e.undeclaredPropertyNote(ctx, p.DimensionID, p.Properties)
+	if err := e.checkMembers(ctx, p.DimensionID, 1); err != nil {
+		return "", "", err
+	}
 
 	// A time dimension's member is a period: dates instead of a parent,
 	// validated and indexed with the rest of the dimension in one
@@ -976,6 +1063,11 @@ func (e *WriteExecutor) addDimensionMember(ctx context.Context, raw json.RawMess
 		}
 		if err := tx.Commit(ctx); err != nil {
 			return "", "", err
+		}
+		if parentID != nil {
+			if _, _, _, err := modeledit.SplitIfFirstChild(ctx, e.pool, p.DimensionID, *parentID, p.Code); err != nil {
+				return "", "", fmt.Errorf("move the parent's values to its first child: %w", err)
+			}
 		}
 		if start == nil {
 			return fmt.Sprintf("Aggregate period '%s' (%s) added (id: %s)%s", p.Label, p.Code, newID, propNote), newID, nil
@@ -1046,6 +1138,13 @@ func (e *WriteExecutor) addDimensionMember(ctx context.Context, raw json.RawMess
 		}
 		return "", "", fmt.Errorf("insert dimension member: %w", err)
 	}
+	// A leaf that gains its first child hands its values down to it, as the
+	// developer's member create does.
+	if parentID != nil {
+		if _, _, _, err := modeledit.SplitIfFirstChild(ctx, e.pool, p.DimensionID, *parentID, p.Code); err != nil {
+			return "", "", fmt.Errorf("move the parent's values to its first child: %w", err)
+		}
+	}
 	result := fmt.Sprintf("Dimension member '%s' (%s) added (id: %s)", p.Label, p.Code, newID)
 	if autoCreatedParent {
 		result += fmt.Sprintf(" — parent '%s' didn't exist yet, created it as a top-level member", p.ParentCode)
@@ -1063,12 +1162,17 @@ func (e *WriteExecutor) addDimensionMember(ctx context.Context, raw json.RawMess
 func (e *WriteExecutor) updateDimensionMember(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p struct {
 		DimensionID string `json:"dimension_id"`
-		Code        string `json:"code"`
-		Label       string `json:"label"`
+		// Code identifies the member; NewCode renames it.
+		Code    string `json:"code"`
+		NewCode string `json:"new_code"`
+		Label   string `json:"label"`
 		// ParentCode moves the member under that parent; omitted/"" leaves
 		// the parent unchanged. ClearParent=true makes it a top-level member.
-		ParentCode  string            `json:"parent_code"`
-		ClearParent bool              `json:"clear_parent"`
+		ParentCode  string `json:"parent_code"`
+		ClearParent bool   `json:"clear_parent"`
+		// A time member's dates; both left out keep the current ones.
+		PeriodStart string            `json:"period_start"`
+		PeriodEnd   string            `json:"period_end"`
 		Properties  map[string]string `json:"properties"` // merged into existing
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
@@ -1083,26 +1187,34 @@ func (e *WriteExecutor) updateDimensionMember(ctx context.Context, raw json.RawM
 	}
 	p.DimensionID = mappedDimID
 
-	var memberID string
+	var memberID, curLabel string
+	var curParent *string
+	var curStart, curEnd *time.Time
 	if err := e.pool.QueryRow(ctx, `
-		SELECT id::text FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2
-	`, p.DimensionID, p.Code).Scan(&memberID); err != nil {
+		SELECT id::text, label, parent_member_id::text, period_start, period_end
+		FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2
+	`, p.DimensionID, p.Code).Scan(&memberID, &curLabel, &curParent, &curStart, &curEnd); err != nil {
 		return "", "", fmt.Errorf("member %q not found in dimension (call list_dimensions to see codes)", p.Code)
+	}
+	if p.Label == "" && p.NewCode == "" && p.ParentCode == "" && !p.ClearParent &&
+		p.PeriodStart == "" && p.PeriodEnd == "" && len(p.Properties) == 0 {
+		return "", "", fmt.Errorf("nothing to change: provide new_code, label, parent_code, clear_parent, period_start/period_end, or properties")
 	}
 
 	var changed []string
+	code, label, parentID := p.Code, curLabel, curParent
+	if p.NewCode != "" && p.NewCode != p.Code {
+		code = p.NewCode
+		changed = append(changed, fmt.Sprintf("code → %s", code))
+	}
 	if p.Label != "" {
-		if _, err := e.pool.Exec(ctx, `UPDATE model.dimension_member SET label=$2 WHERE id=$1::uuid`, memberID, p.Label); err != nil {
-			return "", "", fmt.Errorf("update label: %w", err)
-		}
+		label = p.Label
 		changed = append(changed, fmt.Sprintf("label → %q", p.Label))
 	}
 
 	switch {
 	case p.ClearParent:
-		if _, err := e.pool.Exec(ctx, `UPDATE model.dimension_member SET parent_member_id=NULL WHERE id=$1::uuid`, memberID); err != nil {
-			return "", "", fmt.Errorf("clear parent: %w", err)
-		}
+		parentID = nil
 		changed = append(changed, "parent cleared (now top-level)")
 	case p.ParentCode != "":
 		// Same cross-dimension-aware resolution as add_dimension_member, but
@@ -1114,20 +1226,20 @@ func (e *WriteExecutor) updateDimensionMember(ctx context.Context, raw json.RawM
 		if parentDimensionID != nil {
 			lookupDim = *parentDimensionID
 		}
-		var parentID string
+		var pid string
 		if err := e.pool.QueryRow(ctx, `
 			SELECT id::text FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2
-		`, lookupDim, p.ParentCode).Scan(&parentID); err != nil {
+		`, lookupDim, p.ParentCode).Scan(&pid); err != nil {
 			return "", "", fmt.Errorf("parent member %q not found (add it first with add_dimension_member)", p.ParentCode)
 		}
-		if parentID == memberID {
+		if pid == memberID {
 			return "", "", fmt.Errorf("a member cannot be its own parent")
 		}
 		// Same-dimension re-parent: refuse a cycle (new parent being a
 		// descendant of the member we're moving) before it corrupts every
 		// rollup walk over this hierarchy.
 		if lookupDim == p.DimensionID {
-			cur := parentID
+			cur := pid
 			for cur != "" {
 				var up *string
 				if err := e.pool.QueryRow(ctx, `SELECT parent_member_id::text FROM model.dimension_member WHERE id=$1::uuid`, cur).Scan(&up); err != nil || up == nil {
@@ -1139,10 +1251,36 @@ func (e *WriteExecutor) updateDimensionMember(ctx context.Context, raw json.RawM
 				cur = *up
 			}
 		}
-		if _, err := e.pool.Exec(ctx, `UPDATE model.dimension_member SET parent_member_id=$2::uuid WHERE id=$1::uuid`, memberID, parentID); err != nil {
-			return "", "", fmt.Errorf("set parent: %w", err)
-		}
+		parentID = &pid
 		changed = append(changed, fmt.Sprintf("parent → %s", p.ParentCode))
+	}
+
+	// A time member is written whole through the developer endpoint's path:
+	// dates, parent and code validated with the rest of the dimension and
+	// re-indexed in one transaction. Dates left out keep the member's own,
+	// so a partial change does not turn a leaf period into an aggregate.
+	start, end := p.PeriodStart, p.PeriodEnd
+	if start == "" && end == "" && curStart != nil && curEnd != nil {
+		start, end = curStart.Format("2006-01-02"), curEnd.Format("2006-01-02")
+	}
+	period, isTime, dated, err := modeledit.MemberPeriod(ctx, e.pool, p.DimensionID, start, end)
+	if err != nil {
+		return "", "", err
+	}
+	if p.PeriodStart != "" || p.PeriodEnd != "" {
+		changed = append(changed, fmt.Sprintf("period %s..%s", p.PeriodStart, p.PeriodEnd))
+	}
+	if isTime {
+		_, err = modeledit.WriteTimeMember(ctx, e.pool, p.DimensionID, memberID, code, label, period, dated, parentID)
+	} else {
+		_, err = e.pool.Exec(ctx, `UPDATE model.dimension_member SET code=$2, label=$3, parent_member_id=$4::uuid WHERE id=$1::uuid`,
+			memberID, code, label, parentID)
+	}
+	if err != nil {
+		if metricformula.IsMemberCodeTaken(err) {
+			return "", "", metricformula.MemberCodeTaken(err, code)
+		}
+		return "", "", fmt.Errorf("update member: %w", err)
 	}
 
 	if len(p.Properties) > 0 {
@@ -1155,9 +1293,17 @@ func (e *WriteExecutor) updateDimensionMember(ctx context.Context, raw json.RawM
 		changed = append(changed, fmt.Sprintf("properties merged (%d)%s", len(p.Properties),
 			e.undeclaredPropertyNote(ctx, p.DimensionID, p.Properties)))
 	}
-
-	if len(changed) == 0 {
-		return "", "", fmt.Errorf("nothing to change: provide label, parent_code, clear_parent, or properties")
+	// What the developer's member edit does to stored data: a new code
+	// re-keys the facts, results and widget settings filed under the old
+	// one, and a top-level member placed under a parent that had no
+	// children takes over that parent's values.
+	if err := modeledit.RekeyMemberCode(ctx, e.pool, p.DimensionID, p.Code, code); err != nil {
+		return "", "", err
+	}
+	if parentID != nil && curParent == nil {
+		if _, _, _, err := modeledit.SplitIfFirstChild(ctx, e.pool, p.DimensionID, *parentID, code); err != nil {
+			return "", "", fmt.Errorf("move the parent's values to its first child: %w", err)
+		}
 	}
 	return fmt.Sprintf("Dimension member '%s' updated: %s", p.Code, strings.Join(changed, "; ")), memberID, nil
 }
@@ -1522,54 +1668,35 @@ func (e *WriteExecutor) createGrid(ctx context.Context, raw json.RawMessage) (st
 		return "", "", fmt.Errorf("insert grid: %w", err)
 	}
 
-	// A metric may only belong to one grid at a time (model.grid_metric has
-	// a DB-level UNIQUE(metric_id) constraint) — check before each insert,
-	// same as addGridMetric below, so a conflicting metric is skipped and
-	// reported rather than silently no-op'd via ON CONFLICT DO NOTHING
-	// while the returned message still claimed every requested metric was
-	// attached.
-	attached := 0
+	// Attach through add_grid_metric and add_grid_dimension, so every id gets
+	// their checks: it belongs to this model, it resolves into the working
+	// revision (or by name), the one-grid rule, and the grid's time
+	// validation. Raw inserts here once filed another model's metric, and a
+	// metric of a revision with no counterpart, under a new grid, refused
+	// metric names, and reported dimensions attached that were not.
+	var attachedMetrics, attachedDims int
 	var skipped []string
-	for i, mid := range p.MetricIDs {
-		var existingGridName string
-		err := e.pool.QueryRow(ctx, `
-			SELECT gd.name FROM model.grid_metric gm
-			JOIN model.grid_def gd ON gd.id = gm.grid_id
-			WHERE gm.metric_id=$1::uuid
-			LIMIT 1
-		`, mid).Scan(&existingGridName)
-		if err == nil {
-			skipped = append(skipped, fmt.Sprintf("%s (already in grid %q)", mid, existingGridName))
+	for _, mid := range p.MetricIDs {
+		params, _ := json.Marshal(map[string]string{"grid_id": newID, "metric_id": mid})
+		if _, _, err := e.addGridMetric(ctx, params); err != nil {
+			skipped = append(skipped, fmt.Sprintf("metric %s: %v", mid, err))
 			continue
 		}
-		if _, err := e.pool.Exec(ctx, `
-			INSERT INTO model.grid_metric (grid_id, metric_id, sort_order)
-			VALUES ($1::uuid, $2::uuid, $3) ON CONFLICT DO NOTHING
-		`, newID, mid, i); err != nil {
-			skipped = append(skipped, fmt.Sprintf("%s (insert failed: %v)", mid, err))
-			continue
-		}
-		attached++
+		attachedMetrics++
 	}
 	for _, did := range p.DimensionIDs {
-		_, _ = e.pool.Exec(ctx, `
-			INSERT INTO model.grid_dimension (grid_id, dimension_id)
-			VALUES ($1::uuid, $2::uuid) ON CONFLICT DO NOTHING
-		`, newID, did)
-	}
-	if len(p.DimensionIDs) > 0 {
-		var gridModelID, gridRevID string
-		_ = e.pool.QueryRow(ctx, `SELECT model_id::text, COALESCE(revision_id::text,'') FROM model.grid_def WHERE id=$1::uuid`, newID).Scan(&gridModelID, &gridRevID)
-		if err := metricformula.ValidateGridTime(ctx, e.pool, gridModelID, gridRevID, newID); err != nil {
-			_, _ = e.pool.Exec(ctx, `DELETE FROM model.grid_def WHERE id=$1::uuid`, newID)
-			return "", "", fmt.Errorf("grid configuration: %w", err)
+		params, _ := json.Marshal(map[string]string{"grid_id": newID, "dimension_id": did})
+		if _, _, err := e.addGridDimension(ctx, params); err != nil {
+			skipped = append(skipped, fmt.Sprintf("dimension %s: %v", did, err))
+			continue
 		}
+		attachedDims++
 	}
 
-	msg := fmt.Sprintf("Grid '%s' created (id: %s, %d/%d metrics attached, %d dims)",
-		p.Name, newID, attached, len(p.MetricIDs), len(p.DimensionIDs))
+	msg := fmt.Sprintf("Grid '%s' created (id: %s, %d/%d metrics attached, %d/%d dimensions attached)",
+		p.Name, newID, attachedMetrics, len(p.MetricIDs), attachedDims, len(p.DimensionIDs))
 	if len(skipped) > 0 {
-		msg += fmt.Sprintf(" — skipped (already assigned elsewhere): %s", strings.Join(skipped, "; "))
+		msg += " — not attached: " + strings.Join(skipped, "; ")
 	}
 	return msg, newID, nil
 }
@@ -1744,29 +1871,26 @@ func (e *WriteExecutor) createDashboard(ctx context.Context, raw json.RawMessage
 		Name       string   `json:"name"`
 		Tags       []string `json:"tags"`
 		RevisionID string   `json:"revision_id"`
+		Folder     string   `json:"folder"`
 	}
 	if err := json.Unmarshal(raw, &p); err != nil || p.Name == "" {
 		return "", "", fmt.Errorf("name is required")
 	}
 	p.Tags = tags.Clean(p.Tags)
+	folderID, err := e.resolveFolder(ctx, p.Folder)
+	if err != nil {
+		return "", "", err
+	}
 	revID := e.effectiveRevision(p.RevisionID)
 	if revID == "" {
 		_ = e.pool.QueryRow(ctx, `SELECT COALESCE(active_revision_id::text,'') FROM core.model WHERE id=$1::uuid`, e.modelID).Scan(&revID)
 	}
 
 	var newID string
-	var err error
-	if revID != "" {
-		err = e.pool.QueryRow(ctx, `
-			INSERT INTO model.dashboard_def (model_id, name, tags, revision_id)
-			VALUES ($1::uuid, $2, $3, $4::uuid) RETURNING id::text
-		`, e.modelID, p.Name, p.Tags, revID).Scan(&newID)
-	} else {
-		err = e.pool.QueryRow(ctx, `
-			INSERT INTO model.dashboard_def (model_id, name, tags)
-			VALUES ($1::uuid, $2, $3) RETURNING id::text
-		`, e.modelID, p.Name, p.Tags).Scan(&newID)
-	}
+	err = e.pool.QueryRow(ctx, `
+		INSERT INTO model.dashboard_def (model_id, name, tags, revision_id, folder_id)
+		VALUES ($1::uuid, $2, $3, NULLIF($4,'')::uuid, $5::uuid) RETURNING id::text
+	`, e.modelID, p.Name, p.Tags, revID, folderID).Scan(&newID)
 	if err != nil {
 		return "", "", fmt.Errorf("insert dashboard: %w", err)
 	}
@@ -1801,14 +1925,11 @@ func (e *WriteExecutor) addDashboardWidget(ctx context.Context, raw json.RawMess
 	// stale — the widget looks configured but resolves to nothing at render
 	// time. Widget types whose ref is not a metric/grid (forms, automation
 	// rules, integrations) pass through unchanged, as before.
-	if p.RefID != nil && *p.RefID != "" {
-		if kind, ok := map[string]string{"metric_kpi": "metric", "chart": "grid", "grid": "grid"}[p.WidgetType]; ok {
-			mappedRef, refErr := e.requireInModel(ctx, kind, *p.RefID)
-			if refErr != nil {
-				return "", "", refErr
-			}
-			p.RefID = &mappedRef
-		}
+	if p.RefID, err = e.resolveWidgetRef(ctx, p.WidgetType, p.RefID); err != nil {
+		return "", "", err
+	}
+	if err := validateWidgetContent(p.WidgetType, p.Content); err != nil {
+		return "", "", err
 	}
 	// A chart's widget_props carry their own UUIDs (plotted dimension and
 	// series metrics); remap them the same way or the chart body would query
@@ -2761,36 +2882,6 @@ func (e *WriteExecutor) updateFormDef(ctx context.Context, raw json.RawMessage) 
 		return "", "", fmt.Errorf("update form: %w", err)
 	}
 	return fmt.Sprintf("Form '%s' updated (%d field(s))", name, len(fields)), "", nil
-}
-
-// ── generate_migration ────────────────────────────────────────────────────────
-
-func (e *WriteExecutor) generateMigration(ctx context.Context) (string, string, error) {
-	// Check that there's a pending schema diff to generate.
-	var versionNumber int
-	err := e.pool.QueryRow(ctx, `
-		SELECT COALESCE(MAX(version_number),0)+1 FROM model.schema_migration WHERE model_id=$1::uuid
-	`, e.modelID).Scan(&versionNumber)
-	if err != nil {
-		return "", "", fmt.Errorf("query version: %w", err)
-	}
-	// The heavy lifting (DDL diff) is done by the existing migrationGenerate handler
-	// which uses internal migration logic. For the AI executor we call a lightweight
-	// check and return a descriptive result — actual generation requires the full
-	// handler chain. Signal to the user that they should click "Generate Migration"
-	// in the UI for the DDL preview, or we trigger a self-HTTP call.
-	return fmt.Sprintf("Migration v%d is ready to generate. Use the Migrations tab to preview the DDL and confirm, or confirm this action to trigger generation.", versionNumber), "", nil
-}
-
-// ── apply_migration ───────────────────────────────────────────────────────────
-
-func (e *WriteExecutor) applyMigration(ctx context.Context, raw json.RawMessage) (string, string, error) {
-	var p struct {
-		VersionNumber int `json:"version_number"`
-	}
-	_ = json.Unmarshal(raw, &p)
-	// Signal that migration apply should be done through the UI for safety.
-	return fmt.Sprintf("To apply migration v%d: confirm in the Migrations tab so you can review the DDL first. This action cannot be rolled back automatically.", p.VersionNumber), "", nil
 }
 
 // ── set_user_access_rules ─────────────────────────────────────────────────────

@@ -3,9 +3,12 @@ package aiassistant
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/mavericks-engine/mavericks/internal/formula"
 )
 
 // ModelContext holds the live model snapshot injected into the system prompt.
@@ -31,13 +34,26 @@ func FetchModelContext(ctx context.Context, pool *pgxpool.Pool, modelID, revID s
 		WHERE m.id = $1::uuid`, modelID,
 	).Scan(&mc.AppName, &mc.ModelName, &mc.ActiveRev)
 
+	// The counts describe the revision the session reads — its draft, or the
+	// active revision before a draft exists. Counting across all revisions
+	// told the model a two-revision model had twice the dimensions it has.
+	if revID == "" {
+		_ = pool.QueryRow(ctx, `SELECT COALESCE(active_revision_id::text,'') FROM core.model WHERE id=$1::uuid`, modelID).Scan(&revID)
+	}
 	if revID != "" {
 		_ = pool.QueryRow(ctx, `SELECT name FROM model.revision WHERE id=$1::uuid`, revID).Scan(&mc.WorkingRev)
 	}
-	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid`, modelID, revID).Scan(&mc.MetricCount)
-	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM model.dimension_def WHERE model_id=$1::uuid`, modelID).Scan(&mc.DimCount)
-	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM model.grid_def WHERE model_id=$1::uuid`, modelID).Scan(&mc.GridCount)
-	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM model.dashboard_def WHERE model_id=$1::uuid`, modelID).Scan(&mc.DashCount)
+	for _, c := range []struct {
+		table string
+		n     *int
+	}{
+		{"metric_def", &mc.MetricCount}, {"dimension_def", &mc.DimCount},
+		{"grid_def", &mc.GridCount}, {"dashboard_def", &mc.DashCount},
+	} {
+		_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM model.`+c.table+`
+			WHERE model_id=$1::uuid AND (revision_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid OR revision_id IS NULL)`,
+			modelID, revID).Scan(c.n)
+	}
 	return mc
 }
 
@@ -54,8 +70,16 @@ You have full READ and WRITE capability over the developer's application model:
 - Write gateway: propose_actions — use this whenever the developer asks you to create, update, or delete anything
 
 ## Scope
-You operate on developer-level resources only: metrics, dimensions, grids, dashboards, widgets, revisions, migrations, workflows, automation rules, business roles, forms, and form integrations.
-You do not have access to: platform admin, raw business user data, the file system, or anything outside the developer role.
+You build and change what a developer builds and changes in the console: metrics, dimensions and members, grids,
+dashboard folders, dashboards and widgets, revisions, workflows, automation rules, business roles, forms and form
+integrations. Every model change lands in the session's draft revision. Three kinds of change are live the moment
+the developer confirms, as they are in the console, and discarding the draft does not undo them: business roles
+(create/update/delete_business_role), user access rules (set_user_access_rules — a business-admin capability you
+were given deliberately) and form-record posting (backfill_form_integration posts into the working revision).
+You do not have: platform or tenant administration, user invitations or role membership, data connectors (REST API
+and Google Sheets integrations), entering business data, publishing a workflow, or promoting or discarding the
+draft. Say so and point the developer to the screen when asked for one of these.
+Database migrations are not yours to run: they run automatically when a draft is promoted.
 
 ## Clarification rule
 Before calling propose_actions, make sure you have ALL required parameters.
@@ -77,8 +101,9 @@ the whole model in one pass.
 ## Grid membership rule
 A metric can only belong to ONE grid at a time. If add_grid_metric targets a metric that's
 already in a different grid, the step will fail with that grid's name. When that happens,
-tell the developer which grid currently holds it and ask whether to remove it there first —
-do not just retry.
+tell the developer which grid currently holds it and ask whether to move it — do not just
+retry. With their yes, propose remove_grid_metric {"grid_id", "metric_id"} on the grid that
+holds it, then add_grid_metric on the new one, in that order in one proposal.
 
 ## Dimension hierarchy rule
 A whole dimension can be declared a child of another dimension (e.g. "Cabinet is a child of
@@ -126,6 +151,20 @@ the dimension (DIMENSION_IN_USE); a taken name is DIMENSION_NAME_TAKEN. The dime
 settings cannot change.
 Example: {"tool": "update_dimension", "params": {"dimension_id": "area", "source_property": "region",
   "derive_members": true}}
+
+## Formula language
+A formula names metrics (their technical names), the cell's dimensions (region is the code of the cell's
+region member) and member properties (region.factor), all regardless of case. Operators: + - * / and ^
+(left to right: 2^3^2 = 64), comparisons = <> < <= > >= (text compares ignoring case), & joins text, and
+commas or semicolons separate arguments. Text goes in double quotes ("EMEA"; a quote inside is doubled).
+The functions are exactly these: ` + formulaFunctionList() + `.
+Anything else — VLOOKUP, XLOOKUP, INDEX, MATCH, SUMPRODUCT, ISBLANK, ISNUMBER, VALUE, cell addresses such as A1,
+a % suffix — is refused when the metric is saved, and so is a function given the wrong number of arguments.
+Every stored result is a number: TRUE and FALSE store as 1 and 0 and a text result is an error, so text functions
+belong inside a comparison (IF(LEFT(region, 2) = "DE", revenue, 0)). IF, IFS, AND, OR, SWITCH, IFERROR and IFNA
+evaluate only what they need, so IF(revenue = 0, 0, margin / revenue) never divides by zero. ROUND and its
+siblings round the number as displayed (ROUND(1.005, 2) = 1.01), and numbers compare on their 15 significant
+digits as in Excel (0.1 + 0.2 = 0.3 is TRUE). Metric names, and dimension names, are unique in any case.
 
 ## Aggregation rules
 Every metric has an agg_rule deciding what its parent-level total means. All five are available
@@ -175,6 +214,10 @@ An opening/closing balance pair is legal: opening = LAG(closing, 1, 100), closin
 LOOKUP and the SUMIFS/*IF family below are refused in any metric of such a recurrence.
 Every metric also has "time_summary" — how it totals ACROSS time (sum | average | min | max | first |
 last | none): "sum" for flows (revenue), "last" for a closing balance, "first" for an opening balance.
+To add a run of regular periods at once, propose generate_time_members {"dimension_id", "start", "end" (YYYY-MM-DD),
+"parent_code"?}: one leaf period per step of the dimension's granularity, optionally under an aggregate period; codes
+the dimension already has are skipped. A leaf period's dates change with update_dimension_member's period_start and
+period_end (both together; left out, the member keeps its own).
 Example: {"tool": "create_dimension", "params": {"name": "Period", "dimension_type": "time",
   "time_granularity": "quarter", "fiscal_year_start_month": 1, "members": [
   {"code": "FY26", "label": "FY26"}, {"code": "H1", "label": "H1", "parent_code": "FY26"},
@@ -198,7 +241,7 @@ update_metric for each metric the error names first (so it no longer reads the p
 order in one proposal.
 update_metric changes only the fields the step carries: send just {"metric_id", "formula"} to change a formula; a
 field left out keeps its value. A name the revision already has is refused (METRIC_NAME_TAKEN, DIMENSION_NAME_TAKEN); so is a
-member code the dimension already has (MEMBER_CODE_TAKEN).
+member code the dimension already has (MEMBER_CODE_TAKEN, on add_dimension_member or update_dimension_member's new_code).
 - region.factor — the property of the cell's region member, typed by the declaration (number → number,
   date → date, text → text; an unparsable value is #VALUE!). Blank on a total where region is not pinned.
   A bare dimension name (region) is the member's code (blank on a total too); PARENT(region) is its parent's code.
@@ -229,6 +272,46 @@ Example — developer says "give regions a number factor and create scaled reven
 A metric that reads region.factor, PARENT(region), LOOKUP or *IFS over region computes only once it is
 placed on a grid that has region — always add the add_grid_metric step.
 
+## Changing and removing what exists
+Every change below is the console's own action for it, with the same checks; ids come from the list tools, and most
+references also accept the exact name. A step that fails leaves the rest of the proposal to run, so order dependent
+steps carefully.
+- Metrics: delete_metric {"metric_id"} — refused while another metric reads it, in its formula or as the numerator or
+  denominator of its "rate" total (METRIC_IN_USE names them): propose update_metric for each of them first, then the
+  delete, in that order in one proposal.
+- Dimensions: delete_dimension {"dimension_id"} — refused while a formula names the dimension (DIMENSION_IN_USE) or a
+  property grouping groups it (remove the grouping or change the formulas first).
+- Members: update_dimension_member {"dimension_id", "code" (the member's current code), and any of "new_code", "label",
+  "parent_code" or "clear_parent": true, "period_start"/"period_end", "properties"}. A new code carries the member's
+  stored values, results and dashboard settings over to it. A top-level member placed under a parent that had no
+  children takes over that parent's values, as in the console. delete_dimension_member {"dimension_id", "code"} —
+  refused while a formula names the code (MEMBER_IN_USE); the member's input values move to history and its children
+  become top-level.
+- Grids: update_grid {"grid_id", "name"}; delete_grid {"grid_id"} also removes the dashboard widgets that show it;
+  remove_grid_metric {"grid_id", "metric_id"}; remove_grid_dimension {"grid_id", "dimension_id"} — refused while a
+  metric on the grid reads that dimension; update_grid_dimension {"grid_id", "dimension_id", "display_level": a level
+  number, or null for the default} sets the hierarchy level the grid opens the dimension at (list_grids shows it).
+- Dashboard folders: create_dashboard_folder {"name", "parent"?}; update_dashboard_folder {"folder", "name"?,
+  "parent"? ("" or null = top level)}; delete_dashboard_folder {"folder"} — its subfolders go too, its dashboards move
+  to the top level. A folder is named by id or exact name.
+- Dashboards: create_dashboard also takes "folder". update_dashboard {"dashboard_id", "name"?, "folder"? ("" or null =
+  top level)}; tags change with set_tags. delete_dashboard {"dashboard_id"}.
+- Widgets: list_dashboards shows every widget's id, type, what it shows, place and size.
+  update_dashboard_widget {"widget_id", and any of "ref_id", "title", "show_title", "widget_props", "pos_x", "pos_y",
+  "size_w", "size_h", "content"} changes only what it carries (widget_props is replaced whole — resend what you keep).
+  delete_dashboard_widget {"widget_id"}. To tidy a jumbled dashboard, move widgets with pos_x/pos_y rather than
+  deleting and re-adding them.
+- Workflows: archive_workflow_def {"workflow_def_id"} stops a workflow that has run from starting (delete_workflow_def
+  only removes a draft that never ran); restore_workflow_def returns an archived one to draft, to be published again by
+  a developer; duplicate_workflow_def {"workflow_def_id", "name"} makes a draft copy.
+- Business roles (live): update_business_role {"role", "name"} renames; delete_business_role {"role"} removes the role
+  with its members and dashboard grants. Steps match roles by name, so the result names every workflow that still
+  names the old role — propose update_workflow_def for them. set_role_dashboards {"role", "dashboards": [ids or names]}
+  replaces which dashboards of this revision the role's members may open ([] = none; grants on the draft's dashboards
+  take effect when it is promoted). A role is named by name or id. Who is IN a role stays with a business admin.
+- Form integrations: backfill_form_integration {"form_integration_id"} posts every saved record in a posting status
+  into the metric; update_form_integration re-posts them itself.
+
 ## Write rule — follow exactly
 Whenever the developer asks you to create, update, or delete anything, you MUST call propose_actions.
 - Call propose_actions even if the request seems simple (e.g. "add a metric called X").
@@ -236,9 +319,9 @@ Whenever the developer asks you to create, update, or delete anything, you MUST 
 - Do NOT say "I'm unable to" or "I cannot" perform write operations — you can always propose.
 - The developer confirms or cancels the proposal in the UI before anything is written.
 - The FIRST confirmed proposal in a chat session automatically creates an isolated draft
-  revision (a full copy of the active one) — your writes never touch the live active revision
-  directly. If asked, explain that they can promote the draft to active or discard it from the
-  Revisions panel once they're happy (or not) with the result; you cannot do either yourself.
+  revision (a full copy of the active one) — your model changes never touch the live active
+  revision directly (the few live exceptions are listed under Scope). If asked, explain that they can promote the draft to active or discard it from the
+  draft banner above this chat once they're happy (or not) with the result; you cannot do either yourself.
 
 ## Workflow rule
 A workflow is three things, and you can build all three: the DEFINITION (steps), the ROLES its steps are
@@ -283,7 +366,7 @@ leave them as-is. It also takes "single_active_instance" (true by default): only
 dimension-member scope; set false for per-request forms where many submissions run at once. To edit a
 workflow that already existed before this chat, use the "(id:...)" from list_workflows or its exact name —
 never invent a workflow_def_id. delete_workflow_def removes a DRAFT with no instances; anything that has run
-is archived by a developer, not deleted.
+is archived (archive_workflow_def), not deleted.
 
 "subject_type" says what the workflow is about: "" (general), "grid" (subject_config {"grid_id"}),
 "grid_metric" ({"grid_id","metric_id"}), "form_record" or "form_records" ({"form_id"}).
@@ -354,7 +437,7 @@ up to 50, tell the developer how many remain, and continue with the next batch a
 they confirm.
 
 Call propose_actions with an ordered "steps" list. Each step needs:
-- tool: one of create_metric | update_metric | delete_metric | create_dimension | update_dimension | add_dimension_member | update_dimension_member | add_dimension_property | update_dimension_property | delete_dimension_property | create_grid | add_grid_metric | add_grid_dimension | create_dashboard | add_dashboard_widget | set_tags | create_revision | create_workflow_def | update_workflow_def | delete_workflow_def | create_form_def | update_form_def | delete_form_def | create_automation_rule | update_automation_rule | delete_automation_rule | create_business_role | create_form_integration | update_form_integration | delete_form_integration | set_user_access_rules
+- tool: one of ` + strings.Join(WriteToolNames, " | ") + `
 - description: one plain-English line shown to the developer
 - params: all fields the tool requires
 
@@ -546,4 +629,14 @@ Do NOT describe the steps again in prose — the UI already shows them.
 		mc.MetricCount, mc.DimCount, mc.GridCount, mc.DashCount)
 
 	return sb.String()
+}
+
+// formulaFunctionList is every function the formula engine registers,
+// sorted, for the prompt's "Formula language" section: generated so the
+// assistant is never told of a function the engine lacks, or not told of
+// one it has.
+func formulaFunctionList() string {
+	names := formula.BuiltinNames()
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }

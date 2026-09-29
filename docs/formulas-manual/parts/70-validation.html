@@ -1,0 +1,76 @@
+
+<h2>17. Validation, troubleshooting and limits</h2>
+<h3>What the save refuses</h3>
+<p>Saving a metric (the Add metric form, the row editor or the AI Developer) checks the whole formula against the revision. A refused formula is not saved, and the message appears under the form, as below.</p>
+<table>
+<tr><th style="width:33%">Formula</th><th>Message (abridged)</th><th style="width:26%">Fix</th></tr>
+<tr><td><code>ROUND(sales)</code></td><td>#VALUE!: ROUND: wrong number of arguments (1); it takes 2 arguments</td><td>Add the missing argument (Part II lists every signature)</td></tr>
+<tr><td><code>IFS(sales &gt; 0, 1, FALSE)</code></td><td>IFS: … it takes condition, value pairs</td><td>End with <code>TRUE, fallback</code></td></tr>
+<tr><td><code>VLOOKUP(sales, 1, 2)</code></td><td>formula calls unknown function "VLOOKUP" (available: …)</td><td>Use LOOKUP by member</td></tr>
+<tr><td><code>nonexistent * 2</code></td><td>formula references unknown metric or dimension "nonexistent" in this revision</td><td>Check the name (case does not matter) and the revision</td></tr>
+<tr><td><code>sales +</code>, <code>sales * 50%</code></td><td>formula does not parse: unexpected end of formula / unexpected token "%"</td><td>Complete the expression; write <code>* 0.5</code></td></tr>
+<tr><td><code>IF(region = "DE, 1, 0)</code></td><td>the text starting at position 12 has no closing quote</td><td>Close the text</td></tr>
+<tr><td><code>bad_self + 1</code> in <code>bad_self</code></td><td>formula references the metric it defines — a metric can only read its own value at another period</td><td>Use <code>PREVIOUS(bad_self)</code> if a carry-forward is meant</td></tr>
+<tr><td><code>margin_pct = margin / sales</code> while <code>margin</code> reads <code>margin_pct</code></td><td>TEMPORAL_CYCLE_NOT_CAUSAL: dependency cycle is not broken by time …</td><td>Remove the loop, or break it with a time offset (chapter 14)</td></tr>
+<tr><td><code>LOOKUP(sales + 1, region, "DE")</code></td><td>SOURCE_MUST_BE_METRIC: the source must be a metric name</td><td>Make the expression its own metric</td></tr>
+<tr><td><code>LOOKUP(sales, region, "ZZ")</code></td><td>UNKNOWN_MEMBER: dimension region has no member "ZZ"</td><td>Use an existing code (exact case)</td></tr>
+<tr><td><code>sales * region.nope</code></td><td>UNKNOWN_PROPERTY: … declare it on the dimension first</td><td>Declare the property (Dimensions › Dimension Properties)</td></tr>
+<tr><td><code>LOOKUP(sales, region.segment, "SMB")</code></td><td>DIMENSION_ARGUMENT_REQUIRED: expected a dimension name</td><td>Use a bare dimension; filter by property with SUMIFS</td></tr>
+<tr><td><code>LOOKUP(sales, currency, "EUR")</code></td><td>DIMENSION_NOT_ON_SOURCE: … currency is not one of sales's dimensions</td><td>Look up along a dimension the source has</td></tr>
+<tr><td><code>LAG(sales, 1.5, 0)</code></td><td>TIME_OFFSET_NOT_INTEGER: the offset must be a whole number</td><td>Whole numbers only</td></tr>
+<tr><td><code>MOVINGSUM(sales, lag_n, 0)</code></td><td>MOVING_WINDOW_NOT_LITERAL</td><td>Window bounds are literals</td></tr>
+<tr><td><code>MOVINGSUM(sales, -1, 0, MEDIAN)</code></td><td>#VALUE!: unknown keyword MEDIAN (expected one of SUM, AVERAGE, MIN, MAX)</td><td>Use one of the keywords</td></tr>
+<tr><td>LOOKUP or a dynamic offset in an opening/closing pair</td><td>TEMPORAL_CYCLE_NOT_CAUSAL: closing calls LOOKUP … / reads closing over an unbounded time range</td><td>Move the lookup into a metric outside the cycle; use a fixed offset</td></tr>
+<tr><td>A metric <code>Sales</code> beside <code>sales</code>, a dimension <code>Region</code> beside <code>region</code></td><td>METRIC_NAME_TAKEN / DIMENSION_NAME_TAKEN (names are compared without regard to case)</td><td>Choose another name</td></tr>
+</table>
+
+<h3>Checked later, when the dimensions are known</h3>
+<p>Some rules depend on where a metric sits. They are checked again when a metric is <b>placed on a grid</b>, when a dimension is removed from a grid, and when a revision is <b>activated</b>:</p>
+<ul>
+  <li>a LOOKUP or SUMIFS source whose dimensions do not include the argument dimension (<code>DIMENSION_NOT_ON_SOURCE</code>), when the source was not yet on a grid at save;</li>
+  <li>a literal <code>TIMESUM</code> period code that is not a period of the grid's time dimension (<code>UNKNOWN_MEMBER</code>), and a literal LOOKUP code renamed since;</li>
+  <li>a time function on a grid without exactly one time dimension (<code>TIME_DIMENSION_REQUIRED</code>, <code>MULTIPLE_TIME_DIMENSIONS</code>).</li>
+</ul>
+
+<h3>Changing what formulas name</h3>
+<ul>
+  <li><b>Renaming a property</b> rewrites every formula that reads it (<code>region.old</code> becomes <code>region.new</code>).</li>
+  <li><b>Deleting</b> a property, a dimension or a member that a formula names is refused (<code>PROPERTY_IN_USE</code>, <code>DIMENSION_IN_USE</code>, <code>MEMBER_IN_USE</code>), and the message lists the metrics to change first.</li>
+  <li><b>Renaming a member</b> does not rewrite formulas: a literal naming the old code then fails with <code>#N/A</code>, and activation refuses the revision until the formula is changed.</li>
+  <li><b>Deleting a metric</b> that another metric reads — in its formula, or as the numerator or denominator of its Rate total — is refused with <code>METRIC_IN_USE</code> (HTTP 409), and the message lists those metrics: "units is read by arg_aggs, logic_mix, price; change those metrics first, then delete it". The <b>Used by</b> column shows the formula readers in advance, and the confirmation names them. A metric reading only itself (<code>PREVIOUS(x)</code> in <code>x</code>) does not block its own delete.</li>
+</ul>
+
+<h3>Troubleshooting</h3>
+<table>
+<tr><th style="width:30%">Symptom</th><th>Likely cause and what to do</th></tr>
+<tr><td>A warning triangle beside the formula</td><td>Some cells failed. Hover it for the first error; typical: a division by a zero that is not "no data", a member code that does not exist (<code>#N/A</code>), a dynamic offset that is not whole.</td></tr>
+<tr><td>A cell is empty ("—")</td><td>Its formula failed there; or it read only zeros and failed (no data); or the result is blank (a property the member has no value for, a *VALUE of a metric with summary none); or, for a business user, it is withheld (chapter 15).</td></tr>
+<tr><td>A total looks wrong</td><td>Check the aggregation rule and time summary (chapter 15). Ratios need Formula or Rate; balances need last/first.</td></tr>
+<tr><td>0 where a value was expected</td><td>A metric with nothing recorded reads 0. A plain reference to a metric on another grid reads its total over the dimensions the cell lacks: use LOOKUP to choose a member. A dimension or property at a total is blank.</td></tr>
+<tr><td>A condition never matches</td><td>Numbers compare on 15 significant digits, so a real difference beyond rounding noise is the cause: compare <code>ROUND(x, 2)</code> to ignore cents. Text compares ignoring case, so case is not the problem. A number against text compares as text.</td></tr>
+<tr><td>A metric that reads no other metric did not update</td><td>It recalculates when saved or when the revision is activated, not when inputs change (it has no inputs).</td></tr>
+<tr><td><code>DIM_CONTEXT_REQUIRED</code> or <code>TIME_CONTEXT_REQUIRED</code></td><td>A dimensional or time function evaluated where it has no cell: place the metric on a grid with the dimensions it names.</td></tr>
+</table>
+
+<h3>Not available</h3>
+<ul>
+  <li>Cell addresses and ranges (<code>A1</code>, <code>A1:B9</code>), external workbooks, array formulas, named ranges, the <code>%</code> suffix.</li>
+  <li>XLOOKUP, VLOOKUP, INDEX, MATCH (use LOOKUP by member), SUMPRODUCT, VALUE, ISBLANK, ISNUMBER, ISERROR and the other IS… functions (use IFERROR, IFNA, or <code>x = ""</code> for blank), functions listing a member's children (LOOKUP of the parent already combines them).</li>
+  <li>The time functions POST, SPREAD, PROFILE and WEEKVALUE; MOVINGSUM windows that are not literals; mapping between two time dimensions.</li>
+  <li>Text or date results stored as such: every result is a number.</li>
+  <li>Formulas on form fields. Forms post into input metrics; formulas live on calculated metrics.</li>
+  <li>JavaScript, Python or SQL in formulas.</li>
+</ul>
+
+<h3>Differences from Excel</h3>
+<table>
+<tr><th style="width:40%">Here</th><th>Excel</th></tr>
+<tr><td>Formulas name metrics and dimensions, evaluated per cell of a grid</td><td>Formulas name cells</td></tr>
+<tr><td><code>1 = "1"</code> is TRUE (a number against text compares as text)</td><td>FALSE</td></tr>
+<tr><td>AND and OR stop at the deciding argument: <code>OR(TRUE, 1/0)</code> is TRUE</td><td><code>#DIV/0!</code></td></tr>
+<tr><td>COUNTA does not count errors</td><td>Counts them</td></tr>
+<tr><td><code>CEILING(x, 0)</code> is <code>#DIV/0!</code></td><td>0</td></tr>
+<tr><td>COUNTIFS counts matching members</td><td>Counts matching cells</td></tr>
+<tr><td>A missing metric value reads 0 in <code>AVERAGE(a, b)</code></td><td>An empty cell is skipped</td></tr>
+<tr><td>TEXT supports <code>0</code>, <code>#</code>, <code>0.00…</code> and <code>yyyy</code>/<code>mm</code>/<code>dd</code> date layouts</td><td>The full format language</td></tr>
+</table>

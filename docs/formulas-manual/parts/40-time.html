@@ -1,0 +1,91 @@
+
+<h2>14. Time series</h2>
+<h3>What they need</h3>
+<ul>
+  <li>A dimension created with <b>Dimension type: Time</b> (Build › Dimensions › New dimension), with a granularity (day, week, month, quarter, half year, year or custom) and the month the fiscal year starts. The type is fixed at creation: a dimension merely named "month" is not a time dimension.</li>
+  <li><b>Leaf periods</b> carry a start and end date; periods <b>without</b> dates (FY26, H1, Q1) are aggregate periods that group the leaves under them.</li>
+  <li>The metric must be on a grid with <b>exactly one</b> time dimension. Otherwise the formula is refused when the metric is placed or the revision activated (<code>TIME_DIMENSION_REQUIRED</code>, <code>MULTIPLE_TIME_DIMENSIONS</code>).</li>
+</ul>
+<p>A time function is evaluated at each <b>leaf period</b>, with every other member of the cell held fixed: <code>PREVIOUS(sales)</code> in the DE row reads DE's sales of the previous month, never another region's. The functions move along the leaf periods in date order. They are never evaluated at an aggregate period: Q1, H1 and FY26 show their leaves reduced by the metric's <b>time summary</b> (chapter 15).</p>
+<p>The first argument of the position and window functions is any <b>expression</b>, evaluated at the other period (<code>LAG(sales * region.factor, 1, 0)</code>). A substitute or reset is evaluated at the <i>current</i> period. Functions nest and their offsets add up: <code>PREVIOUS(LAG(sales, 2, 0))</code> reads three periods back.</p>
+
+<h3>Position</h3>
+<table>
+<tr><th style="width:32%">Function</th><th>Reads</th><th style="width:26%">Outside the periods</th></tr>
+<tr><td class="sig">PREVIOUS(x)</td><td>x one period back</td><td>0</td></tr>
+<tr><td class="sig">NEXT(x)</td><td>x one period ahead</td><td>0</td></tr>
+<tr><td class="sig">LAG(x, n, substitute [, mode])</td><td>x <i>n</i> periods back (negative <i>n</i> looks ahead)</td><td><i>substitute</i></td></tr>
+<tr><td class="sig">LEAD(x, n, substitute [, mode])</td><td>x <i>n</i> periods ahead</td><td><i>substitute</i></td></tr>
+<tr><td class="sig">OFFSET(x, n, substitute)</td><td>x at <i>n</i> periods (negative: back); LEAD without a mode</td><td><i>substitute</i></td></tr>
+</table>
+<p><b>mode</b> (a bare keyword): <code>NONSTRICT</code> (default) accepts any <i>n</i>; <code>SEMISTRICT</code> returns the substitute when <i>n</i> &lt; 0; <code>STRICT</code> when <i>n</i> ≤ 0.</p>
+<p><b>Offsets.</b> <i>n</i> may be a whole-number literal or any expression that gives a whole number at the current period: a metric (<code>LAG(sales, lag_months, 0)</code>), a property (<code>LAG(sales, ROUND(region.factor, 0), 0)</code>), an <code>IF</code>. A literal like <code>1.5</code> is refused at save; an expression that gives a fraction fails that cell with <code>TIME_OFFSET_NOT_INTEGER</code>.</p>
+
+<h3>Windows and running totals</h3>
+<div class="fn"><h4><span class="sig">MOVINGSUM(x [, start [, end [, SUM | AVERAGE | MIN | MAX]]])</span></h4>
+<p>Reduces x over the periods from <i>current + start</i> to <i>current + end</i>, inclusive. One argument: every period. Two: from <i>current + start</i> to the last period. Periods outside the range are ignored; an empty window (start after end) is 0 for every method. <i>start</i> and <i>end</i> must be whole-number <b>literals</b> (<code>MOVING_WINDOW_NOT_LITERAL</code> otherwise).</p>
+<table class="ex"><tr><td>MOVINGSUM(sales, -2, 0)</td><td>trailing three periods</td><td></td></tr>
+<tr><td>MOVINGSUM(sales, -2, 0, AVERAGE)</td><td>trailing three-period average</td><td></td></tr>
+<tr><td>MOVINGSUM(sales, 1, 3, MAX)</td><td>peak of the next three</td><td></td></tr></table></div>
+<div class="fn"><h4><span class="sig">CUMULATE(x [, reset])</span> · <span class="sig">DECUMULATE(x)</span></h4>
+<p>CUMULATE is the running total from the first period through the current one. With <i>reset</i>, a period where it is TRUE starts a new run (its own value included): <code>CUMULATE(sales, MOD(MONTH(START()), 3) = 1)</code> restarts every quarter. DECUMULATE is x minus x of the previous period (in the first period, x itself).</p></div>
+
+<h3>Period to date and whole period</h3>
+<table>
+<tr><th style="width:36%">Function</th><th>Result</th><th style="width:28%">Leaf granularity allowed</th></tr>
+<tr><td class="sig">MONTHTODATE(x)</td><td>Sum of x from the start of the month through the current period</td><td>day</td></tr>
+<tr><td class="sig">QUARTERTODATE(x)</td><td>… of the quarter</td><td>day, week, month</td></tr>
+<tr><td class="sig">HALFYEARTODATE(x)</td><td>… of the half year</td><td>day, week, month, quarter</td></tr>
+<tr><td class="sig">YEARTODATE(x)</td><td>… of the fiscal year</td><td>day, week, month, quarter, half year</td></tr>
+<tr><td class="sig">MONTHVALUE(m) · QUARTERVALUE(m) · HALFYEARVALUE(m) · YEARVALUE(m)</td><td>Metric <i>m</i> over the whole month / quarter / half / fiscal year containing the current period, reduced by <i>m</i>'s own time summary; periods with nothing recorded are skipped; a summary of <b>none</b> gives blank</td><td>as the matching *TODATE</td></tr>
+</table>
+<ul>
+  <li>Boundaries come from the periods' dates and the fiscal-year start, never from codes or labels. Quarters and halves count from the fiscal-year start month.</li>
+  <li>A granularity too coarse for the function (MONTHTODATE on months) fails with <code>INVALID_TIME_MEMBER</code>, as does a current period that straddles the boundary (a week across a quarter end).</li>
+  <li>The *VALUE functions take a bare metric name (<code>SOURCE_MUST_BE_METRIC</code>), and that metric must be dimensioned by the same time dimension (<code>TIME_DIMENSION_MISMATCH</code>). With summary <b>last</b> they give the last recorded value of the period (a closing balance); with <b>sum</b>, the period's total.</li>
+</ul>
+<table class="ex"><tr><td>ROUND(sales / YEARVALUE(sales) * 100, 4)</td><td>share of the year</td><td>6.5657 for DE in March (130 ÷ 1980)</td></tr>
+<tr><td>ROUND(QUARTERTODATE(sales) / QUARTERVALUE(sales), 4)</td><td>quarter progress</td><td>0.6389 for DE in Feb (230 ÷ 360)</td></tr></table>
+
+<h3>Ranges and dates</h3>
+<div class="fn"><h4><span class="sig">TIMESUM(x [, start, end [, SUM | AVERAGE | MIN | MAX]])</span></h4>
+<p>Reduces x over the periods from <i>start</i> to <i>end</i>, given as period <b>codes</b> (<code>"2026-01"</code>, not labels or dates); an aggregate code means its first leaf as start and its last leaf as end, so <code>TIMESUM(sales, "Q2", "Q2")</code> is Q2. Without a range it covers every period. Start after end is an empty range, 0. An unknown code is refused when the metric is placed on its grid (<code>UNKNOWN_MEMBER</code>) and fails the cell with <code>#N/A</code> at run time. Exactly 1, 3 or 4 arguments.</p>
+<table class="ex"><tr><td>TIMESUM(sales, "Q2", "Q2")</td><td>fixed quarter, every period</td><td>DE: 450</td></tr>
+<tr><td>TIMESUM(sales, "H1", "H1", MAX)</td><td>peak month of H1</td><td>DE: 160</td></tr>
+<tr><td>TIMESUM(sales, "2026-01", "2026-03", AVERAGE)</td><td>Q1 average</td><td>DE: 120</td></tr></table></div>
+<div class="fn"><h4><span class="sig">START()</span> · <span class="sig">END()</span></h4>
+<p>The first and last day of the current leaf period as date serials (END is inclusive): <code>DAY(END())</code> is 31 in January; <code>DATE(2026, MONTH(START()), 15) - START()</code> is 14 in every month; <code>TEXT(START(), "yyyy-mm")</code> is the month's code on a monthly axis.</p></div>
+
+<h3>Reference values</h3>
+<p>Four monthly periods with <code>sales</code> = 100, 120, 80, 150:</p>
+<table>
+<tr><th style="width:40%">Formula</th><th>Jan</th><th>Feb</th><th>Mar</th><th>Apr</th></tr>
+<tr><td><code>PREVIOUS(sales)</code></td><td>0</td><td>100</td><td>120</td><td>80</td></tr>
+<tr><td><code>NEXT(sales)</code></td><td>120</td><td>80</td><td>150</td><td>0</td></tr>
+<tr><td><code>LAG(sales, 2, 0)</code></td><td>0</td><td>0</td><td>100</td><td>120</td></tr>
+<tr><td><code>LEAD(sales, 1, 0)</code></td><td>120</td><td>80</td><td>150</td><td>0</td></tr>
+<tr><td><code>OFFSET(sales, -1, 0)</code></td><td>0</td><td>100</td><td>120</td><td>80</td></tr>
+<tr><td><code>MOVINGSUM(sales, -2, 0)</code></td><td>100</td><td>220</td><td>300</td><td>350</td></tr>
+<tr><td><code>MOVINGSUM(sales, -2, 0, AVERAGE)</code></td><td>100</td><td>110</td><td>100</td><td>116.6667</td></tr>
+<tr><td><code>CUMULATE(sales)</code></td><td>100</td><td>220</td><td>300</td><td>450</td></tr>
+<tr><td><code>DECUMULATE(sales)</code></td><td>100</td><td>20</td><td>-40</td><td>70</td></tr>
+</table>
+
+<h3>Opening and closing balances (recurrences)</h3>
+<p>A formula cycle is normally refused. The one exception is a cycle that <b>time</b> breaks, such as a balance carried forward:</p>
+<pre>opening = LAG(closing, 1, 100)     time summary: first
+closing = opening + flow           time summary: last</pre>
+<p>Each period's opening is the previous period's closing (100 before the first), so the engine can compute period by period. Create one of the two with a placeholder formula (for example <code>=flow * 0</code>), create the other, then edit the first to its real formula. The rules:</p>
+<ul>
+  <li>Within the cycle, a metric may read another metric of the cycle only through a <b>fixed</b> offset (<code>PREVIOUS</code>, <code>LAG(x, 1, …)</code>, <code>LEAD(x, 1, …)</code>), all in one direction. Same-period reads must not themselves form a loop.</li>
+  <li>No dynamic offset, CUMULATE, TIMESUM or *VALUE function on a metric of the cycle, and no LOOKUP or SUMIFS family anywhere in the cycle's metrics: all are refused with <code>TEMPORAL_CYCLE_NOT_CAUSAL</code>.</li>
+  <li><code>dimension</code>, <code>dimension.property</code> and <code>PARENT</code> are allowed.</li>
+  <li>Set the time summaries so totals make sense: <b>first</b> for the opening, <b>last</b> for the closing.</li>
+</ul>
+
+<h3>Missing values at the edges</h3>
+<ul>
+  <li>An in-range period with nothing recorded reads as 0.</li>
+  <li>A position outside the periods is not a missing value: LAG, LEAD and OFFSET return the substitute, PREVIOUS and NEXT 0, windows ignore it.</li>
+  <li>An error in any period a function reads makes the result that error, unless caught with IFERROR.</li>
+</ul>

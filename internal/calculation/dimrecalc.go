@@ -16,7 +16,8 @@ import (
 // references create no calc_dependency edges, so RecalcAffected's walk from
 // changed inputs cannot find them: a member created, edited or deleted, a
 // property renamed, retyped or deleted, or a member import must call this.
-func (s *Scheduler) RecalcDimensionDependents(ctx context.Context, dimensionID string) error {
+func (s *Scheduler) RecalcDimensionDependents(ctx context.Context, dimensionID string) (err error) {
+	defer s.recoverAsError(&err, "recalculation after a dimension change")
 	var modelID, revisionID, name string
 	if err := s.store.pool.QueryRow(ctx, `
 		SELECT model_id::text, COALESCE(revision_id::text,''), name

@@ -4,7 +4,7 @@
 > dependencies that are not fixed yet, with the evidence and what would close
 > each one.
 
-> **Last verified:** 2026-09-28
+> **Last verified:** 2026-09-29
 
 A finding that is not acted on in the change that found it is written down
 here, so it does not live only in a chat or a commit message. Each entry says
@@ -146,6 +146,9 @@ leaves out, until it is fixed.
 - **What closes it:** deciding whether removals should refuse or only warn for
   the time rules, then running `ValidateGridTime` on them as well; for an
   unplaced source, deciding whether a dimensional read of it is an error.
+- **Also:** since 2026-09-28 the AI Developer's `remove_grid_metric` and
+  `remove_grid_dimension` mirror these endpoints, so they share the gap and
+  close with it.
 
 ### Dimension and member renames leave formulas naming the old name
 
@@ -426,22 +429,89 @@ leaves out, until it is fixed.
 - **What closes it:** nothing needed for computed codes (no static answer
   exists); the race closes with a lock shared by formula saves and deletes.
 
-### The AI Developer cannot delete a dimension member
+### `grid_def.rollup_source_grid_id` can only be set by a model import
 
-- **Noticed:** 2026-09-28, looking for every path that deletes members.
-- **What:** the only member delete is the developer's
-  `DELETE /api/developer/dimensions/{dimId}/members/{memberId}`. The AI
-  assistant has `add_dimension_member` and `update_dimension_member` but no
-  delete tool; CSV and connector imports only upsert members; model import
-  creates a new model; dimension and revision deletes remove members with
-  their parent (the dimension delete is guarded by `DIMENSION_IN_USE`).
-- **Why it matters:** AI Developer parity (standing rule 2): a model the
-  developer can shape by removing a member cannot be shaped that way through
-  the assistant.
-- **How to check:** the write tool list in `internal/aiassistant/tools.go`.
-- **What closes it:** a `delete_dimension_member` tool that calls
-  `metricformula.CheckMemberNotInUse` before deleting, as
-  `delete_dimension_property` calls `CheckPropertyNotInUse`.
+- **Noticed:** 2026-09-28, AI Developer parity audit.
+- **What:** a grid that mirrors another grid's metrics through a
+  cross-dimension rollup is marked by `model.grid_def.rollup_source_grid_id`.
+  Revision copies and model export remap it, and the grid reader honours it,
+  but no developer endpoint or screen sets or clears it: the only writer is
+  `internal/modeltransfer` (model import, a tenant-admin action).
+- **Why it matters:** standing rule 2. The project's own guidance points at it
+  as a primitive to reuse, yet the developer role cannot reach it, and so the
+  AI Developer cannot either.
+- **How to check:** `grep -rn rollup_source_grid_id internal/gateway` finds
+  only reads and the revision-copy remap.
+- **What closes it:** a field on `PATCH /api/developer/grids/{id}` (same
+  model and revision, no cycles) with a control on the Grids screen, then the
+  same on the assistant's `update_grid`.
+
+### Renaming or deleting a business role leaves workflow steps naming it
+
+- **Noticed:** 2026-09-28, AI Developer parity audit.
+- **What:** workflow steps name business roles by NAME (`assignee_roles`,
+  `recipient_role`). `PATCH` and `DELETE /api/business-admin/roles/{id}`
+  change or remove the role without touching the steps, so the steps then
+  name no role. The assistant's `update_business_role` and
+  `delete_business_role` do the same but list the workflows affected; the
+  console says nothing.
+- **Why it matters:** a published workflow's approval step assigned to a
+  renamed role waits for a role nobody holds, and the start dialog does not
+  warn.
+- **How to check:** assign a step to role "Finance Review", rename the role on
+  the Roles screen, and validate the workflow: the step still names the old
+  name.
+- **What closes it:** carrying a rename into the steps of the application's
+  workflow definitions (or refusing it while steps name the role), and a
+  warning before a delete — in the endpoint, so both doors get it.
+
+### Developers can manage role membership through the API but not on a screen
+
+- **Noticed:** 2026-09-28, adding the developer's Roles tab.
+- **What:** the `baOrDev` guard covers every `/api/business-admin/roles`
+  route, including `POST .../members` and `DELETE .../members/{userId}`. The
+  developer's Roles tab (and the assistant) create, rename and delete roles
+  and set their dashboards, but leave membership to a business admin, as the
+  documentation says.
+- **Why it matters:** a guard wider than any screen that uses it; the
+  guidance is a narrow, purpose-scoped guard.
+- **How to check:** as a developer without `business_admin`,
+  `POST /api/business-admin/roles/{id}/members` answers 200.
+- **What closes it:** deciding whether developers manage membership; if not,
+  `ba()` on the two member routes.
+
+### The developer's folder and dashboard updates overwrite fields they were not sent
+
+- **Noticed:** 2026-09-28, AI Developer parity audit.
+- **What:** `PATCH /api/developer/folders/{id}` sets `parent_id` from the body
+  every time, so a rename without `parent_id` moves the folder to the top
+  level; `PATCH /api/developer/dashboards/{id}` requires a name and replaces
+  the tags, so an update without `tags` clears them. `POST` and `PATCH` on
+  folders also accept any existing folder as `parent_id`, of any model. The
+  console always sends every field, so it is not affected; the assistant's
+  folder and dashboard tools update only what they are given and check the
+  folder's model.
+- **Why it matters:** an API client making a partial update loses data, and a
+  folder can be filed under another model's folder (and then vanish from its
+  own tree).
+- **How to check:** `PATCH` a nested folder with only `{"name": "x"}` and read
+  its `parent_id`.
+- **What closes it:** presence-aware updates, as the metric `PATCH` does, and
+  the same-model check `validateDashboardFolder` makes for dashboards.
+
+### `list_workflow_roles` lists every workspace's roles; the role tools use one
+
+- **Noticed:** 2026-09-28, AI Developer parity audit.
+- **What:** the assistant's `list_workflow_roles` lists the business roles of
+  every workspace of the application's customer, while `create_business_role`,
+  `update_business_role`, `delete_business_role` and `set_role_dashboards`
+  resolve roles in one workspace, as the Roles screens do.
+- **Why it matters:** in a tenant with several workspaces the assistant can
+  be shown a role it cannot then change ("not found in this workspace").
+- **How to check:** a customer with two workspaces, a role in each; the list
+  shows both, `update_business_role` on the other one fails.
+- **What closes it:** the list scoped to the same workspace, or roles resolved
+  across the customer's workspaces everywhere.
 
 ### The member-delete confirm and the manual say descendants are deleted
 
@@ -572,6 +642,227 @@ leaves out, until it is fixed.
   grid with 404.
 
 ## Closed
+
+### The Add metric form screenshot shows the old `{name}` hint
+
+- **Noticed:** 2026-09-29, when the Add metric form moved to the row editor's
+  name check.
+- **What:** `docs/developer-manual/img/20-metric-add-form.png` still showed the
+  form's former hint and placeholder (`use {metric_name} references`,
+  `{hc_cost} + {software_cost}`); the chapter's text described the new form.
+- **Why it matters:** cosmetic: the picture disagreed with the text beside it.
+- **How to check:** open the image next to the Metrics chapter.
+- **What closes it:** a new capture of the form.
+- **Closed:** 2026-09-29. Recaptured on the Simple Budget Tutorial model (the
+  OPEX Planning 2026 demo the older captures show was deleted from the local
+  development database at the owner's request), with a typo in the formula so
+  the new hint is visible: "Not a metric or dimension in this revision:
+  varience".
+
+### Deleting a metric leaves the formulas that read it failing
+
+- **Noticed:** 2026-09-28, proved live by `cmd/verify-formula-catalogue`
+  (`tmp_dep = tmp_src * 2`, then delete `tmp_src`).
+- **What:** `DELETE /api/developer/metrics/{id}` deleted the metric, cascaded
+  its `calc_dependency` rows and recalculated its former dependents, but their
+  formula text still named it: `tmp_dep` stayed `=tmp_src * 2` and failed at
+  all 36 cells with `#NAME?: Unknown name: tmp_src`, keeping its last results.
+  The console's confirmation said "This removes the metric from all formulas
+  that reference it". A Rate total whose operand was deleted silently lost it
+  (`agg_numerator_metric_id` is `ON DELETE SET NULL`).
+- **Why it matters:** a developer trusting the dialog broke every dependent
+  metric, which then kept serving stale numbers with only a warning icon.
+- **How to check:** `go run ./cmd/verify-formula-catalogue` (the two
+  `tmp_src` checks).
+- **What closes it:** refusing the delete while the metric is read.
+- **Closed:** 2026-09-29 (uncommitted), by the user's decision: a metric used
+  by formulas cannot be deleted until they are cleaned.
+  `metricformula.CheckMetricNotInUse` refuses the delete with `METRIC_IN_USE`
+  (HTTP 409) while another metric's formula reads it (parsed; an unparsable
+  formula matched as text) or it is another metric's Rate numerator or
+  denominator, naming them; on the developer delete and the AI's
+  `delete_metric` (the model store's `DeleteMetric` has no caller). The
+  console's confirmation names the readers and the refusal shows under the
+  row. Proved by `TestCheckMetricNotInUse`, live (409 naming `tmp_dep` and
+  `tmp_rate (its Rate total)`, then 200 once cleaned) and in the running
+  console.
+
+### Name uniqueness regardless of case is enforced by triggers
+
+- **Noticed:** 2026-09-28/29, with migrations `100_metric_name_case.sql` and
+  `101_dimension_name_case.sql`.
+- **What:** metric and dimension names were unique regardless of case through
+  `BEFORE INSERT OR UPDATE` triggers, chosen so a database that already holds
+  a pair such as `Sales` beside `sales` keeps starting.
+- **Why it matters:** a trigger is a weaker guarantee than an index, and a
+  legacy revision holding a pair cannot be copied until one is renamed.
+- **How to check:** on each deployment,
+  `SELECT model_id, revision_id, lower(name), count(*) FROM model.metric_def GROUP BY 1, 2, 3 HAVING count(*) > 1;`
+  and the same over `model.dimension_def`.
+- **What closes it:** unique indexes on `lower(name)` where no pair exists.
+- **Closed:** 2026-09-29 (uncommitted). Checked read-only on 2026-09-29:
+  production (shared database: 0 metrics, 0 dimensions; the tenant database:
+  3 metrics, 2 dimensions) and staging (12 metrics, 6 dimensions) hold no
+  pair. Migrations 100 and 101 (never released, so rewritten) now build unique
+  indexes `metric_def_name_ci_uq` / `metric_def_null_rev_name_ci_uq` and the
+  dimension equivalents; only a database that already holds a pair (a
+  self-hosted install, say) gets the trigger instead, with a WARNING, so it
+  keeps starting. Both branches exercised on a scratch database migrated to
+  099: with `Sales` beside `sales` the migration warned and installed the
+  trigger (a third variant `SALES` refused); the clean dimension table got the
+  indexes (`Region` beside `region` refused by `dimension_def_name_ci_uq`).
+
+### Dimension names are unique only in their exact case
+
+- **Noticed:** 2026-09-28, while making metric names case-insensitive (migration
+  `100_metric_name_case.sql`) after the formula catalogue run.
+- **What:** `dimension_def_with_rev_uq` / `dimension_def_null_rev_uq` (migration
+  027) are unique on the exact name, but formulas match dimension names
+  regardless of case (`metricformula.revisionDims.lookup`, the evaluator's
+  `Dim.Current`). A revision can hold `Region` beside `region`; a formula naming
+  either then resolves to whichever the lookup meets first.
+- **Why it matters:** the same ambiguity migration 100 removed for metrics: a
+  formula can silently read the other dimension.
+- **How to check:** `SELECT model_id, revision_id, lower(name), count(*) FROM
+  model.dimension_def GROUP BY 1, 2, 3 HAVING count(*) > 1;` and try creating
+  `Region` beside `region` in the console (it is accepted today).
+- **What closes it:** the migration 100 pattern for `dimension_def` (a trigger
+  raising 23505, which the writers already answer as `DIMENSION_NAME_TAKEN`).
+- **Closed:** 2026-09-29 (uncommitted). Migration `101_dimension_name_case.sql`
+  adds the migration 100 pattern to `dimension_def` (a trigger raising 23505,
+  answered as `DIMENSION_NAME_TAKEN`, whose message now says names are compared
+  without regard to case). Proved by `TestDimensionNamesIgnoreCase` and live by
+  `cmd/verify-formula-catalogue` (`Region` beside `region` → 409).
+
+### The case-insensitive metric-name rule is a trigger, not an index
+
+- **Noticed:** 2026-09-28, with migration `100_metric_name_case.sql`.
+- **What:** metric names are unique regardless of case through a `BEFORE INSERT
+  OR UPDATE` trigger, chosen so a database that already holds a pair such as
+  `Sales` beside `sales` keeps starting. Two consequences: two concurrent
+  creates of `Sales` and `sales` can both pass the check (a trigger sees no
+  uncommitted row), and a revision that held such a pair before the migration
+  cannot be duplicated, exported/imported or copied by the AI Developer until
+  one of the two is renamed (the copy's insert trips the trigger).
+- **Why it matters:** the first is a narrow race; the second surfaces as a
+  refused copy naming `METRIC_NAME_TAKEN`, which the developer can resolve.
+- **How to check:** `SELECT model_id, revision_id, lower(name), count(*) FROM
+  model.metric_def GROUP BY 1, 2, 3 HAVING count(*) > 1;` on each deployment.
+- **What closes it:** once no deployment returns rows, a unique index on
+  `(model_id, revision_id, lower(name))` (and the revision-less variant) in
+  place of the trigger.
+- **Closed (the race):** 2026-09-29 (uncommitted). Both name triggers
+  (migrations 100 and 101) take a transaction-scoped advisory lock on (model,
+  revision, lower(name)) before checking, so a second concurrent writer waits
+  for the first and is refused. `TestNameCheckSerialisesConcurrentWriters`
+  proves it, and fails with the locks removed (both writers succeeded). The
+  triggers have since become unique indexes wherever no legacy pair exists
+  (closed entry "Name uniqueness regardless of case is enforced by triggers");
+  the locked trigger remains only as the fallback for a database holding one.
+
+### Numbers in formulas compare exactly, not on 15 digits as Excel does
+
+- **Noticed:** 2026-09-28, by the formula catalogue
+  (`internal/formula/catalogue_test.go`).
+- **What:** `0.1 + 0.2 = 0.3` is FALSE: `compareValues` and the criteria of the
+  `SUMIFS` family compare binary floats exactly. Excel compares on 15
+  significant digits and answers TRUE. Rounding and number-to-text already use
+  15 digits (fixed in the same change); comparisons were left alone because
+  changing them changes which branch every existing `IF` takes near a boundary.
+- **Why it matters:** a developer porting a spreadsheet can get a different
+  branch of an `IF` on computed decimals. Documented in
+  `FORMULA_CALCULATION_INSTRUCTIONS.md` ("Scalar semantics") and the formulas
+  manual, with the advice to compare `ROUND(x, n)`.
+- **How to check:** `go test ./internal/formula/ -run TestCatalogueScalar -v`
+  (the case `ROUND(0.1 + 0.2, 2) = 0.3` and the manual's note).
+- **What closes it:** a decision to compare on 15 significant digits in
+  `compareValues` and `criterion.matches`, with the catalogue cases moved.
+- **Closed:** 2026-09-29 (uncommitted), by decision to follow Excel.
+  `compareValues` (`=`, `<>`, orderings, `SWITCH`) and the SUMIFS family's
+  criteria (`criterion.matches`, and `numberText` for criteria and member codes)
+  compare numbers on their 15 significant digits: `0.1 + 0.2 = 0.3` is TRUE,
+  `1.00000000000001 = 1` still FALSE, and a truthiness test of a tiny
+  difference (`IF(0.1 + 0.2 - 0.3, …)`) is unchanged, as in Excel. Catalogue
+  cases in `internal/formula/catalogue_test.go`; live `cmp_15` and `crit_15` in
+  `cmd/verify-formula-catalogue`.
+
+### Background recalculations have no recover
+
+- **Noticed:** 2026-09-28: `MID(text, start, negative)` panicked and
+  `SUBSTITUTE(text, "", new, n)` never returned; both fixed, and every formula
+  evaluation is now behind `EvalContext.safeEval`, which turns a panic into the
+  cell's `#VALUE!`.
+- **What:** the recalculations the gateway starts with `go h.recalc…` and
+  `go func() { sched.RecalcAffected(…) }()` (`internal/gateway/handler.go`) have
+  no `recover`. A panic anywhere else on that path — the scheduler, rollup, the
+  store — still stops the whole gateway process, for every tenant, and a hang
+  holds a goroutine forever (there is no per-recalculation deadline).
+- **Why it matters:** before the fix, one developer saving
+  `=LEN(MID("abc", 2, -1))` would have stopped the shared gateway.
+- **How to check:** `grep -n 'go h.recalc\|go func() { _ = sched' internal/gateway/handler.go`.
+- **What closes it:** a wrapper for these goroutines that recovers, logs and
+  marks the recalculation failed, and a deadline on the recalculation context.
+- **Closed:** 2026-09-29 (uncommitted). The scheduler recovers at its entry
+  points (`RecalcAffected`, `RecalcSpecific`, `RecalcDimensionDependents`,
+  `recoverAsError`) and per metric and per recurrence (`guarded`: the metric is
+  marked failed and the pass goes on), which covers the gateway, the
+  calculation service's RPCs and the `facts.committed` consumer. The gateway's
+  recalculation helpers and its two inline launches run under
+  `h.backgroundRecalc`, which recovers around the scheduler and bounds the run
+  with `calculation.RecalcTimeout` (30 minutes), as do the calculation
+  service's RPC launches. Tests: `TestRecalcEntryPointsRecover` (a nil store's
+  real nil dereference comes back as an error), `TestGuardedTurnsPanicIntoError`,
+  `TestBackgroundRecalcSurvivesPanic`. A CPU-bound loop inside a formula still
+  ignores the deadline (the evaluator does not check the context); the known
+  ones are fixed.
+
+### The Add metric form checks only `{name}` references as you type
+
+- **Noticed:** 2026-09-28, while documenting the Metrics screen for the formulas
+  manual.
+- **What:** the row editor lists every unknown name under the formula (from
+  `/api/formula/refs`), but the Add metric form checks only `{name}` references
+  (`MetricsTab.tsx`, `formula.match(/\{([^}]+)\}/g)`), and matches them in exact
+  case. A bare name typo is reported only by the server when the metric is
+  added. The form's hint also still suggests `{metric_name}` references,
+  although plain names are the documented style.
+- **Why it matters:** minor: the save still refuses the formula with a clear
+  message; the add form is just less helpful than the row editor.
+- **How to check:** in the console, add a Calc metric `=revenu * 2`; no hint
+  appears until **Add metric**.
+- **What closes it:** the add form using the row editor's `/api/formula/refs`
+  hint.
+- **Closed:** 2026-09-29 (uncommitted). The Add metric form uses the row
+  editor's check (`useUnknownFormulaNames` in `MetricsTab.tsx`: the server's
+  parser, names compared regardless of case, a hint that never blocks **Add
+  metric**), and suggests plain names (`e.g. revenue - cost`). Driven in the
+  running console against a live gateway: `revenu * 2 + region.factor + SALES`
+  lists `revenu`; `MOVINGSUM(sales, -2, 0, AVERAGE) + LAG(sales, 1, 0, STRICT)`
+  and `{sales} - Cost` list nothing.
+
+### The AI Developer cannot delete a dimension member
+
+- **Noticed:** 2026-09-28, looking for every path that deletes members.
+- **What:** the only member delete is the developer's
+  `DELETE /api/developer/dimensions/{dimId}/members/{memberId}`. The AI
+  assistant has `add_dimension_member` and `update_dimension_member` but no
+  delete tool; CSV and connector imports only upsert members; model import
+  creates a new model; dimension and revision deletes remove members with
+  their parent (the dimension delete is guarded by `DIMENSION_IN_USE`).
+- **Why it matters:** AI Developer parity (standing rule 2): a model the
+  developer can shape by removing a member cannot be shaped that way through
+  the assistant.
+- **How to check:** the write tool list in `internal/aiassistant/tools.go`.
+- **What closes it:** a `delete_dimension_member` tool that calls
+  `metricformula.CheckMemberNotInUse` before deleting, as
+  `delete_dimension_property` calls `CheckPropertyNotInUse`.
+- **Closed:** 2026-09-28 (uncommitted — the AI Developer parity audit). The
+  assistant has `delete_dimension_member` (refused with `MEMBER_IN_USE`
+  through `metricformula.CheckMemberNotInUse`) and the rest of the
+  developer's change-and-remove actions. The member delete itself, with its
+  move of input values to history and the time re-index, moved from the
+  gateway to `internal/modeledit`, which both doors call. Covered by
+  `TestDeleteDimensionAndMember` (`internal/aiassistant`).
 
 ### The grid averages a parent's children counting a missing value as 0
 

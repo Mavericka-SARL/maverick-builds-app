@@ -1,0 +1,139 @@
+
+<h2>1. Where formulas live</h2>
+<p>A formula belongs to a <b>calculated metric</b>, never to a cell. You write it once, on the metric, and the engine evaluates it at every cell of the grid the metric is placed on: one value per combination of that grid's members, plus the totals. There is no cell-by-cell override and no "recalculate" button: every change that could alter a result recalculates it on the server before the screens refresh.</p>
+<ul>
+  <li><b>Input</b> metrics hold values that people type, import or post from forms. They have no formula.</li>
+  <li><b>Calculated</b> (Calc) metrics are defined by a formula over other metrics and the cell's dimensions. Nobody types into them.</li>
+  <li>A metric sits on <b>one grid</b>. The grid's dimensions are the metric's dimensions: a metric on <i>Plan [region, period]</i> has a value per region and period.</li>
+  <li>A formula may read a metric on another grid (see chapter 2, "Reading a metric from another grid").</li>
+  <li>Formulas belong to a <b>revision</b>. Editing a formula in a working revision does not touch the active one until you activate it.</li>
+</ul>
+
+<h3>The Metrics screen</h3>
+<p class="path">Sidebar: Build › Metrics</p>
+<figure><img src="../developer-manual/img/20-metric-add-form.png" alt="Add metric form"><figcaption>The Add metric form. The Formula field takes the expression; the aggregation rule and time summary decide how its results total (chapter 15).</figcaption></figure>
+<table class="ctl">
+<tr><th>Where</th><th>What it does for formulas</th></tr>
+<tr><td><b>Add metric</b> form</td><td><b>Metric name</b> is the technical name formulas use (snake_case, for example <code>gross_margin</code>). With <b>Type</b> Calc, <b>Formula</b> takes the expression. <b>Aggregation rule</b> and <b>Time summary</b> decide the totals. As you type, names that are neither a metric nor a dimension of the revision are listed under the field ("Not a metric or dimension in this revision: …"). That is a hint: <b>Add metric</b> stays available, and the server then checks the whole formula and shows its message if it refuses it.</td></tr>
+<tr><td>Row editor (edit icon)</td><td>Change the formula, the rule or the summary of an existing metric. Names that are neither a metric nor a dimension of the revision are listed under the field as you type ("Not a metric or dimension in this revision: …"); the hint never blocks <b>Save</b>, the server decides.</td></tr>
+<tr><td><b>Recalc results</b> banner</td><td>After a save, lists "revision → metric = value" for each affected total.</td></tr>
+<tr><td>Warning triangle beside a formula</td><td>The last calculation of this metric failed at some or all cells. Hover it: "Calculation failing: n/m combos failed … (first error: …)". See chapter 5.</td></tr>
+<tr><td><b>Used by</b> column</td><td>The calculated metrics whose formulas read this one.</td></tr>
+</table>
+<p>The <b>Dependency Graph</b> screen (Build › Dependency Graph) draws the same references as a graph. The AI Developer writes formulas through the same checks as the console.</p>
+
+<h3>When a calculated metric computes</h3>
+<ul>
+  <li>Writing or importing a value, posting a form, saving a formula, changing an aggregation rule, editing a member or a property, and activating a revision all recalculate every metric that depends on what changed.</li>
+  <li>A metric that reads <code>dimension.property</code>, <code>PARENT</code>, <code>LOOKUP</code> or the SUMIFS family over a dimension computes only once it is placed on a grid that has that dimension, because its cells are that grid's cells.</li>
+  <li>A metric that reads no other metric (for example <code>=DAYSINMONTH(YEAR(START()), MONTH(START()))</code>) is computed when the revision is activated or the metric is saved, not when an input changes.</li>
+</ul>
+
+<h2>2. How a formula is evaluated</h2>
+<h3>One cell at a time</h3>
+<p>For each cell of the metric's grid, the engine evaluates the formula with every name bound to the cell:</p>
+<table class="kv">
+<tr><td>A metric name</td><td>That metric's value at the same members. An input with nothing recorded there reads as <b>0</b>; a calculated metric reads its own result for that cell.</td></tr>
+<tr><td>A dimension name</td><td>The <b>code</b> of the cell's member of that dimension (<code>region</code> is <code>"DE"</code> in the DE row).</td></tr>
+<tr><td><code>dimension.property</code></td><td>That member's property value, typed by the property's declaration (chapter 11).</td></tr>
+<tr><td>A time function</td><td>Reads the same cell at other periods of the grid's time dimension (chapter 14).</td></tr>
+<tr><td>LOOKUP, SUMIFS and family</td><td>Read the source metric at other members (chapters 12 and 13).</td></tr>
+</table>
+<p>A formula therefore describes one cell, and the engine applies it to all of them: <code>=sales - cost</code> is the margin of <i>this</i> region in <i>this</i> month.</p>
+
+<h3>Totals and parent members</h3>
+<p>A World row, an EMEA row, a Q1 column or the grand total is not the formula applied to a "total cell". It is decided by the metric's <b>aggregation rule</b> (Sum, Average, Count, Formula, Rate) across ordinary dimensions and its <b>time summary</b> across the time dimension. Chapter 15 explains both; the short version:</p>
+<ul>
+  <li><b>Sum</b> (the default) adds the leaf results. Right for amounts.</li>
+  <li><b>Formula</b> re-evaluates the formula on the totalled inputs. Right for ratios and percentages: <code>margin_pct</code> at World is total margin ÷ total sales, never a sum or mean of percentages.</li>
+  <li><b>Rate</b> divides the total of one metric by the total of another. Right for a price or any blended rate.</li>
+</ul>
+<p>At a total, a dimension that is not pinned has no single member, so a bare dimension name and <code>dimension.property</code> read <b>blank</b> there: <code>IF(region = "EMEA", sales, 0)</code> is 0 at the grand total.</p>
+
+<h3>Reading a metric from another grid</h3>
+<p>A plain reference to a metric on another grid reads it at the members the two share. On a dimension the source has but the cell does not, it reads the source's total over that dimension (by the source's aggregation rule); a dimension of the cell that the source lacks is ignored. So from a <i>[region, period]</i> cell, <code>fx_rate</code> on <i>FX [currency]</i> is the total over all currencies, which is rarely what you want. To choose a member, use LOOKUP: <code>LOOKUP(fx_rate, currency, region.currency)</code> reads the rate of the region's own currency.</p>
+<p>Where one dimension is a parent of another (a Region dimension above Country) or groups another by a property (an Area dimension over employees by their <code>area</code> property), a reference across them resolves through that relation; see the Developer Manual, Dimensions.</p>
+
+<h3>What a result can be</h3>
+<p>Every stored result is a <b>number</b>. TRUE and FALSE are stored as 1 and 0; a blank result stores nothing (the cell stays empty, and it is left out of totals); a text result is an error (<code>#VALUE!</code>). Text functions are therefore used <i>inside</i> a formula, in comparisons, criteria and member codes, not as its final result. The metric's <b>Format</b> (number, percentage, currency) only changes how the number is shown.</p>
+
+<h2>3. Syntax</h2>
+<pre>=revenue - cost
+=IF(revenue = 0, 0, (revenue - cost) / revenue)
+=ROUND(quantity * unit_price, 2)
+={salary} * 0.25
+=sales * region.factor
+=SUMIFS(sales, region.segment, "Enterprise")
+=LOOKUP(sales, region, PARENT(region))
+=LAG(sales, 1, 0)</pre>
+<table class="kv">
+<tr><td>Leading <code>=</code></td><td>Optional. Surrounding spaces are ignored.</td></tr>
+<tr><td>Names</td><td>Metric technical names, dimension names, <code>dimension.property</code>, function names and keywords. Letters, digits and <code>_</code>, not starting with a digit. <b>Case never matters</b>: <code>SALES</code>, <code>Sales</code> and <code>sales</code> are the same metric (and a revision cannot hold two metrics, or two dimensions, whose names differ only in case).</td></tr>
+<tr><td><code>{name}</code></td><td>The older brace form of a metric reference, still accepted: <code>{hc_cost} + {software_cost}</code>. Inside braces a dot is part of the name: <code>{rev.eu}</code> is a metric named <code>rev.eu</code>.</td></tr>
+<tr><td><code>dimension.property</code></td><td>Exactly one dot, directly between two names: <code>employees.salary</code>. <code>region.a.b</code> and <code>region.2026</code> are refused.</td></tr>
+<tr><td>Numbers</td><td><code>12</code>, <code>1.5</code>, <code>.5</code>, <code>1.5e3</code>. No thousands separators, no <code>%</code> suffix (write <code>* 0.5</code>).</td></tr>
+<tr><td>Text</td><td>In double quotes: <code>"EMEA"</code>. A quote inside text is doubled: <code>"say ""hi"""</code>. Text must be closed.</td></tr>
+<tr><td>Booleans</td><td><code>TRUE</code>, <code>FALSE</code>.</td></tr>
+<tr><td>Dates</td><td>No date literal: use <code>DATE(2026, 3, 31)</code>. Criteria and date properties take ISO text such as <code>"2026-01-01"</code>.</td></tr>
+<tr><td>Arguments</td><td>Separated by commas or semicolons: <code>ROUND(x, 2)</code> = <code>ROUND(x; 2)</code>.</td></tr>
+</table>
+
+<h3>Operators and precedence</h3>
+<p>Highest first. Operators on the same level work left to right.</p>
+<table>
+<tr><th style="width:10%">Level</th><th style="width:28%">Operators</th><th>Notes and examples</th></tr>
+<tr><td>1</td><td><code>( )</code>, function calls</td><td><code>(1 + 2) * 3</code> = 9</td></tr>
+<tr><td>2</td><td>unary <code>-</code>, <code>+</code></td><td><code>-2^2</code> = 4, as in Excel (the minus belongs to the 2)</td></tr>
+<tr><td>3</td><td><code>^</code> power</td><td><code>2^10</code> = 1024; <code>2^3^2</code> = (2^3)^2 = 64, as in Excel; <code>2^-1</code> = 0.5</td></tr>
+<tr><td>4</td><td><code>*</code> <code>/</code></td><td><code>10 / 4</code> = 2.5; <code>x / 0</code> is <code>#DIV/0!</code></td></tr>
+<tr><td>5</td><td><code>+</code> <code>-</code></td><td><code>1 + 2 * 3</code> = 7</td></tr>
+<tr><td>6</td><td><code>&amp;</code> joins text</td><td><code>"Q" &amp; 1</code> = "Q1"; <code>1 + 2 &amp; 3</code> = "33"</td></tr>
+<tr><td>7</td><td><code>=</code> <code>&lt;&gt;</code> <code>&lt;</code> <code>&lt;=</code> <code>&gt;</code> <code>&gt;=</code></td><td>Result TRUE or FALSE: <code>revenue - cost &gt; 0</code>; <code>"a" &amp; "b" = "AB"</code> is TRUE</td></tr>
+</table>
+<p>Not part of the language: cell addresses (<code>A1</code> is just an unknown name), ranges (<code>A1:B2</code>), array formulas, named ranges, the <code>%</code> suffix, and references to other workbooks.</p>
+
+<h2>4. Values, types and comparisons</h2>
+<table>
+<tr><th style="width:16%">Type</th><th>Where it comes from</th><th style="width:34%">In arithmetic</th></tr>
+<tr><td>Number</td><td>Metric values, number literals, number and date properties, most functions</td><td>Itself</td></tr>
+<tr><td>Text</td><td>Quoted literals, a bare dimension (the member code), text properties, text functions</td><td><code>#VALUE!</code> (<code>1 + "a"</code>)</td></tr>
+<tr><td>TRUE / FALSE</td><td>Comparisons, <code>AND</code>, <code>OR</code>, <code>NOT</code>, <code>IF</code> with no else</td><td>1 / 0 (<code>TRUE + TRUE</code> = 2)</td></tr>
+<tr><td>Blank</td><td>A property the member has no value for; a dimension at a total; <code>PARENT</code> of a root; a *VALUE function over a metric with time summary none</td><td>0</td></tr>
+<tr><td>Error</td><td>A failed operation (chapter 5)</td><td>The error travels on</td></tr>
+</table>
+
+<h3>Comparisons</h3>
+<ul>
+  <li><b>Text ignores case</b>: <code>"abc" = "ABC"</code> is TRUE; <code>"apple" &lt; "Banana"</code> is TRUE. Member codes compare the same way: <code>region = "de"</code> is TRUE in the DE row.</li>
+  <li><b>A number against text compares as text</b>: <code>1 = "1"</code> is TRUE, so a numeric member code <code>"100"</code> equals <code>100</code>. (Excel says FALSE.)</li>
+  <li><b>Blank equals 0 and ""</b>: <code>region = ""</code> is TRUE at a total.</li>
+  <li><b>Numbers compare on their 15 significant digits</b>, as in Excel. Decimal arithmetic in binary leaves tiny remainders beyond that, which comparisons ignore: <code>0.1 + 0.2 = 0.3</code> is TRUE, and so is <code>1 / 3 * 3 = 1</code>; <code>1.00000000000001 = 1</code> is FALSE. The same holds for SUMIFS criteria and for a number used as a member code. A remainder on its own is still a number, though: <code>IF(0.1 + 0.2 - 0.3, 1, 0)</code> is 1, because the difference is 5.55e-17, not 0 (Excel agrees); compare with <code>=</code> instead.</li>
+</ul>
+
+<h3>Numbers shown as text</h3>
+<p>Where a number becomes text (<code>&amp;</code>, <code>CONCAT</code>, <code>LEN</code>, a comparison with text) it is written with up to 15 significant digits and no exponent between 1e-9 and 1e21: <code>"Total " &amp; 1234567</code> is "Total 1234567", <code>"" &amp; (0.1 + 0.2)</code> is "0.3". For a fixed number of decimals use <code>TEXT(x, "0.00")</code>.</p>
+
+<h2>5. Errors and failing cells</h2>
+<table>
+<tr><th style="width:15%">Value</th><th>Produced by</th></tr>
+<tr><td><code>#DIV/0!</code></td><td>Division by zero; <code>AVERAGE</code> of no numbers; <code>AVERAGEIFS</code> with no recorded match; <code>MOD</code> by 0; <code>CEILING</code>/<code>FLOOR</code> with significance 0</td></tr>
+<tr><td><code>#VALUE!</code></td><td>A value of the wrong type (text in arithmetic, text where a number is needed), a wrong number of arguments, an unknown keyword, <code>MID</code> or <code>SUBSTITUTE</code> given an impossible position</td></tr>
+<tr><td><code>#N/A</code></td><td><code>LOOKUP</code> or <code>TIMESUM</code> naming a member that does not exist (or a blank one); <code>IFS</code> or <code>SWITCH</code> with nothing matching</td></tr>
+<tr><td><code>#NUM!</code></td><td><code>SQRT</code> of a negative; a power that is not a real number (<code>(-8)^(1/3)</code>); <code>DAYSINMONTH</code> with a month outside 1–12; criteria matching more than 1,000,000 member combinations</td></tr>
+<tr><td><code>#NAME?</code></td><td>A name that is neither a metric nor a dimension (the save refuses these first)</td></tr>
+<tr><td>Named codes</td><td><code>TIME_OFFSET_NOT_INTEGER</code>, <code>INVALID_TIME_MEMBER</code>, <code>TIME_DIMENSION_MISMATCH</code> and others from the time and dimensional functions; see the Error index</td></tr>
+</table>
+<p><b>Errors travel.</b> An operation on an error returns that error, so <code>(a / 0) + 1</code> is <code>#DIV/0!</code>. Catch them where they start:</p>
+<ul>
+  <li><code>IFERROR(value, fallback)</code> replaces any error: <code>IFERROR(revenue / units, 0)</code>.</li>
+  <li><code>IFNA(value, fallback)</code> replaces only <code>#N/A</code> (a missing member), letting real mistakes show: <code>IFNA(LOOKUP(sales, region, "XX"), 0)</code>.</li>
+  <li>Better still, avoid the error: <code>IF(units = 0, 0, revenue / units)</code>. The branch not taken is never evaluated.</li>
+</ul>
+
+<h3>What a failing cell looks like</h3>
+<ul>
+  <li>A cell whose formula ends in an error gets <b>no value</b>: the grid shows it empty ("—"), charts leave the point out, and totals are built from the cells that did compute.</li>
+  <li>The metric's other cells are computed and saved as usual. The Metrics list shows the warning triangle with the first error and how many cells failed.</li>
+  <li><b>No data is not an error.</b> Where the formula fails and every metric it reads is 0 or unrecorded (a division in an empty month), the cell is simply left empty, without a warning, so a sparse plan does not light up with errors.</li>
+  <li>If every cell fails, the metric keeps its last successful results rather than showing zeros, except when the failures all name a member that no longer exists: then its results are cleared.</li>
+</ul>

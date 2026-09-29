@@ -1609,59 +1609,39 @@ func TestDeveloperModelSurfacesCalcError(t *testing.T) {
 	}
 }
 
-// TestDeleteMetricRecalculatesDependents is a regression test:
-// DELETE /api/developer/metrics/{id} used to only delete the row and call
-// autoMigrate — never recalculating dependents. Worse than a simple
-// staleness gap: the DELETE's own ON DELETE CASCADE removes the dependent's
-// model.calc_dependency edge in the same statement, so even a blunt
-// "recalc everything reachable from an input" pass (the pattern the
-// sibling PATCH case already used) could never rediscover the dependent
-// afterward — it would stay frozen at its last value forever with no error
-// shown. developerMetricAction's DELETE case now captures the dependent set
-// via a recursive CTE BEFORE deleting and force-recomputes it via
-// Scheduler.RecalcSpecific afterward.
-//
-// This fixture (setupRollupFixture) writes synthetic calc_result rows
-// directly rather than real model.calc_dependency edges (it exercises
-// grid()'s read side, not the scheduler) — so this test adds its own real
-// edge between two of the fixture's existing metrics before deleting one.
-func TestDeleteMetricRecalculatesDependents(t *testing.T) {
+// TestDeleteMetricRefusedWhileRead: DELETE /api/developer/metrics/{id} of a
+// metric other formulas read is refused with 409 METRIC_IN_USE naming them.
+// It used to delete the row and leave each reader failing at every cell with
+// #NAME? while serving its last values. Once no formula reads it, the delete
+// goes through.
+func TestDeleteMetricRefusedWhileRead(t *testing.T) {
 	f := setupRollupFixture(t)
 	ctx := context.Background()
 
-	if _, err := f.pool.Exec(ctx, `
-		INSERT INTO model.calc_dependency (metric_id, depends_on_metric_id) VALUES ($1::uuid, $2::uuid)
-	`, f.deptTotalCappedMetricID, f.deptTotalMetricID); err != nil {
-		t.Fatalf("insert calc_dependency: %v", err)
-	}
-
 	status, body := f.do(t, "DELETE", "/api/developer/metrics/"+f.deptTotalMetricID, "rollup-test-approver", nil)
-	if status != http.StatusOK {
-		t.Fatalf("DELETE metric: status=%d, body=%v", status, body)
+	msg, _ := body["error"].(string)
+	if status != http.StatusConflict || !strings.Contains(msg, "METRIC_IN_USE") {
+		t.Fatalf("DELETE dept_total while formulas read it: status=%d, body=%v; want 409 METRIC_IN_USE", status, body)
+	}
+	for _, reader := range []string{"dept_ratio", "dept_ratio_avg", "dept_total_capped"} {
+		if !strings.Contains(msg, reader) {
+			t.Errorf("the refusal %q does not name %s", msg, reader)
+		}
+	}
+	var exists bool
+	if err := f.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM model.metric_def WHERE id=$1::uuid)`, f.deptTotalMetricID).Scan(&exists); err != nil || !exists {
+		t.Fatalf("dept_total is gone after a refused delete (err %v)", err)
 	}
 
-	// Recalc is fire-and-forget from the handler's perspective (matches the
-	// PATCH case's own synchronous-within-the-request-but-not-awaited-by-
-	// the-test-server style) — poll briefly rather than assume it landed
-	// before the response returned.
-	var calcError string
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		_ = f.pool.QueryRow(ctx, `
-			SELECT COALESCE(error, '') FROM runtime.metric_partition_state
-			WHERE model_id=$1::uuid AND metric_id=$2::uuid AND revision_id=$3::uuid AND status='error'
-			ORDER BY updated_at DESC LIMIT 1
-		`, f.modelID, f.deptTotalCappedMetricID, f.workingRevID).Scan(&calcError)
-		if calcError != "" {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
+	// Clean the readers, then the delete goes through.
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE model.metric_def SET formula='1'
+		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND name IN ('dept_ratio', 'dept_ratio_avg', 'dept_total_capped')
+	`, f.modelID, f.workingRevID); err != nil {
+		t.Fatalf("clean the readers: %v", err)
 	}
-	if calcError == "" {
-		t.Fatal("dept_total_capped's partition never transitioned to error after dept_total was deleted — the dependent was left silently frozen instead of being recomputed")
-	}
-	if !strings.Contains(calcError, "dept_total") {
-		t.Errorf("error message = %q, want it to reference the deleted dept_total identifier", calcError)
+	if status, body := f.do(t, "DELETE", "/api/developer/metrics/"+f.deptTotalMetricID, "rollup-test-approver", nil); status != http.StatusOK {
+		t.Fatalf("DELETE dept_total once no formula reads it: status=%d, body=%v", status, body)
 	}
 }
 

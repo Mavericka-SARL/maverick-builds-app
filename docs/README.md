@@ -34,6 +34,7 @@ remain authoritative.
 | [`docs/WHITE_LABEL.md`](WHITE_LABEL.md) | current | A tenant's own branding and domain |
 | [`ee/README.md`](../ee/README.md) | current | The enterprise source tree and its licence rule |
 | [`docs/developer-manual/`](developer-manual/) | current | Developer-role manual (PDF, built from `parts/*.html` by `build.sh`): every developer console screen plus core concepts |
+| [`docs/formulas-manual/`](formulas-manual/) | current | Formulas manual for the developer role (PDF, built from `parts/*.html` by `build.sh`): the formula language, all 74 functions with their edge behaviour, totals, recipes, validation messages and limits; its function index is held equal to the engine by `TestFormulasManualIndexMatchesEngine` |
 | [`web/README.md`](../web/README.md) | current | Frontend architecture and commands |
 | [`web/src/ui/DESIGN_SYSTEM.md`](../web/src/ui/DESIGN_SYSTEM.md) | current | Shared UI primitives and regression gates |
 

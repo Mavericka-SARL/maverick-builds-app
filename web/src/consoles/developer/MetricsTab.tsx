@@ -189,6 +189,25 @@ export function MetricsTab({ model, revisionId }: { model: DevModel; revisionId?
 
 type RecalcRow = { revision: string; metric: string; value: number | null };
 
+// useUnknownFormulaNames lists the names in a formula that are neither a
+// metric nor a dimension of the revision, from the server's own parser
+// (/api/formula/refs: plain and {name} references, keyword arguments left
+// out), matched regardless of case as the save matches them. A formula may
+// name dimensions too (`region = "EMEA"`, LOOKUP's dimension arguments). It
+// is only a hint and never blocks saving: the server validates on save and
+// its 400 message is shown — blocking once made every formula that mentions a
+// dimension impossible to edit.
+function useUnknownFormulaNames(formula: string, metricNames: string[], dimNames: string[], enabled: boolean): string[] {
+  const { data } = useQuery({
+    queryKey: ["formula-refs", formula],
+    queryFn: () => api.formulaRefs(formula),
+    enabled: enabled && formula.trim() !== "",
+    staleTime: Infinity,
+  });
+  const known = new Set([...metricNames, ...dimNames].map(n => n.toLowerCase()));
+  return (data?.refs ?? []).filter(ref => !known.has(ref.toLowerCase()));
+}
+
 function MetricRow({ m, allMetrics, dimNames, onTimeGrid, activeTag, onTagClick }: {
   m: DevMetric;
   allMetrics: DevMetric[];
@@ -211,21 +230,7 @@ function MetricRow({ m, allMetrics, dimNames, onTimeGrid, activeTag, onTagClick 
   const [tags, setTags] = useState<string[]>(m.tags ?? []);
   const [recalcResults, setRecalcResults] = useState<RecalcRow[] | null>(null);
 
-  // Validate formula refs via backend parser (handles both =ident and {ident} syntax).
-  const { data: formulaRefsData } = useQuery({
-    queryKey: ["formula-refs", formula],
-    queryFn: () => api.formulaRefs(formula),
-    enabled: !m.is_input && formula.trim() !== "",
-    staleTime: Infinity,
-  });
-  // A formula may name metrics and dimensions (`region = "EMEA"`, LOOKUP's
-  // dimension arguments), case-insensitively. Anything else is only a hint:
-  // the server validates on save and its 400 message is shown below, so the
-  // hint never blocks Save — it used to, which made every formula that
-  // mentions a dimension impossible to edit.
-  const formulaRefs = formulaRefsData?.refs ?? [];
-  const knownNames = new Set([...allMetrics.map(x => x.name), ...dimNames].map(n => n.toLowerCase()));
-  const invalidRefs = formulaRefs.filter(ref => !knownNames.has(ref.toLowerCase()));
+  const invalidRefs = useUnknownFormulaNames(formula, allMetrics.map(x => x.name), dimNames, !m.is_input);
   const canSave = name.trim() !== "" && (m.is_input || formula.trim() !== "");
 
   const update = useMutation({
@@ -395,13 +400,26 @@ function MetricRow({ m, allMetrics, dimNames, onTimeGrid, activeTag, onTagClick 
               <Pencil size={13} />
             </IconButton>
             <IconButton aria-label={`Delete metric ${m.name}`} title="Delete" danger size={26} disabled={del.isPending}
-              onClick={() => confirm({ title: "Delete metric?", body: `This removes "${m.name}" from all formulas that reference it.`, confirmLabel: "Delete metric", onConfirm: () => del.mutate() })}>
+              onClick={() => confirm({
+                title: "Delete metric?",
+                // The server refuses the delete while another metric reads
+                // this one (METRIC_IN_USE), in a formula or as a Rate operand.
+                body: m.depended_by.length
+                  ? `"${m.name}" is read by ${m.depended_by.join(", ")}. The delete is refused until no metric reads it: change those formulas first.`
+                  : `This permanently removes "${m.name}".`,
+                confirmLabel: "Delete metric", onConfirm: () => del.mutate(),
+              })}>
               <Trash2 size={13} />
             </IconButton>
           </div>
         </td>
       </tr>
       {resultsBanner}
+      {del.isError && (
+        <tr>
+          <td colSpan={6} className="mvx-admin-error" style={{ padding: "6px 12px" }}>{(del.error as Error).message}</td>
+        </tr>
+      )}
       {confirmElement}
     </>
   );
@@ -442,8 +460,7 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
     },
   });
 
-  const refs = formula.match(/\{([^}]+)\}/g)?.map((r) => r.slice(1, -1)) ?? [];
-  const unknownRefs = refs.filter((r) => !model.metrics.find((m) => m.name === r));
+  const unknownNames = useUnknownFormulaNames(formula, model.metrics.map(m => m.name), revisionDims.map(d => d.name), !isInput);
 
   return (
     <div style={{ maxWidth: 520 }}>
@@ -497,21 +514,14 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
         )}
 
         {!isInput && (
-          <Field label="Formula" description="use {metric_name} references">
+          <Field label="Formula" description="name metrics and the cell's dimensions, e.g. revenue - cost">
             <TextInput value={formula} onChange={(e) => setFormula(e.target.value)}
-              placeholder={`e.g. {hc_cost} + {software_cost}`}
+              placeholder="e.g. revenue - cost"
               style={{ fontFamily: "var(--font-mono)" }} />
-            {refs.length > 0 && (
-              <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {refs.map((r) => {
-                  const known = !unknownRefs.includes(r);
-                  return (
-                    <StatusBadge key={r} tone={known ? "success" : "danger"}>
-                      {r} {known ? "✓" : "✗ unknown"}
-                    </StatusBadge>
-                  );
-                })}
-              </div>
+            {unknownNames.length > 0 && (
+              <p className="mvx-admin-muted" style={{ marginTop: 6, marginBottom: 0 }}>
+                Not a metric or dimension in this revision: {unknownNames.join(", ")}
+              </p>
             )}
           </Field>
         )}
@@ -559,7 +569,7 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
           variant="primary"
           style={{ alignSelf: "flex-start" }}
           leadingIcon={add.isSuccess ? <Check size={14} /> : undefined}
-          disabled={!name || (!isInput && !formula) || unknownRefs.length > 0 ||
+          disabled={!name || (!isInput && !formula) ||
             (aggRule === "rate" && (!numeratorId || !denominatorId))}
           loading={add.isPending}
           loadingLabel="Adding…"

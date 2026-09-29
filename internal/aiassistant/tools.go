@@ -35,12 +35,12 @@ func ReadTools() []providers.ToolDef {
 		},
 		{
 			Name:        "list_grids",
-			Description: "Returns all grid definitions with their configured metrics and dimensions.",
+			Description: "Returns all grid definitions with their metrics and dimensions (and a dimension's display level when one is set).",
 			Parameters:  noParams,
 		},
 		{
 			Name:        "list_dashboards",
-			Description: "Returns all dashboards with their widget list (type, position, referenced resource).",
+			Description: "Returns the dashboard folders, then every dashboard with its folder, tags and widgets — each widget's id, type, what it shows, position and size.",
 			Parameters:  noParams,
 		},
 		{
@@ -65,7 +65,7 @@ func ReadTools() []providers.ToolDef {
 		},
 		{
 			Name:        "list_workflow_roles",
-			Description: "Returns what a step's assignee_roles and a notification's recipient_role may contain: the platform role codes, and this application's business roles by name with their member counts. Call it before assigning any step; propose create_business_role when the role a developer names does not exist.",
+			Description: "Returns what a step's assignee_roles and a notification's recipient_role may contain: the platform role codes, and this application's business roles by name with their member counts and the dashboards of this revision each may open. Call it before assigning any step; propose create_business_role when the role a developer names does not exist.",
 			Parameters:  noParams,
 		},
 		{
@@ -106,6 +106,32 @@ func ReadTools() []providers.ToolDef {
 	}
 }
 
+// WriteToolNames lists every tool a proposal step may name, grouped the way
+// the prompt documents them. The propose_actions schema's enum and the
+// prompt's tool list are built from it, and a test checks that
+// WriteExecutor.Execute runs every tool on it — the list, the schema and the
+// executor once disagreed (two migration tools the schema offered did
+// nothing). A tool added to Execute must be added here to be offered.
+var WriteToolNames = []string{
+	"create_metric", "update_metric", "delete_metric",
+	"create_dimension", "update_dimension", "delete_dimension",
+	"add_dimension_member", "update_dimension_member", "delete_dimension_member", "generate_time_members",
+	"add_dimension_property", "update_dimension_property", "delete_dimension_property",
+	"create_grid", "update_grid", "delete_grid",
+	"add_grid_metric", "remove_grid_metric", "add_grid_dimension", "update_grid_dimension", "remove_grid_dimension",
+	"create_dashboard_folder", "update_dashboard_folder", "delete_dashboard_folder",
+	"create_dashboard", "update_dashboard", "delete_dashboard",
+	"add_dashboard_widget", "update_dashboard_widget", "delete_dashboard_widget",
+	"set_tags", "create_revision",
+	"create_workflow_def", "update_workflow_def", "delete_workflow_def",
+	"archive_workflow_def", "restore_workflow_def", "duplicate_workflow_def",
+	"create_form_def", "update_form_def", "delete_form_def",
+	"create_automation_rule", "update_automation_rule", "delete_automation_rule",
+	"create_business_role", "update_business_role", "delete_business_role", "set_role_dashboards",
+	"create_form_integration", "update_form_integration", "delete_form_integration", "backfill_form_integration",
+	"set_user_access_rules",
+}
+
 // proposeActionsTool is the single write-side tool the LLM can call.
 // It does not execute anything — it presents a plan for developer confirmation.
 var proposeActionsTool = providers.ToolDef{
@@ -113,25 +139,37 @@ var proposeActionsTool = providers.ToolDef{
 	Description: "Propose an ordered list of write operations for the developer to review and confirm. " +
 		"Call this whenever you want to create, update, or delete any resource. " +
 		"Do NOT attempt to execute write operations directly — always use this tool so the developer can confirm first.",
-	Parameters: json.RawMessage(`{
+	Parameters: proposeActionsSchema(),
+}
+
+func proposeActionsSchema() json.RawMessage {
+	schema := map[string]any{
 		"type": "object",
-		"properties": {
-			"steps": {
-				"type": "array",
+		"properties": map[string]any{
+			"steps": map[string]any{
+				"type":        "array",
 				"description": "Ordered list of write actions to perform after developer confirms",
-				"items": {
+				"items": map[string]any{
 					"type": "object",
-					"properties": {
-						"tool":        {"type": "string",  "description": "Write tool name: create_metric | update_metric | delete_metric | create_dimension | update_dimension | add_dimension_member | update_dimension_member | add_dimension_property | update_dimension_property | delete_dimension_property | create_grid | add_grid_metric | add_grid_dimension | create_dashboard | add_dashboard_widget | set_tags | create_revision | create_workflow_def | update_workflow_def | delete_workflow_def | create_form_def | update_form_def | delete_form_def | create_automation_rule | update_automation_rule | delete_automation_rule | create_business_role | create_form_integration | update_form_integration | delete_form_integration | generate_migration | apply_migration | set_user_access_rules"},
-						"description": {"type": "string",  "description": "One-line human-readable description of this step shown to the developer"},
-						"params":      {"type": "object",  "description": "Parameters for the tool (must match the tool's required fields). create_dimension takes name, and optionally agg_rule, parent_dimension_name, dimension_type/time_granularity/fiscal_year_start_month, tags, members, and for a property grouping source_dimension_id (id or name) + source_property (declared on the source) + derive_members"}
+					"properties": map[string]any{
+						"tool": map[string]any{"type": "string", "enum": WriteToolNames,
+							"description": "Write tool name (the system prompt documents each one's params)"},
+						"description": map[string]any{"type": "string",
+							"description": "One-line human-readable description of this step shown to the developer"},
+						"params": map[string]any{"type": "object",
+							"description": "Parameters for the tool (must match the tool's required fields). create_dimension takes name, and optionally agg_rule, parent_dimension_name, dimension_type/time_granularity/fiscal_year_start_month, tags, members, and for a property grouping source_dimension_id (id or name) + source_property (declared on the source) + derive_members"},
 					},
-					"required": ["tool", "description", "params"]
-				}
-			}
+					"required": []string{"tool", "description", "params"},
+				},
+			},
 		},
-		"required": ["steps"]
-	}`),
+		"required": []string{"steps"},
+	}
+	b, err := json.Marshal(schema)
+	if err != nil {
+		panic(err)
+	}
+	return b
 }
 
 // AllTools returns both read tools and the propose_actions write gateway.
@@ -430,7 +468,8 @@ func (e *ToolExecutor) listGrids(ctx context.Context) (string, error) {
 	rows, err := e.pool.Query(ctx, `
 		SELECT g.id::text, g.name,
 		       COALESCE((SELECT string_agg(md.name,', ') FROM model.grid_metric gm JOIN model.metric_def md ON md.id=gm.metric_id WHERE gm.grid_id=g.id),''),
-		       COALESCE((SELECT string_agg(dd.name,', ') FROM model.grid_dimension gdim JOIN model.dimension_def dd ON dd.id=gdim.dimension_id WHERE gdim.grid_id=g.id),'')
+		       COALESCE((SELECT string_agg(dd.name || COALESCE(' (display level ' || gdim.display_level || ')', ''), ', ')
+		                 FROM model.grid_dimension gdim JOIN model.dimension_def dd ON dd.id=gdim.dimension_id WHERE gdim.grid_id=g.id),'')
 		FROM model.grid_def g
 		WHERE g.model_id=$1::uuid
 		  AND (g.revision_id = $2::uuid OR g.revision_id IS NULL)
@@ -450,28 +489,88 @@ func (e *ToolExecutor) listGrids(ctx context.Context) (string, error) {
 	return sb.String(), rows.Err()
 }
 
+// listDashboards lists the working revision's folders, then each dashboard
+// with its folder and every widget — id, type, what it shows, place and
+// size — so a widget can be named in update_dashboard_widget or
+// delete_dashboard_widget.
 func (e *ToolExecutor) listDashboards(ctx context.Context) (string, error) {
+	var sb strings.Builder
+	frows, err := e.pool.Query(ctx, `
+		SELECT f.id::text, f.name, COALESCE(p.name, '')
+		FROM model.dashboard_folder f LEFT JOIN model.dashboard_folder p ON p.id = f.parent_id
+		WHERE f.model_id=$1::uuid AND (f.revision_id = $2::uuid OR f.revision_id IS NULL)
+		ORDER BY f.name`, e.modelID, e.revID)
+	if err != nil {
+		return "", err
+	}
+	sb.WriteString("Folders:\n")
+	nf := 0
+	for frows.Next() {
+		var id, name, parent string
+		_ = frows.Scan(&id, &name, &parent)
+		nf++
+		if parent != "" {
+			fmt.Fprintf(&sb, "  %s (id:%s, in %s)\n", name, id, parent)
+		} else {
+			fmt.Fprintf(&sb, "  %s (id:%s)\n", name, id)
+		}
+	}
+	frows.Close()
+	if nf == 0 {
+		sb.WriteString("  none\n")
+	}
+
 	rows, err := e.pool.Query(ctx, `
-		SELECT d.id::text, d.name, d.tags,
-		       COUNT(w.id) AS widget_count
+		SELECT d.id::text, d.name, d.tags, COALESCE(f.name, ''),
+		       w.id::text, COALESCE(w.widget_type, ''),
+		       COALESCE(md.name, gd.name, fd.name, w.ref_id, ''),
+		       COALESCE(w.pos_x, 0), COALESCE(w.pos_y, 0), COALESCE(w.size_w, 0), COALESCE(w.size_h, 0), COALESCE(w.title, '')
 		FROM model.dashboard_def d
+		LEFT JOIN model.dashboard_folder f ON f.id = d.folder_id
 		LEFT JOIN model.dashboard_widget w ON w.dashboard_id = d.id
+		LEFT JOIN model.metric_def md ON w.widget_type = 'metric_kpi' AND md.id::text = w.ref_id
+		LEFT JOIN model.grid_def gd ON w.widget_type IN ('chart','grid','import') AND gd.id::text = w.ref_id
+		LEFT JOIN model.form_def fd ON w.widget_type = 'form' AND fd.id::text = w.ref_id
 		WHERE d.model_id=$1::uuid
 		  AND (d.revision_id = $2::uuid OR d.revision_id IS NULL)
-		GROUP BY d.id, d.name ORDER BY d.name`, e.modelID, e.revID)
+		ORDER BY d.name, d.id, w.pos_y, w.pos_x`, e.modelID, e.revID)
 	if err != nil {
 		return "", err
 	}
 	defer rows.Close()
 
-	var sb strings.Builder
 	sb.WriteString("Dashboards:\n")
+	last := ""
 	for rows.Next() {
-		var id, name string
+		var id, name, folder string
 		var tagList []string
-		var wc int
-		_ = rows.Scan(&id, &name, &tagList, &wc)
-		fmt.Fprintf(&sb, "  %s (id:%s) — %d widget(s)%s\n", name, id, wc, tagSuffix(tagList))
+		var wid *string
+		var wtype, ref, title string
+		var x, y, w, h int
+		if err := rows.Scan(&id, &name, &tagList, &folder, &wid, &wtype, &ref, &x, &y, &w, &h, &title); err != nil {
+			return "", err
+		}
+		if id != last {
+			last = id
+			where := ""
+			if folder != "" {
+				where = " in folder " + folder
+			}
+			fmt.Fprintf(&sb, "  %s (id:%s)%s%s\n", name, id, where, tagSuffix(tagList))
+		}
+		if wid == nil {
+			sb.WriteString("    no widgets\n")
+			continue
+		}
+		line := fmt.Sprintf("    widget (id:%s) %s", *wid, wtype)
+		if ref != "" {
+			line += " → " + ref
+		}
+		line += fmt.Sprintf(" at (%d,%d) size %dx%d", x, y, w, h)
+		if title != "" {
+			line += fmt.Sprintf(" title %q", title)
+		}
+		sb.WriteString(line + "\n")
 	}
 	return sb.String(), rows.Err()
 }

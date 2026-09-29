@@ -62,6 +62,20 @@ func (ctx *EvalContext) unboundDimension(name string) (Value, bool) {
 	return StringVal(code), true
 }
 
+// safeEval is eval behind the package's entry points (Eval,
+// EvalWithContext, EvalNode): a panic inside a function becomes the cell's
+// #VALUE! error instead of unwinding into the caller. Recalculation runs in
+// background goroutines, where an unrecovered panic stops the whole process
+// for every tenant.
+func (ctx *EvalContext) safeEval(node Node) (v Value) {
+	defer func() {
+		if r := recover(); r != nil {
+			v = ErrorVal(errValue(fmt.Sprintf("internal error while evaluating the formula: %v", r)))
+		}
+	}()
+	return ctx.eval(node)
+}
+
 // eval evaluates a node within a context.
 func (ctx *EvalContext) eval(node Node) Value {
 	switch n := node.(type) {

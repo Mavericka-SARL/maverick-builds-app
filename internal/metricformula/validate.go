@@ -121,6 +121,17 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 		}
 	}
 
+	// 2b. Every scalar function gets the number of arguments it takes; a
+	//     wrong count would otherwise fail every cell with #VALUE!. (Analyze
+	//     already checked the time and dimensional functions.)
+	if err := formula.CheckArguments(req.Formula); err != nil {
+		var ae *formula.AnalysisError
+		if errors.As(err, &ae) {
+			return nil, invalidCode(ae.Code, "%s", ae.Message)
+		}
+		return nil, invalid("formula does not parse: %v", err)
+	}
+
 	// 3. Every reference must resolve inside THIS metric's revision, as a
 	//    metric or a dimension. Metrics additionally become dependency edges,
 	//    each carrying the union of the time offsets it is read at. A
@@ -142,11 +153,15 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 		if ref.Dimensional && overriddenTimeDim(ref, rd) {
 			edge.UnboundedPast, edge.UnboundedFuture = true, true
 		}
+		// Metric names are case-insensitive in formulas, as the evaluator
+		// binds them; migration 100 keeps new names unique regardless of
+		// case, and an exact match wins where an older pair still exists.
 		var metricID string
 		err := pool.QueryRow(ctx, `
 			SELECT id::text FROM model.metric_def
-			WHERE model_id=$1::uuid AND name=$2
+			WHERE model_id=$1::uuid AND lower(name)=lower($2)
 			  AND (revision_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid OR revision_id IS NULL)
+			ORDER BY (name = $2) DESC
 			LIMIT 1
 		`, req.ModelID, ref.Name, req.RevisionID).Scan(&metricID)
 		if err == nil {
@@ -180,7 +195,7 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 		if dErr := pool.QueryRow(ctx, `
 			SELECT EXISTS (
 			    SELECT 1 FROM model.dimension_def
-			    WHERE model_id=$1::uuid AND name=$2
+			    WHERE model_id=$1::uuid AND lower(name)=lower($2)
 			      AND (revision_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid OR revision_id IS NULL)
 			)
 		`, req.ModelID, ref.Name, req.RevisionID).Scan(&dimExists); dErr != nil {

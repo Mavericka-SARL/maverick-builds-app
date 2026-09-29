@@ -1,0 +1,96 @@
+
+<div class="note"><b>The example model of chapters 11 to 16.</b> A <b>region</b> dimension World › EMEA › DE, UK and World › AMER › US, with declared properties <code>segment</code> (text), <code>factor</code> (number), <code>opened</code> (date) and <code>currency</code> (text): DE is Enterprise, 1.5, 2019-04-01, EUR; UK is SMB, 2, 2021-07-15, GBP; US is Enterprise, 0.5, 2020-01-10, USD. A <b>currency</b> dimension (EUR, GBP, USD) carries the input <code>fx_rate</code> (1.1, 1.25, 1). A monthly <b>period</b> time dimension runs FY26 › H1/H2 › Q1–Q4 › 2026-01 … 2026-12. The input <code>sales</code> on Plan [region, period] is 110, 55 and 197 for DE, UK and US in January (DE 100 + 10 per month, UK 50 + 5, US 200 − 3). Every number quoted below is what the engine produced for this model.</div>
+
+<h2>11. The cell's members and their properties</h2>
+<div class="fn"><h4><span class="sig">dimension</span> — the member code</h4>
+<p>A dimension's bare name is the <b>code</b> of the cell's member of that dimension: <code>region</code> is "DE" in the DE row and "EMEA" in the EMEA row. Where the dimension is not pinned (a total, or a row that leaves it open) it is <b>blank</b>.</p>
+<table class="ex"><tr><td>IF(region = "UK", sales * 1.2, sales)</td><td>one member differs</td><td>66 for UK in Jan</td></tr>
+<tr><td>IF(region = "EMEA", sales, 0)</td><td>at the grand total</td><td>0</td></tr>
+<tr><td>IF(region = "", 1, 0)</td><td>"am I a total?"</td><td>1 at a total</td></tr></table></div>
+
+<div class="fn"><h4><span class="sig">dimension.property</span> — a member property</h4>
+<p>The value of a <b>declared</b> property on the cell's member, typed by its declaration (Build › Dimensions › Dimension Properties):</p>
+<ul>
+  <li><b>number</b> → a number (a stored value that is not a number gives <code>#VALUE!</code>);</li>
+  <li><b>date</b> → a date serial, from an ISO <code>yyyy-mm-dd</code> value (anything else gives <code>#VALUE!</code>);</li>
+  <li><b>text</b> → text;</li>
+  <li>no value on the member, or the dimension not pinned → <b>blank</b>.</li>
+</ul>
+<p>A parent member has its own property values; it never inherits its children's. A property that is not declared is refused at save (<code>UNKNOWN_PROPERTY</code>), even if members carry values under that key.</p>
+<table class="ex"><tr><td>sales * region.factor</td><td>number property</td><td>165 for DE in Jan</td></tr>
+<tr><td>DAYS(START(), region.opened)</td><td>date property</td><td>days since opening</td></tr>
+<tr><td>IF(region.segment = "enterprise", 1, 0)</td><td>text, any case</td><td>1 for DE and US</td></tr></table></div>
+
+<div class="fn"><h4><span class="sig">PARENT(dimension)</span> — the parent's code</h4>
+<p>The code of the parent of the cell's member; blank at a root member or where the dimension is not pinned. The argument must be a bare dimension name. To read the parent's <i>value</i>, combine it with LOOKUP: <code>LOOKUP(sales, region, PARENT(region))</code>.</p>
+<table class="ex"><tr><td>IF(PARENT(region) = "EMEA", 1, 0)</td><td></td><td>1 for DE and UK</td></tr></table></div>
+
+<ul>
+  <li>Dimension and property names ignore case; so does comparing a member code with <code>=</code>. LOOKUP and TIMESUM match member codes <b>exactly</b>.</li>
+  <li>These references read only the cell's own member, so they are allowed anywhere, including in an opening/closing recurrence, and they are recomputed normally for users who cannot see every member.</li>
+  <li>If a metric and a dimension share a name, the name means the dimension where the cell pins it, and the metric elsewhere. Avoid the clash.</li>
+</ul>
+
+<h2>12. LOOKUP</h2>
+<div class="fn"><h4><span class="sig">LOOKUP(source, dimension1, member1 [, dimension2, member2 …])</span></h4>
+<p>The value of the metric <i>source</i> at the cell's own members, with each named dimension moved to the given member. It is the dimensional equivalent of XLOOKUP/INDEX/MATCH.</p>
+<table class="ex">
+<tr><td>LOOKUP(sales, region, "DE")</td><td>a fixed member</td><td>110 in Jan, every row</td></tr>
+<tr><td>sales / LOOKUP(sales, region, PARENT(region))</td><td>share of parent</td><td>0.6667 for DE in Jan (110 ÷ 165)</td></tr>
+<tr><td>ROUND(sales * LOOKUP(fx_rate, currency, region.currency), 2)</td><td>a member from a property</td><td>121 for DE in Jan</td></tr>
+<tr><td>LOOKUP(sales, region, "US", period, "2026-01")</td><td>two dimensions</td><td>197</td></tr>
+<tr><td>IFNA(LOOKUP(sales, region, region &amp; "X"), -1)</td><td>member that does not exist</td><td>-1</td></tr>
+</table></div>
+<ul>
+  <li><b>source</b> must be a metric name (<code>SOURCE_MUST_BE_METRIC</code> otherwise). Each <b>dimension</b> must be a bare dimension name (not <code>dim.property</code>, <code>DIMENSION_ARGUMENT_REQUIRED</code>), at most once.</li>
+  <li><b>member</b> is any expression giving a code: a literal (<code>"DE"</code>, checked at save: <code>UNKNOWN_MEMBER</code>), a bare dimension, <code>PARENT(…)</code>, a property, text built with <code>&amp;</code>. A number becomes its digits (<code>1000000</code> → "1000000").</li>
+  <li>A code that does not exist, or a blank member, is <code>#N/A</code>, a failure of that cell. Wrap in <code>IFNA</code> when that can legitimately happen.</li>
+  <li><b>A parent member</b> (EMEA, World, Q1, FY26) returns its leaf members combined by the source's own aggregation rule, and an aggregate period by the source's time summary. A ratio source (rule Formula or Rate) at a parent returns the ratio computed there, never a mean of its children.</li>
+  <li><b>Other dimensions</b>: those the cell and the source share stay at the cell's members; a dimension of the source the cell does not have is totalled; a dimension of the cell the source does not have is ignored.</li>
+  <li>Each dimension must be one of the source's, or related to one (a parent/child dimension chain, or a property grouping), else <code>DIMENSION_NOT_ON_SOURCE</code>. Two dimensions that both relate to the same dimension of the source conflict: <code>CONFLICTING_DIMENSION_ARGUMENTS</code>.</li>
+  <li>With nothing recorded at the target, LOOKUP reads 0, as a plain reference does.</li>
+  <li>LOOKUP is not allowed in an opening/closing recurrence (chapter 14).</li>
+</ul>
+
+<h2>13. Conditional aggregation</h2>
+<table>
+<tr><th style="width:42%">Form</th><th>Result</th><th style="width:18%">Nothing matches</th></tr>
+<tr><td class="sig">SUMIFS(source, range1, criterion1 [, …])</td><td>Sum of <i>source</i> over the matching members</td><td>0</td></tr>
+<tr><td class="sig">AVERAGEIFS(source, range1, criterion1 [, …])</td><td>Mean of the recorded values</td><td><code>#DIV/0!</code></td></tr>
+<tr><td class="sig">MINIFS / MAXIFS(source, range1, criterion1 [, …])</td><td>Smallest / largest recorded value</td><td>0</td></tr>
+<tr><td class="sig">COUNTIFS(range1, criterion1 [, …])</td><td>Number of matching member combinations</td><td>0</td></tr>
+<tr><td class="sig">SUMIF(range, criterion, source)</td><td>SUMIFS with one criterion, in Excel's argument order</td><td>0</td></tr>
+<tr><td class="sig">AVERAGEIF(range, criterion, source)</td><td>AVERAGEIFS with one criterion</td><td><code>#DIV/0!</code></td></tr>
+<tr><td class="sig">COUNTIF(range, criterion)</td><td>COUNTIFS with one criterion</td><td>0</td></tr>
+</table>
+<ul>
+  <li>A <b>range</b> is a dimension (its member codes are tested) or <code>dimension.property</code> (the members' typed property values are tested).</li>
+  <li>They run over the <b>leaf</b> members of each range dimension (for a time dimension, its dated periods). Criteria on several dimensions combine every matching member of one with every matching member of the other. Dimensions without a criterion stay at the cell's own members: in the March row, <code>SUMIFS(sales, region.segment, "Enterprise")</code> adds up March.</li>
+  <li>AVERAGEIFS, MINIFS and MAXIFS skip members with nothing recorded; SUMIFS counts them as 0. <b>COUNTIFS counts members, not data cells</b> (Excel counts cells).</li>
+  <li>The source must be a metric; each range dimension must be the source's or related to it (COUNTIFS, having no source, may use any dimension of the model). Criteria matching more than 1,000,000 combinations give <code>#NUM!</code>. Not allowed in an opening/closing recurrence.</li>
+</ul>
+
+<h3>Criteria</h3>
+<table>
+<tr><th style="width:26%">Criterion</th><th>Matches</th></tr>
+<tr><td><code>"Enterprise"</code>, <code>"=Enterprise"</code></td><td>Equal, ignoring case</td></tr>
+<tr><td><code>"&lt;&gt;GBP"</code></td><td>Not equal (blank members included)</td></tr>
+<tr><td><code>"&gt;=1"</code>, <code>"&lt;0.5"</code></td><td>A numeric comparison with a number property; against codes and text properties the comparison is textual</td></tr>
+<tr><td><code>"&gt;=2020-01-01"</code></td><td>A date comparison with a date property (ISO text)</td></tr>
+<tr><td><code>"E*"</code>, <code>"?1"</code>, <code>"star~*"</code></td><td><code>*</code> any run of characters, <code>?</code> one character, <code>~</code> makes the next one literal (in equality and inequality)</td></tr>
+<tr><td><code>""</code> or <code>"="</code></td><td>Blank (no value)</td></tr>
+<tr><td><code>"&lt;&gt;"</code></td><td>Not blank</td></tr>
+<tr><td>an expression</td><td>Evaluated at the cell first: <code>region.segment</code> (the cell's own segment), <code>"&lt;&gt;" &amp; region</code> (every other member), <code>"&lt;=" &amp; period</code> (this period and earlier), <code>LEFT(product, 1) &amp; "*"</code></td></tr>
+<tr><td>a number, <code>100</code></td><td>Equal to 100; against a member code it compares as the text "100"</td></tr>
+</table>
+<p>A text operand never equals or orders a number property; a member whose property value cannot be read as its type matches only <code>"&lt;&gt;…"</code>. An ordering (<code>&lt;</code>, <code>&gt;</code> …) never matches a blank.</p>
+
+<table class="ex">
+<tr><td>SUMIFS(sales, region.segment, "Enterprise")</td><td>by property</td><td>307 in Jan (DE + US)</td></tr>
+<tr><td>AVERAGEIFS(sales, region.segment, region.segment)</td><td>peers of the cell</td><td>153.5 for DE and US, 55 for UK</td></tr>
+<tr><td>COUNTIFS(region.segment, "Enterprise", region.factor, "&gt;=1") + COUNTIF(region, "U*")</td><td>counts members</td><td>1 + 2 = 3</td></tr>
+<tr><td>MAXIFS(sales, region.currency, "&lt;&gt;GBP") - MINIFS(sales, region.currency, "&lt;&gt;GBP")</td><td>spread</td><td>87 in Jan</td></tr>
+<tr><td>SUMIF(region.opened, "&gt;=2020-01-01", sales)</td><td>date property</td><td>252 in Jan (UK + US)</td></tr>
+<tr><td>ROUND(sales / SUMIFS(sales, region, "*") * 100, 3)</td><td>share of all regions</td><td>30.387 for DE in Jan</td></tr>
+<tr><td>SUMIFS(sales, period, "&lt;=" &amp; period)</td><td>running total along time</td><td>same as <code>YEARTODATE(sales)</code> here</td></tr>
+</table>

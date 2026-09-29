@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Bot, Bookmark, Check, ClipboardList, Cog, FileText, History, LayoutDashboard, Link2, ListTree, Paperclip,
+  Archive, Bot, Bookmark, Check, ClipboardList, FileText, History, LayoutDashboard, Link2, ListTree, Paperclip,
   Pencil, Plus, Puzzle, Rocket, Ruler, Search, Settings, Table2, Trash2, Users, Workflow, Wrench, X, Zap,
 } from "lucide-react";
 import { api, type AISession, type AIMessage, type AISettings, type AIProposal, type AIProposalStep, type AIProposalWithSummary, type AIDocument } from "../../api/client";
@@ -158,24 +158,42 @@ function ToolIcon({ tool }: { tool: string }) {
   switch (tool) {
     case "create_metric":        return <Ruler {...props} />;
     case "update_metric":        return <Pencil {...props} />;
-    case "delete_metric":        return <Trash2 {...props} />;
     case "create_dimension":     return <ListTree {...props} />;
     case "add_dimension_member":
+    case "generate_time_members":
     case "add_dimension_property": return <Plus {...props} />;
     case "update_dimension":
     case "update_dimension_member":
-    case "update_dimension_property": return <Pencil {...props} />;
-    case "delete_dimension_property": return <Trash2 {...props} />;
+    case "update_dimension_property":
+    case "update_grid":
+    case "update_grid_dimension":
+    case "update_dashboard":
+    case "update_dashboard_widget":
+    case "update_dashboard_folder":
+    case "update_business_role": return <Pencil {...props} />;
     case "create_grid":
     case "add_grid_metric":
     case "add_grid_dimension":   return <Table2 {...props} />;
-    case "create_dashboard":     return <LayoutDashboard {...props} />;
+    case "create_dashboard":
+    case "create_dashboard_folder": return <LayoutDashboard {...props} />;
     case "add_dashboard_widget": return <Puzzle {...props} />;
     case "create_revision":      return <Bookmark {...props} />;
-    case "generate_migration":   return <Cog {...props} />;
-    case "apply_migration":      return <Rocket {...props} />;
     case "create_workflow_def":
-    case "update_workflow_def":  return <Workflow {...props} />;
+    case "update_workflow_def":
+    case "restore_workflow_def":
+    case "duplicate_workflow_def": return <Workflow {...props} />;
+    case "archive_workflow_def": return <Archive {...props} />;
+    case "delete_metric":
+    case "delete_dimension":
+    case "delete_dimension_member":
+    case "delete_dimension_property":
+    case "delete_grid":
+    case "remove_grid_metric":
+    case "remove_grid_dimension":
+    case "delete_dashboard":
+    case "delete_dashboard_widget":
+    case "delete_dashboard_folder":
+    case "delete_business_role":
     case "delete_workflow_def":
     case "delete_form_def":
     case "delete_automation_rule":
@@ -184,7 +202,9 @@ function ToolIcon({ tool }: { tool: string }) {
     case "update_form_def":      return <ClipboardList {...props} />;
     case "create_automation_rule":
     case "update_automation_rule": return <Zap {...props} />;
-    case "create_business_role": return <Users {...props} />;
+    case "create_business_role":
+    case "set_role_dashboards":  return <Users {...props} />;
+    case "backfill_form_integration": return <Rocket {...props} />;
     case "create_form_integration":
     case "update_form_integration": return <Link2 {...props} />;
     default:                     return <Wrench {...props} />;
@@ -200,7 +220,18 @@ const TOOL_LABELS: Record<string, string> = {
   update_dimension_property: "Update dimension property", delete_dimension_property: "Delete dimension property",
   create_grid: "Create grid", add_grid_metric: "Add grid metric", add_grid_dimension: "Add grid dimension",
   create_dashboard: "Create dashboard", add_dashboard_widget: "Add dashboard widget", set_tags: "Set tags",
-  create_revision: "Create revision", generate_migration: "Generate migration", apply_migration: "Apply migration",
+  create_revision: "Create revision",
+  delete_dimension: "Delete dimension", delete_dimension_member: "Delete dimension member",
+  generate_time_members: "Generate time periods", update_grid: "Rename grid", delete_grid: "Delete grid",
+  remove_grid_metric: "Remove grid metric", remove_grid_dimension: "Remove grid dimension",
+  update_grid_dimension: "Set grid display level", create_dashboard_folder: "Create dashboard folder",
+  update_dashboard_folder: "Update dashboard folder", delete_dashboard_folder: "Delete dashboard folder",
+  update_dashboard: "Update dashboard", delete_dashboard: "Delete dashboard",
+  update_dashboard_widget: "Update dashboard widget", delete_dashboard_widget: "Delete dashboard widget",
+  archive_workflow_def: "Archive workflow", restore_workflow_def: "Restore workflow",
+  duplicate_workflow_def: "Duplicate workflow", update_business_role: "Rename business role",
+  delete_business_role: "Delete business role", set_role_dashboards: "Set role dashboards",
+  backfill_form_integration: "Post form records",
   create_workflow_def: "Create workflow", update_workflow_def: "Update workflow", delete_workflow_def: "Delete workflow",
   create_form_def: "Create form", update_form_def: "Update form", delete_form_def: "Delete form",
   create_automation_rule: "Create automation rule", update_automation_rule: "Update automation rule",

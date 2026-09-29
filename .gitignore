@@ -57,6 +57,7 @@ deploy/k8s/overlays/prod/
 # Generated: the manual is built from manual.html by build.sh, and test
 # runners write their own reports.
 docs/developer-manual/mavericks-developer-manual.pdf
+docs/formulas-manual/mavericks-formulas-manual.pdf
 test-results/
 web/test-results/
 web/playwright-report/

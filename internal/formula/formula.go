@@ -19,7 +19,7 @@ func Eval(text string, vars map[string]Value) (Value, error) {
 		return ErrorVal(ErrValue), err
 	}
 	ctx := &EvalContext{Vars: upperKeys(vars)}
-	return ctx.eval(node), nil
+	return ctx.safeEval(node), nil
 }
 
 // EvalWithContext evaluates a formula using the provided EvalContext.
@@ -32,7 +32,7 @@ func EvalWithContext(text string, ctx *EvalContext) (Value, error) {
 	if ctx != nil && ctx.Vars != nil {
 		ctx = &EvalContext{Vars: upperKeys(ctx.Vars), Funcs: ctx.Funcs, Time: ctx.Time, Dim: ctx.Dim}
 	}
-	return ctx.eval(node), nil
+	return ctx.safeEval(node), nil
 }
 
 // EvalNumber is a convenience wrapper that returns a float64 result.

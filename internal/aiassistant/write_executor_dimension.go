@@ -229,6 +229,9 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 			return "", "", fmt.Errorf("derive grouping members: %w", err)
 		}
 		var added []string
+		if err := e.checkMembers(ctx, dimID, len(missing)); err != nil {
+			return "", "", err
+		}
 		if len(missing) > 0 {
 			if added, err = metricformula.DeriveGroupingMembers(ctx, e.pool, dimID, missing); err != nil {
 				return "", "", fmt.Errorf("derive grouping members: %w", err)

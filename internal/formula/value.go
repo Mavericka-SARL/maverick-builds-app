@@ -2,7 +2,6 @@ package formula
 
 import (
 	"fmt"
-	"math"
 	"strings"
 )
 
@@ -88,10 +87,7 @@ func (v Value) Number() (float64, bool) {
 func (v Value) String() string {
 	switch v.kind {
 	case KindNumber:
-		if v.num == math.Trunc(v.num) && !math.IsInf(v.num, 0) {
-			return fmt.Sprintf("%g", v.num)
-		}
-		return fmt.Sprintf("%g", v.num)
+		return numberText15(v.num)
 	case KindString:
 		return v.str
 	case KindBool:
@@ -130,10 +126,13 @@ func compareValues(a, b Value) (int, *FormulaError) {
 	if b.kind == KindError {
 		return 0, b.err
 	}
-	// Both numbers or coercible
+	// Both numbers or coercible. Numbers compare on their 15 significant
+	// digits, as Excel does: 0.1 + 0.2 = 0.3 is TRUE, where the binary
+	// values differ in the 17th digit.
 	an, aok := a.Number()
 	bn, bok := b.Number()
 	if aok && bok && a.kind != KindString && b.kind != KindString {
+		an, bn = significant15(an), significant15(bn)
 		if an < bn {
 			return -1, nil
 		}

@@ -194,7 +194,11 @@ func (h *handler) runSheetsGridImport(w http.ResponseWriter, r *http.Request, ac
 	if len(metricIDs) > 0 {
 		calcStore := calculation.NewStore(h.db.For(ctx))
 		sched := calculation.NewScheduler(h.log, calcStore, nil)
-		go func() { _ = sched.RecalcAffected(context.Background(), modelID, revisionID, metricIDs) }() //nolint:contextcheck
+		go func() { //nolint:contextcheck // outlives the request
+			bg, done := h.backgroundRecalc(context.Background(), "recalculation after a sheet import")
+			defer done()
+			_ = sched.RecalcAffected(bg, modelID, revisionID, metricIDs)
+		}()
 	}
 	jsonOK(w, map[string]any{"rows_imported": len(staged), "error_rows": len(importErrs), "errors": errRows})
 }

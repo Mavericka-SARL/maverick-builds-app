@@ -32,8 +32,23 @@ func walkIdents(node Node, seen map[string]bool, out *[]string) {
 		walkIdents(n.Left, seen, out)
 		walkIdents(n.Right, seen, out)
 	case *CallExpr:
-		for _, a := range n.Args {
+		for i, a := range n.Args {
+			if isKeywordArg(n, i) {
+				continue
+			}
 			walkIdents(a, seen, out)
 		}
 	}
+}
+
+// isKeywordArg reports whether argument i of call is a keyword position —
+// LAG/LEAD's STRICT | SEMISTRICT | NONSTRICT, MOVINGSUM's and TIMESUM's
+// SUM | AVERAGE | MIN | MAX — whose bare word is not a reference (Analyze
+// treats these positions the same way).
+func isKeywordArg(call *CallExpr, i int) bool {
+	switch call.Name {
+	case "LAG", "LEAD", "MOVINGSUM", "TIMESUM":
+		return i == 3
+	}
+	return false
 }
