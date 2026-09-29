@@ -428,7 +428,8 @@ func defaultVisibleCode(members []dimMember) string {
 	}
 	// Below a root every member has exactly one parent, so the walk cannot
 	// meet a cycle (a cycle has no root) and always ends at a leaf.
-	for _, code := range roots {
+	if len(roots) > 0 {
+		code := roots[0]
 		for len(children[code]) > 0 {
 			code = children[code][0]
 		}

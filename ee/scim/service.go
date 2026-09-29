@@ -245,6 +245,36 @@ const scopeSQL = `(u.customer_id = $1::uuid OR EXISTS (
 	SELECT 1 FROM identity.role_assignment ra JOIN core.workspace w ON w.id = ra.workspace_id
 	WHERE ra.user_id = u.id AND w.customer_id = $1::uuid))`
 
+// ownedSQL narrows scopeSQL to the accounts this tenant's directory may
+// change or delete: the tenant's own (customer_id), and never a platform
+// admin. scopeSQL also lists people who belong to another tenant, or to
+// none, and hold a role in one of the tenant's workspaces: members here, but
+// their sign-in address, name, status and existence are not this tenant's.
+// Through them a tenant's token rewrote a platform admin's and a
+// platform-wide builder's e-mail in the application and the identity
+// provider, so that a set-password mail then went to the new address, and
+// deleted another platform admin's sign-in account (2026-09-29).
+const ownedSQL = `u.customer_id = $1::uuid AND NOT EXISTS (
+	SELECT 1 FROM identity.role_assignment pa WHERE pa.user_id = u.id AND pa.role = 'platform_admin')`
+
+// owns reports whether the tenant's directory may change the account
+// (ownedSQL).
+func (s *Service) owns(ctx context.Context, userID string) (bool, error) {
+	var ok bool
+	if err := s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM identity.user u WHERE u.id = $2::uuid AND `+ownedSQL+`)`,
+		s.CustomerID, userID).Scan(&ok); err != nil {
+		return false, internal(err)
+	}
+	return ok, nil
+}
+
+// notOwned is the refusal for an account the directory lists but may not
+// change (ownedSQL).
+func notOwned(email string) error {
+	return &scimErr{http.StatusForbidden, "", email + " does not belong to this tenant, or is a platform administrator: " +
+		"this directory lists the account but may not change or delete it"}
+}
+
 func (s *Service) loadUsers(ctx context.Context, where string, args ...any) ([]userRow, error) {
 	rows, err := s.Pool.Query(ctx, `
 		SELECT u.id::text, u.keycloak_sub, u.email, u.display_name, COALESCE(u.external_id,''), u.disabled_at, u.created_at, u.updated_at
@@ -505,6 +535,14 @@ func (s *Service) createUser(ctx context.Context, in userInput) (userRow, error)
 		if err != nil {
 			return userRow{}, upstream(err)
 		}
+		// The identity provider may know the address under an account the
+		// application stores with another e-mail; the upsert below would
+		// take it over (ownedSQL).
+		if existing != "" {
+			if err := s.Pool.QueryRow(ctx, `SELECT id::text FROM identity.user WHERE keycloak_sub = $1`, existing).Scan(&existingID); err == nil {
+				return userRow{}, conflict("a user with userName " + in.Email + " already exists")
+			}
+		}
 		if existing == "" {
 			if existing, err = s.IdP.CreateUser(ctx, in.Email, first, last); err != nil {
 				return userRow{}, upstream(err)
@@ -571,6 +609,19 @@ func (s *Service) updateUser(ctx context.Context, cur userRow, in userInput) (us
 	if in.DisplayName == "" {
 		in.DisplayName = cur.DisplayName
 	}
+	owned, err := s.owns(ctx, cur.ID)
+	if err != nil {
+		return userRow{}, err
+	}
+	if !owned {
+		// A request that changes nothing is answered as one: identity
+		// providers re-send what they hold.
+		if in.Email == strings.ToLower(cur.Email) && in.DisplayName == cur.DisplayName &&
+			in.ExternalID == cur.ExternalID && in.Active == (cur.DisabledAt == nil) {
+			return cur, nil
+		}
+		return userRow{}, notOwned(cur.Email)
+	}
 	if in.Email != cur.Email {
 		var other string
 		if err := s.Pool.QueryRow(ctx, `SELECT id::text FROM identity.user WHERE lower(email) = $1 AND id <> $2::uuid`, in.Email, cur.ID).Scan(&other); err == nil {
@@ -602,6 +653,11 @@ func (s *Service) updateUser(ctx context.Context, cur userRow, in userInput) (us
 }
 
 func (s *Service) deleteUser(ctx context.Context, cur userRow) error {
+	if owned, err := s.owns(ctx, cur.ID); err != nil {
+		return err
+	} else if !owned {
+		return notOwned(cur.Email)
+	}
 	if s.OnUserDeleted != nil {
 		s.OnUserDeleted(ctx, cur.Sub)
 	}

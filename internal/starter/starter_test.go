@@ -909,9 +909,15 @@ func checkLinks(t *testing.T, pkg modeltransfer.Package) {
 }
 
 // publicExclusions reads scripts/public-exclude.txt: one path or shell glob
-// per line, # comments and blank lines ignored.
+// per line, # comments and blank lines ignored. The public repository is
+// exported without that file (it lists itself), and without every path it
+// names, so there it excludes nothing: a link to an excluded document already
+// fails the check that the linked file exists.
 func publicExclusions(t *testing.T) []string {
 	f, err := os.Open(filepath.Join(repoRoot, "scripts", "public-exclude.txt"))
+	if os.IsNotExist(err) {
+		return nil
+	}
 	if err != nil {
 		t.Fatalf("public exclusions: %v", err)
 	}

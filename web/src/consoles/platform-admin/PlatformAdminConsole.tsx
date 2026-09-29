@@ -263,6 +263,7 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
             <ModelRevisionsSection model={m} tenantId={tenantId} canTransferModels={canTransferModels} />
           </div>
         ))}
+        {deleteModel.isError && <p className="mvx-admin-error" role="alert">{(deleteModel.error as Error).message}</p>}
 
         {addModel ? (
           <div className="mvx-admin-inline-form">

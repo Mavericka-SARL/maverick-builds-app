@@ -89,6 +89,10 @@ const stepAssigneeSQL = `EXISTS (
 	            JOIN identity.role_assignment asg_gra ON asg_gra.user_id = asg_gu.id
 	            WHERE asg_gu.id = {user} AND asg_gu.customer_id IS NULL
 	              AND asg_gra.role::text = 'developer' AND asg_gra.workspace_id IS NULL
+	              -- narrowed by application or model grants, it is not
+	              -- platform-wide: the grants' tenants are its scope (below)
+	              AND NOT EXISTS (SELECT 1 FROM identity.user_app_access asg_gua WHERE asg_gua.user_id = asg_gu.id)
+	              AND NOT EXISTS (SELECT 1 FROM identity.user_model_access asg_gum WHERE asg_gum.user_id = asg_gu.id)
 	        )
 	        OR EXISTS (
 	            SELECT 1 FROM identity."user" asg_ou
@@ -114,7 +118,10 @@ const stepAssigneeSQL = `EXISTS (
 	              AND EXISTS (
 	                  SELECT 1 FROM identity.role_assignment asg_nra2
 	                  WHERE asg_nra2.user_id = {user} AND asg_nra2.workspace_id IS NULL
-	                    AND asg_nra2.role::text IN ('tenant_admin', 'developer')
+	                    -- tenant_admin only: a developer with no tenant is
+	                    -- platform-wide (above) or narrowed to its grants
+	                    -- (below), as in adminScopeCustomerIDs
+	                    AND asg_nra2.role::text = 'tenant_admin'
 	              )
 	        )
 	        OR (EXISTS (

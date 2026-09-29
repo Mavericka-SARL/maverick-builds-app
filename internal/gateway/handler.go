@@ -1013,6 +1013,12 @@ func (h *handler) adminScopeCustomerIDs(ctx context.Context, a *actor) (all bool
 		    -- 2026-09-10). An account that HAS a tenant never reads it this
 		    -- way: an unscoped grant made in tenant A plus a plain
 		    -- business_user role in tenant B used to make it admin of B.
+		    -- Only an unscoped tenant_admin counts: a developer with no
+		    -- tenant is either platform-wide (answered above) or narrowed
+		    -- by application or model grants, which are then its scope
+		    -- (the grant arms below). Counting developer here made one
+		    -- narrowed to an application of tenant A administrator of
+		    -- tenant B, where it held only business_user (2026-09-29).
 		    SELECT w.customer_id::text AS customer_id
 		    FROM identity.role_assignment ra
 		    JOIN core.workspace w ON w.id=ra.workspace_id
@@ -1022,7 +1028,7 @@ func (h *handler) adminScopeCustomerIDs(ctx context.Context, a *actor) (all bool
 		      AND EXISTS (
 		          SELECT 1 FROM identity.role_assignment ra2
 		          WHERE ra2.user_id=$1::uuid
-		            AND ra2.role IN ('tenant_admin', 'developer')
+		            AND ra2.role = 'tenant_admin'
 		            AND ra2.workspace_id IS NULL
 		      )
 		    UNION
@@ -1176,6 +1182,8 @@ func (h *handler) adminCanAccessModel(ctx context.Context, a *actor, modelID str
 // isGlobalBuilder reports whether the actor holds a developer role that is
 // not scoped to any workspace — a platform-wide builder who can see and work
 // on every tenant's models (the same reach platform_admin has, for building).
+// Only a platform admin makes one (platformWideGrantErr); an account narrowed
+// by application or model grants is not one (platformWideBuilderSQL).
 func (h *handler) isGlobalBuilder(ctx context.Context, a *actor) bool {
 	// A platform-level developer has no tenant of their own. An account
 	// that belongs to a tenant (self-service sign-up creates its developer
@@ -1187,12 +1195,58 @@ func (h *handler) isGlobalBuilder(ctx context.Context, a *actor) bool {
 		return false
 	}
 	var ok bool
-	_ = h.db.QueryRow(ctx, `
-		SELECT EXISTS(
-			SELECT 1 FROM identity.role_assignment
-			WHERE user_id=$1::uuid AND role='developer' AND workspace_id IS NULL
-		)`, a.UserID).Scan(&ok)
+	_ = h.db.QueryRow(ctx, `SELECT `+platformWideBuilderSQL("$1::uuid"), a.UserID).Scan(&ok)
 	return ok
+}
+
+// platformWideBuilderSQL is isGlobalBuilder as a SQL predicate over the
+// account whose id is userExpr: no tenant of its own, an unscoped developer
+// grant, and no identity.user_app_access or user_model_access row. An
+// account narrowed by such grants is not platform-wide: its explicit grants
+// are its scope (adminScopeCustomerIDs' grant arms, customerlessGrantTenantSQL),
+// as a platform admin who narrows a developer to some applications means.
+// Without the last two conditions an account narrowed to app1 edited
+// another tenant's metrics (2026-09-29).
+func platformWideBuilderSQL(userExpr string) string {
+	return fmt.Sprintf(`(EXISTS (
+		    SELECT 1 FROM identity."user" pwb_u
+		    JOIN identity.role_assignment pwb_ra ON pwb_ra.user_id = pwb_u.id
+		         AND pwb_ra.role = 'developer' AND pwb_ra.workspace_id IS NULL
+		    WHERE pwb_u.id = %[1]s AND pwb_u.customer_id IS NULL
+		) AND NOT EXISTS (SELECT 1 FROM identity.user_app_access pwb_ua WHERE pwb_ua.user_id = %[1]s)
+		  AND NOT EXISTS (SELECT 1 FROM identity.user_model_access pwb_um WHERE pwb_um.user_id = %[1]s))`, userExpr)
+}
+
+// customerlessGrantTenantSQL is a SQL predicate, true when the account whose
+// id is userExpr has no tenant of its own, holds an unscoped developer grant
+// and has an explicit application or model grant (user_app_access,
+// user_model_access) into the tenant tenantExpr. That is a developer a
+// platform admin created and narrowed to some applications or models
+// (platformWideBuilderSQL): a builder of those tenants, where the same grants
+// narrow it further to the granted applications and models, as they narrow
+// every developer. An application's tenant is its own customer_id or its
+// workspace's.
+func customerlessGrantTenantSQL(userExpr, tenantExpr string) string {
+	return fmt.Sprintf(`EXISTS (
+		    SELECT 1 FROM identity."user" cgt_u
+		    JOIN identity.role_assignment cgt_ra ON cgt_ra.user_id = cgt_u.id
+		         AND cgt_ra.role = 'developer' AND cgt_ra.workspace_id IS NULL
+		    WHERE cgt_u.id = %[1]s AND cgt_u.customer_id IS NULL
+		      AND %[2]s IN (
+		          SELECT COALESCE(cgt_a.customer_id, cgt_aw.customer_id)
+		          FROM identity.user_app_access cgt_ua
+		          JOIN core.application cgt_a ON cgt_a.id = cgt_ua.application_id
+		          LEFT JOIN core.workspace cgt_aw ON cgt_aw.id = cgt_a.workspace_id
+		          WHERE cgt_ua.user_id = cgt_u.id
+		          UNION
+		          SELECT COALESCE(cgt_ma.customer_id, cgt_mw.customer_id)
+		          FROM identity.user_model_access cgt_um
+		          JOIN core.model cgt_m ON cgt_m.id = cgt_um.model_id
+		          JOIN core.application cgt_ma ON cgt_ma.id = cgt_m.application_id
+		          LEFT JOIN core.workspace cgt_mw ON cgt_mw.id = cgt_ma.workspace_id
+		          WHERE cgt_um.user_id = cgt_u.id
+		      )
+		)`, userExpr, tenantExpr)
 }
 
 // roleReachesAppSQL is a SQL predicate, true when the user whose id is the
@@ -1207,8 +1261,10 @@ func (h *handler) isGlobalBuilder(ctx context.Context, a *actor) bool {
 // to every workspace of it — the boundary workflowAdminScopeSQL draws for
 // workflow history. A developer is a tenant-wide builder: a developer role
 // in any workspace of the tenant, or an UNSCOPED developer grant held by an
-// account that belongs to the tenant (adminScopeCustomerIDs' first arm),
-// opens every application of it. A developer role held in another tenant's
+// account that belongs to the tenant (adminScopeCustomerIDs' first arm), or
+// by an account with no tenant whose application or model grants are in it
+// (customerlessGrantTenantSQL), opens every application of it — which the
+// callers narrow by those grants. A developer role held in another tenant's
 // workspace makes its holder a builder there, not in its own tenant. (Tenant
 // and platform admins are decided before this predicate, by their admin
 // scope.)
@@ -1240,7 +1296,11 @@ func roleReachesAppSQL(app, appWS, userParam string, builder bool) string {
 		      JOIN identity.role_assignment reach_dra ON reach_dra.user_id = reach_u.id
 		           AND reach_dra.role = 'developer' AND reach_dra.workspace_id IS NULL
 		      WHERE reach_u.id = %[3]s::uuid AND reach_u.customer_id = COALESCE(%[1]s.customer_id, %[2]s.customer_id)
-		  ))`, app, appWS, userParam)
+		  ) OR `, app, appWS, userParam) +
+		// A developer with no tenant, narrowed by application or model
+		// grants: a builder of the tenants those grants are in (every
+		// caller narrows further to the granted applications and models).
+		customerlessGrantTenantSQL(userParam+"::uuid", fmt.Sprintf("COALESCE(%s.customer_id, %s.customer_id)", app, appWS)) + `)`
 }
 
 // reachSQL is roleReachesAppSQL for the route a request arrived through.
@@ -6571,7 +6631,9 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 				LEFT JOIN identity.role_assignment ra ON ra.workspace_id = w.id AND ra.user_id = $1::uuid
 				WHERE (ra.id IS NOT NULL
 				       -- or the tenant is the developer's own (identity.user.customer_id)
-				       OR c.id = (SELECT customer_id FROM identity."user" WHERE id = $1::uuid))
+				       OR c.id = (SELECT customer_id FROM identity."user" WHERE id = $1::uuid)
+				       -- or, for a developer with no tenant, one its grants are in
+				       OR `+customerlessGrantTenantSQL("$1::uuid", "c.id")+`)
 				  AND (
 				      NOT EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$1::uuid)
 				      OR EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$1::uuid AND application_id=app.id)
@@ -6661,7 +6723,8 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 					      SELECT 1 FROM identity.role_assignment ra
 					      JOIN core.workspace rw ON rw.id = ra.workspace_id
 					      WHERE ra.user_id=$2::uuid AND rw.customer_id = $1::uuid
-					  ) OR EXISTS (SELECT 1 FROM identity."user" u WHERE u.id=$2::uuid AND u.customer_id=$1::uuid))
+					  ) OR EXISTS (SELECT 1 FROM identity."user" u WHERE u.id=$2::uuid AND u.customer_id=$1::uuid)
+					    OR `+customerlessGrantTenantSQL("$2::uuid", "$1::uuid")+`)
 					  AND (
 					      NOT EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$2::uuid)
 					      OR EXISTS (SELECT 1 FROM identity.user_app_access WHERE user_id=$2::uuid AND application_id=a.id)
@@ -9522,16 +9585,6 @@ const appWorkingModelQuery = `
 	         name, id
 	LIMIT 1`
 
-// revisionIDFromFormID returns the revision a form belongs to ("" for
-// revision-global forms), so form events only fire that revision's rules.
-func (h *handler) revisionIDFromFormID(ctx context.Context, formID string) string {
-	var revID string
-	_ = h.db.QueryRow(ctx,
-		`SELECT COALESCE(revision_id::text,'') FROM model.form_def WHERE id=$1::uuid`, formID,
-	).Scan(&revID)
-	return revID
-}
-
 func (h *handler) appIDFromModelID(ctx context.Context, modelID string) (string, error) {
 	var appID string
 	err := h.db.QueryRow(ctx, `
@@ -12182,9 +12235,20 @@ func (h *handler) adminApplicationAction(w http.ResponseWriter, r *http.Request)
 		}
 		jsonOK(w, map[string]string{"status": "ok"})
 	case http.MethodDelete:
-		h.forgetApplication(ctx, id)
-		if _, err := h.db.Exec(tctx, `DELETE FROM core.application WHERE id=$1::uuid`, id); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
+		// The grants on the application and its models go with it
+		// (ON DELETE CASCADE), and with them, perhaps, the last thing
+		// narrowing a developer with no tenant (removeGrants).
+		delAct, err := h.resolveActor(ctx, r)
+		if err != nil {
+			jsonErr(w, err, http.StatusUnauthorized)
+			return
+		}
+		if !h.removeGrants(tctx, w, delAct, grantRemoval{appID: id, modelsOfApp: id}, http.StatusConflict, deleteGrantedRemedy,
+			func(tx pgx.Tx) error {
+				h.forgetApplication(ctx, id)
+				_, err := tx.Exec(tctx, `DELETE FROM core.application WHERE id=$1::uuid`, id)
+				return err
+			}) {
 			return
 		}
 		if a, e := h.resolveActor(ctx, r); e == nil {
@@ -12326,10 +12390,20 @@ func (h *handler) adminModelAction(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
 		return
 	}
+	// The model's grants go with it (ON DELETE CASCADE): as for an
+	// application (adminApplicationAction).
+	delAct, err := h.resolveActor(ctx, r)
+	if err != nil {
+		jsonErr(w, err, http.StatusUnauthorized)
+		return
+	}
 	var deletedAppID string
-	_ = h.db.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, id).Scan(&deletedAppID)
-	if _, err := h.db.Exec(ctx, `DELETE FROM core.model WHERE id=$1::uuid`, id); err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
+	if !h.removeGrants(ctx, w, delAct, grantRemoval{modelID: id}, http.StatusConflict, deleteGrantedRemedy,
+		func(tx pgx.Tx) error {
+			_ = tx.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, id).Scan(&deletedAppID)
+			_, err := tx.Exec(ctx, `DELETE FROM core.model WHERE id=$1::uuid`, id)
+			return err
+		}) {
 		return
 	}
 	if a, e := h.resolveActor(ctx, r); e == nil {
@@ -12501,6 +12575,200 @@ func assignableRoles(actorRoles []string) []string {
 	}
 }
 
+// platformWideGrantErr refuses, to anyone but a platform admin, a grant of
+// developer or tenant_admin with no workspace that would reach beyond the
+// caller's own tenants. Such a grant is read against the account's own
+// tenant (identity.user customer_id): it makes the account builder and
+// administrator of that tenant (roleReachesAppSQL, adminScopeCustomerIDs).
+// On an account with no tenant a developer grant is platform-wide — builder
+// of every tenant (isGlobalBuilder) and, through adminScopeCustomerIDs,
+// administrator of every tenant — and a tenant_admin grant administers every
+// tenant the account holds a role in. On an account of another tenant it
+// makes the account builder or administrator there, where that tenant's own
+// administrators granted nothing. assignableRoles lets a tenant admin grant
+// developer, and the grant used to be inserted without looking at the
+// target's tenant — nor at whether the target was the caller: a tenant admin
+// made a member, and itself, builder and admin of every tenant, and a member
+// belonging to another tenant a builder of that one (2026-09-29). The check
+// is on the account, so it holds the same for the caller's own account as
+// for anyone else's. targetCustomer is the account's customer_id ("" =
+// none); scopeAll and scope are the caller's adminScopeCustomerIDs. A grant
+// inside a workspace is unaffected: it reaches that workspace's tenant only
+// (roleReachesAppSQL), and the callers check the workspace is the caller's
+// (adminCanAccessWorkspace).
+func platformWideGrantErr(act *actor, role, workspaceID, targetCustomer string, scopeAll bool, scope []string) error {
+	if act.hasRole("platform_admin") || workspaceID != "" || (role != "developer" && role != "tenant_admin") {
+		return nil
+	}
+	if targetCustomer == "" {
+		if role == "developer" {
+			return fmt.Errorf("forbidden: this account belongs to no tenant, so developer without a workspace would make it " +
+				"a builder of every tenant; only a platform admin can grant that. Grant developer inside a workspace of your tenant instead")
+		}
+		return fmt.Errorf("forbidden: this account belongs to no tenant, so tenant_admin without a workspace would make it " +
+			"an administrator of every tenant it holds a role in; only a platform admin can grant that. Grant tenant_admin inside a workspace instead")
+	}
+	if !scopeAll && !slices.Contains(scope, targetCustomer) {
+		return fmt.Errorf("forbidden: this account belongs to another tenant, so %[1]s without a workspace would apply to that tenant, "+
+			"whose administrators have not granted it. Grant %[1]s inside a workspace of your tenant instead", role)
+	}
+	return nil
+}
+
+// existingAccountAllowed refuses, to anyone but a platform admin, creating a user
+// over an account the application already has under this address (email,
+// compared case-insensitively) or identity-provider subject (sub). Creation
+// used to adopt it: keep its tenant, or give it the caller's when it had
+// none, overwrite its name, add the role and mail it a set-password link —
+// with no check that the account was the caller's to touch. A tenant admin
+// made another tenant's member a builder of that tenant, and pulled a
+// platform-wide builder into its own tenant and then deleted it
+// (2026-09-29). Adding a role to an account the caller administers is what
+// POST /api/admin/users/{id}/roles is for, with its checks. An identity
+// provider account with no application user — left by a creation that
+// failed part-way — is still adopted by the caller.
+// It answers the refusal itself and returns false.
+func (h *handler) existingAccountAllowed(ctx context.Context, w http.ResponseWriter, act *actor, email, sub string) bool {
+	if act.hasRole("platform_admin") {
+		return true
+	}
+	var exists bool
+	if err := h.db.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM identity.user
+		               WHERE ($1 <> '' AND lower(email) = lower($1)) OR ($2 <> '' AND keycloak_sub = $2))
+	`, email, sub).Scan(&exists); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return false
+	}
+	if exists {
+		jsonErr(w, fmt.Errorf("an account with this address already exists: add a role to it in Users instead. "+
+			"If it is not listed there, it belongs elsewhere and only a platform admin can add it to your tenant"), http.StatusConflict)
+		return false
+	}
+	return true
+}
+
+// grantRemoval names the identity.user_app_access and user_model_access rows
+// a request is about to remove, directly or by deleting what they grant. The
+// ids are as the request spelled them.
+type grantRemoval struct {
+	userID      string // only this account's rows; "" = every account's
+	appID       string // the rows granting this application
+	modelsOfApp string // the rows granting a model of this application
+	modelID     string // the rows granting this model
+}
+
+// args are rm's ids as the parameters $1-$4 of grantRemovalLockSQL and
+// accountUnnarrowedBy, which cast them to uuid ("" = NULL) and compare
+// uuids, never text: the DELETE that follows accepts any spelling of a uuid
+// (upper case, no hyphens), and a text comparison missed those — an
+// upper-cased id removed the last grant the check had refused in lower case
+// (2026-09-29).
+func (rm grantRemoval) args() []any {
+	return []any{rm.userID, rm.appID, rm.modelsOfApp, rm.modelID}
+}
+
+// The remedies removeGrants names: what a caller who is not a platform admin
+// can do instead. Revoking the account's developer role is theirs to do
+// (roleIsAssignableBy), and leaves an account that builds nothing; the
+// grants can then go.
+const (
+	revokeGrantRemedy   = "Revoke its developer role instead, or ask a platform admin."
+	deleteGrantedRemedy = "Revoke that account's developer role first (Users), or ask a platform admin to delete it."
+)
+
+// grantRemovalLockSQL locks the accounts holding a row rm removes, so that
+// removals touching one account run one after the other.
+const grantRemovalLockSQL = `
+	SELECT u.id FROM identity."user" u
+	WHERE (NULLIF($1,'') IS NULL OR u.id = NULLIF($1,'')::uuid)
+	  AND (EXISTS (SELECT 1 FROM identity.user_app_access ua
+	               WHERE ua.user_id = u.id AND ua.application_id = NULLIF($2,'')::uuid)
+	       OR EXISTS (SELECT 1 FROM identity.user_model_access um
+	                  JOIN core.model m ON m.id = um.model_id
+	                  WHERE um.user_id = u.id
+	                    AND (m.application_id = NULLIF($3,'')::uuid OR um.model_id = NULLIF($4,'')::uuid)))
+	ORDER BY u.id
+	FOR NO KEY UPDATE OF u`
+
+// accountUnnarrowedBy returns the e-mail of an account the removal would
+// leave platform-wide, or "". An account with no tenant and an unscoped
+// developer grant is narrowed by its application and model grants
+// (platformWideBuilderSQL); removing the last of them makes it a builder of
+// every tenant again, which only a platform admin may do
+// (platformWideGrantErr). A cascade from deleting the one application or
+// model it was narrowed to does the same.
+func accountUnnarrowedBy(ctx context.Context, tx pgx.Tx, rm grantRemoval) (string, error) {
+	var email string
+	err := tx.QueryRow(ctx, `
+		SELECT u.email FROM identity."user" u
+		WHERE (NULLIF($1,'') IS NULL OR u.id = NULLIF($1,'')::uuid)
+		  AND u.customer_id IS NULL
+		  AND EXISTS (SELECT 1 FROM identity.role_assignment ra
+		              WHERE ra.user_id = u.id AND ra.role = 'developer' AND ra.workspace_id IS NULL)
+		  AND (EXISTS (SELECT 1 FROM identity.user_app_access ua WHERE ua.user_id = u.id)
+		       OR EXISTS (SELECT 1 FROM identity.user_model_access um WHERE um.user_id = u.id))
+		  AND NOT EXISTS (SELECT 1 FROM identity.user_app_access ua
+		                  WHERE ua.user_id = u.id AND ua.application_id IS DISTINCT FROM NULLIF($2,'')::uuid)
+		  AND NOT EXISTS (SELECT 1 FROM identity.user_model_access um
+		                  JOIN core.model m ON m.id = um.model_id
+		                  WHERE um.user_id = u.id
+		                    AND m.application_id IS DISTINCT FROM NULLIF($3,'')::uuid
+		                    AND um.model_id IS DISTINCT FROM NULLIF($4,'')::uuid)
+		ORDER BY u.email
+		LIMIT 1
+	`, rm.args()...).Scan(&email)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return email, err
+}
+
+// removeGrants runs del — which removes the rows rm names, directly or by
+// deleting the application or model they grant (ON DELETE CASCADE) — unless
+// a caller other than a platform admin would leave an account platform-wide
+// by it (accountUnnarrowedBy): then it answers status, naming remedy, and
+// returns false. The check and del run in one transaction that first locks
+// the accounts holding the rows. Checked apart, two concurrent removals of an
+// account's last two grants each saw the other still there, both went ahead,
+// and the account was left with none (20 of 30 accounts in a concurrent
+// test, 2026-09-29).
+func (h *handler) removeGrants(ctx context.Context, w http.ResponseWriter, act *actor, rm grantRemoval,
+	status int, remedy string, del func(pgx.Tx) error) bool {
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return false
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if !act.hasRole("platform_admin") {
+		if _, err := tx.Exec(ctx, grantRemovalLockSQL, rm.args()...); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return false
+		}
+		email, err := accountUnnarrowedBy(ctx, tx, rm)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return false
+		}
+		if email != "" {
+			jsonErr(w, fmt.Errorf("%s belongs to no tenant and holds developer without a workspace, and this is the last "+
+				"application or model it is limited to: without it the account would be a builder of every tenant. %s",
+				email, remedy), status)
+			return false
+		}
+	}
+	if err := del(tx); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return false
+	}
+	if err := tx.Commit(ctx); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return false
+	}
+	return true
+}
+
 // businessRoles are the operational roles whose whole purpose is to be scoped
 // to a workspace: unlike the platform tiers, a NULL-workspace grant of one is
 // inert, because actorCanAccessApp resolves access by joining
@@ -12641,8 +12909,22 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			}
 			customerID = adminCustomerIDs[0]
 		}
+		// A creator whose scope is every tenant leaves the account without
+		// one; given developer or tenant_admin with no workspace, it would be
+		// platform-wide, which only a platform admin may make. The account is
+		// always a new one here (existingAccountAllowed below), so customerID is
+		// its tenant.
+		if body.Role != "" {
+			if err := platformWideGrantErr(act, body.Role, body.WorkspaceID, customerID, allAdminScope, adminCustomerIDs); err != nil {
+				jsonErr(w, err, http.StatusForbidden)
+				return
+			}
+		}
 		if body.Email == "" {
 			jsonErr(w, fmt.Errorf("email is required"), http.StatusBadRequest)
+			return
+		}
+		if !h.existingAccountAllowed(ctx, w, act, body.Email, "admin-created-"+body.Email) {
 			return
 		}
 		firstName, lastName := strings.TrimSpace(body.FirstName), strings.TrimSpace(body.LastName)
@@ -12691,6 +12973,13 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, fmt.Errorf("look up identity provider account: %w", err), http.StatusBadGateway)
 				return
 			}
+			// The identity provider may know the address under an account the
+			// application stores with another e-mail: the same check, by subject.
+			if existing != "" {
+				if !h.existingAccountAllowed(ctx, w, act, "", existing) {
+					return
+				}
+			}
 			if existing == "" {
 				existing, err = h.kc.CreateUser(ctx, body.Email, firstName, lastName)
 				if err != nil {
@@ -12737,11 +13026,14 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 		// their next request.
 		h.noteUser(ctx, sub, body.Email)
 		if body.Role != "" {
+			// assigned_by records who made the grant, as sign-up and the
+			// identity service do: it is what tells a platform admin's grant
+			// from anyone else's afterwards.
 			_, _ = h.db.Exec(ctx, `
-				INSERT INTO identity.role_assignment (user_id, role, workspace_id)
-				VALUES ($1::uuid, $2::identity.user_role, NULLIF($3,'')::uuid)
+				INSERT INTO identity.role_assignment (user_id, role, workspace_id, assigned_by)
+				VALUES ($1::uuid, $2::identity.user_role, NULLIF($3,'')::uuid, (SELECT id FROM identity.user WHERE id = NULLIF($4,'')::uuid))
 				ON CONFLICT DO NOTHING
-			`, userID, body.Role, body.WorkspaceID)
+			`, userID, body.Role, body.WorkspaceID, act.UserID)
 		}
 
 		// The invitation is what makes the account reachable: creation sets no
@@ -12791,13 +13083,26 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 	// A platform admin may only be modified by another platform admin —
 	// developers and tenant admins can see them but never edit, re-role,
 	// change access for, or delete them.
+	// The same holds for a platform-wide builder (platformWideBuilderSQL),
+	// which only a platform admin makes (platformWideGrantErr): a tenant
+	// admin whose member it also was could otherwise narrow it to the
+	// tenant's own applications for good — only a platform admin can undo
+	// that (removeGrants) — re-role, rename or delete it.
 	if r.Method != http.MethodGet && !act.hasRole("platform_admin") {
-		var targetIsPlatformAdmin bool
-		_ = h.db.QueryRow(ctx, `
-			SELECT EXISTS(SELECT 1 FROM identity.role_assignment WHERE user_id=$1::uuid AND role='platform_admin')
-		`, userID).Scan(&targetIsPlatformAdmin)
+		var targetIsPlatformAdmin, targetIsPlatformWide bool
+		if err := h.db.QueryRow(ctx, `
+			SELECT EXISTS(SELECT 1 FROM identity.role_assignment WHERE user_id=$1::uuid AND role='platform_admin'),
+			       `+platformWideBuilderSQL("$1::uuid"), userID).Scan(&targetIsPlatformAdmin, &targetIsPlatformWide); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
 		if targetIsPlatformAdmin {
 			jsonErr(w, fmt.Errorf("forbidden: only a platform admin can modify a platform admin"), http.StatusForbidden)
+			return
+		}
+		if targetIsPlatformWide {
+			jsonErr(w, fmt.Errorf("forbidden: this account is a platform-wide builder (developer with no tenant and no workspace); "+
+				"only a platform admin can modify it"), http.StatusForbidden)
 			return
 		}
 	}
@@ -12869,19 +13174,28 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		var targetCustomer string
+		if err := h.db.QueryRow(ctx, `SELECT COALESCE(customer_id::text, '') FROM identity.user WHERE id=$1::uuid`, userID).Scan(&targetCustomer); err != nil {
+			jsonErr(w, fmt.Errorf("user not found"), http.StatusNotFound)
+			return
+		}
+		if err := platformWideGrantErr(act, body.Role, body.WorkspaceID, targetCustomer, allAdminScope, adminCustomerIDs); err != nil {
+			jsonErr(w, err, http.StatusForbidden)
+			return
+		}
 		var execErr error
 		if body.WorkspaceID != "" {
 			_, execErr = h.db.Exec(ctx, `
-				INSERT INTO identity.role_assignment (user_id, role, workspace_id)
-				VALUES ($1::uuid, $2::identity.user_role, $3::uuid)
+				INSERT INTO identity.role_assignment (user_id, role, workspace_id, assigned_by)
+				VALUES ($1::uuid, $2::identity.user_role, $3::uuid, (SELECT id FROM identity.user WHERE id = NULLIF($4,'')::uuid))
 				ON CONFLICT DO NOTHING
-			`, userID, body.Role, body.WorkspaceID)
+			`, userID, body.Role, body.WorkspaceID, act.UserID)
 		} else {
 			_, execErr = h.db.Exec(ctx, `
-				INSERT INTO identity.role_assignment (user_id, role)
-				VALUES ($1::uuid, $2::identity.user_role)
+				INSERT INTO identity.role_assignment (user_id, role, assigned_by)
+				VALUES ($1::uuid, $2::identity.user_role, (SELECT id FROM identity.user WHERE id = NULLIF($3,'')::uuid))
 				ON CONFLICT DO NOTHING
-			`, userID, body.Role)
+			`, userID, body.Role, act.UserID)
 		}
 		if execErr != nil {
 			jsonErr(w, execErr, http.StatusInternalServerError)
@@ -13004,10 +13318,13 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			}
 			event = auditlog.EventUserAppAccessGranted
 		case http.MethodDelete:
-			if _, err := h.db.Exec(ctx, `
-				DELETE FROM identity.user_app_access WHERE user_id=$1::uuid AND application_id=$2::uuid
-			`, userID, appID); err != nil {
-				jsonErr(w, err, http.StatusInternalServerError)
+			if !h.removeGrants(ctx, w, act, grantRemoval{userID: userID, appID: appID}, http.StatusForbidden, revokeGrantRemedy,
+				func(tx pgx.Tx) error {
+					_, err := tx.Exec(ctx, `
+						DELETE FROM identity.user_app_access WHERE user_id=$1::uuid AND application_id=$2::uuid
+					`, userID, appID)
+					return err
+				}) {
 				return
 			}
 			event = auditlog.EventUserAppAccessRevoked
@@ -13053,10 +13370,13 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			}
 			event = auditlog.EventUserModelAccessGranted
 		case http.MethodDelete:
-			if _, err := h.db.Exec(ctx, `
-				DELETE FROM identity.user_model_access WHERE user_id=$1::uuid AND model_id=$2::uuid
-			`, userID, modelID); err != nil {
-				jsonErr(w, err, http.StatusInternalServerError)
+			if !h.removeGrants(ctx, w, act, grantRemoval{userID: userID, modelID: modelID}, http.StatusForbidden, revokeGrantRemedy,
+				func(tx pgx.Tx) error {
+					_, err := tx.Exec(ctx, `
+						DELETE FROM identity.user_model_access WHERE user_id=$1::uuid AND model_id=$2::uuid
+					`, userID, modelID)
+					return err
+				}) {
 				return
 			}
 			event = auditlog.EventUserModelAccessRevoked
@@ -15154,7 +15474,8 @@ func (h *handler) baWorkspaceModelFor(ctx context.Context, r *http.Request, allo
 // baOrDev roles routes), a developer — a tenant-wide builder — administers
 // every workspace of a tenant it builds in: a developer role in one of its
 // workspaces, or an unscoped developer grant held by an account that belongs
-// to it (roleReachesAppSQL). A developer role held in another tenant's
+// to it or, with no tenant of its own, holds application or model grants in
+// it (roleReachesAppSQL). A developer role held in another tenant's
 // workspace does not make its holder a builder of its own tenant.
 func (h *handler) canAdministerWorkspace(ctx context.Context, act *actor, wsID string, allowDeveloper bool) (bool, error) {
 	if act.hasRole("platform_admin") || h.isGlobalBuilder(ctx, act) {
@@ -15182,7 +15503,7 @@ func (h *handler) canAdministerWorkspace(ctx context.Context, act *actor, wsID s
 		             AND dra.role = 'developer' AND dra.workspace_id IS NULL
 		        JOIN core.workspace tw ON tw.id = $2::uuid
 		        WHERE u.id = $1::uuid AND u.customer_id = tw.customer_id
-		    )
+		    ) OR `+customerlessGrantTenantSQL("$1::uuid", "(SELECT customer_id FROM core.workspace WHERE id = $2::uuid)")+`
 		))
 	`, act.UserID, wsID, allowDeveloper).Scan(&ok)
 	return ok, err

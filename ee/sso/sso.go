@@ -390,6 +390,29 @@ func ProvisionFirstLogin(ctx context.Context, pool *pgxpool.Pool, customerID, su
 	if displayName == "" {
 		displayName = email
 	}
+	// An account the application already has under this address signed in
+	// some other way until now; the upsert below re-points it to this login
+	// and gives it the default role. Only this tenant's own accounts are its
+	// sign-in settings' to take: an account of another tenant, or of none,
+	// kept its customer_id, so the default role with no workspace (a tenant
+	// with none) made it builder or administrator of that other tenant — or,
+	// with no tenant, of every tenant (platformWideGrantErr in
+	// internal/gateway) — and the re-pointing handed the whole account, with
+	// every role it holds elsewhere, to whoever this tenant's identity
+	// provider says owns the address (2026-09-29). A platform admin is never
+	// a tenant's to take either.
+	var ownedHere bool
+	switch err := pool.QueryRow(ctx, `
+		SELECT COALESCE(u.customer_id = $2::uuid, FALSE)
+		       AND NOT EXISTS (SELECT 1 FROM identity.role_assignment pa WHERE pa.user_id = u.id AND pa.role = 'platform_admin')
+		FROM identity.user u WHERE u.email = $1`, strings.ToLower(email), customerID).Scan(&ownedHere); {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
+		return "", fmt.Errorf("look up account: %w", err)
+	case !ownedHere:
+		return "", &ErrNotProvisionable{fmt.Sprintf("an account for %s already exists and does not belong to this tenant; "+
+			"a platform admin has to add it", email)}
+	}
 	var userID string
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id, last_login_at)

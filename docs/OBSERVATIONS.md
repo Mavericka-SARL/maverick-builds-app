@@ -4,7 +4,7 @@
 > dependencies that are not fixed yet, with the evidence and what would close
 > each one.
 
-> **Last verified:** 2026-09-29
+> **Last verified:** 2026-09-30
 
 A finding that is not acted on in the change that found it is written down
 here, so it does not live only in a chat or a commit message. Each entry says
@@ -1588,6 +1588,66 @@ leaves out, until it is fixed.
 - **How to check:** `grep -rn "/invite" web/src`.
 - **What closes it:** a Resend invitation action on the Users screen.
 
+### A tenant admin cannot add a person who already has an account
+
+- **Noticed:** 2026-09-30, closing account adoption on user creation.
+  Standing rule 2.
+- **What:** `POST /api/admin/users` answers 409 when the application already
+  has an account at the address, or under the identity-provider subject it
+  resolves to, unless the caller is a platform admin
+  (`existingAccountAllowed`, `internal/gateway/handler.go:12631`). Creation
+  used to adopt such an account. A person who already has an account in
+  another tenant, or one with no tenant, can now be added to a tenant's
+  workspace only by a platform admin. An account the tenant already lists
+  takes a role through `POST /api/admin/users/{id}/roles` as before.
+- **Why it matters:** a tenant admin cannot give an outside consultant who
+  already has an account a role in its workspace.
+- **How to check:** as a tenant admin, create a user at the address of
+  another tenant's user: 409.
+- **What closes it:** a decision whether tenant admins may bring in people
+  from outside. If so, a generic flow that adds a workspace role and nothing
+  else: it does not rename the account, change its tenant or send it a new
+  invitation.
+
+### Nothing sets an existing account's tenant
+
+- **Noticed:** 2026-09-30, closing account adoption at first sign-in.
+  Standing rule 2.
+- **What:** first sign-in through a tenant's single sign-on onto an account
+  that already exists at the address is refused (403, with the reason)
+  unless the account belongs to that tenant and is not a platform admin
+  (`ee/sso/sso.go:393-415`). Accounts with no `customer_id`, such as those a
+  platform admin creates (`internal/gateway/handler.go:12904-12911` leaves it
+  empty when the creator's scope is every tenant), are refused there when
+  their identity-provider subject no longer matches. No route or screen sets
+  an existing account's `customer_id`, so no role can make such an account
+  sign in through its tenant's single sign-on.
+- **Why it matters:** a person invited before their tenant set up single
+  sign-on may be locked out of it, with no way back through the product.
+- **How to check:** `grep -rn 'SET customer_id' --include='*.go' internal`
+  finds only a test.
+- **What closes it:** a platform-admin action that sets an account's tenant,
+  audited; or the refusal naming what to do instead.
+
+### A SCIM delete of a member the tenant does not own leaves the member's access
+
+- **Noticed:** 2026-09-30, limiting SCIM writes to the tenant's own
+  accounts.
+- **What:** a tenant's SCIM token lists everyone who holds a role in its
+  workspaces, but changes and deletes only the tenant's own accounts, never a
+  platform admin (`ownedSQL`, `ee/scim/service.go:257`). For the others it
+  answers 403 (a request that changes nothing is answered as it is), so an
+  identity provider that pushes changes for them logs 403s, and a SCIM delete
+  no longer removes such a member's access in the tenant: the tenant admin
+  removes the member's workspace roles on the Users screen.
+- **Why it matters:** off-boarding through the identity provider leaves
+  these members' roles in place until an administrator removes them.
+- **How to check:** `TestSCIMChangesOnlyTheTenantsOwnAccounts`
+  (`internal/gateway/global_builder_escalation_test.go`).
+- **What closes it:** a SCIM delete of a member the tenant does not own
+  removes that member's roles and business-role memberships in this tenant
+  only, and leaves the account.
+
 ### A tenant cannot create a second workspace
 
 - **Noticed:** 2026-09-29, writing the Tenant admin guide.
@@ -1717,8 +1777,14 @@ leaves out, until it is fixed.
   this change declared it on the endpoints it touched, but did not audit the
   rest (for example the developer dashboards and form-integrations `POST`).
   Most operations do not list the 401, 403 and 404 the shared helpers
-  answer. `TestRouteSpecParity` compares methods and paths only, and nothing
-  checks the operation count in `docs/API.md:122` (251, correct today).
+  answer, nor the statuses added on 2026-09-30: 409 from `POST
+  /api/admin/users` when the application already has an account at the
+  address, 409 from `DELETE /api/admin/applications/{id}` and
+  `/api/admin/models/{id}`, and 404 from `POST /api/admin/users/{id}/roles`
+  for an unknown user (the spec lists 200, 400 and 403 there, and only 200
+  on the other three). `TestRouteSpecParity` compares methods and paths
+  only, and nothing checks the operation count in `docs/API.md:122` (251,
+  correct today).
 - **Why it matters:** a client generated from the spec cannot send the
   headers the console relies on, or expect the errors it gets.
 - **How to check:** grep `internal/gateway/handler.go` for

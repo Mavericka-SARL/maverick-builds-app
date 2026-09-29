@@ -495,6 +495,12 @@ export function UsersPanel({
                       );
                     })}
                     {addRole.isError && <p className="mvx-admin-error" style={{ marginTop: 4 }}>{(addRole.error as Error).message}</p>}
+                    {/* The server may refuse a grant or revoke (the last application
+                        or model narrowing a developer with no tenant, say); its
+                        reason is shown under the account it was about, as sent. */}
+                    {[grantAppAccess, revokeAppAccess, grantModelAccess, revokeModelAccess]
+                      .filter(m => m.isError && m.variables?.userId === u.id)
+                      .map((m, i) => <p key={i} className="mvx-admin-error" role="alert" style={{ marginTop: 4 }}>{(m.error as Error).message}</p>)}
                   </div>
                   )}
                 </td>
