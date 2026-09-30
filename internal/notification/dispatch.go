@@ -55,6 +55,11 @@ type Message struct {
 	ResourceType string
 	ResourceID   string
 	CreatedAt    time.Time
+	// OtherTenant is set when the message is the news of a tenant other
+	// than the recipient's own (CustomerOf): it then leaves under the
+	// platform's name, never the brand of the recipient's tenant
+	// (BrandName), which had nothing to do with it.
+	OtherTenant bool
 }
 
 // Subject is the notification's subject line, falling back to something
@@ -234,6 +239,20 @@ type webhookPayload struct {
 	CreatedAt    time.Time         `json:"created_at"`
 }
 
+// brandTenantOf is the tenant whose brand BrandName puts on the recipient's
+// mail, resolved as ee/branding EmailNameForUser resolves it: the account's
+// own tenant, else that of the first workspace it was given a role in. ""
+// when there is none.
+func (s *Store) brandTenantOf(ctx context.Context, userID string) string {
+	var cid string
+	_ = s.pool.QueryRow(ctx, `
+		SELECT COALESCE(u.customer_id::text, (
+		    SELECT w.customer_id::text FROM identity.role_assignment ra JOIN core.workspace w ON w.id = ra.workspace_id
+		    WHERE ra.user_id = u.id ORDER BY ra.assigned_at LIMIT 1), '')
+		FROM identity."user" u WHERE u.id = $1::uuid`, userID).Scan(&cid)
+	return cid
+}
+
 // Dispatcher delivers the outbound notifications of one database.
 type Dispatcher struct {
 	Store  *Store
@@ -245,7 +264,9 @@ type Dispatcher struct {
 	Batch int
 	// BrandName, when set, names the recipient's tenant on outbound mail
 	// (the subject fallback and the sender's display name) — white-labelling.
-	// It receives the recipient's user id; the tenant is resolved from it.
+	// It receives the recipient's user id; the tenant is resolved from it,
+	// so a message that is another tenant's news is sent without it
+	// (Message.OtherTenant).
 	BrandName func(ctx context.Context, recipientUserID string) string
 }
 
@@ -294,9 +315,18 @@ func (d *Dispatcher) RunOnce(ctx context.Context) (int, error) {
 	// Each message is delivered by its own tenant's settings — the webhook
 	// URL above all (migration 091) — resolved once per tenant per pass.
 	perTenant := map[string]Settings{}
+	brandOf := map[string]string{}
 	delivered := 0
 	for _, m := range msgs {
 		cid := d.Store.CustomerOf(ctx, m.RecipientID, m.ResourceType, m.ResourceID)
+		if d.BrandName != nil && m.Channel == "email" {
+			brandTenant, ok := brandOf[m.RecipientID]
+			if !ok {
+				brandTenant = d.Store.brandTenantOf(ctx, m.RecipientID)
+				brandOf[m.RecipientID] = brandTenant
+			}
+			m.OtherTenant = brandTenant != cid
+		}
 		settings, ok := perTenant[cid]
 		if !ok && cid != "" {
 			var err error
@@ -335,7 +365,7 @@ func (d *Dispatcher) deliver(ctx context.Context, settings Settings, m Message) 
 			return fmt.Errorf("recipient has no e-mail address")
 		}
 		brand := ""
-		if d.BrandName != nil {
+		if d.BrandName != nil && !m.OtherTenant {
 			brand = d.BrandName(ctx, m.RecipientID)
 		}
 		if bm, ok := d.Mailer.(BrandedMailer); ok && brand != "" {

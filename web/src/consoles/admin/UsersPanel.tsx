@@ -1,13 +1,22 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Trash2, X } from "lucide-react";
-import { api, type AdminTenant, type AdminUser, type AdminWorkspace, type UserAssignment } from "../../api/client";
+import { Mail, Pencil, Plus, Trash2, UserMinus, X } from "lucide-react";
+import {
+  api,
+  type AccessRemovalResult,
+  type AdminTenant,
+  type AdminUser,
+  type AdminUserPermissions,
+  type AdminWorkspace,
+  type UserAssignment,
+} from "../../api/client";
 import {
   Badge,
   Button,
   Checkbox,
   Field,
   IconButton,
+  InlineAlert,
   RoleBadge,
   SearchInput,
   Select,
@@ -16,6 +25,7 @@ import {
   useConfirm,
   type DesignTone,
 } from "../../ui";
+import { accessRemovalNotice } from "./accessRemoval";
 
 const ROLE_TONE: Record<string, DesignTone> = {
   platform_admin: "danger",
@@ -41,6 +51,57 @@ const ADMIN_ROLES: string[] = ["platform_admin", "tenant_admin", "developer"];
  * the application's workspace, so a NULL-workspace grant matches nothing.
  */
 const BUSINESS_ROLES: string[] = ["business_admin", "business_user"];
+
+/**
+ * Roles that reach a whole tenant when granted with no workspace. Given to an
+ * address that already has an account, they are only ever given inside a
+ * workspace, so the invite form lets whoever may scope them pick one.
+ */
+const BUILDER_ROLES: string[] = ["developer", "tenant_admin"];
+
+const NO_PERMISSIONS: AdminUserPermissions = {
+  rename: false, delete: false, disable: false, reinvite: false, remove_from_tenant: false,
+};
+
+/**
+ * What the signed-in administrator may do to this account as a whole, as the
+ * server computed it with the function its mutations check. A server that
+ * sends no permissions predates them, so none are offered rather than ones
+ * it might refuse.
+ */
+function permissionsOf(u: AdminUser): AdminUserPermissions {
+  return u.permissions ?? NO_PERMISSIONS;
+}
+
+/**
+ * An account of another organisation, or of none, that this administrator
+ * may not change — only take back what it holds in their own tenant.
+ */
+function isForeignAccount(u: AdminUser) {
+  const p = u.permissions;
+  return !!p && (u.home_tenant === "other" || u.home_tenant === "none") && !p.rename && !p.delete
+    && !(u.assignments ?? []).some(a => a.role === "platform_admin");
+}
+
+/**
+ * Says whose account a foreign one is — another organisation's, or none's,
+ * as the server words its refusals — and, only when this administrator is
+ * offered "Remove from this tenant", that this is what they can do with it.
+ */
+function foreignAccountNote(u: AdminUser) {
+  const whose = u.home_tenant === "none" ? "Not a member of any organisation" : "Member of another organisation";
+  return u.permissions?.remove_from_tenant ? `${whose} — you can only remove their access here` : whose;
+}
+
+/**
+ * A developer grant with no workspace on an account with no organisation is
+ * narrowed only by application and model grants; removing the last of them
+ * also revokes it (revokeUnnarrowed in internal/gateway), so it never reaches
+ * every tenant.
+ */
+function hasNarrowedDeveloperGrant(u: AdminUser) {
+  return u.home_tenant === "none" && (u.assignments ?? []).some(a => a.role === "developer" && a.workspace_id === "");
+}
 
 function assignmentKey(a: UserAssignment) {
   return `${a.role}::${a.workspace_id}`;
@@ -152,13 +213,53 @@ export function UsersPanel({
     qc.invalidateQueries({ queryKey: ["dev-personas"] });
   };
 
+  // The outcome of the last account-level action, shown above the list: the
+  // row it was about may have left the list (removed from this tenant, or a
+  // revoke that took the grant it was listed by), and the invite form has
+  // closed.
+  const [notice, setNotice] = useState<{ tone: "success" | "warning" | "danger"; text: string } | null>(null);
+  const failed = (e: unknown) => setNotice({ tone: "danger", text: (e as Error).message });
+
   const createUser = useMutation({
-    mutationFn: () => api.createAdminUser(newUser),
-    onSuccess: () => { inv(); setShowCreate(false); setNewUser({ email: "", first_name: "", last_name: "", role: "", workspace_id: "" }); },
+    mutationFn: (body: typeof newUser) => api.createAdminUser(body),
+    onMutate: () => setNotice(null),
+    // Worded from what was asked, never from the reply: an address that
+    // already had an account is only given the role, and the confirmation
+    // does not tell the two apart. (The refreshed list still shows such an
+    // account as it is — its own name and joined date — see
+    // docs/OBSERVATIONS.md.)
+    onSuccess: (_res, body) => {
+      inv();
+      setShowCreate(false);
+      setNewUser({ email: "", first_name: "", last_name: "", role: "", workspace_id: "" });
+      setNotice({ tone: "success", text: `Invited ${body.email.trim()}. They will be notified of their access.` });
+    },
   });
   const updateUser = useMutation({
     mutationFn: () => api.updateAdminUser(editId!, editUser),
     onSuccess: () => { inv(); setEditId(null); },
+  });
+  const reinviteUser = useMutation({
+    mutationFn: (u: AdminUser) => api.resendAdminUserInvite(u.id),
+    onMutate: () => setNotice(null),
+    onSuccess: (res, u) => setNotice({ tone: "success", text: `Invitation sent to ${res.email || u.email}.` }),
+    onError: failed,
+  });
+  const removeFromTenant = useMutation({
+    mutationFn: (u: AdminUser) => api.removeAdminUserFromTenant(u.id),
+    onMutate: () => setNotice(null),
+    // A developer with no organisation whose grants here were the last to
+    // narrow it also loses that developer role; the reply lists it.
+    onSuccess: (res, u) => {
+      inv();
+      if (editId === u.id) setEditId(null);
+      const alsoRevoked = accessRemovalNotice(res);
+      const removed = `Removed ${u.display_name || u.email} from this tenant.`;
+      setNotice(alsoRevoked
+        ? { tone: "warning", text: `${removed} ${alsoRevoked}` }
+        : { tone: "success", text: removed });
+    },
+    onError: failed,
   });
   const addRole = useMutation({
     mutationFn: ({ userId, role, workspaceId }: { userId: string; role: string; workspaceId?: string }) =>
@@ -172,15 +273,28 @@ export function UsersPanel({
   });
   const deleteUser = useMutation({
     mutationFn: (id: string) => api.deleteAdminUser(id),
+    onMutate: () => setNotice(null),
     onSuccess: inv,
+    onError: failed,
   });
   const grantAppAccess = useMutation({
     mutationFn: ({ userId, appId }: { userId: string; appId: string }) => api.grantUserAppAccess(userId, appId),
     onSuccess: inv,
   });
+  // A revoke that goes ahead can take more with it: removing the last
+  // application or model that narrows a developer with no tenant also revokes
+  // that developer grant, so the account never becomes a builder of every
+  // tenant. The reply says what it removed, and it is said above the list —
+  // the account may no longer be listed once that grant is gone.
+  const revokeNoticed = (res: AccessRemovalResult) => {
+    inv();
+    const alsoRevoked = accessRemovalNotice(res);
+    if (alsoRevoked) setNotice({ tone: "warning", text: alsoRevoked });
+  };
   const revokeAppAccess = useMutation({
     mutationFn: ({ userId, appId }: { userId: string; appId: string }) => api.revokeUserAppAccess(userId, appId),
-    onSuccess: inv,
+    onMutate: () => setNotice(null),
+    onSuccess: revokeNoticed,
   });
   const grantModelAccess = useMutation({
     mutationFn: ({ userId, modelId }: { userId: string; modelId: string }) => api.grantUserModelAccess(userId, modelId),
@@ -188,7 +302,8 @@ export function UsersPanel({
   });
   const revokeModelAccess = useMutation({
     mutationFn: ({ userId, modelId }: { userId: string; modelId: string }) => api.revokeUserModelAccess(userId, modelId),
-    onSuccess: inv,
+    onMutate: () => setNotice(null),
+    onSuccess: revokeNoticed,
   });
   const { confirm, confirmElement } = useConfirm();
 
@@ -197,6 +312,11 @@ export function UsersPanel({
   // assignable set rather than passed in: whoever can grant a business role at
   // all is exactly who should be able to scope one.
   const canGrantWorkspaceRoles = canManageResourceAccess || assignableRoles.some(r => BUSINESS_ROLES.includes(r));
+  // Whether the invite form asks for a workspace for this role: always for a
+  // business role, and — for whoever may grant them inside one — optionally
+  // for developer and tenant_admin.
+  const inviteTakesWorkspace = (role: string) =>
+    BUSINESS_ROLES.includes(role) || (canManageResourceAccess && BUILDER_ROLES.includes(role));
 
   // A person matches by name, e-mail, a role they hold, or the workspace or
   // tenant a role is held in; the one being edited stays in view.
@@ -246,8 +366,7 @@ export function UsersPanel({
                     onChange={e => setNewUser(u => ({
                       ...u,
                       role: e.target.value,
-                      // A workspace only means something for a business role.
-                      workspace_id: BUSINESS_ROLES.includes(e.target.value) ? u.workspace_id : "",
+                      workspace_id: inviteTakesWorkspace(e.target.value) ? u.workspace_id : "",
                     }))}
                   >
                     <option value="">None</option>
@@ -260,13 +379,15 @@ export function UsersPanel({
                   </Select>
                 </Field>
               )}
-              {BUSINESS_ROLES.includes(newUser.role) && (
+              {inviteTakesWorkspace(newUser.role) && (
                 <Field
                   label="Workspace"
-                  description="a business role grants nothing until it is scoped to a workspace"
+                  description={BUSINESS_ROLES.includes(newUser.role)
+                    ? "a business role grants nothing until it is scoped to a workspace"
+                    : "optional — limits the role to one workspace"}
                 >
                   <Select value={newUser.workspace_id} onChange={e => setNewUser(u => ({ ...u, workspace_id: e.target.value }))}>
-                    <option value="">Select a workspace…</option>
+                    <option value="">{BUSINESS_ROLES.includes(newUser.role) ? "Select a workspace…" : "No specific workspace"}</option>
                     {workspaces.map(w => (
                       <option key={w.id} value={w.id}>{w.customer_name} — {w.name}</option>
                     ))}
@@ -276,7 +397,7 @@ export function UsersPanel({
             </div>
             <Button
               variant="primary"
-              onClick={() => createUser.mutate()}
+              onClick={() => createUser.mutate(newUser)}
               disabled={!newUser.email || !newUser.first_name || !newUser.last_name ||
                 (BUSINESS_ROLES.includes(newUser.role) && !newUser.workspace_id)}
               loading={createUser.isPending}
@@ -289,6 +410,12 @@ export function UsersPanel({
         )}
       </div>
 
+      {notice && (
+        <div role={notice.tone === "danger" ? "alert" : "status"} style={{ marginBottom: 12 }}>
+          <InlineAlert tone={notice.tone}>{notice.text}</InlineAlert>
+        </div>
+      )}
+
       <div className="mvx-table-wrap">
         <table className="mvx-table">
           <thead>
@@ -298,7 +425,7 @@ export function UsersPanel({
               <th>Role</th>
               <th>Access</th>
               <th>Joined</th>
-              <th style={{ width: 80 }}>Actions</th>
+              <th style={{ width: 132 }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -308,23 +435,42 @@ export function UsersPanel({
             {shownUsers.map((u) => editId === u.id ? (
               <tr key={u.id}>
                 <td colSpan={6} style={{ padding: "16px 20px", background: "var(--color-surface-subtle)" }}>
-                  <div className="mvx-admin-inline-form" style={{ marginBottom: 16 }}>
-                    {/* Read-only: the address is also the sign-in identity in
-                        the identity provider, and editing it here would change
-                        only this side. The account would keep signing in under
-                        the old address while the app displayed the new one,
-                        and invitations would go to whichever the provider
-                        still holds. Changing someone's address means
-                        re-inviting them. */}
-                    <TextInput value={editUser.email} readOnly disabled
-                      aria-label="Email (cannot be changed)"
-                      title="Email is the sign-in identity and cannot be changed here"
-                      style={{ width: 220 }} />
-                    <TextInput value={editUser.display_name} onChange={e => setEditUser(x => ({ ...x, display_name: e.target.value }))}
-                      placeholder="display name" style={{ width: 180 }} />
-                    <Button variant="primary" onClick={() => updateUser.mutate()} loading={updateUser.isPending} loadingLabel="Saving…">Save</Button>
-                    <Button onClick={() => setEditId(null)}>Cancel</Button>
+                  <div className="mvx-admin-inline-form" style={{ marginBottom: isForeignAccount(u) || updateUser.isError ? 8 : 16 }}>
+                    {permissionsOf(u).rename ? (
+                      <>
+                        {/* Read-only: the address is also the sign-in identity in
+                            the identity provider, and editing it here would change
+                            only this side. The account would keep signing in under
+                            the old address while the app displayed the new one,
+                            and invitations would go to whichever the provider
+                            still holds. Changing someone's address means
+                            re-inviting them. */}
+                        <TextInput value={editUser.email} readOnly disabled
+                          aria-label="Email (cannot be changed)"
+                          title="Email is the sign-in identity and cannot be changed here"
+                          style={{ width: 220 }} />
+                        <TextInput value={editUser.display_name} onChange={e => setEditUser(x => ({ ...x, display_name: e.target.value }))}
+                          placeholder="display name" style={{ width: 180 }} />
+                        <Button variant="primary" onClick={() => updateUser.mutate()} loading={updateUser.isPending} loadingLabel="Saving…">Save</Button>
+                        <Button onClick={() => setEditId(null)}>Cancel</Button>
+                      </>
+                    ) : (
+                      <>
+                        {/* The name is not this administrator's to change —
+                            the account is another organisation's, or the
+                            server says no — so it is shown, not offered. */}
+                        <span style={{ fontWeight: 600 }}>{u.display_name}</span>
+                        <span className="mvx-admin-mono mvx-admin-muted">{u.email}</span>
+                        <Button onClick={() => setEditId(null)}>Close</Button>
+                      </>
+                    )}
                   </div>
+                  {isForeignAccount(u) && (
+                    <p className="mvx-admin-muted" style={{ margin: "0 0 16px" }}>{foreignAccountNote(u)}</p>
+                  )}
+                  {updateUser.isError && (
+                    <p className="mvx-admin-error" role="alert" style={{ margin: "0 0 16px" }}>{(updateUser.error as Error).message}</p>
+                  )}
 
                   <div style={{ marginBottom: 14 }}>
                     <div className="mvx-admin-revisions__label" style={{ marginBottom: 6 }}>
@@ -336,7 +482,10 @@ export function UsersPanel({
                           key={assignmentKey(a)}
                           role={a.role}
                           label={a.role.replace(/_/g, " ")}
-                          onRemove={assignableRoles.includes(a.role) ? () => removeRole.mutate({ userId: u.id, role: a.role }) : undefined}
+                          // A role with no workspace belongs to the account's
+                          // own organisation; on another's it is not this
+                          // administrator's to take away.
+                          onRemove={assignableRoles.includes(a.role) && !isForeignAccount(u) ? () => removeRole.mutate({ userId: u.id, role: a.role }) : undefined}
                           blockedReason={isLastOwnAdminGrant(u, a, currentUserId)
                             ? "This is what grants you user administration — another administrator has to remove it"
                             : undefined}
@@ -349,7 +498,7 @@ export function UsersPanel({
                       {(() => {
                         const existing = (u.assignments ?? []).filter(a => a.workspace_id === "").map(a => a.role);
                         const available = PLATFORM_ROLES.filter(r => !existing.includes(r) && assignableRoles.includes(r));
-                        if (!available.length) return null;
+                        if (!available.length || isForeignAccount(u)) return null;
                         return (
                           <div className="mvx-admin-inline-form">
                             <Select value={addPlatformRole} onChange={e => setAddPlatformRole(e.target.value)}
@@ -510,6 +659,9 @@ export function UsersPanel({
                 <td style={{ fontWeight: 500 }}>
                   {u.display_name}
                   {u.disabled_at && <> <StatusBadge tone="warning">Disabled</StatusBadge></>}
+                  {isForeignAccount(u) && (
+                    <div className="mvx-admin-muted" style={{ fontSize: 11, fontWeight: 400 }}>{foreignAccountNote(u)}</div>
+                  )}
                 </td>
                 <td className="mvx-admin-mono mvx-admin-muted">{u.email}</td>
                 <td>
@@ -552,25 +704,77 @@ export function UsersPanel({
                         aria-label={`Edit ${u.display_name}`}
                         title="Edit"
                         size={28}
-                        onClick={() => { setEditId(u.id); setEditUser({ email: u.email, display_name: u.display_name }); setAddPlatformRole(""); setAddWsId(""); setAddWsRole("business_user"); setAddWsCustomerId(null); }}
+                        onClick={() => { setEditId(u.id); updateUser.reset(); setEditUser({ email: u.email, display_name: u.display_name }); setAddPlatformRole(""); setAddWsId(""); setAddWsRole("business_user"); setAddWsCustomerId(null); }}
                       >
                         <Pencil size={14} aria-hidden="true" />
                       </IconButton>
+                      {/* Account-level actions are offered as the server's
+                          permissions say, never guessed: a tenant admin
+                          changes only its own tenant's accounts. */}
+                      {permissionsOf(u).reinvite && (
+                        <IconButton
+                          aria-label={`Resend invitation to ${u.display_name}`}
+                          title="Resend invitation"
+                          size={28}
+                          disabled={reinviteUser.isPending}
+                          onClick={() => reinviteUser.mutate(u)}
+                        >
+                          <Mail size={14} aria-hidden="true" />
+                        </IconButton>
+                      )}
+                      {/* Another organisation's account (or one with none)
+                          is not this administrator's to delete — only what
+                          it holds here is theirs to take back. */}
+                      {permissionsOf(u).remove_from_tenant && u.home_tenant !== "own" && (
+                        <IconButton
+                          aria-label={`Remove ${u.display_name} from this tenant`}
+                          title="Remove from this tenant"
+                          danger
+                          size={28}
+                          disabled={removeFromTenant.isPending}
+                          onClick={() => confirm({
+                            title: "Remove from this tenant?",
+                            body: `This removes every role and access grant "${u.display_name}" holds in your tenant's workspaces, applications and models. `
+                              + (hasNarrowedDeveloperGrant(u)
+                                ? "Their developer role belongs to no organisation and is limited to the applications or models it was given: "
+                                  + "if yours are the last of them, that developer role is revoked too, so it never reaches every tenant. "
+                                  + "Nothing else about their account changes."
+                                : "Their account itself is not changed."),
+                            confirmLabel: "Remove from this tenant",
+                            onConfirm: () => removeFromTenant.mutate(u),
+                          })}
+                        >
+                          <UserMinus size={14} aria-hidden="true" />
+                        </IconButton>
+                      )}
                       {/* Deleting your own account takes the row and the
                           identity-provider login with it, so there is no way
                           back through the console — least of all for the sole
                           platform admin. Left visible but inert, because a
                           missing button just reads as a bug. */}
-                      <IconButton
-                        aria-label={u.id === currentUserId ? "You cannot delete your own account" : `Delete ${u.display_name}`}
-                        title={u.id === currentUserId ? "You cannot delete your own account — ask another administrator" : "Delete"}
-                        danger
-                        size={28}
-                        disabled={u.id === currentUserId}
-                        onClick={() => confirm({ title: "Delete user?", body: `This removes "${u.display_name}" and revokes all their access.`, confirmLabel: "Delete user", onConfirm: () => deleteUser.mutate(u.id) })}
-                      >
-                        <Trash2 size={14} aria-hidden="true" />
-                      </IconButton>
+                      {u.id === currentUserId ? (
+                        u.permissions && (
+                          <IconButton
+                            aria-label="You cannot delete your own account"
+                            title="You cannot delete your own account — ask another administrator"
+                            danger
+                            size={28}
+                            disabled
+                          >
+                            <Trash2 size={14} aria-hidden="true" />
+                          </IconButton>
+                        )
+                      ) : permissionsOf(u).delete && (
+                        <IconButton
+                          aria-label={`Delete ${u.display_name}`}
+                          title="Delete"
+                          danger
+                          size={28}
+                          onClick={() => confirm({ title: "Delete user?", body: `This removes "${u.display_name}" and revokes all their access.`, confirmLabel: "Delete user", onConfirm: () => deleteUser.mutate(u.id) })}
+                        >
+                          <Trash2 size={14} aria-hidden="true" />
+                        </IconButton>
+                      )}
                     </div>
                   )}
                 </td>

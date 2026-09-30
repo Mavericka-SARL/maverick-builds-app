@@ -37,12 +37,15 @@ async function openUsersTab(page: Page, selfAssignments = [platformGrant]) {
     {
       id: SELF_ID, email: "admin@example.com", display_name: "Admin",
       created_at: "2026-08-15T00:00:00Z", assignments: selfAssignments, app_ids: [], model_ids: [],
+      // What the gateway sends a platform admin (GET /api/admin/users).
+      home_tenant: "own", permissions: { rename: true, delete: false, disable: false, reinvite: false, remove_from_tenant: false },
     },
     {
       id: OTHER_ID, email: "someone@example.com", display_name: "Someone Else",
       created_at: "2026-08-16T00:00:00Z",
       assignments: [{ role: "developer", workspace_id: "", workspace_name: "", customer_name: "" }],
       app_ids: [], model_ids: [],
+      home_tenant: "own", permissions: { rename: true, delete: true, disable: true, reinvite: true, remove_from_tenant: false },
     },
   ])));
 

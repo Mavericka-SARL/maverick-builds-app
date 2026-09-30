@@ -1575,40 +1575,6 @@ leaves out, until it is fixed.
 - **What closes it:** one shared formatter with one percentage convention,
   honouring `format_decimals`.
 
-### An invitation cannot be resent from the console
-
-- **Noticed:** 2026-09-29, writing the Tenant admin guide. Standing rule 2.
-- **What:** `POST /api/admin/users/{id}/invite`
-  (`internal/gateway/handler.go:510`) exists, but nothing in `web/src` calls
-  it. An invitation expires after 72 hours (`inviteLifetime`, `:164`); after
-  that, the only way left in the console is to delete the person and invite
-  them again.
-- **Why it matters:** the capability exists but the tenant admin cannot
-  reach it.
-- **How to check:** `grep -rn "/invite" web/src`.
-- **What closes it:** a Resend invitation action on the Users screen.
-
-### A tenant admin cannot add a person who already has an account
-
-- **Noticed:** 2026-09-30, closing account adoption on user creation.
-  Standing rule 2.
-- **What:** `POST /api/admin/users` answers 409 when the application already
-  has an account at the address, or under the identity-provider subject it
-  resolves to, unless the caller is a platform admin
-  (`existingAccountAllowed`, `internal/gateway/handler.go:12631`). Creation
-  used to adopt such an account. A person who already has an account in
-  another tenant, or one with no tenant, can now be added to a tenant's
-  workspace only by a platform admin. An account the tenant already lists
-  takes a role through `POST /api/admin/users/{id}/roles` as before.
-- **Why it matters:** a tenant admin cannot give an outside consultant who
-  already has an account a role in its workspace.
-- **How to check:** as a tenant admin, create a user at the address of
-  another tenant's user: 409.
-- **What closes it:** a decision whether tenant admins may bring in people
-  from outside. If so, a generic flow that adds a workspace role and nothing
-  else: it does not rename the account, change its tenant or send it a new
-  invitation.
-
 ### Nothing sets an existing account's tenant
 
 - **Noticed:** 2026-09-30, closing account adoption at first sign-in.
@@ -1617,11 +1583,13 @@ leaves out, until it is fixed.
   that already exists at the address is refused (403, with the reason)
   unless the account belongs to that tenant and is not a platform admin
   (`ee/sso/sso.go:393-415`). Accounts with no `customer_id`, such as those a
-  platform admin creates (`internal/gateway/handler.go:12904-12911` leaves it
+  platform admin creates (`internal/gateway/handler.go:12909-12916` leaves it
   empty when the creator's scope is every tenant), are refused there when
   their identity-provider subject no longer matches. No route or screen sets
   an existing account's `customer_id`, so no role can make such an account
-  sign in through its tenant's single sign-on.
+  sign in through its tenant's single sign-on. Adding an existing account to
+  a tenant (`addExistingAccount`, `internal/gateway/account_boundaries.go:545`)
+  leaves its tenant as it is too.
 - **Why it matters:** a person invited before their tenant set up single
   sign-on may be locked out of it, with no way back through the product.
 - **How to check:** `grep -rn 'SET customer_id' --include='*.go' internal`
@@ -1639,14 +1607,225 @@ leaves out, until it is fixed.
   answers 403 (a request that changes nothing is answered as it is), so an
   identity provider that pushes changes for them logs 403s, and a SCIM delete
   no longer removes such a member's access in the tenant: the tenant admin
-  removes the member's workspace roles on the Users screen.
+  removes it with Remove from this tenant on the Users screen (`DELETE
+  /api/admin/users/{id}/tenant-access`, since 2026-09-30).
 - **Why it matters:** off-boarding through the identity provider leaves
   these members' roles in place until an administrator removes them.
 - **How to check:** `TestSCIMChangesOnlyTheTenantsOwnAccounts`
   (`internal/gateway/global_builder_escalation_test.go`).
 - **What closes it:** a SCIM delete of a member the tenant does not own
-  removes that member's roles and business-role memberships in this tenant
-  only, and leaves the account.
+  removes what that member holds in this tenant, as Remove from this tenant
+  does (`removeTenantAccess`, `internal/gateway/account_boundaries.go:351`),
+  and leaves the account.
+
+### An existing account invited without a workspace is told it was invited, and nothing happens
+
+- **Noticed:** 2026-09-30, adding existing accounts to a tenant. Standing
+  rule 2.
+- **What:** an invitation of an address that already has an account adds it
+  only with a role inside a workspace (`addExistingAccount`,
+  `internal/gateway/account_boundaries.go:545`). With no role, or no
+  workspace, it answers as a new invitation does (200, `status: created`),
+  grants nothing, sends nothing, and records the refusal in an audit event
+  only platform admins see (`refuseExistingAccount`, `:600`). The Users
+  screen still lets a tenant admin invite with role None, and with
+  `developer` or `tenant_admin` and "No specific workspace"
+  (`inviteTakesWorkspace`, `web/src/consoles/admin/UsersPanel.tsx:318`), and
+  then confirms the invitation.
+- **Why it matters:** the tenant admin believes the person was added and
+  invited; the person never hears of it, and nobody in the tenant can see
+  why.
+- **How to check:** `TestInviteExistingAccountAddsItToTheTenant`
+  (`internal/gateway/account_boundaries_test.go:238`) covers the
+  no-workspace answer; on the Users screen, invite another tenant's user
+  with role None and look for them in the list.
+- **What closes it:** the invite form asking for a workspace whenever it
+  offers a role, and saying that someone who may already have an account is
+  added only with one; or a decision to refuse such an invitation visibly,
+  which tells the inviter the address has an account (next entry).
+
+### Inviting an existing address still shows afterwards that it had an account
+
+- **Noticed:** 2026-09-30, adding existing accounts to a tenant.
+- **What:** `POST /api/admin/users` answers alike for a new address and an
+  existing account, but what follows does not. The users list shows an added
+  account with its own display name and creation date and `home_tenant`
+  `other` or `none`, where a new one is `own`, and the Users screen then
+  shows the foreign-account note. The grant's audit event, which the
+  tenant's administrators read (`auditScope`,
+  `internal/gateway/handler.go:7098`), carries `existing_account=true`. And
+  an existing account is answered before any identity-provider call, where a
+  new invitation waits for the identity provider and the invitation's mail
+  (`internal/gateway/handler.go:12954-13009`). Open self-service sign-up
+  answers 409 for an address that has an account
+  (`internal/gateway/signup.go:114-122`), so where it is open the flow tells
+  a tenant admin nothing an unauthenticated caller cannot learn there.
+- **Why it matters:** the decision that an invitation does not reveal an
+  existing account holds for the response only.
+- **How to check:** invite another tenant's user into a workspace, then `GET
+  /api/admin/users` and `GET /api/admin/audit`.
+- **What closes it:** a decision whether the property is wanted beyond the
+  response. If it is, sign-up must stop telling too, and the invitation's
+  mail must go out asynchronously, which conflicts with the rule that a
+  failed invitation rolls the whole creation back.
+
+### A tenant admin cannot rename or delete a fellow tenant admin
+
+- **Noticed:** 2026-09-30, limiting account-level actions to the caller's
+  own accounts. Needs the user's confirmation. Standing rule 2.
+- **What:** renaming, deleting or re-inviting an account now also needs the
+  caller to be able to revoke every role the account holds
+  (`accountPermissionsFor`, `internal/gateway/account_boundaries.go:108`),
+  because a delete takes them all. A tenant admin may not grant or revoke
+  `tenant_admin` (`assignableRoles`, `internal/gateway/handler.go:12594`),
+  so it can no longer rename, delete or re-invite a fellow tenant admin, and
+  a developer can no longer do so to a developer or a tenant admin. The same
+  holds for an account of the caller's tenant that holds, anywhere, a role
+  the caller could not revoke, such as `tenant_admin` in another tenant's
+  workspace granted by a platform admin. A tenant admin with no tenant of
+  its own (home `none`) can no longer rename itself. A caller whose scope is
+  every tenant without being a platform admin (a platform-wide builder)
+  keeps the accounts with no tenant its invitations make, but is offered no
+  Remove from this tenant.
+- **Why it matters:** a tenant whose administrator leaves cannot remove them
+  without a platform admin.
+- **How to check:** `TestAccountActionsNeedEveryRoleRevocable`
+  (`internal/gateway/account_boundaries_test.go:434`).
+- **What closes it:** the user's confirmation of the rule as it is, or a
+  narrower one (for example, a tenant admin may delete a fellow tenant admin
+  of its own tenant, audited).
+
+### The plan's user cap refuses adding an account that is already a member
+
+- **Noticed:** 2026-09-30, adding existing accounts to a tenant.
+- **What:** `POST /api/admin/users` checks the plan's user cap
+  (`CheckUsers`, `internal/gateway/handler.go:12948`) before it looks for an
+  existing account, so both paths answer alike. A tenant at its cap gets 402
+  for an account that already holds a role in it, whose addition would not
+  change the count.
+- **Why it matters:** at the cap, the invite form cannot give an existing
+  member a role in another workspace; the account's own roles route (`POST
+  /api/admin/users/{id}/roles`), which is not capped, still can.
+- **How to check:** a tenant at its user limit; invite the address of one of
+  its members with a role in another workspace.
+- **What closes it:** a decision: counting only accounts new to the tenant
+  makes the two paths answer differently at the cap, so the cost may be
+  accepted and recorded as intended.
+
+### Removal from a tenant leaves the account's button rules
+
+- **Noticed:** 2026-09-30, adding Remove from this tenant.
+- **What:** Remove from this tenant (`removeTenantAccess`,
+  `internal/gateway/account_boundaries.go:351`) deletes the account's roles
+  in the tenant's workspaces, its business-role memberships, its application
+  and model grants there, and its `dimension_member` and `metric` access
+  rules on those models. Its `button` access rules stay: their `ref_id`
+  cannot be tied to a model or a tenant.
+- **Why it matters:** low: a button rule only restricts. If the account is
+  added to the tenant again, the old rules apply again.
+- **How to check:** `SELECT * FROM identity.user_access_rule WHERE rule_type
+  = 'button' AND user_id = …` after a removal.
+- **What closes it:** button rules that name their model, so that a removal
+  takes them too.
+
+### Removal from a tenant and a refused invitation have no audit event types of their own
+
+- **Noticed:** 2026-09-30, adding existing accounts to a tenant.
+- **What:** `pkg/auditlog` has no event type for either. Removal from a
+  tenant is recorded as `user.role_revoked` with metadata
+  `action=removed_from_tenant` (`adminRemoveFromTenant`,
+  `internal/gateway/account_boundaries.go:415`), and a refused invitation of
+  an existing account as `user.role_granted` with `granted=false` and
+  `refused` naming the reason (`refuseExistingAccount`, `:600`). The refusal
+  also carries `visibility=platform`, a new generic marker that `auditScope`
+  (`internal/gateway/handler.go:7098`) leaves out for tenant viewers, in
+  `GET /api/admin/audit` and the enterprise audit export alike.
+- **Why it matters:** an audit reader filtering by event type sees a removal
+  as one revoke, and a refusal as a grant.
+- **How to check:** `grep -n 'removed_from_tenant\|"granted"'
+  internal/gateway/account_boundaries.go`.
+- **What closes it:** `user.removed_from_tenant` and a refusal event type in
+  `pkg/auditlog`, used here.
+
+### Audit events are written after the change commits
+
+- **Noticed:** 2026-09-30, auditing the developer grants a grant removal
+  also revokes.
+- **What:** the grants that `removeGrants` and Remove from this tenant
+  revoke with an account's last application or model grant are audited after
+  the transaction commits, through `auditlog.Log` (`auditRevoked`,
+  `internal/gateway/account_boundaries.go:309`), as every other audited
+  mutation is.
+- **Why it matters:** a crash between the commit and the log loses the audit
+  row; the revocation stands.
+- **How to check:** `grep -n 'auditlog.Log' internal/gateway/*.go`, each
+  against the `tx.Commit` before it.
+- **What closes it:** an audit write inside the mutation's transaction (for
+  example `auditlog` taking a `pgx.Tx`), adopted route by route.
+
+### No route disables or re-enables an account
+
+- **Noticed:** 2026-09-30, adding the users list's `permissions`. Standing
+  rule 2.
+- **What:** only SCIM disables an account, and only one the tenant owns
+  (`ownedSQL`, `ee/scim/service.go:257`). The users list reports
+  `permissions.disable` by the same rule as rename and delete
+  (`accountPermissionsFor`, `internal/gateway/account_boundaries.go:108`),
+  but no gateway route or screen uses it. Changing an account's e-mail is
+  refused (400) for everyone, and the Users screen shows the e-mail
+  read-only.
+- **Why it matters:** a tenant without SCIM can only delete a member, not
+  suspend one.
+- **How to check:** look for a disable route in
+  `internal/gateway/handler.go`.
+- **What closes it:** a decision whether administrators disable accounts; if
+  so, a disable and re-enable route refused as `permissions.disable` says,
+  and its control on the Users screen shown only when that is true.
+
+### An access_granted notification opens nothing
+
+- **Noticed:** 2026-09-30, adding the notification an added account gets.
+- **What:** the `access_granted` notification (`notifyAccessGranted`,
+  `internal/gateway/account_boundaries.go:657`) names resource type
+  `workspace`, so the notification centre treats it as a link
+  (`web/src/ui/NotificationCenter.tsx:35`), but no console section handles
+  `workspace` in `onNotificationNavigate`: a click marks it read and closes
+  the panel.
+- **Why it matters:** low: the message says to sign in and open the
+  workspace, which the person then does by hand.
+- **How to check:** `grep -rn onNotificationNavigate web/src`.
+- **What closes it:** a section that handles `workspace`, for example by
+  opening that workspace's first application.
+
+### Mail about another tenant goes out under the platform's name
+
+- **Noticed:** 2026-09-30, sending `access_granted` by e-mail.
+- **What:** white-labelled mail takes its brand from the recipient
+  (`BrandName`, `cmd/gateway/main.go:364`, through
+  `branding.EmailNameForUser`): the account's own tenant, else its first
+  workspace's. A message that is another tenant's news, such as tenant B
+  telling one of tenant A's accounts that it was added, used to go out under
+  A's brand. It now goes out under the platform's name (`OtherTenant`,
+  `internal/notification/dispatch.go:321-328`). That also moved workflow
+  mail to a member whose home is another tenant from its home brand to the
+  platform's.
+- **Why it matters:** B's mail would better carry B's brand.
+- **How to check:** `internal/notification/dispatch.go:321-328`.
+- **What closes it:** `BrandName` taking the message's tenant instead of the
+  recipient, so each tenant's mail carries its own brand.
+
+### The Users screen can reopen a removed account in edit mode
+
+- **Noticed:** 2026-09-30, adding Remove from this tenant.
+- **What:** when a revoke or a removal from the tenant takes the account
+  being edited out of the list, `editId` in
+  `web/src/consoles/admin/UsersPanel.tsx` still points at it. Nothing
+  happens unless the account is listed again later in the same session: its
+  row then reopens in edit mode.
+- **Why it matters:** low: a surprise, not a wrong write.
+- **How to check:** edit an account of another tenant, remove it from the
+  tenant, then invite it again.
+- **What closes it:** clearing `editId` when its account leaves the list.
 
 ### A tenant cannot create a second workspace
 
@@ -1777,14 +1956,16 @@ leaves out, until it is fixed.
   this change declared it on the endpoints it touched, but did not audit the
   rest (for example the developer dashboards and form-integrations `POST`).
   Most operations do not list the 401, 403 and 404 the shared helpers
-  answer, nor the statuses added on 2026-09-30: 409 from `POST
-  /api/admin/users` when the application already has an account at the
-  address, 409 from `DELETE /api/admin/applications/{id}` and
-  `/api/admin/models/{id}`, and 404 from `POST /api/admin/users/{id}/roles`
-  for an unknown user (the spec lists 200, 400 and 403 there, and only 200
-  on the other three). `TestRouteSpecParity` compares methods and paths
-  only, and nothing checks the operation count in `docs/API.md:122` (251,
-  correct today).
+  answer, nor some statuses added on 2026-09-30: 404 from `POST
+  /api/admin/users/{id}/roles` and `DELETE /api/admin/users/{id}` for an
+  unknown user (the spec lists 200, 400 and 403 on both), and 402 from `POST
+  /api/admin/users` at the plan's user cap. (The 409s of an existing address
+  and of a last-grant application or model delete, named here before, are
+  no longer sent.) `TestRouteSpecParity` compares methods and paths only,
+  and nothing checks the operation count in `docs/API.md:133`: it says 251,
+  and the spec has 254 operations (`grep -c 'operationId:'
+  api/openapi.yaml`, 2026-09-30; 253 before this change added `DELETE
+  /api/admin/users/{id}/tenant-access`).
 - **Why it matters:** a client generated from the spec cannot send the
   headers the console relies on, or expect the errors it gets.
 - **How to check:** grep `internal/gateway/handler.go` for
@@ -1937,6 +2118,79 @@ leaves out, until it is fixed.
   before the tests.
 
 ## Closed
+
+### A tenant admin cannot add a person who already has an account
+
+- **Noticed:** 2026-09-30, closing account adoption on user creation.
+  Standing rule 2.
+- **What it was:** `POST /api/admin/users` answered 409 when the application
+  already had an account at the address, or under the identity-provider
+  subject it resolved to, unless the caller was a platform admin
+  (`existingAccountAllowed`). A person who already had an account in another
+  tenant, or one with no tenant, could be added to a tenant's workspace only
+  by a platform admin.
+- **Closed:** 2026-09-30 (`9f689db`), by the user's decision that a tenant
+  admin may add such a person. Inviting the address
+  (`internal/gateway/handler.go:12954-12970`, and `:12996-13009` for an
+  address the identity provider knows under another account's subject) goes
+  to `addExistingAccount` (`internal/gateway/account_boundaries.go:545`): it
+  adds the requested role inside the requested workspace of the caller's
+  tenant, checked as a new invitation's role is, and nothing else. The
+  account's name, e-mail, tenant, active flag and identity-provider account
+  stay as they are, and no invitation is re-sent. The person is told in the
+  notification centre, and by e-mail when that workspace's tenant sends
+  notifications by e-mail (`notifyAccessGranted`, `:657`; at most once a day
+  per workspace and three times per tenant). The answer is the one a new
+  invitation gets. What cannot be added is answered the same, under an id
+  that names no account, grants nothing, and is audited for the platform
+  only (`refuseExistingAccount`, `:600`): a request with no role or no
+  workspace; a platform admin's or a platform-wide builder's account; and an
+  account with no tenant that holds `tenant_admin` without a workspace,
+  which any role in a new tenant's workspace would make that tenant's
+  administrator (`customerlessAdminGainsTenant`, `:629`). The users list
+  shows such an account with `home_tenant` `other` or `none` and only what
+  it holds in the caller's tenants, and Remove from this tenant (`DELETE
+  /api/admin/users/{id}/tenant-access`, `adminRemoveFromTenant`, `:415`)
+  takes that back: its roles in the tenant's workspaces, its business-role
+  memberships, its application and model grants there, and its member and
+  metric access rules on those models, and nothing else of the account.
+  Proof: `TestInviteExistingAccountAddsItToTheTenant`,
+  `TestRemoveAccountFromTenant`, `TestUsersListShowsOnlyTheTenantsPart` and
+  `TestNoRoleMakesACustomerlessAdminAnotherTenantsAdmin`
+  (`internal/gateway/account_boundaries_test.go`), run 2026-09-30: pass;
+  `web/e2e/account-ownership.spec.ts`, run 2026-09-30: pass. Split out: "An
+  existing account invited without a workspace is told it was invited, and
+  nothing happens", "Inviting an existing address still shows afterwards
+  that it had an account", "The plan's user cap refuses adding an account
+  that is already a member", "Removal from a tenant leaves the account's
+  button rules", "Removal from a tenant and a refused invitation have no
+  audit event types of their own", "An access_granted notification opens
+  nothing" and "Mail about another tenant goes out under the platform's
+  name" (Open, above).
+- **Behaviour change:** `POST /api/admin/users` no longer answers 409 for an
+  address that has an account: a tenant admin's invitation adds a workspace
+  role to it. For a caller who is not a platform admin, `POST` and `DELETE
+  /api/admin/users/{id}/roles` of a role without a workspace on an account
+  whose home is elsewhere answer 403 (`internal/gateway/handler.go:13241`,
+  `:13309`); workspace roles and application and model grants inside the
+  caller's tenant stay allowed on such an account, since inviting it again
+  reaches the same.
+
+### An invitation cannot be resent from the console
+
+- **Noticed:** 2026-09-29, writing the Tenant admin guide. Standing rule 2.
+- **What it was:** `POST /api/admin/users/{id}/invite` existed, but nothing
+  in `web/src` called it. An invitation expires after 72 hours
+  (`inviteLifetime`); after that, the only way left in the console was to
+  delete the person and invite them again.
+- **Closed:** 2026-09-30 (`9f689db`). The Users screen has a Resend
+  invitation action (`reinviteUser`,
+  `web/src/consoles/admin/UsersPanel.tsx:242`; `resendAdminUserInvite`,
+  `web/src/api/client.ts:1965`) on each account the users list's
+  `permissions.reinvite` allows, which is the rule the route itself applies
+  (`accountActionAllowed`, `internal/gateway/handler.go:13146`). Proof:
+  "Resend invitation confirms where it went"
+  (`web/e2e/account-ownership.spec.ts:254`), run 2026-09-30: pass.
 
 ### Re-sending a record's current status might count as a status change
 

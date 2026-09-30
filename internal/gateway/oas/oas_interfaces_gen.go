@@ -477,6 +477,10 @@ type RejectAiProposalRes interface {
 	rejectAiProposalRes()
 }
 
+type RemoveAdminUserFromTenantRes interface {
+	removeAdminUserFromTenantRes()
+}
+
 type RemoveAdminUserRoleRes interface {
 	removeAdminUserRoleRes()
 }

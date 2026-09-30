@@ -162,6 +162,11 @@ func (s *Store) CustomerOf(ctx context.Context, recipientUserID, resourceType, r
 			JOIN core.application a ON a.id = r.application_id WHERE r.id = $1::uuid`, resourceID).Scan(&cid)
 	case "application":
 		_ = s.pool.QueryRow(ctx, `SELECT customer_id::text FROM core.application WHERE id = $1::uuid`, resourceID).Scan(&cid)
+	case "workspace":
+		// Access given in a workspace (the gateway's access_granted
+		// notification) is that workspace's tenant's news, whatever tenant
+		// the recipient's account belongs to.
+		_ = s.pool.QueryRow(ctx, `SELECT customer_id::text FROM core.workspace WHERE id = $1::uuid`, resourceID).Scan(&cid)
 	}
 	if cid != nil && *cid != "" {
 		return *cid

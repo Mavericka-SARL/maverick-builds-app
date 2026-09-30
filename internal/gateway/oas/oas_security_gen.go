@@ -201,6 +201,7 @@ var operationRolesBearerAuth = map[string][]string{
 	PublishWorkflowOperation:              []string{},
 	PutGoogleConnectionOperation:          []string{},
 	RejectAiProposalOperation:             []string{},
+	RemoveAdminUserFromTenantOperation:    []string{},
 	RemoveAdminUserRoleOperation:          []string{},
 	RemoveBARoleMemberOperation:           []string{},
 	RemoveBrandingOperation:               []string{},

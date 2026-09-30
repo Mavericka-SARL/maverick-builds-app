@@ -2413,9 +2413,17 @@ func (s *AdminUser) encodeFields(e *jx.Encoder) {
 		}
 		e.ArrEnd()
 	}
+	{
+		e.FieldStart("home_tenant")
+		s.HomeTenant.Encode(e)
+	}
+	{
+		e.FieldStart("permissions")
+		s.Permissions.Encode(e)
+	}
 }
 
-var jsonFieldsNameOfAdminUser = [7]string{
+var jsonFieldsNameOfAdminUser = [9]string{
 	0: "id",
 	1: "email",
 	2: "display_name",
@@ -2423,6 +2431,8 @@ var jsonFieldsNameOfAdminUser = [7]string{
 	4: "assignments",
 	5: "app_ids",
 	6: "model_ids",
+	7: "home_tenant",
+	8: "permissions",
 }
 
 // Decode decodes AdminUser from json.
@@ -2430,7 +2440,7 @@ func (s *AdminUser) Decode(d *jx.Decoder) error {
 	if s == nil {
 		return errors.New("invalid: unable to decode AdminUser to nil")
 	}
-	var requiredBitSet [1]uint8
+	var requiredBitSet [2]uint8
 
 	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
 		switch string(k) {
@@ -2540,6 +2550,26 @@ func (s *AdminUser) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"model_ids\"")
 			}
+		case "home_tenant":
+			requiredBitSet[0] |= 1 << 7
+			if err := func() error {
+				if err := s.HomeTenant.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"home_tenant\"")
+			}
+		case "permissions":
+			requiredBitSet[1] |= 1 << 0
+			if err := func() error {
+				if err := s.Permissions.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"permissions\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -2549,8 +2579,9 @@ func (s *AdminUser) Decode(d *jx.Decoder) error {
 	}
 	// Validate required fields.
 	var failures []validate.FieldError
-	for i, mask := range [1]uint8{
-		0b01111111,
+	for i, mask := range [2]uint8{
+		0b11111111,
+		0b00000001,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -2592,6 +2623,212 @@ func (s *AdminUser) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *AdminUser) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes AdminUserHomeTenant as json.
+func (s AdminUserHomeTenant) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes AdminUserHomeTenant from json.
+func (s *AdminUserHomeTenant) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode AdminUserHomeTenant to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch AdminUserHomeTenant(v) {
+	case AdminUserHomeTenantOwn:
+		*s = AdminUserHomeTenantOwn
+	case AdminUserHomeTenantOther:
+		*s = AdminUserHomeTenantOther
+	case AdminUserHomeTenantNone:
+		*s = AdminUserHomeTenantNone
+	default:
+		*s = AdminUserHomeTenant(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s AdminUserHomeTenant) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *AdminUserHomeTenant) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *AdminUserPermissions) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *AdminUserPermissions) encodeFields(e *jx.Encoder) {
+	{
+		e.FieldStart("rename")
+		e.Bool(s.Rename)
+	}
+	{
+		e.FieldStart("delete")
+		e.Bool(s.Delete)
+	}
+	{
+		e.FieldStart("disable")
+		e.Bool(s.Disable)
+	}
+	{
+		e.FieldStart("reinvite")
+		e.Bool(s.Reinvite)
+	}
+	{
+		e.FieldStart("remove_from_tenant")
+		e.Bool(s.RemoveFromTenant)
+	}
+}
+
+var jsonFieldsNameOfAdminUserPermissions = [5]string{
+	0: "rename",
+	1: "delete",
+	2: "disable",
+	3: "reinvite",
+	4: "remove_from_tenant",
+}
+
+// Decode decodes AdminUserPermissions from json.
+func (s *AdminUserPermissions) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode AdminUserPermissions to nil")
+	}
+	var requiredBitSet [1]uint8
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "rename":
+			requiredBitSet[0] |= 1 << 0
+			if err := func() error {
+				v, err := d.Bool()
+				s.Rename = bool(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"rename\"")
+			}
+		case "delete":
+			requiredBitSet[0] |= 1 << 1
+			if err := func() error {
+				v, err := d.Bool()
+				s.Delete = bool(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"delete\"")
+			}
+		case "disable":
+			requiredBitSet[0] |= 1 << 2
+			if err := func() error {
+				v, err := d.Bool()
+				s.Disable = bool(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"disable\"")
+			}
+		case "reinvite":
+			requiredBitSet[0] |= 1 << 3
+			if err := func() error {
+				v, err := d.Bool()
+				s.Reinvite = bool(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"reinvite\"")
+			}
+		case "remove_from_tenant":
+			requiredBitSet[0] |= 1 << 4
+			if err := func() error {
+				v, err := d.Bool()
+				s.RemoveFromTenant = bool(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"remove_from_tenant\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode AdminUserPermissions")
+	}
+	// Validate required fields.
+	var failures []validate.FieldError
+	for i, mask := range [1]uint8{
+		0b00011111,
+	} {
+		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
+			// Mask only required fields and check equality to mask using XOR.
+			//
+			// If XOR result is not zero, result is not equal to expected, so some fields are missed.
+			// Bits of fields which would be set are actually bits of missed fields.
+			missed := bits.OnesCount8(result)
+			for bitN := 0; bitN < missed; bitN++ {
+				bitIdx := bits.TrailingZeros8(result)
+				fieldIdx := i*8 + bitIdx
+				var name string
+				if fieldIdx < len(jsonFieldsNameOfAdminUserPermissions) {
+					name = jsonFieldsNameOfAdminUserPermissions[fieldIdx]
+				} else {
+					name = strconv.Itoa(fieldIdx)
+				}
+				failures = append(failures, validate.FieldError{
+					Name:  name,
+					Error: validate.ErrFieldRequired,
+				})
+				// Reset bit.
+				result &^= 1 << bitIdx
+			}
+		}
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *AdminUserPermissions) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *AdminUserPermissions) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -10684,17 +10921,38 @@ func (s *CreateAdminUserReq) encodeFields(e *jx.Encoder) {
 		e.Str(s.DisplayName)
 	}
 	{
+		if s.FirstName.Set {
+			e.FieldStart("first_name")
+			s.FirstName.Encode(e)
+		}
+	}
+	{
+		if s.LastName.Set {
+			e.FieldStart("last_name")
+			s.LastName.Encode(e)
+		}
+	}
+	{
 		if s.Role.Set {
 			e.FieldStart("role")
 			s.Role.Encode(e)
 		}
 	}
+	{
+		if s.WorkspaceID.Set {
+			e.FieldStart("workspace_id")
+			s.WorkspaceID.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfCreateAdminUserReq = [3]string{
+var jsonFieldsNameOfCreateAdminUserReq = [6]string{
 	0: "email",
 	1: "display_name",
-	2: "role",
+	2: "first_name",
+	3: "last_name",
+	4: "role",
+	5: "workspace_id",
 }
 
 // Decode decodes CreateAdminUserReq from json.
@@ -10730,6 +10988,26 @@ func (s *CreateAdminUserReq) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"display_name\"")
 			}
+		case "first_name":
+			if err := func() error {
+				s.FirstName.Reset()
+				if err := s.FirstName.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"first_name\"")
+			}
+		case "last_name":
+			if err := func() error {
+				s.LastName.Reset()
+				if err := s.LastName.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"last_name\"")
+			}
 		case "role":
 			if err := func() error {
 				s.Role.Reset()
@@ -10739,6 +11017,16 @@ func (s *CreateAdminUserReq) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"role\"")
+			}
+		case "workspace_id":
+			if err := func() error {
+				s.WorkspaceID.Reset()
+				if err := s.WorkspaceID.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"workspace_id\"")
 			}
 		default:
 			return d.Skip()
@@ -17323,10 +17611,21 @@ func (s *DeleteAdminApplicationOK) encodeFields(e *jx.Encoder) {
 			s.Status.Encode(e)
 		}
 	}
+	{
+		if s.Revoked != nil {
+			e.FieldStart("revoked")
+			e.ArrStart()
+			for _, elem := range s.Revoked {
+				elem.Encode(e)
+			}
+			e.ArrEnd()
+		}
+	}
 }
 
-var jsonFieldsNameOfDeleteAdminApplicationOK = [1]string{
+var jsonFieldsNameOfDeleteAdminApplicationOK = [2]string{
 	0: "status",
+	1: "revoked",
 }
 
 // Decode decodes DeleteAdminApplicationOK from json.
@@ -17346,6 +17645,23 @@ func (s *DeleteAdminApplicationOK) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"status\"")
+			}
+		case "revoked":
+			if err := func() error {
+				s.Revoked = make([]RevokedGrant, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem RevokedGrant
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.Revoked = append(s.Revoked, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"revoked\"")
 			}
 		default:
 			return d.Skip()
@@ -17386,10 +17702,21 @@ func (s *DeleteAdminModelOK) encodeFields(e *jx.Encoder) {
 			s.Status.Encode(e)
 		}
 	}
+	{
+		if s.Revoked != nil {
+			e.FieldStart("revoked")
+			e.ArrStart()
+			for _, elem := range s.Revoked {
+				elem.Encode(e)
+			}
+			e.ArrEnd()
+		}
+	}
 }
 
-var jsonFieldsNameOfDeleteAdminModelOK = [1]string{
+var jsonFieldsNameOfDeleteAdminModelOK = [2]string{
 	0: "status",
+	1: "revoked",
 }
 
 // Decode decodes DeleteAdminModelOK from json.
@@ -17409,6 +17736,23 @@ func (s *DeleteAdminModelOK) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"status\"")
+			}
+		case "revoked":
+			if err := func() error {
+				s.Revoked = make([]RevokedGrant, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem RevokedGrant
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.Revoked = append(s.Revoked, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"revoked\"")
 			}
 		default:
 			return d.Skip()
@@ -37659,6 +38003,39 @@ func (s *OptProtoTimestamp) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes RemoveAdminUserFromTenantOKStatus as json.
+func (o OptRemoveAdminUserFromTenantOKStatus) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes RemoveAdminUserFromTenantOKStatus from json.
+func (o *OptRemoveAdminUserFromTenantOKStatus) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptRemoveAdminUserFromTenantOKStatus to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptRemoveAdminUserFromTenantOKStatus) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptRemoveAdminUserFromTenantOKStatus) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes ScatterChartDataContext as json.
 func (o OptScatterChartDataContext) Encode(e *jx.Encoder) {
 	if !o.Set {
@@ -40693,6 +41070,249 @@ func (s *RejectAiProposalOK) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes RemoveAdminUserFromTenantBadRequest as json.
+func (s *RemoveAdminUserFromTenantBadRequest) Encode(e *jx.Encoder) {
+	unwrapped := (*Error)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes RemoveAdminUserFromTenantBadRequest from json.
+func (s *RemoveAdminUserFromTenantBadRequest) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode RemoveAdminUserFromTenantBadRequest to nil")
+	}
+	var unwrapped Error
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = RemoveAdminUserFromTenantBadRequest(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *RemoveAdminUserFromTenantBadRequest) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *RemoveAdminUserFromTenantBadRequest) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes RemoveAdminUserFromTenantForbidden as json.
+func (s *RemoveAdminUserFromTenantForbidden) Encode(e *jx.Encoder) {
+	unwrapped := (*Error)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes RemoveAdminUserFromTenantForbidden from json.
+func (s *RemoveAdminUserFromTenantForbidden) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode RemoveAdminUserFromTenantForbidden to nil")
+	}
+	var unwrapped Error
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = RemoveAdminUserFromTenantForbidden(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *RemoveAdminUserFromTenantForbidden) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *RemoveAdminUserFromTenantForbidden) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes RemoveAdminUserFromTenantNotFound as json.
+func (s *RemoveAdminUserFromTenantNotFound) Encode(e *jx.Encoder) {
+	unwrapped := (*Error)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes RemoveAdminUserFromTenantNotFound from json.
+func (s *RemoveAdminUserFromTenantNotFound) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode RemoveAdminUserFromTenantNotFound to nil")
+	}
+	var unwrapped Error
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = RemoveAdminUserFromTenantNotFound(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *RemoveAdminUserFromTenantNotFound) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *RemoveAdminUserFromTenantNotFound) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *RemoveAdminUserFromTenantOK) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *RemoveAdminUserFromTenantOK) encodeFields(e *jx.Encoder) {
+	{
+		if s.Status.Set {
+			e.FieldStart("status")
+			s.Status.Encode(e)
+		}
+	}
+	{
+		if s.Revoked != nil {
+			e.FieldStart("revoked")
+			e.ArrStart()
+			for _, elem := range s.Revoked {
+				elem.Encode(e)
+			}
+			e.ArrEnd()
+		}
+	}
+}
+
+var jsonFieldsNameOfRemoveAdminUserFromTenantOK = [2]string{
+	0: "status",
+	1: "revoked",
+}
+
+// Decode decodes RemoveAdminUserFromTenantOK from json.
+func (s *RemoveAdminUserFromTenantOK) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode RemoveAdminUserFromTenantOK to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "status":
+			if err := func() error {
+				s.Status.Reset()
+				if err := s.Status.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"status\"")
+			}
+		case "revoked":
+			if err := func() error {
+				s.Revoked = make([]RevokedGrant, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem RevokedGrant
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.Revoked = append(s.Revoked, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"revoked\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode RemoveAdminUserFromTenantOK")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *RemoveAdminUserFromTenantOK) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *RemoveAdminUserFromTenantOK) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes RemoveAdminUserFromTenantOKStatus as json.
+func (s RemoveAdminUserFromTenantOKStatus) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes RemoveAdminUserFromTenantOKStatus from json.
+func (s *RemoveAdminUserFromTenantOKStatus) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode RemoveAdminUserFromTenantOKStatus to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch RemoveAdminUserFromTenantOKStatus(v) {
+	case RemoveAdminUserFromTenantOKStatusRemoved:
+		*s = RemoveAdminUserFromTenantOKStatusRemoved
+	default:
+		*s = RemoveAdminUserFromTenantOKStatus(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s RemoveAdminUserFromTenantOKStatus) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *RemoveAdminUserFromTenantOKStatus) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode implements json.Marshaler.
 func (s *RemoveAdminUserRoleOK) Encode(e *jx.Encoder) {
 	e.ObjStart()
@@ -41784,10 +42404,21 @@ func (s *RevokeAdminUserAppAccessOK) encodeFields(e *jx.Encoder) {
 			s.Status.Encode(e)
 		}
 	}
+	{
+		if s.Revoked != nil {
+			e.FieldStart("revoked")
+			e.ArrStart()
+			for _, elem := range s.Revoked {
+				elem.Encode(e)
+			}
+			e.ArrEnd()
+		}
+	}
 }
 
-var jsonFieldsNameOfRevokeAdminUserAppAccessOK = [1]string{
+var jsonFieldsNameOfRevokeAdminUserAppAccessOK = [2]string{
 	0: "status",
+	1: "revoked",
 }
 
 // Decode decodes RevokeAdminUserAppAccessOK from json.
@@ -41807,6 +42438,23 @@ func (s *RevokeAdminUserAppAccessOK) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"status\"")
+			}
+		case "revoked":
+			if err := func() error {
+				s.Revoked = make([]RevokedGrant, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem RevokedGrant
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.Revoked = append(s.Revoked, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"revoked\"")
 			}
 		default:
 			return d.Skip()
@@ -41847,10 +42495,21 @@ func (s *RevokeAdminUserModelAccessOK) encodeFields(e *jx.Encoder) {
 			s.Status.Encode(e)
 		}
 	}
+	{
+		if s.Revoked != nil {
+			e.FieldStart("revoked")
+			e.ArrStart()
+			for _, elem := range s.Revoked {
+				elem.Encode(e)
+			}
+			e.ArrEnd()
+		}
+	}
 }
 
-var jsonFieldsNameOfRevokeAdminUserModelAccessOK = [1]string{
+var jsonFieldsNameOfRevokeAdminUserModelAccessOK = [2]string{
 	0: "status",
+	1: "revoked",
 }
 
 // Decode decodes RevokeAdminUserModelAccessOK from json.
@@ -41870,6 +42529,23 @@ func (s *RevokeAdminUserModelAccessOK) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"status\"")
+			}
+		case "revoked":
+			if err := func() error {
+				s.Revoked = make([]RevokedGrant, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem RevokedGrant
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.Revoked = append(s.Revoked, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"revoked\"")
 			}
 		default:
 			return d.Skip()
@@ -41891,6 +42567,136 @@ func (s *RevokeAdminUserModelAccessOK) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *RevokeAdminUserModelAccessOK) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *RevokedGrant) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *RevokedGrant) encodeFields(e *jx.Encoder) {
+	{
+		e.FieldStart("user_id")
+		json.EncodeUUID(e, s.UserID)
+	}
+	{
+		e.FieldStart("email")
+		e.Str(s.Email)
+	}
+	{
+		e.FieldStart("role")
+		e.Str(s.Role)
+	}
+}
+
+var jsonFieldsNameOfRevokedGrant = [3]string{
+	0: "user_id",
+	1: "email",
+	2: "role",
+}
+
+// Decode decodes RevokedGrant from json.
+func (s *RevokedGrant) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode RevokedGrant to nil")
+	}
+	var requiredBitSet [1]uint8
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "user_id":
+			requiredBitSet[0] |= 1 << 0
+			if err := func() error {
+				v, err := json.DecodeUUID(d)
+				s.UserID = v
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"user_id\"")
+			}
+		case "email":
+			requiredBitSet[0] |= 1 << 1
+			if err := func() error {
+				v, err := d.Str()
+				s.Email = string(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"email\"")
+			}
+		case "role":
+			requiredBitSet[0] |= 1 << 2
+			if err := func() error {
+				v, err := d.Str()
+				s.Role = string(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"role\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode RevokedGrant")
+	}
+	// Validate required fields.
+	var failures []validate.FieldError
+	for i, mask := range [1]uint8{
+		0b00000111,
+	} {
+		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
+			// Mask only required fields and check equality to mask using XOR.
+			//
+			// If XOR result is not zero, result is not equal to expected, so some fields are missed.
+			// Bits of fields which would be set are actually bits of missed fields.
+			missed := bits.OnesCount8(result)
+			for bitN := 0; bitN < missed; bitN++ {
+				bitIdx := bits.TrailingZeros8(result)
+				fieldIdx := i*8 + bitIdx
+				var name string
+				if fieldIdx < len(jsonFieldsNameOfRevokedGrant) {
+					name = jsonFieldsNameOfRevokedGrant[fieldIdx]
+				} else {
+					name = strconv.Itoa(fieldIdx)
+				}
+				failures = append(failures, validate.FieldError{
+					Name:  name,
+					Error: validate.ErrFieldRequired,
+				})
+				// Reset bit.
+				result &^= 1 << bitIdx
+			}
+		}
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *RevokedGrant) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *RevokedGrant) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }

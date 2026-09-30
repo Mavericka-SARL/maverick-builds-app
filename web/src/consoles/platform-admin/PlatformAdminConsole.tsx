@@ -2,8 +2,9 @@ import { useRef, useState } from "react";
 import { AuditExportPanel } from "../../ee/auditexport/AuditExportPanel";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Pencil, Trash2, Download, Upload, Package, Braces } from "lucide-react";
-import { api, withTenant, type AdminTenant, type AdminModel, type AdminApp, type AdminAuditEvent, type AdminRevision, type ModelExportPackage } from "../../api/client";
+import { api, withTenant, type AccessRemovalResult, type AdminTenant, type AdminModel, type AdminApp, type AdminAuditEvent, type AdminRevision, type ModelExportPackage } from "../../api/client";
 import { downloadJSON } from "../../api/download";
+import { accessRemovalNotice } from "../admin/accessRemoval";
 import {
   Button,
   IconButton,
@@ -17,8 +18,26 @@ import {
   Toolbar,
   ToolbarGroup,
   useConfirm,
+  InlineAlert,
   type DesignTone,
 } from "../../ui";
+
+/**
+ * Deleting an application or model also removes the access grants it was
+ * named in. When that would have left a developer with no tenant narrowed to
+ * nothing — a builder of every tenant — the server revokes that developer
+ * grant in the same step and says so in its reply (accessRemovalNotice).
+ * Users are refetched either way: their access lists named what was deleted.
+ */
+function RemovalNotice({ result }: { result?: AccessRemovalResult }) {
+  const message = accessRemovalNotice(result);
+  if (!message) return null;
+  return (
+    <div role="status" style={{ margin: "8px 0" }}>
+      <InlineAlert tone="warning">{message}</InlineAlert>
+    </div>
+  );
+}
 
 // ── Model Revisions Section ────────────────────────────────────────────────────
 
@@ -170,8 +189,8 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
     onSuccess: () => { inv(); setAddModel(false); setModelName(""); },
   });
   const deleteModel = useMutation({
-    mutationFn: (id: string) => withTenant(tenantId, () => api.deleteAdminModel(id)),
-    onSuccess: inv,
+    mutationFn: (id: string): Promise<AccessRemovalResult> => withTenant(tenantId, () => api.deleteAdminModel(id)),
+    onSuccess: () => { inv(); qc.invalidateQueries({ queryKey: ["admin-users"] }); },
   });
   // Export/import is tenant_admin only — the server rejects everyone else,
   // the buttons are simply hidden for other roles.
@@ -264,6 +283,7 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
           </div>
         ))}
         {deleteModel.isError && <p className="mvx-admin-error" role="alert">{(deleteModel.error as Error).message}</p>}
+        {deleteModel.isSuccess && <RemovalNotice result={deleteModel.data} />}
 
         {addModel ? (
           <div className="mvx-admin-inline-form">
@@ -384,8 +404,8 @@ function TenantSection({ tenant, onDelete, isPlatformAdmin, canTransferModels }:
     onSuccess: () => { inv(); setAddApp(false); setAppName(""); },
   });
   const deleteApp = useMutation({
-    mutationFn: (id: string) => api.deleteAdminApplication(id),
-    onSuccess: inv,
+    mutationFn: (id: string): Promise<AccessRemovalResult> => api.deleteAdminApplication(id),
+    onSuccess: () => { inv(); qc.invalidateQueries({ queryKey: ["admin-users"] }); },
   });
   const renameTenant = useMutation({
     mutationFn: () => api.updateAdminTenant(tenant.id, { name: editName }),
@@ -458,6 +478,7 @@ function TenantSection({ tenant, onDelete, isPlatformAdmin, canTransferModels }:
           <AppSection key={app.id} app={app} tenantId={tenant.id} onDelete={() => deleteApp.mutate(app.id)} canTransferModels={canTransferModels} />
         ))}
         {deleteApp.isError && <p className="mvx-admin-error">{(deleteApp.error as Error).message}</p>}
+        {deleteApp.isSuccess && <RemovalNotice result={deleteApp.data} />}
 
         {addApp ? (
           <div className="mvx-admin-inline-form mvx-admin-inline-form--boxed">

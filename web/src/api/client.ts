@@ -849,6 +849,20 @@ export interface UserAssignment {
   customer_name: string;
 }
 
+/**
+ * What the signed-in administrator may do to an account as a whole, computed
+ * by the server with the same function its mutations check. A tenant admin
+ * changes only accounts of its own tenant; for anyone else's it may only
+ * remove what the account holds in its tenant (remove_from_tenant).
+ */
+export interface AdminUserPermissions {
+  rename: boolean;
+  delete: boolean;
+  disable: boolean;
+  reinvite: boolean;
+  remove_from_tenant: boolean;
+}
+
 export interface AdminUser {
   id: string;
   email: string;
@@ -859,6 +873,33 @@ export interface AdminUser {
   assignments: UserAssignment[];
   app_ids: string[];
   model_ids: string[];
+  /**
+   * Absent from a server older than these fields: the console then offers no
+   * account-level action, rather than ones every request might refuse.
+   */
+  permissions?: AdminUserPermissions;
+  /** Whose account this is, seen from the signed-in administrator's tenant. */
+  home_tenant?: "own" | "other" | "none";
+}
+
+/** A grant a removal took away with it (see AccessRemovalResult). */
+export interface RevokedGrant {
+  user_id: string;
+  email: string;
+  role: string;
+}
+
+/**
+ * What removing access answers — revoking an application or model grant, or
+ * deleting the application or model. When that took the last grant narrowing
+ * a developer with no tenant, the server revokes that developer grant in the
+ * same step, so the account never becomes a builder of every tenant, and
+ * lists it in revoked; message, when sent, says it in words.
+ */
+export interface AccessRemovalResult {
+  status: string;
+  message?: string;
+  revoked?: RevokedGrant[];
 }
 
 export interface AdminWorkspace {
@@ -1914,8 +1955,21 @@ export const api = {
   updateAutomationRule: (ruleId: string, body: { name?: string; description?: string; trigger_type?: string; workflow_name?: string; workflow_def_id?: string; source_form_id?: string; source_grid_id?: string; source_integration_id?: string; enabled?: boolean; cron_expr?: string; timezone?: string; misfire_policy?: string }) =>
     apiFetch<AutomationRule>(`/api/automation/rules/${ruleId}`, { method: "PATCH", body: JSON.stringify(body) }),
 
+  // Answers the same whether the address already had an account (which is
+  // then only given the role, in a workspace) or not. Only the reply is
+  // alike: the refreshed users list shows an existing account as it is (see
+  // docs/OBSERVATIONS.md), and a role or workspace left out is refused only
+  // for an existing account.
   createAdminUser: (body: { email: string; first_name: string; last_name: string; role: string; workspace_id?: string }) =>
-    apiFetch<{ id: string; status: string }>("/api/admin/users", { method: "POST", body: JSON.stringify(body) }),
+    apiFetch<{ id: string; status: string; invited?: boolean }>("/api/admin/users", { method: "POST", body: JSON.stringify(body) }),
+  resendAdminUserInvite: (id: string) =>
+    apiFetch<{ status: string; email: string }>(`/api/admin/users/${id}/invite`, { method: "POST" }),
+  // Removes every role and grant the account holds in the caller's tenant —
+  // for an account that belongs to another tenant or none. An account with no
+  // tenant whose developer role those grants were the last to narrow also
+  // loses that role, listed in revoked (AccessRemovalResult).
+  removeAdminUserFromTenant: (id: string) =>
+    apiFetch<AccessRemovalResult>(`/api/admin/users/${id}/tenant-access`, { method: "DELETE" }),
   updateAdminUser: (id: string, body: { email: string; display_name: string }) =>
     apiFetch<{ status: string }>(`/api/admin/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   getAdminWorkspaces: () => apiFetch<AdminWorkspace[]>("/api/admin/workspaces"),
@@ -1928,11 +1982,11 @@ export const api = {
   grantUserAppAccess: (id: string, appId: string) =>
     apiFetch<{ status: string }>(`/api/admin/users/${id}/access/apps/${appId}`, { method: "POST" }),
   revokeUserAppAccess: (id: string, appId: string) =>
-    apiFetch<{ status: string }>(`/api/admin/users/${id}/access/apps/${appId}`, { method: "DELETE" }),
+    apiFetch<AccessRemovalResult>(`/api/admin/users/${id}/access/apps/${appId}`, { method: "DELETE" }),
   grantUserModelAccess: (id: string, modelId: string) =>
     apiFetch<{ status: string }>(`/api/admin/users/${id}/access/models/${modelId}`, { method: "POST" }),
   revokeUserModelAccess: (id: string, modelId: string) =>
-    apiFetch<{ status: string }>(`/api/admin/users/${id}/access/models/${modelId}`, { method: "DELETE" }),
+    apiFetch<AccessRemovalResult>(`/api/admin/users/${id}/access/models/${modelId}`, { method: "DELETE" }),
   createAdminTenant: (body: { name: string; plan: string }) =>
     apiFetch<{ id: string }>("/api/admin/tenants", { method: "POST", body: JSON.stringify(body) }),
   // name renames; the plan is the platform admin's to change.

@@ -1319,15 +1319,75 @@ components:
 
     AdminUser:
       type: object
-      required: [id, email, display_name, created_at, assignments, app_ids, model_ids]
+      required: [id, email, display_name, created_at, assignments, app_ids, model_ids, home_tenant, permissions]
       properties:
         id:            { type: string, format: uuid }
         email:         { type: string, format: email }
         display_name:  { type: string }
         created_at:    { type: string }
-        assignments:   { type: array, items: { $ref: "#/components/schemas/UserAssignment" } }
-        app_ids:       { type: array, items: { type: string, format: uuid } }
-        model_ids:     { type: array, items: { type: string, format: uuid } }
+        assignments:
+          type: array
+          items: { $ref: "#/components/schemas/UserAssignment" }
+          description: >-
+            The account's roles. For a caller whose scope is not every tenant,
+            only those in workspaces of the caller's tenants, and those with no
+            workspace when the account's home_tenant is "own" or "none" (they
+            apply there); its roles elsewhere are not shown. The caller's own
+            account is shown whole.
+        app_ids:
+          type: array
+          items: { type: string, format: uuid }
+          description: Its application grants; limited as assignments are, to applications of the caller's tenants.
+        model_ids:
+          type: array
+          items: { type: string, format: uuid }
+          description: Its model grants; limited as assignments are, to models of the caller's tenants.
+        home_tenant:
+          type: string
+          enum: [own, other, none]
+          description: >-
+            Where the account's own tenant (identity.user customer_id) is, seen
+            from the caller: one of the tenants the caller administers ("own";
+            for a caller whose scope is every tenant, any tenant), another
+            tenant ("other"), or no tenant ("none").
+        permissions: { $ref: "#/components/schemas/AdminUserPermissions" }
+
+    AdminUserPermissions:
+      type: object
+      description: >-
+        The account-level actions the caller may take on this account,
+        computed by the same rule the mutations enforce (accountPermissionsFor
+        in internal/gateway/account_boundaries.go). Anyone but a platform admin
+        renames, deletes, disables, re-invites or changes the e-mail of an
+        account only when its home_tenant is "own" (or, for a caller whose
+        scope is every tenant, "none"), it is not a platform admin or a
+        platform-wide builder, and the caller may revoke every role the
+        account holds, anywhere (its own account it renames and re-invites
+        whatever it holds); an account whose home is elsewhere is removed
+        from the caller's tenant instead (remove_from_tenant), by a tenant
+        admin who may revoke every role it holds there. A platform admin has
+        every action but deleting itself, and no remove_from_tenant (its
+        scope names no one tenant). The gateway has no disable endpoint;
+        "disable" states the rule for the account's own tenant (SCIM).
+      required: [rename, delete, disable, reinvite, remove_from_tenant]
+      properties:
+        rename:             { type: boolean }
+        delete:             { type: boolean }
+        disable:            { type: boolean }
+        reinvite:           { type: boolean }
+        remove_from_tenant: { type: boolean }
+
+    RevokedGrant:
+      type: object
+      description: >-
+        An unscoped developer grant a removal also took away: the removal took
+        the last application or model grant narrowing an account with no
+        tenant, which would otherwise have been a builder of every tenant.
+      required: [user_id, email, role]
+      properties:
+        user_id: { type: string, format: uuid }
+        email:   { type: string }
+        role:    { type: string }
 
     AuditEvent:
       type: object
@@ -5633,6 +5693,13 @@ paths:
       operationId: deleteAdminApplication
       tags: [Admin]
       summary: Delete an application
+      description: >-
+        When this takes the last application or model grant narrowing a
+        developer with no tenant, and the caller is not a platform admin, that
+        account's unscoped developer grant is revoked in the same transaction
+        (audited as user.role_revoked, listed in `revoked`): it ends with no
+        builder reach, never platform-wide. A platform admin's removal leaves
+        it as it is.
       parameters:
         - name: id
           in: path
@@ -5643,7 +5710,17 @@ paths:
           description: Application deleted
           content:
             application/json:
-              schema: { type: object, properties: { status: { type: string } } }
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  revoked:
+                    type: array
+                    description: >-
+                      Unscoped developer grants also taken away, so as not to
+                      leave an account with no tenant platform-wide (absent
+                      when none).
+                    items: { $ref: "#/components/schemas/RevokedGrant" }
 
   /api/admin/models:
     post:
@@ -5695,6 +5772,13 @@ paths:
       operationId: deleteAdminModel
       tags: [Admin]
       summary: Delete a model
+      description: >-
+        When this takes the last application or model grant narrowing a
+        developer with no tenant, and the caller is not a platform admin, that
+        account's unscoped developer grant is revoked in the same transaction
+        (audited as user.role_revoked, listed in `revoked`): it ends with no
+        builder reach, never platform-wide. A platform admin's removal leaves
+        it as it is.
       parameters:
         - name: id
           in: path
@@ -5705,7 +5789,17 @@ paths:
           description: Model deleted
           content:
             application/json:
-              schema: { type: object, properties: { status: { type: string } } }
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  revoked:
+                    type: array
+                    description: >-
+                      Unscoped developer grants also taken away, so as not to
+                      leave an account with no tenant platform-wide (absent
+                      when none).
+                    items: { $ref: "#/components/schemas/RevokedGrant" }
 
   /api/admin/models/{id}/export:
     get:
@@ -5872,6 +5966,26 @@ paths:
         roles during creation.
 
 
+        An address (compared case-insensitively) or identity-provider subject
+        that already has an account is not created again. For anyone but a
+        platform admin, the requested role is added to that account inside
+        workspace_id (a workspace of the caller's tenant, and a role the
+        caller may grant there, checked as for a new address) and nothing else
+        about the account changes: not its name, e-mail, tenant, active flag
+        or identity-provider account, and no invitation is sent. The person is
+        notified that they were given access (notification centre, and e-mail
+        when the workspace's tenant sends notifications by e-mail; at most
+        once a day per workspace and three times a day per tenant). The answer
+        is the same as for a new invitation. Nothing is granted — with the
+        same answer, under an id that names no account, and the refusal
+        audited for the platform only — when no role or no workspace is given,
+        to a platform admin's account or a platform-wide builder's, and to an
+        account with no tenant holding tenant_admin without a workspace, which
+        a role in a new tenant's workspace would make that tenant's
+        administrator. A platform admin creating over an existing address
+        adopts it as before.
+
+
         Creates a real identity-provider account and emails a set-your-password
         invitation; no password is ever set server-side. The whole operation is
         undone if any step fails, so a user that exists can always sign in. When
@@ -5887,10 +6001,21 @@ paths:
               properties:
                 email:        { type: string, format: email }
                 display_name: { type: string }
+                first_name:   { type: string }
+                last_name:    { type: string }
                 role:         { type: string }
+                workspace_id:
+                  type: string
+                  format: uuid
+                  description: >-
+                    The workspace the role is held in. An address that
+                    already has an account is added only inside a workspace
+                    (see above).
       responses:
         "200":
-          description: Created user id
+          description: >-
+            Created user id (the existing account's, when it was added; an id
+            that names no account when nothing was granted)
           content:
             application/json:
               schema:
@@ -5956,6 +6081,8 @@ paths:
       tags: [Admin]
       summary: Update a user's display name (only a platform_admin may modify another platform_admin)
       description: >
+        Refused (403) to anyone but a platform admin unless the account's home
+        is one of the caller's tenants (AdminUser.permissions.rename).
         Only display_name is mutable. The email address is the sign-in identity
         in the identity provider, and this endpoint writes only the
         application's copy — changing it here would leave the account signing
@@ -5990,6 +6117,10 @@ paths:
       tags: [Admin]
       summary: Delete a user (never yourself)
       description: >
+        Refused (403) to anyone but a platform admin unless the account's home
+        is one of the caller's tenants (AdminUser.permissions.delete); an
+        account whose home is elsewhere is removed from the tenant instead
+        (DELETE /api/admin/users/{id}/tenant-access).
         Removes the application row and the identity-provider account.
         Deleting your own account is refused: it is not undoable from inside
         the product, and for the sole platform admin it would leave nobody
@@ -6008,12 +6139,54 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /api/admin/users/{id}/tenant-access:
+    delete:
+      operationId: removeAdminUserFromTenant
+      tags: [Admin]
+      summary: Remove an account whose home is elsewhere from the caller's tenant
+      description: >
+        For an account of another tenant, or of none, that holds roles in the
+        caller's workspaces (AdminUser.permissions.remove_from_tenant): deletes
+        its roles in the workspaces of the caller's tenants, its memberships of
+        their business roles, its grants to their applications and models, and
+        its access rules on those models — nothing else; the account itself,
+        its name, e-mail, tenant and identity-provider account stay. Requires
+        tenant_admin (not a platform admin, whose scope names no one tenant).
+        Refused for the caller itself, for an account of the caller's own
+        tenant (delete it instead), for a platform admin or platform-wide
+        builder, and while the account holds a role there the caller may not
+        revoke. When this takes the last application or model grant narrowing
+        a developer with no tenant, its unscoped developer grant is revoked in
+        the same transaction (listed in `revoked`).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Removed from the tenant
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [removed] }
+                  revoked:
+                    type: array
+                    items: { $ref: "#/components/schemas/RevokedGrant" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/admin/users/{id}/invite:
     post:
       operationId: resendAdminUserInvitation
       tags: [Admin]
       summary: Resend the set-your-password invitation email
       description: >
+        Refused (403) to anyone but a platform admin unless the account's home
+        is one of the caller's tenants (AdminUser.permissions.reinvite).
         Invitations expire and mail gets lost; without this the only recovery is
         deleting and re-creating the user, which discards their roles and access
         grants. Returns 409 for users created before identity-provider
@@ -6057,7 +6230,12 @@ paths:
       operationId: addAdminUserRole
       tags: [Admin]
       summary: Grant a role to a user, platform-wide or scoped to a workspace
-      description: The granting actor may only assign roles strictly below their own tier (see assignableRoles in internal/gateway/handler.go) — a tenant_admin can never mint another tenant_admin, for example.
+      description: >-
+        The granting actor may only assign roles strictly below their own tier
+        (see assignableRoles in internal/gateway/handler.go) — a tenant_admin
+        can never mint another tenant_admin, for example. Anyone but a platform
+        admin grants a role without a workspace only to an account whose home
+        is one of the caller's tenants.
       parameters:
         - name: id
           in: path
@@ -6099,7 +6277,10 @@ paths:
         - name: workspace_id
           in: query
           schema: { type: string, format: uuid }
-          description: Omit to revoke the platform-level (unscoped) grant of this role.
+          description: >-
+            Omit to revoke the platform-level (unscoped) grant of this role —
+            which anyone but a platform admin may do only on an account whose
+            home is one of the caller's tenants.
       responses:
         "200":
           description: Role revoked
@@ -6134,7 +6315,13 @@ paths:
       operationId: revokeAdminUserAppAccess
       tags: [Admin]
       summary: Revoke a user's explicit access to an application
-      description: Requires platform_admin or tenant_admin. See grantAdminUserAppAccess.
+      description: >-
+        Requires platform_admin or tenant_admin. See grantAdminUserAppAccess.
+        When this is the last application or model grant narrowing a developer
+        with no tenant, and the caller is not a platform admin, that account's
+        unscoped developer grant is revoked in the same transaction (audited as
+        user.role_revoked, listed in `revoked`): it ends with no builder reach,
+        never platform-wide.
       parameters:
         - name: id
           in: path
@@ -6149,7 +6336,17 @@ paths:
           description: Access revoked
           content:
             application/json:
-              schema: { type: object, properties: { status: { type: string } } }
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  revoked:
+                    type: array
+                    description: >-
+                      Unscoped developer grants also taken away, so as not to
+                      leave an account with no tenant platform-wide (absent
+                      when none).
+                    items: { $ref: "#/components/schemas/RevokedGrant" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/admin/users/{id}/access/models/{modelId}:
@@ -6178,7 +6375,13 @@ paths:
       operationId: revokeAdminUserModelAccess
       tags: [Admin]
       summary: Revoke a user's explicit access to a model
-      description: Requires platform_admin or tenant_admin. See grantAdminUserModelAccess.
+      description: >-
+        Requires platform_admin or tenant_admin. See grantAdminUserModelAccess.
+        When this is the last application or model grant narrowing a developer
+        with no tenant, and the caller is not a platform admin, that account's
+        unscoped developer grant is revoked in the same transaction (audited as
+        user.role_revoked, listed in `revoked`): it ends with no builder reach,
+        never platform-wide.
       parameters:
         - name: id
           in: path
@@ -6193,7 +6396,17 @@ paths:
           description: Access revoked
           content:
             application/json:
-              schema: { type: object, properties: { status: { type: string } } }
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  revoked:
+                    type: array
+                    description: >-
+                      Unscoped developer grants also taken away, so as not to
+                      leave an account with no tenant platform-wide (absent
+                      when none).
+                    items: { $ref: "#/components/schemas/RevokedGrant" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/admin/workspaces:

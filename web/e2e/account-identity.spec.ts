@@ -117,9 +117,12 @@ test("a disabled danger action is not still painted red", async ({ page }) => {
   await page.route("**/api/admin/audit**", (r) => r.fulfill(json([])));
   await page.route("**/api/admin/users", (r) => r.fulfill(json([
     { id: SELF, email: "a@b.c", display_name: "Admin", created_at: "2026-08-15T00:00:00Z",
-      assignments: [{ role: "platform_admin", workspace_id: "", workspace_name: "", customer_name: "" }], app_ids: [], model_ids: [] },
+      assignments: [{ role: "platform_admin", workspace_id: "", workspace_name: "", customer_name: "" }], app_ids: [], model_ids: [],
+      // What the gateway sends a platform admin (GET /api/admin/users).
+      home_tenant: "own", permissions: { rename: true, delete: false, disable: false, reinvite: false, remove_from_tenant: false } },
     { id: "22222222-2222-2222-2222-222222222222", email: "d@e.f", display_name: "Other", created_at: "2026-08-16T00:00:00Z",
-      assignments: [{ role: "developer", workspace_id: "", workspace_name: "", customer_name: "" }], app_ids: [], model_ids: [] },
+      assignments: [{ role: "developer", workspace_id: "", workspace_name: "", customer_name: "" }], app_ids: [], model_ids: [],
+      home_tenant: "own", permissions: { rename: true, delete: true, disable: true, reinvite: true, remove_from_tenant: false } },
   ])));
 
   await page.goto("/");

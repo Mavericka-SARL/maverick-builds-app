@@ -13,9 +13,10 @@ package gateway
 //     admins; anyone else names a workspace.
 //  2. An account narrowed to some applications or models by user_app_access
 //     or user_model_access was still platform-wide: isGlobalBuilder answered
-//     before the grants were read. Now its grants are its scope, and removing
-//     the last of them — directly or by deleting what it grants — is kept to
-//     platform admins too.
+//     before the grants were read. Now its grants are its scope. Removing the
+//     last of them — directly or by deleting what it grants — was then kept
+//     to platform admins; since 2026-09-30 anyone else's removal goes ahead
+//     and takes the account's unscoped developer grant with it.
 //
 // These reuse setupDevRouteFixture (developer_route_scope_test.go): tenant 1
 // has ws1a (app1, models A and B), ws1b (app2) and appT; tenant 2 has ws2
@@ -219,59 +220,94 @@ func TestNarrowedCustomerlessDeveloperIsNotPlatformWide(t *testing.T) {
 	f.renameMetric(t, "gb-narrow-model", f.metricA, http.StatusForbidden, http.StatusNotFound)
 	f.renameMetric(t, "gb-narrow-model", f.metricD, http.StatusForbidden, http.StatusNotFound)
 
-	// Removing the last grant would make it platform-wide again: a tenant
-	// admin may not, directly or by deleting what it grants.
+	// Removing the last grant would make it platform-wide again. A tenant
+	// admin's removal goes ahead and takes the unscoped developer grant with
+	// it, audited as its own event: the account ends with no builder reach,
+	// never platform-wide (decided 2026-09-30). Directly, by the grant:
 	const ta = "mm-tenant-admin"
-	f.expect(t, ta, "DELETE", "/api/admin/users/"+narrow+"/access/apps/"+f.app1, "", nil, http.StatusForbidden)
-	f.expect(t, ta, "DELETE", "/api/admin/applications/"+f.app1, "", nil, http.StatusConflict)
-	f.expect(t, ta, "DELETE", "/api/admin/users/"+byModel+"/access/models/"+f.modelB, "", nil, http.StatusForbidden)
-	f.expect(t, ta, "DELETE", "/api/admin/models/"+f.modelB, "", nil, http.StatusConflict)
-	// Any spelling of the ids the delete accepts is checked as the same id:
-	// compared as text, an upper-cased id went past the check.
-	up := strings.ToUpper
-	f.expect(t, ta, "DELETE", "/api/admin/users/"+narrow+"/access/apps/"+up(f.app1), "", nil, http.StatusForbidden)
-	f.expect(t, ta, "DELETE", "/api/admin/users/"+up(narrow)+"/access/apps/"+f.app1, "", nil, http.StatusForbidden)
-	f.expect(t, ta, "DELETE", "/api/admin/users/"+byModel+"/access/models/"+up(f.modelB), "", nil, http.StatusForbidden)
-	f.expect(t, ta, "DELETE", "/api/admin/models/"+up(f.modelB), "", nil, http.StatusConflict)
-	// The refusal names what the tenant admin can do instead.
-	raw := f.expect(t, ta, "DELETE", "/api/admin/applications/"+up(f.app1), "", nil, http.StatusConflict)
-	if !strings.Contains(string(raw), "Revoke that account's developer role first") {
-		t.Errorf("application delete refusal names no remedy: %s", raw)
-	}
-	if n := f.one(t, `SELECT (SELECT count(*) FROM identity.user_app_access WHERE user_id=$1::uuid)
-		+ (SELECT count(*) FROM identity.user_model_access WHERE user_id=$2::uuid)
-		+ (SELECT count(*) FROM core.application WHERE id=$3::uuid)
-		+ (SELECT count(*) FROM core.model WHERE id=$4::uuid)`, narrow, byModel, f.app1, f.modelB); n != "4" {
-		t.Errorf("refused removals left %s of the 4 rows", n)
-	}
-	f.renameMetric(t, "gb-narrow", f.metricD, http.StatusForbidden, http.StatusNotFound)
-	// A grant that is not the last one goes as before.
 	if _, err := f.pool.Exec(ctx, `INSERT INTO identity.user_app_access (user_id, application_id) VALUES ($1::uuid, $2::uuid)`, narrow, f.app2); err != nil {
 		t.Fatal(err)
 	}
-	f.expect(t, ta, "DELETE", "/api/admin/users/"+narrow+"/access/apps/"+f.app2, "", nil, http.StatusOK)
-	// A platform admin may, and the account is then platform-wide.
-	f.expect(t, "mm-platform", "DELETE", "/api/admin/users/"+narrow+"/access/apps/"+f.app1, "", nil, http.StatusOK)
-	f.renameMetric(t, "gb-narrow", f.metricD, http.StatusOK)
+	// A grant that is not the last one goes as before, and takes nothing else.
+	raw := f.expect(t, ta, "DELETE", "/api/admin/users/"+narrow+"/access/apps/"+f.app2, "", nil, http.StatusOK)
+	if strings.Contains(string(raw), "revoked") {
+		t.Errorf("removing a grant that is not the last revoked something: %s", raw)
+	}
+	f.renameMetric(t, "gb-narrow", f.metricA, http.StatusOK)
+	// The last one, in any spelling of the ids.
+	up := strings.ToUpper
+	raw = f.expect(t, ta, "DELETE", "/api/admin/users/"+up(narrow)+"/access/apps/"+up(f.app1), "", nil, http.StatusOK)
+	if !strings.Contains(string(raw), `"revoked"`) || !strings.Contains(string(raw), "gb-narrow@gb.test") {
+		t.Errorf("last grant removal does not report the revoked developer grant: %s", raw)
+	}
+	f.assertNoBuilderReach(t, "gb-narrow", narrow, "app_access_revoked")
 
-	// The remedy the refusal names is the tenant admin's: revoke the
-	// developer role, after which the grant may go.
-	rem := f.gbUser(t, "gb-remedy", "", [2]string{"developer", ""})
-	if _, err := f.pool.Exec(ctx, `INSERT INTO identity.user_app_access (user_id, application_id) VALUES ($1::uuid, $2::uuid)`, rem, f.appT); err != nil {
+	// By deleting the model it was narrowed to.
+	raw = f.expect(t, ta, "DELETE", "/api/admin/models/"+up(f.modelB), "", nil, http.StatusOK)
+	if !strings.Contains(string(raw), "gb-narrow-model@gb.test") {
+		t.Errorf("model delete does not report the revoked developer grant: %s", raw)
+	}
+	f.assertNoBuilderReach(t, "gb-narrow-model", byModel, "model_deleted")
+
+	// By deleting the application, for every account it was the last grant
+	// of, directly or through one of its models.
+	byApp := f.gbUser(t, "gb-narrow-app", "", [2]string{"developer", ""})
+	byAppModel := f.gbUser(t, "gb-narrow-appmodel", "", [2]string{"developer", ""})
+	kept := f.gbUser(t, "gb-narrow-kept", "", [2]string{"developer", ""})
+	for _, g := range []struct{ sql, user, id string }{
+		{`INSERT INTO identity.user_app_access (user_id, application_id) VALUES ($1::uuid, $2::uuid)`, byApp, f.app1},
+		{`INSERT INTO identity.user_model_access (user_id, model_id) VALUES ($1::uuid, $2::uuid)`, byAppModel, f.modelA},
+		{`INSERT INTO identity.user_app_access (user_id, application_id) VALUES ($1::uuid, $2::uuid)`, kept, f.app1},
+		{`INSERT INTO identity.user_app_access (user_id, application_id) VALUES ($1::uuid, $2::uuid)`, kept, f.app2},
+	} {
+		if _, err := f.pool.Exec(ctx, g.sql, g.user, g.id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.expect(t, ta, "DELETE", "/api/admin/applications/"+f.app1, "", nil, http.StatusOK)
+	f.assertNoBuilderReach(t, "gb-narrow-app", byApp, "application_deleted")
+	f.assertNoBuilderReach(t, "gb-narrow-appmodel", byAppModel, "application_deleted")
+	// An account the application was not the last grant of keeps its role.
+	if n := f.one(t, `SELECT count(*)::text FROM identity.role_assignment WHERE user_id=$1::uuid AND role='developer'`, kept); n != "1" {
+		t.Errorf("an account still narrowed to app2 lost its developer grant (%s rows)", n)
+	}
+	f.renameMetric(t, "gb-narrow-kept", f.metricC, http.StatusOK)
+	f.renameMetric(t, "gb-narrow-kept", f.metricD, http.StatusForbidden, http.StatusNotFound)
+
+	// A platform admin's removal is as it was: it may mean to make the
+	// account platform-wide.
+	pw := f.gbUser(t, "gb-platform-widened", "", [2]string{"developer", ""})
+	if _, err := f.pool.Exec(ctx, `INSERT INTO identity.user_app_access (user_id, application_id) VALUES ($1::uuid, $2::uuid)`, pw, f.app2); err != nil {
 		t.Fatal(err)
 	}
-	raw = f.expect(t, ta, "DELETE", "/api/admin/users/"+rem+"/access/apps/"+f.appT, "", nil, http.StatusForbidden)
-	if !strings.Contains(string(raw), "Revoke its developer role instead") {
-		t.Errorf("revoke refusal names no remedy: %s", raw)
-	}
-	f.expect(t, ta, "DELETE", "/api/admin/users/"+rem+"/roles/developer", "", nil, http.StatusOK)
-	f.expect(t, ta, "DELETE", "/api/admin/users/"+rem+"/access/apps/"+f.appT, "", nil, http.StatusOK)
-	f.renameMetric(t, "gb-remedy", f.metricD, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound)
+	f.expect(t, "mm-platform", "DELETE", "/api/admin/users/"+pw+"/access/apps/"+f.app2, "", nil, http.StatusOK)
+	f.renameMetric(t, "gb-platform-widened", f.metricD, http.StatusOK)
 }
 
-// Two removals of an account's last two grants, sent together, leave it one:
-// the check and the delete run in one transaction that locks the account.
-// Checked apart, both saw the other grant and both went ahead.
+// assertNoBuilderReach fails unless the account — a developer with no tenant
+// whose last grant a tenant admin just removed — was left with no unscoped
+// developer grant, builds nowhere, and its revocation was audited with cause.
+func (f *devRouteFixture) assertNoBuilderReach(t *testing.T, sub, id, cause string) {
+	t.Helper()
+	if n := f.one(t, `SELECT count(*)::text FROM identity.role_assignment WHERE user_id=$1::uuid AND role='developer' AND workspace_id IS NULL`, id); n != "0" {
+		t.Errorf("%s keeps %s unscoped developer grants after its last grant went", sub, n)
+	}
+	if pw := f.one(t, `SELECT `+platformWideBuilderSQL("$1::uuid")+`::text`, id); pw != "false" {
+		t.Errorf("%s is platform-wide", sub)
+	}
+	f.renameMetric(t, sub, f.metricD, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound)
+	f.renameMetric(t, sub, f.metricC, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound)
+	if n := f.one(t, `SELECT count(*)::text FROM audit.audit_event
+		WHERE event_type='user.role_revoked' AND resource_id=$1 AND metadata->>'role'='developer'
+		  AND metadata->>'cause'=$2 AND metadata->>'reason' LIKE 'last_grant_removed%'`, id, cause); n != "1" {
+		t.Errorf("%s: %s audited revocations with cause %s, want 1", sub, n, cause)
+	}
+}
+
+// Two removals of an account's last two grants, sent together, never leave
+// it platform-wide: the removal and the revocation it may bring run in one
+// transaction that locks the account. Checked apart, both saw the other
+// grant, and the account was left with none and its developer grant.
 func TestConcurrentGrantRemovalsKeepTheLastGrant(t *testing.T) {
 	f := setupDevRouteFixture(t)
 	ctx := context.Background()
@@ -302,9 +338,15 @@ func TestConcurrentGrantRemovalsKeepTheLastGrant(t *testing.T) {
 		}
 	}
 	wg.Wait()
+	// Both removals go ahead (decided 2026-09-30); whichever runs second
+	// sees the first's, and takes the developer grant with the last one.
+	if n := f.one(t, `SELECT count(*)::text FROM unnest($1::uuid[]) AS acc(id) WHERE `+platformWideBuilderSQL("acc.id"), ids); n != "0" {
+		t.Errorf("%s of %d accounts were left platform-wide by two concurrent removals", n, len(ids))
+	}
 	if n := f.one(t, `SELECT count(*)::text FROM unnest($1::uuid[]) AS acc(id)
-		WHERE NOT EXISTS (SELECT 1 FROM identity.user_app_access ua WHERE ua.user_id = acc.id)`, ids); n != "0" {
-		t.Errorf("%s of %d accounts were left with no grant, so platform-wide, by two concurrent removals", n, len(ids))
+		WHERE EXISTS (SELECT 1 FROM identity.user_app_access ua WHERE ua.user_id = acc.id)
+		   OR EXISTS (SELECT 1 FROM identity.role_assignment ra WHERE ra.user_id = acc.id)`, ids); n != "0" {
+		t.Errorf("%s of %d accounts kept a grant or a role after both removals", n, len(ids))
 	}
 }
 
@@ -329,31 +371,39 @@ func TestTenantAdminCannotReachBeyondItsTenant(t *testing.T) {
 	f.expect(t, ta, "POST", "/api/admin/users/"+xt+"/roles", "", map[string]string{"role": "developer", "workspace_id": f.ws1a}, http.StatusOK)
 	f.renameMetric(t, "gb-xt", f.metricD, http.StatusForbidden, http.StatusNotFound)
 
-	// Creating a user over an existing address used to adopt the account.
+	// Creating a user over an existing address used to adopt the account,
+	// and was then refused (409). Now it adds the role to the account inside
+	// a workspace of the caller's tenant, and changes nothing else — with the
+	// answer a new invitation gets; a platform admin's or platform-wide
+	// builder's account gets nothing (decided 2026-09-30).
 	pw := f.gbUser(t, "gb-pw", "", [2]string{"developer", ""}, [2]string{"business_user", f.ws1a})
 	pa := f.gbUser(t, "gb-pa", "", [2]string{"platform_admin", ""}, [2]string{"business_user", f.ws1a})
-	for _, c := range []struct{ email, role, ws string }{
-		{"gb-xt@gb.test", "developer", ""},
-		{"GB-XT@gb.test", "business_user", f.ws1a},
-		{"gb-pw@gb.test", "business_user", f.ws1a},
-		{"gb-pa@gb.test", "business_user", f.ws1a},
+	for _, c := range []struct {
+		email, role, ws string
+		want            int
+	}{
+		{"gb-xt@gb.test", "developer", "", http.StatusOK}, // added only inside a workspace: nothing granted
+		{"GB-XT@gb.test", "business_user", f.ws1b, http.StatusOK},
+		{"gb-pw@gb.test", "business_user", f.ws1b, http.StatusOK},
+		{"gb-pa@gb.test", "business_user", f.ws1b, http.StatusOK},
 	} {
 		body := map[string]string{"email": c.email, "first_name": "Taken", "last_name": "Over", "role": c.role}
 		if c.ws != "" {
 			body["workspace_id"] = c.ws
 		}
-		f.expect(t, ta, "POST", "/api/admin/users/", "", body, http.StatusConflict)
+		f.expect(t, ta, "POST", "/api/admin/users/", "", body, c.want)
 	}
 	for id, want := range map[string]string{
-		xt: "gb-xt|" + f.cust2 + "|business_user,developer",
-		pw: "gb-pw|-|business_user,developer",
-		pa: "gb-pa|-|business_user,platform_admin",
+		xt: "gb-xt|" + f.cust2 + "|business_user@" + f.ws1a + ",business_user@" + f.ws1b + ",developer@" + f.ws1a,
+		pw: "gb-pw|-|business_user@" + f.ws1a + ",developer@",
+		pa: "gb-pa|-|business_user@" + f.ws1a + ",platform_admin@",
 	} {
 		got := f.one(t, `SELECT u.display_name||'|'||COALESCE(u.customer_id::text,'-')||'|'||
-			(SELECT string_agg(ra.role::text, ',' ORDER BY ra.role::text) FROM identity.role_assignment ra WHERE ra.user_id = u.id)
-			FROM identity.user u WHERE u.id = $1::uuid`, id)
+			(SELECT string_agg(ra.role::text||'@'||COALESCE(ra.workspace_id::text,''), ',' ORDER BY ra.role::text, ra.workspace_id = $2::uuid)
+			 FROM identity.role_assignment ra WHERE ra.user_id = u.id)
+			FROM identity.user u WHERE u.id = $1::uuid`, id, f.ws1b)
 		if got != want {
-			t.Errorf("account %s after the refused creations: %q, want %q", id, got, want)
+			t.Errorf("account %s after the invitations: %q, want %q", id, got, want)
 		}
 	}
 	f.renameMetric(t, "gb-xt", f.metricD, http.StatusForbidden, http.StatusNotFound)
@@ -365,10 +415,13 @@ func TestTenantAdminCannotReachBeyondItsTenant(t *testing.T) {
 	if _, err := f.pool.Exec(ctx, `INSERT INTO identity.role_assignment (user_id, role, workspace_id) VALUES ($1::uuid, 'business_user', $2::uuid)`, victim, f.ws2); err != nil {
 		t.Fatal(err)
 	}
-	f.expect(t, ta, "POST", "/api/admin/users/", "", map[string]string{"email": "victim@t2.test", "first_name": "Taken", "last_name": "Over", "role": "developer"}, http.StatusConflict)
+	f.expect(t, ta, "POST", "/api/admin/users/", "", map[string]string{"email": "victim@t2.test", "first_name": "Taken", "last_name": "Over", "role": "developer"}, http.StatusOK)
+	f.expect(t, ta, "POST", "/api/admin/users/", "", map[string]string{"email": "victim@t2.test", "first_name": "Taken", "last_name": "Over",
+		"role": "developer", "workspace_id": f.ws1a}, http.StatusOK)
 	f.renameMetric(t, "admin-created-victim@t2.test", f.metricD, http.StatusForbidden, http.StatusNotFound)
-	if got := f.one(t, `SELECT display_name||'|'||(SELECT string_agg(role::text, ',') FROM identity.role_assignment WHERE user_id=$1::uuid) FROM identity.user WHERE id=$1::uuid`, victim); got != "Vic Tim|business_user" {
-		t.Errorf("tenant 2's account after the refused creation: %q", got)
+	if got := f.one(t, `SELECT display_name||'|'||customer_id::text||'|'||(SELECT string_agg(role::text||'@'||workspace_id::text, ',' ORDER BY role::text)
+		FROM identity.role_assignment WHERE user_id=$1::uuid) FROM identity.user WHERE id=$1::uuid`, victim); got != "Vic Tim|"+f.cust2+"|business_user@"+f.ws2+",developer@"+f.ws1a {
+		t.Errorf("tenant 2's account after the invitation: %q", got)
 	}
 
 	// A platform-wide builder is a platform admin's to modify, as a

@@ -774,13 +774,23 @@ func (s *AdminTenant) SetPlanState(val OptPlanState) {
 
 // Ref: #/components/schemas/AdminUser
 type AdminUser struct {
-	ID          uuid.UUID        `json:"id"`
-	Email       string           `json:"email"`
-	DisplayName string           `json:"display_name"`
-	CreatedAt   string           `json:"created_at"`
+	ID          uuid.UUID `json:"id"`
+	Email       string    `json:"email"`
+	DisplayName string    `json:"display_name"`
+	CreatedAt   string    `json:"created_at"`
+	// The account's roles. For a caller whose scope is not every tenant, only those in workspaces of the
+	// caller's tenants, and those with no workspace when the account's home_tenant is "own" or "none"
+	// (they apply there); its roles elsewhere are not shown. The caller's own account is shown whole.
 	Assignments []UserAssignment `json:"assignments"`
-	AppIds      []uuid.UUID      `json:"app_ids"`
-	ModelIds    []uuid.UUID      `json:"model_ids"`
+	// Its application grants; limited as assignments are, to applications of the caller's tenants.
+	AppIds []uuid.UUID `json:"app_ids"`
+	// Its model grants; limited as assignments are, to models of the caller's tenants.
+	ModelIds []uuid.UUID `json:"model_ids"`
+	// Where the account's own tenant (identity.user customer_id) is, seen from the caller: one of the
+	// tenants the caller administers ("own"; for a caller whose scope is every tenant, any tenant),
+	// another tenant ("other"), or no tenant ("none").
+	HomeTenant  AdminUserHomeTenant  `json:"home_tenant"`
+	Permissions AdminUserPermissions `json:"permissions"`
 }
 
 // GetID returns the value of ID.
@@ -818,6 +828,16 @@ func (s *AdminUser) GetModelIds() []uuid.UUID {
 	return s.ModelIds
 }
 
+// GetHomeTenant returns the value of HomeTenant.
+func (s *AdminUser) GetHomeTenant() AdminUserHomeTenant {
+	return s.HomeTenant
+}
+
+// GetPermissions returns the value of Permissions.
+func (s *AdminUser) GetPermissions() AdminUserPermissions {
+	return s.Permissions
+}
+
 // SetID sets the value of ID.
 func (s *AdminUser) SetID(val uuid.UUID) {
 	s.ID = val
@@ -851,6 +871,136 @@ func (s *AdminUser) SetAppIds(val []uuid.UUID) {
 // SetModelIds sets the value of ModelIds.
 func (s *AdminUser) SetModelIds(val []uuid.UUID) {
 	s.ModelIds = val
+}
+
+// SetHomeTenant sets the value of HomeTenant.
+func (s *AdminUser) SetHomeTenant(val AdminUserHomeTenant) {
+	s.HomeTenant = val
+}
+
+// SetPermissions sets the value of Permissions.
+func (s *AdminUser) SetPermissions(val AdminUserPermissions) {
+	s.Permissions = val
+}
+
+// Where the account's own tenant (identity.user customer_id) is, seen from the caller: one of the
+// tenants the caller administers ("own"; for a caller whose scope is every tenant, any tenant),
+// another tenant ("other"), or no tenant ("none").
+type AdminUserHomeTenant string
+
+const (
+	AdminUserHomeTenantOwn   AdminUserHomeTenant = "own"
+	AdminUserHomeTenantOther AdminUserHomeTenant = "other"
+	AdminUserHomeTenantNone  AdminUserHomeTenant = "none"
+)
+
+// AllValues returns all AdminUserHomeTenant values.
+func (AdminUserHomeTenant) AllValues() []AdminUserHomeTenant {
+	return []AdminUserHomeTenant{
+		AdminUserHomeTenantOwn,
+		AdminUserHomeTenantOther,
+		AdminUserHomeTenantNone,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s AdminUserHomeTenant) MarshalText() ([]byte, error) {
+	switch s {
+	case AdminUserHomeTenantOwn:
+		return []byte(s), nil
+	case AdminUserHomeTenantOther:
+		return []byte(s), nil
+	case AdminUserHomeTenantNone:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *AdminUserHomeTenant) UnmarshalText(data []byte) error {
+	switch AdminUserHomeTenant(data) {
+	case AdminUserHomeTenantOwn:
+		*s = AdminUserHomeTenantOwn
+		return nil
+	case AdminUserHomeTenantOther:
+		*s = AdminUserHomeTenantOther
+		return nil
+	case AdminUserHomeTenantNone:
+		*s = AdminUserHomeTenantNone
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// The account-level actions the caller may take on this account, computed by the same rule the
+// mutations enforce (accountPermissionsFor in internal/gateway/account_boundaries.go). Anyone but a
+// platform admin renames, deletes, disables, re-invites or changes the e-mail of an account only
+// when its home_tenant is "own" (or, for a caller whose scope is every tenant, "none"), it is not a
+// platform admin or a platform-wide builder, and the caller may revoke every role the account holds,
+// anywhere (its own account it renames and re-invites whatever it holds); an account whose home is
+// elsewhere is removed from the caller's tenant instead (remove_from_tenant), by a tenant admin who
+// may revoke every role it holds there. A platform admin has every action but deleting itself, and
+// no remove_from_tenant (its scope names no one tenant). The gateway has no disable endpoint;
+// "disable" states the rule for the account's own tenant (SCIM).
+// Ref: #/components/schemas/AdminUserPermissions
+type AdminUserPermissions struct {
+	Rename           bool `json:"rename"`
+	Delete           bool `json:"delete"`
+	Disable          bool `json:"disable"`
+	Reinvite         bool `json:"reinvite"`
+	RemoveFromTenant bool `json:"remove_from_tenant"`
+}
+
+// GetRename returns the value of Rename.
+func (s *AdminUserPermissions) GetRename() bool {
+	return s.Rename
+}
+
+// GetDelete returns the value of Delete.
+func (s *AdminUserPermissions) GetDelete() bool {
+	return s.Delete
+}
+
+// GetDisable returns the value of Disable.
+func (s *AdminUserPermissions) GetDisable() bool {
+	return s.Disable
+}
+
+// GetReinvite returns the value of Reinvite.
+func (s *AdminUserPermissions) GetReinvite() bool {
+	return s.Reinvite
+}
+
+// GetRemoveFromTenant returns the value of RemoveFromTenant.
+func (s *AdminUserPermissions) GetRemoveFromTenant() bool {
+	return s.RemoveFromTenant
+}
+
+// SetRename sets the value of Rename.
+func (s *AdminUserPermissions) SetRename(val bool) {
+	s.Rename = val
+}
+
+// SetDelete sets the value of Delete.
+func (s *AdminUserPermissions) SetDelete(val bool) {
+	s.Delete = val
+}
+
+// SetDisable sets the value of Disable.
+func (s *AdminUserPermissions) SetDisable(val bool) {
+	s.Disable = val
+}
+
+// SetReinvite sets the value of Reinvite.
+func (s *AdminUserPermissions) SetReinvite(val bool) {
+	s.Reinvite = val
+}
+
+// SetRemoveFromTenant sets the value of RemoveFromTenant.
+func (s *AdminUserPermissions) SetRemoveFromTenant(val bool) {
+	s.RemoveFromTenant = val
 }
 
 // Ref: #/components/schemas/AdminWorkspace
@@ -4317,7 +4467,12 @@ func (*CreateAdminUserOK) createAdminUserRes() {}
 type CreateAdminUserReq struct {
 	Email       string    `json:"email"`
 	DisplayName string    `json:"display_name"`
+	FirstName   OptString `json:"first_name"`
+	LastName    OptString `json:"last_name"`
 	Role        OptString `json:"role"`
+	// The workspace the role is held in. An address that already has an account is added only inside a
+	// workspace (see above).
+	WorkspaceID OptUUID `json:"workspace_id"`
 }
 
 // GetEmail returns the value of Email.
@@ -4330,9 +4485,24 @@ func (s *CreateAdminUserReq) GetDisplayName() string {
 	return s.DisplayName
 }
 
+// GetFirstName returns the value of FirstName.
+func (s *CreateAdminUserReq) GetFirstName() OptString {
+	return s.FirstName
+}
+
+// GetLastName returns the value of LastName.
+func (s *CreateAdminUserReq) GetLastName() OptString {
+	return s.LastName
+}
+
 // GetRole returns the value of Role.
 func (s *CreateAdminUserReq) GetRole() OptString {
 	return s.Role
+}
+
+// GetWorkspaceID returns the value of WorkspaceID.
+func (s *CreateAdminUserReq) GetWorkspaceID() OptUUID {
+	return s.WorkspaceID
 }
 
 // SetEmail sets the value of Email.
@@ -4345,9 +4515,24 @@ func (s *CreateAdminUserReq) SetDisplayName(val string) {
 	s.DisplayName = val
 }
 
+// SetFirstName sets the value of FirstName.
+func (s *CreateAdminUserReq) SetFirstName(val OptString) {
+	s.FirstName = val
+}
+
+// SetLastName sets the value of LastName.
+func (s *CreateAdminUserReq) SetLastName(val OptString) {
+	s.LastName = val
+}
+
 // SetRole sets the value of Role.
 func (s *CreateAdminUserReq) SetRole(val OptString) {
 	s.Role = val
+}
+
+// SetWorkspaceID sets the value of WorkspaceID.
+func (s *CreateAdminUserReq) SetWorkspaceID(val OptUUID) {
+	s.WorkspaceID = val
 }
 
 type CreateAdminUserServiceUnavailable Error
@@ -6540,6 +6725,9 @@ func (s *DebugFactsOKItem) SetEnteredAt(val OptString) {
 
 type DeleteAdminApplicationOK struct {
 	Status OptString `json:"status"`
+	// Unscoped developer grants also taken away, so as not to leave an account with no tenant
+	// platform-wide (absent when none).
+	Revoked []RevokedGrant `json:"revoked"`
 }
 
 // GetStatus returns the value of Status.
@@ -6547,13 +6735,26 @@ func (s *DeleteAdminApplicationOK) GetStatus() OptString {
 	return s.Status
 }
 
+// GetRevoked returns the value of Revoked.
+func (s *DeleteAdminApplicationOK) GetRevoked() []RevokedGrant {
+	return s.Revoked
+}
+
 // SetStatus sets the value of Status.
 func (s *DeleteAdminApplicationOK) SetStatus(val OptString) {
 	s.Status = val
 }
 
+// SetRevoked sets the value of Revoked.
+func (s *DeleteAdminApplicationOK) SetRevoked(val []RevokedGrant) {
+	s.Revoked = val
+}
+
 type DeleteAdminModelOK struct {
 	Status OptString `json:"status"`
+	// Unscoped developer grants also taken away, so as not to leave an account with no tenant
+	// platform-wide (absent when none).
+	Revoked []RevokedGrant `json:"revoked"`
 }
 
 // GetStatus returns the value of Status.
@@ -6561,9 +6762,19 @@ func (s *DeleteAdminModelOK) GetStatus() OptString {
 	return s.Status
 }
 
+// GetRevoked returns the value of Revoked.
+func (s *DeleteAdminModelOK) GetRevoked() []RevokedGrant {
+	return s.Revoked
+}
+
 // SetStatus sets the value of Status.
 func (s *DeleteAdminModelOK) SetStatus(val OptString) {
 	s.Status = val
+}
+
+// SetRevoked sets the value of Revoked.
+func (s *DeleteAdminModelOK) SetRevoked(val []RevokedGrant) {
+	s.Revoked = val
 }
 
 type DeleteAdminRevisionOK struct {
@@ -15979,6 +16190,52 @@ func (o OptProtoTimestamp) Or(d ProtoTimestamp) ProtoTimestamp {
 	return d
 }
 
+// NewOptRemoveAdminUserFromTenantOKStatus returns new OptRemoveAdminUserFromTenantOKStatus with value set to v.
+func NewOptRemoveAdminUserFromTenantOKStatus(v RemoveAdminUserFromTenantOKStatus) OptRemoveAdminUserFromTenantOKStatus {
+	return OptRemoveAdminUserFromTenantOKStatus{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptRemoveAdminUserFromTenantOKStatus is optional RemoveAdminUserFromTenantOKStatus.
+type OptRemoveAdminUserFromTenantOKStatus struct {
+	Value RemoveAdminUserFromTenantOKStatus
+	Set   bool
+}
+
+// IsSet returns true if OptRemoveAdminUserFromTenantOKStatus was set.
+func (o OptRemoveAdminUserFromTenantOKStatus) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptRemoveAdminUserFromTenantOKStatus) Reset() {
+	var v RemoveAdminUserFromTenantOKStatus
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptRemoveAdminUserFromTenantOKStatus) SetTo(v RemoveAdminUserFromTenantOKStatus) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptRemoveAdminUserFromTenantOKStatus) Get() (v RemoveAdminUserFromTenantOKStatus, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptRemoveAdminUserFromTenantOKStatus) Or(d RemoveAdminUserFromTenantOKStatus) RemoveAdminUserFromTenantOKStatus {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptScatterChartDataContext returns new OptScatterChartDataContext with value set to v.
 func NewOptScatterChartDataContext(v ScatterChartDataContext) OptScatterChartDataContext {
 	return OptScatterChartDataContext{
@@ -18051,6 +18308,79 @@ func (s *RejectAiProposalOK) SetMessages(val []AiChatMessage) {
 
 func (*RejectAiProposalOK) rejectAiProposalRes() {}
 
+type RemoveAdminUserFromTenantBadRequest Error
+
+func (*RemoveAdminUserFromTenantBadRequest) removeAdminUserFromTenantRes() {}
+
+type RemoveAdminUserFromTenantForbidden Error
+
+func (*RemoveAdminUserFromTenantForbidden) removeAdminUserFromTenantRes() {}
+
+type RemoveAdminUserFromTenantNotFound Error
+
+func (*RemoveAdminUserFromTenantNotFound) removeAdminUserFromTenantRes() {}
+
+type RemoveAdminUserFromTenantOK struct {
+	Status  OptRemoveAdminUserFromTenantOKStatus `json:"status"`
+	Revoked []RevokedGrant                       `json:"revoked"`
+}
+
+// GetStatus returns the value of Status.
+func (s *RemoveAdminUserFromTenantOK) GetStatus() OptRemoveAdminUserFromTenantOKStatus {
+	return s.Status
+}
+
+// GetRevoked returns the value of Revoked.
+func (s *RemoveAdminUserFromTenantOK) GetRevoked() []RevokedGrant {
+	return s.Revoked
+}
+
+// SetStatus sets the value of Status.
+func (s *RemoveAdminUserFromTenantOK) SetStatus(val OptRemoveAdminUserFromTenantOKStatus) {
+	s.Status = val
+}
+
+// SetRevoked sets the value of Revoked.
+func (s *RemoveAdminUserFromTenantOK) SetRevoked(val []RevokedGrant) {
+	s.Revoked = val
+}
+
+func (*RemoveAdminUserFromTenantOK) removeAdminUserFromTenantRes() {}
+
+type RemoveAdminUserFromTenantOKStatus string
+
+const (
+	RemoveAdminUserFromTenantOKStatusRemoved RemoveAdminUserFromTenantOKStatus = "removed"
+)
+
+// AllValues returns all RemoveAdminUserFromTenantOKStatus values.
+func (RemoveAdminUserFromTenantOKStatus) AllValues() []RemoveAdminUserFromTenantOKStatus {
+	return []RemoveAdminUserFromTenantOKStatus{
+		RemoveAdminUserFromTenantOKStatusRemoved,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s RemoveAdminUserFromTenantOKStatus) MarshalText() ([]byte, error) {
+	switch s {
+	case RemoveAdminUserFromTenantOKStatusRemoved:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *RemoveAdminUserFromTenantOKStatus) UnmarshalText(data []byte) error {
+	switch RemoveAdminUserFromTenantOKStatus(data) {
+	case RemoveAdminUserFromTenantOKStatusRemoved:
+		*s = RemoveAdminUserFromTenantOKStatusRemoved
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
 type RemoveAdminUserRoleOK struct {
 	Status OptString `json:"status"`
 }
@@ -18275,6 +18605,9 @@ func (*ResendAdminUserInvitationServiceUnavailable) resendAdminUserInvitationRes
 
 type RevokeAdminUserAppAccessOK struct {
 	Status OptString `json:"status"`
+	// Unscoped developer grants also taken away, so as not to leave an account with no tenant
+	// platform-wide (absent when none).
+	Revoked []RevokedGrant `json:"revoked"`
 }
 
 // GetStatus returns the value of Status.
@@ -18282,15 +18615,28 @@ func (s *RevokeAdminUserAppAccessOK) GetStatus() OptString {
 	return s.Status
 }
 
+// GetRevoked returns the value of Revoked.
+func (s *RevokeAdminUserAppAccessOK) GetRevoked() []RevokedGrant {
+	return s.Revoked
+}
+
 // SetStatus sets the value of Status.
 func (s *RevokeAdminUserAppAccessOK) SetStatus(val OptString) {
 	s.Status = val
+}
+
+// SetRevoked sets the value of Revoked.
+func (s *RevokeAdminUserAppAccessOK) SetRevoked(val []RevokedGrant) {
+	s.Revoked = val
 }
 
 func (*RevokeAdminUserAppAccessOK) revokeAdminUserAppAccessRes() {}
 
 type RevokeAdminUserModelAccessOK struct {
 	Status OptString `json:"status"`
+	// Unscoped developer grants also taken away, so as not to leave an account with no tenant
+	// platform-wide (absent when none).
+	Revoked []RevokedGrant `json:"revoked"`
 }
 
 // GetStatus returns the value of Status.
@@ -18298,9 +18644,19 @@ func (s *RevokeAdminUserModelAccessOK) GetStatus() OptString {
 	return s.Status
 }
 
+// GetRevoked returns the value of Revoked.
+func (s *RevokeAdminUserModelAccessOK) GetRevoked() []RevokedGrant {
+	return s.Revoked
+}
+
 // SetStatus sets the value of Status.
 func (s *RevokeAdminUserModelAccessOK) SetStatus(val OptString) {
 	s.Status = val
+}
+
+// SetRevoked sets the value of Revoked.
+func (s *RevokeAdminUserModelAccessOK) SetRevoked(val []RevokedGrant) {
+	s.Revoked = val
 }
 
 func (*RevokeAdminUserModelAccessOK) revokeAdminUserModelAccessRes() {}
@@ -18319,6 +18675,46 @@ func (*RevokeScimTokenNotFound) revokeScimTokenRes() {}
 type RevokeScimTokenOK struct{}
 
 func (*RevokeScimTokenOK) revokeScimTokenRes() {}
+
+// An unscoped developer grant a removal also took away: the removal took the last application or
+// model grant narrowing an account with no tenant, which would otherwise have been a builder of
+// every tenant.
+// Ref: #/components/schemas/RevokedGrant
+type RevokedGrant struct {
+	UserID uuid.UUID `json:"user_id"`
+	Email  string    `json:"email"`
+	Role   string    `json:"role"`
+}
+
+// GetUserID returns the value of UserID.
+func (s *RevokedGrant) GetUserID() uuid.UUID {
+	return s.UserID
+}
+
+// GetEmail returns the value of Email.
+func (s *RevokedGrant) GetEmail() string {
+	return s.Email
+}
+
+// GetRole returns the value of Role.
+func (s *RevokedGrant) GetRole() string {
+	return s.Role
+}
+
+// SetUserID sets the value of UserID.
+func (s *RevokedGrant) SetUserID(val uuid.UUID) {
+	s.UserID = val
+}
+
+// SetEmail sets the value of Email.
+func (s *RevokedGrant) SetEmail(val string) {
+	s.Email = val
+}
+
+// SetRole sets the value of Role.
+func (s *RevokedGrant) SetRole(val string) {
+	s.Role = val
+}
 
 type RunIntegrationBadRequest Error
 

@@ -38,6 +38,8 @@ type Invoker interface {
 	//
 	// The granting actor may only assign roles strictly below their own tier (see assignableRoles in
 	// internal/gateway/handler.go) — a tenant_admin can never mint another tenant_admin, for example.
+	// Anyone but a platform admin grants a role without a workspace only to an account whose home is one
+	// of the caller's tenants.
 	//
 	// POST /api/admin/users/{id}/roles
 	AddAdminUserRole(ctx context.Context, request *AddUserRoleRequest, params AddAdminUserRoleParams) (AddAdminUserRoleRes, error)
@@ -144,6 +146,19 @@ type Invoker interface {
 	//
 	// Available to platform_admin, tenant_admin, and developer roles. Non-platform admins create users
 	// in their tenant scope and cannot assign platform-level roles during creation.
+	// An address (compared case-insensitively) or identity-provider subject that already has an account
+	// is not created again. For anyone but a platform admin, the requested role is added to that account
+	// inside workspace_id (a workspace of the caller's tenant, and a role the caller may grant there,
+	// checked as for a new address) and nothing else about the account changes: not its name, e-mail,
+	// tenant, active flag or identity-provider account, and no invitation is sent. The person is
+	// notified that they were given access (notification centre, and e-mail when the workspace's tenant
+	// sends notifications by e-mail; at most once a day per workspace and three times a day per tenant).
+	// The answer is the same as for a new invitation. Nothing is granted — with the same answer, under
+	// an id that names no account, and the refusal audited for the platform only — when no role or no
+	// workspace is given, to a platform admin's account or a platform-wide builder's, and to an account
+	// with no tenant holding tenant_admin without a workspace, which a role in a new tenant's workspace
+	// would make that tenant's administrator. A platform admin creating over an existing address adopts
+	// it as before.
 	// Creates a real identity-provider account and emails a set-your-password invitation; no password is
 	// ever set server-side. The whole operation is undone if any step fails, so a user that exists can
 	// always sign in. When no identity provider is configured (the dev stack) the account is local-only
@@ -308,13 +323,19 @@ type Invoker interface {
 	DebugFacts(ctx context.Context, params DebugFactsParams) (DebugFactsRes, error)
 	// DeleteAdminApplication invokes deleteAdminApplication operation.
 	//
-	// Delete an application.
+	// When this takes the last application or model grant narrowing a developer with no tenant, and the
+	// caller is not a platform admin, that account's unscoped developer grant is revoked in the same
+	// transaction (audited as user.role_revoked, listed in `revoked`): it ends with no builder reach,
+	// never platform-wide. A platform admin's removal leaves it as it is.
 	//
 	// DELETE /api/admin/applications/{id}
 	DeleteAdminApplication(ctx context.Context, params DeleteAdminApplicationParams) (*DeleteAdminApplicationOK, error)
 	// DeleteAdminModel invokes deleteAdminModel operation.
 	//
-	// Delete a model.
+	// When this takes the last application or model grant narrowing a developer with no tenant, and the
+	// caller is not a platform admin, that account's unscoped developer grant is revoked in the same
+	// transaction (audited as user.role_revoked, listed in `revoked`): it ends with no builder reach,
+	// never platform-wide. A platform admin's removal leaves it as it is.
 	//
 	// DELETE /api/admin/models/{id}
 	DeleteAdminModel(ctx context.Context, params DeleteAdminModelParams) (*DeleteAdminModelOK, error)
@@ -326,9 +347,12 @@ type Invoker interface {
 	DeleteAdminRevision(ctx context.Context, params DeleteAdminRevisionParams) (*DeleteAdminRevisionOK, error)
 	// DeleteAdminUser invokes deleteAdminUser operation.
 	//
-	// Removes the application row and the identity-provider account. Deleting your own account is
-	// refused: it is not undoable from inside the product, and for the sole platform admin it would
-	// leave nobody able to administer users at all. Another administrator can do it.
+	// Refused (403) to anyone but a platform admin unless the account's home is one of the caller's
+	// tenants (AdminUser.permissions.delete); an account whose home is elsewhere is removed from the
+	// tenant instead (DELETE /api/admin/users/{id}/tenant-access). Removes the application row and the
+	// identity-provider account. Deleting your own account is refused: it is not undoable from inside
+	// the product, and for the sole platform admin it would leave nobody able to administer users at all.
+	//  Another administrator can do it.
 	//
 	// DELETE /api/admin/users/{id}
 	DeleteAdminUser(ctx context.Context, params DeleteAdminUserParams) (DeleteAdminUserRes, error)
@@ -1121,6 +1145,21 @@ type Invoker interface {
 	//
 	// POST /api/ai/sessions/{id}/proposals/{pid}/reject
 	RejectAiProposal(ctx context.Context, params RejectAiProposalParams) (RejectAiProposalRes, error)
+	// RemoveAdminUserFromTenant invokes removeAdminUserFromTenant operation.
+	//
+	// For an account of another tenant, or of none, that holds roles in the caller's workspaces
+	// (AdminUser.permissions.remove_from_tenant): deletes its roles in the workspaces of the caller's
+	// tenants, its memberships of their business roles, its grants to their applications and models, and
+	// its access rules on those models — nothing else; the account itself, its name, e-mail, tenant
+	// and identity-provider account stay. Requires tenant_admin (not a platform admin, whose scope names
+	// no one tenant). Refused for the caller itself, for an account of the caller's own tenant (delete
+	// it instead), for a platform admin or platform-wide builder, and while the account holds a role
+	// there the caller may not revoke. When this takes the last application or model grant narrowing a
+	// developer with no tenant, its unscoped developer grant is revoked in the same transaction (listed
+	// in `revoked`).
+	//
+	// DELETE /api/admin/users/{id}/tenant-access
+	RemoveAdminUserFromTenant(ctx context.Context, params RemoveAdminUserFromTenantParams) (RemoveAdminUserFromTenantRes, error)
 	// RemoveAdminUserRole invokes removeAdminUserRole operation.
 	//
 	// Mirrors the grant tier check. Additionally refused when the actor is revoking their own last grant
@@ -1177,10 +1216,11 @@ type Invoker interface {
 	ReorderDimensionMembers(ctx context.Context, request *ReorderDimensionMembersReq, params ReorderDimensionMembersParams) (ReorderDimensionMembersRes, error)
 	// ResendAdminUserInvitation invokes resendAdminUserInvitation operation.
 	//
-	// Invitations expire and mail gets lost; without this the only recovery is deleting and re-creating
-	// the user, which discards their roles and access grants. Returns 409 for users created before
-	// identity-provider provisioning existed — they carry a synthetic subject and have no account to
-	// invite.
+	// Refused (403) to anyone but a platform admin unless the account's home is one of the caller's
+	// tenants (AdminUser.permissions.reinvite). Invitations expire and mail gets lost; without this the
+	// only recovery is deleting and re-creating the user, which discards their roles and access grants.
+	// Returns 409 for users created before identity-provider provisioning existed — they carry a
+	// synthetic subject and have no account to invite.
 	//
 	// POST /api/admin/users/{id}/invite
 	ResendAdminUserInvitation(ctx context.Context, params ResendAdminUserInvitationParams) (ResendAdminUserInvitationRes, error)
@@ -1192,13 +1232,19 @@ type Invoker interface {
 	RestoreWorkflow(ctx context.Context, params RestoreWorkflowParams) (RestoreWorkflowRes, error)
 	// RevokeAdminUserAppAccess invokes revokeAdminUserAppAccess operation.
 	//
-	// Requires platform_admin or tenant_admin. See grantAdminUserAppAccess.
+	// Requires platform_admin or tenant_admin. See grantAdminUserAppAccess. When this is the last
+	// application or model grant narrowing a developer with no tenant, and the caller is not a platform
+	// admin, that account's unscoped developer grant is revoked in the same transaction (audited as user.
+	// role_revoked, listed in `revoked`): it ends with no builder reach, never platform-wide.
 	//
 	// DELETE /api/admin/users/{id}/access/apps/{appId}
 	RevokeAdminUserAppAccess(ctx context.Context, params RevokeAdminUserAppAccessParams) (RevokeAdminUserAppAccessRes, error)
 	// RevokeAdminUserModelAccess invokes revokeAdminUserModelAccess operation.
 	//
-	// Requires platform_admin or tenant_admin. See grantAdminUserModelAccess.
+	// Requires platform_admin or tenant_admin. See grantAdminUserModelAccess. When this is the last
+	// application or model grant narrowing a developer with no tenant, and the caller is not a platform
+	// admin, that account's unscoped developer grant is revoked in the same transaction (audited as user.
+	// role_revoked, listed in `revoked`): it ends with no builder reach, never platform-wide.
 	//
 	// DELETE /api/admin/users/{id}/access/models/{modelId}
 	RevokeAdminUserModelAccess(ctx context.Context, params RevokeAdminUserModelAccessParams) (RevokeAdminUserModelAccessRes, error)
@@ -1478,11 +1524,12 @@ type Invoker interface {
 	UpdateAdminRevision(ctx context.Context, request *UpdateAdminRevisionRequest, params UpdateAdminRevisionParams) (*UpdateAdminRevisionOK, error)
 	// UpdateAdminUser invokes updateAdminUser operation.
 	//
-	// Only display_name is mutable. The email address is the sign-in identity in the identity provider,
-	// and this endpoint writes only the application's copy — changing it here would leave the account
-	// signing in under the old address while the console showed the new one. Sending an email that
-	// differs from the stored one is rejected; to move someone to a new address, delete them and invite
-	// them again.
+	// Refused (403) to anyone but a platform admin unless the account's home is one of the caller's
+	// tenants (AdminUser.permissions.rename). Only display_name is mutable. The email address is the
+	// sign-in identity in the identity provider, and this endpoint writes only the application's copy
+	// — changing it here would leave the account signing in under the old address while the console
+	// showed the new one. Sending an email that differs from the stored one is rejected; to move someone
+	// to a new address, delete them and invite them again.
 	//
 	// PATCH /api/admin/users/{id}
 	UpdateAdminUser(ctx context.Context, request *UpdateAdminUserRequest, params UpdateAdminUserParams) (UpdateAdminUserRes, error)
@@ -1857,6 +1904,8 @@ func (c *Client) sendActivateRevision(ctx context.Context, params ActivateRevisi
 //
 // The granting actor may only assign roles strictly below their own tier (see assignableRoles in
 // internal/gateway/handler.go) — a tenant_admin can never mint another tenant_admin, for example.
+// Anyone but a platform admin grants a role without a workspace only to an account whose home is one
+// of the caller's tenants.
 //
 // POST /api/admin/users/{id}/roles
 func (c *Client) AddAdminUserRole(ctx context.Context, request *AddUserRoleRequest, params AddAdminUserRoleParams) (AddAdminUserRoleRes, error) {
@@ -3927,6 +3976,19 @@ func (c *Client) sendCreateAdminRevision(ctx context.Context, request *CreateAdm
 //
 // Available to platform_admin, tenant_admin, and developer roles. Non-platform admins create users
 // in their tenant scope and cannot assign platform-level roles during creation.
+// An address (compared case-insensitively) or identity-provider subject that already has an account
+// is not created again. For anyone but a platform admin, the requested role is added to that account
+// inside workspace_id (a workspace of the caller's tenant, and a role the caller may grant there,
+// checked as for a new address) and nothing else about the account changes: not its name, e-mail,
+// tenant, active flag or identity-provider account, and no invitation is sent. The person is
+// notified that they were given access (notification centre, and e-mail when the workspace's tenant
+// sends notifications by e-mail; at most once a day per workspace and three times a day per tenant).
+// The answer is the same as for a new invitation. Nothing is granted — with the same answer, under
+// an id that names no account, and the refusal audited for the platform only — when no role or no
+// workspace is given, to a platform admin's account or a platform-wide builder's, and to an account
+// with no tenant holding tenant_admin without a workspace, which a role in a new tenant's workspace
+// would make that tenant's administrator. A platform admin creating over an existing address adopts
+// it as before.
 // Creates a real identity-provider account and emails a set-your-password invitation; no password is
 // ever set server-side. The whole operation is undone if any step fails, so a user that exists can
 // always sign in. When no identity provider is configured (the dev stack) the account is local-only
@@ -6978,7 +7040,10 @@ func (c *Client) sendDebugFacts(ctx context.Context, params DebugFactsParams) (r
 
 // DeleteAdminApplication invokes deleteAdminApplication operation.
 //
-// Delete an application.
+// When this takes the last application or model grant narrowing a developer with no tenant, and the
+// caller is not a platform admin, that account's unscoped developer grant is revoked in the same
+// transaction (audited as user.role_revoked, listed in `revoked`): it ends with no builder reach,
+// never platform-wide. A platform admin's removal leaves it as it is.
 //
 // DELETE /api/admin/applications/{id}
 func (c *Client) DeleteAdminApplication(ctx context.Context, params DeleteAdminApplicationParams) (*DeleteAdminApplicationOK, error) {
@@ -7103,7 +7168,10 @@ func (c *Client) sendDeleteAdminApplication(ctx context.Context, params DeleteAd
 
 // DeleteAdminModel invokes deleteAdminModel operation.
 //
-// Delete a model.
+// When this takes the last application or model grant narrowing a developer with no tenant, and the
+// caller is not a platform admin, that account's unscoped developer grant is revoked in the same
+// transaction (audited as user.role_revoked, listed in `revoked`): it ends with no builder reach,
+// never platform-wide. A platform admin's removal leaves it as it is.
 //
 // DELETE /api/admin/models/{id}
 func (c *Client) DeleteAdminModel(ctx context.Context, params DeleteAdminModelParams) (*DeleteAdminModelOK, error) {
@@ -7353,9 +7421,13 @@ func (c *Client) sendDeleteAdminRevision(ctx context.Context, params DeleteAdmin
 
 // DeleteAdminUser invokes deleteAdminUser operation.
 //
-// Removes the application row and the identity-provider account. Deleting your own account is
-// refused: it is not undoable from inside the product, and for the sole platform admin it would
-// leave nobody able to administer users at all. Another administrator can do it.
+// Refused (403) to anyone but a platform admin unless the account's home is one of the caller's
+// tenants (AdminUser.permissions.delete); an account whose home is elsewhere is removed from the
+// tenant instead (DELETE /api/admin/users/{id}/tenant-access). Removes the application row and the
+// identity-provider account. Deleting your own account is refused: it is not undoable from inside
+// the product, and for the sole platform admin it would leave nobody able to administer users at all.
+//
+//	Another administrator can do it.
 //
 // DELETE /api/admin/users/{id}
 func (c *Client) DeleteAdminUser(ctx context.Context, params DeleteAdminUserParams) (DeleteAdminUserRes, error) {
@@ -22490,6 +22562,141 @@ func (c *Client) sendRejectAiProposal(ctx context.Context, params RejectAiPropos
 	return result, nil
 }
 
+// RemoveAdminUserFromTenant invokes removeAdminUserFromTenant operation.
+//
+// For an account of another tenant, or of none, that holds roles in the caller's workspaces
+// (AdminUser.permissions.remove_from_tenant): deletes its roles in the workspaces of the caller's
+// tenants, its memberships of their business roles, its grants to their applications and models, and
+// its access rules on those models — nothing else; the account itself, its name, e-mail, tenant
+// and identity-provider account stay. Requires tenant_admin (not a platform admin, whose scope names
+// no one tenant). Refused for the caller itself, for an account of the caller's own tenant (delete
+// it instead), for a platform admin or platform-wide builder, and while the account holds a role
+// there the caller may not revoke. When this takes the last application or model grant narrowing a
+// developer with no tenant, its unscoped developer grant is revoked in the same transaction (listed
+// in `revoked`).
+//
+// DELETE /api/admin/users/{id}/tenant-access
+func (c *Client) RemoveAdminUserFromTenant(ctx context.Context, params RemoveAdminUserFromTenantParams) (RemoveAdminUserFromTenantRes, error) {
+	res, err := c.sendRemoveAdminUserFromTenant(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendRemoveAdminUserFromTenant(ctx context.Context, params RemoveAdminUserFromTenantParams) (res RemoveAdminUserFromTenantRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("removeAdminUserFromTenant"),
+		semconv.HTTPRequestMethodKey.String("DELETE"),
+		semconv.URLTemplateKey.String("/api/admin/users/{id}/tenant-access"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, RemoveAdminUserFromTenantOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/admin/users/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/tenant-access"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "DELETE", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, RemoveAdminUserFromTenantOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeRemoveAdminUserFromTenantResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // RemoveAdminUserRole invokes removeAdminUserRole operation.
 //
 // Mirrors the grant tier check. Additionally refused when the actor is revoking their own last grant
@@ -23566,10 +23773,11 @@ func (c *Client) sendReorderDimensionMembers(ctx context.Context, request *Reord
 
 // ResendAdminUserInvitation invokes resendAdminUserInvitation operation.
 //
-// Invitations expire and mail gets lost; without this the only recovery is deleting and re-creating
-// the user, which discards their roles and access grants. Returns 409 for users created before
-// identity-provider provisioning existed — they carry a synthetic subject and have no account to
-// invite.
+// Refused (403) to anyone but a platform admin unless the account's home is one of the caller's
+// tenants (AdminUser.permissions.reinvite). Invitations expire and mail gets lost; without this the
+// only recovery is deleting and re-creating the user, which discards their roles and access grants.
+// Returns 409 for users created before identity-provider provisioning existed — they carry a
+// synthetic subject and have no account to invite.
 //
 // POST /api/admin/users/{id}/invite
 func (c *Client) ResendAdminUserInvitation(ctx context.Context, params ResendAdminUserInvitationParams) (ResendAdminUserInvitationRes, error) {
@@ -23821,7 +24029,10 @@ func (c *Client) sendRestoreWorkflow(ctx context.Context, params RestoreWorkflow
 
 // RevokeAdminUserAppAccess invokes revokeAdminUserAppAccess operation.
 //
-// Requires platform_admin or tenant_admin. See grantAdminUserAppAccess.
+// Requires platform_admin or tenant_admin. See grantAdminUserAppAccess. When this is the last
+// application or model grant narrowing a developer with no tenant, and the caller is not a platform
+// admin, that account's unscoped developer grant is revoked in the same transaction (audited as user.
+// role_revoked, listed in `revoked`): it ends with no builder reach, never platform-wide.
 //
 // DELETE /api/admin/users/{id}/access/apps/{appId}
 func (c *Client) RevokeAdminUserAppAccess(ctx context.Context, params RevokeAdminUserAppAccessParams) (RevokeAdminUserAppAccessRes, error) {
@@ -23965,7 +24176,10 @@ func (c *Client) sendRevokeAdminUserAppAccess(ctx context.Context, params Revoke
 
 // RevokeAdminUserModelAccess invokes revokeAdminUserModelAccess operation.
 //
-// Requires platform_admin or tenant_admin. See grantAdminUserModelAccess.
+// Requires platform_admin or tenant_admin. See grantAdminUserModelAccess. When this is the last
+// application or model grant narrowing a developer with no tenant, and the caller is not a platform
+// admin, that account's unscoped developer grant is revoked in the same transaction (audited as user.
+// role_revoked, listed in `revoked`): it ends with no builder reach, never platform-wide.
 //
 // DELETE /api/admin/users/{id}/access/models/{modelId}
 func (c *Client) RevokeAdminUserModelAccess(ctx context.Context, params RevokeAdminUserModelAccessParams) (RevokeAdminUserModelAccessRes, error) {
@@ -29062,11 +29276,12 @@ func (c *Client) sendUpdateAdminRevision(ctx context.Context, request *UpdateAdm
 
 // UpdateAdminUser invokes updateAdminUser operation.
 //
-// Only display_name is mutable. The email address is the sign-in identity in the identity provider,
-// and this endpoint writes only the application's copy — changing it here would leave the account
-// signing in under the old address while the console showed the new one. Sending an email that
-// differs from the stored one is rejected; to move someone to a new address, delete them and invite
-// them again.
+// Refused (403) to anyone but a platform admin unless the account's home is one of the caller's
+// tenants (AdminUser.permissions.rename). Only display_name is mutable. The email address is the
+// sign-in identity in the identity provider, and this endpoint writes only the application's copy
+// — changing it here would leave the account signing in under the old address while the console
+// showed the new one. Sending an email that differs from the stored one is rejected; to move someone
+// to a new address, delete them and invite them again.
 //
 // PATCH /api/admin/users/{id}
 func (c *Client) UpdateAdminUser(ctx context.Context, request *UpdateAdminUserRequest, params UpdateAdminUserParams) (UpdateAdminUserRes, error) {

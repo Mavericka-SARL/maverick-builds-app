@@ -401,18 +401,20 @@ jobs:
     # Ports: the smoke suite (web-e2e) runs its console on 5173 on the same
     # self-hosted node at the same time, so this one takes 3000 — the other
     # redirect the realm's mavericks-web client allows — and its gateway
-    # 8090; the database and Keycloak sit on 15432/18180. Nothing else on
-    # the node uses any of them, but two of THESE would, so the job is one
-    # at a time across every run.
+    # 8090. The database and Keycloak take host ports picked per attempt
+    # (below): rootless Docker on the runner node does not always release a
+    # published port when a stack is torn down, and a fixed port left bound
+    # that way failed every later run (2026-09-29, 15432 and 18180). The web
+    # and gateway ports are plain processes, released when they exit; two of
+    # THOSE would still collide, so the job is one at a time across every run.
     concurrency:
       group: e2e-keycloak-${{ vars.RUNNER_LABEL || 'hosted' }}
       cancel-in-progress: false
     env:
       E2E_WEB_PORT: "3000"
       E2E_GATEWAY_PORT: "8090"
-      DATABASE_URL: postgres://mavericks:mavericks@localhost:15432/mavericks?sslmode=disable
-      KEYCLOAK_URL: http://localhost:18180
-      VITE_KEYCLOAK_URL: http://localhost:18180
+      # DATABASE_URL, KEYCLOAK_URL and VITE_KEYCLOAK_URL are set by the
+      # "Start Postgres and Keycloak" step, from the ports it binds.
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -443,10 +445,30 @@ jobs:
           # and wait for the ports rather than fail on the first bind.
           docker compose -f deploy/docker/docker-compose.ci-keycloak.yml down -v --remove-orphans 2>/dev/null || true
           for i in $(seq 1 45); do
-            ss -ltn 2>/dev/null | grep -qE ':(18180|15432|8090|3000) ' || break
+            ss -ltn 2>/dev/null | grep -qE ':(8090|3000) ' || break
             echo "waiting for a previous run to release the ports ($i)"; sleep 2
           done
-          docker compose -f deploy/docker/docker-compose.ci-keycloak.yml up -d --wait
+          # A port rootless Docker still holds does not show in ss, so bind
+          # fresh random ports and, if one is taken anyway, try others.
+          for attempt in 1 2 3 4; do
+            export CI_PG_PORT=$((20000 + RANDOM % 10000)) CI_KC_PORT=$((30000 + RANDOM % 10000))
+            if out=$(docker compose -f deploy/docker/docker-compose.ci-keycloak.yml up -d --wait 2>&1); then
+              echo "$out"; break
+            fi
+            echo "$out"
+            docker compose -f deploy/docker/docker-compose.ci-keycloak.yml down -v --remove-orphans 2>/dev/null || true
+            if [ "$attempt" = 4 ] || ! grep -qiE 'address already in use|port is already allocated|PortManager' <<<"$out"; then
+              exit 1
+            fi
+            echo "a port was taken; trying other ports ($attempt)"
+          done
+          {
+            echo "CI_PG_PORT=$CI_PG_PORT"
+            echo "CI_KC_PORT=$CI_KC_PORT"
+            echo "DATABASE_URL=postgres://mavericks:mavericks@localhost:$CI_PG_PORT/mavericks?sslmode=disable"
+            echo "KEYCLOAK_URL=http://localhost:$CI_KC_PORT"
+            echo "VITE_KEYCLOAK_URL=http://localhost:$CI_KC_PORT"
+          } >> "$GITHUB_ENV"
           # Keycloak's master realm requires HTTPS for callers it deems
           # external, which the host is from inside the container: relax it,
           # or the global setup's admin login answers "HTTPS required".

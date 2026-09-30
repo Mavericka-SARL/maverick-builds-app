@@ -175,6 +175,7 @@ const (
 	PublishWorkflowOperation              OperationName = "PublishWorkflow"
 	PutGoogleConnectionOperation          OperationName = "PutGoogleConnection"
 	RejectAiProposalOperation             OperationName = "RejectAiProposal"
+	RemoveAdminUserFromTenantOperation    OperationName = "RemoveAdminUserFromTenant"
 	RemoveAdminUserRoleOperation          OperationName = "RemoveAdminUserRole"
 	RemoveBARoleMemberOperation           OperationName = "RemoveBARoleMember"
 	RemoveBrandingOperation               OperationName = "RemoveBranding"
