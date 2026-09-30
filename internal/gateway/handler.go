@@ -286,10 +286,12 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	// caller also holds opens no application (builderRouteKey). dev marks
 	// its requests developerRoute as well: there only developer reach opens
 	// an application, and the caller's admin scope counts only in the
-	// tenants its developer grants reach (developerRouteKey).
+	// tenants its developer grants reach (developerRouteKey). adm and
+	// tenantAdm mark theirs adminRoute: there only the tenants the caller is
+	// tenant admin of count, never a developer tier (adminRouteKey).
 	dev := func(fn http.HandlerFunc) http.HandlerFunc { return cors(h.guard(developerRoute(fn), "developer")) }
 	adm := func(fn http.HandlerFunc) http.HandlerFunc {
-		return cors(h.guard(builderRoute(fn), "platform_admin", "tenant_admin"))
+		return cors(h.guard(adminRoute(fn), "platform_admin", "tenant_admin"))
 	}
 	ba := func(fn http.HandlerFunc) http.HandlerFunc { return cors(h.guard(fn, "business_admin")) }
 	// baOrDev: named business roles (identity.business_role) are referenced
@@ -490,7 +492,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	// 2026-09-20), never a developer — moving whole models across tenants
 	// is an owner action.
 	tenantAdm := func(fn http.HandlerFunc) http.HandlerFunc {
-		return cors(h.guard(builderRoute(fn), "tenant_admin", "platform_admin"))
+		return cors(h.guard(adminRoute(fn), "tenant_admin", "platform_admin"))
 	}
 	register("GET", "/api/admin/models/{id}/export", "admin", tenantAdm(h.adminModelExport))
 	register("GET", "/api/admin/models/{id}/export/package", "admin", tenantAdm(h.adminModelExportPackage))
@@ -972,125 +974,46 @@ func jsonAccessErr(w http.ResponseWriter, err error, label string) {
 	jsonErr(w, fmt.Errorf("%s: %w", label, err), http.StatusInternalServerError)
 }
 
+// adminScopeCustomerIDs is the tenants a administers as their tenant admin
+// (adminTiers): all is set for a platform admin, and customerIDs is every
+// tenant a holds tenant_admin in. Every administrator-only power reads it —
+// the Applications and tenants views, audit, notification, branding, AI-key,
+// single sign-on and SCIM settings, the workflow history — and a tenant
+// admin's whole-tenant reach (builderAdminScope, adminCanAccessApp).
+//
+// It used to be every tenant a held tenant_admin OR developer in, plus the
+// tenants of its application and model grants whenever it held either role
+// anywhere: a developer grant in tenant C made a tenant admin of A C's
+// administrator, and granting an application to another tenant's
+// administrator made it an administrator of the application's tenant
+// (2026-09-30). The users screen, which a developer tier also opens, reads
+// the tiers themselves (loadAdminTiers).
 func (h *handler) adminScopeCustomerIDs(ctx context.Context, a *actor) (all bool, customerIDs []string, err error) {
-	// Platform admins and platform-level developers (no workspace scope, no
-	// tenant of their own) operate platform-wide.
-	if a.hasRole("platform_admin") || h.isGlobalBuilder(ctx, a) {
-		return true, nil, nil
-	}
-	rows, err := h.db.Query(ctx, `
-		SELECT DISTINCT customer_id FROM (
-		    -- An UNSCOPED (NULL workspace) tenant_admin/developer grant —
-		    -- which the Users panel offers as a "platform role" — means
-		    -- "admin of the tenant I belong to": the account's own tenant.
-		    -- A workspace-scoped grant is the next arm's; it used to count
-		    -- here too, so a developer role held in another tenant's
-		    -- workspace made its holder admin of their own tenant, where
-		    -- they might hold no role above business_user.
-		    SELECT u.customer_id::text AS customer_id
-		    FROM identity.user u
-		    WHERE u.id=$1::uuid
-		      AND u.customer_id IS NOT NULL
-		      AND EXISTS (
-		          SELECT 1 FROM identity.role_assignment ra
-		          WHERE ra.user_id=u.id AND ra.role IN ('tenant_admin', 'developer')
-		            AND ra.workspace_id IS NULL
-		      )
-		    UNION
-		    -- A workspace-scoped tenant_admin/developer grant scopes to that
-		    -- workspace's tenant.
-		    SELECT w.customer_id::text AS customer_id
-		    FROM identity.role_assignment ra
-		    JOIN core.workspace w ON w.id=ra.workspace_id
-		    WHERE ra.user_id=$1::uuid
-		      AND ra.role IN ('tenant_admin', 'developer')
-		    UNION
-		    -- An unscoped grant held by an admin-created user with NO tenant
-		    -- of their own: their membership is their other workspace roles
-		    -- (same definition as adminCanAccessUser and the users list: own
-		    -- customer_id, a workspace role in the tenant, or an explicit
-		    -- app/model grant). Ignoring those roles left such a user —
-		    -- tenant_admin without a workspace plus business_admin in their
-		    -- tenant's workspace — with NO tenant at all: empty Applications
-		    -- view, no model export/import (found live in production,
-		    -- 2026-09-10). An account that HAS a tenant never reads it this
-		    -- way: an unscoped grant made in tenant A plus a plain
-		    -- business_user role in tenant B used to make it admin of B.
-		    -- Only an unscoped tenant_admin counts: a developer with no
-		    -- tenant is either platform-wide (answered above) or narrowed
-		    -- by application or model grants, which are then its scope
-		    -- (the grant arms below). Counting developer here made one
-		    -- narrowed to an application of tenant A administrator of
-		    -- tenant B, where it held only business_user (2026-09-29).
-		    SELECT w.customer_id::text AS customer_id
-		    FROM identity.role_assignment ra
-		    JOIN core.workspace w ON w.id=ra.workspace_id
-		    JOIN identity.user u ON u.id=ra.user_id
-		    WHERE ra.user_id=$1::uuid
-		      AND u.customer_id IS NULL
-		      AND EXISTS (
-		          SELECT 1 FROM identity.role_assignment ra2
-		          WHERE ra2.user_id=$1::uuid
-		            AND ra2.role = 'tenant_admin'
-		            AND ra2.workspace_id IS NULL
-		      )
-		    UNION
-		    -- Explicit app/model access grants also confer tenant scope: a
-		    -- tenant_admin/developer created by the platform admin has no
-		    -- customer_id of their own, so the tenants of the apps/models the
-		    -- platform admin granted them ARE their scope.
-		    SELECT app.customer_id::text AS customer_id
-		    FROM identity.user_app_access ua
-		    JOIN core.application app ON app.id = ua.application_id
-		    WHERE ua.user_id=$1::uuid
-		      AND EXISTS (
-		          SELECT 1 FROM identity.role_assignment ra
-		          WHERE ra.user_id=$1::uuid AND ra.role IN ('tenant_admin', 'developer')
-		      )
-		    UNION
-		    SELECT app2.customer_id::text AS customer_id
-		    FROM identity.user_model_access um
-		    JOIN core.model m ON m.id = um.model_id
-		    JOIN core.application app2 ON app2.id = m.application_id
-		    WHERE um.user_id=$1::uuid
-		      AND EXISTS (
-		          SELECT 1 FROM identity.role_assignment ra
-		          WHERE ra.user_id=$1::uuid AND ra.role IN ('tenant_admin', 'developer')
-		      )
-		) scoped
-		WHERE customer_id IS NOT NULL
-		ORDER BY customer_id
-	`, a.UserID)
+	t, err := h.loadAdminTiers(ctx, a)
 	if err != nil {
 		return false, nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return false, nil, err
-		}
-		customerIDs = append(customerIDs, id)
+	if t.platform {
+		return true, nil, nil
 	}
-	if err := rows.Err(); err != nil {
-		return false, nil, err
-	}
-	return false, customerIDs, nil
+	return false, t.adminIDs(), nil
 }
 
-func (h *handler) adminCanAccessUser(ctx context.Context, a *actor, userID string) (bool, error) {
-	all, customerIDs, err := h.adminScopeCustomerIDs(ctx, a)
-	if err != nil || all {
-		return all, err
+// userInTiers reports whether userID is a member of a tenant t holds a tier
+// in (every account, when t's scope is every tenant). Tenant membership uses
+// one definition everywhere (same as the users list): own customer_id, a
+// workspace role in the tenant, or an explicit app/model access grant into
+// it.
+func (h *handler) userInTiers(ctx context.Context, t adminTiers, userID string) (bool, error) {
+	if t.all {
+		return true, nil
 	}
+	customerIDs := t.ids()
 	if len(customerIDs) == 0 {
 		return false, nil
 	}
-	// Tenant membership uses one definition everywhere (same as the users
-	// list): own customer_id, a workspace role in the tenant, or an explicit
-	// app/model access grant into it.
 	var ok bool
-	err = h.db.QueryRow(ctx, `
+	err := h.db.QueryRow(ctx, `
 		SELECT EXISTS (
 		    SELECT 1
 		    FROM identity.user u
@@ -1120,66 +1043,44 @@ func (h *handler) adminCanAccessUser(ctx context.Context, a *actor, userID strin
 	return ok, err
 }
 
+// adminCanAccessWorkspace reports whether a administers workspaceID's
+// tenant as its tenant admin (adminScopeCustomerIDs).
 func (h *handler) adminCanAccessWorkspace(ctx context.Context, a *actor, workspaceID string) (bool, error) {
-	all, customerIDs, err := h.adminScopeCustomerIDs(ctx, a)
-	if err != nil || all {
-		return all, err
+	t, err := h.loadAdminTiers(ctx, a)
+	if err != nil {
+		return false, err
 	}
-	if len(customerIDs) == 0 {
-		return false, nil
-	}
-	var ok bool
-	err = h.db.QueryRow(ctx, `
-		SELECT EXISTS (
-		    SELECT 1 FROM core.workspace
-		    WHERE id=$1::uuid AND customer_id::text = ANY($2)
-		)
-	`, workspaceID, customerIDs).Scan(&ok)
-	return ok, err
+	return t.tenantAdminOf(h.customerOfWorkspace(ctx, workspaceID)), nil
 }
 
+// adminCanAccessApp reports whether a opens appID on the route ctx arrived
+// through as an administrator or builder: every application of a tenant it
+// is tenant admin of (a platform admin every one; a platform-wide builder
+// every one outside the administrator-only routes); elsewhere only what its
+// roles open there (rolesReachApp) — on an administrator-only route no
+// developer reach, and for an account with no tenant that holds
+// tenant_admin, exactly the applications its grants name (reachSQL).
 func (h *handler) adminCanAccessApp(ctx context.Context, a *actor, appID string) (bool, error) {
-	all, customerIDs, err := h.adminScopeCustomerIDs(ctx, a)
-	if err != nil || all {
-		return all, err
+	t, err := h.loadAdminTiers(ctx, a)
+	if err != nil {
+		return false, err
 	}
-	if len(customerIDs) == 0 {
-		return false, nil
+	if t.platform || (t.all && !onAdminRoute(ctx)) || t.tenantAdminOf(h.customerOfApplication(ctx, appID)) {
+		return true, nil
 	}
-	var ok bool
-	err = h.db.QueryRow(ctx, `
-		SELECT EXISTS (
-		    SELECT 1 FROM core.application
-		    WHERE id=$1::uuid AND customer_id::text = ANY($2)
-		)
-	`, appID, customerIDs).Scan(&ok)
-	if err != nil || !ok || a.hasRole("tenant_admin") {
-		return ok, err
-	}
-	return h.actorCanAccessApp(ctx, a, appID)
+	return h.rolesReachApp(ctx, a, appID)
 }
 
+// adminCanAccessModel is adminCanAccessApp for a model.
 func (h *handler) adminCanAccessModel(ctx context.Context, a *actor, modelID string) (bool, error) {
-	all, customerIDs, err := h.adminScopeCustomerIDs(ctx, a)
-	if err != nil || all {
-		return all, err
+	t, err := h.loadAdminTiers(ctx, a)
+	if err != nil {
+		return false, err
 	}
-	if len(customerIDs) == 0 {
-		return false, nil
+	if t.platform || (t.all && !onAdminRoute(ctx)) || t.tenantAdminOf(h.customerOfModel(ctx, modelID)) {
+		return true, nil
 	}
-	var ok bool
-	err = h.db.QueryRow(ctx, `
-		SELECT EXISTS (
-		    SELECT 1
-		    FROM core.model m
-		    JOIN core.application app ON app.id=m.application_id
-		    WHERE m.id=$1::uuid AND app.customer_id::text = ANY($2)
-		)
-	`, modelID, customerIDs).Scan(&ok)
-	if err != nil || !ok || a.hasRole("tenant_admin") {
-		return ok, err
-	}
-	return h.actorCanAccessModel(ctx, a, modelID)
+	return h.rolesReachModel(ctx, a, modelID)
 }
 
 // isGlobalBuilder reports whether the actor holds a developer role that is
@@ -1206,7 +1107,7 @@ func (h *handler) isGlobalBuilder(ctx context.Context, a *actor) bool {
 // account whose id is userExpr: no tenant of its own, an unscoped developer
 // grant, and no identity.user_app_access or user_model_access row. An
 // account narrowed by such grants is not platform-wide: its explicit grants
-// are its scope (adminScopeCustomerIDs' grant arms, customerlessGrantTenantSQL),
+// are its scope (customerlessGrantTenantSQL),
 // as a platform admin who narrows a developer to some applications means.
 // Without the last two conditions an account narrowed to app1 edited
 // another tenant's metrics (2026-09-29).
@@ -1264,7 +1165,7 @@ func customerlessGrantTenantSQL(userExpr, tenantExpr string) string {
 // to every workspace of it — the boundary workflowAdminScopeSQL draws for
 // workflow history. A developer is a tenant-wide builder: a developer role
 // in any workspace of the tenant, or an UNSCOPED developer grant held by an
-// account that belongs to the tenant (adminScopeCustomerIDs' first arm), or
+// account that belongs to the tenant (a developer tier there: adminTiers), or
 // by an account with no tenant whose application or model grants are in it
 // (customerlessGrantTenantSQL), opens every application of it — which the
 // callers narrow by those grants. A developer role held in another tenant's
@@ -1306,9 +1207,24 @@ func roleReachesAppSQL(app, appWS, userParam string, builder bool) string {
 		customerlessGrantTenantSQL(userParam+"::uuid", fmt.Sprintf("COALESCE(%s.customer_id, %s.customer_id)", app, appWS)) + `)`
 }
 
-// reachSQL is roleReachesAppSQL for the route a request arrived through.
+// reachSQL is roleReachesAppSQL for the route a request arrived through: its
+// builder arms on a builder route, and on an administrator-only route
+// (adminRouteKey) none of them — a developer tier opens nothing there
+// (adminTiers). Outside a developer-only route, an account with no tenant
+// that holds tenant_admin also reaches the applications and models its
+// grants name (customerlessAdminGrantTenantSQL; the callers narrow to them).
 func reachSQL(ctx context.Context, app, appWS, userParam string) string {
-	return roleReachesAppSQL(app, appWS, userParam, onBuilderRoute(ctx))
+	grants := customerlessAdminGrantTenantSQL(userParam+"::uuid", fmt.Sprintf("COALESCE(%s.customer_id, %s.customer_id)", app, appWS))
+	switch {
+	case !onBuilderRoute(ctx):
+		return "(" + roleReachesAppSQL(app, appWS, userParam, false) + " OR " + grants + ")"
+	case onDeveloperRoute(ctx):
+		return roleReachesAppSQL(app, appWS, userParam, true)
+	case onAdminRoute(ctx):
+		return grants
+	default:
+		return "(" + roleReachesAppSQL(app, appWS, userParam, true) + " OR " + grants + ")"
+	}
 }
 
 // builderRouteKey marks a request that arrived through a builder or
@@ -1373,19 +1289,15 @@ func developerRoute(fn http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// adminScopeOnly reports whether a tenant admin opens its admin scope and
-// nothing else on the route ctx arrived through: a builder or administrator
-// route (builderRouteKey) that is not developer-only. On a developer-only
-// route (developerRouteKey) the developer arms still decide what the
-// narrowed admin scope (builderAdminScope) leaves out; on a business route,
-// a workspace role held elsewhere does.
-func adminScopeOnly(ctx context.Context, a *actor) bool {
-	return a.hasRole("tenant_admin") && onBuilderRoute(ctx) && !onDeveloperRoute(ctx)
-}
-
-// builderAdminScope is a's admin scope (adminScopeCustomerIDs) as it counts
-// on the route ctx arrived through. On a developer-only route
-// (developerRouteKey) it keeps only the tenants a's developer grants also
+// builderAdminScope is a's admin scope (adminScopeCustomerIDs: the tenants
+// it is tenant admin of) as it counts on the route ctx arrived through.
+// Beyond it, what a's roles open on the route decides (reachSQL): on a
+// developer-or-administrator route its developer reach, on an
+// administrator-only route none. A tenant admin used to open its admin scope
+// and nothing else on a builder route, which then held the tenants of its
+// developer grants too (adminScopeOnly, until 2026-09-30).
+//
+// On a developer-only route (developerRouteKey) it keeps only the tenants a's developer grants also
 // reach — roleReachesAppSQL's builder arms, over the tenant alone: a
 // developer grant in a workspace of it, or an unscoped developer grant of an
 // account that belongs to it. So a tenant_admin grant gives no builder reach
@@ -1421,11 +1333,13 @@ func (h *handler) builderAdminScope(ctx context.Context, a *actor) (all bool, cu
 	return false, reached, rows.Err()
 }
 
-// builderAdminReachesApp reports whether a's admin scope (builderAdminScope
-// on a developer-only route, adminCanAccessApp elsewhere) opens appID.
+// builderAdminReachesApp reports whether a's admin scope (builderAdminScope)
+// opens appID: an application of a tenant it is tenant admin of — on a
+// developer-only route, one its developer grants reach too.
 func (h *handler) builderAdminReachesApp(ctx context.Context, a *actor, appID string) (bool, error) {
 	if !onDeveloperRoute(ctx) {
-		return h.adminCanAccessApp(ctx, a, appID)
+		t, err := h.loadAdminTiers(ctx, a)
+		return err == nil && t.tenantAdminOf(h.customerOfApplication(ctx, appID)), err
 	}
 	all, customerIDs, err := h.builderAdminScope(ctx, a)
 	if err != nil || all || len(customerIDs) == 0 {
@@ -1444,7 +1358,8 @@ func (h *handler) builderAdminReachesApp(ctx context.Context, a *actor, appID st
 // builderAdminReachesModel is builderAdminReachesApp for a model.
 func (h *handler) builderAdminReachesModel(ctx context.Context, a *actor, modelID string) (bool, error) {
 	if !onDeveloperRoute(ctx) {
-		return h.adminCanAccessModel(ctx, a, modelID)
+		t, err := h.loadAdminTiers(ctx, a)
+		return err == nil && t.tenantAdminOf(h.customerOfModel(ctx, modelID)), err
 	}
 	all, customerIDs, err := h.builderAdminScope(ctx, a)
 	if err != nil || all || len(customerIDs) == 0 {
@@ -1463,22 +1378,31 @@ func (h *handler) builderAdminReachesModel(ctx context.Context, a *actor, modelI
 }
 
 func (h *handler) actorCanAccessApp(ctx context.Context, a *actor, appID string) (bool, error) {
-	if a.hasRole("platform_admin") || h.isGlobalBuilder(ctx, a) {
+	// A platform-wide builder is a developer of every tenant, which opens
+	// nothing on an administrator-only route (adminTiers).
+	if a.hasRole("platform_admin") || (!onAdminRoute(ctx) && h.isGlobalBuilder(ctx, a)) {
 		return true, nil
 	}
 	if a.hasRole("tenant_admin") {
-		// A tenant admin opens every application of its tenants. On a
-		// builder or administrator route that is all it opens. On a business
-		// route, a workspace role it holds in another tenant still opens
-		// what that role opens for anyone (below) — and adds no admin reach
-		// there, since the admin routes never get this far. On a
-		// developer-only route the admin scope counts only in the tenants
-		// the account's developer grants reach (builderAdminScope), and the
-		// developer arms below decide the rest (developerRouteKey).
-		if ok, err := h.builderAdminReachesApp(ctx, a, appID); err != nil || ok || adminScopeOnly(ctx, a) {
+		// A tenant admin opens every application of the tenants it is tenant
+		// admin of — on a developer-only route, of those its developer
+		// grants reach too (builderAdminScope). Beyond them its roles decide,
+		// as they count on the route (rolesReachApp): on a business route a
+		// workspace role held in another tenant opens what it opens for
+		// anyone, on a developer-or-administrator route a developer grant
+		// what it opens a developer, and on an administrator-only route
+		// neither.
+		if ok, err := h.builderAdminReachesApp(ctx, a, appID); err != nil || ok {
 			return ok, err
 		}
 	}
+	return h.rolesReachApp(ctx, a, appID)
+}
+
+// rolesReachApp reports whether a's roles open appID on the route ctx
+// arrived through (reachSQL), narrowed by its application and model grants;
+// an application with no model it may open opens for no role.
+func (h *handler) rolesReachApp(ctx context.Context, a *actor, appID string) (bool, error) {
 	var ok bool
 	err := h.db.QueryRow(ctx, `
 		SELECT EXISTS (
@@ -1506,18 +1430,22 @@ func (h *handler) actorCanAccessApp(ctx context.Context, a *actor, appID string)
 }
 
 func (h *handler) actorCanAccessModel(ctx context.Context, a *actor, modelID string) (bool, error) {
-	if a.hasRole("platform_admin") || h.isGlobalBuilder(ctx, a) {
+	if a.hasRole("platform_admin") || (!onAdminRoute(ctx) && h.isGlobalBuilder(ctx, a)) {
 		return true, nil
 	}
 	if a.hasRole("tenant_admin") {
-		// As in actorCanAccessApp: the admin scope, and on a business route
-		// whatever a workspace role held elsewhere opens; on a
-		// developer-only route, the admin scope where the developer grants
-		// reach (builderAdminScope), else the developer arms below.
-		if ok, err := h.builderAdminReachesModel(ctx, a, modelID); err != nil || ok || adminScopeOnly(ctx, a) {
+		// As in actorCanAccessApp: the admin scope (on a developer-only
+		// route, where the developer grants reach too), else the roles as
+		// they count on the route.
+		if ok, err := h.builderAdminReachesModel(ctx, a, modelID); err != nil || ok {
 			return ok, err
 		}
 	}
+	return h.rolesReachModel(ctx, a, modelID)
+}
+
+// rolesReachModel is rolesReachApp for a model.
+func (h *handler) rolesReachModel(ctx context.Context, a *actor, modelID string) (bool, error) {
 	var ok bool
 	err := h.db.QueryRow(ctx, `
 		SELECT EXISTS (
@@ -6598,6 +6526,9 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 		Scan(...any) error
 		Close()
 	}
+	// scanGrantOnly: the rows carry a fifth column, whether only the
+	// account's grants reach the tenant (the tenant_admin branch).
+	scanGrantOnly := false
 	if isPlatformAdmin || h.isGlobalBuilder(ctx, act) {
 		// Platform admins and platform-level developers (no workspace scope)
 		// see every tenant.
@@ -6608,22 +6539,33 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 		}
 		cRows = rows
 	} else if isTenantAdmin {
-		// tenant_admin: scoped to their tenants — own customer, workspace
-		// roles, or explicit app/model access grants (adminScopeCustomerIDs
-		// derives all three).
-		_, customerIDs, scopeErr := h.adminScopeCustomerIDs(ctx, act)
+		// tenant_admin: the tenants it is tenant admin of on the
+		// administrator route; on the developer-or-administrator one, the
+		// tenants it is a developer of too (adminTiers), whose applications
+		// it then sees as a developer (isScopedDeveloper below).
+		tiers, scopeErr := h.loadAdminTiers(ctx, act)
 		if scopeErr != nil {
 			jsonErr(w, scopeErr, http.StatusInternalServerError)
 			return
 		}
+		customerIDs := tiers.ids()
+		if onAdminRoute(ctx) {
+			customerIDs = tiers.adminIDs()
+		}
+		// An account with no tenant also sees each tenant its application
+		// and model grants are in, with exactly the granted applications
+		// (grantOnly, below): its reach there, not its administration.
 		rows, err := h.db.Query(ctx,
-			`SELECT id::text, name, plan, created_at::text FROM core.customer WHERE id::text = ANY($1) ORDER BY created_at`,
-			customerIDs)
+			`SELECT id::text, name, plan, created_at::text, NOT (id::text = ANY($1)) FROM core.customer c
+			 WHERE id::text = ANY($1) OR `+customerlessAdminGrantTenantSQL("$2::uuid", "c.id")+`
+			 ORDER BY created_at`,
+			customerIDs, act.UserID)
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
 		cRows = rows
+		scanGrantOnly = true
 	} else {
 		// developer: customers reachable through accessible workspace/app/model scope
 		rows, err := h.db.Query(ctx, `
@@ -6660,12 +6602,19 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 	}
 	defer cRows.Close()
 	var tenants []adminTenantItem
+	grantOnly := map[string]bool{}
 	for cRows.Next() {
 		var t adminTenantItem
-		if err := cRows.Scan(&t.ID, &t.Name, &t.Plan, &t.CreatedAt); err != nil {
+		dest := []any{&t.ID, &t.Name, &t.Plan, &t.CreatedAt}
+		var onlyGranted bool
+		if scanGrantOnly {
+			dest = append(dest, &onlyGranted)
+		}
+		if err := cRows.Scan(dest...); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
+		grantOnly[t.ID] = onlyGranted
 		tenants = append(tenants, t)
 	}
 	cRows.Close()
@@ -6708,7 +6657,17 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 			Close()
 		}
 		var err error
-		if isScopedDeveloper {
+		if grantOnly[t.ID] {
+			// A tenant only the account's grants reach: the granted
+			// applications (grantedAppSQL), whose models the grants narrow
+			// as a developer's (below).
+			aRows, err = h.db.Query(ctx, `
+				SELECT a.id::text, a.name, a.mode::text, a.status::text
+				FROM core.application a
+				LEFT JOIN core.workspace aw ON aw.id = a.workspace_id
+				WHERE (a.customer_id=$1::uuid OR aw.customer_id=$1::uuid) AND `+grantedAppSQL("a", "$2::uuid")+`
+				ORDER BY a.created_at`, t.ID, act.UserID)
+		} else if isScopedDeveloper {
 			// Workspace-scoped developer: apps of tenants where they hold a
 			// role in any of the tenant's workspaces, filtered by explicit
 			// app/model access grants when present. An application belongs to
@@ -6767,7 +6726,7 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 				Scan(...any) error
 				Close()
 			}
-			if isDeveloper {
+			if isDeveloper || grantOnly[t.ID] {
 				mRows, _ = h.db.Query(ctx, `
 						SELECT id::text, name, storage_type::text, COALESCE(active_revision_name,''),
 						       (m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) IS TRUE
@@ -6854,6 +6813,10 @@ type adminUserItem struct {
 	// actions the caller may take on it (accountPermissionsFor).
 	HomeTenant  string             `json:"home_tenant"`
 	Permissions accountPermissions `json:"permissions"`
+	// GrantableRoles are the roles the caller may grant the account with
+	// no workspace (unscopedGrantableRoles); inside a workspace, the
+	// workspace's grantable_roles (GET /api/admin/workspaces) apply.
+	GrantableRoles []string `json:"grantable_roles"`
 }
 
 func (h *handler) adminUsers(w http.ResponseWriter, r *http.Request) {
@@ -6872,11 +6835,14 @@ func (h *handler) adminUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	all, customerIDs, err := h.adminScopeCustomerIDs(ctx, act)
+	// Every tenant the caller holds a tier in (adminTiers): a developer tier
+	// lists its tenant's people too, and acts on them as a developer.
+	tiers, err := h.loadAdminTiers(ctx, act)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
+	all, customerIDs := tiers.all, tiers.ids()
 	if !all && len(customerIDs) == 0 {
 		jsonOK(w, []adminUserItem{})
 		return
@@ -6987,7 +6953,7 @@ func (h *handler) adminUsers(w http.ResponseWriter, r *http.Request) {
 	if users == nil {
 		users = []adminUserItem{}
 	}
-	if err := h.withUserPermissions(ctx, act, all, customerIDs, users); err != nil {
+	if err := h.withUserPermissions(ctx, act, tiers, users); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
@@ -7132,11 +7098,14 @@ func (h *handler) adminWorkspaces(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusUnauthorized)
 		return
 	}
-	all, customerIDs, err := h.adminScopeCustomerIDs(ctx, act)
+	// The workspaces of every tenant the caller holds a tier in (adminTiers):
+	// a developer places people in its tenant's workspaces too.
+	tiers, err := h.loadAdminTiers(ctx, act)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
+	all, customerIDs := tiers.all, tiers.ids()
 	if !all && len(customerIDs) == 0 {
 		jsonOK(w, []struct{}{})
 		return
@@ -7159,11 +7128,18 @@ func (h *handler) adminWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
+	// GrantableRoles and ManageAccess are what the caller may do in the
+	// workspace, by its tier in the workspace's tenant: the console offers
+	// those and no more. It used to offer what the caller's roles merged
+	// across its tenants allowed, and each attempt the tier forbade was
+	// refused (2026-09-30).
 	type wsItem struct {
-		ID           string `json:"id"`
-		Name         string `json:"name"`
-		CustomerName string `json:"customer_name"`
-		CustomerID   string `json:"customer_id"`
+		ID             string   `json:"id"`
+		Name           string   `json:"name"`
+		CustomerName   string   `json:"customer_name"`
+		CustomerID     string   `json:"customer_id"`
+		GrantableRoles []string `json:"grantable_roles"`
+		ManageAccess   bool     `json:"manage_access"`
 	}
 	var out []wsItem
 	for rows.Next() {
@@ -7172,6 +7148,9 @@ func (h *handler) adminWorkspaces(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
+		tierRoles := tiers.rolesIn(item.CustomerID)
+		item.GrantableRoles = workspaceGrantableRoles(act, tierRoles)
+		item.ManageAccess = canManageResourceAccess(tierRoles)
 		out = append(out, item)
 	}
 	if out == nil {
@@ -9885,11 +9864,6 @@ func (h *handler) resolveDemoModelID(ctx context.Context, r *http.Request) (stri
 					scoped = err == nil
 				}
 			}
-			if !scoped && adminScopeOnly(ctx, act) {
-				// On a builder or administrator route that is not developer-only
-				// a tenant admin opens its admin scope only (adminScopeOnly).
-				return "", errAccessDenied
-			}
 			if !scoped {
 				// developer is a tenant-wide trusted role — the same breadth
 				// adminTenants already grants it when LISTING apps ("any
@@ -9993,11 +9967,6 @@ func (h *handler) resolveDemoModelID(ctx context.Context, r *http.Request) (stri
 				`, customerIDs).Scan(&modelID)
 				scoped = err == nil
 			}
-		}
-		if !scoped && adminScopeOnly(ctx, act) {
-			// On a builder or administrator route that is not developer-only
-			// a tenant admin opens its admin scope only (adminScopeOnly).
-			return "", errAccessDenied
 		}
 		if !scoped {
 			// Same developer/customer-wide broadening as the appID branch above.
@@ -10113,11 +10082,6 @@ func (h *handler) resolveDemoAppID(ctx context.Context, r *http.Request) (string
 				`, customerIDs).Scan(&appID)
 				scoped = err == nil
 			}
-		}
-		if !scoped && adminScopeOnly(ctx, act) {
-			// On a builder or administrator route that is not developer-only
-			// a tenant admin opens its admin scope only (adminScopeOnly).
-			return "", errAccessDenied
 		}
 		if !scoped {
 			// The applications the caller's roles open (roleReachesAppSQL,
@@ -11960,10 +11924,22 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 // account. Keycloak is best effort, and deliberately after the row is
 // gone: a Keycloak that is briefly unreachable must not block removing
 // someone's access. Synthetic dev subjects have no account to remove.
+//
+// With a database per tenant one identity can have a user row in several
+// databases (platform.user_directory lists the dedicated ones). Removing
+// one of them removes the person from that database only: the
+// identity-provider account stays while another database still holds the
+// subject (identityHeldElsewhere). Deleting it cut the person off every
+// other tenant, at the word of one tenant's administrator (2026-09-30).
 func (h *handler) removeUserAccount(ctx context.Context, userID, keycloakSub string) error {
 	h.forgetUser(ctx, keycloakSub)
 	if _, err := h.db.Exec(ctx, `DELETE FROM identity.user WHERE id=$1::uuid`, userID); err != nil {
 		return err
+	}
+	if h.kc != nil && keycloakSub != "" && h.identityHeldElsewhere(ctx, keycloakSub) {
+		h.log.Info().Str("user_id", userID).
+			Msg("application user deleted; the identity provider account stays, another tenant database still holds it")
+		return nil
 	}
 	if h.kc != nil && keycloakSub != "" && !strings.HasPrefix(keycloakSub, "admin-created-") {
 		if err := h.kc.DeleteUser(ctx, keycloakSub); err != nil {
@@ -11972,6 +11948,37 @@ func (h *handler) removeUserAccount(ctx context.Context, userID, keycloakSub str
 		}
 	}
 	return nil
+}
+
+// identityHeldElsewhere reports whether a database other than the one ctx
+// is routed to still holds a user row for keycloakSub: a dedicated tenant
+// the directory lists it in, or — from a dedicated tenant — the control
+// plane. Always false with a single database. An error counts as held: the
+// identity-provider account is not deleted on a guess.
+func (h *handler) identityHeldElsewhere(ctx context.Context, keycloakSub string) bool {
+	router := h.db.Router()
+	if router == nil {
+		return false
+	}
+	here := tenantdb.TenantFrom(ctx)
+	member, err := router.Catalog().TenantsForUser(ctx, keycloakSub)
+	if err != nil {
+		return true
+	}
+	for _, id := range member {
+		if id != here {
+			return true
+		}
+	}
+	if here == "" {
+		return false
+	}
+	var inControl bool
+	if err := h.db.Control().QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM identity.user WHERE keycloak_sub = $1)`, keycloakSub).Scan(&inControl); err != nil {
+		return true
+	}
+	return inControl
 }
 
 func (h *handler) adminTenantAction(w http.ResponseWriter, r *http.Request) {
@@ -11991,13 +11998,18 @@ func (h *handler) adminTenantAction(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	// tenant_admin can only touch their own tenant
+	// A tenant admin touches only a tenant it is tenant admin of — by the
+	// roles it holds there (adminTiers). It used to be any holder of
+	// tenant_admin anywhere whose own account belonged to the tenant: an
+	// account of tenant C that was tenant_admin only in a workspace of A
+	// renamed C (2026-09-30).
 	if !isPlatformAdmin {
-		var ownerID string
-		_ = h.db.QueryRow(ctx,
-			`SELECT COALESCE(customer_id::text,'') FROM identity.user WHERE id=$1::uuid`, act.UserID,
-		).Scan(&ownerID)
-		if ownerID != id {
+		tiers, err := h.loadAdminTiers(ctx, act)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		if !tiers.tenantAdminOf(id) {
 			jsonErr(w, fmt.Errorf("forbidden: not your tenant"), http.StatusForbidden)
 			return
 		}
@@ -12184,7 +12196,9 @@ func (h *handler) adminApplications(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// GET: every application in the caller's scope — all of them for a
-	// platform admin, their own tenants' for a tenant admin.
+	// platform admin, the tenants' it is tenant admin of for a tenant admin,
+	// and for one with no tenant the applications its grants name
+	// (customerlessAdminGrantTenantSQL, grantedAppSQL).
 	act, err := h.resolveActor(ctx, r)
 	if err != nil {
 		jsonErr(w, err, http.StatusUnauthorized)
@@ -12195,15 +12209,16 @@ func (h *handler) adminApplications(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
-	if !all && len(mine) == 0 {
-		jsonOK(w, []struct{}{})
-		return
+	if mine == nil {
+		mine = []string{}
 	}
 	rows, err := h.db.Query(ctx, `
-		SELECT id::text, COALESCE(customer_id::text,''), name, mode::text, status::text, created_at::text
-		FROM core.application
-		WHERE $1 OR customer_id::text = ANY($2)
-		ORDER BY created_at DESC`, all, mine)
+		SELECT a.id::text, COALESCE(a.customer_id::text,''), a.name, a.mode::text, a.status::text, a.created_at::text
+		FROM core.application a
+		LEFT JOIN core.workspace aw ON aw.id = a.workspace_id
+		WHERE $1 OR a.customer_id::text = ANY($2)
+		   OR (`+customerlessAdminGrantTenantSQL("$3::uuid", "COALESCE(a.customer_id, aw.customer_id)")+` AND `+grantedAppSQL("a", "$3::uuid")+`)
+		ORDER BY a.created_at DESC`, all, mine, act.UserID)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -12616,10 +12631,10 @@ func assignableRoles(actorRoles []string) []string {
 // developer or tenant_admin with no workspace that would reach beyond the
 // caller's own tenants. Such a grant is read against the account's own
 // tenant (identity.user customer_id): it makes the account builder and
-// administrator of that tenant (roleReachesAppSQL, adminScopeCustomerIDs).
+// administrator of that tenant (roleReachesAppSQL, adminTiers).
 // On an account with no tenant a developer grant is platform-wide — builder
-// of every tenant (isGlobalBuilder) and, through adminScopeCustomerIDs,
-// administrator of every tenant — and a tenant_admin grant administers every
+// of every tenant (isGlobalBuilder) and, through adminTiers, a developer of
+// every tenant's people — and a tenant_admin grant administers every
 // tenant the account holds a role in. On an account of another tenant it
 // makes the account builder or administrator there, where that tenant's own
 // administrators granted nothing. assignableRoles lets a tenant admin grant
@@ -12629,10 +12644,10 @@ func assignableRoles(actorRoles []string) []string {
 // belonging to another tenant a builder of that one (2026-09-29). The check
 // is on the account, so it holds the same for the caller's own account as
 // for anyone else's. targetCustomer is the account's customer_id ("" =
-// none); scopeAll and scope are the caller's adminScopeCustomerIDs. A grant
+// none); scopeAll and scope are the caller's adminTiers all and ids. A grant
 // inside a workspace is unaffected: it reaches that workspace's tenant only
-// (roleReachesAppSQL), and the callers check the workspace is the caller's
-// (adminCanAccessWorkspace).
+// (roleReachesAppSQL), and the callers check the caller's tier in that
+// tenant (adminTiers.rolesIn).
 func platformWideGrantErr(act *actor, role, workspaceID, targetCustomer string, scopeAll bool, scope []string) error {
 	if act.hasRole("platform_admin") || workspaceID != "" || (role != "developer" && role != "tenant_admin") {
 		return nil
@@ -12851,7 +12866,9 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusUnauthorized)
 		return
 	}
-	allAdminScope, adminCustomerIDs, err := h.adminScopeCustomerIDs(ctx, act)
+	// The caller's tier in each tenant (adminTiers): what it may grant,
+	// revoke and change in a tenant is decided by the roles it holds there.
+	tiers, err := h.loadAdminTiers(ctx, act)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -12881,46 +12898,60 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
 			return
 		}
+		// Anyone but a platform admin invites with a role inside a workspace
+		// (decided 2026-09-30). An address that already has an account is
+		// only ever added that way (addExistingAccount), so an invitation
+		// without both used to be answered as done for it, and grant nothing
+		// — told apart from a new address by nothing but that nothing
+		// happened. Refused here, before the address is looked at, alike for
+		// both.
+		if !tiers.platform && (body.Role == "" || body.WorkspaceID == "") {
+			jsonErr(w, errInviteNeedsRoleAndWorkspace, http.StatusBadRequest)
+			return
+		}
 		if body.Role != "" && !roleIsAssignableBy(act.Roles, body.Role) {
 			jsonErr(w, fmt.Errorf("forbidden: you may not assign the %q role", body.Role), http.StatusForbidden)
 			return
 		}
+		// The new account belongs to the tenant of the workspace it is
+		// invited into — whoever invites it, a platform admin too (decided
+		// 2026-09-30): a platform admin's used to belong to no tenant, and a
+		// tenant admin's to the first of its tenants, whichever workspace it
+		// was given. A platform admin's with no workspace belongs to none.
+		// tierRoles is the caller's tier there (adminTiers).
+		customerID := ""
+		tierRoles := tiers.rolesIn("")
 		if body.WorkspaceID != "" {
-			// Same two checks the standalone grant endpoint applies, for the
+			// Same checks the standalone grant endpoint applies, for the
 			// same reason: creating a user is not a way around them.
 			if body.Role == "" {
 				jsonErr(w, fmt.Errorf("workspace_id given without a role"), http.StatusBadRequest)
 				return
 			}
-			if !canGrantWorkspaceRole(act.Roles, body.Role) {
-				jsonErr(w, fmt.Errorf("forbidden: you may not grant the %q role inside a workspace", body.Role), http.StatusForbidden)
+			customerID = h.customerOfWorkspace(ctx, body.WorkspaceID)
+			if customerID == "" && tiers.platform {
+				jsonErr(w, fmt.Errorf("workspace not found"), http.StatusBadRequest)
 				return
 			}
-			canTouchWorkspace, wsErr := h.adminCanAccessWorkspace(ctx, act, body.WorkspaceID)
-			if wsErr != nil {
-				jsonErr(w, wsErr, http.StatusInternalServerError)
-				return
-			}
-			if !canTouchWorkspace {
+			if customerID == "" || !tiers.inScope(customerID) {
 				jsonErr(w, fmt.Errorf("forbidden: workspace is outside your tenant scope"), http.StatusForbidden)
 				return
 			}
-		}
-		customerID := ""
-		if !allAdminScope {
-			if len(adminCustomerIDs) == 0 {
-				jsonErr(w, fmt.Errorf("forbidden: no tenant scope available for user creation"), http.StatusForbidden)
+			tierRoles = tiers.rolesIn(customerID)
+			if !roleIsAssignableBy(tierRoles, body.Role) {
+				jsonErr(w, fmt.Errorf("forbidden: you may not assign the %q role in this workspace's tenant", body.Role), http.StatusForbidden)
 				return
 			}
-			customerID = adminCustomerIDs[0]
+			if !canGrantWorkspaceRole(tierRoles, body.Role) {
+				jsonErr(w, fmt.Errorf("forbidden: you may not grant the %q role inside a workspace", body.Role), http.StatusForbidden)
+				return
+			}
 		}
-		// A creator whose scope is every tenant leaves the account without
-		// one; given developer or tenant_admin with no workspace, it would be
-		// platform-wide, which only a platform admin may make. customerID is
-		// the tenant of a new account; an existing one is only ever added
-		// inside a workspace (addExistingAccount), where this does not apply.
+		// Given developer or tenant_admin with no workspace, an account of
+		// no tenant would be platform-wide, which only a platform admin may
+		// make (and only a platform admin gets this far without one).
 		if body.Role != "" {
-			if err := platformWideGrantErr(act, body.Role, body.WorkspaceID, customerID, allAdminScope, adminCustomerIDs); err != nil {
+			if err := platformWideGrantErr(act, body.Role, body.WorkspaceID, customerID, tiers.all, tiers.ids()); err != nil {
 				jsonErr(w, err, http.StatusForbidden)
 				return
 			}
@@ -12964,7 +12995,7 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if existingID != "" {
-				h.addExistingAccount(ctx, w, act, existingID, body.Email, body.Role, body.WorkspaceID)
+				h.addExistingAccount(ctx, w, act, tierRoles, existingID, body.Email, body.Role, body.WorkspaceID)
 				return
 			}
 		}
@@ -13002,7 +13033,7 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				if existingID != "" {
-					h.addExistingAccount(ctx, w, act, existingID, body.Email, body.Role, body.WorkspaceID)
+					h.addExistingAccount(ctx, w, act, tierRoles, existingID, body.Email, body.Role, body.WorkspaceID)
 					return
 				}
 			}
@@ -13037,29 +13068,45 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		var userID string
+		// customerID is the tenant of a NEW account only. An account this
+		// adopts (a platform admin creating over an address that already has
+		// one, or a retry of a half-finished creation) keeps its own:
+		// filling in one it has none of turned a platform-wide builder into
+		// one tenant's developer, took an unscoped tenant_admin's
+		// administration of its other tenants away, and handed the account
+		// to the invited workspace's tenant admin to delete (2026-09-30).
+		// Migration 102 leaves the same accounts alone for the same reason.
+		// accountCustomer is what the account belongs to afterwards, and
+		// insertedRow whether this request made the row (xmax is 0 on a
+		// row an INSERT ... ON CONFLICT inserted, set on one it updated).
+		var userID, accountCustomer string
+		var insertedRow bool
 		if err := h.db.QueryRow(ctx, `
 			INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id)
 			VALUES ($1, $2, $3, NULLIF($4, '')::uuid)
 			ON CONFLICT (keycloak_sub) DO UPDATE
-			SET email=EXCLUDED.email, display_name=EXCLUDED.display_name, customer_id=COALESCE(identity.user.customer_id, EXCLUDED.customer_id)
-			RETURNING id::text
-		`, sub, body.Email, body.DisplayName, customerID).Scan(&userID); err != nil {
+			SET email=EXCLUDED.email, display_name=EXCLUDED.display_name
+			RETURNING id::text, COALESCE(customer_id::text, ''), (xmax = 0)
+		`, sub, body.Email, body.DisplayName, customerID).Scan(&userID, &accountCustomer, &insertedRow); err != nil {
 			abort(http.StatusInternalServerError, err)
 			return
 		}
 		// The directory is what routes this person to their database on
 		// their next request.
 		h.noteUser(ctx, sub, body.Email)
+		// grantedRoleID is the role row this request added ("" when the
+		// account held it already), which a failed invitation takes back.
+		var grantedRoleID string
 		if body.Role != "" {
 			// assigned_by records who made the grant, as sign-up and the
 			// identity service do: it is what tells a platform admin's grant
 			// from anyone else's afterwards.
-			_, _ = h.db.Exec(ctx, `
+			_ = h.db.QueryRow(ctx, `
 				INSERT INTO identity.role_assignment (user_id, role, workspace_id, assigned_by)
 				VALUES ($1::uuid, $2::identity.user_role, NULLIF($3,'')::uuid, (SELECT id FROM identity.user WHERE id = NULLIF($4,'')::uuid))
 				ON CONFLICT DO NOTHING
-			`, userID, body.Role, body.WorkspaceID, act.UserID)
+				RETURNING id::text
+			`, userID, body.Role, body.WorkspaceID, act.UserID).Scan(&grantedRoleID)
 		}
 
 		// The invitation is what makes the account reachable: creation sets no
@@ -13069,7 +13116,15 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 		invited := false
 		if h.kc != nil {
 			if err := h.kc.SendInvite(ctx, sub, inviteLifetime); err != nil {
-				_, _ = h.db.Exec(ctx, `DELETE FROM identity.user WHERE id=$1::uuid`, userID)
+				// Only what this request made is undone: an account it
+				// adopted was someone's before, with what they authored —
+				// deleting its row cut the person off (2026-09-30). It
+				// loses only the role this invitation gave it.
+				if insertedRow {
+					_, _ = h.db.Exec(ctx, `DELETE FROM identity.user WHERE id=$1::uuid`, userID)
+				} else if grantedRoleID != "" {
+					_, _ = h.db.Exec(ctx, `DELETE FROM identity.role_assignment WHERE id=$1::uuid`, grantedRoleID)
+				}
 				abort(http.StatusBadGateway, fmt.Errorf("%w — no user was created; "+
 					"check the realm's SMTP settings", err))
 				return
@@ -13081,8 +13136,8 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			Category: auditlog.CategoryAdmin, EventType: auditlog.EventUserCreated,
 			ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
 			ResourceType: "identity_user", ResourceID: userID,
-			Metadata: map[string]string{"email": body.Email, "role": body.Role,
-				"invited": strconv.FormatBool(invited)},
+			Metadata: map[string]string{"email": body.Email, "role": body.Role, "workspace_id": body.WorkspaceID,
+				"customer_id": accountCustomer, "invited": strconv.FormatBool(invited)},
 		})
 		jsonOK(w, map[string]any{"id": userID, "status": "created", "invited": invited})
 		return
@@ -13096,7 +13151,7 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("user id required"), http.StatusBadRequest)
 		return
 	}
-	canTouchUser, err := h.adminCanAccessUser(ctx, act, userID)
+	canTouchUser, err := h.userInTiers(ctx, tiers, userID)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -13136,14 +13191,14 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 	// DELETE /api/admin/users/{id}/tenant-access — take away everything an
 	// account whose home is elsewhere holds in the caller's tenant.
 	if len(parts) == 2 && parts[1] == "tenant-access" && r.Method == http.MethodDelete {
-		h.adminRemoveFromTenant(ctx, w, act, allAdminScope, adminCustomerIDs, userID)
+		h.adminRemoveFromTenant(ctx, w, act, tiers, userID)
 		return
 	}
 
 	// POST /api/admin/users/{id}/invite — resend the set-your-password email
 	if len(parts) == 2 && parts[1] == "invite" && r.Method == http.MethodPost {
 		// The sign-in account is its own tenant's (accountPermissionsFor).
-		if !h.accountActionAllowed(ctx, w, act, allAdminScope, adminCustomerIDs, userID, "re-invite",
+		if !h.accountActionAllowed(ctx, w, act, tiers, userID, "re-invite",
 			func(p accountPermissions) bool { return p.Reinvite }) {
 			return
 		}
@@ -13194,21 +13249,25 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("forbidden: you may not assign the %q role", body.Role), http.StatusForbidden)
 			return
 		}
+		// The caller's tier where the grant applies decides (adminTiers):
+		// the workspace's tenant, or — with no workspace — the account's own.
+		var tierRoles []string
 		if body.WorkspaceID != "" {
 			// A workspace-scoped grant is resource access, not a platform
 			// role — it decides which workspace someone reaches. Developers
 			// are admitted for business roles only; see canGrantWorkspaceRole.
-			if !canGrantWorkspaceRole(act.Roles, body.Role) {
-				jsonErr(w, fmt.Errorf("forbidden: you may not grant the %q role inside a workspace", body.Role), http.StatusForbidden)
-				return
-			}
-			canTouchWorkspace, err := h.adminCanAccessWorkspace(ctx, act, body.WorkspaceID)
-			if err != nil {
-				jsonErr(w, err, http.StatusInternalServerError)
-				return
-			}
-			if !canTouchWorkspace {
+			wsCustomer := h.customerOfWorkspace(ctx, body.WorkspaceID)
+			if wsCustomer == "" || !tiers.inScope(wsCustomer) {
 				jsonErr(w, fmt.Errorf("forbidden: workspace is outside your tenant scope"), http.StatusForbidden)
+				return
+			}
+			tierRoles = tiers.rolesIn(wsCustomer)
+			if !roleIsAssignableBy(tierRoles, body.Role) {
+				jsonErr(w, fmt.Errorf("forbidden: you may not assign the %q role in this workspace's tenant", body.Role), http.StatusForbidden)
+				return
+			}
+			if !canGrantWorkspaceRole(tierRoles, body.Role) {
+				jsonErr(w, fmt.Errorf("forbidden: you may not grant the %q role inside a workspace", body.Role), http.StatusForbidden)
 				return
 			}
 		}
@@ -13217,14 +13276,14 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("user not found"), http.StatusNotFound)
 			return
 		}
-		if err := platformWideGrantErr(act, body.Role, body.WorkspaceID, targetCustomer, allAdminScope, adminCustomerIDs); err != nil {
+		if err := platformWideGrantErr(act, body.Role, body.WorkspaceID, targetCustomer, tiers.all, tiers.ids()); err != nil {
 			jsonErr(w, err, http.StatusForbidden)
 			return
 		}
 		// Any role in a new tenant's workspace makes an account with no
 		// tenant and tenant_admin without a workspace that tenant's
 		// administrator (customerlessAdminGainsTenant).
-		if body.WorkspaceID != "" && !roleIsAssignableBy(act.Roles, "tenant_admin") {
+		if body.WorkspaceID != "" && !roleIsAssignableBy(tierRoles, "tenant_admin") {
 			gains, err := h.customerlessAdminGainsTenant(ctx, userID, body.WorkspaceID)
 			if err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
@@ -13237,9 +13296,13 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 		}
 		// Of an account whose home is elsewhere, only what it holds in the
 		// caller's tenant is the caller's: a grant with no workspace is not.
-		if body.WorkspaceID == "" && !act.hasRole("platform_admin") && !accountIsCallers(targetCustomer, allAdminScope, adminCustomerIDs) {
+		if body.WorkspaceID == "" && !act.hasRole("platform_admin") && !accountIsCallers(targetCustomer, tiers.all, tiers.ids()) {
 			jsonErr(w, fmt.Errorf("forbidden: this account does not belong to your tenant, so a role without a workspace is not yours to give it. "+
 				"Grant %s inside a workspace of your tenant instead", body.Role), http.StatusForbidden)
+			return
+		}
+		if body.WorkspaceID == "" && !roleIsAssignableBy(tiers.rolesIn(targetCustomer), body.Role) {
+			jsonErr(w, fmt.Errorf("forbidden: you may not assign the %q role in this account's tenant", body.Role), http.StatusForbidden)
 			return
 		}
 		var execErr error
@@ -13280,18 +13343,19 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 		}
 		if wsID != "" {
 			// Symmetric with the grant above: revoking workspace-scoped access
-			// is the same decision as granting it.
+			// is the same decision as granting it, by the caller's tier in the
+			// workspace's tenant (adminTiers).
 			if !canGrantWorkspaceRole(act.Roles, role) {
 				jsonErr(w, fmt.Errorf("forbidden: you may not remove the %q role from a workspace", role), http.StatusForbidden)
 				return
 			}
-			canTouchWorkspace, err := h.adminCanAccessWorkspace(ctx, act, wsID)
-			if err != nil {
-				jsonErr(w, err, http.StatusInternalServerError)
+			wsCustomer := h.customerOfWorkspace(ctx, wsID)
+			if wsCustomer == "" || !tiers.inScope(wsCustomer) {
+				jsonErr(w, fmt.Errorf("forbidden: workspace is outside your tenant scope"), http.StatusForbidden)
 				return
 			}
-			if !canTouchWorkspace {
-				jsonErr(w, fmt.Errorf("forbidden: workspace is outside your tenant scope"), http.StatusForbidden)
+			if tierRoles := tiers.rolesIn(wsCustomer); !roleIsAssignableBy(tierRoles, role) || !canGrantWorkspaceRole(tierRoles, role) {
+				jsonErr(w, fmt.Errorf("forbidden: you may not remove the %q role in this workspace's tenant", role), http.StatusForbidden)
 				return
 			}
 		} else if !act.hasRole("platform_admin") {
@@ -13304,9 +13368,13 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, fmt.Errorf("user not found"), http.StatusNotFound)
 				return
 			}
-			if !accountIsCallers(targetCustomer, allAdminScope, adminCustomerIDs) {
+			if !accountIsCallers(targetCustomer, tiers.all, tiers.ids()) {
 				jsonErr(w, fmt.Errorf("forbidden: this account does not belong to your tenant, so a role it holds without a workspace "+
 					"is not yours to remove. Remove its roles in your workspaces, or remove it from your tenant"), http.StatusForbidden)
+				return
+			}
+			if !roleIsAssignableBy(tiers.rolesIn(targetCustomer), role) {
+				jsonErr(w, fmt.Errorf("forbidden: you may not remove the %q role in this account's tenant", role), http.StatusForbidden)
 				return
 			}
 		}
@@ -13370,14 +13438,12 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("forbidden: you may not manage resource access"), http.StatusForbidden)
 			return
 		}
+		// Deciding who opens an application is its tenant's administrator's
+		// (adminTiers): an application grant, or a developer tier, in its
+		// tenant is no part of it.
 		appID := parts[3]
-		canTouchApp, err := h.adminCanAccessApp(ctx, act, appID)
-		if err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
-		}
-		if !canTouchApp {
-			jsonErr(w, fmt.Errorf("forbidden: app is outside your tenant scope"), http.StatusForbidden)
+		if !tiers.tenantAdminOf(h.customerOfApplication(ctx, appID)) {
+			jsonErr(w, fmt.Errorf("forbidden: app is outside your tenant scope: only a tenant admin of its tenant manages access to it"), http.StatusForbidden)
 			return
 		}
 		var event auditlog.EventType
@@ -13427,13 +13493,8 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		modelID := parts[3]
-		canTouchModel, err := h.adminCanAccessModel(ctx, act, modelID)
-		if err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
-		}
-		if !canTouchModel {
-			jsonErr(w, fmt.Errorf("forbidden: model is outside your tenant scope"), http.StatusForbidden)
+		if !tiers.tenantAdminOf(h.customerOfModel(ctx, modelID)) {
+			jsonErr(w, fmt.Errorf("forbidden: model is outside your tenant scope: only a tenant admin of its tenant manages access to it"), http.StatusForbidden)
 			return
 		}
 		var event auditlog.EventType
@@ -13490,7 +13551,7 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 		}
 		// Name and address are the account's, so its own tenant's
 		// (accountPermissionsFor).
-		if !h.accountActionAllowed(ctx, w, act, allAdminScope, adminCustomerIDs, userID, "rename",
+		if !h.accountActionAllowed(ctx, w, act, tiers, userID, "rename",
 			func(p accountPermissions) bool { return p.Rename }) {
 			return
 		}
@@ -13556,7 +13617,7 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 		// The account, and its identity-provider account, are its own
 		// tenant's to delete (accountPermissionsFor): an account of another
 		// tenant, or of none, is removed from this tenant instead.
-		if !h.accountActionAllowed(ctx, w, act, allAdminScope, adminCustomerIDs, userID, "delete",
+		if !h.accountActionAllowed(ctx, w, act, tiers, userID, "delete",
 			func(p accountPermissions) bool { return p.Delete }) {
 			return
 		}

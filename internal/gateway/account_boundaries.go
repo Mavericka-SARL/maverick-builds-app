@@ -5,13 +5,14 @@ package gateway
 // An account has a home: its identity.user customer_id. An administrator who
 // is not a platform admin changes an account itself — renames, deletes,
 // disables, re-invites it, changes its e-mail — only when that home is one of
-// the tenants the administrator administers (adminScopeCustomerIDs), it is
-// not a platform admin, and the administrator may revoke every role it holds.
-// An account of another tenant, or of none, that
-// holds roles in the administrator's workspaces is listed, and can be removed
-// from the tenant: what it holds there goes, nothing else about it changes.
-// Inviting an address that already has an account adds it to the tenant
-// the same way, inside a workspace, and leaves the account as it is.
+// the tenants the administrator holds a tier in (adminTiers), it is not a
+// platform admin, and the administrator's tier THERE may revoke every role it
+// holds. An account of another tenant, or of none, that holds roles in the
+// workspaces of a tenant the administrator is tenant admin of is listed, and
+// can be removed from that tenant: what it holds there goes, nothing else
+// about it changes. Inviting an address that already has an account adds it
+// to the tenant the same way, inside a workspace, and leaves the account as
+// it is.
 //
 // accountPermissionsFor is the one rule: the users list reports it to the
 // console, and each of these mutations is refused by it.
@@ -50,8 +51,13 @@ type accountFacts struct {
 	PlatformWide  bool // platformWideBuilderSQL
 	Self          bool // the caller's own account
 	// ScopeRoles are the roles the account holds in workspaces of the
-	// caller's tenants.
+	// tenants the caller is tenant admin of (adminTiers.adminIDs): what
+	// Remove from this tenant takes.
 	ScopeRoles []string
+	// HoldsInScope is whether the account holds anything there — a
+	// workspace role, a business-role membership, an application or model
+	// grant — that Remove from this tenant would take (removeTenantAccess).
+	HoldsInScope bool
 	// Roles are every role the account holds, in any workspace or none.
 	Roles []string
 }
@@ -66,8 +72,8 @@ type accountPermissions struct {
 	RemoveFromTenant bool `json:"remove_from_tenant"`
 }
 
-// homeTenant classifies customerID against the caller's admin scope
-// (adminScopeCustomerIDs). A caller whose scope is every tenant counts every
+// homeTenant classifies customerID against the tenants the caller holds a
+// tier in (adminTiers.ids). A caller whose scope is every tenant counts every
 // account that has a tenant as within it.
 func homeTenant(customerID string, scopeAll bool, scope []string) string {
 	switch {
@@ -82,7 +88,7 @@ func homeTenant(customerID string, scopeAll bool, scope []string) string {
 
 // accountIsCallers reports whether an account whose customer_id is
 // customerID is the caller's to change (scopeAll and scope are the caller's
-// adminScopeCustomerIDs): its home is one of the caller's tenants, or — for a
+// adminTiers all and ids): its home is one of the caller's tenants, or — for a
 // caller whose scope is every tenant, a platform-wide builder, whose own
 // invitations make accounts of no tenant — it has no tenant at all. Decided
 // for tenant admins (2026-09-30); a platform-level builder keeps what it had.
@@ -96,37 +102,43 @@ func accountIsCallers(customerID string, scopeAll bool, scope []string) bool {
 // scope is every tenant, so "this tenant" names none). Anyone else changes
 // only an account that is its own (accountIsCallers), never a platform admin
 // or a platform-wide builder (which only a platform admin modifies), and
-// only one whose every role it may revoke (roleIsAssignableBy): deleting an
-// account takes all of them, and renaming or re-inviting it is no less its
-// administrator's business. A developer could delete its own tenant's
-// administrator, identity-provider account and all, though it may not
-// revoke that administrator's role (2026-09-30). Its own account it renames
-// and re-invites whatever it holds. It removes from its tenant an account
-// whose home is elsewhere — when it may manage resource access at all, and
-// may revoke every role the account holds there (a tenant_admin grant a
+// only one whose every role its tier in the account's home tenant may revoke
+// (adminTiers.rolesIn, roleIsAssignableBy): deleting an account takes all of
+// them, and renaming or re-inviting it is no less its administrator's
+// business. A developer could delete its own tenant's administrator,
+// identity-provider account and all, though it may not revoke that
+// administrator's role (2026-09-30), and a tenant admin elsewhere that is a
+// developer of the home tenant read its tenant_admin tier there. Its own
+// account it renames and re-invites whatever it holds. It removes from the
+// tenants it is tenant admin of an account whose home is none of them — when
+// it may revoke every role the account holds there (a tenant_admin grant a
 // platform admin made stays).
-func accountPermissionsFor(act *actor, scopeAll bool, scope []string, f accountFacts) (string, accountPermissions) {
-	home := homeTenant(f.CustomerID, scopeAll, scope)
-	if act.hasRole("platform_admin") {
+func accountPermissionsFor(act *actor, tiers adminTiers, f accountFacts) (string, accountPermissions) {
+	home := homeTenant(f.CustomerID, tiers.all, tiers.ids())
+	if tiers.platform {
 		return home, accountPermissions{Rename: true, Delete: !f.Self, Disable: true, Reinvite: true}
 	}
 	if f.PlatformAdmin || f.PlatformWide {
 		return home, accountPermissions{}
 	}
-	own := accountIsCallers(f.CustomerID, scopeAll, scope)
-	change := own && (f.Self || revokesEvery(act, f.Roles))
+	own := accountIsCallers(f.CustomerID, tiers.all, tiers.ids())
+	change := own && (f.Self || revokesEvery(tiers.rolesIn(f.CustomerID), f.Roles))
 	p := accountPermissions{Rename: change, Delete: change && !f.Self, Disable: change, Reinvite: change}
-	p.RemoveFromTenant = !own && !scopeAll && !f.Self && canManageResourceAccess(act.Roles) && revokesEvery(act, f.ScopeRoles)
+	admin := tiers.adminIDs()
+	p.RemoveFromTenant = !tiers.all && !f.Self && f.HoldsInScope && !slices.Contains(admin, f.CustomerID) &&
+		revokesEvery([]string{"tenant_admin"}, f.ScopeRoles)
 	return home, p
 }
 
-// revokesEvery reports whether act may revoke every one of roles.
-func revokesEvery(act *actor, roles []string) bool {
-	return !slices.ContainsFunc(roles, func(r string) bool { return !roleIsAssignableBy(act.Roles, r) })
+// revokesEvery reports whether a caller whose tier is callerRoles may revoke
+// every one of roles.
+func revokesEvery(callerRoles, roles []string) bool {
+	return !slices.ContainsFunc(roles, func(r string) bool { return !roleIsAssignableBy(callerRoles, r) })
 }
 
 // loadAccountFacts reads accountFacts for ids, keyed by the id as the
-// database spells it. scope is the caller's adminScopeCustomerIDs.
+// database spells it. scope is the tenants the caller is tenant admin of
+// (adminTiers.adminIDs), which ScopeRoles is read over.
 func (h *handler) loadAccountFacts(ctx context.Context, act *actor, scope, ids []string) (map[string]accountFacts, error) {
 	if scope == nil {
 		scope = []string{}
@@ -140,7 +152,18 @@ func (h *handler) loadAccountFacts(ctx context.Context, act *actor, scope, ids [
 		             JOIN core.workspace w ON w.id = ra.workspace_id
 		             WHERE ra.user_id = u.id AND w.customer_id::text = ANY($3::text[])
 		             ORDER BY 1),
-		       ARRAY(SELECT DISTINCT ra.role::text FROM identity.role_assignment ra WHERE ra.user_id = u.id ORDER BY 1)
+		       ARRAY(SELECT DISTINCT ra.role::text FROM identity.role_assignment ra WHERE ra.user_id = u.id ORDER BY 1),
+		       EXISTS (SELECT 1 FROM identity.role_assignment ra JOIN core.workspace w ON w.id = ra.workspace_id
+		               WHERE ra.user_id = u.id AND w.customer_id::text = ANY($3::text[]))
+		       OR EXISTS (SELECT 1 FROM identity.business_role_member brm
+		                  JOIN identity.business_role br ON br.id = brm.role_id JOIN core.workspace w ON w.id = br.workspace_id
+		                  WHERE brm.user_id = u.id AND w.customer_id::text = ANY($3::text[]))
+		       OR EXISTS (SELECT 1 FROM identity.user_app_access ua JOIN core.application a ON a.id = ua.application_id
+		                  LEFT JOIN core.workspace aw ON aw.id = a.workspace_id
+		                  WHERE ua.user_id = u.id AND COALESCE(a.customer_id, aw.customer_id)::text = ANY($3::text[]))
+		       OR EXISTS (SELECT 1 FROM identity.user_model_access um JOIN core.model m ON m.id = um.model_id
+		                  JOIN core.application a ON a.id = m.application_id LEFT JOIN core.workspace aw ON aw.id = a.workspace_id
+		                  WHERE um.user_id = u.id AND COALESCE(a.customer_id, aw.customer_id)::text = ANY($3::text[]))
 		FROM identity."user" u
 		WHERE u.id = ANY($1::uuid[])`, ids, act.UserID, scope)
 	if err != nil {
@@ -150,7 +173,7 @@ func (h *handler) loadAccountFacts(ctx context.Context, act *actor, scope, ids [
 	out := make(map[string]accountFacts, len(ids))
 	for rows.Next() {
 		var f accountFacts
-		if err := rows.Scan(&f.ID, &f.Email, &f.CustomerID, &f.PlatformAdmin, &f.PlatformWide, &f.Self, &f.ScopeRoles, &f.Roles); err != nil {
+		if err := rows.Scan(&f.ID, &f.Email, &f.CustomerID, &f.PlatformAdmin, &f.PlatformWide, &f.Self, &f.ScopeRoles, &f.Roles, &f.HoldsInScope); err != nil {
 			return nil, err
 		}
 		out[f.ID] = f
@@ -159,7 +182,7 @@ func (h *handler) loadAccountFacts(ctx context.Context, act *actor, scope, ids [
 }
 
 // accountFactsOf is loadAccountFacts for one account, spelled any way a uuid
-// can be. found is false when there is no such account.
+// can be (scope as there). found is false when there is no such account.
 func (h *handler) accountFactsOf(ctx context.Context, act *actor, scope []string, userID string) (f accountFacts, found bool, err error) {
 	facts, err := h.loadAccountFacts(ctx, act, scope, []string{userID})
 	if err != nil {
@@ -185,9 +208,9 @@ func accountActionRefusal(home, action string) error {
 // accountActionAllowed answers the refusal of an account-level action the
 // caller may not take on userID (accountPermissionsFor) and returns false.
 // allowed picks the action's permission; action names it in the refusal.
-func (h *handler) accountActionAllowed(ctx context.Context, w http.ResponseWriter, act *actor, scopeAll bool, scope []string,
+func (h *handler) accountActionAllowed(ctx context.Context, w http.ResponseWriter, act *actor, tiers adminTiers,
 	userID, action string, allowed func(accountPermissions) bool) bool {
-	f, found, err := h.accountFactsOf(ctx, act, scope, userID)
+	f, found, err := h.accountFactsOf(ctx, act, tiers.adminIDs(), userID)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return false
@@ -196,12 +219,13 @@ func (h *handler) accountActionAllowed(ctx context.Context, w http.ResponseWrite
 		jsonErr(w, fmt.Errorf("user not found"), http.StatusNotFound)
 		return false
 	}
-	home, p := accountPermissionsFor(act, scopeAll, scope, f)
+	home, p := accountPermissionsFor(act, tiers, f)
 	if allowed(p) {
 		return true
 	}
-	if accountIsCallers(f.CustomerID, scopeAll, scope) && !f.PlatformAdmin && !f.PlatformWide {
-		unrevocable := slices.DeleteFunc(slices.Clone(f.Roles), func(r string) bool { return roleIsAssignableBy(act.Roles, r) })
+	if accountIsCallers(f.CustomerID, tiers.all, tiers.ids()) && !f.PlatformAdmin && !f.PlatformWide {
+		tierRoles := tiers.rolesIn(f.CustomerID)
+		unrevocable := slices.DeleteFunc(slices.Clone(f.Roles), func(r string) bool { return roleIsAssignableBy(tierRoles, r) })
 		jsonErr(w, fmt.Errorf("forbidden: this account holds a role you may not revoke (%s), so you may not %s it either",
 			strings.Join(unrevocable, ", "), action), http.StatusForbidden)
 		return false
@@ -212,7 +236,7 @@ func (h *handler) accountActionAllowed(ctx context.Context, w http.ResponseWrite
 
 // withUserPermissions fills each listed user's home_tenant and permissions
 // for the caller.
-func (h *handler) withUserPermissions(ctx context.Context, act *actor, scopeAll bool, scope []string, users []adminUserItem) error {
+func (h *handler) withUserPermissions(ctx context.Context, act *actor, tiers adminTiers, users []adminUserItem) error {
 	if len(users) == 0 {
 		return nil
 	}
@@ -220,7 +244,7 @@ func (h *handler) withUserPermissions(ctx context.Context, act *actor, scopeAll 
 	for i, u := range users {
 		ids[i] = u.ID
 	}
-	facts, err := h.loadAccountFacts(ctx, act, scope, ids)
+	facts, err := h.loadAccountFacts(ctx, act, tiers.adminIDs(), ids)
 	if err != nil {
 		return err
 	}
@@ -229,9 +253,11 @@ func (h *handler) withUserPermissions(ctx context.Context, act *actor, scopeAll 
 		if !ok {
 			// Deleted between the two reads: nothing may be done to it.
 			users[i].HomeTenant = homeNone
+			users[i].GrantableRoles = []string{}
 			continue
 		}
-		users[i].HomeTenant, users[i].Permissions = accountPermissionsFor(act, scopeAll, scope, f)
+		users[i].HomeTenant, users[i].Permissions = accountPermissionsFor(act, tiers, f)
+		users[i].GrantableRoles = unscopedGrantableRoles(act, tiers, f.CustomerID)
 	}
 	return nil
 }
@@ -251,8 +277,8 @@ type revokedGrant struct {
 // accounts that is platform-wide now (platformWideBuilderSQL): an account
 // with no tenant that held one was narrowed to its application and model
 // grants, and the removal in tx took the last of them. That grant is the only
-// one that makes such an account platform-wide, and so an administrator of
-// every tenant (adminScopeCustomerIDs); once it is gone the account builds
+// one that makes such an account platform-wide, and so a developer of every
+// tenant (adminTiers); once it is gone the account builds
 // nothing. A platform admin's is left alone: its reach is every tenant with
 // it or without. It then checks no account is left platform-wide, and fails
 // — rolling the removal back — if one is.
@@ -408,11 +434,12 @@ func removeTenantAccess(ctx context.Context, tx pgx.Tx, userID string, scope []s
 
 // adminRemoveFromTenant is DELETE /api/admin/users/{id}/tenant-access: the
 // caller takes away everything an account whose home is elsewhere holds in
-// the caller's tenants (removeTenantAccess), in one transaction that locks
-// the account. If that was the last application or model grant narrowing a
-// developer with no tenant, its unscoped developer grant goes too
-// (revokeUnnarrowed). Refused as accountPermissionsFor says.
-func (h *handler) adminRemoveFromTenant(ctx context.Context, w http.ResponseWriter, act *actor, scopeAll bool, scope []string, userID string) {
+// the tenants the caller is tenant admin of (removeTenantAccess), in one
+// transaction that locks the account. If that was the last application or
+// model grant narrowing a developer with no tenant, its unscoped developer
+// grant goes too (revokeUnnarrowed). Refused as accountPermissionsFor says.
+func (h *handler) adminRemoveFromTenant(ctx context.Context, w http.ResponseWriter, act *actor, tiers adminTiers, userID string) {
+	scope := tiers.adminIDs()
 	f, found, err := h.accountFactsOf(ctx, act, scope, userID)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
@@ -422,18 +449,22 @@ func (h *handler) adminRemoveFromTenant(ctx context.Context, w http.ResponseWrit
 		jsonErr(w, fmt.Errorf("user not found"), http.StatusNotFound)
 		return
 	}
-	home, p := accountPermissionsFor(act, scopeAll, scope, f)
+	_, p := accountPermissionsFor(act, tiers, f)
+	// Where the account's home is, seen from the tenants the removal is from.
+	home := homeTenant(f.CustomerID, false, scope)
 	if !p.RemoveFromTenant {
 		switch {
-		case !canManageResourceAccess(act.Roles):
+		case !tiers.platform && len(scope) == 0:
 			jsonErr(w, fmt.Errorf("forbidden: only a tenant admin can remove an account from the tenant"), http.StatusForbidden)
-		case scopeAll:
+		case tiers.all:
 			jsonErr(w, fmt.Errorf("your scope is every tenant, so there is no one tenant to remove this account from: "+
 				"revoke its roles and grants one by one, or delete the account"), http.StatusBadRequest)
 		case f.Self:
 			jsonErr(w, fmt.Errorf("you cannot remove yourself from your tenant; ask another administrator"), http.StatusForbidden)
 		case home == homeOwn:
 			jsonErr(w, fmt.Errorf("this account belongs to your tenant: delete it, or revoke its roles one by one"), http.StatusBadRequest)
+		case !f.HoldsInScope:
+			jsonErr(w, fmt.Errorf("this account holds nothing in a tenant you administer, so there is nothing to remove it from"), http.StatusBadRequest)
 		default:
 			jsonErr(w, fmt.Errorf("forbidden: this account holds a role in your tenant that only a platform admin can remove (%s)",
 				strings.Join(f.ScopeRoles, ", ")), http.StatusForbidden)
@@ -462,7 +493,7 @@ func (h *handler) adminRemoveFromTenant(ctx context.Context, w http.ResponseWrit
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
-	unrevocable = slices.DeleteFunc(unrevocable, func(r string) bool { return roleIsAssignableBy(act.Roles, r) })
+	unrevocable = slices.DeleteFunc(unrevocable, func(r string) bool { return roleIsAssignableBy([]string{"tenant_admin"}, r) })
 	if len(unrevocable) > 0 {
 		jsonErr(w, fmt.Errorf("forbidden: this account holds a role in your tenant that only a platform admin can remove (%s)",
 			strings.Join(unrevocable, ", ")), http.StatusForbidden)
@@ -534,20 +565,18 @@ func (h *handler) existingAccountID(ctx context.Context, email, sub string) (str
 // had an account.
 //
 // Whatever cannot be added answers the same, grants nothing and is audited
-// for the platform only (refuseExistingAccount): a request with no role or
-// no workspace, which a new address would have been created for; a platform
-// admin's account or a platform-wide builder's, which only a platform admin
-// changes; and an account with no tenant holding tenant_admin without a
-// workspace, which any role in a new tenant's workspace would make that
-// tenant's administrator (customerlessAdminGainsTenant). A 400 naming the
-// existing account, and the real id of a platform admin's, used to tell the
-// caller the address was taken, and whose it was (2026-09-30).
-func (h *handler) addExistingAccount(ctx context.Context, w http.ResponseWriter, act *actor, userID, email, role, workspaceID string) {
-	if role == "" || workspaceID == "" {
-		h.refuseExistingAccount(ctx, w, act, userID, email, role, workspaceID,
-			"an existing account is added to a tenant only with a role inside a workspace")
-		return
-	}
+// for the platform only (refuseExistingAccount): a platform admin's account
+// or a platform-wide builder's, which only a platform admin changes; and an
+// account with no tenant holding tenant_admin without a workspace, which any
+// role in a new tenant's workspace would make that tenant's administrator
+// (customerlessAdminGainsTenant). A 400 naming the existing account, and the
+// real id of a platform admin's, used to tell the caller the address was
+// taken, and whose it was (2026-09-30). A request with no role or no
+// workspace, which used to be answered here as done and grant nothing, is
+// refused before the address is looked at, alike for a new one
+// (errInviteNeedsRoleAndWorkspace). tierRoles is the caller's tier in the
+// workspace's tenant (adminTiers).
+func (h *handler) addExistingAccount(ctx context.Context, w http.ResponseWriter, act *actor, tierRoles []string, userID, email, role, workspaceID string) {
 	var platformAdmin, platformWide bool
 	if err := h.db.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1 FROM identity.role_assignment WHERE user_id = $1::uuid AND role = 'platform_admin'),
@@ -560,7 +589,7 @@ func (h *handler) addExistingAccount(ctx context.Context, w http.ResponseWriter,
 			"a platform admin or platform-wide builder is modified only by a platform admin")
 		return
 	}
-	if !roleIsAssignableBy(act.Roles, "tenant_admin") {
+	if !roleIsAssignableBy(tierRoles, "tenant_admin") {
 		gains, err := h.customerlessAdminGainsTenant(ctx, userID, workspaceID)
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
@@ -591,6 +620,13 @@ func (h *handler) addExistingAccount(ctx context.Context, w http.ResponseWriter,
 	}
 	jsonOK(w, map[string]any{"id": userID, "status": "created", "invited": h.kc != nil})
 }
+
+// errInviteNeedsRoleAndWorkspace refuses, to anyone but a platform admin, an
+// invitation that does not name both a role and a workspace. It is checked
+// before the address is looked at, so a new address and an existing account
+// are answered alike.
+var errInviteNeedsRoleAndWorkspace = errors.New("role and workspace_id are both required: an invitation gives a role " +
+	"inside a workspace, and someone who already has an account is added only that way")
 
 // refuseExistingAccount answers an invitation of an existing account that
 // adds nothing as a new invitation is answered — under an id that names no
@@ -624,7 +660,7 @@ const customerlessAdminRefusal = "this account has no tenant and holds tenant_ad
 // workspaceID would make it administrator of a tenant it does not administer
 // yet. An account with no tenant of its own that holds tenant_admin without a
 // workspace administers every tenant it holds any workspace role in
-// (adminScopeCustomerIDs): even business_user in a new tenant's workspace is
+// (adminTiers): even business_user in a new tenant's workspace is
 // tenant_admin there, which only a platform admin grants (assignableRoles).
 func (h *handler) customerlessAdminGainsTenant(ctx context.Context, userID, workspaceID string) (bool, error) {
 	var gains bool

@@ -275,14 +275,14 @@ func TestInviteExistingAccountAddsItToTheTenant(t *testing.T) {
 	invite("ab-existing@gb.test", "business_user", f.ws2, http.StatusForbidden)
 
 	fresh := invite("ab-fresh@gb.test", "business_user", f.ws1b, http.StatusOK)
-	// An existing account is added inside a workspace, or not at all — and
-	// answered as a new address sent the same request is: no error naming
-	// the account, and an id that is not its own.
-	for i, c := range [][2]string{{"business_user", ""}, {"", ""}} {
-		got := invite("ab-existing@gb.test", c[0], c[1], http.StatusOK)
-		newAddr := invite(fmt.Sprintf("ab-new-%d@gb.test", i), c[0], c[1], http.StatusOK)
-		if !slices.Equal(keys(got), keys(newAddr)) || got["status"] != newAddr["status"] || got["invited"] != newAddr["invited"] || got["id"] == ex {
-			t.Errorf("existing address with role %q and no workspace answered %v, a new one %v", c[0], got, newAddr)
+	// An invitation names a role and a workspace (decided 2026-09-30): one
+	// that does not is refused before the address is looked at, alike for an
+	// existing account and a new address.
+	for i, c := range [][2]string{{"business_user", ""}, {"", ""}, {"", f.ws1b}} {
+		got := invite("ab-existing@gb.test", c[0], c[1], http.StatusBadRequest)
+		newAddr := invite(fmt.Sprintf("ab-new-%d@gb.test", i), c[0], c[1], http.StatusBadRequest)
+		if got["error"] == nil || got["error"] != newAddr["error"] {
+			t.Errorf("existing address with role %q and workspace %q answered %v, a new one %v", c[0], c[1], got, newAddr)
 		}
 	}
 	added := invite("AB-Existing@GB.test", "business_user", f.ws1b, http.StatusOK)
@@ -319,10 +319,11 @@ func TestInviteExistingAccountAddsItToTheTenant(t *testing.T) {
 		AND metadata->>'existing_account'='true' AND metadata->>'granted'='true'`, ex); n != "2" {
 		t.Errorf("%s audited additions, want 2", n)
 	}
-	// The refusals are audited, for the platform only.
+	// Refused before the address was looked at, nothing about the account
+	// was recorded.
 	if n := f.one(t, `SELECT count(*)::text FROM audit.audit_event WHERE event_type='user.role_granted' AND resource_id=$1
-		AND metadata->>'granted'='false' AND metadata->>'refused' <> '' AND metadata->>'visibility'='platform'`, ex); n != "2" {
-		t.Errorf("%s audited refusals without a workspace, want 2", n)
+		AND metadata->>'granted'='false'`, ex); n != "0" {
+		t.Errorf("%s audited refusals without a workspace, want none", n)
 	}
 
 	// Added, removed and added again: told once a day per workspace.
@@ -467,8 +468,10 @@ func TestAccountActionsNeedEveryRoleRevocable(t *testing.T) {
 	}
 }
 
-// A builder whose scope is every tenant keeps the accounts it invites, which
-// have no tenant: it renames, re-invites and deletes them as before.
+// A builder whose scope is every tenant keeps the accounts it invites: it
+// renames, re-invites and deletes them as before. They belong to the tenant
+// of the workspace they are invited into (decided 2026-09-30); they used to
+// belong to none.
 func TestPlatformWideBuilderKeepsItsInvitees(t *testing.T) {
 	f := setupDevRouteFixture(t)
 	const pw = "ab-pw-dev"
@@ -479,7 +482,10 @@ func TestPlatformWideBuilderKeepsItsInvitees(t *testing.T) {
 		t.Fatal(err)
 	}
 	id, _ := made["id"].(string)
-	if got := f.listUsers(t, pw)[id]; got.HomeTenant != "none" ||
+	if got := f.one(t, `SELECT COALESCE(customer_id::text, '-') FROM identity.user WHERE id=$1::uuid`, id); got != f.cust1 {
+		t.Errorf("its invitee's tenant: %s, want tenant 1's %s", got, f.cust1)
+	}
+	if got := f.listUsers(t, pw)[id]; got.HomeTenant != "own" ||
 		got.Permissions != (listedPermissions{Rename: true, Delete: true, Disable: true, Reinvite: true}) {
 		t.Errorf("its invitee in its list: %+v", got)
 	}

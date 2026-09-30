@@ -1319,7 +1319,7 @@ components:
 
     AdminUser:
       type: object
-      required: [id, email, display_name, created_at, assignments, app_ids, model_ids, home_tenant, permissions]
+      required: [id, email, display_name, created_at, assignments, app_ids, model_ids, home_tenant, permissions, grantable_roles]
       properties:
         id:            { type: string, format: uuid }
         email:         { type: string, format: email }
@@ -1351,6 +1351,15 @@ components:
             for a caller whose scope is every tenant, any tenant), another
             tenant ("other"), or no tenant ("none").
         permissions: { $ref: "#/components/schemas/AdminUserPermissions" }
+        grantable_roles:
+          type: array
+          items: { type: string }
+          description: >-
+            The roles the caller may grant this account with no workspace, by
+            its tier in the account's own tenant: none on an account whose
+            home_tenant is "other", and for an account with no tenant never
+            developer or tenant_admin unless the caller is a platform admin.
+            Inside a workspace, that workspace's grantable_roles apply.
 
     AdminUserPermissions:
       type: object
@@ -1446,12 +1455,28 @@ components:
 
     AdminWorkspace:
       type: object
-      required: [id, name, customer_name, customer_id]
+      required: [id, name, customer_name, customer_id, grantable_roles, manage_access]
       properties:
         id:            { type: string, format: uuid }
         name:          { type: string }
         customer_name: { type: string }
         customer_id:   { type: string, format: uuid }
+        grantable_roles:
+          type: array
+          items: { type: string }
+          description: >-
+            The roles the caller may grant inside this workspace (to an
+            existing account, or by invitation), by its tier in the
+            workspace's tenant: a tenant admin of that tenant every role but
+            platform_admin, a developer of it the business roles. Roles count
+            per tenant: what the caller holds in another tenant adds nothing
+            here.
+        manage_access:
+          type: boolean
+          description: >-
+            Whether the caller may grant and revoke access to this tenant's
+            applications and models: a platform admin, or a tenant admin of
+            the workspace's tenant.
 
     AdminTenant:
       type: object
@@ -5947,7 +5972,12 @@ paths:
       operationId: listAdminUsers
       tags: [Admin]
       summary: List users for administration
-      description: Available to platform_admin, tenant_admin, and developer roles. Platform admins see all users; tenant admins and developers are scoped to reachable tenant/workspace/app/model access.
+      description: >-
+        Available to platform_admin, tenant_admin, and developer roles. Platform
+        admins see all users; anyone else sees the members of the tenants it
+        holds tenant_admin or developer in. Its tier in each tenant is decided
+        by the roles it holds there, and each user's `permissions` by the tier
+        in that user's own tenant; an application or model grant is no tier.
       responses:
         "200":
           description: User list
@@ -5961,29 +5991,34 @@ paths:
       tags: [Admin]
       summary: Create a user for administration
       description: >
-        Available to platform_admin, tenant_admin, and developer roles. Non-platform
-        admins create users in their tenant scope and cannot assign platform-level
-        roles during creation.
+        Available to platform_admin, tenant_admin, and developer roles. Anyone
+        but a platform admin names both a role and a workspace_id: without
+        either the request is answered 400, before the address is looked at,
+        alike for a new address and an existing account. The role must be one
+        the caller's tier in the workspace's tenant may grant there (its
+        tenant_admin or developer roles held in that tenant only). The new
+        account belongs to the workspace's tenant, whoever creates it; a
+        platform admin's created without a workspace belongs to none.
 
 
         An address (compared case-insensitively) or identity-provider subject
         that already has an account is not created again. For anyone but a
         platform admin, the requested role is added to that account inside
-        workspace_id (a workspace of the caller's tenant, and a role the
-        caller may grant there, checked as for a new address) and nothing else
-        about the account changes: not its name, e-mail, tenant, active flag
-        or identity-provider account, and no invitation is sent. The person is
+        workspace_id (checked as for a new address) and nothing else about the
+        account changes: not its name, e-mail, tenant, active flag or
+        identity-provider account, and no invitation is sent. The person is
         notified that they were given access (notification centre, and e-mail
         when the workspace's tenant sends notifications by e-mail; at most
         once a day per workspace and three times a day per tenant). The answer
         is the same as for a new invitation. Nothing is granted — with the
         same answer, under an id that names no account, and the refusal
-        audited for the platform only — when no role or no workspace is given,
-        to a platform admin's account or a platform-wide builder's, and to an
-        account with no tenant holding tenant_admin without a workspace, which
-        a role in a new tenant's workspace would make that tenant's
-        administrator. A platform admin creating over an existing address
-        adopts it as before.
+        audited for the platform only — to a platform admin's account or a
+        platform-wide builder's, and to an account with no tenant holding
+        tenant_admin without a workspace, which a role in a new tenant's
+        workspace would make that tenant's administrator. A platform admin
+        creating over an existing address adopts it as before, and the
+        account keeps its tenant (none, if it had none): only a new account
+        takes the workspace's.
 
 
         Creates a real identity-provider account and emails a set-your-password
@@ -6008,9 +6043,9 @@ paths:
                   type: string
                   format: uuid
                   description: >-
-                    The workspace the role is held in. An address that
-                    already has an account is added only inside a workspace
-                    (see above).
+                    The workspace the role is held in, and whose tenant the
+                    new account belongs to. Required, with role, for anyone
+                    but a platform admin.
       responses:
         "200":
           description: >-

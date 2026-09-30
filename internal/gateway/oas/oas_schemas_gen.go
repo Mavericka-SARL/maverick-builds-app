@@ -791,6 +791,11 @@ type AdminUser struct {
 	// another tenant ("other"), or no tenant ("none").
 	HomeTenant  AdminUserHomeTenant  `json:"home_tenant"`
 	Permissions AdminUserPermissions `json:"permissions"`
+	// The roles the caller may grant this account with no workspace, by its tier in the account's own
+	// tenant: none on an account whose home_tenant is "other", and for an account with no tenant never
+	// developer or tenant_admin unless the caller is a platform admin. Inside a workspace, that
+	// workspace's grantable_roles apply.
+	GrantableRoles []string `json:"grantable_roles"`
 }
 
 // GetID returns the value of ID.
@@ -838,6 +843,11 @@ func (s *AdminUser) GetPermissions() AdminUserPermissions {
 	return s.Permissions
 }
 
+// GetGrantableRoles returns the value of GrantableRoles.
+func (s *AdminUser) GetGrantableRoles() []string {
+	return s.GrantableRoles
+}
+
 // SetID sets the value of ID.
 func (s *AdminUser) SetID(val uuid.UUID) {
 	s.ID = val
@@ -881,6 +891,11 @@ func (s *AdminUser) SetHomeTenant(val AdminUserHomeTenant) {
 // SetPermissions sets the value of Permissions.
 func (s *AdminUser) SetPermissions(val AdminUserPermissions) {
 	s.Permissions = val
+}
+
+// SetGrantableRoles sets the value of GrantableRoles.
+func (s *AdminUser) SetGrantableRoles(val []string) {
+	s.GrantableRoles = val
 }
 
 // Where the account's own tenant (identity.user customer_id) is, seen from the caller: one of the
@@ -1009,6 +1024,14 @@ type AdminWorkspace struct {
 	Name         string    `json:"name"`
 	CustomerName string    `json:"customer_name"`
 	CustomerID   uuid.UUID `json:"customer_id"`
+	// The roles the caller may grant inside this workspace (to an existing account, or by invitation),
+	// by its tier in the workspace's tenant: a tenant admin of that tenant every role but platform_admin,
+	//  a developer of it the business roles. Roles count per tenant: what the caller holds in another
+	// tenant adds nothing here.
+	GrantableRoles []string `json:"grantable_roles"`
+	// Whether the caller may grant and revoke access to this tenant's applications and models: a
+	// platform admin, or a tenant admin of the workspace's tenant.
+	ManageAccess bool `json:"manage_access"`
 }
 
 // GetID returns the value of ID.
@@ -1031,6 +1054,16 @@ func (s *AdminWorkspace) GetCustomerID() uuid.UUID {
 	return s.CustomerID
 }
 
+// GetGrantableRoles returns the value of GrantableRoles.
+func (s *AdminWorkspace) GetGrantableRoles() []string {
+	return s.GrantableRoles
+}
+
+// GetManageAccess returns the value of ManageAccess.
+func (s *AdminWorkspace) GetManageAccess() bool {
+	return s.ManageAccess
+}
+
 // SetID sets the value of ID.
 func (s *AdminWorkspace) SetID(val uuid.UUID) {
 	s.ID = val
@@ -1049,6 +1082,16 @@ func (s *AdminWorkspace) SetCustomerName(val string) {
 // SetCustomerID sets the value of CustomerID.
 func (s *AdminWorkspace) SetCustomerID(val uuid.UUID) {
 	s.CustomerID = val
+}
+
+// SetGrantableRoles sets the value of GrantableRoles.
+func (s *AdminWorkspace) SetGrantableRoles(val []string) {
+	s.GrantableRoles = val
+}
+
+// SetManageAccess sets the value of ManageAccess.
+func (s *AdminWorkspace) SetManageAccess(val bool) {
+	s.ManageAccess = val
 }
 
 // Ref: #/components/schemas/AiChatMessage
@@ -4470,8 +4513,8 @@ type CreateAdminUserReq struct {
 	FirstName   OptString `json:"first_name"`
 	LastName    OptString `json:"last_name"`
 	Role        OptString `json:"role"`
-	// The workspace the role is held in. An address that already has an account is added only inside a
-	// workspace (see above).
+	// The workspace the role is held in, and whose tenant the new account belongs to. Required, with
+	// role, for anyone but a platform admin.
 	WorkspaceID OptUUID `json:"workspace_id"`
 }
 

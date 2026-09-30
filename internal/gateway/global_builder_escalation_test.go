@@ -127,9 +127,12 @@ func TestTenantAdminCannotMakePlatformWideBuilder(t *testing.T) {
 	}
 
 	// Creating the account is not a way around it: a platform-wide builder
-	// that is also tenant_admin (its scope is every tenant, so the account
-	// it creates has none) may not create a platform-wide developer — but
-	// may create one inside a workspace.
+	// that also holds tenant_admin without a workspace may not create a
+	// platform-wide developer. Nor one inside a workspace: its tenant_admin
+	// grant, on an account with no tenant, is held in the tenants it holds a
+	// workspace role in — none — and its developer grant makes it a developer
+	// of tenant 1, which grants no developer (roles count per tenant,
+	// decided 2026-09-30).
 	f.gbUser(t, "gb-global-ta", "", [2]string{"developer", ""}, [2]string{"tenant_admin", ""})
 	create := func(sub, email, ws string, want int) {
 		t.Helper()
@@ -139,11 +142,11 @@ func TestTenantAdminCannotMakePlatformWideBuilder(t *testing.T) {
 		}
 		f.expect(t, sub, "POST", "/api/admin/users/", "", body, want)
 	}
-	create("gb-global-ta", "minted@gb.test", "", http.StatusForbidden)
+	create("gb-global-ta", "minted@gb.test", "", http.StatusBadRequest)
 	if n := f.one(t, `SELECT count(*)::text FROM identity.user WHERE email='minted@gb.test'`); n != "0" {
 		t.Errorf("refused creation left %s accounts", n)
 	}
-	create("gb-global-ta", "scoped@gb.test", f.ws1a, http.StatusOK)
+	create("gb-global-ta", "scoped@gb.test", f.ws1a, http.StatusForbidden)
 
 	// A platform admin still makes a platform-wide developer, which then
 	// builds in every tenant.
@@ -382,7 +385,9 @@ func TestTenantAdminCannotReachBeyondItsTenant(t *testing.T) {
 		email, role, ws string
 		want            int
 	}{
-		{"gb-xt@gb.test", "developer", "", http.StatusOK}, // added only inside a workspace: nothing granted
+		// An invitation names a workspace, or is refused before the address
+		// is looked at (decided 2026-09-30): nothing granted.
+		{"gb-xt@gb.test", "developer", "", http.StatusBadRequest},
 		{"GB-XT@gb.test", "business_user", f.ws1b, http.StatusOK},
 		{"gb-pw@gb.test", "business_user", f.ws1b, http.StatusOK},
 		{"gb-pa@gb.test", "business_user", f.ws1b, http.StatusOK},
@@ -415,7 +420,7 @@ func TestTenantAdminCannotReachBeyondItsTenant(t *testing.T) {
 	if _, err := f.pool.Exec(ctx, `INSERT INTO identity.role_assignment (user_id, role, workspace_id) VALUES ($1::uuid, 'business_user', $2::uuid)`, victim, f.ws2); err != nil {
 		t.Fatal(err)
 	}
-	f.expect(t, ta, "POST", "/api/admin/users/", "", map[string]string{"email": "victim@t2.test", "first_name": "Taken", "last_name": "Over", "role": "developer"}, http.StatusOK)
+	f.expect(t, ta, "POST", "/api/admin/users/", "", map[string]string{"email": "victim@t2.test", "first_name": "Taken", "last_name": "Over", "role": "developer"}, http.StatusBadRequest)
 	f.expect(t, ta, "POST", "/api/admin/users/", "", map[string]string{"email": "victim@t2.test", "first_name": "Taken", "last_name": "Over",
 		"role": "developer", "workspace_id": f.ws1a}, http.StatusOK)
 	f.renameMetric(t, "admin-created-victim@t2.test", f.metricD, http.StatusForbidden, http.StatusNotFound)
@@ -436,8 +441,9 @@ func TestTenantAdminCannotReachBeyondItsTenant(t *testing.T) {
 	f.renameMetric(t, "gb-pw", f.metricD, http.StatusForbidden, http.StatusNotFound)
 
 	// A developer with no tenant narrowed to app1 (tenant 1) that holds a
-	// plain business_user role in tenant 2 administers tenant 1 only: its
-	// grants are its scope.
+	// plain business_user role in tenant 2 administers neither: its grant is
+	// its reach, exactly app1, and no administration of tenant 1's people
+	// (decided 2026-09-30); it used to administer tenant 1.
 	nx := f.gbUser(t, "gb-nx", "", [2]string{"developer", ""}, [2]string{"business_user", f.ws2})
 	if _, err := f.pool.Exec(ctx, `INSERT INTO identity.user_app_access (user_id, application_id) VALUES ($1::uuid, $2::uuid)`, nx, f.app1); err != nil {
 		t.Fatal(err)
@@ -463,7 +469,11 @@ func TestTenantAdminCannotReachBeyondItsTenant(t *testing.T) {
 	if n := f.one(t, `SELECT count(*)::text FROM identity.user WHERE id=$1::uuid`, f.ba2); n != "1" {
 		t.Errorf("tenant 2's business admin was deleted")
 	}
-	f.expect(t, "gb-nx", "POST", "/api/admin/users/"+nx+"/roles", "", map[string]string{"role": "business_admin", "workspace_id": f.ws1a}, http.StatusOK)
+	f.expect(t, "gb-nx", "POST", "/api/admin/users/"+nx+"/roles", "", map[string]string{"role": "business_admin", "workspace_id": f.ws1a}, http.StatusForbidden)
+	if len(listed) != 0 {
+		t.Errorf("the users list of a developer narrowed to app1 lists %d accounts, want none", len(listed))
+	}
+	f.renameMetric(t, "gb-nx", f.metricA, http.StatusOK)
 }
 
 // Workflow assignment draws the same line: a narrowed developer with no

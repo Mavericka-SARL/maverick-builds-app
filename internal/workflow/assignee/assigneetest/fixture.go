@@ -47,6 +47,13 @@ import (
 //	                     and developer, and business_admin in ws1a
 //	ba_dev_global        business_admin in ws1a and unscoped developer of an
 //	                     account with no tenant (a global builder)
+//	ta_home1_grant3      unscoped tenant_admin of an account of tenant 1,
+//	                     granted App3 (tenant 2): its reach there, no tier
+//	ta_home1_dev2        unscoped tenant_admin of an account of tenant 1 and
+//	                     developer held in ws2: a developer of tenant 2 only
+//	ta_ws2_nt_grant1     no tenant, tenant_admin held in ws2, business_user in
+//	                     ws1b and granted App1: tenant 2's administrator, and
+//	                     in tenant 1 only what ws1b opens
 type Fixture struct {
 	Pool                   *pgxpool.Pool
 	Cust1, Cust2           string
@@ -163,6 +170,18 @@ func Seed(t *testing.T, pool *pgxpool.Pool) *Fixture {
 	bdg := user("ba_dev_global", nil)
 	role(bdg, "business_admin", f.WS1a)
 	role(bdg, "developer", nil)
+	// Roles count per tenant (2026-09-30): what these hold in one tenant
+	// makes them nothing in another.
+	grant3 := user("ta_home1_grant3", f.Cust1)
+	role(grant3, "tenant_admin", nil)
+	ex(`INSERT INTO identity.user_app_access (user_id, application_id) VALUES ($1::uuid, $2::uuid)`, grant3, f.App3)
+	dev2 := user("ta_home1_dev2", f.Cust1)
+	role(dev2, "tenant_admin", nil)
+	role(dev2, "developer", f.WS2)
+	nt := user("ta_ws2_nt_grant1", nil)
+	role(nt, "tenant_admin", f.WS2)
+	role(nt, "business_user", f.WS1b)
+	ex(`INSERT INTO identity.user_app_access (user_id, application_id) VALUES ($1::uuid, $2::uuid)`, nt, f.App1)
 	return f
 }
 
@@ -239,24 +258,33 @@ var Cases = []Case{
 	{"named developer, tenant 1", func(f *Fixture) string { return f.App1 }, []string{"developer"},
 		[]string{"ba_dev_global", "dev_global", "dev_home1", "dev_ws1b", "owner_1"}},
 	{"named developer, tenant 2", func(f *Fixture) string { return f.App3 }, []string{"developer"},
-		[]string{"ba_dev_global", "dev_global", "dev_home2", "dev_ws2"}},
+		[]string{"ba_dev_global", "dev_global", "dev_home2", "dev_ws2", "ta_home1_dev2"}},
 	{"named tenant_admin, tenant 1", func(f *Fixture) string { return f.App1 }, []string{"tenant_admin"},
-		[]string{"owner_1", "ta_1", "ta_nt_1b", "ta_ws1b"}},
+		[]string{"owner_1", "ta_1", "ta_home1_dev2", "ta_home1_grant3", "ta_nt_1b", "ta_ws1b"}},
 	{"named tenant_admin, tenant-level app", func(f *Fixture) string { return f.AppT }, []string{"tenant_admin"},
-		[]string{"owner_1", "ta_1", "ta_nt_1b", "ta_ws1b"}},
+		[]string{"owner_1", "ta_1", "ta_home1_dev2", "ta_home1_grant3", "ta_nt_1b", "ta_ws1b"}},
+	// An application or model grant is no tier (ta_grant2, ta_model2,
+	// ta_home1_grant3), and a developer role in tenant 2 makes an
+	// administrator of tenant 1 no administrator here (ta_home1_dev2).
 	{"named tenant_admin, tenant 2", func(f *Fixture) string { return f.App3 }, []string{"tenant_admin"},
-		[]string{"ta_2", "ta_grant2", "ta_model2"}},
+		[]string{"ta_2", "ta_ws2_nt_grant1"}},
 	{"named platform_admin", func(f *Fixture) string { return f.App3 }, []string{"platform_admin"},
 		[]string{"pa", "pa_ws1a"}},
 	{"named platform_admin, workspace app", func(f *Fixture) string { return f.App1 }, []string{"platform_admin"},
 		[]string{"pa", "pa_ws1a"}},
+	// ta_ws2_nt_grant1's App1 grant is no reach: it holds tenant_admin only
+	// inside a workspace of tenant 2.
 	{"no role named, workspace app", func(f *Fixture) string { return f.App1 }, nil,
 		[]string{"appr_1a", "ba_1a", "ba_dev_global", "bu_1a", "dev_global", "dev_home1", "dev_ws1b", "imp_1a",
-			"owner_1", "pa", "pa_ws1a", "ta_1", "ta_nt_1b", "ta_ws1b"}},
+			"owner_1", "pa", "pa_ws1a", "ta_1", "ta_home1_dev2", "ta_home1_grant3", "ta_nt_1b", "ta_ws1b"}},
 	{"no role named, tenant-level app", func(f *Fixture) string { return f.AppT }, nil,
 		[]string{"appr_1a", "appr_1b", "ba_1a", "ba_1b", "ba_dev_global", "bu_1a", "dev_global", "dev_home1", "dev_ws1b",
-			"imp_1a", "owner_1", "pa", "pa_ws1a", "ta_1", "ta_nt_1b", "ta_ws1b"}},
+			"imp_1a", "owner_1", "pa", "pa_ws1a", "ta_1", "ta_home1_dev2", "ta_home1_grant3", "ta_nt_1b", "ta_ws1b",
+			"ta_ws2_nt_grant1"}},
+	// ta_grant2 and ta_model2 reach App3 through their grants (they have no
+	// tenant); ta_home1_grant3, which has one, does not: its grant narrows,
+	// it opens nothing.
 	{"no role named, tenant 2", func(f *Fixture) string { return f.App3 }, nil,
 		[]string{"appr_2", "ba_2", "ba_dev_global", "dev_global", "dev_home2", "dev_ws2", "pa", "pa_ws1a", "ta_2",
-			"ta_grant2", "ta_model2"}},
+			"ta_grant2", "ta_home1_dev2", "ta_model2", "ta_ws2_nt_grant1"}},
 }

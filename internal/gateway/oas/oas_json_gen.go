@@ -2421,9 +2421,17 @@ func (s *AdminUser) encodeFields(e *jx.Encoder) {
 		e.FieldStart("permissions")
 		s.Permissions.Encode(e)
 	}
+	{
+		e.FieldStart("grantable_roles")
+		e.ArrStart()
+		for _, elem := range s.GrantableRoles {
+			e.Str(elem)
+		}
+		e.ArrEnd()
+	}
 }
 
-var jsonFieldsNameOfAdminUser = [9]string{
+var jsonFieldsNameOfAdminUser = [10]string{
 	0: "id",
 	1: "email",
 	2: "display_name",
@@ -2433,6 +2441,7 @@ var jsonFieldsNameOfAdminUser = [9]string{
 	6: "model_ids",
 	7: "home_tenant",
 	8: "permissions",
+	9: "grantable_roles",
 }
 
 // Decode decodes AdminUser from json.
@@ -2570,6 +2579,26 @@ func (s *AdminUser) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"permissions\"")
 			}
+		case "grantable_roles":
+			requiredBitSet[1] |= 1 << 1
+			if err := func() error {
+				s.GrantableRoles = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.GrantableRoles = append(s.GrantableRoles, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"grantable_roles\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -2581,7 +2610,7 @@ func (s *AdminUser) Decode(d *jx.Decoder) error {
 	var failures []validate.FieldError
 	for i, mask := range [2]uint8{
 		0b11111111,
-		0b00000001,
+		0b00000011,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -2858,13 +2887,27 @@ func (s *AdminWorkspace) encodeFields(e *jx.Encoder) {
 		e.FieldStart("customer_id")
 		json.EncodeUUID(e, s.CustomerID)
 	}
+	{
+		e.FieldStart("grantable_roles")
+		e.ArrStart()
+		for _, elem := range s.GrantableRoles {
+			e.Str(elem)
+		}
+		e.ArrEnd()
+	}
+	{
+		e.FieldStart("manage_access")
+		e.Bool(s.ManageAccess)
+	}
 }
 
-var jsonFieldsNameOfAdminWorkspace = [4]string{
+var jsonFieldsNameOfAdminWorkspace = [6]string{
 	0: "id",
 	1: "name",
 	2: "customer_name",
 	3: "customer_id",
+	4: "grantable_roles",
+	5: "manage_access",
 }
 
 // Decode decodes AdminWorkspace from json.
@@ -2924,6 +2967,38 @@ func (s *AdminWorkspace) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"customer_id\"")
 			}
+		case "grantable_roles":
+			requiredBitSet[0] |= 1 << 4
+			if err := func() error {
+				s.GrantableRoles = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.GrantableRoles = append(s.GrantableRoles, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"grantable_roles\"")
+			}
+		case "manage_access":
+			requiredBitSet[0] |= 1 << 5
+			if err := func() error {
+				v, err := d.Bool()
+				s.ManageAccess = bool(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"manage_access\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -2934,7 +3009,7 @@ func (s *AdminWorkspace) Decode(d *jx.Decoder) error {
 	// Validate required fields.
 	var failures []validate.FieldError
 	for i, mask := range [1]uint8{
-		0b00001111,
+		0b00111111,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.

@@ -159,8 +159,15 @@ func TestCreateUserRoleGate(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			// Anyone but a platform admin invites inside a workspace
+			// (decided 2026-09-30, TestInviteNeedsRoleAndWorkspace); the
+			// role gate is the same there.
+			ws := ""
+			if c.actorSub != f.platformAdminSub {
+				ws = f.wsID
+			}
 			status, body := f.do(t, "POST", "/api/admin/users/", c.actorSub, map[string]string{
-				"email": c.email, "display_name": "New User", "role": c.role,
+				"email": c.email, "display_name": "New User", "role": c.role, "workspace_id": ws,
 			})
 			if status != c.wantStatus {
 				t.Fatalf("status = %d, want %d (body %v)", status, c.wantStatus, body)
@@ -172,7 +179,7 @@ func TestCreateUserRoleGate(t *testing.T) {
 			if userID == "" {
 				t.Fatalf("expected created user id in response, got %v", body)
 			}
-			if !hasRoleRow(t, f.pool, userID, c.role, "") {
+			if !hasRoleRow(t, f.pool, userID, c.role, ws) {
 				t.Errorf("expected role %q assigned to created user", c.role)
 			}
 		})

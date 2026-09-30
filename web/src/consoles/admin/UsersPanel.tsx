@@ -312,11 +312,21 @@ export function UsersPanel({
   // assignable set rather than passed in: whoever can grant a business role at
   // all is exactly who should be able to scope one.
   const canGrantWorkspaceRoles = canManageResourceAccess || assignableRoles.some(r => BUSINESS_ROLES.includes(r));
-  // Whether the invite form asks for a workspace for this role: always for a
-  // business role, and — for whoever may grant them inside one — optionally
-  // for developer and tenant_admin.
+  // Only a platform admin may assign platform_admin (computeAssignableRoles),
+  // so this is exactly "the caller is a platform admin".
+  const callerIsPlatformAdmin = assignableRoles.includes("platform_admin");
+  // Anyone else always adds a person with a role inside a workspace: the
+  // gateway refuses POST /api/admin/users from them without both, and refuses
+  // it the same way whether or not the address already has an account, so
+  // the answer never tells the two apart. The form asks for both up front.
+  const inviteNeedsRoleAndWorkspace = !callerIsPlatformAdmin;
+  // Whether the invite form asks for a workspace for this role — always when
+  // it needs one, and for a platform admin always for a business role and
+  // optionally for developer and tenant_admin.
+  const inviteNeedsWorkspace = (role: string) =>
+    inviteNeedsRoleAndWorkspace || BUSINESS_ROLES.includes(role);
   const inviteTakesWorkspace = (role: string) =>
-    BUSINESS_ROLES.includes(role) || (canManageResourceAccess && BUILDER_ROLES.includes(role));
+    inviteNeedsWorkspace(role) || (canManageResourceAccess && BUILDER_ROLES.includes(role));
 
   // A person matches by name, e-mail, a role they hold, or the workspace or
   // tenant a role is held in; the one being edited stays in view.
@@ -360,16 +370,19 @@ export function UsersPanel({
                   placeholder="Smith" />
               </Field>
               {assignableRoles.length > 0 && (
-                <Field label="Initial Role">
+                <Field label="Initial Role" required={inviteNeedsRoleAndWorkspace}>
                   <Select
                     value={newUser.role}
+                    required={inviteNeedsRoleAndWorkspace}
                     onChange={e => setNewUser(u => ({
                       ...u,
                       role: e.target.value,
                       workspace_id: inviteTakesWorkspace(e.target.value) ? u.workspace_id : "",
                     }))}
                   >
-                    <option value="">None</option>
+                    {inviteNeedsRoleAndWorkspace
+                      ? <option value="" disabled>Select a role…</option>
+                      : <option value="">None</option>}
                     {/* Every role this actor may assign, not just the platform
                         tiers. A developer's whole assignable set is the
                         business roles, so filtering to PLATFORM_ROLES left
@@ -382,12 +395,21 @@ export function UsersPanel({
               {inviteTakesWorkspace(newUser.role) && (
                 <Field
                   label="Workspace"
-                  description={BUSINESS_ROLES.includes(newUser.role)
-                    ? "a business role grants nothing until it is scoped to a workspace"
-                    : "optional — limits the role to one workspace"}
+                  required={inviteNeedsRoleAndWorkspace}
+                  description={inviteNeedsRoleAndWorkspace
+                    ? "People are always added to a workspace"
+                    : BUSINESS_ROLES.includes(newUser.role)
+                      ? "a business role grants nothing until it is scoped to a workspace"
+                      : "optional — limits the role to one workspace"}
                 >
-                  <Select value={newUser.workspace_id} onChange={e => setNewUser(u => ({ ...u, workspace_id: e.target.value }))}>
-                    <option value="">{BUSINESS_ROLES.includes(newUser.role) ? "Select a workspace…" : "No specific workspace"}</option>
+                  {/* The native required (no <form> here, so no browser
+                      popup) is what tells assistive tech the field is
+                      required; Field's asterisk is visual only. */}
+                  <Select value={newUser.workspace_id} required={inviteNeedsRoleAndWorkspace}
+                    onChange={e => setNewUser(u => ({ ...u, workspace_id: e.target.value }))}>
+                    {inviteNeedsWorkspace(newUser.role)
+                      ? <option value="" disabled={inviteNeedsRoleAndWorkspace}>Select a workspace…</option>
+                      : <option value="">No specific workspace</option>}
                     {workspaces.map(w => (
                       <option key={w.id} value={w.id}>{w.customer_name} — {w.name}</option>
                     ))}
@@ -399,7 +421,8 @@ export function UsersPanel({
               variant="primary"
               onClick={() => createUser.mutate(newUser)}
               disabled={!newUser.email || !newUser.first_name || !newUser.last_name ||
-                (BUSINESS_ROLES.includes(newUser.role) && !newUser.workspace_id)}
+                (inviteNeedsRoleAndWorkspace && !newUser.role) ||
+                (inviteNeedsWorkspace(newUser.role) && !newUser.workspace_id)}
               loading={createUser.isPending}
               loadingLabel="Creating…"
             >

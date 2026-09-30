@@ -530,3 +530,47 @@ func signTestToken(t *testing.T, key *rsa.PrivateKey, kid, issuer, sub string) s
 	}
 	return signed
 }
+
+// An invitation that cannot be sent undoes what it did, and only that. A
+// platform admin re-inviting an address that already has an account adopts
+// it; when the mail then failed, the account's row was deleted — the person
+// lost their access and what they authored went to "a former user"
+// (2026-09-30). The row stays; only the role this invitation gave goes.
+func TestCreateUserKeepsAnAdoptedAccountRowOnFailure(t *testing.T) {
+	idp := newFakeIDP(t)
+	f := setupProvFixture(t, idp)
+	ctx := context.Background()
+	pre, err := idp.client().CreateUser(ctx, "keeprow@prov.test", "Keep", "Row")
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	one := func(sql string, args ...any) string {
+		t.Helper()
+		var s string
+		if err := f.pool.QueryRow(ctx, sql, args...).Scan(&s); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return s
+	}
+	cust := one(`INSERT INTO core.customer (name, plan) VALUES ('Keep Co', 'enterprise') RETURNING id::text`)
+	ws := one(`INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'Default') RETURNING id::text`, cust)
+	id := one(`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ($1, 'keeprow@prov.test', 'Keep Row', $2::uuid) RETURNING id::text`, pre, cust)
+	one(`INSERT INTO identity.role_assignment (user_id, role, workspace_id) VALUES ($1::uuid, 'business_user', $2::uuid) RETURNING id::text`, id, ws)
+	idp.failInvite = true
+
+	status, body := f.do(t, "POST", "/api/admin/users", map[string]any{
+		"email": "keeprow@prov.test", "first_name": "Keep", "last_name": "Row", "role": "business_admin", "workspace_id": ws,
+	})
+	if status != http.StatusBadGateway {
+		t.Fatalf("status = %d %v, want 502", status, body)
+	}
+	if n := one(`SELECT count(*)::text FROM identity.user WHERE id=$1::uuid`, id); n != "1" {
+		t.Fatalf("the adopted account's row was deleted")
+	}
+	if got := one(`SELECT string_agg(role::text, ',' ORDER BY role::text) FROM identity.role_assignment WHERE user_id=$1::uuid`, id); got != "business_user" {
+		t.Errorf("roles after the failed invitation: %s, want its own business_user only", got)
+	}
+	if _, still := idp.users[pre]; !still {
+		t.Error("the identity provider account was removed")
+	}
+}

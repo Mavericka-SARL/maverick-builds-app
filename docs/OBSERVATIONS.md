@@ -1578,22 +1578,61 @@ leaves out, until it is fixed.
 ### Nothing sets an existing account's tenant
 
 - **Noticed:** 2026-09-30, closing account adoption at first sign-in.
-  Standing rule 2.
+  Standing rule 2. Narrowed 2026-09-30 (uncommitted): a new account invited
+  into a workspace now belongs to its tenant, and migration 102 gives most
+  accounts made before theirs ("A platform admin's invitation made an
+  account with no tenant", Closed below). What is left is below.
 - **What:** first sign-in through a tenant's single sign-on onto an account
   that already exists at the address is refused (403, with the reason)
   unless the account belongs to that tenant and is not a platform admin
-  (`ee/sso/sso.go:393-415`). Accounts with no `customer_id`, such as those a
-  platform admin creates (`internal/gateway/handler.go:12909-12916` leaves it
-  empty when the creator's scope is every tenant), are refused there when
-  their identity-provider subject no longer matches. No route or screen sets
-  an existing account's `customer_id`, so no role can make such an account
-  sign in through its tenant's single sign-on. Adding an existing account to
-  a tenant (`addExistingAccount`, `internal/gateway/account_boundaries.go:545`)
-  leaves its tenant as it is too.
+  (`ee/sso/sso.go:393-415`). Accounts with no `customer_id` remain: those
+  migration 102 (`migrations/102_account_tenant_backfill.sql`) leaves alone
+  (a platform admin; an account holding `developer` or `tenant_admin`
+  without a workspace; one whose identity-provider subject the directory,
+  `platform.user_directory`, lists in a tenant database; and one whose
+  workspace roles, business-role memberships and application and model
+  grants lie in several tenants, or in none), a platform admin's creation
+  with no workspace, and an account a platform admin's creation adopts,
+  which keeps what it had (`internal/gateway/handler.go:13071-13089`). No
+  route or screen sets an existing account's `customer_id`, so no role can
+  make such an account sign in through its tenant's single sign-on. Adding
+  an existing account to a tenant (`addExistingAccount`,
+  `internal/gateway/account_boundaries.go:579`) leaves its tenant as it is
+  too.
 - **Why it matters:** a person invited before their tenant set up single
   sign-on may be locked out of it, with no way back through the product.
-- **How to check:** `grep -rn 'SET customer_id' --include='*.go' internal`
-  finds only a test.
+- **How to check:** `grep -rn 'SET customer_id' --include='*.go' internal
+  ee` finds nothing outside tests. The accounts with no tenant, by why 102
+  left them, read-only on the shared database (in a tenant database 102
+  writes nothing):
+  ```sql
+  SELECT count(*) FILTER (WHERE pa) AS platform_admins,
+         count(*) FILTER (WHERE NOT pa AND unscoped_builder) AS unscoped_dev_or_ta,
+         count(*) FILTER (WHERE NOT pa AND NOT unscoped_builder AND in_directory) AS in_a_tenant_database,
+         count(*) FILTER (WHERE NOT pa AND NOT unscoped_builder AND NOT in_directory AND tenants = 0) AS no_roles,
+         count(*) FILTER (WHERE NOT pa AND NOT unscoped_builder AND NOT in_directory AND tenants > 1) AS several_tenants,
+         count(*) FILTER (WHERE NOT pa AND NOT unscoped_builder AND NOT in_directory AND tenants = 1) AS backfilled_by_102
+  FROM (
+    SELECT EXISTS (SELECT 1 FROM identity.role_assignment ra WHERE ra.user_id = u.id AND ra.role = 'platform_admin') AS pa,
+           EXISTS (SELECT 1 FROM identity.role_assignment ra WHERE ra.user_id = u.id AND ra.workspace_id IS NULL
+                     AND ra.role IN ('developer', 'tenant_admin')) AS unscoped_builder,
+           EXISTS (SELECT 1 FROM platform.user_directory d WHERE d.keycloak_sub = u.keycloak_sub) AS in_directory,
+           (SELECT count(DISTINCT c) FROM (
+               SELECT w.customer_id AS c FROM identity.role_assignment ra JOIN core.workspace w ON w.id = ra.workspace_id WHERE ra.user_id = u.id
+               UNION SELECT w.customer_id FROM identity.business_role_member m JOIN identity.business_role br ON br.id = m.role_id
+                     JOIN core.workspace w ON w.id = br.workspace_id WHERE m.user_id = u.id
+               UNION SELECT COALESCE(a.customer_id, aw.customer_id) FROM identity.user_app_access ua JOIN core.application a ON a.id = ua.application_id
+                     LEFT JOIN core.workspace aw ON aw.id = a.workspace_id WHERE ua.user_id = u.id
+               UNION SELECT COALESCE(a.customer_id, aw.customer_id) FROM identity.user_model_access um JOIN core.model mm ON mm.id = um.model_id
+                     JOIN core.application a ON a.id = mm.application_id LEFT JOIN core.workspace aw ON aw.id = a.workspace_id WHERE um.user_id = u.id
+           ) held) AS tenants
+    FROM identity."user" u WHERE u.customer_id IS NULL
+  ) s;
+  ```
+  Run 2026-09-30 on the local development database, before 102 was
+  applied: 1 platform admin, 0 unscoped developer or tenant_admin, 0 listed
+  in a tenant database, 3 with no roles, 0 in several tenants, and 5 that
+  102 backfills. Not yet run on any deployment.
 - **What closes it:** a platform-admin action that sets an account's tenant,
   audited; or the refusal naming what to do instead.
 
@@ -1618,32 +1657,6 @@ leaves out, until it is fixed.
   does (`removeTenantAccess`, `internal/gateway/account_boundaries.go:351`),
   and leaves the account.
 
-### An existing account invited without a workspace is told it was invited, and nothing happens
-
-- **Noticed:** 2026-09-30, adding existing accounts to a tenant. Standing
-  rule 2.
-- **What:** an invitation of an address that already has an account adds it
-  only with a role inside a workspace (`addExistingAccount`,
-  `internal/gateway/account_boundaries.go:545`). With no role, or no
-  workspace, it answers as a new invitation does (200, `status: created`),
-  grants nothing, sends nothing, and records the refusal in an audit event
-  only platform admins see (`refuseExistingAccount`, `:600`). The Users
-  screen still lets a tenant admin invite with role None, and with
-  `developer` or `tenant_admin` and "No specific workspace"
-  (`inviteTakesWorkspace`, `web/src/consoles/admin/UsersPanel.tsx:318`), and
-  then confirms the invitation.
-- **Why it matters:** the tenant admin believes the person was added and
-  invited; the person never hears of it, and nobody in the tenant can see
-  why.
-- **How to check:** `TestInviteExistingAccountAddsItToTheTenant`
-  (`internal/gateway/account_boundaries_test.go:238`) covers the
-  no-workspace answer; on the Users screen, invite another tenant's user
-  with role None and look for them in the list.
-- **What closes it:** the invite form asking for a workspace whenever it
-  offers a role, and saying that someone who may already have an account is
-  added only with one; or a decision to refuse such an invitation visibly,
-  which tells the inviter the address has an account (next entry).
-
 ### Inviting an existing address still shows afterwards that it had an account
 
 - **Noticed:** 2026-09-30, adding existing accounts to a tenant.
@@ -1653,21 +1666,31 @@ leaves out, until it is fixed.
   `other` or `none`, where a new one is `own`, and the Users screen then
   shows the foreign-account note. The grant's audit event, which the
   tenant's administrators read (`auditScope`,
-  `internal/gateway/handler.go:7098`), carries `existing_account=true`. And
+  `internal/gateway/handler.go:7064`), carries `existing_account=true`. And
   an existing account is answered before any identity-provider call, where a
   new invitation waits for the identity provider and the invitation's mail
-  (`internal/gateway/handler.go:12954-13009`). Open self-service sign-up
+  (`internal/gateway/handler.go:12990-13128`). Open self-service sign-up
   answers 409 for an address that has an account
   (`internal/gateway/signup.go:114-122`), so where it is open the flow tells
-  a tenant admin nothing an unauthenticated caller cannot learn there.
+  a tenant admin nothing an unauthenticated caller cannot learn there. An
+  invitation with no role or no workspace is now refused before the address
+  is looked at, alike for both ("An existing account invited without a
+  workspace is told it was invited, and nothing happens", Closed below).
+  Re-checked 2026-09-30 against the uncommitted change: unchanged.
 - **Why it matters:** the decision that an invitation does not reveal an
   existing account holds for the response only.
 - **How to check:** invite another tenant's user into a workspace, then `GET
   /api/admin/users` and `GET /api/admin/audit`.
-- **What closes it:** a decision whether the property is wanted beyond the
-  response. If it is, sign-up must stop telling too, and the invitation's
-  mail must go out asynchronously, which conflicts with the rule that a
-  failed invitation rolls the whole creation back.
+- **Decision:** accepted by the user on 2026-09-30: the `existing_account`
+  flag in the grant's audit event, which the tenant's administrators read,
+  and the difference in answer time between an existing account and a new
+  address stay as they are. The users list's `home_tenant` was not part of
+  the decision; the foreign-account note and Remove from this tenant read
+  it.
+- **What closes it:** only if that decision changes: the flag left out of
+  the event the tenant reads, and the invitation's mail sent asynchronously,
+  which conflicts with the rule that a failed invitation rolls the whole
+  creation back; sign-up would then have to stop telling too.
 
 ### A tenant admin cannot rename or delete a fellow tenant admin
 
@@ -1675,18 +1698,22 @@ leaves out, until it is fixed.
   own accounts. Needs the user's confirmation. Standing rule 2.
 - **What:** renaming, deleting or re-inviting an account now also needs the
   caller to be able to revoke every role the account holds
-  (`accountPermissionsFor`, `internal/gateway/account_boundaries.go:108`),
-  because a delete takes them all. A tenant admin may not grant or revoke
-  `tenant_admin` (`assignableRoles`, `internal/gateway/handler.go:12594`),
-  so it can no longer rename, delete or re-invite a fellow tenant admin, and
-  a developer can no longer do so to a developer or a tenant admin. The same
-  holds for an account of the caller's tenant that holds, anywhere, a role
-  the caller could not revoke, such as `tenant_admin` in another tenant's
-  workspace granted by a platform admin. A tenant admin with no tenant of
-  its own (home `none`) can no longer rename itself. A caller whose scope is
-  every tenant without being a platform admin (a platform-wide builder)
-  keeps the accounts with no tenant its invitations make, but is offered no
-  Remove from this tenant.
+  (`accountPermissionsFor`, `internal/gateway/account_boundaries.go:116`),
+  because a delete takes them all. Since 2026-09-30 (uncommitted) the
+  caller's tier is the one it holds in the account's home tenant
+  (`adminTiers.rolesIn`, `internal/gateway/admin_tiers.go:150`). A tenant
+  admin may not grant or revoke `tenant_admin` (`assignableRoles`,
+  `internal/gateway/handler.go:12609`), so it can no longer rename, delete
+  or re-invite a fellow tenant admin, and a developer can no longer do so to
+  a developer or a tenant admin. The same holds for an account of the
+  caller's tenant that holds, anywhere, a role the caller could not revoke,
+  such as `tenant_admin` in another tenant's workspace granted by a platform
+  admin. A tenant admin with no tenant of its own (home `none`) can no
+  longer rename itself. A caller whose scope is every tenant without being a
+  platform admin (a platform-wide builder) keeps the accounts with no
+  tenant, but is offered no Remove from this tenant; since 2026-09-30
+  (uncommitted) its invitations name a workspace and make accounts of that
+  workspace's tenant, which it keeps too.
 - **Why it matters:** a tenant whose administrator leaves cannot remove them
   without a platform admin.
 - **How to check:** `TestAccountActionsNeedEveryRoleRevocable`
@@ -1699,7 +1726,7 @@ leaves out, until it is fixed.
 
 - **Noticed:** 2026-09-30, adding existing accounts to a tenant.
 - **What:** `POST /api/admin/users` checks the plan's user cap
-  (`CheckUsers`, `internal/gateway/handler.go:12948`) before it looks for an
+  (`CheckUsers`, `internal/gateway/handler.go:12979`) before it looks for an
   existing account, so both paths answer alike. A tenant at its cap gets 402
   for an account that already holds a role in it, whose addition would not
   change the count.
@@ -1711,6 +1738,136 @@ leaves out, until it is fixed.
 - **What closes it:** a decision: counting only accounts new to the tenant
   makes the two paths answer differently at the cap, so the cost may be
   accepted and recorded as intended.
+
+### Migration 102 adds accounts to a tenant's user count
+
+- **Noticed:** 2026-09-30, giving accounts with no tenant the tenant of what
+  they hold (migration 102, uncommitted).
+- **What:** the plan's user cap counts an account in a tenant by its
+  `customer_id` or by a role in one of the tenant's workspaces
+  (`CheckUsers`, `internal/plan/enforcer.go:176`). Migration 102
+  (`migrations/102_account_tenant_backfill.sql`) sets `customer_id` from
+  business-role memberships and application and model grants too, so an
+  account whose only link to a tenant was one of those now counts toward
+  that tenant's cap.
+- **Why it matters:** a tenant can reach or pass its user limit on the
+  deployment that applies 102, without adding anyone, and then gets 402 on
+  its next invitation.
+- **How to check:** per tenant, `CheckUsers`' count before and after 102 is
+  applied; the accounts 102 moves are the `backfilled_by_102` column of the
+  query under "Nothing sets an existing account's tenant".
+- **What closes it:** those counts compared with each tenant's plan before
+  102 runs on a deployment, and a limit raised or the new count accepted as
+  the right one, recorded here.
+
+### Migration 102 writes no audit event
+
+- **Noticed:** 2026-09-30, writing migration 102 (uncommitted).
+- **What:** migration 102 gives accounts with no tenant a `customer_id`.
+  Audit events are written through `pkg/auditlog`, which a SQL migration
+  does not run, so which accounts it moved, and into which tenant, is
+  recorded nowhere. Creation records it since the same change: `user.created`
+  carries `workspace_id` and `customer_id`
+  (`internal/gateway/handler.go:13136`).
+- **Why it matters:** an account's tenant decides who administers it. After
+  102 a tenant's administrators may rename, delete and re-invite accounts
+  they could not before, and the audit log does not say why.
+- **How to check:** after 102 has run, nothing tells a backfilled account
+  from one created with its tenant; before, the query under "Nothing sets an
+  existing account's tenant" counts them.
+- **What closes it:** the list of accounts 102 will change kept for each
+  deployment before it runs (the same query, listing ids and tenants), or a
+  gateway step that audits each account the migration moved.
+
+### Migration 102 tells a tenant database by its name
+
+- **Noticed:** 2026-09-30, writing migration 102 (uncommitted).
+- **What:** in a tenant's own database every workspace is that tenant's, so
+  every account there would pass 102's one-tenant test. 102 writes nothing
+  in a database whose name is `tenant_` followed by one of its
+  `core.customer` ids without dashes
+  (`migrations/102_account_tenant_backfill.sql:71-74`), the naming of
+  `tenantdb.DatabaseName` (`pkg/tenantdb/provision.go:26`). Nothing ties the
+  two: `TestBackfill102LeavesTenantDatabasesAlone`
+  (`migrations/backfill_102_test.go:184`) builds the name itself rather
+  than calling `DatabaseName`.
+- **Why it matters:** if the naming changes, or a tenant database is
+  restored under another name, 102 backfills there and hands every account
+  with no tenant in it, identities shared with other tenants included, to
+  that tenant's administrators.
+- **How to check:** compare `DatabaseName` with the migration's expression.
+- **What closes it:** the backfill test building the name with
+  `tenantdb.DatabaseName`, so a change to it fails there; or a marker in the
+  database that says whose it is, read instead of the name.
+
+### An administrator with no tenant opens some of its granted applications in only some places
+
+- **Noticed:** 2026-09-30, counting roles per tenant (uncommitted). Standing
+  rule 2.
+- **What:** an account with no tenant of its own that holds `tenant_admin`
+  without a workspace (a platform admin's creation), narrowed by
+  application or model grants, now reaches exactly what its grants name
+  and administers nothing there (`customerlessAdminGrantTenantSQL`,
+  `internal/gateway/admin_tiers.go:205`). `GET /api/admin/applications`
+  and the `/api/admin/tenants` tree list a granted application that has no
+  model, but the checks built on `reachSQL` (`rolesReachApp`,
+  `internal/gateway/handler.go:1405`, and the `/api/apps` list, `userApps`,
+  `:9630`) also want a model it may open, so such an application does not
+  open there. The
+  workflow history's admin scope (`resolveWorkflowAdminScope`, `:5528`)
+  leaves the granted applications out.
+- **Why it matters:** low: before the change the account administered the
+  whole tenant, so this is a narrowing, not a loss of safety. If the shape
+  is used, part of what it was granted is out of its reach.
+- **How to check:** `TestCustomerlessAdminGrantIsReachNotAdministration`
+  (`internal/gateway/admin_tiers_test.go:104`) covers the reach it has; for
+  the gaps, grant such an account an application with no model, open it,
+  and read its workflow history.
+- **What closes it:** `rolesReachApp` and `resolveWorkflowAdminScope`
+  reading the same grant reach as `GET /api/admin/applications`
+  (`grantedAppSQL`, `internal/gateway/admin_tiers.go:234`); or a decision
+  that such an account is not a supported shape.
+
+### A platform admin's failed re-invitation keeps the new name and e-mail
+
+- **Noticed:** 2026-09-30, keeping an adopted account's row when its
+  invitation fails (uncommitted).
+- **What:** a platform admin's creation over an address or subject that
+  already has an account adopts it, and the upsert (`ON CONFLICT
+  (keycloak_sub) DO UPDATE SET email, display_name`,
+  `internal/gateway/handler.go:13084-13089`) overwrites the account's
+  e-mail and display name. When the invitation's mail then fails, the
+  request takes back only the row it inserted or the role it added
+  (`:13118-13128`); the overwritten e-mail and name stay.
+- **Why it matters:** low: the answer (502) says no user was created, yet
+  the existing account was renamed.
+- **How to check:** `TestCreateUserKeepsAnAdoptedAccountRowOnFailure`
+  (`internal/gateway/user_provisioning_test.go`) checks that the row and its
+  other roles stay; it does not check the name or e-mail.
+- **What closes it:** the old values restored on failure, or the upsert and
+  the grant held in a transaction committed only after the invitation is
+  sent.
+
+### A failed identity lookup keeps a removed account's sign-in and logs another reason
+
+- **Noticed:** 2026-09-30, keeping a shared identity-provider account when
+  one tenant database removes its user (uncommitted).
+- **What:** with a database per tenant, removing an account
+  (`removeUserAccount`, `internal/gateway/handler.go:11934`) keeps the
+  identity-provider account while another database still holds the identity
+  (`identityHeldElsewhere`, `:11958`). A catalog or control-plane error
+  counts as held, so the row goes and the identity-provider account stays;
+  the error is dropped, and the log line says another tenant database still
+  holds the identity.
+- **Why it matters:** low: it never deletes an account wrongly, but leaves
+  an identity-provider account that resolves to no user (every request 401)
+  and keeps the address taken, with a log line naming the wrong reason.
+- **How to check:** read `identityHeldElsewhere`;
+  `TestRemovingAnAccountKeepsAnIdentityAnotherDatabaseHolds`
+  (`internal/gateway/identity_elsewhere_test.go:20`) covers the held case
+  only.
+- **What closes it:** the error logged as such, naming the account to
+  remove by hand, or the check retried before the row is deleted.
 
 ### Removal from a tenant leaves the account's button rules
 
@@ -1826,6 +1983,73 @@ leaves out, until it is fixed.
 - **How to check:** edit an account of another tenant, remove it from the
   tenant, then invite it again.
 - **What closes it:** clearing `editId` when its account leaves the list.
+
+### The invite form cannot be sent while the caller's roles load, and says nothing
+
+- **Noticed:** 2026-09-30, making the invite form ask for a role and a
+  workspace (uncommitted).
+- **What:** until `/api/me` answers, `assignableRoles` is empty, so the
+  Users screen's invite form treats the caller as someone other than a
+  platform admin (`inviteNeedsRoleAndWorkspace`,
+  `web/src/consoles/admin/UsersPanel.tsx:322`) and hides Initial Role,
+  which it renders only when `assignableRoles` is not empty (`:372`). The
+  Workspace field shows, and Create user stays disabled with no role to pick
+  and no reason given.
+- **Why it matters:** low: nothing wrong is sent, but on a slow `/api/me`
+  the form looks broken.
+- **How to check:** slow `/api/me` down in the browser's network tools and
+  open the invite form.
+- **What closes it:** the form showing that it is loading, or saying why
+  Create user is disabled, until the roles arrive.
+
+### The invite e2e spec mocks a refusal the gateway words differently
+
+- **Noticed:** 2026-09-30, making the invite form ask for a role and a
+  workspace (uncommitted).
+- **What:** `web/e2e/account-ownership.spec.ts:92` mocks the 400 of an
+  invitation without a role and a workspace as "choose a role and a
+  workspace: people are always added to a workspace". The gateway answers
+  "role and workspace_id are both required: an invitation gives a role
+  inside a workspace, and someone who already has an account is added only
+  that way" (`errInviteNeedsRoleAndWorkspace`,
+  `internal/gateway/account_boundaries.go:628`). No test ties the two. The
+  gateway's side, the same 400 for a new address and an existing account
+  before any lookup, is `TestInviteNeedsRoleAndWorkspace`
+  (`internal/gateway/admin_tiers_test.go:244`).
+- **Why it matters:** low: the spec proves that the screen shows what the
+  server says, not what a person would read.
+- **How to check:** compare the two strings.
+- **What closes it:** the mock using the gateway's wording, or a case in the
+  real-Keycloak e2e job.
+
+### The Playwright specs are not type-checked
+
+- **Noticed:** 2026-09-30, editing `web/e2e/account-ownership.spec.ts`.
+- **What:** `web/tsconfig.json` references only `tsconfig.app.json`
+  (`include: ["src"]`) and `tsconfig.node.json` (`vite.config.ts`), so
+  neither `npm run build` (`tsc -b && vite build`) nor CI's `npx tsc -b
+  --noEmit` (`.github/workflows/ci.yml:342`) type-checks
+  `web/e2e/*.spec.ts`. Playwright strips their types without checking them.
+- **Why it matters:** a type error in a spec shows only when the spec runs,
+  if at all.
+- **How to check:** `grep -n include web/tsconfig.*.json`.
+- **What closes it:** a `tsconfig` for `web/e2e` referenced from
+  `web/tsconfig.json`, so `tsc -b` checks the specs too.
+
+### Field descriptions and errors are not tied to their controls
+
+- **Noticed:** 2026-09-30, adding the invite form's workspace hint.
+- **What:** `Field` (`web/src/ui/Field.tsx:26`) ties its label to the
+  control by id, but renders `description` and `error` as plain spans with
+  no id, and sets no `aria-describedby` on the control. The invite form's
+  "People are always added to a workspace", and every other field's hint or
+  error, is not announced with its control.
+- **Why it matters:** a screen-reader user misses hints and validation
+  errors on every form built on `Field`.
+- **How to check:** inspect the invite form's Workspace select: it has no
+  `aria-describedby`.
+- **What closes it:** `Field` giving the description and the error ids and
+  setting `aria-describedby` on the control, as it sets `id`.
 
 ### A tenant cannot create a second workspace
 
@@ -2119,6 +2343,92 @@ leaves out, until it is fixed.
 
 ## Closed
 
+### An existing account invited without a workspace is told it was invited, and nothing happens
+
+- **Noticed:** 2026-09-30, adding existing accounts to a tenant. Standing
+  rule 2.
+- **What it was:** an invitation of an address that already had an account
+  added it only with a role inside a workspace. With no role, or no
+  workspace, it answered as a new invitation does (200, `status: created`),
+  granted nothing, sent nothing, and recorded the refusal in an audit event
+  only platform admins see. The Users screen let a tenant admin invite with
+  role None, and with `developer` or `tenant_admin` and "No specific
+  workspace", and then confirmed the invitation. The same invitation of a
+  new address made an account, so the users list afterwards told the two
+  apart as well.
+- **Closed:** 2026-09-30 (`f0f8986`), by the user's decision that anyone
+  but a platform admin invites with a role inside a workspace. `POST
+  /api/admin/users` refuses such a request with 400 before the address is
+  looked at, alike for a new address and an existing account
+  (`internal/gateway/handler.go:12908`, `errInviteNeedsRoleAndWorkspace`,
+  `internal/gateway/account_boundaries.go:628`). The invite form asks for
+  both whenever the caller is not a platform admin ("Select a role…",
+  "Select a workspace…", the hint "People are always added to a
+  workspace"), and Create user stays disabled until both are chosen
+  (`inviteNeedsRoleAndWorkspace`,
+  `web/src/consoles/admin/UsersPanel.tsx:322`). A platform admin still
+  invites with no role or no workspace. Proof:
+  `TestInviteNeedsRoleAndWorkspace`
+  (`internal/gateway/admin_tiers_test.go:244`), run 2026-09-30: pass;
+  `web/e2e/account-ownership.spec.ts` (the invite cases at `:362`, `:403`
+  and `:431`), run 2026-09-30: pass. Split out: "The invite form cannot be
+  sent while the caller's roles load, and says nothing", "The invite e2e
+  spec mocks a refusal the gateway words differently", "The Playwright
+  specs are not type-checked" and "Field descriptions and errors are not
+  tied to their controls" (Open, above).
+- **Behaviour change:** a tenant admin's or developer's `POST
+  /api/admin/users` with no role, or no workspace, answers 400. It used to
+  create a new address's account with no role, or with `developer` or
+  `tenant_admin` for the whole tenant; such a grant is now a second step,
+  on the account's roles route.
+
+### A platform admin's invitation made an account with no tenant
+
+- **Noticed:** 2026-09-30, closing account adoption at first sign-in; split
+  from "Nothing sets an existing account's tenant" (Open, above).
+- **What it was:** `POST /api/admin/users` left a new account's
+  `customer_id` empty when the creator's scope was every tenant (a platform
+  admin, or a platform-wide builder), even when it named the workspace the
+  role went into. Such an account belonged to no tenant: its tenant's
+  administrators could not rename, delete or re-invite it, and its tenant's
+  single sign-on refused its first sign-in once its identity-provider
+  subject no longer matched.
+- **Closed:** 2026-09-30 (`f0f8986`), by the user's decision that an
+  account belongs to the tenant of what it holds. A new account invited
+  into a workspace belongs to that workspace's tenant, whoever invites it
+  (`internal/gateway/handler.go:12916-12931`); a platform admin's creation
+  with no workspace belongs to none, and an account a platform admin's
+  creation adopts keeps its own (`:13071-13089`). `user.created` records
+  `workspace_id` and `customer_id` (`:13136`). Migration 102
+  (`migrations/102_account_tenant_backfill.sql`) gives an account with no
+  tenant the one tenant its workspace roles, business-role memberships and
+  application and model grants lie in, and leaves alone a platform admin,
+  an account holding `developer` or `tenant_admin` without a workspace, one
+  the directory lists in a tenant database, one whose holdings lie in
+  several tenants or none, and every account in a tenant's own database.
+  Proof: `TestPlatformAdminInviteBelongsToTheWorkspacesTenant` and
+  `TestPlatformAdminInviteKeepsAnExistingAccountsTenant`
+  (`internal/gateway/admin_tiers_test.go`),
+  `TestPlatformWideBuilderKeepsItsInvitees`
+  (`internal/gateway/account_boundaries_test.go`),
+  `TestBackfill102AccountTenant` and
+  `TestBackfill102LeavesTenantDatabasesAlone`
+  (`migrations/backfill_102_test.go`), run 2026-09-30: pass. Split out:
+  "Nothing sets an existing account's tenant" (narrowed), "Migration 102
+  adds accounts to a tenant's user count", "Migration 102 writes no audit
+  event", "Migration 102 tells a tenant database by its name" and "A
+  platform admin's failed re-invitation keeps the new name and e-mail"
+  (Open, above).
+- **Behaviour change:** flagged as scope growth: the rule applies to every
+  creator, not only a platform admin, for consistency with 102, which
+  backfills the same shape whoever made it. A platform-wide builder's
+  invitee now belongs to the workspace's tenant (`home_tenant` `own`, where
+  it was `none`), and the builder keeps every action on it. A tenant's
+  administrators now rename, delete and re-invite the accounts a platform
+  admin invited into their workspaces, and those 102 gives them. Reverting
+  the growth means an empty `customer_id` again for a platform-wide
+  builder's invitations.
+
 ### A tenant admin cannot add a person who already has an account
 
 - **Noticed:** 2026-09-30, closing account adoption on user creation.
@@ -2166,7 +2476,7 @@ leaves out, until it is fixed.
   button rules", "Removal from a tenant and a refused invitation have no
   audit event types of their own", "An access_granted notification opens
   nothing" and "Mail about another tenant goes out under the platform's
-  name" (Open, above).
+  name" (Open, above; the first closed 2026-09-30, above).
 - **Behaviour change:** `POST /api/admin/users` no longer answers 409 for an
   address that has an account: a tenant admin's invitation adds a workspace
   role to it. For a caller who is not a platform admin, `POST` and `DELETE

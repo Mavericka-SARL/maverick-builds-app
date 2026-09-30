@@ -183,21 +183,24 @@ func (UnimplementedHandler) CreateAdminRevision(ctx context.Context, req *Create
 
 // CreateAdminUser implements createAdminUser operation.
 //
-// Available to platform_admin, tenant_admin, and developer roles. Non-platform admins create users
-// in their tenant scope and cannot assign platform-level roles during creation.
+// Available to platform_admin, tenant_admin, and developer roles. Anyone but a platform admin names
+// both a role and a workspace_id: without either the request is answered 400, before the address is
+// looked at, alike for a new address and an existing account. The role must be one the caller's tier
+// in the workspace's tenant may grant there (its tenant_admin or developer roles held in that tenant
+// only). The new account belongs to the workspace's tenant, whoever creates it; a platform admin's
+// created without a workspace belongs to none.
 // An address (compared case-insensitively) or identity-provider subject that already has an account
 // is not created again. For anyone but a platform admin, the requested role is added to that account
-// inside workspace_id (a workspace of the caller's tenant, and a role the caller may grant there,
-// checked as for a new address) and nothing else about the account changes: not its name, e-mail,
-// tenant, active flag or identity-provider account, and no invitation is sent. The person is
-// notified that they were given access (notification centre, and e-mail when the workspace's tenant
-// sends notifications by e-mail; at most once a day per workspace and three times a day per tenant).
-// The answer is the same as for a new invitation. Nothing is granted — with the same answer, under
-// an id that names no account, and the refusal audited for the platform only — when no role or no
-// workspace is given, to a platform admin's account or a platform-wide builder's, and to an account
-// with no tenant holding tenant_admin without a workspace, which a role in a new tenant's workspace
-// would make that tenant's administrator. A platform admin creating over an existing address adopts
-// it as before.
+// inside workspace_id (checked as for a new address) and nothing else about the account changes: not
+// its name, e-mail, tenant, active flag or identity-provider account, and no invitation is sent. The
+// person is notified that they were given access (notification centre, and e-mail when the
+// workspace's tenant sends notifications by e-mail; at most once a day per workspace and three times
+// a day per tenant). The answer is the same as for a new invitation. Nothing is granted — with the
+// same answer, under an id that names no account, and the refusal audited for the platform only —
+// to a platform admin's account or a platform-wide builder's, and to an account with no tenant
+// holding tenant_admin without a workspace, which a role in a new tenant's workspace would make that
+// tenant's administrator. A platform admin creating over an existing address adopts it as before,
+// and the account keeps its tenant (none, if it had none): only a new account takes the workspace's.
 // Creates a real identity-provider account and emails a set-your-password invitation; no password is
 // ever set server-side. The whole operation is undone if any step fails, so a user that exists can
 // always sign in. When no identity provider is configured (the dev stack) the account is local-only
@@ -1195,7 +1198,9 @@ func (UnimplementedHandler) ListAdminTenants(ctx context.Context) (r []AdminTena
 // ListAdminUsers implements listAdminUsers operation.
 //
 // Available to platform_admin, tenant_admin, and developer roles. Platform admins see all users;
-// tenant admins and developers are scoped to reachable tenant/workspace/app/model access.
+// anyone else sees the members of the tenants it holds tenant_admin or developer in. Its tier in
+// each tenant is decided by the roles it holds there, and each user's `permissions` by the tier in
+// that user's own tenant; an application or model grant is no tier.
 //
 // GET /api/admin/users
 func (UnimplementedHandler) ListAdminUsers(ctx context.Context) (r []AdminUser, _ error) {

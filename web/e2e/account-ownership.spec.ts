@@ -12,6 +12,9 @@
  *    (DELETE /api/admin/users/{id}/tenant-access), asked for first;
  *  - Invite user confirms the same way whether the address already had an
  *    account (then only given the role, in a workspace) or not;
+ *  - for anyone but a platform admin, Invite user asks for a role and a
+ *    workspace before it can be sent, for every address alike (user decision
+ *    2026-09-30); a platform admin keeps inviting with neither;
  *  - a revoke, a removal from the tenant, or an application/model delete
  *    that also revoked a narrowed developer's grant says so — from the
  *    reply's revoked list, or its message when it sends one — above the list,
@@ -19,8 +22,8 @@
  *
  * The admin endpoints are mocked, following what the gateway answers: an
  * account leaves GET /api/admin/users once nothing in the tenant lists it,
- * and an existing address invited without a role and workspace is refused
- * (addExistingAccount).
+ * and anyone but a platform admin inviting without a role and a workspace is
+ * refused, the same way whether or not the address already has an account.
  */
 import { test, expect, type Page, type Request } from "@playwright/test";
 
@@ -78,10 +81,16 @@ const users = [
 
 type Json = Record<string, unknown>;
 
-type Replies = { invite?: Json[]; revoke?: Json; tenantAccess?: Json; deleteModel?: Json; deleteApp?: Json; users?: Json[] };
+type Replies = {
+  invite?: Json[]; revoke?: Json; tenantAccess?: Json; deleteModel?: Json; deleteApp?: Json; users?: Json[];
+  /** Who is signed in; a tenant admin unless said otherwise. */
+  persona?: "tenant_admin" | "platform_admin";
+};
 
-// What addExistingAccount answers an existing address invited without both.
-const EXISTING_NEEDS_WORKSPACE = "this address already has an account. To add it to your tenant, choose a role and a workspace";
+// What the gateway answers anyone but a platform admin inviting without both —
+// before it looks the address up, so alike for new and existing addresses.
+const NEEDS_ROLE_AND_WORKSPACE = "choose a role and a workspace: people are always added to a workspace";
+const WORKSPACE_HINT = "People are always added to a workspace";
 
 async function openConsole(page: Page, replies: Replies = {}) {
   const calls: Request[] = [];
@@ -90,12 +99,13 @@ async function openConsole(page: Page, replies: Replies = {}) {
   let listed: Json[] = [...(replies.users ?? users)];
   const unlist = (ids: string[]) => { listed = listed.filter((u) => !ids.includes(u.id as string)); };
   const revokedIds = (reply: Json | undefined) => ((reply?.revoked as { user_id: string }[] | undefined) ?? []).map((g) => g.user_id);
-  await page.addInitScript(() => localStorage.setItem("dev_persona", "tenant_admin"));
+  const persona = replies.persona ?? "tenant_admin";
+  await page.addInitScript((p) => localStorage.setItem("dev_persona", p), persona);
   const json = (body: unknown, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(body) });
   // Anything not mocked below answers empty rather than reaching a gateway.
   await page.route((url) => url.pathname.startsWith("/api/"), (route) =>
     route.fulfill(json(route.request().method() === "GET" ? [] : {})));
-  const me = { user_id: SELF_ID, email: "admin@acme.test", display_name: "Ada Admin", roles: ["tenant_admin"] };
+  const me = { user_id: SELF_ID, email: "admin@acme.test", display_name: "Ada Admin", roles: [persona] };
   await page.route("**/api/me", (route) => route.fulfill(json(me)));
   await page.route("**/api/admin/me", (route) => route.fulfill(json(me)));
   await page.route("**/api/admin/tenants", (route) => route.fulfill(json([{
@@ -113,8 +123,9 @@ async function openConsole(page: Page, replies: Replies = {}) {
     if (route.request().method() === "POST") {
       calls.push(route.request());
       const body = route.request().postDataJSON() as { email: string; role?: string; workspace_id?: string };
-      const exists = listed.some((u) => (u.email as string).toLowerCase() === body.email.trim().toLowerCase());
-      if (exists && (!body.role || !body.workspace_id)) return route.fulfill(json({ error: EXISTING_NEEDS_WORKSPACE }, 400));
+      if (persona !== "platform_admin" && (!body.role || !body.workspace_id)) {
+        return route.fulfill(json({ error: NEEDS_ROLE_AND_WORKSPACE }, 400));
+      }
       return route.fulfill(json(invites.shift() ?? { id: "new-id", status: "created", invited: true }));
     }
     return route.fulfill(json(listed));
@@ -346,4 +357,101 @@ test("a developer invite can be placed in a workspace, which is how an existing 
   await expect(page.getByRole("status").filter({ hasText: "Invited fred@other.test." })).toBeVisible();
   const post = calls.find((r) => r.method() === "POST" && new URL(r.url()).pathname === "/api/admin/users");
   expect(post?.postDataJSON()).toMatchObject({ email: "fred@other.test", role: "developer", workspace_id: WS_ID });
+});
+
+test("a tenant admin's invite asks for a role and a workspace before it can be sent", async ({ page }) => {
+  // The gateway refuses anyone but a platform admin an invite without both,
+  // for a new address and an existing one alike, so the answer never says
+  // which it was; the form asks for both rather than offering "None" or "No
+  // specific workspace", which it would only refuse.
+  const calls = await openConsole(page);
+  await openUsers(page);
+  await page.getByRole("button", { name: "Invite user" }).click();
+  await page.getByLabel("Email").fill("jane@new.test");
+  await page.getByLabel("First name").fill("Jane");
+  await page.getByLabel("Last name").fill("Smith");
+
+  const role = page.getByLabel("Initial Role");
+  const workspace = page.getByLabel("Workspace");
+  const create = page.getByRole("button", { name: "Create user" });
+  await expect(role.locator("option", { hasText: "None" })).toHaveCount(0);
+  await expect(role).toHaveValue("");
+  // Required for assistive tech too, not only by the visual asterisk.
+  await expect(role).toHaveJSProperty("required", true);
+  // Asked for from the start, with the reason, before any role is picked.
+  await expect(workspace).toBeVisible();
+  await expect(workspace).toHaveJSProperty("required", true);
+  await expect(page.getByText(WORKSPACE_HINT, { exact: true })).toBeVisible();
+  await expect(create).toBeDisabled();
+
+  // A builder role too is always placed in a workspace.
+  await role.selectOption("developer");
+  await expect(workspace.locator("option", { hasText: "No specific workspace" })).toHaveCount(0);
+  await expect(workspace).toHaveValue("");
+  await expect(create).toBeDisabled();
+
+  await workspace.selectOption(WS_ID);
+  await expect(create).toBeEnabled();
+  await create.click();
+  await expect(page.getByRole("status").filter({ hasText: "Invited jane@new.test." })).toBeVisible();
+  const posts = calls.filter((r) => r.method() === "POST" && new URL(r.url()).pathname === "/api/admin/users");
+  expect(posts.map((r) => r.postDataJSON())).toEqual([
+    { email: "jane@new.test", first_name: "Jane", last_name: "Smith", role: "developer", workspace_id: WS_ID },
+  ]);
+});
+
+test("a tenant admin's invite with a workspace still asks for a role", async ({ page }) => {
+  // The workspace is offered before any role is picked, so it can be chosen
+  // first; the form still holds the invite until a role is chosen too.
+  const calls = await openConsole(page);
+  await openUsers(page);
+  await page.getByRole("button", { name: "Invite user" }).click();
+  await page.getByLabel("Email").fill("jane@new.test");
+  await page.getByLabel("First name").fill("Jane");
+  await page.getByLabel("Last name").fill("Smith");
+
+  const role = page.getByLabel("Initial Role");
+  const workspace = page.getByLabel("Workspace");
+  const create = page.getByRole("button", { name: "Create user" });
+  await workspace.selectOption(WS_ID);
+  await expect(role).toHaveValue("");
+  await expect(create).toBeDisabled();
+
+  await role.selectOption("business_user");
+  await expect(workspace).toHaveValue(WS_ID);
+  await expect(create).toBeEnabled();
+  await create.click();
+  await expect(page.getByRole("status").filter({ hasText: "Invited jane@new.test." })).toBeVisible();
+  const posts = calls.filter((r) => r.method() === "POST" && new URL(r.url()).pathname === "/api/admin/users");
+  expect(posts.map((r) => r.postDataJSON())).toEqual([
+    { email: "jane@new.test", first_name: "Jane", last_name: "Smith", role: "business_user", workspace_id: WS_ID },
+  ]);
+});
+
+test("a platform admin keeps inviting with no role or no specific workspace", async ({ page }) => {
+  const calls = await openConsole(page, { persona: "platform_admin" });
+  await openUsers(page);
+  await page.getByRole("button", { name: "Invite user" }).click();
+  await page.getByLabel("Email").fill("pat@new.test");
+  await page.getByLabel("First name").fill("Pat");
+  await page.getByLabel("Last name").fill("Smith");
+
+  const role = page.getByLabel("Initial Role");
+  await expect(role.locator("option", { hasText: "None" })).toHaveCount(1);
+  await expect(role).toHaveValue("");
+  await expect(role).toHaveJSProperty("required", false);
+  await expect(page.getByText(WORKSPACE_HINT, { exact: true })).toHaveCount(0);
+  const create = page.getByRole("button", { name: "Create user" });
+  await expect(create).toBeEnabled();
+
+  await role.selectOption("developer");
+  const workspace = page.getByLabel("Workspace");
+  await expect(workspace.locator("option", { hasText: "No specific workspace" })).toHaveCount(1);
+  await expect(workspace).toHaveValue("");
+  await expect(workspace).toHaveJSProperty("required", false);
+  await expect(create).toBeEnabled();
+  await create.click();
+  await expect(page.getByRole("status").filter({ hasText: "Invited pat@new.test." })).toBeVisible();
+  const post = calls.find((r) => r.method() === "POST" && new URL(r.url()).pathname === "/api/admin/users");
+  expect(post?.postDataJSON()).toMatchObject({ email: "pat@new.test", role: "developer", workspace_id: "" });
 });
