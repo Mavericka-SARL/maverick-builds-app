@@ -130,7 +130,7 @@ after generation.
 | `deploy/compose/` | The self-hosted single-server stack (docs/SELF_HOSTING.md) |
 | `deploy/docker/` | Dockerfiles, local development infrastructure and optional observability stack |
 | `deploy/k8s/` | Base and overlay manifests for the distributed service topology |
-| `examples/` | Demo documentation and model references |
+| `examples/` | Model packages to import and try, and how to share your own |
 | `docs/` | Current documentation index and engineering guides |
 
 ## Editions and licensing
@@ -143,6 +143,19 @@ edition adds gated features such as single sign-on, audit export and per-cell
 history, whose source lives under [`ee/`](ee/README.md) under the
 [Enterprise License](ee/LICENSE). A signed, offline license key unlocks the
 paid editions; see [docs/LICENSING.md](docs/LICENSING.md).
+
+## Community
+
+- **Share a model:** export it definitions only and post it in
+  [Show and tell](https://github.com/Mavericka-SARL/maverick-builds-app/discussions/categories/show-and-tell);
+  [examples/](examples/README.md) has one to import and the steps.
+- **Report a bug:** [open an issue](https://github.com/Mavericka-SARL/maverick-builds-app/issues/new/choose).
+- **Suggest a feature:** post or upvote it in
+  [Ideas](https://github.com/Mavericka-SARL/maverick-builds-app/discussions/categories/ideas);
+  what we take on is on the [roadmap board](https://github.com/orgs/Mavericka-SARL/projects/1).
+- **Ask a question:** [Q&A](https://github.com/Mavericka-SARL/maverick-builds-app/discussions/categories/q-a).
+
+[CONTRIBUTING.md](CONTRIBUTING.md) has the details.
 
 ## Main documentation
 

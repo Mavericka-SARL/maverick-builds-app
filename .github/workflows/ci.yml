@@ -878,6 +878,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      issues: read
     steps:
       - name: Create the release
         env:
@@ -890,7 +891,22 @@ jobs:
             echo "release $TAG already exists"; exit 0
           fi
           prefix="ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/mavericks"
+          # The public repository has snapshots, not pull requests, so
+          # GitHub's generated notes would be empty: list the issues closed
+          # as completed since the previous release instead.
+          prev=$(gh release list --repo "$REPO" --exclude-drafts --exclude-pre-releases --limit 1 --json publishedAt --jq '.[0].publishedAt // empty')
+          closed() {
+            gh issue list --repo "$REPO" --state closed --limit 200 \
+              --search "reason:completed${prev:+ closed:>$prev}" \
+              --json number,title,labels --jq "$1"
+          }
+          fixed=$(closed '.[] | select(any(.labels[]; .name == "bug")) | "- \(.title) (#\(.number))"')
+          added=$(closed '.[] | select(all(.labels[]; .name != "bug")) | "- \(.title) (#\(.number))"')
           {
+            if [ -n "$added" ]; then printf '## New\n\n%s\n\n' "$added"; fi
+            if [ -n "$fixed" ]; then printf '## Fixed\n\n%s\n\n' "$fixed"; fi
+            echo "## Images"
+            echo
             echo "Container images of this release (linux/amd64), each tagged \`$TAG\`:"
             echo
             for n in gateway identity tenant model schema-migration policy calculation workflow import query audit notification ai-assistant integration web postgres-backup postgres-walg minio; do

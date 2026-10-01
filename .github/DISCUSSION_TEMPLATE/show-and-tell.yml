@@ -1,0 +1,41 @@
+title: "[Model] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Share a model you built, so others can import it and start from it. [examples/README.md](https://github.com/Mavericka-SARL/maverick-builds-app/blob/main/examples/README.md#share-your-own-model) explains how to export one.
+        Export it **definitions only**: a full export also carries the values people entered and every form record. Open the file before you post it, and remove anything confidential.
+  - type: textarea
+    id: purpose
+    attributes:
+      label: What the model is for
+      description: The planning or business problem it covers, and who would use it (developer, business administrator, business user).
+    validations:
+      required: true
+  - type: textarea
+    id: contents
+    attributes:
+      label: What is in it
+      description: Dimensions, the metrics and formulas worth a look, grids, dashboards, forms, workflows.
+  - type: input
+    id: release
+    attributes:
+      label: Release it was exported from
+      description: The release you run (e.g. 2026.09.26), or the commit if you built from main.
+      placeholder: "2026.09.26"
+    validations:
+      required: true
+  - type: textarea
+    id: package
+    attributes:
+      label: The model package
+      description: Drag the .mavericks-model.json file here. If GitHub refuses the file type, zip it first. Screenshots of its dashboards are welcome too.
+    validations:
+      required: true
+  - type: checkboxes
+    id: definitions-only
+    attributes:
+      label: Before you post
+      options:
+        - label: I exported definitions only, and the file holds nothing confidential.
+          required: true

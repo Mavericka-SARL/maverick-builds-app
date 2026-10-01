@@ -451,12 +451,17 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 		return nil, err
 	}
 
+	// Ordered by name, here and for grid dimensions and form mappings below,
+	// so two exports of one revision are the same file: a shared package then
+	// diffs cleanly, and examples/ can be checked against a fresh export.
 	rows, err = q.Query(ctx, `
 		SELECT cd.metric_id::text, cd.depends_on_metric_id::text,
 		       cd.min_time_offset, cd.max_time_offset, cd.unbounded_past, cd.unbounded_future
 		FROM model.calc_dependency cd
 		JOIN model.metric_def m ON m.id = cd.metric_id
-		WHERE m.model_id=$1::uuid AND (m.revision_id=$2::uuid OR m.revision_id IS NULL)`,
+		JOIN model.metric_def dm ON dm.id = cd.depends_on_metric_id
+		WHERE m.model_id=$1::uuid AND (m.revision_id=$2::uuid OR m.revision_id IS NULL)
+		ORDER BY m.name, dm.name, cd.min_time_offset NULLS FIRST, cd.max_time_offset NULLS FIRST`,
 		modelID, revisionID)
 	if err != nil {
 		return nil, err
@@ -515,7 +520,9 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 			return nil, err
 		}
 		gdRows, err := q.Query(ctx,
-			`SELECT dimension_id::text, display_level FROM model.grid_dimension WHERE grid_id=$1::uuid`,
+			`SELECT gd.dimension_id::text, gd.display_level FROM model.grid_dimension gd
+			 JOIN model.dimension_def d ON d.id = gd.dimension_id
+			 WHERE gd.grid_id=$1::uuid ORDER BY d.name`,
 			pkg.Grids[i].ID)
 		if err != nil {
 			return nil, err
@@ -653,7 +660,8 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 		       fmm.aggregation, fmm.posting_statuses, fmm.dimension_mappings, fmm.live_posting
 		FROM model.form_metric_mapping fmm
 		JOIN model.form_def fd ON fd.id = fmm.form_id
-		WHERE fd.model_id=$1::uuid AND (fd.revision_id=$2::uuid OR fd.revision_id IS NULL)`,
+		WHERE fd.model_id=$1::uuid AND (fd.revision_id=$2::uuid OR fd.revision_id IS NULL)
+		ORDER BY fd.name, fmm.name`,
 		modelID, revisionID)
 	if err != nil {
 		return nil, err

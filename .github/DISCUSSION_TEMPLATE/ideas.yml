@@ -1,12 +1,10 @@
-name: Feature request
-description: Something maverickbuilds.app should do that it does not do today.
-labels: [enhancement]
 body:
   - type: markdown
     attributes:
       value: |
+        Ideas are where new features start. Upvote the ones you want: the most wanted ideas become issues on the [roadmap](https://github.com/Mavericka-SARL/maverick-builds-app/blob/main/CONTRIBUTING.md#roadmap-and-releases).
+        Search first: an idea that already exists is better upvoted and commented than posted twice.
         Describe the problem first: a clear problem often has a better answer than the first solution that comes to mind.
-        Still an idea, or want others to upvote it first? Post it in [Ideas](https://github.com/Mavericka-SARL/maverick-builds-app/discussions/categories/ideas) instead.
   - type: textarea
     id: problem
     attributes:
@@ -19,8 +17,6 @@ body:
     attributes:
       label: What you would like
       description: How it could work, from the point of view of the person who needs it.
-    validations:
-      required: true
   - type: textarea
     id: alternatives
     attributes:

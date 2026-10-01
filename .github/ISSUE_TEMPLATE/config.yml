@@ -1,5 +1,14 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Ask a question
+    url: https://github.com/Mavericka-SARL/maverick-builds-app/discussions/categories/q-a
+    about: Installing, configuring or using maverickbuilds.app.
+  - name: Suggest or upvote an idea
+    url: https://github.com/Mavericka-SARL/maverick-builds-app/discussions/categories/ideas
+    about: Not sure it is a feature request yet, or want to see who else needs it? Start here.
+  - name: Share a model
+    url: https://github.com/Mavericka-SARL/maverick-builds-app/discussions/categories/show-and-tell
+    about: Post a model package others can import (definitions only).
   - name: Report a security vulnerability
     url: https://github.com/Mavericka-SARL/maverick-builds-app/security/advisories/new
     about: Privately, never in a public issue. See SECURITY.md.

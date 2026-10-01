@@ -1,0 +1,1034 @@
+{
+  "format": "mavericks-model-export",
+  "version": 1,
+  "exported_at": "0001-01-01T00:00:00Z",
+  "model_name": "Sales Planning",
+  "storage_type": "oltp",
+  "revision_name": "Working",
+  "facts_policy": "definitions_only",
+  "include_data": false,
+  "dimensions": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "lineage_id": "00000000-0000-4000-8000-000000000002",
+      "name": "geography",
+      "agg_rule": "sum",
+      "properties": [],
+      "dimension_type": "standard",
+      "members": [
+        {
+          "id": "00000000-0000-4000-8000-000000000003",
+          "lineage_id": "00000000-0000-4000-8000-000000000004",
+          "code": "WORLD",
+          "label": "World",
+          "properties": {},
+          "sort_order": 1
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000005",
+          "lineage_id": "00000000-0000-4000-8000-000000000006",
+          "code": "EMEA",
+          "label": "EMEA",
+          "parent_member_id": "00000000-0000-4000-8000-000000000003",
+          "properties": {},
+          "sort_order": 2
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000007",
+          "lineage_id": "00000000-0000-4000-8000-000000000008",
+          "code": "AMER",
+          "label": "Americas",
+          "parent_member_id": "00000000-0000-4000-8000-000000000003",
+          "properties": {},
+          "sort_order": 3
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000009",
+          "lineage_id": "00000000-0000-4000-8000-000000000010",
+          "code": "UK",
+          "label": "United Kingdom",
+          "parent_member_id": "00000000-0000-4000-8000-000000000005",
+          "properties": {},
+          "sort_order": 4
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000011",
+          "lineage_id": "00000000-0000-4000-8000-000000000012",
+          "code": "DE",
+          "label": "Germany",
+          "parent_member_id": "00000000-0000-4000-8000-000000000005",
+          "properties": {},
+          "sort_order": 5
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000013",
+          "lineage_id": "00000000-0000-4000-8000-000000000014",
+          "code": "US",
+          "label": "United States",
+          "parent_member_id": "00000000-0000-4000-8000-000000000007",
+          "properties": {},
+          "sort_order": 6
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000015",
+          "lineage_id": "00000000-0000-4000-8000-000000000016",
+          "code": "CA",
+          "label": "Canada",
+          "parent_member_id": "00000000-0000-4000-8000-000000000007",
+          "properties": {},
+          "sort_order": 7
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000017",
+      "lineage_id": "00000000-0000-4000-8000-000000000018",
+      "name": "product",
+      "agg_rule": "sum",
+      "properties": [],
+      "dimension_type": "standard",
+      "members": [
+        {
+          "id": "00000000-0000-4000-8000-000000000019",
+          "lineage_id": "00000000-0000-4000-8000-000000000020",
+          "code": "ALL_PROD",
+          "label": "All products",
+          "properties": {},
+          "sort_order": 1
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000021",
+          "lineage_id": "00000000-0000-4000-8000-000000000022",
+          "code": "HARDWARE",
+          "label": "Hardware",
+          "parent_member_id": "00000000-0000-4000-8000-000000000019",
+          "properties": {},
+          "sort_order": 2
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000023",
+          "lineage_id": "00000000-0000-4000-8000-000000000024",
+          "code": "SOFTWARE",
+          "label": "Software",
+          "parent_member_id": "00000000-0000-4000-8000-000000000019",
+          "properties": {},
+          "sort_order": 3
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000025",
+          "lineage_id": "00000000-0000-4000-8000-000000000026",
+          "code": "LAPTOP",
+          "label": "Laptop",
+          "parent_member_id": "00000000-0000-4000-8000-000000000021",
+          "properties": {},
+          "sort_order": 4
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000027",
+          "lineage_id": "00000000-0000-4000-8000-000000000028",
+          "code": "MONITOR",
+          "label": "Monitor",
+          "parent_member_id": "00000000-0000-4000-8000-000000000021",
+          "properties": {},
+          "sort_order": 5
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000029",
+          "lineage_id": "00000000-0000-4000-8000-000000000030",
+          "code": "LICENSE",
+          "label": "Licence",
+          "parent_member_id": "00000000-0000-4000-8000-000000000023",
+          "properties": {},
+          "sort_order": 6
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000031",
+          "lineage_id": "00000000-0000-4000-8000-000000000032",
+          "code": "SUPPORT",
+          "label": "Support",
+          "parent_member_id": "00000000-0000-4000-8000-000000000023",
+          "properties": {},
+          "sort_order": 7
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000033",
+      "lineage_id": "00000000-0000-4000-8000-000000000034",
+      "name": "period",
+      "agg_rule": "sum",
+      "properties": [],
+      "dimension_type": "time",
+      "time_granularity": "quarter",
+      "fiscal_year_start_month": 1,
+      "members": [
+        {
+          "id": "00000000-0000-4000-8000-000000000035",
+          "lineage_id": "00000000-0000-4000-8000-000000000036",
+          "code": "Q1",
+          "label": "Q1",
+          "parent_member_id": "00000000-0000-4000-8000-000000000037",
+          "properties": {},
+          "sort_order": 0,
+          "period_start": "2026-01-01",
+          "period_end": "2026-03-31",
+          "time_index": 0
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000038",
+          "lineage_id": "00000000-0000-4000-8000-000000000039",
+          "code": "Q2",
+          "label": "Q2",
+          "parent_member_id": "00000000-0000-4000-8000-000000000037",
+          "properties": {},
+          "sort_order": 0,
+          "period_start": "2026-04-01",
+          "period_end": "2026-06-30",
+          "time_index": 1
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000040",
+          "lineage_id": "00000000-0000-4000-8000-000000000041",
+          "code": "Q3",
+          "label": "Q3",
+          "parent_member_id": "00000000-0000-4000-8000-000000000042",
+          "properties": {},
+          "sort_order": 0,
+          "period_start": "2026-07-01",
+          "period_end": "2026-09-30",
+          "time_index": 2
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000043",
+          "lineage_id": "00000000-0000-4000-8000-000000000044",
+          "code": "Q4",
+          "label": "Q4",
+          "parent_member_id": "00000000-0000-4000-8000-000000000042",
+          "properties": {},
+          "sort_order": 0,
+          "period_start": "2026-10-01",
+          "period_end": "2026-12-31",
+          "time_index": 3
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000045",
+          "lineage_id": "00000000-0000-4000-8000-000000000046",
+          "code": "FY26",
+          "label": "FY26",
+          "properties": {},
+          "sort_order": 0
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000037",
+          "lineage_id": "00000000-0000-4000-8000-000000000047",
+          "code": "H1",
+          "label": "H1",
+          "parent_member_id": "00000000-0000-4000-8000-000000000045",
+          "properties": {},
+          "sort_order": 0
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000042",
+          "lineage_id": "00000000-0000-4000-8000-000000000048",
+          "code": "H2",
+          "label": "H2",
+          "parent_member_id": "00000000-0000-4000-8000-000000000045",
+          "properties": {},
+          "sort_order": 0
+        }
+      ]
+    }
+  ],
+  "metrics": [
+    {
+      "id": "00000000-0000-4000-8000-000000000049",
+      "lineage_id": "00000000-0000-4000-8000-000000000050",
+      "name": "units",
+      "storage_type": "oltp",
+      "is_input": true,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000051",
+      "lineage_id": "00000000-0000-4000-8000-000000000052",
+      "name": "revenue",
+      "storage_type": "oltp",
+      "is_input": true,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000053",
+      "lineage_id": "00000000-0000-4000-8000-000000000054",
+      "name": "cost",
+      "storage_type": "oltp",
+      "is_input": true,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000055",
+      "lineage_id": "00000000-0000-4000-8000-000000000056",
+      "name": "target",
+      "storage_type": "oltp",
+      "is_input": true,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000057",
+      "lineage_id": "00000000-0000-4000-8000-000000000058",
+      "name": "margin",
+      "formula": "={revenue} - {cost}",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000059",
+      "lineage_id": "00000000-0000-4000-8000-000000000060",
+      "name": "margin_pct",
+      "formula": "={margin} / {revenue} * 100",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "formula",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000061",
+      "lineage_id": "00000000-0000-4000-8000-000000000062",
+      "name": "attainment_pct",
+      "formula": "={revenue} / {target} * 100",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "formula",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000063",
+      "lineage_id": "00000000-0000-4000-8000-000000000064",
+      "name": "avg_price",
+      "formula": "={revenue} / {units}",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "rate",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum",
+      "agg_numerator_metric_id": "00000000-0000-4000-8000-000000000051",
+      "agg_denominator_metric_id": "00000000-0000-4000-8000-000000000049"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000065",
+      "lineage_id": "00000000-0000-4000-8000-000000000066",
+      "name": "seasonality",
+      "storage_type": "oltp",
+      "is_input": true,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000067",
+      "lineage_id": "00000000-0000-4000-8000-000000000068",
+      "name": "pipeline",
+      "storage_type": "oltp",
+      "is_input": true,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000069",
+      "lineage_id": "00000000-0000-4000-8000-000000000070",
+      "name": "growth_pct",
+      "formula": "=IFERROR(({revenue} - LAG({revenue}, 1, 0)) / LAG({revenue}, 1, 0) * 100, 0)",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "formula",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000071",
+      "lineage_id": "00000000-0000-4000-8000-000000000072",
+      "name": "forecast_base",
+      "formula": "={revenue} * (1 + {growth_pct} / 100)",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000073",
+      "lineage_id": "00000000-0000-4000-8000-000000000074",
+      "name": "forecast_seasonal",
+      "formula": "=ROUND({forecast_base} * {seasonality}, 0)",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000075",
+      "lineage_id": "00000000-0000-4000-8000-000000000076",
+      "name": "forecast_capped",
+      "formula": "=MIN(MAX({forecast_seasonal}, 0), 2000000)",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000077",
+      "lineage_id": "00000000-0000-4000-8000-000000000078",
+      "name": "weighted_target",
+      "formula": "={target} * SWITCH(period, \"Q1\", 0.2, \"Q2\", 0.25, \"Q3\", 0.25, 0.3)",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000079",
+      "lineage_id": "00000000-0000-4000-8000-000000000080",
+      "name": "h1_revenue",
+      "formula": "=IF(OR(period = \"Q1\", period = \"Q2\"), {revenue}, 0)",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000081",
+      "lineage_id": "00000000-0000-4000-8000-000000000082",
+      "name": "off_peak_revenue",
+      "formula": "=IF(NOT(period = \"Q4\"), {revenue}, 0)",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000083",
+      "lineage_id": "00000000-0000-4000-8000-000000000084",
+      "name": "quarter_weight",
+      "formula": "=SWITCH(period, \"Q1\", 0.2, \"Q2\", 0.25, \"Q3\", 0.25, 0.3)",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000085",
+      "lineage_id": "00000000-0000-4000-8000-000000000086",
+      "name": "abs_variance",
+      "formula": "=ABS({revenue} - {target})",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000087",
+      "lineage_id": "00000000-0000-4000-8000-000000000088",
+      "name": "cagr_pct",
+      "formula": "=IFERROR((POWER({revenue} / PREVIOUS({revenue}), 0.25) - 1) * 100, 0)",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "formula",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000089",
+      "lineage_id": "00000000-0000-4000-8000-000000000090",
+      "name": "rmse",
+      "formula": "=SQRT(POWER({revenue} - {target}, 2))",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000091",
+      "lineage_id": "00000000-0000-4000-8000-000000000092",
+      "name": "scenario_mid",
+      "formula": "=AVERAGE({revenue}, {target}, {pipeline})",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000093",
+      "lineage_id": "00000000-0000-4000-8000-000000000094",
+      "name": "best_case",
+      "formula": "=MAX({revenue}, {target}, {pipeline})",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000095",
+      "lineage_id": "00000000-0000-4000-8000-000000000096",
+      "name": "worst_case",
+      "formula": "=MIN({revenue}, {target}, {pipeline})",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000097",
+      "lineage_id": "00000000-0000-4000-8000-000000000098",
+      "name": "input_total",
+      "formula": "=SUM({revenue}, {cost}, {target})",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000099",
+      "lineage_id": "00000000-0000-4000-8000-000000000100",
+      "name": "funded_flag",
+      "formula": "=IF(AND({revenue} \u003e 0, {cost} \u003e 0), 1, 0)",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000101",
+      "lineage_id": "00000000-0000-4000-8000-000000000102",
+      "name": "units_whole",
+      "formula": "=INT({units})",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000103",
+      "lineage_id": "00000000-0000-4000-8000-000000000104",
+      "name": "batch_remainder",
+      "formula": "=MOD({units}, 7)",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000105",
+      "lineage_id": "00000000-0000-4000-8000-000000000106",
+      "name": "risk_tier",
+      "formula": "=IFS({growth_pct} \u003e 15, 3, {growth_pct} \u003e 5, 2, {growth_pct} \u003e -100, 1)",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000107",
+      "lineage_id": "00000000-0000-4000-8000-000000000108",
+      "name": "pallets_needed",
+      "formula": "=CEILING({units} / 48, 1)",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000109",
+      "lineage_id": "00000000-0000-4000-8000-000000000110",
+      "name": "pallets_full",
+      "formula": "=FLOOR({units} / 48, 1)",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000111",
+      "lineage_id": "00000000-0000-4000-8000-000000000112",
+      "name": "revenue_k_down",
+      "formula": "=ROUNDDOWN({revenue} / 1000, 0)",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000113",
+      "lineage_id": "00000000-0000-4000-8000-000000000114",
+      "name": "revenue_k_up",
+      "formula": "=ROUNDUP({revenue} / 1000, 0)",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000115",
+      "lineage_id": "00000000-0000-4000-8000-000000000116",
+      "name": "scenarios_present",
+      "formula": "=COUNT({revenue}, {target}, {pipeline})",
+      "storage_type": "oltp",
+      "is_input": false,
+      "agg_rule": "sum",
+      "format": "number",
+      "format_decimals": 0,
+      "format_currency": "$",
+      "time_summary": "sum"
+    }
+  ],
+  "dependencies": [
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000085",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000051"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000085",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000055"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000061",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000051"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000061",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000055"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000063",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000051"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000063",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000049"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000103",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000049"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000093",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000067"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000093",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000051"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000093",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000055"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000087",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000051",
+      "min_time_offset": -1
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000071",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000069"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000071",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000051"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000075",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000073"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000073",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000071"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000073",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000065"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000099",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000053"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000099",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000051"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000069",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000051",
+      "min_time_offset": -1
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000079",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000051"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000097",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000053"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000097",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000051"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000097",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000055"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000057",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000053"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000057",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000051"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000059",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000057"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000059",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000051"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000081",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000051"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000109",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000049"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000107",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000049"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000111",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000051"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000113",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000051"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000105",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000069"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000089",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000051"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000089",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000055"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000091",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000067"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000091",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000051"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000091",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000055"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000115",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000067"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000115",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000051"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000115",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000055"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000101",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000049"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000077",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000055"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000095",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000067"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000095",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000051"
+    },
+    {
+      "metric_id": "00000000-0000-4000-8000-000000000095",
+      "depends_on_metric_id": "00000000-0000-4000-8000-000000000055"
+    }
+  ],
+  "grids": [
+    {
+      "id": "00000000-0000-4000-8000-000000000117",
+      "name": "Sales Plan",
+      "metrics": [
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000049",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000051",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000053",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000055",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000057",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000059",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000061",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000063",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000065",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000067",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000069",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000071",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000073",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000075",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000077",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000079",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000085",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000087",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000089",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000091",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000093",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000095",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000097",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000099",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000081",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000101",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000103",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000105",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000107",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000109",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000111",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000113",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000115",
+          "sort_order": 0
+        },
+        {
+          "metric_id": "00000000-0000-4000-8000-000000000083",
+          "sort_order": 0
+        }
+      ],
+      "dimensions": [
+        {
+          "dimension_id": "00000000-0000-4000-8000-000000000001"
+        },
+        {
+          "dimension_id": "00000000-0000-4000-8000-000000000033"
+        },
+        {
+          "dimension_id": "00000000-0000-4000-8000-000000000017"
+        }
+      ]
+    }
+  ],
+  "folders": null,
+  "dashboards": null,
+  "forms": null,
+  "form_records": null,
+  "form_mappings": null,
+  "integrations": null,
+  "workflows": null,
+  "automation_rules": null,
+  "facts": null
+}
