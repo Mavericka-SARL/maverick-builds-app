@@ -29,7 +29,7 @@ the tab renders the feature gate naming the edition that would unlock it.
 3. **A tenant key that is set but not enforced** — a convenience, so a
    developer who has not pasted a key still has a working assistant.
 4. **The provider's environment variable** (`OPENAI_API_KEY`,
-   `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`), the
+   `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`), the
    single-tenant and self-hosted fallback.
 
 A key always brings its own provider and model with it: the key belongs to one

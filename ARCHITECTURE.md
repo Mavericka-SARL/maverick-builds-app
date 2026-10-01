@@ -458,8 +458,8 @@ package's own manifest rather than silently omitted.
 ## AI assistant architecture
 
 The Developer Console AI surface is implemented inside the HTTP gateway. It has
-provider-neutral chat interfaces with OpenAI, Anthropic, Mistral, and DeepSeek
-adapters; per-user provider settings; per-tenant keys
+provider-neutral chat interfaces with OpenAI, Anthropic, Google Gemini,
+Mistral and DeepSeek adapters; per-user provider settings; per-tenant keys
 (`/api/admin/ai-settings`, optionally enforced); deployment-wide
 `*_API_KEY` environment keys as the last fallback; persisted sessions and
 messages; streamed responses; PDF/XLSX/DOCX/CSV/text document context; read

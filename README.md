@@ -2,11 +2,11 @@
 
 > **Classification:** Current — Product overview of what the platform does today.
 
-maverickbuilds.app is a Go and React platform for building governed business
-applications. The current product combines multidimensional planning grids,
-calculated metrics, forms, imports, dashboards, workflows, automations,
-role-scoped access, revision management, audit history, and an AI-assisted
-developer workspace.
+maverickbuilds.app is a Go and React platform for building governed
+decision-making applications for business. The current product combines
+calculated metrics, multidimensional grids, forms, imports, dashboards,
+workflows, automations, role-scoped access, revision management, audit history,
+and an AI-assisted developer workspace.
 
 This repository is the source of truth for the running implementation. The
 current architecture is described in [ARCHITECTURE.md](ARCHITECTURE.md), and
