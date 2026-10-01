@@ -1093,6 +1093,7 @@ type IdentityUser struct {
 	ScimManaged bool               `json:"scim_managed"`
 	LastSeenAt  pgtype.Timestamptz `json:"last_seen_at"`
 	Preferences json.RawMessage    `json:"preferences"`
+	StandIn     bool               `json:"stand_in"`
 }
 
 type IdentityUserAccessRule struct {
