@@ -4,6 +4,7 @@ import { api, type DemoContext, type DashboardDef, type DashboardFolder } from "
 import { LoadingState, EmptyState, Toolbar, ToolbarGroup, SearchInput, FilterChip, Button, Select, Tabs, SectionHeader } from "../../ui";
 import { flattenFolders, UNFILED_LABEL } from "../developer/folderTree";
 import { DashboardWidgetGrid } from "./DashboardWidgets";
+import { ModelSwitcher } from "./ModelSwitcher";
 
 // Matches the Developer Console's folder controls: "" filters nothing,
 // this sentinel narrows to dashboards that aren't in any folder.
@@ -69,14 +70,23 @@ export function DashboardsView({ ctx, onOpenInstance }: { ctx: DemoContext; onOp
   if (isLoading) return <LoadingState label="Loading dashboards…" />;
 
   if (allDashboards.length === 0) {
-    return <EmptyState label="No dashboards are available to you yet. A developer builds them under Build › Dashboards, and a business admin decides which roles see them." />;
+    // Still offer the model switch: another model may have dashboards.
+    return (
+      <div>
+        <Toolbar className="mvx-toolbar--spaced">
+          <ToolbarGroup><ModelSwitcher ctx={ctx} /></ToolbarGroup>
+        </Toolbar>
+        <EmptyState label="No dashboards are available to you yet. A developer builds them under Build › Dashboards, and a business admin decides which roles see them." />
+      </div>
+    );
   }
 
   return (
     <div>
-      {/* ── Search + tag filter bar ── */}
+      {/* ── Model + search + tag filter bar ── */}
       <Toolbar className="mvx-toolbar--spaced">
         <ToolbarGroup>
+          <ModelSwitcher ctx={ctx} />
           <SearchInput
             value={search}
             onChange={e => setSearch(e.target.value)}

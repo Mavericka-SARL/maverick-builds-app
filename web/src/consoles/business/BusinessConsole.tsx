@@ -8,7 +8,8 @@ import { tabId, localTab, type ConsoleSection, type SectionId, type SectionInput
 import { WorkflowInbox } from "./WorkflowInboxTab";
 import { WorkflowMyHistory } from "./WorkflowHistoryTab";
 import { DashboardsView } from "./DashboardsView";
-import { AppsTab, SELECTED_APP_KEY } from "./AppsTab";
+import { AppsTab } from "./AppsTab";
+import { SELECTED_APP_KEY } from "./modelSelection";
 
 // ── Section ───────────────────────────────────────────────────────────────────
 

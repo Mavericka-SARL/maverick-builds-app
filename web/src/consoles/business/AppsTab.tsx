@@ -1,28 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type AppInfo } from "../../api/client";
 import { Button, LoadingState, EmptyState, StatusBadge } from "../../ui";
-
-export const SELECTED_APP_KEY = "selected_app_id";
+import { SELECTED_APP_KEY, SELECTED_MODEL_KEY, selectModel } from "./modelSelection";
 
 export function AppsTab() {
   const { data: apps = [], isLoading } = useQuery({ queryKey: ["apps"], queryFn: api.getApps });
   const currentId = localStorage.getItem(SELECTED_APP_KEY) ?? "";
 
-  const currentModelId = localStorage.getItem("selected_model_id") ?? "";
+  const currentModelId = localStorage.getItem(SELECTED_MODEL_KEY) ?? "";
 
   function select(id: string) {
     if (id === currentId) return;
     localStorage.setItem(SELECTED_APP_KEY, id);
-    localStorage.removeItem("selected_model_id");
-    window.location.reload();
-  }
-
-  function selectModel(appId: string, modelId: string, isDefault: boolean) {
-    localStorage.setItem(SELECTED_APP_KEY, appId);
-    // The default needs no pin — clearing keeps behavior stable if the
-    // developer later changes which model is the default.
-    if (isDefault) localStorage.removeItem("selected_model_id");
-    else localStorage.setItem("selected_model_id", modelId);
+    localStorage.removeItem(SELECTED_MODEL_KEY);
     window.location.reload();
   }
 

@@ -2427,6 +2427,24 @@ leaves out, until it is fixed.
 - **What closes it:** usage per home where the person holds tenant_admin,
   merged as the other lists are.
 
+### Switching to a model with no revision strands the business consoles
+
+- **Noticed:** 2026-10-01, testing the Dashboards model selector.
+- **What:** a model made through Admin › Applications (`POST /api/admin/models`)
+  has no revision until a developer creates one. Selecting it — from the
+  Dashboards selector or the Models tab — makes `/api/demo` answer 500
+  ("no revision found for model"). The business_user section then shows
+  "Cannot reach gateway" on Dashboards, and the business-admin section shows an
+  empty page; neither renders the model selector, since it needs the context.
+- **Why it matters:** a business user who picks a model a developer has not
+  started yet sees a misleading connection error, and has to know to go to the
+  Models tab to switch back.
+- **How to check:** as a tenant admin, create a model in an application a
+  business user reaches; as that user, pick it on Dashboards.
+- **What closes it:** list only models with a revision in `/api/apps` for
+  business routes, or have `/api/demo` report "no revision yet" as its own
+  state that the consoles render with the selector still shown.
+
 ## Closed
 
 ### A first sign-in could be aimed at another tenant
