@@ -40,7 +40,9 @@ type fakeBroker struct {
 	federated map[string][]map[string]string
 	invited   []string
 	deleted   []string
-	nextID    int
+	// realmRoles lists each subject a realm role was assigned to.
+	realmRoles []string
+	nextID     int
 	// failInvite makes the invitation mail fail, as a realm without SMTP does.
 	failInvite bool
 }
@@ -87,6 +89,7 @@ func newFakeBroker(t *testing.T) *fakeBroker {
 		sub, tail, _ := strings.Cut(rest, "/")
 		switch {
 		case tail == "role-mappings/realm":
+			f.realmRoles = append(f.realmRoles, sub)
 			w.WriteHeader(http.StatusNoContent)
 		case tail == "execute-actions-email":
 			if f.failInvite {

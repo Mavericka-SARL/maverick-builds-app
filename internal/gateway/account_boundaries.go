@@ -29,9 +29,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/mavericks-engine/mavericks/internal/identity"
 	"github.com/mavericks-engine/mavericks/internal/notification"
 	"github.com/mavericks-engine/mavericks/internal/writeguard"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
+	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
 )
 
 // Where an account's home (identity.user customer_id) is, seen from the
@@ -144,7 +146,7 @@ func (h *handler) loadAccountFacts(ctx context.Context, act *actor, scope, ids [
 		scope = []string{}
 	}
 	rows, err := h.db.Query(ctx, `
-		SELECT u.id::text, u.email, COALESCE(u.customer_id::text, ''),
+		SELECT u.id::text, u.keycloak_sub, u.email, COALESCE(u.customer_id::text, ''),
 		       EXISTS (SELECT 1 FROM identity.role_assignment pa WHERE pa.user_id = u.id AND pa.role = 'platform_admin'),
 		       `+platformWideBuilderSQL("u.id")+`,
 		       u.id = NULLIF($2, '')::uuid,
@@ -171,14 +173,37 @@ func (h *handler) loadAccountFacts(ctx context.Context, act *actor, scope, ids [
 	}
 	defer rows.Close()
 	out := make(map[string]accountFacts, len(ids))
+	subOf := map[string]string{}
 	for rows.Next() {
 		var f accountFacts
-		if err := rows.Scan(&f.ID, &f.Email, &f.CustomerID, &f.PlatformAdmin, &f.PlatformWide, &f.Self, &f.ScopeRoles, &f.Roles, &f.HoldsInScope); err != nil {
+		var sub string
+		if err := rows.Scan(&f.ID, &sub, &f.Email, &f.CustomerID, &f.PlatformAdmin, &f.PlatformWide, &f.Self, &f.ScopeRoles, &f.Roles, &f.HoldsInScope); err != nil {
 			return nil, err
 		}
 		out[f.ID] = f
+		subOf[f.ID] = sub
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	// A tenant's row of someone with platform reach in the control plane is
+	// a platform account's, as in one database (platformReachOf).
+	subs := make([]string, 0, len(subOf))
+	for _, sub := range subOf {
+		subs = append(subs, sub)
+	}
+	reach, err := h.platformReachOf(ctx, subs)
+	if err != nil {
+		return nil, err
+	}
+	for id, f := range out {
+		if reach[subOf[id]] {
+			f.PlatformAdmin = true
+			out[id] = f
+		}
+	}
+	return out, nil
 }
 
 // accountFactsOf is loadAccountFacts for one account, spelled any way a uuid
@@ -257,7 +282,76 @@ func (h *handler) withUserPermissions(ctx context.Context, act *actor, tiers adm
 			continue
 		}
 		users[i].HomeTenant, users[i].Permissions = accountPermissionsFor(act, tiers, f)
-		users[i].GrantableRoles = unscopedGrantableRoles(act, tiers, f.CustomerID)
+		users[i].GrantableRoles = unscopedGrantableRoles(ctx, act, tiers, f.CustomerID)
+	}
+	return h.labelMembersFromElsewhere(ctx, users)
+}
+
+// labelMembersFromElsewhere marks as homeOther the accounts listed with no
+// tenant that another database holds — another dedicated tenant's, or (seen
+// from a dedicated tenant) the control plane: members
+// (addMemberFromElsewhere, ReconcileAdoptedAccounts), whose row has no
+// tenant only because theirs is in another database. They were shown as
+// having no tenant of their own.
+func (h *handler) labelMembersFromElsewhere(ctx context.Context, users []adminUserItem) error {
+	here := tenantdb.TenantFrom(ctx)
+	if h.db.Router() == nil {
+		return nil
+	}
+	var ids []string
+	for _, u := range users {
+		if u.HomeTenant == homeNone {
+			ids = append(ids, u.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	subs := map[string]string{} // keycloak_sub -> user id
+	rows, err := h.db.Query(ctx, `SELECT id::text, keycloak_sub FROM identity."user" WHERE id::text = ANY($1)`, ids)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id, sub string
+		if err := rows.Scan(&id, &sub); err != nil {
+			rows.Close()
+			return err
+		}
+		subs[sub] = id
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	list := make([]string, 0, len(subs))
+	for sub := range subs {
+		list = append(list, sub)
+	}
+	elsewhere := map[string]bool{}
+	drows, err := h.db.Control().Query(ctx, `
+		SELECT keycloak_sub FROM platform.user_directory
+		WHERE keycloak_sub = ANY($1) AND customer_id::text <> $2
+		UNION
+		SELECT keycloak_sub FROM identity."user" WHERE $2 <> '' AND keycloak_sub = ANY($1)`, list, here)
+	if err != nil {
+		return err
+	}
+	defer drows.Close()
+	for drows.Next() {
+		var sub string
+		if err := drows.Scan(&sub); err != nil {
+			return err
+		}
+		elsewhere[subs[sub]] = true
+	}
+	if err := drows.Err(); err != nil {
+		return err
+	}
+	for i := range users {
+		if elsewhere[users[i].ID] {
+			users[i].HomeTenant = homeOther
+		}
 	}
 	return nil
 }
@@ -513,6 +607,17 @@ func (h *handler) adminRemoveFromTenant(ctx context.Context, w http.ResponseWrit
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
+	// In a dedicated tenant's database the removal took everything the
+	// member held in it, so the directory stops routing them here: the
+	// tenant left their list, empty, and stayed there. The row stays, as in
+	// one database, for what they wrote; adding them again restores the
+	// entry (addExistingAccount).
+	if f.CustomerID == "" && tenantdb.TenantFrom(ctx) != "" {
+		var sub string
+		if err := h.db.QueryRow(ctx, `SELECT keycloak_sub FROM identity."user" WHERE id = $1::uuid`, f.ID).Scan(&sub); err == nil {
+			h.forgetUser(ctx, sub)
+		}
+	}
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 		Category: auditlog.CategoryAdmin, EventType: auditlog.EventUserRoleRevoked,
 		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
@@ -537,18 +642,153 @@ func (h *handler) adminRemoveFromTenant(ctx context.Context, w http.ResponseWrit
 
 // existingAccountID returns the id of the account the application already
 // has under email (compared case-insensitively) or identity-provider subject
-// sub, preferring the e-mail's, or "".
+// sub, preferring the e-mail's, or "". A platform admin's stand-in is no
+// account: the control plane holds theirs (identityHeldIn).
 func (h *handler) existingAccountID(ctx context.Context, email, sub string) (string, error) {
 	var id string
 	err := h.db.QueryRow(ctx, `
 		SELECT id::text FROM identity.user
-		WHERE ($1 <> '' AND lower(email) = lower($1)) OR ($2 <> '' AND keycloak_sub = $2)
+		WHERE NOT stand_in AND (($1 <> '' AND lower(email) = lower($1)) OR ($2 <> '' AND keycloak_sub = $2))
 		ORDER BY ($1 <> '' AND lower(email) = lower($1)) DESC
 		LIMIT 1`, email, sub).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
 	return id, err
+}
+
+// Where, other than the database a request is routed to, an identity has a
+// user row (identityHeldIn).
+type heldAt int
+
+const (
+	heldNowhere heldAt = iota
+	// heldInTenants: dedicated tenants' databases only.
+	heldInTenants
+	// heldInControl: the control plane, where platform admins and every
+	// tenant without a database of its own live — whatever else holds it.
+	heldInControl
+)
+
+// identityHeldIn reports where, other than the database ctx is routed to, a
+// user row is held under identity-provider subject sub or — without an
+// identity provider — email (compared case-insensitively): the control plane,
+// or a dedicated tenant the directory lists. heldSub is that row's subject,
+// the one sub names when it matched. Always heldNowhere with a single
+// database.
+//
+// existingAccountID sees the routed database only. With a database per
+// tenant, an invitation into a dedicated tenant of a person another database
+// held found no account, so it adopted the identity-provider account as a
+// failed creation's: a row the inviting tenant owned (renamed, re-invited and
+// deleted by its admin), its realm role added to the shared account, a
+// set-password e-mail, and a directory entry — which, for someone the control
+// plane held, routed every request of theirs to the inviting tenant: a
+// platform admin lost the platform console to any tenant admin who invited
+// their address (2026-09-30). SCIM creation did the same, and then changed
+// the shared account's e-mail, disabled it or deleted it.
+func (h *handler) identityHeldIn(ctx context.Context, email, sub string) (held heldAt, heldSub string, err error) {
+	// With an identity provider, it alone says whose an address is, and every
+	// caller passes the subject it gives for the address; an e-mail a
+	// directory entry or a control-plane row still carries can be stale, and
+	// refused a new person's address as someone else's (2026-09-30).
+	if h.kc != nil {
+		email = ""
+	}
+	if h.db.Router() == nil || (email == "" && sub == "") {
+		return heldNowhere, "", nil
+	}
+	var inControl, inTenants bool
+	err = h.db.Control().QueryRow(ctx, `
+		WITH held AS (
+		    SELECT keycloak_sub, TRUE AS control FROM identity."user"
+		    WHERE $3 <> '' AND (($1 <> '' AND lower(email) = lower($1)) OR ($2 <> '' AND keycloak_sub = $2))
+		    UNION ALL
+		    SELECT keycloak_sub, FALSE FROM platform.user_directory
+		    WHERE customer_id::text <> $3
+		      AND (($1 <> '' AND lower(email) = lower($1)) OR ($2 <> '' AND keycloak_sub = $2)))
+		SELECT COALESCE(bool_or(control), FALSE), COALESCE(bool_or(NOT control), FALSE),
+		       COALESCE((SELECT keycloak_sub FROM held ORDER BY keycloak_sub = $2 DESC LIMIT 1), '')
+		FROM held`, email, sub, tenantdb.TenantFrom(ctx)).Scan(&inControl, &inTenants, &heldSub)
+	switch {
+	case err != nil:
+		return heldNowhere, "", err
+	case inControl:
+		return heldInControl, heldSub, nil
+	case inTenants:
+		return heldInTenants, heldSub, nil
+	}
+	return heldNowhere, "", nil
+}
+
+// heldElsewhereRefusal refuses an address another database holds when the
+// identity provider knows it under no subject: whose it is cannot be told.
+const heldElsewhereRefusal = "this person's account is in another database, and could not be added here"
+
+// addMemberFromElsewhere is POST /api/admin/users for someone another
+// database holds and this one does not — another dedicated tenant's, or the
+// control plane, or from the control plane a dedicated tenant's — by a
+// caller who is not a platform admin. The person is added as
+// addExistingAccount adds an account, not adopted: a user row here under
+// their subject that belongs to no tenant (its tenant lives in another
+// database), so this tenant's admin cannot rename, re-invite or delete it
+// (accountIsCallers); the name and e-mail the identity provider holds for
+// them; a directory entry in a dedicated tenant's database, so their
+// requests reach it when they address it (the control plane is reached
+// through its tenants and applications, tenantRouting); and then the role,
+// the notification and the answer addExistingAccount gives. Nothing on the
+// shared identity-provider account changes, and no set-password e-mail is
+// sent.
+func (h *handler) addMemberFromElsewhere(ctx context.Context, w http.ResponseWriter, act *actor, tierRoles []string, sub, email, role, workspaceID string) {
+	name := email
+	if h.kc != nil {
+		if u, err := h.kc.GetUser(ctx, sub); err == nil {
+			if n := strings.TrimSpace(u.FirstName + " " + u.LastName); n != "" {
+				name = n
+			}
+			if u.Email != "" {
+				email = u.Email
+			}
+		}
+	}
+	var userID string
+	if err := h.db.QueryRow(ctx, `
+		INSERT INTO identity.user (keycloak_sub, email, display_name) VALUES ($1, $2, $3)
+		ON CONFLICT (keycloak_sub) DO UPDATE SET keycloak_sub = EXCLUDED.keycloak_sub
+		RETURNING id::text`, sub, email, name).Scan(&userID); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	h.noteUser(ctx, sub, email)
+	h.addExistingAccount(ctx, w, act, tierRoles, userID, email, role, workspaceID)
+}
+
+// followIdentity brings a member's row in a dedicated tenant's database
+// (addMemberFromElsewhere) up to the name and e-mail of the token they signed
+// in with. The row is a copy: its tenant's administrators cannot rename it,
+// and a change in the person's home database — a SCIM update, their own
+// profile — reached it nowhere else. Only a row with no tenant that another
+// database holds follows; any other keeps what its administrators gave it.
+func (h *handler) followIdentity(ctx context.Context, a *actor, claims *identity.Claims) {
+	email := strings.TrimSpace(claims.Email)
+	name := strings.TrimSpace(claims.Name)
+	if name == "" {
+		name = strings.TrimSpace(claims.GivenName + " " + claims.FamilyName)
+	}
+	if a.CustomerID != "" || h.db.Router() == nil || email == "" || name == "" || reservedAddress(email) ||
+		(strings.EqualFold(email, a.Email) && name == a.Name) {
+		return
+	}
+	if held, _, err := h.identityHeldIn(ctx, "", claims.Subject); err != nil || held == heldNowhere {
+		return
+	}
+	if _, err := h.db.Exec(ctx, `
+		UPDATE identity."user" SET email = $2, display_name = $3, updated_at = now()
+		WHERE id = $1::uuid AND customer_id IS NULL AND NOT stand_in`, a.UserID, email, name); err != nil {
+		h.log.Warn().Err(err).Str("user_id", a.UserID).Msg("member's name and e-mail not brought up to their sign-in")
+		return
+	}
+	a.Email, a.Name = email, name
 }
 
 // addExistingAccount is POST /api/admin/users for an address that already has
@@ -578,11 +818,20 @@ func (h *handler) existingAccountID(ctx context.Context, email, sub string) (str
 // workspace's tenant (adminTiers).
 func (h *handler) addExistingAccount(ctx context.Context, w http.ResponseWriter, act *actor, tierRoles []string, userID, email, role, workspaceID string) {
 	var platformAdmin, platformWide bool
+	var existingSub string
 	if err := h.db.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1 FROM identity.role_assignment WHERE user_id = $1::uuid AND role = 'platform_admin'),
-		       `+platformWideBuilderSQL("$1::uuid"), userID).Scan(&platformAdmin, &platformWide); err != nil {
+		       `+platformWideBuilderSQL("$1::uuid")+`, (SELECT keycloak_sub FROM identity."user" WHERE id = $1::uuid)`,
+		userID).Scan(&platformAdmin, &platformWide, &existingSub); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
+	}
+	// In a tenant's database the control plane says it (platformReachOf).
+	if reach, err := h.platformReachOf(ctx, []string{existingSub}); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	} else if reach[existingSub] {
+		platformAdmin = true
 	}
 	if platformAdmin || platformWide {
 		h.refuseExistingAccount(ctx, w, act, userID, email, role, workspaceID,
@@ -597,6 +846,14 @@ func (h *handler) addExistingAccount(ctx context.Context, w http.ResponseWriter,
 		}
 		if gains {
 			h.refuseExistingAccount(ctx, w, act, userID, email, role, workspaceID, customerlessAdminRefusal)
+			return
+		}
+	}
+	here := tenantdb.TenantFrom(ctx)
+	var sub string
+	if here != "" {
+		if err := h.db.QueryRow(ctx, `SELECT keycloak_sub FROM identity."user" WHERE id = $1::uuid`, userID).Scan(&sub); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
 	}
@@ -617,6 +874,11 @@ func (h *handler) addExistingAccount(ctx context.Context, w http.ResponseWriter,
 	})
 	if tag.RowsAffected() > 0 {
 		h.notifyAccessGranted(ctx, userID, role, workspaceID)
+	}
+	// A member of a dedicated tenant removed before (adminRemoveFromTenant)
+	// is routed here again.
+	if here != "" {
+		h.noteUser(ctx, sub, email)
 	}
 	jsonOK(w, map[string]any{"id": userID, "status": "created", "invited": h.kc != nil})
 }

@@ -96,13 +96,15 @@ func (h *handler) buildProviderForRequest(r *http.Request, act *actor) (provider
 	if h.testProvider != nil {
 		return h.testProvider, "test", "test-model", nil
 	}
-	ctx := r.Context()
+	// The person's own settings and key are read where they live
+	// (personalCtx); the tenant's key in the tenant's database.
+	ctx := personalCtx(r.Context(), act)
 	store := h.aiChatStore(ctx)
 	settings, err := store.GetSettings(ctx, userID)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("load llm settings: %w", err)
 	}
-	tenant := h.tenantAIKey(ctx, h.requestCustomerID(ctx, r, act))
+	tenant := h.tenantAIKey(r.Context(), h.requestCustomerID(r.Context(), r, act))
 
 	var provider, model, apiKey string
 	switch {
@@ -159,7 +161,7 @@ func (h *handler) aiCreateSession(w http.ResponseWriter, r *http.Request) {
 	_ = h.db.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, modelID).Scan(&appID)
 
 	store := h.aiChatStore(ctx)
-	settings, _ := store.GetSettings(ctx, a.UserID)
+	settings, _ := h.aiChatStore(personalCtx(ctx, a)).GetSettings(personalCtx(ctx, a), a.UserID)
 
 	sess, err := store.CreateSession(ctx, appID, a.UserID, settings.Provider, settings.Model)
 	if err != nil {
@@ -1140,7 +1142,7 @@ func (h *handler) aiGetSettings(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusUnauthorized)
 		return
 	}
-	settings, err := h.aiChatStore(ctx).GetSettings(ctx, a.UserID)
+	settings, err := h.aiChatStore(personalCtx(ctx, a)).GetSettings(personalCtx(ctx, a), a.UserID)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -1211,7 +1213,7 @@ func (h *handler) aiSaveSettings(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusBadRequest)
 		return
 	}
-	if err := h.aiChatStore(ctx).SaveSettings(ctx, a.UserID, req.Provider, req.Model, req.APIKey); err != nil {
+	if err := h.aiChatStore(personalCtx(ctx, a)).SaveSettings(personalCtx(ctx, a), a.UserID, req.Provider, req.Model, req.APIKey); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
@@ -1376,8 +1378,10 @@ func (h *handler) aiTestSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	store := h.aiChatStore(ctx)
-	settings, _ := store.GetSettings(ctx, a.UserID)
+	// The person's own settings and key (personalCtx).
+	pctx := personalCtx(ctx, a)
+	store := h.aiChatStore(pctx)
+	settings, _ := store.GetSettings(pctx, a.UserID)
 	provider := req.Provider
 	if provider == "" {
 		provider = settings.Provider
@@ -1400,7 +1404,7 @@ func (h *handler) aiTestSettings(w http.ResponseWriter, r *http.Request) {
 	})
 	apiKey := req.APIKey
 	if apiKey == "" {
-		apiKey, _ = store.GetDecryptedAPIKey(ctx, a.UserID)
+		apiKey, _ = store.GetDecryptedAPIKey(pctx, a.UserID)
 	}
 	if apiKey == "" {
 		apiKey = os.Getenv(providerEnvKeys[provider])

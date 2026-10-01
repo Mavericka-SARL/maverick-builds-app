@@ -7,6 +7,8 @@ import { InfraNodesTab } from "./InfraNodesTab";
 import { LicenseTab } from "./LicenseTab";
 import { PlansTab } from "./PlansTab";
 import { SettingsScopePicker, DEPLOYMENT_SCOPE } from "./SettingsScopePicker";
+import { UsersScopePicker } from "./UsersScopePicker";
+import { ALL_PEOPLE, peopleIn } from "./people";
 import { NotificationSettingsTab } from "../admin/NotificationSettingsTab";
 import { TenantAIKeysTab } from "../../ee/aikeys/TenantAIKeysTab";
 import { SsoTab } from "../../ee/sso/SsoTab";
@@ -46,7 +48,15 @@ export function useAdminSection({ enabled, tab, scope }: SectionInput & { scope:
   const local = (sectionOf(tab) === section ? localTab(tab) : "") as Tab | "";
   const { data: me } = useQuery({ queryKey: ["admin-me"], queryFn: api.getAdminMe, enabled });
   const { data: tenants, isLoading: tenantsLoading, error: tenantsError } = useQuery({ queryKey: ["admin-tenants"], queryFn: api.getAdminTenants, enabled });
-  const { data: users, isLoading: usersLoading, error: usersError } = useQuery({ queryKey: ["admin-users"], queryFn: api.getAdminUsers, enabled: enabled && local === "users" });
+  // The Users tab is one list across every database; each row says which it
+  // lives in, and UsersScopePicker narrows the list to one.
+  const [usersScope, setUsersScope] = useState(ALL_PEOPLE);
+  const { data: allUsers, isLoading: usersLoading, error: usersError } = useQuery({
+    queryKey: ["admin-users"],
+    queryFn: api.getAdminUsers,
+    enabled: enabled && local === "users",
+  });
+  const users = allUsers && peopleIn(allUsers, usersScope);
   const { data: audit, isLoading: auditLoading, error: auditError } = useQuery({ queryKey: ["admin-audit"], queryFn: api.getAdminAudit, enabled: enabled && local === "audit" });
   // Whose settings the per-tenant tabs show at platform scope: a tenant, or
   // the deployment's own row (SettingsScopePicker).
@@ -102,8 +112,17 @@ export function useAdminSection({ enabled, tab, scope }: SectionInput & { scope:
           {isLoading && <LoadingState />}
           {error && <ErrorState message={(error as Error).message} />}
           {!isLoading && !error && cur === "applications" && tenants && <ApplicationsView tenants={tenants} isPlatformAdmin={isPlatformAdmin} canTransferModels={isTenantAdmin || isPlatformAdmin} />}
+          {scope === "platform" && cur === "users" && (
+            <UsersScopePicker tenants={tenants ?? []} value={usersScope} onChange={setUsersScope} />
+          )}
           {!isLoading && !error && cur === "users" && users && (
-            <UsersPanel users={users} tenants={tenants ?? []} assignableRoles={computeAssignableRoles(roles)} canManageResourceAccess={canManageResourceAccess(roles)} currentUserId={me?.user_id} />
+            <UsersPanel
+              users={users}
+              tenants={tenants ?? []}
+              assignableRoles={computeAssignableRoles(roles)}
+              canManageResourceAccess={canManageResourceAccess(roles)}
+              currentUserId={me?.user_id}
+            />
           )}
           {!isLoading && !error && cur === "audit" && audit && <AuditView events={audit} />}
           {scope === "platform" && SCOPED_TABS.has(cur) && (

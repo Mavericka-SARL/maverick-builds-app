@@ -56,7 +56,9 @@ export function AppsTab() {
               <div className="mvx-admin-avatar mvx-admin-avatar--app">{app.name[0]}</div>
               <div className="mvx-admin-object__title">
                 <div className="mvx-admin-object__name">{app.name}</div>
-                <div className="mvx-admin-object__meta">{app.workspace_name}</div>
+                <div className="mvx-admin-object__meta">
+                  {app.tenant_name && new Set(apps.map((a) => a.tenant_id ?? "")).size > 1 ? `${app.tenant_name} · ${app.workspace_name}` : app.workspace_name}
+                </div>
               </div>
               {isCurrent && <StatusBadge tone="brand">Active</StatusBadge>}
             </div>

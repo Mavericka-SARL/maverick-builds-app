@@ -118,7 +118,7 @@ func (h *handler) updateMyPreferences(w http.ResponseWriter, r *http.Request) {
 
 	// One statement, so two tabs saving different keys cannot lose either.
 	var raw []byte
-	err = h.db.QueryRow(ctx,
+	err = h.db.QueryRow(personalCtx(ctx, act),
 		`UPDATE identity.user SET preferences = (preferences || $2::jsonb) - $3::text[]
 		 WHERE id = $1::uuid RETURNING preferences`,
 		act.UserID, string(setJSON), reset,

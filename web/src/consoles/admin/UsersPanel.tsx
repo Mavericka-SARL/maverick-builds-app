@@ -9,6 +9,8 @@ import {
   type AdminUserPermissions,
   type AdminWorkspace,
   type UserAssignment,
+  CONTROL_PLANE,
+  withTenant,
 } from "../../api/client";
 import {
   Badge,
@@ -154,12 +156,25 @@ function RemovableRoleChip({
   );
 }
 
+/**
+ * Whether a tenant lives in the database a user row does, so that a role in
+ * its workspaces can be granted to that row: the row's own dedicated tenant,
+ * or — for a control-plane row — any tenant without a database of its own.
+ */
+function inRowDatabase(tenant: AdminTenant, u: AdminUser): boolean {
+  const db = u.tenant_id ?? "";
+  if (!db) return true;
+  if (db === CONTROL_PLANE) return !tenant.dedicated;
+  return tenant.id === db;
+}
+
 export function UsersPanel({
   users,
   tenants,
   assignableRoles = [],
   canManageResourceAccess = false,
   currentUserId,
+  tenantId = "",
 }: {
   users: AdminUser[];
   tenants: AdminTenant[];
@@ -178,8 +193,26 @@ export function UsersPanel({
    * controls that would end their own access — see isLastOwnAdminGrant().
    */
   currentUserId?: string;
+  /**
+   * The dedicated tenant whose people these are, for a platform admin: every
+   * call the panel makes is addressed to its database (X-Tenant-Id). Empty
+   * for the control plane, and for everyone else, whom the server routes.
+   */
+  tenantId?: string;
 }) {
   const qc = useQueryClient();
+  // The list spans more than one database (a platform admin's, or a person
+  // in several tenants): each row says which.
+  const manyDatabases = new Set(users.map((u) => u.tenant_id ?? "")).size > 1;
+  // Each row lives in one database (AdminUser.tenant_id): what is done to it
+  // is addressed there, and an invitation is addressed to the chosen
+  // workspace's. tenantId addresses what has neither.
+  const address = <T,>(tid: string | undefined, call: () => Promise<T>): Promise<T> => {
+    const target = tid || tenantId;
+    return target ? withTenant(target, call) : call();
+  };
+  const tenantOfUser = useMemo(() => new Map(users.map((u) => [u.id, u.tenant_id ?? ""])), [users]);
+  const atUser = <T,>(userId: string, call: () => Promise<T>): Promise<T> => address(tenantOfUser.get(userId), call);
   const [showCreate, setShowCreate] = useState(false);
   const [newUser, setNewUser] = useState({ email: "", first_name: "", last_name: "", role: "", workspace_id: "" });
   const [editId, setEditId] = useState<string | null>(null);
@@ -191,8 +224,8 @@ export function UsersPanel({
   const [addWsCustomerId, setAddWsCustomerId] = useState<string | null>(null);
 
   const { data: workspaces = [] } = useQuery<AdminWorkspace[]>({
-    queryKey: ["admin-workspaces"],
-    queryFn: api.getAdminWorkspaces,
+    queryKey: ["admin-workspaces", tenantId],
+    queryFn: () => address("", api.getAdminWorkspaces),
   });
 
   const modelNames = useMemo(() => {
@@ -221,7 +254,8 @@ export function UsersPanel({
   const failed = (e: unknown) => setNotice({ tone: "danger", text: (e as Error).message });
 
   const createUser = useMutation({
-    mutationFn: (body: typeof newUser) => api.createAdminUser(body),
+    mutationFn: (body: typeof newUser) =>
+      address(workspaces.find((w) => w.id === body.workspace_id)?.tenant_id, () => api.createAdminUser(body)),
     onMutate: () => setNotice(null),
     // Worded from what was asked, never from the reply: an address that
     // already had an account is only given the role, and the confirmation
@@ -236,17 +270,17 @@ export function UsersPanel({
     },
   });
   const updateUser = useMutation({
-    mutationFn: () => api.updateAdminUser(editId!, editUser),
+    mutationFn: () => atUser(editId!, () => api.updateAdminUser(editId!, editUser)),
     onSuccess: () => { inv(); setEditId(null); },
   });
   const reinviteUser = useMutation({
-    mutationFn: (u: AdminUser) => api.resendAdminUserInvite(u.id),
+    mutationFn: (u: AdminUser) => atUser(u.id, () => api.resendAdminUserInvite(u.id)),
     onMutate: () => setNotice(null),
     onSuccess: (res, u) => setNotice({ tone: "success", text: `Invitation sent to ${res.email || u.email}.` }),
     onError: failed,
   });
   const removeFromTenant = useMutation({
-    mutationFn: (u: AdminUser) => api.removeAdminUserFromTenant(u.id),
+    mutationFn: (u: AdminUser) => atUser(u.id, () => api.removeAdminUserFromTenant(u.id)),
     onMutate: () => setNotice(null),
     // A developer with no organisation whose grants here were the last to
     // narrow it also loses that developer role; the reply lists it.
@@ -263,22 +297,22 @@ export function UsersPanel({
   });
   const addRole = useMutation({
     mutationFn: ({ userId, role, workspaceId }: { userId: string; role: string; workspaceId?: string }) =>
-      api.addAdminUserRole(userId, role, workspaceId),
+      atUser(userId, () => api.addAdminUserRole(userId, role, workspaceId)),
     onSuccess: () => { inv(); setAddPlatformRole(""); setAddWsId(""); setAddWsCustomerId(null); },
   });
   const removeRole = useMutation({
     mutationFn: ({ userId, role, workspaceId }: { userId: string; role: string; workspaceId?: string }) =>
-      api.removeAdminUserRole(userId, role, workspaceId),
+      atUser(userId, () => api.removeAdminUserRole(userId, role, workspaceId)),
     onSuccess: inv,
   });
   const deleteUser = useMutation({
-    mutationFn: (id: string) => api.deleteAdminUser(id),
+    mutationFn: (id: string) => atUser(id, () => api.deleteAdminUser(id)),
     onMutate: () => setNotice(null),
     onSuccess: inv,
     onError: failed,
   });
   const grantAppAccess = useMutation({
-    mutationFn: ({ userId, appId }: { userId: string; appId: string }) => api.grantUserAppAccess(userId, appId),
+    mutationFn: ({ userId, appId }: { userId: string; appId: string }) => atUser(userId, () => api.grantUserAppAccess(userId, appId)),
     onSuccess: inv,
   });
   // A revoke that goes ahead can take more with it: removing the last
@@ -292,16 +326,16 @@ export function UsersPanel({
     if (alsoRevoked) setNotice({ tone: "warning", text: alsoRevoked });
   };
   const revokeAppAccess = useMutation({
-    mutationFn: ({ userId, appId }: { userId: string; appId: string }) => api.revokeUserAppAccess(userId, appId),
+    mutationFn: ({ userId, appId }: { userId: string; appId: string }) => atUser(userId, () => api.revokeUserAppAccess(userId, appId)),
     onMutate: () => setNotice(null),
     onSuccess: revokeNoticed,
   });
   const grantModelAccess = useMutation({
-    mutationFn: ({ userId, modelId }: { userId: string; modelId: string }) => api.grantUserModelAccess(userId, modelId),
+    mutationFn: ({ userId, modelId }: { userId: string; modelId: string }) => atUser(userId, () => api.grantUserModelAccess(userId, modelId)),
     onSuccess: inv,
   });
   const revokeModelAccess = useMutation({
-    mutationFn: ({ userId, modelId }: { userId: string; modelId: string }) => api.revokeUserModelAccess(userId, modelId),
+    mutationFn: ({ userId, modelId }: { userId: string; modelId: string }) => atUser(userId, () => api.revokeUserModelAccess(userId, modelId)),
     onMutate: () => setNotice(null),
     onSuccess: revokeNoticed,
   });
@@ -456,7 +490,7 @@ export function UsersPanel({
               <tr><td colSpan={6} style={{ padding: 20, textAlign: "center" }} className="mvx-admin-muted">No users match "{search.trim()}"</td></tr>
             )}
             {shownUsers.map((u) => editId === u.id ? (
-              <tr key={u.id}>
+              <tr key={`${u.tenant_id ?? ""}:${u.id}`}>
                 <td colSpan={6} style={{ padding: "16px 20px", background: "var(--color-surface-subtle)" }}>
                   <div className="mvx-admin-inline-form" style={{ marginBottom: isForeignAccount(u) || updateUser.isError ? 8 : 16 }}>
                     {permissionsOf(u).rename ? (
@@ -520,7 +554,8 @@ export function UsersPanel({
                       )}
                       {(() => {
                         const existing = (u.assignments ?? []).filter(a => a.workspace_id === "").map(a => a.role);
-                        const available = PLATFORM_ROLES.filter(r => !existing.includes(r) && assignableRoles.includes(r));
+                        const available = PLATFORM_ROLES.filter(r => !existing.includes(r) && assignableRoles.includes(r) &&
+                          (u.grantable_roles ? u.grantable_roles.includes(r) : true));
                         if (!available.length || isForeignAccount(u)) return null;
                         return (
                           <div className="mvx-admin-inline-form">
@@ -551,7 +586,7 @@ export function UsersPanel({
                     <div className="mvx-admin-revisions__label" style={{ marginBottom: 8 }}>
                       {canManageResourceAccess ? "Resource access" : "Workspace roles"}
                     </div>
-                    {tenants.map(tenant => {
+                    {tenants.filter(tenant => inRowDatabase(tenant, u)).map(tenant => {
                       const wsAssignments = (u.assignments ?? []).filter(a => a.workspace_id !== "" && a.customer_name === tenant.name);
                       const custWorkspaces = workspaces.filter(w => w.customer_id === tenant.id);
                       const appIds = u.app_ids ?? [];
@@ -678,12 +713,17 @@ export function UsersPanel({
                 </td>
               </tr>
             ) : (
-              <tr key={u.id}>
+              <tr key={`${u.tenant_id ?? ""}:${u.id}`}>
                 <td style={{ fontWeight: 500 }}>
                   {u.display_name}
                   {u.disabled_at && <> <StatusBadge tone="warning">Disabled</StatusBadge></>}
                   {isForeignAccount(u) && (
                     <div className="mvx-admin-muted" style={{ fontSize: 11, fontWeight: 400 }}>{foreignAccountNote(u)}</div>
+                  )}
+                  {manyDatabases && (
+                    <div className="mvx-admin-muted" style={{ fontSize: 11, fontWeight: 400 }} data-testid="user-database">
+                      {u.tenant_id === CONTROL_PLANE ? "Control plane" : u.tenant_name || "This tenant"}
+                    </div>
                   )}
                 </td>
                 <td className="mvx-admin-mono mvx-admin-muted">{u.email}</td>

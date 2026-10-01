@@ -1197,10 +1197,12 @@ func (UnimplementedHandler) ListAdminTenants(ctx context.Context) (r []AdminTena
 
 // ListAdminUsers implements listAdminUsers operation.
 //
-// Available to platform_admin, tenant_admin, and developer roles. Platform admins see all users;
-// anyone else sees the members of the tenants it holds tenant_admin or developer in. Its tier in
-// each tenant is decided by the roles it holds there, and each user's `permissions` by the tier in
-// that user's own tenant; an application or model grant is no tier.
+// Available to platform_admin, tenant_admin, and developer roles. Platform admins (and platform-wide
+// builders) see all users, in every database; anyone else sees the members of the tenants it holds
+// tenant_admin or developer in, in every database that holds it, by its own account in each. Its
+// tier in each tenant is decided by the roles it holds there, and each user's `permissions` by the
+// tier in that user's own tenant; an application or model grant is no tier. Each row names the
+// database it lives in (`tenant_id`); X-Tenant-Id limits the list to one.
 //
 // GET /api/admin/users
 func (UnimplementedHandler) ListAdminUsers(ctx context.Context) (r []AdminUser, _ error) {

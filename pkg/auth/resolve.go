@@ -36,6 +36,7 @@ func ResolveActorByKeycloakSub(ctx context.Context, pool *pgxpool.Pool, sub stri
 		FROM identity.user u
 		LEFT JOIN identity.role_assignment ra ON ra.user_id = u.id
 		WHERE u.keycloak_sub = $1 AND u.disabled_at IS NULL
+		  AND NOT u.stand_in -- a platform account's stand-in in a tenant's database is never an actor (migration 103)
 		GROUP BY u.id
 	`, sub).Scan(&userID, &rolesCSV)
 	if err != nil {

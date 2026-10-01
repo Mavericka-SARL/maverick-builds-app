@@ -310,6 +310,8 @@ components:
         db_bytes is the tenant's own database size, 0 on a shared database.
       required: [customer_id, name, plan, users, active_users, applications, models, revisions]
       properties:
+        status: { type: string, description: "Why the tenant could not be counted (its database not ready, or counting failed); absent when it was." }
+        error:  { type: string }
         customer_id: { type: string }
         name: { type: string }
         plan: { type: string }
@@ -688,6 +690,7 @@ components:
       type: object
       required: [id, instance_id, workflow_name, step_def_id, created_at]
       properties:
+        tenant_id:     { type: string, description: "The tenant of the task's application; an inbox spans every database that holds the person, and completing the task addresses this tenant (X-Tenant-Id)." }
         id:            { type: string, format: uuid }
         instance_id:   { type: string, format: uuid }
         workflow_name: { type: string }
@@ -1321,6 +1324,14 @@ components:
       type: object
       required: [id, email, display_name, created_at, assignments, app_ids, model_ids, home_tenant, permissions, grantable_roles]
       properties:
+        tenant_id:
+          type: string
+          description: >-
+            The database the row lives in, as the console addresses it
+            (X-Tenant-Id): a dedicated tenant's id, "control-plane" for the
+            control plane, or empty with a single database. Lists span every
+            database a platform admin sees, or every home of anyone else.
+        tenant_name:   { type: string, description: The dedicated tenant's name, when the row is in one. }
         id:            { type: string, format: uuid }
         email:         { type: string, format: email }
         display_name:  { type: string }
@@ -1349,7 +1360,8 @@ components:
             Where the account's own tenant (identity.user customer_id) is, seen
             from the caller: one of the tenants the caller administers ("own";
             for a caller whose scope is every tenant, any tenant), another
-            tenant ("other"), or no tenant ("none").
+            tenant ("other"), or no tenant ("none"). A member whose account
+            another database holds is "other".
         permissions: { $ref: "#/components/schemas/AdminUserPermissions" }
         grantable_roles:
           type: array
@@ -1407,6 +1419,14 @@ components:
         it unconditionally returns the 200 most recent events.
       required: [id, category, event_type, actor_name, actor_role, application_id, application_name, resource_type, resource_id, revision_id, revision_name, occurred_at]
       properties:
+        tenant_id:
+          type: string
+          description: >-
+            The database the row lives in, as the console addresses it
+            (X-Tenant-Id): a dedicated tenant's id, "control-plane" for the
+            control plane, or empty with a single database. Lists span every
+            database a platform admin sees, or every home of anyone else.
+        tenant_name:   { type: string, description: The dedicated tenant's name, when the event is in one. }
         id:            { type: string, format: uuid }
         category:
           type: string
@@ -1457,6 +1477,13 @@ components:
       type: object
       required: [id, name, customer_name, customer_id, grantable_roles, manage_access]
       properties:
+        tenant_id:
+          type: string
+          description: >-
+            The database the row lives in, as the console addresses it
+            (X-Tenant-Id): a dedicated tenant's id, "control-plane" for the
+            control plane, or empty with a single database. Lists span every
+            database a platform admin sees, or every home of anyone else.
         id:            { type: string, format: uuid }
         name:          { type: string }
         customer_name: { type: string }
@@ -1482,12 +1509,19 @@ components:
       type: object
       required: [id, name, plan, created_at, applications]
       properties:
+        status:       { type: string, description: "Why a dedicated tenant's database could not be read (provisioning, failed, disabled); absent when it was." }
+        error:        { type: string }
         id:           { type: string, format: uuid }
         name:         { type: string }
         plan:         { type: string }
         created_at:   { type: string }
         applications: { type: array, items: { $ref: "#/components/schemas/AdminApp" } }
         plan_state:   { $ref: "#/components/schemas/PlanState" }
+        dedicated:
+          type: boolean
+          description: >-
+            The tenant has a database of its own. A platform admin acts on its
+            people by addressing it (X-Tenant-Id).
 
     CreateTenantRequest:
       type: object
@@ -2179,6 +2213,8 @@ components:
       type: object
       required: [id, name, mode, workspace_name, model_name, active_revision]
       properties:
+        tenant_id:   { type: string, description: The tenant the application belongs to; a person's applications span every database that holds them. }
+        tenant_name: { type: string }
         id:              { type: string, format: uuid }
         name:            { type: string }
         mode:            { type: string, enum: [planning, crud, execution] }
@@ -5974,10 +6010,13 @@ paths:
       summary: List users for administration
       description: >-
         Available to platform_admin, tenant_admin, and developer roles. Platform
-        admins see all users; anyone else sees the members of the tenants it
-        holds tenant_admin or developer in. Its tier in each tenant is decided
-        by the roles it holds there, and each user's `permissions` by the tier
-        in that user's own tenant; an application or model grant is no tier.
+        admins (and platform-wide builders) see all users, in every database;
+        anyone else sees the members of the tenants it holds tenant_admin or
+        developer in, in every database that holds it, by its own account in
+        each. Its tier in each tenant is decided by the roles it holds there,
+        and each user's `permissions` by the tier in that user's own tenant;
+        an application or model grant is no tier. Each row names the database
+        it lives in (`tenant_id`); X-Tenant-Id limits the list to one.
       responses:
         "200":
           description: User list

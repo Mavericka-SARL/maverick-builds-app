@@ -51,6 +51,24 @@ type Service struct {
 	// which database a subject belongs to).
 	OnUserCreated func(ctx context.Context, sub, email string)
 	OnUserDeleted func(ctx context.Context, sub string)
+	// HeldElsewhere, when set, reports whether a database other than Pool
+	// holds a user under email or identity-provider subject sub (a database
+	// per tenant). Such a person is not created here, and deleting a user
+	// here leaves their identity-provider account alone: a creation found no
+	// user in Pool, adopted the shared account and then changed its e-mail,
+	// disabled it or deleted it for every database (2026-09-30).
+	HeldElsewhere func(ctx context.Context, email, sub string) (bool, error)
+	// PlatformReach, when set, reports whether the control plane holds sub
+	// with platform reach — a platform admin or a platform-wide builder.
+	// Such a person's row in the tenant's database is never the tenant's to
+	// change: a SCIM update rewrote a platform admin's sign-in address
+	// (2026-10-01).
+	PlatformReach func(ctx context.Context, sub string) (bool, error)
+	// OwnDatabase is whether Pool is the tenant's own database (a database
+	// per tenant). Only there is a member's row the tenant's alone to
+	// deactivate or delete (memberHere); in the control plane other tenants
+	// rely on it.
+	OwnDatabase bool
 	// CanCreateUser, when set, is asked before a user is created; an error
 	// refuses the creation with its message (the tenant's plan limit).
 	CanCreateUser func(ctx context.Context) error
@@ -265,7 +283,59 @@ func (s *Service) owns(ctx context.Context, userID string) (bool, error) {
 		s.CustomerID, userID).Scan(&ok); err != nil {
 		return false, internal(err)
 	}
-	return ok, nil
+	if !ok {
+		return false, nil
+	}
+	return s.notPlatformAccount(ctx, userID)
+}
+
+// notPlatformAccount reports whether userID's row is not that of someone the
+// control plane holds with platform reach (PlatformReach).
+func (s *Service) notPlatformAccount(ctx context.Context, userID string) (bool, error) {
+	if s.PlatformReach == nil {
+		return true, nil
+	}
+	var sub string
+	if err := s.Pool.QueryRow(ctx, `SELECT keycloak_sub FROM identity.user WHERE id = $1::uuid`, userID).Scan(&sub); err != nil {
+		return false, internal(err)
+	}
+	reach, err := s.PlatformReach(ctx, sub)
+	if err != nil {
+		return false, internal(err)
+	}
+	return !reach, nil
+}
+
+// memberHere reports whether cur is a member of this tenant whose account
+// another database holds (HeldElsewhere, a database per tenant): a row with
+// no tenant, not a platform admin's stand-in or a platform admin. The account
+// is not the tenant's to change, but the member's place here is: the
+// tenant's directory may deactivate, reactivate or delete this database's row,
+// and nothing on the shared account. A member made from an account the
+// tenant's SCIM had created could not be deprovisioned at all, and kept its
+// roles (2026-09-30).
+func (s *Service) memberHere(ctx context.Context, cur userRow) (bool, error) {
+	if s.HeldElsewhere == nil || !s.OwnDatabase {
+		return false, nil
+	}
+	if ok, err := s.notPlatformAccount(ctx, cur.ID); err != nil || !ok {
+		return false, err
+	}
+	var candidate bool
+	if err := s.Pool.QueryRow(ctx, `
+		SELECT u.customer_id IS NULL AND NOT u.stand_in AND NOT EXISTS (
+		    SELECT 1 FROM identity.role_assignment pa WHERE pa.user_id = u.id AND pa.role = 'platform_admin')
+		FROM identity.user u WHERE u.id = $1::uuid`, cur.ID).Scan(&candidate); err != nil {
+		return false, internal(err)
+	}
+	if !candidate {
+		return false, nil
+	}
+	held, err := s.HeldElsewhere(ctx, "", cur.Sub)
+	if err != nil {
+		return false, internal(err)
+	}
+	return held, nil
 }
 
 // notOwned is the refusal for an account the directory lists but may not
@@ -511,13 +581,23 @@ func userFilterSQL(clauses []clause) (string, []any, error) {
 // has no SSO — the invitation. A failure after the account was created
 // removes it again, so a retry from the identity provider never finds a
 // half-made user.
+// reservedDomain is the gateway's stand-in address domain (migration 103's
+// stand_in_address_reserved): no user is provisioned or renamed into it.
+const reservedDomain = "@stand-in.invalid"
+
 func (s *Service) createUser(ctx context.Context, in userInput) (userRow, error) {
 	if in.Email == "" || !strings.Contains(in.Email, "@") {
 		return userRow{}, bad("invalidValue", "userName must be the person's e-mail address")
 	}
+	if strings.HasSuffix(in.Email, reservedDomain) {
+		return userRow{}, bad("invalidValue", "userName is in a reserved domain")
+	}
 	var existingID string
 	if err := s.Pool.QueryRow(ctx, `SELECT id::text FROM identity.user WHERE lower(email) = $1`, in.Email).Scan(&existingID); err == nil {
 		return userRow{}, conflict("a user with userName " + in.Email + " already exists")
+	}
+	if err := s.refuseHeldElsewhere(ctx, in.Email, ""); err != nil {
+		return userRow{}, err
 	}
 	if s.CanCreateUser != nil {
 		if err := s.CanCreateUser(ctx); err != nil {
@@ -541,6 +621,9 @@ func (s *Service) createUser(ctx context.Context, in userInput) (userRow, error)
 		if existing != "" {
 			if err := s.Pool.QueryRow(ctx, `SELECT id::text FROM identity.user WHERE keycloak_sub = $1`, existing).Scan(&existingID); err == nil {
 				return userRow{}, conflict("a user with userName " + in.Email + " already exists")
+			}
+			if err := s.refuseHeldElsewhere(ctx, in.Email, existing); err != nil {
+				return userRow{}, err
 			}
 		}
 		if existing == "" {
@@ -593,6 +676,22 @@ func (s *Service) createUser(ctx context.Context, in userInput) (userRow, error)
 	return s.loadUser(ctx, userID)
 }
 
+// refuseHeldElsewhere answers the creation of someone another database
+// holds (HeldElsewhere) as the creation of an existing user is answered.
+func (s *Service) refuseHeldElsewhere(ctx context.Context, email, sub string) error {
+	if s.HeldElsewhere == nil {
+		return nil
+	}
+	held, err := s.HeldElsewhere(ctx, email, sub)
+	if err != nil {
+		return internal(err)
+	}
+	if held {
+		return conflict("a user with userName " + email + " already exists")
+	}
+	return nil
+}
+
 func (s *Service) abortIdP(ctx context.Context, created bool, sub string) {
 	if created && s.IdP != nil {
 		if err := s.IdP.DeleteUser(ctx, sub); err != nil {
@@ -605,6 +704,9 @@ func (s *Service) updateUser(ctx context.Context, cur userRow, in userInput) (us
 	in.Email = strings.ToLower(strings.TrimSpace(in.Email))
 	if in.Email == "" || !strings.Contains(in.Email, "@") {
 		return userRow{}, bad("invalidValue", "userName must be the person's e-mail address")
+	}
+	if strings.HasSuffix(in.Email, reservedDomain) {
+		return userRow{}, bad("invalidValue", "userName is in a reserved domain")
 	}
 	if in.DisplayName == "" {
 		in.DisplayName = cur.DisplayName
@@ -619,6 +721,23 @@ func (s *Service) updateUser(ctx context.Context, cur userRow, in userInput) (us
 		if in.Email == strings.ToLower(cur.Email) && in.DisplayName == cur.DisplayName &&
 			in.ExternalID == cur.ExternalID && in.Active == (cur.DisabledAt == nil) {
 			return cur, nil
+		}
+		// A member's place here is the tenant's: its status and external id
+		// change on this database's row only (memberHere).
+		if in.Email == strings.ToLower(cur.Email) && in.DisplayName == cur.DisplayName {
+			member, err := s.memberHere(ctx, cur)
+			if err != nil {
+				return userRow{}, err
+			}
+			if member {
+				if _, err := s.Pool.Exec(ctx, `
+					UPDATE identity.user SET external_id = NULLIF($3,''),
+					    disabled_at = CASE WHEN $2 THEN NULL ELSE COALESCE(disabled_at, now()) END, updated_at = now()
+					WHERE id = $1::uuid`, cur.ID, in.Active, in.ExternalID); err != nil {
+					return userRow{}, internal(err)
+				}
+				return s.loadUser(ctx, cur.ID)
+			}
 		}
 		return userRow{}, notOwned(cur.Email)
 	}
@@ -656,7 +775,15 @@ func (s *Service) deleteUser(ctx context.Context, cur userRow) error {
 	if owned, err := s.owns(ctx, cur.ID); err != nil {
 		return err
 	} else if !owned {
-		return notOwned(cur.Email)
+		// A member leaves this database only; the identity-provider account
+		// stays below, since another database holds them (memberHere).
+		member, err := s.memberHere(ctx, cur)
+		if err != nil {
+			return err
+		}
+		if !member {
+			return notOwned(cur.Email)
+		}
 	}
 	if s.OnUserDeleted != nil {
 		s.OnUserDeleted(ctx, cur.Sub)
@@ -665,6 +792,14 @@ func (s *Service) deleteUser(ctx context.Context, cur userRow) error {
 		return internal(err)
 	}
 	if s.IdP != nil && !strings.HasPrefix(cur.Sub, syntheticPrefix) && !strings.HasPrefix(cur.Sub, "admin-created-") {
+		if s.HeldElsewhere != nil {
+			// An error counts as held: the account is not deleted on a guess.
+			if held, err := s.HeldElsewhere(ctx, "", cur.Sub); err != nil || held {
+				s.Log.Info().Str("user_id", cur.ID).
+					Msg("scim: user deleted; the identity provider account stays, another database still holds it")
+				return nil
+			}
+		}
 		if err := s.IdP.DeleteUser(ctx, cur.Sub); err != nil {
 			s.Log.Error().Err(err).Str("user_id", cur.ID).Msg("scim: application user deleted but the identity provider account remains")
 		}

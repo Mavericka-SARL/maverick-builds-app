@@ -75,9 +75,9 @@ and the workspace groups are created in. Revoking is immediate.
 
 | SCIM | Platform |
 |---|---|
-| `POST /Users` | exactly what the console's Users screen does: the Keycloak account (adopting one that exists), `identity.user`, the default role, the directory entry — and an invitation mail only when the tenant has no SSO |
+| `POST /Users` | exactly what the console's Users screen does: the Keycloak account (adopting one that no application database holds; an address this tenant or, with a database per tenant, another database already holds answers 409), `identity.user`, the default role, the directory entry — and an invitation mail only when the tenant has no SSO |
 | `active: false` (PATCH or PUT) | `identity.user.disabled_at` set and the Keycloak account disabled: sign-in stops at once, every actor resolver refuses the user, rows and history stay |
-| `DELETE /Users/{id}` | the console's delete: the row, the directory entry, the Keycloak account |
+| `DELETE /Users/{id}` | the console's delete: the row, the directory entry, the Keycloak account — kept while another database still holds the person. For a member whose account another tenant's database or the control plane holds, the tenant's row and directory entry only; `active: false` on such a member disables the tenant's row only |
 | `POST /Groups`, members | a business role in the token's workspace and its members |
 | `GET /Users?filter=userName eq "…"` | equality filters on userName, externalId, id, emails.value, displayName, active, joined by `and` — what Entra and Okta send |
 

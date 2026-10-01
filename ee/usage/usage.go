@@ -45,6 +45,10 @@ type Tenant struct {
 	AuditEvents       int `json:"audit_events"`
 	// The tenant's newest audit event, whenever it was.
 	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
+	// Status and Error say why a tenant could not be counted — its database
+	// is not ready, or counting it failed; empty when it was.
+	Status string `json:"status,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 // ParsePeriod accepts "7d", "30d", "90d", "365d" (default 30d).

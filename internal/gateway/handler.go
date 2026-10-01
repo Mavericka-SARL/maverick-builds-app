@@ -108,6 +108,15 @@ type handler struct {
 	// lastSeen throttles the per-account last_seen_at refresh.
 	lastSeenMu sync.Mutex
 	lastSeen   map[string]time.Time
+	// standIns throttles the refresh of platform admins' stand-ins in
+	// tenant databases (ensureStandIn), keyed by tenant and account.
+	standInMu sync.Mutex
+	standIns  map[string]time.Time
+	// presence caches what the control plane holds of a subject, for routing
+	// (controlPresenceOf).
+	presenceMu sync.Mutex
+	presence   map[string]presenceEntry
+	active     map[string]activeEntry
 	// mailer is the deployment's SMTP relay, nil when none is configured —
 	// the console warns before e-mail notifications are switched on, and an
 	// administrator can send themselves a test message through it.
@@ -696,6 +705,11 @@ type actor struct {
 	// its own (self-service and admin-created tenant users); empty for
 	// platform-level accounts.
 	CustomerID string `json:"customer_id,omitempty"`
+	// onControl: resolved from the control plane while the request runs in
+	// a tenant's database (platformActorOnControl), which holds only the
+	// actor's stand-in: nothing about the actor may be read from it.
+	// platformWide is then the control plane's isGlobalBuilder.
+	onControl, platformWide bool
 }
 
 var errAccessDenied = errors.New("access denied")
@@ -716,6 +730,9 @@ func (h *handler) resolveActor(ctx context.Context, r *http.Request) (*actor, er
 	// The plan guard resolved the actor of a mutating request already.
 	if cached, ok := ctx.Value(actorCtxKey).(*actor); ok && cached != nil {
 		return cached, nil
+	}
+	if a, handled, err := h.platformActorOnControl(ctx, r); handled {
+		return a, err
 	}
 	var a *actor
 	var err error
@@ -825,6 +842,7 @@ func (h *handler) devPersonaList(w http.ResponseWriter, r *http.Request) {
 		FROM identity.user u
 		LEFT JOIN identity.role_assignment ra ON ra.user_id = u.id
 		LEFT JOIN core.customer c ON c.id = u.customer_id
+		WHERE NOT u.stand_in
 		GROUP BY u.id, u.keycloak_sub, u.display_name, u.email, c.name
 		ORDER BY min(u.created_at)
 	`)
@@ -890,12 +908,18 @@ func (h *handler) resolveJWTActor(ctx context.Context, r *http.Request) (*actor,
 		// login through a tenant's own identity provider, if the tenant
 		// allows accounts to be created that way (ee/sso).
 		if jit, jitErr := h.jitProvision(ctx, claims); jitErr == nil {
+			// The account is made in its provider's tenant; it is never
+			// served in another tenant's database.
+			if routed := tenantdb.TenantFrom(ctx); routed != "" && routed != jit.CustomerID {
+				return nil, fmt.Errorf("unauthorized")
+			}
 			return jit, nil
 		} else if np := (*errNotProvisionable)(nil); errors.As(jitErr, &np) {
 			return nil, jitErr
 		}
 		return nil, err
 	}
+	h.followIdentity(ctx, a, claims)
 	return a, nil
 }
 
@@ -908,6 +932,7 @@ func (h *handler) actorByKeycloakSub(ctx context.Context, sub string) (*actor, e
 		FROM identity.user u
 		LEFT JOIN identity.role_assignment ra ON ra.user_id = u.id
 		WHERE u.keycloak_sub = $1 AND u.disabled_at IS NULL
+		  AND NOT u.stand_in -- a platform admin is resolved from the control plane (platformActorOnControl)
 		GROUP BY u.id, u.email, u.display_name, u.customer_id
 	`, sub).Scan(&a.UserID, &a.Email, &a.Name, &a.CustomerID, &rolesCSV)
 	if err != nil {
@@ -917,6 +942,11 @@ func (h *handler) actorByKeycloakSub(ctx context.Context, sub string) (*actor, e
 		a.Roles = strings.Split(rolesCSV, ",")
 	} else {
 		a.Roles = []string{}
+	}
+	// platform_admin is held only in the control plane: one found in a
+	// tenant's database grants nothing (dedicatedGrantErr).
+	if tenantdb.TenantFrom(ctx) != "" {
+		a.Roles = slices.DeleteFunc(a.Roles, func(r string) bool { return r == "platform_admin" })
 	}
 	return &a, nil
 }
@@ -1097,6 +1127,11 @@ func (h *handler) isGlobalBuilder(ctx context.Context, a *actor) bool {
 	// 2026-09-17).
 	if a == nil || !a.hasRole("developer") || a.CustomerID != "" {
 		return false
+	}
+	// Read from the control plane when the actor was: the tenant's database
+	// holds only a stand-in, which holds no grant (platformActorOnControl).
+	if a.onControl {
+		return a.platformWide
 	}
 	var ok bool
 	_ = h.db.QueryRow(ctx, `SELECT `+platformWideBuilderSQL("$1::uuid"), a.UserID).Scan(&ok)
@@ -1708,7 +1743,7 @@ func (h *handler) me(w http.ResponseWriter, r *http.Request) {
 	if !act.hasRole("platform_admin") {
 		cid = h.requestCustomerID(ctx, r, act)
 	}
-	jsonOK(w, meResponse{actor: act, Plan: h.planStateFor(ctx, cid), ContactURL: h.signupCfg.ContactURL, Preferences: h.preferencesFor(ctx, act.UserID)})
+	jsonOK(w, meResponse{actor: act, Plan: h.planStateFor(ctx, cid), ContactURL: h.signupCfg.ContactURL, Preferences: h.preferencesFor(personalCtx(ctx, act), act.UserID)})
 }
 
 func (h *handler) demo(w http.ResponseWriter, r *http.Request) {
@@ -2309,6 +2344,10 @@ type taskRow struct {
 	// Human-readable context: same values as Context, with dimension member
 	// codes and metric ids resolved to their display names.
 	ContextDisplay []taskContextEntry `json:"context_display,omitempty"`
+	// TenantID is the tenant of the task's application. A person's inbox
+	// spans every database that holds them (homesOf); completing the task
+	// addresses this tenant (X-Tenant-Id), which routes to its database.
+	TenantID string `json:"tenant_id"`
 }
 
 // taskAssigneeSQL is true when user $1 is an assignee of the workflow step
@@ -2333,7 +2372,33 @@ func (h *handler) tasks(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusUnauthorized)
 		return
 	}
+	// Every home's inbox, each by the person's account there (homesOf).
+	result := []taskRow{}
+	for _, hm := range h.homesOf(ctx, r, a) {
+		got, err := h.tasksIn(tenantdb.WithScope(ctx, hm.Scope), hm.Actor)
+		if err != nil {
+			h.log.Warn().Err(err).Str("tenant", hm.TenantID).Msg("tasks of one database not listed")
+			continue
+		}
+		result = append(result, got...)
+	}
+	// Due first, then newest, as each database orders its own.
+	sort.SliceStable(result, func(i, j int) bool {
+		di, dj := result[i].DueAt, result[j].DueAt
+		switch {
+		case di != nil && dj != nil && *di != *dj:
+			return *di < *dj
+		case (di == nil) != (dj == nil):
+			return di != nil
+		}
+		return result[i].CreatedAt > result[j].CreatedAt
+	})
+	jsonOK(w, result)
+}
 
+// tasksIn lists the in-progress steps a is an assignee of in the database
+// ctx is routed to.
+func (h *handler) tasksIn(ctx context.Context, a *actor) ([]taskRow, error) {
 	// Only return steps whose assignee_roles name a role the current user
 	// holds for the task's application (taskAssigneeSQL). Steps with no
 	// assignee_roles defined are visible to everyone who reaches the
@@ -2355,7 +2420,8 @@ func (h *handler) tasks(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(wi.context_schema_snapshot, wd.context_schema),
 		       COALESCE(NULLIF(u.display_name, ''), u.email, ''),
 		       step_def.elem->'condition',
-		       ws.rework_count, CASE WHEN ws.rework_count > 0 THEN COALESCE(ws.comment, '') ELSE '' END
+		       ws.rework_count, CASE WHEN ws.rework_count > 0 THEN COALESCE(ws.comment, '') ELSE '' END,
+		       COALESCE(app.customer_id, appws.customer_id)::text
 		FROM workflow.workflow_step ws
 		JOIN workflow.workflow_instance wi ON wi.id = ws.instance_id
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
@@ -2377,20 +2443,18 @@ func (h *handler) tasks(w http.ResponseWriter, r *http.Request) {
 		ORDER BY ws.due_at ASC NULLS LAST, ws.created_at DESC
 	`, a.UserID)
 	if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
-	var result []taskRow
+	result := []taskRow{}
 	for rows.Next() {
 		var t taskRow
 		var ctxJSON, schemaJSON []byte
 		var conditionJSON []byte
 		if err := rows.Scan(&t.ID, &t.StepDefID, &t.Status, &t.WFName, &t.InstanceID, &ctxJSON, &t.CreatedAt,
-			&t.StepName, &t.StepType, &t.Instructions, &t.SLAHours, &t.RequiredComment, &t.CompletionLabel, &t.DueAt, &schemaJSON, &t.RequestedBy, &conditionJSON, &t.ReworkCount, &t.ReworkNote); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
+			&t.StepName, &t.StepType, &t.Instructions, &t.SLAHours, &t.RequiredComment, &t.CompletionLabel, &t.DueAt, &schemaJSON, &t.RequestedBy, &conditionJSON, &t.ReworkCount, &t.ReworkNote, &t.TenantID); err != nil {
+			return nil, err
 		}
 		if t.StepType == "condition" && len(conditionJSON) > 0 {
 			t.Condition = json.RawMessage(conditionJSON)
@@ -2400,14 +2464,7 @@ func (h *handler) tasks(w http.ResponseWriter, r *http.Request) {
 		t.ContextDisplay = h.contextDisplay(ctx, schemaJSON, t.Context)
 		result = append(result, t)
 	}
-	if err := rows.Err(); err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
-	}
-	if result == nil {
-		result = []taskRow{}
-	}
-	jsonOK(w, result)
+	return result, rows.Err()
 }
 
 type completeTaskReq struct {
@@ -2435,6 +2492,16 @@ func (h *handler) taskAction(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		jsonErr(w, err, http.StatusUnauthorized)
 		return
+	}
+	// The inbox lists a step for the person's own account in each home
+	// (homesOf). A platform admin or builder is resolved as their stand-in
+	// in a tenant, which is no assignee of anything there; their own
+	// account in that tenant, when they have one, decides the step, as it
+	// listed it. It grants nothing beyond what that account holds.
+	if a.onControl {
+		if own, err := h.actorByKeycloakSub(ctx, h.subjectOf(r)); err == nil {
+			a = own
+		}
 	}
 
 	var req completeTaskReq
@@ -2567,7 +2634,28 @@ func (h *handler) notifications(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusUnauthorized)
 		return
 	}
+	// Every home's notifications, each by the person's account there
+	// (homesOf): one a second tenant sent — "you were added" among them —
+	// was never seen.
+	result := []notifRow{}
+	for _, hm := range h.homesOf(ctx, r, a) {
+		got, err := h.notificationsIn(tenantdb.WithScope(ctx, hm.Scope), hm.Actor)
+		if err != nil {
+			h.log.Warn().Err(err).Str("tenant", hm.TenantID).Msg("notifications of one database not listed")
+			continue
+		}
+		result = append(result, got...)
+	}
+	sort.SliceStable(result, func(i, j int) bool { return result[i].CreatedAt > result[j].CreatedAt })
+	if len(result) > 50 {
+		result = result[:50]
+	}
+	jsonOK(w, result)
+}
 
+// notificationsIn lists a's latest notifications in the database ctx is
+// routed to.
+func (h *handler) notificationsIn(ctx context.Context, a *actor) ([]notifRow, error) {
 	rows, err := h.db.Query(ctx, `
 		SELECT id::text, template_id, status::text, template_vars,
 		       created_at::text,
@@ -2579,30 +2667,20 @@ func (h *handler) notifications(w http.ResponseWriter, r *http.Request) {
 		LIMIT 50
 	`, a.UserID)
 	if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 	defer rows.Close()
-
-	var result []notifRow
+	result := []notifRow{}
 	for rows.Next() {
 		var n notifRow
 		var varsJSON []byte
 		if err := rows.Scan(&n.ID, &n.TemplateID, &n.Status, &varsJSON, &n.CreatedAt, &n.DeliveredAt, &n.ResourceType, &n.ResourceID); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
+			return nil, err
 		}
 		_ = json.Unmarshal(varsJSON, &n.TemplateVar)
 		result = append(result, n)
 	}
-	if err := rows.Err(); err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
-	}
-	if result == nil {
-		result = []notifRow{}
-	}
-	jsonOK(w, result)
+	return result, rows.Err()
 }
 
 type markReadReq struct {
@@ -2634,25 +2712,31 @@ func (h *handler) markNotifRead(w http.ResponseWriter, r *http.Request) {
 
 	// Scoped to the caller's own notifications — without this, any
 	// authenticated caller could mark another user's notification as read
-	// by ID (guessed/enumerated/observed elsewhere).
+	// by ID (guessed/enumerated/observed elsewhere). The list spans every
+	// home (notifications), so each home marks its own, by the person's
+	// account there.
 	placeholders := make([]string, len(req.IDs))
 	args := make([]any, len(req.IDs)+1)
 	for i, id := range req.IDs {
 		placeholders[i] = fmt.Sprintf("$%d::uuid", i+1)
 		args[i] = id
 	}
-	args[len(req.IDs)] = a.UserID
-	tag, err := h.db.Exec(ctx,
-		fmt.Sprintf(`UPDATE notification.notification SET status = 'read'
-		             WHERE id IN (%s) AND status != 'read' AND recipient_user_id = $%d::uuid`,
-			strings.Join(placeholders, ","), len(req.IDs)+1),
-		args...,
-	)
-	if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
+	var updated int64
+	for _, hm := range h.homesOf(ctx, r, a) {
+		args[len(req.IDs)] = hm.Actor.UserID
+		tag, err := h.db.Exec(tenantdb.WithScope(ctx, hm.Scope),
+			fmt.Sprintf(`UPDATE notification.notification SET status = 'read'
+			             WHERE id IN (%s) AND status != 'read' AND recipient_user_id = $%d::uuid`,
+				strings.Join(placeholders, ","), len(req.IDs)+1),
+			args...,
+		)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		updated += tag.RowsAffected()
 	}
-	jsonOK(w, map[string]int64{"updated": tag.RowsAffected()})
+	jsonOK(w, map[string]int64{"updated": updated})
 }
 
 // ── /api/grid ─────────────────────────────────────────────────────────────────
@@ -6376,6 +6460,13 @@ type adminTenantItem struct {
 	// PlanState is the plan as it applies right now: trial, days left,
 	// read-only and why (plan.go).
 	PlanState *plan.State `json:"plan_state,omitempty"`
+	// Dedicated is whether the tenant has a database of its own: the
+	// platform console addresses it by id (X-Tenant-Id) to act on its people.
+	Dedicated bool `json:"dedicated,omitempty"`
+	// Status and Error say why a dedicated tenant's database could not be
+	// read (provisioning, failed, disabled); empty when it was.
+	Status string `json:"status,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 func (h *handler) adminMe(w http.ResponseWriter, r *http.Request) {
@@ -6419,7 +6510,7 @@ func (h *handler) adminInfraNodes(w http.ResponseWriter, r *http.Request) {
 		CollectedAt    string  `json:"collected_at"`
 		Stale          bool    `json:"stale"`
 	}
-	rows, err := h.db.Query(ctx, `
+	rows, err := h.db.Control().Query(ctx, `
 		SELECT DISTINCT ON (node) node, disk_total_gb::float8, disk_used_gb::float8, disk_pct,
 		       mem_total_mb, mem_available_mb, load1::float8, collected_at::text,
 		       collected_at < now() - interval '15 minutes'
@@ -6508,6 +6599,72 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// GET: every database for a platform admin or a platform-wide builder;
+	// every home of anyone else, each with their own account there
+	// (homesOf). It used to read the routed database, append the person's
+	// other dedicated tenants and list their applications by the routed
+	// database's roles: a tenant admin of one tenant, a mere member of
+	// another, saw all of the other's applications and models (2026-09-30).
+	var homes []home
+	var unavailable []tenantdb.Tenant
+	if isPlatformAdmin || h.isGlobalBuilder(ctx, act) {
+		homes, unavailable = h.platformHomes(ctx, act)
+	} else {
+		homes = h.homesOf(ctx, r, act)
+	}
+	inCatalog := map[string]bool{}
+	if router := h.db.Router(); router != nil {
+		if all, err := router.Catalog().List(ctx); err == nil {
+			for _, t := range all {
+				inCatalog[t.CustomerID] = true
+			}
+		} else {
+			h.log.Warn().Err(err).Msg("tenant catalog listing failed")
+		}
+	}
+	tenants := []adminTenantItem{}
+	seen := map[string]bool{}
+	for _, hm := range homes {
+		// A home lists only by what the person holds there: tenant_admin, or
+		// on the developer route developer too. A business user there lists
+		// nothing — the routed home's roles used to decide every home's.
+		holds := hm.Actor.hasRole("platform_admin") || hm.Actor.hasRole("tenant_admin") ||
+			(!onAdminRoute(ctx) && hm.Actor.hasRole("developer"))
+		if !holds {
+			continue
+		}
+		got, err := h.tenantsIn(tenantdb.WithScope(ctx, hm.Scope), hm.Actor)
+		if err != nil {
+			h.log.Warn().Err(err).Str("tenant", hm.TenantID).Msg("tenants of one database not listed")
+			continue
+		}
+		for _, t := range got {
+			if seen[t.ID] {
+				continue
+			}
+			seen[t.ID] = true
+			t.Dedicated = inCatalog[t.ID]
+			tenants = append(tenants, t)
+		}
+	}
+	// A dedicated tenant whose database cannot be read is still listed, with
+	// why: it used to show with no applications and no explanation.
+	for _, t := range unavailable {
+		tenants = append(tenants, adminTenantItem{
+			ID: t.CustomerID, Name: t.Name, Plan: t.Plan, CreatedAt: t.CreatedAt.Format(time.RFC3339),
+			Dedicated: true, Status: t.Status, Error: t.Error, Applications: []adminAppItem{},
+		})
+	}
+	jsonOK(w, tenants)
+}
+
+// tenantsIn lists the tenants act reaches in the database ctx is routed to,
+// with their applications, models and revisions: every one for a platform
+// admin or a platform-wide builder; for a tenant admin, its tenants (on the
+// administrator route) or those it administers or builds in; for a
+// developer, those its roles and grants reach.
+func (h *handler) tenantsIn(ctx context.Context, act *actor) ([]adminTenantItem, error) {
+	isPlatformAdmin := act.hasRole("platform_admin")
 	isTenantAdmin := false
 	isDeveloper := false
 	for _, role := range act.Roles {
@@ -6534,8 +6691,7 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 		// see every tenant.
 		rows, err := h.db.Query(ctx, `SELECT id::text, name, plan, created_at::text FROM core.customer ORDER BY created_at`)
 		if err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
+			return nil, err
 		}
 		cRows = rows
 	} else if isTenantAdmin {
@@ -6545,8 +6701,7 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 		// it then sees as a developer (isScopedDeveloper below).
 		tiers, scopeErr := h.loadAdminTiers(ctx, act)
 		if scopeErr != nil {
-			jsonErr(w, scopeErr, http.StatusInternalServerError)
-			return
+			return nil, scopeErr
 		}
 		customerIDs := tiers.ids()
 		if onAdminRoute(ctx) {
@@ -6561,8 +6716,7 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 			 ORDER BY created_at`,
 			customerIDs, act.UserID)
 		if err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
+			return nil, err
 		}
 		cRows = rows
 		scanGrantOnly = true
@@ -6595,13 +6749,12 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 				ORDER BY c.name
 			`, act.UserID)
 		if err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
+			return nil, err
 		}
 		cRows = rows
 	}
 	defer cRows.Close()
-	var tenants []adminTenantItem
+	tenants := []adminTenantItem{}
 	grantOnly := map[string]bool{}
 	for cRows.Next() {
 		var t adminTenantItem
@@ -6611,45 +6764,15 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 			dest = append(dest, &onlyGranted)
 		}
 		if err := cRows.Scan(dest...); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
+			return nil, err
 		}
 		grantOnly[t.ID] = onlyGranted
 		tenants = append(tenants, t)
 	}
 	cRows.Close()
 
-	// Tenants with their own database have no row here — the catalog is
-	// their listing. Their applications are read below, each in its own
-	// database.
-	if dedicated, cErr := h.catalogTenants(ctx, act, h.subjectOf(r)); cErr == nil {
-		// A member of a dedicated tenant is already routed to its database,
-		// where the query above found its one customer row — appending the
-		// catalog entry as well would list that tenant twice.
-		already := map[string]bool{}
-		for _, t := range tenants {
-			already[t.ID] = true
-		}
-		for _, d := range dedicated {
-			if already[d.CustomerID] {
-				continue
-			}
-			tenants = append(tenants, adminTenantItem{
-				ID: d.CustomerID, Name: d.Name, Plan: d.Plan,
-				CreatedAt: d.CreatedAt.Format(time.RFC3339),
-			})
-		}
-	} else {
-		h.log.Warn().Err(cErr).Msg("tenant catalog listing failed")
-	}
-
-	// isScopedDeveloper is hoisted: inside the loop ctx is a tenant's
-	// database, where a platform-level actor has no row to look up.
 	isScopedDeveloper := isDeveloper && !isPlatformAdmin && !h.isGlobalBuilder(ctx, act)
 	for i, t := range tenants {
-		// Shadowed on purpose: every query in this iteration runs against
-		// the database that holds this tenant.
-		ctx := h.tenantCtx(ctx, t.ID)
 		tenants[i].PlanState = h.planStateFor(ctx, t.ID)
 		var aRows interface {
 			Next() bool
@@ -6714,6 +6837,8 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 				ORDER BY a.created_at`, t.ID)
 		}
 		if err != nil {
+			h.log.Warn().Err(err).Str("tenant", t.ID).Msg("applications of a tenant not listed")
+			tenants[i].Applications = []adminAppItem{}
 			continue
 		}
 		for aRows.Next() {
@@ -6726,7 +6851,9 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 				Scan(...any) error
 				Close()
 			}
-			if isDeveloper || grantOnly[t.ID] {
+			// A platform admin who is also a developer sees every model:
+			// only a scoped developer's and a grant's are narrowed.
+			if isScopedDeveloper || grantOnly[t.ID] {
 				mRows, _ = h.db.Query(ctx, `
 						SELECT id::text, name, storage_type::text, COALESCE(active_revision_name,''),
 						       (m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) IS TRUE
@@ -6784,10 +6911,7 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if tenants == nil {
-		tenants = []adminTenantItem{}
-	}
-	jsonOK(w, tenants)
+	return tenants, nil
 }
 
 type userAssignment struct {
@@ -6817,6 +6941,13 @@ type adminUserItem struct {
 	// no workspace (unscopedGrantableRoles); inside a workspace, the
 	// workspace's grantable_roles (GET /api/admin/workspaces) apply.
 	GrantableRoles []string `json:"grantable_roles"`
+	// TenantID is the database the row lives in, as the console addresses
+	// it (X-Tenant-Id): a dedicated tenant's id, controlPlaneAddress for the
+	// control plane, or "" with a single database. The same person has a
+	// row, and an id, in each database that holds them. TenantName names a
+	// dedicated tenant.
+	TenantID   string `json:"tenant_id"`
+	TenantName string `json:"tenant_name,omitempty"`
 }
 
 func (h *handler) adminUsers(w http.ResponseWriter, r *http.Request) {
@@ -6835,23 +6966,56 @@ func (h *handler) adminUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// One list across databases (homesOf, platformHomes): every database for
+	// a platform admin or a platform-wide builder, every home for anyone
+	// else, each read with the caller's account there; X-Tenant-Id names one.
+	// Each row says which database it lives in (tenant_id), and the console
+	// addresses what it does with the row there. It used to list the
+	// database the request was routed to — for a platform admin, the control
+	// plane, or whichever tenant the application last opened belonged to.
+	var homes []home
+	switch {
+	case r.Header.Get(tenantHeader) != "" || h.db.Router() == nil:
+		homes = []home{{TenantID: tenantdb.TenantFrom(ctx), Scope: routedScope(ctx), Actor: act}}
+	case h.isPlatformLevel(ctx, act):
+		homes, _ = h.platformHomes(ctx, act)
+	default:
+		homes = h.homesOf(ctx, r, act)
+	}
+	names := h.tenantNames(ctx)
+	users := []adminUserItem{}
+	for _, hm := range homes {
+		got, err := h.usersIn(tenantdb.WithScope(ctx, hm.Scope), hm.Actor)
+		if err != nil {
+			h.log.Warn().Err(err).Str("tenant", hm.TenantID).Msg("users of one database not listed")
+			continue
+		}
+		for i := range got {
+			got[i].TenantID, got[i].TenantName = h.homeAddress(hm.TenantID), names[hm.TenantID]
+		}
+		users = append(users, got...)
+	}
+	jsonOK(w, users)
+}
+
+// usersIn lists the people act may see in the database ctx is routed to,
+// with what act may do to each.
+func (h *handler) usersIn(ctx context.Context, act *actor) ([]adminUserItem, error) {
 	// Every tenant the caller holds a tier in (adminTiers): a developer tier
 	// lists its tenant's people too, and acts on them as a developer.
 	tiers, err := h.loadAdminTiers(ctx, act)
 	if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 	all, customerIDs := tiers.all, tiers.ids()
 	if !all && len(customerIDs) == 0 {
-		jsonOK(w, []adminUserItem{})
-		return
+		return []adminUserItem{}, nil
 	}
 	scopeWhere := ""
 	args := []any{}
 	if !all {
 		scopeWhere = `
-			WHERE (
+			AND (
 			    u.customer_id::text = ANY($1)
 			    OR u.id = $2::uuid
 			    OR EXISTS (
@@ -6917,13 +7081,12 @@ func (h *handler) adminUsers(w http.ResponseWriter, r *http.Request) {
 			LEFT JOIN identity.role_assignment ra ON ra.user_id = u.id
 			LEFT JOIN core.workspace w ON w.id = ra.workspace_id
 			LEFT JOIN core.customer cust ON cust.id = w.customer_id
-			`+scopeWhere+`
+			WHERE NOT u.stand_in `+scopeWhere+`
 			GROUP BY u.id, u.email, u.display_name, u.created_at, u.disabled_at
 			ORDER BY u.created_at
 		`, args...)
 	if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -6932,8 +7095,7 @@ func (h *handler) adminUsers(w http.ResponseWriter, r *http.Request) {
 		var u adminUserItem
 		var assignmentsJSON []byte
 		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.CreatedAt, &u.DisabledAt, &assignmentsJSON, &u.AppIDs, &u.ModelIDs); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
+			return nil, err
 		}
 		if err := json.Unmarshal(assignmentsJSON, &u.Assignments); err != nil || u.Assignments == nil {
 			u.Assignments = []userAssignment{}
@@ -6947,17 +7109,15 @@ func (h *handler) adminUsers(w http.ResponseWriter, r *http.Request) {
 		users = append(users, u)
 	}
 	if err := rows.Err(); err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 	if users == nil {
 		users = []adminUserItem{}
 	}
 	if err := h.withUserPermissions(ctx, act, tiers, users); err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
+		return nil, err
 	}
-	jsonOK(w, users)
+	return users, nil
 }
 
 type auditEventItem struct {
@@ -6974,6 +7134,10 @@ type auditEventItem struct {
 	RevisionName    string `json:"revision_name"`
 	Metadata        any    `json:"metadata"`
 	OccurredAt      string `json:"occurred_at"`
+	// TenantID and TenantName are the database the event was recorded in,
+	// as adminUserItem's: a platform admin's log spans every database.
+	TenantID   string `json:"tenant_id"`
+	TenantName string `json:"tenant_name,omitempty"`
 }
 
 func (h *handler) adminAudit(w http.ResponseWriter, r *http.Request) {
@@ -6990,14 +7154,58 @@ func (h *handler) adminAudit(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusUnauthorized)
 		return
 	}
+	// Across databases as the users list is (adminUsers): a platform admin's
+	// log is every database's newest events, each naming its tenant; it used
+	// to be the control plane's alone, or the routed tenant's. X-Tenant-Id
+	// names one tenant: a shared-database tenant's own events, which used to
+	// be the whole control plane's under its name.
+	want := r.Header.Get(tenantHeader)
+	var homes []home
+	switch {
+	case want != "" || h.db.Router() == nil:
+		homes = []home{{TenantID: tenantdb.TenantFrom(ctx), Scope: routedScope(ctx), Actor: act}}
+	case h.isPlatformLevel(ctx, act):
+		homes, _ = h.platformHomes(ctx, act)
+	default:
+		homes = h.homesOf(ctx, r, act)
+	}
+	narrowTo := ""
+	if act.hasRole("platform_admin") && want != "" && want != controlPlaneAddress && tenantdb.TenantFrom(ctx) == "" {
+		narrowTo = want
+	}
+	names := h.tenantNames(ctx)
+	events := []auditEventItem{}
+	for _, hm := range homes {
+		got, err := h.auditEventsIn(tenantdb.WithScope(ctx, hm.Scope), hm.Actor, narrowTo)
+		if err != nil {
+			h.log.Warn().Err(err).Str("tenant", hm.TenantID).Msg("audit events of one database not listed")
+			continue
+		}
+		for i := range got {
+			got[i].TenantID, got[i].TenantName = h.homeAddress(hm.TenantID), names[hm.TenantID]
+		}
+		events = append(events, got...)
+	}
+	sort.SliceStable(events, func(i, j int) bool { return events[i].OccurredAt > events[j].OccurredAt })
+	if len(events) > 200 {
+		events = events[:200]
+	}
+	jsonOK(w, events)
+}
+
+// auditEventsIn lists the newest 200 audit events act may see in the
+// database ctx is routed to (auditScope), or — narrowTo set, for a platform
+// admin — that tenant's events only.
+func (h *handler) auditEventsIn(ctx context.Context, act *actor, narrowTo string) ([]auditEventItem, error) {
 	cond, args, visible, err := h.auditScope(ctx, act)
 	if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 	if !visible {
-		jsonOK(w, []auditEventItem{})
-		return
+		return []auditEventItem{}, nil
+	}
+	if narrowTo != "" {
+		cond, args = auditTenantsCond, []any{[]string{narrowTo}}
 	}
 	scopeWhere := ""
 	if cond != "" {
@@ -7024,30 +7232,21 @@ func (h *handler) adminAudit(w http.ResponseWriter, r *http.Request) {
 		LIMIT 200
 	`, args...)
 	if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
-	var events []auditEventItem
+	events := []auditEventItem{}
 	for rows.Next() {
 		var e auditEventItem
 		var metaJSON []byte
 		if err := rows.Scan(&e.ID, &e.Category, &e.EventType, &e.ActorName, &e.ActorRole, &e.ApplicationID, &e.ApplicationName, &e.ResourceType, &e.ResourceID, &e.RevisionID, &e.RevisionName, &metaJSON, &e.OccurredAt); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
+			return nil, err
 		}
 		_ = json.Unmarshal(metaJSON, &e.Metadata)
 		events = append(events, e)
 	}
-	if err := rows.Err(); err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
-	}
-	if events == nil {
-		events = []auditEventItem{}
-	}
-	jsonOK(w, events)
+	return events, rows.Err()
 }
 
 // auditScope is the one definition of which audit events an administrator
@@ -7075,15 +7274,20 @@ func (h *handler) auditScope(ctx context.Context, act *actor) (cond string, args
 	// An event marked for the platform only (auditPlatformOnly) is never a
 	// tenant's: refusing to add an existing account to a tenant is recorded
 	// with why, which said whose the address was (refuseExistingAccount).
-	return `(
+	return auditTenantsCond + ` AND ae.metadata->>'` + auditVisibilityKey + `' IS DISTINCT FROM '` + auditPlatformOnly + `'`,
+		[]any{customerIDs}, true, nil
+}
+
+// auditTenantsCond is true for an audit event of one of the tenants $1
+// names: its application's, or — with no application — its actor's.
+const auditTenantsCond = `(
 		    app.customer_id::text = ANY($1)
 		    OR EXISTS (
 		        SELECT 1 FROM core.workspace w_scope
 		        WHERE w_scope.id = app.workspace_id AND w_scope.customer_id::text = ANY($1)
 		    )
 		    OR (ae.application_id IS NULL AND u.customer_id::text = ANY($1))
-		) AND ae.metadata->>'` + auditVisibilityKey + `' IS DISTINCT FROM '` + auditPlatformOnly + `'`, []any{customerIDs}, true, nil
-}
+		)`
 
 // ── /api/admin/workspaces ─────────────────────────────────────────────────────
 
@@ -7098,17 +7302,60 @@ func (h *handler) adminWorkspaces(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusUnauthorized)
 		return
 	}
-	// The workspaces of every tenant the caller holds a tier in (adminTiers):
-	// a developer places people in its tenant's workspaces too.
+	// Across databases as the users list is (adminUsers): each workspace
+	// says which database it lives in (tenant_id), where a role in it is
+	// granted.
+	var homes []home
+	switch {
+	case r.Header.Get(tenantHeader) != "" || h.db.Router() == nil:
+		homes = []home{{TenantID: tenantdb.TenantFrom(ctx), Scope: routedScope(ctx), Actor: act}}
+	case h.isPlatformLevel(ctx, act):
+		homes, _ = h.platformHomes(ctx, act)
+	default:
+		homes = h.homesOf(ctx, r, act)
+	}
+	out := []adminWorkspaceItem{}
+	for _, hm := range homes {
+		got, err := h.workspacesIn(tenantdb.WithScope(ctx, hm.Scope), hm.Actor)
+		if err != nil {
+			h.log.Warn().Err(err).Str("tenant", hm.TenantID).Msg("workspaces of one database not listed")
+			continue
+		}
+		for i := range got {
+			got[i].TenantID = h.homeAddress(hm.TenantID)
+		}
+		out = append(out, got...)
+	}
+	jsonOK(w, out)
+}
+
+// adminWorkspaceItem is one workspace of GET /api/admin/workspaces.
+// GrantableRoles and ManageAccess are what the caller may do in the
+// workspace, by its tier in the workspace's tenant: the console offers those
+// and no more. It used to offer what the caller's roles merged across its
+// tenants allowed, and each attempt the tier forbade was refused
+// (2026-09-30). TenantID is the database it lives in, as adminUserItem's.
+type adminWorkspaceItem struct {
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	CustomerName   string   `json:"customer_name"`
+	CustomerID     string   `json:"customer_id"`
+	GrantableRoles []string `json:"grantable_roles"`
+	ManageAccess   bool     `json:"manage_access"`
+	TenantID       string   `json:"tenant_id"`
+}
+
+// workspacesIn lists the workspaces of every tenant act holds a tier in
+// (adminTiers), in the database ctx is routed to: a developer places people
+// in its tenant's workspaces too.
+func (h *handler) workspacesIn(ctx context.Context, act *actor) ([]adminWorkspaceItem, error) {
 	tiers, err := h.loadAdminTiers(ctx, act)
 	if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 	all, customerIDs := tiers.all, tiers.ids()
 	if !all && len(customerIDs) == 0 {
-		jsonOK(w, []struct{}{})
-		return
+		return []adminWorkspaceItem{}, nil
 	}
 	scopeWhere := ""
 	args := []any{}
@@ -7124,39 +7371,23 @@ func (h *handler) adminWorkspaces(w http.ResponseWriter, r *http.Request) {
 		ORDER BY c.name, w.name
 	`, args...)
 	if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 	defer rows.Close()
-	// GrantableRoles and ManageAccess are what the caller may do in the
-	// workspace, by its tier in the workspace's tenant: the console offers
-	// those and no more. It used to offer what the caller's roles merged
-	// across its tenants allowed, and each attempt the tier forbade was
-	// refused (2026-09-30).
-	type wsItem struct {
-		ID             string   `json:"id"`
-		Name           string   `json:"name"`
-		CustomerName   string   `json:"customer_name"`
-		CustomerID     string   `json:"customer_id"`
-		GrantableRoles []string `json:"grantable_roles"`
-		ManageAccess   bool     `json:"manage_access"`
-	}
-	var out []wsItem
+	out := []adminWorkspaceItem{}
 	for rows.Next() {
-		var item wsItem
+		var item adminWorkspaceItem
 		if err := rows.Scan(&item.ID, &item.Name, &item.CustomerName, &item.CustomerID); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
+			return nil, err
 		}
 		tierRoles := tiers.rolesIn(item.CustomerID)
-		item.GrantableRoles = workspaceGrantableRoles(act, tierRoles)
+		item.GrantableRoles = slices.DeleteFunc(workspaceGrantableRoles(act, tierRoles), func(role string) bool {
+			return dedicatedGrantErr(ctx, role, item.ID, "") != nil
+		})
 		item.ManageAccess = canManageResourceAccess(tierRoles)
 		out = append(out, item)
 	}
-	if out == nil {
-		out = []wsItem{}
-	}
-	jsonOK(w, out)
+	return out, rows.Err()
 }
 
 // ── Import ────────────────────────────────────────────────────────────────────
@@ -9623,6 +9854,11 @@ type appInfo struct {
 	// Every model of the app the caller may access — the business Models
 	// tab switches between them (X-Model-Id header); default first.
 	Models []appModelInfo `json:"models"`
+	// TenantID and TenantName are the tenant the application belongs to.
+	// A person's applications come from every database that holds them
+	// (homesOf); opening one routes by its id (X-App-Id).
+	TenantID   string `json:"tenant_id"`
+	TenantName string `json:"tenant_name"`
 }
 
 // userApps returns applications accessible to the current user, scoped by
@@ -9634,20 +9870,42 @@ func (h *handler) userApps(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
+	// Every database for a platform admin or a platform-wide builder;
+	// every home, each with the person's own account there, for anyone else.
+	var homes []home
+	if h.isPlatformLevel(ctx, a) {
+		homes, _ = h.platformHomes(ctx, a)
+	} else {
+		homes = h.homesOf(ctx, r, a)
+	}
+	apps := []appInfo{}
+	for _, hm := range homes {
+		got, err := h.appsIn(tenantdb.WithScope(ctx, hm.Scope), hm.Actor)
+		if err != nil {
+			h.log.Warn().Err(err).Str("tenant", hm.TenantID).Msg("applications of one database not listed")
+			continue
+		}
+		apps = append(apps, got...)
+	}
+	jsonOK(w, apps)
+}
 
+// appsIn lists the applications a reaches in the database ctx is routed to,
+// with the models it may access in each.
+func (h *handler) appsIn(ctx context.Context, a *actor) ([]appInfo, error) {
 	var rows interface {
 		Next() bool
 		Scan(...any) error
 		Close()
+		Err() error
 	}
-
+	var err error
 	platformWide := a.hasRole("platform_admin") || h.isGlobalBuilder(ctx, a)
 	var customerIDs []string
 	if !platformWide && a.hasRole("tenant_admin") {
 		_, ids, scopeErr := h.adminScopeCustomerIDs(ctx, a)
 		if scopeErr != nil {
-			jsonErr(w, scopeErr, http.StatusInternalServerError)
-			return
+			return nil, scopeErr
 		}
 		customerIDs = ids
 	}
@@ -9655,7 +9913,8 @@ func (h *handler) userApps(w http.ResponseWriter, r *http.Request) {
 		rows, err = h.db.Query(ctx, `
 			SELECT a.id::text, a.name, COALESCE(a.mode, 'planning'), w.name,
 			       COALESCE((SELECT name FROM core.model WHERE application_id = a.id ORDER BY (id = a.default_model_id) IS TRUE DESC, created_at DESC, name, id LIMIT 1), ''),
-			       COALESCE((SELECT active_revision_name FROM core.model WHERE application_id = a.id ORDER BY (id = a.default_model_id) IS TRUE DESC, created_at DESC, name, id LIMIT 1), '')
+			       COALESCE((SELECT active_revision_name FROM core.model WHERE application_id = a.id ORDER BY (id = a.default_model_id) IS TRUE DESC, created_at DESC, name, id LIMIT 1), ''),
+			       w.customer_id::text, COALESCE((SELECT c.name FROM core.customer c WHERE c.id = w.customer_id), '')
 			FROM core.application a
 			JOIN core.workspace w ON w.id = COALESCE(a.workspace_id,
 			    (SELECT w2.id FROM core.workspace w2 WHERE w2.customer_id = a.customer_id ORDER BY w2.created_at LIMIT 1))
@@ -9667,7 +9926,8 @@ func (h *handler) userApps(w http.ResponseWriter, r *http.Request) {
 		rows, err = h.db.Query(ctx, `
 			SELECT a.id::text, a.name, COALESCE(a.mode, 'planning'), w.name,
 			       COALESCE((SELECT name FROM core.model WHERE application_id = a.id ORDER BY (id = a.default_model_id) IS TRUE DESC, created_at DESC, name, id LIMIT 1), ''),
-			       COALESCE((SELECT active_revision_name FROM core.model WHERE application_id = a.id ORDER BY (id = a.default_model_id) IS TRUE DESC, created_at DESC, name, id LIMIT 1), '')
+			       COALESCE((SELECT active_revision_name FROM core.model WHERE application_id = a.id ORDER BY (id = a.default_model_id) IS TRUE DESC, created_at DESC, name, id LIMIT 1), ''),
+			       w.customer_id::text, COALESCE((SELECT c.name FROM core.customer c WHERE c.id = w.customer_id), '')
 			FROM core.application a
 			JOIN core.workspace w ON w.id = COALESCE(a.workspace_id,
 			    (SELECT w2.id FROM core.workspace w2 WHERE w2.customer_id = a.customer_id ORDER BY w2.created_at LIMIT 1))
@@ -9709,7 +9969,8 @@ func (h *handler) userApps(w http.ResponseWriter, r *http.Request) {
 			             )
 			           ORDER BY (m.id = a.default_model_id) IS TRUE DESC, m.created_at DESC, m.name, m.id
 			           LIMIT 1
-			       ), '')
+			       ), ''),
+			       w.customer_id::text, COALESCE((SELECT c.name FROM core.customer c WHERE c.id = w.customer_id), '')
 			FROM core.application a
 			JOIN core.workspace w ON w.id = COALESCE(a.workspace_id,
 			    (SELECT w2.id FROM core.workspace w2 WHERE w2.customer_id = a.customer_id ORDER BY w2.created_at LIMIT 1))
@@ -9730,20 +9991,23 @@ func (h *handler) userApps(w http.ResponseWriter, r *http.Request) {
 		`, a.UserID)
 	}
 	if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
 	apps := []appInfo{}
 	for rows.Next() {
 		var app appInfo
-		if err := rows.Scan(&app.ID, &app.Name, &app.Mode, &app.WorkspaceName, &app.ModelName, &app.ActiveRevision); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
+		if err := rows.Scan(&app.ID, &app.Name, &app.Mode, &app.WorkspaceName, &app.ModelName, &app.ActiveRevision,
+			&app.TenantID, &app.TenantName); err != nil {
+			return nil, err
 		}
 		apps = append(apps, app)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
 	// Per-app accessible models (default first) for the model switcher.
 	// is_default is "IS TRUE": with no default set the comparison is NULL,
 	// which does not scan into a bool, and a row that fails to scan is
@@ -9773,7 +10037,7 @@ func (h *handler) userApps(w http.ResponseWriter, r *http.Request) {
 		}
 		mRows.Close()
 	}
-	jsonOK(w, apps)
+	return apps, nil
 }
 
 // pinModelForRevision switches a resolved model to the one owning revID —
@@ -11953,32 +12217,11 @@ func (h *handler) removeUserAccount(ctx context.Context, userID, keycloakSub str
 // identityHeldElsewhere reports whether a database other than the one ctx
 // is routed to still holds a user row for keycloakSub: a dedicated tenant
 // the directory lists it in, or — from a dedicated tenant — the control
-// plane. Always false with a single database. An error counts as held: the
-// identity-provider account is not deleted on a guess.
+// plane (identityHeldIn). Always false with a single database. An error
+// counts as held: the identity-provider account is not deleted on a guess.
 func (h *handler) identityHeldElsewhere(ctx context.Context, keycloakSub string) bool {
-	router := h.db.Router()
-	if router == nil {
-		return false
-	}
-	here := tenantdb.TenantFrom(ctx)
-	member, err := router.Catalog().TenantsForUser(ctx, keycloakSub)
-	if err != nil {
-		return true
-	}
-	for _, id := range member {
-		if id != here {
-			return true
-		}
-	}
-	if here == "" {
-		return false
-	}
-	var inControl bool
-	if err := h.db.Control().QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM identity.user WHERE keycloak_sub = $1)`, keycloakSub).Scan(&inControl); err != nil {
-		return true
-	}
-	return inControl
+	held, _, err := h.identityHeldIn(ctx, "", keycloakSub)
+	return err != nil || held != heldNowhere
 }
 
 func (h *handler) adminTenantAction(w http.ResponseWriter, r *http.Request) {
@@ -12184,12 +12427,28 @@ func (h *handler) adminApplications(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if a, e := h.resolveActor(ctx, r); e == nil {
-			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+			// The event names the application, so it is recorded where the
+			// application is. For an actor of another database — a platform
+			// admin creating a dedicated tenant's application — that is the
+			// tenant's, under the actor's stand-in there; written to the
+			// control plane, its application id broke a foreign key and the
+			// event was lost (2026-09-30).
+			actx := ctx
+			if tenantdb.TenantFrom(tctx) != tenantdb.TenantFrom(ctx) {
+				if err := h.ensureStandIn(tctx, a); err == nil {
+					actx = tctx
+				}
+			}
+			fields := auditlog.Fields{
 				Category: auditlog.CategoryAdmin, EventType: auditlog.EventApplicationCreated,
 				ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
 				ApplicationID: id, ResourceType: "application", ResourceID: id,
 				Metadata: map[string]string{"name": body.Name, "mode": body.Mode},
-			})
+			}
+			if tenantdb.TenantFrom(actx) != tenantdb.TenantFrom(tctx) {
+				fields.ApplicationID = ""
+			}
+			auditlog.Log(actx, h.db.For(actx), h.log, fields)
 		}
 		h.noteApplication(tctx, id)
 		jsonOK(w, map[string]string{"id": id, "created_at": createdAt})
@@ -12955,9 +13214,17 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, err, http.StatusForbidden)
 				return
 			}
+			if err := dedicatedGrantErr(ctx, body.Role, body.WorkspaceID, customerID); err != nil {
+				jsonErr(w, err, http.StatusForbidden)
+				return
+			}
 		}
 		if body.Email == "" {
 			jsonErr(w, fmt.Errorf("email is required"), http.StatusBadRequest)
+			return
+		}
+		if reservedAddress(body.Email) {
+			jsonErr(w, fmt.Errorf("that address is reserved and cannot be invited"), http.StatusBadRequest)
 			return
 		}
 		firstName, lastName := strings.TrimSpace(body.FirstName), strings.TrimSpace(body.LastName)
@@ -13015,11 +13282,13 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 				"(set KEYCLOAK_ADMIN_CLIENT_ID and KEYCLOAK_ADMIN_CLIENT_SECRET)"), http.StatusServiceUnavailable)
 			return
 		}
+		// An account may already exist from a previous attempt that failed
+		// after this point; adopt it rather than erroring, and do not delete
+		// it during cleanup since this request did not create it.
+		existing := ""
 		if h.kc != nil {
-			// An account may already exist from a previous attempt that failed
-			// after this point; adopt it rather than erroring, and do not
-			// delete it during cleanup since this request did not create it.
-			existing, err := h.kc.FindUserByEmail(ctx, body.Email)
+			var err error
+			existing, err = h.kc.FindUserByEmail(ctx, body.Email)
 			if err != nil {
 				jsonErr(w, fmt.Errorf("look up identity provider account: %w", err), http.StatusBadGateway)
 				return
@@ -13037,6 +13306,56 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
+		}
+		// With a database per tenant, the lookups above saw this database
+		// only; another may hold the person (identityHeldIn). Then they are
+		// added here as a member, never adopted (addMemberFromElsewhere):
+		// the control plane and every dedicated tenant are reachable homes of
+		// one person (tenantRouting). Someone with platform reach in the
+		// control plane is changed only by a platform admin, as in one
+		// database (addExistingAccount). A platform admin's creation for
+		// someone another database holds adopts as it does in one database,
+		// and the row gets no tenant: its tenant is in another database, and
+		// this one's admin would own it. Refusals get the answer a new
+		// invitation gets; a platform admin is told why.
+		lookupSub := sub
+		if h.kc != nil {
+			lookupSub = existing
+		}
+		held, heldSub, err := h.identityHeldIn(ctx, body.Email, lookupSub)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		// heldElsewhere: a platform admin adds someone another database
+		// holds — under their own subject, with nothing on their
+		// identity-provider account and no set-password e-mail: they have
+		// one already.
+		heldElsewhere := false
+		if held != heldNowhere {
+			memberSub := heldSub
+			if h.kc != nil {
+				memberSub = existing
+			}
+			switch {
+			case memberSub == "" && platformCreator:
+				jsonErr(w, errors.New(heldElsewhereRefusal), http.StatusConflict)
+				return
+			case memberSub == "":
+				h.refuseExistingAccount(ctx, w, act, "", body.Email, body.Role, body.WorkspaceID, heldElsewhereRefusal)
+				return
+			case platformCreator:
+				customerID, heldElsewhere, sub = "", true, memberSub
+			case h.controlPresenceOf(ctx, memberSub).platformReach:
+				h.refuseExistingAccount(ctx, w, act, "", body.Email, body.Role, body.WorkspaceID,
+					"a platform admin or platform-wide builder is modified only by a platform admin")
+				return
+			default:
+				h.addMemberFromElsewhere(ctx, w, act, tierRoles, memberSub, body.Email, body.Role, body.WorkspaceID)
+				return
+			}
+		}
+		if h.kc != nil && !heldElsewhere {
 			if existing == "" {
 				existing, err = h.kc.CreateUser(ctx, body.Email, firstName, lastName)
 				if err != nil {
@@ -13061,7 +13380,7 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, err, status)
 		}
 
-		if h.kc != nil && body.Role != "" {
+		if h.kc != nil && body.Role != "" && !heldElsewhere {
 			if err := h.kc.AssignRealmRole(ctx, sub, body.Role); err != nil {
 				abort(http.StatusBadGateway, fmt.Errorf("assign role in identity provider: %w", err))
 				return
@@ -13114,7 +13433,7 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 		// A failure here therefore rolls the whole thing back rather than
 		// reporting a success that leaves an account nobody can use.
 		invited := false
-		if h.kc != nil {
+		if h.kc != nil && !heldElsewhere {
 			if err := h.kc.SendInvite(ctx, sub, inviteLifetime); err != nil {
 				// Only what this request made is undone: an account it
 				// adopted was someone's before, with what they authored —
@@ -13151,6 +13470,12 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("user id required"), http.StatusBadRequest)
 		return
 	}
+	// A platform admin's stand-in in a tenant's database is no account of
+	// the tenant's, for anyone: the platform admin's is in the control plane.
+	if h.isStandIn(ctx, userID) {
+		jsonErr(w, fmt.Errorf("user not found"), http.StatusNotFound)
+		return
+	}
 	canTouchUser, err := h.userInTiers(ctx, tiers, userID)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
@@ -13176,6 +13501,15 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			       `+platformWideBuilderSQL("$1::uuid"), userID).Scan(&targetIsPlatformAdmin, &targetIsPlatformWide); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
+		}
+		// In a tenant's database the control plane says it (platformReachOf).
+		var targetSub string
+		_ = h.db.QueryRow(ctx, `SELECT keycloak_sub FROM identity.user WHERE id::text = $1`, userID).Scan(&targetSub)
+		if reach, err := h.platformReachOf(ctx, []string{targetSub}); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		} else if reach[targetSub] {
+			targetIsPlatformAdmin = true
 		}
 		if targetIsPlatformAdmin {
 			jsonErr(w, fmt.Errorf("forbidden: only a platform admin can modify a platform admin"), http.StatusForbidden)
@@ -13277,6 +13611,10 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := platformWideGrantErr(act, body.Role, body.WorkspaceID, targetCustomer, tiers.all, tiers.ids()); err != nil {
+			jsonErr(w, err, http.StatusForbidden)
+			return
+		}
+		if err := dedicatedGrantErr(ctx, body.Role, body.WorkspaceID, targetCustomer); err != nil {
 			jsonErr(w, err, http.StatusForbidden)
 			return
 		}

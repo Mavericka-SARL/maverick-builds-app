@@ -31,7 +31,21 @@ export function UsageTab({ scope }: { scope: "platform" | "tenant" }) {
 }
 
 const COLUMNS: DataTableColumn<TenantUsage>[] = [
-  { id: "name", header: "Tenant", cell: (t) => <span style={{ fontWeight: 600 }}>{t.name}</span> },
+  {
+    id: "name",
+    header: "Tenant",
+    cell: (t) => (
+      <span style={{ fontWeight: 600 }}>
+        {t.name}
+        {/* A tenant that could not be counted is listed with why, not left out. */}
+        {t.status && (
+          <span className="mvx-admin-muted" style={{ display: "block", fontSize: 11, fontWeight: 400 }}>
+            Not counted: {t.status}{t.error ? ` — ${t.error}` : ""}
+          </span>
+        )}
+      </span>
+    ),
+  },
   { id: "plan", header: "Plan", cell: (t) => t.plan },
   { id: "active_users", header: "Active / users", align: "right", cell: (t) => `${num(t.active_users)} / ${num(t.users)}` },
   { id: "models", header: "Apps / models / revisions", align: "right", cell: (t) => `${num(t.applications)} / ${num(t.models)} / ${num(t.revisions)}` },

@@ -33,8 +33,8 @@ export function WorkflowInbox() {
   });
 
   const complete = useMutation({
-    mutationFn: ({ stepId, decision, comment }: { stepId: string; decision: string; comment: string }) =>
-      api.completeTask(stepId, decision, comment),
+    mutationFn: ({ stepId, decision, comment, tenantId }: { stepId: string; decision: string; comment: string; tenantId?: string }) =>
+      api.completeTask(stepId, decision, comment, tenantId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tasks"] });
       qc.invalidateQueries({ queryKey: ["wf-history"] });
@@ -91,7 +91,7 @@ export function WorkflowInbox() {
               completionLabel={t.completion_label}
               condition={t.condition}
               disabled={complete.isPending || (t.required_comment && !comment[t.id]?.trim())}
-              onDecide={decision => complete.mutate({ stepId: t.id, decision, comment: comment[t.id] ?? "" })}
+              onDecide={decision => complete.mutate({ stepId: t.id, decision, comment: comment[t.id] ?? "", tenantId: t.tenant_id })}
             />
 
             {complete.isError && (

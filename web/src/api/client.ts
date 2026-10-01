@@ -207,6 +207,9 @@ export interface TenantUsage {
   ai_messages: number;
   audit_events: number;
   last_activity_at?: string;
+  /** Why the tenant could not be counted: its database is not ready, or counting failed. */
+  status?: string;
+  error?: string;
 }
 
 export interface UsageReport {
@@ -381,6 +384,9 @@ export interface AppInfo {
   model_name: string;
   active_revision: string;
   models?: AppModelInfo[];
+  /** The tenant the application belongs to: a person's applications span every database that holds them. */
+  tenant_id?: string;
+  tenant_name?: string;
 }
 
 export interface DemoContext {
@@ -434,6 +440,8 @@ export interface Task {
   /** > 0 when a later decision sent this step back; the note says which step and why. */
   rework_count?: number;
   rework_note?: string;
+  /** The tenant of the task's application; completing it addresses this tenant. */
+  tenant_id?: string;
 }
 
 // One human-readable context line: value is the stable code, display the
@@ -840,6 +848,11 @@ export interface AdminTenant {
   applications: AdminApp[];
   /** The plan as it applies right now: read-only and why. */
   plan_state?: PlanState;
+  /** Has a database of its own: the platform console addresses it by id to act on its people. */
+  dedicated?: boolean;
+  /** Why a dedicated tenant's database could not be read (provisioning, failed, disabled); absent when it was. */
+  status?: string;
+  error?: string;
 }
 
 export interface UserAssignment {
@@ -880,6 +893,15 @@ export interface AdminUser {
   permissions?: AdminUserPermissions;
   /** Whose account this is, seen from the signed-in administrator's tenant. */
   home_tenant?: "own" | "other" | "none";
+  /** Roles this caller may give the account without a workspace (the server's grantable_roles). */
+  grantable_roles?: string[];
+  /**
+   * The database the row lives in, as the console addresses it (X-Tenant-Id):
+   * a dedicated tenant's id, CONTROL_PLANE, or "" with a single database. The
+   * same person has a row, and an id, in each database that holds them.
+   */
+  tenant_id?: string;
+  tenant_name?: string;
 }
 
 /** A grant a removal took away with it (see AccessRemovalResult). */
@@ -907,6 +929,10 @@ export interface AdminWorkspace {
   name: string;
   customer_name: string;
   customer_id: string;
+  grantable_roles?: string[];
+  manage_access?: boolean;
+  /** The database the workspace lives in, as AdminUser.tenant_id: a role in it is granted there. */
+  tenant_id?: string;
 }
 
 export interface AdminAuditEvent {
@@ -923,6 +949,9 @@ export interface AdminAuditEvent {
   revision_name: string;
   metadata: Record<string, unknown>;
   occurred_at: string;
+  /** The database the event was recorded in, as AdminUser.tenant_id. */
+  tenant_id?: string;
+  tenant_name?: string;
 }
 
 export interface Notification {
@@ -1477,6 +1506,13 @@ export function withTenant<T>(tenantId: string, fn: () => Promise<T>): Promise<T
 // Sticky, unlike withTenant, because those tabs make their own calls.
 let scopedTenantId = "";
 
+/**
+ * The X-Tenant-Id that names the control plane, where platform accounts and
+ * tenants without a database of their own live. Lists that span databases
+ * give their control-plane rows this address.
+ */
+export const CONTROL_PLANE = "control-plane";
+
 /** Address every following request to `tenantId` ("" = the deployment). */
 export function setScopedTenant(tenantId: string) {
   scopedTenantId = tenantId;
@@ -1678,11 +1714,17 @@ export const api = {
   // Planning workspace renders its start-workflow dialog from these.
   listWorkflowDefinitions: () => apiFetch<WorkflowDefPublic[]>("/api/workflow/definitions"),
 
-  completeTask: (stepId: string, decision: string, comment: string) =>
-    apiFetch<{ status: string }>(`/api/tasks/${stepId}/complete`, {
+  /**
+   * `tenantId` is the task's own tenant (Task.tenant_id): an inbox spans every
+   * database that holds the person, and the step is completed in its own.
+   */
+  completeTask: (stepId: string, decision: string, comment: string, tenantId = "") => {
+    const call = () => apiFetch<{ status: string }>(`/api/tasks/${stepId}/complete`, {
       method: "POST",
       body: JSON.stringify({ decision, comment }),
-    }),
+    });
+    return tenantId ? withTenant(tenantId, call) : call();
+  },
 
   getDevApplications: () => apiFetch<AdminTenant[]>("/api/developer/applications"),
   setDefaultModel: (modelId: string) =>

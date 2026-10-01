@@ -251,6 +251,14 @@ func main() {
 		if err := router.MigrateAll(ctx); err != nil {
 			log.Error().Err(err).Msg("one or more tenant databases could not be migrated — they are disabled until fixed")
 		}
+		// Invitations and SCIM creations before 2026-09-30 adopted people
+		// another database held; undone once, then nothing matches.
+		if undone, err := gateway.ReconcileAdoptedAccounts(ctx, router, log); err != nil {
+			log.Error().Err(err).Msg("some adopted accounts could not be reconciled — tried again at the next start")
+		} else if undone.Removed+undone.MadeMembers > 0 {
+			log.Warn().Int("removed", undone.Removed).Int("made_members", undone.MadeMembers).
+				Msg("adoptions of people another database holds undone")
+		}
 		tenants, _ := router.Catalog().List(ctx)
 		log.Info().Int("tenants", len(tenants)).Msg("dedicated tenant databases enabled")
 	} else {

@@ -1,21 +1,26 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Trash2, Plus } from "lucide-react";
-import { api, type AdminModel } from "../../api/client";
+import { api, withTenant, type AdminModel } from "../../api/client";
 import { Button, IconButton, TextInput, LoadingState, EmptyState, StatusBadge, RevisionBadge, useConfirm } from "../../ui";
 
 function DevModelRevisions({
   model,
   appId,
+  tenantId,
   revisionId,
   onSelect,
 }: {
   model: AdminModel;
   appId: string;
+  /** The tenant the model belongs to: the list spans databases, and each
+   *  revision action is addressed to the model's own (X-Tenant-Id). */
+  tenantId: string;
   revisionId: string;
   onSelect: (id: string, name: string) => void;
 }) {
   const qc = useQueryClient();
+  const at = <T,>(call: () => Promise<T>): Promise<T> => (tenantId ? withTenant(tenantId, call) : call());
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState("");
 
@@ -36,7 +41,7 @@ function DevModelRevisions({
     mutationFn: () => {
       localStorage.setItem("selected_app_id", appId);
       // This row's model, not whichever model the server would resolve.
-      return api.createDevRevision(model.id, newName.trim(), sourceRevId || undefined);
+      return at(() => api.createDevRevision(model.id, newName.trim(), sourceRevId || undefined));
     },
     onSuccess: (data) => {
       inv();
@@ -47,12 +52,12 @@ function DevModelRevisions({
   });
 
   const activate = useMutation({
-    mutationFn: (id: string) => api.activateDevRevision(id),
+    mutationFn: (id: string) => at(() => api.activateDevRevision(id)),
     onSuccess: () => inv(),
   });
 
   const del = useMutation({
-    mutationFn: (id: string) => api.deleteDevRevision(id),
+    mutationFn: (id: string) => at(() => api.deleteDevRevision(id)),
     onSuccess: (_, id) => {
       inv();
       if (revisionId === id) onSelect("", "");
@@ -173,7 +178,8 @@ export function DevApplicationsTab({
   });
   const qc = useQueryClient();
   const setDefault = useMutation({
-    mutationFn: (modelId: string) => api.setDefaultModel(modelId),
+    mutationFn: ({ modelId, tenantId }: { modelId: string; tenantId: string }) =>
+      withTenant(tenantId, () => api.setDefaultModel(modelId)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["dev-applications"] });
       // The default drives what /api/demo and every business list resolve.
@@ -182,6 +188,9 @@ export function DevApplicationsTab({
   });
 
   const apps = tenants.flatMap((t) => t.applications ?? []);
+  // The list spans every database the caller reaches; an action on a row is
+  // addressed to the row's tenant.
+  const tenantOfApp = new Map(tenants.flatMap((t) => (t.applications ?? []).map((a) => [a.id, t.id] as const)));
 
   // With no working revision and none in the default model, fall back to the
   // most recently created revision. It waits for the default model's answer:
@@ -245,13 +254,13 @@ export function DevApplicationsTab({
                       size="sm"
                       variant="ghost"
                       title="Business consoles (dashboards, workflows, grids) show the default model. Developers pin other models via the revision selector."
-                      onClick={() => setDefault.mutate(m.id)}
+                      onClick={() => setDefault.mutate({ modelId: m.id, tenantId: tenantOfApp.get(app.id) ?? "" })}
                     >
                       Set as business default
                     </Button>
                   )}
                 </div>
-                <DevModelRevisions model={m} appId={app.id} revisionId={revisionId} onSelect={onSelect} />
+                <DevModelRevisions model={m} appId={app.id} tenantId={tenantOfApp.get(app.id) ?? ""} revisionId={revisionId} onSelect={onSelect} />
               </div>
             ))}
           </div>

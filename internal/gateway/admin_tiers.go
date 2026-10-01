@@ -259,13 +259,14 @@ func workspaceGrantableRoles(act *actor, tierRoles []string) []string {
 // caller's (a platform admin's, any), by the caller's tier in the account's
 // tenant, and never one that would make an account with no tenant a builder
 // or administrator of every tenant (platformWideGrantErr).
-func unscopedGrantableRoles(act *actor, t adminTiers, customerID string) []string {
+func unscopedGrantableRoles(ctx context.Context, act *actor, t adminTiers, customerID string) []string {
 	out := []string{}
 	if !act.hasRole("platform_admin") && !accountIsCallers(customerID, t.all, t.ids()) {
 		return out
 	}
 	for _, r := range assignableRoles(t.rolesIn(customerID)) {
-		if roleIsAssignableBy(act.Roles, r) && platformWideGrantErr(act, r, "", customerID, t.all, t.ids()) == nil {
+		if roleIsAssignableBy(act.Roles, r) && platformWideGrantErr(act, r, "", customerID, t.all, t.ids()) == nil &&
+			dedicatedGrantErr(ctx, r, "", customerID) == nil {
 			out = append(out, r)
 		}
 	}

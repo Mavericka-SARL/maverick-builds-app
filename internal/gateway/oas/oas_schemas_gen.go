@@ -704,12 +704,29 @@ func (s *AdminRevisionItem) SetCreatedAt(val string) {
 
 // Ref: #/components/schemas/AdminTenant
 type AdminTenant struct {
+	// Why a dedicated tenant's database could not be read (provisioning, failed, disabled); absent when
+	// it was.
+	Status       OptString    `json:"status"`
+	Error        OptString    `json:"error"`
 	ID           uuid.UUID    `json:"id"`
 	Name         string       `json:"name"`
 	Plan         string       `json:"plan"`
 	CreatedAt    string       `json:"created_at"`
 	Applications []AdminApp   `json:"applications"`
 	PlanState    OptPlanState `json:"plan_state"`
+	// The tenant has a database of its own. A platform admin acts on its people by addressing it
+	// (X-Tenant-Id).
+	Dedicated OptBool `json:"dedicated"`
+}
+
+// GetStatus returns the value of Status.
+func (s *AdminTenant) GetStatus() OptString {
+	return s.Status
+}
+
+// GetError returns the value of Error.
+func (s *AdminTenant) GetError() OptString {
+	return s.Error
 }
 
 // GetID returns the value of ID.
@@ -742,6 +759,21 @@ func (s *AdminTenant) GetPlanState() OptPlanState {
 	return s.PlanState
 }
 
+// GetDedicated returns the value of Dedicated.
+func (s *AdminTenant) GetDedicated() OptBool {
+	return s.Dedicated
+}
+
+// SetStatus sets the value of Status.
+func (s *AdminTenant) SetStatus(val OptString) {
+	s.Status = val
+}
+
+// SetError sets the value of Error.
+func (s *AdminTenant) SetError(val OptString) {
+	s.Error = val
+}
+
 // SetID sets the value of ID.
 func (s *AdminTenant) SetID(val uuid.UUID) {
 	s.ID = val
@@ -772,8 +804,19 @@ func (s *AdminTenant) SetPlanState(val OptPlanState) {
 	s.PlanState = val
 }
 
+// SetDedicated sets the value of Dedicated.
+func (s *AdminTenant) SetDedicated(val OptBool) {
+	s.Dedicated = val
+}
+
 // Ref: #/components/schemas/AdminUser
 type AdminUser struct {
+	// The database the row lives in, as the console addresses it (X-Tenant-Id): a dedicated tenant's id,
+	// "control-plane" for the control plane, or empty with a single database. Lists span every database
+	// a platform admin sees, or every home of anyone else.
+	TenantID OptString `json:"tenant_id"`
+	// The dedicated tenant's name.
+	TenantName  OptString `json:"tenant_name"`
 	ID          uuid.UUID `json:"id"`
 	Email       string    `json:"email"`
 	DisplayName string    `json:"display_name"`
@@ -788,7 +831,8 @@ type AdminUser struct {
 	ModelIds []uuid.UUID `json:"model_ids"`
 	// Where the account's own tenant (identity.user customer_id) is, seen from the caller: one of the
 	// tenants the caller administers ("own"; for a caller whose scope is every tenant, any tenant),
-	// another tenant ("other"), or no tenant ("none").
+	// another tenant ("other"), or no tenant ("none"). A member whose account another database holds is
+	// "other".
 	HomeTenant  AdminUserHomeTenant  `json:"home_tenant"`
 	Permissions AdminUserPermissions `json:"permissions"`
 	// The roles the caller may grant this account with no workspace, by its tier in the account's own
@@ -796,6 +840,16 @@ type AdminUser struct {
 	// developer or tenant_admin unless the caller is a platform admin. Inside a workspace, that
 	// workspace's grantable_roles apply.
 	GrantableRoles []string `json:"grantable_roles"`
+}
+
+// GetTenantID returns the value of TenantID.
+func (s *AdminUser) GetTenantID() OptString {
+	return s.TenantID
+}
+
+// GetTenantName returns the value of TenantName.
+func (s *AdminUser) GetTenantName() OptString {
+	return s.TenantName
 }
 
 // GetID returns the value of ID.
@@ -846,6 +900,16 @@ func (s *AdminUser) GetPermissions() AdminUserPermissions {
 // GetGrantableRoles returns the value of GrantableRoles.
 func (s *AdminUser) GetGrantableRoles() []string {
 	return s.GrantableRoles
+}
+
+// SetTenantID sets the value of TenantID.
+func (s *AdminUser) SetTenantID(val OptString) {
+	s.TenantID = val
+}
+
+// SetTenantName sets the value of TenantName.
+func (s *AdminUser) SetTenantName(val OptString) {
+	s.TenantName = val
 }
 
 // SetID sets the value of ID.
@@ -900,7 +964,8 @@ func (s *AdminUser) SetGrantableRoles(val []string) {
 
 // Where the account's own tenant (identity.user customer_id) is, seen from the caller: one of the
 // tenants the caller administers ("own"; for a caller whose scope is every tenant, any tenant),
-// another tenant ("other"), or no tenant ("none").
+// another tenant ("other"), or no tenant ("none"). A member whose account another database holds is
+// "other".
 type AdminUserHomeTenant string
 
 const (
@@ -1020,6 +1085,10 @@ func (s *AdminUserPermissions) SetRemoveFromTenant(val bool) {
 
 // Ref: #/components/schemas/AdminWorkspace
 type AdminWorkspace struct {
+	// The database the row lives in, as the console addresses it (X-Tenant-Id): a dedicated tenant's id,
+	// "control-plane" for the control plane, or empty with a single database. Lists span every database
+	// a platform admin sees, or every home of anyone else.
+	TenantID     OptString `json:"tenant_id"`
 	ID           uuid.UUID `json:"id"`
 	Name         string    `json:"name"`
 	CustomerName string    `json:"customer_name"`
@@ -1032,6 +1101,11 @@ type AdminWorkspace struct {
 	// Whether the caller may grant and revoke access to this tenant's applications and models: a
 	// platform admin, or a tenant admin of the workspace's tenant.
 	ManageAccess bool `json:"manage_access"`
+}
+
+// GetTenantID returns the value of TenantID.
+func (s *AdminWorkspace) GetTenantID() OptString {
+	return s.TenantID
 }
 
 // GetID returns the value of ID.
@@ -1062,6 +1136,11 @@ func (s *AdminWorkspace) GetGrantableRoles() []string {
 // GetManageAccess returns the value of ManageAccess.
 func (s *AdminWorkspace) GetManageAccess() bool {
 	return s.ManageAccess
+}
+
+// SetTenantID sets the value of TenantID.
+func (s *AdminWorkspace) SetTenantID(val OptString) {
+	s.TenantID = val
 }
 
 // SetID sets the value of ID.
@@ -2067,9 +2146,15 @@ func (*ApplyMigrationOK) applyMigrationRes() {}
 // — it unconditionally returns the 200 most recent events.
 // Ref: #/components/schemas/AuditEvent
 type AuditEvent struct {
-	ID        uuid.UUID          `json:"id"`
-	Category  AuditEventCategory `json:"category"`
-	EventType string             `json:"event_type"`
+	// The database the row lives in, as the console addresses it (X-Tenant-Id): a dedicated tenant's id,
+	// "control-plane" for the control plane, or empty with a single database. Lists span every database
+	// a platform admin sees, or every home of anyone else.
+	TenantID OptString `json:"tenant_id"`
+	// The dedicated tenant's name.
+	TenantName OptString          `json:"tenant_name"`
+	ID         uuid.UUID          `json:"id"`
+	Category   AuditEventCategory `json:"category"`
+	EventType  string             `json:"event_type"`
 	// "system" when there is no actor user.
 	ActorName       string                `json:"actor_name"`
 	ActorRole       string                `json:"actor_role"`
@@ -2081,6 +2166,16 @@ type AuditEvent struct {
 	RevisionName    string                `json:"revision_name"`
 	Metadata        OptAuditEventMetadata `json:"metadata"`
 	OccurredAt      time.Time             `json:"occurred_at"`
+}
+
+// GetTenantID returns the value of TenantID.
+func (s *AuditEvent) GetTenantID() OptString {
+	return s.TenantID
+}
+
+// GetTenantName returns the value of TenantName.
+func (s *AuditEvent) GetTenantName() OptString {
+	return s.TenantName
 }
 
 // GetID returns the value of ID.
@@ -2146,6 +2241,16 @@ func (s *AuditEvent) GetMetadata() OptAuditEventMetadata {
 // GetOccurredAt returns the value of OccurredAt.
 func (s *AuditEvent) GetOccurredAt() time.Time {
 	return s.OccurredAt
+}
+
+// SetTenantID sets the value of TenantID.
+func (s *AuditEvent) SetTenantID(val OptString) {
+	s.TenantID = val
+}
+
+// SetTenantName sets the value of TenantName.
+func (s *AuditEvent) SetTenantName(val OptString) {
+	s.TenantName = val
 }
 
 // SetID sets the value of ID.
@@ -20488,6 +20593,9 @@ func (*SyncFormMappingsOK) syncFormMappingsRes() {}
 
 // Ref: #/components/schemas/Task
 type Task struct {
+	// The tenant of the task's application; an inbox spans every database that holds the person, and
+	// completing the task addresses this tenant (X-Tenant-Id).
+	TenantID     OptString      `json:"tenant_id"`
 	ID           uuid.UUID      `json:"id"`
 	InstanceID   uuid.UUID      `json:"instance_id"`
 	WorkflowName string         `json:"workflow_name"`
@@ -20496,6 +20604,11 @@ type Task struct {
 	// Human-readable context lines — dimension member codes and metric ids resolved to display names.
 	ContextDisplay []TaskContextEntry `json:"context_display"`
 	CreatedAt      time.Time          `json:"created_at"`
+}
+
+// GetTenantID returns the value of TenantID.
+func (s *Task) GetTenantID() OptString {
+	return s.TenantID
 }
 
 // GetID returns the value of ID.
@@ -20531,6 +20644,11 @@ func (s *Task) GetContextDisplay() []TaskContextEntry {
 // GetCreatedAt returns the value of CreatedAt.
 func (s *Task) GetCreatedAt() time.Time {
 	return s.CreatedAt
+}
+
+// SetTenantID sets the value of TenantID.
+func (s *Task) SetTenantID(val OptString) {
+	s.TenantID = val
 }
 
 // SetID sets the value of ID.
@@ -20851,6 +20969,10 @@ func (s *TenantAISettingsProvider) UnmarshalText(data []byte) error {
 // period. db_bytes is the tenant's own database size, 0 on a shared database.
 // Ref: #/components/schemas/TenantUsage
 type TenantUsage struct {
+	// Why the tenant could not be counted (its database not ready, or counting failed); absent when it
+	// was.
+	Status            OptString   `json:"status"`
+	Error             OptString   `json:"error"`
 	CustomerID        string      `json:"customer_id"`
 	Name              string      `json:"name"`
 	Plan              string      `json:"plan"`
@@ -20870,6 +20992,16 @@ type TenantUsage struct {
 	AiMessages        OptInt      `json:"ai_messages"`
 	AuditEvents       OptInt      `json:"audit_events"`
 	LastActivityAt    OptDateTime `json:"last_activity_at"`
+}
+
+// GetStatus returns the value of Status.
+func (s *TenantUsage) GetStatus() OptString {
+	return s.Status
+}
+
+// GetError returns the value of Error.
+func (s *TenantUsage) GetError() OptString {
+	return s.Error
 }
 
 // GetCustomerID returns the value of CustomerID.
@@ -20965,6 +21097,16 @@ func (s *TenantUsage) GetAuditEvents() OptInt {
 // GetLastActivityAt returns the value of LastActivityAt.
 func (s *TenantUsage) GetLastActivityAt() OptDateTime {
 	return s.LastActivityAt
+}
+
+// SetStatus sets the value of Status.
+func (s *TenantUsage) SetStatus(val OptString) {
+	s.Status = val
+}
+
+// SetError sets the value of Error.
+func (s *TenantUsage) SetError(val OptString) {
+	s.Error = val
 }
 
 // SetCustomerID sets the value of CustomerID.
@@ -23200,12 +23342,25 @@ func (s *UserAccessRule) SetAccess(val string) {
 
 // Ref: #/components/schemas/UserApp
 type UserApp struct {
+	// The tenant the application belongs to; a person's applications span every database that holds them.
+	TenantID       OptString   `json:"tenant_id"`
+	TenantName     OptString   `json:"tenant_name"`
 	ID             uuid.UUID   `json:"id"`
 	Name           string      `json:"name"`
 	Mode           UserAppMode `json:"mode"`
 	WorkspaceName  string      `json:"workspace_name"`
 	ModelName      string      `json:"model_name"`
 	ActiveRevision string      `json:"active_revision"`
+}
+
+// GetTenantID returns the value of TenantID.
+func (s *UserApp) GetTenantID() OptString {
+	return s.TenantID
+}
+
+// GetTenantName returns the value of TenantName.
+func (s *UserApp) GetTenantName() OptString {
+	return s.TenantName
 }
 
 // GetID returns the value of ID.
@@ -23236,6 +23391,16 @@ func (s *UserApp) GetModelName() string {
 // GetActiveRevision returns the value of ActiveRevision.
 func (s *UserApp) GetActiveRevision() string {
 	return s.ActiveRevision
+}
+
+// SetTenantID sets the value of TenantID.
+func (s *UserApp) SetTenantID(val OptString) {
+	s.TenantID = val
+}
+
+// SetTenantName sets the value of TenantName.
+func (s *UserApp) SetTenantName(val OptString) {
+	s.TenantName = val
 }
 
 // SetID sets the value of ID.

@@ -11,6 +11,7 @@ import (
 	"github.com/mavericks-engine/mavericks/ee/sso"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 	"github.com/mavericks-engine/mavericks/pkg/license"
+	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
 )
 
 // SCIM provisioning (enterprise). Token administration is a console
@@ -153,6 +154,15 @@ func (h *handler) scimEndpoint(w http.ResponseWriter, r *http.Request) {
 		InviteNewUsers: invite, InviteLifetime: inviteLifetime, Log: h.log,
 		OnUserCreated: func(c context.Context, sub, email string) { h.noteUser(c, sub, email) },
 		OnUserDeleted: func(c context.Context, sub string) { h.forgetUser(c, sub) },
+		HeldElsewhere: func(c context.Context, email, sub string) (bool, error) {
+			held, _, err := h.identityHeldIn(c, email, sub)
+			return held != heldNowhere, err
+		},
+		PlatformReach: func(c context.Context, sub string) (bool, error) {
+			reach, err := h.platformReachOf(c, []string{sub})
+			return reach[sub], err
+		},
+		OwnDatabase: tenantdb.TenantFrom(tctx) == customerID,
 	}
 	if h.kc != nil {
 		svc.IdP = h.kc

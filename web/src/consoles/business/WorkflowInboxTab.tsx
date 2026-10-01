@@ -290,8 +290,8 @@ export function WorkflowInbox() {
   });
 
   const complete = useMutation({
-    mutationFn: ({ stepId, decision, comment }: { stepId: string; decision: string; comment: string }) =>
-      api.completeTask(stepId, decision, comment),
+    mutationFn: ({ stepId, decision, comment, tenantId }: { stepId: string; decision: string; comment: string; tenantId?: string }) =>
+      api.completeTask(stepId, decision, comment, tenantId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks"] }),
   });
 
@@ -386,7 +386,7 @@ export function WorkflowInbox() {
                   completionLabel={t.completion_label}
                   condition={t.condition}
                   disabled={complete.isPending || !canSubmit}
-                  onDecide={decision => complete.mutate({ stepId: t.id, decision, comment: commentVal })}
+                  onDecide={decision => complete.mutate({ stepId: t.id, decision, comment: commentVal, tenantId: t.tenant_id })}
                 />
                 {complete.isError && (
                   <div className="mvx-admin-error">{String(complete.error)}</div>

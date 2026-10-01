@@ -4,7 +4,7 @@
 > dependencies that are not fixed yet, with the evidence and what would close
 > each one.
 
-> **Last verified:** 2026-09-30
+> **Last verified:** 2026-10-01
 
 A finding that is not acted on in the change that found it is written down
 here, so it does not live only in a chat or a commit message. Each entry says
@@ -1578,7 +1578,7 @@ leaves out, until it is fixed.
 ### Nothing sets an existing account's tenant
 
 - **Noticed:** 2026-09-30, closing account adoption at first sign-in.
-  Standing rule 2. Narrowed 2026-09-30 (uncommitted): a new account invited
+  Standing rule 2. Narrowed 2026-09-30 (`f0f8986`): a new account invited
   into a workspace now belongs to its tenant, and migration 102 gives most
   accounts made before theirs ("A platform admin's invitation made an
   account with no tenant", Closed below). What is left is below.
@@ -1699,7 +1699,7 @@ leaves out, until it is fixed.
 - **What:** renaming, deleting or re-inviting an account now also needs the
   caller to be able to revoke every role the account holds
   (`accountPermissionsFor`, `internal/gateway/account_boundaries.go:116`),
-  because a delete takes them all. Since 2026-09-30 (uncommitted) the
+  because a delete takes them all. Since 2026-09-30 (`f0f8986`) the
   caller's tier is the one it holds in the account's home tenant
   (`adminTiers.rolesIn`, `internal/gateway/admin_tiers.go:150`). A tenant
   admin may not grant or revoke `tenant_admin` (`assignableRoles`,
@@ -1712,7 +1712,7 @@ leaves out, until it is fixed.
   longer rename itself. A caller whose scope is every tenant without being a
   platform admin (a platform-wide builder) keeps the accounts with no
   tenant, but is offered no Remove from this tenant; since 2026-09-30
-  (uncommitted) its invitations name a workspace and make accounts of that
+  (`f0f8986`) its invitations name a workspace and make accounts of that
   workspace's tenant, which it keeps too.
 - **Why it matters:** a tenant whose administrator leaves cannot remove them
   without a platform admin.
@@ -1762,7 +1762,7 @@ leaves out, until it is fixed.
 
 ### Migration 102 writes no audit event
 
-- **Noticed:** 2026-09-30, writing migration 102 (uncommitted).
+- **Noticed:** 2026-09-30, writing migration 102 (`f0f8986`).
 - **What:** migration 102 gives accounts with no tenant a `customer_id`.
   Audit events are written through `pkg/auditlog`, which a SQL migration
   does not run, so which accounts it moved, and into which tenant, is
@@ -1781,7 +1781,7 @@ leaves out, until it is fixed.
 
 ### Migration 102 tells a tenant database by its name
 
-- **Noticed:** 2026-09-30, writing migration 102 (uncommitted).
+- **Noticed:** 2026-09-30, writing migration 102 (`f0f8986`).
 - **What:** in a tenant's own database every workspace is that tenant's, so
   every account there would pass 102's one-tenant test. 102 writes nothing
   in a database whose name is `tenant_` followed by one of its
@@ -1802,7 +1802,7 @@ leaves out, until it is fixed.
 
 ### An administrator with no tenant opens some of its granted applications in only some places
 
-- **Noticed:** 2026-09-30, counting roles per tenant (uncommitted). Standing
+- **Noticed:** 2026-09-30, counting roles per tenant (`f0f8986`). Standing
   rule 2.
 - **What:** an account with no tenant of its own that holds `tenant_admin`
   without a workspace (a platform admin's creation), narrowed by
@@ -1831,7 +1831,7 @@ leaves out, until it is fixed.
 ### A platform admin's failed re-invitation keeps the new name and e-mail
 
 - **Noticed:** 2026-09-30, keeping an adopted account's row when its
-  invitation fails (uncommitted).
+  invitation fails (`f0f8986`).
 - **What:** a platform admin's creation over an address or subject that
   already has an account adopts it, and the upsert (`ON CONFLICT
   (keycloak_sub) DO UPDATE SET email, display_name`,
@@ -1851,7 +1851,7 @@ leaves out, until it is fixed.
 ### A failed identity lookup keeps a removed account's sign-in and logs another reason
 
 - **Noticed:** 2026-09-30, keeping a shared identity-provider account when
-  one tenant database removes its user (uncommitted).
+  one tenant database removes its user (`f0f8986`).
 - **What:** with a database per tenant, removing an account
   (`removeUserAccount`, `internal/gateway/handler.go:11934`) keeps the
   identity-provider account while another database still holds the identity
@@ -1987,7 +1987,7 @@ leaves out, until it is fixed.
 ### The invite form cannot be sent while the caller's roles load, and says nothing
 
 - **Noticed:** 2026-09-30, making the invite form ask for a role and a
-  workspace (uncommitted).
+  workspace (`f0f8986`).
 - **What:** until `/api/me` answers, `assignableRoles` is empty, so the
   Users screen's invite form treats the caller as someone other than a
   platform admin (`inviteNeedsRoleAndWorkspace`,
@@ -2005,7 +2005,7 @@ leaves out, until it is fixed.
 ### The invite e2e spec mocks a refusal the gateway words differently
 
 - **Noticed:** 2026-09-30, making the invite form ask for a role and a
-  workspace (uncommitted).
+  workspace (`f0f8986`).
 - **What:** `web/e2e/account-ownership.spec.ts:92` mocks the 400 of an
   invitation without a role and a workspace as "choose a role and a
   workspace: people are always added to a workspace". The gateway answers
@@ -2341,7 +2341,330 @@ leaves out, until it is fixed.
   cold compile, a warm-up (a global setup that loads the console once)
   before the tests.
 
+### The audit export and workflow history read one database
+
+- **Noticed:** 2026-10-01, making the platform admin's views span every
+  database (`docs/TENANT_DATABASES.md`, "What a platform admin sees").
+- **What:** with a database per tenant, the audit log list now merges every
+  database's newest events for a platform admin, but the enterprise audit
+  export (`internal/gateway/audit_export.go`) streams the database the
+  request is routed to. `GET /api/workflow/my-history` and the business
+  admin console's workflow history read the routed home only, and a step
+  completed from that history is completed there; only the inbox
+  (`GET /api/tasks`) spans a person's homes and addresses each task's own.
+  `GET /api/admin/applications`, which the console does not call, lists the
+  routed database's applications only.
+- **Why it matters:** an export or a history taken from one home looks
+  complete and is not.
+- **How to check:** in dedicated mode, export the audit log as a platform
+  admin with no tenant chosen, and compare with the list; open the workflow
+  history of a person in two tenants.
+- **What closes it:** the same per-database merge as the lists
+  (`homesOf`, `platformHomes`), and a tenant address on history rows.
+
+### Stand-ins are no workflow assignees
+
+- **Noticed:** 2026-10-01, letting platform-wide builders work in dedicated
+  tenants through stand-ins (`internal/gateway/stand_in.go`).
+- **What:** the assignee predicate (`internal/workflow/assignee`) reads roles
+  from the database the step is in. A platform admin's or platform-wide
+  builder's stand-in holds none, so in a dedicated tenant they are assignees
+  of nothing — not of a step naming `developer`, which in the control plane
+  a platform-wide builder is.
+- **Why it matters:** the same workflow routes a step differently in a
+  shared and in a dedicated tenant.
+- **How to check:** a workflow in a dedicated tenant with a step naming
+  `developer`; the platform-wide builder's inbox.
+- **What closes it:** a decision whether platform-level accounts should be
+  assignees in tenants at all; stand-ins are never mailed.
+
+### Per-tenant settings follow a tenant admin's first tenant
+
+- **Noticed:** 2026-10-01, making lists span a person's homes.
+- **What:** a tenant admin of two dedicated tenants now sees both tenants'
+  people, applications and audit in one list. The settings tabs (SSO, SCIM,
+  notifications, branding, AI keys) have a tenant picker for platform admins
+  only; a tenant admin's requests there go to their oldest membership, so the
+  second tenant's settings are reached only by opening one of its
+  applications first.
+- **Why it matters:** standing rule 2, for an administrator of more than one
+  tenant.
+- **How to check:** in dedicated mode, a person who is tenant admin of two
+  dedicated tenants opens the SSO tab.
+- **What closes it:** the settings tabs' tenant picker offered to anyone who
+  administers more than one tenant, listing those tenants.
+
+### Usage for a tenant admin covers the routed tenant only
+
+- **Noticed:** 2026-10-01, reviewing the per-home lists.
+- **What:** the users, workspaces, audit and Applications lists span every
+  tenant a tenant admin administers, in every database that holds them, but
+  `GET /api/admin/usage` reports the one tenant the request is routed to
+  (`currentCustomerID`, `internal/gateway/usage.go`). A tenant admin of two
+  tenants sees the second's usage only after opening one of its
+  applications.
+- **Why it matters:** the Usage tab silently shows one tenant of several.
+- **How to check:** in dedicated mode, a tenant admin of two dedicated
+  tenants opens Usage.
+- **What closes it:** usage per home where the person holds tenant_admin,
+  merged as the other lists are.
+
 ## Closed
+
+### A first sign-in could be aimed at another tenant
+
+- **Noticed:** 2026-10-01, reviewing the routing rewrite; the behaviour
+  predates it.
+- **What it was:** tenant routing treated a subject with no directory
+  membership as platform-level and honoured its `X-Tenant-Id` for any
+  dedicated tenant. A first sign-in through tenant X's identity provider
+  has no membership yet: aimed at tenant B, it was served in B's database
+  with the account X's first-login provisioning had just made, roles and
+  all. With X's default role `tenant_admin`, it passed B's administrator
+  gates — B's SSO settings and SCIM tokens — which take the tenant from the
+  routed database.
+- **Closed:** 2026-10-01 (`57d565d`). Platform level comes from platform
+  reach in the control plane only (`tenantRouting`,
+  `internal/gateway/tenant.go`); a subject held nowhere stays on the control
+  plane. An account a first sign-in makes is never served in another
+  tenant's database (`resolveJWTActor`). Proof:
+  `TestRoutingDecidesByMembershipAndReach`, run 2026-10-01: pass; it fails
+  with an empty membership counted as platform level.
+
+### A dedicated tenant's SCIM could change a platform admin's sign-in
+
+- **Noticed:** 2026-10-01, reviewing the per-home changes.
+- **What it was:** someone the control plane holds with platform reach can
+  also be a dedicated tenant's own person — a platform admin who signed up a
+  tenant, or the control plane's later adoption of a tenant's person. That
+  tenant's database said nothing of the platform role, so its SCIM token
+  owned the row and could change the shared sign-in address (a
+  password-reset takeover), disable or delete it, and its administrators
+  could rename, re-invite and delete it.
+- **Closed:** 2026-10-01 (`57d565d`). Such a row is a platform account's
+  to the tenant (`platformReachOf`, `internal/gateway/stand_in.go`): SCIM
+  does not own it (`PlatformReach`, `ee/scim/service.go`), the users
+  routes refuse it to anyone but a platform admin, and an invitation does
+  not add to it. Proof: `TestScimDoesNotAdoptSomeoneAnotherDatabaseHolds`
+  (Dana), run 2026-10-01: pass; it fails with the control plane's answer
+  ignored.
+
+### The platform admin did not see every database
+
+- **Noticed:** 2026-10-01, mapping the platform console in dedicated mode.
+- **What it was:** with a database per tenant, the platform admin's users,
+  workspaces and audit log read one database — the control plane, or one
+  tenant chosen at a time. Usage statistics left out every tenant still in
+  the control plane, skipped a tenant whose database was not ready, and
+  stopped on one that failed to open. A dedicated tenant whose database could
+  not be read was listed with no applications and no reason. The application
+  last opened (`X-App-Id`, sent on every request) took the platform admin's
+  tenants list, users, audit and infrastructure views into that tenant's
+  database, where the control plane's tenants vanished. A platform admin's
+  preferences and personal AI key followed the tenant being worked on, and
+  creating a dedicated tenant's application lost its audit event to a
+  foreign key.
+- **Closed:** 2026-10-01 (`57d565d`). Every list reads every database for
+  a platform admin (`platformHomes`, `internal/gateway/tenant.go:392`), each
+  row naming its database (`tenant_id`): users (`usersIn`,
+  `internal/gateway/handler.go:6987`), workspaces (`workspacesIn`, `:7335`),
+  tenants (`tenantsIn`, `:6650`), applications (`appsIn`, `:9879`), the audit
+  log (`auditEventsIn`, `:7183`), and usage (`internal/gateway/usage.go`),
+  which also lists a tenant it could not count with why, as the tenants list
+  does. A platform-level caller's `/api/admin/` requests ignore `X-App-Id`;
+  `X-Tenant-Id: control-plane` names the control plane. Preferences and AI
+  settings of an actor resolved from the control plane stay there
+  (`personalCtx`); infrastructure nodes are read there. The application
+  event is written in the tenant's database under the actor's stand-in. The
+  console's Users tab is one list; **People of** narrows it, and each action
+  is addressed to its row's database. Proof:
+  `TestPlatformAdminSeesEveryDatabase`
+  (`internal/gateway/homes_test.go`) and
+  `web/e2e/platform-dedicated-users.spec.ts`, run 2026-10-01: pass; with the
+  per-database listing switched off the first fails.
+
+### A person in several databases reached only one, and one list leaked another's applications
+
+- **Noticed:** 2026-10-01, mapping how people in more than one database are
+  served.
+- **What it was:** the control plane was never a destination for someone
+  with a dedicated membership, so a person of a shared-database tenant who
+  was also in a dedicated tenant could not reach the shared tenant at all.
+  Lists read the routed database only: a member of a second dedicated tenant
+  never saw its applications, tasks or notifications. And the
+  administration's tenants list appended the person's other dedicated
+  tenants and listed their applications by the routed database's roles: a
+  tenant admin of one tenant who was a business user of another saw all of
+  the other's applications, models and revisions.
+- **Closed:** 2026-10-01 (`57d565d`). The control plane is addressed by
+  one of its tenants or applications, or as `control-plane`, for a caller it
+  holds (`tenantRouting`, `internal/gateway/tenant.go`). Lists run once per
+  home with the person's own account there and merge (`homesOf`, `:351`):
+  applications, the Applications lists, the inbox and notifications (and
+  marking them read), users, workspaces, audit. A home lists only by what the
+  person holds in it; each row names its home, and the console addresses a
+  task's completion to it. Invitations add someone another database holds as
+  a member, wherever the invitation is made. Proof:
+  `TestAPersonReachesEveryHome` (`internal/gateway/homes_test.go`), run
+  2026-10-01: pass; it fails with the per-home listing, the control-plane
+  address or the per-home role check switched off.
+- **Found in review before commit, and closed with it:** a home where the
+  person's account is deactivated was still their default route, so one
+  tenant deactivating its row (by SCIM) answered 401 to every request they
+  made elsewhere; routing now counts only homes with an active account
+  (`activeHomes`, `internal/gateway/tenant.go`). Completing a task listed
+  for a platform admin's own account in a tenant ran as their stand-in and
+  was refused; it runs as that account (`taskAction`; read, not run). A
+  shared-database tenant's SCIM could deactivate or delete a member row
+  the other shared tenants rely on; only a dedicated tenant's SCIM does
+  (`OwnDatabase`, `ee/scim/service.go`). Deleting a dedicated tenant's
+  application from the platform console, and the developer list's revision
+  and default-model actions on another tenant's row, went to the wrong
+  database; each is addressed to its row's tenant. Proof:
+  `TestRoutingDecidesByMembershipAndReach`, run 2026-10-01: pass; it fails
+  with deactivated homes counted.
+
+### A platform-wide builder did not reach dedicated tenants
+
+- **Noticed:** 2026-09-30, resolving platform admins from the control plane.
+- **What it was:** only a platform admin was resolved from the control plane
+  when addressing a dedicated tenant; a platform-wide builder was looked up in
+  the tenant's database, had no account there, and was refused, and the
+  tenant list offered it only its own memberships.
+- **Closed:** 2026-10-01 (`57d565d`). `platformActorOnControl` resolves a
+  platform-wide builder too, with a stand-in (`internal/gateway/stand_in.go`);
+  `isGlobalBuilder` answers from what the control plane said
+  (`actor.onControl`); the Applications lists read every database for it
+  (`platformHomes`). Proof:
+  `TestAPlatformWideBuilderReachesDedicatedTenants`
+  (`internal/gateway/homes_test.go`): it builds in Acme, and once narrowed by
+  an application grant it is refused; run 2026-10-01: pass.
+- **Found in review before commit, and closed with it:** the builder kept
+  every role it held in the control plane, so a tenant_admin of a shared
+  tenant passed a dedicated tenant's administrator gates — SSO, SCIM
+  tokens, branding, usage. There it is only a developer now
+  (`platformActorOnControl`). Proof: the same test, refused on each of those
+  routes; it fails with the roles kept.
+
+### A control-plane account that adopted a dedicated tenant's person was left unused
+
+- **Noticed:** 2026-09-30, reviewing the start-up clean-up.
+- **What it was:** a control-plane creation that had adopted a dedicated
+  tenant's person was left alone, and — since the control plane was never
+  addressed for someone with a directory entry — unused, including a
+  platform role a platform admin had given it.
+- **Closed:** 2026-10-01 (`57d565d`). The control plane is reachable for
+  such a person (above). A platform role there makes them platform-level:
+  routed as a platform admin or builder even though a tenant holds them. A
+  row a shared-database tenant owned becomes a member's there, with a role it
+  held without a workspace moved into that tenant's workspaces
+  (`ReconcileAdoptedAccounts`, `internal/gateway/reconcile_adoptions.go`).
+  Proof: `TestReconcileAdoptedAccounts` (Ed's and Dana's cases), run
+  2026-10-01: pass.
+
+### A platform_admin role already in a tenant's database was shown but granted nothing
+
+- **Noticed:** 2026-09-30, refusing platform-level grants in tenant
+  databases.
+- **Closed:** 2026-10-01 (`57d565d`). The start-up clean-up removes every
+  `platform_admin` grant a tenant's database holds, audited for the platform
+  only (`ReconcileAdoptedAccounts`). Proof: `TestReconcileAdoptedAccounts`
+  (Ann's planted grant), run 2026-10-01: pass.
+
+### A platform admin could not act on a dedicated tenant
+
+- **Noticed:** 2026-09-30, testing invitations with a database per tenant.
+- **What it was:** a platform admin's request addressed to a dedicated
+  tenant (`X-Tenant-Id`, or `X-App-Id` of its application) ran in the
+  tenant's database, where the platform admin has no account: every one
+  answered 401. The platform console's Users tab showed and invited the
+  control plane's people only, and tenant creation names no first
+  administrator, so a tenant the platform admin created in dedicated mode
+  could not be given its people from the console (standing rule 2). The
+  settings tabs' tenant picker, and a tenant's model creation, revisions
+  and export, failed the same way.
+- **Closed:** 2026-09-30 (`57d565d`). A request addressed to a tenant by
+  someone with no tenant of their own is marked (`tenantRouting`,
+  `internal/gateway/tenant.go`), and its actor is read from the control
+  plane; only a platform admin is resolved that way
+  (`platformActorOnControl`, `internal/gateway/stand_in.go:49`), and
+  anyone else resolves as before. The tenant's database holds a stand-in
+  under the platform admin's id, so that what they write there names them
+  (`ensureStandIn`, `:91`; migration 103): their name and a reserved
+  address, no tenant, no role or grant (a trigger refuses them), left out
+  of the users list and the dev persona list, never an actor by itself, and
+  answered 404 by the users routes. The platform Users tab has a **People
+  of** picker when tenants with their own database exist, and then
+  addresses every call to the chosen one (`UsersScopePicker`,
+  `web/src/consoles/platform-admin/section.tsx:114`; `tenantId`,
+  `web/src/consoles/admin/UsersPanel.tsx`); the tenant list marks those
+  tenants `dedicated`. Proof: `TestPlatformAdminActsOnADedicatedTenant`
+  (`internal/gateway/platform_stand_in_test.go`: the invitation, its
+  `assigned_by` and audit event naming the platform admin, the stand-in
+  unlisted and 404 to the tenant's admin, the trigger, workspaces,
+  notification settings, audit, a model's creation, revision and export,
+  and a demoted platform admin refused), and
+  `web/e2e/platform-dedicated-users.spec.ts`, run 2026-09-30: pass; with the
+  control-plane resolution switched off the test answers 401 again.
+- **Found in review before commit, and closed with it:** acting in a
+  tenant's database, a platform admin could grant `platform_admin` there,
+  which the actor lookup then trusted: an administrator of the platform
+  the control plane could not see or demote. A tenant's database now
+  refuses `platform_admin`, and `developer` or `tenant_admin` without a
+  workspace on an account with no tenant, which would be platform-wide
+  there (`dedicatedGrantErr`, `internal/gateway/stand_in.go:150`); a
+  `platform_admin` found in a tenant's database grants nothing
+  (`actorByKeycloakSub`, `internal/gateway/handler.go:934`); the Users tab
+  does not offer it for a dedicated tenant. And any writer could take a
+  stand-in's reserved address first; migration 103 reserves the domain
+  (`stand_in_address_reserved`), and invitations and SCIM refuse it with
+  400. Proof: `TestPlatformAdminActsOnADedicatedTenant`, run 2026-09-30:
+  pass; with either rule switched off it fails.
+
+### A platform admin whose e-mail a tenant's account used could not act on that tenant
+
+- **Noticed:** 2026-09-30, adding platform admins' stand-ins.
+- **What it was:** a platform admin's stand-in in a dedicated tenant's
+  database carried the platform admin's address, which is unique per
+  database. An account of the tenant's under that address kept the stand-in
+  from being written, and the platform admin's requests to that tenant
+  answered 401. Every tenant a platform admin acted in also stored their
+  address.
+- **Closed:** 2026-09-30 (`57d565d`). A stand-in carries a reserved
+  address built from the platform admin's id, `<id>@stand-in.invalid`,
+  which is never mailed (`standInEmail`, `internal/gateway/stand_in.go:82`).
+  Nothing uses a stand-in's address: it has no role, so no notification
+  reaches it, and the audit log shows the actor's name. Proof:
+  `TestAStandInDoesNotNeedThePlatformAdminsAddress` and the address check in
+  `TestPlatformAdminActsOnADedicatedTenant`
+  (`internal/gateway/platform_stand_in_test.go`), run 2026-09-30: pass; with
+  the platform admin's own address the first answers 401.
+
+### A member added from another database was shown as having no tenant
+
+- **Noticed:** 2026-09-30, adding someone another dedicated tenant's
+  database holds as a member (`addMemberFromElsewhere`).
+- **What it was:** the member's row belongs to no tenant, because its
+  tenant is in another database, and the users list said `home_tenant:
+  none`, which the console shows as not a member of any organisation.
+  Remove from this tenant left the directory entry, so the tenant stayed
+  among the person's tenants, empty. The name and e-mail were copied once,
+  when the member was added.
+- **Closed:** 2026-09-30 (`57d565d`). The list labels such a row
+  `other` — "Member of another organisation" — when another database, a
+  dedicated tenant's or the control plane, holds the person
+  (`labelMembersFromElsewhere`,
+  `internal/gateway/account_boundaries.go:273`). Remove from this tenant
+  forgets the directory entry in a dedicated tenant's database, and adding
+  the person again restores it (`:595`, `addExistingAccount`). The row
+  follows the name and e-mail the person signs in with, and only such a
+  row does (`followIdentity`, `:746`). Proof:
+  `TestAnInvitationDoesNotAdoptSomeoneAnotherDatabaseHolds`,
+  `TestAMemberFollowsTheirSignIn`
+  (`internal/gateway/identity_elsewhere_test.go`) and
+  `TestReconcileAdoptedAccounts`
+  (`internal/gateway/platform_stand_in_test.go`), run 2026-09-30: pass;
+  without the label the first reports `none`.
 
 ### An existing account invited without a workspace is told it was invited, and nothing happens
 

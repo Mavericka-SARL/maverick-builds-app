@@ -24,6 +24,9 @@ export function AppPicker() {
 
   const currentId = localStorage.getItem(SELECTED_APP_KEY) ?? "";
   const current = apps.find((a) => a.id === currentId);
+  // A person's applications can come from more than one tenant (one per
+  // database that holds them); then each is named with its tenant.
+  const manyTenants = new Set(apps.map((a) => a.tenant_id ?? "")).size > 1;
 
   function select(id: string) {
     localStorage.setItem(SELECTED_APP_KEY, id);
@@ -72,13 +75,13 @@ export function AppPicker() {
         {!currentId && <option value="">— select app —</option>}
         {apps.map((a) => (
           <option key={a.id} value={a.id}>
-            {a.name}
+            {manyTenants && a.tenant_name ? `${a.tenant_name} — ${a.name}` : a.name}
           </option>
         ))}
       </select>
       {current && (
         <div style={{ fontSize: 10, color: "var(--color-text-subtle)", marginTop: 3 }}>
-          {current.workspace_name}
+          {manyTenants && current.tenant_name ? `${current.tenant_name} · ${current.workspace_name}` : current.workspace_name}
         </div>
       )}
     </div>

@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { AuditExportPanel } from "../../ee/auditexport/AuditExportPanel";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Pencil, Trash2, Download, Upload, Package, Braces } from "lucide-react";
-import { api, withTenant, type AccessRemovalResult, type AdminTenant, type AdminModel, type AdminApp, type AdminAuditEvent, type AdminRevision, type ModelExportPackage } from "../../api/client";
+import { api, withTenant, CONTROL_PLANE, type AccessRemovalResult, type AdminTenant, type AdminModel, type AdminApp, type AdminAuditEvent, type AdminRevision, type ModelExportPackage } from "../../api/client";
 import { downloadJSON } from "../../api/download";
 import { accessRemovalNotice } from "../admin/accessRemoval";
 import {
@@ -350,6 +350,8 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
 // planLabel is the tenant's plan as the card's meta line says it: the plan's
 // name, and whether the tenant is read-only.
 function planLabel(tenant: AdminTenant): string {
+  // A dedicated tenant whose database could not be read says why.
+  if (tenant.status) return `${tenant.plan} · database ${tenant.status}${tenant.error ? `: ${tenant.error}` : ""}`;
   const st = tenant.plan_state;
   if (!st) return tenant.plan;
   const parts = [st.plan_known ? st.plan.name : `${tenant.plan} (no such plan)`];
@@ -404,7 +406,9 @@ function TenantSection({ tenant, onDelete, isPlatformAdmin, canTransferModels }:
     onSuccess: () => { inv(); setAddApp(false); setAppName(""); },
   });
   const deleteApp = useMutation({
-    mutationFn: (id: string): Promise<AccessRemovalResult> => api.deleteAdminApplication(id),
+    // Addressed to the tenant: a dedicated tenant's application is in its
+    // own database.
+    mutationFn: (id: string): Promise<AccessRemovalResult> => withTenant(tenant.id, () => api.deleteAdminApplication(id)),
     onSuccess: () => { inv(); qc.invalidateQueries({ queryKey: ["admin-users"] }); },
   });
   const renameTenant = useMutation({
@@ -595,6 +599,14 @@ const CATEGORY_TONE: Record<string, DesignTone> = {
 
 const AUDIT_COLUMNS: DataTableColumn<AdminAuditEvent>[] = [
   {
+    // A platform admin's log spans every database; each event names its own.
+    id: "tenant",
+    header: "Where",
+    cell: (e) => (
+      <span className="mvx-admin-muted">{e.tenant_id === CONTROL_PLANE ? "Control plane" : e.tenant_name || "—"}</span>
+    ),
+  },
+  {
     id: "time",
     header: "Time",
     cell: (e) => (
@@ -679,7 +691,7 @@ export function AuditView({ events }: { events: AdminAuditEvent[] }) {
         </ToolbarGroup>
       </Toolbar>
       <DataTable
-        columns={AUDIT_COLUMNS}
+        columns={new Set(events.map((e) => e.tenant_id ?? "")).size > 1 ? AUDIT_COLUMNS : AUDIT_COLUMNS.filter((c) => c.id !== "tenant")}
         rows={filtered}
         getRowKey={(e) => e.id}
         density="compact"
