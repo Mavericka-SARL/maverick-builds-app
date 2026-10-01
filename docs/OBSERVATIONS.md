@@ -73,6 +73,24 @@ leaves out, until it is fixed.
 - **What closes it:** `gofmt -w` on those files, and enabling the `gofmt`
   formatter in the golangci-lint configuration so it cannot drift again.
 
+### The home page's dashboard illustration copies the console's dark theme
+
+- **Noticed:** 2026-10-01.
+- **What:** the hero illustration on maverickbuilds.app (private deploy
+  repository, `prod/site/index.html` and the `.mock` rules in `site.css`) draws
+  a grid, chart, KPI and automation-button widget in markup, with colours and
+  sizes copied from a live dark-mode render of the console
+  (`web/src/ui/design-system.css`, `:root[data-theme="dark"]`, and the widget
+  rules). Nothing links the two.
+- **Why it matters:** the illustration is meant to look exactly like the
+  product. A change to the console's dark tokens or widget styling leaves the
+  home page showing something the product no longer looks like.
+- **How to check:** render a dashboard with a grid, chart and KPI in dark mode
+  and compare against the `--m-*` values at the top of the `.mock` rule.
+- **What closes it:** generating the illustration's values from
+  `design-system.css` when the site is built, or a check that fails when the
+  dark tokens it copies change.
+
 ### The console is one 1.75 MB JavaScript file
 
 - **Noticed:** 2026-09-27; `vite build` warns about chunks over 500 kB.
