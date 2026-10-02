@@ -516,12 +516,17 @@ func newValidatorFor(ctx context.Context, jwksBaseURL string) (*identity.JWKSVal
 	return identity.NewJWKSValidator(ctx, jwksBaseURL, "mavericks", "")
 }
 
+// signTestToken mints a console token (issued to mavericks-web, the client
+// the REST API accepts tokens from).
 func signTestToken(t *testing.T, key *rsa.PrivateKey, kid, issuer, sub string) string {
 	t.Helper()
-	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.RegisteredClaims{
-		Issuer: issuer, Subject: sub,
-		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
-		IssuedAt:  jwt.NewNumericDate(time.Now()),
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, identity.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer: issuer, Subject: sub,
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+		AuthorizedParty: "mavericks-web",
 	})
 	tok.Header["kid"] = kid
 	signed, err := tok.SignedString(key)

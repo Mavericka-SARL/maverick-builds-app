@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/MicahParks/keyfunc/v3"
@@ -21,12 +22,33 @@ type Claims struct {
 	PreferredUsername string `json:"preferred_username"`
 	// Name claims, present when the realm maps them (it does by default);
 	// first-login provisioning uses them for the display name.
-	Name       string `json:"name"`
-	GivenName  string `json:"given_name"`
-	FamilyName string `json:"family_name"`
-	RealmAccess       struct {
+	Name        string `json:"name"`
+	GivenName   string `json:"given_name"`
+	FamilyName  string `json:"family_name"`
+	RealmAccess struct {
 		Roles []string `json:"roles"`
 	} `json:"realm_access"`
+	// AuthorizedParty (azp) is the OAuth client the token was issued to, and
+	// Scope its granted scopes, space-separated. Validate checks neither: a
+	// token is only good for the resource that asks for its client
+	// (IssuedTo) or for its audience and scope (HasAudience, HasScope).
+	AuthorizedParty string `json:"azp"`
+	Scope           string `json:"scope"`
+}
+
+// IssuedTo reports whether the token was issued to one of clients.
+func (c *Claims) IssuedTo(clients []string) bool {
+	return c.AuthorizedParty != "" && slices.Contains(clients, c.AuthorizedParty)
+}
+
+// HasAudience reports whether aud is among the token's audiences.
+func (c *Claims) HasAudience(aud string) bool {
+	return aud != "" && slices.Contains(c.Audience, aud)
+}
+
+// HasScope reports whether scope was granted.
+func (c *Claims) HasScope(scope string) bool {
+	return scope != "" && slices.Contains(strings.Fields(c.Scope), scope)
 }
 
 // NewJWKSValidator builds a validator that fetches signing keys from

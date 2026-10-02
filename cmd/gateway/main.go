@@ -114,6 +114,21 @@ type cfg struct {
 	LegalUpdated      string `mapstructure:"LEGAL_UPDATED"`
 	LegalTermsURL     string `mapstructure:"LEGAL_TERMS_URL"`
 	LegalPrivacyURL   string `mapstructure:"LEGAL_PRIVACY_URL"`
+	// TokenClients are the OAuth clients whose tokens the REST API accepts
+	// (comma-separated; empty = the console's own, mavericks-web). A token
+	// of any other client of the realm — a chat connector's above all —
+	// opens no REST route.
+	TokenClients string `mapstructure:"GATEWAY_TOKEN_CLIENTS"`
+	// The read-only chat-reporting connector at /mcp (docs/CHAT_CONNECTOR.md).
+	// MCPResourceURL defaults to CONSOLE_URL + "/mcp"; its tokens must carry
+	// it as their audience, and the MCP_SCOPE scope (default models:read).
+	MCPEnabled             bool   `mapstructure:"MCP_ENABLED"`
+	MCPResourceURL         string `mapstructure:"MCP_RESOURCE_URL"`
+	MCPAuthorizationServer string `mapstructure:"MCP_AUTHORIZATION_SERVER"`
+	MCPScope               string `mapstructure:"MCP_SCOPE"`
+	// MCPClients: the chat hosts' registered clients (cmd/connector-clients),
+	// comma-separated; default chatgpt-connector,claude-connector.
+	MCPClients string `mapstructure:"MCP_CLIENTS"`
 }
 
 func main() {
@@ -333,6 +348,8 @@ func main() {
 
 			Mailer:            mailer,
 			KeycloakPublicURL: firstNonEmptyString(c.KeycloakIssuer, c.KeycloakURL), KeycloakRealm: c.KeycloakRealm, PublicURL: c.ConsoleURL,
+			TokenClients: splitList(c.TokenClients),
+			MCP:          mcpConfig(c, log),
 		}),
 		"gateway",
 		otelhttp.WithMessageEvents(otelhttp.ReadEvents, otelhttp.WriteEvents),
@@ -433,4 +450,34 @@ func firstNonEmptyString(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// splitList splits a comma-separated setting, dropping empty entries.
+func splitList(v string) []string {
+	var out []string
+	for _, s := range strings.Split(v, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// mcpConfig is the connector's configuration. It stays off without a
+// resource URL to name in its tokens' audience.
+func mcpConfig(c cfg, log zerolog.Logger) gateway.MCPConfig {
+	if !c.MCPEnabled {
+		return gateway.MCPConfig{}
+	}
+	resource := c.MCPResourceURL
+	if resource == "" && c.ConsoleURL != "" {
+		resource = strings.TrimSuffix(c.ConsoleURL, "/") + "/mcp"
+	}
+	if resource == "" {
+		log.Warn().Msg("MCP_ENABLED=true but neither MCP_RESOURCE_URL nor CONSOLE_URL is set: the chat connector stays off")
+		return gateway.MCPConfig{}
+	}
+	log.Info().Str("resource", resource).Msg("chat connector enabled at /mcp (read-only)")
+	return gateway.MCPConfig{Enabled: true, ResourceURL: resource, AuthorizationServer: c.MCPAuthorizationServer,
+		Scope: c.MCPScope, Clients: splitList(c.MCPClients), Version: c.ServiceVersion}
 }

@@ -651,6 +651,15 @@ type Handler interface {
 	//
 	// GET /api/grid
 	GetGrid(ctx context.Context, params GetGridParams) (GetGridRes, error)
+	// GetGridSeries implements getGridSeries operation.
+	//
+	// Values are the engine's: inputs rolled up by their aggregation and time-summary rules, formulas
+	// evaluated per member, values withheld where they depend on data hidden from the caller. Reach is
+	// GET /api/grid's. A context member that does not exist or is hidden from the caller is refused with
+	// the same 400, never replaced by another member.
+	//
+	// GET /api/grid/series
+	GetGridSeries(ctx context.Context, params GetGridSeriesParams) (GetGridSeriesRes, error)
 	// GetIntegration implements getIntegration operation.
 	//
 	// One integration; rest_api returns the typed definition + schedule + tested flag.
@@ -986,7 +995,9 @@ type Handler interface {
 	//
 	// For a caller who reaches the form's application the way the business console opens it; anyone else
 	// gets 404, as for a form that does not exist. Records the caller's access rules withhold are left
-	// out. Each record carries the caller's permissions on it.
+	// out before the page is filled, so they neither shorten a page nor end the list early. Each record
+	// carries the caller's permissions on it. When more records may follow, the X-Next-Cursor response
+	// header carries the cursor for the next page.
 	//
 	// GET /api/forms/{id}/records
 	ListFormRecords(ctx context.Context, params ListFormRecordsParams) (ListFormRecordsRes, error)
@@ -1044,6 +1055,14 @@ type Handler interface {
 	//
 	// GET /api/dimensions
 	ListPublicDimensions(ctx context.Context, params ListPublicDimensionsParams) (ListPublicDimensionsRes, error)
+	// ListReadableGrids implements listReadableGrids operation.
+	//
+	// The grids of the request's model (X-App-Id / X-Model-Id) in a revision, for anyone who opens the
+	// model — the same reach as GET /api/grid, which has no per-grid grant. A grid whose every metric
+	// is hidden from the caller is left out; metric_count counts only metrics the caller may see.
+	//
+	// GET /api/grids
+	ListReadableGrids(ctx context.Context, params ListReadableGridsParams) (ListReadableGridsRes, error)
 	// ListRevisions implements listRevisions operation.
 	//
 	// List revisions for a model.

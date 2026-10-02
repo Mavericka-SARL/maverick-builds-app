@@ -2708,6 +2708,56 @@ func (s GetGridMetaOnly) Validate() error {
 	}
 }
 
+func (s GetGridSeriesChartType) Validate() error {
+	switch s {
+	case "bar":
+		return nil
+	case "line":
+		return nil
+	case "pie":
+		return nil
+	case "scatter":
+		return nil
+	case "histogram":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
+}
+
+func (s GetGridSeriesHideRollupMembers) Validate() error {
+	switch s {
+	case "0":
+		return nil
+	case "1":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
+}
+
+func (s GetGridSeriesOK) Validate() error {
+	switch s.Type {
+	case CategoryChartDataGetGridSeriesOK:
+		if err := s.CategoryChartData.Validate(); err != nil {
+			return err
+		}
+		return nil
+	case ScatterChartDataGetGridSeriesOK:
+		if err := s.ScatterChartData.Validate(); err != nil {
+			return err
+		}
+		return nil
+	case HistogramChartDataGetGridSeriesOK:
+		if err := s.HistogramChartData.Validate(); err != nil {
+			return err
+		}
+		return nil
+	default:
+		return errors.Errorf("invalid type %q", s.Type)
+	}
+}
+
 func (s GetGridTotalsOnly) Validate() error {
 	switch s {
 	case "1":
@@ -2715,6 +2765,29 @@ func (s GetGridTotalsOnly) Validate() error {
 	default:
 		return errors.Errorf("invalid value: %v", s)
 	}
+}
+
+func (s *GridCatalogItem) Validate() error {
+	if s == nil {
+		return validate.ErrNilPointer
+	}
+
+	var failures []validate.FieldError
+	if err := func() error {
+		if s.Dimensions == nil {
+			return errors.New("nil is invalid value")
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "dimensions",
+			Error: err,
+		})
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
 }
 
 func (s *GridChartSeries) Validate() error {
@@ -3743,24 +3816,39 @@ func (s ListFormMappingsOKApplicationJSON) Validate() error {
 	return nil
 }
 
-func (s ListFormRecordsOKApplicationJSON) Validate() error {
-	alias := ([]FormRecord)(s)
-	if alias == nil {
-		return errors.New("nil is invalid value")
+func (s *ListFormRecordsOKHeaders) Validate() error {
+	if s == nil {
+		return validate.ErrNilPointer
 	}
+
 	var failures []validate.FieldError
-	for i, elem := range alias {
-		if err := func() error {
-			if err := elem.Validate(); err != nil {
-				return err
-			}
-			return nil
-		}(); err != nil {
-			failures = append(failures, validate.FieldError{
-				Name:  fmt.Sprintf("[%d]", i),
-				Error: err,
-			})
+	if err := func() error {
+		if s.Response == nil {
+			return errors.New("nil is invalid value")
 		}
+		var failures []validate.FieldError
+		for i, elem := range s.Response {
+			if err := func() error {
+				if err := elem.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				failures = append(failures, validate.FieldError{
+					Name:  fmt.Sprintf("[%d]", i),
+					Error: err,
+				})
+			}
+		}
+		if len(failures) > 0 {
+			return &validate.Error{Fields: failures}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "Response",
+			Error: err,
+		})
 	}
 	if len(failures) > 0 {
 		return &validate.Error{Fields: failures}
@@ -3912,6 +4000,31 @@ func (s ListPlansOKApplicationJSON) Validate() error {
 
 func (s ListPublicDimensionsOKApplicationJSON) Validate() error {
 	alias := ([]Dimension)(s)
+	if alias == nil {
+		return errors.New("nil is invalid value")
+	}
+	var failures []validate.FieldError
+	for i, elem := range alias {
+		if err := func() error {
+			if err := elem.Validate(); err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			failures = append(failures, validate.FieldError{
+				Name:  fmt.Sprintf("[%d]", i),
+				Error: err,
+			})
+		}
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
+func (s ListReadableGridsOKApplicationJSON) Validate() error {
+	alias := ([]GridCatalogItem)(s)
 	if alias == nil {
 		return errors.New("nil is invalid value")
 	}

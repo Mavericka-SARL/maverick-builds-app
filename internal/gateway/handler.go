@@ -134,6 +134,10 @@ type handler struct {
 	// belongs to (plan.go).
 	ownerMu sync.Mutex
 	owners  map[string]ownerEntry
+	// tokenClients are the OAuth clients whose tokens the REST API accepts
+	// (restClaims); mcp configures the chat-reporting connector (mcp.go).
+	tokenClients []string
+	mcp          MCPConfig
 }
 
 // Deps are the optional collaborators a handler can be built with. Every field
@@ -164,7 +168,17 @@ type Deps struct {
 	// Plans is the enforcer shared with the usage sweep, so a sweep's
 	// verdict reaches requests at once; nil builds a private one.
 	Plans *plan.Enforcer
+	// TokenClients are the OAuth clients (a token's azp) the REST API
+	// accepts tokens from; empty means DefaultTokenClients.
+	TokenClients []string
+	// MCP mounts the read-only chat-reporting connector (mcp.go); the zero
+	// value leaves it off.
+	MCP MCPConfig
 }
+
+// DefaultTokenClients is the console's own client, the only one whose tokens
+// the REST API accepts unless TokenClients says otherwise.
+var DefaultTokenClients = []string{"mavericks-web"}
 
 // inviteLifetime is how long a set-your-password link stays valid. Keycloak's
 // default is 12 hours, which routinely expires before someone invited on a
@@ -230,11 +244,18 @@ func NewHandlerWithDeps(log zerolog.Logger, pool *pgxpool.Pool, jwks *identity.J
 	if h.plans == nil {
 		h.plans = plan.NewEnforcer(h.db.Control())
 	}
+	h.tokenClients = deps.TokenClients
+	if len(h.tokenClients) == 0 {
+		h.tokenClients = DefaultTokenClients
+	}
+	h.mcp = deps.MCP
 	mux := http.NewServeMux()
 	h.registerRoutes(mux, nil)
 	// appIDMiddleware first: tenant routing reads the application id it puts
-	// in the context; the plan guard needs the routed tenant.
-	return limitRequestBodies(appIDMiddleware(h.tenantRouting(h.planGuard(mux))))
+	// in the context; the plan guard needs the routed tenant. The connector's
+	// reads run through this same chain (mcpReader), behind delegatedReadGate.
+	api := appIDMiddleware(h.tenantRouting(h.delegatedReadGate(h.planGuard(mux))))
+	return limitRequestBodies(h.mountMCP(api))
 }
 
 // maxRequestBodyBytes caps every request body the gateway reads. It is the
@@ -347,6 +368,9 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("POST", "/api/tasks/{stepId}/complete", "any", cors(h.taskAction))
 	register("GET", "/api/grid", "any", cors(h.grid))
 	register("GET", "/api/grid/export", "any", cors(h.gridExport))
+	// Generic grid reads for readers other than the grid screen (grid_reads.go).
+	register("GET", "/api/grids", "any", cors(h.gridCatalog))
+	register("GET", "/api/grid/series", "any", cors(h.gridSeries))
 
 	// Developer-only endpoints
 	register("GET", "/api/developer/applications", "developer_or_admin", devOrAdm(h.adminTenants))
@@ -738,7 +762,12 @@ func (h *handler) resolveActor(ctx context.Context, r *http.Request) (*actor, er
 	}
 	var a *actor
 	var err error
-	if h.devMode {
+	if sub, ok := delegatedSubject(ctx); ok {
+		// A connector's read (mcp.go): the subject of a token verified for
+		// /mcp, resolved like any account — never provisioned, never
+		// followed — so a disabled or removed account reads nothing.
+		a, err = h.actorByKeycloakSub(ctx, sub)
+	} else if h.devMode {
 		a, err = h.resolveDevActor(ctx, r)
 	} else if h.jwks == nil {
 		return nil, fmt.Errorf("authentication not configured")
@@ -900,7 +929,7 @@ func (h *handler) resolveJWTActor(ctx context.Context, r *http.Request) (*actor,
 	if h.jwks == nil {
 		return nil, fmt.Errorf("JWKS validator not configured")
 	}
-	claims, err := h.jwks.Validate(tokenStr)
+	claims, err := h.restClaims(tokenStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid token: %w", err)
 	}
@@ -923,6 +952,22 @@ func (h *handler) resolveJWTActor(ctx context.Context, r *http.Request) (*actor,
 	}
 	h.followIdentity(ctx, a, claims)
 	return a, nil
+}
+
+// restClaims validates a REST request's bearer token: issuer, signature and
+// expiry (identity.JWKSValidator), and the client it was issued to. A token
+// minted for any other client of the realm opens nothing here — above all a
+// chat connector's, whose grant is a read-only one served at /mcp alone: were
+// it accepted here it would carry the account's full read-write reach.
+func (h *handler) restClaims(token string) (*identity.Claims, error) {
+	claims, err := h.jwks.Validate(token)
+	if err != nil {
+		return nil, err
+	}
+	if !claims.IssuedTo(h.tokenClients) {
+		return nil, fmt.Errorf("token issued to client %q, not to this console", claims.AuthorizedParty)
+	}
+	return claims, nil
 }
 
 func (h *handler) actorByKeycloakSub(ctx context.Context, sub string) (*actor, error) {
@@ -1651,7 +1696,7 @@ var errRevisionNotInModel = errors.New("revision does not belong to this model")
 // shaped like `($2 = ” OR revision_id::text = $2)` silently widens the result
 // to every revision instead of refusing the request.
 func rejectForeignRevision(w http.ResponseWriter, err error) bool {
-	if errors.Is(err, errRevisionNotInModel) {
+	if errors.Is(err, errRevisionNotInModel) || errors.Is(err, errRevisionNotOpen) {
 		jsonErr(w, fmt.Errorf("revision not found"), http.StatusNotFound)
 		return true
 	}
@@ -1682,6 +1727,11 @@ func (h *handler) requireRevisionInModel(w http.ResponseWriter, r *http.Request,
 		return false
 	}
 	if !found {
+		jsonErr(w, fmt.Errorf("revision not found"), http.StatusNotFound)
+		return false
+	}
+	// A revision other than the open one is its builders' (revision_access.go).
+	if act, err := h.resolveActor(r.Context(), r); err != nil || !h.revisionOpen(r.Context(), act, modelID, revisionID) {
 		jsonErr(w, fmt.Errorf("revision not found"), http.StatusNotFound)
 		return false
 	}
@@ -1849,7 +1899,7 @@ func (h *handler) metrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	revisionID, _, err := h.resolveRevisionCtx(ctx, r.URL.Query().Get("revision_id"), modelID)
+	revisionID, _, err := h.businessRevisionCtx(ctx, r, r.URL.Query().Get("revision_id"), modelID)
 	if rejectForeignRevision(w, err) {
 		return
 	}
@@ -2035,6 +2085,11 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 	}
 	if !revisionBelongs {
 		jsonErr(w, fmt.Errorf("revision is outside this model"), http.StatusForbidden)
+		return
+	}
+	// Only the open revision is a business user's to write (revision_access.go).
+	if !h.revisionOpen(ctx, a, req.ModelID, req.RevisionID) {
+		jsonErr(w, fmt.Errorf("revision not found"), http.StatusNotFound)
 		return
 	}
 
@@ -2938,7 +2993,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── resolve revision ─────────────────────────────────────────────────────
-	revisionID, _, err := h.resolveRevisionCtx(ctx, r.URL.Query().Get("revision_id"), modelID)
+	revisionID, _, err := h.businessRevisionCtx(ctx, r, r.URL.Query().Get("revision_id"), modelID)
 	if rejectForeignRevision(w, err) {
 		return
 	}
@@ -2957,6 +3012,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			`SELECT COALESCE(revision_id::text,'') FROM model.grid_def WHERE id=$1::uuid`, gridDefID,
 		).Scan(&gridRevision)
 		if gridRevision != "" && gridRevision != revisionID {
+			redirected := false
 			var gridName string
 			if err2 := h.db.QueryRow(ctx,
 				`SELECT name FROM model.grid_def WHERE id=$1::uuid`, gridDefID,
@@ -2966,8 +3022,15 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 					`SELECT id::text FROM model.grid_def WHERE model_id=$1::uuid AND name=$2 AND revision_id=$3::uuid`,
 					modelID, gridName, revisionID,
 				).Scan(&altID); err3 == nil {
-					gridDefID = altID
+					gridDefID, redirected = altID, true
 				}
+			}
+			// No counterpart in the revision read: the grid's own layout
+			// would be read through it, and a revision other than the open
+			// one is its builders' (revision_access.go).
+			if !redirected && !h.revisionOpen(ctx, act, modelID, gridRevision) {
+				jsonErr(w, fmt.Errorf("grid not found"), http.StatusNotFound)
+				return
 			}
 		}
 	}
@@ -8575,7 +8638,7 @@ func (h *handler) listIntegrations(w http.ResponseWriter, r *http.Request) {
 		jsonAccessErr(w, err, "resolve model")
 		return
 	}
-	revisionID, _, revErr := h.resolveRevisionCtx(ctx, r.URL.Query().Get("revision_id"), modelID)
+	revisionID, _, revErr := h.businessRevisionCtx(ctx, r, r.URL.Query().Get("revision_id"), modelID)
 	if rejectForeignRevision(w, revErr) {
 		return
 	}
@@ -8663,6 +8726,12 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if !canAccess {
 		jsonErr(w, fmt.Errorf("forbidden: integration is outside your access scope"), http.StatusForbidden)
+		return
+	}
+	// A run writes into its integration's revision: the open one, unless
+	// the caller builds the model (revision_access.go).
+	if !h.revisionOpen(ctx, act, intModelID, intRevisionID) {
+		jsonErr(w, fmt.Errorf("integration not found"), http.StatusNotFound)
 		return
 	}
 	if cid := h.customerOfApplication(ctx, appID); cid != "" && h.plans != nil {
@@ -9752,6 +9821,9 @@ func (h *handler) resolveAppRevisionID(ctx context.Context, r *http.Request, app
 		if !found {
 			return "", errRevisionNotInModel
 		}
+		if act, err := h.resolveActor(ctx, r); err != nil || !h.revisionOpen(ctx, act, h.revisionModel(ctx, rev), rev) {
+			return "", errRevisionNotOpen
+		}
 		return rev, nil
 	}
 	var modelID string
@@ -9816,7 +9888,10 @@ func (h *handler) userApps(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	a, err := h.resolveActor(ctx, r)
 	if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
+		// No account to list for — a missing or invalid token, or one
+		// disabled since: an authentication failure like on every other
+		// route, not a server error.
+		jsonErr(w, fmt.Errorf("unauthorized"), http.StatusUnauthorized)
 		return
 	}
 	// Every database for a platform admin or a platform-wide builder;
@@ -10338,7 +10413,7 @@ func (h *handler) forms(w http.ResponseWriter, r *http.Request) {
 	}
 	// Forms are revision-scoped; default to the active revision when the
 	// caller doesn't pass one.
-	revisionID, _, revErr := h.resolveRevisionCtx(ctx, r.URL.Query().Get("revision_id"), modelID)
+	revisionID, _, revErr := h.businessRevisionCtx(ctx, r, r.URL.Query().Get("revision_id"), modelID)
 	if rejectForeignRevision(w, revErr) {
 		return
 	}
@@ -10411,7 +10486,7 @@ func (h *handler) publicDimensions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	revisionID, _, revErr := h.resolveRevisionCtx(ctx, r.URL.Query().Get("revision_id"), modelID)
+	revisionID, _, revErr := h.businessRevisionCtx(ctx, r, r.URL.Query().Get("revision_id"), modelID)
 	if rejectForeignRevision(w, revErr) {
 		return
 	}
@@ -10667,9 +10742,9 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			jsonOK(w, rec)
 			return
 		}
-		records, err := store.ListRecords(ctx, formID, 100)
+		limit, after, err := recordPageParams(r)
 		if err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
+			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
 		form, err := store.GetForm(ctx, formID)
@@ -10677,10 +10752,13 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
-		records, err = h.filterFormRecords(ctx, act, form, records)
+		records, next, err := h.visibleRecordPage(ctx, act, store, form, after, limit)
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
+		}
+		if next != "" {
+			w.Header().Set(nextCursorHeader, next)
 		}
 		if records == nil {
 			jsonOK(w, []any{})
@@ -11025,6 +11103,14 @@ func (h *handler) automationTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if !canAccess {
 		jsonErr(w, fmt.Errorf("forbidden: automation rule is outside your access scope"), http.StatusForbidden)
+		return
+	}
+	// A rule of a revision being built is its builders' to fire
+	// (revision_access.go).
+	var ruleRevision string
+	_ = h.db.QueryRow(ctx, `SELECT COALESCE(revision_id::text,'') FROM workflow.automation_rule WHERE id=$1::uuid`, ruleID).Scan(&ruleRevision)
+	if ruleRevision != "" && !h.revisionOpen(ctx, act, h.revisionModel(ctx, ruleRevision), ruleRevision) {
+		jsonErr(w, fmt.Errorf("automation rule not found"), http.StatusNotFound)
 		return
 	}
 	userID := act.UserID
@@ -14567,7 +14653,7 @@ func (h *handler) businessFolders(w http.ResponseWriter, r *http.Request) {
 		jsonAccessErr(w, err, "resolve model")
 		return
 	}
-	revisionID, _, revErr := h.resolveRevisionCtx(ctx, r.URL.Query().Get("revision_id"), modelID)
+	revisionID, _, revErr := h.businessRevisionCtx(ctx, r, r.URL.Query().Get("revision_id"), modelID)
 	if rejectForeignRevision(w, revErr) {
 		return
 	}
@@ -14575,14 +14661,17 @@ func (h *handler) businessFolders(w http.ResponseWriter, r *http.Request) {
 	// has no dashboards yet (an empty/new folder — benign) or contains at
 	// least one dashboard the caller can see, using the same
 	// business_role_member/business_role_dashboard/workspace-fallback
-	// check as businessDashboards. Without this, GET /api/folders leaked
-	// every folder name regardless of business-role assignment.
+	// check as businessDashboards, administrators included
+	// (dashboardAdminBypass): they were listed dashboards whose folders
+	// were withheld. Without this, GET /api/folders leaked every folder
+	// name regardless of business-role assignment.
 	rows, err := h.db.Query(ctx,
 		`SELECT f.id::text, f.name, f.parent_id::text FROM model.dashboard_folder f
 		 WHERE f.model_id=$1::uuid
 		   AND ($2 = '' OR f.revision_id IS NULL OR f.revision_id::text = $2)
 		   AND (
-		       NOT EXISTS (SELECT 1 FROM model.dashboard_def dd WHERE dd.folder_id = f.id)
+		       $4::boolean
+		       OR NOT EXISTS (SELECT 1 FROM model.dashboard_def dd WHERE dd.folder_id = f.id)
 		       OR EXISTS (
 		           SELECT 1 FROM model.dashboard_def dd
 		           WHERE dd.folder_id = f.id
@@ -14605,7 +14694,7 @@ func (h *handler) businessFolders(w http.ResponseWriter, r *http.Request) {
 		       )
 		   )
 		 ORDER BY f.created_at`,
-		modelID, revisionID, a.UserID)
+		modelID, revisionID, a.UserID, h.dashboardAdminBypass(ctx, a, modelID))
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -14887,14 +14976,15 @@ func (h *handler) validateDashboardFolder(ctx context.Context, modelID, folderID
 // "this workspace has no business roles" fallback grants every tenant.
 // An unknown dashboard ID returns false, so callers can 404 uniformly.
 func (h *handler) dashboardModelInScope(ctx context.Context, a *actor, dashID string) bool {
-	var modelID string
+	var modelID, revisionID string
 	if err := h.db.QueryRow(ctx,
-		`SELECT model_id::text FROM model.dashboard_def WHERE id=$1::uuid`, dashID,
-	).Scan(&modelID); err != nil {
+		`SELECT model_id::text, COALESCE(revision_id::text, '') FROM model.dashboard_def WHERE id=$1::uuid`, dashID,
+	).Scan(&modelID, &revisionID); err != nil {
 		return false
 	}
 	ok, err := h.actorCanAccessModel(ctx, a, modelID)
-	return err == nil && ok
+	// A dashboard of a revision being built is its builders' (revision_access.go).
+	return err == nil && ok && h.revisionOpen(ctx, a, modelID, revisionID)
 }
 
 // dropWidgetsReferencing: see modeledit.DropWidgetsReferencing.
@@ -15217,6 +15307,28 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 
 // ── /api/dashboards  (business-user read) ────────────────────────────────────
 
+// dashboardAdminBypass reports whether a passes the dashboard-assignment
+// filter (business roles' dashboard grants) for modelID's dashboards,
+// whatever their own business roles: they administer that application
+// (administersApp), so they administer those grants. The folder, list,
+// detail and chart-data routes share it. It used to be any of these roles
+// held anywhere — a developer of one workspace skipped another workspace's
+// assignments where they were a business user; held for another
+// application, it now counts for nothing. Fails closed.
+func (h *handler) dashboardAdminBypass(ctx context.Context, a *actor, modelID string) bool {
+	ok, err := h.administersModel(ctx, a, modelID)
+	return err == nil && ok
+}
+
+// dashboardModel is the model a dashboard belongs to; "" when unknown.
+func (h *handler) dashboardModel(ctx context.Context, dashID string) string {
+	var modelID string
+	_ = h.db.QueryRow(ctx,
+		`SELECT model_id::text FROM model.dashboard_def WHERE id=$1::uuid`, dashID,
+	).Scan(&modelID)
+	return modelID
+}
+
 func (h *handler) businessDashboards(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
@@ -15250,7 +15362,7 @@ func (h *handler) businessDashboards(w http.ResponseWriter, r *http.Request) {
 	// role filter entirely: they administer the roles and grants themselves,
 	// and a business admin with no CFO membership seeing ZERO dashboards was
 	// reported live as simply broken.
-	adminBypass := a.hasRole("business_admin") || a.hasRole("developer") || a.hasRole("tenant_admin") || a.hasRole("platform_admin")
+	adminBypass := h.dashboardAdminBypass(ctx, a, modelID)
 	roleFilter := func(userParam string) string {
 		if adminBypass {
 			// Always-true clause that still consumes the user parameter, so
@@ -15349,9 +15461,13 @@ func (h *handler) businessDashboardDetail(w http.ResponseWriter, r *http.Request
 
 	// Verify the user may access this dashboard: either a business role of
 	// theirs includes it, or they are a member of no business role at all
-	// (unassigned users see everything — mirrors businessDashboards).
-	var allowed bool
-	if err := h.db.QueryRow(ctx, `
+	// (unassigned users see everything — mirrors businessDashboards). An
+	// administrator passes as on the list and chart-data routes
+	// (dashboardAdminBypass): this route had no bypass, so an administrator
+	// was listed a dashboard whose definition then answered 404.
+	allowed := h.dashboardAdminBypass(ctx, a, h.dashboardModel(ctx, dashID))
+	if !allowed {
+		if err := h.db.QueryRow(ctx, `
 		SELECT EXISTS (
 		    SELECT 1 FROM model.dashboard_def dd
 		    WHERE dd.id = $1::uuid
@@ -15372,7 +15488,11 @@ func (h *handler) businessDashboardDetail(w http.ResponseWriter, r *http.Request
 		          )
 		      )
 		)
-	`, dashID, a.UserID).Scan(&allowed); err != nil || !allowed {
+	`, dashID, a.UserID).Scan(&allowed); err != nil {
+			allowed = false
+		}
+	}
+	if !allowed {
 		jsonErr(w, fmt.Errorf("dashboard not found"), http.StatusNotFound)
 		return
 	}
@@ -17548,7 +17668,7 @@ func (h *handler) dashboardWidgetAction(w http.ResponseWriter, r *http.Request) 
 	// while every chart widget 403'd in a retry loop ("doesn't load
 	// properly", reported live with the exact console trace). The tenancy
 	// gate above (dashboardModelInScope) still bounds all of it.
-	adminBypass := a.hasRole("business_admin") || a.hasRole("developer") || a.hasRole("tenant_admin") || a.hasRole("platform_admin")
+	adminBypass := h.dashboardAdminBypass(ctx, a, h.dashboardModel(ctx, dashID))
 	if !adminBypass {
 		var allowed bool
 		if err := h.db.QueryRow(ctx, `
@@ -17591,38 +17711,8 @@ func (h *handler) dashboardWidgetAction(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	cfg := widgetProps.Chart
-
-	// Validate chart config basics
-	if cfg.DimensionID == "" {
-		jsonErr(w, fmt.Errorf("chart dimension_id missing"), http.StatusBadRequest)
-		return
-	}
-	switch cfg.ChartType {
-	case query.ChartBar, query.ChartLine:
-		if len(cfg.MetricIDs) < 1 || len(cfg.MetricIDs) > 5 {
-			jsonErr(w, fmt.Errorf("bar/line charts require 1–5 metrics"), http.StatusBadRequest)
-			return
-		}
-	case query.ChartPie, query.ChartHistogram:
-		if len(cfg.MetricIDs) != 1 {
-			jsonErr(w, fmt.Errorf("pie/histogram charts require exactly 1 metric"), http.StatusBadRequest)
-			return
-		}
-	case query.ChartScatter:
-		if cfg.XMetricID == "" || cfg.YMetricID == "" {
-			jsonErr(w, fmt.Errorf("scatter charts require x_metric_id and y_metric_id"), http.StatusBadRequest)
-			return
-		}
-		if cfg.XMetricID == cfg.YMetricID {
-			jsonErr(w, fmt.Errorf("scatter X and Y metrics must be different"), http.StatusBadRequest)
-			return
-		}
-	default:
-		jsonErr(w, fmt.Errorf("unsupported chart type: %s", cfg.ChartType), http.StatusBadRequest)
-		return
-	}
-	if cfg.BinCount != 0 && (cfg.BinCount < 3 || cfg.BinCount > 30) {
-		jsonErr(w, fmt.Errorf("bin_count must be between 3 and 30"), http.StatusBadRequest)
+	if err := validateChartConfig(cfg); err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
 		return
 	}
 
@@ -17680,6 +17770,10 @@ func (h *handler) dashboardWidgetAction(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	if !h.revisionOpen(ctx, a, modelID, revisionID) {
+		jsonErr(w, fmt.Errorf("dashboard not accessible"), http.StatusForbidden)
+		return
+	}
 	resolver := query.NewChartResolver(h.db.For(ctx))
 	result, err := resolver.Resolve(ctx, cfg, req.Context, modelID, revisionID, gridDefID, a.UserID)
 	if err != nil {

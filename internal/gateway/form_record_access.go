@@ -11,9 +11,13 @@ package gateway
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -65,34 +69,60 @@ func (h *handler) resolveFormRecordScope(ctx context.Context, act *actor, formID
 	if err != nil || !reach {
 		return s, err
 	}
+	// A form of a revision being built is its builders' (revision_access.go).
+	if !h.revisionOpen(ctx, act, s.modelID, s.revisionID) {
+		return s, nil
+	}
 	s.reach = true
 
-	admin, err := h.actorCanAccessModel(withBuilderRoute(ctx), act, s.modelID)
+	admin, err := h.administersApp(ctx, act, s.modelID, s.appID)
 	if err != nil {
 		return s, err
 	}
-	if !admin {
-		// A business_admin of the application's workspace — of any
-		// workspace of its tenant for a tenant-level application, which
-		// belongs to all of them (roleReachesAppSQL's business arms, and
-		// workflowAdminScopeSQL's business_admin arm). The per-user app and
-		// model restrictions are reach's, checked above.
-		err = h.db.QueryRow(ctx, `
-			SELECT EXISTS (
-			    SELECT 1
-			    FROM core.application app
-			    JOIN identity.role_assignment ra ON ra.user_id = $2::uuid AND ra.role = 'business_admin'
-			    JOIN core.workspace rws ON rws.id = ra.workspace_id
-			    WHERE app.id = $1::uuid
-			      AND (rws.id = app.workspace_id
-			           OR (app.workspace_id IS NULL AND rws.customer_id = app.customer_id))
-			)`, s.appID, act.UserID).Scan(&admin)
-		if err != nil {
-			return s, fmt.Errorf("resolve record admin: %w", err)
-		}
-	}
 	s.admin = admin
 	return s, nil
+}
+
+// administersApp reports whether act administers the business surface of
+// appID, whose model modelID is: builder and administrator reach over the
+// model (a developer or tenant admin within their scope, a platform admin:
+// actorCanAccessModel on a builder route), or business_admin of the
+// application's workspace — of any workspace of its tenant for a
+// tenant-level application, which belongs to all of them
+// (roleReachesAppSQL's business arms, and workflowAdminScopeSQL's
+// business_admin arm). A role held for another workspace or tenant counts
+// for nothing here. Per-user app and model restrictions are the caller's
+// reach check, made before this one.
+func (h *handler) administersApp(ctx context.Context, act *actor, modelID, appID string) (bool, error) {
+	admin, err := h.actorCanAccessModel(withBuilderRoute(ctx), act, modelID)
+	if err != nil || admin {
+		return admin, err
+	}
+	err = h.db.QueryRow(ctx, `
+		SELECT EXISTS (
+		    SELECT 1
+		    FROM core.application app
+		    JOIN identity.role_assignment ra ON ra.user_id = $2::uuid AND ra.role = 'business_admin'
+		    JOIN core.workspace rws ON rws.id = ra.workspace_id
+		    WHERE app.id = $1::uuid
+		      AND (rws.id = app.workspace_id
+		           OR (app.workspace_id IS NULL AND rws.customer_id = app.customer_id))
+		)`, appID, act.UserID).Scan(&admin)
+	if err != nil {
+		return false, fmt.Errorf("resolve application admin: %w", err)
+	}
+	return admin, nil
+}
+
+// administersModel is administersApp for the application modelID belongs to.
+func (h *handler) administersModel(ctx context.Context, act *actor, modelID string) (bool, error) {
+	var appID string
+	if err := h.db.QueryRow(ctx,
+		`SELECT application_id::text FROM core.model WHERE id = $1::uuid`, modelID,
+	).Scan(&appID); err != nil {
+		return false, fmt.Errorf("resolve model application: %w", err)
+	}
+	return h.administersApp(ctx, act, modelID, appID)
 }
 
 // access is who the scope's caller is to rec.
@@ -209,4 +239,94 @@ func jsonRecordErr(w http.ResponseWriter, err error, what string) {
 		return
 	}
 	jsonErr(w, err, http.StatusInternalServerError)
+}
+
+// nextCursorHeader carries the continuation of a paged record list: present
+// when more records the caller may see can follow, absent on the last page.
+const nextCursorHeader = "X-Next-Cursor"
+
+// Record pages: limit records per page by default, at most maxRecordPage.
+const (
+	defaultRecordPage = 100
+	maxRecordPage     = 1000
+)
+
+// recordPageParams reads ?limit and ?cursor of a record list.
+func recordPageParams(r *http.Request) (limit int, after *crudapp.RecordPosition, err error) {
+	limit = defaultRecordPage
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, convErr := strconv.Atoi(v)
+		if convErr != nil || n < 1 || n > maxRecordPage {
+			return 0, nil, fmt.Errorf("limit must be between 1 and %d", maxRecordPage)
+		}
+		limit = n
+	}
+	if c := r.URL.Query().Get("cursor"); c != "" {
+		if after, err = decodeRecordCursor(c); err != nil {
+			return 0, nil, err
+		}
+	}
+	return limit, after, nil
+}
+
+// visibleRecordPage is up to limit records of form the caller may see,
+// newest first, after `after`: pages of the form's records are read and
+// filtered (filterFormRecords) until limit are kept or none are left, so
+// records the caller's access rules withhold neither fill the page nor end
+// the list early — a list of the newest 100 rows, filtered, did both. next
+// continues after the last record served, never after a withheld one, whose
+// place would otherwise be disclosed; "" when no more can follow.
+func (h *handler) visibleRecordPage(ctx context.Context, act *actor, store *crudapp.Store, form *crudapp.FormDef, after *crudapp.RecordPosition, limit int) (records []*crudapp.FormRecord, next string, err error) {
+	pos := after
+	for {
+		batch, err := store.ListRecordsPage(ctx, form.ID, pos, limit)
+		if err != nil {
+			return nil, "", err
+		}
+		if len(batch) == 0 {
+			return records, "", nil
+		}
+		last := batch[len(batch)-1]
+		pos = &crudapp.RecordPosition{CreatedAt: last.CreatedAt, ID: last.ID}
+		kept, err := h.filterFormRecords(ctx, act, form, batch)
+		if err != nil {
+			return nil, "", err
+		}
+		for _, rec := range kept {
+			records = append(records, rec)
+			if len(records) == limit {
+				return records, encodeRecordCursor(rec), nil
+			}
+		}
+		if len(batch) < limit {
+			return records, "", nil
+		}
+	}
+}
+
+// A record cursor is the position of the last record served, opaque to the
+// caller. It grants nothing: every page is read and filtered for whoever
+// presents it.
+func encodeRecordCursor(rec *crudapp.FormRecord) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(rec.CreatedAt.UTC().Format(time.RFC3339Nano) + "|" + rec.ID))
+}
+
+func decodeRecordCursor(c string) (*crudapp.RecordPosition, error) {
+	bad := fmt.Errorf("invalid cursor")
+	raw, err := base64.RawURLEncoding.DecodeString(c)
+	if err != nil {
+		return nil, bad
+	}
+	at, id, ok := strings.Cut(string(raw), "|")
+	if !ok {
+		return nil, bad
+	}
+	t, err := time.Parse(time.RFC3339Nano, at)
+	if err != nil {
+		return nil, bad
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, bad
+	}
+	return &crudapp.RecordPosition{CreatedAt: t, ID: id}, nil
 }

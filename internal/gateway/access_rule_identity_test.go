@@ -79,6 +79,8 @@ func (f *restrictedFixture) viewerWrite(rev, metricID, dim, code string) int {
 // DE, US and cost are refused.
 func assertOldRevisionRestricted(f *restrictedFixture, label, revA string) {
 	f.t.Helper()
+	f.assertOldRevisionClosed(label, revA)
+	defer f.grantBuilder()()
 	q := "grid_def_id=" + f.plan + "&revision_id=" + revA
 	assertRestrictedGrid(f, label+": old A grid", f.gridAt(f.viewer, q), f.members, f.metric, false)
 	assertRestrictedGrid(f, label+": old A totals_only", f.gridAt(f.viewer, q+"&totals_only=1"), f.members, f.metric, true)
@@ -186,7 +188,9 @@ func TestAccessRulesFollowRenameBeforeActivation(t *testing.T) {
 	f.call("PUT", "/api/business-admin/users/"+f.viewerID+"/access-rules", f.admin, map[string]any{"rules": []map[string]string{
 		{"rule_type": "dimension_member", "ref_id": membersB["UK"], "access": "hidden"},
 	}})
+	revoke := f.grantBuilder()
 	g := f.gridAt(f.viewer, "grid_def_id="+f.plan+"&revision_id="+revA)
+	revoke()
 	for k, v := range g.Cells {
 		if strings.HasSuffix(k, ":UK") {
 			t.Errorf("old A serves UK after a rule on its renamed copy GB hid it: %s = %v", k, v)

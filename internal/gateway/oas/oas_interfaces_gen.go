@@ -293,6 +293,10 @@ type GetGridRes interface {
 	getGridRes()
 }
 
+type GetGridSeriesRes interface {
+	getGridSeriesRes()
+}
+
 type GetIntegrationRes interface {
 	getIntegrationRes()
 }
@@ -439,6 +443,10 @@ type ListPlansRes interface {
 
 type ListPublicDimensionsRes interface {
 	listPublicDimensionsRes()
+}
+
+type ListReadableGridsRes interface {
+	listReadableGridsRes()
 }
 
 type ListScimTokensRes interface {

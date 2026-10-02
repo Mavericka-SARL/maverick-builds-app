@@ -83,18 +83,25 @@ func setupJWKSFixture(t *testing.T) *jwksFixture {
 	return f
 }
 
-// sign mints a token for sub/issuer/expiresAt, signed with the fixture's
-// private key and a "kid" header matching the JWK served above.
+// sign mints a console token (issued to mavericks-web, the client the REST
+// API accepts) for sub/issuer/expiresAt, signed with the fixture's private
+// key and a "kid" header matching the JWK served above.
 func (f *jwksFixture) sign(t *testing.T, sub, issuer string, expiresAt time.Time) string {
 	t.Helper()
-	claims := identity.Claims{
+	return f.signClaims(t, identity.Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   sub,
 			Issuer:    issuer,
 			IssuedAt:  jwt.NewNumericDate(time.Now().Add(-time.Minute)),
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 		},
-	}
+		AuthorizedParty: "mavericks-web",
+	})
+}
+
+// signClaims mints a token carrying exactly claims.
+func (f *jwksFixture) signClaims(t *testing.T, claims identity.Claims) string {
+	t.Helper()
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = "test-kid"
 	signed, err := token.SignedString(f.privateKey)

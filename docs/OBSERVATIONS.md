@@ -18,51 +18,48 @@ leaves out, until it is fixed.
 
 ## Open
 
-### Conversational reporting needs independent discovery and complete form queries
+### The chart resolver does not tell a withheld value from a missing one
 
-- **Noticed:** 2026-10-02, while preparing the ChatGPT/Claude reporting brief.
-- **What:** The engine has no MCP server. Grid discovery is under the
-  developer-gated `/api/developer/grids`, and the chart HTTP endpoint loads an
-  existing dashboard widget. Form record listing calls
-  `crudapp.Store.ListRecords(..., 100)` before applying `filterFormRecords`;
-  that response cannot supply complete reporting totals or pagination. The
-  chart resolver supports grids, so form aggregation is an additional generic
-  read capability. Its visible-default substitution for hidden context members
-  also needs explicit-filter validation at a reporting entry point.
-- **Why it matters:** A business user needs to discover readable sources and
-  obtain correct reports inside a chat without creating a dashboard, acquiring
-  a developer role, or mistaking a partial record list for the whole dataset.
-- **How to check:** Inspect `registerRoutes`, `formsRouter` and
-  `dashboardWidgetAction` in `internal/gateway/handler.go`, `ListRecords` in
-  `internal/crudapp/store.go`, and `ChartResolver.Resolve` in
-  `internal/query/chart.go`. Exercise a business user on a model with no
-  dashboards and a form with more than 100 records.
-- **What closes it:** Implement and verify the authorized discovery, complete
-  query/aggregation and standalone chart paths specified in
-  [`CHAT_MODEL_REPORTING_INSTRUCTIONS.md`](../CHAT_MODEL_REPORTING_INSTRUCTIONS.md),
-  with an end-to-end report in both hosts under the user's existing permissions.
-  The brief also includes reading existing developer-created dashboards: adapt
-  their business-facing definition reads and assemble widget values with the
-  saved/synchronized filters and dashboard assignments preserved.
+- **Noticed:** 2026-10-02, building `query_grid`'s breakdowns on
+  `GET /api/grid/series`.
+- **What:** `internal/query/chart.go` returns a `nil` point both where nothing
+  is recorded or calculable and where the value is withheld from the viewer
+  (`errWithheld`). `/api/grid` keeps them apart (`withheld`). The connector
+  reports such points as state `absent` ("no value, or withheld"), never as 0.
+- **Why it matters:** A report cannot say which of the two it is looking at.
+- **How to check:** Hide a member a calculated metric reads, then compare the
+  chart-data point with `/api/grid`'s `withheld` for the same combination.
+- **What closes it:** A per-point state in `GridChartSeries`, read by the
+  connector and the chart widget.
 
-### Dashboard listing and detail differ on administrative role handling
+### A foreign X-Model-Id silently selects another model
 
-- **Noticed:** 2026-10-02, while adding dashboard reads to the chat reporting brief.
-- **What:** In `internal/gateway/handler.go`, `businessDashboards` and
-  `dashboardWidgetAction` explicitly bypass the dashboard-assignment filter for
-  administrative/developer roles after scope checks. `businessDashboardDetail`
-  applies its business-role assignment query without that bypass. Inspection
-  therefore indicates that an administrator with a relevant business role but
-  no assignment to a particular dashboard can be listed that dashboard yet be
-  refused its detail. This has not been reproduced in a live test in this change.
-- **Why it matters:** A connector that discovers a dashboard and then reads its
-  definition cannot assume those operations have identical role behavior.
-- **How to check:** Exercise list, detail and chart-data routes with a scoped
-  business administrator who is a member of a business role that grants only
-  another dashboard, then repeat as an ordinary business user.
-- **What closes it:** Confirm the intended policy, obtain authorization for any
-  permission widening under `CLAUDE.md`, and make all three reads consistent with
-  focused role/scope tests. The chat adapter must not bypass a denied detail read.
+- **Noticed:** 2026-10-02, pinning the connector's read context.
+- **What:** `headerModelInApp` returns "" for an `X-Model-Id` the caller may
+  not open, and `resolveDemoModelID` then falls back to the application's
+  default model. Every model-scoped business route therefore answers for a
+  different model than the one named, without saying so.
+- **Why it matters:** Nothing is disclosed — the fallback is a model the caller
+  opens — but a client that labels results by the model it asked for labels
+  them wrongly. The connector guards against it: it confirms the model against
+  `/api/apps` and against `/api/demo`'s resolved context before every read.
+- **How to check:** `GET /api/demo` with `X-Model-Id` of a model the caller may
+  not open: the answer names another `model_id`.
+- **What closes it:** Refuse an explicit model the caller may not open (404),
+  after checking which console paths rely on the fallback.
+
+### The load-test password grant needs its client allowed
+
+- **Noticed:** 2026-10-02, when the REST API began accepting console tokens
+  only (`GATEWAY_TOKEN_CLIENTS`).
+- **What:** `cmd/loadtest`'s `-username/-password` mode takes a password grant
+  through the realm's `admin-cli` client. Its tokens are no longer accepted by
+  the REST API unless the target deployment lists `admin-cli` in
+  `GATEWAY_TOKEN_CLIENTS`; `-token` and `-dev-user` are unaffected.
+- **Why it matters:** A load test against a deployment answers 401 throughout.
+- **How to check:** Run `cmd/loadtest` with `-keycloak -username -password`.
+- **What closes it:** A dedicated load-test client allowed only on the
+  deployments being tested, or a `-token` obtained through the console client.
 
 ### SheetJS is outside Dependabot's and npm audit's view
 
@@ -2553,6 +2550,33 @@ leaves out, until it is fixed.
   `CheckMembers` before the first insert, for every caller.
 
 ## Closed
+
+### Chat reports could not read complete workflow, trigger and notification histories
+
+- **Noticed:** 2026-10-02, extending the reporting brief to operational data.
+- **What it was:** `workflowHistory`, `workflowMyHistory`, `automationExecutions`
+  and `notificationsIn` return their latest 50 records only, which reports
+  over a period would have understated.
+- **Closed:** 2026-10-02 by scope, not by code: the owner narrowed the chat
+  connector to grid data only, so it reads none of these routes. The routes
+  keep their latest-50 lists, which is what the console shows.
+
+### Conversational reporting lacked independent discovery and complete form queries
+
+- **Noticed:** 2026-10-02, while preparing the ChatGPT/Claude reporting brief.
+- **What it was:** no MCP server; grid discovery only under the developer-gated
+  `/api/developer/grids`; the chart resolver reachable only through a saved
+  dashboard widget, substituting a visible member for a hidden one; the record
+  list reading the newest 100 rows and filtering them afterwards, so records
+  hidden from the caller filled the page and ended the list early.
+- **Closed:** 2026-10-02 (chat connector, milestone 1; commit pending).
+  `GET /api/grids` and `GET /api/grid/series` (`internal/gateway/grid_reads.go`)
+  give any model reader the catalog and the resolver, refusing a hidden or
+  unknown context member alike; the record list pages by `(created_at, id)`
+  and fills each page with visible records (`visibleRecordPage`,
+  `X-Next-Cursor`); `/mcp` serves the read tools. Covered by
+  `TestMCPConnector*`. The connector has since been narrowed to grid data
+  (it no longer reads forms); the record-list paging stays, for the console.
 
 ### A saved Excel/CSV integration could not be run from a dashboard with a normal file
 

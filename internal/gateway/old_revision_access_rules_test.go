@@ -233,7 +233,10 @@ func TestRestrictedUserReadsOldRevisionRestricted(t *testing.T) {
 	// The active revision B behaves as before.
 	assertRestrictedGrid(f, "active B", f.gridAt(f.viewer, "grid_def_id="+gridB), membersB, metricsB, false)
 
-	// The OLD revision A, requested explicitly.
+	// The OLD revision A, requested explicitly: closed to a business user,
+	// and restricted for a builder who carries the same rules.
+	f.assertOldRevisionClosed("old A", revA)
+	f.grantBuilder()
 	oldQ := "grid_def_id=" + f.plan + "&revision_id=" + revA
 	assertRestrictedGrid(f, "old A grid", f.gridAt(f.viewer, oldQ), f.members, f.metric, false)
 	assertRestrictedGrid(f, "old A totals_only", f.gridAt(f.viewer, oldQ+"&totals_only=1"), f.members, f.metric, true)
@@ -323,6 +326,8 @@ func TestHiddenMetricOnOldRevision(t *testing.T) {
 		{"rule_type": "metric", "ref_id": f.metric["revenue"], "access": "hidden"},
 	}})
 	newRevisionAndActivate(f)
+	f.assertOldRevisionClosed("old revision", revA)
+	f.grantBuilder()
 
 	g := f.gridAt(f.viewer, "grid_def_id="+f.plan+"&revision_id="+revA)
 	for k, v := range g.Cells {

@@ -671,6 +671,15 @@ type Invoker interface {
 	//
 	// GET /api/grid
 	GetGrid(ctx context.Context, params GetGridParams) (GetGridRes, error)
+	// GetGridSeries invokes getGridSeries operation.
+	//
+	// Values are the engine's: inputs rolled up by their aggregation and time-summary rules, formulas
+	// evaluated per member, values withheld where they depend on data hidden from the caller. Reach is
+	// GET /api/grid's. A context member that does not exist or is hidden from the caller is refused with
+	// the same 400, never replaced by another member.
+	//
+	// GET /api/grid/series
+	GetGridSeries(ctx context.Context, params GetGridSeriesParams) (GetGridSeriesRes, error)
 	// GetIntegration invokes getIntegration operation.
 	//
 	// One integration; rest_api returns the typed definition + schedule + tested flag.
@@ -1006,7 +1015,9 @@ type Invoker interface {
 	//
 	// For a caller who reaches the form's application the way the business console opens it; anyone else
 	// gets 404, as for a form that does not exist. Records the caller's access rules withhold are left
-	// out. Each record carries the caller's permissions on it.
+	// out before the page is filled, so they neither shorten a page nor end the list early. Each record
+	// carries the caller's permissions on it. When more records may follow, the X-Next-Cursor response
+	// header carries the cursor for the next page.
 	//
 	// GET /api/forms/{id}/records
 	ListFormRecords(ctx context.Context, params ListFormRecordsParams) (ListFormRecordsRes, error)
@@ -1064,6 +1075,14 @@ type Invoker interface {
 	//
 	// GET /api/dimensions
 	ListPublicDimensions(ctx context.Context, params ListPublicDimensionsParams) (ListPublicDimensionsRes, error)
+	// ListReadableGrids invokes listReadableGrids operation.
+	//
+	// The grids of the request's model (X-App-Id / X-Model-Id) in a revision, for anyone who opens the
+	// model — the same reach as GET /api/grid, which has no per-grid grant. A grid whose every metric
+	// is hidden from the caller is left out; metric_count counts only metrics the caller may see.
+	//
+	// GET /api/grids
+	ListReadableGrids(ctx context.Context, params ListReadableGridsParams) (ListReadableGridsRes, error)
 	// ListRevisions invokes listRevisions operation.
 	//
 	// List revisions for a model.
@@ -13982,6 +14001,284 @@ func (c *Client) sendGetGrid(ctx context.Context, params GetGridParams) (res Get
 	return result, nil
 }
 
+// GetGridSeries invokes getGridSeries operation.
+//
+// Values are the engine's: inputs rolled up by their aggregation and time-summary rules, formulas
+// evaluated per member, values withheld where they depend on data hidden from the caller. Reach is
+// GET /api/grid's. A context member that does not exist or is hidden from the caller is refused with
+// the same 400, never replaced by another member.
+//
+// GET /api/grid/series
+func (c *Client) GetGridSeries(ctx context.Context, params GetGridSeriesParams) (GetGridSeriesRes, error) {
+	res, err := c.sendGetGridSeries(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendGetGridSeries(ctx context.Context, params GetGridSeriesParams) (res GetGridSeriesRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getGridSeries"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/grid/series"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetGridSeriesOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/grid/series"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "grid_def_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "grid_def_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			return e.EncodeValue(conv.UUIDToString(params.GridDefID))
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "chart_type" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "chart_type",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.ChartType.Get(); ok {
+				return e.EncodeValue(conv.StringToString(string(val)))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "dimension_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "dimension_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			return e.EncodeValue(conv.UUIDToString(params.DimensionID))
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "metric_ids" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "metric_ids",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.MetricIds.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "x_metric_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "x_metric_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.XMetricID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "y_metric_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "y_metric_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.YMetricID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "bin_count" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "bin_count",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.BinCount.Get(); ok {
+				return e.EncodeValue(conv.IntToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "hide_rollup_members" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "hide_rollup_members",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.HideRollupMembers.Get(); ok {
+				return e.EncodeValue(conv.StringToString(string(val)))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "context" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "context",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.Context.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, GetGridSeriesOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetGridSeriesResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // GetIntegration invokes getIntegration operation.
 //
 // One integration; rest_api returns the typed definition + schedule + tested flag.
@@ -19690,7 +19987,9 @@ func (c *Client) sendListFormMappings(ctx context.Context, params ListFormMappin
 //
 // For a caller who reaches the form's application the way the business console opens it; anyone else
 // gets 404, as for a form that does not exist. Records the caller's access rules withhold are left
-// out. Each record carries the caller's permissions on it.
+// out before the page is filled, so they neither shorten a page nor end the list early. Each record
+// carries the caller's permissions on it. When more records may follow, the X-Next-Cursor response
+// header carries the cursor for the next page.
 //
 // GET /api/forms/{id}/records
 func (c *Client) ListFormRecords(ctx context.Context, params ListFormRecordsParams) (ListFormRecordsRes, error) {
@@ -19757,6 +20056,44 @@ func (c *Client) sendListFormRecords(ctx context.Context, params ListFormRecords
 	}
 	pathParts[2] = "/records"
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "limit" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "limit",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.Limit.Get(); ok {
+				return e.EncodeValue(conv.IntToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "cursor" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "cursor",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.Cursor.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "GET", u)
@@ -20873,6 +21210,136 @@ func (c *Client) sendListPublicDimensions(ctx context.Context, params ListPublic
 
 	stage = "DecodeResponse"
 	result, err := decodeListPublicDimensionsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// ListReadableGrids invokes listReadableGrids operation.
+//
+// The grids of the request's model (X-App-Id / X-Model-Id) in a revision, for anyone who opens the
+// model — the same reach as GET /api/grid, which has no per-grid grant. A grid whose every metric
+// is hidden from the caller is left out; metric_count counts only metrics the caller may see.
+//
+// GET /api/grids
+func (c *Client) ListReadableGrids(ctx context.Context, params ListReadableGridsParams) (ListReadableGridsRes, error) {
+	res, err := c.sendListReadableGrids(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendListReadableGrids(ctx context.Context, params ListReadableGridsParams) (res ListReadableGridsRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("listReadableGrids"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/grids"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ListReadableGridsOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/grids"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ListReadableGridsOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeListReadableGridsResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

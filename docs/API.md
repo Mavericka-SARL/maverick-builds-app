@@ -2,7 +2,7 @@
 
 > **Classification:** Current — HTTP surface as served by internal/gateway.
 
-> **Last verified:** 2026-09-25
+> **Last verified:** 2026-10-02
 > **Router authority:** `internal/gateway.NewHandler` (`registerRoutes`)
 
 ## Transport and context
@@ -15,7 +15,10 @@ Request context:
 - `Authorization: Bearer <Keycloak access token>` — sent by the console's API
   client on every request, and the only accepted credential when
   `DEV_MODE=false`: the gateway validates it against the realm's JWKS, and a
-  gateway that cannot build its validator refuses to start;
+  gateway that cannot build its validator refuses to start. The token must
+  have been issued to one of `GATEWAY_TOKEN_CLIENTS` (its `azp`; default
+  `mavericks-web`): a token of any other client of the realm — a chat
+  connector's above all — opens no REST route;
 - `X-Dev-User: <persona-or-keycloak-sub>` only when the gateway runs with
   `DEV_MODE=true`; and
 - `X-App-Id: <application UUID>` to select the current application.
@@ -24,6 +27,19 @@ The server normally resolves model and active revision from the selected
 application. Resource handlers check explicit model, revision, grid, form,
 dashboard, widget and job IDs — from the path and from the request body —
 against the actor's accessible scope.
+
+The read-only chat connector is served at `/mcp` when `MCP_ENABLED=true`
+(Model Context Protocol, not REST; see [CHAT_CONNECTOR.md](CHAT_CONNECTOR.md)),
+with its OAuth protected-resource metadata at
+`/.well-known/oauth-protected-resource[/mcp]`. It accepts only tokens of the
+registered host clients (`MCP_CLIENTS`), and reads grid data through the grid
+routes below as the token's subject.
+
+Revisions: a model's active revision is open to everyone who opens the model;
+any other is its builders' (developers, tenant and platform admins with builder
+reach). A business route asked for another revision — by `revision_id`, a body
+field, or an object that lives in one (grid, form, dashboard, widget,
+integration, rule) — answers as for a revision that does not exist (404).
 
 Public (no actor) routes: `/healthz`; `/api/signup` and
 `/api/signup/options`; `/api/legal`; `/api/branding`; `/api/sso/discover`;
@@ -49,17 +65,19 @@ user with a role; the handler then applies the scope checks above.
 | `/api/apps` | actor-visible applications | authenticated + app grants |
 | `/api/demo` | active app/model/revision/persona context | authenticated + app/model access |
 | `/api/grid`, `GET /api/grid/export` | grid definition, cells, totals, access metadata; CSV/XLSX export of input values | authenticated + model/member/metric access |
+| `GET /api/grids` | the selected model's grids the caller can read (a grid all of whose metrics are hidden is left out) | authenticated + model access |
+| `GET /api/grid/series` | one grid's metrics resolved along one of its dimensions (the dashboard chart resolver without a dashboard); a hidden or unknown context member is refused alike | authenticated + model/member/metric access |
 | `/api/metrics`, `/api/dimensions`, `/api/formula/refs` | runtime metric and dimension summaries, formula reference catalog | authenticated + model access |
 | `/api/cells` | input fact writeback and recalculation | authenticated + shared write guard |
 | `GET /api/cells/history` | one input cell's change history, including archived rows (enterprise) | authenticated + metric and member access, hidden ancestors included |
-| `/api/dashboards`, `/api/folders` | role-visible dashboard runtime | authenticated + business-role assignment |
+| `/api/dashboards`, `/api/folders` | role-visible dashboard runtime; list, detail, folders and chart-data apply the same rule: business-role assignments, which an administrator of the dashboard's application (builder reach over the model, or `business_admin` of its workspace) passes | authenticated + business-role assignment |
 | `POST /api/dashboard-widgets/{id}/chart-data` | server-resolved chart series used by every chart widget | dashboard + member + metric access |
 | `/api/tasks`, `/api/tasks/{id}` | inbox and task decisions | authenticated + task eligibility |
 | `/api/workflow/submit`, `/api/workflow/instances`, `/api/workflow/my-history` | start, inspect and act on instances | authenticated; admin status override `business_admin`, on instances `/api/workflow/history` lists (otherwise 404) |
 | `/api/workflow/history` | latest instances of the applications the caller administers (its business_admin workspaces; `X-App-Id` narrows to one application), without test runs | `business_admin` |
 | `/api/notifications`, `…/mark-read` | list and mark read (own notifications only) | authenticated |
 | `/api/notifications/settings*` | per-tenant e-mail delivery settings and a test send | `platform_admin` or `tenant_admin` |
-| `/api/forms*`, `/api/records*` | form runtime and record actions; CSV/XLSX form export/import | reach of the form's application, plus per-record permissions: the creator edits and deletes their own draft or submitted records and moves them only between draft and submitted; business admins of the workspace, developers and tenant admins within their scope, and platform admins do everything; `POST /api/forms/{id}/sync` is admin-only |
+| `/api/forms*`, `/api/records*` | form runtime and record actions; CSV/XLSX form export/import; `GET /api/forms/{id}/records` pages the records the caller may see (`limit` ≤ 1000, `cursor` from the `X-Next-Cursor` header), withheld records neither filling a page nor ending the list | reach of the form's application, plus per-record permissions: the creator edits and deletes their own draft or submitted records and moves them only between draft and submitted; business admins of the workspace, developers and tenant admins within their scope, and platform admins do everything; `POST /api/forms/{id}/sync` is admin-only |
 | form definition create/update/delete under `/api/forms` | building forms | `developer` |
 | `/api/automation/rules*` | automation rules (list: authenticated; create/update/delete, including cron schedules) | `developer` |
 | `/api/automation/trigger/{id}`, `/api/automation/executions` | fire a manual rule, execution log | authenticated + app scope |

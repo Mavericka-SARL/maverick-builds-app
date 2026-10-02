@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>maverickbuilds.app report</title>
+<style>
+:root{--bg:#fff;--fg:#1f2937;--muted:#6b7280;--line:#e5e7eb;--card:#f9fafb;--accent:#2563eb;
+  --s0:#2563eb;--s1:#f59e0b;--s2:#10b981;--s3:#ef4444;--s4:#8b5cf6;color-scheme:light}
+:root[data-theme="dark"]{--bg:#111827;--fg:#f3f4f6;--muted:#9ca3af;--line:#374151;--card:#1f2937;--accent:#60a5fa;
+  --s0:#60a5fa;--s1:#fbbf24;--s2:#34d399;--s3:#f87171;--s4:#a78bfa;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+h1{font-size:18px;margin:0 0 2px}h2{font-size:15px;margin:20px 0 4px}
+.sub{color:var(--muted);font-size:12px;margin-bottom:8px}
+.bar{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+button{font:inherit;font-size:12px;padding:4px 10px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+svg{width:100%;height:auto;display:block}
+svg text{fill:var(--muted);font-size:11px}
+.grid line{stroke:var(--line)}
+table{border-collapse:collapse;width:100%;font-size:12px;margin-top:8px}
+th,td{border-bottom:1px solid var(--line);padding:4px 6px;text-align:left}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+.absent{color:var(--muted);font-style:italic}
+.kpis{display:flex;gap:10px;flex-wrap:wrap}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:140px}
+.kpi b{display:block;font-size:20px}
+.note{color:var(--muted);font-size:12px;margin-top:6px}
+.comment{border-left:3px solid var(--line);padding:2px 8px;margin:6px 0;color:var(--fg)}
+.comment small{display:block;color:var(--muted)}
+.warn{color:#b45309}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;margin-top:4px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:middle}
+footer{color:var(--muted);font-size:11px;margin-top:14px;border-top:1px solid var(--line);padding-top:6px}
+</style>
+</head>
+<body>
+<main id="root" aria-live="polite"><p class="sub">Loading…</p></main>
+<script>
+"use strict";
+// MCP Apps view for maverickbuilds.app reporting. Talks to the host over
+// postMessage (JSON-RPC 2.0); every number it shows came from the server,
+// read as the signed-in person. Data is only ever inserted as text.
+const root = document.getElementById("root");
+let nextId = 1; const pending = new Map(); let current = null;
+
+function send(msg) { window.parent.postMessage(Object.assign({ jsonrpc: "2.0" }, msg), "*"); }
+function request(method, params) {
+  const id = nextId++;
+  return new Promise((resolve, reject) => { pending.set(id, { resolve, reject }); send({ id, method, params }); });
+}
+function notify(method, params) { send({ method, params }); }
+
+window.addEventListener("message", (ev) => {
+  const m = ev.data;
+  if (!m || m.jsonrpc !== "2.0") return;
+  if (m.id !== undefined && pending.has(m.id) && (m.result !== undefined || m.error !== undefined)) {
+    const p = pending.get(m.id); pending.delete(m.id);
+    m.error ? p.reject(m.error) : p.resolve(m.result); return;
+  }
+  if (m.method === "ui/notifications/tool-result") show(m.params && m.params.structuredContent, m.params);
+  if (m.method === "ui/notifications/host-context-changed" && m.params) theme(m.params.theme);
+  if (m.method === "ui/resource-teardown" && m.id !== undefined) send({ id: m.id, result: {} });
+});
+
+function theme(t) {
+  const dark = t ? t === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+}
+
+request("ui/initialize", {
+  protocolVersion: "2026-01-26",
+  appInfo: { name: "maverickbuilds-reporting", version: "1" },
+  appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] },
+}).then((r) => { theme(r && r.hostContext && r.hostContext.theme); notify("ui/notifications/initialized", {}); })
+  .catch(() => theme());
+
+new ResizeObserver(() => notify("ui/notifications/size-changed",
+  { width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight })).observe(document.body);
+
+// ── helpers ──────────────────────────────────────────────────────────────
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) { if (v != null) e.setAttribute(k, v); }
+  for (const k of kids) if (k != null) e.append(k instanceof Node ? k : document.createTextNode(String(k)));
+  return e;
+}
+const SVG = "http://www.w3.org/2000/svg";
+function s(tag, attrs, text) {
+  const e = document.createElementNS(SVG, tag);
+  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
+  if (text != null) e.textContent = String(text);
+  return e;
+}
+const colors = () => [0, 1, 2, 3, 4].map((i) => getComputedStyle(document.documentElement).getPropertyValue("--s" + i).trim());
+function fmt(v, f) {
+  if (v == null) return "—";
+  const d = (f && f.decimals) || 0;
+  if (f && f.format === "percentage") return (v * 100).toFixed(1) + "%";
+  const n = v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+  return f && f.format === "currency" ? (f.currency || "") + n : n;
+}
+function compact(v) {
+  const a = Math.abs(v);
+  if (a >= 1e9) return +(v / 1e9).toFixed(1) + "B";
+  if (a >= 1e6) return +(v / 1e6).toFixed(1) + "M";
+  if (a >= 1e3) return +(v / 1e3).toFixed(1) + "K";
+  return +v.toFixed(2) + "";
+}
+function niceAxis(lo, hi, zero) {
+  if (zero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+  if (hi === lo) hi = lo + 1;
+  const raw = (hi - lo) / 5, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((x) => x >= raw);
+  return { lo: Math.floor(lo / step) * step, hi: Math.ceil(hi / step) * step, step };
+}
+const valueText = (v) => (v && v.state === "ok" ? null : v ? v.state.replace("_", " ") : "absent");
+
+// ── charts ───────────────────────────────────────────────────────────────
+function chartSVG(c) {
+  const W = 720, H = 360, L = 60, R = 12, T = 12, B = 46;
+  const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": c.title });
+  const pal = colors();
+  const yAxis = (a, fmtTick) => {
+    const g = s("g", { class: "grid" });
+    for (let v = a.lo; v <= a.hi + a.step / 2; v += a.step) {
+      const y = H - B - ((v - a.lo) / (a.hi - a.lo)) * (H - B - T);
+      g.append(s("line", { x1: L, x2: W - R, y1: y, y2: y }));
+      g.append(s("text", { x: L - 6, y: y + 4, "text-anchor": "end" }, fmtTick(v)));
+    }
+    svg.append(g);
+  };
+  const ypos = (a, v) => H - B - ((v - a.lo) / (a.hi - a.lo)) * (H - B - T);
+  if (c.kind === "pie") {
+    const vals = c.series[0].values, total = vals.reduce((t, v) => t + (v || 0), 0);
+    let a0 = -Math.PI / 2; const cx = 180, cy = H / 2, r = 140;
+    vals.forEach((v, i) => {
+      const a1 = a0 + (v / total) * 2 * Math.PI, large = a1 - a0 > Math.PI ? 1 : 0;
+      const p = `M${cx},${cy} L${cx + r * Math.cos(a0)},${cy + r * Math.sin(a0)} A${r},${r} 0 ${large} 1 ${cx + r * Math.cos(a1)},${cy + r * Math.sin(a1)} Z`;
+      const path = s("path", { d: p, fill: pal[i % 5], opacity: 1 - 0.2 * Math.floor(i / 5) % 0.6 });
+      path.append(s("title", {}, `${c.categories[i].name}: ${compact(v)} (${(v / total * 100).toFixed(1)}%)`));
+      svg.append(path);
+      svg.append(s("text", { x: 360, y: 24 + i * 18 }, `${c.categories[i].name} — ${compact(v)} (${(v / total * 100).toFixed(1)}%)`));
+      a0 = a1;
+    });
+    return svg;
+  }
+  if (c.kind === "scatter") {
+    const xs = c.points.map((p) => p.x), ys = c.points.map((p) => p.y);
+    const ax = niceAxis(Math.min(...xs), Math.max(...xs)), ay = niceAxis(Math.min(...ys), Math.max(...ys));
+    yAxis(ay, compact);
+    for (let v = ax.lo; v <= ax.hi + ax.step / 2; v += ax.step)
+      svg.append(s("text", { x: L + ((v - ax.lo) / (ax.hi - ax.lo)) * (W - L - R), y: H - B + 16, "text-anchor": "middle" }, compact(v)));
+    c.points.forEach((p) => {
+      const dot = s("circle", { cx: L + ((p.x - ax.lo) / (ax.hi - ax.lo)) * (W - L - R), cy: ypos(ay, p.y), r: 4, fill: pal[0] });
+      dot.append(s("title", {}, `${p.label}: x ${compact(p.x)}, y ${compact(p.y)}`));
+      svg.append(dot);
+    });
+    svg.append(s("text", { x: W / 2, y: H - 6, "text-anchor": "middle" }, "x: " + c.x_axis.label + " · y: " + c.y_axis.label));
+    return svg;
+  }
+  if (c.kind === "histogram") {
+    const a = niceAxis(0, Math.max(1, ...c.bins.map((b) => b.count)), true);
+    yAxis(a, (v) => v.toFixed(0));
+    const slot = (W - L - R) / c.bins.length;
+    c.bins.forEach((b, i) => {
+      const r = s("rect", { x: L + i * slot + 1, width: slot - 2, y: ypos(a, b.count), height: ypos(a, 0) - ypos(a, b.count), fill: pal[0] });
+      r.append(s("title", {}, `${compact(b.min)} – ${compact(b.max)}: ${b.count}`));
+      svg.append(r);
+      svg.append(s("text", { x: L + i * slot, y: H - B + 16, "text-anchor": "middle" }, compact(b.min)));
+    });
+    return svg;
+  }
+  // bar and line
+  const all = c.series.flatMap((x) => x.values.filter((v) => v != null));
+  const a = niceAxis(all.length ? Math.min(...all) : 0, all.length ? Math.max(...all) : 1, c.kind === "bar");
+  yAxis(a, compact);
+  const n = c.categories.length, slot = (W - L - R) / Math.max(1, n), every = Math.max(1, Math.ceil(n * 56 / (W - L - R)));
+  c.categories.forEach((cat, i) => {
+    if (i % every === 0) svg.append(s("text", { x: L + slot * (i + 0.5), y: H - B + 16, "text-anchor": "middle" },
+      cat.name.length > 14 ? cat.name.slice(0, 13) + "…" : cat.name));
+  });
+  c.series.forEach((sr, si) => {
+    if (c.kind === "line") {
+      let d = "", pen = false;
+      sr.values.forEach((v, i) => {
+        if (v == null) { pen = false; return; } // a gap, not a zero
+        const x = L + slot * (i + 0.5), y = ypos(a, v);
+        d += (pen ? " L" : " M") + x + "," + y; pen = true;
+        const dot = s("circle", { cx: x, cy: y, r: 3, fill: pal[si % 5] });
+        dot.append(s("title", {}, `${c.categories[i].name} · ${sr.label}: ${fmt(v, sr)}`));
+        svg.append(dot);
+      });
+      svg.append(s("path", { d, fill: "none", stroke: pal[si % 5], "stroke-width": 2 }));
+    } else {
+      const bw = (slot * 0.8) / c.series.length, zero = ypos(a, Math.max(a.lo, Math.min(0, a.hi)));
+      sr.values.forEach((v, i) => {
+        if (v == null) return;
+        const y = ypos(a, v), r = s("rect", { x: L + slot * i + slot * 0.1 + bw * si, width: Math.max(1, bw - 2),
+          y: Math.min(y, zero), height: Math.abs(zero - y), fill: pal[si % 5] });
+        r.append(s("title", {}, `${c.categories[i].name} · ${sr.label}: ${fmt(v, sr)}`));
+        svg.append(r);
+      });
+    }
+  });
+  return svg;
+}
+
+function legend(c) {
+  if (!c.series || c.series.length < 2) return null;
+  const pal = colors();
+  return el("div", { class: "legend" }, ...c.series.map((sr, i) => {
+    const sw = el("i"); sw.style.background = pal[i % 5]; return el("span", {}, sw, sr.label);
+  }));
+}
+
+function chartTable(c) {
+  if (c.kind === "scatter") return table(["Member", c.x_axis.label, c.y_axis.label],
+    c.points.map((p) => [p.label, [p.x, c.x_axis], [p.y, c.y_axis]]));
+  if (c.kind === "histogram") return table(["From", "To", "Members"], c.bins.map((b) => [compact(b.min), compact(b.max), b.count]));
+  return table(["", ...c.series.map((x) => x.label)], c.categories.map((cat, i) =>
+    [cat.name, ...c.series.map((sr) => sr.values[i] == null ? { absent: sr.states[i] } : [sr.values[i], sr])]));
+}
+
+function table(head, rows) {
+  const t = el("table", {}, el("thead", {}, el("tr", {}, ...head.map((h, i) => el("th", { class: i ? "n" : null }, h)))));
+  const tb = el("tbody");
+  rows.forEach((r) => tb.append(el("tr", {}, ...r.map((cell, i) => {
+    if (cell && cell.absent !== undefined) return el("td", { class: "n absent" }, (cell.absent || "absent").replace("_", " "));
+    if (Array.isArray(cell)) return el("td", { class: "n" }, fmt(cell[0], cell[1]));
+    return el("td", { class: i ? "n" : null }, cell);
+  }))));
+  t.append(tb);
+  return el("details", { open: "" }, el("summary", {}, "Data"), t);
+}
+
+function gridTable(d) {
+  if (!d) return null;
+  const metricCols = d.group_by ? d.columns.slice(2) : null;
+  if (!d.group_by) return table(["Metric", "Value"], d.rows.map((r) =>
+    [r.metric, r.value.state === "ok" ? [r.value.value, r] : { absent: r.value.state }]));
+  return table([d.group_by.name, ...metricCols.map((c) => c.label)], d.rows.map((r) =>
+    [r.member, ...metricCols.map((c) => r[c.id] && r[c.id].state === "ok" ? [r[c.id].value, c] : { absent: r[c.id] ? r[c.id].state : "absent" })]));
+}
+
+function kpis(d) {
+  if (!d || d.group_by) return gridTable(d);
+  return el("div", { class: "kpis" }, ...d.rows.map((r) =>
+    el("div", { class: "kpi" }, r.metric, el("b", {}, r.value.state === "ok" ? fmt(r.value.value, r) : "—"),
+      r.value.state === "ok" ? null : el("small", { class: "absent" }, r.value.state.replace("_", " ")))));
+}
+
+function comparison(cmp) {
+  return table([cmp.group_by ? cmp.group_by.name : "", cmp.current.metric.name, cmp.baseline.metric.name, "Difference", "Change %"],
+    cmp.rows.map((r) => [r.label,
+      r.current.state === "ok" ? [r.current.value, {}] : { absent: r.current.state },
+      r.baseline.state === "ok" ? [r.baseline.value, {}] : { absent: r.baseline.state },
+      r.difference == null ? { absent: "—" } : [r.difference, {}],
+      r.percent_change == null ? { absent: r.note ? "n/a" : "—" } : r.percent_change.toFixed(1) + "%"]));
+}
+
+function provenance(ctx, read) {
+  return el("footer", {}, `${ctx.application_name} · ${ctx.model_name} · revision ${ctx.revision_name} · read ${new Date(read).toLocaleString()} · values from maverickbuilds.app, read as you`);
+}
+
+// ── views ────────────────────────────────────────────────────────────────
+function show(v) {
+  if (!v || !v.view) return;
+  current = v; root.replaceChildren();
+  if (v.view === "chart") return showChart(v);
+  if (v.view === "report") return showReport(v.report);
+}
+
+function showChart(v) {
+  const c = v.chart;
+  root.append(el("h1", {}, c.title));
+  if (c.subtitle) root.append(el("div", { class: "sub" }, c.subtitle));
+  const kinds = v.alternatives || [];
+  if (kinds.length > 1) {
+    const bar = el("div", { class: "bar", role: "toolbar", "aria-label": "Chart type" });
+    kinds.forEach((k) => { const b = el("button", { "aria-pressed": String(k === c.kind) }, k); b.onclick = () => rerender({ kind: k }); bar.append(b); });
+    const r = el("button", {}, "Refresh"); r.onclick = () => rerender({}); bar.append(r);
+    root.append(bar);
+  }
+  root.append(chartSVG(c));
+  const lg = legend(c); if (lg) root.append(lg);
+  root.append(chartTable(c));
+  (c.notes || []).forEach((n) => root.append(el("div", { class: "note" }, n)));
+  root.append(provenance(v.context, v.read_at));
+}
+
+function showReport(r) {
+  root.append(el("h1", {}, r.title));
+  if (!r.complete) root.append(el("div", { class: "note warn" }, "Some sections could not be read; this report is incomplete."));
+  r.sections.forEach((sec) => {
+    root.append(el("h2", {}, sec.heading));
+    if (sec.commentary) root.append(el("div", { class: "comment" }, el("small", {}, "Assistant's commentary"), sec.commentary));
+    if (sec.status !== "ok") { root.append(el("div", { class: "note warn" }, sec.message || "unavailable")); return; }
+    if (sec.chart) { root.append(chartSVG(sec.chart)); const lg = legend(sec.chart); if (lg) root.append(lg); root.append(chartTable(sec.chart));
+      (sec.chart.notes || []).forEach((n) => root.append(el("div", { class: "note" }, n))); }
+    else if (sec.comparison) root.append(comparison(sec.comparison));
+    else if (sec.presentation === "kpi") root.append(kpis(sec.data));
+    else root.append(gridTable(sec.data));
+    if (sec.data && sec.data.filters && sec.data.filters.length)
+      root.append(el("div", { class: "note" }, "Filters: " + sec.data.filters.map((f) => f.dimension_name + " = " + f.member_label).join(", ")));
+  });
+  r.notes.forEach((n) => root.append(el("div", { class: "note" }, n)));
+  root.append(provenance(r.context, r.read_at));
+}
+
+function rerender(change) {
+  if (!current || !current.request) return;
+  const args = Object.assign({}, current.request, change);
+  request("tools/call", { name: "render_chart", arguments: args }).then((res) => {
+    if (res && res.structuredContent) {
+      show(res.structuredContent);
+      const c = res.structuredContent.chart;
+      notify("ui/update-model-context", { content: [{ type: "text",
+        text: `On screen now: ${c.kind} chart "${c.title}"${c.subtitle ? " (" + c.subtitle + ")" : ""}, read at ${res.structuredContent.read_at}.` }] });
+    } else if (res && res.isError) {
+      root.append(el("div", { class: "note warn" }, (res.content && res.content[0] && res.content[0].text) || "The chart could not be read."));
+    }
+  }).catch(() => root.append(el("div", { class: "note warn" }, "The chart could not be refreshed.")));
+}
+</script>
+</body>
+</html>

@@ -233,6 +233,46 @@ func (s *Store) ListRecords(ctx context.Context, formID string, limit int) ([]*F
 	return records, rows.Err()
 }
 
+// RecordPosition is a place in a form's record order (newest first, id the
+// tie-breaker): ListRecordsPage continues after it.
+type RecordPosition struct {
+	CreatedAt time.Time
+	ID        string
+}
+
+// ListRecordsPage lists up to limit of a form's records, newest first,
+// after `after` (from the start when nil). The order is total — created_at
+// alone is not, and two records of one import share it — so paging through
+// it reaches every record exactly once.
+func (s *Store) ListRecordsPage(ctx context.Context, formID string, after *RecordPosition, limit int) ([]*FormRecord, error) {
+	var afterAt *time.Time
+	var afterID *string
+	if after != nil {
+		afterAt, afterID = &after.CreatedAt, &after.ID
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, form_id::text, data, status::text, created_by::text, created_at, updated_at
+		FROM runtime.form_record
+		WHERE form_id = $1::uuid
+		  AND ($2::timestamptz IS NULL OR (created_at, id) < ($2::timestamptz, $3::uuid))
+		ORDER BY created_at DESC, id DESC LIMIT $4
+	`, formID, afterAt, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []*FormRecord
+	for rows.Next() {
+		r, err := scanRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, r)
+	}
+	return records, rows.Err()
+}
+
 func (s *Store) GetRecord(ctx context.Context, recordID string) (*FormRecord, error) {
 	var r FormRecord
 	var dataJSON []byte

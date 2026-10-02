@@ -839,3 +839,34 @@ func TestChartServesFormulaRuleRollupRow(t *testing.T) {
 	f.point("DE hidden", c, "us_share", "EMEA", nil)
 	f.point("DE hidden", c, "us_share", "UK", v(302.0/102))
 }
+
+// grantBuilder gives the viewer the developer role in the application's
+// workspace, keeping their access rules, and returns its revocation. A
+// revision other than the active one is a builder's (revision_access.go),
+// so the tests that read an old revision as a restricted person read it as
+// a restricted builder — access rules bind builders like everyone else.
+func (f *restrictedFixture) grantBuilder() (revoke func()) {
+	f.t.Helper()
+	ctx := context.Background()
+	var raID string
+	if err := f.pool.QueryRow(ctx, `
+		INSERT INTO identity.role_assignment (user_id, role, workspace_id)
+		SELECT $1::uuid, 'developer', workspace_id FROM core.application WHERE id = $2::uuid
+		RETURNING id::text`, f.viewerID, f.appID).Scan(&raID); err != nil {
+		f.t.Fatalf("grant builder: %v", err)
+	}
+	return func() {
+		if _, err := f.pool.Exec(ctx, `DELETE FROM identity.role_assignment WHERE id::text = $1`, raID); err != nil {
+			f.t.Fatalf("revoke builder: %v", err)
+		}
+	}
+}
+
+// assertOldRevisionClosed checks the viewer, a business user, is refused
+// revisionID as one that does not exist.
+func (f *restrictedFixture) assertOldRevisionClosed(label, revisionID string) {
+	f.t.Helper()
+	if status, raw := f.req("GET", "/api/grid?grid_def_id="+f.plan+"&revision_id="+revisionID, f.viewer, nil); status != http.StatusNotFound {
+		f.errf(label, "business viewer reading a non-active revision: %d %.200s, want 404", status, raw)
+	}
+}

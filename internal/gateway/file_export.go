@@ -382,6 +382,12 @@ func (h *handler) integrationExport(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("integration not found"), http.StatusNotFound)
 		return
 	}
+	// An export reads its integration's revision: the open one, unless the
+	// caller builds the model (revision_access.go).
+	if !h.revisionOpen(ctx, act, h.revisionModel(ctx, revisionID), revisionID) {
+		jsonErr(w, fmt.Errorf("integration not found"), http.StatusNotFound)
+		return
+	}
 	if typ != "file_export" {
 		jsonErr(w, fmt.Errorf("integration %q imports data; only an export integration is downloaded", name), http.StatusBadRequest)
 		return

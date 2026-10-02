@@ -3,6 +3,18 @@
 > **Classification:** Target — Implementation brief; this feature is not yet implemented.
 >
 > **Prepared:** 2026-10-02. Repository evidence and external documentation checked on this date.
+>
+> **Status (2026-10-02):** implemented and tested against the gateway and a real
+> Keycloak, **with the scope narrowed by the owner to grid data only**: charts
+> and reports are made in ChatGPT or Claude from grids, never from dashboards,
+> and nothing is saved in maverickbuilds.app. Forms, dashboards, workflows,
+> triggers, notifications and the related-resource families below are out of
+> the connector's scope, and the sections on them are superseded. Business
+> users read only each model's active revision. Built: nine grid tools incl.
+> `compare_grid`, `render_chart`, `render_report` (MCP Apps view + PNG
+> fallback); per-host registered clients (`cmd/connector-clients`); token
+> separation. Remaining: verification inside ChatGPT and Claude with a
+> deployed connector. See [`docs/CHAT_CONNECTOR.md`](docs/CHAT_CONNECTOR.md).
 
 ## 1. Outcome
 
@@ -442,6 +454,105 @@ If a dashboard definition changes between description and widget evaluation,
 detect the change and refresh or explicitly preserve the prior snapshot. Do not
 silently combine old titles/settings with newly selected sources.
 
+### Workflows, tasks and approvals
+
+Provide three clearly distinguished read views, each using its existing policy:
+
+| View | Content and authority |
+|---|---|
+| Published workflow summary | Permitted name, description, trigger event and context schema from the business-facing workflow catalog |
+| Builder definition | Full authorized step graph, conditions, assignments, subject/context configuration and draft/published/archived state; requires the existing builder read capability |
+| Runtime activity | Instances, eligible tasks, approval progress, decisions, permitted comments, due dates and timestamps under personal-participation or scoped administrative-history rules |
+
+Permission to read the published catalog does not expose a draft or full builder
+definition. A task assignment permits the corresponding task read; it does not
+automatically grant every step, subject record or instance in that application.
+Do not merge personal history, task inbox and administrative history into one
+unrestricted dataset. Determine which view and fields the caller may read before
+querying, then apply any additional application/model/date selection.
+
+Use the engine's shared assignment logic, including
+`internal/workflow/assignee`, for task eligibility. Match roles in the correct
+tenant/workspace/application. A business role named `tenant_admin` is not the
+platform role, and holding an administrative role in one tenant grants no such
+role in another. Apply disabled-account and current role-membership checks.
+
+Describe historical/running instances from their captured step/context-schema
+snapshots when present, with the engine's documented legacy fallback. A later
+edit to the workflow definition must not rewrite a report's explanation of an
+older instance. These definition snapshots do not freeze a user's permissions;
+current read restrictions still apply.
+
+Return permitted statuses, requester/assignee labels, current steps, recorded
+decisions and comments, timing, due dates, and links/IDs to subjects only as
+authorized. Redact hidden context members and restricted subject fields in
+structured data, display labels and narrative inputs alike. Any drill-through
+to a form record, grid or related workflow uses that resource's own read policy.
+
+Support reports such as pending tasks by workflow, overdue approvals, counts by
+instance state and completion-time distributions. Define the population, timezone
+and selected timestamp (`started_at`, `completed_at`, or task due time). Count
+instances distinctly instead of multiplying them by joined steps; label task-level
+and instance-level measures separately. Compute completion duration only from
+appropriate recorded timestamps, and overdue status only where a due date and
+applicable pending state exist. Distinguish test runs from production instances;
+exclude test runs from business summaries unless explicitly selected and allowed.
+
+Every read is passive. Do not start, advance, approve, reject, reassign, cancel,
+publish or test-run a workflow, or mark a task complete. A request to perform
+such an action must explain that this connection provides reads only.
+
+### Triggers and execution history
+
+Read the trigger types actually configured in the engine: manual, scheduled and
+supported event-driven rules. Return authorized rule IDs, names, enabled/state
+information, event type, source and target workflow references, and schedule
+configuration when applicable. Validate source/target visibility separately;
+readable rule metadata does not grant access to a referenced form or integration.
+
+For schedules, preserve timezone, cron/interval semantics where supported and
+recorded next/last-fire timestamps. Distinguish a configured schedule, a computed
+next occurrence and an observed execution. Do not imply a trigger ran just because
+its schedule says it should have. Resolve name-based workflow bindings using the
+engine's actual rules; do not invent a workflow ID from a matching display label.
+
+Execution queries expose permitted timestamps, status, attempts, durations,
+sanitized recorded error summaries and related run/instance references. Aggregate
+over all permitted matching executions before presenting counts, rates or charts.
+Define whether retries count as separate attempts or one logical execution and
+state the denominator; do not mix a per-attempt failure rate with a per-run count.
+Reading metadata or history must never fire a rule, enable/disable it, recalculate
+its schedule, retry an execution, or cause an import/integration to run.
+
+### Other supported resources
+
+The initial related-resource adapter registry is explicitly bounded below.
+“Read access” means the intersection of the current engine policy, connector
+scope and feature entitlement described in section 5, not simply authentication.
+
+| Resource family | Read/report capability | Boundary |
+|---|---|---|
+| Metrics and dimensions | Definitions, units, hierarchies, member properties and permitted declared dependencies | Filter hidden metadata and validate every referenced metric/member; no inference of a protected formula dependency |
+| Revisions | Permitted revision metadata, active context and comparable snapshots | Honor current revision read policy; never expose a builder draft because the caller may read the active revision |
+| Integrations | Safe name/type/status/target metadata and permitted configuration summaries | Explicit field allowlist; no credentials, OAuth tokens, secret-bearing headers, connection strings or arbitrary raw config |
+| Integration runs | Permitted run outcomes, timing, row counts and sanitized error summaries | Preserve the existing run-history role guard and source restrictions; do not grant developer history to all business users |
+| Notifications | The caller's own permitted notifications, delivery/read status and safe related-resource references | Reading never marks them read; opening a referenced object requires that object's read policy |
+| Cell history | Permitted changes to a selected cell, timestamps and allowed actor/value fields | Same source/member/metric access and feature entitlement as the existing cell-history capability |
+| Audit events | Authorized scoped event summaries, filters and aggregate activity | Existing audit role, scope, retention and edition/licence gates; no general audit feed for ordinary users |
+
+Use approved projections even if an existing endpoint returns broader JSON.
+Permission to inspect an integration does not justify putting credentials or raw
+request/response bodies in a chat result. Sanitize error text as well as structured
+fields. Do not expose identity-provider settings, users' private profiles, full ACL
+tables, billing data or infrastructure through an unbounded “other” tool.
+
+Additional resource families require a registered read contract with ownership,
+field visibility, relationship checks, pagination, completeness, safe projection
+and acceptance tests. Reuse an existing policy where available. If no suitable
+read policy exists, report that gap and obtain the required product/access decision
+under repository rules; do not fall back to an administrator endpoint or direct
+database access as a substitute for authorization.
+
 ### Comparisons and reports across sources
 
 Support comparisons of compatible results: the same measure, compatible units,
@@ -456,6 +567,11 @@ to form records requires a declared relationship and compatible grain; absent
 that, keep separate sections and explain the limitation. Do not invent joins,
 currency conversion, missing budget values or causality.
 
+Operational charts use the same authorized tabular result contract as grid/form
+charts. Compare only populations with matching grain, status definitions, date
+windows and units. Cross-resource reports must not reveal a hidden subject through
+a workflow comment, trigger label, run error, aggregate or notification reference.
+
 ### Result envelope and limits
 
 Each query returns a typed table/series and a provenance envelope containing:
@@ -463,6 +579,8 @@ Each query returns a typed table/series and a provenance envelope containing:
 - Result ID and expiry; application/model/revision/source IDs and readable labels.
 - Originating dashboard/widget IDs and saved configuration identity for results
   read through a dashboard, alongside any temporary filter overrides.
+- Resource family and relevant workflow definition/instance/task/trigger/run IDs
+  for operational results; identify the definition snapshot or live metadata used.
 - Requested and effective filters, grouping, measure definitions and aggregation.
 - Column types, units, currencies, numeric precision and time/calendar semantics.
 - Query timestamp and actual data/calculation freshness when known. A request
@@ -565,20 +683,23 @@ feature to make the baseline feature work.
 
 ## 9. Implementation sequence
 
-1. **Confirm reach and contracts.** Trace discovery, grids, forms, dashboards and calculations
-   for business users. Document the intended read policy and source capabilities.
+1. **Confirm reach and contracts.** Trace data, dashboard and operational reads
+   for business users, business administrators, developers and tenant administrators.
+   Document effective restrictions, role combinations and resource capabilities.
    Identify any permission change requiring a separate decision.
 2. **Build shared reporting reads.** Add authorized source/dashboard discovery,
    typed grid queries, complete form pagination/aggregation and dashboard-widget
-   reads with saved/synchronized context. Reuse calculation and access services.
+   reads with saved/synchronized context. Add workflow/task, trigger/execution and
+   related-resource adapters with their own read policies and complete aggregates.
+   Reuse calculation, assignment and access services.
    Add generic REST contracts where needed and regenerate clients.
 3. **Add MCP and OAuth.** Implement `/mcp`, metadata, discovery and data tools.
    Prove the complete per-user login/read/revoke flow with each client.
 4. **Add comparison and presentation.** Implement authorized result references,
    deterministic comparisons, shared chart/report components and static fallback.
 5. **Verify end to end.** Run the scenarios below on both a model with no dashboards
-   and a model with developer-created dashboards, using real business-user roles
-   and both chat clients.
+   and a model with developer-created dashboards, workflows and triggers, using
+   the actual scoped roles and both chat clients. Exercise live permission changes.
 6. **Document operation.** Provide connection instructions for ChatGPT and Claude,
    identity-provider configuration, deployment configuration, query limits,
    disconnect behavior, troubleshooting and the tested host capability matrix.
@@ -611,6 +732,19 @@ request verification. Never claim a mocked provider proves host compatibility.
 | Large/partial dashboard | Widget pagination covers every permitted widget; missing, unsupported or failed widgets are reported without falsely claiming complete coverage |
 | Dashboard definition change | Results identify the configuration read; concurrent edits cannot mix stale titles with different sources silently |
 | Action widgets | Automation, integration and import controls remain descriptive and cause no domain writes |
+| Restrictions configured by each authority | A restriction set through the business-admin, developer or tenant-admin capability is enforced identically in the application and connector wherever that setting applies |
+| Combined roles and scope | Business/admin/developer role combinations retain the engine's policy precedence; roles held in another workspace/tenant confer no unintended access |
+| Shared connector setup | Users connecting to a tenant-installed connector receive their own permitted data, never the installer's credentials or privileges |
+| Permission change during a connection | Remove a role, dashboard grant, member/metric permission, model grant or tenant access and verify subsequent reads, cursors and cached renders obey the new policy without reconnecting |
+| Disabled user or policy lookup failure | Refuse data even with a previously valid token/session/cache; do not use the last successful allowed response |
+| Workflow catalog versus full definition | An ordinary reader receives only permitted published summary fields; full/draft definitions require the actual builder read capability |
+| Workflow activity | Requester, assignee, notification recipient, unrelated user and scoped business administrator receive exactly their permitted views; subject/context data stays independently protected |
+| Definition edited after instance start | Historical steps and context use the captured definition, with current access checks |
+| Trigger/schedule reads | Rule configuration, schedule and observed execution remain distinct; reads cause no execution or schedule mutation |
+| More than 50 operational records | Workflow/trigger/notification queries paginate completely; aggregate totals and rates match the full permitted population |
+| Workflow and trigger charts | Task versus instance grain, duration population, due-date logic, retry counting, timezone and test-run handling are explicit and correct |
+| Integration configuration and errors | Safe projections and sanitized errors contain no credentials or hidden-source data, including for privileged readers |
+| Notifications and audit/history | Only permitted recipient/scoped records are read; licence/role gates remain enforced and notification read state does not change |
 | Another application/model/tenant | Forged IDs cannot reach data, metadata, cached results or counts |
 | Hidden metric/member/ancestor | Excluded everywhere, including derived values, form references, filters, totals and rankings |
 | Explicit inaccessible filter | Rejected without silently selecting a visible default |
@@ -632,26 +766,31 @@ request verification. Never claim a mocked provider proves host compatibility.
 Add tests near the shared services and existing gateway authorization tests;
 cover MCP schemas, cursor/result ownership and UI rendering separately. Exercise
 new query paths with relevant existing tests in `internal/query`,
-`internal/calculation`, `internal/rollup`, `internal/readset` and
+`internal/calculation`, `internal/rollup`, `internal/readset`, `internal/workflow`,
+`internal/workflow/assignee`, `internal/identity` and
 `internal/gateway`. Run the repository's required generation, Go, frontend build
 and lint checks for the files changed. A documentation-only change does not
 require running the application test suite.
 
 Record manual verification for each supported ChatGPT/Claude surface: account
 and workspace conditions, connection/authentication, discovery, grid/form and
-dashboard reports, charts, follow-up filters, fallback behavior and disconnect. Availability
+dashboard reports, workflow/trigger activity reports, related resources, charts,
+follow-up filters, live access changes, fallback behavior and disconnect. Availability
 can depend on host account/workspace policy; state any untested surface explicitly.
 Automated tests alone do not establish that either host renders the integration.
 
 The feature is complete when an authorized business user can connect from
-either chat client, discover model data and developer-created dashboards, read
-grids/forms and dashboard widgets, receive accurate reports and rendered charts,
-and refine them conversationally without entering the dashboard screens in
-maverickbuilds.app. Models without dashboards remain fully supported.
+either chat client, read permitted model data, dashboards, workflows, triggers and
+related resources, receive accurate reports/charts and refine them conversationally
+without entering the application screens. Every read must honor the restrictions
+configured by business administrators, developers and tenant administrators, under
+the signed-in user's current effective permissions. Models without dashboards
+remain fully supported.
 
 ## 11. Deliverables and supporting references
 
-Deliver the reporting services and schemas, MCP/OAuth integration, in-chat report
+Deliver the reporting services and resource adapters, effective-access contract
+and parity tests, MCP/OAuth integration, in-chat report
 and chart components, tests, configuration examples, connection guide and actual
 host verification evidence. Update [docs/API.md](docs/API.md),
 [docs/README.md](docs/README.md), and implementation status after the work ships.
@@ -667,6 +806,9 @@ Repository references:
 - [Dashboard selector synchronization](web/src/consoles/DashboardContextSyncProvider.tsx)
 - [Form record access](internal/gateway/form_record_access.go)
 - [Form storage](internal/crudapp/store.go)
+- [Workflow definitions, instances and triggers](internal/workflow/store.go)
+- [Shared task-assignment policy](internal/workflow/assignee/assignee.go)
+- [Existing workflow/inbox scope observations](docs/OBSERVATIONS.md#workflow-history-and-the-workflow-inbox-are-scoped-differently)
 
 External setup references, checked 2026-10-02; verify again when implementing:
 

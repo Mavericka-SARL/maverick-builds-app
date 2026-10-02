@@ -39,6 +39,9 @@ const tenantHeader = "X-Tenant-Id"
 // resolution does, without touching a database — the middleware needs it
 // before it knows which database to touch.
 func (h *handler) subjectOf(r *http.Request) string {
+	if sub, ok := delegatedSubject(r.Context()); ok {
+		return sub // a connector's read (mcp.go), verified at /mcp
+	}
 	if h.devMode {
 		persona := r.Header.Get("X-Dev-User")
 		if persona == "" {
@@ -56,7 +59,7 @@ func (h *handler) subjectOf(r *http.Request) string {
 	if token == "" {
 		return ""
 	}
-	claims, err := h.jwks.Validate(token)
+	claims, err := h.restClaims(token)
 	if err != nil {
 		return ""
 	}

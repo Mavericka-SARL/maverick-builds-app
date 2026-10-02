@@ -207,7 +207,9 @@ func TestFormMappingRecalculatesItsOwnRevisionNotTheModelsActiveOne(t *testing.T
 	devPersonas["rollup-test-manager-annual"] = "test-manager"
 	t.Cleanup(func() { delete(devPersonas, "rollup-test-manager-annual") })
 
-	status, body := f.do(t, "POST", "/api/forms/"+formID+"/records", "rollup-test-manager-annual", map[string]any{
+	// The form lives in a revision other than the active one, which is its
+	// builders' (revision_access.go): the developer submits.
+	status, body := f.do(t, "POST", "/api/forms/"+formID+"/records", "rollup-test-approver", map[string]any{
 		"data": map[string]any{"amount": 25.0},
 	})
 	if status != 200 {

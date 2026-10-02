@@ -8175,7 +8175,6 @@ func (*Error) listDevPersonasRes()             {}
 func (*Error) listDeveloperFoldersRes()        {}
 func (*Error) listDeveloperIntegrationsRes()   {}
 func (*Error) listFormMappingsRes()            {}
-func (*Error) listFormRecordsRes()             {}
 func (*Error) listFormsRes()                   {}
 func (*Error) listGridsRes()                   {}
 func (*Error) listIntegrationRunsRes()         {}
@@ -10138,6 +10137,213 @@ type GetGridNotFound Error
 
 func (*GetGridNotFound) getGridRes() {}
 
+type GetGridSeriesBadRequest Error
+
+func (*GetGridSeriesBadRequest) getGridSeriesRes() {}
+
+type GetGridSeriesChartType string
+
+const (
+	GetGridSeriesChartTypeBar       GetGridSeriesChartType = "bar"
+	GetGridSeriesChartTypeLine      GetGridSeriesChartType = "line"
+	GetGridSeriesChartTypePie       GetGridSeriesChartType = "pie"
+	GetGridSeriesChartTypeScatter   GetGridSeriesChartType = "scatter"
+	GetGridSeriesChartTypeHistogram GetGridSeriesChartType = "histogram"
+)
+
+// AllValues returns all GetGridSeriesChartType values.
+func (GetGridSeriesChartType) AllValues() []GetGridSeriesChartType {
+	return []GetGridSeriesChartType{
+		GetGridSeriesChartTypeBar,
+		GetGridSeriesChartTypeLine,
+		GetGridSeriesChartTypePie,
+		GetGridSeriesChartTypeScatter,
+		GetGridSeriesChartTypeHistogram,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s GetGridSeriesChartType) MarshalText() ([]byte, error) {
+	switch s {
+	case GetGridSeriesChartTypeBar:
+		return []byte(s), nil
+	case GetGridSeriesChartTypeLine:
+		return []byte(s), nil
+	case GetGridSeriesChartTypePie:
+		return []byte(s), nil
+	case GetGridSeriesChartTypeScatter:
+		return []byte(s), nil
+	case GetGridSeriesChartTypeHistogram:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *GetGridSeriesChartType) UnmarshalText(data []byte) error {
+	switch GetGridSeriesChartType(data) {
+	case GetGridSeriesChartTypeBar:
+		*s = GetGridSeriesChartTypeBar
+		return nil
+	case GetGridSeriesChartTypeLine:
+		*s = GetGridSeriesChartTypeLine
+		return nil
+	case GetGridSeriesChartTypePie:
+		*s = GetGridSeriesChartTypePie
+		return nil
+	case GetGridSeriesChartTypeScatter:
+		*s = GetGridSeriesChartTypeScatter
+		return nil
+	case GetGridSeriesChartTypeHistogram:
+		*s = GetGridSeriesChartTypeHistogram
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type GetGridSeriesHideRollupMembers string
+
+const (
+	GetGridSeriesHideRollupMembers0 GetGridSeriesHideRollupMembers = "0"
+	GetGridSeriesHideRollupMembers1 GetGridSeriesHideRollupMembers = "1"
+)
+
+// AllValues returns all GetGridSeriesHideRollupMembers values.
+func (GetGridSeriesHideRollupMembers) AllValues() []GetGridSeriesHideRollupMembers {
+	return []GetGridSeriesHideRollupMembers{
+		GetGridSeriesHideRollupMembers0,
+		GetGridSeriesHideRollupMembers1,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s GetGridSeriesHideRollupMembers) MarshalText() ([]byte, error) {
+	switch s {
+	case GetGridSeriesHideRollupMembers0:
+		return []byte(s), nil
+	case GetGridSeriesHideRollupMembers1:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *GetGridSeriesHideRollupMembers) UnmarshalText(data []byte) error {
+	switch GetGridSeriesHideRollupMembers(data) {
+	case GetGridSeriesHideRollupMembers0:
+		*s = GetGridSeriesHideRollupMembers0
+		return nil
+	case GetGridSeriesHideRollupMembers1:
+		*s = GetGridSeriesHideRollupMembers1
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type GetGridSeriesNotFound Error
+
+func (*GetGridSeriesNotFound) getGridSeriesRes() {}
+
+// GetGridSeriesOK represents sum type.
+type GetGridSeriesOK struct {
+	Type               GetGridSeriesOKType // switch on this field
+	CategoryChartData  CategoryChartData
+	ScatterChartData   ScatterChartData
+	HistogramChartData HistogramChartData
+}
+
+// GetGridSeriesOKType is oneOf type of GetGridSeriesOK.
+type GetGridSeriesOKType string
+
+// Possible values for GetGridSeriesOKType.
+const (
+	CategoryChartDataGetGridSeriesOK  GetGridSeriesOKType = "CategoryChartData"
+	ScatterChartDataGetGridSeriesOK   GetGridSeriesOKType = "ScatterChartData"
+	HistogramChartDataGetGridSeriesOK GetGridSeriesOKType = "HistogramChartData"
+)
+
+// IsCategoryChartData reports whether GetGridSeriesOK is CategoryChartData.
+func (s GetGridSeriesOK) IsCategoryChartData() bool {
+	return s.Type == CategoryChartDataGetGridSeriesOK
+}
+
+// IsScatterChartData reports whether GetGridSeriesOK is ScatterChartData.
+func (s GetGridSeriesOK) IsScatterChartData() bool { return s.Type == ScatterChartDataGetGridSeriesOK }
+
+// IsHistogramChartData reports whether GetGridSeriesOK is HistogramChartData.
+func (s GetGridSeriesOK) IsHistogramChartData() bool {
+	return s.Type == HistogramChartDataGetGridSeriesOK
+}
+
+// SetCategoryChartData sets GetGridSeriesOK to CategoryChartData.
+func (s *GetGridSeriesOK) SetCategoryChartData(v CategoryChartData) {
+	s.Type = CategoryChartDataGetGridSeriesOK
+	s.CategoryChartData = v
+}
+
+// GetCategoryChartData returns CategoryChartData and true boolean if GetGridSeriesOK is CategoryChartData.
+func (s GetGridSeriesOK) GetCategoryChartData() (v CategoryChartData, ok bool) {
+	if !s.IsCategoryChartData() {
+		return v, false
+	}
+	return s.CategoryChartData, true
+}
+
+// NewCategoryChartDataGetGridSeriesOK returns new GetGridSeriesOK from CategoryChartData.
+func NewCategoryChartDataGetGridSeriesOK(v CategoryChartData) GetGridSeriesOK {
+	var s GetGridSeriesOK
+	s.SetCategoryChartData(v)
+	return s
+}
+
+// SetScatterChartData sets GetGridSeriesOK to ScatterChartData.
+func (s *GetGridSeriesOK) SetScatterChartData(v ScatterChartData) {
+	s.Type = ScatterChartDataGetGridSeriesOK
+	s.ScatterChartData = v
+}
+
+// GetScatterChartData returns ScatterChartData and true boolean if GetGridSeriesOK is ScatterChartData.
+func (s GetGridSeriesOK) GetScatterChartData() (v ScatterChartData, ok bool) {
+	if !s.IsScatterChartData() {
+		return v, false
+	}
+	return s.ScatterChartData, true
+}
+
+// NewScatterChartDataGetGridSeriesOK returns new GetGridSeriesOK from ScatterChartData.
+func NewScatterChartDataGetGridSeriesOK(v ScatterChartData) GetGridSeriesOK {
+	var s GetGridSeriesOK
+	s.SetScatterChartData(v)
+	return s
+}
+
+// SetHistogramChartData sets GetGridSeriesOK to HistogramChartData.
+func (s *GetGridSeriesOK) SetHistogramChartData(v HistogramChartData) {
+	s.Type = HistogramChartDataGetGridSeriesOK
+	s.HistogramChartData = v
+}
+
+// GetHistogramChartData returns HistogramChartData and true boolean if GetGridSeriesOK is HistogramChartData.
+func (s GetGridSeriesOK) GetHistogramChartData() (v HistogramChartData, ok bool) {
+	if !s.IsHistogramChartData() {
+		return v, false
+	}
+	return s.HistogramChartData, true
+}
+
+// NewHistogramChartDataGetGridSeriesOK returns new GetGridSeriesOK from HistogramChartData.
+func NewHistogramChartDataGetGridSeriesOK(v HistogramChartData) GetGridSeriesOK {
+	var s GetGridSeriesOK
+	s.SetHistogramChartData(v)
+	return s
+}
+
+func (*GetGridSeriesOK) getGridSeriesRes() {}
+
 type GetGridTotalsOnly string
 
 const (
@@ -10350,6 +10556,103 @@ func (s *GridAccessRules) init() GridAccessRules {
 		*s = m
 	}
 	return m
+}
+
+// Ref: #/components/schemas/GridCatalogItem
+type GridCatalogItem struct {
+	ID         uuid.UUID                       `json:"id"`
+	Name       string                          `json:"name"`
+	RevisionID uuid.UUID                       `json:"revision_id"`
+	Dimensions []GridCatalogItemDimensionsItem `json:"dimensions"`
+	// Metrics of the grid the caller may see.
+	MetricCount int `json:"metric_count"`
+	// Set when the grid mirrors another grid's metrics through a cross-dimension rollup.
+	RollupSourceGridID OptUUID `json:"rollup_source_grid_id"`
+}
+
+// GetID returns the value of ID.
+func (s *GridCatalogItem) GetID() uuid.UUID {
+	return s.ID
+}
+
+// GetName returns the value of Name.
+func (s *GridCatalogItem) GetName() string {
+	return s.Name
+}
+
+// GetRevisionID returns the value of RevisionID.
+func (s *GridCatalogItem) GetRevisionID() uuid.UUID {
+	return s.RevisionID
+}
+
+// GetDimensions returns the value of Dimensions.
+func (s *GridCatalogItem) GetDimensions() []GridCatalogItemDimensionsItem {
+	return s.Dimensions
+}
+
+// GetMetricCount returns the value of MetricCount.
+func (s *GridCatalogItem) GetMetricCount() int {
+	return s.MetricCount
+}
+
+// GetRollupSourceGridID returns the value of RollupSourceGridID.
+func (s *GridCatalogItem) GetRollupSourceGridID() OptUUID {
+	return s.RollupSourceGridID
+}
+
+// SetID sets the value of ID.
+func (s *GridCatalogItem) SetID(val uuid.UUID) {
+	s.ID = val
+}
+
+// SetName sets the value of Name.
+func (s *GridCatalogItem) SetName(val string) {
+	s.Name = val
+}
+
+// SetRevisionID sets the value of RevisionID.
+func (s *GridCatalogItem) SetRevisionID(val uuid.UUID) {
+	s.RevisionID = val
+}
+
+// SetDimensions sets the value of Dimensions.
+func (s *GridCatalogItem) SetDimensions(val []GridCatalogItemDimensionsItem) {
+	s.Dimensions = val
+}
+
+// SetMetricCount sets the value of MetricCount.
+func (s *GridCatalogItem) SetMetricCount(val int) {
+	s.MetricCount = val
+}
+
+// SetRollupSourceGridID sets the value of RollupSourceGridID.
+func (s *GridCatalogItem) SetRollupSourceGridID(val OptUUID) {
+	s.RollupSourceGridID = val
+}
+
+type GridCatalogItemDimensionsItem struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
+// GetID returns the value of ID.
+func (s *GridCatalogItemDimensionsItem) GetID() uuid.UUID {
+	return s.ID
+}
+
+// GetName returns the value of Name.
+func (s *GridCatalogItemDimensionsItem) GetName() string {
+	return s.Name
+}
+
+// SetID sets the value of ID.
+func (s *GridCatalogItemDimensionsItem) SetID(val uuid.UUID) {
+	s.ID = val
+}
+
+// SetName sets the value of Name.
+func (s *GridCatalogItemDimensionsItem) SetName(val string) {
+	s.Name = val
 }
 
 // Ref: #/components/schemas/GridChartCategory
@@ -12564,9 +12867,41 @@ type ListFormMappingsOKApplicationJSON []FormMetricMapping
 
 func (*ListFormMappingsOKApplicationJSON) listFormMappingsRes() {}
 
-type ListFormRecordsOKApplicationJSON []FormRecord
+type ListFormRecordsBadRequest Error
 
-func (*ListFormRecordsOKApplicationJSON) listFormRecordsRes() {}
+func (*ListFormRecordsBadRequest) listFormRecordsRes() {}
+
+type ListFormRecordsNotFound Error
+
+func (*ListFormRecordsNotFound) listFormRecordsRes() {}
+
+// ListFormRecordsOKHeaders wraps []FormRecord with response headers.
+type ListFormRecordsOKHeaders struct {
+	XNextCursor OptString
+	Response    []FormRecord
+}
+
+// GetXNextCursor returns the value of XNextCursor.
+func (s *ListFormRecordsOKHeaders) GetXNextCursor() OptString {
+	return s.XNextCursor
+}
+
+// GetResponse returns the value of Response.
+func (s *ListFormRecordsOKHeaders) GetResponse() []FormRecord {
+	return s.Response
+}
+
+// SetXNextCursor sets the value of XNextCursor.
+func (s *ListFormRecordsOKHeaders) SetXNextCursor(val OptString) {
+	s.XNextCursor = val
+}
+
+// SetResponse sets the value of Response.
+func (s *ListFormRecordsOKHeaders) SetResponse(val []FormRecord) {
+	s.Response = val
+}
+
+func (*ListFormRecordsOKHeaders) listFormRecordsRes() {}
 
 type ListFormsOKApplicationJSON []ListedForm
 
@@ -12735,6 +13070,18 @@ func (*ListPublicDimensionsNotFound) listPublicDimensionsRes() {}
 type ListPublicDimensionsOKApplicationJSON []Dimension
 
 func (*ListPublicDimensionsOKApplicationJSON) listPublicDimensionsRes() {}
+
+type ListReadableGridsForbidden Error
+
+func (*ListReadableGridsForbidden) listReadableGridsRes() {}
+
+type ListReadableGridsNotFound Error
+
+func (*ListReadableGridsNotFound) listReadableGridsRes() {}
+
+type ListReadableGridsOKApplicationJSON []GridCatalogItem
+
+func (*ListReadableGridsOKApplicationJSON) listReadableGridsRes() {}
 
 // ListScimTokensForbidden is response for ListScimTokens operation.
 type ListScimTokensForbidden struct{}
@@ -16012,6 +16359,98 @@ func (o OptGetGridMetaOnly) Get() (v GetGridMetaOnly, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptGetGridMetaOnly) Or(d GetGridMetaOnly) GetGridMetaOnly {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptGetGridSeriesChartType returns new OptGetGridSeriesChartType with value set to v.
+func NewOptGetGridSeriesChartType(v GetGridSeriesChartType) OptGetGridSeriesChartType {
+	return OptGetGridSeriesChartType{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGetGridSeriesChartType is optional GetGridSeriesChartType.
+type OptGetGridSeriesChartType struct {
+	Value GetGridSeriesChartType
+	Set   bool
+}
+
+// IsSet returns true if OptGetGridSeriesChartType was set.
+func (o OptGetGridSeriesChartType) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGetGridSeriesChartType) Reset() {
+	var v GetGridSeriesChartType
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGetGridSeriesChartType) SetTo(v GetGridSeriesChartType) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGetGridSeriesChartType) Get() (v GetGridSeriesChartType, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGetGridSeriesChartType) Or(d GetGridSeriesChartType) GetGridSeriesChartType {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptGetGridSeriesHideRollupMembers returns new OptGetGridSeriesHideRollupMembers with value set to v.
+func NewOptGetGridSeriesHideRollupMembers(v GetGridSeriesHideRollupMembers) OptGetGridSeriesHideRollupMembers {
+	return OptGetGridSeriesHideRollupMembers{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGetGridSeriesHideRollupMembers is optional GetGridSeriesHideRollupMembers.
+type OptGetGridSeriesHideRollupMembers struct {
+	Value GetGridSeriesHideRollupMembers
+	Set   bool
+}
+
+// IsSet returns true if OptGetGridSeriesHideRollupMembers was set.
+func (o OptGetGridSeriesHideRollupMembers) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGetGridSeriesHideRollupMembers) Reset() {
+	var v GetGridSeriesHideRollupMembers
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGetGridSeriesHideRollupMembers) SetTo(v GetGridSeriesHideRollupMembers) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGetGridSeriesHideRollupMembers) Get() (v GetGridSeriesHideRollupMembers, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGetGridSeriesHideRollupMembers) Or(d GetGridSeriesHideRollupMembers) GetGridSeriesHideRollupMembers {
 	if v, ok := o.Get(); ok {
 		return v
 	}

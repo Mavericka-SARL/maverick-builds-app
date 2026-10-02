@@ -5947,6 +5947,580 @@ func decodeGetGridParams(args [0]string, argsEscaped bool, r *http.Request) (par
 	return params, nil
 }
 
+// GetGridSeriesParams is parameters of getGridSeries operation.
+type GetGridSeriesParams struct {
+	GridDefID uuid.UUID
+	// Revision to read; omitted resolves the model's active revision.
+	RevisionID OptUUID                   `json:",omitempty,omitzero"`
+	ChartType  OptGetGridSeriesChartType `json:",omitempty,omitzero"`
+	// The grid dimension the metrics are resolved along.
+	DimensionID uuid.UUID
+	// Comma-separated metric ids (1–5 for bar/line, exactly 1 for pie/histogram).
+	MetricIds OptString `json:",omitempty,omitzero"`
+	XMetricID OptUUID   `json:",omitempty,omitzero"`
+	YMetricID OptUUID   `json:",omitempty,omitzero"`
+	BinCount  OptInt    `json:",omitempty,omitzero"`
+	// 1 keeps only leaf members of the resolved dimension.
+	HideRollupMembers OptGetGridSeriesHideRollupMembers `json:",omitempty,omitzero"`
+	// JSON object of dimension id to member code fixing the grid's other dimensions.
+	Context OptString `json:",omitempty,omitzero"`
+}
+
+func unpackGetGridSeriesParams(packed middleware.Parameters) (params GetGridSeriesParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "grid_def_id",
+			In:   "query",
+		}
+		params.GridDefID = packed[key].(uuid.UUID)
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "chart_type",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.ChartType = v.(OptGetGridSeriesChartType)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "dimension_id",
+			In:   "query",
+		}
+		params.DimensionID = packed[key].(uuid.UUID)
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "metric_ids",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.MetricIds = v.(OptString)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "x_metric_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.XMetricID = v.(OptUUID)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "y_metric_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.YMetricID = v.(OptUUID)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "bin_count",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.BinCount = v.(OptInt)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "hide_rollup_members",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.HideRollupMembers = v.(OptGetGridSeriesHideRollupMembers)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "context",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.Context = v.(OptString)
+		}
+	}
+	return params
+}
+
+func decodeGetGridSeriesParams(args [0]string, argsEscaped bool, r *http.Request) (params GetGridSeriesParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: grid_def_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "grid_def_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.GridDefID = c
+				return nil
+			}); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "grid_def_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Set default value for query: chart_type.
+	{
+		val := GetGridSeriesChartType("bar")
+		params.ChartType.SetTo(val)
+	}
+	// Decode query: chart_type.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "chart_type",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotChartTypeVal GetGridSeriesChartType
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotChartTypeVal = GetGridSeriesChartType(c)
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.ChartType.SetTo(paramsDotChartTypeVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+			if err := func() error {
+				if value, ok := params.ChartType.Get(); ok {
+					if err := func() error {
+						if err := value.Validate(); err != nil {
+							return err
+						}
+						return nil
+					}(); err != nil {
+						return err
+					}
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "chart_type",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: dimension_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "dimension_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.DimensionID = c
+				return nil
+			}); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "dimension_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: metric_ids.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "metric_ids",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotMetricIdsVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotMetricIdsVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.MetricIds.SetTo(paramsDotMetricIdsVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "metric_ids",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: x_metric_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "x_metric_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotXMetricIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotXMetricIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.XMetricID.SetTo(paramsDotXMetricIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "x_metric_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: y_metric_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "y_metric_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotYMetricIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotYMetricIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.YMetricID.SetTo(paramsDotYMetricIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "y_metric_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: bin_count.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "bin_count",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotBinCountVal int
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToInt(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotBinCountVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.BinCount.SetTo(paramsDotBinCountVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+			if err := func() error {
+				if value, ok := params.BinCount.Get(); ok {
+					if err := func() error {
+						if err := (validate.Int{
+							MinSet:        true,
+							Min:           3,
+							MaxSet:        true,
+							Max:           30,
+							MinExclusive:  false,
+							MaxExclusive:  false,
+							MultipleOfSet: false,
+							MultipleOf:    0,
+							Pattern:       nil,
+						}).Validate(int64(value)); err != nil {
+							return errors.Wrap(err, "int")
+						}
+						return nil
+					}(); err != nil {
+						return err
+					}
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "bin_count",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: hide_rollup_members.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "hide_rollup_members",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotHideRollupMembersVal GetGridSeriesHideRollupMembers
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotHideRollupMembersVal = GetGridSeriesHideRollupMembers(c)
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.HideRollupMembers.SetTo(paramsDotHideRollupMembersVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+			if err := func() error {
+				if value, ok := params.HideRollupMembers.Get(); ok {
+					if err := func() error {
+						if err := value.Validate(); err != nil {
+							return err
+						}
+						return nil
+					}(); err != nil {
+						return err
+					}
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "hide_rollup_members",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: context.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "context",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotContextVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotContextVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.Context.SetTo(paramsDotContextVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "context",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // GetIntegrationParams is parameters of getIntegration operation.
 type GetIntegrationParams struct {
 	ID uuid.UUID
@@ -7689,7 +8263,10 @@ func decodeListFormMappingsParams(args [0]string, argsEscaped bool, r *http.Requ
 
 // ListFormRecordsParams is parameters of listFormRecords operation.
 type ListFormRecordsParams struct {
-	ID uuid.UUID
+	ID    uuid.UUID
+	Limit OptInt `json:",omitempty,omitzero"`
+	// X-Next-Cursor of the previous page.
+	Cursor OptString `json:",omitempty,omitzero"`
 }
 
 func unpackListFormRecordsParams(packed middleware.Parameters) (params ListFormRecordsParams) {
@@ -7700,10 +8277,29 @@ func unpackListFormRecordsParams(packed middleware.Parameters) (params ListFormR
 		}
 		params.ID = packed[key].(uuid.UUID)
 	}
+	{
+		key := middleware.ParameterKey{
+			Name: "limit",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.Limit = v.(OptInt)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "cursor",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.Cursor = v.(OptString)
+		}
+	}
 	return params
 }
 
 func decodeListFormRecordsParams(args [1]string, argsEscaped bool, r *http.Request) (params ListFormRecordsParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]
@@ -7746,6 +8342,118 @@ func decodeListFormRecordsParams(args [1]string, argsEscaped bool, r *http.Reque
 		return params, &ogenerrors.DecodeParamError{
 			Name: "id",
 			In:   "path",
+			Err:  err,
+		}
+	}
+	// Set default value for query: limit.
+	{
+		val := int(100)
+		params.Limit.SetTo(val)
+	}
+	// Decode query: limit.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "limit",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotLimitVal int
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToInt(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotLimitVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.Limit.SetTo(paramsDotLimitVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+			if err := func() error {
+				if value, ok := params.Limit.Get(); ok {
+					if err := func() error {
+						if err := (validate.Int{
+							MinSet:        true,
+							Min:           1,
+							MaxSet:        true,
+							Max:           1000,
+							MinExclusive:  false,
+							MaxExclusive:  false,
+							MultipleOfSet: false,
+							MultipleOf:    0,
+							Pattern:       nil,
+						}).Validate(int64(value)); err != nil {
+							return errors.Wrap(err, "int")
+						}
+						return nil
+					}(); err != nil {
+						return err
+					}
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "limit",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: cursor.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "cursor",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotCursorVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotCursorVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.Cursor.SetTo(paramsDotCursorVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "cursor",
+			In:   "query",
 			Err:  err,
 		}
 	}
@@ -8033,6 +8741,71 @@ func unpackListPublicDimensionsParams(packed middleware.Parameters) (params List
 }
 
 func decodeListPublicDimensionsParams(args [0]string, argsEscaped bool, r *http.Request) (params ListPublicDimensionsParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// ListReadableGridsParams is parameters of listReadableGrids operation.
+type ListReadableGridsParams struct {
+	// Revision to list; omitted resolves the model's active revision.
+	RevisionID OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackListReadableGridsParams(packed middleware.Parameters) (params ListReadableGridsParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeListReadableGridsParams(args [0]string, argsEscaped bool, r *http.Request) (params ListReadableGridsParams, _ error) {
 	q := uri.NewQueryDecoder(r.URL.Query())
 	// Decode query: revision_id.
 	if err := func() error {

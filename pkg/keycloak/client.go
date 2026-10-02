@@ -43,6 +43,11 @@ type Client struct {
 	mu       sync.Mutex
 	token    string
 	tokenExp time.Time
+
+	// adminUser/adminPassword, set by NewAdmin only, sign in as a master
+	// realm administrator instead of the service account: for operator
+	// tools (cmd/connector-clients), never for the gateway.
+	adminUser, adminPassword string
 }
 
 // New builds a client. All arguments are required except consoleURL, which is
@@ -57,6 +62,16 @@ func New(baseURL, realm, clientID, clientSecret, consoleURL string) *Client {
 		consoleURL:   strings.TrimSuffix(consoleURL, "/"),
 		http:         &http.Client{Timeout: 15 * time.Second},
 	}
+}
+
+// NewAdmin builds a client that signs in to the master realm as an
+// administrator (admin-cli, password grant) to manage realm. It is for
+// operator tools that change the realm's configuration — the connector's
+// OAuth clients — which the gateway's service account deliberately cannot.
+func NewAdmin(baseURL, realm, adminUser, adminPassword string) *Client {
+	c := New(baseURL, realm, "", "", "")
+	c.adminUser, c.adminPassword = adminUser, adminPassword
+	return c
 }
 
 // User is the subset of Keycloak's user representation this package uses.
@@ -86,6 +101,15 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 		"client_secret": {c.clientSecret},
 	}
 	endpoint := fmt.Sprintf("%s/realms/%s/protocol/openid-connect/token", c.baseURL, c.realm)
+	if c.adminUser != "" {
+		form = url.Values{
+			"grant_type": {"password"},
+			"client_id":  {"admin-cli"},
+			"username":   {c.adminUser},
+			"password":   {c.adminPassword},
+		}
+		endpoint = c.baseURL + "/realms/master/protocol/openid-connect/token"
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", fmt.Errorf("build token request: %w", err)
@@ -98,6 +122,9 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 	}
 	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != http.StatusOK {
+		if c.adminUser != "" {
+			return "", fmt.Errorf("administrator token: %s (are the administrator user and password correct?)", resp.Status)
+		}
 		return "", fmt.Errorf("service-account token: %s (is KEYCLOAK_ADMIN_CLIENT_SECRET correct?)", resp.Status)
 	}
 

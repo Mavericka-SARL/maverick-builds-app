@@ -66,7 +66,7 @@ func (h *handler) gridExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	revisionID, _, err := h.resolveRevisionCtx(ctx, r.URL.Query().Get("revision_id"), modelID)
+	revisionID, _, err := h.businessRevisionCtx(ctx, r, r.URL.Query().Get("revision_id"), modelID)
 	if rejectForeignRevision(w, err) {
 		return
 	}

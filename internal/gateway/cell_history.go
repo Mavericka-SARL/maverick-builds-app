@@ -48,6 +48,10 @@ func (h *handler) cellHistory(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("revision is outside this model"), http.StatusForbidden)
 		return
 	}
+	if !h.revisionOpen(ctx, a, modelID, revisionID) {
+		jsonErr(w, fmt.Errorf("revision not found"), http.StatusNotFound)
+		return
+	}
 	var isInput bool
 	if err := h.db.QueryRow(ctx, `SELECT is_input FROM model.metric_def WHERE id=$1::uuid AND model_id=$2::uuid`, metricID, modelID).Scan(&isInput); err != nil {
 		jsonErr(w, fmt.Errorf("metric not found"), http.StatusNotFound)

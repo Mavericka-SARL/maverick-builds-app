@@ -2135,6 +2135,23 @@ components:
         format_decimals: { type: integer }
         format_currency: { type: string }
 
+    GridCatalogItem:
+      type: object
+      required: [id, name, revision_id, dimensions, metric_count]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        revision_id: { type: string, format: uuid }
+        dimensions:
+          type: array
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+        metric_count: { type: integer, description: Metrics of the grid the caller may see }
+        rollup_source_grid_id: { type: string, format: uuid, description: Set when the grid mirrors another grid's metrics through a cross-dimension rollup }
     GridChartCategory:
       type: object
       required: [key, label]
@@ -3227,6 +3244,90 @@ paths:
               schema: { type: string, format: binary }
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/grids:
+    get:
+      operationId: listReadableGrids
+      summary: List the grids of the selected model the caller can read
+      description: >-
+        The grids of the request's model (X-App-Id / X-Model-Id) in a revision, for anyone who opens the
+        model — the same reach as GET /api/grid, which has no per-grid grant. A grid whose every metric is
+        hidden from the caller is left out; metric_count counts only metrics the caller may see.
+      parameters:
+        - name: revision_id
+          in: query
+          description: Revision to list; omitted resolves the model's active revision
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Readable grids
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/GridCatalogItem" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/grid/series:
+    get:
+      operationId: getGridSeries
+      summary: Resolve a grid's metrics along one of its dimensions (the dashboard chart resolver, without a dashboard)
+      description: >-
+        Values are the engine's: inputs rolled up by their aggregation and time-summary rules, formulas
+        evaluated per member, values withheld where they depend on data hidden from the caller. Reach is
+        GET /api/grid's. A context member that does not exist or is hidden from the caller is refused with
+        the same 400, never replaced by another member.
+      parameters:
+        - name: grid_def_id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - name: revision_id
+          in: query
+          description: Revision to read; omitted resolves the model's active revision
+          schema: { type: string, format: uuid }
+        - name: chart_type
+          in: query
+          schema: { type: string, enum: [bar, line, pie, scatter, histogram], default: bar }
+        - name: dimension_id
+          in: query
+          required: true
+          description: The grid dimension the metrics are resolved along
+          schema: { type: string, format: uuid }
+        - name: metric_ids
+          in: query
+          description: Comma-separated metric ids (1–5 for bar/line, exactly 1 for pie/histogram)
+          schema: { type: string }
+        - name: x_metric_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: y_metric_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: bin_count
+          in: query
+          schema: { type: integer, minimum: 3, maximum: 30 }
+        - name: hide_rollup_members
+          in: query
+          description: "1 keeps only leaf members of the resolved dimension"
+          schema: { type: string, enum: ["0", "1"] }
+        - name: context
+          in: query
+          description: JSON object of dimension id to member code fixing the grid's other dimensions
+          schema: { type: string }
+      responses:
+        "200":
+          description: Resolved values — shape depends on chart_type
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/CategoryChartData" }
+                  - { $ref: "#/components/schemas/ScatterChartData" }
+                  - { $ref: "#/components/schemas/HistogramChartData" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /api/grid:
@@ -7567,24 +7668,38 @@ paths:
     get:
       operationId: listFormRecords
       tags: [CRUD Forms]
-      summary: List the 100 most recent records submitted to a form
+      summary: List a form's records the caller may see, newest first, a page at a time
       description: >-
         For a caller who reaches the form's application the way the business console opens it; anyone
         else gets 404, as for a form that does not exist. Records the caller's access rules withhold are
-        left out. Each record carries the caller's permissions on it.
+        left out before the page is filled, so they neither shorten a page nor end the list early. Each
+        record carries the caller's permissions on it. When more records may follow, the X-Next-Cursor
+        response header carries the cursor for the next page.
       parameters:
         - name: id
           in: path
           required: true
           schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+        - name: cursor
+          in: query
+          description: X-Next-Cursor of the previous page
+          schema: { type: string }
       responses:
         "200":
           description: Record list
+          headers:
+            X-Next-Cursor:
+              description: Cursor for the next page; absent on the last page
+              schema: { type: string }
           content:
             application/json:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/FormRecord" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
     post:
       operationId: createFormRecord

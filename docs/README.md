@@ -15,6 +15,7 @@ remain authoritative.
 | [`README.md`](../README.md) | current | Repository entry point and quick start |
 | [`ARCHITECTURE.md`](../ARCHITECTURE.md) | current | Implemented system architecture and known boundaries |
 | [`docs/SELF_HOSTING.md`](SELF_HOSTING.md) | current | Deploying on your own infrastructure: requirements, Docker Compose and Kubernetes installs, backups, upgrades |
+| [`docs/CHAT_CONNECTOR.md`](CHAT_CONNECTOR.md) | current | The read-only chat connector at `/mcp` (ChatGPT, Claude): grid tools, charts and reports, security model, configuration, per-host Keycloak clients |
 | [`docs/DEVELOPMENT.md`](DEVELOPMENT.md) | current | Local development, generation, and validation |
 | [`docs/API.md`](API.md) | current | Actual HTTP route groups and API conventions |
 | [`docs/LICENSING.md`](LICENSING.md) | current | Editions, the signed license key, and the `ee/` enterprise tree |
@@ -46,7 +47,7 @@ Their status block records current implementation and remaining gaps.
 | Document | Classification |
 |---|---|
 | [`TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md`](../TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md) | Phase 1 and the time additions implemented (explicit time dimensions, 19 time-series functions incl. dynamic offsets, `*VALUE`, `TIMESUM`, `START`/`END`; causal recurrences); §13 lists what is still deferred (`POST`, `SPREAD`, `PROFILE`, `WEEKVALUE`) |
-| [`CHAT_MODEL_REPORTING_INSTRUCTIONS.md`](../CHAT_MODEL_REPORTING_INSTRUCTIONS.md) | target: authenticated read-only MCP access to grids, forms and developer-created dashboards, with reports/charts inside ChatGPT and Claude; dashboard-free queries remain supported |
+| [`CHAT_MODEL_REPORTING_INSTRUCTIONS.md`](../CHAT_MODEL_REPORTING_INSTRUCTIONS.md) | implemented, narrowed to grid data (charts/reports from grids in ChatGPT/Claude, no dashboards, nothing saved); host verification remains — see [`docs/CHAT_CONNECTOR.md`](CHAT_CONNECTOR.md) |
 
 ## UX decision history
 
