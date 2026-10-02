@@ -897,6 +897,18 @@ func (UnimplementedHandler) GetChartData(ctx context.Context, req OptChartRuntim
 	return r, ht.ErrNotImplemented
 }
 
+// GetConnectorInfo implements getConnectorInfo operation.
+//
+// For any signed-in person: whether this deployment serves the read-only chat connector (/mcp), its
+// URL, and each chat host's registered OAuth client id and secret, which they enter when adding the
+// connector in that host. Every person who connects signs in with their own account and reads only
+// what their access allows.
+//
+// GET /api/connector
+func (UnimplementedHandler) GetConnectorInfo(ctx context.Context) (r *ConnectorInfo, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // GetDemo implements getDemo operation.
 //
 // Get demo context (model, revision, actor for current persona).

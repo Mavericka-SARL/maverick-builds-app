@@ -97,6 +97,18 @@ func TestConnectorTokens(t *testing.T) {
 		}
 	})
 
+	t.Run("the connection details are for signed-in people", func(t *testing.T) {
+		if resp, _ := do("GET", "/api/connector", "", ""); resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("no token: %d, want 401", resp.StatusCode)
+		}
+		if resp, body := do("GET", "/api/connector", console, ""); resp.StatusCode != http.StatusOK || !strings.Contains(body, `"enabled":true`) {
+			t.Errorf("console token: %d %s", resp.StatusCode, body)
+		}
+		if resp, _ := do("GET", "/api/connector", connector, ""); resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("a connector token on the REST API: %d, want 401", resp.StatusCode)
+		}
+	})
+
 	t.Run("/mcp refuses everything but a connector token", func(t *testing.T) {
 		resp, _ := do("POST", "/mcp", "", initialize)
 		if resp.StatusCode != http.StatusUnauthorized ||

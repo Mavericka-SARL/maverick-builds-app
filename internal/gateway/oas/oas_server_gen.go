@@ -618,6 +618,15 @@ type Handler interface {
 	//
 	// POST /api/dashboard-widgets/{id}/chart-data
 	GetChartData(ctx context.Context, req OptChartRuntimeRequest, params GetChartDataParams) (GetChartDataRes, error)
+	// GetConnectorInfo implements getConnectorInfo operation.
+	//
+	// For any signed-in person: whether this deployment serves the read-only chat connector (/mcp), its
+	// URL, and each chat host's registered OAuth client id and secret, which they enter when adding the
+	// connector in that host. Every person who connects signs in with their own account and reads only
+	// what their access allows.
+	//
+	// GET /api/connector
+	GetConnectorInfo(ctx context.Context) (*ConnectorInfo, error)
 	// GetDemo implements getDemo operation.
 	//
 	// Get demo context (model, revision, actor for current persona).

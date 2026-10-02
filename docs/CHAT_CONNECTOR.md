@@ -6,14 +6,20 @@
 > are made in ChatGPT or Claude from grids, never from dashboards, and nothing
 > is saved in maverickbuilds.app.
 
-> **Last verified:** 2026-10-02 — `go test ./internal/gateway -run 'TestMCPConnector|TestConnectorTokens|TestDelegatedReadGate'`;
+> **Last verified:** 2026-10-02 — `go test ./internal/gateway -run 'TestMCPConnector|TestConnectorTokens|TestDelegatedReadGate'`
+> (shared and dedicated tenant databases);
 > `MAVERICKS_KEYCLOAK_IT=1 go test ./internal/gateway -run TestConnectorClientsAgainstKeycloak`
 > (Keycloak 24, both hosts' sign-in flows); the in-chat view in Chromium with a
-> simulated host. **Not yet verified inside ChatGPT or Claude themselves.**
+> simulated host. **Live on the hosted service** (app.maverickbuilds.app): the
+> metadata, the 401 challenge and both hosts' sign-in pages checked from the
+> internet. **Not yet verified inside ChatGPT or Claude themselves.**
 
 A person connects ChatGPT or Claude to maverickbuilds.app once. The assistant
 can then read the grids of the models they open, as them, and make tables,
-charts, comparisons and reports in the conversation.
+charts, comparisons and reports in the conversation. On the hosted service it
+is available to every workspace, the free Basic workspace included, and to
+every person in it: the account menu (top right) → **Connect ChatGPT or
+Claude** shows the connector URL and each host's client ID and secret.
 
 ## Tools
 
@@ -80,12 +86,16 @@ stops later reads only.
 | `MCP_ENABLED` | `true` serves `/mcp` and its protected-resource metadata |
 | `MCP_RESOURCE_URL` | the connector's public URL, default `CONSOLE_URL` + `/mcp` — what people paste into their chat app |
 | `MCP_CLIENTS` | the registered host clients, default `chatgpt-connector,claude-connector` |
+| `MCP_CLIENT_SECRETS` | those clients' secrets as `client-id=secret` pairs, comma-separated, from the optional secret `mavericks-connector`; shown to every signed-in person in the account menu (`GET /api/connector`) |
 | `MCP_AUTHORIZATION_SERVER` | issuer named in the metadata, default this deployment's Keycloak realm |
 | `MCP_SCOPE` | required scope, default `models:read` |
 | `GATEWAY_TOKEN_CLIENTS` | clients whose tokens the REST API accepts, default `mavericks-web` |
 
 The ingress must route `/mcp`, `/.well-known/oauth-protected-resource` and
 `/.well-known/oauth-protected-resource/mcp` on the console host to the gateway.
+Use `pathType: Prefix` for `/mcp`: Traefik ranks routers by rule length, and an
+`Exact` `Path(`/mcp`)` is shorter than the console's `PathPrefix(`/`)`, so the
+console answered `/mcp` instead.
 Keycloak must be reachable from the hosts (Anthropic's egress is
 `160.79.104.0/21`).
 
@@ -109,14 +119,21 @@ Both are confidential clients: authorization code with S256 PKCE only, consent
 required, no realm roles in tokens, five-minute access tokens, refresh and
 offline tokens allowed (the hosts keep the connection until the person revokes
 it). It prints each client's id, and its secret when created (`-show-secrets`
-reprints them). Run it again after changing the connector's URL.
+reprints them). Put the secrets in the gateway's optional secret
+`mavericks-connector` as `MCP_CLIENT_SECRETS=chatgpt-connector=…,claude-connector=…`
+(sealed, in production) so the account menu can show them. The secrets
+are shared by every workspace on the deployment — each person still signs in
+as themselves — so treat them as a host credential, not a person's: rotating
+one (Keycloak → the client → Credentials) means updating the secret and
+reconnecting every chat that uses it. Run the command again after changing the
+connector's URL.
 
 Offline access needs the realm's default role `offline_access`, which every
 account created through the console, sign-up, SSO or SCIM has; accounts
 imported from a realm file with explicit roles (the dev stack's `pat`, `sam`, …)
 do not.
 
-### 3. In each host
+### 3. In each host (every user)
 
 - **Claude** (claude.ai, Desktop, mobile): add a custom connector with the URL
   `MCP_RESOURCE_URL`, and under its advanced settings enter the

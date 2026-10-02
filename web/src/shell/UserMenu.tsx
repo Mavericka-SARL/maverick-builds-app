@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { LogOut } from "lucide-react";
+import { LogOut, MessageSquare } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { RoleBadge } from "../ui";
 import { useAuth } from "../auth/useAuth";
 import { api } from "../api/client";
 import { EDITION_LABELS, useLicense } from "../license/useLicense";
 import { useThemePreference, type ThemePreference } from "../theme/theme";
+import { ChatConnectorDialog } from "./ChatConnectorDialog";
+import { useConnectorInfo } from "./connectorInfo";
 
 const THEMES: { id: ThemePreference; label: string }[] = [
   { id: "light", label: "Light" },
@@ -35,7 +37,8 @@ const THEMES: { id: ThemePreference; label: string }[] = [
  * which is its own overlay.
  *
  * The theme switch lives here too: it is a per-person setting, and this is
- * the one menu every role opens.
+ * the one menu every role opens — which is also why the chat connector's
+ * connection details (ChatGPT, Claude) open from here.
  */
 function initialsOf(name: string, email: string): string {
   const source = name.trim() || email.trim();
@@ -50,6 +53,8 @@ export function UserMenu() {
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: api.getMe });
   const license = useLicense();
   const [theme, setTheme] = useThemePreference();
+  const { data: connector } = useConnectorInfo();
+  const [connectorOpen, setConnectorOpen] = useState(false);
   const [open, setOpen] = useState(false);
   const [style, setStyle] = useState<React.CSSProperties>({});
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -152,6 +157,20 @@ export function UserMenu() {
               ))}
             </div>
           </div>
+          {connector?.enabled && (
+            <button
+              type="button"
+              role="menuitem"
+              className="mvx-user-menu__action"
+              onClick={() => {
+                setOpen(false);
+                setConnectorOpen(true);
+              }}
+            >
+              <MessageSquare size={14} aria-hidden="true" />
+              Connect ChatGPT or Claude
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"
@@ -167,6 +186,7 @@ export function UserMenu() {
         </div>,
         document.body,
       )}
+      <ChatConnectorDialog open={connectorOpen} onClose={() => setConnectorOpen(false)} />
     </>
   );
 }

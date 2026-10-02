@@ -127,6 +127,7 @@ var operationRolesBearerAuth = map[string][]string{
 	GetBusinessDashboardOperation:         []string{},
 	GetCellHistoryOperation:               []string{},
 	GetChartDataOperation:                 []string{},
+	GetConnectorInfoOperation:             []string{},
 	GetDemoOperation:                      []string{},
 	GetDeveloperModelOperation:            []string{},
 	GetFormRecordOperation:                []string{},

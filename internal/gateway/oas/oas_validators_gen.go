@@ -1301,6 +1301,29 @@ func (s *ConfirmAiProposalOK) Validate() error {
 	return nil
 }
 
+func (s *ConnectorInfo) Validate() error {
+	if s == nil {
+		return validate.ErrNilPointer
+	}
+
+	var failures []validate.FieldError
+	if err := func() error {
+		if s.Hosts == nil {
+			return errors.New("nil is invalid value")
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "hosts",
+			Error: err,
+		})
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
 func (s *CreateAdminUserReq) Validate() error {
 	if s == nil {
 		return validate.ErrNilPointer

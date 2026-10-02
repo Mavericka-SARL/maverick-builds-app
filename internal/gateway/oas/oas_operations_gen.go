@@ -97,6 +97,7 @@ const (
 	GetBusinessDashboardOperation         OperationName = "GetBusinessDashboard"
 	GetCellHistoryOperation               OperationName = "GetCellHistory"
 	GetChartDataOperation                 OperationName = "GetChartData"
+	GetConnectorInfoOperation             OperationName = "GetConnectorInfo"
 	GetDemoOperation                      OperationName = "GetDemo"
 	GetDeveloperModelOperation            OperationName = "GetDeveloperModel"
 	GetFormRecordOperation                OperationName = "GetFormRecord"

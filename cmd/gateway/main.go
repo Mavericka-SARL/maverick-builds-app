@@ -129,6 +129,10 @@ type cfg struct {
 	// MCPClients: the chat hosts' registered clients (cmd/connector-clients),
 	// comma-separated; default chatgpt-connector,claude-connector.
 	MCPClients string `mapstructure:"MCP_CLIENTS"`
+	// MCPClientSecrets: those clients' secrets as id=secret pairs,
+	// comma-separated (a sealed secret in production), shown to builders in
+	// AI Developer Settings.
+	MCPClientSecrets string `mapstructure:"MCP_CLIENT_SECRETS"`
 }
 
 func main() {
@@ -479,5 +483,16 @@ func mcpConfig(c cfg, log zerolog.Logger) gateway.MCPConfig {
 	}
 	log.Info().Str("resource", resource).Msg("chat connector enabled at /mcp (read-only)")
 	return gateway.MCPConfig{Enabled: true, ResourceURL: resource, AuthorizationServer: c.MCPAuthorizationServer,
-		Scope: c.MCPScope, Clients: splitList(c.MCPClients), Version: c.ServiceVersion}
+		Scope: c.MCPScope, Clients: splitList(c.MCPClients), ClientSecrets: splitPairs(c.MCPClientSecrets), Version: c.ServiceVersion}
+}
+
+// splitPairs parses "key=value,key=value", dropping malformed entries.
+func splitPairs(v string) map[string]string {
+	out := map[string]string{}
+	for _, kv := range splitList(v) {
+		if k, val, ok := strings.Cut(kv, "="); ok && k != "" && val != "" {
+			out[strings.TrimSpace(k)] = strings.TrimSpace(val)
+		}
+	}
+	return out
 }

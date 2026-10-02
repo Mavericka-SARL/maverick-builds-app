@@ -1409,6 +1409,20 @@ export interface AIMessage {
   created_at: string;
 }
 
+// The chat connector's connection details (GET /api/connector): what a
+// builder enters when adding maverickbuilds.app to ChatGPT or Claude.
+export interface ConnectorHost {
+  name: string;
+  client_id: string;
+  client_secret?: string;
+}
+export interface ConnectorInfo {
+  enabled: boolean;
+  url?: string;
+  scope?: string;
+  hosts: ConnectorHost[];
+}
+
 export interface AISettings {
   provider: string;
   model: string;
@@ -2388,6 +2402,7 @@ export const api = {
   aiListProposals: (sessionId: string) =>
     apiFetch<AIProposalWithSummary[]>(`/api/ai/sessions/${sessionId}/proposals`),
   aiGetSettings: () => apiFetch<AISettings>("/api/ai/settings"),
+  getConnectorInfo: () => apiFetch<ConnectorInfo>("/api/connector"),
   aiSaveSettings: (body: { provider: string; model: string; api_key?: string }) =>
     apiFetch<{ status: string }>("/api/ai/settings", { method: "PUT", body: JSON.stringify(body) }),
 

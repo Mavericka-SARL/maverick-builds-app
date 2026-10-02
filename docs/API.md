@@ -65,6 +65,7 @@ user with a role; the handler then applies the scope checks above.
 | `/api/apps` | actor-visible applications | authenticated + app grants |
 | `/api/demo` | active app/model/revision/persona context | authenticated + app/model access |
 | `/api/grid`, `GET /api/grid/export` | grid definition, cells, totals, access metadata; CSV/XLSX export of input values | authenticated + model/member/metric access |
+| `GET /api/connector` | the chat connector's URL and each host's client id and secret (account menu → Connect ChatGPT or Claude) | authenticated |
 | `GET /api/grids` | the selected model's grids the caller can read (a grid all of whose metrics are hidden is left out) | authenticated + model access |
 | `GET /api/grid/series` | one grid's metrics resolved along one of its dimensions (the dashboard chart resolver without a dashboard); a hidden or unknown context member is refused alike | authenticated + model/member/metric access |
 | `/api/metrics`, `/api/dimensions`, `/api/formula/refs` | runtime metric and dimension summaries, formula reference catalog | authenticated + model access |

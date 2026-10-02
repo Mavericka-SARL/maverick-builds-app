@@ -4417,6 +4417,92 @@ func (s *ConfirmAiProposalOK) SetSession(val OptAiSession) {
 
 func (*ConfirmAiProposalOK) confirmAiProposalRes() {}
 
+// Ref: #/components/schemas/ConnectorInfo
+type ConnectorInfo struct {
+	Enabled bool `json:"enabled"`
+	// The connector's URL (MCP_RESOURCE_URL).
+	URL   OptString                `json:"url"`
+	Scope OptString                `json:"scope"`
+	Hosts []ConnectorInfoHostsItem `json:"hosts"`
+}
+
+// GetEnabled returns the value of Enabled.
+func (s *ConnectorInfo) GetEnabled() bool {
+	return s.Enabled
+}
+
+// GetURL returns the value of URL.
+func (s *ConnectorInfo) GetURL() OptString {
+	return s.URL
+}
+
+// GetScope returns the value of Scope.
+func (s *ConnectorInfo) GetScope() OptString {
+	return s.Scope
+}
+
+// GetHosts returns the value of Hosts.
+func (s *ConnectorInfo) GetHosts() []ConnectorInfoHostsItem {
+	return s.Hosts
+}
+
+// SetEnabled sets the value of Enabled.
+func (s *ConnectorInfo) SetEnabled(val bool) {
+	s.Enabled = val
+}
+
+// SetURL sets the value of URL.
+func (s *ConnectorInfo) SetURL(val OptString) {
+	s.URL = val
+}
+
+// SetScope sets the value of Scope.
+func (s *ConnectorInfo) SetScope(val OptString) {
+	s.Scope = val
+}
+
+// SetHosts sets the value of Hosts.
+func (s *ConnectorInfo) SetHosts(val []ConnectorInfoHostsItem) {
+	s.Hosts = val
+}
+
+type ConnectorInfoHostsItem struct {
+	Name     string `json:"name"`
+	ClientID string `json:"client_id"`
+	// Absent when the deployment has not configured it.
+	ClientSecret OptString `json:"client_secret"`
+}
+
+// GetName returns the value of Name.
+func (s *ConnectorInfoHostsItem) GetName() string {
+	return s.Name
+}
+
+// GetClientID returns the value of ClientID.
+func (s *ConnectorInfoHostsItem) GetClientID() string {
+	return s.ClientID
+}
+
+// GetClientSecret returns the value of ClientSecret.
+func (s *ConnectorInfoHostsItem) GetClientSecret() OptString {
+	return s.ClientSecret
+}
+
+// SetName sets the value of Name.
+func (s *ConnectorInfoHostsItem) SetName(val string) {
+	s.Name = val
+}
+
+// SetClientID sets the value of ClientID.
+func (s *ConnectorInfoHostsItem) SetClientID(val string) {
+	s.ClientID = val
+}
+
+// SetClientSecret sets the value of ClientSecret.
+func (s *ConnectorInfoHostsItem) SetClientSecret(val OptString) {
+	s.ClientSecret = val
+}
+
 type CreateAdminApplicationOK struct {
 	ID        OptUUID   `json:"id"`
 	CreatedAt OptString `json:"created_at"`

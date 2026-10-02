@@ -503,6 +503,9 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("DELETE", "/api/ai/sessions/{id}/documents/{docId}", "developer", dev(h.aiSessionDetail))
 	register("POST", "/api/ai/sessions/{id}/proposals/{pid}/confirm", "developer", dev(h.aiSessionDetail))
 	register("POST", "/api/ai/sessions/{id}/proposals/{pid}/reject", "developer", dev(h.aiSessionDetail))
+	// The chat connector's connection details, for every signed-in person
+	// from the account menu (mcp.go).
+	register("GET", "/api/connector", "any", cors(h.connectorInfo))
 	register("GET", "/api/ai/settings", "developer", dev(h.aiSettings))
 	register("PUT", "/api/ai/settings", "developer", dev(h.aiSettings))
 	register("POST", "/api/ai/settings/test", "developer", dev(h.aiTestSettings))

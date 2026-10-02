@@ -2135,6 +2135,22 @@ components:
         format_decimals: { type: integer }
         format_currency: { type: string }
 
+    ConnectorInfo:
+      type: object
+      required: [enabled, hosts]
+      properties:
+        enabled: { type: boolean }
+        url: { type: string, description: The connector's URL (MCP_RESOURCE_URL) }
+        scope: { type: string }
+        hosts:
+          type: array
+          items:
+            type: object
+            required: [name, client_id]
+            properties:
+              name: { type: string }
+              client_id: { type: string }
+              client_secret: { type: string, description: Absent when the deployment has not configured it }
     GridCatalogItem:
       type: object
       required: [id, name, revision_id, dimensions, metric_count]
@@ -7281,6 +7297,22 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+
+  /api/connector:
+    get:
+      operationId: getConnectorInfo
+      summary: The chat connector's connection details for ChatGPT and Claude (account menu)
+      description: >-
+        For any signed-in person: whether this deployment serves the read-only chat connector (/mcp), its URL,
+        and each chat host's registered OAuth client id and secret, which they enter when adding the connector
+        in that host. Every person who connects signs in with their own account and reads only what their
+        access allows.
+      responses:
+        "200":
+          description: Connection details
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConnectorInfo" }
 
   /api/ai/settings:
     get:

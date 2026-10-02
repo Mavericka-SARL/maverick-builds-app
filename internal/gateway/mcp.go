@@ -39,6 +39,7 @@ import (
 
 	"github.com/mavericks-engine/mavericks/internal/mcpserver"
 	"github.com/mavericks-engine/mavericks/internal/reporting"
+	"github.com/mavericks-engine/mavericks/pkg/keycloak"
 )
 
 // MCPConfig configures the connector. The zero value leaves it off.
@@ -57,6 +58,11 @@ type MCPConfig struct {
 	// Clients are the OAuth clients registered for the chat hosts (a
 	// token's azp; cmd/connector-clients); empty means DefaultMCPClients.
 	Clients []string
+	// ClientSecrets are those clients' secrets (client id → secret), shown
+	// to every signed-in person from the account menu so they can add the
+	// connector in each host (connectorInfo). Every workspace on a
+	// deployment shares them: each person still signs in as themselves.
+	ClientSecrets map[string]string
 	// Version is reported to hosts as the server's version.
 	Version string
 }
@@ -341,4 +347,46 @@ func nonEmpty(s string) []string {
 		return nil
 	}
 	return []string{s}
+}
+
+// connectorHost is one chat host's connection details.
+type connectorHost struct {
+	Name         string `json:"name"`
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret,omitempty"`
+}
+
+// connectorInfo serves GET /api/connector to any signed-in person: whether
+// this deployment serves the chat connector, its URL, and each host's client
+// id and secret — what they enter when adding the connector in ChatGPT or
+// Claude (the account menu). The secret is the host's, not the person's:
+// each person who connects signs in with their own account, and reads only
+// what their own access allows.
+func (h *handler) connectorInfo(w http.ResponseWriter, r *http.Request) {
+	if _, err := h.resolveActor(r.Context(), r); err != nil {
+		jsonErr(w, fmt.Errorf("unauthorized"), http.StatusUnauthorized)
+		return
+	}
+	if !h.mcp.Enabled {
+		jsonOK(w, map[string]any{"enabled": false, "hosts": []connectorHost{}})
+		return
+	}
+	names := map[string]string{}
+	for _, host := range keycloak.DefaultConnectorHosts {
+		names[host.ClientID] = host.Name
+	}
+	hosts := []connectorHost{}
+	for _, id := range h.mcp.clients() {
+		name := names[id]
+		if name == "" {
+			name = id
+		}
+		hosts = append(hosts, connectorHost{Name: name, ClientID: id, ClientSecret: h.mcp.ClientSecrets[id]})
+	}
+	jsonOK(w, map[string]any{
+		"enabled": true,
+		"url":     strings.TrimSuffix(h.mcp.ResourceURL, "/"),
+		"scope":   h.mcp.scope(),
+		"hosts":   hosts,
+	})
 }

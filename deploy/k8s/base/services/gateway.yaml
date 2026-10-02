@@ -55,6 +55,13 @@ spec:
             - secretRef:
                 name: mavericks-integration
                 optional: true
+            # MCP_CLIENT_SECRETS: the chat connector's per-host OAuth client
+            # secrets (cmd/connector-clients prints them), shown to builders
+            # in AI Developer Settings. optional: a deployment without the
+            # connector, or without the secret yet, boots without it.
+            - secretRef:
+                name: mavericks-connector
+                optional: true
           # DATABASE_URL is composed here, not in the ConfigMap: envFrom
           # never expands $(VAR) references — only an explicit env: entry
           # can, by referencing $(POSTGRES_PASSWORD) already contributed
