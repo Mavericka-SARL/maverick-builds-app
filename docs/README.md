@@ -46,6 +46,7 @@ Their status block records current implementation and remaining gaps.
 | Document | Classification |
 |---|---|
 | [`TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md`](../TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md) | Phase 1 and the time additions implemented (explicit time dimensions, 19 time-series functions incl. dynamic offsets, `*VALUE`, `TIMESUM`, `START`/`END`; causal recurrences); §13 lists what is still deferred (`POST`, `SPREAD`, `PROFILE`, `WEEKVALUE`) |
+| [`CHAT_MODEL_REPORTING_INSTRUCTIONS.md`](../CHAT_MODEL_REPORTING_INSTRUCTIONS.md) | target: authenticated read-only MCP access to grids, forms and developer-created dashboards, with reports/charts inside ChatGPT and Claude; dashboard-free queries remain supported |
 
 ## UX decision history
 

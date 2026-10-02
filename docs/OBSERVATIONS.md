@@ -18,6 +18,52 @@ leaves out, until it is fixed.
 
 ## Open
 
+### Conversational reporting needs independent discovery and complete form queries
+
+- **Noticed:** 2026-10-02, while preparing the ChatGPT/Claude reporting brief.
+- **What:** The engine has no MCP server. Grid discovery is under the
+  developer-gated `/api/developer/grids`, and the chart HTTP endpoint loads an
+  existing dashboard widget. Form record listing calls
+  `crudapp.Store.ListRecords(..., 100)` before applying `filterFormRecords`;
+  that response cannot supply complete reporting totals or pagination. The
+  chart resolver supports grids, so form aggregation is an additional generic
+  read capability. Its visible-default substitution for hidden context members
+  also needs explicit-filter validation at a reporting entry point.
+- **Why it matters:** A business user needs to discover readable sources and
+  obtain correct reports inside a chat without creating a dashboard, acquiring
+  a developer role, or mistaking a partial record list for the whole dataset.
+- **How to check:** Inspect `registerRoutes`, `formsRouter` and
+  `dashboardWidgetAction` in `internal/gateway/handler.go`, `ListRecords` in
+  `internal/crudapp/store.go`, and `ChartResolver.Resolve` in
+  `internal/query/chart.go`. Exercise a business user on a model with no
+  dashboards and a form with more than 100 records.
+- **What closes it:** Implement and verify the authorized discovery, complete
+  query/aggregation and standalone chart paths specified in
+  [`CHAT_MODEL_REPORTING_INSTRUCTIONS.md`](../CHAT_MODEL_REPORTING_INSTRUCTIONS.md),
+  with an end-to-end report in both hosts under the user's existing permissions.
+  The brief also includes reading existing developer-created dashboards: adapt
+  their business-facing definition reads and assemble widget values with the
+  saved/synchronized filters and dashboard assignments preserved.
+
+### Dashboard listing and detail differ on administrative role handling
+
+- **Noticed:** 2026-10-02, while adding dashboard reads to the chat reporting brief.
+- **What:** In `internal/gateway/handler.go`, `businessDashboards` and
+  `dashboardWidgetAction` explicitly bypass the dashboard-assignment filter for
+  administrative/developer roles after scope checks. `businessDashboardDetail`
+  applies its business-role assignment query without that bypass. Inspection
+  therefore indicates that an administrator with a relevant business role but
+  no assignment to a particular dashboard can be listed that dashboard yet be
+  refused its detail. This has not been reproduced in a live test in this change.
+- **Why it matters:** A connector that discovers a dashboard and then reads its
+  definition cannot assume those operations have identical role behavior.
+- **How to check:** Exercise list, detail and chart-data routes with a scoped
+  business administrator who is a member of a business role that grants only
+  another dashboard, then repeat as an ordinary business user.
+- **What closes it:** Confirm the intended policy, obtain authorization for any
+  permission widening under `CLAUDE.md`, and make all three reads consistent with
+  focused role/scope tests. The chat adapter must not bypass a denied detail read.
+
 ### SheetJS is outside Dependabot's and npm audit's view
 
 - **Noticed:** 2026-09-27, while closing the public repository's Dependabot alerts (`0a74995`).
