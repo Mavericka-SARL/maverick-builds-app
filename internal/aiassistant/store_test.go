@@ -58,7 +58,7 @@ func setupDB(t *testing.T) (*aiassistant.Store, func()) {
 	}
 }
 
-func insertFixtures(t *testing.T, store *aiassistant.Store) (appID, userID string) {
+func insertFixtures(t *testing.T, store *aiassistant.Store) (appID, modelID, userID string) {
 	t.Helper()
 	ctx := context.Background()
 	pool := store.Pool()
@@ -80,8 +80,11 @@ func insertFixtures(t *testing.T, store *aiassistant.Store) (appID, userID strin
 	if err := pool.QueryRow(ctx, `INSERT INTO core.application (workspace_id, name) VALUES ($1::uuid, 'App') RETURNING id::text`, wsID).Scan(&appID); err != nil {
 		t.Fatalf("insert application: %v", err)
 	}
+	if err := pool.QueryRow(ctx, `INSERT INTO core.model (application_id, name) VALUES ($1::uuid, 'Model') RETURNING id::text`, appID).Scan(&modelID); err != nil {
+		t.Fatalf("insert model: %v", err)
+	}
 
-	return appID, userID
+	return appID, modelID, userID
 }
 
 func TestCreateAndGetSession(t *testing.T) {
@@ -89,9 +92,9 @@ func TestCreateAndGetSession(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	appID, userID := insertFixtures(t, store)
+	appID, modelID, userID := insertFixtures(t, store)
 
-	sess, err := store.CreateSession(ctx, appID, userID)
+	sess, err := store.CreateSession(ctx, appID, modelID, userID)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -119,9 +122,9 @@ func TestCreateAction(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	appID, userID := insertFixtures(t, store)
+	appID, modelID, userID := insertFixtures(t, store)
 
-	sess, err := store.CreateSession(ctx, appID, userID)
+	sess, err := store.CreateSession(ctx, appID, modelID, userID)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -162,9 +165,9 @@ func TestGetAction(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	appID, userID := insertFixtures(t, store)
+	appID, modelID, userID := insertFixtures(t, store)
 
-	sess, _ := store.CreateSession(ctx, appID, userID)
+	sess, _ := store.CreateSession(ctx, appID, modelID, userID)
 	action, err := store.CreateAction(ctx, sess.Id, aiassistantv1.ActionType_ACTION_TYPE_GENERATE_MIGRATION,
 		"add users table", nil, nil)
 	if err != nil {
@@ -188,9 +191,9 @@ func TestMarkApplied(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	appID, userID := insertFixtures(t, store)
+	appID, modelID, userID := insertFixtures(t, store)
 
-	sess, _ := store.CreateSession(ctx, appID, userID)
+	sess, _ := store.CreateSession(ctx, appID, modelID, userID)
 	action, _ := store.CreateAction(ctx, sess.Id, aiassistantv1.ActionType_ACTION_TYPE_ADD_DIMENSION, "add region", nil, nil)
 
 	if err := store.MarkApplied(ctx, action.Id, ""); err != nil {
@@ -211,9 +214,9 @@ func TestMarkRolledBack(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	appID, userID := insertFixtures(t, store)
+	appID, modelID, userID := insertFixtures(t, store)
 
-	sess, _ := store.CreateSession(ctx, appID, userID)
+	sess, _ := store.CreateSession(ctx, appID, modelID, userID)
 	action, _ := store.CreateAction(ctx, sess.Id, aiassistantv1.ActionType_ACTION_TYPE_MODIFY_FORMULA, "fix formula", nil, nil)
 	_ = store.MarkApplied(ctx, action.Id, "")
 
@@ -235,9 +238,9 @@ func TestDiffRoundtrip(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	appID, userID := insertFixtures(t, store)
+	appID, modelID, userID := insertFixtures(t, store)
 
-	sess, _ := store.CreateSession(ctx, appID, userID)
+	sess, _ := store.CreateSession(ctx, appID, modelID, userID)
 
 	diffs := []*aiassistantv1.FileDiff{
 		{Path: "a.sql", Before: "old", After: "new", Diff: "@@ -1 +1 @@ -old +new"},

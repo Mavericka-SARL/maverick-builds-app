@@ -8596,7 +8596,7 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 								switch method {
 								case "GET":
 									r.name = ListAiSessionsOperation
-									r.summary = "List the caller's 20 most recent AI assistant sessions for the current application"
+									r.summary = "List the caller's 20 most recent AI assistant sessions in the current model"
 									r.operationID = "listAiSessions"
 									r.operationGroup = ""
 									r.pathPattern = "/api/ai/sessions"
@@ -8605,7 +8605,7 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 									return r, true
 								case "POST":
 									r.name = CreateAiSessionOperation
-									r.summary = "Create a new AI assistant session, seeded with the caller's saved provider/model settings"
+									r.summary = "Create a new AI assistant session in the current model, seeded with the caller's saved provider/model settings"
 									r.operationID = "createAiSession"
 									r.operationGroup = ""
 									r.pathPattern = "/api/ai/sessions"

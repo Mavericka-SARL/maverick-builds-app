@@ -23,34 +23,40 @@ func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
-// CreateSession inserts a new assistant session and returns the proto representation.
-func (s *Store) CreateSession(ctx context.Context, applicationID, userID string) (*aiassistantv1.AssistantSession, error) {
+// CreateSession inserts a new assistant session in modelID, a model of
+// applicationID, and returns the proto representation.
+func (s *Store) CreateSession(ctx context.Context, applicationID, modelID, userID string) (*aiassistantv1.AssistantSession, error) {
 	var id string
 	var createdAt time.Time
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO ai_assistant.session (application_id, user_id)
-		VALUES ($1::uuid, $2::uuid)
+		INSERT INTO ai_assistant.session (application_id, model_id, user_id)
+		SELECT m.application_id, m.id, $3::uuid
+		FROM core.model m WHERE m.id = $2::uuid AND m.application_id = $1::uuid
 		RETURNING id::text, created_at
-	`, applicationID, userID).Scan(&id, &createdAt)
+	`, applicationID, modelID, userID).Scan(&id, &createdAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("create session: model %s is not in application %s", modelID, applicationID)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}
 	return &aiassistantv1.AssistantSession{
 		Id:            id,
 		ApplicationId: applicationID,
+		ModelId:       modelID,
 		CreatedAt:     timestamppb.New(createdAt),
 	}, nil
 }
 
 // GetSession retrieves a session and all its actions.
 func (s *Store) GetSession(ctx context.Context, sessionID string) (*aiassistantv1.AssistantSession, []*aiassistantv1.AssistantAction, error) {
-	var id, appID string
+	var id, appID, modelID string
 	var createdAt time.Time
 
 	err := s.pool.QueryRow(ctx, `
-		SELECT id::text, application_id::text, created_at
+		SELECT id::text, application_id::text, model_id::text, created_at
 		FROM ai_assistant.session WHERE id = $1::uuid
-	`, sessionID).Scan(&id, &appID, &createdAt)
+	`, sessionID).Scan(&id, &appID, &modelID, &createdAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, fmt.Errorf("session %s not found", sessionID)
 	}
@@ -61,6 +67,7 @@ func (s *Store) GetSession(ctx context.Context, sessionID string) (*aiassistantv
 	session := &aiassistantv1.AssistantSession{
 		Id:            id,
 		ApplicationId: appID,
+		ModelId:       modelID,
 		CreatedAt:     timestamppb.New(createdAt),
 	}
 

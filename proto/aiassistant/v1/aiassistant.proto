@@ -45,6 +45,7 @@ message AssistantSession {
   string application_id = 2;
   common.v1.Actor actor = 3;
   google.protobuf.Timestamp created_at = 4;
+  string model_id = 5; // the model the session works in, a model of application_id
 }
 
 message AssistantAction {
@@ -59,7 +60,7 @@ message AssistantAction {
   google.protobuf.Timestamp created_at = 9;
 }
 
-message StartSessionRequest { string application_id = 1; common.v1.Actor actor = 2; }
+message StartSessionRequest { string application_id = 1; common.v1.Actor actor = 2; string model_id = 3; }
 message StartSessionResponse { AssistantSession session = 1; }
 
 message GenerateDiffRequest { string session_id = 1; ActionType action_type = 2; string prompt = 3; }

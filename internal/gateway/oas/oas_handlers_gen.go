@@ -2799,6 +2799,10 @@ func (s *Server) handleConfirmAiProposalRequest(args [2]string, argsEscaped bool
 					Name: "pid",
 					In:   "path",
 				}: params.Pid,
+				{
+					Name: "revision_id",
+					In:   "query",
+				}: params.RevisionID,
 			},
 			Raw: r,
 		}
@@ -3801,7 +3805,8 @@ func (s *Server) handleCreateAdminUserTrailingSlashRequest(args [0]string, argsE
 
 // handleCreateAiSessionRequest handles createAiSession operation.
 //
-// Create a new AI assistant session, seeded with the caller's saved provider/model settings.
+// A session belongs to the model it is created in; requests on it that resolve another model are
+// refused with 409.
 //
 // POST /api/ai/sessions
 func (s *Server) handleCreateAiSessionRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -3919,6 +3924,16 @@ func (s *Server) handleCreateAiSessionRequest(args [0]string, argsEscaped bool, 
 			return
 		}
 	}
+	params, err := decodeCreateAiSessionParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
 
 	var rawBody []byte
 
@@ -3927,17 +3942,22 @@ func (s *Server) handleCreateAiSessionRequest(args [0]string, argsEscaped bool, 
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    CreateAiSessionOperation,
-			OperationSummary: "Create a new AI assistant session, seeded with the caller's saved provider/model settings",
+			OperationSummary: "Create a new AI assistant session in the current model, seeded with the caller's saved provider/model settings",
 			OperationID:      "createAiSession",
 			Body:             nil,
 			RawBody:          rawBody,
-			Params:           middleware.Parameters{},
-			Raw:              r,
+			Params: middleware.Parameters{
+				{
+					Name: "revision_id",
+					In:   "query",
+				}: params.RevisionID,
+			},
+			Raw: r,
 		}
 
 		type (
 			Request  = struct{}
-			Params   = struct{}
+			Params   = CreateAiSessionParams
 			Response = *AiSession
 		)
 		response, err = middleware.HookMiddleware[
@@ -3947,14 +3967,14 @@ func (s *Server) handleCreateAiSessionRequest(args [0]string, argsEscaped bool, 
 		](
 			m,
 			mreq,
-			nil,
+			unpackCreateAiSessionParams,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.CreateAiSession(ctx)
+				response, err = s.h.CreateAiSession(ctx, params)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.CreateAiSession(ctx)
+		response, err = s.h.CreateAiSession(ctx, params)
 	}
 	if err != nil {
 		defer recordError("Internal", err)
@@ -23667,7 +23687,7 @@ func (s *Server) handleListAiProposalsRequest(args [1]string, argsEscaped bool, 
 
 // handleListAiSessionsRequest handles listAiSessions operation.
 //
-// List the caller's 20 most recent AI assistant sessions for the current application.
+// List the caller's 20 most recent AI assistant sessions in the current model.
 //
 // GET /api/ai/sessions
 func (s *Server) handleListAiSessionsRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -23785,6 +23805,16 @@ func (s *Server) handleListAiSessionsRequest(args [0]string, argsEscaped bool, w
 			return
 		}
 	}
+	params, err := decodeListAiSessionsParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
 
 	var rawBody []byte
 
@@ -23793,17 +23823,22 @@ func (s *Server) handleListAiSessionsRequest(args [0]string, argsEscaped bool, w
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    ListAiSessionsOperation,
-			OperationSummary: "List the caller's 20 most recent AI assistant sessions for the current application",
+			OperationSummary: "List the caller's 20 most recent AI assistant sessions in the current model",
 			OperationID:      "listAiSessions",
 			Body:             nil,
 			RawBody:          rawBody,
-			Params:           middleware.Parameters{},
-			Raw:              r,
+			Params: middleware.Parameters{
+				{
+					Name: "revision_id",
+					In:   "query",
+				}: params.RevisionID,
+			},
+			Raw: r,
 		}
 
 		type (
 			Request  = struct{}
-			Params   = struct{}
+			Params   = ListAiSessionsParams
 			Response = []AiSession
 		)
 		response, err = middleware.HookMiddleware[
@@ -23813,14 +23848,14 @@ func (s *Server) handleListAiSessionsRequest(args [0]string, argsEscaped bool, w
 		](
 			m,
 			mreq,
-			nil,
+			unpackListAiSessionsParams,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.ListAiSessions(ctx)
+				response, err = s.h.ListAiSessions(ctx, params)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.ListAiSessions(ctx)
+		response, err = s.h.ListAiSessions(ctx, params)
 	}
 	if err != nil {
 		defer recordError("Internal", err)

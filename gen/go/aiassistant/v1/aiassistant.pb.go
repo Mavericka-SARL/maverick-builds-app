@@ -226,6 +226,7 @@ type AssistantSession struct {
 	ApplicationId string                 `protobuf:"bytes,2,opt,name=application_id,json=applicationId,proto3" json:"application_id,omitempty"`
 	Actor         *v1.Actor              `protobuf:"bytes,3,opt,name=actor,proto3" json:"actor,omitempty"`
 	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	ModelId       string                 `protobuf:"bytes,5,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"` // the model the session works in, a model of application_id
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -286,6 +287,13 @@ func (x *AssistantSession) GetCreatedAt() *timestamppb.Timestamp {
 		return x.CreatedAt
 	}
 	return nil
+}
+
+func (x *AssistantSession) GetModelId() string {
+	if x != nil {
+		return x.ModelId
+	}
+	return ""
 }
 
 type AssistantAction struct {
@@ -400,6 +408,7 @@ type StartSessionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ApplicationId string                 `protobuf:"bytes,1,opt,name=application_id,json=applicationId,proto3" json:"application_id,omitempty"`
 	Actor         *v1.Actor              `protobuf:"bytes,2,opt,name=actor,proto3" json:"actor,omitempty"`
+	ModelId       string                 `protobuf:"bytes,3,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -446,6 +455,13 @@ func (x *StartSessionRequest) GetActor() *v1.Actor {
 		return x.Actor
 	}
 	return nil
+}
+
+func (x *StartSessionRequest) GetModelId() string {
+	if x != nil {
+		return x.ModelId
+	}
+	return ""
 }
 
 type StartSessionResponse struct {
@@ -994,13 +1010,14 @@ const file_aiassistant_v1_aiassistant_proto_rawDesc = "" +
 	"\x10affected_metrics\x18\x01 \x03(\tR\x0faffectedMetrics\x12+\n" +
 	"\x11affected_policies\x18\x02 \x03(\tR\x10affectedPolicies\x12/\n" +
 	"\x13required_migrations\x18\x03 \x03(\tR\x12requiredMigrations\x12\x1a\n" +
-	"\bwarnings\x18\x04 \x03(\tR\bwarnings\"\xac\x01\n" +
+	"\bwarnings\x18\x04 \x03(\tR\bwarnings\"\xc7\x01\n" +
 	"\x10AssistantSession\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12%\n" +
 	"\x0eapplication_id\x18\x02 \x01(\tR\rapplicationId\x12&\n" +
 	"\x05actor\x18\x03 \x01(\v2\x10.common.v1.ActorR\x05actor\x129\n" +
 	"\n" +
-	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\xff\x02\n" +
+	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x19\n" +
+	"\bmodel_id\x18\x05 \x01(\tR\amodelId\"\xff\x02\n" +
 	"\x0fAssistantAction\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -1013,10 +1030,11 @@ const file_aiassistant_v1_aiassistant_proto_rawDesc = "" +
 	"\aapplied\x18\a \x01(\bR\aapplied\x12,\n" +
 	"\x12rollback_action_id\x18\b \x01(\tR\x10rollbackActionId\x129\n" +
 	"\n" +
-	"created_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"d\n" +
+	"created_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\x7f\n" +
 	"\x13StartSessionRequest\x12%\n" +
 	"\x0eapplication_id\x18\x01 \x01(\tR\rapplicationId\x12&\n" +
-	"\x05actor\x18\x02 \x01(\v2\x10.common.v1.ActorR\x05actor\"R\n" +
+	"\x05actor\x18\x02 \x01(\v2\x10.common.v1.ActorR\x05actor\x12\x19\n" +
+	"\bmodel_id\x18\x03 \x01(\tR\amodelId\"R\n" +
 	"\x14StartSessionResponse\x12:\n" +
 	"\asession\x18\x01 \x01(\v2 .aiassistant.v1.AssistantSessionR\asession\"\x89\x01\n" +
 	"\x13GenerateDiffRequest\x12\x1d\n" +

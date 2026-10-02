@@ -147,7 +147,7 @@ func (f *aiAuditFixture) latestAuditEvent(t *testing.T, eventType string) auditR
 // createSession seeds a chat session owned by devID, bypassing the LLM.
 func (f *aiAuditFixture) createSession(t *testing.T) string {
 	t.Helper()
-	sess, err := aiassistant.NewChatStore(f.pool).CreateSession(context.Background(), f.appID, f.devID, "openai", "gpt-4o-mini")
+	sess, err := aiassistant.NewChatStore(f.pool).CreateSession(context.Background(), f.appID, f.modelID, f.devID, "openai", "gpt-4o-mini")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}

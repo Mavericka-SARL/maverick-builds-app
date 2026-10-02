@@ -4730,6 +4730,10 @@ func (s *AiSession) encodeFields(e *jx.Encoder) {
 		json.EncodeUUID(e, s.AppID)
 	}
 	{
+		e.FieldStart("model_id")
+		json.EncodeUUID(e, s.ModelID)
+	}
+	{
 		e.FieldStart("user_id")
 		json.EncodeUUID(e, s.UserID)
 	}
@@ -4759,15 +4763,16 @@ func (s *AiSession) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfAiSession = [8]string{
+var jsonFieldsNameOfAiSession = [9]string{
 	0: "id",
 	1: "app_id",
-	2: "user_id",
-	3: "llm_provider",
-	4: "llm_model",
-	5: "title",
-	6: "draft_revision_id",
-	7: "created_at",
+	2: "model_id",
+	3: "user_id",
+	4: "llm_provider",
+	5: "llm_model",
+	6: "title",
+	7: "draft_revision_id",
+	8: "created_at",
 }
 
 // Decode decodes AiSession from json.
@@ -4775,7 +4780,7 @@ func (s *AiSession) Decode(d *jx.Decoder) error {
 	if s == nil {
 		return errors.New("invalid: unable to decode AiSession to nil")
 	}
-	var requiredBitSet [1]uint8
+	var requiredBitSet [2]uint8
 
 	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
 		switch string(k) {
@@ -4803,8 +4808,20 @@ func (s *AiSession) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"app_id\"")
 			}
-		case "user_id":
+		case "model_id":
 			requiredBitSet[0] |= 1 << 2
+			if err := func() error {
+				v, err := json.DecodeUUID(d)
+				s.ModelID = v
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"model_id\"")
+			}
+		case "user_id":
+			requiredBitSet[0] |= 1 << 3
 			if err := func() error {
 				v, err := json.DecodeUUID(d)
 				s.UserID = v
@@ -4816,7 +4833,7 @@ func (s *AiSession) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"user_id\"")
 			}
 		case "llm_provider":
-			requiredBitSet[0] |= 1 << 3
+			requiredBitSet[0] |= 1 << 4
 			if err := func() error {
 				v, err := d.Str()
 				s.LlmProvider = string(v)
@@ -4828,7 +4845,7 @@ func (s *AiSession) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"llm_provider\"")
 			}
 		case "llm_model":
-			requiredBitSet[0] |= 1 << 4
+			requiredBitSet[0] |= 1 << 5
 			if err := func() error {
 				v, err := d.Str()
 				s.LlmModel = string(v)
@@ -4860,7 +4877,7 @@ func (s *AiSession) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"draft_revision_id\"")
 			}
 		case "created_at":
-			requiredBitSet[0] |= 1 << 7
+			requiredBitSet[1] |= 1 << 0
 			if err := func() error {
 				v, err := json.DecodeDateTime(d)
 				s.CreatedAt = v
@@ -4880,8 +4897,9 @@ func (s *AiSession) Decode(d *jx.Decoder) error {
 	}
 	// Validate required fields.
 	var failures []validate.FieldError
-	for i, mask := range [1]uint8{
-		0b10011111,
+	for i, mask := range [2]uint8{
+		0b00111111,
+		0b00000001,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -46837,6 +46855,44 @@ func (s *SendAiMessageBadRequest) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *SendAiMessageBadRequest) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes SendAiMessageConflict as json.
+func (s *SendAiMessageConflict) Encode(e *jx.Encoder) {
+	unwrapped := (*Error)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes SendAiMessageConflict from json.
+func (s *SendAiMessageConflict) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode SendAiMessageConflict to nil")
+	}
+	var unwrapped Error
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = SendAiMessageConflict(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *SendAiMessageConflict) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *SendAiMessageConflict) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }

@@ -1900,8 +1900,10 @@ func (s *AiSendMessageRequest) SetContent(val string) {
 
 // Ref: #/components/schemas/AiSession
 type AiSession struct {
-	ID          uuid.UUID `json:"id"`
-	AppID       uuid.UUID `json:"app_id"`
+	ID    uuid.UUID `json:"id"`
+	AppID uuid.UUID `json:"app_id"`
+	// The model the session belongs to, fixed at creation.
+	ModelID     uuid.UUID `json:"model_id"`
 	UserID      uuid.UUID `json:"user_id"`
 	LlmProvider string    `json:"llm_provider"`
 	LlmModel    string    `json:"llm_model"`
@@ -1920,6 +1922,11 @@ func (s *AiSession) GetID() uuid.UUID {
 // GetAppID returns the value of AppID.
 func (s *AiSession) GetAppID() uuid.UUID {
 	return s.AppID
+}
+
+// GetModelID returns the value of ModelID.
+func (s *AiSession) GetModelID() uuid.UUID {
+	return s.ModelID
 }
 
 // GetUserID returns the value of UserID.
@@ -1960,6 +1967,11 @@ func (s *AiSession) SetID(val uuid.UUID) {
 // SetAppID sets the value of AppID.
 func (s *AiSession) SetAppID(val uuid.UUID) {
 	s.AppID = val
+}
+
+// SetModelID sets the value of ModelID.
+func (s *AiSession) SetModelID(val uuid.UUID) {
+	s.ModelID = val
 }
 
 // SetUserID sets the value of UserID.
@@ -21197,6 +21209,10 @@ func (s *ScimTokenDefaultRole) UnmarshalText(data []byte) error {
 type SendAiMessageBadRequest Error
 
 func (*SendAiMessageBadRequest) sendAiMessageRes() {}
+
+type SendAiMessageConflict Error
+
+func (*SendAiMessageConflict) sendAiMessageRes() {}
 
 type SendAiMessageNotFound Error
 

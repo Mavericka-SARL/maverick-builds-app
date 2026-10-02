@@ -1390,6 +1390,7 @@ export interface BAAvailableItem {
 export interface AISession {
   id: string;
   app_id: string;
+  model_id: string;
   llm_provider: string;
   llm_model: string;
   // Set once the session's first confirmed proposal creates an isolated
@@ -2330,8 +2331,11 @@ export const api = {
     ),
 
   // ── AI Assistant ─────────────────────────────────────────────────────────────
-  aiListSessions: () => apiFetch<AISession[]>("/api/ai/sessions"),
-  aiCreateSession: () => apiFetch<AISession>("/api/ai/sessions", { method: "POST" }),
+  // A session belongs to one model: the console's revision names it.
+  aiListSessions: (revisionId?: string) =>
+    apiFetch<AISession[]>(`/api/ai/sessions${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
+  aiCreateSession: (revisionId?: string) =>
+    apiFetch<AISession>(`/api/ai/sessions${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, { method: "POST" }),
   aiDeleteSession: (id: string) =>
     apiFetch<{ status: string }>(`/api/ai/sessions/${id}`, { method: "DELETE" }),
   aiRenameSession: (id: string, title: string) =>

@@ -29,6 +29,9 @@ func (s *Server) StartSession(ctx context.Context, req *aiassistantv1.StartSessi
 	if req.ApplicationId == "" {
 		return nil, status.Error(codes.InvalidArgument, "application_id is required")
 	}
+	if req.ModelId == "" {
+		return nil, status.Error(codes.InvalidArgument, "model_id is required")
+	}
 	if req.Actor == nil {
 		return nil, status.Error(codes.InvalidArgument, "actor is required")
 	}
@@ -36,7 +39,7 @@ func (s *Server) StartSession(ctx context.Context, req *aiassistantv1.StartSessi
 		return nil, status.Error(codes.PermissionDenied, "AI assistant is available to developers and platform admins only")
 	}
 
-	sess, err := s.store.CreateSession(ctx, req.ApplicationId, req.Actor.UserId)
+	sess, err := s.store.CreateSession(ctx, req.ApplicationId, req.ModelId, req.Actor.UserId)
 	if err != nil {
 		s.log.Error().Err(err).Msg("create session")
 		return nil, status.Error(codes.Internal, err.Error())

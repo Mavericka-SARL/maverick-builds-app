@@ -275,7 +275,7 @@ func TestAIDeveloperBuildsAWholeModel(t *testing.T) {
 	}
 
 	chatStore := aiassistant.NewChatStore(pool)
-	sess, err := chatStore.CreateSession(ctx, appID, devID, "openai", "gpt-4o-mini")
+	sess, err := chatStore.CreateSession(ctx, appID, modelID, devID, "openai", "gpt-4o-mini")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -746,7 +746,7 @@ func runAIBuild(t *testing.T, request string, steps []map[string]any) *aiBuild {
 	}
 
 	chatStore := aiassistant.NewChatStore(pool)
-	sess, err := chatStore.CreateSession(ctx, appID, devID, "openai", "gpt-4o-mini")
+	sess, err := chatStore.CreateSession(ctx, appID, modelID, devID, "openai", "gpt-4o-mini")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}

@@ -1078,6 +1078,7 @@ type AiAssistantSession struct {
 	LlmModel        string      `json:"llm_model"`
 	DraftRevisionID pgtype.UUID `json:"draft_revision_id"`
 	Title           string      `json:"title"`
+	ModelID         uuid.UUID   `json:"model_id"`
 }
 
 type AiAssistantTenantLlmSetting struct {

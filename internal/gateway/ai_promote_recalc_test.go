@@ -47,7 +47,7 @@ func assertActivationRecalculatesAIDraft(t *testing.T, activate func(f *promoteF
 	q(`INSERT INTO model.grid_dimension (grid_id, dimension_id) VALUES ($1::uuid,$2::uuid) RETURNING grid_id::text`, grid, region)
 	q(`INSERT INTO model.grid_metric (grid_id, metric_id) VALUES ($1::uuid,$2::uuid) RETURNING grid_id::text`, grid, metric)
 
-	sess, err := aiassistant.NewChatStore(f.pool).CreateSession(ctx, f.appID, f.devID, "openai", "gpt-4o-mini")
+	sess, err := aiassistant.NewChatStore(f.pool).CreateSession(ctx, f.appID, f.modelID, f.devID, "openai", "gpt-4o-mini")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}

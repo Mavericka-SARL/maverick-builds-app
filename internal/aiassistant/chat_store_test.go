@@ -14,7 +14,7 @@ import (
 // rather than the older hand-curated testdata fixture used by store_test.go —
 // that fixture predates ai_assistant.message/llm_settings and identity.user's
 // keycloak_sub column, so it can't seed what ChatStore needs.
-func seedAppAndUser(t *testing.T, pool *pgxpool.Pool, email string) (appID, userID string) {
+func seedAppAndUser(t *testing.T, pool *pgxpool.Pool, email string) (appID, modelID, userID string) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -28,12 +28,15 @@ func seedAppAndUser(t *testing.T, pool *pgxpool.Pool, email string) (appID, user
 	if err := pool.QueryRow(ctx, `INSERT INTO core.application (workspace_id, name, mode) VALUES ($1::uuid, 'Test App', 'planning') RETURNING id::text`, workspaceID).Scan(&appID); err != nil {
 		t.Fatalf("seed application: %v", err)
 	}
+	if err := pool.QueryRow(ctx, `INSERT INTO core.model (application_id, name) VALUES ($1::uuid, 'Test Model') RETURNING id::text`, appID).Scan(&modelID); err != nil {
+		t.Fatalf("seed model: %v", err)
+	}
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO identity.user (keycloak_sub, email) VALUES ($1, $2) RETURNING id::text
 	`, "sub-"+email, email).Scan(&userID); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
-	return appID, userID
+	return appID, modelID, userID
 }
 
 // TestCountLLMCallsInSession_OnlyCountsAssistantMessages is a regression test
@@ -43,10 +46,10 @@ func seedAppAndUser(t *testing.T, pool *pgxpool.Pool, email string) (appID, user
 func TestCountLLMCallsInSession_OnlyCountsAssistantMessages(t *testing.T) {
 	pool := setupWriteExecutorDB(t)
 	ctx := context.Background()
-	appID, userID := seedAppAndUser(t, pool, "dev@test.com")
+	appID, modelID, userID := seedAppAndUser(t, pool, "dev@test.com")
 	chatStore := aiassistant.NewChatStore(pool)
 
-	sess, err := chatStore.CreateSession(ctx, appID, userID, "openai", "gpt-4o-mini")
+	sess, err := chatStore.CreateSession(ctx, appID, modelID, userID, "openai", "gpt-4o-mini")
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -73,11 +76,11 @@ func TestCountLLMCallsInSession_OnlyCountsAssistantMessages(t *testing.T) {
 func TestCountLLMCallsInSession_ScopedToSession(t *testing.T) {
 	pool := setupWriteExecutorDB(t)
 	ctx := context.Background()
-	appID, userID := seedAppAndUser(t, pool, "dev@test.com")
+	appID, modelID, userID := seedAppAndUser(t, pool, "dev@test.com")
 	chatStore := aiassistant.NewChatStore(pool)
 
-	sessA, _ := chatStore.CreateSession(ctx, appID, userID, "openai", "gpt-4o-mini")
-	sessB, _ := chatStore.CreateSession(ctx, appID, userID, "openai", "gpt-4o-mini")
+	sessA, _ := chatStore.CreateSession(ctx, appID, modelID, userID, "openai", "gpt-4o-mini")
+	sessB, _ := chatStore.CreateSession(ctx, appID, modelID, userID, "openai", "gpt-4o-mini")
 
 	if _, err := chatStore.SaveMessage(ctx, sessA.ID, "assistant", "reply A1", nil, "", ""); err != nil {
 		t.Fatalf("SaveMessage A1: %v", err)
@@ -108,13 +111,13 @@ func TestCountLLMCallsInSession_ScopedToSession(t *testing.T) {
 func TestCountLLMCallsToday_ScopedToUserAcrossSessions(t *testing.T) {
 	pool := setupWriteExecutorDB(t)
 	ctx := context.Background()
-	appID, userID := seedAppAndUser(t, pool, "dev@test.com")
-	_, otherUserID := seedAppAndUser(t, pool, "other@test.com")
+	appID, modelID, userID := seedAppAndUser(t, pool, "dev@test.com")
+	_, _, otherUserID := seedAppAndUser(t, pool, "other@test.com")
 	chatStore := aiassistant.NewChatStore(pool)
 
-	sess1, _ := chatStore.CreateSession(ctx, appID, userID, "openai", "gpt-4o-mini")
-	sess2, _ := chatStore.CreateSession(ctx, appID, userID, "openai", "gpt-4o-mini")
-	otherSess, _ := chatStore.CreateSession(ctx, appID, otherUserID, "openai", "gpt-4o-mini")
+	sess1, _ := chatStore.CreateSession(ctx, appID, modelID, userID, "openai", "gpt-4o-mini")
+	sess2, _ := chatStore.CreateSession(ctx, appID, modelID, userID, "openai", "gpt-4o-mini")
+	otherSess, _ := chatStore.CreateSession(ctx, appID, modelID, otherUserID, "openai", "gpt-4o-mini")
 
 	for range 2 {
 		if _, err := chatStore.SaveMessage(ctx, sess1.ID, "assistant", "r", nil, "", ""); err != nil {
@@ -143,10 +146,10 @@ func TestCountLLMCallsToday_ScopedToUserAcrossSessions(t *testing.T) {
 func TestCountLLMCallsToday_ExcludesPriorDays(t *testing.T) {
 	pool := setupWriteExecutorDB(t)
 	ctx := context.Background()
-	appID, userID := seedAppAndUser(t, pool, "dev@test.com")
+	appID, modelID, userID := seedAppAndUser(t, pool, "dev@test.com")
 	chatStore := aiassistant.NewChatStore(pool)
 
-	sess, _ := chatStore.CreateSession(ctx, appID, userID, "openai", "gpt-4o-mini")
+	sess, _ := chatStore.CreateSession(ctx, appID, modelID, userID, "openai", "gpt-4o-mini")
 	msg, err := chatStore.SaveMessage(ctx, sess.ID, "assistant", "old reply", nil, "", "")
 	if err != nil {
 		t.Fatalf("SaveMessage: %v", err)
@@ -169,7 +172,7 @@ func TestCountLLMCallsToday_ExcludesPriorDays(t *testing.T) {
 // owner-scoped — a generated title must never clobber a name the user chose.
 func TestSessionTitleLifecycle(t *testing.T) {
 	pool := setupWriteExecutorDB(t)
-	appID, userID := seedAppAndUser(t, pool, "title@test.dev")
+	appID, modelID, userID := seedAppAndUser(t, pool, "title@test.dev")
 	_, otherUserID := func() (string, string) {
 		var id string
 		if err := pool.QueryRow(context.Background(),
@@ -181,7 +184,7 @@ func TestSessionTitleLifecycle(t *testing.T) {
 	ctx := context.Background()
 	store := aiassistant.NewChatStore(pool)
 
-	sess, err := store.CreateSession(ctx, appID, userID, "openai", "gpt-4o-mini")
+	sess, err := store.CreateSession(ctx, appID, modelID, userID, "openai", "gpt-4o-mini")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -220,7 +223,7 @@ func TestSessionTitleLifecycle(t *testing.T) {
 		t.Error("RenameSession by a non-owner succeeded, want error")
 	}
 	// And the list surface serves the title.
-	list, err := store.ListSessions(ctx, appID, userID)
+	list, err := store.ListSessions(ctx, modelID, userID)
 	if err != nil || len(list) == 0 {
 		t.Fatalf("list sessions: %v (%d)", err, len(list))
 	}

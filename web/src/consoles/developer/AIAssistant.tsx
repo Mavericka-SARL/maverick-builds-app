@@ -561,9 +561,27 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
     queryFn: () => api.getDevModel(revisionId || undefined),
   });
 
+  // A session belongs to one model. When the console moves to another
+  // model the open session stays behind with it; another revision of the
+  // same model (a promoted draft, say) keeps it open.
+  const consoleModelId = sessionModel?.model_id;
+  const [shownModelId, setShownModelId] = useState(consoleModelId);
+  if (consoleModelId && consoleModelId !== shownModelId) {
+    setShownModelId(consoleModelId);
+    if (currentSession && currentSession.model_id !== consoleModelId) {
+      setSessionId(null);
+      setCurrentSession(null);
+      setMessages([]);
+      setDocuments([]);
+      setPendingProposal(null);
+      setStreamingContent("");
+      setToolStatus(null);
+    }
+  }
+
   const { data: sessions = [] } = useQuery<AISession[]>({
-    queryKey: ["ai-sessions"],
-    queryFn: api.aiListSessions,
+    queryKey: ["ai-sessions", revisionId ?? ""],
+    queryFn: () => api.aiListSessions(revisionId),
   });
 
   const { data: settings } = useQuery<AISettings>({
@@ -591,7 +609,7 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
 
   // Create a new session.
   const newSession = useMutation({
-    mutationFn: api.aiCreateSession,
+    mutationFn: () => api.aiCreateSession(revisionId),
     onSuccess: (sess) => {
       qc.invalidateQueries({ queryKey: ["ai-sessions"] });
       setSessionId(sess.id);
@@ -687,7 +705,7 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
     try {
       let sid = sessionId;
       if (!sid) {
-        const sess = await api.aiCreateSession();
+        const sess = await api.aiCreateSession(revisionId);
         qc.invalidateQueries({ queryKey: ["ai-sessions"] });
         sid = sess.id;
         setSessionId(sid);
@@ -740,7 +758,7 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
         return;
       }
       try {
-        const sess = await api.aiCreateSession();
+        const sess = await api.aiCreateSession(revisionId);
         qc.invalidateQueries({ queryKey: ["ai-sessions"] });
         sid = sess.id;
         setSessionId(sid);
@@ -802,7 +820,7 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
             setMessages(prev => prev.filter(m => m.id !== optimistic.id));
             break;
         }
-      });
+      }, revisionId);
       // The auto-generated title lands asynchronously shortly after the
       // first send — refetch the list now and once more after the namer's
       // window so the "Session" placeholder becomes the real name.

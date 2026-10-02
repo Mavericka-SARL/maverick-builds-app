@@ -26,7 +26,7 @@ func TestPromoteDraftTriggersAutoMigrate(t *testing.T) {
 	// metric ("model has no metrics defined" otherwise) — a plain dimension
 	// proposal wouldn't exercise the real path.
 	chatStore := aiassistant.NewChatStore(f.pool)
-	sess, err := chatStore.CreateSession(ctx, f.appID, f.devID, "openai", "gpt-4o-mini")
+	sess, err := chatStore.CreateSession(ctx, f.appID, f.modelID, f.devID, "openai", "gpt-4o-mini")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}

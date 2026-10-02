@@ -6,7 +6,7 @@
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
 <tr><td><b>AI Settings</b> (gear)</td><td><b>LLM Provider</b>: OpenAI, Anthropic (Claude), Mistral, DeepSeek. <b>Model</b> name. <b>API Key</b> (kept server-side; "key saved" once set, leave blank to keep it). <b>Save settings</b>. Chatting is blocked until a key is set: "Set your API key in Settings before chatting."</td></tr>
-<tr><td><b>New session</b></td><td>Starts a conversation; sessions can be renamed and deleted from the list.</td></tr>
+<tr><td><b>New session</b></td><td>Starts a conversation in the model selected in the console. A session belongs to that model: the list shows only its sessions, and a session from another model has to be continued from that model. Sessions can be renamed and deleted from the list.</td></tr>
 <tr><td>Message box</td><td>"Ask about your model…"; Enter sends, Shift+Enter inserts a newline. The paperclip attaches a document (pdf, xlsx, docx, csv, txt, md) the assistant can read. A spreadsheet (.xlsx, .xlsm, .csv, up to 16 MB) is kept whole, marked with a spreadsheet icon, so the assistant can import all of it.</td></tr>
 <tr><td>Status line</td><td>"Thinking…" or "Calling &lt;tool&gt;…" while the assistant reads the model.</td></tr>
 <tr><td><b>Action plan</b> card</td><td>When the assistant wants to change something it proposes numbered steps (for example Create metric, Add dimension member, Create grid, Add dashboard widget). <b>Execute</b> runs them; <b>Reject</b> discards. After execution each step shows success or failure; a plan with failures is marked partial.</td></tr>

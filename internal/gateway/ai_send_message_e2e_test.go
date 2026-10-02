@@ -104,7 +104,7 @@ func TestSendMessage_ProposeActionsToolCallCreatesRealProposal(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	chatStore := aiassistant.NewChatStore(pool)
-	sess, err := chatStore.CreateSession(ctx, appID, devID, "openai", "gpt-4o-mini")
+	sess, err := chatStore.CreateSession(ctx, appID, modelID, devID, "openai", "gpt-4o-mini")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestSendMessage_OversizedProposalRejectedThenBatched(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	chatStore := aiassistant.NewChatStore(pool)
-	sess, err := chatStore.CreateSession(ctx, appID, devID, "openai", "gpt-4o-mini")
+	sess, err := chatStore.CreateSession(ctx, appID, modelID, devID, "openai", "gpt-4o-mini")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}

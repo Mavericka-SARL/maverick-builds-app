@@ -19,7 +19,7 @@ func TestConfirmProposal_CreateAndUpdateWorkflowDefLandsAfterPromote(t *testing.
 	ctx := context.Background()
 
 	chatStore := aiassistant.NewChatStore(f.pool)
-	sess, err := chatStore.CreateSession(ctx, f.appID, f.devID, "openai", "gpt-4o-mini")
+	sess, err := chatStore.CreateSession(ctx, f.appID, f.modelID, f.devID, "openai", "gpt-4o-mini")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestConfirmProposal_UpdateWorkflowDefEditsPreSessionWorkflow(t *testing.T) 
 	}
 
 	chatStore := aiassistant.NewChatStore(f.pool)
-	sess, err := chatStore.CreateSession(ctx, f.appID, f.devID, "openai", "gpt-4o-mini")
+	sess, err := chatStore.CreateSession(ctx, f.appID, f.modelID, f.devID, "openai", "gpt-4o-mini")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestConfirmProposal_CreateFormDefLandsAfterPromote(t *testing.T) {
 	ctx := context.Background()
 
 	chatStore := aiassistant.NewChatStore(f.pool)
-	sess, err := chatStore.CreateSession(ctx, f.appID, f.devID, "openai", "gpt-4o-mini")
+	sess, err := chatStore.CreateSession(ctx, f.appID, f.modelID, f.devID, "openai", "gpt-4o-mini")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}

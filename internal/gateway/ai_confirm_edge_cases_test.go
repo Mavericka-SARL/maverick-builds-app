@@ -27,7 +27,7 @@ func TestConfirmProposal_PartialFailureLeavesDraftUsable(t *testing.T) {
 	ctx := context.Background()
 
 	chatStore := aiassistant.NewChatStore(f.pool)
-	sess, err := chatStore.CreateSession(ctx, f.appID, f.devID, "openai", "gpt-4o-mini")
+	sess, err := chatStore.CreateSession(ctx, f.appID, f.modelID, f.devID, "openai", "gpt-4o-mini")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}

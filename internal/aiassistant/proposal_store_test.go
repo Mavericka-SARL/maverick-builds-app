@@ -16,9 +16,9 @@ import (
 func TestListProposals_ReturnsEveryStatusMostRecentFirst(t *testing.T) {
 	pool := setupWriteExecutorDB(t)
 	ctx := context.Background()
-	appID, userID := seedAppAndUser(t, pool, "proposals@test.com")
+	appID, modelID, userID := seedAppAndUser(t, pool, "proposals@test.com")
 	chatStore := aiassistant.NewChatStore(pool)
-	sess, err := chatStore.CreateSession(ctx, appID, userID, "openai", "gpt-4o-mini")
+	sess, err := chatStore.CreateSession(ctx, appID, modelID, userID, "openai", "gpt-4o-mini")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -87,9 +87,9 @@ func TestListProposals_ReturnsEveryStatusMostRecentFirst(t *testing.T) {
 func TestListProposals_EmptySessionReturnsNoRows(t *testing.T) {
 	pool := setupWriteExecutorDB(t)
 	ctx := context.Background()
-	appID, userID := seedAppAndUser(t, pool, "empty@test.com")
+	appID, modelID, userID := seedAppAndUser(t, pool, "empty@test.com")
 	chatStore := aiassistant.NewChatStore(pool)
-	sess, err := chatStore.CreateSession(ctx, appID, userID, "openai", "gpt-4o-mini")
+	sess, err := chatStore.CreateSession(ctx, appID, modelID, userID, "openai", "gpt-4o-mini")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}

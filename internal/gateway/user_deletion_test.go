@@ -51,7 +51,7 @@ func TestUserDeleteKeepsTenantData(t *testing.T) {
 	wiID := q(`INSERT INTO workflow.workflow_instance (workflow_def_id, started_by) VALUES ($1::uuid, $2::uuid) RETURNING id::text`, wdID, workerID)
 	q(`INSERT INTO workflow.workflow_step (instance_id, step_def_id, assignee_user_id) VALUES ($1::uuid, 'review', $2::uuid) RETURNING id::text`, wiID, workerID)
 	q(`INSERT INTO import.import_job (model_id, revision_id, file_url, created_by) VALUES ($1::uuid, $2::uuid, 'memory://x.csv', $3::uuid) RETURNING id::text`, modelID, revID, workerID)
-	q(`INSERT INTO ai_assistant.session (application_id, user_id) VALUES ($1::uuid, $2::uuid) RETURNING id::text`, appID, workerID)
+	q(`INSERT INTO ai_assistant.session (application_id, model_id, user_id) VALUES ($1::uuid, $2::uuid, $3::uuid) RETURNING id::text`, appID, modelID, workerID)
 
 	h := &handler{log: logger.New("test"), db: tenantdb.NewHandle(pool, nil), devMode: true}
 	mux := http.NewServeMux()

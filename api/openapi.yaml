@@ -1724,10 +1724,11 @@ components:
 
     AiSession:
       type: object
-      required: [id, app_id, user_id, llm_provider, llm_model, created_at]
+      required: [id, app_id, model_id, user_id, llm_provider, llm_model, created_at]
       properties:
         id:                { type: string, format: uuid }
         app_id:            { type: string, format: uuid }
+        model_id:          { type: string, format: uuid, description: "The model the session belongs to, fixed at creation" }
         user_id:           { type: string, format: uuid }
         llm_provider:      { type: string }
         llm_model:         { type: string }
@@ -6989,7 +6990,12 @@ paths:
     get:
       operationId: listAiSessions
       tags: [AI Assistant]
-      summary: List the caller's 20 most recent AI assistant sessions for the current application
+      summary: List the caller's 20 most recent AI assistant sessions in the current model
+      parameters:
+        - name: revision_id
+          in: query
+          schema: { type: string, format: uuid }
+          description: Names the model whose sessions are listed (the revision's model). Without it, the application's selected or default model.
       responses:
         "200":
           description: Session list
@@ -7001,7 +7007,13 @@ paths:
     post:
       operationId: createAiSession
       tags: [AI Assistant]
-      summary: Create a new AI assistant session, seeded with the caller's saved provider/model settings
+      summary: Create a new AI assistant session in the current model, seeded with the caller's saved provider/model settings
+      description: A session belongs to the model it is created in; requests on it that resolve another model are refused with 409.
+      parameters:
+        - name: revision_id
+          in: query
+          schema: { type: string, format: uuid }
+          description: Names the model the session belongs to (the revision's model). Without it, the application's selected or default model.
       responses:
         "200":
           description: Session created
@@ -7099,7 +7111,7 @@ paths:
         - name: revision_id
           in: query
           schema: { type: string, format: uuid }
-          description: Defaults to the session's draft revision, then the model's active revision.
+          description: Names the model, which must be the session's own (409 otherwise). Reads use the session's draft revision when it has one, else this revision, else the model's active revision.
       requestBody:
         required: true
         content:
@@ -7113,6 +7125,11 @@ paths:
               schema: { type: string }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The session belongs to another model than the request names
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "429":
           description: Session or daily LLM call limit reached
           content:
@@ -7249,6 +7266,10 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
+        - name: revision_id
+          in: query
+          schema: { type: string, format: uuid }
+          description: Names the model, which must be the session's own (409 otherwise).
       responses:
         "200":
           description: Proposal executed (fully or partially — see proposal.status)
@@ -7262,7 +7283,7 @@ paths:
                   session:  { $ref: "#/components/schemas/AiSession" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409":
-          description: Proposal is no longer pending
+          description: Proposal is no longer pending, or the session belongs to another model than the request names
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

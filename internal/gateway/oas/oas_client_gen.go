@@ -179,10 +179,11 @@ type Invoker interface {
 	CreateAdminUserTrailingSlash(ctx context.Context, request *CreateAdminUserTrailingSlashReq) (*CreateAdminUserTrailingSlashOK, error)
 	// CreateAiSession invokes createAiSession operation.
 	//
-	// Create a new AI assistant session, seeded with the caller's saved provider/model settings.
+	// A session belongs to the model it is created in; requests on it that resolve another model are
+	// refused with 409.
 	//
 	// POST /api/ai/sessions
-	CreateAiSession(ctx context.Context) (*AiSession, error)
+	CreateAiSession(ctx context.Context, params CreateAiSessionParams) (*AiSession, error)
 	// CreateAutomationRule invokes createAutomationRule operation.
 	//
 	// Create an automation rule (a workflow_def_id must point at a published workflow).
@@ -895,10 +896,10 @@ type Invoker interface {
 	ListAiProposals(ctx context.Context, params ListAiProposalsParams) (ListAiProposalsRes, error)
 	// ListAiSessions invokes listAiSessions operation.
 	//
-	// List the caller's 20 most recent AI assistant sessions for the current application.
+	// List the caller's 20 most recent AI assistant sessions in the current model.
 	//
 	// GET /api/ai/sessions
-	ListAiSessions(ctx context.Context) ([]AiSession, error)
+	ListAiSessions(ctx context.Context, params ListAiSessionsParams) ([]AiSession, error)
 	// ListApplicationsForDeveloper invokes listApplicationsForDeveloper operation.
 	//
 	// Same underlying handler as GET /api/admin/tenants; reachable by developer, platform_admin, or
@@ -3638,6 +3639,27 @@ func (c *Client) sendConfirmAiProposal(ctx context.Context, params ConfirmAiProp
 	pathParts[4] = "/confirm"
 	uri.AddPathParts(u, pathParts[:]...)
 
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
+
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "POST", u)
 	if err != nil {
@@ -4271,15 +4293,16 @@ func (c *Client) sendCreateAdminUserTrailingSlash(ctx context.Context, request *
 
 // CreateAiSession invokes createAiSession operation.
 //
-// Create a new AI assistant session, seeded with the caller's saved provider/model settings.
+// A session belongs to the model it is created in; requests on it that resolve another model are
+// refused with 409.
 //
 // POST /api/ai/sessions
-func (c *Client) CreateAiSession(ctx context.Context) (*AiSession, error) {
-	res, err := c.sendCreateAiSession(ctx)
+func (c *Client) CreateAiSession(ctx context.Context, params CreateAiSessionParams) (*AiSession, error) {
+	res, err := c.sendCreateAiSession(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendCreateAiSession(ctx context.Context) (res *AiSession, err error) {
+func (c *Client) sendCreateAiSession(ctx context.Context, params CreateAiSessionParams) (res *AiSession, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("createAiSession"),
 		semconv.HTTPRequestMethodKey.String("POST"),
@@ -4319,6 +4342,27 @@ func (c *Client) sendCreateAiSession(ctx context.Context) (res *AiSession, err e
 	var pathParts [1]string
 	pathParts[0] = "/api/ai/sessions"
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "POST", u)
@@ -17714,15 +17758,15 @@ func (c *Client) sendListAiProposals(ctx context.Context, params ListAiProposals
 
 // ListAiSessions invokes listAiSessions operation.
 //
-// List the caller's 20 most recent AI assistant sessions for the current application.
+// List the caller's 20 most recent AI assistant sessions in the current model.
 //
 // GET /api/ai/sessions
-func (c *Client) ListAiSessions(ctx context.Context) ([]AiSession, error) {
-	res, err := c.sendListAiSessions(ctx)
+func (c *Client) ListAiSessions(ctx context.Context, params ListAiSessionsParams) ([]AiSession, error) {
+	res, err := c.sendListAiSessions(ctx, params)
 	return res, err
 }
 
-func (c *Client) sendListAiSessions(ctx context.Context) (res []AiSession, err error) {
+func (c *Client) sendListAiSessions(ctx context.Context, params ListAiSessionsParams) (res []AiSession, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("listAiSessions"),
 		semconv.HTTPRequestMethodKey.String("GET"),
@@ -17762,6 +17806,27 @@ func (c *Client) sendListAiSessions(ctx context.Context) (res []AiSession, err e
 	var pathParts [1]string
 	pathParts[0] = "/api/ai/sessions"
 	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "revision_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.RevisionID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
 
 	stage = "EncodeRequest"
 	r, err := ht.NewRequest(ctx, "GET", u)

@@ -164,7 +164,7 @@ func (h *handler) aiCreateSession(w http.ResponseWriter, r *http.Request) {
 	store := h.aiChatStore(ctx)
 	settings, _ := h.aiChatStore(personalCtx(ctx, a)).GetSettings(personalCtx(ctx, a), a.UserID)
 
-	sess, err := store.CreateSession(ctx, appID, a.UserID, settings.Provider, settings.Model)
+	sess, err := store.CreateSession(ctx, appID, modelID, a.UserID, settings.Provider, settings.Model)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -191,10 +191,7 @@ func (h *handler) aiListSessions(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
-	var appID string
-	_ = h.db.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, modelID).Scan(&appID)
-
-	sessions, err := h.aiChatStore(ctx).ListSessions(ctx, appID, a.UserID)
+	sessions, err := h.aiChatStore(ctx).ListSessions(ctx, modelID, a.UserID)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -364,7 +361,13 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("revision does not belong to this model"), http.StatusForbidden)
 		return
 	}
-	if revID == "" {
+	if err := h.aiSessionInModel(ctx, sess, modelID); err != nil {
+		jsonErr(w, err, http.StatusConflict)
+		return
+	}
+	// The draft outranks the console's revision: the session's writes land
+	// there.
+	if sess.DraftRevisionID != "" {
 		revID = sess.DraftRevisionID
 	}
 	if revID == "" {
@@ -677,6 +680,13 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 	modelID, mErr := h.resolveDemoModelID(ctx, r)
 	if mErr != nil {
 		jsonAccessErr(w, mErr, "resolve model")
+		return
+	}
+	// Without this a proposal written in one model could be confirmed into
+	// another — its draft, or rows carrying the second model's id written
+	// into the first model's draft.
+	if err := h.aiSessionInModel(ctx, sess, modelID); err != nil {
+		jsonErr(w, err, http.StatusConflict)
 		return
 	}
 	revID := sess.DraftRevisionID
@@ -1576,6 +1586,20 @@ func (h *handler) revisionBelongsToModel(ctx context.Context, revID, modelID str
 		return false
 	}
 	return ok
+}
+
+// aiSessionInModel refuses a request on a session from a model other than
+// the one the request resolved. A session belongs to the model it was
+// started in — its draft is a copy of that model, and its proposals name
+// that model's metrics and dimensions. The error names the session's model
+// so the developer knows where to go back to.
+func (h *handler) aiSessionInModel(ctx context.Context, sess aiassistant.Session, modelID string) error {
+	if sess.ModelID == modelID {
+		return nil
+	}
+	var name string
+	_ = h.db.QueryRow(ctx, `SELECT name FROM core.model WHERE id=$1::uuid`, sess.ModelID).Scan(&name)
+	return fmt.Errorf("this session belongs to the model %q — open that model to continue it, or start a new session for this model", name)
 }
 
 // aiRenameSession serves PATCH /api/ai/sessions/{id} {"title": "..."} —

@@ -224,10 +224,11 @@ func (UnimplementedHandler) CreateAdminUserTrailingSlash(ctx context.Context, re
 
 // CreateAiSession implements createAiSession operation.
 //
-// Create a new AI assistant session, seeded with the caller's saved provider/model settings.
+// A session belongs to the model it is created in; requests on it that resolve another model are
+// refused with 409.
 //
 // POST /api/ai/sessions
-func (UnimplementedHandler) CreateAiSession(ctx context.Context) (r *AiSession, _ error) {
+func (UnimplementedHandler) CreateAiSession(ctx context.Context, params CreateAiSessionParams) (r *AiSession, _ error) {
 	return r, ht.ErrNotImplemented
 }
 
@@ -1266,10 +1267,10 @@ func (UnimplementedHandler) ListAiProposals(ctx context.Context, params ListAiPr
 
 // ListAiSessions implements listAiSessions operation.
 //
-// List the caller's 20 most recent AI assistant sessions for the current application.
+// List the caller's 20 most recent AI assistant sessions in the current model.
 //
 // GET /api/ai/sessions
-func (UnimplementedHandler) ListAiSessions(ctx context.Context) (r []AiSession, _ error) {
+func (UnimplementedHandler) ListAiSessions(ctx context.Context, params ListAiSessionsParams) (r []AiSession, _ error) {
 	return r, ht.ErrNotImplemented
 }
 

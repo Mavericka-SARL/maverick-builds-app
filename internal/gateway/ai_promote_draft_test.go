@@ -117,7 +117,7 @@ func (f *promoteFixture) createSessionWithProposal(t *testing.T, ownerID, dimNam
 	ctx := context.Background()
 
 	chatStore := aiassistant.NewChatStore(f.pool)
-	sess, err := chatStore.CreateSession(ctx, f.appID, ownerID, "openai", "gpt-4o-mini")
+	sess, err := chatStore.CreateSession(ctx, f.appID, f.modelID, ownerID, "openai", "gpt-4o-mini")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestPromoteDraftRejectsWrongOwnerAndMissingDraft(t *testing.T) {
 
 	t.Run("a session with no draft cannot be promoted", func(t *testing.T) {
 		chatStore := aiassistant.NewChatStore(f.pool)
-		sess, err := chatStore.CreateSession(context.Background(), f.appID, f.devID, "openai", "gpt-4o-mini")
+		sess, err := chatStore.CreateSession(context.Background(), f.appID, f.modelID, f.devID, "openai", "gpt-4o-mini")
 		if err != nil {
 			t.Fatalf("create session: %v", err)
 		}

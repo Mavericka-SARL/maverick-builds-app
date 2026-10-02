@@ -142,7 +142,7 @@ func TestDiscardDraftRejectsWrongOwnerAndMissingDraft(t *testing.T) {
 
 	t.Run("a session with no draft cannot be discarded", func(t *testing.T) {
 		chatStore := aiassistant.NewChatStore(f.pool)
-		sess, err := chatStore.CreateSession(context.Background(), f.appID, f.devID, "openai", "gpt-4o-mini")
+		sess, err := chatStore.CreateSession(context.Background(), f.appID, f.modelID, f.devID, "openai", "gpt-4o-mini")
 		if err != nil {
 			t.Fatalf("create session: %v", err)
 		}

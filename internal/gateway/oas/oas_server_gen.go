@@ -159,10 +159,11 @@ type Handler interface {
 	CreateAdminUserTrailingSlash(ctx context.Context, req *CreateAdminUserTrailingSlashReq) (*CreateAdminUserTrailingSlashOK, error)
 	// CreateAiSession implements createAiSession operation.
 	//
-	// Create a new AI assistant session, seeded with the caller's saved provider/model settings.
+	// A session belongs to the model it is created in; requests on it that resolve another model are
+	// refused with 409.
 	//
 	// POST /api/ai/sessions
-	CreateAiSession(ctx context.Context) (*AiSession, error)
+	CreateAiSession(ctx context.Context, params CreateAiSessionParams) (*AiSession, error)
 	// CreateAutomationRule implements createAutomationRule operation.
 	//
 	// Create an automation rule (a workflow_def_id must point at a published workflow).
@@ -875,10 +876,10 @@ type Handler interface {
 	ListAiProposals(ctx context.Context, params ListAiProposalsParams) (ListAiProposalsRes, error)
 	// ListAiSessions implements listAiSessions operation.
 	//
-	// List the caller's 20 most recent AI assistant sessions for the current application.
+	// List the caller's 20 most recent AI assistant sessions in the current model.
 	//
 	// GET /api/ai/sessions
-	ListAiSessions(ctx context.Context) ([]AiSession, error)
+	ListAiSessions(ctx context.Context, params ListAiSessionsParams) ([]AiSession, error)
 	// ListApplicationsForDeveloper implements listApplicationsForDeveloper operation.
 	//
 	// Same underlying handler as GET /api/admin/tenants; reachable by developer, platform_admin, or

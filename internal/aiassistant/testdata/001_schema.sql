@@ -28,9 +28,16 @@ CREATE TABLE core.application (
     name         TEXT NOT NULL
 );
 
+CREATE TABLE core.model (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    application_id UUID NOT NULL REFERENCES core.application(id) ON DELETE CASCADE,
+    name           TEXT NOT NULL
+);
+
 CREATE TABLE ai_assistant.session (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     application_id UUID NOT NULL REFERENCES core.application(id) ON DELETE CASCADE,
+    model_id       UUID NOT NULL REFERENCES core.model(id) ON DELETE CASCADE,
     user_id        UUID NOT NULL REFERENCES identity.user(id),
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );

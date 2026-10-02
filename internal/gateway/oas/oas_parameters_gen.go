@@ -710,6 +710,8 @@ func decodeCompleteTaskParams(args [1]string, argsEscaped bool, r *http.Request)
 type ConfirmAiProposalParams struct {
 	ID  uuid.UUID
 	Pid uuid.UUID
+	// Names the model, which must be the session's own (409 otherwise).
+	RevisionID OptUUID `json:",omitempty,omitzero"`
 }
 
 func unpackConfirmAiProposalParams(packed middleware.Parameters) (params ConfirmAiProposalParams) {
@@ -727,10 +729,20 @@ func unpackConfirmAiProposalParams(packed middleware.Parameters) (params Confirm
 		}
 		params.Pid = packed[key].(uuid.UUID)
 	}
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
+	}
 	return params
 }
 
 func decodeConfirmAiProposalParams(args [2]string, argsEscaped bool, r *http.Request) (params ConfirmAiProposalParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]
@@ -818,6 +830,113 @@ func decodeConfirmAiProposalParams(args [2]string, argsEscaped bool, r *http.Req
 		return params, &ogenerrors.DecodeParamError{
 			Name: "pid",
 			In:   "path",
+			Err:  err,
+		}
+	}
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// CreateAiSessionParams is parameters of createAiSession operation.
+type CreateAiSessionParams struct {
+	// Names the model the session belongs to (the revision's model). Without it, the application's
+	// selected or default model.
+	RevisionID OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackCreateAiSessionParams(packed middleware.Parameters) (params CreateAiSessionParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeCreateAiSessionParams(args [0]string, argsEscaped bool, r *http.Request) (params CreateAiSessionParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
 			Err:  err,
 		}
 	}
@@ -7487,6 +7606,72 @@ func decodeListAiProposalsParams(args [1]string, argsEscaped bool, r *http.Reque
 	return params, nil
 }
 
+// ListAiSessionsParams is parameters of listAiSessions operation.
+type ListAiSessionsParams struct {
+	// Names the model whose sessions are listed (the revision's model). Without it, the application's
+	// selected or default model.
+	RevisionID OptUUID `json:",omitempty,omitzero"`
+}
+
+func unpackListAiSessionsParams(packed middleware.Parameters) (params ListAiSessionsParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "revision_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.RevisionID = v.(OptUUID)
+		}
+	}
+	return params
+}
+
+func decodeListAiSessionsParams(args [0]string, argsEscaped bool, r *http.Request) (params ListAiSessionsParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: revision_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "revision_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotRevisionIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotRevisionIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.RevisionID.SetTo(paramsDotRevisionIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "revision_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // ListAutomationRulesParams is parameters of listAutomationRules operation.
 type ListAutomationRulesParams struct {
 	// The revision to work in (a developer's working revision); it must be a revision of a model of the
@@ -11652,7 +11837,8 @@ func decodeScimReplaceUserParams(args [1]string, argsEscaped bool, r *http.Reque
 // SendAiMessageParams is parameters of sendAiMessage operation.
 type SendAiMessageParams struct {
 	ID uuid.UUID
-	// Defaults to the session's draft revision, then the model's active revision.
+	// Names the model, which must be the session's own (409 otherwise). Reads use the session's draft
+	// revision when it has one, else this revision, else the model's active revision.
 	RevisionID OptUUID `json:",omitempty,omitzero"`
 }
 

@@ -26,6 +26,7 @@ func NewChatStore(pool *pgxpool.Pool) *ChatStore {
 type Session struct {
 	ID              string `json:"id"`
 	AppID           string `json:"app_id"`
+	ModelID         string `json:"model_id"`
 	UserID          string `json:"user_id"`
 	LLMProvider     string `json:"llm_provider"`
 	LLMModel        string `json:"llm_model"`
@@ -36,15 +37,20 @@ type Session struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-func (s *ChatStore) CreateSession(ctx context.Context, appID, userID, provider, model string) (Session, error) {
+// CreateSession starts a session in modelID, a model of appID — a model of
+// another application is refused (no row comes back). The model is fixed
+// for the session's life: the gateway refuses a request on it that
+// resolves another one.
+func (s *ChatStore) CreateSession(ctx context.Context, appID, modelID, userID, provider, model string) (Session, error) {
 	var sess Session
 	var draftRevID *string
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO ai_assistant.session (application_id, user_id, llm_provider, llm_model)
-		VALUES ($1::uuid, $2::uuid, $3, $4)
-		RETURNING id::text, application_id::text, user_id::text, llm_provider, llm_model, draft_revision_id::text, title, created_at
-	`, appID, userID, provider, model).Scan(
-		&sess.ID, &sess.AppID, &sess.UserID, &sess.LLMProvider, &sess.LLMModel, &draftRevID, &sess.Title, &sess.CreatedAt,
+		INSERT INTO ai_assistant.session (application_id, model_id, user_id, llm_provider, llm_model)
+		SELECT m.application_id, m.id, $3::uuid, $4, $5
+		FROM core.model m WHERE m.id = $2::uuid AND m.application_id = $1::uuid
+		RETURNING id::text, application_id::text, model_id::text, user_id::text, llm_provider, llm_model, draft_revision_id::text, title, created_at
+	`, appID, modelID, userID, provider, model).Scan(
+		&sess.ID, &sess.AppID, &sess.ModelID, &sess.UserID, &sess.LLMProvider, &sess.LLMModel, &draftRevID, &sess.Title, &sess.CreatedAt,
 	)
 	if draftRevID != nil {
 		sess.DraftRevisionID = *draftRevID
@@ -52,13 +58,14 @@ func (s *ChatStore) CreateSession(ctx context.Context, appID, userID, provider, 
 	return sess, err
 }
 
-func (s *ChatStore) ListSessions(ctx context.Context, appID, userID string) ([]Session, error) {
+// ListSessions lists the user's sessions in one model, newest first.
+func (s *ChatStore) ListSessions(ctx context.Context, modelID, userID string) ([]Session, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id::text, application_id::text, user_id::text, llm_provider, llm_model, draft_revision_id::text, title, created_at
+		SELECT id::text, application_id::text, model_id::text, user_id::text, llm_provider, llm_model, draft_revision_id::text, title, created_at
 		FROM ai_assistant.session
-		WHERE application_id=$1::uuid AND user_id=$2::uuid
+		WHERE model_id=$1::uuid AND user_id=$2::uuid
 		ORDER BY created_at DESC LIMIT 20
-	`, appID, userID)
+	`, modelID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +74,7 @@ func (s *ChatStore) ListSessions(ctx context.Context, appID, userID string) ([]S
 	for rows.Next() {
 		var sess Session
 		var draftRevID *string
-		if rows.Scan(&sess.ID, &sess.AppID, &sess.UserID, &sess.LLMProvider, &sess.LLMModel, &draftRevID, &sess.Title, &sess.CreatedAt) == nil {
+		if rows.Scan(&sess.ID, &sess.AppID, &sess.ModelID, &sess.UserID, &sess.LLMProvider, &sess.LLMModel, &draftRevID, &sess.Title, &sess.CreatedAt) == nil {
 			if draftRevID != nil {
 				sess.DraftRevisionID = *draftRevID
 			}
@@ -81,9 +88,9 @@ func (s *ChatStore) GetSession(ctx context.Context, sessionID string) (Session, 
 	var sess Session
 	var draftRevID *string
 	err := s.pool.QueryRow(ctx, `
-		SELECT id::text, application_id::text, user_id::text, llm_provider, llm_model, draft_revision_id::text, title, created_at
+		SELECT id::text, application_id::text, model_id::text, user_id::text, llm_provider, llm_model, draft_revision_id::text, title, created_at
 		FROM ai_assistant.session WHERE id=$1::uuid
-	`, sessionID).Scan(&sess.ID, &sess.AppID, &sess.UserID, &sess.LLMProvider, &sess.LLMModel, &draftRevID, &sess.Title, &sess.CreatedAt)
+	`, sessionID).Scan(&sess.ID, &sess.AppID, &sess.ModelID, &sess.UserID, &sess.LLMProvider, &sess.LLMModel, &draftRevID, &sess.Title, &sess.CreatedAt)
 	if err != nil {
 		return Session{}, fmt.Errorf("session not found: %w", err)
 	}
