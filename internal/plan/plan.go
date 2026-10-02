@@ -199,15 +199,18 @@ type Tenant struct {
 	LimitState     string     `json:"limit_state"`
 	LimitReason    string     `json:"limit_reason,omitempty"`
 	UsageCheckedAt *time.Time `json:"usage_checked_at,omitempty"`
+	// StorageBytes is what the last sweep measured (StorageBytes); nil
+	// before the first sweep.
+	StorageBytes *int64 `json:"storage_bytes,omitempty"`
 }
 
 // LoadTenant reads the tenant's row from the database that holds it.
 func LoadTenant(ctx context.Context, db DB, customerID string) (Tenant, error) {
 	var t Tenant
 	err := db.QueryRow(ctx, `
-		SELECT id::text, name, plan, limit_state, limit_reason, usage_checked_at
+		SELECT id::text, name, plan, limit_state, limit_reason, usage_checked_at, storage_bytes
 		FROM core.customer WHERE id = $1::uuid`, customerID,
-	).Scan(&t.CustomerID, &t.Name, &t.Plan, &t.LimitState, &t.LimitReason, &t.UsageCheckedAt)
+	).Scan(&t.CustomerID, &t.Name, &t.Plan, &t.LimitState, &t.LimitReason, &t.UsageCheckedAt, &t.StorageBytes)
 	if err != nil {
 		return Tenant{}, fmt.Errorf("tenant %s: %w", customerID, err)
 	}
@@ -240,11 +243,14 @@ type State struct {
 	LimitState     string     `json:"limit_state"`
 	LimitReason    string     `json:"limit_reason,omitempty"`
 	UsageCheckedAt *time.Time `json:"usage_checked_at,omitempty"`
+	// StorageBytes is the tenant's data as of UsageCheckedAt; against
+	// Plan.Limits.MaxStorageMB it is the space left.
+	StorageBytes *int64 `json:"storage_bytes,omitempty"`
 }
 
 // Evaluate combines a plan and a tenant row into the state.
 func Evaluate(p Plan, known bool, t Tenant) State {
-	st := State{Plan: p, PlanKnown: known, LimitState: t.LimitState, LimitReason: t.LimitReason, UsageCheckedAt: t.UsageCheckedAt}
+	st := State{Plan: p, PlanKnown: known, LimitState: t.LimitState, LimitReason: t.LimitReason, UsageCheckedAt: t.UsageCheckedAt, StorageBytes: t.StorageBytes}
 	if t.LimitState == "over" {
 		st.ReadOnly = true
 		st.Code = CodeOverLimit

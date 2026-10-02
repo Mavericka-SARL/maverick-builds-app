@@ -493,6 +493,7 @@ components:
         limit_state:      { type: string, enum: [ok, over] }
         limit_reason:     { type: string }
         usage_checked_at: { type: string, format: date-time }
+        storage_bytes:    { type: integer, format: int64, description: "The tenant's data as the usage sweep last measured it (at usage_checked_at): exact in a dedicated database, an estimate in a shared one, and absent where it is not measured (a shared database on a plan without a storage limit)" }
 
     LegalInfo:
       type: object

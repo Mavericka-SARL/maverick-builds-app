@@ -16877,6 +16877,52 @@ func (o OptInt) Or(d int) int {
 	return d
 }
 
+// NewOptInt64 returns new OptInt64 with value set to v.
+func NewOptInt64(v int64) OptInt64 {
+	return OptInt64{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptInt64 is optional int64.
+type OptInt64 struct {
+	Value int64
+	Set   bool
+}
+
+// IsSet returns true if OptInt64 was set.
+func (o OptInt64) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptInt64) Reset() {
+	var v int64
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptInt64) SetTo(v int64) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptInt64) Get() (v int64, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptInt64) Or(d int64) int64 {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptLicenseInfoLimits returns new OptLicenseInfoLimits with value set to v.
 func NewOptLicenseInfoLimits(v LicenseInfoLimits) OptLicenseInfoLimits {
 	return OptLicenseInfoLimits{
@@ -19291,6 +19337,10 @@ type PlanState struct {
 	LimitState     PlanStateLimitState `json:"limit_state"`
 	LimitReason    OptString           `json:"limit_reason"`
 	UsageCheckedAt OptDateTime         `json:"usage_checked_at"`
+	// The tenant's data as the usage sweep last measured it (at usage_checked_at): exact in a dedicated
+	// database, an estimate in a shared one, and absent where it is not measured (a shared database on a
+	// plan without a storage limit).
+	StorageBytes OptInt64 `json:"storage_bytes"`
 }
 
 // GetPlan returns the value of Plan.
@@ -19333,6 +19383,11 @@ func (s *PlanState) GetUsageCheckedAt() OptDateTime {
 	return s.UsageCheckedAt
 }
 
+// GetStorageBytes returns the value of StorageBytes.
+func (s *PlanState) GetStorageBytes() OptInt64 {
+	return s.StorageBytes
+}
+
 // SetPlan sets the value of Plan.
 func (s *PlanState) SetPlan(val Plan) {
 	s.Plan = val
@@ -19371,6 +19426,11 @@ func (s *PlanState) SetLimitReason(val OptString) {
 // SetUsageCheckedAt sets the value of UsageCheckedAt.
 func (s *PlanState) SetUsageCheckedAt(val OptDateTime) {
 	s.UsageCheckedAt = val
+}
+
+// SetStorageBytes sets the value of StorageBytes.
+func (s *PlanState) SetStorageBytes(val OptInt64) {
+	s.StorageBytes = val
 }
 
 type PlanStateCode string

@@ -258,14 +258,23 @@ func megabytes(b int64) int {
 // statistics. Definitions, users and audit rows are small next to those
 // and are left out of the estimate.
 func StorageBytes(ctx context.Context, db DB, customerID string) (int64, error) {
-	var current string
-	if err := db.QueryRow(ctx, `SELECT current_database()`).Scan(&current); err != nil {
+	dedicated, err := dedicatedTo(ctx, db, customerID)
+	if err != nil {
 		return 0, err
 	}
-	if current == "tenant_"+strings.ReplaceAll(customerID, "-", "") {
+	if dedicated {
 		return dedicatedStorageBytes(ctx, db)
 	}
 	return sharedStorageBytes(ctx, db, customerID)
+}
+
+// dedicatedTo reports whether db is customerID's own database (pkg/tenantdb).
+func dedicatedTo(ctx context.Context, db DB, customerID string) (bool, error) {
+	var current string
+	if err := db.QueryRow(ctx, `SELECT current_database()`).Scan(&current); err != nil {
+		return false, err
+	}
+	return current == "tenant_"+strings.ReplaceAll(customerID, "-", ""), nil
 }
 
 // dedicatedStorageBytes is every table of the database, indexes and TOAST
@@ -329,7 +338,8 @@ func (e *Enforcer) CheckIntegrationRuns(ctx context.Context, db DB, customerID s
 }
 
 // Sweep recounts one tenant against its plan and records the verdict on its
-// row: limit_state 'over' with the first violation as the reason, or 'ok'.
+// row: limit_state 'over' with the first violation as the reason, or 'ok',
+// and the storage it measured.
 // Daily limits are not part of it — they refuse at request time and reset
 // by themselves. Returns the tenant as stored.
 func (e *Enforcer) Sweep(ctx context.Context, db DB, customerID string) (Tenant, error) {
@@ -343,9 +353,26 @@ func (e *Enforcer) Sweep(ctx context.Context, db DB, customerID string) (Tenant,
 	} else if err != nil {
 		return Tenant{}, err
 	}
+	// Storage is recorded so a tenant admin sees the space used, and the
+	// space left under a limit. Measured where it is cheap or needed anyway:
+	// a dedicated database's size is a catalog read, while the shared-mode
+	// estimate counts the tenant's rows, so there it runs only for a plan
+	// that limits storage.
+	var storage *int64
+	dedicated, err := dedicatedTo(ctx, db, customerID)
+	if err != nil {
+		return Tenant{}, fmt.Errorf("sweep tenant %s: %w", customerID, err)
+	}
+	if dedicated || p.Limits.MaxStorageMB > 0 {
+		b, err := StorageBytes(ctx, db, customerID)
+		if err != nil {
+			return Tenant{}, fmt.Errorf("sweep tenant %s: storage: %w", customerID, err)
+		}
+		storage = &b
+	}
 	reason := ""
 	if p.Limits.Any() {
-		reason, err = e.firstViolation(ctx, db, customerID, p)
+		reason, err = e.firstViolation(ctx, db, customerID, p, storage)
 		if err != nil {
 			return Tenant{}, fmt.Errorf("sweep tenant %s: %w", customerID, err)
 		}
@@ -354,8 +381,8 @@ func (e *Enforcer) Sweep(ctx context.Context, db DB, customerID string) (Tenant,
 	if reason != "" {
 		state = "over"
 	}
-	if _, err := db.Exec(ctx, `UPDATE core.customer SET limit_state = $2, limit_reason = $3, usage_checked_at = now() WHERE id = $1::uuid`,
-		customerID, state, reason); err != nil {
+	if _, err := db.Exec(ctx, `UPDATE core.customer SET limit_state = $2, limit_reason = $3, storage_bytes = $4, usage_checked_at = now() WHERE id = $1::uuid`,
+		customerID, state, reason, storage); err != nil {
 		return Tenant{}, err
 	}
 	e.Invalidate(customerID)
@@ -364,7 +391,7 @@ func (e *Enforcer) Sweep(ctx context.Context, db DB, customerID string) (Tenant,
 
 // firstViolation returns a sentence for the first limit the tenant exceeds,
 // or "" when it is within every limit.
-func (e *Enforcer) firstViolation(ctx context.Context, db DB, customerID string, p Plan) (string, error) {
+func (e *Enforcer) firstViolation(ctx context.Context, db DB, customerID string, p Plan, storageBytes *int64) (string, error) {
 	l := p.Limits
 	over := func(limit string, max, current int) string {
 		return (&LimitError{Plan: p.Name, Limit: limit, Max: max, Current: current, Next: p.NextStep()}).Error()
@@ -445,12 +472,8 @@ func (e *Enforcer) firstViolation(ctx context.Context, db DB, customerID string,
 			return "", err
 		}
 	}
-	if l.MaxStorageMB > 0 {
-		b, err := StorageBytes(ctx, db, customerID)
-		if err != nil {
-			return "", err
-		}
-		if used := megabytes(b); used > l.MaxStorageMB {
+	if l.MaxStorageMB > 0 && storageBytes != nil {
+		if used := megabytes(*storageBytes); used > l.MaxStorageMB {
 			return over("max_storage_mb", l.MaxStorageMB, used), nil
 		}
 	}

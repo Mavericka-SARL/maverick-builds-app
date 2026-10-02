@@ -162,6 +162,11 @@ func TestCatalogChecksAndSweep(t *testing.T) {
 	if tt, err := e.Sweep(ctx, pool, cust); err != nil || tt.LimitState != "ok" || tt.UsageCheckedAt == nil {
 		t.Fatalf("sweep within = %+v err=%v", tt, err)
 	}
+	// The test database is shared and this plan does not limit storage, so
+	// the sweep leaves the row-counting estimate alone.
+	if tt, _ := LoadTenant(ctx, pool, cust); tt.StorageBytes != nil {
+		t.Fatalf("shared, unlimited tenant got storage %d recorded", *tt.StorageBytes)
+	}
 	extra := make([]string, 0, 3)
 	for i := 0; i < 3; i++ {
 		extra = append(extra, q(`INSERT INTO core.model (application_id, name) VALUES ($1::uuid, $2) RETURNING id::text`, app, "X"+strconv.Itoa(i)))
@@ -238,8 +243,17 @@ func TestCatalogChecksAndSweep(t *testing.T) {
 	if st, _ := e.State(ctx, pool, cust); !strings.Contains(st.Reason, "Run it yourself for more.") || strings.Contains(st.Reason, "plan is changed") {
 		t.Fatalf("state reason with note = %q", st.Reason)
 	}
-	if tt, err := e.Sweep(ctx, pool, cust); err != nil || tt.LimitState != "over" || !strings.Contains(tt.LimitReason, "1 MB of storage") {
+	tt, err = e.Sweep(ctx, pool, cust)
+	if err != nil || tt.LimitState != "over" || !strings.Contains(tt.LimitReason, "1 MB of storage") {
 		t.Fatalf("storage sweep over = %+v err=%v", tt, err)
+	}
+	// What it measured is recorded, and the state a tenant admin reads
+	// carries it beside the limit.
+	if b, _ := StorageBytes(ctx, pool, cust); tt.StorageBytes == nil || *tt.StorageBytes != b {
+		t.Fatalf("recorded storage = %v, measured %d", tt.StorageBytes, b)
+	}
+	if st, _ := e.State(ctx, pool, cust); st.StorageBytes == nil || *st.StorageBytes != *tt.StorageBytes || st.Plan.Limits.MaxStorageMB != 1 {
+		t.Fatalf("state storage = %v of %d MB", st.StorageBytes, st.Plan.Limits.MaxStorageMB)
 	}
 	// Deleting rows archives them (081): the tenant is no smaller for it.
 	if _, err := pool.Exec(ctx, `DELETE FROM runtime.fact_input WHERE model_id = $1::uuid`, model); err != nil {

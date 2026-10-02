@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mavericks-engine/mavericks/internal/plan"
 	"github.com/mavericks-engine/mavericks/internal/testdb"
 	migrationfs "github.com/mavericks-engine/mavericks/migrations"
 	"github.com/mavericks-engine/mavericks/pkg/logger"
@@ -27,8 +28,11 @@ type dedicatedFixture struct {
 	srv     *httptest.Server
 	// reader reads and writes the databases directly.
 	reader *handler
-	pa     call
-	paID   string
+	// plans is the gateway's plan enforcer, shared with any sweep a test
+	// runs, as cmd/gateway shares it with the usage sweep.
+	plans *plan.Enforcer
+	pa    call
+	paID  string
 }
 
 func newDedicatedFixture(t *testing.T, deps Deps) *dedicatedFixture {
@@ -50,6 +54,10 @@ func newDedicatedFixture(t *testing.T, deps Deps) *dedicatedFixture {
 	f.broker = newFakeBroker(t)
 	f.broker.users["held-pa"] = &fakeKCUser{Email: "pa@held.test", First: "Pat", Last: "Admin", Enabled: true}
 	t.Setenv("DEV_MODE", "true")
+	if deps.Plans == nil {
+		deps.Plans = plan.NewEnforcer(f.control)
+	}
+	f.plans = deps.Plans
 	deps.Router, deps.Keycloak = f.router, f.broker.client()
 	f.srv = httptest.NewServer(NewHandlerWithDeps(logger.New("test"), f.control, nil, deps))
 	t.Cleanup(f.srv.Close)

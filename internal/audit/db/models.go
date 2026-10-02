@@ -1168,6 +1168,7 @@ type CoreCustomer struct {
 	LimitState     string             `json:"limit_state"`
 	LimitReason    string             `json:"limit_reason"`
 	UsageCheckedAt pgtype.Timestamptz `json:"usage_checked_at"`
+	StorageBytes   *int64             `json:"storage_bytes"`
 }
 
 type CoreModel struct {

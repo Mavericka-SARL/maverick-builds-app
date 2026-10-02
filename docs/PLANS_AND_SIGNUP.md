@@ -106,7 +106,11 @@ models; this tenant has 3. Change the plan to add more."}`.
 those handlers (the AI assistant's write executor, scheduled integrations, a
 package restore). Every five minutes the gateway recounts each tenant against
 its plan (`plan.RunSweep`, one pass per database) and records the verdict on
-the tenant's row (`limit_state`, `limit_reason`, `usage_checked_at`). A tenant
+the tenant's row (`limit_state`, `limit_reason`, `usage_checked_at`), with the
+storage it measured (`storage_bytes`, migration 106). Storage is measured on
+every plan in a dedicated database, where it is a catalog read, and in a
+shared one only for a plan that limits it, since the estimate counts the
+tenant's rows. A tenant
 found **over** a limit is read-only — except for **deleting**, so it can get
 back under — with `402 {"code": "over_limit"}` and the reason naming the
 limit and the object ("… 100000 data rows per model; this model has 120000
@@ -215,13 +219,19 @@ and the page offers to open the console as the new account.
   or rename instead. Tenant administrators can read the catalog (to see what
   an upgrade is) but not change it.
 - **Applications › tenant card**: the meta line shows the plan and
-  "read-only" when it applies; **Change plan** (platform administrators)
+  "read-only" when it applies. Below it, the storage the last sweep measured:
+  on a plan with a storage limit a meter with "40 MB of 100 MB used · 60 MB
+  free" (amber from 80%, red and "N MB over the limit" past it), otherwise
+  "Storage: N MB used"; hovering shows when it was measured. This is how a
+  tenant administrator sees the space left before the workspace turns
+  read-only. **Change plan** (platform administrators)
   moves the tenant. `PATCH /api/admin/tenants/{id}` takes `plan`; the next
   usage sweep judges the tenant by the new limits. A tenant administrator
   has the same console for their own tenant, minus this: lifting one's own
   limits is the platform's side of the relationship.
 - `GET /api/admin/tenants` carries `plan_state` per tenant; `GET /api/me`
-  carries `plan` for a member of a tenant.
+  carries `plan` for a member of a tenant. Both include `storage_bytes` once
+  a sweep has measured it.
 
 ## Limits of this design
 

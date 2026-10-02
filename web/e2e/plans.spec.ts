@@ -5,7 +5,7 @@
  * trial: a plan bounds how much, never for how long.
  */
 import { test, expect } from "@playwright/test";
-import { mockApi, loadAs, smallPlanState, overStoragePlanState } from "./mocks";
+import { mockApi, loadAs, smallPlanState, overStoragePlanState, adminPlans } from "./mocks";
 
 test("a basic workspace that has filled its space is read-only and told where to go, not to change plan", async ({ page }) => {
   await mockApi(page, { plan: overStoragePlanState() });
@@ -78,4 +78,26 @@ test("a developer has no Plans tab", async ({ page }) => {
   await mockApi(page);
   await loadAs(page, "developer");
   await expect(page.getByRole("button", { name: "Plans", exact: true })).toHaveCount(0);
+});
+
+test("tenant admin: the tenant card shows the space used and the space left", async ({ page }) => {
+  const MB = 1 << 20;
+  await mockApi(page, { plan: { plan: adminPlans[0], plan_known: true, read_only: false, limit_state: "ok", storage_bytes: 40 * MB, usage_checked_at: "2026-10-02T19:00:00Z" } });
+  await loadAs(page, "tenant_admin");
+  const storage = page.getByTestId("tenant-storage-tenant-1");
+  await expect(storage).toContainText("40 MB of 100 MB used · 60 MB free");
+  await expect(storage.getByRole("meter", { name: "Storage used" })).toHaveAttribute("aria-valuenow", "40");
+});
+
+test("tenant admin: a tenant over its storage limit sees by how much", async ({ page }) => {
+  const MB = 1 << 20;
+  await mockApi(page, { plan: { ...overStoragePlanState(), storage_bytes: 104 * MB } });
+  await loadAs(page, "tenant_admin");
+  await expect(page.getByTestId("tenant-storage-tenant-1")).toContainText("104 MB of 100 MB used · 4.0 MB over the limit");
+});
+
+test("a plan without a storage limit shows the space used only", async ({ page }) => {
+  await mockApi(page, { plan: smallPlanState({ plan: adminPlans[3], storage_bytes: 3 * (1 << 20) }) });
+  await loadAs(page, "tenant_admin");
+  await expect(page.getByTestId("tenant-storage-tenant-1")).toHaveText("Storage: 3.0 MB used");
 });

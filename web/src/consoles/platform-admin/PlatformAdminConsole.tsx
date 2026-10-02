@@ -359,6 +359,47 @@ function planLabel(tenant: AdminTenant): string {
   return parts.join(" · ");
 }
 
+const MB = 1 << 20;
+
+function formatMB(mb: number): string {
+  return mb < 10 ? `${mb.toFixed(1)} MB` : `${Math.round(mb)} MB`;
+}
+
+/**
+ * The tenant's storage as the last usage sweep measured it, against its
+ * plan's limit: what a tenant admin needs to make room before the workspace
+ * turns read-only, not after. Megabytes are the enforcer's (2^20 bytes).
+ */
+function StorageMeter({ tenant }: { tenant: AdminTenant }) {
+  const st = tenant.plan_state;
+  if (!st || st.storage_bytes == null) return null;
+  const used = st.storage_bytes / MB;
+  const limit = st.plan_known ? st.plan.limits.max_storage_mb : 0;
+  const measured = st.usage_checked_at ? `Measured ${new Date(st.usage_checked_at).toLocaleString()}` : undefined;
+  if (!limit) {
+    return <div className="mvx-admin-object__meta" data-testid={`tenant-storage-${tenant.id}`} title={measured}>Storage: {formatMB(used)} used</div>;
+  }
+  const over = used > limit;
+  const tone = over ? "over" : used >= limit * 0.8 ? "near" : "ok";
+  const text = `${formatMB(used)} of ${limit} MB used · ${over ? `${formatMB(used - limit)} over the limit` : `${formatMB(limit - used)} free`}`;
+  return (
+    <div className="mvx-storage" data-testid={`tenant-storage-${tenant.id}`} title={measured}>
+      <div
+        className={`mvx-storage__bar mvx-storage__bar--${tone}`}
+        role="meter"
+        aria-label="Storage used"
+        aria-valuemin={0}
+        aria-valuemax={limit}
+        aria-valuenow={Math.min(used, limit)}
+        aria-valuetext={text}
+      >
+        <span style={{ width: `${Math.min(100, (used / limit) * 100)}%` }} />
+      </div>
+      <span className="mvx-storage__text">{text}</span>
+    </div>
+  );
+}
+
 /**
  * The platform admin's plan control on a tenant card: move the tenant to
  * another plan. The next usage sweep judges it by the new limits.
@@ -448,6 +489,7 @@ function TenantSection({ tenant, onDelete, isPlatformAdmin, canTransferModels }:
             <div className="mvx-admin-object__meta" data-testid={`tenant-meta-${tenant.id}`}>
               {planLabel(tenant)} · {(tenant.applications ?? []).length} app{(tenant.applications ?? []).length !== 1 ? "s" : ""}
             </div>
+            <StorageMeter tenant={tenant} />
           </div>
         )}
         {!editing && (

@@ -39757,6 +39757,41 @@ func (s *OptInt) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes int64 as json.
+func (o OptInt64) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Int64(int64(o.Value))
+}
+
+// Decode decodes int64 from json.
+func (o *OptInt64) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptInt64 to nil")
+	}
+	o.Set = true
+	v, err := d.Int64()
+	if err != nil {
+		return err
+	}
+	o.Value = int64(v)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptInt64) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptInt64) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes LicenseInfoLimits as json.
 func (o OptLicenseInfoLimits) Encode(e *jx.Encoder) {
 	if !o.Set {
@@ -41927,9 +41962,15 @@ func (s *PlanState) encodeFields(e *jx.Encoder) {
 			s.UsageCheckedAt.Encode(e, json.EncodeDateTime)
 		}
 	}
+	{
+		if s.StorageBytes.Set {
+			e.FieldStart("storage_bytes")
+			s.StorageBytes.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfPlanState = [8]string{
+var jsonFieldsNameOfPlanState = [9]string{
 	0: "plan",
 	1: "plan_known",
 	2: "read_only",
@@ -41938,6 +41979,7 @@ var jsonFieldsNameOfPlanState = [8]string{
 	5: "limit_state",
 	6: "limit_reason",
 	7: "usage_checked_at",
+	8: "storage_bytes",
 }
 
 // Decode decodes PlanState from json.
@@ -41945,7 +41987,7 @@ func (s *PlanState) Decode(d *jx.Decoder) error {
 	if s == nil {
 		return errors.New("invalid: unable to decode PlanState to nil")
 	}
-	var requiredBitSet [1]uint8
+	var requiredBitSet [2]uint8
 
 	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
 		switch string(k) {
@@ -42033,6 +42075,16 @@ func (s *PlanState) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"usage_checked_at\"")
 			}
+		case "storage_bytes":
+			if err := func() error {
+				s.StorageBytes.Reset()
+				if err := s.StorageBytes.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"storage_bytes\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -42042,8 +42094,9 @@ func (s *PlanState) Decode(d *jx.Decoder) error {
 	}
 	// Validate required fields.
 	var failures []validate.FieldError
-	for i, mask := range [1]uint8{
+	for i, mask := range [2]uint8{
 		0b00100111,
+		0b00000000,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.

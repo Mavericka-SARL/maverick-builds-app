@@ -183,7 +183,7 @@ They are the **Tenant admin** group in the sidebar:
 
 Two different things. The **edition** is what this deployment can do — *Community*, *Commercial* or *Enterprise*, decided by its licence key. Click your initials at the top right: the account menu names the edition under your roles, and holds the **Theme** switch (**Light**, **Dark** or **System**), which your account remembers.
 
-The **plan** is how much your tenant may use — storage, for example, or AI messages a day. Whoever runs the platform sets it; you cannot change it yourself. Its name is on your tenant's card under **Tenant admin › Applications**. If the tenant goes over a limit, it turns read-only and a banner at the top of the console says why. Deleting still works, so removing what you no longer need is how you make room.
+The **plan** is how much your tenant may use — storage, for example, or AI messages a day. Whoever runs the platform sets it; you cannot change it yourself. Its name is on your tenant's card under **Tenant admin › Applications**, and below it the storage your data uses — on a plan with a storage limit, also how much is left, measured every few minutes. If the tenant goes over a limit, it turns read-only and a banner at the top of the console says why. Deleting still works, so removing what you no longer need is how you make room.
 
 More: `+taDoc("editions and licensing", "LICENSING.md")+` · `+taDoc("plans", "PLANS_AND_SIGNUP.md")+``, 240),
 

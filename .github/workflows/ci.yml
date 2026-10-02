@@ -136,8 +136,13 @@ jobs:
     timeout-minutes: 30
     needs: changes
     if: needs.changes.outputs.go == 'true'
-    env:
-      TESTCONTAINERS_RYUK_DISABLED: "true"
+    # Ryuk is on. It was turned off (2026-05) while CI ran on GitHub's
+    # runners, and on the self-hosted ones that meant every test process left
+    # its Postgres container running: about 20 per run, the gateway's alone
+    # near 6G, kept until an hour-old reaper removed them. Two runs within an
+    # hour filled worker-2's disk and the kubelet evicted production pods
+    # (2026-10-02). internal/testdb never terminates its shared container, by
+    # design; Ryuk removes it when the test process exits, however it exits.
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -195,16 +200,19 @@ jobs:
         # the run. See docs/OBSERVATIONS.md, "The gateway test package is
         # outgrowing CI's time limits".
         run: go test -race -p 4 -timeout 20m ./...
-      # Testcontainers leak when a run is killed mid-suite (timeout,
-      # concurrency cancellation): TESTCONTAINERS_RYUK_DISABLED means no
-      # reaper, so orphaned postgres containers and their volumes pile up
-      # until the disk is full — 93GB of them took all three runners down
-      # (2026-08-29, the second disk-full outage after the buildx one).
-      # Age-filtered (>1h) so a PARALLEL run's live containers are never
-      # touched; volume prune only removes volumes nothing references.
+      # A backstop for Ryuk (a reaper that died with the runner leaves its
+      # containers): orphaned postgres containers and their volumes once
+      # took all three runners down (93GB, 2026-08-29). Age-filtered (>1h) so
+      # a PARALLEL run's live containers are never touched; volume prune only
+      # removes volumes nothing references. The runner node's own janitor
+      # does the same every 15 minutes.
       - name: Clean up leaked test containers
         if: always()
         run: |
+          # Ryuk removes a process's containers about ten seconds after it
+          # exits; counted sooner, this run's own would look leaked.
+          sleep 15
+          echo "postgres test containers still running: $(docker ps -q --filter ancestor=postgres:16-alpine | wc -l)"
           now=$(date +%s)
           for c in $(docker ps -aq --filter ancestor=postgres:16-alpine) \
                    $(docker ps -aq --filter ancestor=mavericks-test-minio:local); do

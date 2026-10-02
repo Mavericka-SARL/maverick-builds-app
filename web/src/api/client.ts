@@ -292,6 +292,8 @@ export interface PlanState {
   limit_state: string;
   limit_reason?: string;
   usage_checked_at?: string;
+  /** The tenant's data as of usage_checked_at; absent until measured. */
+  storage_bytes?: number;
 }
 
 export interface Me {
