@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Archive, ArrowUpDown, Bot, Bookmark, Check, ClipboardList, FileText, History, LayoutDashboard, Link2, ListTree, Paperclip,
+  Archive, ArrowUpDown, Bot, Bookmark, Check, ClipboardList, FileSpreadsheet, FileText, History, LayoutDashboard, Link2, ListTree, Paperclip,
   Pencil, Plus, Puzzle, Rocket, Ruler, Search, Settings, Table2, Trash2, Users, Workflow, Wrench, X, Zap,
 } from "lucide-react";
+import { ExportDownloadButton } from "../ExportDownloadButton";
 import { api, type AISession, type AIMessage, type AISettings, type AIProposal, type AIProposalStep, type AIProposalWithSummary, type AIDocument } from "../../api/client";
 import {
   Button, IconButton, TextInput, Select, Textarea, Field, StatusBadge, RevisionBadge,
@@ -240,6 +241,9 @@ const TOOL_LABELS: Record<string, string> = {
   delete_automation_rule: "Delete automation rule", create_business_role: "Create business role",
   create_form_integration: "Create form integration", update_form_integration: "Update form integration",
   delete_form_integration: "Delete form integration", set_user_access_rules: "Set user access rules",
+  create_file_integration: "Create Excel/CSV integration", import_file_data: "Import attached file",
+  create_export_integration: "Create data export", update_integration: "Update integration",
+  delete_integration: "Delete integration",
 };
 function friendlyTool(tool: string): string {
   return TOOL_LABELS[tool] ?? tool.replace(/_/g, " ");
@@ -444,6 +448,34 @@ function ProposalPanel({
           {err && <span className="mvx-admin-error" style={{ alignSelf: "center" }}>{err}</span>}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Exports from this session ─────────────────────────────────────────────────
+// Every data export this session's confirmed proposals created, each with a
+// Download button. A confirmed proposal leaves the chat at once (only its
+// summary message stays), so the downloads live here, fed by the session's
+// proposal history: they survive a reload and refresh on every confirm.
+
+function SessionExports({ sessionId }: { sessionId: string }) {
+  const { data: proposals = [] } = useQuery<AIProposalWithSummary[]>({
+    queryKey: ["ai-proposals", sessionId],
+    queryFn: () => api.aiListProposals(sessionId),
+  });
+  const exports = proposals.flatMap(p => (p.steps ?? [])
+    .filter(s => s.tool === "create_export_integration" && s.status === "success" && s.created_id)
+    .map(s => ({ id: s.created_id as string, name: String(s.params?.name ?? s.description) })));
+  if (exports.length === 0) return null;
+  return (
+    <div data-testid="session-exports" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 8 }}>
+      <span className="mvx-admin-muted" style={{ fontSize: 12 }}>Exports from this session:</span>
+      {exports.map(e => (
+        <span key={e.id} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 13 }}>{e.name}</span>
+          <ExportDownloadButton integrationId={e.id} />
+        </span>
+      ))}
     </div>
   );
 }
@@ -1023,16 +1055,20 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
 
         {/* Input bar */}
         <div style={{ padding: "12px 24px 20px", borderTop: "1px solid var(--color-border)" }}>
+          {sessionId && <SessionExports sessionId={sessionId} />}
           {/* Attached document chips */}
           {(documents.length > 0 || uploading) && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
               {documents.map(d => (
                 <FilterChip
                   key={d.id}
-                  title={`${d.char_count.toLocaleString()} chars extracted${d.truncated ? " (truncated)" : ""}`}
+                  title={d.importable
+                    ? "Spreadsheet kept whole — the assistant can import all of it into a grid or dimension"
+                    : `${d.char_count.toLocaleString()} chars extracted${d.truncated ? " (truncated)" : ""}`}
                   onClear={() => removeDocument(d.id)}
                 >
-                  <FileText size={11} aria-hidden="true" /> {d.filename}{d.truncated ? " ⚠" : ""}
+                  {d.importable ? <FileSpreadsheet size={11} aria-hidden="true" /> : <FileText size={11} aria-hidden="true" />}{" "}
+                  {d.filename}{d.truncated && !d.importable ? " ⚠" : ""}
                 </FilterChip>
               ))}
               {uploading && (

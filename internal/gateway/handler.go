@@ -420,6 +420,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/developer/integrations/{id}", "developer", dev(h.developerIntegrationAction))
 	register("PATCH", "/api/developer/integrations/{id}", "developer", dev(h.developerIntegrationAction))
 	register("DELETE", "/api/developer/integrations/{id}", "developer", dev(h.developerIntegrationAction))
+	register("POST", "/api/developer/integrations/export-preview", "developer", dev(h.exportPreview))
 	register("POST", "/api/developer/integrations/{id}/duplicate", "developer", dev(h.restAPIIntegrationSubAction))
 	register("POST", "/api/developer/integrations/{id}/validate", "developer", dev(h.restAPIIntegrationSubAction))
 	register("POST", "/api/developer/integrations/{id}/test", "developer", dev(h.restAPIIntegrationSubAction))
@@ -437,6 +438,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/integrations/oauth/callback", "public", cors(h.integrationOAuthCallback))
 	register("GET", "/api/integrations", "any", cors(h.listIntegrations))
 	register("POST", "/api/integrations/{id}/run", "any", cors(h.integrationRun))
+	register("GET", "/api/integrations/{id}/export", "any", cors(h.integrationExport))
 	register("GET", "/api/developer/form-integrations", "developer", dev(h.developerFormIntegrations))
 	register("POST", "/api/developer/form-integrations", "developer", dev(h.developerFormIntegrations))
 	register("POST", "/api/developer/form-integrations/{id}/backfill", "developer", dev(h.developerFormIntegrationAction))
@@ -8275,6 +8277,11 @@ func (h *handler) developerIntegrations(w http.ResponseWriter, r *http.Request) 
 			h.restAPICreate(w, r, modelID, revisionID, raw)
 			return
 		}
+		// file_export: the spec is validated against its grid at create.
+		if probe.Type == "file_export" {
+			h.fileExportCreate(w, r, modelID, revisionID, raw)
+			return
+		}
 		var body struct {
 			Name       string   `json:"name"`
 			Type       string   `json:"type"`
@@ -8392,6 +8399,32 @@ func (h *handler) developerIntegrationAction(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		// DELETE falls through to the shared legacy path (cascade + audit).
+	}
+	if intType == "file_export" {
+		switch {
+		case subPath == "config" && r.Method == http.MethodPatch:
+			h.fileExportConfigPatch(w, r, intID)
+			return
+		case subPath == "" && r.Method == http.MethodPatch:
+			// The shared PATCH below saves name/target/status/tags; an
+			// active export must still fit the grid it targets.
+			raw, rerr := readAll(r)
+			if rerr != nil {
+				jsonErr(w, rerr, http.StatusBadRequest)
+				return
+			}
+			var probe struct {
+				TargetType string  `json:"target_type"`
+				TargetID   string  `json:"target_id"`
+				Status     *string `json:"status"`
+			}
+			_ = json.Unmarshal(raw, &probe)
+			if err := h.fileExportCheckRetarget(r, intID, probe.TargetType, probe.TargetID, probe.Status != nil && *probe.Status == "active"); err != nil {
+				jsonErr(w, err, http.StatusBadRequest)
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(raw))
+		}
 	}
 
 	if subPath == "runs" && r.Method == http.MethodGet {
@@ -8639,6 +8672,10 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if intg.Type == "file_export" {
+		jsonErr(w, fmt.Errorf("%q is an export: download it with GET /api/integrations/%s/export", intg.Name, intID), http.StatusBadRequest)
+		return
+	}
 	// rest_api runs are asynchronous: the worker executes them (the gateway
 	// never makes external requests). 202 + run id; poll the run endpoint.
 	if intg.Type == "rest_api" {
@@ -8658,8 +8695,8 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 	if intg.Config == nil {
 		intg.Config = json.RawMessage("{}")
 	}
-	// Parse optional settings from config. sheet_url/import_mode are only
-	// meaningful for type "google_sheets"; column_map applies to both types.
+	// Parse optional settings from config. sheet_url applies to a
+	// google_sheets integration; column_map and import_mode to both kinds.
 	var cfg struct {
 		ColumnMap  map[string]string `json:"column_map"`
 		SheetURL   string            `json:"sheet_url"`
@@ -8667,14 +8704,12 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.Unmarshal(intg.Config, &cfg)
 
-	// A csv_import integration carries its data in the request body; a
-	// google_sheets one carries none — the sheet named by its config is
-	// re-fetched at run time, which is what makes "run" a sync.
-	var body struct {
-		CSV string `json:"csv"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	csvText := body.CSV
+	// A csv_import integration carries its file in the request body — CSV
+	// text, or a workbook as xlsx_base64 (+ sheet); a google_sheets one
+	// carries none: the sheet its config names is re-fetched at run time,
+	// which is what makes "run" a sync. See integration_file_run.go.
+	var header []string
+	var rows []importpkg.RawRow
 	if intg.Type == "google_sheets" {
 		if strings.TrimSpace(cfg.SheetURL) == "" {
 			jsonErr(w, fmt.Errorf("integration has no sheet_url configured"), http.StatusBadRequest)
@@ -8690,32 +8725,20 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			jsonSheetErr(w, ferr)
 			return
 		}
-		csvText = string(data)
-	} else if csvText == "" {
-		jsonErr(w, fmt.Errorf("csv field required"), http.StatusBadRequest)
-		return
+		header, rows, err = importpkg.ParseCSVRows(data)
+	} else {
+		header, rows, err = parseRunFile(w, r)
 	}
-
-	cr := csv.NewReader(bytes.NewReader([]byte(csvText)))
-	cr.TrimLeadingSpace = true
-	header, err := cr.Read()
 	if err != nil {
-		jsonErr(w, fmt.Errorf("csv header: %w", err), http.StatusBadRequest)
+		jsonErr(w, err, http.StatusBadRequest)
 		return
 	}
-	// Build colIdx from original headers, then apply column_map to produce logical names.
-	// column_map maps CSV header → logical field name (e.g. "Dept Name" → "code")
-	rawColIdx := make(map[string]int, len(header))
-	for i, col := range header {
-		rawColIdx[strings.TrimSpace(col)] = i
-	}
-	colIdx := make(map[string]int, len(header))
-	for rawCol, idx := range rawColIdx {
-		if mapped, ok := cfg.ColumnMap[rawCol]; ok && mapped != "" {
-			colIdx[strings.ToLower(mapped)] = idx
-		} else {
-			colIdx[strings.ToLower(rawCol)] = idx
-		}
+	// The saved column map, in the Import Wizard's vocabulary: a source
+	// column renamed to a metric, dimension or field name ("metric" and
+	// "value" for a long file), "ignore" dropped, any other kept as is.
+	if header, err = importpkg.ApplyColumnMap(header, rows, cfg.ColumnMap); err != nil {
+		jsonErr(w, fmt.Errorf("column map: %w", err), http.StatusBadRequest)
+		return
 	}
 
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
@@ -8727,6 +8750,11 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 
 	switch intg.TargetType {
 	case "form":
+		cr, colIdx, cErr := rowsCSV(header, rows)
+		if cErr != nil {
+			jsonErr(w, cErr, http.StatusBadRequest)
+			return
+		}
 		imported, errs := 0, 0
 		for {
 			record, err := cr.Read()
@@ -8753,6 +8781,11 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]any{"rows_imported": imported, "error_rows": errs})
 
 	case "dimension":
+		cr, colIdx, cErr := rowsCSV(header, rows)
+		if cErr != nil {
+			jsonErr(w, cErr, http.StatusBadRequest)
+			return
+		}
 		imported, errs, importErr := h.importDimensionMembersCSV(ctx, intg.TargetID, cr, colIdx)
 		if importErr != nil {
 			h.recordIntegrationRun(ctx, intID, act.UserID, 0, 0, "error", importErr.Error())
@@ -8763,101 +8796,17 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]any{"rows_imported": imported, "error_rows": errs})
 
 	default: // "grid"
-		if intg.Type == "google_sheets" {
-			// The legacy path below stages raw metric_id cell values, so it
-			// requires UUIDs; a sheet a business team maintains holds metric
-			// and member names. Route through ResolveRows instead.
-			h.runSheetsGridImport(w, r, act, intModelID, intRevisionID, cfg.ColumnMap, cfg.ImportMode, csvText)
-			return
-		}
-		modelID := intModelID
-
-		metricCol, hasMetric := colIdx["metric_id"]
-		valueCol, hasValue := colIdx["value"]
-		if !hasMetric || !hasValue {
-			jsonErr(w, fmt.Errorf("grid csv must have 'metric_id' and 'value' columns"), http.StatusBadRequest)
-			return
-		}
-		dimCols := make(map[string]int)
-		for col, idx := range colIdx {
-			if col != "metric_id" && col != "value" {
-				dimCols[col] = idx
+		// A sheet is re-synced against the same living sheet, so its default
+		// must converge ("replace"); a file run keeps CommitImport's
+		// "incremental" default. A saved import_mode wins either way.
+		mode := importpkg.ImportMode(cfg.ImportMode)
+		if mode == "" {
+			mode = importpkg.ModeIncremental
+			if intg.Type == "google_sheets" {
+				mode = importpkg.ModeReplace
 			}
 		}
-
-		// Resolve dimension column names → UUIDs (same format as writeback).
-		intDimNameToID := make(map[string]string, len(dimCols))
-		for colName := range dimCols {
-			var dimID string
-			if err := h.db.QueryRow(ctx,
-				`SELECT id::text FROM model.dimension_def WHERE model_id=$1::uuid AND lower(name)=$2 LIMIT 1`,
-				modelID, colName,
-			).Scan(&dimID); err == nil {
-				intDimNameToID[colName] = dimID
-			} else {
-				intDimNameToID[colName] = colName
-			}
-		}
-
-		store := importpkg.NewStore(h.db.For(ctx))
-		job, err := store.CreateImportJob(ctx, modelID, intRevisionID, "integration", act.UserID, nil)
-		if err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
-		}
-
-		var staged []importpkg.StagingRow
-		totalRows, errorRows := 0, 0
-		for {
-			record, err := cr.Read()
-			if err != nil {
-				break
-			}
-			totalRows++
-			val, err := strconv.ParseFloat(strings.TrimSpace(record[valueCol]), 64)
-			if err != nil {
-				errorRows++
-				continue
-			}
-			dims := make(map[string]string, len(dimCols))
-			for col, idx := range dimCols {
-				dims[intDimNameToID[col]] = strings.TrimSpace(record[idx])
-			}
-			staged = append(staged, importpkg.StagingRow{
-				MetricID: strings.TrimSpace(record[metricCol]), DimMembers: dims,
-				Value: val, RowNumber: totalRows,
-			})
-		}
-		if len(staged) == 0 {
-			h.recordIntegrationRun(ctx, intID, act.UserID, 0, errorRows, "error", "no valid rows")
-			jsonOK(w, map[string]any{"rows_imported": 0, "error_rows": errorRows})
-			return
-		}
-		if err := store.StageRows(ctx, job.Id, staged, nil); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
-		}
-		metricIDs, err := store.CommitImport(ctx, job.Id, modelID, intRevisionID, act.UserID, importpkg.ModeIncremental)
-		if err != nil {
-			h.recordIntegrationRun(ctx, intID, act.UserID, 0, totalRows, "error", err.Error())
-			if errors.Is(err, importpkg.ErrWriteDenied) {
-				jsonErr(w, err, http.StatusForbidden)
-				return
-			}
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
-		}
-		if len(metricIDs) > 0 {
-			calcStore := calculation.NewStore(h.db.For(ctx))
-			sched := calculation.NewScheduler(h.log, calcStore, nil)
-			go func() { //nolint:contextcheck // outlives the request
-				bg, done := h.backgroundRecalc(context.Background(), "recalculation after an integration run")
-				defer done()
-				_ = sched.RecalcAffected(bg, modelID, intRevisionID, metricIDs)
-			}()
-		}
-		h.recordIntegrationRun(ctx, intID, act.UserID, totalRows-errorRows, errorRows, "success", "")
-		jsonOK(w, map[string]any{"rows_imported": totalRows - errorRows, "error_rows": errorRows})
+		h.runGridIntegration(w, ctx, act, intID, intModelID, intRevisionID, header, rows, mode, intg.Type)
 	}
 }
 

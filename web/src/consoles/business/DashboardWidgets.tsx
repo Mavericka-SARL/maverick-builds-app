@@ -12,6 +12,7 @@ import { ChartWidget } from "../dashboard/ChartWidget";
 import { FormFieldInput, RecordStatusBadge } from "./FormsTab";
 import { canSyncForm, createStatusesOf, createStatusFor, syncFailure, syncRefused, type SyncMessage } from "./formPermissions";
 import { ImportWidget } from "./ImportWidget";
+import { downloadBlob, fileToBase64 } from "./blobUtils";
 import { PlanningGrid } from "./PlanningGrid";
 
 // The one place row-grouped widgets actually get laid out and painted —
@@ -298,35 +299,56 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps }: { metricId: stri
 
 export function IntegrationButtonWidget({ integrationId, label, buttonColor }: { integrationId: string; label: string; buttonColor?: string }) {
   const fileRef = React.useRef<HTMLInputElement>(null);
-  const [result, setResult] = useState<{ rows_imported?: number; error_rows?: number; message?: string } | null>(null);
+  const [result, setResult] = useState<{ rows_imported?: number; error_rows?: number; errors?: { row: number; message: string }[]; message?: string } | null>(null);
 
   // A google_sheets integration needs no file — the server re-fetches its
   // configured sheet on every run — so its button syncs on click instead of
   // opening a picker. The list is how the widget learns the type.
   const { data: integrations = [] } = useQuery({ queryKey: ["integrations"], queryFn: () => api.listIntegrations() });
-  const isSheets = (integrations as IntegrationDef[]).find(i => i.id === integrationId)?.type === "google_sheets";
+  const type = (integrations as IntegrationDef[]).find(i => i.id === integrationId)?.type;
+  const isSheets = type === "google_sheets";
+  // An export downloads a file built from this user's own view of the grid.
+  const isExport = type === "file_export";
 
   const run = useMutation({
-    mutationFn: (csv?: string) => api.runIntegration(integrationId, csv),
+    mutationFn: (file?: { csv?: string; xlsx_base64?: string }) => api.runIntegration(integrationId, file),
     onSuccess: (data) => setResult(data as typeof result),
     onError: (err) => setResult({ message: (err as Error).message }),
   });
+  const download = useMutation({
+    mutationFn: async () => {
+      const { blob, filename } = await api.downloadIntegrationExport(integrationId);
+      downloadBlob(blob, filename);
+    },
+    onError: (err) => setResult({ message: (err as Error).message }),
+  });
 
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+  if (isExport) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%" }}>
+        <CommandButton color={buttonColor} onClick={() => { setResult(null); download.mutate(); }} disabled={download.isPending}>
+          {download.isPending ? "Preparing…" : label}
+        </CommandButton>
+        {result?.message && !download.isPending && (
+          <div style={{ fontSize: 12, color: "var(--color-danger)" }}>{result.message}</div>
+        )}
+      </div>
+    );
+  }
+
+  // The file goes as it is — a workbook as base64, a CSV as text — and the
+  // server applies the integration's saved column map.
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target?.result as string;
-      run.mutate(text);
-    };
-    reader.readAsText(file);
     e.target.value = "";
+    if (!file) return;
+    if (/\.xls[xm]$/i.test(file.name)) run.mutate({ xlsx_base64: await fileToBase64(file) });
+    else run.mutate({ csv: await file.text() });
   }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%" }}>
-      <input ref={fileRef} type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={handleFile} />
+      <input ref={fileRef} type="file" accept=".csv,.xlsx,.xlsm,text/csv" style={{ display: "none" }} onChange={handleFile} />
       <CommandButton
         color={run.isSuccess ? "var(--color-info-solid)" : buttonColor}
         onClick={() => {
@@ -344,6 +366,11 @@ export function IntegrationButtonWidget({ integrationId, label, buttonColor }: {
           {result.message
             ? result.message
             : `${result.rows_imported ?? 0} rows imported${result.error_rows ? `, ${result.error_rows} errors` : ""}`}
+          {!result.message && result.errors && result.errors.length > 0 && (
+            <div style={{ color: "var(--color-danger)" }}>
+              Row {result.errors[0].row}: {result.errors[0].message}{result.errors.length > 1 ? ` (+${result.errors.length - 1} more)` : ""}
+            </div>
+          )}
         </div>
       )}
     </div>

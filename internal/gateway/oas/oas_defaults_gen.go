@@ -131,6 +131,46 @@ func (s *CreateWorkflowRequest) setDefaults() {
 }
 
 // setDefaults set default value of fields.
+func (s *ExportSpec) setDefaults() {
+	{
+		val := ExportSpecFormat("csv")
+		s.Format.SetTo(val)
+	}
+	{
+		val := ExportSpecLayout("wide")
+		s.Layout.SetTo(val)
+	}
+	{
+		val := ExportSpecMemberDisplay("code")
+		s.MemberDisplay.SetTo(val)
+	}
+	{
+		val := ExportSpecMetricDisplay("name")
+		s.MetricDisplay.SetTo(val)
+	}
+	{
+		val := ExportSpecDelimiter(",")
+		s.Delimiter.SetTo(val)
+	}
+	{
+		val := ExportSpecDecimalSeparator(".")
+		s.DecimalSeparator.SetTo(val)
+	}
+	{
+		val := bool(true)
+		s.IncludeHeader.SetTo(val)
+	}
+	{
+		val := bool(false)
+		s.IncludeEmptyRows.SetTo(val)
+	}
+	{
+		val := string("Data")
+		s.SheetName.SetTo(val)
+	}
+}
+
+// setDefaults set default value of fields.
 func (s *ImportUploadRequest) setDefaults() {
 	{
 		val := ImportUploadRequestImportMode("incremental")

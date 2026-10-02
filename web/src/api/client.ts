@@ -1092,7 +1092,39 @@ export interface IntegrationDef {
     // re-syncing converges instead of double-counting).
     sheet_url?: string;
     import_mode?: ImportModeParam;
-  };
+  } & Partial<ExportSpec>;
+}
+
+// ExportSpec is a "file_export" integration's config (internal/dataexport):
+// one grid's leaf-level values written in a chosen format and layout.
+// Everything is named by metric/dimension NAME and member CODE.
+export interface ExportSpec {
+  format?: "csv" | "xlsx" | "json";
+  layout?: "wide" | "long" | "pivot";
+  pivot_dimension?: string;
+  metrics?: string[];
+  dimensions?: string[];
+  member_display?: "code" | "label" | "code_and_label";
+  metric_display?: "name" | "label";
+  filters?: Record<string, string[]>;
+  column_names?: Record<string, string>;
+  decimals?: number;
+  delimiter?: "," | ";" | "tab" | "|";
+  decimal_separator?: "." | ",";
+  include_header?: boolean;
+  include_empty_rows?: boolean;
+  sheet_name?: string;
+  file_name?: string;
+}
+
+export interface ExportPreview {
+  header: string[];
+  default_header: string[]; // before column_names renamed them — its keys
+  rows: string[][];
+  total_rows: number;
+  warnings: string[];
+  file_name: string;
+  summary: string;
 }
 
 export interface FormMetricMapping {
@@ -1424,6 +1456,8 @@ export interface AIDocument {
   mime_type: string;
   char_count: number;
   truncated: boolean;
+  // A spreadsheet kept whole: the assistant can import it.
+  importable?: boolean;
   created_at: string;
 }
 
@@ -1898,16 +1932,27 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ dimension_id: dimensionId, csv }),
     }),
+  createExportIntegration: (body: { name: string; target_id: string; status?: string; tags?: string[]; config: ExportSpec }, revisionId?: string) =>
+    apiFetch<{ id: string }>(`/api/developer/integrations${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, {
+      method: "POST", body: JSON.stringify({ ...body, type: "file_export", target_type: "grid" }),
+    }),
+  previewExport: (body: { target_id: string; name?: string; config: ExportSpec; rows?: number }) =>
+    apiFetch<ExportPreview>("/api/developer/integrations/export-preview", { method: "POST", body: JSON.stringify(body) }),
+  // The file is built for the caller, from their own view of the grid.
+  downloadIntegrationExport: (id: string) => apiFetchBlob(`/api/integrations/${encodeURIComponent(id)}/export`),
   updateIntegrationConfig: (id: string, config: Record<string, unknown>) =>
     apiFetch<{ status: string }>(`/api/developer/integrations/${id}/config`, { method: "PATCH", body: JSON.stringify({ config }) }),
   listIntegrations: (revisionId?: string) =>
     apiFetch<IntegrationDef[]>(`/api/integrations${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
-  // csv is required for csv_import integrations; google_sheets ones carry no
-  // body — the server re-fetches the configured sheet at run time.
-  runIntegration: (id: string, csv?: string) =>
-    apiFetch<{ rows_imported: number; error_rows: number; errors?: ImportRowError[] }>(`/api/integrations/${id}/run`, {
+  // A csv_import run carries its file — CSV text, or a workbook as
+  // xlsx_base64 (+ sheet); google_sheets ones carry no body — the server
+  // re-fetches the configured sheet at run time. The integration's saved
+  // column map is applied server-side, so a file of metric and member names
+  // runs as it is.
+  runIntegration: (id: string, file?: string | { csv?: string; xlsx_base64?: string; sheet?: string }) =>
+    apiFetch<{ rows_imported: number; values_imported?: number; error_rows: number; errors?: ImportRowError[] }>(`/api/integrations/${id}/run`, {
       method: "POST",
-      body: JSON.stringify(csv ? { csv } : {}),
+      body: JSON.stringify(typeof file === "string" ? { csv: file } : (file ?? {})),
     }),
 
   getDimensions: () => apiFetch<DevDimension[]>("/api/dimensions"),

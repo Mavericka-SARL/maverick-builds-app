@@ -17,7 +17,7 @@ import (
 // ReadTools returns the read-only tool definitions (no confirmation required).
 func ReadTools() []providers.ToolDef {
 	noParams := json.RawMessage(`{"type":"object","properties":{},"required":[]}`)
-	return []providers.ToolDef{
+	tools := []providers.ToolDef{
 		{
 			Name:        "get_model_summary",
 			Description: "Returns a high-level summary of the current application: name, active revision, and counts of metrics, dimensions, grids, dashboards, and workflows.",
@@ -104,6 +104,10 @@ func ReadTools() []providers.ToolDef {
 			Parameters:  noParams,
 		},
 	}
+	for _, d := range integrationToolDefs() {
+		tools = append(tools, providers.ToolDef{Name: d.Name, Description: d.Description, Parameters: json.RawMessage(d.Parameters)})
+	}
+	return tools
 }
 
 // WriteToolNames lists every tool a proposal step may name, grouped the way
@@ -131,6 +135,7 @@ var WriteToolNames = []string{
 	"create_business_role", "update_business_role", "delete_business_role", "set_role_dashboards",
 	"create_form_integration", "update_form_integration", "delete_form_integration", "backfill_form_integration",
 	"set_user_access_rules",
+	"create_file_integration", "import_file_data", "create_export_integration", "update_integration", "delete_integration",
 }
 
 // proposeActionsTool is the single write-side tool the LLM can call.
@@ -189,6 +194,7 @@ type ToolExecutor struct {
 	pool    *pgxpool.Pool
 	modelID string
 	revID   string
+	hooks   ReadHooks
 }
 
 func NewToolExecutor(pool *pgxpool.Pool, modelID, revID string) *ToolExecutor {
@@ -232,6 +238,12 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, args json.RawMe
 		return e.validateFormulas(ctx)
 	case "check_grid_completeness":
 		return e.checkGridCompleteness(ctx)
+	case "list_integrations":
+		return e.listIntegrations(ctx)
+	case "preview_file_import":
+		return e.previewFileImport(ctx, args)
+	case "preview_export":
+		return e.previewExport(ctx, args)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}

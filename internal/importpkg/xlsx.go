@@ -3,16 +3,14 @@ package importpkg
 // Native .xlsx parsing for fact import, sharing the exact same RawRow shape
 // (and therefore the exact same ResolveRows validation) as CSV — so a
 // spreadsheet upload isn't a lesser, differently-validated path: it goes
-// through the same name-based column mapping, leaf-member check, and
-// non-negative check as everything else. excelize is already a direct
+// through the same name-based column mapping, leaf-member check and number
+// check as everything else. excelize is already a direct
 // dependency (used by internal/aiassistant for document parsing).
 
 import (
 	"bytes"
 	"encoding/csv"
 	"fmt"
-
-	"github.com/xuri/excelize/v2"
 )
 
 // ParseCSVRows reads header + data rows from CSV text.
@@ -37,35 +35,11 @@ func ParseCSVRows(data []byte) (header []string, rows []RawRow, err error) {
 
 // ParseXLSXRows reads header + data rows from the first sheet of a native
 // Excel workbook. Blank trailing rows (common in exported/templated sheets)
-// are skipped rather than staged as empty.
+// are skipped rather than staged as empty. Cells are read as DISPLAYED (see
+// docs/OBSERVATIONS.md: a "#,##0" value arrives as "1,234" and fails the
+// number check); ParseTabularFile reads stored values instead.
 func ParseXLSXRows(data []byte) (header []string, rows []RawRow, err error) {
-	f, err := excelize.OpenReader(bytes.NewReader(data))
-	if err != nil {
-		return nil, nil, fmt.Errorf("open xlsx: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	sheets := f.GetSheetList()
-	if len(sheets) == 0 {
-		return nil, nil, fmt.Errorf("workbook has no sheets")
-	}
-	allRows, err := f.GetRows(sheets[0])
-	if err != nil {
-		return nil, nil, fmt.Errorf("read sheet %q: %w", sheets[0], err)
-	}
-	if len(allRows) == 0 {
-		return nil, nil, fmt.Errorf("sheet %q has no header row", sheets[0])
-	}
-	header = allRows[0]
-	rowNum := 0
-	for _, record := range allRows[1:] {
-		rowNum++
-		if isBlankRecord(record) {
-			continue
-		}
-		rows = append(rows, recordToRawRow(header, record, rowNum))
-	}
-	return header, rows, nil
+	return parseXLSXSheet(data, "", false)
 }
 
 func recordToRawRow(header, record []string, rowNum int) RawRow {

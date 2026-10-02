@@ -14,8 +14,10 @@ package importpkg
 // Every referenced dimension member is validated as a leaf (no children) —
 // structurally, not by dimension name, so a hierarchy parent (e.g. a year in
 // a months dimension) is rejected for any demo's any dimension with no
-// per-dimension configuration — and every value must be a non-negative
-// number. ResolveRows returns every row's outcome (staged or errored); the
+// per-dimension configuration — and every value must be a number. Negative
+// values are values (credits, losses, variances), as they are when typed into
+// a cell or pulled by a connector; an import once refused them, a rule from
+// the July 2026 salary demo. ResolveRows returns every row's outcome (staged or errored); the
 // caller decides atomicity (see importUpload's "reject the whole workbook
 // if any row is invalid" handling).
 
@@ -111,8 +113,8 @@ func (e *unknownColumnError) Error() string {
 // ResolveRows turns parsed (header, rows) into staged, write-ready rows plus
 // a per-row/column error for anything that couldn't be resolved or failed
 // validation: unknown metric/dimension reference, unknown member code, a
-// non-leaf member (e.g. a hierarchy parent), a value that isn't a
-// non-negative number. A row contributing to `errs` is never present in
+// non-leaf member (e.g. a hierarchy parent), a value that isn't a number.
+// A row contributing to `errs` is never present in
 // `staged` — the two slices partition the input exactly.
 func ResolveRows(ctx context.Context, pool *pgxpool.Pool, modelID, revisionID string, header []string, rows []RawRow) (staged []StagingRow, errs []*importpkgv1.ImportError, err error) {
 	cols, hasMetricIDCol, hasValueCol, err := classifyColumns(ctx, pool, modelID, revisionID, header)
@@ -262,14 +264,6 @@ func ResolveRows(ctx context.Context, pool *pgxpool.Pool, modelID, revisionID st
 					RowNumber: int32(row.RowNumber), Column: ev.column,
 					ErrorCode: "INVALID_NUMBER", RawValue: ev.valueRaw,
 					Message: "cannot parse \"" + ev.valueRaw + "\" as a number",
-				})
-				continue
-			}
-			if val < 0 {
-				errs = append(errs, &importpkgv1.ImportError{
-					RowNumber: int32(row.RowNumber), Column: ev.column,
-					ErrorCode: "NEGATIVE_VALUE", RawValue: ev.valueRaw,
-					Message: "value must be non-negative, got " + ev.valueRaw,
 				})
 				continue
 			}

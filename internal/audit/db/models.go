@@ -1039,6 +1039,7 @@ type AiAssistantDocument struct {
 	Truncated bool      `json:"truncated"`
 	Content   string    `json:"content"`
 	CreatedAt time.Time `json:"created_at"`
+	RawData   []byte    `json:"raw_data"`
 }
 
 type AiAssistantLlmSetting struct {

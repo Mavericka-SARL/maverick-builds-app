@@ -507,6 +507,14 @@ type Invoker interface {
 	//
 	// POST /api/developer/integration-connections/{id}/oauth/disconnect
 	DisconnectIntegrationOAuth(ctx context.Context, params DisconnectIntegrationOAuthParams) (DisconnectIntegrationOAuthRes, error)
+	// DownloadExportIntegration invokes downloadExportIntegration operation.
+	//
+	// Download a file_export integration — the grid's leaf-level values (inputs and calculated
+	// metrics) as CSV, XLSX or JSON in its spec's layout, built from the caller's own view of the grid
+	// (hidden members and metrics left out). Recorded in the integration's run history.
+	//
+	// GET /api/integrations/{id}/export
+	DownloadExportIntegration(ctx context.Context, params DownloadExportIntegrationParams) (DownloadExportIntegrationRes, error)
 	// DuplicateIntegration invokes duplicateIntegration operation.
 	//
 	// Duplicate a rest_api integration (test state cleared, schedule copied disabled, no run history).
@@ -1120,6 +1128,14 @@ type Invoker interface {
 	//
 	// POST /api/notifications/mark-read
 	MarkNotificationRead(ctx context.Context, request *MarkNotificationReadRequest) (*MarkNotificationReadOK, error)
+	// PreviewExportIntegration invokes previewExportIntegration operation.
+	//
+	// Render a file_export spec against a grid without saving — the columns, the first rows (default
+	// 20, at most 200) and the row count, built from the caller's own view of the grid. 400 lists every
+	// spec problem.
+	//
+	// POST /api/developer/integrations/export-preview
+	PreviewExportIntegration(ctx context.Context, request *PreviewExportIntegrationReq) (PreviewExportIntegrationRes, error)
 	// PreviewFormMapping invokes previewFormMapping operation.
 	//
 	// Preview the fact rows a mapping would currently produce, without writing them.
@@ -1263,8 +1279,11 @@ type Invoker interface {
 	RevokeScimToken(ctx context.Context, params RevokeScimTokenParams) (RevokeScimTokenRes, error)
 	// RunIntegration invokes runIntegration operation.
 	//
-	// Execute a saved integration against an uploaded CSV (target is a form, dimension, or grid, per the
-	// integration's target_type).
+	// Run a saved integration — a csv_import with the CSV or workbook in the body, a google_sheets by
+	// re-fetching its sheet — into its form, dimension or grid. A grid run resolves names, checks
+	// members are leaves, commits valid rows through the write guard and the plan's limits (invalid rows
+	// are listed), and recalculates; every run is recorded in the integration's history. A file_export
+	// is downloaded instead (GET /api/integrations/{id}/export).
 	//
 	// POST /api/integrations/{id}/run
 	RunIntegration(ctx context.Context, request *IntegrationRunRequest, params RunIntegrationParams) (RunIntegrationRes, error)
@@ -10617,6 +10636,134 @@ func (c *Client) sendDisconnectIntegrationOAuth(ctx context.Context, params Disc
 
 	stage = "DecodeResponse"
 	result, err := decodeDisconnectIntegrationOAuthResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// DownloadExportIntegration invokes downloadExportIntegration operation.
+//
+// Download a file_export integration — the grid's leaf-level values (inputs and calculated
+// metrics) as CSV, XLSX or JSON in its spec's layout, built from the caller's own view of the grid
+// (hidden members and metrics left out). Recorded in the integration's run history.
+//
+// GET /api/integrations/{id}/export
+func (c *Client) DownloadExportIntegration(ctx context.Context, params DownloadExportIntegrationParams) (DownloadExportIntegrationRes, error) {
+	res, err := c.sendDownloadExportIntegration(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendDownloadExportIntegration(ctx context.Context, params DownloadExportIntegrationParams) (res DownloadExportIntegrationRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("downloadExportIntegration"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/integrations/{id}/export"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, DownloadExportIntegrationOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/integrations/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/export"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, DownloadExportIntegrationOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeDownloadExportIntegrationResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -21941,6 +22088,118 @@ func (c *Client) sendMarkNotificationRead(ctx context.Context, request *MarkNoti
 	return result, nil
 }
 
+// PreviewExportIntegration invokes previewExportIntegration operation.
+//
+// Render a file_export spec against a grid without saving — the columns, the first rows (default
+// 20, at most 200) and the row count, built from the caller's own view of the grid. 400 lists every
+// spec problem.
+//
+// POST /api/developer/integrations/export-preview
+func (c *Client) PreviewExportIntegration(ctx context.Context, request *PreviewExportIntegrationReq) (PreviewExportIntegrationRes, error) {
+	res, err := c.sendPreviewExportIntegration(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendPreviewExportIntegration(ctx context.Context, request *PreviewExportIntegrationReq) (res PreviewExportIntegrationRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("previewExportIntegration"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/developer/integrations/export-preview"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, PreviewExportIntegrationOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/developer/integrations/export-preview"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodePreviewExportIntegrationRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, PreviewExportIntegrationOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodePreviewExportIntegrationResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // PreviewFormMapping invokes previewFormMapping operation.
 //
 // Preview the fact rows a mapping would currently produce, without writing them.
@@ -24462,8 +24721,11 @@ func (c *Client) sendRevokeScimToken(ctx context.Context, params RevokeScimToken
 
 // RunIntegration invokes runIntegration operation.
 //
-// Execute a saved integration against an uploaded CSV (target is a form, dimension, or grid, per the
-// integration's target_type).
+// Run a saved integration — a csv_import with the CSV or workbook in the body, a google_sheets by
+// re-fetching its sheet — into its form, dimension or grid. A grid run resolves names, checks
+// members are leaves, commits valid rows through the write guard and the plan's limits (invalid rows
+// are listed), and recalculates; every run is recorded in the integration's history. A file_export
+// is downloaded instead (GET /api/integrations/{id}/export).
 //
 // POST /api/integrations/{id}/run
 func (c *Client) RunIntegration(ctx context.Context, request *IntegrationRunRequest, params RunIntegrationParams) (RunIntegrationRes, error) {

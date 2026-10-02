@@ -76,6 +76,10 @@ type Hooks struct {
 	// into its metric: the developer's backfill, and what the developer's
 	// integration update runs after saving.
 	PostFormIntegration func(ctx context.Context, integrationID string) (int, error)
+	// ImportFile imports a spreadsheet attached to the session through the
+	// Import Wizard's pipeline (parse, column map, name resolution, write
+	// guard, plan limits, recalculation, audit) and returns a summary.
+	ImportFile func(ctx context.Context, req FileImportRequest) (string, error)
 }
 
 // WithHooks sets the executor's gateway hooks and returns it.
@@ -396,6 +400,16 @@ func (e *WriteExecutor) Execute(ctx context.Context, tool string, params json.Ra
 		return e.deleteFormIntegration(ctx, params)
 	case "set_user_access_rules":
 		return e.setUserAccessRules(ctx, params)
+	case "create_file_integration":
+		return e.createFileIntegration(ctx, params)
+	case "import_file_data":
+		return e.importFileData(ctx, params)
+	case "create_export_integration":
+		return e.createExportIntegration(ctx, params)
+	case "update_integration":
+		return e.updateIntegration(ctx, params)
+	case "delete_integration":
+		return e.deleteIntegration(ctx, params)
 	}
 	if fn, ok := e.editTools()[tool]; ok {
 		return fn(ctx, params)

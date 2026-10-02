@@ -21706,6 +21706,176 @@ func (s *DisconnectIntegrationOAuthOKMeta) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes DownloadExportIntegrationBadRequest as json.
+func (s *DownloadExportIntegrationBadRequest) Encode(e *jx.Encoder) {
+	unwrapped := (*Error)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes DownloadExportIntegrationBadRequest from json.
+func (s *DownloadExportIntegrationBadRequest) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode DownloadExportIntegrationBadRequest to nil")
+	}
+	var unwrapped Error
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = DownloadExportIntegrationBadRequest(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *DownloadExportIntegrationBadRequest) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *DownloadExportIntegrationBadRequest) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes DownloadExportIntegrationNotFound as json.
+func (s *DownloadExportIntegrationNotFound) Encode(e *jx.Encoder) {
+	unwrapped := (*Error)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes DownloadExportIntegrationNotFound from json.
+func (s *DownloadExportIntegrationNotFound) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode DownloadExportIntegrationNotFound to nil")
+	}
+	var unwrapped Error
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = DownloadExportIntegrationNotFound(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *DownloadExportIntegrationNotFound) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *DownloadExportIntegrationNotFound) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes DownloadExportIntegrationOKApplicationJSON as json.
+func (s DownloadExportIntegrationOKApplicationJSON) Encode(e *jx.Encoder) {
+	unwrapped := []DownloadExportIntegrationOKApplicationJSONItem(s)
+
+	e.ArrStart()
+	for _, elem := range unwrapped {
+		elem.Encode(e)
+	}
+	e.ArrEnd()
+}
+
+// Decode decodes DownloadExportIntegrationOKApplicationJSON from json.
+func (s *DownloadExportIntegrationOKApplicationJSON) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode DownloadExportIntegrationOKApplicationJSON to nil")
+	}
+	var unwrapped []DownloadExportIntegrationOKApplicationJSONItem
+	if err := func() error {
+		unwrapped = make([]DownloadExportIntegrationOKApplicationJSONItem, 0)
+		if err := d.Arr(func(d *jx.Decoder) error {
+			var elem DownloadExportIntegrationOKApplicationJSONItem
+			if err := elem.Decode(d); err != nil {
+				return err
+			}
+			unwrapped = append(unwrapped, elem)
+			return nil
+		}); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = DownloadExportIntegrationOKApplicationJSON(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s DownloadExportIntegrationOKApplicationJSON) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *DownloadExportIntegrationOKApplicationJSON) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *DownloadExportIntegrationOKApplicationJSONItem) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *DownloadExportIntegrationOKApplicationJSONItem) encodeFields(e *jx.Encoder) {
+}
+
+var jsonFieldsNameOfDownloadExportIntegrationOKApplicationJSONItem = [0]string{}
+
+// Decode decodes DownloadExportIntegrationOKApplicationJSONItem from json.
+func (s *DownloadExportIntegrationOKApplicationJSONItem) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode DownloadExportIntegrationOKApplicationJSONItem to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		default:
+			return d.Skip()
+		}
+	}); err != nil {
+		return errors.Wrap(err, "decode DownloadExportIntegrationOKApplicationJSONItem")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *DownloadExportIntegrationOKApplicationJSONItem) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *DownloadExportIntegrationOKApplicationJSONItem) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode implements json.Marshaler.
 func (s *DuplicateIntegrationOK) Encode(e *jx.Encoder) {
 	e.ObjStart()
@@ -22323,6 +22493,725 @@ func (s *ExportModelPackageNotFound) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *ExportModelPackageNotFound) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *ExportSpec) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *ExportSpec) encodeFields(e *jx.Encoder) {
+	{
+		if s.Format.Set {
+			e.FieldStart("format")
+			s.Format.Encode(e)
+		}
+	}
+	{
+		if s.Layout.Set {
+			e.FieldStart("layout")
+			s.Layout.Encode(e)
+		}
+	}
+	{
+		if s.PivotDimension.Set {
+			e.FieldStart("pivot_dimension")
+			s.PivotDimension.Encode(e)
+		}
+	}
+	{
+		if s.Metrics != nil {
+			e.FieldStart("metrics")
+			e.ArrStart()
+			for _, elem := range s.Metrics {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.Dimensions != nil {
+			e.FieldStart("dimensions")
+			e.ArrStart()
+			for _, elem := range s.Dimensions {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.MemberDisplay.Set {
+			e.FieldStart("member_display")
+			s.MemberDisplay.Encode(e)
+		}
+	}
+	{
+		if s.MetricDisplay.Set {
+			e.FieldStart("metric_display")
+			s.MetricDisplay.Encode(e)
+		}
+	}
+	{
+		if s.Filters.Set {
+			e.FieldStart("filters")
+			s.Filters.Encode(e)
+		}
+	}
+	{
+		if s.ColumnNames.Set {
+			e.FieldStart("column_names")
+			s.ColumnNames.Encode(e)
+		}
+	}
+	{
+		if s.Decimals.Set {
+			e.FieldStart("decimals")
+			s.Decimals.Encode(e)
+		}
+	}
+	{
+		if s.Delimiter.Set {
+			e.FieldStart("delimiter")
+			s.Delimiter.Encode(e)
+		}
+	}
+	{
+		if s.DecimalSeparator.Set {
+			e.FieldStart("decimal_separator")
+			s.DecimalSeparator.Encode(e)
+		}
+	}
+	{
+		if s.IncludeHeader.Set {
+			e.FieldStart("include_header")
+			s.IncludeHeader.Encode(e)
+		}
+	}
+	{
+		if s.IncludeEmptyRows.Set {
+			e.FieldStart("include_empty_rows")
+			s.IncludeEmptyRows.Encode(e)
+		}
+	}
+	{
+		if s.SheetName.Set {
+			e.FieldStart("sheet_name")
+			s.SheetName.Encode(e)
+		}
+	}
+	{
+		if s.FileName.Set {
+			e.FieldStart("file_name")
+			s.FileName.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfExportSpec = [16]string{
+	0:  "format",
+	1:  "layout",
+	2:  "pivot_dimension",
+	3:  "metrics",
+	4:  "dimensions",
+	5:  "member_display",
+	6:  "metric_display",
+	7:  "filters",
+	8:  "column_names",
+	9:  "decimals",
+	10: "delimiter",
+	11: "decimal_separator",
+	12: "include_header",
+	13: "include_empty_rows",
+	14: "sheet_name",
+	15: "file_name",
+}
+
+// Decode decodes ExportSpec from json.
+func (s *ExportSpec) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ExportSpec to nil")
+	}
+	s.setDefaults()
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "format":
+			if err := func() error {
+				s.Format.Reset()
+				if err := s.Format.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"format\"")
+			}
+		case "layout":
+			if err := func() error {
+				s.Layout.Reset()
+				if err := s.Layout.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"layout\"")
+			}
+		case "pivot_dimension":
+			if err := func() error {
+				s.PivotDimension.Reset()
+				if err := s.PivotDimension.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"pivot_dimension\"")
+			}
+		case "metrics":
+			if err := func() error {
+				s.Metrics = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Metrics = append(s.Metrics, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"metrics\"")
+			}
+		case "dimensions":
+			if err := func() error {
+				s.Dimensions = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Dimensions = append(s.Dimensions, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"dimensions\"")
+			}
+		case "member_display":
+			if err := func() error {
+				s.MemberDisplay.Reset()
+				if err := s.MemberDisplay.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"member_display\"")
+			}
+		case "metric_display":
+			if err := func() error {
+				s.MetricDisplay.Reset()
+				if err := s.MetricDisplay.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"metric_display\"")
+			}
+		case "filters":
+			if err := func() error {
+				s.Filters.Reset()
+				if err := s.Filters.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"filters\"")
+			}
+		case "column_names":
+			if err := func() error {
+				s.ColumnNames.Reset()
+				if err := s.ColumnNames.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"column_names\"")
+			}
+		case "decimals":
+			if err := func() error {
+				s.Decimals.Reset()
+				if err := s.Decimals.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"decimals\"")
+			}
+		case "delimiter":
+			if err := func() error {
+				s.Delimiter.Reset()
+				if err := s.Delimiter.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"delimiter\"")
+			}
+		case "decimal_separator":
+			if err := func() error {
+				s.DecimalSeparator.Reset()
+				if err := s.DecimalSeparator.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"decimal_separator\"")
+			}
+		case "include_header":
+			if err := func() error {
+				s.IncludeHeader.Reset()
+				if err := s.IncludeHeader.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"include_header\"")
+			}
+		case "include_empty_rows":
+			if err := func() error {
+				s.IncludeEmptyRows.Reset()
+				if err := s.IncludeEmptyRows.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"include_empty_rows\"")
+			}
+		case "sheet_name":
+			if err := func() error {
+				s.SheetName.Reset()
+				if err := s.SheetName.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"sheet_name\"")
+			}
+		case "file_name":
+			if err := func() error {
+				s.FileName.Reset()
+				if err := s.FileName.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"file_name\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode ExportSpec")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *ExportSpec) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ExportSpec) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s ExportSpecColumnNames) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields implements json.Marshaler.
+func (s ExportSpecColumnNames) encodeFields(e *jx.Encoder) {
+	for k, elem := range s {
+		e.FieldStart(k)
+
+		e.Str(elem)
+	}
+}
+
+// Decode decodes ExportSpecColumnNames from json.
+func (s *ExportSpecColumnNames) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ExportSpecColumnNames to nil")
+	}
+	m := s.init()
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		var elem string
+		if err := func() error {
+			v, err := d.Str()
+			elem = string(v)
+			if err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			return errors.Wrapf(err, "decode field %q", k)
+		}
+		m[string(k)] = elem
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode ExportSpecColumnNames")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s ExportSpecColumnNames) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ExportSpecColumnNames) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ExportSpecDecimalSeparator as json.
+func (s ExportSpecDecimalSeparator) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes ExportSpecDecimalSeparator from json.
+func (s *ExportSpecDecimalSeparator) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ExportSpecDecimalSeparator to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch ExportSpecDecimalSeparator(v) {
+	case ExportSpecDecimalSeparator_Dot:
+		*s = ExportSpecDecimalSeparator_Dot
+	case ExportSpecDecimalSeparator_:
+		*s = ExportSpecDecimalSeparator_
+	default:
+		*s = ExportSpecDecimalSeparator(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s ExportSpecDecimalSeparator) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ExportSpecDecimalSeparator) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ExportSpecDelimiter as json.
+func (s ExportSpecDelimiter) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes ExportSpecDelimiter from json.
+func (s *ExportSpecDelimiter) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ExportSpecDelimiter to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch ExportSpecDelimiter(v) {
+	case ExportSpecDelimiter_0:
+		*s = ExportSpecDelimiter_0
+	case ExportSpecDelimiter_1:
+		*s = ExportSpecDelimiter_1
+	case ExportSpecDelimiter_2:
+		*s = ExportSpecDelimiter_2
+	case ExportSpecDelimiter_3:
+		*s = ExportSpecDelimiter_3
+	default:
+		*s = ExportSpecDelimiter(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s ExportSpecDelimiter) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ExportSpecDelimiter) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s ExportSpecFilters) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields implements json.Marshaler.
+func (s ExportSpecFilters) encodeFields(e *jx.Encoder) {
+	for k, elem := range s {
+		e.FieldStart(k)
+
+		e.ArrStart()
+		for _, elem := range elem {
+			e.Str(elem)
+		}
+		e.ArrEnd()
+	}
+}
+
+// Decode decodes ExportSpecFilters from json.
+func (s *ExportSpecFilters) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ExportSpecFilters to nil")
+	}
+	m := s.init()
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		var elem []string
+		if err := func() error {
+			elem = make([]string, 0)
+			if err := d.Arr(func(d *jx.Decoder) error {
+				var elemElem string
+				v, err := d.Str()
+				elemElem = string(v)
+				if err != nil {
+					return err
+				}
+				elem = append(elem, elemElem)
+				return nil
+			}); err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			return errors.Wrapf(err, "decode field %q", k)
+		}
+		m[string(k)] = elem
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode ExportSpecFilters")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s ExportSpecFilters) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ExportSpecFilters) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ExportSpecFormat as json.
+func (s ExportSpecFormat) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes ExportSpecFormat from json.
+func (s *ExportSpecFormat) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ExportSpecFormat to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch ExportSpecFormat(v) {
+	case ExportSpecFormatCsv:
+		*s = ExportSpecFormatCsv
+	case ExportSpecFormatXlsx:
+		*s = ExportSpecFormatXlsx
+	case ExportSpecFormatJSON:
+		*s = ExportSpecFormatJSON
+	default:
+		*s = ExportSpecFormat(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s ExportSpecFormat) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ExportSpecFormat) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ExportSpecLayout as json.
+func (s ExportSpecLayout) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes ExportSpecLayout from json.
+func (s *ExportSpecLayout) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ExportSpecLayout to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch ExportSpecLayout(v) {
+	case ExportSpecLayoutWide:
+		*s = ExportSpecLayoutWide
+	case ExportSpecLayoutLong:
+		*s = ExportSpecLayoutLong
+	case ExportSpecLayoutPivot:
+		*s = ExportSpecLayoutPivot
+	default:
+		*s = ExportSpecLayout(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s ExportSpecLayout) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ExportSpecLayout) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ExportSpecMemberDisplay as json.
+func (s ExportSpecMemberDisplay) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes ExportSpecMemberDisplay from json.
+func (s *ExportSpecMemberDisplay) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ExportSpecMemberDisplay to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch ExportSpecMemberDisplay(v) {
+	case ExportSpecMemberDisplayCode:
+		*s = ExportSpecMemberDisplayCode
+	case ExportSpecMemberDisplayLabel:
+		*s = ExportSpecMemberDisplayLabel
+	case ExportSpecMemberDisplayCodeAndLabel:
+		*s = ExportSpecMemberDisplayCodeAndLabel
+	default:
+		*s = ExportSpecMemberDisplay(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s ExportSpecMemberDisplay) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ExportSpecMemberDisplay) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ExportSpecMetricDisplay as json.
+func (s ExportSpecMetricDisplay) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes ExportSpecMetricDisplay from json.
+func (s *ExportSpecMetricDisplay) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ExportSpecMetricDisplay to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch ExportSpecMetricDisplay(v) {
+	case ExportSpecMetricDisplayName:
+		*s = ExportSpecMetricDisplayName
+	case ExportSpecMetricDisplayLabel:
+		*s = ExportSpecMetricDisplayLabel
+	default:
+		*s = ExportSpecMetricDisplay(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s ExportSpecMetricDisplay) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ExportSpecMetricDisplay) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -29760,10 +30649,24 @@ func (s *IntegrationRunRequest) encodeFields(e *jx.Encoder) {
 			s.Csv.Encode(e)
 		}
 	}
+	{
+		if s.XlsxBase64.Set {
+			e.FieldStart("xlsx_base64")
+			s.XlsxBase64.Encode(e)
+		}
+	}
+	{
+		if s.Sheet.Set {
+			e.FieldStart("sheet")
+			s.Sheet.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfIntegrationRunRequest = [1]string{
+var jsonFieldsNameOfIntegrationRunRequest = [3]string{
 	0: "csv",
+	1: "xlsx_base64",
+	2: "sheet",
 }
 
 // Decode decodes IntegrationRunRequest from json.
@@ -29783,6 +30686,26 @@ func (s *IntegrationRunRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"csv\"")
+			}
+		case "xlsx_base64":
+			if err := func() error {
+				s.XlsxBase64.Reset()
+				if err := s.XlsxBase64.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"xlsx_base64\"")
+			}
+		case "sheet":
+			if err := func() error {
+				s.Sheet.Reset()
+				if err := s.Sheet.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"sheet\"")
 			}
 		default:
 			return d.Skip()
@@ -37191,6 +38114,272 @@ func (s *OptDuplicateWorkflowRequest) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes ExportSpecColumnNames as json.
+func (o OptExportSpecColumnNames) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	o.Value.Encode(e)
+}
+
+// Decode decodes ExportSpecColumnNames from json.
+func (o *OptExportSpecColumnNames) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptExportSpecColumnNames to nil")
+	}
+	o.Set = true
+	o.Value = make(ExportSpecColumnNames)
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptExportSpecColumnNames) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptExportSpecColumnNames) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ExportSpecDecimalSeparator as json.
+func (o OptExportSpecDecimalSeparator) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes ExportSpecDecimalSeparator from json.
+func (o *OptExportSpecDecimalSeparator) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptExportSpecDecimalSeparator to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptExportSpecDecimalSeparator) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptExportSpecDecimalSeparator) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ExportSpecDelimiter as json.
+func (o OptExportSpecDelimiter) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes ExportSpecDelimiter from json.
+func (o *OptExportSpecDelimiter) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptExportSpecDelimiter to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptExportSpecDelimiter) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptExportSpecDelimiter) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ExportSpecFilters as json.
+func (o OptExportSpecFilters) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	o.Value.Encode(e)
+}
+
+// Decode decodes ExportSpecFilters from json.
+func (o *OptExportSpecFilters) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptExportSpecFilters to nil")
+	}
+	o.Set = true
+	o.Value = make(ExportSpecFilters)
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptExportSpecFilters) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptExportSpecFilters) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ExportSpecFormat as json.
+func (o OptExportSpecFormat) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes ExportSpecFormat from json.
+func (o *OptExportSpecFormat) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptExportSpecFormat to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptExportSpecFormat) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptExportSpecFormat) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ExportSpecLayout as json.
+func (o OptExportSpecLayout) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes ExportSpecLayout from json.
+func (o *OptExportSpecLayout) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptExportSpecLayout to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptExportSpecLayout) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptExportSpecLayout) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ExportSpecMemberDisplay as json.
+func (o OptExportSpecMemberDisplay) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes ExportSpecMemberDisplay from json.
+func (o *OptExportSpecMemberDisplay) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptExportSpecMemberDisplay to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptExportSpecMemberDisplay) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptExportSpecMemberDisplay) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ExportSpecMetricDisplay as json.
+func (o OptExportSpecMetricDisplay) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes ExportSpecMetricDisplay from json.
+func (o *OptExportSpecMetricDisplay) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptExportSpecMetricDisplay to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptExportSpecMetricDisplay) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptExportSpecMetricDisplay) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes float64 as json.
 func (o OptFloat64) Encode(e *jx.Encoder) {
 	if !o.Set {
@@ -40210,6 +41399,473 @@ func (s *PreferencesUpdateTheme) UnmarshalJSON(data []byte) error {
 }
 
 // Encode implements json.Marshaler.
+func (s *PreviewExportIntegrationBadRequest) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *PreviewExportIntegrationBadRequest) encodeFields(e *jx.Encoder) {
+	{
+		if s.Error.Set {
+			e.FieldStart("error")
+			s.Error.Encode(e)
+		}
+	}
+	{
+		if s.Problems != nil {
+			e.FieldStart("problems")
+			e.ArrStart()
+			for _, elem := range s.Problems {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+}
+
+var jsonFieldsNameOfPreviewExportIntegrationBadRequest = [2]string{
+	0: "error",
+	1: "problems",
+}
+
+// Decode decodes PreviewExportIntegrationBadRequest from json.
+func (s *PreviewExportIntegrationBadRequest) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode PreviewExportIntegrationBadRequest to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "error":
+			if err := func() error {
+				s.Error.Reset()
+				if err := s.Error.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"error\"")
+			}
+		case "problems":
+			if err := func() error {
+				s.Problems = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Problems = append(s.Problems, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"problems\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode PreviewExportIntegrationBadRequest")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *PreviewExportIntegrationBadRequest) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *PreviewExportIntegrationBadRequest) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *PreviewExportIntegrationOK) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *PreviewExportIntegrationOK) encodeFields(e *jx.Encoder) {
+	{
+		if s.Header != nil {
+			e.FieldStart("header")
+			e.ArrStart()
+			for _, elem := range s.Header {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.DefaultHeader != nil {
+			e.FieldStart("default_header")
+			e.ArrStart()
+			for _, elem := range s.DefaultHeader {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.Rows != nil {
+			e.FieldStart("rows")
+			e.ArrStart()
+			for _, elem := range s.Rows {
+				e.ArrStart()
+				for _, elem := range elem {
+					e.Str(elem)
+				}
+				e.ArrEnd()
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.TotalRows.Set {
+			e.FieldStart("total_rows")
+			s.TotalRows.Encode(e)
+		}
+	}
+	{
+		if s.Warnings != nil {
+			e.FieldStart("warnings")
+			e.ArrStart()
+			for _, elem := range s.Warnings {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.FileName.Set {
+			e.FieldStart("file_name")
+			s.FileName.Encode(e)
+		}
+	}
+	{
+		if s.Summary.Set {
+			e.FieldStart("summary")
+			s.Summary.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfPreviewExportIntegrationOK = [7]string{
+	0: "header",
+	1: "default_header",
+	2: "rows",
+	3: "total_rows",
+	4: "warnings",
+	5: "file_name",
+	6: "summary",
+}
+
+// Decode decodes PreviewExportIntegrationOK from json.
+func (s *PreviewExportIntegrationOK) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode PreviewExportIntegrationOK to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "header":
+			if err := func() error {
+				s.Header = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Header = append(s.Header, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"header\"")
+			}
+		case "default_header":
+			if err := func() error {
+				s.DefaultHeader = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.DefaultHeader = append(s.DefaultHeader, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"default_header\"")
+			}
+		case "rows":
+			if err := func() error {
+				s.Rows = make([][]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem []string
+					elem = make([]string, 0)
+					if err := d.Arr(func(d *jx.Decoder) error {
+						var elemElem string
+						v, err := d.Str()
+						elemElem = string(v)
+						if err != nil {
+							return err
+						}
+						elem = append(elem, elemElem)
+						return nil
+					}); err != nil {
+						return err
+					}
+					s.Rows = append(s.Rows, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"rows\"")
+			}
+		case "total_rows":
+			if err := func() error {
+				s.TotalRows.Reset()
+				if err := s.TotalRows.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"total_rows\"")
+			}
+		case "warnings":
+			if err := func() error {
+				s.Warnings = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Warnings = append(s.Warnings, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"warnings\"")
+			}
+		case "file_name":
+			if err := func() error {
+				s.FileName.Reset()
+				if err := s.FileName.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"file_name\"")
+			}
+		case "summary":
+			if err := func() error {
+				s.Summary.Reset()
+				if err := s.Summary.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"summary\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode PreviewExportIntegrationOK")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *PreviewExportIntegrationOK) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *PreviewExportIntegrationOK) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *PreviewExportIntegrationReq) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *PreviewExportIntegrationReq) encodeFields(e *jx.Encoder) {
+	{
+		e.FieldStart("target_id")
+		json.EncodeUUID(e, s.TargetID)
+	}
+	{
+		if s.Name.Set {
+			e.FieldStart("name")
+			s.Name.Encode(e)
+		}
+	}
+	{
+		if s.Rows.Set {
+			e.FieldStart("rows")
+			s.Rows.Encode(e)
+		}
+	}
+	{
+		e.FieldStart("config")
+		s.Config.Encode(e)
+	}
+}
+
+var jsonFieldsNameOfPreviewExportIntegrationReq = [4]string{
+	0: "target_id",
+	1: "name",
+	2: "rows",
+	3: "config",
+}
+
+// Decode decodes PreviewExportIntegrationReq from json.
+func (s *PreviewExportIntegrationReq) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode PreviewExportIntegrationReq to nil")
+	}
+	var requiredBitSet [1]uint8
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "target_id":
+			requiredBitSet[0] |= 1 << 0
+			if err := func() error {
+				v, err := json.DecodeUUID(d)
+				s.TargetID = v
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"target_id\"")
+			}
+		case "name":
+			if err := func() error {
+				s.Name.Reset()
+				if err := s.Name.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"name\"")
+			}
+		case "rows":
+			if err := func() error {
+				s.Rows.Reset()
+				if err := s.Rows.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"rows\"")
+			}
+		case "config":
+			requiredBitSet[0] |= 1 << 3
+			if err := func() error {
+				if err := s.Config.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"config\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode PreviewExportIntegrationReq")
+	}
+	// Validate required fields.
+	var failures []validate.FieldError
+	for i, mask := range [1]uint8{
+		0b00001001,
+	} {
+		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
+			// Mask only required fields and check equality to mask using XOR.
+			//
+			// If XOR result is not zero, result is not equal to expected, so some fields are missed.
+			// Bits of fields which would be set are actually bits of missed fields.
+			missed := bits.OnesCount8(result)
+			for bitN := 0; bitN < missed; bitN++ {
+				bitIdx := bits.TrailingZeros8(result)
+				fieldIdx := i*8 + bitIdx
+				var name string
+				if fieldIdx < len(jsonFieldsNameOfPreviewExportIntegrationReq) {
+					name = jsonFieldsNameOfPreviewExportIntegrationReq[fieldIdx]
+				} else {
+					name = strconv.Itoa(fieldIdx)
+				}
+				failures = append(failures, validate.FieldError{
+					Name:  name,
+					Error: validate.ErrFieldRequired,
+				})
+				// Reset bit.
+				result &^= 1 << bitIdx
+			}
+		}
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *PreviewExportIntegrationReq) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *PreviewExportIntegrationReq) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
 func (s PreviewFormMappingOKItem) Encode(e *jx.Encoder) {
 	e.ObjStart()
 	s.encodeFields(e)
@@ -43005,16 +44661,34 @@ func (s *RunIntegrationOK) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.ValuesImported.Set {
+			e.FieldStart("values_imported")
+			s.ValuesImported.Encode(e)
+		}
+	}
+	{
 		if s.ErrorRows.Set {
 			e.FieldStart("error_rows")
 			s.ErrorRows.Encode(e)
 		}
 	}
+	{
+		if s.Errors != nil {
+			e.FieldStart("errors")
+			e.ArrStart()
+			for _, elem := range s.Errors {
+				elem.Encode(e)
+			}
+			e.ArrEnd()
+		}
+	}
 }
 
-var jsonFieldsNameOfRunIntegrationOK = [2]string{
+var jsonFieldsNameOfRunIntegrationOK = [4]string{
 	0: "rows_imported",
-	1: "error_rows",
+	1: "values_imported",
+	2: "error_rows",
+	3: "errors",
 }
 
 // Decode decodes RunIntegrationOK from json.
@@ -43035,6 +44709,16 @@ func (s *RunIntegrationOK) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"rows_imported\"")
 			}
+		case "values_imported":
+			if err := func() error {
+				s.ValuesImported.Reset()
+				if err := s.ValuesImported.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"values_imported\"")
+			}
 		case "error_rows":
 			if err := func() error {
 				s.ErrorRows.Reset()
@@ -43044,6 +44728,23 @@ func (s *RunIntegrationOK) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"error_rows\"")
+			}
+		case "errors":
+			if err := func() error {
+				s.Errors = make([]RunIntegrationOKErrorsItem, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem RunIntegrationOKErrorsItem
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.Errors = append(s.Errors, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"errors\"")
 			}
 		default:
 			return d.Skip()
@@ -43065,6 +44766,137 @@ func (s *RunIntegrationOK) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *RunIntegrationOK) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *RunIntegrationOKErrorsItem) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *RunIntegrationOKErrorsItem) encodeFields(e *jx.Encoder) {
+	{
+		if s.Row.Set {
+			e.FieldStart("row")
+			s.Row.Encode(e)
+		}
+	}
+	{
+		if s.Column.Set {
+			e.FieldStart("column")
+			s.Column.Encode(e)
+		}
+	}
+	{
+		if s.Code.Set {
+			e.FieldStart("code")
+			s.Code.Encode(e)
+		}
+	}
+	{
+		if s.Message.Set {
+			e.FieldStart("message")
+			s.Message.Encode(e)
+		}
+	}
+	{
+		if s.RawValue.Set {
+			e.FieldStart("raw_value")
+			s.RawValue.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfRunIntegrationOKErrorsItem = [5]string{
+	0: "row",
+	1: "column",
+	2: "code",
+	3: "message",
+	4: "raw_value",
+}
+
+// Decode decodes RunIntegrationOKErrorsItem from json.
+func (s *RunIntegrationOKErrorsItem) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode RunIntegrationOKErrorsItem to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "row":
+			if err := func() error {
+				s.Row.Reset()
+				if err := s.Row.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"row\"")
+			}
+		case "column":
+			if err := func() error {
+				s.Column.Reset()
+				if err := s.Column.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"column\"")
+			}
+		case "code":
+			if err := func() error {
+				s.Code.Reset()
+				if err := s.Code.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"code\"")
+			}
+		case "message":
+			if err := func() error {
+				s.Message.Reset()
+				if err := s.Message.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"message\"")
+			}
+		case "raw_value":
+			if err := func() error {
+				s.RawValue.Reset()
+				if err := s.RawValue.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"raw_value\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode RunIntegrationOKErrorsItem")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *RunIntegrationOKErrorsItem) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *RunIntegrationOKErrorsItem) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }

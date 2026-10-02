@@ -567,7 +567,7 @@
 <h2>Integrations</h2>
 <p class="path">Sidebar: Build › Integrations</p>
 <p>Integrations bring data in and out of the model without typing: file uploads, a Google Sheet (link-shared, or private through the tenant's service account), any JSON REST API, and posting of form records into planning cells. The screen opens with one tile per source; selecting a tile shows that source's list and actions below.</p>
-<figure><img src="img/09-integrations.png" alt="Integrations screen with source tiles and the Excel/CSV import section"><figcaption>Source tiles: Excel / CSV Import, Google Sheets, REST API, Supabase (coming soon), Form Records. The section under the tiles belongs to the selected source.</figcaption></figure>
+<figure><img src="img/09-integrations.png" alt="Integrations screen with source tiles and the Excel/CSV import section"><figcaption>Source tiles: Excel / CSV Import, Google Sheets, REST API, Supabase (coming soon), Form Records, Data Export. The section under the tiles belongs to the selected source.</figcaption></figure>
 
 <h3>Excel / CSV Import</h3>
 <p><b>New Import</b> opens the four-step <b>Import Wizard</b>: <b>Upload</b>, <b>Map Columns</b>, <b>Validate</b>, <b>Commit</b>. The section also lists <b>Saved Integrations</b> and <b>Recent Imports</b>.</p>
@@ -582,7 +582,8 @@
 <tr><td><b>Validate</b></td><td>Counts <b>Total rows</b>, <b>Valid</b>, <b>Errors</b>, <b>Warnings</b> with a per-row issue list (for example "Empty row — will be skipped"). Choose to import valid rows only or <b>Import All Anyway</b>.</td></tr>
 <tr><td><b>Commit</b></td><td>A <b>Confirm Import</b> summary (target, revision, rows, columns mapped, rows skipped), then <b>Import Complete</b> or <b>Import Failed</b> with the reason.</td></tr>
 </table>
-<p><b>File layout by target.</b> Grid: <code>metric_id</code>, <code>value</code>, plus one column per dimension holding member codes. Form: one column per form field name. Dimension: <code>code</code>, <code>label</code> and optionally <code>parent_code</code>.</p>
+<p><b>File layout by target.</b> Grid: one column per dimension holding leaf member codes, and either one column per metric named after it (wide) or a column of metric names mapped to <b>metric</b> with the amounts in a column mapped to <b>value</b> (long). Values may be negative. Form: one column per form field name. Dimension: <code>code</code>, <code>label</code> and optionally <code>parent_code</code>.</p>
+<p><b>Running a saved integration with a new file.</b> The integration keeps its column mapping, so the next file only has to have the same columns. <b>Run Import</b> opens the wizard with it; on a dashboard, an <b>Integration</b> button lets a business user pick a <code>.csv</code>, <code>.xlsx</code> or <code>.xlsm</code> file and imports it straight away with the saved mapping and mode: valid rows are imported, and the first failing row is named under the button. Every run, from either place, is in the integration's <b>Run history</b>.</p>
 <p><b>Saved Integrations</b> lists CSV and Google Sheets integrations with a status badge, tags, <b>Sync Now</b> (Sheets), <b>Run history</b> and <b>Delete integration</b> ("removes the integration and its import history"). Double-click a name to rename. <b>Recent Imports</b> shows each import job with its status (Validating, Committed, error) and a delete action.</p>
 <div class="note warn"><b>Imports write to the revision you choose and respect the same rules as typing.</b> Hidden or read-only members, calculated metrics, locked workflow scopes and system-managed revisions are refused row by row. Each committed import triggers recalculation and can start a workflow through an integration trigger.</div>
 
@@ -626,6 +627,22 @@
 <tr><td>Card actions</td><td><b>Preview</b> (what would be posted), <b>Backfill</b> (post existing records now), <b>Delete</b> (confirm <b>Delete integration?</b>: "stops future postings"). A postings table lists record, revision, dimensions, value and time.</td></tr>
 </table>
 <p>Posted values are ordinary input values: they recalculate dependents and obey access rules and locks. Metric-typed form fields ("By name") let one form feed different metrics per record.</p>
+<h3>Data Export</h3>
+<p>A data export is a saved, re-downloadable file of one grid's values in the format another system expects. <b>New export</b> opens the editor; its preview updates as you change it, and an export that cannot be produced lists every reason and cannot be saved.</p>
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td><b>Name</b>, <b>Grid</b>, <b>Tags</b></td><td>The grid is fixed once saved; create another export for another grid.</td></tr>
+<tr><td><b>Format</b></td><td><b>CSV</b>, <b>Excel</b> or <b>JSON</b> (an array of objects keyed by column).</td></tr>
+<tr><td><b>Layout</b></td><td><b>Metrics as columns</b> (one column per metric), <b>One row per value</b> (metric and value columns) or <b>Members as columns</b> (the leaf members of the dimension chosen under <b>Members across from</b>, for example periods across).</td></tr>
+<tr><td><b>Metrics</b></td><td>All of the grid's metrics, including ones added later, or a chosen set. Calculated metrics export their calculated values.</td></tr>
+<tr><td><b>Dimension columns</b></td><td>Which dimensions are columns, in which order. Exports are leaf-level, one row per leaf combination: a dimension that is not a column must be filtered to exactly one leaf member.</td></tr>
+<tr><td><b>Filters</b></td><td>Members to keep per dimension; a parent keeps every leaf under it.</td></tr>
+<tr><td><b>Members as</b>, <b>Metrics as</b></td><td>Codes, labels, or a code and a label column; metric names or labels.</td></tr>
+<tr><td><b>Decimals</b>, <b>Delimiter</b>, <b>Decimal separator</b>, <b>Sheet name</b>, <b>File name</b></td><td>Rounding; for CSV the delimiter (comma, semicolon, tab, pipe) and decimal separator (a decimal comma needs another delimiter); the Excel sheet's name; the file's name without extension.</td></tr>
+<tr><td><b>Header row</b>, <b>Include combinations without values</b></td><td>Whether CSV and Excel start with a header row; whether every leaf combination gets a row, even with no values.</td></tr>
+<tr><td><b>Column names</b></td><td>Rename any column as it should appear in the file.</td></tr>
+</table>
+<p>Each card has <b>Download</b>, edit and delete. A download is built when it is asked for, from the downloader's own view of the grid: members and metrics hidden from them are left out, and every value is the one their grid shows. Put an export on a dashboard with an <b>Integration</b> button and business users download it there; each download is kept in the export's run history. The AI Developer creates exports the same way (see the AI chapter), and can import a spreadsheet attached to its chat into a grid or dimension.</p>
 <h2>AI Developer</h2>
 <p class="path">Sidebar: Build › AI Developer</p>
 <p>A chat assistant that can read the model and, when you approve, build, change and remove what you build on the other Build screens, under the same checks. Model changes happen in an isolated <b>AI draft</b> revision that you promote or discard, so the live model is never touched by accident. Three kinds of change are live as soon as you execute the plan, as they are on their own screens: business roles, user access rules, and form records posted through a form integration.</p>
@@ -635,7 +652,7 @@
 <tr><th>Control</th><th>What it does</th></tr>
 <tr><td><b>AI Settings</b> (gear)</td><td><b>LLM Provider</b>: OpenAI, Anthropic (Claude), Mistral, DeepSeek. <b>Model</b> name. <b>API Key</b> (kept server-side; "key saved" once set, leave blank to keep it). <b>Save settings</b>. Chatting is blocked until a key is set: "Set your API key in Settings before chatting."</td></tr>
 <tr><td><b>New session</b></td><td>Starts a conversation; sessions can be renamed and deleted from the list.</td></tr>
-<tr><td>Message box</td><td>"Ask about your model…"; Enter sends, Shift+Enter inserts a newline. The paperclip attaches a document (pdf, xlsx, docx, csv, txt, md) the assistant can read.</td></tr>
+<tr><td>Message box</td><td>"Ask about your model…"; Enter sends, Shift+Enter inserts a newline. The paperclip attaches a document (pdf, xlsx, docx, csv, txt, md) the assistant can read. A spreadsheet (.xlsx, .xlsm, .csv, up to 16 MB) is kept whole, marked with a spreadsheet icon, so the assistant can import all of it.</td></tr>
 <tr><td>Status line</td><td>"Thinking…" or "Calling &lt;tool&gt;…" while the assistant reads the model.</td></tr>
 <tr><td><b>Action plan</b> card</td><td>When the assistant wants to change something it proposes numbered steps (for example Create metric, Add dimension member, Create grid, Add dashboard widget). <b>Execute</b> runs them; <b>Reject</b> discards. After execution each step shows success or failure; a plan with failures is marked partial.</td></tr>
 <tr><td><b>Activity</b> panel</td><td>This session's proposal history.</td></tr>
@@ -651,12 +668,13 @@
       <li>grids: create, rename, delete, add and remove metrics and dimensions, set a dimension's display level;</li>
       <li>dashboards: folders, dashboards and widgets — create, change (a widget's place, size, title, what it shows) and delete;</li>
       <li>tags, revisions, and user access rules (a business-admin capability given to the assistant on purpose);</li>
-      <li>workflows, triggers, business roles, forms and form integrations (below).</li>
+      <li>workflows, triggers, business roles, forms and form integrations (below);</li>
+      <li>data: import an attached spreadsheet into a grid (metric values) or a dimension (members), first as a dry run that names every row that would fail, then all-or-nothing into the draft; save the mapping as a re-runnable Excel/CSV integration; create, change and delete data exports (see Integrations › Data Export). Exports created in a session are listed above the message box with a <b>Download</b> button.</li>
     </ul>
     Each change is the screen's own action with the screen's checks: a dimension or member a formula still uses is refused, a new member code carries its stored values over, a leaf that gains its first child hands its values down to it.</li>
   <li>The tenant's plan limits apply to the assistant as they apply to you.</li>
   <li>Plans are capped at 50 steps; long tasks are continued in a follow-up plan.</li>
-  <li>What stays yours: publishing and test-running a workflow, promoting or discarding the draft and deleting revisions, who is in a business role, users, data connectors (REST API and Google Sheets), entering business data, and creating applications. Database tables are migrated automatically; there is nothing to run.</li>
+  <li>What stays yours: publishing and test-running a workflow, promoting or discarding the draft and deleting revisions, who is in a business role, users, configuring data connectors (REST API and Google Sheets), typing business values and form records (the assistant only imports a spreadsheet you attach to its chat), and creating applications. Database tables are migrated automatically; there is nothing to run.</li>
 </ul>
 <div class="note"><b>Workflows and forms.</b> The assistant builds the whole chain a workflow needs: the business roles its steps are assigned to, the definition with every step type the editor offers, the automation rule that starts it, and the form and form integration that feed it. It also archives, restores and duplicates workflows, renames and deletes roles and sets the dashboards they may open, and backfills a form integration. It runs the same Validate check as the Workflows editor and reports the verdict with every change. Two things stay yours: <b>publishing</b> a workflow (the assistant leaves it as a draft and tells you so) and adding <b>members</b> to a role. The assistant uses the same validation as the screens, so a formula or a workflow it proposes is rejected under the same rules you would be.</div>
 

@@ -1,12 +1,13 @@
 import React, { useState } from "react";
 import { ApiIntegrationSection } from "./api-integrations/ApiIntegrationSection";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Trash2, Plus, FileSpreadsheet, Table2, Database, ClipboardList, Globe } from "lucide-react";
+import { Pencil, Trash2, Plus, FileSpreadsheet, Table2, Database, ClipboardList, Globe, FileDown } from "lucide-react";
 import { api, type FormDef, type DevMetric, type DevDimension, type GridDef, type FormMetricMapping, type FormRecordPosting } from "../../api/client";
 import { Field, TextInput, Select, FilterChip, Switch, Button, StatusBadge, SectionHeader, EmptyState, useConfirm } from "../../ui";
 import { ExcelImportSection, GoogleSheetsImportSection } from "./ImportWizard";
+import { ExportSection } from "./ExportSection";
 
-type IntegrationSource = "csv" | "google_sheets" | "rest_api" | "supabase" | "form_records";
+type IntegrationSource = "csv" | "google_sheets" | "rest_api" | "supabase" | "form_records" | "export";
 
 // ── Form Records Integration Section ─────────────────────────────────────────
 
@@ -423,6 +424,13 @@ export function IntegrationsTab({ revisionId }: { revisionId?: string } = {}) {
       description: "Post submitted or approved form records to input metrics.",
       available: true,
     },
+    {
+      id: "export",
+      icon: <FileDown size={24} />,
+      title: "Data Export",
+      description: "Download a grid's values as CSV, Excel or JSON in a fixed format.",
+      available: true,
+    },
   ];
 
   return (
@@ -457,6 +465,8 @@ export function IntegrationsTab({ revisionId }: { revisionId?: string } = {}) {
       )}
 
       {activeSource === "form_records" && <FormRecordsSection />}
+
+      {activeSource === "export" && <ExportSection revisionId={revisionId} />}
     </div>
   );
 }

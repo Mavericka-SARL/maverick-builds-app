@@ -15,6 +15,7 @@ import (
 
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
 	"github.com/mavericks-engine/mavericks/internal/aiassistant/providers"
+	"github.com/mavericks-engine/mavericks/internal/importpkg"
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 )
@@ -403,7 +404,7 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. Tool executors.
-	readExecutor := aiassistant.NewToolExecutor(h.db.For(ctx), modelID, revID)
+	readExecutor := aiassistant.NewToolExecutor(h.db.For(ctx), modelID, revID).WithReadHooks(h.aiReadHooks(r, sessionID))
 	writeExecutor := aiassistant.NewWriteExecutor(h.db.For(ctx), modelID, revID)
 	proposalStore := aiassistant.NewProposalStore(h.db.For(ctx))
 	tools := aiassistant.AllTools()
@@ -707,8 +708,11 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 	// updated_by directly to ::uuid with no NULLIF (see NewWriteExecutorWithActor's
 	// doc comment) — a plain NewWriteExecutor here would 500 on the very first
 	// AI-authored workflow confirmed through this real endpoint.
-	executor := aiassistant.NewWriteExecutorWithActor(h.db.For(ctx), modelID, revID, a.UserID).
-		WithHooks(h.aiWriteHooks(modelID, a.UserID))
+	hooks := h.aiWriteHooks(modelID, a.UserID)
+	hooks.ImportFile = func(ctx context.Context, req aiassistant.FileImportRequest) (string, error) {
+		return h.aiImportFile(ctx, a, sessionID, req)
+	}
+	executor := aiassistant.NewWriteExecutorWithActor(h.db.For(ctx), modelID, revID, a.UserID).WithHooks(hooks)
 	_ = pStore.SetStatus(ctx, proposalID, "confirmed")
 
 	// Execute each step, substituting "<created in step N>" placeholders with
@@ -1269,7 +1273,13 @@ func (h *handler) aiUploadDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	doc, err := aiassistant.NewDocumentStore(h.db.For(ctx)).CreateDocument(ctx, sessionID, header.Filename, mimeType, text, truncated)
+	// A spreadsheet also keeps its bytes, so the assistant can import the
+	// whole file (import_file_data); the text above is only the LLM's view.
+	var raw []byte
+	if importpkg.IsTabularFile(header.Filename) && len(data) <= maxAIImportBytes {
+		raw = data
+	}
+	doc, err := aiassistant.NewDocumentStore(h.db.For(ctx)).CreateDocument(ctx, sessionID, header.Filename, mimeType, text, truncated, raw)
 	if err != nil {
 		jsonErr(w, fmt.Errorf("save document: %w", err), http.StatusInternalServerError)
 		return
@@ -1343,6 +1353,9 @@ func buildDocumentContext(docs []aiassistant.Document) string {
 		}
 		used += len(content)
 		fmt.Fprintf(&sb, "\n### %s\n", d.Filename)
+		if d.Importable {
+			sb.WriteString("(Spreadsheet kept whole: importable with preview_file_import / import_file_data — the text below is a sample, not the data.)\n")
+		}
 		sb.WriteString(content)
 		if clipped {
 			sb.WriteString("\n(... document truncated)")

@@ -221,6 +221,10 @@ type DisconnectIntegrationOAuthRes interface {
 	disconnectIntegrationOAuthRes()
 }
 
+type DownloadExportIntegrationRes interface {
+	downloadExportIntegrationRes()
+}
+
 type DuplicateIntegrationRes interface {
 	duplicateIntegrationRes()
 }
@@ -459,6 +463,10 @@ type ListWorkflowTriggerEventsRes interface {
 
 type ListWorkflowsRes interface {
 	listWorkflowsRes()
+}
+
+type PreviewExportIntegrationRes interface {
+	previewExportIntegrationRes()
 }
 
 type PromoteAiDraftRes interface {

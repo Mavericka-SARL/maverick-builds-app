@@ -7,7 +7,7 @@
 <tr><th>Control</th><th>What it does</th></tr>
 <tr><td><b>AI Settings</b> (gear)</td><td><b>LLM Provider</b>: OpenAI, Anthropic (Claude), Mistral, DeepSeek. <b>Model</b> name. <b>API Key</b> (kept server-side; "key saved" once set, leave blank to keep it). <b>Save settings</b>. Chatting is blocked until a key is set: "Set your API key in Settings before chatting."</td></tr>
 <tr><td><b>New session</b></td><td>Starts a conversation; sessions can be renamed and deleted from the list.</td></tr>
-<tr><td>Message box</td><td>"Ask about your model…"; Enter sends, Shift+Enter inserts a newline. The paperclip attaches a document (pdf, xlsx, docx, csv, txt, md) the assistant can read.</td></tr>
+<tr><td>Message box</td><td>"Ask about your model…"; Enter sends, Shift+Enter inserts a newline. The paperclip attaches a document (pdf, xlsx, docx, csv, txt, md) the assistant can read. A spreadsheet (.xlsx, .xlsm, .csv, up to 16 MB) is kept whole, marked with a spreadsheet icon, so the assistant can import all of it.</td></tr>
 <tr><td>Status line</td><td>"Thinking…" or "Calling &lt;tool&gt;…" while the assistant reads the model.</td></tr>
 <tr><td><b>Action plan</b> card</td><td>When the assistant wants to change something it proposes numbered steps (for example Create metric, Add dimension member, Create grid, Add dashboard widget). <b>Execute</b> runs them; <b>Reject</b> discards. After execution each step shows success or failure; a plan with failures is marked partial.</td></tr>
 <tr><td><b>Activity</b> panel</td><td>This session's proposal history.</td></tr>
@@ -23,12 +23,13 @@
       <li>grids: create, rename, delete, add and remove metrics and dimensions, set a dimension's display level;</li>
       <li>dashboards: folders, dashboards and widgets — create, change (a widget's place, size, title, what it shows) and delete;</li>
       <li>tags, revisions, and user access rules (a business-admin capability given to the assistant on purpose);</li>
-      <li>workflows, triggers, business roles, forms and form integrations (below).</li>
+      <li>workflows, triggers, business roles, forms and form integrations (below);</li>
+      <li>data: import an attached spreadsheet into a grid (metric values) or a dimension (members), first as a dry run that names every row that would fail, then all-or-nothing into the draft; save the mapping as a re-runnable Excel/CSV integration; create, change and delete data exports (see Integrations › Data Export). Exports created in a session are listed above the message box with a <b>Download</b> button.</li>
     </ul>
     Each change is the screen's own action with the screen's checks: a dimension or member a formula still uses is refused, a new member code carries its stored values over, a leaf that gains its first child hands its values down to it.</li>
   <li>The tenant's plan limits apply to the assistant as they apply to you.</li>
   <li>Plans are capped at 50 steps; long tasks are continued in a follow-up plan.</li>
-  <li>What stays yours: publishing and test-running a workflow, promoting or discarding the draft and deleting revisions, who is in a business role, users, data connectors (REST API and Google Sheets), entering business data, and creating applications. Database tables are migrated automatically; there is nothing to run.</li>
+  <li>What stays yours: publishing and test-running a workflow, promoting or discarding the draft and deleting revisions, who is in a business role, users, configuring data connectors (REST API and Google Sheets), typing business values and form records (the assistant only imports a spreadsheet you attach to its chat), and creating applications. Database tables are migrated automatically; there is nothing to run.</li>
 </ul>
 <div class="note"><b>Workflows and forms.</b> The assistant builds the whole chain a workflow needs: the business roles its steps are assigned to, the definition with every step type the editor offers, the automation rule that starts it, and the form and form integration that feed it. It also archives, restores and duplicates workflows, renames and deletes roles and sets the dashboards they may open, and backfills a form integration. It runs the same Validate check as the Workflows editor and reports the verdict with every change. Two things stay yours: <b>publishing</b> a workflow (the assistant leaves it as a draft and tells you so) and adding <b>members</b> to a role. The assistant uses the same validation as the screens, so a formula or a workflow it proposes is rejected under the same rules you would be.</div>
 

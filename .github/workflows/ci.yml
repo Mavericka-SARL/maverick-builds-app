@@ -187,7 +187,14 @@ jobs:
         # Both of these go away if the suite stops starting a container per
         # package: one shared Postgres with per-test schema isolation would
         # remove the contention and most of the runtime.
-        run: go test -race -p 4 ./...
+        #
+        # -timeout 20m: Go's default is 10 minutes per package, and
+        # internal/gateway alone grew from 339s to 437s here in three days
+        # (2.5 minutes locally under -race), then crossed 600s on 2026-10-02
+        # and was killed mid-suite. The job's own 30-minute limit still bounds
+        # the run. See docs/OBSERVATIONS.md, "The gateway test package is
+        # outgrowing CI's time limits".
+        run: go test -race -p 4 -timeout 20m ./...
       # Testcontainers leak when a run is killed mid-suite (timeout,
       # concurrency cancellation): TESTCONTAINERS_RYUK_DISABLED means no
       # reaper, so orphaned postgres containers and their volumes pile up

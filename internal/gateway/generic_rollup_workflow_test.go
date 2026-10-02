@@ -1141,30 +1141,41 @@ func TestImportXLSXNativeParsingNameBasedMapping(t *testing.T) {
 	}
 }
 
-// TestImportRejectsNegativeValueAtomically proves the whole-file atomic
-// rejection: a workbook with one bad row (negative value) must commit
-// NOTHING, not the other valid rows in the same file.
-func TestImportRejectsNegativeValueAtomically(t *testing.T) {
+// TestImportRejectsABadRowAtomically proves the whole-file atomic
+// rejection: a workbook with one bad row (a value that is not a number) must
+// commit NOTHING, not the other valid rows in the same file. A negative value
+// is not a bad row: it imports like any other.
+func TestImportRejectsABadRowAtomically(t *testing.T) {
 	f := setupRollupFixture(t)
 	ctx := context.Background()
 
 	var beforeCount int
 	_ = f.pool.QueryRow(ctx, `SELECT COUNT(*) FROM runtime.fact_input WHERE model_id=$1::uuid AND revision_id=$2::uuid`, f.modelID, f.workingRevID).Scan(&beforeCount)
 
-	csv := fmt.Sprintf("metric_id,staff,value\n%s,STAFF_A1,999\n%s,STAFF_A2,-5\n", f.amountMetricID, f.amountMetricID)
+	csv := fmt.Sprintf("metric_id,staff,value\n%s,STAFF_A1,999\n%s,STAFF_A2,abc\n", f.amountMetricID, f.amountMetricID)
 	status, body := f.do(t, "POST", "/api/import/upload", "rollup-test-approver", map[string]string{"csv": csv, "revision_id": f.workingRevID})
 	if status != http.StatusUnprocessableEntity {
-		t.Fatalf("import with one negative-value row status = %d, want 422, body = %v", status, body)
+		t.Fatalf("import with one unparseable row status = %d, want 422, body = %v", status, body)
 	}
 	errs, _ := body["errors"].([]any)
-	if len(errs) != 1 || errs[0].(map[string]any)["code"] != "NEGATIVE_VALUE" {
-		t.Errorf("errors = %v, want one NEGATIVE_VALUE error", errs)
+	if len(errs) != 1 || errs[0].(map[string]any)["code"] != "INVALID_NUMBER" {
+		t.Errorf("errors = %v, want one INVALID_NUMBER error", errs)
 	}
 
 	var afterCount int
 	_ = f.pool.QueryRow(ctx, `SELECT COUNT(*) FROM runtime.fact_input WHERE model_id=$1::uuid AND revision_id=$2::uuid`, f.modelID, f.workingRevID).Scan(&afterCount)
 	if afterCount != beforeCount {
 		t.Errorf("fact_input row count changed %d -> %d; the valid STAFF_A1=999 row must NOT have been committed alongside the rejected one", beforeCount, afterCount)
+	}
+
+	csv = fmt.Sprintf("metric_id,staff,value\n%s,STAFF_A2,-5\n", f.amountMetricID)
+	if status, body := f.do(t, "POST", "/api/import/upload", "rollup-test-approver", map[string]string{"csv": csv, "revision_id": f.workingRevID, "import_mode": "replace"}); status != http.StatusOK {
+		t.Fatalf("a negative value must import: status = %d, body = %v", status, body)
+	}
+	var latest float64
+	if err := f.pool.QueryRow(ctx, `SELECT value::float8 FROM runtime.fact_input WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid
+		AND dim_members::text LIKE '%STAFF_A2%' ORDER BY entered_at DESC, id DESC LIMIT 1`, f.modelID, f.workingRevID, f.amountMetricID).Scan(&latest); err != nil || latest != -5 {
+		t.Errorf("STAFF_A2 = %v (err %v), want -5", latest, err)
 	}
 }
 

@@ -487,6 +487,14 @@ type Handler interface {
 	//
 	// POST /api/developer/integration-connections/{id}/oauth/disconnect
 	DisconnectIntegrationOAuth(ctx context.Context, params DisconnectIntegrationOAuthParams) (DisconnectIntegrationOAuthRes, error)
+	// DownloadExportIntegration implements downloadExportIntegration operation.
+	//
+	// Download a file_export integration — the grid's leaf-level values (inputs and calculated
+	// metrics) as CSV, XLSX or JSON in its spec's layout, built from the caller's own view of the grid
+	// (hidden members and metrics left out). Recorded in the integration's run history.
+	//
+	// GET /api/integrations/{id}/export
+	DownloadExportIntegration(ctx context.Context, params DownloadExportIntegrationParams) (DownloadExportIntegrationRes, error)
 	// DuplicateIntegration implements duplicateIntegration operation.
 	//
 	// Duplicate a rest_api integration (test state cleared, schedule copied disabled, no run history).
@@ -1100,6 +1108,14 @@ type Handler interface {
 	//
 	// POST /api/notifications/mark-read
 	MarkNotificationRead(ctx context.Context, req *MarkNotificationReadRequest) (*MarkNotificationReadOK, error)
+	// PreviewExportIntegration implements previewExportIntegration operation.
+	//
+	// Render a file_export spec against a grid without saving — the columns, the first rows (default
+	// 20, at most 200) and the row count, built from the caller's own view of the grid. 400 lists every
+	// spec problem.
+	//
+	// POST /api/developer/integrations/export-preview
+	PreviewExportIntegration(ctx context.Context, req *PreviewExportIntegrationReq) (PreviewExportIntegrationRes, error)
 	// PreviewFormMapping implements previewFormMapping operation.
 	//
 	// Preview the fact rows a mapping would currently produce, without writing them.
@@ -1243,8 +1259,11 @@ type Handler interface {
 	RevokeScimToken(ctx context.Context, params RevokeScimTokenParams) (RevokeScimTokenRes, error)
 	// RunIntegration implements runIntegration operation.
 	//
-	// Execute a saved integration against an uploaded CSV (target is a form, dimension, or grid, per the
-	// integration's target_type).
+	// Run a saved integration — a csv_import with the CSV or workbook in the body, a google_sheets by
+	// re-fetching its sheet — into its form, dimension or grid. A grid run resolves names, checks
+	// members are leaves, commits valid rows through the write guard and the plan's limits (invalid rows
+	// are listed), and recalculates; every run is recorded in the integration's history. A file_export
+	// is downloaded instead (GET /api/integrations/{id}/export).
 	//
 	// POST /api/integrations/{id}/run
 	RunIntegration(ctx context.Context, req *IntegrationRunRequest, params RunIntegrationParams) (RunIntegrationRes, error)

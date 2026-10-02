@@ -2,7 +2,7 @@
 
 > **Classification:** Current — The assistant's tool surface and its limits.
 
-> **Last verified:** 2026-09-28
+> **Last verified:** 2026-10-02
 
 The AI Developer is the assistant inside the developer console. Its rule is
 parity: it can build, change and remove what a developer builds, changes and
@@ -14,7 +14,8 @@ Nothing is written until then.
 
 **Where its writes land.** Model changes land in an isolated draft revision,
 created on the session's first confirmed proposal and promoted or discarded by
-the developer. Three kinds of write are not revision-scoped, exactly as in the
+the developer — and so does data the assistant imports from a spreadsheet
+attached to the chat. Three kinds of write are not revision-scoped, exactly as in the
 console, so they take effect on confirmation and discarding the draft does not
 undo them:
 
@@ -57,6 +58,9 @@ posting runs the gateway's own posting code the same way.
 | `list_automation_rules` | what starts each workflow |
 | `list_forms`, `get_form` | forms; one in full — fields, integrations, record count |
 | `list_form_integrations` | which form field posts into which metric |
+| `list_integrations` | every data integration — Excel/CSV imports, Google Sheets, REST API, data exports — with its target, column map or export spec, and last run |
+| `preview_file_import` | a dry run of importing an attached spreadsheet: its sheets and columns, how each column maps, every row that would fail and why, what would be imported. Writes nothing |
+| `preview_export` | an export spec rendered against the grid's current values — columns, first rows, row count — or every problem with the spec. Saves nothing |
 
 ## Write tools (through `propose_actions`)
 
@@ -72,6 +76,7 @@ on it.
 | Properties | `add_dimension_property`, `update_dimension_property`, `delete_dimension_property` | the Dimension Properties panel |
 | Grids | `create_grid`, `update_grid`, `delete_grid`, `add_grid_metric`, `remove_grid_metric`, `add_grid_dimension`, `update_grid_dimension`, `remove_grid_dimension` | the Grids screen, including a dimension's display level |
 | Dashboards | `create_dashboard_folder`, `update_dashboard_folder`, `delete_dashboard_folder`, `create_dashboard`, `update_dashboard`, `delete_dashboard`, `add_dashboard_widget`, `update_dashboard_widget`, `delete_dashboard_widget` | the Dashboards screen and its designer |
+| Integrations | `create_file_integration`, `import_file_data`, `create_export_integration`, `update_integration`, `delete_integration` | the Integrations tab: the Import Wizard's file import and **Save as integration**, the **Data Export** editor, an integration's rename, tags and delete (REST API connectors are configured only in their wizard) |
 | Other | `set_tags`, `create_revision`, `set_user_access_rules` | tag editors, **New revision**, the exception above |
 
 What an edit does to stored data is the developer's own code, not a copy:
@@ -171,6 +176,44 @@ Workflows and forms (added 2026-09-16, programme item 5):
 | `create_form_def`, `update_form_def`, `delete_form_def` | the Forms builder |
 | `create_form_integration`, `update_form_integration`, `delete_form_integration`, `backfill_form_integration` | the form-to-metric posting screen and its **Backfill**; an update re-posts, as the screen's does |
 
+## Attached spreadsheets and data exports
+
+A `.xlsx`, `.xlsm` or `.csv` file attached to the chat (up to 16 MB) keeps its
+original bytes (`ai_assistant.document.raw_data`) next to the text sample the
+language model reads, so the assistant imports the **whole** file, not the
+500 rows a sheet the model sees. `preview_file_import` and `import_file_data`
+take the file's name, an optional sheet, a target (a grid — the metric values
+its columns name — or a dimension — members) and a `column_map` in the Import
+Wizard's vocabulary (a metric or dimension name; `metric` + `value` for a long
+file; `code`, `label`, `parent_code`, `property:<name>`; `ignore`). The import
+is the developer's own pipeline, run by the gateway through the executor's
+`ImportFile` hook (`internal/gateway/ai_file_import.go`): stored cell values,
+not displayed ones (`1234.5`, not `"1,234.50"`), `importpkg.ResolveRows`, the
+revision's write guard, the plan's fact, storage and member limits,
+recalculation and an `import.uploaded` audit row. It is all-or-nothing: one bad
+row and nothing is written, with the rows named. A grid import defaults to
+`replace` — re-importing the same file converges instead of adding to the
+totals; values may be negative. `create_file_integration` saves the target,
+map and mode as a re-runnable `csv_import` integration; `import_file_data`
+with its `integration_id` uses them and records the run in its history. The
+same integration is re-run with a new file of the same columns from the
+Integrations tab, or by a business user from a dashboard **Integration**
+button with a `.csv` or `.xlsx` (`POST /api/integrations/{id}/run` applies the
+saved map; `internal/gateway/integration_file_run.go`).
+
+`create_export_integration` saves a `file_export` integration: a grid and a
+spec (`internal/dataexport`) — CSV (delimiter, decimal separator), XLSX or
+JSON; a wide, long or pivoted layout; chosen and renamed columns; member codes
+or labels; member filters; rounding. Specs name metrics, dimensions and
+members, never ids, so they survive revision copies and model export. Exports
+are leaf-level: a dimension that is not a column must be filtered to one leaf.
+The spec is validated by the same code as the console's editor, and a download
+(`GET /api/integrations/{id}/export`) is rendered for whoever asks from their
+own `/api/grid` view, so hidden members and metrics never reach the file and
+every value is the one their grid shows. The panel lists the session's exports
+with a **Download** button; developers find them in the Integrations tab, and
+a dashboard's Integration button downloads one for business users.
+
 ## What stays human
 
 - **Publishing a workflow**, and its test run. The assistant creates and
@@ -184,10 +227,12 @@ Workflows and forms (added 2026-09-16, programme item 5):
 - **Promoting or discarding the draft revision**, deleting a revision, and
   choosing the model business users open by default.
 - **Users** — invitations, deletion, platform and business role grants.
-- **Data connectors** — REST API and Google Sheets integrations, their
-  connections and credentials, and their runs.
-- **Business data** — cells, imports and form records. The assistant posts
-  saved form records through a form integration, and nothing else.
+- **Data connectors** — configuring REST API and Google Sheets integrations,
+  their connections and credentials, and their runs. The assistant can list,
+  rename, retag or delete them.
+- **Business data** — typing cells and entering form records. The assistant
+  imports a spreadsheet the developer attaches to its chat (into the draft)
+  and posts saved form records through a form integration, and nothing else.
 - **Applications**, which the assistant does not create: a session works in
   one model.
 - **Database migrations.** There is no migration tool: the gateway migrates a

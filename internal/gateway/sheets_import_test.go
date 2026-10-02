@@ -3,8 +3,8 @@
 // server in for docs.google.com. Proves the two entry points against a real
 // database: POST /api/import/sheets/fetch (the wizard's preview) and a saved
 // type="google_sheets" integration whose run re-fetches the sheet, applies
-// its column_map, resolves rows by NAME (the legacy CSV grid path requires
-// metric UUIDs — a maintained sheet never has those), and commits
+// its column_map, resolves rows by NAME (a maintained sheet holds names,
+// never UUIDs), and commits
 // idempotently (default mode "replace": syncing twice must not double the
 // values, which mode "incremental" would).
 package gateway
@@ -232,5 +232,30 @@ func TestGoogleSheetsIntegrationRunSyncsGridFacts(t *testing.T) {
 	}
 	if latest, _ := queryValue(t); latest != 250 {
 		t.Errorf("latest fact value after failed sync = %v, want unchanged 250", latest)
+	}
+}
+
+// A sheet mapped the Import Wizard's long way — a column of metric names
+// mapped to "metric", the amounts to "value" — syncs. Every run of such an
+// integration used to fail: the column was renamed to "metric", which
+// ResolveRows read as an unknown metric or dimension name.
+func TestGoogleSheetsIntegrationRunsALongFormatMapping(t *testing.T) {
+	do, setSheetCSV, queryValue := setupSheetsFixture(t)
+	setSheetCSV("Account,Amount\nFixtureRevenue,100\n")
+	status, body := do(t, "POST", "/api/developer/integrations", map[string]string{"name": "long", "type": "google_sheets", "target_type": "grid"})
+	if status != http.StatusOK {
+		t.Fatalf("create: %d %v", status, body)
+	}
+	id, _ := body["id"].(string)
+	if status, body := do(t, "PATCH", "/api/developer/integrations/"+id+"/config", map[string]any{"config": map[string]any{
+		"sheet_url": sheetURL(sharedSheetID), "column_map": map[string]string{"Account": "metric", "Amount": "value"}}}); status != http.StatusOK {
+		t.Fatalf("config: %d %v", status, body)
+	}
+	status, body = do(t, "POST", "/api/integrations/"+id+"/run", nil)
+	if status != http.StatusOK || body["rows_imported"] != 1.0 {
+		t.Fatalf("run: %d %v", status, body)
+	}
+	if latest, _ := queryValue(t); latest != 100 {
+		t.Errorf("latest value = %v, want 100", latest)
 	}
 }

@@ -1871,12 +1871,39 @@ components:
         completed_at:  { $ref: "#/components/schemas/ProtoTimestamp" }
         revision_id:   { type: string, format: uuid }
 
+    ExportSpec:
+      type: object
+      description: A file_export integration's config. Names, not ids, so it survives revision copies and model export. Leaf-level only — a dimension that is not a column must be filtered to exactly one leaf.
+      properties:
+        format: {type: string, enum: [csv, xlsx, json], default: csv}
+        layout: {type: string, enum: [wide, long, pivot], default: wide}
+        pivot_dimension: {type: string, description: "pivot: the dimension whose leaf members become columns"}
+        metrics: {type: array, items: {type: string}, description: Metric names in column order; empty = every grid metric}
+        dimensions: {type: array, items: {type: string}, description: Dimension names in column order; empty = every grid dimension}
+        member_display: {type: string, enum: [code, label, code_and_label], default: code}
+        metric_display: {type: string, enum: [name, label], default: name}
+        filters: {type: object, additionalProperties: {type: array, items: {type: string}}, description: Dimension name -> member codes; a parent stands for every leaf under it}
+        column_names: {type: object, additionalProperties: {type: string}, description: Default header -> header in the file}
+        decimals: {type: integer, minimum: 0, maximum: 10}
+        delimiter: {type: string, enum: [",", ";", "tab", "|"], default: ","}
+        decimal_separator: {type: string, enum: [".", ","], default: "."}
+        include_header: {type: boolean, default: true}
+        include_empty_rows: {type: boolean, default: false}
+        sheet_name: {type: string, default: Data}
+        file_name: {type: string}
     IntegrationRunRequest:
       type: object
+      description: A csv_import run carries its file — csv, or xlsx_base64 (+ sheet). A google_sheets run carries none; it re-fetches the sheet named by its config's sheet_url. The integration's saved column_map is applied in the Import Wizard's vocabulary (metric or dimension names, "metric" + "value" for a long file, form fields, code/label/parent_code/property:<name> for a dimension, "ignore"), so a file holding names runs as it is.
       properties:
         csv:
           type: string
-          description: Required for type "csv_import". Ignored for type "google_sheets" — those integrations re-fetch the sheet named by their config's sheet_url at run time.
+          description: The file as CSV text (csv_import).
+        xlsx_base64:
+          type: string
+          description: The file as a base64 .xlsx/.xlsm workbook (csv_import), read as stored cell values. At most 16 MB before encoding.
+        sheet:
+          type: string
+          description: The workbook's sheet; the first when omitted.
 
     FormField:
       type: object
@@ -4269,6 +4296,43 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/developer/integrations/export-preview:
+    post:
+      operationId: previewExportIntegration
+      tags: [Developer Console]
+      summary: Render a file_export spec against a grid without saving — the columns, the first rows (default 20, at most 200) and the row count, built from the caller's own view of the grid. 400 lists every spec problem.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_id, config]
+              properties:
+                target_id: {type: string, format: uuid, description: The grid}
+                name: {type: string, description: The export's name (default file name)}
+                rows: {type: integer}
+                config: { $ref: "#/components/schemas/ExportSpec" }
+      responses:
+        "200":
+          description: Preview
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  header: {type: array, items: {type: string}}
+                  default_header: {type: array, items: {type: string}, description: The columns before column_names renamed them (its keys)}
+                  rows: {type: array, items: {type: array, items: {type: string}}}
+                  total_rows: {type: integer}
+                  warnings: {type: array, items: {type: string}}
+                  file_name: {type: string}
+                  summary: {type: string}
+        "400":
+          description: The spec's problems
+          content: {application/json: {schema: {type: object, properties: {error: {type: string}, problems: {type: array, items: {type: string}}}}}}
         "404": { $ref: "#/components/responses/NotFound" }
 
   /api/developer/integrations/{id}/duplicate:
@@ -7340,7 +7404,7 @@ paths:
     post:
       operationId: runIntegration
       tags: [Import & Integrations]
-      summary: Execute a saved integration against an uploaded CSV (target is a form, dimension, or grid, per the integration's target_type)
+      summary: Run a saved integration — a csv_import with the CSV or workbook in the body, a google_sheets by re-fetching its sheet — into its form, dimension or grid. A grid run resolves names, checks members are leaves, commits valid rows through the write guard and the plan's limits (invalid rows are listed), and recalculates; every run is recorded in the integration's history. A file_export is downloaded instead (GET /api/integrations/{id}/export).
       parameters:
         - name: id
           in: path
@@ -7359,8 +7423,35 @@ paths:
               schema:
                 type: object
                 properties:
-                  rows_imported: { type: integer }
-                  error_rows:    { type: integer }
+                  rows_imported:   { type: integer }
+                  values_imported: { type: integer, description: Grid runs — one row can carry several metrics' values }
+                  error_rows:      { type: integer }
+                  errors:
+                    type: array
+                    description: Grid runs — each value that failed, by row and column
+                    items: {type: object, properties: {row: {type: integer}, column: {type: string}, code: {type: string}, message: {type: string}, raw_value: {type: string}}}
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "402": {description: The tenant's plan limit would be exceeded}
+        "403": {description: The file writes a member, metric or scope the caller may not write}
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/integrations/{id}/export:
+    get:
+      operationId: downloadExportIntegration
+      tags: [Import & Integrations]
+      summary: Download a file_export integration — the grid's leaf-level values (inputs and calculated metrics) as CSV, XLSX or JSON in its spec's layout, built from the caller's own view of the grid (hidden members and metrics left out). Recorded in the integration's run history.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The file (Content-Disposition attachment)
+          content:
+            text/csv: {schema: {type: string}}
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: {schema: {type: string, format: binary}}
+            application/json: {schema: {type: array, items: {type: object}}}
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 

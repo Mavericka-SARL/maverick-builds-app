@@ -8046,6 +8046,53 @@ func (*DisconnectIntegrationOAuthOK) disconnectIntegrationOAuthRes() {}
 
 type DisconnectIntegrationOAuthOKMeta struct{}
 
+type DownloadExportIntegrationBadRequest Error
+
+func (*DownloadExportIntegrationBadRequest) downloadExportIntegrationRes() {}
+
+type DownloadExportIntegrationNotFound Error
+
+func (*DownloadExportIntegrationNotFound) downloadExportIntegrationRes() {}
+
+type DownloadExportIntegrationOKApplicationJSON []DownloadExportIntegrationOKApplicationJSONItem
+
+func (*DownloadExportIntegrationOKApplicationJSON) downloadExportIntegrationRes() {}
+
+type DownloadExportIntegrationOKApplicationJSONItem struct{}
+
+type DownloadExportIntegrationOKApplicationVndOpenxmlformatsOfficedocumentSpreadsheetmlSheet struct {
+	Data io.Reader
+}
+
+// Read reads data from the Data reader.
+//
+// Kept to satisfy the io.Reader interface.
+func (s DownloadExportIntegrationOKApplicationVndOpenxmlformatsOfficedocumentSpreadsheetmlSheet) Read(p []byte) (n int, err error) {
+	if s.Data == nil {
+		return 0, io.EOF
+	}
+	return s.Data.Read(p)
+}
+
+func (*DownloadExportIntegrationOKApplicationVndOpenxmlformatsOfficedocumentSpreadsheetmlSheet) downloadExportIntegrationRes() {
+}
+
+type DownloadExportIntegrationOKTextCsv struct {
+	Data io.Reader
+}
+
+// Read reads data from the Data reader.
+//
+// Kept to satisfy the io.Reader interface.
+func (s DownloadExportIntegrationOKTextCsv) Read(p []byte) (n int, err error) {
+	if s.Data == nil {
+		return 0, io.EOF
+	}
+	return s.Data.Read(p)
+}
+
+func (*DownloadExportIntegrationOKTextCsv) downloadExportIntegrationRes() {}
+
 type DuplicateIntegrationOK struct{}
 
 func (*DuplicateIntegrationOK) duplicateIntegrationRes() {}
@@ -8136,6 +8183,7 @@ func (*Error) listPlansRes()                   {}
 func (*Error) listUserAccessRulesRes()         {}
 func (*Error) listWorkflowRolesRes()           {}
 func (*Error) listWorkflowTriggerEventsRes()   {}
+func (*Error) previewExportIntegrationRes()    {}
 func (*Error) removeAdminUserRoleRes()         {}
 func (*Error) removeGridDimensionRes()         {}
 func (*Error) renameAiSessionRes()             {}
@@ -8452,6 +8500,498 @@ func (s ExportModelPackageOK) Read(p []byte) (n int, err error) {
 }
 
 func (*ExportModelPackageOK) exportModelPackageRes() {}
+
+// A file_export integration's config. Names, not ids, so it survives revision copies and model
+// export. Leaf-level only — a dimension that is not a column must be filtered to exactly one leaf.
+// Ref: #/components/schemas/ExportSpec
+type ExportSpec struct {
+	Format OptExportSpecFormat `json:"format"`
+	Layout OptExportSpecLayout `json:"layout"`
+	// Pivot: the dimension whose leaf members become columns.
+	PivotDimension OptString `json:"pivot_dimension"`
+	// Metric names in column order; empty = every grid metric.
+	Metrics []string `json:"metrics"`
+	// Dimension names in column order; empty = every grid dimension.
+	Dimensions    []string                   `json:"dimensions"`
+	MemberDisplay OptExportSpecMemberDisplay `json:"member_display"`
+	MetricDisplay OptExportSpecMetricDisplay `json:"metric_display"`
+	// Dimension name -> member codes; a parent stands for every leaf under it.
+	Filters OptExportSpecFilters `json:"filters"`
+	// Default header -> header in the file.
+	ColumnNames      OptExportSpecColumnNames      `json:"column_names"`
+	Decimals         OptInt                        `json:"decimals"`
+	Delimiter        OptExportSpecDelimiter        `json:"delimiter"`
+	DecimalSeparator OptExportSpecDecimalSeparator `json:"decimal_separator"`
+	IncludeHeader    OptBool                       `json:"include_header"`
+	IncludeEmptyRows OptBool                       `json:"include_empty_rows"`
+	SheetName        OptString                     `json:"sheet_name"`
+	FileName         OptString                     `json:"file_name"`
+}
+
+// GetFormat returns the value of Format.
+func (s *ExportSpec) GetFormat() OptExportSpecFormat {
+	return s.Format
+}
+
+// GetLayout returns the value of Layout.
+func (s *ExportSpec) GetLayout() OptExportSpecLayout {
+	return s.Layout
+}
+
+// GetPivotDimension returns the value of PivotDimension.
+func (s *ExportSpec) GetPivotDimension() OptString {
+	return s.PivotDimension
+}
+
+// GetMetrics returns the value of Metrics.
+func (s *ExportSpec) GetMetrics() []string {
+	return s.Metrics
+}
+
+// GetDimensions returns the value of Dimensions.
+func (s *ExportSpec) GetDimensions() []string {
+	return s.Dimensions
+}
+
+// GetMemberDisplay returns the value of MemberDisplay.
+func (s *ExportSpec) GetMemberDisplay() OptExportSpecMemberDisplay {
+	return s.MemberDisplay
+}
+
+// GetMetricDisplay returns the value of MetricDisplay.
+func (s *ExportSpec) GetMetricDisplay() OptExportSpecMetricDisplay {
+	return s.MetricDisplay
+}
+
+// GetFilters returns the value of Filters.
+func (s *ExportSpec) GetFilters() OptExportSpecFilters {
+	return s.Filters
+}
+
+// GetColumnNames returns the value of ColumnNames.
+func (s *ExportSpec) GetColumnNames() OptExportSpecColumnNames {
+	return s.ColumnNames
+}
+
+// GetDecimals returns the value of Decimals.
+func (s *ExportSpec) GetDecimals() OptInt {
+	return s.Decimals
+}
+
+// GetDelimiter returns the value of Delimiter.
+func (s *ExportSpec) GetDelimiter() OptExportSpecDelimiter {
+	return s.Delimiter
+}
+
+// GetDecimalSeparator returns the value of DecimalSeparator.
+func (s *ExportSpec) GetDecimalSeparator() OptExportSpecDecimalSeparator {
+	return s.DecimalSeparator
+}
+
+// GetIncludeHeader returns the value of IncludeHeader.
+func (s *ExportSpec) GetIncludeHeader() OptBool {
+	return s.IncludeHeader
+}
+
+// GetIncludeEmptyRows returns the value of IncludeEmptyRows.
+func (s *ExportSpec) GetIncludeEmptyRows() OptBool {
+	return s.IncludeEmptyRows
+}
+
+// GetSheetName returns the value of SheetName.
+func (s *ExportSpec) GetSheetName() OptString {
+	return s.SheetName
+}
+
+// GetFileName returns the value of FileName.
+func (s *ExportSpec) GetFileName() OptString {
+	return s.FileName
+}
+
+// SetFormat sets the value of Format.
+func (s *ExportSpec) SetFormat(val OptExportSpecFormat) {
+	s.Format = val
+}
+
+// SetLayout sets the value of Layout.
+func (s *ExportSpec) SetLayout(val OptExportSpecLayout) {
+	s.Layout = val
+}
+
+// SetPivotDimension sets the value of PivotDimension.
+func (s *ExportSpec) SetPivotDimension(val OptString) {
+	s.PivotDimension = val
+}
+
+// SetMetrics sets the value of Metrics.
+func (s *ExportSpec) SetMetrics(val []string) {
+	s.Metrics = val
+}
+
+// SetDimensions sets the value of Dimensions.
+func (s *ExportSpec) SetDimensions(val []string) {
+	s.Dimensions = val
+}
+
+// SetMemberDisplay sets the value of MemberDisplay.
+func (s *ExportSpec) SetMemberDisplay(val OptExportSpecMemberDisplay) {
+	s.MemberDisplay = val
+}
+
+// SetMetricDisplay sets the value of MetricDisplay.
+func (s *ExportSpec) SetMetricDisplay(val OptExportSpecMetricDisplay) {
+	s.MetricDisplay = val
+}
+
+// SetFilters sets the value of Filters.
+func (s *ExportSpec) SetFilters(val OptExportSpecFilters) {
+	s.Filters = val
+}
+
+// SetColumnNames sets the value of ColumnNames.
+func (s *ExportSpec) SetColumnNames(val OptExportSpecColumnNames) {
+	s.ColumnNames = val
+}
+
+// SetDecimals sets the value of Decimals.
+func (s *ExportSpec) SetDecimals(val OptInt) {
+	s.Decimals = val
+}
+
+// SetDelimiter sets the value of Delimiter.
+func (s *ExportSpec) SetDelimiter(val OptExportSpecDelimiter) {
+	s.Delimiter = val
+}
+
+// SetDecimalSeparator sets the value of DecimalSeparator.
+func (s *ExportSpec) SetDecimalSeparator(val OptExportSpecDecimalSeparator) {
+	s.DecimalSeparator = val
+}
+
+// SetIncludeHeader sets the value of IncludeHeader.
+func (s *ExportSpec) SetIncludeHeader(val OptBool) {
+	s.IncludeHeader = val
+}
+
+// SetIncludeEmptyRows sets the value of IncludeEmptyRows.
+func (s *ExportSpec) SetIncludeEmptyRows(val OptBool) {
+	s.IncludeEmptyRows = val
+}
+
+// SetSheetName sets the value of SheetName.
+func (s *ExportSpec) SetSheetName(val OptString) {
+	s.SheetName = val
+}
+
+// SetFileName sets the value of FileName.
+func (s *ExportSpec) SetFileName(val OptString) {
+	s.FileName = val
+}
+
+// Default header -> header in the file.
+type ExportSpecColumnNames map[string]string
+
+func (s *ExportSpecColumnNames) init() ExportSpecColumnNames {
+	m := *s
+	if m == nil {
+		m = map[string]string{}
+		*s = m
+	}
+	return m
+}
+
+type ExportSpecDecimalSeparator string
+
+const (
+	ExportSpecDecimalSeparator_Dot ExportSpecDecimalSeparator = "."
+	ExportSpecDecimalSeparator_    ExportSpecDecimalSeparator = ","
+)
+
+// AllValues returns all ExportSpecDecimalSeparator values.
+func (ExportSpecDecimalSeparator) AllValues() []ExportSpecDecimalSeparator {
+	return []ExportSpecDecimalSeparator{
+		ExportSpecDecimalSeparator_Dot,
+		ExportSpecDecimalSeparator_,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s ExportSpecDecimalSeparator) MarshalText() ([]byte, error) {
+	switch s {
+	case ExportSpecDecimalSeparator_Dot:
+		return []byte(s), nil
+	case ExportSpecDecimalSeparator_:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *ExportSpecDecimalSeparator) UnmarshalText(data []byte) error {
+	switch ExportSpecDecimalSeparator(data) {
+	case ExportSpecDecimalSeparator_Dot:
+		*s = ExportSpecDecimalSeparator_Dot
+		return nil
+	case ExportSpecDecimalSeparator_:
+		*s = ExportSpecDecimalSeparator_
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type ExportSpecDelimiter string
+
+const (
+	ExportSpecDelimiter_0 ExportSpecDelimiter = ","
+	ExportSpecDelimiter_1 ExportSpecDelimiter = ";"
+	ExportSpecDelimiter_2 ExportSpecDelimiter = "tab"
+	ExportSpecDelimiter_3 ExportSpecDelimiter = "|"
+)
+
+// AllValues returns all ExportSpecDelimiter values.
+func (ExportSpecDelimiter) AllValues() []ExportSpecDelimiter {
+	return []ExportSpecDelimiter{
+		ExportSpecDelimiter_0,
+		ExportSpecDelimiter_1,
+		ExportSpecDelimiter_2,
+		ExportSpecDelimiter_3,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s ExportSpecDelimiter) MarshalText() ([]byte, error) {
+	switch s {
+	case ExportSpecDelimiter_0:
+		return []byte(s), nil
+	case ExportSpecDelimiter_1:
+		return []byte(s), nil
+	case ExportSpecDelimiter_2:
+		return []byte(s), nil
+	case ExportSpecDelimiter_3:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *ExportSpecDelimiter) UnmarshalText(data []byte) error {
+	switch ExportSpecDelimiter(data) {
+	case ExportSpecDelimiter_0:
+		*s = ExportSpecDelimiter_0
+		return nil
+	case ExportSpecDelimiter_1:
+		*s = ExportSpecDelimiter_1
+		return nil
+	case ExportSpecDelimiter_2:
+		*s = ExportSpecDelimiter_2
+		return nil
+	case ExportSpecDelimiter_3:
+		*s = ExportSpecDelimiter_3
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// Dimension name -> member codes; a parent stands for every leaf under it.
+type ExportSpecFilters map[string][]string
+
+func (s *ExportSpecFilters) init() ExportSpecFilters {
+	m := *s
+	if m == nil {
+		m = map[string][]string{}
+		*s = m
+	}
+	return m
+}
+
+type ExportSpecFormat string
+
+const (
+	ExportSpecFormatCsv  ExportSpecFormat = "csv"
+	ExportSpecFormatXlsx ExportSpecFormat = "xlsx"
+	ExportSpecFormatJSON ExportSpecFormat = "json"
+)
+
+// AllValues returns all ExportSpecFormat values.
+func (ExportSpecFormat) AllValues() []ExportSpecFormat {
+	return []ExportSpecFormat{
+		ExportSpecFormatCsv,
+		ExportSpecFormatXlsx,
+		ExportSpecFormatJSON,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s ExportSpecFormat) MarshalText() ([]byte, error) {
+	switch s {
+	case ExportSpecFormatCsv:
+		return []byte(s), nil
+	case ExportSpecFormatXlsx:
+		return []byte(s), nil
+	case ExportSpecFormatJSON:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *ExportSpecFormat) UnmarshalText(data []byte) error {
+	switch ExportSpecFormat(data) {
+	case ExportSpecFormatCsv:
+		*s = ExportSpecFormatCsv
+		return nil
+	case ExportSpecFormatXlsx:
+		*s = ExportSpecFormatXlsx
+		return nil
+	case ExportSpecFormatJSON:
+		*s = ExportSpecFormatJSON
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type ExportSpecLayout string
+
+const (
+	ExportSpecLayoutWide  ExportSpecLayout = "wide"
+	ExportSpecLayoutLong  ExportSpecLayout = "long"
+	ExportSpecLayoutPivot ExportSpecLayout = "pivot"
+)
+
+// AllValues returns all ExportSpecLayout values.
+func (ExportSpecLayout) AllValues() []ExportSpecLayout {
+	return []ExportSpecLayout{
+		ExportSpecLayoutWide,
+		ExportSpecLayoutLong,
+		ExportSpecLayoutPivot,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s ExportSpecLayout) MarshalText() ([]byte, error) {
+	switch s {
+	case ExportSpecLayoutWide:
+		return []byte(s), nil
+	case ExportSpecLayoutLong:
+		return []byte(s), nil
+	case ExportSpecLayoutPivot:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *ExportSpecLayout) UnmarshalText(data []byte) error {
+	switch ExportSpecLayout(data) {
+	case ExportSpecLayoutWide:
+		*s = ExportSpecLayoutWide
+		return nil
+	case ExportSpecLayoutLong:
+		*s = ExportSpecLayoutLong
+		return nil
+	case ExportSpecLayoutPivot:
+		*s = ExportSpecLayoutPivot
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type ExportSpecMemberDisplay string
+
+const (
+	ExportSpecMemberDisplayCode         ExportSpecMemberDisplay = "code"
+	ExportSpecMemberDisplayLabel        ExportSpecMemberDisplay = "label"
+	ExportSpecMemberDisplayCodeAndLabel ExportSpecMemberDisplay = "code_and_label"
+)
+
+// AllValues returns all ExportSpecMemberDisplay values.
+func (ExportSpecMemberDisplay) AllValues() []ExportSpecMemberDisplay {
+	return []ExportSpecMemberDisplay{
+		ExportSpecMemberDisplayCode,
+		ExportSpecMemberDisplayLabel,
+		ExportSpecMemberDisplayCodeAndLabel,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s ExportSpecMemberDisplay) MarshalText() ([]byte, error) {
+	switch s {
+	case ExportSpecMemberDisplayCode:
+		return []byte(s), nil
+	case ExportSpecMemberDisplayLabel:
+		return []byte(s), nil
+	case ExportSpecMemberDisplayCodeAndLabel:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *ExportSpecMemberDisplay) UnmarshalText(data []byte) error {
+	switch ExportSpecMemberDisplay(data) {
+	case ExportSpecMemberDisplayCode:
+		*s = ExportSpecMemberDisplayCode
+		return nil
+	case ExportSpecMemberDisplayLabel:
+		*s = ExportSpecMemberDisplayLabel
+		return nil
+	case ExportSpecMemberDisplayCodeAndLabel:
+		*s = ExportSpecMemberDisplayCodeAndLabel
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type ExportSpecMetricDisplay string
+
+const (
+	ExportSpecMetricDisplayName  ExportSpecMetricDisplay = "name"
+	ExportSpecMetricDisplayLabel ExportSpecMetricDisplay = "label"
+)
+
+// AllValues returns all ExportSpecMetricDisplay values.
+func (ExportSpecMetricDisplay) AllValues() []ExportSpecMetricDisplay {
+	return []ExportSpecMetricDisplay{
+		ExportSpecMetricDisplayName,
+		ExportSpecMetricDisplayLabel,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s ExportSpecMetricDisplay) MarshalText() ([]byte, error) {
+	switch s {
+	case ExportSpecMetricDisplayName:
+		return []byte(s), nil
+	case ExportSpecMetricDisplayLabel:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *ExportSpecMetricDisplay) UnmarshalText(data []byte) error {
+	switch ExportSpecMetricDisplay(data) {
+	case ExportSpecMetricDisplayName:
+		*s = ExportSpecMetricDisplayName
+		return nil
+	case ExportSpecMetricDisplayLabel:
+		*s = ExportSpecMetricDisplayLabel
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
 
 type ExtractFormulaRefsOK struct {
 	Refs  []string  `json:"refs"`
@@ -11319,11 +11859,20 @@ func (s *IntegrationDefConfig) init() IntegrationDefConfig {
 // IntegrationOAuthCallbackFound is response for IntegrationOAuthCallback operation.
 type IntegrationOAuthCallbackFound struct{}
 
+// A csv_import run carries its file — csv, or xlsx_base64 (+ sheet). A google_sheets run carries
+// none; it re-fetches the sheet named by its config's sheet_url. The integration's saved column_map
+// is applied in the Import Wizard's vocabulary (metric or dimension names, "metric" + "value" for a
+// long file, form fields, code/label/parent_code/property:<name> for a dimension, "ignore"), so a
+// file holding names runs as it is.
 // Ref: #/components/schemas/IntegrationRunRequest
 type IntegrationRunRequest struct {
-	// Required for type "csv_import". Ignored for type "google_sheets" — those integrations re-fetch
-	// the sheet named by their config's sheet_url at run time.
+	// The file as CSV text (csv_import).
 	Csv OptString `json:"csv"`
+	// The file as a base64 .xlsx/.xlsm workbook (csv_import), read as stored cell values. At most 16 MB
+	// before encoding.
+	XlsxBase64 OptString `json:"xlsx_base64"`
+	// The workbook's sheet; the first when omitted.
+	Sheet OptString `json:"sheet"`
 }
 
 // GetCsv returns the value of Csv.
@@ -11331,9 +11880,29 @@ func (s *IntegrationRunRequest) GetCsv() OptString {
 	return s.Csv
 }
 
+// GetXlsxBase64 returns the value of XlsxBase64.
+func (s *IntegrationRunRequest) GetXlsxBase64() OptString {
+	return s.XlsxBase64
+}
+
+// GetSheet returns the value of Sheet.
+func (s *IntegrationRunRequest) GetSheet() OptString {
+	return s.Sheet
+}
+
 // SetCsv sets the value of Csv.
 func (s *IntegrationRunRequest) SetCsv(val OptString) {
 	s.Csv = val
+}
+
+// SetXlsxBase64 sets the value of XlsxBase64.
+func (s *IntegrationRunRequest) SetXlsxBase64(val OptString) {
+	s.XlsxBase64 = val
+}
+
+// SetSheet sets the value of Sheet.
+func (s *IntegrationRunRequest) SetSheet(val OptString) {
+	s.Sheet = val
 }
 
 // Ref: #/components/schemas/LegalInfo
@@ -14897,6 +15466,374 @@ func (o OptExportGridFormat) Or(d ExportGridFormat) ExportGridFormat {
 	return d
 }
 
+// NewOptExportSpecColumnNames returns new OptExportSpecColumnNames with value set to v.
+func NewOptExportSpecColumnNames(v ExportSpecColumnNames) OptExportSpecColumnNames {
+	return OptExportSpecColumnNames{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptExportSpecColumnNames is optional ExportSpecColumnNames.
+type OptExportSpecColumnNames struct {
+	Value ExportSpecColumnNames
+	Set   bool
+}
+
+// IsSet returns true if OptExportSpecColumnNames was set.
+func (o OptExportSpecColumnNames) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptExportSpecColumnNames) Reset() {
+	var v ExportSpecColumnNames
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptExportSpecColumnNames) SetTo(v ExportSpecColumnNames) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptExportSpecColumnNames) Get() (v ExportSpecColumnNames, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptExportSpecColumnNames) Or(d ExportSpecColumnNames) ExportSpecColumnNames {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptExportSpecDecimalSeparator returns new OptExportSpecDecimalSeparator with value set to v.
+func NewOptExportSpecDecimalSeparator(v ExportSpecDecimalSeparator) OptExportSpecDecimalSeparator {
+	return OptExportSpecDecimalSeparator{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptExportSpecDecimalSeparator is optional ExportSpecDecimalSeparator.
+type OptExportSpecDecimalSeparator struct {
+	Value ExportSpecDecimalSeparator
+	Set   bool
+}
+
+// IsSet returns true if OptExportSpecDecimalSeparator was set.
+func (o OptExportSpecDecimalSeparator) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptExportSpecDecimalSeparator) Reset() {
+	var v ExportSpecDecimalSeparator
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptExportSpecDecimalSeparator) SetTo(v ExportSpecDecimalSeparator) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptExportSpecDecimalSeparator) Get() (v ExportSpecDecimalSeparator, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptExportSpecDecimalSeparator) Or(d ExportSpecDecimalSeparator) ExportSpecDecimalSeparator {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptExportSpecDelimiter returns new OptExportSpecDelimiter with value set to v.
+func NewOptExportSpecDelimiter(v ExportSpecDelimiter) OptExportSpecDelimiter {
+	return OptExportSpecDelimiter{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptExportSpecDelimiter is optional ExportSpecDelimiter.
+type OptExportSpecDelimiter struct {
+	Value ExportSpecDelimiter
+	Set   bool
+}
+
+// IsSet returns true if OptExportSpecDelimiter was set.
+func (o OptExportSpecDelimiter) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptExportSpecDelimiter) Reset() {
+	var v ExportSpecDelimiter
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptExportSpecDelimiter) SetTo(v ExportSpecDelimiter) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptExportSpecDelimiter) Get() (v ExportSpecDelimiter, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptExportSpecDelimiter) Or(d ExportSpecDelimiter) ExportSpecDelimiter {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptExportSpecFilters returns new OptExportSpecFilters with value set to v.
+func NewOptExportSpecFilters(v ExportSpecFilters) OptExportSpecFilters {
+	return OptExportSpecFilters{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptExportSpecFilters is optional ExportSpecFilters.
+type OptExportSpecFilters struct {
+	Value ExportSpecFilters
+	Set   bool
+}
+
+// IsSet returns true if OptExportSpecFilters was set.
+func (o OptExportSpecFilters) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptExportSpecFilters) Reset() {
+	var v ExportSpecFilters
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptExportSpecFilters) SetTo(v ExportSpecFilters) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptExportSpecFilters) Get() (v ExportSpecFilters, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptExportSpecFilters) Or(d ExportSpecFilters) ExportSpecFilters {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptExportSpecFormat returns new OptExportSpecFormat with value set to v.
+func NewOptExportSpecFormat(v ExportSpecFormat) OptExportSpecFormat {
+	return OptExportSpecFormat{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptExportSpecFormat is optional ExportSpecFormat.
+type OptExportSpecFormat struct {
+	Value ExportSpecFormat
+	Set   bool
+}
+
+// IsSet returns true if OptExportSpecFormat was set.
+func (o OptExportSpecFormat) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptExportSpecFormat) Reset() {
+	var v ExportSpecFormat
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptExportSpecFormat) SetTo(v ExportSpecFormat) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptExportSpecFormat) Get() (v ExportSpecFormat, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptExportSpecFormat) Or(d ExportSpecFormat) ExportSpecFormat {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptExportSpecLayout returns new OptExportSpecLayout with value set to v.
+func NewOptExportSpecLayout(v ExportSpecLayout) OptExportSpecLayout {
+	return OptExportSpecLayout{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptExportSpecLayout is optional ExportSpecLayout.
+type OptExportSpecLayout struct {
+	Value ExportSpecLayout
+	Set   bool
+}
+
+// IsSet returns true if OptExportSpecLayout was set.
+func (o OptExportSpecLayout) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptExportSpecLayout) Reset() {
+	var v ExportSpecLayout
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptExportSpecLayout) SetTo(v ExportSpecLayout) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptExportSpecLayout) Get() (v ExportSpecLayout, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptExportSpecLayout) Or(d ExportSpecLayout) ExportSpecLayout {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptExportSpecMemberDisplay returns new OptExportSpecMemberDisplay with value set to v.
+func NewOptExportSpecMemberDisplay(v ExportSpecMemberDisplay) OptExportSpecMemberDisplay {
+	return OptExportSpecMemberDisplay{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptExportSpecMemberDisplay is optional ExportSpecMemberDisplay.
+type OptExportSpecMemberDisplay struct {
+	Value ExportSpecMemberDisplay
+	Set   bool
+}
+
+// IsSet returns true if OptExportSpecMemberDisplay was set.
+func (o OptExportSpecMemberDisplay) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptExportSpecMemberDisplay) Reset() {
+	var v ExportSpecMemberDisplay
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptExportSpecMemberDisplay) SetTo(v ExportSpecMemberDisplay) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptExportSpecMemberDisplay) Get() (v ExportSpecMemberDisplay, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptExportSpecMemberDisplay) Or(d ExportSpecMemberDisplay) ExportSpecMemberDisplay {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptExportSpecMetricDisplay returns new OptExportSpecMetricDisplay with value set to v.
+func NewOptExportSpecMetricDisplay(v ExportSpecMetricDisplay) OptExportSpecMetricDisplay {
+	return OptExportSpecMetricDisplay{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptExportSpecMetricDisplay is optional ExportSpecMetricDisplay.
+type OptExportSpecMetricDisplay struct {
+	Value ExportSpecMetricDisplay
+	Set   bool
+}
+
+// IsSet returns true if OptExportSpecMetricDisplay was set.
+func (o OptExportSpecMetricDisplay) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptExportSpecMetricDisplay) Reset() {
+	var v ExportSpecMetricDisplay
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptExportSpecMetricDisplay) SetTo(v ExportSpecMetricDisplay) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptExportSpecMetricDisplay) Get() (v ExportSpecMetricDisplay, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptExportSpecMetricDisplay) Or(d ExportSpecMetricDisplay) ExportSpecMetricDisplay {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptFloat64 returns new OptFloat64 with value set to v.
 func NewOptFloat64(v float64) OptFloat64 {
 	return OptFloat64{
@@ -18117,6 +19054,165 @@ func (s *PreferencesUpdateTheme) UnmarshalText(data []byte) error {
 	}
 }
 
+type PreviewExportIntegrationBadRequest struct {
+	Error    OptString `json:"error"`
+	Problems []string  `json:"problems"`
+}
+
+// GetError returns the value of Error.
+func (s *PreviewExportIntegrationBadRequest) GetError() OptString {
+	return s.Error
+}
+
+// GetProblems returns the value of Problems.
+func (s *PreviewExportIntegrationBadRequest) GetProblems() []string {
+	return s.Problems
+}
+
+// SetError sets the value of Error.
+func (s *PreviewExportIntegrationBadRequest) SetError(val OptString) {
+	s.Error = val
+}
+
+// SetProblems sets the value of Problems.
+func (s *PreviewExportIntegrationBadRequest) SetProblems(val []string) {
+	s.Problems = val
+}
+
+func (*PreviewExportIntegrationBadRequest) previewExportIntegrationRes() {}
+
+type PreviewExportIntegrationOK struct {
+	Header []string `json:"header"`
+	// The columns before column_names renamed them (its keys).
+	DefaultHeader []string   `json:"default_header"`
+	Rows          [][]string `json:"rows"`
+	TotalRows     OptInt     `json:"total_rows"`
+	Warnings      []string   `json:"warnings"`
+	FileName      OptString  `json:"file_name"`
+	Summary       OptString  `json:"summary"`
+}
+
+// GetHeader returns the value of Header.
+func (s *PreviewExportIntegrationOK) GetHeader() []string {
+	return s.Header
+}
+
+// GetDefaultHeader returns the value of DefaultHeader.
+func (s *PreviewExportIntegrationOK) GetDefaultHeader() []string {
+	return s.DefaultHeader
+}
+
+// GetRows returns the value of Rows.
+func (s *PreviewExportIntegrationOK) GetRows() [][]string {
+	return s.Rows
+}
+
+// GetTotalRows returns the value of TotalRows.
+func (s *PreviewExportIntegrationOK) GetTotalRows() OptInt {
+	return s.TotalRows
+}
+
+// GetWarnings returns the value of Warnings.
+func (s *PreviewExportIntegrationOK) GetWarnings() []string {
+	return s.Warnings
+}
+
+// GetFileName returns the value of FileName.
+func (s *PreviewExportIntegrationOK) GetFileName() OptString {
+	return s.FileName
+}
+
+// GetSummary returns the value of Summary.
+func (s *PreviewExportIntegrationOK) GetSummary() OptString {
+	return s.Summary
+}
+
+// SetHeader sets the value of Header.
+func (s *PreviewExportIntegrationOK) SetHeader(val []string) {
+	s.Header = val
+}
+
+// SetDefaultHeader sets the value of DefaultHeader.
+func (s *PreviewExportIntegrationOK) SetDefaultHeader(val []string) {
+	s.DefaultHeader = val
+}
+
+// SetRows sets the value of Rows.
+func (s *PreviewExportIntegrationOK) SetRows(val [][]string) {
+	s.Rows = val
+}
+
+// SetTotalRows sets the value of TotalRows.
+func (s *PreviewExportIntegrationOK) SetTotalRows(val OptInt) {
+	s.TotalRows = val
+}
+
+// SetWarnings sets the value of Warnings.
+func (s *PreviewExportIntegrationOK) SetWarnings(val []string) {
+	s.Warnings = val
+}
+
+// SetFileName sets the value of FileName.
+func (s *PreviewExportIntegrationOK) SetFileName(val OptString) {
+	s.FileName = val
+}
+
+// SetSummary sets the value of Summary.
+func (s *PreviewExportIntegrationOK) SetSummary(val OptString) {
+	s.Summary = val
+}
+
+func (*PreviewExportIntegrationOK) previewExportIntegrationRes() {}
+
+type PreviewExportIntegrationReq struct {
+	// The grid.
+	TargetID uuid.UUID `json:"target_id"`
+	// The export's name (default file name).
+	Name   OptString  `json:"name"`
+	Rows   OptInt     `json:"rows"`
+	Config ExportSpec `json:"config"`
+}
+
+// GetTargetID returns the value of TargetID.
+func (s *PreviewExportIntegrationReq) GetTargetID() uuid.UUID {
+	return s.TargetID
+}
+
+// GetName returns the value of Name.
+func (s *PreviewExportIntegrationReq) GetName() OptString {
+	return s.Name
+}
+
+// GetRows returns the value of Rows.
+func (s *PreviewExportIntegrationReq) GetRows() OptInt {
+	return s.Rows
+}
+
+// GetConfig returns the value of Config.
+func (s *PreviewExportIntegrationReq) GetConfig() ExportSpec {
+	return s.Config
+}
+
+// SetTargetID sets the value of TargetID.
+func (s *PreviewExportIntegrationReq) SetTargetID(val uuid.UUID) {
+	s.TargetID = val
+}
+
+// SetName sets the value of Name.
+func (s *PreviewExportIntegrationReq) SetName(val OptString) {
+	s.Name = val
+}
+
+// SetRows sets the value of Rows.
+func (s *PreviewExportIntegrationReq) SetRows(val OptInt) {
+	s.Rows = val
+}
+
+// SetConfig sets the value of Config.
+func (s *PreviewExportIntegrationReq) SetConfig(val ExportSpec) {
+	s.Config = val
+}
+
 type PreviewFormMappingOKItem map[string]jx.Raw
 
 func (s *PreviewFormMappingOKItem) init() PreviewFormMappingOKItem {
@@ -18868,13 +19964,22 @@ type RunIntegrationBadRequest Error
 
 func (*RunIntegrationBadRequest) runIntegrationRes() {}
 
+// RunIntegrationForbidden is response for RunIntegration operation.
+type RunIntegrationForbidden struct{}
+
+func (*RunIntegrationForbidden) runIntegrationRes() {}
+
 type RunIntegrationNotFound Error
 
 func (*RunIntegrationNotFound) runIntegrationRes() {}
 
 type RunIntegrationOK struct {
 	RowsImported OptInt `json:"rows_imported"`
-	ErrorRows    OptInt `json:"error_rows"`
+	// Grid runs — one row can carry several metrics' values.
+	ValuesImported OptInt `json:"values_imported"`
+	ErrorRows      OptInt `json:"error_rows"`
+	// Grid runs — each value that failed, by row and column.
+	Errors []RunIntegrationOKErrorsItem `json:"errors"`
 }
 
 // GetRowsImported returns the value of RowsImported.
@@ -18882,9 +19987,19 @@ func (s *RunIntegrationOK) GetRowsImported() OptInt {
 	return s.RowsImported
 }
 
+// GetValuesImported returns the value of ValuesImported.
+func (s *RunIntegrationOK) GetValuesImported() OptInt {
+	return s.ValuesImported
+}
+
 // GetErrorRows returns the value of ErrorRows.
 func (s *RunIntegrationOK) GetErrorRows() OptInt {
 	return s.ErrorRows
+}
+
+// GetErrors returns the value of Errors.
+func (s *RunIntegrationOK) GetErrors() []RunIntegrationOKErrorsItem {
+	return s.Errors
 }
 
 // SetRowsImported sets the value of RowsImported.
@@ -18892,12 +20007,85 @@ func (s *RunIntegrationOK) SetRowsImported(val OptInt) {
 	s.RowsImported = val
 }
 
+// SetValuesImported sets the value of ValuesImported.
+func (s *RunIntegrationOK) SetValuesImported(val OptInt) {
+	s.ValuesImported = val
+}
+
 // SetErrorRows sets the value of ErrorRows.
 func (s *RunIntegrationOK) SetErrorRows(val OptInt) {
 	s.ErrorRows = val
 }
 
+// SetErrors sets the value of Errors.
+func (s *RunIntegrationOK) SetErrors(val []RunIntegrationOKErrorsItem) {
+	s.Errors = val
+}
+
 func (*RunIntegrationOK) runIntegrationRes() {}
+
+type RunIntegrationOKErrorsItem struct {
+	Row      OptInt    `json:"row"`
+	Column   OptString `json:"column"`
+	Code     OptString `json:"code"`
+	Message  OptString `json:"message"`
+	RawValue OptString `json:"raw_value"`
+}
+
+// GetRow returns the value of Row.
+func (s *RunIntegrationOKErrorsItem) GetRow() OptInt {
+	return s.Row
+}
+
+// GetColumn returns the value of Column.
+func (s *RunIntegrationOKErrorsItem) GetColumn() OptString {
+	return s.Column
+}
+
+// GetCode returns the value of Code.
+func (s *RunIntegrationOKErrorsItem) GetCode() OptString {
+	return s.Code
+}
+
+// GetMessage returns the value of Message.
+func (s *RunIntegrationOKErrorsItem) GetMessage() OptString {
+	return s.Message
+}
+
+// GetRawValue returns the value of RawValue.
+func (s *RunIntegrationOKErrorsItem) GetRawValue() OptString {
+	return s.RawValue
+}
+
+// SetRow sets the value of Row.
+func (s *RunIntegrationOKErrorsItem) SetRow(val OptInt) {
+	s.Row = val
+}
+
+// SetColumn sets the value of Column.
+func (s *RunIntegrationOKErrorsItem) SetColumn(val OptString) {
+	s.Column = val
+}
+
+// SetCode sets the value of Code.
+func (s *RunIntegrationOKErrorsItem) SetCode(val OptString) {
+	s.Code = val
+}
+
+// SetMessage sets the value of Message.
+func (s *RunIntegrationOKErrorsItem) SetMessage(val OptString) {
+	s.Message = val
+}
+
+// SetRawValue sets the value of RawValue.
+func (s *RunIntegrationOKErrorsItem) SetRawValue(val OptString) {
+	s.RawValue = val
+}
+
+// RunIntegrationPaymentRequired is response for RunIntegration operation.
+type RunIntegrationPaymentRequired struct{}
+
+func (*RunIntegrationPaymentRequired) runIntegrationRes() {}
 
 type SaveAiSettingsOK struct {
 	Status OptString `json:"status"`

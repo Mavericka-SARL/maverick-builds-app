@@ -4,7 +4,7 @@
 > dependencies that are not fixed yet, with the evidence and what would close
 > each one.
 
-> **Last verified:** 2026-10-01
+> **Last verified:** 2026-10-02
 
 A finding that is not acted on in the change that found it is written down
 here, so it does not live only in a chat or a commit message. Each entry says
@@ -2445,7 +2445,98 @@ leaves out, until it is fixed.
   business routes, or have `/api/demo` report "no revision yet" as its own
   state that the consoles render with the selector still shown.
 
+### The gateway test package is outgrowing CI's time limits
+
+- **Noticed:** 2026-10-02, when a deploy's Go test job failed: `go test -race
+  -p 4 ./...` killed `internal/gateway` at Go's default 10-minute package
+  timeout, and the deploy was skipped.
+- **What:** the package's CI time in green runs went 339s (09-29), 377s,
+  382s, 405s, 467s, 423s, 437s (10-01), then past 600s. No one test is slow —
+  locally the whole package takes about 150s under `-race` (363 tests, the
+  slowest the 18s 10k-row scale test) — but the self-hosted runners run it
+  roughly three times slower, four packages at once, each starting its own
+  Postgres container, and it grows with every feature's tests. CI now passes
+  `-timeout 20m`, inside the job's 30-minute limit.
+- **Why it matters:** at this rate the package reaches the new limit within
+  weeks, and every failure blocks a deploy until the tests are re-run.
+- **How to check:** `gh run view <run> --log | grep -E 'ok\s+.*internal/gateway\s'`
+  over recent green runs of `ci.yml`, against 1200s.
+- **What closes it:** cutting the runtime rather than raising limits — one
+  shared Postgres with per-test schema isolation (the CI step's own comment
+  says it would remove most of it), or splitting `internal/gateway`'s tests
+  so they spread over the four parallel slots.
+
+### The .xlsx upload reads cells as displayed, so formatted numbers are refused
+
+- **Noticed:** 2026-10-02, same change.
+- **What:** `importpkg.ParseXLSXRows` (`POST /api/import/upload` with
+  `xlsx_base64`, used by the business Import widget) reads each cell as Excel
+  displays it. A value formatted `#,##0.00` arrives as `"1,234.50"`, which
+  `ResolveRows` refuses as not a number, and the whole workbook is rejected.
+  `importpkg.ParseTabularFile` (the AI Developer's attachment import) reads
+  stored values instead; the upload endpoint was left as it was because a
+  date-formatted cell used as a member code would change from its displayed
+  text to Excel's serial number.
+- **Why it matters:** finance workbooks nearly always format numbers with
+  thousands separators, so a business user's upload of one fails with a
+  validation error on every value row.
+- **How to check:** upload a workbook whose value cells use number format 4
+  through the business Import widget; the response is 422 with
+  `"1,234.50"`-style raw values. `TestParseTabularFileReadsStoredValuesAndPicksSheet`
+  shows the two readings side by side.
+- **What closes it:** reading stored values for value columns (or all
+  columns, after deciding what a date-typed member-code cell should become),
+  then `ParseXLSXRows` can call `parseXLSXSheet(data, "", true)`.
+
+### Dimension member imports are not held to the plan's member limit
+
+- **Noticed:** 2026-10-02, same change.
+- **What:** `importDimensionMembersCSV` (`POST /api/import/dimension-members`
+  and a `csv_import` integration run with a dimension target) adds members
+  without `plan.Enforcer.CheckMembers`, which the member endpoints and the AI
+  Developer's member tools run. The AI Developer's attachment import counts
+  the new members first and checks them (`newMemberCount` in
+  `internal/gateway/ai_file_import.go`); the developer's own imports do not.
+- **Why it matters:** on a plan with a member limit, an import passes it by
+  any number of members.
+- **How to check:** on a customer whose plan limits members, import a CSV with
+  more new codes than the remaining allowance through the Import Wizard — it
+  succeeds.
+- **What closes it:** counting the file's new codes in
+  `importDimensionMembersCSV` (as `newMemberCount` does) and calling
+  `CheckMembers` before the first insert, for every caller.
+
 ## Closed
+
+### A saved Excel/CSV integration could not be run from a dashboard with a normal file
+
+- **Noticed:** 2026-10-02, while adding Excel/CSV integrations to the AI Developer.
+- **What it was:** `POST /api/integrations/{id}/run` for a `csv_import` grid
+  integration took CSV text only and needed a `metric_id` column of metric
+  **UUIDs** plus `value`: it staged the raw cell as the metric id, checked no
+  member, and ignored the saved `import_mode`. The console's "Run Import"
+  worked only because the Import Wizard resolves names to ids in the browser;
+  a business user's dashboard button (`IntegrationButtonWidget`) sent the file
+  as read with `readAsText`, so an `.xlsx` could not be sent, and a CSV of
+  metric names — the files the wizard and the AI Developer map — failed with
+  "grid csv must have 'metric_id' and 'value' columns". Google Sheets syncs
+  went through `ResolveRows` but skipped the plan's limits and kept no run
+  history.
+- **Closed:** 2026-10-02 (`e7f8810`), in the change that found it (AI file
+  import and data exports). Every file integration's grid run shares
+  `runGridIntegration` (`internal/gateway/integration_file_run.go`): the run
+  takes `csv` or `xlsx_base64` (+ `sheet`, stored cell values), applies the
+  saved column map in the wizard's vocabulary (`importpkg.ApplyColumnMap`),
+  resolves names and leaf members, commits valid rows through the write guard
+  and the plan's fact and storage limits, lists the invalid ones, honours the
+  saved `import_mode`, recalculates and records the run. The dashboard button
+  sends a workbook as base64 and shows the first failing row. With the
+  owner's agreement the July salary demo's non-negative rule went from
+  `ResolveRows`: negative values import on every path, as typed cells and the
+  REST connector already allowed. Proof: `TestBusinessUserRunsANameMappedFileIntegration`,
+  `TestDimensionIntegrationRunsFromAWorkbook`, `TestImportRejectsABadRowAtomically`
+  and the dashboard-button cases in `web/e2e/ai-file-integration.spec.ts`,
+  run 2026-10-02: pass.
 
 ### A first sign-in could be aimed at another tenant
 
