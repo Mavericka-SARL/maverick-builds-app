@@ -2551,6 +2551,57 @@ leaves out, until it is fixed.
 
 ## Closed
 
+### The REST API accepted a token issued to any client of the realm
+
+- **Noticed:** 2026-10-02, designing the chat connector's authorization.
+- **What it was:** `identity.JWKSValidator.Validate` checks issuer, signature
+  and expiry, and the gateway used it alone: a token any client of the realm
+  obtained for a person — a chat host's, once hosts can register clients, or a
+  password grant through `admin-cli` — carried that person's full read-write
+  REST reach, so a "read-only" connector token would not have been read-only.
+- **Closed:** 2026-10-02 (`b871556`, deployed the same day). REST
+  accepts a token only when its `azp` is one of `GATEWAY_TOKEN_CLIENTS`
+  (default `mavericks-web`, `restClaims` in `internal/gateway/handler.go`);
+  `/mcp` accepts only a token with the connector's audience and `models:read`
+  scope that is not a console token (`verifyMCPToken`, `internal/gateway/mcp.go`).
+  Covered by `TestConnectorTokens` with real signatures.
+
+### Dashboard listing and detail differed on administrative roles, and the bypass ignored scope
+
+- **Noticed:** 2026-10-02, adding dashboard reads to the chat reporting brief.
+- **What it was:** `businessDashboards` and `dashboardWidgetAction` let any
+  holder of `business_admin`, `developer`, `tenant_admin` or `platform_admin`
+  skip business-role dashboard assignments; `businessDashboardDetail` and
+  `businessFolders` had no bypass, so administrators were listed dashboards
+  whose definition answered 404 and whose folders were withheld. The bypass
+  checked the role anywhere: proved live, a developer of another tenant and a
+  business administrator of another workspace — each only a business user
+  here — were listed, and could open, a dashboard their business role did not
+  grant.
+- **Closed:** 2026-10-02 (`b871556`, deployed the same day), with
+  the owner's decision to align detail to the list and scope the bypass. All
+  four routes share `dashboardAdminBypass`, which passes only someone who
+  administers the dashboard's application (`administersApp`, the predicate
+  form records already used: builder or administrator reach over the model, or
+  `business_admin` of the application's workspace). Covered by
+  `TestMCPConnectorDashboards`, which fails under the old bypass.
+
+### Business users could read and write revisions being built, by id
+
+- **Noticed:** 2026-10-02, pinning the chat connector to a revision.
+- **What it was:** `resolveRevisionCtx` accepted any revision of the model,
+  and business routes took it from `?revision_id`, a body field, or an object
+  living in one (grid, form, dashboard, chart widget, integration, rule): any
+  business user of a model could read — and write cells into — a developer's
+  draft revision once they knew its id.
+- **Closed:** 2026-10-02 (`b871556`, deployed the same day), with the owner's decision that
+  business users read only the active revision. `revisionOpen` and
+  `businessRevisionCtx` (`internal/gateway/revision_access.go`) leave every
+  other revision to builders, on every business route that takes a revision
+  directly or through an object; a closed revision answers like a missing one.
+  Covered by `TestRevisionsBeyondTheActiveOneAreTheBuilders` (15 of its 16
+  cases fail without the rule).
+
 ### Chat reports could not read complete workflow, trigger and notification histories
 
 - **Noticed:** 2026-10-02, extending the reporting brief to operational data.
@@ -2569,7 +2620,7 @@ leaves out, until it is fixed.
   dashboard widget, substituting a visible member for a hidden one; the record
   list reading the newest 100 rows and filtering them afterwards, so records
   hidden from the caller filled the page and ended the list early.
-- **Closed:** 2026-10-02 (chat connector, milestone 1; commit pending).
+- **Closed:** 2026-10-02 (`b871556`).
   `GET /api/grids` and `GET /api/grid/series` (`internal/gateway/grid_reads.go`)
   give any model reader the catalog and the resolver, refusing a hidden or
   unknown context member alike; the record list pages by `(created_at, id)`
