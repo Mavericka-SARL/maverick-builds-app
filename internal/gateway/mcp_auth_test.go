@@ -157,8 +157,9 @@ func TestConnectorTokens(t *testing.T) {
 			t.Fatalf("get_connection_access: %v %+v", err, res)
 		}
 		raw, _ := json.Marshal(res.StructuredContent)
-		if !strings.Contains(string(raw), `"email":"conn@t.com"`) || !strings.Contains(string(raw), `"read_only":true`) {
-			t.Errorf("access summary: %s", raw)
+		if !strings.Contains(string(raw), `"roles":[]`) || !strings.Contains(string(raw), `"read_only":true`) ||
+			strings.Contains(string(raw), "conn@t.com") || strings.Contains(string(raw), "Connie") {
+			t.Errorf("access summary: %s — want roles and read_only, and no name or address", raw)
 		}
 		if _, err := pool.Exec(ctx, `UPDATE identity.user SET disabled_at = now() WHERE id = $1::uuid`, userID); err != nil {
 			t.Fatal(err)

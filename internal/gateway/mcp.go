@@ -65,6 +65,10 @@ type MCPConfig struct {
 	ClientSecrets map[string]string
 	// Version is reported to hosts as the server's version.
 	Version string
+	// OpenAIAppsChallenge is the token OpenAI's plugin submission asks the
+	// connector's domain to serve at /.well-known/openai-apps-challenge, to
+	// prove the domain is ours; empty serves nothing there.
+	OpenAIAppsChallenge string
 }
 
 // DefaultMCPScope is the connector's one scope: reading models and their
@@ -263,6 +267,12 @@ func (h *handler) mountMCP(api http.Handler) http.Handler {
 
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", protected)
+	if token := strings.TrimSpace(h.mcp.OpenAIAppsChallenge); token != "" {
+		mux.HandleFunc("GET /.well-known/openai-apps-challenge", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			_, _ = w.Write([]byte(token))
+		})
+	}
 	mux.Handle("/.well-known/oauth-protected-resource", metadata)
 	if path := wellKnownPath(resource); path != "/.well-known/oauth-protected-resource" {
 		mux.Handle(path, metadata)

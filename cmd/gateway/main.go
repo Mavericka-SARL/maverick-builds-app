@@ -133,6 +133,9 @@ type cfg struct {
 	// comma-separated (a sealed secret in production), shown to builders in
 	// AI Developer Settings.
 	MCPClientSecrets string `mapstructure:"MCP_CLIENT_SECRETS"`
+	// MCPOpenAIAppsChallenge: the domain-verification token of the ChatGPT
+	// plugin submission, served at /.well-known/openai-apps-challenge.
+	MCPOpenAIAppsChallenge string `mapstructure:"MCP_OPENAI_APPS_CHALLENGE"`
 }
 
 func main() {
@@ -483,7 +486,8 @@ func mcpConfig(c cfg, log zerolog.Logger) gateway.MCPConfig {
 	}
 	log.Info().Str("resource", resource).Msg("chat connector enabled at /mcp (read-only)")
 	return gateway.MCPConfig{Enabled: true, ResourceURL: resource, AuthorizationServer: c.MCPAuthorizationServer,
-		Scope: c.MCPScope, Clients: splitList(c.MCPClients), ClientSecrets: splitPairs(c.MCPClientSecrets), Version: c.ServiceVersion}
+		Scope: c.MCPScope, Clients: splitList(c.MCPClients), ClientSecrets: splitPairs(c.MCPClientSecrets), Version: c.ServiceVersion,
+		OpenAIAppsChallenge: c.MCPOpenAIAppsChallenge}
 }
 
 // splitPairs parses "key=value,key=value", dropping malformed entries.

@@ -142,7 +142,7 @@ type gridQueryIn struct {
 
 func (t *tools) register(s *sdk.Server) {
 	sdk.AddTool(s, &sdk.Tool{Name: "get_connection_access", Annotations: readOnly("What this connection can read"),
-		Description: "Your identity, your roles and the kinds of resources this read-only connection reads for you, with what decides each. Lists nothing about anyone else."},
+		Description: "Your roles and what this read-only connection reads for you, with what decides each. Names no one and lists nothing about anyone else."},
 		read(t, "get_connection_access", func(ctx context.Context, s *reporting.Session, _ accessIn) (any, error) {
 			return s.Access(ctx)
 		}))

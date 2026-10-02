@@ -25,7 +25,7 @@ Claude** shows the connector URL and each host's client ID and secret.
 
 | Tool | What it does |
 |---|---|
-| `get_connection_access` | your identity, roles, and what decides what you read |
+| `get_connection_access` | your roles and what decides what you read (no name or address) |
 | `list_models` | models you can open, across your workspaces |
 | `list_sources` | a model's grids you can read |
 | `describe_source` | a grid's metrics (input or calculated, aggregation, time summary, format) and dimensions |

@@ -276,16 +276,12 @@ func (s *Session) Pin(ctx context.Context, appID, modelID, revisionID string) (P
 
 // ── access summary ──────────────────────────────────────────────────────────
 
-// Access describes what this connection can read for the person: their own
-// identity and roles, and each resource family with how its reads are
-// decided. It lists nothing about anyone else, and no object they may not
-// read.
+// Access describes what this connection can read for the person: their
+// roles, and each resource family with how its reads are decided. It names
+// no one — not even the person, whom the host already knows — and lists
+// nothing about anyone else or any object they may not read.
 type Access struct {
-	User struct {
-		Name  string   `json:"display_name"`
-		Email string   `json:"email"`
-		Roles []string `json:"roles"`
-	} `json:"user"`
+	Roles    []string       `json:"roles"`
 	ReadOnly bool           `json:"read_only"`
 	Families []AccessFamily `json:"families"`
 	Note     string         `json:"note"`
@@ -302,11 +298,15 @@ type AccessFamily struct {
 // Access summarizes the person's reach through this connection.
 func (s *Session) Access(ctx context.Context) (Access, error) {
 	var a Access
-	if _, err := s.get(ctx, "account", Request{Path: "/api/me"}, &a.User); err != nil {
+	var me struct {
+		Roles []string `json:"roles"`
+	}
+	if _, err := s.get(ctx, "account", Request{Path: "/api/me"}, &me); err != nil {
 		return a, err
 	}
-	if a.User.Roles == nil {
-		a.User.Roles = []string{}
+	a.Roles = me.Roles
+	if a.Roles == nil {
+		a.Roles = []string{}
 	}
 	a.ReadOnly = true
 	a.Note = "Every read is made as you, under the access your administrators and developers configured in maverickbuilds.app, and is decided again on every call. This connection reads grid data of each model's active revision; it never changes data, and charts and reports made from it are not saved in maverickbuilds.app."
