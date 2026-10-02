@@ -209,10 +209,15 @@ jobs:
       - name: Clean up leaked test containers
         if: always()
         run: |
-          # Ryuk removes a process's containers about ten seconds after it
-          # exits; counted sooner, this run's own would look leaked.
-          sleep 15
-          echo "postgres test containers still running: $(docker ps -q --filter ancestor=postgres:16-alpine | wc -l)"
+          # Ryuk starts removing the run's containers about ten seconds after
+          # the tests exit and takes another twenty or so for sixteen of them
+          # (run 37058074070); counted sooner, they look leaked.
+          for _ in $(seq 1 12); do
+            n=$(docker ps -q --filter ancestor=postgres:16-alpine | wc -l)
+            [ "$n" -eq 0 ] && break
+            sleep 5
+          done
+          echo "postgres test containers still running: $n"
           now=$(date +%s)
           for c in $(docker ps -aq --filter ancestor=postgres:16-alpine) \
                    $(docker ps -aq --filter ancestor=mavericks-test-minio:local); do
