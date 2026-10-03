@@ -485,6 +485,10 @@ type PreviewExportIntegrationRes interface {
 	previewExportIntegrationRes()
 }
 
+type PreviewImportReshapeRes interface {
+	previewImportReshapeRes()
+}
+
 type PromoteAiDraftRes interface {
 	promoteAiDraftRes()
 }

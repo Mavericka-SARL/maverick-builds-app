@@ -9,7 +9,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rs/zerolog"
 )
 
@@ -255,7 +255,13 @@ func nullableArgs(f Fields) (actor, application, revision *string) {
 // the row immediately after the triggering call returns. A write failure is
 // logged (unlike the old logAudit, which silently swallowed it) but never
 // returned: audit logging must never fail the primary response.
-func Log(ctx context.Context, pool *pgxpool.Pool, log zerolog.Logger, f Fields) {
+// Execer is what Log writes through: a pool, or a transaction the row
+// should share the fate of.
+type Execer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+func Log(ctx context.Context, pool Execer, log zerolog.Logger, f Fields) {
 	if f.Metadata == nil {
 		// A nil map marshals to the JSON scalar null; every reader expects an
 		// object, and exports render null as the word "null".

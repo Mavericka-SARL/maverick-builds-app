@@ -178,6 +178,7 @@ const (
 	MarkNotificationReadOperation         OperationName = "MarkNotificationRead"
 	PreviewExportIntegrationOperation     OperationName = "PreviewExportIntegration"
 	PreviewFormMappingOperation           OperationName = "PreviewFormMapping"
+	PreviewImportReshapeOperation         OperationName = "PreviewImportReshape"
 	PromoteAiDraftOperation               OperationName = "PromoteAiDraft"
 	PublishWorkflowOperation              OperationName = "PublishWorkflow"
 	PutGoogleConnectionOperation          OperationName = "PutGoogleConnection"

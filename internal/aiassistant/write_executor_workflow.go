@@ -97,7 +97,7 @@ func (e *WriteExecutor) deleteWorkflowDef(ctx context.Context, raw json.RawMessa
 	_ = e.pool.QueryRow(ctx, `SELECT name, status FROM workflow.workflow_def WHERE id=$1::uuid`, id).Scan(&name, &status)
 	// Same rule as the developer's DELETE: only a draft with no instances
 	// goes; anything that has run is archived, never deleted.
-	if err := workflow.NewStore(e.live).DeleteWorkflowDef(ctx, id); err != nil {
+	if err := workflow.NewStoreOn(e.pool).DeleteWorkflowDef(ctx, id); err != nil {
 		if status != "" && status != "draft" {
 			return "", "", fmt.Errorf("workflow '%s' is %s — only a draft can be deleted; a developer archives a published workflow from the Workflows tab", name, status)
 		}
@@ -124,7 +124,7 @@ func (e *WriteExecutor) deleteFormDef(ctx context.Context, raw json.RawMessage) 
 	_ = e.pool.QueryRow(ctx, `SELECT name FROM model.form_def WHERE id=$1::uuid`, id).Scan(&name)
 	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM runtime.form_record WHERE form_id=$1::uuid`, id).Scan(&records)
 	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM model.form_metric_mapping WHERE form_id=$1::uuid`, id).Scan(&integrations)
-	if err := crudapp.NewStore(e.live).DeleteForm(ctx, id); err != nil {
+	if err := crudapp.NewStoreOn(e.pool).DeleteForm(ctx, id); err != nil {
 		return "", "", fmt.Errorf("delete form: %w", err)
 	}
 	note := ""
@@ -251,13 +251,13 @@ func (e *WriteExecutor) createAutomationRule(ctx context.Context, raw json.RawMe
 	if err := e.ruleSources(ctx, &p); err != nil {
 		return "", "", err
 	}
-	rule, err := workflow.NewStore(e.live).CreateAutomationRuleScoped(ctx, appID, e.revID, p.Name, p.Description, p.TriggerType,
+	rule, err := workflow.NewStoreOn(e.pool).CreateAutomationRuleScoped(ctx, appID, e.revID, p.Name, p.Description, p.TriggerType,
 		workflowName, workflowDefID, p.SourceFormID, p.SourceGridID, p.SourceIntegrationID, schedule(p))
 	if err != nil {
 		return "", "", fmt.Errorf("create automation rule: %w", err)
 	}
 	if p.Enabled != nil && !*p.Enabled {
-		if _, err := workflow.NewStore(e.live).UpdateAutomationRuleScoped(ctx, rule.ID, "", "", "", "", "", "", "", "", p.Enabled, nil); err != nil {
+		if _, err := workflow.NewStoreOn(e.pool).UpdateAutomationRuleScoped(ctx, rule.ID, "", "", "", "", "", "", "", "", p.Enabled, nil); err != nil {
 			return "", "", fmt.Errorf("disable automation rule: %w", err)
 		}
 	}
@@ -314,7 +314,7 @@ func (e *WriteExecutor) updateAutomationRule(ctx context.Context, raw json.RawMe
 	if trigger == curTrigger {
 		trigger = ""
 	}
-	rule, err := workflow.NewStore(e.live).UpdateAutomationRuleScoped(ctx, p.AutomationRuleID, p.Name, p.Description, trigger,
+	rule, err := workflow.NewStoreOn(e.pool).UpdateAutomationRuleScoped(ctx, p.AutomationRuleID, p.Name, p.Description, trigger,
 		workflowName, workflowDefID, p.SourceFormID, p.SourceGridID, p.SourceIntegrationID, p.Enabled, schedule(p))
 	if err != nil {
 		return "", "", fmt.Errorf("update automation rule: %w", err)
@@ -348,7 +348,7 @@ func (e *WriteExecutor) deleteAutomationRule(ctx context.Context, raw json.RawMe
 	if ruleAppID != appID {
 		return "", "", fmt.Errorf("automation rule %s belongs to another application", p.AutomationRuleID)
 	}
-	if err := workflow.NewStore(e.live).DeleteAutomationRule(ctx, p.AutomationRuleID); err != nil {
+	if err := workflow.NewStoreOn(e.pool).DeleteAutomationRule(ctx, p.AutomationRuleID); err != nil {
 		return "", "", fmt.Errorf("delete automation rule: %w", err)
 	}
 	return fmt.Sprintf("Automation rule '%s' deleted", name), "", nil
@@ -407,7 +407,7 @@ type formIntegrationParams struct {
 // working revision. The console's pickers make these mistakes impossible;
 // a model typing names can make all of them.
 func (e *WriteExecutor) checkIntegrationFields(ctx context.Context, formID string, p *formIntegrationParams) error {
-	form, err := crudapp.NewStore(e.live).GetForm(ctx, formID)
+	form, err := crudapp.NewStoreOn(e.pool).GetForm(ctx, formID)
 	if err != nil {
 		return fmt.Errorf("load form: %w", err)
 	}

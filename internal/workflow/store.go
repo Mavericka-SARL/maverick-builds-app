@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/mavericks-engine/mavericks/pkg/dbx"
 	"github.com/robfig/cron/v3"
 	"github.com/rs/zerolog"
 
@@ -27,10 +29,22 @@ import (
 
 type Store struct {
 	pool *pgxpool.Pool
+	db   dbx.DB // what the store\'s statements run on: the pool, or a transaction
 	log  zerolog.Logger
 }
 
-func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool, log: zerolog.Nop()} }
+func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool, db: pool, log: zerolog.Nop()} }
+
+// NewStoreOn is NewStore on a pool or a transaction (dbx.DB): built on a
+// transaction it writes nothing the transaction does not keep. Pool() is
+// nil unless db is a pool.
+func NewStoreOn(db dbx.DB) *Store {
+	s := &Store{db: db, log: zerolog.Nop()}
+	if p, ok := db.(*pgxpool.Pool); ok {
+		s.pool = p
+	}
+	return s
+}
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
@@ -58,7 +72,7 @@ func (s *Store) CreateWorkflowDef(ctx context.Context, applicationID, name, trig
 
 	var id string
 	var createdAt time.Time
-	err = s.pool.QueryRow(ctx, `
+	err = s.db.QueryRow(ctx, `
 		INSERT INTO workflow.workflow_def (application_id, name, trigger_event, steps)
 		VALUES ($1::uuid, $2, $3, $4)
 		ON CONFLICT (application_id, revision_id, name) DO UPDATE SET trigger_event = EXCLUDED.trigger_event, steps = EXCLUDED.steps
@@ -83,7 +97,7 @@ func (s *Store) GetWorkflowDef(ctx context.Context, defID string) (*workflowv1.W
 	var stepsJSON []byte
 	var createdAt time.Time
 
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT id::text, application_id::text, name, trigger_event, steps, created_at
 		FROM workflow.workflow_def WHERE id = $1::uuid
 	`, defID).Scan(&id, &appID, &name, &triggerEvent, &stepsJSON, &createdAt)
@@ -119,7 +133,7 @@ func (s *Store) GetWorkflowDef(ctx context.Context, defID string) (*workflowv1.W
 // error from silently disabling real business effects.
 func (s *Store) isTestRun(ctx context.Context, instanceID string) bool {
 	var testRun bool
-	if err := s.pool.QueryRow(ctx,
+	if err := s.db.QueryRow(ctx,
 		`SELECT test_run FROM workflow.workflow_instance WHERE id=$1::uuid`, instanceID,
 	).Scan(&testRun); err != nil {
 		return false
@@ -165,13 +179,13 @@ func (s *Store) startWorkflow(ctx context.Context, defID, startedByUserID string
 	// schema are snapshotted here and every runtime reader prefers the
 	// snapshot, so editing a published workflow affects new starts only.
 	var stepsJSON, schemaJSON []byte
-	if err := s.pool.QueryRow(ctx, `SELECT steps, COALESCE(context_schema, '[]'::jsonb) FROM workflow.workflow_def WHERE id = $1::uuid`, defID).Scan(&stepsJSON, &schemaJSON); err != nil {
+	if err := s.db.QueryRow(ctx, `SELECT steps, COALESCE(context_schema, '[]'::jsonb) FROM workflow.workflow_def WHERE id = $1::uuid`, defID).Scan(&stepsJSON, &schemaJSON); err != nil {
 		return nil, fmt.Errorf("load definition for snapshot: %w", err)
 	}
 
 	var instanceID string
 	var startedAt time.Time
-	err = s.pool.QueryRow(ctx, `
+	err = s.db.QueryRow(ctx, `
 		INSERT INTO workflow.workflow_instance (workflow_def_id, started_by, context, test_run, steps_snapshot, context_schema_snapshot)
 		VALUES ($1::uuid, $2::uuid, $3, $4, $5::jsonb, $6::jsonb)
 		RETURNING id::text, started_at
@@ -194,7 +208,7 @@ func (s *Store) startWorkflow(ctx context.Context, defID, startedByUserID string
 			}
 		}
 
-		_, err = s.pool.Exec(ctx, `
+		_, err = s.db.Exec(ctx, `
 			INSERT INTO workflow.workflow_step
 			    (instance_id, step_def_id, status, due_at)
 			VALUES ($1::uuid, $2, $3::workflow.step_status, $4)
@@ -228,7 +242,7 @@ func (s *Store) GetWorkflowInstance(ctx context.Context, instanceID string) (*wo
 	var startedAt time.Time
 	var completedAt *time.Time
 
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT id::text, workflow_def_id::text, status::text, COALESCE(started_by::text, ''),
 		       context, started_at, completed_at
 		FROM workflow.workflow_instance WHERE id = $1::uuid
@@ -278,7 +292,7 @@ func (s *Store) ListWorkflowInstances(ctx context.Context, applicationID string,
 	args = append(args, limit, offset)
 	query += fmt.Sprintf(" ORDER BY wi.started_at DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args))
 
-	rows, err := s.pool.Query(ctx, query, args...)
+	rows, err := s.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +341,7 @@ func (s *Store) ListWorkflowInstances(ctx context.Context, applicationID string,
 // could decide the step.
 func (s *Store) IsAssigneeEligible(ctx context.Context, stepID, userID string) (bool, error) {
 	var eligible bool
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT EXISTS (
 		    SELECT 1
 		    FROM workflow.workflow_def wd
@@ -349,7 +363,7 @@ func (s *Store) CompleteStep(ctx context.Context, stepID, userID, decision, comm
 	var instanceID, stepDefID string
 	var currentStatus string
 
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT instance_id::text, step_def_id, status::text
 		FROM workflow.workflow_step WHERE id = $1::uuid
 	`, stepID).Scan(&instanceID, &stepDefID, &currentStatus)
@@ -376,7 +390,7 @@ func (s *Store) CompleteStep(ctx context.Context, stepID, userID, decision, comm
 	// matches (and only one transaction's WHERE can match) a step still
 	// in_progress/pending, closing a check-then-act race the earlier
 	// SELECT-then-UPDATE pair left open.
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -444,7 +458,7 @@ func (s *Store) CompleteStep(ctx context.Context, stepID, userID, decision, comm
 	// acceptable redundancy in exchange for keeping the decision+copy
 	// transaction narrowly scoped.
 	var stepsJSON []byte
-	_ = s.pool.QueryRow(ctx, `
+	_ = s.db.QueryRow(ctx, `
 		SELECT COALESCE(wi.steps_snapshot, wd.steps)
 		FROM workflow.workflow_instance wi
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
@@ -459,7 +473,7 @@ func (s *Store) CompleteStep(ctx context.Context, stepID, userID, decision, comm
 		s.reconcileInstance(ctx, instanceID, stepDefs)
 	} else {
 		// Fallback to sequential activation for legacy / unparseable defs.
-		_, _ = s.pool.Exec(ctx, `
+		_, _ = s.db.Exec(ctx, `
 			UPDATE workflow.workflow_step
 			SET status = 'in_progress'
 			WHERE id = (
@@ -487,7 +501,7 @@ func (s *Store) CompleteStep(ctx context.Context, stepID, userID, decision, comm
 	// WHERE status='dirty' guard is what makes it safe to trigger here even
 	// though the partition may already have been marked dirty by the tx.
 	if copyResult != nil && len(copyResult.AffectedMetrics) > 0 {
-		scheduler := calculation.NewScheduler(s.log, calculation.NewStore(s.pool), nil)
+		scheduler := calculation.NewScheduler(s.log, calculation.NewStoreOn(s.db), nil)
 		if err := scheduler.RecalcAffected(ctx, copyResult.ModelID, copyResult.TargetRevisionID, copyResult.AffectedMetrics); err != nil {
 			s.log.Warn().Err(err).Str("instance_id", instanceID).Msg("on_approve recalc failed")
 		}
@@ -757,7 +771,7 @@ func (s *Store) runOnApproveCopy(ctx context.Context, tx pgx.Tx, instanceID, use
 	// IDs to find what depends on them. Only the resulting partition KEY
 	// (below) is scoped to targetRevisionID, matching where the copied
 	// facts — and the eventual recalculated result — actually live.
-	calcStore := calculation.NewStore(s.pool)
+	calcStore := calculation.NewStoreOn(s.db)
 	defs, err := calcStore.LoadModelMetrics(ctx, modelID, sourceRevisionID)
 	if err != nil {
 		return nil, fmt.Errorf("load metrics for dirty-marking: %w", err)
@@ -857,7 +871,7 @@ func (s *Store) activateNextSteps(ctx context.Context, instanceID, completedDefI
 	}
 	if completedDef == nil || (len(completedDef.Routes) == 0 && len(completedDef.NextStepIDs) == 0) {
 		// No routes configured — fall back to sequential.
-		_, _ = s.pool.Exec(ctx, `
+		_, _ = s.db.Exec(ctx, `
 			UPDATE workflow.workflow_step SET status = 'in_progress'
 			WHERE id = (
 				SELECT id FROM workflow.workflow_step
@@ -882,7 +896,7 @@ func (s *Store) activateNextSteps(ctx context.Context, instanceID, completedDefI
 		if nextDef != nil && nextDef.Type == stepTypeJoin {
 			if s.allPredecessorsComplete(ctx, instanceID, nextDefID, stepDefs) {
 				// Auto-complete the join and continue along its routes.
-				_, _ = s.pool.Exec(ctx, `
+				_, _ = s.db.Exec(ctx, `
 					UPDATE workflow.workflow_step
 					SET status = 'completed', completed_at = now()
 					WHERE instance_id = $1::uuid AND step_def_id = $2 AND status = 'pending'
@@ -896,7 +910,7 @@ func (s *Store) activateNextSteps(ctx context.Context, instanceID, completedDefI
 			if nextDef != nil {
 				sla = nextDef.SlaHours
 			}
-			ct, _ := s.pool.Exec(ctx, `
+			ct, _ := s.db.Exec(ctx, `
 				UPDATE workflow.workflow_step
 				SET status = 'in_progress',
 				    due_at = CASE WHEN $3::int > 0 THEN now() + make_interval(hours => $3::int) ELSE due_at END
@@ -933,20 +947,20 @@ const maxReworks = 20
 func (s *Store) reworkStep(ctx context.Context, instanceID string, target, from *stepDefRouted, stepDefs []*stepDefRouted) bool {
 	var status string
 	var count int
-	if err := s.pool.QueryRow(ctx, `
+	if err := s.db.QueryRow(ctx, `
 		SELECT status::text, rework_count FROM workflow.workflow_step
 		WHERE instance_id = $1::uuid AND step_def_id = $2
 	`, instanceID, target.ID).Scan(&status, &count); err != nil || status == "in_progress" || status == "pending" {
 		return false
 	}
 	if count >= maxReworks {
-		_, _ = s.pool.Exec(ctx, `UPDATE workflow.workflow_instance SET status = 'failed', completed_at = now() WHERE id = $1::uuid AND status = 'running'`, instanceID)
-		_, _ = s.pool.Exec(ctx, `UPDATE workflow.execution SET status = 'failed', error = 'rework loop cap reached', completed_at = now() WHERE instance_id = $1::uuid AND status = 'running'`, instanceID)
+		_, _ = s.db.Exec(ctx, `UPDATE workflow.workflow_instance SET status = 'failed', completed_at = now() WHERE id = $1::uuid AND status = 'running'`, instanceID)
+		_, _ = s.db.Exec(ctx, `UPDATE workflow.execution SET status = 'failed', error = 'rework loop cap reached', completed_at = now() WHERE instance_id = $1::uuid AND status = 'running'`, instanceID)
 		s.log.Warn().Str("instance", instanceID).Str("step", target.ID).Int("reworks", count).Msg("rework loop cap reached; instance failed")
 		return false
 	}
 	var fromComment string
-	_ = s.pool.QueryRow(ctx, `SELECT COALESCE(comment,'') FROM workflow.workflow_step WHERE instance_id = $1::uuid AND step_def_id = $2`, instanceID, from.ID).Scan(&fromComment)
+	_ = s.db.QueryRow(ctx, `SELECT COALESCE(comment,'') FROM workflow.workflow_step WHERE instance_id = $1::uuid AND step_def_id = $2`, instanceID, from.ID).Scan(&fromComment)
 
 	// Everything downstream of the target (following every route, not just
 	// the decided one) starts over; steps mid-flight on parallel branches
@@ -968,7 +982,7 @@ func (s *Store) reworkStep(ctx context.Context, instanceID string, target, from 
 			frontier = append(frontier, allRouteTargets(d)...)
 		}
 	}
-	_, _ = s.pool.Exec(ctx, `
+	_, _ = s.db.Exec(ctx, `
 		UPDATE workflow.workflow_step
 		SET status = 'pending', decision = NULL, comment = NULL, completed_at = NULL, due_at = NULL
 		WHERE instance_id = $1::uuid AND step_def_id = ANY($2) AND status <> 'in_progress'
@@ -985,7 +999,7 @@ func (s *Store) reworkStep(ctx context.Context, instanceID string, target, from 
 	if fromComment != "" {
 		note += ": " + fromComment
 	}
-	if _, err := s.pool.Exec(ctx, `
+	if _, err := s.db.Exec(ctx, `
 		UPDATE workflow.workflow_step
 		SET status = 'in_progress', decision = NULL, comment = $3, completed_at = NULL,
 		    rework_count = rework_count + 1,
@@ -996,9 +1010,9 @@ func (s *Store) reworkStep(ctx context.Context, instanceID string, target, from 
 	}
 	// The requester learns the request went back, with the reason.
 	var startedBy string
-	if qErr := s.pool.QueryRow(ctx, `SELECT COALESCE(started_by::text, '') FROM workflow.workflow_instance WHERE id = $1::uuid`, instanceID).Scan(&startedBy); qErr == nil && startedBy != "" {
+	if qErr := s.db.QueryRow(ctx, `SELECT COALESCE(started_by::text, '') FROM workflow.workflow_instance WHERE id = $1::uuid`, instanceID).Scan(&startedBy); qErr == nil && startedBy != "" {
 		vars := map[string]string{"subject": "Sent back for rework", "message": fmt.Sprintf("%q needs another pass. %s", targetName, note)}
-		_, _ = notification.NewStore(s.pool).Notify(ctx, startedBy, "workflow_step_notification", vars, "workflow_instance", instanceID)
+		_, _ = notification.NewStoreOn(s.db).Notify(ctx, startedBy, "workflow_step_notification", vars, "workflow_instance", instanceID)
 	}
 	return true
 }
@@ -1042,7 +1056,7 @@ func (s *Store) processAutoStep(ctx context.Context, instanceID string, def *ste
 			decision = "skipped"
 			comment = "No recipient configured or resolved"
 		}
-		_, _ = s.pool.Exec(ctx, `
+		_, _ = s.db.Exec(ctx, `
 			UPDATE workflow.workflow_step
 			SET status = 'completed', decision = $3, comment = $4, completed_at = now()
 			WHERE instance_id = $1::uuid AND step_def_id = $2 AND status = 'in_progress'
@@ -1058,7 +1072,7 @@ func (s *Store) processAutoStep(ctx context.Context, instanceID string, def *ste
 		if result {
 			decision = "true"
 		}
-		_, _ = s.pool.Exec(ctx, `
+		_, _ = s.db.Exec(ctx, `
 			UPDATE workflow.workflow_step
 			SET status = 'completed', decision = $3, comment = 'Auto-evaluated', completed_at = now()
 			WHERE instance_id = $1::uuid AND step_def_id = $2 AND status = 'in_progress'
@@ -1074,7 +1088,7 @@ func (s *Store) processAutoStep(ctx context.Context, instanceID string, def *ste
 // instanceContextVars loads an instance's context as a string map.
 func (s *Store) instanceContextVars(ctx context.Context, instanceID string) map[string]string {
 	var ctxJSON []byte
-	_ = s.pool.QueryRow(ctx, `
+	_ = s.db.QueryRow(ctx, `
 		SELECT context FROM workflow.workflow_instance WHERE id = $1::uuid
 	`, instanceID).Scan(&ctxJSON)
 	vars := map[string]string{}
@@ -1180,7 +1194,7 @@ func (s *Store) reconcileInstance(ctx context.Context, instanceID string, stepDe
 
 	for range stepDefs { // fixpoint: each pass may unlock another join
 		reachable := s.reachableStepDefIDs(ctx, instanceID, stepDefs)
-		ct, _ := s.pool.Exec(ctx, `
+		ct, _ := s.db.Exec(ctx, `
 			UPDATE workflow.workflow_step
 			SET status = 'skipped', comment = COALESCE(comment, 'Branch not taken')
 			WHERE instance_id = $1::uuid AND status = 'pending'
@@ -1193,7 +1207,7 @@ func (s *Store) reconcileInstance(ctx context.Context, instanceID string, stepDe
 				continue
 			}
 			var status string
-			if err := s.pool.QueryRow(ctx, `
+			if err := s.db.QueryRow(ctx, `
 				SELECT status::text FROM workflow.workflow_step
 				WHERE instance_id = $1::uuid AND step_def_id = $2
 			`, instanceID, def.ID).Scan(&status); err != nil || status != "pending" {
@@ -1205,7 +1219,7 @@ func (s *Store) reconcileInstance(ctx context.Context, instanceID string, stepDe
 			if !s.anyPredecessorCompleted(ctx, instanceID, def.ID, stepDefs) {
 				continue
 			}
-			_, _ = s.pool.Exec(ctx, `
+			_, _ = s.db.Exec(ctx, `
 				UPDATE workflow.workflow_step
 				SET status = 'completed', completed_at = now()
 				WHERE instance_id = $1::uuid AND step_def_id = $2 AND status = 'pending'
@@ -1230,7 +1244,7 @@ func (s *Store) reachableStepDefIDs(ctx context.Context, instanceID string, step
 	}
 
 	type stepRow struct{ status, decision string }
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT step_def_id, status::text, COALESCE(decision,'')
 		FROM workflow.workflow_step WHERE instance_id = $1::uuid
 	`, instanceID)
@@ -1297,7 +1311,7 @@ func (s *Store) anyPredecessorCompleted(ctx context.Context, instanceID, targetD
 			continue
 		}
 		var status string
-		if err := s.pool.QueryRow(ctx, `
+		if err := s.db.QueryRow(ctx, `
 			SELECT status::text FROM workflow.workflow_step
 			WHERE instance_id = $1::uuid AND step_def_id = $2
 		`, instanceID, sd.ID).Scan(&status); err == nil && status == "completed" {
@@ -1321,18 +1335,18 @@ func keysOf(m map[string]bool) []string {
 // automation executions tied to it are updated to reflect the real outcome.
 func (s *Store) closeInstanceIfIdle(ctx context.Context, instanceID, finalStatus string) {
 	var active int
-	_ = s.pool.QueryRow(ctx, `
+	_ = s.db.QueryRow(ctx, `
 		SELECT COUNT(*) FROM workflow.workflow_step
 		WHERE instance_id = $1::uuid AND status = 'in_progress'
 	`, instanceID).Scan(&active)
 	if active > 0 {
 		return
 	}
-	_, _ = s.pool.Exec(ctx, `
+	_, _ = s.db.Exec(ctx, `
 		UPDATE workflow.workflow_step SET status = 'skipped'
 		WHERE instance_id = $1::uuid AND status = 'pending'
 	`, instanceID)
-	_, _ = s.pool.Exec(ctx, `
+	_, _ = s.db.Exec(ctx, `
 		UPDATE workflow.workflow_instance
 		SET status = $2::workflow.workflow_status, completed_at = now()
 		WHERE id = $1::uuid AND status = 'running'
@@ -1341,7 +1355,7 @@ func (s *Store) closeInstanceIfIdle(ctx context.Context, instanceID, finalStatus
 	if finalStatus != "completed" {
 		execStatus = "cancelled"
 	}
-	_, _ = s.pool.Exec(ctx, `
+	_, _ = s.db.Exec(ctx, `
 		UPDATE workflow.execution
 		SET status = $2::workflow.execution_status, completed_at = now()
 		WHERE instance_id = $1::uuid AND status = 'running'
@@ -1366,7 +1380,7 @@ func (s *Store) dispatchStepNotification(ctx context.Context, instanceID string,
 	}
 
 	var appID, startedBy string
-	if err := s.pool.QueryRow(ctx, `
+	if err := s.db.QueryRow(ctx, `
 		SELECT wd.application_id::text, COALESCE(wi.started_by::text, '')
 		FROM workflow.workflow_instance wi
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
@@ -1380,7 +1394,7 @@ func (s *Store) dispatchStepNotification(ctx context.Context, instanceID string,
 		return false
 	}
 
-	notifStore := notification.NewStore(s.pool)
+	notifStore := notification.NewStoreOn(s.db)
 	sent := false
 	for _, userID := range recipients {
 		vars := map[string]string{"subject": cfg.Subject, "message": cfg.Message}
@@ -1418,7 +1432,7 @@ func (s *Store) resolveNotificationRecipients(ctx context.Context, appID, starte
 	// match the role in every workspace of the application's tenant, and an
 	// unscoped holder of it in every tenant — who received this workflow's
 	// name and message.
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT u.id::text
 		FROM identity.user u
 		WHERE `+assignee.SQL("$1::uuid", "jsonb_build_array($2::text)", "u.id"),
@@ -1486,7 +1500,7 @@ func (s *Store) allPredecessorsComplete(ctx context.Context, instanceID, targetD
 			continue
 		}
 		var status string
-		err := s.pool.QueryRow(ctx, `
+		err := s.db.QueryRow(ctx, `
 			SELECT status::text FROM workflow.workflow_step
 			WHERE instance_id = $1::uuid AND step_def_id = $2
 		`, instanceID, sd.ID).Scan(&status)
@@ -1535,7 +1549,7 @@ func (s *Store) GetPendingTasks(ctx context.Context, userID, applicationID strin
 	}
 	query += " ORDER BY ws.due_at ASC NULLS LAST"
 
-	rows, err := s.pool.Query(ctx, query, args...)
+	rows, err := s.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1547,7 +1561,7 @@ func (s *Store) GetPendingTasks(ctx context.Context, userID, applicationID strin
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func (s *Store) listSteps(ctx context.Context, instanceID string) ([]*workflowv1.WorkflowStep, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT id::text, instance_id::text, step_def_id,
 		       status::text, COALESCE(assignee_user_id::text,''),
 		       COALESCE(decision,''), COALESCE(comment,''),
@@ -1565,7 +1579,7 @@ func (s *Store) listSteps(ctx context.Context, instanceID string) ([]*workflowv1
 // GetStepApplicationID returns the application_id for the workflow a step belongs to.
 func (s *Store) GetStepApplicationID(ctx context.Context, stepID string) (string, error) {
 	var applicationID string
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT wd.application_id::text
 		FROM workflow.workflow_step ws
 		JOIN workflow.workflow_instance wi ON wi.id = ws.instance_id
@@ -1784,7 +1798,7 @@ type WorkflowDefFull struct {
 // ListWorkflowDefs lists a revision's workflow defs plus revision-global
 // (NULL revision) ones. An empty revisionID lists every def for the app.
 func (s *Store) ListWorkflowDefs(ctx context.Context, appID, revisionID string) ([]*WorkflowDefSummary, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT id::text, application_id::text, name, COALESCE(description,''),
 		       trigger_event, status, jsonb_array_length(steps),
 		       created_at, updated_at, published_at, archived_at
@@ -1813,7 +1827,7 @@ func (s *Store) ListWorkflowDefs(ctx context.Context, appID, revisionID string) 
 
 func (s *Store) GetWorkflowDefFull(ctx context.Context, defID string) (*WorkflowDefFull, error) {
 	var w WorkflowDefFull
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT id::text, application_id::text, name, COALESCE(description,''),
 		       trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
 		       created_at, updated_at, published_at, archived_at, single_active_instance
@@ -1843,7 +1857,7 @@ func nameTaken(err error) error {
 
 func (s *Store) CreateWorkflowDefFull(ctx context.Context, appID, revisionID, name, description, triggerEvent, userID string) (*WorkflowDefFull, error) {
 	var w WorkflowDefFull
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		INSERT INTO workflow.workflow_def
 		    (application_id, revision_id, name, description, trigger_event, created_by, updated_by)
 		VALUES ($1::uuid, NULLIF($2,'')::uuid, $3, $4, $5, $6::uuid, $6::uuid)
@@ -1863,7 +1877,7 @@ func (s *Store) CreateWorkflowDefFull(ctx context.Context, appID, revisionID, na
 
 func (s *Store) UpdateWorkflowDefFull(ctx context.Context, defID, name, description, triggerEvent, subjectType, userID string, steps, contextSchema, subjectConfig json.RawMessage) (*WorkflowDefFull, error) {
 	var w WorkflowDefFull
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		UPDATE workflow.workflow_def
 		SET name           = $2,
 		    description    = $3,
@@ -1895,7 +1909,7 @@ func (s *Store) UpdateWorkflowDefFull(ctx context.Context, defID, name, descript
 // SetWorkflowDefSingleActiveInstance flips the per-definition dedup choice
 // (see WorkflowDefFull.SingleActiveInstance); archived definitions refuse.
 func (s *Store) SetWorkflowDefSingleActiveInstance(ctx context.Context, defID string, v bool) error {
-	tag, err := s.pool.Exec(ctx, `
+	tag, err := s.db.Exec(ctx, `
 		UPDATE workflow.workflow_def SET single_active_instance = $2, updated_at = now()
 		WHERE id = $1::uuid AND status != 'archived'
 	`, defID, v)
@@ -1910,7 +1924,7 @@ func (s *Store) SetWorkflowDefSingleActiveInstance(ctx context.Context, defID st
 
 func (s *Store) PublishWorkflowDef(ctx context.Context, defID, userID string) (*WorkflowDefFull, error) {
 	var w WorkflowDefFull
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		UPDATE workflow.workflow_def
 		SET status = 'published', published_at = now(), updated_by = $2::uuid, updated_at = now()
 		WHERE id = $1::uuid AND status IN ('draft', 'invalid')
@@ -1945,13 +1959,13 @@ func (s *Store) PublishWorkflowDef(ctx context.Context, defID, userID string) (*
 	// The to_regclass guard only skips when core.model does not exist at
 	// all — minimal test fixtures; every real deployment migrates it.
 	var coreModelExists bool
-	if err := s.pool.QueryRow(ctx, `SELECT to_regclass('core.model') IS NOT NULL`).Scan(&coreModelExists); err != nil {
+	if err := s.db.QueryRow(ctx, `SELECT to_regclass('core.model') IS NOT NULL`).Scan(&coreModelExists); err != nil {
 		return nil, fmt.Errorf("publish re-home precheck: %w", err)
 	}
 	if !coreModelExists {
 		return &w, nil
 	}
-	if _, rhErr := s.pool.Exec(ctx, `
+	if _, rhErr := s.db.Exec(ctx, `
 		WITH target AS (
 			SELECT m.active_revision_id AS active_rev
 			FROM workflow.workflow_def wd
@@ -1984,7 +1998,7 @@ func (s *Store) PublishWorkflowDef(ctx context.Context, defID, userID string) (*
 
 func (s *Store) ArchiveWorkflowDef(ctx context.Context, defID, userID string) (*WorkflowDefFull, error) {
 	var w WorkflowDefFull
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		UPDATE workflow.workflow_def
 		SET status = 'archived', archived_at = now(), updated_by = $2::uuid, updated_at = now()
 		WHERE id = $1::uuid AND status != 'archived'
@@ -2007,7 +2021,7 @@ func (s *Store) ArchiveWorkflowDef(ctx context.Context, defID, userID string) (*
 // and an explicit publish again).
 func (s *Store) RestoreWorkflowDef(ctx context.Context, defID, userID string) (*WorkflowDefFull, error) {
 	var w WorkflowDefFull
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		UPDATE workflow.workflow_def
 		SET status = 'draft', archived_at = NULL, updated_by = $2::uuid, updated_at = now()
 		WHERE id = $1::uuid AND status = 'archived'
@@ -2028,13 +2042,13 @@ func (s *Store) RestoreWorkflowDef(ctx context.Context, defID, userID string) (*
 func (s *Store) DeleteWorkflowDef(ctx context.Context, defID string) error {
 	// Only draft workflows with no instances may be deleted
 	var instanceCount int
-	_ = s.pool.QueryRow(ctx, `
+	_ = s.db.QueryRow(ctx, `
 		SELECT COUNT(*) FROM workflow.workflow_instance WHERE workflow_def_id = $1::uuid
 	`, defID).Scan(&instanceCount)
 	if instanceCount > 0 {
 		return fmt.Errorf("cannot delete workflow with existing instances; archive it instead")
 	}
-	tag, err := s.pool.Exec(ctx, `
+	tag, err := s.db.Exec(ctx, `
 		DELETE FROM workflow.workflow_def WHERE id = $1::uuid AND status = 'draft'
 	`, defID)
 	if err != nil {
@@ -2048,7 +2062,7 @@ func (s *Store) DeleteWorkflowDef(ctx context.Context, defID string) error {
 
 func (s *Store) DuplicateWorkflowDef(ctx context.Context, defID, newName, userID string) (*WorkflowDefFull, error) {
 	var w WorkflowDefFull
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		INSERT INTO workflow.workflow_def
 		    (application_id, revision_id, name, description, trigger_event, subject_type, subject_config, steps, context_schema, created_by, updated_by)
 		SELECT application_id, revision_id, $2, description, trigger_event, subject_type, subject_config, steps, context_schema, $3::uuid, $3::uuid
@@ -2081,7 +2095,7 @@ func (s *Store) GetWorkflowDefUsage(ctx context.Context, defID string) ([]*Workf
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT id::text, name, trigger_type::text, enabled
 		FROM workflow.automation_rule
 		WHERE workflow_def_id = $1::uuid
@@ -2105,7 +2119,7 @@ func (s *Store) GetWorkflowDefUsage(ctx context.Context, defID string) ([]*Workf
 }
 
 func (s *Store) ListWorkflowInstancesByDef(ctx context.Context, defID string, limit int) ([]*Execution, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT id::text, status::text, started_at, completed_at, COALESCE(context, '{}'::jsonb), test_run
 		FROM workflow.workflow_instance
 		WHERE workflow_def_id = $1::uuid
@@ -2242,7 +2256,7 @@ var ErrRuleWorkflowInvalid = errors.New("automation rule's workflow is not a val
 // dashboard-widget and form-field checks use.
 func (s *Store) ValidateRuleWorkflowDef(ctx context.Context, ruleAppID, ruleRevisionID, defID string) error {
 	var defAppID, defRevisionID, status string
-	if err := s.pool.QueryRow(ctx, `
+	if err := s.db.QueryRow(ctx, `
 		SELECT application_id::text, COALESCE(revision_id::text,''), status
 		FROM workflow.workflow_def WHERE id = $1::uuid
 	`, defID).Scan(&defAppID, &defRevisionID, &status); err != nil {
@@ -2305,7 +2319,7 @@ func (s *Store) CreateAutomationRuleScoped(ctx context.Context, appID, revisionI
 
 	var id string
 	var createdAt time.Time
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		INSERT INTO workflow.automation_rule
 		    (application_id, revision_id, name, description, trigger_type, workflow_name,
 		     workflow_def_id, source_form_id, source_grid_id, source_integration_id,
@@ -2358,7 +2372,7 @@ func (s *Store) CreateAutomationRuleScoped(ctx context.Context, appID, revisionI
 // ListAutomationRules lists a revision's rules plus revision-global (NULL
 // revision) ones. An empty revisionID lists every rule for the app.
 func (s *Store) ListAutomationRules(ctx context.Context, appID, revisionID string) ([]*AutomationRule, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT id::text, application_id::text, COALESCE(revision_id::text,''), name, COALESCE(description,''),
 		       trigger_type::text, workflow_name,
 		       COALESCE(workflow_def_id::text,''), COALESCE(source_form_id::text,''), COALESCE(source_grid_id::text,''),
@@ -2428,7 +2442,7 @@ type startContextVarDef struct {
 // "responsible" for per security.raci_rule (pattern "CC_SALES.*" -> "CC_SALES"),
 // scoped to one application. ok=false means the caller has no such grant.
 func (s *Store) resolveRACIResponsible(ctx context.Context, appID, userID string) (code string, ok bool, err error) {
-	err = s.pool.QueryRow(ctx, `
+	err = s.db.QueryRow(ctx, `
 		SELECT resource_pattern FROM security.raci_rule
 		WHERE application_id=$1::uuid AND user_id=$2::uuid AND raci_type='responsible'
 		ORDER BY created_at LIMIT 1
@@ -2454,7 +2468,7 @@ func (s *Store) checkDimMemberAccess(ctx context.Context, userID, dimensionID, c
 		return nil
 	}
 	var memberID string
-	if err := s.pool.QueryRow(ctx,
+	if err := s.db.QueryRow(ctx,
 		`SELECT id::text FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2`,
 		dimensionID, code,
 	).Scan(&memberID); err != nil {
@@ -2545,7 +2559,7 @@ func (s *Store) ResolveStartContext(ctx context.Context, defID, userID string, c
 			continue
 		}
 		var canonical string
-		if err := s.pool.QueryRow(ctx, `
+		if err := s.db.QueryRow(ctx, `
 			SELECT md.name
 			FROM model.metric_def md
 			JOIN core.model m ON m.id = md.model_id
@@ -2602,7 +2616,7 @@ func (s *Store) ResolveStartContext(ctx context.Context, defID, userID string, c
 		// a typo used to start an instance nobody could act on sensibly.
 		if cv.DimensionID != "" {
 			var exists bool
-			if err := s.pool.QueryRow(ctx,
+			if err := s.db.QueryRow(ctx,
 				`SELECT EXISTS (SELECT 1 FROM model.dimension_member WHERE dimension_id = $1::uuid AND code = $2)`,
 				cv.DimensionID, v).Scan(&exists); err != nil {
 				return nil, err
@@ -2618,7 +2632,7 @@ func (s *Store) ResolveStartContext(ctx context.Context, defID, userID string, c
 	}
 
 	if len(dimMemberKeys) > 0 && def.SingleActiveInstance {
-		running, dErr := s.pool.Query(ctx,
+		running, dErr := s.db.Query(ctx,
 			// A developer's test run is a dry run: it must never block a real
 			// start (found live: every form-triggered start failed "already
 			// running" against the developer's test-run instance).
@@ -2670,7 +2684,7 @@ func (s *Store) fireRule(ctx context.Context, rule AutomationRule, triggeredByUs
 		// Name fallback for rules created before workflow_def_id existed.
 		// Scoped to the rule's own revision when it has one, so a rule can't
 		// silently bind to another revision's definition of the same name.
-		if err = s.pool.QueryRow(ctx, `
+		if err = s.db.QueryRow(ctx, `
 			SELECT id::text FROM workflow.workflow_def
 			WHERE application_id = $1::uuid AND name = $2
 			  AND status != 'archived'
@@ -2702,7 +2716,7 @@ func (s *Store) fireRule(ctx context.Context, rule AutomationRule, triggeredByUs
 	// were all auto-processed may already be closed — report its real status.
 	execStatus = "running"
 	var instStatus string
-	if qErr := s.pool.QueryRow(ctx, `
+	if qErr := s.db.QueryRow(ctx, `
 		SELECT status::text, completed_at FROM workflow.workflow_instance WHERE id = $1::uuid
 	`, instance.Id).Scan(&instStatus, &instCompletedAt); qErr == nil && instStatus != "running" {
 		execStatus = "completed"
@@ -2720,7 +2734,7 @@ func (s *Store) fireRule(ctx context.Context, rule AutomationRule, triggeredByUs
 // instance, and records the execution.
 func (s *Store) TriggerRule(ctx context.Context, ruleID, triggeredByUserID string, payload map[string]string) (*Execution, error) {
 	var rule AutomationRule
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT id::text, application_id::text, COALESCE(revision_id::text,''), name, workflow_name,
 		       COALESCE(workflow_def_id::text,''), enabled
 		FROM workflow.automation_rule WHERE id = $1::uuid
@@ -2733,7 +2747,7 @@ func (s *Store) TriggerRule(ctx context.Context, ruleID, triggeredByUserID strin
 	// Every failed fire leaves an execution row — otherwise event-dispatched
 	// rules (fire-and-forget) fail with no trace anywhere.
 	recordFailure := func(fireErr error) {
-		_, _ = s.pool.Exec(ctx, `
+		_, _ = s.db.Exec(ctx, `
 			INSERT INTO workflow.execution
 			    (rule_id, application_id, status, trigger_payload, error, completed_at)
 			VALUES ($1::uuid, $2::uuid, 'failed', $3, $4, now())
@@ -2755,7 +2769,7 @@ func (s *Store) TriggerRule(ctx context.Context, ruleID, triggeredByUserID strin
 
 	var execID string
 	var startedAt time.Time
-	err = s.pool.QueryRow(ctx, `
+	err = s.db.QueryRow(ctx, `
 		INSERT INTO workflow.execution
 		    (rule_id, application_id, status, trigger_payload, instance_id, completed_at)
 		VALUES ($1::uuid, $2::uuid, $3::workflow.execution_status, $4, $5::uuid, $6)
@@ -2792,14 +2806,14 @@ func (s *Store) notifyStartFailure(ctx context.Context, userID, ruleID, ruleName
 		return
 	}
 	var sub string
-	if err := s.pool.QueryRow(ctx, `SELECT COALESCE(keycloak_sub,'') FROM identity."user" WHERE id = $1::uuid`, userID).Scan(&sub); err != nil || sub == "system-scheduler" {
+	if err := s.db.QueryRow(ctx, `SELECT COALESCE(keycloak_sub,'') FROM identity."user" WHERE id = $1::uuid`, userID).Scan(&sub); err != nil || sub == "system-scheduler" {
 		return
 	}
 	vars := map[string]string{
 		"subject": "Workflow could not start",
 		"message": fmt.Sprintf("%s: %s", ruleName, fireErr.Error()),
 	}
-	_, _ = notification.NewStore(s.pool).Notify(ctx, userID, "workflow_step_notification", vars, "automation_rule", ruleID)
+	_, _ = notification.NewStoreOn(s.db).Notify(ctx, userID, "workflow_step_notification", vars, "automation_rule", ruleID)
 }
 
 var ErrAlreadyClaimed = errors.New("scheduled tick already claimed by another worker")
@@ -2829,7 +2843,7 @@ func (s *Store) TriggerScheduledRule(ctx context.Context, rule AutomationRule, s
 
 	var execID string
 	var startedAt time.Time
-	err = s.pool.QueryRow(ctx, `
+	err = s.db.QueryRow(ctx, `
 		INSERT INTO workflow.execution
 		    (rule_id, application_id, status, trigger_payload, scheduled_for, claimed_by)
 		VALUES ($1::uuid, $2::uuid, 'running', $3, $4, $5)
@@ -2859,14 +2873,14 @@ func (s *Store) TriggerScheduledRule(ctx context.Context, rule AutomationRule, s
 	}
 
 	if fireErr != nil {
-		_, _ = s.pool.Exec(ctx, `
+		_, _ = s.db.Exec(ctx, `
 			UPDATE workflow.execution SET status='failed', error=$2, completed_at=now()
 			WHERE id = $1::uuid
 		`, execID, fireErr.Error())
 		return nil, fireErr
 	}
 
-	if _, err := s.pool.Exec(ctx, `
+	if _, err := s.db.Exec(ctx, `
 		UPDATE workflow.execution
 		SET status = $2::workflow.execution_status, instance_id = $3::uuid, completed_at = $4
 		WHERE id = $1::uuid
@@ -2915,7 +2929,7 @@ func (s *Store) DispatchEventRules(ctx context.Context, appID, revisionID, trigg
 
 	// A rule scoped to a specific form/grid fires only when the event names
 	// that source; an event with no source matches only unscoped rules.
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT id::text FROM workflow.automation_rule
 		WHERE application_id = $1::uuid
 		  AND trigger_type = $2::workflow.trigger_type
@@ -2961,7 +2975,7 @@ func (s *Store) DispatchEventRules(ctx context.Context, appID, revisionID, trigg
 // runtime-schema access; failures leave the payload unenriched.
 func (s *Store) enrichFormPayload(ctx context.Context, payload map[string]string) map[string]string {
 	var dataJSON []byte
-	if err := s.pool.QueryRow(ctx, `
+	if err := s.db.QueryRow(ctx, `
 		SELECT data FROM runtime.form_record WHERE id = $1::uuid
 	`, payload["record_id"]).Scan(&dataJSON); err != nil {
 		return payload
@@ -2987,8 +3001,8 @@ func (s *Store) enrichFormPayload(ctx context.Context, payload map[string]string
 // widgets (automation_button) referencing it — ref_id has no FK, and a
 // dangling button fired a 404 on click (SYNC-01 cascade policy).
 func (s *Store) DeleteAutomationRule(ctx context.Context, ruleID string) error {
-	_, _ = s.pool.Exec(ctx, `DELETE FROM model.dashboard_widget WHERE ref_id = $1`, ruleID)
-	_, err := s.pool.Exec(ctx, `DELETE FROM workflow.automation_rule WHERE id = $1::uuid`, ruleID)
+	_, _ = s.db.Exec(ctx, `DELETE FROM model.dashboard_widget WHERE ref_id = $1`, ruleID)
+	_, err := s.db.Exec(ctx, `DELETE FROM workflow.automation_rule WHERE id = $1::uuid`, ruleID)
 	return err
 }
 
@@ -3006,7 +3020,7 @@ func (s *Store) UpdateAutomationRuleScoped(ctx context.Context, ruleID, name, de
 	// accepted any workflow_def_id at all, including another application's.
 	if workflowDefID != "" {
 		var ruleAppID, ruleRevisionID string
-		if err := s.pool.QueryRow(ctx, `
+		if err := s.db.QueryRow(ctx, `
 			SELECT application_id::text, COALESCE(revision_id::text,'')
 			FROM workflow.automation_rule WHERE id = $1::uuid
 		`, ruleID).Scan(&ruleAppID, &ruleRevisionID); err != nil {
@@ -3045,7 +3059,7 @@ func (s *Store) UpdateAutomationRuleScoped(ctx context.Context, ruleID, name, de
 	}
 
 	var r AutomationRule
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		UPDATE workflow.automation_rule
 		SET name           = COALESCE(NULLIF($2, ''), name),
 		    description    = COALESCE(NULLIF($3, ''), description),
@@ -3083,7 +3097,7 @@ func (s *Store) UpdateAutomationRuleScoped(ctx context.Context, ruleID, name, de
 }
 
 func (s *Store) ListExecutions(ctx context.Context, appID string, limit int) ([]*Execution, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT id::text, COALESCE(rule_id::text,''), application_id::text,
 		       status::text, trigger_payload,
 		       COALESCE(instance_id::text,''), COALESCE(error,''),

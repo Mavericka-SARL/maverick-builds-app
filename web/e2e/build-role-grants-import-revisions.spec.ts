@@ -172,7 +172,8 @@ test("the import wizard's targets, saved integrations and new integration are th
   // "Save as integration" creates it in the working revision.
   await page.getByLabel("Grid", { exact: true }).selectOption({ label: "Sales Plan Grid" });
   await page.locator('input[type="file"]').setInputFiles({ name: "sales.csv", mimeType: "text/csv", buffer: Buffer.from("Channel,Value\nWeb,10\n") });
-  await page.getByRole("button", { name: "Next: Map Columns" }).click();
+  await page.getByRole("button", { name: "Next: Shape" }).click();
+  await page.getByRole("button", { name: "Next: Map Columns (no shaping)" }).click();
   await page.getByRole("button", { name: "Save as Integration" }).click();
   await page.getByPlaceholder("Integration name (e.g. Import OPEX Data)").fill("Sales CSV");
   await page.getByRole("button", { name: "Save", exact: true }).click();

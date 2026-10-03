@@ -9,8 +9,11 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -239,5 +242,137 @@ func TestRejectionStopsAfterThreeTries(t *testing.T) {
 	}
 	if r := c.rejection(maxProposalRejections); !strings.Contains(r, "Do not propose again in this turn") {
 		t.Errorf("last rejection: %s", r)
+	}
+}
+
+// Workflows, forms, automation rules and file imports are checked too: their
+// stores run on the check's transaction, so a mistake in them comes back to
+// the assistant like any other — and the check leaves nothing behind.
+func TestThePlanCheckCoversWorkflowsFormsAndFileImports(t *testing.T) {
+	propose := func(steps ...map[string]any) providers.ChatResponse {
+		b, _ := json.Marshal(map[string]any{"steps": steps})
+		return providers.ChatResponse{FinishReason: "tool_calls", Message: providers.Message{Role: "assistant",
+			ToolCalls: []providers.ToolCall{{ID: "call_propose", Name: "propose_actions", Arguments: b}}}}
+	}
+	form := proposeStep("create_form_def", "Create form 'cost_request'", map[string]any{
+		"name": "cost_request", "label": "Cost request",
+		"fields": []map[string]any{{"name": "amount", "label": "Amount", "type": "number", "required": true}},
+	})
+	workflow := proposeStep("create_workflow_def", "Create workflow 'Cost Approval'", map[string]any{
+		"name": "Cost Approval", "description": "Approve costs", "trigger_event": "manual",
+	})
+	rule := func(workflowName string) map[string]any {
+		return proposeStep("create_automation_rule", "Start '"+workflowName+"' by hand", map[string]any{
+			"name": "Submit cost", "trigger_type": "manual", "workflow_name": workflowName,
+		})
+	}
+	grid := func(step int) []map[string]any {
+		ref := fmt.Sprintf("<created in step %d>", step)
+		return []map[string]any{
+			proposeStep("create_grid", "Create grid 'Costs'", map[string]any{"name": "Costs"}),
+			proposeStep("add_grid_dimension", "Cost Center on Costs", map[string]any{"grid_id": ref, "dimension_id": "Cost Center"}),
+			proposeStep("add_grid_metric", "amount on Costs", map[string]any{"grid_id": ref, "metric_id": "amount"}),
+		}
+	}
+	importStep := proposeStep("import_file_data", "Import costs.csv", map[string]any{
+		"file": "costs.csv", "target_type": "grid", "target_id": "Costs", "column_map": map[string]string{"Cost Center": "Cost Center"},
+	})
+	addS200 := proposeStep("add_dimension_member", "Add S200", map[string]any{"dimension_id": "Cost Center", "code": "S200", "label": "Support"})
+	reply := providers.ChatResponse{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: "ok"}}
+	fake := &multiScriptProvider{resps: []providers.ChatResponse{
+		// 1. A rule naming a workflow that does not exist.
+		propose(form, workflow, rule("Expense Review")),
+		propose(form, workflow, rule("Cost Approval")),
+		// 2. A file naming a member the plan does not add, then one it does.
+		propose(append(grid(1), importStep)...),
+		propose(append(append([]map[string]any{addS200}, grid(2)...), importStep)...),
+		reply,
+	}}
+	f := newPlanFixture(t, fake)
+	sess := f.session(t)
+	rejections := func() []string {
+		msgs, _ := f.chat.ListMessages(f.ctx, sess.ID)
+		var out []string
+		for _, m := range msgs {
+			if m.Role == "tool" && strings.HasPrefix(m.Content, "Proposal NOT shown") {
+				out = append(out, m.Content)
+			}
+		}
+		return out
+	}
+	nothingLeft := func(when string) {
+		t.Helper()
+		for table, n := range map[string]int{
+			"form defs":        f.count(`SELECT count(*) FROM model.form_def`),
+			"workflow defs":    f.count(`SELECT count(*) FROM workflow.workflow_def`),
+			"automation rules": f.count(`SELECT count(*) FROM workflow.automation_rule`),
+			"grids":            f.count(`SELECT count(*) FROM model.grid_def`),
+			"S200 members":     f.count(`SELECT count(*) FROM model.dimension_member WHERE code='S200'`),
+		} {
+			if n != 0 {
+				t.Errorf("%s: the check left %d %s behind", when, n, table)
+			}
+		}
+	}
+	confirmPending := func() {
+		t.Helper()
+		pending, err := f.proposals.ListPendingProposals(f.ctx, sess.ID)
+		if err != nil || len(pending) != 1 {
+			t.Fatalf("pending proposals: %v %+v", err, pending)
+		}
+		if status, body := f.post(t, "/api/ai/sessions/"+sess.ID+"/proposals/"+pending[0].ID+"/confirm", nil); status != http.StatusOK {
+			t.Fatalf("confirm: %d %s", status, body)
+		}
+		if p, _ := f.proposals.GetProposal(f.ctx, pending[0].ID); p.Status != "executed" {
+			t.Fatalf("confirmed plan %s: %+v", p.Status, p.Steps)
+		}
+	}
+
+	if status, body := f.post(t, "/api/ai/sessions/"+sess.ID+"/messages", map[string]string{"content": "a cost approval workflow"}); status != http.StatusOK {
+		t.Fatalf("message: %d %s", status, body)
+	}
+	if r := rejections(); len(r) != 1 || !strings.Contains(r[0], "step 3 (create_automation_rule") || strings.Contains(r[0], "step 1") || strings.Contains(r[0], "could not be checked") {
+		t.Fatalf("the check's answers: %q", r)
+	}
+	nothingLeft("after the workflow plan was checked")
+	confirmPending()
+
+	// The attachment for the grid import.
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, _ := mw.CreateFormFile("file", "costs.csv")
+	_, _ = fw.Write([]byte("Cost Center,amount\nS100,5\nS200,7\n"))
+	_ = mw.Close()
+	req, _ := http.NewRequestWithContext(f.ctx, "POST", f.srv.URL+"/api/ai/sessions/"+sess.ID+"/documents", &body)
+	req.Header.Set("X-Dev-User", f.devSub)
+	req.Header.Set("X-App-Id", f.appID)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("attach: status %d", resp.StatusCode)
+	}
+	draft, _ := f.chat.GetSession(f.ctx, sess.ID)
+	gridsBefore := f.count(`SELECT count(*) FROM model.grid_def WHERE revision_id=$1::uuid`, draft.DraftRevisionID)
+
+	if status, body := f.post(t, "/api/ai/sessions/"+sess.ID+"/messages", map[string]string{"content": "import the costs"}); status != http.StatusOK {
+		t.Fatalf("message: %d %s", status, body)
+	}
+	r := rejections()
+	if len(r) != 2 || !strings.Contains(r[1], "step 4 (import_file_data") || !strings.Contains(r[1], "S200") {
+		t.Fatalf("the import check's answer: %q", r)
+	}
+	if n := f.count(`SELECT count(*) FROM model.grid_def WHERE revision_id=$1::uuid`, draft.DraftRevisionID); n != gridsBefore {
+		t.Fatalf("the check left a grid behind")
+	}
+	if n := f.count(`SELECT count(*) FROM model.dimension_member WHERE code='S200'`); n != 0 {
+		t.Fatal("the check left S200 behind")
+	}
+	confirmPending() // the plan that adds S200 first
+	if n := f.count(`SELECT count(*) FROM runtime.fact_input WHERE revision_id=$1::uuid`, draft.DraftRevisionID); n != 2 {
+		t.Fatalf("imported %d value(s), want 2", n)
 	}
 }

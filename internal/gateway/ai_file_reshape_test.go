@@ -212,3 +212,42 @@ func TestAIDeveloperReshapesAPeopleShapedWorkbook(t *testing.T) {
 		t.Errorf("UK Q2 revenue after the run = %v, want 8000 (%s)", v, out)
 	}
 }
+
+// The Import Wizard's Shape step previews a reshape by the server's code —
+// what a developer sets up there is what every run applies.
+func TestImportReshapePreview(t *testing.T) {
+	f := newSalesFileFixture(t)
+	_, do := f.serve(t, &multiScriptProvider{})
+	csv := "Plan FY26\nCountry;Q1;Q2\nCanada;1.234,5;(2)\nTotal;1;1\n"
+	reshape := map[string]any{
+		"delimiter": ";", "header_row": 2, "decimal_comma": true,
+		"skip_rows": []map[string]any{{"column": "Country", "equals": "Total"}},
+		"unpivot":   map[string]any{"from": "Q1", "to": "Q2", "name_column": "period", "value_column": "revenue"},
+	}
+	status, body := do(f.devSub, "POST", "/api/import/reshape-preview", map[string]any{"csv": csv, "reshape": reshape})
+	var out struct {
+		Raw      [][]string `json:"raw"`
+		Header   []string   `json:"header"`
+		Rows     [][]string `json:"rows"`
+		RowCount int        `json:"row_count"`
+	}
+	if status != http.StatusOK || json.Unmarshal(body, &out) != nil {
+		t.Fatalf("preview: %d %s", status, body)
+	}
+	if strings.Join(out.Header, ",") != "Country,period,revenue" || out.RowCount != 2 ||
+		strings.Join(out.Rows[0], ",") != "Canada,Q1,1234.5" || strings.Join(out.Rows[1], ",") != "Canada,Q2,-2" || len(out.Raw) != 4 {
+		t.Fatalf("preview = %+v", out)
+	}
+
+	// A reshape naming a column the file lacks: the sheet as read comes back
+	// with the error, to correct it by.
+	reshape["fill_down"] = []string{"Region"}
+	status, body = do(f.devSub, "POST", "/api/import/reshape-preview", map[string]any{"csv": csv, "reshape": reshape})
+	if status != http.StatusUnprocessableEntity || !strings.Contains(string(body), `names column \"Region\"`) || !strings.Contains(string(body), "Plan FY26") {
+		t.Fatalf("bad reshape: %d %s", status, body)
+	}
+	// A developer's tool, as the Import Wizard is.
+	if status, _ := do(f.bizSub, "POST", "/api/import/reshape-preview", map[string]any{"csv": csv}); status != http.StatusForbidden {
+		t.Fatalf("a business user previewing a reshape: %d, want 403", status)
+	}
+}

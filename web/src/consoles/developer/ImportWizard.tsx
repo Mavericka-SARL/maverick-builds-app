@@ -5,6 +5,7 @@ import { FileSpreadsheet, FileText, FolderOpen, ArrowLeft, ArrowRight, History, 
 import { Button, IconButton, TextInput, Select, Field, StatusBadge, Stepper, InlineAlert, FilterChip, useConfirm, type DesignTone } from "../../ui";
 import { GoogleServiceAccountPanel } from "./GoogleServiceAccountPanel";
 import { fileToBase64 } from "../business/blobUtils";
+import { ShapeStep, type Shaped, type ShapeSource } from "./ShapeStep";
 import {
   api,
   type IntegrationDef,
@@ -16,11 +17,13 @@ import {
   type DevRevision,
   type FileReshape,
   describeReshape,
+  cleanReshape,
+  isEmptyReshape,
 } from "../../api/client";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type WizardStep = "upload" | "map" | "validate" | "commit";
+type WizardStep = "upload" | "shape" | "map" | "validate" | "commit";
 type TargetType = "grid" | "form" | "dimension";
 type MappingStatus = "auto" | "manual" | "ignored";
 
@@ -31,6 +34,8 @@ interface ParsedFile {
   activeSheet: string;
   headers: string[];
   rows: string[][];
+  // The file as it came, for the Shape step's server preview.
+  source?: ShapeSource;
 }
 
 interface FieldOption {
@@ -65,6 +70,9 @@ interface WizardConfig {
   integrationName?: string;
   // Resuming a saved DRAFT integration: finishing the wizard activates it.
   draftId?: string;
+  // Editing a saved integration's shape and mapping on a sample file:
+  // "Save changes" writes them back; nothing need be imported.
+  editIntegration?: IntegrationDef;
   // The draft's saved reshape, written back when the wizard finishes it (the
   // config is replaced whole, and the wizard has no editor for it).
   reshape?: FileReshape;
@@ -114,11 +122,12 @@ async function parseFile(file: File, sheet?: string): Promise<ParsedFile> {
     const data = ws ? XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: "" }) : [];
     const headers = data.length ? (data[0] as unknown[]).map(v => String(v ?? "").trim()) : [];
     const rows = data.slice(1).map(r => (r as unknown[]).map(v => String(v ?? "").trim()));
-    return { name: file.name, ext: "xlsx", sheets: wb.SheetNames, activeSheet, headers, rows };
+    return { name: file.name, ext: "xlsx", sheets: wb.SheetNames, activeSheet, headers, rows,
+      source: { xlsx_base64: await fileToBase64(file), sheet: activeSheet } };
   } else {
     const text = await file.text();
     const { headers, rows } = parseCSVText(text);
-    return { name: file.name, ext: "csv", sheets: [], activeSheet: "", headers, rows };
+    return { name: file.name, ext: "csv", sheets: [], activeSheet: "", headers, rows, source: { csv: text } };
   }
 }
 
@@ -299,6 +308,7 @@ function runValidation(
 
 const STEPS: { id: WizardStep; label: string }[] = [
   { id: "upload", label: "Upload" },
+  { id: "shape", label: "Shape" },
   { id: "map", label: "Map Columns" },
   { id: "validate", label: "Validate" },
   { id: "commit", label: "Commit" },
@@ -358,7 +368,7 @@ function UploadStep({
     try {
       const res = await api.fetchSheetPreview(url);
       const { headers, rows } = parseCSVText(res.csv);
-      setParsedFile({ name: "Google Sheet", ext: "csv", sheets: [], activeSheet: "", headers, rows });
+      setParsedFile({ name: "Google Sheet", ext: "csv", sheets: [], activeSheet: "", headers, rows, source: { csv: res.csv } });
       onConfigChange({ ...config, sheetUrl: url });
     } catch (e) {
       setParsedFile(null);
@@ -606,7 +616,7 @@ function UploadStep({
             }
             onNext(parsedFile);
           }}>
-          Next: Map Columns
+          Next: Shape
         </Button>
       </div>
     </div>
@@ -625,6 +635,9 @@ function MapColumnsStep({
   onSaveAsIntegration,
   savedIntegrationName,
   allowProperties,
+  editingName,
+  onSaveChanges,
+  savingChanges,
 }: {
   parsedFile: ParsedFile;
   fieldOptions: FieldOption[];
@@ -637,6 +650,10 @@ function MapColumnsStep({
   // Dimension targets may map a column into an arbitrary member property
   // (dimension_member.properties JSONB) via a typed-in property name.
   allowProperties?: boolean;
+  // Editing a saved integration: its shape and mapping are saved back.
+  editingName?: string;
+  onSaveChanges?: () => void;
+  savingChanges?: boolean;
 }) {
   const [saveName, setSaveName] = useState(savedIntegrationName ?? "");
   const [showSave, setShowSave] = useState(false);
@@ -765,9 +782,16 @@ function MapColumnsStep({
         </table>
       </div>
 
-      {/* Save as integration */}
+      {/* Save as integration — or, editing one, save its changes */}
       <div className="mvx-panel" style={{ marginBottom: 20, padding: "12px 16px", background: "var(--color-surface-subtle)" }}>
-        {showSave ? (
+        {onSaveChanges ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span className="mvx-admin-muted" style={{ fontSize: 13 }}>Save this shape and mapping to <b>{editingName}</b>; its next runs use them</span>
+            <Button size="sm" variant="primary" loading={savingChanges} loadingLabel="Saving…" disabled={!requiredMapped} onClick={onSaveChanges}>
+              Save changes
+            </Button>
+          </div>
+        ) : showSave ? (
           <div className="mvx-admin-inline-form" style={{ flexWrap: "nowrap" }}>
             <TextInput
               value={saveName}
@@ -965,8 +989,9 @@ function CommitStep({
             target_id: config.targetId,
             status: "active",
           });
+          const shaped = cleanReshape(config.reshape ?? {});
           await api.updateIntegrationConfig(config.draftId, {
-            ...(config.reshape ? { reshape: config.reshape } : {}),
+            ...(isEmptyReshape(shaped) ? {} : { reshape: shaped }),
             column_map: Object.fromEntries(mappings.filter(m => m.targetField).map(m => [m.sourceCol, m.targetField])),
             ...(config.source === "google_sheets" ? { sheet_url: config.sheetUrl, import_mode: config.importMode } : {}),
           });
@@ -1153,6 +1178,7 @@ function ImportWizard({
     ...(workingRevisionId ? { revisionId: workingRevisionId } : {}),
     ...initialConfig,
   });
+  const [sourceFile, setSourceFile] = useState<ParsedFile | null>(null);
   const [parsedFile, setParsedFile] = useState<ParsedFile | null>(null);
   const [mappings, setMappings] = useState<ColMapping[]>([]);
   const [errors, setErrors] = useState<ValError[]>([]);
@@ -1202,11 +1228,39 @@ function ImportWizard({
     .map(f => f.value);
 
   const handleFileReady = (pf: ParsedFile) => {
+    setSourceFile(pf);
+    setStep("shape");
+  };
+
+  // The Shape step's result is the file the rest of the wizard maps: its
+  // columns are the shaped ones, which a saved column map names.
+  const handleShaped = (shaped: Shaped) => {
+    if (!sourceFile) return;
+    const pf = { ...sourceFile, headers: shaped.headers, rows: shaped.rows };
     setParsedFile(pf);
     const opts = getFieldOptions(config, grids as GridDef[], forms as FormDef[], dims as DevDimension[], knownProps);
-    setMappings(autoMap(pf.headers, opts));
+    const saved = config.editIntegration?.config.column_map ?? {};
+    setMappings(autoMap(pf.headers, opts).map(m => saved[m.sourceCol] !== undefined
+      ? { ...m, targetField: saved[m.sourceCol] === "ignore" ? "" : saved[m.sourceCol], status: saved[m.sourceCol] === "ignore" ? "ignored" : "manual" }
+      : m));
     setStep("map");
   };
+  const savedReshape = () => {
+    const r = cleanReshape(config.reshape ?? {});
+    return isEmptyReshape(r) ? {} : { reshape: r };
+  };
+  const columnMap = () => Object.fromEntries(mappings.filter(m => m.targetField).map(m => [m.sourceCol, m.targetField]));
+
+  // Edit mode: the integration's other settings stay as they are.
+  const saveChanges = useMutation({
+    mutationFn: async () => {
+      const it = config.editIntegration!;
+      const { reshape: _old, column_map: _oldMap, ...rest } = it.config;
+      void _old; void _oldMap;
+      await api.updateIntegrationConfig(it.id, { ...rest, ...savedReshape(), column_map: columnMap() });
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["dev-integrations"] }); onClose(); },
+  });
 
   const handleMappingDone = () => {
     if (!parsedFile) return;
@@ -1230,7 +1284,8 @@ function ImportWizard({
         status: asDraft ? "draft" : "active",
       }, workingRevisionId).then(res =>
         api.updateIntegrationConfig(res.id, {
-          column_map: Object.fromEntries(mappings.filter(m => m.targetField).map(m => [m.sourceCol, m.targetField])),
+          ...savedReshape(),
+          column_map: columnMap(),
           // A google_sheets integration stores its source and mode so a run
           // needs no input at all — the server re-fetches the sheet.
           ...(config.source === "google_sheets"
@@ -1264,6 +1319,19 @@ function ImportWizard({
         />
       )}
 
+      {step === "shape" && sourceFile && (
+        <ShapeStep
+          fileName={sourceFile.name}
+          source={sourceFile.source ?? {}}
+          asRead={{ headers: sourceFile.headers, rows: sourceFile.rows }}
+          isCsv={sourceFile.ext === "csv"}
+          reshape={config.reshape ?? {}}
+          onReshapeChange={reshape => setConfig(c => ({ ...c, reshape }))}
+          onNext={handleShaped}
+          onBack={() => setStep("upload")}
+        />
+      )}
+
       {step === "map" && parsedFile && (
         <MapColumnsStep
           parsedFile={parsedFile}
@@ -1271,7 +1339,10 @@ function ImportWizard({
           mappings={mappings}
           onMappingChange={setMappings}
           onNext={handleMappingDone}
-          onBack={() => setStep("upload")}
+          onBack={() => setStep("shape")}
+          editingName={config.editIntegration?.name}
+          onSaveChanges={config.editIntegration ? () => saveChanges.mutate() : undefined}
+          savingChanges={saveChanges.isPending}
           onSaveAsIntegration={(name, asDraft) => saveAsIntegration.mutate({ name, asDraft })}
           savedIntegrationName={config.integrationName}
           allowProperties={config.targetType === "dimension"}
@@ -1438,7 +1509,7 @@ function SavedIntegrationsList({
                   </span>
                 )}
                 {d.config?.reshape && describeReshape(d.config.reshape) && (
-                  <span className="mvx-admin-muted" style={{ fontSize: 11 }} data-testid={`integration-reshape-${d.id}`} title="Set up by the AI Developer; it applies on every run">
+                  <span className="mvx-admin-muted" style={{ fontSize: 11 }} data-testid={`integration-reshape-${d.id}`} title="Applies to every run; change it with Edit shape and mapping">
                     Reshapes each file: {describeReshape(d.config.reshape)}
                   </span>
                 )}
@@ -1459,8 +1530,6 @@ function SavedIntegrationsList({
                 >
                   Continue draft
                 </Button>
-              ) : d.config?.reshape ? (
-                <RunReshapedIntegration integration={d} />
               ) : d.type === "google_sheets" ? (
                 <Button
                   size="sm"
@@ -1471,6 +1540,8 @@ function SavedIntegrationsList({
                 >
                   Sync Now
                 </Button>
+              ) : d.config?.reshape ? (
+                <RunReshapedIntegration integration={d} />
               ) : (
                 <Button
                   size="sm"
@@ -1478,6 +1549,23 @@ function SavedIntegrationsList({
                   onClick={() => onRun({ integrationId: d.id, integrationName: d.name, targetType: d.target_type as TargetType, targetId: d.target_id })}
                 >
                   Run Import
+                </Button>
+              )}
+              {d.status !== "draft" && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => onRun({
+                    editIntegration: d,
+                    integrationName: d.name,
+                    targetType: d.target_type as TargetType,
+                    targetId: d.target_id,
+                    ...(d.config?.reshape ? { reshape: d.config.reshape } : {}),
+                    ...(d.type === "google_sheets" ? { source: "google_sheets" as const, sheetUrl: d.config?.sheet_url } : {}),
+                  })}
+                  aria-label={`Edit shape and mapping of ${d.name}`}
+                >
+                  Edit shape and mapping
                 </Button>
               )}
               <IconButton

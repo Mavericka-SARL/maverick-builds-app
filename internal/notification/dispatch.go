@@ -245,7 +245,7 @@ type webhookPayload struct {
 // when there is none.
 func (s *Store) brandTenantOf(ctx context.Context, userID string) string {
 	var cid string
-	_ = s.pool.QueryRow(ctx, `
+	_ = s.db.QueryRow(ctx, `
 		SELECT COALESCE(u.customer_id::text, (
 		    SELECT w.customer_id::text FROM identity.role_assignment ra JOIN core.workspace w ON w.id = ra.workspace_id
 		    WHERE ra.user_id = u.id ORDER BY ra.assigned_at LIMIT 1), '')
@@ -425,7 +425,7 @@ func (d *Dispatcher) postWebhook(ctx context.Context, settings Settings, m Messa
 // are separate: a crash after claiming costs a delay, never a duplicate
 // storm.
 func (s *Store) claimOutbound(ctx context.Context, limit int) ([]Message, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		WITH due AS (
 		    SELECT id FROM notification.notification
 		    WHERE status = 'pending' AND channel <> 'in_app' AND next_attempt_at <= now()
@@ -464,7 +464,7 @@ func (s *Store) claimOutbound(ctx context.Context, limit int) ([]Message, error)
 }
 
 func (s *Store) recordDelivered(ctx context.Context, id string) error {
-	_, err := s.pool.Exec(ctx, `
+	_, err := s.db.Exec(ctx, `
 		UPDATE notification.notification
 		SET status = 'delivered', delivered_at = now(), last_error = ''
 		WHERE id = $1::uuid`, id)
@@ -475,17 +475,17 @@ func (s *Store) recordDelivered(ctx context.Context, id string) error {
 // reached, keeping the reason on the row either way.
 func (s *Store) recordFailure(ctx context.Context, id, reason string) error {
 	var attempts int
-	if err := s.pool.QueryRow(ctx,
+	if err := s.db.QueryRow(ctx,
 		`SELECT attempts FROM notification.notification WHERE id = $1::uuid`, id).Scan(&attempts); err != nil {
 		return err
 	}
 	if attempts >= MaxAttempts {
-		_, err := s.pool.Exec(ctx, `
+		_, err := s.db.Exec(ctx, `
 			UPDATE notification.notification SET status = 'failed', last_error = $2
 			WHERE id = $1::uuid`, id, reason)
 		return err
 	}
-	_, err := s.pool.Exec(ctx, `
+	_, err := s.db.Exec(ctx, `
 		UPDATE notification.notification SET last_error = $2, next_attempt_at = now() + $3::interval
 		WHERE id = $1::uuid`, id, reason, backoff(attempts).String())
 	return err

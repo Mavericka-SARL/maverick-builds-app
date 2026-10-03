@@ -8509,6 +8509,7 @@ func (*Error) listUserAccessRulesRes()         {}
 func (*Error) listWorkflowRolesRes()           {}
 func (*Error) listWorkflowTriggerEventsRes()   {}
 func (*Error) previewExportIntegrationRes()    {}
+func (*Error) previewImportReshapeRes()        {}
 func (*Error) removeAdminUserRoleRes()         {}
 func (*Error) removeGridDimensionRes()         {}
 func (*Error) renameAiSessionRes()             {}
@@ -18182,6 +18183,52 @@ func (o OptPreferencesTheme) Or(d PreferencesTheme) PreferencesTheme {
 	return d
 }
 
+// NewOptPreviewImportReshapeReqReshape returns new OptPreviewImportReshapeReqReshape with value set to v.
+func NewOptPreviewImportReshapeReqReshape(v PreviewImportReshapeReqReshape) OptPreviewImportReshapeReqReshape {
+	return OptPreviewImportReshapeReqReshape{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptPreviewImportReshapeReqReshape is optional PreviewImportReshapeReqReshape.
+type OptPreviewImportReshapeReqReshape struct {
+	Value PreviewImportReshapeReqReshape
+	Set   bool
+}
+
+// IsSet returns true if OptPreviewImportReshapeReqReshape was set.
+func (o OptPreviewImportReshapeReqReshape) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptPreviewImportReshapeReqReshape) Reset() {
+	var v PreviewImportReshapeReqReshape
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptPreviewImportReshapeReqReshape) SetTo(v PreviewImportReshapeReqReshape) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptPreviewImportReshapeReqReshape) Get() (v PreviewImportReshapeReqReshape, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptPreviewImportReshapeReqReshape) Or(d PreviewImportReshapeReqReshape) PreviewImportReshapeReqReshape {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptProtoTimestamp returns new OptProtoTimestamp with value set to v.
 func NewOptProtoTimestamp(v ProtoTimestamp) OptProtoTimestamp {
 	return OptProtoTimestamp{
@@ -20190,6 +20237,166 @@ func (s *PreviewFormMappingOKItem) init() PreviewFormMappingOKItem {
 	}
 	return m
 }
+
+type PreviewImportReshapeOK struct {
+	Sheets   []string   `json:"sheets"`
+	Raw      [][]string `json:"raw"`
+	Header   []string   `json:"header"`
+	Rows     [][]string `json:"rows"`
+	RowCount OptInt     `json:"row_count"`
+}
+
+// GetSheets returns the value of Sheets.
+func (s *PreviewImportReshapeOK) GetSheets() []string {
+	return s.Sheets
+}
+
+// GetRaw returns the value of Raw.
+func (s *PreviewImportReshapeOK) GetRaw() [][]string {
+	return s.Raw
+}
+
+// GetHeader returns the value of Header.
+func (s *PreviewImportReshapeOK) GetHeader() []string {
+	return s.Header
+}
+
+// GetRows returns the value of Rows.
+func (s *PreviewImportReshapeOK) GetRows() [][]string {
+	return s.Rows
+}
+
+// GetRowCount returns the value of RowCount.
+func (s *PreviewImportReshapeOK) GetRowCount() OptInt {
+	return s.RowCount
+}
+
+// SetSheets sets the value of Sheets.
+func (s *PreviewImportReshapeOK) SetSheets(val []string) {
+	s.Sheets = val
+}
+
+// SetRaw sets the value of Raw.
+func (s *PreviewImportReshapeOK) SetRaw(val [][]string) {
+	s.Raw = val
+}
+
+// SetHeader sets the value of Header.
+func (s *PreviewImportReshapeOK) SetHeader(val []string) {
+	s.Header = val
+}
+
+// SetRows sets the value of Rows.
+func (s *PreviewImportReshapeOK) SetRows(val [][]string) {
+	s.Rows = val
+}
+
+// SetRowCount sets the value of RowCount.
+func (s *PreviewImportReshapeOK) SetRowCount(val OptInt) {
+	s.RowCount = val
+}
+
+func (*PreviewImportReshapeOK) previewImportReshapeRes() {}
+
+type PreviewImportReshapeReq struct {
+	Csv        OptString `json:"csv"`
+	XlsxBase64 OptString `json:"xlsx_base64"`
+	Sheet      OptString `json:"sheet"`
+	// Importpkg.Reshape: delimiter, header_row, fill_down, skip_rows, unpivot, constants, value_map,
+	// number_columns, decimal_comma, scale.
+	Reshape OptPreviewImportReshapeReqReshape `json:"reshape"`
+}
+
+// GetCsv returns the value of Csv.
+func (s *PreviewImportReshapeReq) GetCsv() OptString {
+	return s.Csv
+}
+
+// GetXlsxBase64 returns the value of XlsxBase64.
+func (s *PreviewImportReshapeReq) GetXlsxBase64() OptString {
+	return s.XlsxBase64
+}
+
+// GetSheet returns the value of Sheet.
+func (s *PreviewImportReshapeReq) GetSheet() OptString {
+	return s.Sheet
+}
+
+// GetReshape returns the value of Reshape.
+func (s *PreviewImportReshapeReq) GetReshape() OptPreviewImportReshapeReqReshape {
+	return s.Reshape
+}
+
+// SetCsv sets the value of Csv.
+func (s *PreviewImportReshapeReq) SetCsv(val OptString) {
+	s.Csv = val
+}
+
+// SetXlsxBase64 sets the value of XlsxBase64.
+func (s *PreviewImportReshapeReq) SetXlsxBase64(val OptString) {
+	s.XlsxBase64 = val
+}
+
+// SetSheet sets the value of Sheet.
+func (s *PreviewImportReshapeReq) SetSheet(val OptString) {
+	s.Sheet = val
+}
+
+// SetReshape sets the value of Reshape.
+func (s *PreviewImportReshapeReq) SetReshape(val OptPreviewImportReshapeReqReshape) {
+	s.Reshape = val
+}
+
+// Importpkg.Reshape: delimiter, header_row, fill_down, skip_rows, unpivot, constants, value_map,
+// number_columns, decimal_comma, scale.
+type PreviewImportReshapeReqReshape map[string]jx.Raw
+
+func (s *PreviewImportReshapeReqReshape) init() PreviewImportReshapeReqReshape {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
+
+type PreviewImportReshapeUnprocessableEntity struct {
+	Error  OptString  `json:"error"`
+	Raw    [][]string `json:"raw"`
+	Sheets []string   `json:"sheets"`
+}
+
+// GetError returns the value of Error.
+func (s *PreviewImportReshapeUnprocessableEntity) GetError() OptString {
+	return s.Error
+}
+
+// GetRaw returns the value of Raw.
+func (s *PreviewImportReshapeUnprocessableEntity) GetRaw() [][]string {
+	return s.Raw
+}
+
+// GetSheets returns the value of Sheets.
+func (s *PreviewImportReshapeUnprocessableEntity) GetSheets() []string {
+	return s.Sheets
+}
+
+// SetError sets the value of Error.
+func (s *PreviewImportReshapeUnprocessableEntity) SetError(val OptString) {
+	s.Error = val
+}
+
+// SetRaw sets the value of Raw.
+func (s *PreviewImportReshapeUnprocessableEntity) SetRaw(val [][]string) {
+	s.Raw = val
+}
+
+// SetSheets sets the value of Sheets.
+func (s *PreviewImportReshapeUnprocessableEntity) SetSheets(val []string) {
+	s.Sheets = val
+}
+
+func (*PreviewImportReshapeUnprocessableEntity) previewImportReshapeRes() {}
 
 type PromoteAiDraftBadRequest Error
 

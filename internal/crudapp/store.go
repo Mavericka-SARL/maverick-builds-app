@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/mavericks-engine/mavericks/pkg/dbx"
 )
 
 type FormField struct {
@@ -60,9 +62,21 @@ var ErrRecordChanged = errors.New("record changed since it was read")
 
 type Store struct {
 	pool *pgxpool.Pool
+	db   dbx.DB // what the store\'s statements run on: the pool, or a transaction
 }
 
-func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool, db: pool} }
+
+// NewStoreOn is NewStore on a pool or a transaction (dbx.DB): built on a
+// transaction it writes nothing the transaction does not keep. Pool() is
+// nil unless db is a pool.
+func NewStoreOn(db dbx.DB) *Store {
+	s := &Store{db: db}
+	if p, ok := db.(*pgxpool.Pool); ok {
+		s.pool = p
+	}
+	return s
+}
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
@@ -86,7 +100,7 @@ func (s *Store) CreateForm(ctx context.Context, modelID, revisionID, name, label
 
 	var id string
 	var createdAt time.Time
-	err = s.pool.QueryRow(ctx, `
+	err = s.db.QueryRow(ctx, `
 		INSERT INTO model.form_def (model_id, revision_id, name, label, fields)
 		VALUES ($1::uuid, NULLIF($2,'')::uuid, $3, $4, $5)
 		ON CONFLICT (model_id, revision_id, name) DO UPDATE SET label = EXCLUDED.label, fields = EXCLUDED.fields
@@ -110,7 +124,7 @@ func (s *Store) GetForm(ctx context.Context, formID string) (*FormDef, error) {
 	var f FormDef
 	var fieldsJSON []byte
 
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT id::text, model_id::text, name, label, fields, created_at
 		FROM model.form_def WHERE id = $1::uuid
 	`, formID).Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.CreatedAt)
@@ -128,7 +142,7 @@ func (s *Store) GetForm(ctx context.Context, formID string) (*FormDef, error) {
 // ListForms lists a revision's forms plus revision-global (NULL revision)
 // ones. An empty revisionID lists every form for the model.
 func (s *Store) ListForms(ctx context.Context, modelID, revisionID string) ([]*FormDef, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT id::text, model_id::text, name, label, fields, created_at
 		FROM model.form_def
 		WHERE model_id = $1::uuid
@@ -161,7 +175,7 @@ func (s *Store) UpdateForm(ctx context.Context, formID, name, label string, fiel
 	if err != nil {
 		return err
 	}
-	_, err = s.pool.Exec(ctx,
+	_, err = s.db.Exec(ctx,
 		`UPDATE model.form_def SET name=$2, label=$3, fields=$4 WHERE id=$1::uuid`,
 		formID, name, label, fieldsJSON)
 	return err
@@ -170,8 +184,8 @@ func (s *Store) UpdateForm(ctx context.Context, formID, name, label string, fiel
 func (s *Store) DeleteForm(ctx context.Context, formID string) error {
 	// SYNC-01 cascade: drop form widgets referencing this form (ref_id is
 	// bare TEXT, no FK — a dangling form widget rendered an empty error box).
-	_, _ = s.pool.Exec(ctx, `DELETE FROM model.dashboard_widget WHERE ref_id = $1`, formID)
-	_, err := s.pool.Exec(ctx, `DELETE FROM model.form_def WHERE id=$1::uuid`, formID)
+	_, _ = s.db.Exec(ctx, `DELETE FROM model.dashboard_widget WHERE ref_id = $1`, formID)
+	_, err := s.db.Exec(ctx, `DELETE FROM model.form_def WHERE id=$1::uuid`, formID)
 	return err
 }
 
@@ -190,7 +204,7 @@ func (s *Store) CreateRecordWithStatus(ctx context.Context, formID, userID, stat
 
 	var id string
 	var createdAt, updatedAt time.Time
-	err = s.pool.QueryRow(ctx, `
+	err = s.db.QueryRow(ctx, `
 		INSERT INTO runtime.form_record (form_id, data, status, created_by)
 		VALUES ($1::uuid, $2, $3::runtime.record_status, $4::uuid)
 		RETURNING id::text, created_at, updated_at
@@ -212,7 +226,7 @@ func (s *Store) CreateRecordWithStatus(ctx context.Context, formID, userID, stat
 }
 
 func (s *Store) ListRecords(ctx context.Context, formID string, limit int) ([]*FormRecord, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT id::text, form_id::text, data, status::text, created_by::text, created_at, updated_at
 		FROM runtime.form_record WHERE form_id = $1::uuid
 		ORDER BY created_at DESC LIMIT $2
@@ -250,7 +264,7 @@ func (s *Store) ListRecordsPage(ctx context.Context, formID string, after *Recor
 	if after != nil {
 		afterAt, afterID = &after.CreatedAt, &after.ID
 	}
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT id::text, form_id::text, data, status::text, created_by::text, created_at, updated_at
 		FROM runtime.form_record
 		WHERE form_id = $1::uuid
@@ -276,7 +290,7 @@ func (s *Store) ListRecordsPage(ctx context.Context, formID string, after *Recor
 func (s *Store) GetRecord(ctx context.Context, recordID string) (*FormRecord, error) {
 	var r FormRecord
 	var dataJSON []byte
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT id::text, form_id::text, data, status::text, created_by::text, created_at, updated_at
 		FROM runtime.form_record WHERE id = $1::uuid
 	`, recordID).Scan(&r.ID, &r.FormID, &dataJSON, &r.Status, &r.CreatedBy, &r.CreatedAt, &r.UpdatedAt)
@@ -296,7 +310,7 @@ func (s *Store) UpdateRecord(ctx context.Context, recordID, status string, data 
 		return err
 	}
 
-	tag, err := s.pool.Exec(ctx, `
+	tag, err := s.db.Exec(ctx, `
 		UPDATE runtime.form_record
 		SET data = $2, status = $3::runtime.record_status, updated_at = now()
 		WHERE id = $1::uuid
@@ -323,7 +337,7 @@ func (s *Store) UpdateRecordFrom(ctx context.Context, recordID, fromStatus, stat
 	if err != nil {
 		return err
 	}
-	tag, err := s.pool.Exec(ctx, `
+	tag, err := s.db.Exec(ctx, `
 		UPDATE runtime.form_record
 		SET data = $2, status = $3::runtime.record_status, updated_at = now()
 		WHERE id = $1::uuid AND status = $4::runtime.record_status
@@ -340,7 +354,7 @@ func (s *Store) UpdateRecordFrom(ctx context.Context, recordID, fromStatus, stat
 // DeleteRecordFrom deletes a record only while it is still in fromStatus
 // (UpdateRecordFrom's guard). ErrRecordChanged otherwise.
 func (s *Store) DeleteRecordFrom(ctx context.Context, recordID, fromStatus string) error {
-	tag, err := s.pool.Exec(ctx,
+	tag, err := s.db.Exec(ctx,
 		`DELETE FROM runtime.form_record WHERE id = $1::uuid AND status = $2::runtime.record_status`,
 		recordID, fromStatus)
 	if err != nil {
@@ -353,7 +367,7 @@ func (s *Store) DeleteRecordFrom(ctx context.Context, recordID, fromStatus strin
 }
 
 func (s *Store) DeleteRecord(ctx context.Context, recordID string) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM runtime.form_record WHERE id = $1::uuid`, recordID)
+	tag, err := s.db.Exec(ctx, `DELETE FROM runtime.form_record WHERE id = $1::uuid`, recordID)
 	if err != nil {
 		return err
 	}

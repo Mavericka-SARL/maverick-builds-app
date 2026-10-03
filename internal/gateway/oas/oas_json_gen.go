@@ -41087,6 +41087,40 @@ func (s *OptPreferencesTheme) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes PreviewImportReshapeReqReshape as json.
+func (o OptPreviewImportReshapeReqReshape) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	o.Value.Encode(e)
+}
+
+// Decode decodes PreviewImportReshapeReqReshape from json.
+func (o *OptPreviewImportReshapeReqReshape) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptPreviewImportReshapeReqReshape to nil")
+	}
+	o.Set = true
+	o.Value = make(PreviewImportReshapeReqReshape)
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptPreviewImportReshapeReqReshape) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptPreviewImportReshapeReqReshape) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes ProtoTimestamp as json.
 func (o OptProtoTimestamp) Encode(e *jx.Encoder) {
 	if !o.Set {
@@ -43653,6 +43687,520 @@ func (s PreviewFormMappingOKItem) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *PreviewFormMappingOKItem) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *PreviewImportReshapeOK) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *PreviewImportReshapeOK) encodeFields(e *jx.Encoder) {
+	{
+		if s.Sheets != nil {
+			e.FieldStart("sheets")
+			e.ArrStart()
+			for _, elem := range s.Sheets {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.Raw != nil {
+			e.FieldStart("raw")
+			e.ArrStart()
+			for _, elem := range s.Raw {
+				e.ArrStart()
+				for _, elem := range elem {
+					e.Str(elem)
+				}
+				e.ArrEnd()
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.Header != nil {
+			e.FieldStart("header")
+			e.ArrStart()
+			for _, elem := range s.Header {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.Rows != nil {
+			e.FieldStart("rows")
+			e.ArrStart()
+			for _, elem := range s.Rows {
+				e.ArrStart()
+				for _, elem := range elem {
+					e.Str(elem)
+				}
+				e.ArrEnd()
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.RowCount.Set {
+			e.FieldStart("row_count")
+			s.RowCount.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfPreviewImportReshapeOK = [5]string{
+	0: "sheets",
+	1: "raw",
+	2: "header",
+	3: "rows",
+	4: "row_count",
+}
+
+// Decode decodes PreviewImportReshapeOK from json.
+func (s *PreviewImportReshapeOK) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode PreviewImportReshapeOK to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "sheets":
+			if err := func() error {
+				s.Sheets = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Sheets = append(s.Sheets, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"sheets\"")
+			}
+		case "raw":
+			if err := func() error {
+				s.Raw = make([][]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem []string
+					elem = make([]string, 0)
+					if err := d.Arr(func(d *jx.Decoder) error {
+						var elemElem string
+						v, err := d.Str()
+						elemElem = string(v)
+						if err != nil {
+							return err
+						}
+						elem = append(elem, elemElem)
+						return nil
+					}); err != nil {
+						return err
+					}
+					s.Raw = append(s.Raw, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"raw\"")
+			}
+		case "header":
+			if err := func() error {
+				s.Header = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Header = append(s.Header, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"header\"")
+			}
+		case "rows":
+			if err := func() error {
+				s.Rows = make([][]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem []string
+					elem = make([]string, 0)
+					if err := d.Arr(func(d *jx.Decoder) error {
+						var elemElem string
+						v, err := d.Str()
+						elemElem = string(v)
+						if err != nil {
+							return err
+						}
+						elem = append(elem, elemElem)
+						return nil
+					}); err != nil {
+						return err
+					}
+					s.Rows = append(s.Rows, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"rows\"")
+			}
+		case "row_count":
+			if err := func() error {
+				s.RowCount.Reset()
+				if err := s.RowCount.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"row_count\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode PreviewImportReshapeOK")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *PreviewImportReshapeOK) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *PreviewImportReshapeOK) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *PreviewImportReshapeReq) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *PreviewImportReshapeReq) encodeFields(e *jx.Encoder) {
+	{
+		if s.Csv.Set {
+			e.FieldStart("csv")
+			s.Csv.Encode(e)
+		}
+	}
+	{
+		if s.XlsxBase64.Set {
+			e.FieldStart("xlsx_base64")
+			s.XlsxBase64.Encode(e)
+		}
+	}
+	{
+		if s.Sheet.Set {
+			e.FieldStart("sheet")
+			s.Sheet.Encode(e)
+		}
+	}
+	{
+		if s.Reshape.Set {
+			e.FieldStart("reshape")
+			s.Reshape.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfPreviewImportReshapeReq = [4]string{
+	0: "csv",
+	1: "xlsx_base64",
+	2: "sheet",
+	3: "reshape",
+}
+
+// Decode decodes PreviewImportReshapeReq from json.
+func (s *PreviewImportReshapeReq) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode PreviewImportReshapeReq to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "csv":
+			if err := func() error {
+				s.Csv.Reset()
+				if err := s.Csv.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"csv\"")
+			}
+		case "xlsx_base64":
+			if err := func() error {
+				s.XlsxBase64.Reset()
+				if err := s.XlsxBase64.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"xlsx_base64\"")
+			}
+		case "sheet":
+			if err := func() error {
+				s.Sheet.Reset()
+				if err := s.Sheet.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"sheet\"")
+			}
+		case "reshape":
+			if err := func() error {
+				s.Reshape.Reset()
+				if err := s.Reshape.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"reshape\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode PreviewImportReshapeReq")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *PreviewImportReshapeReq) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *PreviewImportReshapeReq) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s PreviewImportReshapeReqReshape) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields implements json.Marshaler.
+func (s PreviewImportReshapeReqReshape) encodeFields(e *jx.Encoder) {
+	for k, elem := range s {
+		e.FieldStart(k)
+
+		if len(elem) != 0 {
+			e.Raw(elem)
+		}
+	}
+}
+
+// Decode decodes PreviewImportReshapeReqReshape from json.
+func (s *PreviewImportReshapeReqReshape) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode PreviewImportReshapeReqReshape to nil")
+	}
+	m := s.init()
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		var elem jx.Raw
+		if err := func() error {
+			v, err := d.RawAppend(nil)
+			elem = jx.Raw(v)
+			if err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			return errors.Wrapf(err, "decode field %q", k)
+		}
+		m[string(k)] = elem
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode PreviewImportReshapeReqReshape")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s PreviewImportReshapeReqReshape) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *PreviewImportReshapeReqReshape) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *PreviewImportReshapeUnprocessableEntity) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *PreviewImportReshapeUnprocessableEntity) encodeFields(e *jx.Encoder) {
+	{
+		if s.Error.Set {
+			e.FieldStart("error")
+			s.Error.Encode(e)
+		}
+	}
+	{
+		if s.Raw != nil {
+			e.FieldStart("raw")
+			e.ArrStart()
+			for _, elem := range s.Raw {
+				e.ArrStart()
+				for _, elem := range elem {
+					e.Str(elem)
+				}
+				e.ArrEnd()
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.Sheets != nil {
+			e.FieldStart("sheets")
+			e.ArrStart()
+			for _, elem := range s.Sheets {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+}
+
+var jsonFieldsNameOfPreviewImportReshapeUnprocessableEntity = [3]string{
+	0: "error",
+	1: "raw",
+	2: "sheets",
+}
+
+// Decode decodes PreviewImportReshapeUnprocessableEntity from json.
+func (s *PreviewImportReshapeUnprocessableEntity) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode PreviewImportReshapeUnprocessableEntity to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "error":
+			if err := func() error {
+				s.Error.Reset()
+				if err := s.Error.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"error\"")
+			}
+		case "raw":
+			if err := func() error {
+				s.Raw = make([][]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem []string
+					elem = make([]string, 0)
+					if err := d.Arr(func(d *jx.Decoder) error {
+						var elemElem string
+						v, err := d.Str()
+						elemElem = string(v)
+						if err != nil {
+							return err
+						}
+						elem = append(elem, elemElem)
+						return nil
+					}); err != nil {
+						return err
+					}
+					s.Raw = append(s.Raw, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"raw\"")
+			}
+		case "sheets":
+			if err := func() error {
+				s.Sheets = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Sheets = append(s.Sheets, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"sheets\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode PreviewImportReshapeUnprocessableEntity")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *PreviewImportReshapeUnprocessableEntity) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *PreviewImportReshapeUnprocessableEntity) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }

@@ -12,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mavericks-engine/mavericks/pkg/dbx"
+
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	calculationv1 "github.com/mavericks-engine/mavericks/gen/go/calculation/v1"
@@ -21,9 +23,21 @@ import (
 
 type Store struct {
 	pool *pgxpool.Pool
+	db   dbx.DB // what the store\'s statements run on: the pool, or a transaction
 }
 
-func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool, db: pool} }
+
+// NewStoreOn is NewStore on a pool or a transaction (dbx.DB): built on a
+// transaction it writes nothing the transaction does not keep. Pool() is
+// nil unless db is a pool.
+func NewStoreOn(db dbx.DB) *Store {
+	s := &Store{db: db}
+	if p, ok := db.(*pgxpool.Pool); ok {
+		s.pool = p
+	}
+	return s
+}
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
@@ -34,7 +48,7 @@ func (s *Store) GetPartitionState(ctx context.Context, key string) (*calculation
 	var lastCalcAt *time.Time
 	var errMsg *string
 
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT status::text, last_calc_at, error
 		FROM runtime.metric_partition_state
 		WHERE partition_key = $1
@@ -64,7 +78,7 @@ func (s *Store) GetPartitionState(ctx context.Context, key string) (*calculation
 // MarkDirty marks the given partition keys as dirty.
 func (s *Store) MarkDirty(ctx context.Context, keys []string, modelID, metricID, revisionID, timePartition string) error {
 	for _, key := range keys {
-		_, err := s.pool.Exec(ctx, `
+		_, err := s.db.Exec(ctx, `
 			INSERT INTO runtime.metric_partition_state
 			    (partition_key, model_id, metric_id, revision_id, time_partition, status)
 			VALUES ($1, $2::uuid, $3::uuid, $4::uuid, $5, 'dirty')
@@ -105,7 +119,7 @@ func (s *Store) MarkDirtyTx(ctx context.Context, tx pgx.Tx, keys []string, model
 // ClaimForCalculation atomically transitions a partition from dirty → calculating.
 // Returns false if already claimed by another worker.
 func (s *Store) ClaimForCalculation(ctx context.Context, key string) (bool, error) {
-	tag, err := s.pool.Exec(ctx, `
+	tag, err := s.db.Exec(ctx, `
 		UPDATE runtime.metric_partition_state
 		SET status = 'calculating', updated_at = now()
 		WHERE partition_key = $1 AND status = 'dirty'
@@ -115,7 +129,7 @@ func (s *Store) ClaimForCalculation(ctx context.Context, key string) (bool, erro
 
 // MarkClean marks a partition as successfully calculated.
 func (s *Store) MarkClean(ctx context.Context, key string) error {
-	_, err := s.pool.Exec(ctx, `
+	_, err := s.db.Exec(ctx, `
 		UPDATE runtime.metric_partition_state
 		SET status = 'clean', last_calc_at = now(), error = NULL, updated_at = now()
 		WHERE partition_key = $1
@@ -125,7 +139,7 @@ func (s *Store) MarkClean(ctx context.Context, key string) error {
 
 // MarkError records a calculation failure for a partition.
 func (s *Store) MarkError(ctx context.Context, key, errMsg string) error {
-	_, err := s.pool.Exec(ctx, `
+	_, err := s.db.Exec(ctx, `
 		UPDATE runtime.metric_partition_state
 		SET status = 'error', error = $2, updated_at = now()
 		WHERE partition_key = $1
@@ -135,7 +149,7 @@ func (s *Store) MarkError(ctx context.Context, key, errMsg string) error {
 
 // ListDirtyPartitions returns partition keys in order of updated_at (oldest first).
 func (s *Store) ListDirtyPartitions(ctx context.Context, modelID string, limit int) ([]string, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT partition_key FROM runtime.metric_partition_state
 		WHERE model_id = $1 AND status = 'dirty'
 		ORDER BY updated_at ASC
@@ -190,7 +204,7 @@ type MetricDef struct {
 // dimension_def's genuine legacy/global-visibility case — mirrors
 // internal/query/chart.go's loadAllMetricDefs exactly.
 func (s *Store) LoadModelMetrics(ctx context.Context, modelID, revisionID string) (map[string]*MetricDef, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT id::text, name, COALESCE(formula,''), is_input, agg_rule,
 		       COALESCE(agg_numerator_metric_id::text,''), COALESCE(agg_denominator_metric_id::text,''),
 		       time_summary
@@ -214,7 +228,7 @@ func (s *Store) LoadModelMetrics(ctx context.Context, modelID, revisionID string
 	}
 
 	// Load dependency edges
-	edgeRows, err := s.pool.Query(ctx, `
+	edgeRows, err := s.db.Query(ctx, `
 		SELECT d.metric_id::text, d.depends_on_metric_id::text,
 		       d.min_time_offset, d.max_time_offset, d.unbounded_past, d.unbounded_future
 		FROM model.calc_dependency d
@@ -246,7 +260,7 @@ func (s *Store) GetCalcValue(ctx context.Context, modelID, revisionID, metricID 
 	dimJSON, _ := json.Marshal(dimMembers)
 
 	var value *float64
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT value FROM runtime.calc_result
 		WHERE model_id = $1 AND revision_id = $2::uuid
 		  AND metric_id = $3::uuid AND dim_members = $4
@@ -262,7 +276,7 @@ func (s *Store) GetCalcValue(ctx context.Context, modelID, revisionID, metricID 
 // ── Dependency graph (mirrors model.graph but reads from DB) ──────────────────
 
 func (s *Store) LoadDependencyGraph(ctx context.Context, modelID, revisionID string) (map[string][]string, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT d.metric_id::text, d.depends_on_metric_id::text
 		FROM model.calc_dependency d
 		JOIN model.metric_def m ON m.id = d.metric_id
@@ -291,7 +305,7 @@ func (s *Store) LoadDependencyGraph(ctx context.Context, modelID, revisionID str
 // global-visibility case (revision_id IS NULL) — mirrors chart.go's
 // loadAllDimensions exactly.
 func (s *Store) LoadDimIDToName(ctx context.Context, modelID, revisionID string) (map[string]string, error) {
-	rows, err := s.pool.Query(ctx,
+	rows, err := s.db.Query(ctx,
 		`SELECT id::text, name FROM model.dimension_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL)`,
 		modelID, revisionID)
 	if err != nil {
@@ -344,7 +358,7 @@ type DimensionSchema struct {
 // revision's own rows and revision-less ones). Loaded once per
 // recalculation pass.
 func (s *Store) LoadDimensionSchema(ctx context.Context, modelID, revisionID string) (*DimensionSchema, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT d.id::text, d.revision_id IS NOT NULL, COALESCE(p.name,''), COALESCE(p.data_type,'')
 		FROM model.dimension_def d
 		LEFT JOIN model.dimension_property p ON p.dimension_id = d.id
@@ -389,7 +403,7 @@ func (s *Store) LoadDimensionSchema(ctx context.Context, modelID, revisionID str
 // and a computed value must exist regardless of who can currently see it —
 // exactly like fact_input itself is never access-filtered at write time.
 func (s *Store) LoadAllDimensions(ctx context.Context, modelID, revisionID string) (map[string]*rollup.Dimension, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT d.id::text, COALESCE(d.parent_dimension_id::text,''),
 		       COALESCE(d.source_dimension_id::text,''), COALESCE(d.source_property,''),
 		       d.dimension_type = 'time', COALESCE(d.time_granularity,''), COALESCE(d.fiscal_year_start_month,0),
@@ -448,7 +462,7 @@ func (s *Store) LoadAllDimensions(ctx context.Context, modelID, revisionID strin
 // grid_metric a bare UNIQUE(metric_id) constraint, so a metric belongs to at
 // most one grid. Mirrors chart.go's loadMetricDimensionIDs exactly.
 func (s *Store) LoadMetricDimensionIDs(ctx context.Context, modelID, revisionID string) (map[string][]string, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT gm.metric_id::text, gd.dimension_id::text
 		FROM model.grid_metric gm
 		JOIN model.grid_dimension gd ON gd.grid_id = gm.grid_id
@@ -509,7 +523,7 @@ func dimKey(dimMembers map[string]string) string {
 // grid's own revenue−cost) once precomputed slice totals were compared
 // against the grid's scoped recompute.
 func (s *Store) LoadInputValueMap(ctx context.Context, modelID, revisionID, metricID string) (map[string]float64, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT dim_members::text, SUM(value)::float8
 		FROM (
 			SELECT direct.dim_members, direct.value FROM (
@@ -538,7 +552,7 @@ func (s *Store) LoadInputValueMap(ctx context.Context, modelID, revisionID, metr
 
 // LoadCalcValueMap is LoadInputValueMap's runtime.calc_result analog.
 func (s *Store) LoadCalcValueMap(ctx context.Context, modelID, revisionID, metricID string) (map[string]float64, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT DISTINCT ON (dim_members) dim_members::text, value
 		FROM runtime.calc_result
 		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid
@@ -563,7 +577,7 @@ func (s *Store) LoadAllCalcValueMaps(ctx context.Context, modelID, revisionID st
 // totals-only, unscoped grid read this is ~one row per metric instead of the
 // tens of thousands LoadAllCalcValueMaps pulls back on a large model.
 func (s *Store) LoadCalcTotals(ctx context.Context, modelID, revisionID string) (map[string]float64, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT DISTINCT ON (metric_id) metric_id::text, value
 		FROM runtime.calc_result
 		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND dim_members = '{}'::jsonb
@@ -593,7 +607,7 @@ func (s *Store) LoadCalcTotals(ctx context.Context, modelID, revisionID string) 
 // (an eval-skipped combo, or a revision mid-recompute) and the caller must
 // fall back to the live recompute for the whole read.
 func (s *Store) LoadCalcSlice(ctx context.Context, modelID, revisionID, sliceJSON string) (map[string]float64, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT DISTINCT ON (metric_id) metric_id::text, value
 		FROM runtime.calc_result
 		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND dim_members=$3::jsonb
@@ -623,7 +637,7 @@ func (s *Store) LoadCalcSlice(ctx context.Context, modelID, revisionID, sliceJSO
 // members. scopeSQL == "" loads everything (the unscoped call above).
 func (s *Store) LoadAllCalcValueMapsScoped(ctx context.Context, modelID, revisionID, scopeSQL string, scopeArgs []any) (map[string]map[string]float64, error) {
 	args := append([]any{modelID, revisionID}, scopeArgs...)
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT DISTINCT ON (metric_id, dim_members) metric_id::text, dim_members::text, value
 		FROM runtime.calc_result
 		WHERE model_id=$1::uuid AND revision_id=$2::uuid`+scopeSQL+`
@@ -736,7 +750,7 @@ func clearResults(ctx context.Context, w resultWriter, modelID, revisionID, metr
 // never the empty moment between the clear and the write — and a failed
 // write keeps the last good rows.
 func (s *Store) InTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return err
 	}

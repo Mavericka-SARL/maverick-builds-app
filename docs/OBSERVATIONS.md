@@ -18,42 +18,6 @@ leaves out, until it is fixed.
 
 ## Open
 
-### Workflow, form, access-rule and import steps skip the proposal check
-
-- **Noticed:** 2026-10-03, adding the check that runs an AI plan before the
-  developer sees it (`aiCheckProposal`).
-- **What:** the check runs steps in a transaction it rolls back. The
-  workflow, form and automation-rule stores (`internal/workflow`,
-  `internal/crudapp`), the access-rule tool's audit write and the file import
-  and form-posting hooks work on the pool, outside that transaction, so those
-  tools — and any step using their result — are left to confirmation
-  (`aiassistant.ErrNotDryRunnable`). Confirmation still stops at the first
-  failing step.
-- **Why it matters:** a mistake in such a step is found only after the
-  developer confirms, as every mistake was before the check.
-- **How to check:** propose a `create_workflow_def` with an unknown form
-  field; it reaches the developer and fails on confirm.
-- **What closes it:** those stores (and `calculation`/`notification`, which
-  the workflow store passes its pool to) taking an interface a transaction
-  satisfies, as `metricformula.ValidateAggOperands` now does.
-
-### A file reshape can be written only through the AI Developer
-
-- **Noticed:** 2026-10-02, adding file reshaping (`importpkg.Reshape`).
-- **What:** the AI Developer writes, previews and saves a reshape (header row,
-  fill down, skip rows, unpivot, constants, value map, number formats) on a
-  file integration, and every run applies it. The Import Wizard shows a saved
-  one ("Reshapes each file: …") and runs such an integration with the file as
-  it is, but has no editor: it reads a file's header from row 1. Chosen scope
-  (the owner picked "AI + saved integrations").
-- **Why it matters:** a developer without an AI provider configured cannot
-  set up or change a reshape — the capability is reachable by the developer
-  role only through the assistant.
-- **How to check:** in the Integrations tab, look for any control that edits
-  a reshape; there is none.
-- **What closes it:** a reshape step in the Import Wizard (each transform as a
-  control, with the server's preview of the reshaped rows).
-
 ### The chart resolver does not tell a withheld value from a missing one
 
 - **Noticed:** 2026-10-02, building `query_grid`'s breakdowns on
@@ -2586,6 +2550,33 @@ leaves out, until it is fixed.
   `CheckMembers` before the first insert, for every caller.
 
 ## Closed
+
+### Workflow, form, access-rule and import steps skipped the proposal check
+
+- **Noticed:** 2026-10-03, adding the check that runs an AI plan before the
+  developer sees it (`aiCheckProposal`).
+- **What was wrong:** the check ran steps in a transaction it rolled back,
+  but the workflow, form and automation-rule stores, the access-rule tool's
+  audit write and the file-import and form-posting hooks worked on the pool,
+  so those steps — and any step using their result — were checked only on
+  confirmation.
+- **Closed by:** the commit "the plan check covers every tool, and the
+  Import Wizard shapes files": `pkg/dbx.DB`, `NewStoreOn` on the workflow,
+  form, calculation and notification stores, `auditlog.Log` and
+  `importpkg.ResolveRows` on an interface, a dimension import that writes
+  through a given connection, and dry-run versions of the import and posting
+  hooks (`TestThePlanCheckCoversWorkflowsFormsAndFileImports`).
+
+### A file reshape could be written only through the AI Developer
+
+- **Noticed:** 2026-10-02, adding file reshaping (`importpkg.Reshape`).
+- **What was wrong:** the Import Wizard showed a saved reshape but had no
+  editor, so a developer without an AI provider could not set one up.
+- **Closed by:** the same commit: the wizard's Shape step (`ShapeStep.tsx`,
+  previewed by `POST /api/import/reshape-preview` with the server's own code)
+  saves a reshape with "Save as integration", and **Edit shape and mapping**
+  changes a saved integration's on a sample file
+  (`e2e/import-wizard-shape.spec.ts`, `TestImportReshapePreview`).
 
 ### A CSV import stopped silently at the first row of a different length
 

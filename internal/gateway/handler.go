@@ -48,6 +48,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/workflow/assignee"
 	"github.com/mavericks-engine/mavericks/internal/writeguard"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
+	"github.com/mavericks-engine/mavericks/pkg/dbx"
 	"github.com/mavericks-engine/mavericks/pkg/keycloak"
 	"github.com/mavericks-engine/mavericks/pkg/license"
 	"github.com/mavericks-engine/mavericks/pkg/objectstore"
@@ -429,6 +430,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	// impossible regardless of any access rule granted to them.
 	register("POST", "/api/import/upload", "any", cors(h.importUpload))
 	register("POST", "/api/import/dimension-members", "developer", dev(h.importDimensionMembers))
+	register("POST", "/api/import/reshape-preview", "developer", dev(h.importReshapePreview))
 	// "any" for the same reason as upload: fetching a link-shared sheet is
 	// the read half of an import any cell-writer may perform; the commit
 	// that follows is what writeguard polices.
@@ -8011,6 +8013,29 @@ func (h *handler) importDimensionMembers(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID string, cr *csv.Reader, colIdx map[string]int) (imported, errs int, fatal error) {
+	imported, errs, isTime, fatal := h.importDimensionMembersOn(ctx, h.db.For(ctx), dimensionID, cr, colIdx)
+	if fatal != nil || imported == 0 {
+		return imported, errs, fatal
+	}
+	if isTime {
+		var modelID string
+		_ = h.db.QueryRow(ctx, `SELECT model_id::text FROM model.dimension_def WHERE id=$1::uuid`, dimensionID).Scan(&modelID)
+		if modelID != "" {
+			go h.recalcAllInputsAcrossRevisions(context.WithoutCancel(ctx), modelID) //nolint:contextcheck
+		}
+	} else {
+		// Imported codes, parents and properties are what LOOKUP, PARENT
+		// and dim.property read (contract C8).
+		go h.recalcDimensionDependents(context.WithoutCancel(ctx), dimensionID) //nolint:contextcheck
+	}
+	return imported, errs, nil
+}
+
+// importDimensionMembersOn writes a dimension file's members through db — the
+// pool, or the AI Developer's proposal check's transaction — and reports
+// whether the dimension is a time dimension. It recalculates nothing: that
+// is importDimensionMembersCSV's, after a real import.
+func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimensionID string, cr *csv.Reader, colIdx map[string]int) (imported, errs int, isTime bool, fatal error) {
 	codeCol, hasCode := colIdx["code"]
 	labelCol, hasLabel := colIdx["label"]
 	parentCol, hasParent := colIdx["parent_code"]
@@ -8020,22 +8045,22 @@ func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID str
 	// reindexed together in one transaction.
 	startCol, hasStart := colIdx["period_start"]
 	endCol, hasEnd := colIdx["period_end"]
-	timeCfg, cfgErr := timedim.LoadConfig(ctx, h.db.For(ctx), dimensionID)
+	timeCfg, cfgErr := timedim.LoadConfig(ctx, db, dimensionID)
 	if cfgErr != nil {
-		return 0, 0, fmt.Errorf("dimension not found")
+		return 0, 0, isTime, fmt.Errorf("dimension not found")
 	}
-	isTime := timeCfg.Type == timedim.TypeTime
+	isTime = timeCfg.Type == timedim.TypeTime
 	if isTime && (!hasStart || !hasEnd) {
-		return 0, 0, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: "a time dimension import needs period_start and period_end columns"}
+		return 0, 0, isTime, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: "a time dimension import needs period_start and period_end columns"}
 	}
 	if !isTime && (hasStart || hasEnd) {
-		return 0, 0, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: "period_start/period_end apply only to a time dimension"}
+		return 0, 0, isTime, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: "period_start/period_end apply only to a time dimension"}
 	}
 	var tx pgx.Tx
 	if isTime {
 		var err error
-		if tx, err = h.db.Begin(ctx); err != nil {
-			return 0, 0, err
+		if tx, err = db.Begin(ctx); err != nil {
+			return 0, 0, isTime, err
 		}
 		defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
 	}
@@ -8056,7 +8081,7 @@ func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID str
 	// can't find it in the properties"). Idempotent via the (dimension_id,
 	// name) unique constraint; default type "text".
 	for _, pc := range propCols {
-		if _, err := h.db.Exec(ctx,
+		if _, err := db.Exec(ctx,
 			`INSERT INTO model.dimension_property (dimension_id, name, data_type)
 			 VALUES ($1::uuid, $2, 'text') ON CONFLICT (dimension_id, name) DO NOTHING`,
 			dimensionID, pc.name); err != nil {
@@ -8092,7 +8117,7 @@ func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID str
 				errs++
 				continue
 			}
-			code, err = h.autoMemberCode(ctx, dimensionID, label)
+			code, err = h.autoMemberCodeOn(ctx, db, dimensionID, label)
 			if err != nil {
 				errs++
 				continue
@@ -8102,7 +8127,7 @@ func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID str
 		if hasParent {
 			if parentCode := cell(record, parentCol); parentCode != "" {
 				var pid string
-				if err := h.db.QueryRow(ctx,
+				if err := db.QueryRow(ctx,
 					`SELECT id::text FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2`,
 					dimensionID, parentCode,
 				).Scan(&pid); err == nil {
@@ -8124,7 +8149,7 @@ func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID str
 				ps, perr := timedim.ParseDate(cell(record, startCol))
 				pe, perr2 := timedim.ParseDate(cell(record, endCol))
 				if perr != nil || perr2 != nil {
-					return 0, 0, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: fmt.Sprintf("member %q: period_start and period_end must be YYYY-MM-DD dates (both empty for an aggregate period)", code)}
+					return 0, 0, isTime, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: fmt.Sprintf("member %q: period_start and period_end must be YYYY-MM-DD dates (both empty for an aggregate period)", code)}
 				}
 				start, end = &ps, &pe
 				zero := 0
@@ -8137,7 +8162,7 @@ func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID str
 					if err := tx.QueryRow(ctx,
 						`SELECT id::text FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2`,
 						dimensionID, parentCode).Scan(&pid); err != nil {
-						return 0, 0, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: fmt.Sprintf("member %q: parent %q not found (list parents before their children)", code, parentCode)}
+						return 0, 0, isTime, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: fmt.Sprintf("member %q: parent %q not found (list parents before their children)", code, parentCode)}
 					}
 					parentID = &pid
 				}
@@ -8151,12 +8176,12 @@ func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID str
 				   parent_member_id = COALESCE(EXCLUDED.parent_member_id, model.dimension_member.parent_member_id),
 				   properties = model.dimension_member.properties || EXCLUDED.properties`,
 				dimensionID, code, label, string(propsJSON), start, end, idx, parentID); err != nil {
-				return 0, 0, fmt.Errorf("member %q: %w", code, err)
+				return 0, 0, isTime, fmt.Errorf("member %q: %w", code, err)
 			}
 			imported++
 			continue
 		}
-		_, err = h.db.Exec(ctx,
+		_, err = db.Exec(ctx,
 			// A new member is appended (MAX+1, as the connector and AI
 			// paths do); a re-imported one keeps its place.
 			`INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id, properties, sort_order)
@@ -8175,22 +8200,13 @@ func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID str
 	}
 	if isTime {
 		if err := timedim.ValidateAndReindex(ctx, tx, dimensionID); err != nil {
-			return 0, 0, err
+			return 0, 0, isTime, err
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return 0, 0, err
+			return 0, 0, isTime, err
 		}
-		var modelID string
-		_ = h.db.QueryRow(ctx, `SELECT model_id::text FROM model.dimension_def WHERE id=$1::uuid`, dimensionID).Scan(&modelID)
-		if modelID != "" && imported > 0 {
-			go h.recalcAllInputsAcrossRevisions(context.WithoutCancel(ctx), modelID) //nolint:contextcheck
-		}
-	} else if imported > 0 {
-		// Imported codes, parents and properties are what LOOKUP, PARENT
-		// and dim.property read (contract C8).
-		go h.recalcDimensionDependents(context.WithoutCancel(ctx), dimensionID) //nolint:contextcheck
 	}
-	return imported, errs, nil
+	return imported, errs, isTime, nil
 }
 
 func deref(s *string) string {
@@ -8200,11 +8216,14 @@ func deref(s *string) string {
 	return *s
 }
 
-// autoMemberCode derives a stable member code from a label: an uppercased
+// autoMemberCodeOn derives a stable member code from a label: an uppercased
 // alphanumeric slug. If the slug is already taken by a member with the SAME
 // label the existing code is reused (idempotent re-import); a different
 // label gets numeric suffixes until a free (or same-labeled) code is found.
-func (h *handler) autoMemberCode(ctx context.Context, dimensionID, label string) (string, error) {
+//
+// It reads through db: the pool, or the AI Developer's proposal check's
+// transaction.
+func (h *handler) autoMemberCodeOn(ctx context.Context, db dbx.DB, dimensionID, label string) (string, error) {
 	slug := strings.ToUpper(strings.TrimSpace(label))
 	var b strings.Builder
 	lastUnderscore := false
@@ -8238,7 +8257,7 @@ func (h *handler) autoMemberCode(ctx context.Context, dimensionID, label string)
 	candidate := base
 	for i := 2; i < 100; i++ {
 		var existingLabel string
-		err := h.db.QueryRow(ctx,
+		err := db.QueryRow(ctx,
 			`SELECT label FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2`,
 			dimensionID, candidate,
 		).Scan(&existingLabel)

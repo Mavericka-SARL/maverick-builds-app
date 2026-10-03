@@ -1689,6 +1689,16 @@ func (UnimplementedHandler) PreviewFormMapping(ctx context.Context, params Previ
 	return r, ht.ErrNotImplemented
 }
 
+// PreviewImportReshape implements previewImportReshape operation.
+//
+// The Import Wizard's Shape step. Uses the same code every run of a saved file integration applies
+// (importpkg.Reshape). Nothing is stored.
+//
+// POST /api/import/reshape-preview
+func (UnimplementedHandler) PreviewImportReshape(ctx context.Context, req *PreviewImportReshapeReq) (r PreviewImportReshapeRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // PromoteAiDraft implements promoteAiDraft operation.
 //
 // Make the session's isolated draft revision the model's active revision, then clear the session's

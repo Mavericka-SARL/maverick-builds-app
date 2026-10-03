@@ -27,13 +27,20 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
 
 	importpkgv1 "github.com/mavericks-engine/mavericks/gen/go/importpkg/v1"
 )
 
 // RawRow is one data row from a parsed CSV or XLSX file, keyed by the
 // original (untrimmed-case) header text.
+// Querier is what name resolution reads through: a pool, or a transaction
+// (the AI Developer's proposal check resolves a file against the model as
+// the plan's earlier steps leave it).
+type Querier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 type RawRow struct {
 	RowNumber int
 	Cells     map[string]string
@@ -59,7 +66,7 @@ type columnMeta struct {
 // of the two legacy sentinel columns. Returns an error naming the first
 // unrecognized column — a header problem is a whole-file problem, reported
 // before any row is examined.
-func classifyColumns(ctx context.Context, pool *pgxpool.Pool, modelID, revisionID string, header []string) (map[string]columnMeta, bool, bool, error) {
+func classifyColumns(ctx context.Context, pool Querier, modelID, revisionID string, header []string) (map[string]columnMeta, bool, bool, error) {
 	cols := make(map[string]columnMeta, len(header))
 	hasMetricIDCol, hasValueCol := false, false
 	for _, raw := range header {
@@ -116,7 +123,7 @@ func (e *unknownColumnError) Error() string {
 // non-leaf member (e.g. a hierarchy parent), a value that isn't a number.
 // A row contributing to `errs` is never present in
 // `staged` — the two slices partition the input exactly.
-func ResolveRows(ctx context.Context, pool *pgxpool.Pool, modelID, revisionID string, header []string, rows []RawRow) (staged []StagingRow, errs []*importpkgv1.ImportError, err error) {
+func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, header []string, rows []RawRow) (staged []StagingRow, errs []*importpkgv1.ImportError, err error) {
 	cols, hasMetricIDCol, hasValueCol, err := classifyColumns(ctx, pool, modelID, revisionID, header)
 	if err != nil {
 		return nil, nil, err

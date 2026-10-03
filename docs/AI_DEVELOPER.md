@@ -188,9 +188,12 @@ never shown; the model corrects it and proposes the whole plan again, at most
 three times in one turn before it must explain the problem instead. Unknown
 names in formulas say what they most likely meant (`setup_item` → `{Setup
 Item}`; `p_and_l_line` → `{Cost Center}.p_and_l_line`), so one correction
-round usually suffices. Workflow, form, automation-rule, access-rule and file
-import steps work outside the transaction and are checked only when
-confirmed, as is any step that uses their result.
+round usually suffices. Every tool is checked: the workflow, form,
+calculation and notification stores are built on the transaction
+(`NewStoreOn`, `pkg/dbx`), a file import into a dimension writes its members
+into it and one into a grid resolves its values against the model as the
+plan's earlier steps leave it, and a form integration's posting counts what
+it would post. A step that uses a failed step's result is not run.
 
 Confirming runs the steps in order and **stops at the first failure**: the
 steps after it are marked *not run*, because they are usually built on it.
@@ -240,8 +243,10 @@ import reads them, so the assistant can see a layout and correct its reshape.
 integration, and every run applies it — a business user's monthly upload of
 the same layout from a dashboard button included. In the Integrations tab such
 an integration says what its reshape does and runs with **Run with a file**,
-which sends the file as it is (the Import Wizard reads a header from row 1 and
-has no reshape editor, so it would map the wrong rows).
+which sends the file as it is. A developer sets one up without the assistant
+in the Import Wizard's **Shape** step (previewed by the server's own code,
+`POST /api/import/reshape-preview`) and changes a saved one with **Edit shape
+and mapping**.
 
 **Converted files.** `prepare_converted_file` records the attachment with its
 reshape and column map (`ai_assistant.conversion`, migration 107); the panel's

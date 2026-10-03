@@ -1114,6 +1114,37 @@ export interface FileReshape {
   scale?: Record<string, number>;
 }
 
+/** isEmptyReshape reports whether a reshape changes nothing. */
+export function isEmptyReshape(r: FileReshape): boolean {
+  return !r.delimiter && !(r.header_row && r.header_row > 1) && !r.fill_down?.length && !r.skip_rows?.length && !r.unpivot &&
+    !Object.keys(r.constants ?? {}).length && !Object.keys(r.value_map ?? {}).length && !r.number_columns?.length &&
+    !r.decimal_comma && !Object.keys(r.scale ?? {}).length;
+}
+
+/** cleanReshape drops empty entries, so a saved reshape holds only what does something. */
+export function cleanReshape(r: FileReshape): FileReshape {
+  const out: FileReshape = {};
+  if (r.delimiter && r.delimiter !== ",") out.delimiter = r.delimiter;
+  if (r.header_row && r.header_row > 1) out.header_row = r.header_row;
+  const fill = (r.fill_down ?? []).filter(Boolean);
+  if (fill.length) out.fill_down = fill;
+  const skip = (r.skip_rows ?? []).filter(f => f.blank ? !!f.column : !!(f.equals || f.contains));
+  if (skip.length) out.skip_rows = skip;
+  if (r.unpivot && r.unpivot.name_column && r.unpivot.value_column && (r.unpivot.columns?.length || (r.unpivot.from && r.unpivot.to))) out.unpivot = r.unpivot;
+  const constants = Object.fromEntries(Object.entries(r.constants ?? {}).filter(([k]) => k.trim()));
+  if (Object.keys(constants).length) out.constants = constants;
+  const valueMap = Object.fromEntries(Object.entries(r.value_map ?? {})
+    .map(([c, m]) => [c, Object.fromEntries(Object.entries(m).filter(([from]) => from.trim()))] as const)
+    .filter(([c, m]) => c.trim() && Object.keys(m).length));
+  if (Object.keys(valueMap).length) out.value_map = valueMap;
+  const numbers = (r.number_columns ?? []).filter(Boolean);
+  if (numbers.length) out.number_columns = numbers;
+  if (r.decimal_comma) out.decimal_comma = true;
+  const scale = Object.fromEntries(Object.entries(r.scale ?? {}).filter(([k, f]) => k.trim() && f && Number.isFinite(f)));
+  if (Object.keys(scale).length) out.scale = scale;
+  return out;
+}
+
 /** describeReshape says in a line what a saved reshape does to each file. */
 export function describeReshape(r: FileReshape): string {
   const parts: string[] = [];
@@ -1959,6 +1990,13 @@ export const api = {
   // Server-side fetch of a link-shared Google Sheet as CSV text — Google's
   // export endpoint sends no CORS headers, so the browser cannot fetch it
   // directly. The returned CSV then flows through the normal import path.
+  // The Import Wizard's Shape step: a reshape applied to a sample file by
+  // the server's own code (POST /api/import/reshape-preview).
+  reshapePreview: (body: { csv?: string; xlsx_base64?: string; sheet?: string; reshape: FileReshape }) =>
+    apiFetch<{ sheets?: string[]; raw: string[][]; header: string[]; rows: string[][]; row_count: number }>("/api/import/reshape-preview", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   fetchSheetPreview: (sheetUrl: string) =>
     apiFetch<{ csv: string; spreadsheet_id: string; gid: string }>("/api/import/sheets/fetch", {
       method: "POST",

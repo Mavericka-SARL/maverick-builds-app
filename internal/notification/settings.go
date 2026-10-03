@@ -41,7 +41,7 @@ const DeploymentScope = ""
 // and the zero Settings (every channel off) come back.
 func (s *Store) GetSettings(ctx context.Context, customerID string) (out Settings, found bool, err error) {
 	var secret string
-	err = s.pool.QueryRow(ctx, `
+	err = s.db.QueryRow(ctx, `
 		SELECT email_enabled, webhook_enabled, webhook_url, webhook_secret,
 		       reminders_enabled, reminder_lead_hours
 		FROM notification.settings WHERE customer_id IS NOT DISTINCT FROM NULLIF($1, '')::uuid
@@ -71,7 +71,7 @@ func (s *Store) UpdateSettings(ctx context.Context, customerID string, in Settin
 	if in.ReminderLeadHours < 0 {
 		return Settings{}, fmt.Errorf("reminder lead hours cannot be negative")
 	}
-	_, err := s.pool.Exec(ctx, `
+	_, err := s.db.Exec(ctx, `
 		INSERT INTO notification.settings
 		    (customer_id, email_enabled, webhook_enabled, webhook_url, webhook_secret, reminders_enabled, reminder_lead_hours)
 		VALUES (NULLIF($1, '')::uuid, $2, $3, $4, $5, $6, $7)
@@ -97,7 +97,7 @@ func (s *Store) ClearSettings(ctx context.Context, customerID string) error {
 	if customerID == DeploymentScope {
 		return fmt.Errorf("the deployment's own settings cannot be cleared")
 	}
-	_, err := s.pool.Exec(ctx, `DELETE FROM notification.settings WHERE customer_id = $1::uuid`, customerID)
+	_, err := s.db.Exec(ctx, `DELETE FROM notification.settings WHERE customer_id = $1::uuid`, customerID)
 	return err
 }
 
@@ -117,7 +117,7 @@ var DeploymentDefaults Defaults
 // widened by the deployment's own — how far ahead the reminder has to look.
 func (s *Store) maxReminderLead(ctx context.Context) (int32, error) {
 	var lead int32
-	if err := s.pool.QueryRow(ctx, `SELECT COALESCE(max(reminder_lead_hours), 0) FROM notification.settings WHERE reminders_enabled`).Scan(&lead); err != nil {
+	if err := s.db.QueryRow(ctx, `SELECT COALESCE(max(reminder_lead_hours), 0) FROM notification.settings WHERE reminders_enabled`).Scan(&lead); err != nil {
 		return 0, fmt.Errorf("read reminder leads: %w", err)
 	}
 	if DeploymentDefaults != nil {
@@ -152,33 +152,33 @@ func (s *Store) CustomerOf(ctx context.Context, recipientUserID, resourceType, r
 	var cid *string
 	switch resourceType {
 	case "workflow_instance":
-		_ = s.pool.QueryRow(ctx, `
+		_ = s.db.QueryRow(ctx, `
 			SELECT a.customer_id::text FROM workflow.workflow_instance i
 			JOIN workflow.workflow_def d ON d.id = i.workflow_def_id
 			JOIN core.application a ON a.id = d.application_id WHERE i.id = $1::uuid`, resourceID).Scan(&cid)
 	case "automation_rule":
-		_ = s.pool.QueryRow(ctx, `
+		_ = s.db.QueryRow(ctx, `
 			SELECT a.customer_id::text FROM workflow.automation_rule r
 			JOIN core.application a ON a.id = r.application_id WHERE r.id = $1::uuid`, resourceID).Scan(&cid)
 	case "application":
-		_ = s.pool.QueryRow(ctx, `SELECT customer_id::text FROM core.application WHERE id = $1::uuid`, resourceID).Scan(&cid)
+		_ = s.db.QueryRow(ctx, `SELECT customer_id::text FROM core.application WHERE id = $1::uuid`, resourceID).Scan(&cid)
 	case "workspace":
 		// Access given in a workspace (the gateway's access_granted
 		// notification) is that workspace's tenant's news, whatever tenant
 		// the recipient's account belongs to.
-		_ = s.pool.QueryRow(ctx, `SELECT customer_id::text FROM core.workspace WHERE id = $1::uuid`, resourceID).Scan(&cid)
+		_ = s.db.QueryRow(ctx, `SELECT customer_id::text FROM core.workspace WHERE id = $1::uuid`, resourceID).Scan(&cid)
 	}
 	if cid != nil && *cid != "" {
 		return *cid
 	}
 	cid = nil
-	_ = s.pool.QueryRow(ctx, `SELECT customer_id::text FROM identity.user WHERE id = $1::uuid`, recipientUserID).Scan(&cid)
+	_ = s.db.QueryRow(ctx, `SELECT customer_id::text FROM identity.user WHERE id = $1::uuid`, recipientUserID).Scan(&cid)
 	if cid != nil && *cid != "" {
 		return *cid
 	}
 	var n int
 	var only *string
-	if err := s.pool.QueryRow(ctx, `SELECT count(*), min(id::text) FROM core.customer`).Scan(&n, &only); err == nil && n == 1 && only != nil {
+	if err := s.db.QueryRow(ctx, `SELECT count(*), min(id::text) FROM core.customer`).Scan(&n, &only); err == nil && n == 1 && only != nil {
 		return *only // exactly one tenant in this database
 	}
 	return ""

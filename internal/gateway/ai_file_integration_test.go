@@ -213,11 +213,13 @@ func TestAIDeveloperImportsAttachedFileAndDefinesAnExport(t *testing.T) {
 			proposeStep("import_file_data", "Import actuals.xlsx", map[string]any{
 				"file": "actuals.xlsx", "sheet": "Actuals", "integration_id": "<created in step 1>"}),
 		}}),
-		// Turn 2: a file with an unknown member — the import must fail whole.
+		// Turn 2: a file with an unknown member — the plan check refuses it
+		// before the developer sees it, and the assistant says so.
 		tool("propose_actions", map[string]any{"steps": []map[string]any{
 			proposeStep("import_file_data", "Import bad.csv", map[string]any{
 				"file": "bad.csv", "target_type": "grid", "target_id": "Sales", "column_map": columnMap}),
 		}}),
+		providers.ChatResponse{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: "FR is not a country in the model."}},
 		// Turn 3: preview an export, then propose it.
 		tool("preview_export", map[string]any{"grid_id": "Sales", "name": "Sales to ERP", "spec": spec}),
 		tool("propose_actions", map[string]any{"steps": []map[string]any{
@@ -341,9 +343,11 @@ func TestAIDeveloperImportsAttachedFileAndDefinesAnExport(t *testing.T) {
 	if status, body := do(devSub, "POST", "/api/ai/sessions/"+sess.ID+"/messages", map[string]string{"content": "import bad.csv"}); status != http.StatusOK {
 		t.Fatalf("message: %d %s", status, body)
 	}
-	p = confirmLatest()
-	if p.Steps[0].Status != "failed" || !strings.Contains(p.Steps[0].Result, `"FR" is not a member of dimension "geography"`) {
-		t.Errorf("bad file step = %s: %s", p.Steps[0].Status, p.Steps[0].Result)
+	if pending, _ := pStore.ListPendingProposals(ctx, sess.ID); len(pending) != 0 {
+		t.Fatalf("a file that cannot import became a proposal: %+v", pending)
+	}
+	if got := lastToolResult("propose_actions"); !strings.HasPrefix(got, "Proposal NOT shown") || !strings.Contains(got, `"FR" is not a member of dimension "geography"`) {
+		t.Errorf("the plan check's answer for bad.csv:\n%s", got)
 	}
 	if n := facts(draft); n != 6 {
 		t.Errorf("draft facts after a rejected file = %d, want 6 (all-or-nothing)", n)

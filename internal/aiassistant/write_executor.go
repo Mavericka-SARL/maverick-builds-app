@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
@@ -24,6 +23,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/workflow"
 	"github.com/mavericks-engine/mavericks/internal/writeguard"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
+	"github.com/mavericks-engine/mavericks/pkg/dbx"
 )
 
 // revisionIDMap runs a two-column (old_id, new_id) mapping query inside the
@@ -50,36 +50,18 @@ func revisionIDMap(ctx context.Context, tx pgx.Tx, query, modelID, newRevID, src
 // It mirrors the SQL logic of the existing developer HTTP handlers.
 // ExecDB is what a WriteExecutor runs its statements on: the pool, or — for
 // a proposal's dry run (NewDryRunWriteExecutor) — a transaction that is
-// always rolled back. pgx.Tx's Begin is a savepoint, so a step's own
-// transaction nests inside the dry run's.
-type ExecDB interface {
-	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
-	Begin(ctx context.Context) (pgx.Tx, error)
-}
+// always rolled back. Every store the executor uses is built on it
+// (workflow.NewStoreOn, crudapp.NewStoreOn), so every tool runs in a dry run
+// exactly as it would for real.
+type ExecDB = dbx.DB
 
-// ErrNotDryRunnable is a dry run's answer for a tool it cannot check
-// without writing for real: the workflow, form, automation-rule and
-// access-rule stores and the gateway hooks (file import, form postings)
-// work on the pool, outside the dry run's transaction. Confirming runs it.
+// ErrNotDryRunnable is a dry run's answer for a step it could not run (a
+// step that panicked, or a gateway hook the dry run was not given);
+// confirming runs it.
 var ErrNotDryRunnable = errors.New("checked only when the proposal is confirmed")
 
-// dryRunUnchecked are the tools ErrNotDryRunnable answers in a dry run.
-var dryRunUnchecked = map[string]bool{
-	"create_workflow_def": true, "update_workflow_def": true, "delete_workflow_def": true,
-	"archive_workflow_def": true, "restore_workflow_def": true, "duplicate_workflow_def": true,
-	"create_form_def": true, "update_form_def": true, "delete_form_def": true,
-	"create_automation_rule": true, "update_automation_rule": true, "delete_automation_rule": true,
-	"create_form_integration": true, "update_form_integration": true, "delete_form_integration": true,
-	"backfill_form_integration": true, "set_user_access_rules": true, "import_file_data": true,
-}
-
 type WriteExecutor struct {
-	pool ExecDB
-	// live is the pool itself, for the stores that need one; nil in a dry
-	// run, whose Execute refuses every tool that would reach it.
-	live    *pgxpool.Pool
+	pool    ExecDB
 	modelID string
 	revID   string
 	userID  string
@@ -134,12 +116,13 @@ func (e *WriteExecutor) checkMembers(ctx context.Context, dimensionID string, ad
 }
 
 func NewWriteExecutor(pool *pgxpool.Pool, modelID, revID string) *WriteExecutor {
-	return &WriteExecutor{pool: pool, live: pool, modelID: modelID, revID: revID}
+	return &WriteExecutor{pool: pool, modelID: modelID, revID: revID}
 }
 
 // NewDryRunWriteExecutor runs steps on tx, which the caller rolls back:
-// what confirming a proposal would do, without keeping any of it. Tools in
-// dryRunUnchecked answer ErrNotDryRunnable.
+// what confirming a proposal would do, without keeping any of it. The
+// gateway hooks (file import, form postings) it is given must check on tx
+// rather than write.
 func NewDryRunWriteExecutor(tx pgx.Tx, modelID, revID, userID string) *WriteExecutor {
 	return &WriteExecutor{pool: tx, modelID: modelID, revID: revID, userID: userID}
 }
@@ -151,7 +134,7 @@ func NewDryRunWriteExecutor(tx pgx.Tx, modelID, revID, userID string) *WriteExec
 // NewWriteExecutor's signature — that constructor has 3 real call sites
 // plus 17 in write_executor_test.go, none of which need an actor.
 func NewWriteExecutorWithActor(pool *pgxpool.Pool, modelID, revID, userID string) *WriteExecutor {
-	return &WriteExecutor{pool: pool, live: pool, modelID: modelID, revID: revID, userID: userID}
+	return &WriteExecutor{pool: pool, modelID: modelID, revID: revID, userID: userID}
 }
 
 // modelScopedResourceSQL resolves a resource ID to the model that owns it,
@@ -375,9 +358,6 @@ func (e *WriteExecutor) requireInModel(ctx context.Context, kind, id string) (st
 // Execute runs a single write tool and returns (humanResult, createdID, error).
 // createdID is non-empty when a new resource was created (used for rollback).
 func (e *WriteExecutor) Execute(ctx context.Context, tool string, params json.RawMessage) (result, createdID string, err error) {
-	if e.live == nil && dryRunUnchecked[tool] {
-		return "", "", ErrNotDryRunnable
-	}
 	switch tool {
 	case "create_metric":
 		return e.createMetric(ctx, params)
@@ -2791,7 +2771,7 @@ func (e *WriteExecutor) createWorkflowDef(ctx context.Context, raw json.RawMessa
 		return "", "", fmt.Errorf("resolve application: %w", err)
 	}
 
-	ws := workflow.NewStore(e.live)
+	ws := workflow.NewStoreOn(e.pool)
 	def, err := ws.CreateWorkflowDefFull(ctx, appID, revID, p.Name, p.Description, p.TriggerEvent, e.userID)
 	if err != nil {
 		return "", "", fmt.Errorf("create workflow: %w", err)
@@ -2868,7 +2848,7 @@ func (e *WriteExecutor) updateWorkflowDef(ctx context.Context, raw json.RawMessa
 		subjectType = curSubjectType
 	}
 
-	ws := workflow.NewStore(e.live)
+	ws := workflow.NewStoreOn(e.pool)
 	def, err := ws.UpdateWorkflowDefFull(ctx, p.WorkflowDefID, name, description, triggerEvent, subjectType, e.userID, p.Steps, p.ContextSchema, p.SubjectConfig)
 	if err != nil {
 		return "", "", fmt.Errorf("update workflow: %w", err)
@@ -2921,7 +2901,7 @@ func (e *WriteExecutor) createFormDef(ctx context.Context, raw json.RawMessage) 
 	}
 	revID := e.effectiveRevision(p.RevisionID)
 
-	fs := crudapp.NewStore(e.live)
+	fs := crudapp.NewStoreOn(e.pool)
 	form, err := fs.CreateForm(ctx, e.modelID, revID, p.Name, p.Label, p.Fields)
 	if err != nil {
 		return "", "", fmt.Errorf("create form: %w", err)
@@ -2984,7 +2964,7 @@ func (e *WriteExecutor) updateFormDef(ctx context.Context, raw json.RawMessage) 
 		_ = json.Unmarshal(curFieldsJSON, &fields)
 	}
 
-	fs := crudapp.NewStore(e.live)
+	fs := crudapp.NewStoreOn(e.pool)
 	if err := fs.UpdateForm(ctx, p.FormID, name, label, fields); err != nil {
 		return "", "", fmt.Errorf("update form: %w", err)
 	}
@@ -3110,7 +3090,7 @@ func (e *WriteExecutor) setUserAccessRules(ctx context.Context, raw json.RawMess
 
 	// Same audit event the business-admin endpoint writes, so "who changed
 	// this user's access" has one answer regardless of which door was used.
-	auditlog.Log(ctx, e.live, zerolog.Nop(), auditlog.Fields{
+	auditlog.Log(ctx, e.pool, zerolog.Nop(), auditlog.Fields{
 		Category: auditlog.CategoryAdmin, EventType: auditlog.EventUserAccessRulesUpdated,
 		ActorUserID: e.userID, ActorRole: "developer(ai_assistant)",
 		ResourceType: "identity_user", ResourceID: targetID,

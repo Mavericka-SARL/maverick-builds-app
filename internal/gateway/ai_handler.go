@@ -569,7 +569,7 @@ turn:
 			// would fail goes back to the model with its errors, not to the
 			// developer. A check that cannot run lets the plan through:
 			// confirming still stops at the first failing step.
-			check, cErr := h.aiCheckProposal(ctx, modelID, revID, a.UserID, args.Steps)
+			check, cErr := h.aiCheckProposal(ctx, sessionID, modelID, revID, a.UserID, args.Steps)
 			if cErr != nil {
 				log.Printf("AI proposal check: %v", cErr)
 			} else if len(check.problems) > 0 {

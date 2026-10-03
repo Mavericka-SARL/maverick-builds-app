@@ -204,6 +204,7 @@ var operationRolesBearerAuth = map[string][]string{
 	MarkNotificationReadOperation:         []string{},
 	PreviewExportIntegrationOperation:     []string{},
 	PreviewFormMappingOperation:           []string{},
+	PreviewImportReshapeOperation:         []string{},
 	PromoteAiDraftOperation:               []string{},
 	PublishWorkflowOperation:              []string{},
 	PutGoogleConnectionOperation:          []string{},

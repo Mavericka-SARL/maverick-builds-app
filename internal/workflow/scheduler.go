@@ -17,7 +17,7 @@ import (
 // call after the first just returns the same existing row.
 func (s *Store) ensureSystemUser(ctx context.Context) (string, error) {
 	var id string
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		INSERT INTO identity.user (keycloak_sub, email, display_name)
 		VALUES ('system-scheduler', 'scheduler@system.internal', 'Automation Scheduler')
 		ON CONFLICT (keycloak_sub) DO UPDATE SET keycloak_sub = EXCLUDED.keycloak_sub
@@ -97,7 +97,7 @@ func (s *Store) PollDueSchedules(ctx context.Context, log zerolog.Logger, worker
 // short transaction, then commits, releasing the row lock quickly rather
 // than holding it for the duration of actually firing.
 func (s *Store) claimDueSchedules(ctx context.Context, log zerolog.Logger, misfireThreshold time.Duration) ([]dueRule, error) {
-	tx, err := s.pool.Begin(ctx)
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +183,7 @@ func (s *Store) claimDueSchedules(ctx context.Context, log zerolog.Logger, misfi
 // with no request in flight; detail carries the execution ID (fire/skip) or
 // error message (failure) as metadata.
 func (s *Store) auditScheduleEvent(ctx context.Context, rule AutomationRule, eventType auditlog.EventType, workerID, detail string) {
-	auditlog.Log(ctx, s.pool, s.log, auditlog.Fields{
+	auditlog.Log(ctx, s.db, s.log, auditlog.Fields{
 		Category:      auditlog.CategoryDataChange,
 		EventType:     eventType,
 		ApplicationID: rule.ApplicationID,

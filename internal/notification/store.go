@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mavericks-engine/mavericks/pkg/dbx"
+
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	notificationv1 "github.com/mavericks-engine/mavericks/gen/go/notification/v1"
@@ -18,9 +20,21 @@ import (
 
 type Store struct {
 	pool *pgxpool.Pool
+	db   dbx.DB // what the store\'s statements run on: the pool, or a transaction
 }
 
-func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool, db: pool} }
+
+// NewStoreOn is NewStore on a pool or a transaction (dbx.DB): built on a
+// transaction it writes nothing the transaction does not keep. Pool() is
+// nil unless db is a pool.
+func NewStoreOn(db dbx.DB) *Store {
+	s := &Store{db: db}
+	if p, ok := db.(*pgxpool.Pool); ok {
+		s.pool = p
+	}
+	return s
+}
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
@@ -44,7 +58,7 @@ func (s *Store) Send(ctx context.Context, recipientUserID, templateID string, ch
 	}
 
 	var id string
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		INSERT INTO notification.notification
 		    (recipient_user_id, channel, template_id, template_vars, resource_type, resource_id)
 		VALUES ($1::uuid, $2::notification.channel, $3, $4, $5, $6)
@@ -57,7 +71,7 @@ func (s *Store) Send(ctx context.Context, recipientUserID, templateID string, ch
 	// in_app is delivered by being written: the console reads the row. The
 	// outbound channels stay pending for the dispatcher (dispatch.go).
 	if channel == notificationv1.NotificationChannel_NOTIFICATION_CHANNEL_IN_APP {
-		_, _ = s.pool.Exec(ctx, `
+		_, _ = s.db.Exec(ctx, `
 			UPDATE notification.notification
 			SET status = 'delivered', delivered_at = now()
 			WHERE id = $1::uuid
@@ -82,7 +96,7 @@ func (s *Store) List(ctx context.Context, userID string, unreadOnly bool, limit 
 	args = append(args, limit)
 	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d", len(args))
 
-	rows, err := s.pool.Query(ctx, query, args...)
+	rows, err := s.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +146,7 @@ func (s *Store) MarkRead(ctx context.Context, notificationIDs []string) (int32, 
 		args[i] = id
 	}
 
-	tag, err := s.pool.Exec(ctx,
+	tag, err := s.db.Exec(ctx,
 		fmt.Sprintf(`
 			UPDATE notification.notification SET status = 'read'
 			WHERE id IN (%s) AND status != 'read'
@@ -151,7 +165,7 @@ func (s *Store) GetByID(ctx context.Context, id string) (*notificationv1.Notific
 	var createdAt time.Time
 	var deliveredAt *time.Time
 
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT id::text, recipient_user_id::text, channel::text, template_id,
 		       template_vars, status::text, created_at, delivered_at
 		FROM notification.notification WHERE id = $1::uuid

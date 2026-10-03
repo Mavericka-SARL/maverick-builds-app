@@ -1163,6 +1163,13 @@ type Handler interface {
 	//
 	// GET /api/developer/form-integrations/{id}/preview
 	PreviewFormMapping(ctx context.Context, params PreviewFormMappingParams) ([]PreviewFormMappingOKItem, error)
+	// PreviewImportReshape implements previewImportReshape operation.
+	//
+	// The Import Wizard's Shape step. Uses the same code every run of a saved file integration applies
+	// (importpkg.Reshape). Nothing is stored.
+	//
+	// POST /api/import/reshape-preview
+	PreviewImportReshape(ctx context.Context, req *PreviewImportReshapeReq) (PreviewImportReshapeRes, error)
 	// PromoteAiDraft implements promoteAiDraft operation.
 	//
 	// Make the session's isolated draft revision the model's active revision, then clear the session's

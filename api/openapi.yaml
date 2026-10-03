@@ -7484,6 +7484,48 @@ paths:
                   error_rows:    { type: integer }
         "400": { $ref: "#/components/responses/BadRequest" }
 
+  /api/import/reshape-preview:
+    post:
+      operationId: previewImportReshape
+      tags: [Import]
+      summary: Apply a reshape to a sample file and return the rows an import would read
+      description: The Import Wizard's Shape step. Uses the same code every run of a saved file integration applies (importpkg.Reshape). Nothing is stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                csv:         { type: string }
+                xlsx_base64: { type: string }
+                sheet:       { type: string }
+                reshape:     { type: object, additionalProperties: true, description: "importpkg.Reshape: delimiter, header_row, fill_down, skip_rows, unpivot, constants, value_map, number_columns, decimal_comma, scale" }
+      responses:
+        "200":
+          description: The sheet as read (first rows) and the reshaped header and rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sheets:    { type: array, items: { type: string } }
+                  raw:       { type: array, items: { type: array, items: { type: string } } }
+                  header:    { type: array, items: { type: string } }
+                  rows:      { type: array, items: { type: array, items: { type: string } } }
+                  row_count: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "422":
+          description: The reshape does not fit the file; the sheet as read is returned with the error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:  { type: string }
+                  raw:    { type: array, items: { type: array, items: { type: string } } }
+                  sheets: { type: array, items: { type: string } }
+
   /api/import/upload:
     post:
       operationId: importUpload
