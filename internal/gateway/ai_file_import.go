@@ -29,12 +29,15 @@ import (
 // POST /api/import/upload sets on a file.
 const maxAIImportBytes = 16 << 20
 
-// attachedFile is an attachment parsed and column-mapped for import.
+// attachedFile is an attachment parsed, reshaped and column-mapped for import.
 type attachedFile struct {
+	docID    string
 	filename string
 	sheet    string
 	sheets   []string
-	header   []string // as in the file
+	grid     [][]string // the sheet as read, header row included
+	reshaped bool
+	header   []string // after the reshape (the file's own when there is none)
 	mapped   []string // after the column map
 	rows     []importpkg.RawRow
 }
@@ -59,7 +62,7 @@ func (h *handler) loadAttachedFile(ctx context.Context, sessionID string, req ai
 	if !doc.Importable || raw == nil {
 		return nil, fmt.Errorf("%s cannot be imported: only .xlsx, .xlsm and .csv files up to 16 MB attached since file import was added are kept whole — ask the developer to attach it again", doc.Filename)
 	}
-	f := &attachedFile{filename: doc.Filename, sheet: req.Sheet}
+	f := &attachedFile{docID: doc.ID, filename: doc.Filename, sheet: req.Sheet}
 	if strings.HasSuffix(strings.ToLower(doc.Filename), ".xlsx") || strings.HasSuffix(strings.ToLower(doc.Filename), ".xlsm") {
 		if f.sheets, err = importpkg.XLSXSheetNames(raw); err != nil {
 			return nil, err
@@ -68,21 +71,78 @@ func (h *handler) loadAttachedFile(ctx context.Context, sessionID string, req ai
 			f.sheet = f.sheets[0]
 		}
 	}
-	header, rows, err := importpkg.ParseTabularFile(doc.Filename, raw, req.Sheet)
+	if err := req.Reshape.Validate(); err != nil {
+		return nil, err
+	}
+	delim, err := req.Reshape.Comma()
+	if err != nil {
+		return nil, err
+	}
+	if f.grid, err = importpkg.ReadGrid(doc.Filename, raw, req.Sheet, delim); err != nil {
+		return nil, err
+	}
+	f.reshaped = !req.Reshape.IsZero()
+	header, rows, err := importpkg.ShapeGrid(f.grid, req.Reshape)
 	if err != nil {
 		return nil, err
 	}
 	f.header = append([]string(nil), header...)
 	if missing := importpkg.UnmatchedColumnMapKeys(header, req.ColumnMap); len(missing) > 0 {
 		sort.Strings(missing)
-		return nil, fmt.Errorf("column_map names column(s) %s that %s does not have — its columns are: %s",
-			strings.Join(missing, ", "), f.describe(), strings.Join(header, ", "))
+		after := ""
+		if f.reshaped {
+			after = " after the reshape"
+		}
+		return nil, fmt.Errorf("column_map names column(s) %s that %s does not have%s — its columns are: %s",
+			strings.Join(missing, ", "), f.describe(), after, strings.Join(header, ", "))
 	}
 	if f.mapped, err = importpkg.ApplyColumnMap(header, rows, req.ColumnMap); err != nil {
 		return nil, err
 	}
 	f.rows = rows
 	return f, nil
+}
+
+// sampleLines renders up to n rows for the assistant, each cell clipped, so
+// it can see a sheet's layout (where the header is, what runs across).
+func sampleLines(rows [][]string, n int) string {
+	var sb strings.Builder
+	for i, r := range rows {
+		if i == n {
+			fmt.Fprintf(&sb, "  … %d more row(s)\n", len(rows)-n)
+			break
+		}
+		cells := r
+		if len(cells) > 14 {
+			cells = append(append([]string(nil), cells[:14]...), fmt.Sprintf("… %d more", len(r)-14))
+		}
+		clipped := make([]string, len(cells))
+		for j, c := range cells {
+			c = strings.TrimSpace(c)
+			if len([]rune(c)) > 32 {
+				c = string([]rune(c)[:31]) + "…"
+			}
+			clipped[j] = fmt.Sprintf("%q", c)
+		}
+		fmt.Fprintf(&sb, "  %d: %s\n", i+1, strings.Join(clipped, ", "))
+	}
+	return sb.String()
+}
+
+// mappedSample is the first n rows as an import reads them.
+func (f *attachedFile) mappedSample(n int) [][]string {
+	out := make([][]string, 0, n)
+	for i, r := range f.rows {
+		if i == n {
+			break
+		}
+		line := make([]string, len(f.mapped))
+		for j, c := range f.mapped {
+			line[j] = r.Cells[c]
+		}
+		out = append(out, line)
+	}
+	return out
 }
 
 func (f *attachedFile) describe() string {
@@ -212,13 +272,7 @@ func (h *handler) aiPreviewFileImport(ctx context.Context, sessionID string, req
 		return "", err
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "File %s: %d data row(s); columns: %s\n", f.describe(), len(f.rows), strings.Join(f.header, ", "))
-	if len(f.sheets) > 1 {
-		fmt.Fprintf(&sb, "Workbook sheets: %s (pass \"sheet\" to choose another)\n", strings.Join(f.sheets, ", "))
-	}
-	if len(req.ColumnMap) > 0 {
-		fmt.Fprintf(&sb, "Columns after column_map: %s\n", strings.Join(f.mapped, ", "))
-	}
+	sb.WriteString(f.layout(req))
 
 	if req.TargetType == "dimension" {
 		if _, _, err := dimensionCSV(f); err != nil {
@@ -255,6 +309,29 @@ func (h *handler) aiPreviewFileImport(ctx context.Context, sessionID string, req
 	sort.Strings(parts)
 	fmt.Fprintf(&sb, "No errors. Would import %d value(s): %s.\n", len(staged), strings.Join(parts, ", "))
 	return sb.String(), nil
+}
+
+// layout describes the file as read and as the import will read it: the
+// sheet's first rows, then — after the reshape and column map — its columns
+// and first rows. It is what lets the assistant see a layout to reshape.
+func (f *attachedFile) layout(req aiassistant.FileImportRequest) string {
+	var sb strings.Builder
+	if len(f.sheets) > 1 {
+		fmt.Fprintf(&sb, "Workbook sheets: %s (pass \"sheet\" to choose another)\n", strings.Join(f.sheets, ", "))
+	}
+	fmt.Fprintf(&sb, "%s as read, first rows:\n%s", f.describe(), sampleLines(f.grid, 8))
+	if f.reshaped {
+		fmt.Fprintf(&sb, "After the reshape: %d row(s); columns: %s\n", len(f.rows), strings.Join(f.header, ", "))
+	} else {
+		fmt.Fprintf(&sb, "%d data row(s) under the header (row 1); columns: %s\n", len(f.rows), strings.Join(f.header, ", "))
+	}
+	if len(req.ColumnMap) > 0 {
+		fmt.Fprintf(&sb, "Columns after column_map: %s\n", strings.Join(f.mapped, ", "))
+	}
+	if f.reshaped || len(req.ColumnMap) > 0 {
+		fmt.Fprintf(&sb, "First rows as the import reads them:\n%s", sampleLines(f.mappedSample(5), 5))
+	}
+	return sb.String()
 }
 
 func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string, req aiassistant.FileImportRequest) (string, error) {
@@ -395,6 +472,9 @@ func (h *handler) aiReadHooks(r *http.Request, sessionID string) aiassistant.Rea
 		},
 		PreviewExport: func(ctx context.Context, revisionID, gridID, name string, spec dataexport.Spec) (string, error) {
 			return h.aiPreviewExport(r.WithContext(ctx), gridID, name, spec)
+		},
+		PrepareConversion: func(ctx context.Context, req aiassistant.FileImportRequest) (string, error) {
+			return h.aiPrepareConversion(ctx, sessionID, req)
 		},
 	}
 }

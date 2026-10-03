@@ -3,7 +3,6 @@ package metricformula
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mavericks-engine/mavericks/internal/rollup"
 )
@@ -54,7 +53,7 @@ func ValidateAggRule(rule string, isInput bool, numeratorID, denominatorID, metr
 // ValidateAggOperands additionally confirms both ratio operands are metrics of
 // the same model and revision. Pointing at another revision's metric would
 // resolve against values this one never sees.
-func ValidateAggOperands(ctx context.Context, pool *pgxpool.Pool, rule, modelID, revisionID, numeratorID, denominatorID string) error {
+func ValidateAggOperands(ctx context.Context, pool Querier, rule, modelID, revisionID, numeratorID, denominatorID string) error {
 	if rule != string(rollup.AggRate) {
 		return nil
 	}

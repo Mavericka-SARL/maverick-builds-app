@@ -6,6 +6,9 @@ package gateway
 //
 //   - a run's file arrives as CSV text or as a workbook (xlsx_base64 + sheet),
 //     so a business user's dashboard button can send the .xlsx they have;
+//   - the integration's saved reshape (importpkg.Reshape) turns a sheet laid
+//     out for people — a title above the header, months across, total rows —
+//     into importable rows first;
 //   - the integration's saved column_map is applied in the Import Wizard's
 //     vocabulary (importpkg.ApplyColumnMap), so a file holding metric and
 //     member NAMES runs — not only the metric-UUID CSV the wizard builds;
@@ -37,9 +40,10 @@ import (
 const maxRunBodyBytes = 24 << 20
 
 // parseRunFile reads the file a csv_import run carries: "csv" text, or
-// "xlsx_base64" with an optional "sheet" (default the first). Workbook cells
-// are read as stored, so a formatted "1,234.50" arrives as 1234.5.
-func parseRunFile(w http.ResponseWriter, r *http.Request) ([]string, []importpkg.RawRow, error) {
+// "xlsx_base64" with an optional "sheet" (default the first), reshaped as
+// the integration saved (nil = as is). Workbook cells are read as stored,
+// so a formatted "1,234.50" arrives as 1234.5.
+func parseRunFile(w http.ResponseWriter, r *http.Request, reshape *importpkg.Reshape) ([]string, []importpkg.RawRow, error) {
 	var body struct {
 		CSV        string `json:"csv"`
 		XLSXBase64 string `json:"xlsx_base64"`
@@ -54,9 +58,9 @@ func parseRunFile(w http.ResponseWriter, r *http.Request) ([]string, []importpkg
 		if err != nil {
 			return nil, nil, fmt.Errorf("xlsx_base64: %w", err)
 		}
-		return importpkg.ParseTabularFile("run.xlsx", raw, body.Sheet)
+		return importpkg.ReadShaped("run.xlsx", raw, body.Sheet, reshape)
 	case body.CSV != "":
-		return importpkg.ParseCSVRows(bytes.TrimPrefix([]byte(body.CSV), []byte("\xef\xbb\xbf")))
+		return importpkg.ShapeCSV([]byte(body.CSV), reshape)
 	}
 	return nil, nil, fmt.Errorf("csv or xlsx_base64 field required")
 }

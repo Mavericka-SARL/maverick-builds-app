@@ -825,6 +825,19 @@ type AiAssistantAction struct {
 	CreatedAt        time.Time             `json:"created_at"`
 }
 
+type AiAssistantConversion struct {
+	ID         uuid.UUID `json:"id"`
+	SessionID  uuid.UUID `json:"session_id"`
+	DocumentID uuid.UUID `json:"document_id"`
+	Sheet      string    `json:"sheet"`
+	Reshape    []byte    `json:"reshape"`
+	ColumnMap  []byte    `json:"column_map"`
+	Filename   string    `json:"filename"`
+	RowCount   int32     `json:"row_count"`
+	Columns    []string  `json:"columns"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
 type AiAssistantDocument struct {
 	ID        uuid.UUID `json:"id"`
 	SessionID uuid.UUID `json:"session_id"`

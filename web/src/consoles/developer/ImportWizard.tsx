@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 import { FileSpreadsheet, FileText, FolderOpen, ArrowLeft, ArrowRight, History, Pencil, Trash2, Play, Plus as PlusIcon, X as XIcon } from "lucide-react";
 import { Button, IconButton, TextInput, Select, Field, StatusBadge, Stepper, InlineAlert, FilterChip, useConfirm, type DesignTone } from "../../ui";
 import { GoogleServiceAccountPanel } from "./GoogleServiceAccountPanel";
+import { fileToBase64 } from "../business/blobUtils";
 import {
   api,
   type IntegrationDef,
@@ -13,6 +14,8 @@ import {
   type DevMetric,
   type DevModel,
   type DevRevision,
+  type FileReshape,
+  describeReshape,
 } from "../../api/client";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -62,6 +65,9 @@ interface WizardConfig {
   integrationName?: string;
   // Resuming a saved DRAFT integration: finishing the wizard activates it.
   draftId?: string;
+  // The draft's saved reshape, written back when the wizard finishes it (the
+  // config is replaced whole, and the wizard has no editor for it).
+  reshape?: FileReshape;
   // "file" (default) uploads a local .csv/.xlsx; "google_sheets" fetches a
   // link-shared sheet server-side and then flows through the same steps.
   source?: "file" | "google_sheets";
@@ -960,6 +966,7 @@ function CommitStep({
             status: "active",
           });
           await api.updateIntegrationConfig(config.draftId, {
+            ...(config.reshape ? { reshape: config.reshape } : {}),
             column_map: Object.fromEntries(mappings.filter(m => m.targetField).map(m => [m.sourceCol, m.targetField])),
             ...(config.source === "google_sheets" ? { sheet_url: config.sheetUrl, import_mode: config.importMode } : {}),
           });
@@ -1430,6 +1437,11 @@ function SavedIntegrationsList({
                     {Object.keys(d.config.column_map).length} columns mapped
                   </span>
                 )}
+                {d.config?.reshape && describeReshape(d.config.reshape) && (
+                  <span className="mvx-admin-muted" style={{ fontSize: 11 }} data-testid={`integration-reshape-${d.id}`} title="Set up by the AI Developer; it applies on every run">
+                    Reshapes each file: {describeReshape(d.config.reshape)}
+                  </span>
+                )}
               </div>
               {d.status === "draft" ? (
                 <Button
@@ -1441,11 +1453,14 @@ function SavedIntegrationsList({
                     targetType: d.target_type as TargetType,
                     targetId: d.target_id,
                     ...(d.config?.import_mode ? { importMode: d.config.import_mode as WizardConfig["importMode"] } : {}),
+                    ...(d.config?.reshape ? { reshape: d.config.reshape } : {}),
                     ...(d.type === "google_sheets" ? { source: "google_sheets" as const, sheetUrl: d.config?.sheet_url } : {}),
                   })}
                 >
                   Continue draft
                 </Button>
+              ) : d.config?.reshape ? (
+                <RunReshapedIntegration integration={d} />
               ) : d.type === "google_sheets" ? (
                 <Button
                   size="sm"
@@ -1501,6 +1516,48 @@ function SavedIntegrationsList({
 }
 
 // ── Per-integration run history ────────────────────────────────────────────────
+
+// RunReshapedIntegration runs a file integration whose files are reshaped
+// before mapping (set up by the AI Developer). The wizard reads a file's
+// header from its first row and has no editor for a reshape, so the file
+// goes to the server as it is — as a dashboard's Integration button sends
+// it — and the saved reshape, column map and mode apply there.
+function RunReshapedIntegration({ integration }: { integration: IntegrationDef }) {
+  const qc = useQueryClient();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const run = useMutation({
+    mutationFn: (file: { csv?: string; xlsx_base64?: string }) => api.runIntegration(integration.id, file),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["integration-runs", integration.id] });
+      qc.invalidateQueries({ queryKey: ["dev-integrations"] });
+    },
+  });
+  const pick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (/\.xls[xm]$/i.test(file.name)) run.mutate({ xlsx_base64: await fileToBase64(file) });
+    else run.mutate({ csv: await file.text() });
+  };
+  const firstError = run.data?.errors?.[0];
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <input ref={fileRef} type="file" accept=".csv,.xlsx,.xlsm,text/csv" style={{ display: "none" }} onChange={pick}
+        aria-label={`File for ${integration.name}`} />
+      <Button size="sm" leadingIcon={<Play size={13} />} loading={run.isPending} loadingLabel="Importing…"
+        onClick={() => fileRef.current?.click()}>
+        Run with a file
+      </Button>
+      {run.isSuccess && (
+        <span className="mvx-admin-muted" style={{ fontSize: 12 }} role="status">
+          {run.data.values_imported ?? run.data.rows_imported} value(s) imported
+          {firstError ? ` · row ${firstError.row}, ${firstError.column}: ${firstError.message}` : ""}
+        </span>
+      )}
+      {run.isError && <span className="mvx-admin-error" style={{ fontSize: 12 }}>{(run.error as Error).message}</span>}
+    </span>
+  );
+}
 
 function IntegrationRunHistory({ integrationId }: { integrationId: string }) {
   const { data: runs = [], isLoading } = useQuery({

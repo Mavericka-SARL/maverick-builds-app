@@ -449,7 +449,9 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	const maxIdenticalCalls = 3
 	var lastCallSig string
 	identicalCalls := 0
+	rejections := 0 // plans sent back by aiCheckProposal this turn
 
+turn:
 	for {
 		if sessionCalls >= maxLLMCallsPerSession {
 			sendSSE("error", map[string]string{"error": fmt.Sprintf("this session has reached its limit of %d LLM calls — start a new session to continue", maxLLMCallsPerSession)})
@@ -562,6 +564,33 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(tc.Arguments, &args); err != nil || len(args.Steps) == 0 {
 				sendSSE("error", map[string]string{"error": "propose_actions: invalid steps"})
 				return
+			}
+			// Run the plan as confirming would (aiCheckProposal); one that
+			// would fail goes back to the model with its errors, not to the
+			// developer. A check that cannot run lets the plan through:
+			// confirming still stops at the first failing step.
+			check, cErr := h.aiCheckProposal(ctx, modelID, revID, a.UserID, args.Steps)
+			if cErr != nil {
+				log.Printf("AI proposal check: %v", cErr)
+			} else if len(check.problems) > 0 {
+				rejections++
+				_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, llmResp.Message.ToolCalls, "", "")
+				provMessages = append(provMessages, llmResp.Message)
+				for _, call := range llmResp.Message.ToolCalls {
+					var result string
+					if aiassistant.IsWriteTool(call.Name) {
+						result = check.rejection(rejections)
+					} else {
+						var execErr error
+						if result, execErr = readExecutor.Execute(ctx, call.Name, call.Arguments); execErr != nil {
+							result = fmt.Sprintf("error: %v", execErr)
+						}
+					}
+					_, _ = store.SaveMessage(ctx, sessionID, "tool", result, nil, call.ID, call.Name)
+					provMessages = append(provMessages, providers.Message{Role: "tool", Content: result, ToolCallID: call.ID, ToolName: call.Name})
+				}
+				sendSSE("tool_status", map[string]string{"tool": "checking the plan"})
+				continue turn
 			}
 			proposal, pErr := proposalStore.CreateProposal(ctx, sessionID, args.Steps)
 			if pErr != nil {
@@ -726,11 +755,20 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 	_ = pStore.SetStatus(ctx, proposalID, "confirmed")
 
 	// Execute each step, substituting "<created in step N>" placeholders with
-	// actual IDs returned by earlier steps.
+	// actual IDs returned by earlier steps. The first failure stops the
+	// plan: later steps are built on it (a formula naming a metric the
+	// failed step was to create), and running them anyway only multiplied
+	// one mistake into a page of errors — reported live. What ran before it
+	// stays in the draft.
 	anyFailed := false
 	steps := proposal.Steps
 	created := make([]string, len(steps))
 	for i, step := range steps {
+		if anyFailed {
+			steps[i].Status = "skipped"
+			steps[i].Result = "not run: an earlier step failed"
+			continue
+		}
 		resolved := resolveParamRefs(step.Params, created[:i])
 		result, createdID, execErr := executor.Execute(ctx, step.Tool, resolved)
 		if execErr != nil {
@@ -799,18 +837,35 @@ func shortStepLabel(s aiassistant.ProposalStep) string {
 // just the chat-facing summary. Failures are always listed individually and
 // in full: they're rare and need enough detail to diagnose, so they're
 // never worth collapsing.
-func buildExecutionSummary(steps []aiassistant.ProposalStep) string {
-	failed := 0
-	for _, s := range steps {
+// firstFailed is the 1-based number of the first failed step (0: none).
+func firstFailed(steps []aiassistant.ProposalStep) int {
+	for i, s := range steps {
 		if s.Status == "failed" {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+func buildExecutionSummary(steps []aiassistant.ProposalStep) string {
+	failed, skipped := 0, 0
+	for _, s := range steps {
+		switch s.Status {
+		case "failed":
 			failed++
+		case "skipped":
+			skipped++
 		}
 	}
 
 	var sb strings.Builder
-	if failed == 0 {
+	switch {
+	case failed == 0:
 		fmt.Fprintf(&sb, "Executed %d step%s successfully.\n", len(steps), plural(len(steps)))
-	} else {
+	case skipped > 0:
+		fmt.Fprintf(&sb, "Executed %d of %d steps — step %d failed, so the %d after it were not run.\n",
+			len(steps)-failed-skipped, len(steps), firstFailed(steps), skipped)
+	default:
 		fmt.Fprintf(&sb, "Executed %d step%s — %d failed.\n", len(steps), plural(len(steps)), failed)
 	}
 
@@ -825,6 +880,10 @@ func buildExecutionSummary(steps []aiassistant.ProposalStep) string {
 	for i, s := range steps {
 		if s.Status == "failed" {
 			failLines = append(failLines, fmt.Sprintf("✗ Step %d: %s — %s", i+1, s.Description, s.Result))
+			continue
+		}
+		if s.Status == "skipped" {
+			failLines = append(failLines, fmt.Sprintf("– Step %d not run: %s", i+1, s.Description))
 			continue
 		}
 		g, ok := byTool[s.Tool]

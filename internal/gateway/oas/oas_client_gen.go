@@ -508,6 +508,12 @@ type Invoker interface {
 	//
 	// POST /api/developer/integration-connections/{id}/oauth/disconnect
 	DisconnectIntegrationOAuth(ctx context.Context, params DisconnectIntegrationOAuthParams) (DisconnectIntegrationOAuthRes, error)
+	// DownloadAiConversion invokes downloadAiConversion operation.
+	//
+	// Download a converted file, rebuilt from its attachment.
+	//
+	// GET /api/ai/sessions/{id}/conversions/{cid}
+	DownloadAiConversion(ctx context.Context, params DownloadAiConversionParams) (DownloadAiConversionRes, error)
 	// DownloadExportIntegration invokes downloadExportIntegration operation.
 	//
 	// Download a file_export integration — the grid's leaf-level values (inputs and calculated
@@ -887,6 +893,12 @@ type Invoker interface {
 	//
 	// GET /api/admin/workspaces
 	ListAdminWorkspaces(ctx context.Context) ([]AdminWorkspace, error)
+	// ListAiConversions invokes listAiConversions operation.
+	//
+	// An attachment reshaped and column-mapped into the layout an import reads. Session owner only.
+	//
+	// GET /api/ai/sessions/{id}/conversions
+	ListAiConversions(ctx context.Context, params ListAiConversionsParams) (ListAiConversionsRes, error)
 	// ListAiProposals invokes listAiProposals operation.
 	//
 	// List every proposal ever made in a session, most recent first (not just pending ones) — the
@@ -10715,6 +10727,171 @@ func (c *Client) sendDisconnectIntegrationOAuth(ctx context.Context, params Disc
 	return result, nil
 }
 
+// DownloadAiConversion invokes downloadAiConversion operation.
+//
+// Download a converted file, rebuilt from its attachment.
+//
+// GET /api/ai/sessions/{id}/conversions/{cid}
+func (c *Client) DownloadAiConversion(ctx context.Context, params DownloadAiConversionParams) (DownloadAiConversionRes, error) {
+	res, err := c.sendDownloadAiConversion(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendDownloadAiConversion(ctx context.Context, params DownloadAiConversionParams) (res DownloadAiConversionRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("downloadAiConversion"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/ai/sessions/{id}/conversions/{cid}"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, DownloadAiConversionOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [4]string
+	pathParts[0] = "/api/ai/sessions/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/conversions/"
+	{
+		// Encode "cid" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "cid",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.Cid))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[3] = encoded
+	}
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "format" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "format",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.Format.Get(); ok {
+				return e.EncodeValue(conv.StringToString(string(val)))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, DownloadAiConversionOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeDownloadAiConversionResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // DownloadExportIntegration invokes downloadExportIntegration operation.
 //
 // Download a file_export integration — the grid's leaf-level values (inputs and calculated
@@ -17622,6 +17799,132 @@ func (c *Client) sendListAdminWorkspaces(ctx context.Context) (res []AdminWorksp
 
 	stage = "DecodeResponse"
 	result, err := decodeListAdminWorkspacesResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// ListAiConversions invokes listAiConversions operation.
+//
+// An attachment reshaped and column-mapped into the layout an import reads. Session owner only.
+//
+// GET /api/ai/sessions/{id}/conversions
+func (c *Client) ListAiConversions(ctx context.Context, params ListAiConversionsParams) (ListAiConversionsRes, error) {
+	res, err := c.sendListAiConversions(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendListAiConversions(ctx context.Context, params ListAiConversionsParams) (res ListAiConversionsRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("listAiConversions"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/ai/sessions/{id}/conversions"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ListAiConversionsOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/ai/sessions/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/conversions"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ListAiConversionsOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeListAiConversionsResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

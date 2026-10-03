@@ -142,8 +142,9 @@ func memberExists(ctx context.Context, q Querier, dimID, code string) (bool, err
 // argument is a dimension — never a metric of the same name
 // (DIMENSION_ARGUMENT_REQUIRED) — and every literal LOOKUP member exists in
 // its dimension (UNKNOWN_MEMBER). isMetric reports whether a name is a
-// metric of the revision, for a message that says so.
-func checkDimensionNames(ctx context.Context, q Querier, an *formula.Analysis, rd *revisionDims, isMetric func(string) bool) error {
+// metric of the revision, for a message that says so; suggest says what an
+// unknown name most likely meant (suggestName).
+func checkDimensionNames(ctx context.Context, q Querier, an *formula.Analysis, rd *revisionDims, isMetric func(string) bool, suggest func(string) string) error {
 	for _, arg := range an.DimensionArgs {
 		if rd.lookup(arg) != nil {
 			continue
@@ -153,7 +154,7 @@ func checkDimensionNames(ctx context.Context, q Querier, an *formula.Analysis, r
 				"%s is a metric, but this argument must be a dimension name (PARENT, LOOKUP and criteria ranges take a dimension)", arg)
 		}
 		return invalidCode(formula.CodeDimensionArgRequired,
-			"there is no dimension named %s in this revision (PARENT, LOOKUP and criteria ranges take a dimension name)", arg)
+			"there is no dimension named %s in this revision (PARENT, LOOKUP and criteria ranges take a dimension name)%s", arg, suggest(arg))
 	}
 	for _, p := range an.PropertyRefs {
 		d := rd.lookup(p.Dim)
@@ -163,7 +164,7 @@ func checkDimensionNames(ctx context.Context, q Querier, an *formula.Analysis, r
 					"%s.%s: %s is a metric; the dimension.property form reads a property of a dimension's member", p.Dim, p.Property, p.Dim)
 			}
 			return invalidCode(formula.CodeDimensionArgRequired,
-				"%s.%s: there is no dimension named %s in this revision", p.Dim, p.Property, p.Dim)
+				"%s.%s: there is no dimension named %s in this revision%s", p.Dim, p.Property, p.Dim, suggest(p.Dim))
 		}
 		ok, err := propertyDeclared(ctx, q, d.id, p.Property)
 		if err != nil {

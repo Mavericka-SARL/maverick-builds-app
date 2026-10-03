@@ -16,12 +16,14 @@ func RenameProperty(text, dim, oldProp, newProp string) (out string, changed boo
 		if tok.Type != tokDotted {
 			continue
 		}
-		d, p, ok := strings.Cut(tok.Val, ".")
-		if !ok || !strings.EqualFold(d, dim) || !strings.EqualFold(p, oldProp) {
+		d, p := tok.Dim, tok.Prop
+		if !strings.EqualFold(d, dim) || !strings.EqualFold(p, oldProp) {
 			continue
 		}
-		// tok.Pos is a rune index and tok.Val is the token's exact source.
-		propStart := tok.Pos + len([]rune(d)) + 1
+		// tok.Pos is a rune index and tok.Val is the token's exact source,
+		// which ends with the property name in both spellings (dim.prop and
+		// {Dim Name}.prop).
+		propStart := tok.Pos + len([]rune(tok.Val)) - len([]rune(p))
 		b.WriteString(string(src[last:propStart]))
 		b.WriteString(newProp)
 		last = propStart + len([]rune(p))

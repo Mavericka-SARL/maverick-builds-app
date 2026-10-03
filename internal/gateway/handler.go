@@ -501,6 +501,8 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/ai/sessions/{id}/proposals", "developer", dev(h.aiSessionDetail))
 	register("POST", "/api/ai/sessions/{id}/documents", "developer", dev(h.aiSessionDetail))
 	register("DELETE", "/api/ai/sessions/{id}/documents/{docId}", "developer", dev(h.aiSessionDetail))
+	register("GET", "/api/ai/sessions/{id}/conversions", "developer", dev(h.aiConversions))
+	register("GET", "/api/ai/sessions/{id}/conversions/{cid}", "developer", dev(h.aiConversions))
 	register("POST", "/api/ai/sessions/{id}/proposals/{pid}/confirm", "developer", dev(h.aiSessionDetail))
 	register("POST", "/api/ai/sessions/{id}/proposals/{pid}/reject", "developer", dev(h.aiSessionDetail))
 	// The chat connector's connection details, for every signed-in person
@@ -8770,9 +8772,10 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 	// Parse optional settings from config. sheet_url applies to a
 	// google_sheets integration; column_map and import_mode to both kinds.
 	var cfg struct {
-		ColumnMap  map[string]string `json:"column_map"`
-		SheetURL   string            `json:"sheet_url"`
-		ImportMode string            `json:"import_mode"`
+		Reshape    *importpkg.Reshape `json:"reshape"`
+		ColumnMap  map[string]string  `json:"column_map"`
+		SheetURL   string             `json:"sheet_url"`
+		ImportMode string             `json:"import_mode"`
 	}
 	_ = json.Unmarshal(intg.Config, &cfg)
 
@@ -8797,9 +8800,9 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			jsonSheetErr(w, ferr)
 			return
 		}
-		header, rows, err = importpkg.ParseCSVRows(data)
+		header, rows, err = importpkg.ShapeCSV(data, cfg.Reshape)
 	} else {
-		header, rows, err = parseRunFile(w, r)
+		header, rows, err = parseRunFile(w, r, cfg.Reshape)
 	}
 	if err != nil {
 		jsonErr(w, err, http.StatusBadRequest)

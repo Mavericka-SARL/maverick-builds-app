@@ -11,6 +11,8 @@
 <tr><td>Status line</td><td>"Thinking…" or "Calling &lt;tool&gt;…" while the assistant reads the model.</td></tr>
 <tr><td><b>Action plan</b> card</td><td>When the assistant wants to change something it proposes numbered steps (for example Create metric, Add dimension member, Create grid, Add dashboard widget). <b>Execute</b> runs them; <b>Reject</b> discards. After execution each step shows success or failure; a plan with failures is marked partial.</td></tr>
 <tr><td><b>Activity</b> panel</td><td>This session's proposal history.</td></tr>
+<tr><td>Proposals</td><td>Every plan is tried against the model before you see it; a plan that would fail goes back to the assistant to correct, so what you confirm is expected to run. If a step still fails when confirmed, the steps after it are not run (they usually depend on it), and the summary says so.</td></tr>
+<tr><td><b>Converted files</b></td><td>Spreadsheets the assistant converted to the import layout, each with <b>CSV</b> and <b>Excel</b> download buttons. Nothing in them has been imported.</td></tr>
 <tr><td>Draft banner</td><td>"Working in an isolated draft revision — changes here won't affect the live model until promoted." <b>Promote to Active</b> makes the draft the active revision; <b>Discard</b> asks <b>Discard this draft?</b> and permanently removes every model change the AI made in this session (business roles, access rules and posted form records are not in the draft and stay).</td></tr>
 </table>
 <h3>What it can do</h3>

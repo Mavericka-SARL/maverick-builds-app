@@ -18,6 +18,42 @@ leaves out, until it is fixed.
 
 ## Open
 
+### Workflow, form, access-rule and import steps skip the proposal check
+
+- **Noticed:** 2026-10-03, adding the check that runs an AI plan before the
+  developer sees it (`aiCheckProposal`).
+- **What:** the check runs steps in a transaction it rolls back. The
+  workflow, form and automation-rule stores (`internal/workflow`,
+  `internal/crudapp`), the access-rule tool's audit write and the file import
+  and form-posting hooks work on the pool, outside that transaction, so those
+  tools — and any step using their result — are left to confirmation
+  (`aiassistant.ErrNotDryRunnable`). Confirmation still stops at the first
+  failing step.
+- **Why it matters:** a mistake in such a step is found only after the
+  developer confirms, as every mistake was before the check.
+- **How to check:** propose a `create_workflow_def` with an unknown form
+  field; it reaches the developer and fails on confirm.
+- **What closes it:** those stores (and `calculation`/`notification`, which
+  the workflow store passes its pool to) taking an interface a transaction
+  satisfies, as `metricformula.ValidateAggOperands` now does.
+
+### A file reshape can be written only through the AI Developer
+
+- **Noticed:** 2026-10-02, adding file reshaping (`importpkg.Reshape`).
+- **What:** the AI Developer writes, previews and saves a reshape (header row,
+  fill down, skip rows, unpivot, constants, value map, number formats) on a
+  file integration, and every run applies it. The Import Wizard shows a saved
+  one ("Reshapes each file: …") and runs such an integration with the file as
+  it is, but has no editor: it reads a file's header from row 1. Chosen scope
+  (the owner picked "AI + saved integrations").
+- **Why it matters:** a developer without an AI provider configured cannot
+  set up or change a reshape — the capability is reachable by the developer
+  role only through the assistant.
+- **How to check:** in the Integrations tab, look for any control that edits
+  a reshape; there is none.
+- **What closes it:** a reshape step in the Import Wizard (each transform as a
+  control, with the server's preview of the reshaped rows).
+
 ### The chart resolver does not tell a withheld value from a missing one
 
 - **Noticed:** 2026-10-02, building `query_grid`'s breakdowns on
@@ -2550,6 +2586,18 @@ leaves out, until it is fixed.
   `CheckMembers` before the first insert, for every caller.
 
 ## Closed
+
+### A CSV import stopped silently at the first row of a different length
+
+- **Noticed and fixed:** 2026-10-02, while adding file reshaping.
+- **What was wrong:** `importpkg.ParseCSVRows` ended the file at the first
+  row whose field count differed from the header's (a stray trailing comma)
+  or that had a bare quote, without an error: every row after it was never
+  imported, on the Import Wizard's upload, integration runs and Google Sheets
+  syncs alike.
+- **Closed by:** the commit adding `importpkg.Reshape` — CSV is read with
+  rows of any length and lenient quotes, and any other malformation is an
+  error naming its line (`TestCSVRowsAfterARaggedRowAreRead`).
 
 ### The REST API accepted a token issued to any client of the realm
 

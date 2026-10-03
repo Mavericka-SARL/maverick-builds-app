@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
 )
 
 // resolveWorkflowDefRef turns what the model handed us for a workflow — a
@@ -18,7 +18,14 @@ import (
 // touch (update_workflow_def learned this live: adding a context variable to
 // a published def failed with "not visible"). And models routinely pass the
 // name where the schema says id, so a non-UUID is resolved by name.
-func resolveWorkflowDefRef(ctx context.Context, pool *pgxpool.Pool, modelID, revID, ref string) (string, error) {
+// refQuerier is what the reference resolvers read through: a pool, or a
+// dry run's transaction.
+type refQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func resolveWorkflowDefRef(ctx context.Context, pool refQuerier, modelID, revID, ref string) (string, error) {
 	if ref == "" {
 		return "", fmt.Errorf("workflow_def_id is required")
 	}
@@ -65,7 +72,7 @@ func resolveWorkflowDefRef(ctx context.Context, pool *pgxpool.Pool, modelID, rev
 // resolveFormDefRef is resolveWorkflowDefRef for forms, which are
 // model-scoped rather than application-scoped but copied per revision in
 // exactly the same way.
-func resolveFormDefRef(ctx context.Context, pool *pgxpool.Pool, modelID, revID, ref string) (string, error) {
+func resolveFormDefRef(ctx context.Context, pool refQuerier, modelID, revID, ref string) (string, error) {
 	if ref == "" {
 		return "", fmt.Errorf("form_id is required")
 	}

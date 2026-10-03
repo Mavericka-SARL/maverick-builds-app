@@ -59,7 +59,8 @@ posting runs the gateway's own posting code the same way.
 | `list_forms`, `get_form` | forms; one in full — fields, integrations, record count |
 | `list_form_integrations` | which form field posts into which metric |
 | `list_integrations` | every data integration — Excel/CSV imports, Google Sheets, REST API, data exports — with its target, column map or export spec, and last run |
-| `preview_file_import` | a dry run of importing an attached spreadsheet: its sheets and columns, how each column maps, every row that would fail and why, what would be imported. Writes nothing |
+| `preview_file_import` | a dry run of importing an attached spreadsheet: its first rows as read, its columns and first rows after the reshape and column map, every row that would fail and why, what would be imported. Writes nothing |
+| `prepare_converted_file` | saves an attached spreadsheet reshaped and column-mapped into the import layout, for the developer to download as CSV or Excel from the chat. Imports nothing |
 | `preview_export` | an export spec rendered against the grid's current values — columns, first rows, row count — or every problem with the spec. Saves nothing |
 
 ## Write tools (through `propose_actions`)
@@ -176,6 +177,25 @@ Workflows and forms (added 2026-09-16, programme item 5):
 | `create_form_def`, `update_form_def`, `delete_form_def` | the Forms builder |
 | `create_form_integration`, `update_form_integration`, `delete_form_integration`, `backfill_form_integration` | the form-to-metric posting screen and its **Backfill**; an update re-posts, as the screen's does |
 
+## A plan is checked before the developer sees it
+
+Every `propose_actions` call is first run exactly as confirming would run it —
+the same write executor, the same validation — inside a database transaction
+that is always rolled back (`internal/gateway/ai_proposal_check.go`,
+`aiassistant.NewDryRunWriteExecutor`). A plan with a failing step goes back to
+the model as the tool result, listing each failing step with its error, and is
+never shown; the model corrects it and proposes the whole plan again, at most
+three times in one turn before it must explain the problem instead. Unknown
+names in formulas say what they most likely meant (`setup_item` → `{Setup
+Item}`; `p_and_l_line` → `{Cost Center}.p_and_l_line`), so one correction
+round usually suffices. Workflow, form, automation-rule, access-rule and file
+import steps work outside the transaction and are checked only when
+confirmed, as is any step that uses their result.
+
+Confirming runs the steps in order and **stops at the first failure**: the
+steps after it are marked *not run*, because they are usually built on it.
+What ran before it stays in the draft.
+
 ## Attached spreadsheets and data exports
 
 A `.xlsx`, `.xlsm` or `.csv` file attached to the chat (up to 16 MB) keeps its
@@ -185,7 +205,8 @@ language model reads, so the assistant imports the **whole** file, not the
 take the file's name, an optional sheet, a target (a grid — the metric values
 its columns name — or a dimension — members) and a `column_map` in the Import
 Wizard's vocabulary (a metric or dimension name; `metric` + `value` for a long
-file; `code`, `label`, `parent_code`, `property:<name>`; `ignore`). The import
+file; `code`, `label`, `parent_code`, `property:<name>`; `ignore`), applied
+after an optional `reshape`. The import
 is the developer's own pipeline, run by the gateway through the executor's
 `ImportFile` hook (`internal/gateway/ai_file_import.go`): stored cell values,
 not displayed ones (`1234.5`, not `"1,234.50"`), `importpkg.ResolveRows`, the
@@ -199,7 +220,36 @@ with its `integration_id` uses them and records the run in its history. The
 same integration is re-run with a new file of the same columns from the
 Integrations tab, or by a business user from a dashboard **Integration**
 button with a `.csv` or `.xlsx` (`POST /api/integrations/{id}/run` applies the
-saved map; `internal/gateway/integration_file_run.go`).
+saved reshape and map; `internal/gateway/integration_file_run.go`).
+
+**Reshaping a file laid out for people** (`internal/importpkg/reshape.go`). A
+`reshape` turns a sheet as finance teams send it into one row per value before
+the column map, declaratively — nothing in it is code. Its steps run in a
+fixed order: `delimiter` (a `;`-separated CSV), `header_row` (titles above the
+header), `fill_down` (a group label written once), `skip_rows` (total and
+blank rows), `unpivot` (months across the columns become a column of month
+names and a value column), `constants` (what the file means but does not say:
+`{"Scenario": "Budget"}`), `value_map` (labels into member codes:
+`{"Month": {"Jan": "2026-01"}}`), and numbers written for people
+(`number_columns`, `decimal_comma`, `scale` for a file in thousands;
+`(123)`, `12%`, thousands separators and currency signs are read; a separator
+that cannot be a thousands separator is never guessed, so `1,5` is not 15).
+The preview shows the sheet's first rows as read and the first rows as the
+import reads them, so the assistant can see a layout and correct its reshape.
+`create_file_integration` and `update_integration` save a reshape with the
+integration, and every run applies it — a business user's monthly upload of
+the same layout from a dashboard button included. In the Integrations tab such
+an integration says what its reshape does and runs with **Run with a file**,
+which sends the file as it is (the Import Wizard reads a header from row 1 and
+has no reshape editor, so it would map the wrong rows).
+
+**Converted files.** `prepare_converted_file` records the attachment with its
+reshape and column map (`ai_assistant.conversion`, migration 107); the panel's
+**Converted files** strip downloads it as CSV or Excel
+(`GET /api/ai/sessions/{id}/conversions/{cid}?format=csv|xlsx`, the session
+owner only). The file is rebuilt from the attachment on every download by the
+code an import uses, so it is exactly what an import would read; a column of
+plain numbers is written as numbers in Excel, member codes stay text.
 
 `create_export_integration` saves a `file_export` integration: a grid and a
 spec (`internal/dataexport`) — CSV (delimiter, decimal separator), XLSX or

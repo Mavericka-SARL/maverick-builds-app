@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Archive, ArrowUpDown, Bot, Bookmark, Check, ClipboardList, FileSpreadsheet, FileText, History, LayoutDashboard, Link2, ListTree, Paperclip,
+  Archive, ArrowUpDown, Bot, Bookmark, Check, ClipboardList, Download, FileSpreadsheet, FileText, History, LayoutDashboard, Link2, ListTree, Paperclip,
   Pencil, Plus, Puzzle, Rocket, Ruler, Search, Settings, Table2, Trash2, Users, Workflow, Wrench, X, Zap,
 } from "lucide-react";
 import { ExportDownloadButton } from "../ExportDownloadButton";
-import { api, type AISession, type AIMessage, type AISettings, type AIProposal, type AIProposalStep, type AIProposalWithSummary, type AIDocument } from "../../api/client";
+import { downloadBlob } from "../business/blobUtils";
+import { api, type AIConversion, type AISession, type AIMessage, type AISettings, type AIProposal, type AIProposalStep, type AIProposalWithSummary, type AIDocument } from "../../api/client";
 import {
   Button, IconButton, TextInput, Select, Textarea, Field, StatusBadge, RevisionBadge,
   FilterChip, InlineAlert, SectionHeader, useConfirm, type DesignTone,
@@ -278,7 +279,7 @@ function groupProposalSteps(steps: AIProposalStep[]): ProposalStepEntry[] {
   const order: ProposalStepEntry[] = [];
 
   steps.forEach((step, index) => {
-    if (step.status === "failed") {
+    if (step.status === "failed" || step.status === "skipped") {
       order.push({ kind: "single", index, step });
       return;
     }
@@ -476,6 +477,49 @@ function SessionExports({ sessionId }: { sessionId: string }) {
           <ExportDownloadButton integrationId={e.id} />
         </span>
       ))}
+    </div>
+  );
+}
+
+// ── Converted files ───────────────────────────────────────────────────────────
+// Attachments the assistant converted to the layout an import reads
+// (prepare_converted_file), each downloadable as CSV or Excel. The server
+// rebuilds the file from the attachment on every download.
+
+function SessionConversions({ sessionId }: { sessionId: string }) {
+  const { data: conversions = [] } = useQuery<AIConversion[]>({
+    queryKey: ["ai-conversions", sessionId],
+    queryFn: () => api.aiListConversions(sessionId),
+  });
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (conversions.length === 0) return null;
+  const download = async (c: AIConversion, format: "csv" | "xlsx") => {
+    setBusy(c.id + format);
+    setError(null);
+    try {
+      const { blob, filename } = await api.aiDownloadConversion(sessionId, c.id, format);
+      downloadBlob(blob, filename);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Download failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <div data-testid="session-conversions" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 8 }}>
+      <span className="mvx-admin-muted" style={{ fontSize: 12 }}>Converted files:</span>
+      {conversions.map(c => (
+        <span key={c.id} style={{ display: "inline-flex", alignItems: "center", gap: 6 }} title={c.columns.join(", ")}>
+          <span style={{ fontSize: 13 }}>{c.filename}</span>
+          <span className="mvx-admin-muted" style={{ fontSize: 12 }}>{c.row_count} row{c.row_count !== 1 ? "s" : ""}</span>
+          <Button size="sm" leadingIcon={<Download size={13} />} loading={busy === c.id + "csv"} loadingLabel="Preparing…"
+            onClick={() => download(c, "csv")} aria-label={`Download ${c.filename} as CSV`}>CSV</Button>
+          <Button size="sm" leadingIcon={<Download size={13} />} loading={busy === c.id + "xlsx"} loadingLabel="Preparing…"
+            onClick={() => download(c, "xlsx")} aria-label={`Download ${c.filename} as Excel`}>Excel</Button>
+        </span>
+      ))}
+      {error && <span className="mvx-admin-error" style={{ fontSize: 12 }}>{error}</span>}
     </div>
   );
 }
@@ -825,6 +869,7 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
       // first send — refetch the list now and once more after the namer's
       // window so the "Session" placeholder becomes the real name.
       qc.invalidateQueries({ queryKey: ["ai-sessions"] });
+      qc.invalidateQueries({ queryKey: ["ai-conversions", sid] });
       setTimeout(() => qc.invalidateQueries({ queryKey: ["ai-sessions"] }), 5000);
     } catch (e) {
       setError((e as Error).message);
@@ -1074,6 +1119,7 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
         {/* Input bar */}
         <div style={{ padding: "12px 24px 20px", borderTop: "1px solid var(--color-border)" }}>
           {sessionId && <SessionExports sessionId={sessionId} />}
+          {sessionId && <SessionConversions sessionId={sessionId} />}
           {/* Attached document chips */}
           {(documents.length > 0 || uploading) && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>

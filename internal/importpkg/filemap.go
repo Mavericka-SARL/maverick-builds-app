@@ -31,17 +31,7 @@ func IsTabularFile(filename string) bool {
 // a value formatted "#,##0.00" arrives as 1234.5, not "1,234.50", which
 // strconv.ParseFloat would reject.
 func ParseTabularFile(filename string, data []byte, sheet string) (header []string, rows []RawRow, err error) {
-	switch strings.ToLower(filepath.Ext(filename)) {
-	case ".csv":
-		if sheet != "" {
-			return nil, nil, fmt.Errorf("%s is a CSV file and has no sheets", filename)
-		}
-		return ParseCSVRows(bytes.TrimPrefix(data, []byte("\xef\xbb\xbf")))
-	case ".xlsx", ".xlsm":
-		return parseXLSXSheet(data, sheet, true)
-	default:
-		return nil, nil, fmt.Errorf("%s is not a spreadsheet — import reads .csv, .xlsx and .xlsm files", filename)
-	}
+	return ReadShaped(filename, data, sheet, nil)
 }
 
 // XLSXSheetNames lists a workbook's worksheets in order.
@@ -55,51 +45,11 @@ func XLSXSheetNames(data []byte) ([]string, error) {
 }
 
 func parseXLSXSheet(data []byte, sheet string, rawValues bool) (header []string, rows []RawRow, err error) {
-	f, err := excelize.OpenReader(bytes.NewReader(data))
+	grid, err := readXLSXGrid(data, sheet, rawValues)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open xlsx: %w", err)
+		return nil, nil, err
 	}
-	defer func() { _ = f.Close() }()
-
-	sheets := f.GetSheetList()
-	if len(sheets) == 0 {
-		return nil, nil, fmt.Errorf("workbook has no sheets")
-	}
-	name := sheets[0]
-	if sheet != "" {
-		name = ""
-		for _, s := range sheets {
-			if strings.EqualFold(s, sheet) {
-				name = s
-				break
-			}
-		}
-		if name == "" {
-			return nil, nil, fmt.Errorf("workbook has no sheet %q — its sheets are: %s", sheet, strings.Join(sheets, ", "))
-		}
-	}
-	var allRows [][]string
-	if rawValues {
-		allRows, err = f.GetRows(name, excelize.Options{RawCellValue: true})
-	} else {
-		allRows, err = f.GetRows(name)
-	}
-	if err != nil {
-		return nil, nil, fmt.Errorf("read sheet %q: %w", name, err)
-	}
-	if len(allRows) == 0 {
-		return nil, nil, fmt.Errorf("sheet %q has no header row", name)
-	}
-	header = allRows[0]
-	rowNum := 0
-	for _, record := range allRows[1:] {
-		rowNum++
-		if isBlankRecord(record) {
-			continue
-		}
-		rows = append(rows, recordToRawRow(header, record, rowNum))
-	}
-	return header, rows, nil
+	return ShapeGrid(grid, nil)
 }
 
 // ColumnIgnored is the column_map target that drops a file column. An empty

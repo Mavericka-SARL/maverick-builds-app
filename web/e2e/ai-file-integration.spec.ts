@@ -210,3 +210,73 @@ test("a dashboard Integration button on an export downloads the file", async ({ 
   ]);
   expect(download.suggestedFilename()).toBe("ERP_feed.csv");
 });
+
+// ── Reshaped files ───────────────────────────────────────────────────────────
+
+test("the AI panel downloads a converted file as CSV and as Excel", async ({ page }) => {
+  await mockApi(page);
+  await mockAiSession(page);
+  await page.route(url => url.pathname === `/api/ai/sessions/${SESSION_ID}/conversions`, (route) =>
+    route.fulfill({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify([{ id: "conv-1", session_id: SESSION_ID, document_id: "doc-1", filename: "plan (converted)", row_count: 5, columns: ["geography", "metric_id", "period", "value"], created_at: session.created_at }]),
+    }));
+  const formats: string[] = [];
+  await page.route(url => url.pathname === `/api/ai/sessions/${SESSION_ID}/conversions/conv-1`, async (route) => {
+    const format = new URL(route.request().url()).searchParams.get("format") ?? "";
+    formats.push(format);
+    await route.fulfill({
+      status: 200, contentType: format === "xlsx" ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "text/csv",
+      headers: { "Content-Disposition": `attachment; filename="plan_converted.${format}"` },
+      body: "geography,metric_id,period,value\nCA,Revenue,Q1,10000\n",
+    });
+  });
+
+  await loadAs(page, "developer");
+  await page.getByRole("button", { name: "AI Developer" }).click();
+  await page.getByRole("button", { name: /Session/ }).first().click();
+
+  const strip = page.getByTestId("session-conversions");
+  await expect(strip).toContainText("plan (converted)");
+  await expect(strip).toContainText("5 rows");
+  for (const [label, file] of [["CSV", "plan_converted.csv"], ["Excel", "plan_converted.xlsx"]] as const) {
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      strip.getByRole("button", { name: `Download plan (converted) as ${label}` }).click(),
+    ]);
+    expect(download.suggestedFilename()).toBe(file);
+  }
+  expect(formats).toEqual(["csv", "xlsx"]);
+});
+
+test("a file integration the AI set up to reshape says how in the Integrations tab", async ({ page }) => {
+  await mockApi(page);
+  await page.route(url => url.pathname === "/api/developer/integrations" || url.pathname === "/api/integrations", (route) =>
+    route.request().method() !== "GET" ? route.fallback() : route.fulfill({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify([{
+        id: "int-r", name: "Plan upload", type: "csv_import", target_type: "grid", target_id: "grid-1", status: "active",
+        config: {
+          column_map: { Country: "geography", Quarter: "period", Line: "metric" },
+          reshape: { header_row: 3, fill_down: ["Country"], skip_rows: [{ column: "Country", equals: "Total" }],
+            unpivot: { from: "Quarter 1", to: "Quarter 2", name_column: "Quarter", value_column: "value" }, scale: { value: 1000 } },
+        },
+      }]),
+    }));
+  await loadAs(page, "developer");
+  await page.getByRole("button", { name: "Integrations" }).first().click();
+  await expect(page.getByTestId("integration-reshape-int-r")).toHaveText(
+    "Reshapes each file: header on row 3 · fills down Country · skips 1 kind of row · turns Quarter 1…Quarter 2 into rows (Quarter, value) · value ×1000");
+
+  // The wizard cannot show a reshape, so the run sends the file as it is
+  // and the server reshapes it — never the wizard's own mapped CSV.
+  await expect(page.getByRole("button", { name: "Run Import" })).toHaveCount(0);
+  let sent: Record<string, unknown> | null = null;
+  await page.route("**/api/integrations/int-r/run", async (route) => {
+    sent = route.request().postDataJSON();
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ rows_imported: 2, values_imported: 4, error_rows: 0, errors: [] }) });
+  });
+  await page.getByLabel("File for Plan upload").setInputFiles({ name: "plan.csv", mimeType: "text/csv", buffer: Buffer.from("Plan FY26\n\nCountry,Line,Quarter 1\nCanada,Revenue,10\n") });
+  await expect(page.getByRole("status").filter({ hasText: "4 value(s) imported" })).toBeVisible();
+  expect(sent).toEqual({ csv: "Plan FY26\n\nCountry,Line,Quarter 1\nCanada,Revenue,10\n" });
+});

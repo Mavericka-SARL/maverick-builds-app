@@ -1089,12 +1089,47 @@ export interface IntegrationDef {
   tags?: string[];
   config: {
     column_map?: Record<string, string>;
+    // How each file is reshaped before the column map (set up by the AI
+    // Developer; the wizard shows and keeps it but has no editor for it).
+    reshape?: FileReshape;
     // google_sheets integrations only: the link-shared sheet re-fetched on
     // every run, and the commit mode (server defaults to "replace" so that
     // re-syncing converges instead of double-counting).
     sheet_url?: string;
     import_mode?: ImportModeParam;
   } & Partial<ExportSpec>;
+}
+
+/** internal/importpkg.Reshape: a sheet laid out for people, made importable. */
+export interface FileReshape {
+  delimiter?: string;
+  header_row?: number;
+  fill_down?: string[];
+  skip_rows?: { column?: string; equals?: string; contains?: string; blank?: boolean }[];
+  unpivot?: { columns?: string[]; from?: string; to?: string; name_column: string; value_column: string };
+  constants?: Record<string, string>;
+  value_map?: Record<string, Record<string, string>>;
+  number_columns?: string[];
+  decimal_comma?: boolean;
+  scale?: Record<string, number>;
+}
+
+/** describeReshape says in a line what a saved reshape does to each file. */
+export function describeReshape(r: FileReshape): string {
+  const parts: string[] = [];
+  if (r.delimiter && r.delimiter !== ",") parts.push(`fields separated by "${r.delimiter === "\t" || r.delimiter === "\\t" ? "tab" : r.delimiter}"`);
+  if (r.header_row && r.header_row > 1) parts.push(`header on row ${r.header_row}`);
+  if (r.fill_down?.length) parts.push(`fills down ${r.fill_down.join(", ")}`);
+  if (r.skip_rows?.length) parts.push(`skips ${r.skip_rows.length} kind${r.skip_rows.length > 1 ? "s" : ""} of row`);
+  if (r.unpivot) {
+    const cols = r.unpivot.columns?.length ? r.unpivot.columns.join(", ") : `${r.unpivot.from}…${r.unpivot.to}`;
+    parts.push(`turns ${cols} into rows (${r.unpivot.name_column}, ${r.unpivot.value_column})`);
+  }
+  if (r.constants && Object.keys(r.constants).length) parts.push(`adds ${Object.entries(r.constants).map(([k, v]) => `${k} = ${v}`).join(", ")}`);
+  if (r.value_map && Object.keys(r.value_map).length) parts.push(`renames values in ${Object.keys(r.value_map).join(", ")}`);
+  if (r.scale && Object.keys(r.scale).length) parts.push(Object.entries(r.scale).map(([k, f]) => `${k} ×${f}`).join(", "));
+  if (r.decimal_comma) parts.push("decimal comma");
+  return parts.join(" · ");
 }
 
 // ExportSpec is a "file_export" integration's config (internal/dataexport):
@@ -1389,6 +1424,18 @@ export interface BAAvailableItem {
   group?: string; // dimension name for dimension_members type
 }
 
+/** An attachment converted to the layout an import reads (prepare_converted_file). */
+export interface AIConversion {
+  id: string;
+  session_id: string;
+  document_id: string;
+  sheet?: string;
+  filename: string;
+  row_count: number;
+  columns: string[];
+  created_at: string;
+}
+
 export interface AISession {
   id: string;
   app_id: string;
@@ -1491,7 +1538,8 @@ export interface AIProposalStep {
   description: string;
   params: Record<string, unknown>;
   // set after execution:
-  status?: "pending" | "success" | "failed";
+  // "skipped": not run because an earlier step of the proposal failed.
+  status?: "pending" | "success" | "failed" | "skipped";
   result?: string;
   created_id?: string;
 }
@@ -1957,6 +2005,9 @@ export const api = {
     apiFetch<ExportPreview>("/api/developer/integrations/export-preview", { method: "POST", body: JSON.stringify(body) }),
   // The file is built for the caller, from their own view of the grid.
   downloadIntegrationExport: (id: string) => apiFetchBlob(`/api/integrations/${encodeURIComponent(id)}/export`),
+  aiListConversions: (sessionId: string) => apiFetch<AIConversion[]>(`/api/ai/sessions/${sessionId}/conversions`),
+  aiDownloadConversion: (sessionId: string, id: string, format: "csv" | "xlsx") =>
+    apiFetchBlob(`/api/ai/sessions/${sessionId}/conversions/${encodeURIComponent(id)}?format=${format}`),
   updateIntegrationConfig: (id: string, config: Record<string, unknown>) =>
     apiFetch<{ status: string }>(`/api/developer/integrations/${id}/config`, { method: "PATCH", body: JSON.stringify({ config }) }),
   listIntegrations: (revisionId?: string) =>

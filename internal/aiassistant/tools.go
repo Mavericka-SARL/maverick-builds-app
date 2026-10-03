@@ -242,6 +242,8 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, args json.RawMe
 		return e.listIntegrations(ctx)
 	case "preview_file_import":
 		return e.previewFileImport(ctx, args)
+	case "prepare_converted_file":
+		return e.prepareConvertedFile(ctx, args)
 	case "preview_export":
 		return e.previewExport(ctx, args)
 	default:

@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/mavericks-engine/mavericks/internal/dataexport"
+	"github.com/mavericks-engine/mavericks/internal/importpkg"
 	"github.com/mavericks-engine/mavericks/internal/modeledit"
 )
 
@@ -34,6 +35,9 @@ type FileImportRequest struct {
 	// Wizard does; the grid says which one the integration belongs to.
 	TargetType string
 	TargetID   string
+	// Reshape turns a sheet laid out for people into importable rows
+	// before ColumnMap applies (importpkg.Reshape); nil changes nothing.
+	Reshape    *importpkg.Reshape
 	ColumnMap  map[string]string
 	ImportMode string
 	// IntegrationID, when set, records the run in that integration's
@@ -46,6 +50,9 @@ type FileImportRequest struct {
 type ReadHooks struct {
 	PreviewFileImport func(ctx context.Context, req FileImportRequest) (string, error)
 	PreviewExport     func(ctx context.Context, revisionID, gridID, name string, spec dataexport.Spec) (string, error)
+	// PrepareConversion saves an attachment's reshaped, column-mapped rows
+	// as a converted file the developer downloads from the chat.
+	PrepareConversion func(ctx context.Context, req FileImportRequest) (string, error)
 }
 
 // WithReadHooks sets the read executor's gateway hooks and returns it.
@@ -69,8 +76,19 @@ func integrationToolDefs() []toolDef {
 				"sheet":{"type":"string","description":"Worksheet name; omit for the first sheet"},
 				"target_type":{"type":"string","enum":["grid","dimension"]},
 				"target_id":{"type":"string","description":"The grid or dimension: id or exact name"},
-				"column_map":{"type":"object","description":"File column -> model field (see the File import section of your instructions); omit to use the headers as they are"}
+				"reshape":` + reshapeSchema + `,
+				"column_map":{"type":"object","description":"File column -> model field, applied AFTER reshape (see the File import section of your instructions); omit to use the headers as they are"}
 			},"required":["file","target_type","target_id"]}`,
+		},
+		{
+			Name:        "prepare_converted_file",
+			Description: "Saves an attached spreadsheet converted to the import layout — reshaped and column-mapped exactly as preview_file_import would, so the developer can download it as CSV or Excel from the chat (the Converted files strip). Nothing is imported. Use it when the developer asks for the file in the right format, or wants to check the conversion before importing; preview first.",
+			Parameters: `{"type":"object","properties":{
+				"file":{"type":"string","description":"The attached file's name, as listed under Attached documents"},
+				"sheet":{"type":"string","description":"Worksheet name; omit for the first sheet"},
+				"reshape":` + reshapeSchema + `,
+				"column_map":{"type":"object","description":"File column -> model field, applied after reshape"}
+			},"required":["file"]}`,
 		},
 		{
 			Name:        "preview_export",
@@ -159,15 +177,20 @@ func (e *ToolExecutor) listIntegrations(ctx context.Context) (string, error) {
 			fmt.Fprintf(&sb, "    export: %s\n    spec: %s\n", dataexport.Describe(spec), b)
 		case "csv_import", "google_sheets":
 			var c struct {
-				ColumnMap  map[string]string `json:"column_map"`
-				ImportMode string            `json:"import_mode"`
-				SheetURL   string            `json:"sheet_url"`
+				Reshape    *importpkg.Reshape `json:"reshape"`
+				ColumnMap  map[string]string  `json:"column_map"`
+				ImportMode string             `json:"import_mode"`
+				SheetURL   string             `json:"sheet_url"`
 			}
 			_ = json.Unmarshal([]byte(cfg), &c)
 			b, _ := json.Marshal(c.ColumnMap)
 			fmt.Fprintf(&sb, "    column_map: %s · import_mode: %s", b, orDefault(c.ImportMode, "default"))
 			if c.SheetURL != "" {
 				fmt.Fprintf(&sb, " · sheet: %s", c.SheetURL)
+			}
+			if !c.Reshape.IsZero() {
+				r, _ := json.Marshal(c.Reshape)
+				fmt.Fprintf(&sb, "\n    reshape: %s", r)
 			}
 			sb.WriteString("\n")
 		}
@@ -193,17 +216,21 @@ func (e *ToolExecutor) previewFileImport(ctx context.Context, raw json.RawMessag
 		return "", fmt.Errorf("file import is not available here")
 	}
 	var p struct {
-		File       string            `json:"file"`
-		Sheet      string            `json:"sheet"`
-		TargetType string            `json:"target_type"`
-		TargetID   string            `json:"target_id"`
-		ColumnMap  map[string]string `json:"column_map"`
+		File       string             `json:"file"`
+		Sheet      string             `json:"sheet"`
+		TargetType string             `json:"target_type"`
+		TargetID   string             `json:"target_id"`
+		Reshape    *importpkg.Reshape `json:"reshape"`
+		ColumnMap  map[string]string  `json:"column_map"`
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return "", fmt.Errorf("invalid params: %w", err)
 	}
 	if p.File == "" {
 		return "", fmt.Errorf("file is required — the attached file's name")
+	}
+	if err := p.Reshape.Validate(); err != nil {
+		return "", err
 	}
 	kind, err := importTargetKind(p.TargetType)
 	if err != nil {
@@ -215,9 +242,48 @@ func (e *ToolExecutor) previewFileImport(ctx context.Context, raw json.RawMessag
 	}
 	return e.hooks.PreviewFileImport(ctx, FileImportRequest{
 		RevisionID: e.revID, File: p.File, Sheet: p.Sheet,
-		TargetType: p.TargetType, TargetID: targetID, ColumnMap: p.ColumnMap,
+		TargetType: p.TargetType, TargetID: targetID, Reshape: p.Reshape, ColumnMap: p.ColumnMap,
 	})
 }
+
+func (e *ToolExecutor) prepareConvertedFile(ctx context.Context, raw json.RawMessage) (string, error) {
+	if e.hooks.PrepareConversion == nil {
+		return "", fmt.Errorf("file conversion is not available here")
+	}
+	var p struct {
+		File      string             `json:"file"`
+		Sheet     string             `json:"sheet"`
+		Reshape   *importpkg.Reshape `json:"reshape"`
+		ColumnMap map[string]string  `json:"column_map"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return "", fmt.Errorf("invalid params: %w", err)
+	}
+	if p.File == "" {
+		return "", fmt.Errorf("file is required — the attached file's name")
+	}
+	if err := p.Reshape.Validate(); err != nil {
+		return "", err
+	}
+	return e.hooks.PrepareConversion(ctx, FileImportRequest{
+		RevisionID: e.revID, File: p.File, Sheet: p.Sheet, Reshape: p.Reshape, ColumnMap: p.ColumnMap,
+	})
+}
+
+// reshapeSchema is the JSON schema of importpkg.Reshape, shared by every
+// tool that reads an attached file.
+const reshapeSchema = `{"type":"object","description":"How to turn a sheet laid out for people into importable rows, applied before column_map (see Reshaping a file in your instructions). Steps, in this order: header_row, fill_down, skip_rows, unpivot, constants, value_map, numbers.","properties":{
+	"delimiter":{"type":"string","enum":[",",";","\\t","|"],"description":"CSV field separator (default \",\")"},
+	"header_row":{"type":"integer","description":"1-based row holding the column names (default 1); rows above are dropped"},
+	"fill_down":{"type":"array","items":{"type":"string"},"description":"Columns whose blank cells take the value above"},
+	"skip_rows":{"type":"array","items":{"type":"object","properties":{"column":{"type":"string","description":"omit = any column"},"equals":{"type":"string"},"contains":{"type":"string"},"blank":{"type":"boolean"}}},"description":"Drop rows matching any filter (exactly one of equals/contains/blank each)"},
+	"unpivot":{"type":"object","properties":{"columns":{"type":"array","items":{"type":"string"}},"from":{"type":"string"},"to":{"type":"string"},"name_column":{"type":"string"},"value_column":{"type":"string"}},"description":"Turn wide columns (a list, or the adjacent run from..to) into rows: name_column gets each column's header, value_column its cell; blank cells make no row"},
+	"constants":{"type":"object","description":"New column -> the same value on every row"},
+	"value_map":{"type":"object","description":"Column -> {file value: new value}; case and spaces ignored"},
+	"number_columns":{"type":"array","items":{"type":"string"},"description":"Columns read as human-written numbers (1,234.50; (123); 12%; currency signs). The unpivot value column and scale columns are always read so"},
+	"decimal_comma":{"type":"boolean","description":"Numbers use a decimal comma (1.234,5)"},
+	"scale":{"type":"object","description":"Column -> factor, e.g. 1000 for a file in thousands"}
+}}`
 
 func (e *ToolExecutor) previewExport(ctx context.Context, raw json.RawMessage) (string, error) {
 	if e.hooks.PreviewExport == nil {
@@ -302,20 +368,22 @@ func (e *WriteExecutor) loadIntegrationDef(ctx context.Context, ref string) (int
 }
 
 type fileIntegrationConfig struct {
-	ColumnMap  map[string]string `json:"column_map,omitempty"`
-	ImportMode string            `json:"import_mode,omitempty"`
+	Reshape    *importpkg.Reshape `json:"reshape,omitempty"`
+	ColumnMap  map[string]string  `json:"column_map,omitempty"`
+	ImportMode string             `json:"import_mode,omitempty"`
 }
 
 // create_file_integration saves a re-runnable Excel/CSV import: the Import
 // Wizard's "save as integration" — a target, a column map and a commit mode.
 func (e *WriteExecutor) createFileIntegration(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p struct {
-		Name       string            `json:"name"`
-		TargetType string            `json:"target_type"`
-		TargetID   string            `json:"target_id"`
-		ColumnMap  map[string]string `json:"column_map"`
-		ImportMode string            `json:"import_mode"`
-		Tags       []string          `json:"tags"`
+		Name       string             `json:"name"`
+		TargetType string             `json:"target_type"`
+		TargetID   string             `json:"target_id"`
+		Reshape    *importpkg.Reshape `json:"reshape"`
+		ColumnMap  map[string]string  `json:"column_map"`
+		ImportMode string             `json:"import_mode"`
+		Tags       []string           `json:"tags"`
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
@@ -336,6 +404,12 @@ func (e *WriteExecutor) createFileIntegration(ctx context.Context, raw json.RawM
 	if err != nil {
 		return "", "", err
 	}
+	if err := p.Reshape.Validate(); err != nil {
+		return "", "", err
+	}
+	if !p.Reshape.IsZero() {
+		cfg.Reshape = p.Reshape
+	}
 	if err := e.integrationNameFree(ctx, p.Name, ""); err != nil {
 		return "", "", err
 	}
@@ -351,8 +425,12 @@ func (e *WriteExecutor) createFileIntegration(ctx context.Context, raw json.RawM
 		RETURNING id::text`, e.modelID, p.Name, p.TargetType, targetID, e.revID, tags, string(cfgJSON)).Scan(&id); err != nil {
 		return "", "", fmt.Errorf("create integration: %w", err)
 	}
-	return fmt.Sprintf("Excel/CSV integration '%s' created (id: %s) into %s, %d mapped column(s), mode %s",
-		p.Name, id, p.TargetType, len(cfg.ColumnMap), orDefault(cfg.ImportMode, "default")), id, nil
+	reshaped := ""
+	if cfg.Reshape != nil {
+		reshaped = ", reshaping each file first"
+	}
+	return fmt.Sprintf("Excel/CSV integration '%s' created (id: %s) into %s, %d mapped column(s), mode %s%s",
+		p.Name, id, p.TargetType, len(cfg.ColumnMap), orDefault(cfg.ImportMode, "default"), reshaped), id, nil
 }
 
 func fileImportConfig(targetType string, columnMap map[string]string, mode string) (fileIntegrationConfig, error) {
@@ -424,6 +502,7 @@ func (e *WriteExecutor) updateIntegration(ctx context.Context, raw json.RawMessa
 		Name          *string           `json:"name"`
 		Tags          *[]string         `json:"tags"`
 		TargetID      string            `json:"target_id"`
+		Reshape       json.RawMessage   `json:"reshape"`
 		ColumnMap     map[string]string `json:"column_map"`
 		ImportMode    *string           `json:"import_mode"`
 		Spec          json.RawMessage   `json:"spec"`
@@ -467,7 +546,7 @@ func (e *WriteExecutor) updateIntegration(ctx context.Context, raw json.RawMessa
 	var changed []string
 	switch row.Type {
 	case "file_export":
-		if p.ColumnMap != nil || p.ImportMode != nil {
+		if p.ColumnMap != nil || p.ImportMode != nil || len(p.Reshape) > 0 {
 			return "", "", fmt.Errorf("an export has a spec, not a column_map or import_mode")
 		}
 		var spec dataexport.Spec
@@ -500,6 +579,22 @@ func (e *WriteExecutor) updateIntegration(ctx context.Context, raw json.RawMessa
 			c["column_map"] = p.ColumnMap
 			changed = append(changed, "column_map")
 		}
+		// reshape replaces the saved one whole; {} or null removes it.
+		if len(p.Reshape) > 0 {
+			var rs *importpkg.Reshape
+			if err := json.Unmarshal(p.Reshape, &rs); err != nil {
+				return "", "", fmt.Errorf("reshape: %w", err)
+			}
+			if err := rs.Validate(); err != nil {
+				return "", "", err
+			}
+			if rs.IsZero() {
+				delete(c, "reshape")
+			} else {
+				c["reshape"] = rs
+			}
+			changed = append(changed, "reshape")
+		}
 		if p.ImportMode != nil {
 			if row.TargetType != "grid" {
 				return "", "", fmt.Errorf("import_mode applies to grid imports only")
@@ -525,7 +620,7 @@ func (e *WriteExecutor) updateIntegration(ctx context.Context, raw json.RawMessa
 		changed = append(changed, "status")
 	}
 	if len(changed) == 0 {
-		return "", "", fmt.Errorf("nothing to change — pass name, tags, target_id, status, column_map, import_mode or spec")
+		return "", "", fmt.Errorf("nothing to change — pass name, tags, target_id, status, reshape, column_map, import_mode or spec")
 	}
 	if _, err := e.pool.Exec(ctx, `
 		UPDATE model.integration_def
@@ -564,13 +659,14 @@ func (e *WriteExecutor) deleteIntegration(ctx context.Context, raw json.RawMessa
 // column map and mode it then uses (any given here override them).
 func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p struct {
-		File          string            `json:"file"`
-		Sheet         string            `json:"sheet"`
-		IntegrationID string            `json:"integration_id"`
-		TargetType    string            `json:"target_type"`
-		TargetID      string            `json:"target_id"`
-		ColumnMap     map[string]string `json:"column_map"`
-		ImportMode    string            `json:"import_mode"`
+		File          string             `json:"file"`
+		Sheet         string             `json:"sheet"`
+		IntegrationID string             `json:"integration_id"`
+		TargetType    string             `json:"target_type"`
+		TargetID      string             `json:"target_id"`
+		Reshape       *importpkg.Reshape `json:"reshape"`
+		ColumnMap     map[string]string  `json:"column_map"`
+		ImportMode    string             `json:"import_mode"`
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
@@ -593,7 +689,7 @@ func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage)
 		var c fileIntegrationConfig
 		_ = json.Unmarshal(row.Config, &c)
 		req.IntegrationID, req.TargetType, req.TargetID = row.ID, row.TargetType, row.TargetID
-		req.ColumnMap, req.ImportMode = c.ColumnMap, c.ImportMode
+		req.Reshape, req.ColumnMap, req.ImportMode = c.Reshape, c.ColumnMap, c.ImportMode
 		if p.TargetType != "" && p.TargetType != row.TargetType {
 			return "", "", fmt.Errorf("integration '%s' imports into a %s; leave target_type out or match it", row.Name, row.TargetType)
 		}
@@ -610,6 +706,12 @@ func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage)
 	}
 	if req.TargetID, err = e.requireInModel(ctx, kind, req.TargetID); err != nil {
 		return "", "", err
+	}
+	if p.Reshape != nil {
+		if err := p.Reshape.Validate(); err != nil {
+			return "", "", err
+		}
+		req.Reshape = p.Reshape
 	}
 	if p.ColumnMap != nil {
 		req.ColumnMap = p.ColumnMap

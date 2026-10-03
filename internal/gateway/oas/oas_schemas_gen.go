@@ -1313,6 +1313,147 @@ func (s *AiChatMessageRole) UnmarshalText(data []byte) error {
 	}
 }
 
+// Ref: #/components/schemas/AiConversion
+type AiConversion struct {
+	ID         uuid.UUID `json:"id"`
+	SessionID  uuid.UUID `json:"session_id"`
+	DocumentID uuid.UUID `json:"document_id"`
+	Sheet      OptString `json:"sheet"`
+	// Importpkg.Reshape: header_row, fill_down, skip_rows, unpivot, constants, value_map, number_columns,
+	//  decimal_comma, scale, delimiter.
+	Reshape   OptAiConversionReshape   `json:"reshape"`
+	ColumnMap OptAiConversionColumnMap `json:"column_map"`
+	Filename  string                   `json:"filename"`
+	RowCount  int                      `json:"row_count"`
+	Columns   []string                 `json:"columns"`
+	CreatedAt time.Time                `json:"created_at"`
+}
+
+// GetID returns the value of ID.
+func (s *AiConversion) GetID() uuid.UUID {
+	return s.ID
+}
+
+// GetSessionID returns the value of SessionID.
+func (s *AiConversion) GetSessionID() uuid.UUID {
+	return s.SessionID
+}
+
+// GetDocumentID returns the value of DocumentID.
+func (s *AiConversion) GetDocumentID() uuid.UUID {
+	return s.DocumentID
+}
+
+// GetSheet returns the value of Sheet.
+func (s *AiConversion) GetSheet() OptString {
+	return s.Sheet
+}
+
+// GetReshape returns the value of Reshape.
+func (s *AiConversion) GetReshape() OptAiConversionReshape {
+	return s.Reshape
+}
+
+// GetColumnMap returns the value of ColumnMap.
+func (s *AiConversion) GetColumnMap() OptAiConversionColumnMap {
+	return s.ColumnMap
+}
+
+// GetFilename returns the value of Filename.
+func (s *AiConversion) GetFilename() string {
+	return s.Filename
+}
+
+// GetRowCount returns the value of RowCount.
+func (s *AiConversion) GetRowCount() int {
+	return s.RowCount
+}
+
+// GetColumns returns the value of Columns.
+func (s *AiConversion) GetColumns() []string {
+	return s.Columns
+}
+
+// GetCreatedAt returns the value of CreatedAt.
+func (s *AiConversion) GetCreatedAt() time.Time {
+	return s.CreatedAt
+}
+
+// SetID sets the value of ID.
+func (s *AiConversion) SetID(val uuid.UUID) {
+	s.ID = val
+}
+
+// SetSessionID sets the value of SessionID.
+func (s *AiConversion) SetSessionID(val uuid.UUID) {
+	s.SessionID = val
+}
+
+// SetDocumentID sets the value of DocumentID.
+func (s *AiConversion) SetDocumentID(val uuid.UUID) {
+	s.DocumentID = val
+}
+
+// SetSheet sets the value of Sheet.
+func (s *AiConversion) SetSheet(val OptString) {
+	s.Sheet = val
+}
+
+// SetReshape sets the value of Reshape.
+func (s *AiConversion) SetReshape(val OptAiConversionReshape) {
+	s.Reshape = val
+}
+
+// SetColumnMap sets the value of ColumnMap.
+func (s *AiConversion) SetColumnMap(val OptAiConversionColumnMap) {
+	s.ColumnMap = val
+}
+
+// SetFilename sets the value of Filename.
+func (s *AiConversion) SetFilename(val string) {
+	s.Filename = val
+}
+
+// SetRowCount sets the value of RowCount.
+func (s *AiConversion) SetRowCount(val int) {
+	s.RowCount = val
+}
+
+// SetColumns sets the value of Columns.
+func (s *AiConversion) SetColumns(val []string) {
+	s.Columns = val
+}
+
+// SetCreatedAt sets the value of CreatedAt.
+func (s *AiConversion) SetCreatedAt(val time.Time) {
+	s.CreatedAt = val
+}
+
+type AiConversionColumnMap map[string]string
+
+func (s *AiConversionColumnMap) init() AiConversionColumnMap {
+	m := *s
+	if m == nil {
+		m = map[string]string{}
+		*s = m
+	}
+	return m
+}
+
+// Importpkg.Reshape: header_row, fill_down, skip_rows, unpivot, constants, value_map, number_columns,
+//
+//	decimal_comma, scale, delimiter.
+type AiConversionReshape map[string]jx.Raw
+
+func (s *AiConversionReshape) init() AiConversionReshape {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
+
 // Ref: #/components/schemas/AiDocument
 type AiDocument struct {
 	ID        uuid.UUID `json:"id"`
@@ -8144,6 +8285,92 @@ func (*DisconnectIntegrationOAuthOK) disconnectIntegrationOAuthRes() {}
 
 type DisconnectIntegrationOAuthOKMeta struct{}
 
+type DownloadAiConversionBadRequest Error
+
+func (*DownloadAiConversionBadRequest) downloadAiConversionRes() {}
+
+type DownloadAiConversionFormat string
+
+const (
+	DownloadAiConversionFormatCsv  DownloadAiConversionFormat = "csv"
+	DownloadAiConversionFormatXlsx DownloadAiConversionFormat = "xlsx"
+)
+
+// AllValues returns all DownloadAiConversionFormat values.
+func (DownloadAiConversionFormat) AllValues() []DownloadAiConversionFormat {
+	return []DownloadAiConversionFormat{
+		DownloadAiConversionFormatCsv,
+		DownloadAiConversionFormatXlsx,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s DownloadAiConversionFormat) MarshalText() ([]byte, error) {
+	switch s {
+	case DownloadAiConversionFormatCsv:
+		return []byte(s), nil
+	case DownloadAiConversionFormatXlsx:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *DownloadAiConversionFormat) UnmarshalText(data []byte) error {
+	switch DownloadAiConversionFormat(data) {
+	case DownloadAiConversionFormatCsv:
+		*s = DownloadAiConversionFormatCsv
+		return nil
+	case DownloadAiConversionFormatXlsx:
+		*s = DownloadAiConversionFormatXlsx
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type DownloadAiConversionNotFound Error
+
+func (*DownloadAiConversionNotFound) downloadAiConversionRes() {}
+
+type DownloadAiConversionOKApplicationVndOpenxmlformatsOfficedocumentSpreadsheetmlSheet struct {
+	Data io.Reader
+}
+
+// Read reads data from the Data reader.
+//
+// Kept to satisfy the io.Reader interface.
+func (s DownloadAiConversionOKApplicationVndOpenxmlformatsOfficedocumentSpreadsheetmlSheet) Read(p []byte) (n int, err error) {
+	if s.Data == nil {
+		return 0, io.EOF
+	}
+	return s.Data.Read(p)
+}
+
+func (*DownloadAiConversionOKApplicationVndOpenxmlformatsOfficedocumentSpreadsheetmlSheet) downloadAiConversionRes() {
+}
+
+type DownloadAiConversionOKTextCsv struct {
+	Data io.Reader
+}
+
+// Read reads data from the Data reader.
+//
+// Kept to satisfy the io.Reader interface.
+func (s DownloadAiConversionOKTextCsv) Read(p []byte) (n int, err error) {
+	if s.Data == nil {
+		return 0, io.EOF
+	}
+	return s.Data.Read(p)
+}
+
+func (*DownloadAiConversionOKTextCsv) downloadAiConversionRes() {}
+
+type DownloadAiConversionUnprocessableEntity Error
+
+func (*DownloadAiConversionUnprocessableEntity) downloadAiConversionRes() {}
+
 type DownloadExportIntegrationBadRequest Error
 
 func (*DownloadExportIntegrationBadRequest) downloadExportIntegrationRes() {}
@@ -8262,6 +8489,7 @@ func (*Error) getWorkflowRes()                 {}
 func (*Error) grantAdminUserAppAccessRes()     {}
 func (*Error) grantAdminUserModelAccessRes()   {}
 func (*Error) importDimensionMembersRes()      {}
+func (*Error) listAiConversionsRes()           {}
 func (*Error) listAiProposalsRes()             {}
 func (*Error) listAuditEventsRes()             {}
 func (*Error) listAutomationRulesRes()         {}
@@ -12826,6 +13054,10 @@ func (s *LicenseInfoState) UnmarshalText(data []byte) error {
 	}
 }
 
+type ListAiConversionsOKApplicationJSON []AiConversion
+
+func (*ListAiConversionsOKApplicationJSON) listAiConversionsRes() {}
+
 type ListAiProposalsOKApplicationJSON []AiProposalWithSummary
 
 func (*ListAiProposalsOKApplicationJSON) listAiProposalsRes() {}
@@ -14623,6 +14855,98 @@ func (s *NotificationTemplateVars) init() NotificationTemplateVars {
 	return m
 }
 
+// NewOptAiConversionColumnMap returns new OptAiConversionColumnMap with value set to v.
+func NewOptAiConversionColumnMap(v AiConversionColumnMap) OptAiConversionColumnMap {
+	return OptAiConversionColumnMap{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptAiConversionColumnMap is optional AiConversionColumnMap.
+type OptAiConversionColumnMap struct {
+	Value AiConversionColumnMap
+	Set   bool
+}
+
+// IsSet returns true if OptAiConversionColumnMap was set.
+func (o OptAiConversionColumnMap) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptAiConversionColumnMap) Reset() {
+	var v AiConversionColumnMap
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptAiConversionColumnMap) SetTo(v AiConversionColumnMap) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptAiConversionColumnMap) Get() (v AiConversionColumnMap, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptAiConversionColumnMap) Or(d AiConversionColumnMap) AiConversionColumnMap {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptAiConversionReshape returns new OptAiConversionReshape with value set to v.
+func NewOptAiConversionReshape(v AiConversionReshape) OptAiConversionReshape {
+	return OptAiConversionReshape{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptAiConversionReshape is optional AiConversionReshape.
+type OptAiConversionReshape struct {
+	Value AiConversionReshape
+	Set   bool
+}
+
+// IsSet returns true if OptAiConversionReshape was set.
+func (o OptAiConversionReshape) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptAiConversionReshape) Reset() {
+	var v AiConversionReshape
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptAiConversionReshape) SetTo(v AiConversionReshape) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptAiConversionReshape) Get() (v AiConversionReshape, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptAiConversionReshape) Or(d AiConversionReshape) AiConversionReshape {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptAiProposal returns new OptAiProposal with value set to v.
 func NewOptAiProposal(v AiProposal) OptAiProposal {
 	return OptAiProposal{
@@ -15721,6 +16045,52 @@ func (o OptDimensionTimeGranularity) Get() (v DimensionTimeGranularity, ok bool)
 
 // Or returns value if set, or given parameter if does not.
 func (o OptDimensionTimeGranularity) Or(d DimensionTimeGranularity) DimensionTimeGranularity {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptDownloadAiConversionFormat returns new OptDownloadAiConversionFormat with value set to v.
+func NewOptDownloadAiConversionFormat(v DownloadAiConversionFormat) OptDownloadAiConversionFormat {
+	return OptDownloadAiConversionFormat{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptDownloadAiConversionFormat is optional DownloadAiConversionFormat.
+type OptDownloadAiConversionFormat struct {
+	Value DownloadAiConversionFormat
+	Set   bool
+}
+
+// IsSet returns true if OptDownloadAiConversionFormat was set.
+func (o OptDownloadAiConversionFormat) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptDownloadAiConversionFormat) Reset() {
+	var v DownloadAiConversionFormat
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptDownloadAiConversionFormat) SetTo(v DownloadAiConversionFormat) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptDownloadAiConversionFormat) Get() (v DownloadAiConversionFormat, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptDownloadAiConversionFormat) Or(d DownloadAiConversionFormat) DownloadAiConversionFormat {
 	if v, ok := o.Get(); ok {
 		return v
 	}

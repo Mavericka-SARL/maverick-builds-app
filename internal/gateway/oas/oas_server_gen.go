@@ -488,6 +488,12 @@ type Handler interface {
 	//
 	// POST /api/developer/integration-connections/{id}/oauth/disconnect
 	DisconnectIntegrationOAuth(ctx context.Context, params DisconnectIntegrationOAuthParams) (DisconnectIntegrationOAuthRes, error)
+	// DownloadAiConversion implements downloadAiConversion operation.
+	//
+	// Download a converted file, rebuilt from its attachment.
+	//
+	// GET /api/ai/sessions/{id}/conversions/{cid}
+	DownloadAiConversion(ctx context.Context, params DownloadAiConversionParams) (DownloadAiConversionRes, error)
 	// DownloadExportIntegration implements downloadExportIntegration operation.
 	//
 	// Download a file_export integration — the grid's leaf-level values (inputs and calculated
@@ -867,6 +873,12 @@ type Handler interface {
 	//
 	// GET /api/admin/workspaces
 	ListAdminWorkspaces(ctx context.Context) ([]AdminWorkspace, error)
+	// ListAiConversions implements listAiConversions operation.
+	//
+	// An attachment reshaped and column-mapped into the layout an import reads. Session owner only.
+	//
+	// GET /api/ai/sessions/{id}/conversions
+	ListAiConversions(ctx context.Context, params ListAiConversionsParams) (ListAiConversionsRes, error)
 	// ListAiProposals implements listAiProposals operation.
 	//
 	// List every proposal ever made in a session, most recent first (not just pending ones) — the

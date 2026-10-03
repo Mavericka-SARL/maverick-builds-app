@@ -785,38 +785,34 @@ func runAIBuild(t *testing.T, request string, steps []map[string]any) *aiBuild {
 	return &aiBuild{t: t, pool: pool, modelID: modelID, revID: revID, draft: draft.DraftRevisionID, sessID: sess.ID, do: do, fake: fake}
 }
 
-// proposeAgain has the assistant answer request in the same session with
-// one more propose_actions call, confirms that proposal through the real
-// endpoint and returns it as executed. Unlike runAIBuild it does not
-// require every step to succeed: a caller checking a refusal reads the
-// failed step's result.
-func (b *aiBuild) proposeAgain(request string, steps []map[string]any) aiassistant.Proposal {
+// proposeRefused has the assistant answer request with a plan the
+// proposal check (aiCheckProposal) refuses, and returns what the check told
+// it. A refused plan never becomes a proposal.
+func (b *aiBuild) proposeRefused(request string, steps []map[string]any) string {
 	b.t.Helper()
 	ctx := context.Background()
 	args, _ := json.Marshal(map[string]any{"steps": steps})
-	b.fake.resps = append(b.fake.resps, providers.ChatResponse{
-		FinishReason: "tool_calls",
-		Message: providers.Message{Role: "assistant", ToolCalls: []providers.ToolCall{
+	b.fake.resps = append(b.fake.resps,
+		providers.ChatResponse{FinishReason: "tool_calls", Message: providers.Message{Role: "assistant", ToolCalls: []providers.ToolCall{
 			{ID: fmt.Sprintf("call_%d", len(b.fake.resps)+1), Name: "propose_actions", Arguments: args},
-		}},
-	})
+		}}},
+		providers.ChatResponse{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: "Those properties do not exist."}},
+	)
 	if status, body := b.do("POST", "/api/ai/sessions/"+b.sessID+"/messages",
 		map[string]string{"content": request}); status != http.StatusOK {
 		b.t.Fatalf("send message: status %d\n%s", status, body)
 	}
-	pStore := aiassistant.NewProposalStore(b.pool)
-	pending, err := pStore.ListPendingProposals(ctx, b.sessID)
-	if err != nil || len(pending) != 1 {
-		b.t.Fatalf("want one pending proposal, got %+v (err %v)", pending, err)
+	if pending, _ := aiassistant.NewProposalStore(b.pool).ListPendingProposals(ctx, b.sessID); len(pending) != 0 {
+		b.t.Fatalf("a refused plan became a proposal: %+v", pending)
 	}
-	if status, body := b.do("POST", "/api/ai/sessions/"+b.sessID+"/proposals/"+pending[0].ID+"/confirm", nil); status != http.StatusOK {
-		b.t.Fatalf("confirm: status %d\n%s", status, body)
+	msgs, _ := aiassistant.NewChatStore(b.pool).ListMessages(ctx, b.sessID)
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "tool" && strings.HasPrefix(msgs[i].Content, "Proposal NOT shown") {
+			return msgs[i].Content
+		}
 	}
-	confirmed, err := pStore.GetProposal(ctx, pending[0].ID)
-	if err != nil {
-		b.t.Fatalf("re-read proposal: %v", err)
-	}
-	return confirmed
+	b.t.Fatal("the check did not answer the plan")
+	return ""
 }
 
 // TestAIDeveloperBuildsDimensionalFormulas is AI Developer parity for member
@@ -1165,9 +1161,10 @@ func TestAIDeveloperRenamesAndDeletesProperties(t *testing.T) {
 		cellKey("scaled", "EMEA"): 200, cellKey("scaled", "US"): 150,
 	})
 
-	// The deleted property, and the old name, are refused by the next
-	// proposal with the developer path's code.
-	refused := b.proposeAgain("add tiered revenue and a metric on the old fact property", []map[string]any{
+	// The deleted property, and the old name, are refused with the developer
+	// path's code — now by the proposal check, before the developer sees a
+	// plan that would fail.
+	refused := b.proposeRefused("add tiered revenue and a metric on the old fact property", []map[string]any{
 		proposeStep("create_metric", "Calculated 'tiered'", map[string]any{
 			"name": "tiered", "is_input": false, "formula": `IF(region.tier = "A", revenue, 0)`, "format": "number",
 		}),
@@ -1175,12 +1172,12 @@ func TestAIDeveloperRenamesAndDeletesProperties(t *testing.T) {
 			"name": "stale", "is_input": false, "formula": "revenue * region.fact", "format": "number",
 		}),
 	})
-	if refused.Status != "partial" {
-		t.Errorf("second proposal finished %q, want partial", refused.Status)
-	}
-	for _, s := range refused.Steps {
-		if s.Status != "failed" || !strings.Contains(s.Result, "UNKNOWN_PROPERTY") {
-			t.Errorf("step %q: %s %q, want failed with UNKNOWN_PROPERTY", s.Description, s.Status, s.Result)
+	for _, want := range []string{
+		"step 1 (create_metric — Calculated 'tiered'): UNKNOWN_PROPERTY",
+		"step 2 (create_metric — Calculated 'stale'): UNKNOWN_PROPERTY",
+	} {
+		if !strings.Contains(refused, want) {
+			t.Errorf("the check's answer lacks %q:\n%s", want, refused)
 		}
 	}
 	var saved int

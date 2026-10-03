@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -209,7 +210,7 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 		// for PARENT, dim.property and criteria ranges, and as the runtime
 		// binds them.
 		if !dimExists && rd.lookup(ref.Name) == nil {
-			return nil, invalid("formula references unknown metric or dimension %q in this revision", ref.Name)
+			return nil, invalid("formula references unknown metric or dimension %q in this revision%s", ref.Name, suggestName(ctx, pool, req, ref.Name))
 		}
 	}
 
@@ -224,7 +225,8 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 		`, req.ModelID, name, req.RevisionID).Scan(&ok)
 		return ok
 	}
-	if err := checkDimensionNames(ctx, pool, an, rd, isMetric); err != nil {
+	suggest := func(name string) string { return suggestName(ctx, pool, req, name) }
+	if err := checkDimensionNames(ctx, pool, an, rd, isMetric, suggest); err != nil {
 		return nil, err
 	}
 
@@ -379,4 +381,61 @@ func WriteDependencies(ctx context.Context, tx Execer, metricID string, edges []
 		}
 	}
 	return nil
+}
+
+// suggestName says what an unknown name most likely meant, so whoever wrote
+// it — a person, or the AI Developer reading the error — can correct it in
+// one step: a metric or dimension spelled differently (setup_item for
+// "Setup Item", written {Setup Item}), or a property, which is read through
+// its dimension ({Cost Center}.p_and_l_line). "" when nothing is close.
+func suggestName(ctx context.Context, q Querier, req Request, name string) string {
+	key := looseName(name)
+	if key == "" {
+		return ""
+	}
+	var hits []string
+	rows, err := q.Query(ctx, `
+		SELECT 'metric', name, '' FROM model.metric_def
+		WHERE model_id=$1::uuid AND (revision_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid OR revision_id IS NULL)
+		UNION ALL
+		SELECT 'dimension', name, '' FROM model.dimension_def
+		WHERE model_id=$1::uuid AND (revision_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid OR revision_id IS NULL)
+		UNION ALL
+		SELECT 'property', p.name, d.name FROM model.dimension_property p
+		JOIN model.dimension_def d ON d.id = p.dimension_id
+		WHERE d.model_id=$1::uuid AND (d.revision_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid OR d.revision_id IS NULL)
+	`, req.ModelID, req.RevisionID)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var kind, n, dim string
+		if rows.Scan(&kind, &n, &dim) != nil || looseName(n) != key {
+			continue
+		}
+		switch kind {
+		case "property":
+			ref := formula.QuoteName(dim) + "." + n
+			hits = append(hits, fmt.Sprintf("%s is a property of dimension %q, not a metric or dimension: read it as %s (as a SUMIFS/COUNTIFS range, SUMIFS(<metric>, %s, \"<value>\"))", name, dim, ref, ref))
+		default:
+			hits = append(hits, fmt.Sprintf("the %s is named %q: write it as %s", kind, n, formula.QuoteName(n)))
+		}
+	}
+	if len(hits) == 0 {
+		return ""
+	}
+	sort.Strings(hits)
+	return " — " + strings.Join(hits, "; ")
+}
+
+// looseName compares names ignoring case, spaces and punctuation.
+func looseName(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }

@@ -228,8 +228,7 @@ func (p *parser) parsePrimary() (Node, error) {
 			return nil, fmt.Errorf("%s: a function name cannot contain a dot", t.Val)
 		}
 		p.advance()
-		dot := strings.IndexByte(t.Val, '.')
-		return &DimProperty{Dim: t.Val[:dot], Property: t.Val[dot+1:]}, nil
+		return &DimProperty{Dim: t.Dim, Property: t.Prop}, nil
 
 	case tokError:
 		return nil, fmt.Errorf("%s", t.Val)

@@ -1737,6 +1737,21 @@ components:
         draft_revision_id: { type: string, format: uuid, description: "Set once this session's first confirmed proposal lazily creates an isolated draft revision" }
         created_at:        { type: string, format: date-time }
 
+    AiConversion:
+      type: object
+      required: [id, session_id, document_id, filename, row_count, columns, created_at]
+      properties:
+        id:          { type: string, format: uuid }
+        session_id:  { type: string, format: uuid }
+        document_id: { type: string, format: uuid }
+        sheet:       { type: string }
+        reshape:     { type: object, additionalProperties: true, description: "importpkg.Reshape: header_row, fill_down, skip_rows, unpivot, constants, value_map, number_columns, decimal_comma, scale, delimiter" }
+        column_map:  { type: object, additionalProperties: { type: string } }
+        filename:    { type: string }
+        row_count:   { type: integer }
+        columns:     { type: array, items: { type: string } }
+        created_at:  { type: string, format: date-time }
+
     AiToolCall:
       type: object
       required: [id, name, arguments]
@@ -7252,6 +7267,60 @@ paths:
             application/json:
               schema: { type: object, properties: { status: { type: string } } }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/ai/sessions/{id}/conversions:
+    get:
+      operationId: listAiConversions
+      tags: [AI Assistant]
+      summary: The session's converted files (prepare_converted_file), oldest first
+      description: An attachment reshaped and column-mapped into the layout an import reads. Session owner only.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Conversions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AiConversion" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/ai/sessions/{id}/conversions/{cid}:
+    get:
+      operationId: downloadAiConversion
+      tags: [AI Assistant]
+      summary: Download a converted file, rebuilt from its attachment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: cid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: format
+          in: query
+          schema: { type: string, enum: [csv, xlsx], default: csv }
+      responses:
+        "200":
+          description: The converted file
+          content:
+            text/csv:
+              schema: { type: string }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: The attachment no longer converts (its reshape no longer fits it)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/ai/sessions/{id}/proposals/{pid}/confirm:
     post:

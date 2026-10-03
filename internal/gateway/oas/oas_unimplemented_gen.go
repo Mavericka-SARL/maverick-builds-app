@@ -707,6 +707,15 @@ func (UnimplementedHandler) DisconnectIntegrationOAuth(ctx context.Context, para
 	return r, ht.ErrNotImplemented
 }
 
+// DownloadAiConversion implements downloadAiConversion operation.
+//
+// Download a converted file, rebuilt from its attachment.
+//
+// GET /api/ai/sessions/{id}/conversions/{cid}
+func (UnimplementedHandler) DownloadAiConversion(ctx context.Context, params DownloadAiConversionParams) (r DownloadAiConversionRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // DownloadExportIntegration implements downloadExportIntegration operation.
 //
 // Download a file_export integration — the grid's leaf-level values (inputs and calculated
@@ -1252,6 +1261,15 @@ func (UnimplementedHandler) ListAdminUsers(ctx context.Context) (r []AdminUser, 
 //
 // GET /api/admin/workspaces
 func (UnimplementedHandler) ListAdminWorkspaces(ctx context.Context) (r []AdminWorkspace, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// ListAiConversions implements listAiConversions operation.
+//
+// An attachment reshaped and column-mapped into the layout an import reads. Session owner only.
+//
+// GET /api/ai/sessions/{id}/conversions
+func (UnimplementedHandler) ListAiConversions(ctx context.Context, params ListAiConversionsParams) (r ListAiConversionsRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 

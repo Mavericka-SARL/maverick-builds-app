@@ -787,7 +787,7 @@ func (e *WriteExecutor) archiveWorkflowDef(ctx context.Context, raw json.RawMess
 	if err != nil {
 		return "", "", err
 	}
-	if _, err := workflow.NewStore(e.pool).ArchiveWorkflowDef(ctx, id, e.userID); err != nil {
+	if _, err := workflow.NewStore(e.live).ArchiveWorkflowDef(ctx, id, e.userID); err != nil {
 		return "", "", err
 	}
 	return fmt.Sprintf("Workflow '%s' archived", name), id, nil
@@ -800,7 +800,7 @@ func (e *WriteExecutor) restoreWorkflowDef(ctx context.Context, raw json.RawMess
 	if err != nil {
 		return "", "", err
 	}
-	if _, err := workflow.NewStore(e.pool).RestoreWorkflowDef(ctx, id, e.userID); err != nil {
+	if _, err := workflow.NewStore(e.live).RestoreWorkflowDef(ctx, id, e.userID); err != nil {
 		return "", "", err
 	}
 	return fmt.Sprintf("Workflow '%s' restored as a draft — a developer publishes it from the Workflows tab", name), id, nil
@@ -820,7 +820,7 @@ func (e *WriteExecutor) duplicateWorkflowDef(ctx context.Context, raw json.RawMe
 	if strings.TrimSpace(p.Name) == "" {
 		return "", "", fmt.Errorf("name (for the copy) is required")
 	}
-	dup, err := workflow.NewStore(e.pool).DuplicateWorkflowDef(ctx, id, p.Name, e.userID)
+	dup, err := workflow.NewStore(e.live).DuplicateWorkflowDef(ctx, id, p.Name, e.userID)
 	if err != nil {
 		return "", "", err
 	}

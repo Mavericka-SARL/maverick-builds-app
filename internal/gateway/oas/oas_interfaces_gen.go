@@ -221,6 +221,10 @@ type DisconnectIntegrationOAuthRes interface {
 	disconnectIntegrationOAuthRes()
 }
 
+type DownloadAiConversionRes interface {
+	downloadAiConversionRes()
+}
+
 type DownloadExportIntegrationRes interface {
 	downloadExportIntegrationRes()
 }
@@ -359,6 +363,10 @@ type ImportSheetFetchRes interface {
 
 type ImportUploadRes interface {
 	importUploadRes()
+}
+
+type ListAiConversionsRes interface {
+	listAiConversionsRes()
 }
 
 type ListAiProposalsRes interface {

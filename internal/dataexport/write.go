@@ -50,6 +50,13 @@ func FileName(s Spec, fallback string) string {
 	return base + "." + s.Format
 }
 
+// NewTable is a table a caller already has rather than one rendered from a
+// grid (an AI Assistant conversion), written in format — "csv" or "xlsx" —
+// with every default a spec would have.
+func NewTable(header []string, rows [][]Value, format string) *Table {
+	return &Table{Header: header, DefaultHeader: header, Rows: rows, spec: Spec{Format: format}.Normalized()}
+}
+
 // Write writes a rendered table in its spec's format.
 func Write(w io.Writer, t *Table) error {
 	switch t.spec.Format {

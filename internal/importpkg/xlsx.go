@@ -7,30 +7,16 @@ package importpkg
 // check as everything else. excelize is already a direct
 // dependency (used by internal/aiassistant for document parsing).
 
-import (
-	"bytes"
-	"encoding/csv"
-	"fmt"
-)
-
-// ParseCSVRows reads header + data rows from CSV text.
+// ParseCSVRows reads header + data rows from CSV text. Rows of a different
+// length are read (missing cells are blank); a malformed file is an error
+// naming its line. Until 2026-10 the first such row silently ended the
+// file, so everything after it was never imported.
 func ParseCSVRows(data []byte) (header []string, rows []RawRow, err error) {
-	r := csv.NewReader(bytes.NewReader(data))
-	r.TrimLeadingSpace = true
-	header, err = r.Read()
+	grid, err := readCSVGrid(data, ',')
 	if err != nil {
-		return nil, nil, fmt.Errorf("read header: %w", err)
+		return nil, nil, err
 	}
-	rowNum := 0
-	for {
-		record, rerr := r.Read()
-		if rerr != nil {
-			break
-		}
-		rowNum++
-		rows = append(rows, recordToRawRow(header, record, rowNum))
-	}
-	return header, rows, nil
+	return ShapeGrid(grid, nil)
 }
 
 // ParseXLSXRows reads header + data rows from the first sheet of a native
