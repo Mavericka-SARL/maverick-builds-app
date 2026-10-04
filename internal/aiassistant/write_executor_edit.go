@@ -636,6 +636,16 @@ func (e *WriteExecutor) updateDashboardWidget(ctx context.Context, raw json.RawM
 	}
 	var props *string
 	if len(p.WidgetProps) > 0 && string(p.WidgetProps) != "null" {
+		// Merged into what the widget has, not put in its place: live, the
+		// assistant sent {"hide_rollup_members": true} to two charts and
+		// replacing the props whole would have wiped both charts.
+		var stored []byte
+		_ = e.pool.QueryRow(ctx, `SELECT COALESCE(widget_props,'{}'::jsonb) FROM model.dashboard_widget WHERE id=$1::uuid`, widgetID).Scan(&stored)
+		merged, mErr := mergeWidgetProps(widgetType, stored, p.WidgetProps)
+		if mErr != nil {
+			return "", "", mErr
+		}
+		p.WidgetProps = merged
 		if widgetType == "chart" {
 			remapped, err := e.remapChartProps(ctx, p.WidgetProps)
 			if err != nil {
@@ -1036,4 +1046,60 @@ func (e *WriteExecutor) backfillFormIntegration(ctx context.Context, raw json.Ra
 		return "", "", fmt.Errorf("backfill: %w", err)
 	}
 	return fmt.Sprintf("Posted %d form record(s) into the integration's metric", n), "", nil
+}
+
+// chartSettings are the keys that live under a chart widget's "chart".
+var chartSettings = map[string]bool{"chart_type": true, "dimension_id": true, "metric_ids": true, "x_metric_id": true,
+	"y_metric_id": true, "context_defaults": true, "bin_count": true, "show_legend": true, "show_values": true,
+	"value_format": true, "refresh_seconds": true, "hide_rollup_members": true}
+
+// mergeWidgetProps lays the given props over the stored ones: a key given
+// replaces the stored value, a null removes it, anything not given stays;
+// "chart" merges the same way one level down, and a chart setting given at
+// the top level of a chart widget's props goes under "chart".
+func mergeWidgetProps(widgetType string, stored, given json.RawMessage) (json.RawMessage, error) {
+	base := map[string]any{}
+	if len(stored) > 0 && string(stored) != "null" {
+		_ = json.Unmarshal(stored, &base)
+	}
+	var patch map[string]any
+	if err := json.Unmarshal(given, &patch); err != nil {
+		return nil, fmt.Errorf("widget_props is not a JSON object: %w", err)
+	}
+	if widgetType == "chart" {
+		for k, v := range patch {
+			if chartSettings[k] {
+				c, _ := patch["chart"].(map[string]any)
+				if c == nil {
+					c = map[string]any{}
+				}
+				c[k] = v
+				patch["chart"] = c
+				delete(patch, k)
+			}
+		}
+	}
+	for k, v := range patch {
+		switch {
+		case v == nil:
+			delete(base, k)
+		case k == "chart":
+			pc, ok := v.(map[string]any)
+			bc, okBase := base["chart"].(map[string]any)
+			if !ok || !okBase {
+				base[k] = v
+				continue
+			}
+			for ck, cv := range pc {
+				if cv == nil {
+					delete(bc, ck)
+				} else {
+					bc[ck] = cv
+				}
+			}
+		default:
+			base[k] = v
+		}
+	}
+	return json.Marshal(base)
 }

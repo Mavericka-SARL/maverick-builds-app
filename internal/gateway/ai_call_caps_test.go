@@ -21,3 +21,21 @@ func TestLLMCallCapsAreSettings(t *testing.T) {
 		t.Errorf("invalid values = %d, %d; want the defaults", s, d)
 	}
 }
+
+// A placeholder without a step number used to become the most recently
+// created id — every KPI tile of a live dashboard plan pointed at the
+// dashboard itself. A placeholder naming something becomes that name.
+func TestResolveParamRefs(t *testing.T) {
+	created := []string{"dash-1", ""}
+	for in, want := range map[string]string{
+		`{"dashboard_id":"<created in step 1>"}`:               `{"dashboard_id":"dash-1"}`,
+		`{"ref_id":"<rolling_revenue_forecast id>"}`:           `{"ref_id":"rolling_revenue_forecast"}`,
+		`{"ref_id":"<gross_profit_id>"}`:                       `{"ref_id":"gross_profit"}`,
+		`{"ref_id":"<grid id for revenue by region>"}`:         `{"ref_id":"<grid id for revenue by region>"}`,
+		`{"metric_ids":["<ebitda id>","<created in step 1>"]}`: `{"metric_ids":["ebitda","dash-1"]}`,
+	} {
+		if got := string(resolveParamRefs([]byte(in), created)); got != want {
+			t.Errorf("%s -> %s, want %s", in, got, want)
+		}
+	}
+}

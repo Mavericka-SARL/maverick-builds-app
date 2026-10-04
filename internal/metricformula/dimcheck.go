@@ -203,7 +203,7 @@ func checkLiteralMembers(ctx context.Context, q Querier, metricName string, an *
 					where = call.Func + " in " + metricName
 				}
 				return invalidCode(formula.CodeUnknownMember,
-					"%s: dimension %s has no member %q", where, d.name, code)
+					"%s: dimension %s has no member %q — add the member first (a total such as All Regions is a parent member: add it, then move the members under it)", where, d.name, code)
 			}
 		}
 	}

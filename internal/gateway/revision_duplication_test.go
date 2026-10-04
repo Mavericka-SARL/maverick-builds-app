@@ -417,3 +417,60 @@ func TestGridDeleteCascadesWidgetsAndMemberRenameRekeysWidgetProps(t *testing.T)
 		t.Error("a chart that never had metrics was deleted by an unrelated metric's deletion")
 	}
 }
+
+// Widgets added to a dashboard all get sort_order 0. The copy matched old to
+// new widgets by (type, sort_order), so every KPI tile paired with every
+// other and the duplicate's tiles all pointed at one metric. Each copied
+// tile must point at its own metric's counterpart.
+func TestDuplicateRevisionKeepsEachKPITilesMetric(t *testing.T) {
+	f := setupRollupFixture(t)
+	ctx := context.Background()
+	h := &handler{db: tenantdb.NewHandle(f.pool, nil), log: logger.New("test")}
+	var dashID string
+	if err := f.pool.QueryRow(ctx, `INSERT INTO model.dashboard_def (model_id, name, revision_id) VALUES ($1::uuid, 'KPIs', $2::uuid) RETURNING id::text`,
+		f.modelID, f.workingRevID).Scan(&dashID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `
+		INSERT INTO model.dashboard_widget (dashboard_id, widget_type, ref_id, sort_order, pos_x) VALUES
+		  ($1::uuid, 'metric_kpi', $2, 0, 0), ($1::uuid, 'metric_kpi', $3, 0, 300), ($1::uuid, 'metric_kpi', $4, 0, 600)`,
+		dashID, f.amountMetricID, f.deptTotalMetricID, f.regionTotalMetricID); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	newRevID, err := h.duplicateRevision(ctx, tx, f.modelID, "Copy", f.workingRevID, &f.workingRevID)
+	if err != nil {
+		t.Fatalf("duplicateRevision: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := f.pool.Query(ctx, `SELECT w.pos_x, m.name, m.revision_id::text FROM model.dashboard_widget w
+		JOIN model.dashboard_def d ON d.id = w.dashboard_id
+		LEFT JOIN model.metric_def m ON m.id::text = w.ref_id
+		WHERE d.revision_id = $1::uuid AND d.name = 'KPIs' ORDER BY w.pos_x`, newRevID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var x int
+		var name, rev *string
+		if err := rows.Scan(&x, &name, &rev); err != nil {
+			t.Fatal(err)
+		}
+		if name == nil || rev == nil || *rev != newRevID {
+			t.Errorf("tile at x=%d does not point at a metric of the copy", x)
+			continue
+		}
+		got = append(got, *name)
+	}
+	if len(got) != 3 || got[0] == got[1] || got[1] == got[2] || got[0] == got[2] {
+		t.Errorf("copied tiles point at %v, want three different metrics in their original order", got)
+	}
+}

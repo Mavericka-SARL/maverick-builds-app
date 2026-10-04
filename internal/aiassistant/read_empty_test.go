@@ -148,3 +148,152 @@ func TestCreateGridFailsWhenAMetricCannotBeAttached(t *testing.T) {
 		t.Errorf("create_grid with a formula for a metric: %v, want a refusal naming it", err)
 	}
 }
+
+// Live, the assistant put KPI tiles at x=1200 and three more at x=1, 2, 3.
+func TestWidgetPlacementIsChecked(t *testing.T) {
+	pool := setupWriteExecutorDB(t)
+	modelID := seedModel(t, pool)
+	revID := seedRevision(t, pool, modelID, "Rev")
+	exec := aiassistant.NewWriteExecutor(pool, modelID, revID)
+	ctx := context.Background()
+	_, dash, err := exec.Execute(ctx, "create_dashboard", mustJSON(t, map[string]any{"name": "D"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	add := func(x, y int) error {
+		_, _, err := exec.Execute(ctx, "add_dashboard_widget", mustJSON(t, map[string]any{"dashboard_id": dash, "widget_type": "text",
+			"content": "t", "pos_x": x, "pos_y": y, "size_w": 300, "size_h": 100}))
+		return err
+	}
+	if err := add(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := add(300, 0); err != nil {
+		t.Errorf("a tile beside the first: %v", err)
+	}
+	if err := add(1200, 0); err == nil || !strings.Contains(err.Error(), "does not fit") {
+		t.Errorf("a tile at x=1200: %v, want refused", err)
+	}
+	if err := add(1, 50); err == nil || !strings.Contains(err.Error(), "overlaps") || !strings.Contains(err.Error(), "below y=100") {
+		t.Errorf("a tile on top of another: %v, want refused with where to go", err)
+	}
+}
+
+// Live: {"chart": {"ref_id": "Dashboard Data", …}} with no widget ref_id and
+// no plotted dimension. The grid moves up to the widget, and a grid with one
+// dimension plots along it.
+func TestChartGridInPropsIsHoisted(t *testing.T) {
+	pool := setupWriteExecutorDB(t)
+	modelID := seedModel(t, pool)
+	revID := seedRevision(t, pool, modelID, "Rev")
+	exec := aiassistant.NewWriteExecutor(pool, modelID, revID)
+	ctx := context.Background()
+	run := func(tool string, p map[string]any) string {
+		t.Helper()
+		_, id, err := exec.Execute(ctx, tool, mustJSON(t, p))
+		if err != nil {
+			t.Fatalf("%s: %v", tool, err)
+		}
+		return id
+	}
+	dimID := run("create_dimension", map[string]any{"name": "Month", "members": []map[string]any{{"code": "M1", "label": "M1"}}})
+	run("create_metric", map[string]any{"name": "a", "is_input": true})
+	run("create_metric", map[string]any{"name": "b", "is_input": true})
+	gridID := run("create_grid", map[string]any{"name": "Dashboard Data", "metrics": []string{"a", "b"}, "dimensions": []string{"Month"}})
+	dash := run("create_dashboard", map[string]any{"name": "D"})
+	wid := run("add_dashboard_widget", map[string]any{"dashboard_id": dash, "widget_type": "chart", "pos_x": 0, "pos_y": 0, "size_w": 600, "size_h": 300,
+		"widget_props": map[string]any{"chart": map[string]any{"ref_id": "Dashboard Data", "chart_type": "line", "metric_ids": []string{"a", "b"}}}})
+	var ref, props string
+	if err := pool.QueryRow(ctx, `SELECT ref_id::text, widget_props::text FROM model.dashboard_widget WHERE id=$1::uuid`, wid).Scan(&ref, &props); err != nil {
+		t.Fatal(err)
+	}
+	if ref != gridID || !strings.Contains(props, dimID) || strings.Contains(props, `"ref_id"`) {
+		t.Errorf("ref_id %s (want %s), props %s (want the Month dimension, no ref_id inside)", ref, gridID, props)
+	}
+}
+
+// A KPI tile the assistant adds shows the total, and a chart leaves out
+// total members, unless the step says otherwise.
+func TestAIWidgetDefaults(t *testing.T) {
+	pool := setupWriteExecutorDB(t)
+	modelID := seedModel(t, pool)
+	revID := seedRevision(t, pool, modelID, "Rev")
+	exec := aiassistant.NewWriteExecutor(pool, modelID, revID)
+	ctx := context.Background()
+	run := func(tool string, p map[string]any) string {
+		t.Helper()
+		_, id, err := exec.Execute(ctx, tool, mustJSON(t, p))
+		if err != nil {
+			t.Fatalf("%s: %v", tool, err)
+		}
+		return id
+	}
+	run("create_dimension", map[string]any{"name": "Month", "members": []map[string]any{{"code": "M1", "label": "M1"}}})
+	run("create_metric", map[string]any{"name": "a", "is_input": true})
+	run("create_grid", map[string]any{"name": "G", "metrics": []string{"a"}, "dimensions": []string{"Month"}})
+	dash := run("create_dashboard", map[string]any{"name": "D"})
+	props := func(id string) string {
+		var s string
+		_ = pool.QueryRow(ctx, `SELECT COALESCE(widget_props::text,'') FROM model.dashboard_widget WHERE id=$1::uuid`, id).Scan(&s)
+		return s
+	}
+	kpi := run("add_dashboard_widget", map[string]any{"dashboard_id": dash, "widget_type": "metric_kpi", "ref_id": "a", "pos_x": 0, "pos_y": 0, "size_w": 300, "size_h": 120})
+	synced := run("add_dashboard_widget", map[string]any{"dashboard_id": dash, "widget_type": "metric_kpi", "ref_id": "a", "pos_x": 300, "pos_y": 0, "size_w": 300, "size_h": 120,
+		"widget_props": map[string]any{"kpi_context_mode": "sync"}})
+	chart := run("add_dashboard_widget", map[string]any{"dashboard_id": dash, "widget_type": "chart", "ref_id": "G", "pos_x": 0, "pos_y": 200, "size_w": 600, "size_h": 300,
+		"widget_props": map[string]any{"chart": map[string]any{"chart_type": "line", "metric_ids": []string{"a"}}}})
+	if !strings.Contains(props(kpi), `"kpi_context_mode": "total"`) {
+		t.Errorf("kpi props %s, want the total", props(kpi))
+	}
+	if !strings.Contains(props(synced), `"kpi_context_mode": "sync"`) {
+		t.Errorf("an explicit sync was overridden: %s", props(synced))
+	}
+	if !strings.Contains(props(chart), `"hide_rollup_members": true`) {
+		t.Errorf("chart props %s, want total members left out", props(chart))
+	}
+}
+
+// The AI draft's copy of a revision matched widgets by (type, sort_order);
+// KPI tiles added by the assistant all have sort_order 0, so every copied
+// tile pointed at one metric (live: twelve tiles all "rolling revenue
+// forecast").
+func TestCreateRevisionKeepsEachKPITilesMetric(t *testing.T) {
+	pool := setupWriteExecutorDB(t)
+	modelID := seedModel(t, pool)
+	revA := seedRevision(t, pool, modelID, "A")
+	exec := aiassistant.NewWriteExecutor(pool, modelID, revA)
+	ctx := context.Background()
+	run := func(tool string, p map[string]any) string {
+		t.Helper()
+		_, id, err := exec.Execute(ctx, tool, mustJSON(t, p))
+		if err != nil {
+			t.Fatalf("%s: %v", tool, err)
+		}
+		return id
+	}
+	for _, m := range []string{"revenue", "cost", "margin_value"} {
+		run("create_metric", map[string]any{"name": m, "is_input": true})
+	}
+	dash := run("create_dashboard", map[string]any{"name": "KPIs"})
+	for i, m := range []string{"revenue", "cost", "margin_value"} {
+		run("add_dashboard_widget", map[string]any{"dashboard_id": dash, "widget_type": "metric_kpi", "ref_id": m,
+			"pos_x": i * 300, "pos_y": 0, "size_w": 300, "size_h": 120})
+	}
+	revB := run("create_revision", map[string]any{"name": "B", "source_revision_id": revA})
+	rows, err := pool.Query(ctx, `SELECT m.name FROM model.dashboard_widget w JOIN model.dashboard_def d ON d.id = w.dashboard_id
+		JOIN model.metric_def m ON m.id::text = w.ref_id AND m.revision_id = d.revision_id
+		WHERE d.revision_id = $1::uuid ORDER BY w.pos_x`, revB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var n string
+		_ = rows.Scan(&n)
+		got = append(got, n)
+	}
+	if strings.Join(got, ",") != "revenue,cost,margin_value" {
+		t.Errorf("copied tiles point at %v, want revenue, cost, margin_value", got)
+	}
+}

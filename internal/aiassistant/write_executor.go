@@ -342,7 +342,15 @@ func (e *WriteExecutor) requireInModel(ctx context.Context, kind, id string) (st
 		return "", fmt.Errorf("%s %q not found in the working revision — pass its exact name or id%s", kind, id, e.availableNames(ctx, kind))
 	}
 	var owner, revision, identity string
-	if err := e.pool.QueryRow(ctx, q.lookup, id).Scan(&owner, &revision, &identity); err != nil {
+	// Only a UUID-shaped id reaches the ::uuid lookup: a malformed one fails
+	// the cast, which inside the plan check's transaction aborts it, so the
+	// near-match below could not run (live: a widget id with one character
+	// too many).
+	lookupErr := fmt.Errorf("not a uuid")
+	if uuidShaped(id) {
+		lookupErr = e.pool.QueryRow(ctx, q.lookup, id).Scan(&owner, &revision, &identity)
+	}
+	if err := lookupErr; err != nil {
 		// A UUID one or two characters off the id of exactly one of the
 		// model's grids (metrics, …) is that one: the model copies ids from
 		// list output and slips a character — live, "4d0b" for "4d0d", again
@@ -616,7 +624,8 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 	}
 	mappedMetricID, err := e.requireInModel(ctx, "metric", p.MetricID)
 	if err != nil {
-		return "", "", err
+		// Live, the assistant "updated" metrics it had never created.
+		return "", "", fmt.Errorf("%w — update_metric changes an existing metric; to make a new one, propose create_metric", err)
 	}
 	p.MetricID = mappedMetricID
 	// A partial update, as the developer's PATCH: a key left out keeps the
@@ -2033,6 +2042,10 @@ func (e *WriteExecutor) addDashboardWidget(ctx context.Context, raw json.RawMess
 		return "", "", err
 	}
 	p.DashboardID = mappedDashID
+	if p.WidgetType == "chart" {
+		p.RefID, p.WidgetProps = hoistChartGrid(p.RefID, p.WidgetProps)
+	}
+	p.WidgetProps = widgetDefaults(p.WidgetType, p.WidgetProps)
 	// The typed refs get the same in-model + cross-revision resolution as the
 	// dashboard itself: a widget storing another revision's UUID is exactly
 	// the "dashboard renders blank" failure the console shows when refs go
@@ -2053,11 +2066,13 @@ func (e *WriteExecutor) addDashboardWidget(ctx context.Context, raw json.RawMess
 		if propErr != nil {
 			return "", "", propErr
 		}
-		p.WidgetProps = remapped
+		p.WidgetProps = e.defaultChartDimension(ctx, p.RefID, remapped)
+		gridRef := ""
 		if p.RefID != nil {
-			if err := modeledit.CheckChartMetrics(ctx, e.pool, *p.RefID, p.WidgetProps); err != nil {
-				return "", "", err
-			}
+			gridRef = *p.RefID
+		}
+		if err := modeledit.CheckChartMetrics(ctx, e.pool, gridRef, p.WidgetProps); err != nil {
+			return "", "", err
 		}
 	}
 	if p.SizeW < 20 {
@@ -2065,6 +2080,9 @@ func (e *WriteExecutor) addDashboardWidget(ctx context.Context, raw json.RawMess
 	}
 	if p.SizeH < 20 {
 		p.SizeH = 60
+	}
+	if err := e.checkWidgetPlacement(ctx, p.DashboardID, p.PosX, p.PosY, p.SizeW, p.SizeH); err != nil {
+		return "", "", err
 	}
 	var propsStr *string
 	if len(p.WidgetProps) > 0 && string(p.WidgetProps) != "null" {
@@ -2706,14 +2724,16 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 				JOIN model.dashboard_def nd ON nd.model_id = od.model_id AND nd.name = od.name AND nd.revision_id = $2::uuid
 				WHERE od.model_id=$1::uuid AND od.revision_id=$3::uuid
 			),
+			-- The copied widget still holds the source revision's ref_id, so
+			-- it is read off the copy itself. Matching old to new widgets by
+			-- (type, sort_order) paired every KPI tile with every other when
+			-- they shared a sort_order (0 for every widget added), and all of
+			-- them came out pointing at one metric.
 			widget_map AS (
-				SELECT nw.id AS new_widget_id, ow.widget_type, ow.ref_id AS old_ref_id
-				FROM model.dashboard_widget ow
-				JOIN dash_map dm ON dm.old_id = ow.dashboard_id
-				JOIN model.dashboard_widget nw ON nw.dashboard_id = dm.new_id
-				                               AND nw.widget_type = ow.widget_type
-				                               AND nw.sort_order = ow.sort_order
-				WHERE ow.ref_id IS NOT NULL AND ow.ref_id <> ''
+				SELECT nw.id AS new_widget_id, nw.widget_type, nw.ref_id AS old_ref_id
+				FROM model.dashboard_widget nw
+				JOIN dash_map dm ON dm.new_id = nw.dashboard_id
+				WHERE nw.ref_id IS NOT NULL AND nw.ref_id <> ''
 			),
 			remap AS (
 				UPDATE model.dashboard_widget w
@@ -3227,11 +3247,18 @@ func (e *WriteExecutor) availableNames(ctx context.Context, kind string) string 
 // nearID returns the one id of the model's resources of a kind (any
 // revision) within two edits of id, or "".
 func (e *WriteExecutor) nearID(ctx context.Context, kind, id string) string {
-	table := map[string]string{"grid": "model.grid_def", "metric": "model.metric_def", "dimension": "model.dimension_def", "dashboard": "model.dashboard_def"}[kind]
-	if table == "" {
+	query := map[string]string{
+		"grid":      `SELECT id::text FROM model.grid_def WHERE model_id=$1::uuid`,
+		"metric":    `SELECT id::text FROM model.metric_def WHERE model_id=$1::uuid`,
+		"dimension": `SELECT id::text FROM model.dimension_def WHERE model_id=$1::uuid`,
+		"dashboard": `SELECT id::text FROM model.dashboard_def WHERE model_id=$1::uuid`,
+		"dashboard_widget": `SELECT w.id::text FROM model.dashboard_widget w
+			JOIN model.dashboard_def d ON d.id = w.dashboard_id WHERE d.model_id=$1::uuid`,
+	}[kind]
+	if query == "" {
 		return ""
 	}
-	rows, err := e.pool.Query(ctx, `SELECT id::text FROM `+table+` WHERE model_id=$1::uuid`, e.modelID)
+	rows, err := e.pool.Query(ctx, query, e.modelID)
 	if err != nil {
 		return ""
 	}
@@ -3281,4 +3308,150 @@ func editDistanceWithin(a, b string, max int) int {
 		return -1
 	}
 	return prev[len(b)]
+}
+
+// dashboardCanvasWidth is the width, in pixels, of the canvas widgets are
+// placed on (see "Dashboard geometry" in the prompt).
+const dashboardCanvasWidth = 1200
+
+// checkWidgetPlacement refuses a widget off the canvas or on top of one the
+// dashboard already has. Live, the assistant put KPI tiles at x=1200 and
+// three more at x=1, 2 and 3 on one row.
+func (e *WriteExecutor) checkWidgetPlacement(ctx context.Context, dashboardID string, x, y, w, h int) error {
+	if x < 0 || y < 0 || x+w > dashboardCanvasWidth {
+		return fmt.Errorf("the widget at x=%d, width %d does not fit the %d px canvas: keep pos_x >= 0 and pos_x + size_w <= %d",
+			x, w, dashboardCanvasWidth, dashboardCanvasWidth)
+	}
+	rows, err := e.pool.Query(ctx, `SELECT widget_type, pos_x, pos_y, size_w, size_h FROM model.dashboard_widget WHERE dashboard_id=$1::uuid`, dashboardID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	bottom := 0
+	var clash string
+	for rows.Next() {
+		var typ string
+		var ox, oy, ow, oh int
+		if rows.Scan(&typ, &ox, &oy, &ow, &oh) != nil {
+			continue
+		}
+		bottom = max(bottom, oy+oh)
+		if clash == "" && x < ox+ow && ox < x+w && y < oy+oh && oy < y+h {
+			clash = fmt.Sprintf("the %s widget at x=%d, y=%d (%d×%d)", typ, ox, oy, ow, oh)
+		}
+	}
+	if clash != "" {
+		return fmt.Errorf("the widget at x=%d, y=%d (%d×%d) overlaps %s — place it beside it, or below y=%d where the dashboard's widgets end",
+			x, y, w, h, clash, bottom)
+	}
+	return nil
+}
+
+// hoistChartGrid moves a grid named inside a chart's props ("ref_id",
+// "grid_id" or "grid" under "chart") up to the widget's ref_id when the
+// widget names none: live, the assistant wrote {"chart": {"ref_id":
+// "Dashboard Data", …}} and the chart was refused for having no grid.
+func hoistChartGrid(refID *string, props json.RawMessage) (*string, json.RawMessage) {
+	if (refID != nil && *refID != "") || len(props) == 0 {
+		return refID, props
+	}
+	var all map[string]any
+	if json.Unmarshal(props, &all) != nil {
+		return refID, props
+	}
+	chart, ok := all["chart"].(map[string]any)
+	if !ok {
+		return refID, props
+	}
+	for _, k := range []string{"ref_id", "grid_id", "grid"} {
+		if s, ok := chart[k].(string); ok && s != "" {
+			delete(chart, k)
+			out, err := json.Marshal(all)
+			if err != nil {
+				return refID, props
+			}
+			return &s, out
+		}
+	}
+	return refID, props
+}
+
+// defaultChartDimension sets a chart's plotted dimension to its grid's only
+// dimension when the props leave it out.
+func (e *WriteExecutor) defaultChartDimension(ctx context.Context, refID *string, props json.RawMessage) json.RawMessage {
+	if refID == nil || *refID == "" {
+		return props
+	}
+	var all map[string]any
+	if json.Unmarshal(props, &all) != nil {
+		return props
+	}
+	chart, ok := all["chart"].(map[string]any)
+	if !ok {
+		return props
+	}
+	if d, _ := chart["dimension_id"].(string); d != "" {
+		return props
+	}
+	var dims []string
+	rows, err := e.pool.Query(ctx, `SELECT dimension_id::text FROM model.grid_dimension WHERE grid_id=$1::uuid`, *refID)
+	if err != nil {
+		return props
+	}
+	for rows.Next() {
+		var d string
+		if rows.Scan(&d) == nil {
+			dims = append(dims, d)
+		}
+	}
+	rows.Close()
+	if len(dims) != 1 {
+		return props
+	}
+	chart["dimension_id"] = dims[0]
+	if out, err := json.Marshal(all); err == nil {
+		return out
+	}
+	return props
+}
+
+// widgetDefaults fills what a widget the assistant adds leaves unsaid with
+// what such a widget usually means: a KPI tile is the metric's total, and a
+// chart leaves out total members (an FY point after twelve months rose to
+// the year's sum, live). The console's editor starts from the other
+// settings and has the developer pick; the assistant's plan rarely does.
+func widgetDefaults(widgetType string, props json.RawMessage) json.RawMessage {
+	if widgetType != "metric_kpi" && widgetType != "chart" {
+		return props
+	}
+	all := map[string]any{}
+	if len(props) > 0 && string(props) != "null" {
+		if json.Unmarshal(props, &all) != nil {
+			return props
+		}
+	}
+	switch widgetType {
+	case "metric_kpi":
+		if _, set := all["kpi_context_mode"]; set {
+			return props
+		}
+		if _, scoped := all["kpi_scope"]; scoped {
+			return props
+		}
+		all["kpi_context_mode"] = "total"
+	case "chart":
+		chart, ok := all["chart"].(map[string]any)
+		if !ok {
+			return props
+		}
+		if _, set := chart["hide_rollup_members"]; set {
+			return props
+		}
+		chart["hide_rollup_members"] = true
+	}
+	out, err := json.Marshal(all)
+	if err != nil {
+		return props
+	}
+	return out
 }

@@ -4957,14 +4957,16 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 			JOIN model.dashboard_def nd ON nd.model_id = od.model_id AND nd.name = od.name AND nd.revision_id = $2::uuid
 			WHERE od.model_id=$1::uuid AND od.revision_id=$3::uuid
 		),
+		-- The copied widget still holds the source revision's ref_id, so it
+		-- is read off the copy itself. Matching old to new widgets by
+		-- (type, sort_order) paired every KPI tile with every other when they
+		-- shared a sort_order (0 for every widget added), and all of them
+		-- came out pointing at one metric.
 		widget_map AS (
-			SELECT nw.id AS new_widget_id, ow.widget_type, ow.ref_id AS old_ref_id
-			FROM model.dashboard_widget ow
-			JOIN dash_map dm ON dm.old_id = ow.dashboard_id
-			JOIN model.dashboard_widget nw ON nw.dashboard_id = dm.new_id
-			                               AND nw.widget_type = ow.widget_type
-			                               AND nw.sort_order = ow.sort_order
-			WHERE ow.ref_id IS NOT NULL AND ow.ref_id <> ''
+			SELECT nw.id AS new_widget_id, nw.widget_type, nw.ref_id AS old_ref_id
+			FROM model.dashboard_widget nw
+			JOIN dash_map dm ON dm.new_id = nw.dashboard_id
+			WHERE nw.ref_id IS NOT NULL AND nw.ref_id <> ''
 		),
 		remap AS (
 			UPDATE model.dashboard_widget w
@@ -15288,8 +15290,12 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
-		if body.WidgetType == "chart" && body.RefID != nil {
-			if err := modeledit.CheckChartMetrics(ctx, h.db, *body.RefID, body.WidgetProps); err != nil {
+		if body.WidgetType == "chart" {
+			gridRef := ""
+			if body.RefID != nil {
+				gridRef = *body.RefID
+			}
+			if err := modeledit.CheckChartMetrics(ctx, h.db, gridRef, body.WidgetProps); err != nil {
 				jsonErr(w, err, http.StatusBadRequest)
 				return
 			}

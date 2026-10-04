@@ -29,41 +29,54 @@ leaves out, until it is fixed.
 - **What closes it:** a decision on charts plotting metrics of several grids
   that share the plotted dimension.
 
-### The AI Developer on gpt-4o-mini cannot finish a whole model alone
+### The AI Developer on gpt-4o-mini needs a developer's review at every stage
 
-- **Noticed:** 2026-10-03, and rerun 2026-10-04 after 462a218, driving the
-  AI Developer with the CPG workbook attached and confirming plans as a
-  developer.
-- **What:** after the fixes it built the dimensions, properties, inputs,
-  grids, all six data loads, the rolling forecasts and the rolling-forecast,
-  prior-year and variance P&L grids: 572 of 598 values match the workbook.
-  It still needed a developer's review on every stage — it dropped steps
-  between attempts, wrote `update_metric` for metrics it had not created,
-  set the EBITDA and operating-profit variance % to the variance itself, and
-  never reached the revenue summary or the dashboard. 209 LLM calls across
-  five sessions (calls are capped per session and per day; see
-  `AI_MAX_CALLS_PER_*`).
-- **Why it matters:** the checks now stop wrong plans, but a small model
-  needs many rounds of review for a model this size.
+- **Noticed:** 2026-10-03, rerun 2026-10-04, driving the AI Developer with the
+  CPG workbook attached and confirming plans as a developer.
+- **What:** with the fixes it rebuilt the whole workbook: dimensions,
+  properties, all six data loads, rolling forecasts, the four P&L grids (676
+  of 676 values match), the revenue summary (shares and variance % match at
+  FY) and the management dashboard (KPIs and charts match). It took 275 LLM
+  calls over eight sessions and a review of every stage: it dropped steps
+  between attempts, repeated earlier work when the history grew long, slipped
+  characters in ids, and needed the variance rule and the parent-member idiom
+  spelled out once.
+- **Why it matters:** the checks now stop wrong plans, but a small model is a
+  slow way to build a model this size.
 - **How to check:** in AI Developer on an empty model with an OpenAI key,
   attach the workbook, ask for the model stage by stage, and confirm each
   plan that reaches you; compare with the workbook.
 - **What closes it:** a rerun on a stronger model to separate the model's
-  limits from the tools'; possibly a step that proposes a whole block of
-  look-alike metrics from one pattern.
+  limits from the tools'; possibly a step that proposes a block of look-alike
+  metrics from one pattern.
 
 ### Most AI write tools ignore keys they do not read
 
 - **Noticed:** 2026-10-04, the AI Developer rerun.
 - **What:** a step's params are decoded leniently, so a misspelt or invented
   key is dropped without a word. Live: `create_grid`'s "metrics" (every grid
-  built empty), `create_metric`'s "value": 9, and "scale" inside "unpivot".
-  462a218 reads the aliases, checks `create_metric` and `create_grid` keys in
-  the plan check and reshape keys strictly; the other tools are unchecked.
+  built empty), `create_metric`'s "value": 9, "scale" inside "unpivot",
+  "ref_id" inside a chart's props. Covered so far: aliases and known keys for
+  `create_metric` and `create_grid`, strict reshape keys, a chart's grid moved
+  up from its props, and widget props merged instead of replaced. The other
+  tools are unchecked.
 - **Why it matters:** a step that did less than it said passes the check.
-- **How to check:** propose `add_dashboard_widget` with an invented key.
+- **How to check:** propose `add_dimension_member` with an invented key.
 - **What closes it:** strict decoding (or a known-key list) for every write
   tool, reported by the plan check.
+
+### KPI tiles follow the dashboard's selectors and charts plot total members by default
+
+- **Noticed:** 2026-10-04, the AI-built dashboard in the console.
+- **What:** a KPI tile without `kpi_context_mode` follows the dashboard's
+  shared selectors (a single month, product and region, here), and a line
+  chart over a time dimension plots the FY aggregate after the twelve months
+  unless `hide_rollup_members` is set. The console's editor starts from these;
+  the AI Developer now adds tiles as totals and charts without total members.
+- **Why it matters:** a headline tile shows a slice, and a monthly line ends
+  in a spike, until someone changes the settings.
+- **How to check:** add a KPI tile and a monthly line chart in the console.
+- **What closes it:** a product decision on the editor's defaults.
 
 ### SUMIFS across the metric's own grid dimension returned nothing
 
@@ -2647,6 +2660,18 @@ leaves out, until it is fixed.
   `CheckMembers` before the first insert, for every caller.
 
 ## Closed
+
+### Duplicating a revision pointed every KPI tile at one metric
+
+- **Noticed:** 2026-10-04, the AI-built dashboard after a new AI Developer
+  session copied the active revision into its draft.
+- **What was wrong:** both revision copies (the console's duplicate and the AI
+  draft's) matched old to new widgets by (dashboard, type, sort_order) to
+  remap `ref_id`. Widgets added to a dashboard all get sort_order 0, so every
+  KPI tile matched every other and all twelve came out showing one metric.
+- **Closed by:** 4c7cbe7 — the copied widget still holds the source ref, so it
+  is read off the copy itself (`TestDuplicateRevisionKeepsEachKPITilesMetric`,
+  `TestCreateRevisionKeepsEachKPITilesMetric`).
 
 ### KPI tiles show a Percentage metric 100 times too large
 

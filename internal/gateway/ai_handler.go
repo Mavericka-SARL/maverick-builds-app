@@ -1795,9 +1795,28 @@ func (h *handler) aiSessionDetail(w http.ResponseWriter, r *http.Request) {
 //
 // Resolution rules (applied in order):
 //  1. If the placeholder text contains "step N" (any case), use created[N-1].
-//  2. Fallback: use the most recently created non-empty ID before this step.
+//  2. A placeholder naming something — "<rolling_revenue_forecast id>" —
+//     becomes that name, which the tools resolve or refuse by name. It used
+//     to become the most recently created id: live, every KPI tile of a
+//     dashboard plan pointed at the dashboard created in step 1.
+//  3. Anything else stays as written, and the step's own check refuses it.
 var placeholderRe = regexp.MustCompile(`"<[^"]*>"`)
 var stepNumRe = regexp.MustCompile(`(?i)step\s*(\d+)`)
+
+var placeholderIdent = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// placeholderName reads "<revenue id>", "<revenue_id>" or "<revenue>" as the
+// name revenue; "" when the text is not one name.
+func placeholderName(inner string) string {
+	s := strings.TrimSpace(inner)
+	for _, suffix := range []string{" id", " ID", " Id", "_id", "_ID"} {
+		s = strings.TrimSpace(strings.TrimSuffix(s, suffix))
+	}
+	if placeholderIdent.MatchString(s) {
+		return s
+	}
+	return ""
+}
 
 func resolveParamRefs(params json.RawMessage, created []string) json.RawMessage {
 	s := string(params)
@@ -1813,13 +1832,10 @@ func resolveParamRefs(params json.RawMessage, created []string) json.RawMessage 
 			}
 		}
 
-		// No step reference — use the most recent non-empty created ID.
-		for i := len(created) - 1; i >= 0; i-- {
-			if created[i] != "" {
-				return `"` + created[i] + `"`
-			}
+		if name := placeholderName(inner); name != "" {
+			return `"` + name + `"`
 		}
-		return match // unresolvable — keep as-is (will surface as a DB error)
+		return match // unresolvable — keep as-is; the step refuses it by name
 	})
 	return json.RawMessage(result)
 }

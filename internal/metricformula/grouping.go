@@ -120,7 +120,7 @@ func ValidateGrouping(ctx context.Context, q Querier, g Grouping) (string, error
 	`, g.SourceDimensionID, g.SourceProperty).Scan(&declared)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", invalidCode(CodeInvalidGrouping,
-			"property %q is not declared on %s; declare it first (its members' values of it name the groups)",
+			"property %q is not declared on %s; declare it first (its members' values of it name the groups). A grouping is a new dimension; to put existing members under a parent MEMBER (a total), add that member to the dimension and set each member's parent to it instead",
 			g.SourceProperty, srcName)
 	}
 	if err != nil {

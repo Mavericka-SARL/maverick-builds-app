@@ -55,4 +55,10 @@ func TestChartWidgetRefusesAnotherGridsMetric(t *testing.T) {
 		map[string]any{"widget_props": chart(revenue, other)}); status != http.StatusBadRequest {
 		t.Errorf("an update adding another grid's metric: %d %s, want 400", status, body)
 	}
+
+	// A chart with no grid never draws.
+	if status, body := do(f.devSub, "POST", "/api/developer/dashboards/"+dash.ID+"/widgets", map[string]any{
+		"widget_type": "chart", "pos_x": 0, "pos_y": 0, "size_w": 400, "size_h": 300, "widget_props": chart(revenue)}); status != http.StatusBadRequest || !strings.Contains(string(body), "set ref_id") {
+		t.Errorf("a chart with no grid: %d %s, want 400", status, body)
+	}
 }

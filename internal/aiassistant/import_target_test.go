@@ -57,3 +57,36 @@ func TestEditDistanceWithin(t *testing.T) {
 		}
 	}
 }
+
+// {"hide_rollup_members": true} sent to a chart used to replace its props
+// whole, wiping the chart; it now lands under "chart" and the rest stays.
+func TestMergeWidgetProps(t *testing.T) {
+	stored := []byte(`{"sync_context":true,"chart":{"chart_type":"line","metric_ids":["a","b"],"dimension_id":"d"}}`)
+	out, err := mergeWidgetProps("chart", stored, []byte(`{"hide_rollup_members":true,"sync_context":null}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, want := range []string{`"hide_rollup_members":true`, `"chart_type":"line"`, `"metric_ids":["a","b"]`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("merged %s lacks %s", s, want)
+		}
+	}
+	if strings.Contains(s, "sync_context") {
+		t.Errorf("null should remove sync_context: %s", s)
+	}
+	out, _ = mergeWidgetProps("metric_kpi", []byte(`{"background":"white"}`), []byte(`{"kpi_context_mode":"total"}`))
+	if string(out) != `{"background":"white","kpi_context_mode":"total"}` {
+		t.Errorf("kpi merge = %s", out)
+	}
+	out, _ = mergeWidgetProps("chart", stored, []byte(`{"chart":{"chart_type":"bar"}}`))
+	if !strings.Contains(string(out), `"chart_type":"bar"`) || !strings.Contains(string(out), `"metric_ids":["a","b"]`) {
+		t.Errorf("a chart patch should keep the chart's other settings: %s", out)
+	}
+}
+
+func TestEditDistanceWithinCountsAnInsertedCharacter(t *testing.T) {
+	if got := editDistanceWithin("43356b28-9344-41f1-acb91-8aeef92ac94a", "43356b28-9344-41f1-acb9-18aeef92ac94a", 2); got < 0 {
+		t.Errorf("a character too many should be within two edits, got %d", got)
+	}
+}

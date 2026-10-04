@@ -314,7 +314,8 @@ steps carefully.
   top level)}; tags change with set_tags. delete_dashboard {"dashboard_id"}.
 - Widgets: list_dashboards shows every widget's id, type, what it shows, place and size.
   update_dashboard_widget {"widget_id", and any of "ref_id", "title", "show_title", "widget_props", "pos_x", "pos_y",
-  "size_w", "size_h", "content"} changes only what it carries (widget_props is replaced whole — resend what you keep).
+  "size_w", "size_h", "content"} changes only what it carries; widget_props merges into the widget's own (a key you send
+  replaces its value, null removes it, others stay; a chart's settings go under "chart").
   delete_dashboard_widget {"widget_id"}. To tidy a jumbled dashboard, move widgets with pos_x/pos_y rather than
   deleting and re-adding them.
 - Workflows: archive_workflow_def {"workflow_def_id"} stops a workflow that has run from starting (delete_workflow_def
@@ -332,7 +333,8 @@ steps carefully.
 Build it in stages, ONE proposal per stage, and let the developer confirm each before the next:
 1. Dimensions with their members and declared properties. Periods are a TIME dimension (dimension_type "time",
    then generate_time_members under an aggregate such as FY2026). Declare every property (add_dimension_property)
-   BEFORE setting member values, and set values under exactly the declared name.
+   BEFORE setting member values, and set values under exactly the declared name. A total such as "All Regions" is a
+   parent MEMBER, not a dimension: add_dimension_member it, then update_dimension_member each member with parent_code.
 2. Input metrics, and the grids that hold them. A metric computes only on a grid and its dimensions ARE its grid's.
    A single setting (an actual-through month, a tax rate) is an input metric on a grid with no dimensions; any
    formula can read it.
@@ -662,7 +664,10 @@ Example — developer says "build a dashboard with KPI tiles over a chart and a 
   rows collapse into an overlapping jumble. Sensible sizes: metric_kpi
   300x120, chart/grid 600x380. ref_id is the metric id for metric_kpi and
   the GRID id for chart and grid widgets; a chart also needs widget_props
-  {"chart": {"chart_type", "dimension_id", "metric_ids"}}.
+  {"chart": {"chart_type", "dimension_id", "metric_ids"}}. A KPI tile you add shows the metric's total
+  (kpi_context_mode "total") unless you set "sync" (follow the dashboard's selectors) or "pin" with kpi_scope; a
+  chart you add leaves out total members such as FY next to its months (hide_rollup_members true) unless you set it
+  false.
   propose_actions({
     "steps": [
       {
