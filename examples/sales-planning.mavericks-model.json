@@ -874,139 +874,139 @@
       "metrics": [
         {
           "metric_id": "00000000-0000-4000-8000-000000000049",
-          "sort_order": 0
+          "sort_order": 1
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000051",
-          "sort_order": 0
+          "sort_order": 2
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000053",
-          "sort_order": 0
+          "sort_order": 3
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000055",
-          "sort_order": 0
+          "sort_order": 4
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000057",
-          "sort_order": 0
+          "sort_order": 5
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000059",
-          "sort_order": 0
+          "sort_order": 6
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000061",
-          "sort_order": 0
+          "sort_order": 7
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000063",
-          "sort_order": 0
+          "sort_order": 8
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000065",
-          "sort_order": 0
+          "sort_order": 9
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000067",
-          "sort_order": 0
+          "sort_order": 10
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000069",
-          "sort_order": 0
+          "sort_order": 11
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000071",
-          "sort_order": 0
+          "sort_order": 12
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000073",
-          "sort_order": 0
+          "sort_order": 13
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000075",
-          "sort_order": 0
+          "sort_order": 14
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000077",
-          "sort_order": 0
+          "sort_order": 15
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000079",
-          "sort_order": 0
+          "sort_order": 16
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000085",
-          "sort_order": 0
+          "sort_order": 17
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000087",
-          "sort_order": 0
+          "sort_order": 18
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000089",
-          "sort_order": 0
+          "sort_order": 19
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000091",
-          "sort_order": 0
+          "sort_order": 20
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000093",
-          "sort_order": 0
+          "sort_order": 21
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000095",
-          "sort_order": 0
+          "sort_order": 22
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000097",
-          "sort_order": 0
+          "sort_order": 23
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000099",
-          "sort_order": 0
+          "sort_order": 24
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000081",
-          "sort_order": 0
+          "sort_order": 25
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000101",
-          "sort_order": 0
+          "sort_order": 26
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000103",
-          "sort_order": 0
+          "sort_order": 27
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000105",
-          "sort_order": 0
+          "sort_order": 28
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000107",
-          "sort_order": 0
+          "sort_order": 29
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000109",
-          "sort_order": 0
+          "sort_order": 30
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000111",
-          "sort_order": 0
+          "sort_order": 31
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000113",
-          "sort_order": 0
+          "sort_order": 32
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000115",
-          "sort_order": 0
+          "sort_order": 33
         },
         {
           "metric_id": "00000000-0000-4000-8000-000000000083",
-          "sort_order": 0
+          "sort_order": 34
         }
       ],
       "dimensions": [

@@ -13,6 +13,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -198,7 +199,10 @@ func importErrorLines(errs []map[string]any, limit int) string {
 }
 
 // resolveAttachedGrid runs ResolveRows: staged rows, or the problems.
-func (h *handler) resolveAttachedGrid(ctx context.Context, modelID, revisionID string, f *attachedFile) ([]importpkg.StagingRow, []map[string]any, error) {
+func (h *handler) resolveAttachedGrid(ctx context.Context, modelID, revisionID, gridID string, f *attachedFile) ([]importpkg.StagingRow, []map[string]any, error) {
+	if err := importpkg.CheckGridColumns(ctx, h.db.For(ctx), gridID, f.mapped); err != nil {
+		return nil, nil, err
+	}
 	staged, importErrs, err := importpkg.ResolveRows(ctx, h.db.For(ctx), modelID, revisionID, f.mapped, f.rows)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w. Map each column to a model name or \"ignore\" in column_map — %s", err, h.modelNamesHint(ctx, modelID, revisionID))
@@ -283,9 +287,9 @@ func (h *handler) aiPreviewFileImport(ctx context.Context, sessionID string, req
 		return sb.String(), nil
 	}
 
-	staged, errRows, err := h.resolveAttachedGrid(ctx, modelID, req.RevisionID, f)
+	staged, errRows, err := h.resolveAttachedGrid(ctx, modelID, req.RevisionID, req.TargetID, f)
 	if err != nil {
-		return sb.String() + "Cannot import: " + err.Error(), nil
+		return sb.String() + "Cannot import: " + err.Error() + "\n" + h.suggestColumnMap(ctx, req, f), nil
 	}
 	if len(errRows) > 0 {
 		fmt.Fprintf(&sb, "%d value(s) fail validation — an import is all-or-nothing, so nothing would be imported until they are fixed:\n%s",
@@ -308,6 +312,7 @@ func (h *handler) aiPreviewFileImport(ctx context.Context, sessionID string, req
 	}
 	sort.Strings(parts)
 	fmt.Fprintf(&sb, "No errors. Would import %d value(s): %s.\n", len(staged), strings.Join(parts, ", "))
+	sb.WriteString(h.percentFractionWarning(ctx, staged))
 	return sb.String(), nil
 }
 
@@ -324,6 +329,12 @@ func (f *attachedFile) layout(req aiassistant.FileImportRequest) string {
 		fmt.Fprintf(&sb, "After the reshape: %d row(s); columns: %s\n", len(f.rows), strings.Join(f.header, ", "))
 	} else {
 		fmt.Fprintf(&sb, "%d data row(s) under the header (row 1); columns: %s\n", len(f.rows), strings.Join(f.header, ", "))
+		if s := importpkg.SuggestReshape(f.grid); s != nil {
+			js, _ := json.Marshal(s)
+			fmt.Fprintf(&sb, "This sheet is laid out for people. Suggested \"reshape\": %s — then map the columns it leaves "+
+				"(the dimension columns to their dimensions, \"Period\" to the time dimension, \"Value\" to the metric or "+
+				"\"value\" beside a \"metric\" constant, totals and notes to \"ignore\") and preview again.\n", js)
+		}
 	}
 	if len(req.ColumnMap) > 0 {
 		fmt.Fprintf(&sb, "Columns after column_map: %s\n", strings.Join(f.mapped, ", "))
@@ -406,7 +417,7 @@ func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string
 	if systemManaged {
 		return fail(fmt.Errorf("this revision is system-managed and read-only"))
 	}
-	staged, errRows, err := h.resolveAttachedGrid(ctx, modelID, req.RevisionID, f)
+	staged, errRows, err := h.resolveAttachedGrid(ctx, modelID, req.RevisionID, req.TargetID, f)
 	if err != nil {
 		return fail(err)
 	}
@@ -426,7 +437,8 @@ func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string
 		h.recordIntegrationRun(ctx, req.IntegrationID, act.UserID, len(staged), 0, "success", "AI import of "+f.describe())
 	}
 	audit(len(staged))
-	return fmt.Sprintf("Imported %d value(s) from %s into %d metric(s) (mode %s)", len(staged), f.describe(), len(metricIDs), mode), nil
+	return fmt.Sprintf("Imported %d value(s) from %s into %d metric(s) (mode %s)", len(staged), f.describe(), len(metricIDs), mode) +
+		h.percentFractionWarning(ctx, staged), nil
 }
 
 // aiPreviewExport renders an export spec for the assistant, as text.
@@ -477,4 +489,148 @@ func (h *handler) aiReadHooks(r *http.Request, sessionID string) aiassistant.Rea
 			return h.aiPrepareConversion(ctx, sessionID, req)
 		},
 	}
+}
+
+// percentFractionWarning names the Percentage metrics whose every staged
+// value lies between -1 and 1. A Percentage metric stores percent units
+// (5.6 shows as 5.6%, and formulas divide by 100); a spreadsheet stores the
+// fraction 0.056, which would show as 0.06% and be read as 0.056%.
+func (h *handler) percentFractionWarning(ctx context.Context, staged []importpkg.StagingRow) string {
+	maxAbs := map[string]float64{}
+	for _, s := range staged {
+		v := s.Value
+		if v < 0 {
+			v = -v
+		}
+		if v > maxAbs[s.MetricID] {
+			maxAbs[s.MetricID] = v
+		}
+	}
+	var names []string
+	for id, m := range maxAbs {
+		if m == 0 || m > 1 {
+			continue
+		}
+		var name, format string
+		if h.db.QueryRow(ctx, `SELECT name, format FROM model.metric_def WHERE id=$1::uuid`, id).Scan(&name, &format) == nil && format == "percentage" {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	sort.Strings(names)
+	return fmt.Sprintf("\nWARNING: every value for %s is a fraction (at most 1). A Percentage metric stores percent units (5.6 = 5.6%%) "+
+		"and formulas divide it by 100 — add \"scale\": {\"<the value column>\": 100} to the reshape unless these really are values under 1%%.\n",
+		strings.Join(names, ", "))
+}
+
+// suggestColumnMap proposes a column_map for a grid import whose columns do
+// not all name the model: a column named like one of the grid's dimensions
+// maps to it, the "Period" column of a suggested unpivot to the grid's time
+// dimension, a metric name stays, and anything else is ignored — except the
+// amounts, which only the assistant can attribute to a metric. Each failed
+// preview costs the assistant an LLM call; the live run spent its session's
+// budget mapping "FY", "Source / Note" and "P&L Line" one at a time.
+func (h *handler) suggestColumnMap(ctx context.Context, req aiassistant.FileImportRequest, f *attachedFile) string {
+	if req.TargetType != "grid" || req.TargetID == "" {
+		return ""
+	}
+	dims := map[string]string{} // lower name -> name
+	timeDim := ""
+	rows, err := h.db.Query(ctx, `SELECT d.name, d.dimension_type = 'time' FROM model.grid_dimension gd
+		JOIN model.dimension_def d ON d.id = gd.dimension_id WHERE gd.grid_id = $1::uuid`, req.TargetID)
+	if err != nil {
+		return ""
+	}
+	for rows.Next() {
+		var name string
+		var isTime bool
+		if rows.Scan(&name, &isTime) == nil {
+			dims[strings.ToLower(name)] = name
+			if isTime {
+				timeDim = name
+			}
+		}
+	}
+	rows.Close()
+	metrics := map[string]bool{}
+	mrows, err := h.db.Query(ctx, `SELECT lower(m.name) FROM model.grid_metric gm JOIN model.metric_def m ON m.id = gm.metric_id WHERE gm.grid_id = $1::uuid`, req.TargetID)
+	if err == nil {
+		for mrows.Next() {
+			var n string
+			if mrows.Scan(&n) == nil {
+				metrics[n] = true
+			}
+		}
+		mrows.Close()
+	}
+	// Worked out from the grid, not echoed from the map the assistant sent:
+	// its own mapping is kept only where it names something on the grid.
+	onGrid := func(target string) bool {
+		l := strings.ToLower(target)
+		return dims[l] != "" || metrics[l] || l == "metric" || l == "value"
+	}
+	suggested := map[string]string{}
+	var amounts []string
+	for _, col := range f.header {
+		key := strings.ToLower(strings.TrimSpace(col))
+		sent := req.ColumnMap[col]
+		switch {
+		case dims[key] != "":
+			suggested[col] = dims[key]
+		case (key == "period" || key == "month") && timeDim != "":
+			suggested[col] = timeDim
+		case sent != "" && sent != "ignore" && onGrid(sent):
+			suggested[col] = sent
+		case metrics[key]:
+		case key == "metric" || key == "value":
+			amounts = append(amounts, col)
+		default:
+			suggested[col] = "ignore"
+		}
+	}
+	js, _ := json.Marshal(suggested)
+	msg := fmt.Sprintf("Suggested \"column_map\" for this grid: %s", js)
+	if len(amounts) > 0 {
+		msg += fmt.Sprintf(" — and map %s to the metric these amounts are (or keep \"value\" with a \"metric\" constant in the reshape)", strings.Join(amounts, ", "))
+	}
+	return msg + ".\n"
+}
+
+// recallCleanPreview finds this session's latest preview_file_import of the
+// file's sheet whose result reported no errors, and returns its target,
+// reshape and column map as the assistant wrote them (names resolve again
+// on import).
+func (h *handler) recallCleanPreview(ctx context.Context, sessionID, file, sheet string) (aiassistant.FileImportRequest, bool) {
+	msgs, err := aiassistant.NewChatStore(h.db.For(ctx)).ListMessages(ctx, sessionID)
+	if err != nil {
+		return aiassistant.FileImportRequest{}, false
+	}
+	results := map[string]string{}
+	for _, m := range msgs {
+		if m.Role == "tool" {
+			results[m.ToolCallID] = m.Content
+		}
+	}
+	for i := len(msgs) - 1; i >= 0; i-- {
+		for _, tc := range msgs[i].ToolCalls {
+			if tc.Name != "preview_file_import" || !strings.Contains(results[tc.ID], "No errors.") {
+				continue
+			}
+			var p struct {
+				File       string             `json:"file"`
+				Sheet      string             `json:"sheet"`
+				TargetType string             `json:"target_type"`
+				TargetID   string             `json:"target_id"`
+				Reshape    *importpkg.Reshape `json:"reshape"`
+				ColumnMap  map[string]string  `json:"column_map"`
+			}
+			if json.Unmarshal(tc.Arguments, &p) != nil || !strings.EqualFold(p.File, file) || !strings.EqualFold(p.Sheet, sheet) {
+				continue
+			}
+			return aiassistant.FileImportRequest{TargetType: p.TargetType, TargetID: p.TargetID, Reshape: p.Reshape, ColumnMap: p.ColumnMap}, true
+		}
+	}
+	return aiassistant.FileImportRequest{}, false
 }

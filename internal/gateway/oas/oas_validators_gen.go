@@ -4970,6 +4970,29 @@ func (s *ReorderDimensionMembersReq) Validate() error {
 	return nil
 }
 
+func (s *ReorderGridMetricsReq) Validate() error {
+	if s == nil {
+		return validate.ErrNilPointer
+	}
+
+	var failures []validate.FieldError
+	if err := func() error {
+		if s.MetricIds == nil {
+			return errors.New("nil is invalid value")
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "metric_ids",
+			Error: err,
+		})
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
 func (s *ScatterChartData) Validate() error {
 	if s == nil {
 		return validate.ErrNilPointer

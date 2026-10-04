@@ -402,6 +402,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("POST", "/api/developer/grids", "developer", dev(h.developerGrids))
 	register("PATCH", "/api/developer/grids/{id}", "developer", dev(h.developerGridAction))
 	register("DELETE", "/api/developer/grids/{id}", "developer", dev(h.developerGridAction))
+	register("PUT", "/api/developer/grids/{id}/metrics/order", "developer", dev(h.reorderGridMetrics))
 	register("POST", "/api/developer/grids/{id}/metrics/{metricId}", "developer", dev(h.developerGridAction))
 	register("DELETE", "/api/developer/grids/{id}/metrics/{metricId}", "developer", dev(h.developerGridAction))
 	register("POST", "/api/developer/grids/{id}/dimensions/{dimId}", "developer", dev(h.developerGridAction))
@@ -5481,6 +5482,14 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.requireRevisionInModel(w, r, req.RevisionID, modelID) {
+		return
+	}
+	if err := metricformula.ValidMetricName(req.Name); err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
+		return
+	}
+	if err := metricformula.ValidMetricFormat(req.Format); err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
 		return
 	}
 
@@ -11259,6 +11268,12 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		body.Name = storedName
 		if patch.Name != nil && *patch.Name != "" {
 			body.Name = *patch.Name
+			if body.Name != storedName {
+				if err := metricformula.ValidMetricName(body.Name); err != nil {
+					jsonErr(w, err, http.StatusBadRequest)
+					return
+				}
+			}
 		}
 		for _, f := range []struct{ dst, src *string }{
 			{&body.Formula, patch.Formula}, {&body.AggRule, patch.AggRule},
@@ -11267,6 +11282,12 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		} {
 			if f.src != nil {
 				*f.dst = *f.src
+			}
+		}
+		if patch.Format != nil {
+			if err := metricformula.ValidMetricFormat(*patch.Format); err != nil {
+				jsonErr(w, err, http.StatusBadRequest)
+				return
 			}
 		}
 		if patch.FormatDecimals != nil {
@@ -11563,6 +11584,56 @@ func (h *handler) auditDimensionUpdated(ctx context.Context, r *http.Request, di
 	})
 }
 
+// ── PUT /api/developer/grids/{id}/metrics/order ──────────────────────────────
+
+// reorderGridMetrics sets the order a grid shows its metrics in:
+// {metric_ids: exactly the grid's metrics, in the wanted order}. The edit is
+// modeledit.ReorderGridMetrics, which the AI Developer's reorder_grid_metrics
+// runs too. Developer only, in a model the caller may build in; a grid
+// outside the caller's scope answers 404 like an unknown one. No
+// recalculation: the order changes no value.
+func (h *handler) reorderGridMetrics(w http.ResponseWriter, r *http.Request) {
+	gridID := r.PathValue("id")
+	ctx := withBuilderRoute(r.Context())
+	act, err := h.resolveActor(ctx, r)
+	if err != nil {
+		jsonErr(w, err, http.StatusUnauthorized)
+		return
+	}
+	var modelID string
+	if err := h.db.QueryRow(ctx, modelScopedResourceSQL["grid"], gridID).Scan(&modelID); err != nil {
+		jsonErr(w, fmt.Errorf("grid not found"), http.StatusNotFound)
+		return
+	}
+	allowed, err := h.actorCanAccessModel(ctx, act, modelID)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	if !allowed {
+		jsonErr(w, fmt.Errorf("grid not found"), http.StatusNotFound)
+		return
+	}
+	var body struct {
+		MetricIDs []string `json:"metric_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.MetricIDs == nil {
+		jsonErr(w, fmt.Errorf("metric_ids is required: every metric of the grid, in the wanted order"), http.StatusBadRequest)
+		return
+	}
+	if err := modeledit.ReorderGridMetrics(ctx, h.db, gridID, body.MetricIDs); err != nil {
+		var oe *modeledit.GridOrderError
+		if errors.As(err, &oe) {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		}
+		jsonErr(w, fmt.Errorf("reorder grid metrics: %w", err), http.StatusInternalServerError)
+		return
+	}
+	h.auditGridUpdated(ctx, r, gridID, "metrics_reordered", map[string]string{"metric_ids": strings.Join(body.MetricIDs, ",")})
+	jsonOK(w, map[string]string{"status": "ok"})
+}
+
 // ── PUT /api/developer/dimensions/{id}/members/order ─────────────────────────
 
 // reorderDimensionMembers sets the order of one level of a dimension's
@@ -11829,9 +11900,22 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				ParentMemberID *string `json:"parent_member_id"`
 				PeriodStart    string  `json:"period_start"`
 				PeriodEnd      string  `json:"period_end"`
+				// Optional property values, held to the dimension's declared
+				// properties like an edit's. They used to be dropped while the
+				// create answered 200.
+				Properties map[string]string `json:"properties"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
+				return
+			}
+			props, err := metricformula.CheckMemberProperties(ctx, h.db.For(ctx), dimID, body.Properties, nil)
+			if err != nil {
+				if metricformula.IsValidationError(err) {
+					jsonErr(w, err, http.StatusBadRequest)
+					return
+				}
+				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
 			if err := h.validateMemberParent(ctx, dimID, body.ParentMemberID); err != nil {
@@ -11881,6 +11965,13 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
+			if len(props) > 0 {
+				propsJSON, _ := json.Marshal(props)
+				if _, err := h.db.Exec(ctx, `UPDATE model.dimension_member SET properties = $2::jsonb WHERE id=$1::uuid`, newID, string(propsJSON)); err != nil {
+					jsonErr(w, err, http.StatusInternalServerError)
+					return
+				}
+			}
 			if isTime {
 				// Every metric on this time dimension and their dependents
 				// move with the period set (spec §8.3).
@@ -11927,6 +12018,23 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
 				return
+			}
+			if body.Properties != nil {
+				var stored map[string]string
+				var storedJSON []byte
+				if err := h.db.QueryRow(ctx, `SELECT COALESCE(properties,'{}'::jsonb) FROM model.dimension_member WHERE id=$1::uuid`, subID).Scan(&storedJSON); err == nil {
+					_ = json.Unmarshal(storedJSON, &stored)
+				}
+				props, err := metricformula.CheckMemberProperties(ctx, h.db.For(ctx), dimID, body.Properties, stored)
+				if err != nil {
+					if metricformula.IsValidationError(err) {
+						jsonErr(w, err, http.StatusBadRequest)
+						return
+					}
+					jsonErr(w, err, http.StatusInternalServerError)
+					return
+				}
+				body.Properties = props
 			}
 			if err := h.validateMemberParent(ctx, dimID, body.ParentMemberID); err != nil {
 				jsonErr(w, err, http.StatusBadRequest)
@@ -12116,6 +12224,12 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				VALUES ($1, $2, $3) RETURNING id::text
 			`, dimID, body.Name, body.DataType).Scan(&newID)
 			if err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			// Values stored under the name in another case move under the
+			// declared spelling, as the AI Developer's declare does.
+			if _, _, err := metricformula.AdoptPropertyValues(ctx, h.db.For(ctx), dimID, body.Name); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -14427,7 +14541,12 @@ func (h *handler) developerGridAction(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if err := h.gridMembershipTx(ctx, gridID,
-				`INSERT INTO model.grid_metric (grid_id, metric_id, sort_order) VALUES ($1::uuid,$2::uuid,0) ON CONFLICT DO NOTHING`,
+				// Appended after the grid's metrics, as the AI's add does: the
+				// order a grid shows its metrics in, set again with
+				// PUT …/metrics/order. 0 for every add showed them by name.
+				`INSERT INTO model.grid_metric (grid_id, metric_id, sort_order)
+				 VALUES ($1::uuid,$2::uuid,(SELECT COALESCE(MAX(sort_order),0)+1 FROM model.grid_metric WHERE grid_id=$1::uuid))
+				 ON CONFLICT DO NOTHING`,
 				gridID, subID); err != nil {
 				if metricformula.IsValidationError(err) {
 					jsonErr(w, err, http.StatusBadRequest)
@@ -15169,6 +15288,12 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
+		if body.WidgetType == "chart" && body.RefID != nil {
+			if err := modeledit.CheckChartMetrics(ctx, h.db, *body.RefID, body.WidgetProps); err != nil {
+				jsonErr(w, err, http.StatusBadRequest)
+				return
+			}
+		}
 		var widgetPropsForInsert *string
 		if len(body.WidgetProps) > 0 && string(body.WidgetProps) != "null" {
 			s := string(body.WidgetProps)
@@ -15256,6 +15381,25 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 			if err := validateWidgetContent(existingType, body.Content); err != nil {
 				jsonErr(w, err, http.StatusBadRequest)
 				return
+			}
+		}
+		if (body.RefID != nil && *body.RefID != "") || (len(body.WidgetProps) > 0 && string(body.WidgetProps) != "null") {
+			// The chart as it will be: the new grid or props, else the stored ones.
+			var wType, refID string
+			var props []byte
+			if err := h.db.QueryRow(ctx,
+				`SELECT widget_type, COALESCE(ref_id::text,''), COALESCE(widget_props,'null'::jsonb) FROM model.dashboard_widget WHERE id=$1::uuid AND dashboard_id=$2::uuid`,
+				widgetID, dashID).Scan(&wType, &refID, &props); err == nil && wType == "chart" {
+				if body.RefID != nil && *body.RefID != "" {
+					refID = *body.RefID
+				}
+				if len(body.WidgetProps) > 0 && string(body.WidgetProps) != "null" {
+					props = body.WidgetProps
+				}
+				if err := modeledit.CheckChartMetrics(ctx, h.db, refID, props); err != nil {
+					jsonErr(w, err, http.StatusBadRequest)
+					return
+				}
 			}
 		}
 		var showTitle *bool

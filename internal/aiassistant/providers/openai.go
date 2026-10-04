@@ -10,6 +10,10 @@ import (
 	openai "github.com/sashabaranov/go-openai"
 )
 
+// emptyToolResult stands in for a tool result with no text, which the Chat
+// Completions API does not accept.
+const emptyToolResult = "(no output)"
+
 // OpenAIProvider implements Provider using the OpenAI Chat Completions API
 // with tool calling (function calling). Also serves any OpenAI-compatible
 // backend (Mistral, DeepSeek) via NewOpenAICompatible.
@@ -68,9 +72,17 @@ func (p *OpenAIProvider) buildRequest(req ChatRequest) openai.ChatCompletionRequ
 			}
 			msgs = append(msgs, msg)
 		case "tool":
+			// go-openai tags Content omitempty, so an empty tool result (a
+			// read tool on an empty revision) would go out with no content,
+			// which OpenAI refuses with 400 "expected a string, got null" —
+			// and the stored history replays it, breaking every later turn.
+			content := m.Content
+			if content == "" {
+				content = emptyToolResult
+			}
 			msgs = append(msgs, openai.ChatCompletionMessage{
 				Role:       openai.ChatMessageRoleTool,
-				Content:    m.Content,
+				Content:    content,
 				ToolCallID: m.ToolCallID,
 			})
 		}
@@ -98,6 +110,13 @@ func (p *OpenAIProvider) buildRequest(req ChatRequest) openai.ChatCompletionRequ
 	}
 	if len(tools) > 0 {
 		creq.Tools = tools
+		// One tool call per message on OpenAI itself: gpt-4o-mini otherwise
+		// sends the same propose_actions twice in one message, and only one
+		// proposal is shown per turn. Other OpenAI-compatible vendors do not
+		// all accept the field, so it is left to their defaults.
+		if p.label == "openai" {
+			creq.ParallelToolCalls = false
+		}
 	}
 	return creq
 }

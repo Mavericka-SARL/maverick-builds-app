@@ -40,6 +40,10 @@ type FileImportRequest struct {
 	Reshape    *importpkg.Reshape
 	ColumnMap  map[string]string
 	ImportMode string
+	// ValuesArePercentUnits confirms that values of at most 1 headed for a
+	// Percentage metric really are percents under 1% — the plan check
+	// otherwise refuses them as fractions to scale by 100.
+	ValuesArePercentUnits bool
 	// IntegrationID, when set, records the run in that integration's
 	// history.
 	IntegrationID string
@@ -78,7 +82,7 @@ func integrationToolDefs() []toolDef {
 				"target_id":{"type":"string","description":"The grid or dimension: id or exact name"},
 				"reshape":` + reshapeSchema + `,
 				"column_map":{"type":"object","description":"File column -> model field, applied AFTER reshape (see the File import section of your instructions); omit to use the headers as they are"}
-			},"required":["file","target_type","target_id"]}`,
+			},"required":["file","target_id"]}`,
 		},
 		{
 			Name:        "prepare_converted_file",
@@ -226,23 +230,24 @@ func (e *ToolExecutor) previewFileImport(ctx context.Context, raw json.RawMessag
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return "", fmt.Errorf("invalid params: %w", err)
 	}
+	if err := reshapeKeysChecked(raw); err != nil {
+		return "", err
+	}
 	if p.File == "" {
 		return "", fmt.Errorf("file is required — the attached file's name")
 	}
 	if err := p.Reshape.Validate(); err != nil {
 		return "", err
 	}
-	kind, err := importTargetKind(p.TargetType)
-	if err != nil {
-		return "", err
-	}
-	targetID, err := e.resolveRef(ctx, kind, p.TargetID)
+	kind, targetID, err := importTarget(p.TargetType, p.TargetID, func(kind, ref string) (string, error) {
+		return e.resolveRef(ctx, kind, ref)
+	})
 	if err != nil {
 		return "", err
 	}
 	return e.hooks.PreviewFileImport(ctx, FileImportRequest{
 		RevisionID: e.revID, File: p.File, Sheet: p.Sheet,
-		TargetType: p.TargetType, TargetID: targetID, Reshape: p.Reshape, ColumnMap: p.ColumnMap,
+		TargetType: kind, TargetID: targetID, Reshape: p.Reshape, ColumnMap: p.ColumnMap,
 	})
 }
 
@@ -258,6 +263,9 @@ func (e *ToolExecutor) prepareConvertedFile(ctx context.Context, raw json.RawMes
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return "", fmt.Errorf("invalid params: %w", err)
+	}
+	if err := reshapeKeysChecked(raw); err != nil {
+		return "", err
 	}
 	if p.File == "" {
 		return "", fmt.Errorf("file is required — the attached file's name")
@@ -312,6 +320,32 @@ func importTargetKind(targetType string) (string, error) {
 		return "dimension", nil
 	}
 	return "", fmt.Errorf("target_type must be \"grid\" (metric values) or \"dimension\" (members), not %q", targetType)
+}
+
+// importTarget returns the target's kind and id. A target_type left out is
+// read from target_id: the assistant named the grid or dimension and kept
+// omitting the type (live, six plans in a row), so a target that resolves as
+// exactly one of the two settles it.
+func importTarget(targetType, targetID string, resolve func(kind, ref string) (string, error)) (string, string, error) {
+	if targetType != "" || targetID == "" {
+		kind, err := importTargetKind(targetType)
+		if err != nil {
+			return "", "", err
+		}
+		id, err := resolve(kind, targetID)
+		return kind, id, err
+	}
+	gridID, gridErr := resolve("grid", targetID)
+	dimID, dimErr := resolve("dimension", targetID)
+	switch {
+	case gridErr == nil && dimErr == nil:
+		return "", "", fmt.Errorf("%q names both a grid and a dimension: set target_type to \"grid\" (metric values) or \"dimension\" (members)", targetID)
+	case gridErr == nil:
+		return "grid", gridID, nil
+	case dimErr == nil:
+		return "dimension", dimID, nil
+	}
+	return "", "", fmt.Errorf("target_id %q is neither a grid nor a dimension of this revision (list_grids / list_dimensions)", targetID)
 }
 
 var importModes = map[string]bool{"incremental": true, "replace": true, "full_reload": true}
@@ -388,18 +422,20 @@ func (e *WriteExecutor) createFileIntegration(ctx context.Context, raw json.RawM
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
+	if err := reshapeKeysChecked(raw); err != nil {
+		return "", "", err
+	}
 	p.Name = strings.TrimSpace(p.Name)
 	if p.Name == "" {
 		return "", "", fmt.Errorf("name is required")
 	}
-	kind, err := importTargetKind(p.TargetType)
+	kind, targetID, err := importTarget(p.TargetType, p.TargetID, func(kind, ref string) (string, error) {
+		return e.requireInModel(ctx, kind, ref)
+	})
 	if err != nil {
 		return "", "", err
 	}
-	targetID, err := e.requireInModel(ctx, kind, p.TargetID)
-	if err != nil {
-		return "", "", err
-	}
+	p.TargetType = kind
 	cfg, err := fileImportConfig(p.TargetType, p.ColumnMap, p.ImportMode)
 	if err != nil {
 		return "", "", err
@@ -510,6 +546,9 @@ func (e *WriteExecutor) updateIntegration(ctx context.Context, raw json.RawMessa
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
+	}
+	if err := reshapeKeysChecked(raw); err != nil {
+		return "", "", err
 	}
 	row, err := e.loadIntegrationDef(ctx, p.IntegrationID)
 	if err != nil {
@@ -667,9 +706,14 @@ func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage)
 		Reshape       *importpkg.Reshape `json:"reshape"`
 		ColumnMap     map[string]string  `json:"column_map"`
 		ImportMode    string             `json:"import_mode"`
+		// See FileImportRequest.ValuesArePercentUnits.
+		ValuesArePercentUnits bool `json:"values_are_percent_units"`
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
+	}
+	if err := reshapeKeysChecked(raw); err != nil {
+		return "", "", err
 	}
 	if e.hooks.ImportFile == nil {
 		return "", "", fmt.Errorf("file import is not available here")
@@ -677,7 +721,7 @@ func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage)
 	if strings.TrimSpace(p.File) == "" {
 		return "", "", fmt.Errorf("file is required — the attached file's name")
 	}
-	req := FileImportRequest{RevisionID: e.revID, File: p.File, Sheet: p.Sheet}
+	req := FileImportRequest{RevisionID: e.revID, File: p.File, Sheet: p.Sheet, ValuesArePercentUnits: p.ValuesArePercentUnits}
 	if p.IntegrationID != "" {
 		row, err := e.loadIntegrationDef(ctx, p.IntegrationID)
 		if err != nil {
@@ -694,19 +738,47 @@ func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage)
 			return "", "", fmt.Errorf("integration '%s' imports into a %s; leave target_type out or match it", row.Name, row.TargetType)
 		}
 	}
+	// What the step leaves out comes from the session's last clean preview of
+	// the sheet: the target, the reshape, the column map (the step's own
+	// entries win). Live, the assistant proposed {"column_map": {"Value": …}}
+	// alone after previewing the full reshape and map clean.
+	if p.IntegrationID == "" && (p.TargetID == "" || p.Reshape == nil || p.ColumnMap == nil) && e.hooks.RecallPreview != nil {
+		if prev, ok := e.hooks.RecallPreview(ctx, p.File, p.Sheet); ok {
+			if p.TargetID == "" {
+				req.TargetType, req.TargetID = prev.TargetType, prev.TargetID
+			}
+			if p.Reshape == nil {
+				req.Reshape = prev.Reshape
+			}
+			if prev.ColumnMap != nil {
+				merged := make(map[string]string, len(prev.ColumnMap)+len(p.ColumnMap))
+				for k, v := range prev.ColumnMap {
+					merged[k] = v
+				}
+				for k, v := range p.ColumnMap {
+					merged[k] = v
+				}
+				p.ColumnMap = merged
+			}
+		}
+	}
 	if p.TargetType != "" {
 		req.TargetType = p.TargetType
-	}
-	kind, err := importTargetKind(req.TargetType)
-	if err != nil {
-		return "", "", err
 	}
 	if p.TargetID != "" {
 		req.TargetID = p.TargetID
 	}
-	if req.TargetID, err = e.requireInModel(ctx, kind, req.TargetID); err != nil {
+	if req.TargetID == "" {
+		return "", "", fmt.Errorf("target_id is required (the grid or dimension to import into), with the reshape and column_map — "+
+			"or preview_file_import %s until it reports no errors, then import it with just file and sheet", sheetName(p.File, p.Sheet))
+	}
+	kind, targetID, err := importTarget(req.TargetType, req.TargetID, func(kind, ref string) (string, error) {
+		return e.requireInModel(ctx, kind, ref)
+	})
+	if err != nil {
 		return "", "", err
 	}
+	req.TargetType, req.TargetID = kind, targetID
 	if p.Reshape != nil {
 		if err := p.Reshape.Validate(); err != nil {
 			return "", "", err
@@ -729,4 +801,23 @@ func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage)
 		return "", "", err
 	}
 	return result, "", nil
+}
+
+func sheetName(file, sheet string) string {
+	if sheet == "" {
+		return file
+	}
+	return fmt.Sprintf("%s (sheet %q)", file, sheet)
+}
+
+// reshapeKeysChecked refuses a step whose "reshape" names a key no reshape
+// step reads (importpkg.CheckReshapeKeys).
+func reshapeKeysChecked(raw json.RawMessage) error {
+	var p struct {
+		Reshape json.RawMessage `json:"reshape"`
+	}
+	if json.Unmarshal(raw, &p) != nil {
+		return nil
+	}
+	return importpkg.CheckReshapeKeys(p.Reshape)
 }

@@ -175,6 +175,11 @@ which seals connector credentials and has no plaintext fallback at all
 (docs/HETZNER_DEPLOYMENT.md, step 6). The separate legacy gRPC assistant
 uses `ANTHROPIC_API_KEY`.
 
+`AI_MAX_CALLS_PER_SESSION` (default 50) and `AI_MAX_CALLS_PER_DAY` (default 200,
+per user, UTC day) cap the AI Developer's LLM calls; every call counts, read-tool
+round trips included. Building a whole model with a small model spends calls
+quickly, since each file preview is one, so raise them where that is expected.
+
 ## Migrations are frozen once released
 
 `pkg/migrate` matches an already-applied migration by filename **and**

@@ -35,7 +35,7 @@ func TestAINameTakenAndPartialUpdateMetric(t *testing.T) {
 	}
 	for _, m := range []map[string]any{
 		{"name": "revenue", "is_input": true},
-		{"name": "double", "formula": "revenue * 2", "agg_rule": "average", "format": "percent", "format_decimals": 2},
+		{"name": "double", "formula": "revenue * 2", "agg_rule": "average", "format": "percentage", "format_decimals": 2},
 		{"name": "triple", "formula": "revenue * 3"},
 	} {
 		if _, _, err := exec.Execute(ctx, "create_metric", mustJSON(t, m)); err != nil {
@@ -67,7 +67,7 @@ func TestAINameTakenAndPartialUpdateMetric(t *testing.T) {
 		Scan(&name, &text, &agg, &format, &decimals); err != nil {
 		t.Fatal(err)
 	}
-	if name != "double" || text != "revenue * 2 + 1" || agg != "average" || format != "percent" || decimals != 2 {
+	if name != "double" || text != "revenue * 2 + 1" || agg != "average" || format != "percentage" || decimals != 2 {
 		t.Errorf("after a formula-only update_metric: %q %q %q %q %d; want the formula changed and the rest kept", name, text, agg, format, decimals)
 	}
 	if _, _, err := exec.Execute(ctx, "update_metric", mustJSON(t, map[string]any{"metric_id": triple, "name": "thrice"})); err != nil {

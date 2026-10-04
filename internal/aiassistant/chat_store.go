@@ -239,19 +239,46 @@ func (s *ChatStore) CountLLMCallsToday(ctx context.Context, userID string) (int,
 	return n, err
 }
 
+// unansweredToolCall is the result replayed for a stored tool call that never
+// got one, so an old session stays usable.
+const unansweredToolCall = "No result was recorded for this call; it did not run."
+
 // MessagesToProviderHistory converts DB messages to the provider format for the LLM.
+// A tool call with no stored result (sessions saved before every sibling call
+// was answered) gets a stand-in result right after its group: providers refuse
+// a history with an unanswered tool call, which would break every later turn.
 func MessagesToProviderHistory(msgs []ChatMessage) []providers.Message {
 	out := make([]providers.Message, 0, len(msgs))
+	var pending []providers.ToolCall
+	flush := func() {
+		for _, tc := range pending {
+			out = append(out, providers.Message{Role: "tool", Content: unansweredToolCall, ToolCallID: tc.ID, ToolName: tc.Name})
+		}
+		pending = nil
+	}
 	for _, m := range msgs {
-		pm := providers.Message{
+		if m.Role == "tool" {
+			for i, tc := range pending {
+				if tc.ID == m.ToolCallID {
+					pending = append(pending[:i], pending[i+1:]...)
+					break
+				}
+			}
+		} else {
+			flush()
+		}
+		out = append(out, providers.Message{
 			Role:       m.Role,
 			Content:    m.Content,
 			ToolCalls:  m.ToolCalls,
 			ToolCallID: m.ToolCallID,
 			ToolName:   m.ToolName,
+		})
+		if m.Role == "assistant" {
+			pending = append(pending, m.ToolCalls...)
 		}
-		out = append(out, pm)
 	}
+	flush()
 	return out
 }
 

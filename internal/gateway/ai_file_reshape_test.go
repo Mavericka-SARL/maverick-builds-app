@@ -251,3 +251,197 @@ func TestImportReshapePreview(t *testing.T) {
 		t.Fatalf("a business user previewing a reshape: %d, want 403", status)
 	}
 }
+
+// The preview hands the assistant what it could not work out live: the
+// reshape a sheet laid out for people needs (title rows above the header,
+// months across), and a warning when fractions are headed for a Percentage
+// metric, which stores percent units.
+func TestPreviewSuggestsReshapeAndWarnsOnFractions(t *testing.T) {
+	f := newSalesFileFixture(t)
+	ctx, pool := f.ctx, f.pool
+	if _, err := pool.Exec(ctx, `
+		WITH m AS (INSERT INTO model.metric_def (model_id, revision_id, name, is_input, agg_rule, format)
+		           VALUES ($1::uuid,$2::uuid,'growth_pct',true,'average','percentage') RETURNING id)
+		INSERT INTO model.grid_metric (grid_id, metric_id, sort_order) SELECT $3::uuid, id, 9 FROM m`, f.modelID, f.revID, f.grid); err != nil {
+		t.Fatal(err)
+	}
+	x := excelize.NewFile()
+	for i, r := range [][]any{{"Plan by month"}, {}, {"Country", "Jan", "Feb", "Mar", "FY"}, {"Canada", 1, 2, 3, 6}} {
+		cell, _ := excelize.CoordinatesToCellName(1, i+1)
+		_ = x.SetSheetRow("Sheet1", cell, &r)
+	}
+	var wb bytes.Buffer
+	_ = x.Write(&wb)
+	_ = x.Close()
+
+	tool := func(id string, a any) providers.ChatResponse {
+		b, _ := json.Marshal(a)
+		return providers.ChatResponse{FinishReason: "tool_calls", Message: providers.Message{Role: "assistant",
+			ToolCalls: []providers.ToolCall{{ID: id, Name: "preview_file_import", Arguments: b}}}}
+	}
+	fake := &multiScriptProvider{resps: []providers.ChatResponse{
+		tool("call_layout", map[string]any{"file": "plan.xlsx", "target_id": "Sales"}),
+		tool("call_pct", map[string]any{"file": "rates.csv", "target_id": "Sales"}),
+		{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: "Done."}},
+	}}
+	send, do := f.serve(t, fake)
+	chatStore := aiassistant.NewChatStore(pool)
+	sess, err := chatStore.CreateSession(ctx, f.appID, f.modelID, f.devID, "openai", "gpt-4o-mini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = chatStore.SetTitleIfEmpty(ctx, sess.ID, "pre-titled")
+	attach := func(name string, data []byte) {
+		var body bytes.Buffer
+		mw := multipart.NewWriter(&body)
+		fw, _ := mw.CreateFormFile("file", name)
+		_, _ = fw.Write(data)
+		_ = mw.Close()
+		if status, out := send(f.devSub, "POST", "/api/ai/sessions/"+sess.ID+"/documents", mw.FormDataContentType(), body.Bytes()); status != http.StatusOK {
+			t.Fatalf("attach %s: %d %s", name, status, out)
+		}
+	}
+	attach("plan.xlsx", wb.Bytes())
+	attach("rates.csv", []byte("geography,period,growth_pct\nCA,Q1,0.05\nUK,Q1,0.07\n"))
+	if status, out := do(f.devSub, "POST", "/api/ai/sessions/"+sess.ID+"/messages", map[string]string{"content": "preview both"}); status != http.StatusOK {
+		t.Fatalf("message: %d %s", status, out)
+	}
+	results := map[string]string{}
+	msgs, _ := chatStore.ListMessages(ctx, sess.ID)
+	for _, m := range msgs {
+		if m.Role == "tool" {
+			results[m.ToolCallID] = m.Content
+		}
+	}
+	if r := results["call_layout"]; !strings.Contains(r, `Suggested "reshape": {"header_row":3,"unpivot":{"columns":["Jan","Feb","Mar"]`) {
+		t.Errorf("layout preview should suggest header_row 3 and the months into rows; got:\n%s", r)
+	}
+	// The unmapped title header fails the preview, which then suggests a map.
+	if r := results["call_layout"]; !strings.Contains(r, `Suggested "column_map" for this grid: {"Plan by month":"ignore"}`) {
+		t.Errorf("a failed preview should suggest a column_map; got:\n%s", r)
+	}
+	if r := results["call_pct"]; !strings.Contains(r, "WARNING: every value for growth_pct is a fraction") {
+		t.Errorf("fractions into a Percentage metric should warn; got:\n%s", r)
+	}
+}
+
+// Live, the assistant reached a clean preview and then proposed the import
+// without the target, reshape and map it had just proven. An import naming
+// only the file (and sheet) repeats the session's last clean preview of it.
+func TestImportRepeatsTheLastCleanPreview(t *testing.T) {
+	f := newSalesFileFixture(t)
+	ctx, pool := f.ctx, f.pool
+	args := map[string]any{"file": "plan.csv", "target_id": "Sales",
+		"reshape":    map[string]any{"value_map": map[string]any{"Country": map[string]string{"Canada": "CA"}}},
+		"column_map": map[string]string{"Country": "geography", "Quarter": "period", "Amount": "revenue"}}
+	tool := func(id, name string, a any) providers.ChatResponse {
+		b, _ := json.Marshal(a)
+		return providers.ChatResponse{FinishReason: "tool_calls", Message: providers.Message{Role: "assistant",
+			ToolCalls: []providers.ToolCall{{ID: id, Name: name, Arguments: b}}}}
+	}
+	fake := &multiScriptProvider{resps: []providers.ChatResponse{
+		tool("call_preview", "preview_file_import", args),
+		tool("call_propose", "propose_actions", map[string]any{"steps": []map[string]any{
+			// As live: the target type and one map entry, the reshape left out.
+			proposeStep("import_file_data", "Import plan.csv", map[string]any{"file": "plan.csv", "target_type": "grid",
+				"column_map": map[string]string{"Amount": "revenue"}}),
+		}}),
+	}}
+	send, do := f.serve(t, fake)
+	chatStore := aiassistant.NewChatStore(pool)
+	sess, err := chatStore.CreateSession(ctx, f.appID, f.modelID, f.devID, "openai", "gpt-4o-mini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = chatStore.SetTitleIfEmpty(ctx, sess.ID, "pre-titled")
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, _ := mw.CreateFormFile("file", "plan.csv")
+	_, _ = fw.Write([]byte("Country,Quarter,Amount\nCanada,Q1,41\n"))
+	_ = mw.Close()
+	if status, out := send(f.devSub, "POST", "/api/ai/sessions/"+sess.ID+"/documents", mw.FormDataContentType(), body.Bytes()); status != http.StatusOK {
+		t.Fatalf("attach: %d %s", status, out)
+	}
+	if status, out := do(f.devSub, "POST", "/api/ai/sessions/"+sess.ID+"/messages", map[string]string{"content": "import it"}); status != http.StatusOK {
+		t.Fatalf("message: %d %s", status, out)
+	}
+	pending, err := aiassistant.NewProposalStore(pool).ListProposals(ctx, sess.ID)
+	if err != nil || len(pending) != 1 {
+		msgs, _ := chatStore.ListMessages(ctx, sess.ID)
+		for _, m := range msgs {
+			t.Logf("%s: %.300s", m.Role, m.Content)
+		}
+		t.Fatalf("want the plan shown (its import resolved from the clean preview): %d proposal(s), %v", len(pending), err)
+	}
+	if status, out := do(f.devSub, "POST", "/api/ai/sessions/"+sess.ID+"/proposals/"+pending[0].ID+"/confirm", nil); status != http.StatusOK {
+		t.Fatalf("confirm: %d %s", status, out)
+	}
+	if n := f.count(t, `SELECT count(*) FROM runtime.fact_input fi JOIN model.metric_def m ON m.id = fi.metric_id
+		WHERE m.name = 'revenue' AND fi.value = 41`); n == 0 {
+		t.Error("the import did not land: the recalled preview's target, reshape and map were not used")
+	}
+}
+
+// Fractions headed for a Percentage metric pass a preview with a warning the
+// assistant ignored live; the plan check refuses them unless the step says
+// they really are percents under 1%.
+func TestPlanCheckRefusesFractionsIntoAPercentage(t *testing.T) {
+	f := newSalesFileFixture(t)
+	ctx, pool := f.ctx, f.pool
+	if _, err := pool.Exec(ctx, `
+		WITH m AS (INSERT INTO model.metric_def (model_id, revision_id, name, is_input, agg_rule, format)
+		           VALUES ($1::uuid,$2::uuid,'growth_pct',true,'average','percentage') RETURNING id)
+		INSERT INTO model.grid_metric (grid_id, metric_id, sort_order) SELECT $3::uuid, id, 9 FROM m`, f.modelID, f.revID, f.grid); err != nil {
+		t.Fatal(err)
+	}
+	step := func(confirmUnits bool) map[string]any {
+		p := map[string]any{"file": "rates.csv", "target_id": "Sales"}
+		if confirmUnits {
+			p["values_are_percent_units"] = true
+		}
+		return proposeStep("import_file_data", "Import rates", p)
+	}
+	propose := func(id string, s map[string]any) providers.ChatResponse {
+		b, _ := json.Marshal(map[string]any{"steps": []map[string]any{s}})
+		return providers.ChatResponse{FinishReason: "tool_calls", Message: providers.Message{Role: "assistant",
+			ToolCalls: []providers.ToolCall{{ID: id, Name: "propose_actions", Arguments: b}}}}
+	}
+	fake := &multiScriptProvider{resps: []providers.ChatResponse{
+		propose("call_fractions", step(false)),
+		{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: "Refused."}},
+		propose("call_units", step(true)),
+	}}
+	send, do := f.serve(t, fake)
+	chatStore := aiassistant.NewChatStore(pool)
+	sess, err := chatStore.CreateSession(ctx, f.appID, f.modelID, f.devID, "openai", "gpt-4o-mini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = chatStore.SetTitleIfEmpty(ctx, sess.ID, "pre-titled")
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, _ := mw.CreateFormFile("file", "rates.csv")
+	_, _ = fw.Write([]byte("geography,period,growth_pct\nCA,Q1,0.05\nUK,Q1,0.07\n"))
+	_ = mw.Close()
+	if status, out := send(f.devSub, "POST", "/api/ai/sessions/"+sess.ID+"/documents", mw.FormDataContentType(), body.Bytes()); status != http.StatusOK {
+		t.Fatalf("attach: %d %s", status, out)
+	}
+	for _, msg := range []string{"import the rates", "they really are under 1%"} {
+		if status, out := do(f.devSub, "POST", "/api/ai/sessions/"+sess.ID+"/messages", map[string]string{"content": msg}); status != http.StatusOK {
+			t.Fatalf("message: %d %s", status, out)
+		}
+	}
+	results := map[string]string{}
+	msgs, _ := chatStore.ListMessages(ctx, sess.ID)
+	for _, m := range msgs {
+		if m.Role == "tool" {
+			results[m.ToolCallID] = m.Content
+		}
+	}
+	if r := results["call_fractions"]; !strings.Contains(r, "Proposal NOT shown") || !strings.Contains(r, "values_are_percent_units") {
+		t.Errorf("fractions into growth_pct should be refused with the way out; got %q", r)
+	}
+	if r := results["call_units"]; !strings.Contains(r, "Proposal created") {
+		t.Errorf("with values_are_percent_units the plan should be shown; got %q", r)
+	}
+}

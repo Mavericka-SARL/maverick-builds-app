@@ -35,6 +35,7 @@ func (e *WriteExecutor) editTools() map[string]writeTool {
 		"delete_dimension_member":   e.deleteDimensionMember,
 		"generate_time_members":     e.generateTimeMembers,
 		"reorder_dimension_members": e.reorderDimensionMembers,
+		"reorder_grid_metrics":      e.reorderGridMetrics,
 		"update_grid":               e.updateGrid,
 		"delete_grid":               e.deleteGrid,
 		"remove_grid_metric":        e.removeGridMetric,
@@ -197,6 +198,39 @@ func (e *WriteExecutor) reorderDimensionMembers(ctx context.Context, raw json.Ra
 		level = fmt.Sprintf("Members under '%s'", res.ParentCode)
 	}
 	return fmt.Sprintf("%s reordered: %s", level, strings.Join(res.Codes, ", ")), "", nil
+}
+
+// reorderGridMetrics is PUT /api/developer/grids/{id}/metrics/order: the
+// order a grid shows its metrics in, given as every metric of the grid (by
+// name or id), once each.
+func (e *WriteExecutor) reorderGridMetrics(ctx context.Context, raw json.RawMessage) (string, string, error) {
+	var p struct {
+		GridID  string   `json:"grid_id"`
+		Metrics []string `json:"metrics"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil || p.GridID == "" || len(p.Metrics) == 0 {
+		return "", "", fmt.Errorf("grid_id and metrics (every metric of the grid, in the wanted order) are required")
+	}
+	gridID, err := e.requireInModel(ctx, "grid", p.GridID)
+	if err != nil {
+		return "", "", err
+	}
+	ids := make([]string, 0, len(p.Metrics))
+	for _, ref := range p.Metrics {
+		id, err := e.requireInModel(ctx, "metric", ref)
+		if err != nil {
+			return "", "", err
+		}
+		ids = append(ids, id)
+	}
+	if err := modeledit.ReorderGridMetrics(ctx, e.pool, gridID, ids); err != nil {
+		var oe *modeledit.GridOrderError
+		if errors.As(err, &oe) {
+			return "", "", fmt.Errorf("%w (list_grids shows the grid's metrics)", err)
+		}
+		return "", "", fmt.Errorf("reorder grid metrics: %w", err)
+	}
+	return fmt.Sprintf("Grid metrics reordered: %s", strings.Join(p.Metrics, ", ")), "", nil
 }
 
 // generateTimeMembers is POST /api/developer/dimensions/{id}/members/generate:
@@ -611,6 +645,21 @@ func (e *WriteExecutor) updateDashboardWidget(ctx context.Context, raw json.RawM
 		}
 		s := string(p.WidgetProps)
 		props = &s
+	}
+	if widgetType == "chart" && (p.RefID != nil || props != nil) {
+		// The chart as it will be: the new grid or props, else the stored ones.
+		var refID string
+		var stored []byte
+		_ = e.pool.QueryRow(ctx, `SELECT COALESCE(ref_id::text,''), COALESCE(widget_props,'null'::jsonb) FROM model.dashboard_widget WHERE id=$1::uuid`, widgetID).Scan(&refID, &stored)
+		if p.RefID != nil && *p.RefID != "" {
+			refID = *p.RefID
+		}
+		if props != nil {
+			stored = []byte(*props)
+		}
+		if err := modeledit.CheckChartMetrics(ctx, e.pool, refID, stored); err != nil {
+			return "", "", err
+		}
 	}
 	for _, v := range []*int{p.SizeW, p.SizeH} {
 		if v != nil && *v < 20 {

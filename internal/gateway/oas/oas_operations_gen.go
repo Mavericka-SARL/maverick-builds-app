@@ -192,6 +192,7 @@ const (
 	RemoveSsoOperation                    OperationName = "RemoveSso"
 	RenameAiSessionOperation              OperationName = "RenameAiSession"
 	ReorderDimensionMembersOperation      OperationName = "ReorderDimensionMembers"
+	ReorderGridMetricsOperation           OperationName = "ReorderGridMetrics"
 	ResendAdminUserInvitationOperation    OperationName = "ResendAdminUserInvitation"
 	RestoreWorkflowOperation              OperationName = "RestoreWorkflow"
 	RevokeAdminUserAppAccessOperation     OperationName = "RevokeAdminUserAppAccess"

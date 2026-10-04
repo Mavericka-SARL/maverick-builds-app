@@ -50,3 +50,8 @@ data:
 
   # OpenTelemetry collector endpoint (no schema — gRPC plain-text)
   OTEL_ENDPOINT: "otel-collector:4317"
+
+  # AI Developer LLM call caps: per chat session, and per user per UTC day.
+  # Every model call counts, read-tool round trips included.
+  AI_MAX_CALLS_PER_SESSION: "50"
+  AI_MAX_CALLS_PER_DAY: "200"

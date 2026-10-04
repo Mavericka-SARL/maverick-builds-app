@@ -20974,6 +20974,48 @@ func (s *ReorderDimensionMembersReq) SetMemberIds(val []uuid.UUID) {
 	s.MemberIds = val
 }
 
+type ReorderGridMetricsBadRequest Error
+
+func (*ReorderGridMetricsBadRequest) reorderGridMetricsRes() {}
+
+type ReorderGridMetricsForbidden Error
+
+func (*ReorderGridMetricsForbidden) reorderGridMetricsRes() {}
+
+type ReorderGridMetricsNotFound Error
+
+func (*ReorderGridMetricsNotFound) reorderGridMetricsRes() {}
+
+type ReorderGridMetricsOK struct {
+	Status OptString `json:"status"`
+}
+
+// GetStatus returns the value of Status.
+func (s *ReorderGridMetricsOK) GetStatus() OptString {
+	return s.Status
+}
+
+// SetStatus sets the value of Status.
+func (s *ReorderGridMetricsOK) SetStatus(val OptString) {
+	s.Status = val
+}
+
+func (*ReorderGridMetricsOK) reorderGridMetricsRes() {}
+
+type ReorderGridMetricsReq struct {
+	MetricIds []uuid.UUID `json:"metric_ids"`
+}
+
+// GetMetricIds returns the value of MetricIds.
+func (s *ReorderGridMetricsReq) GetMetricIds() []uuid.UUID {
+	return s.MetricIds
+}
+
+// SetMetricIds sets the value of MetricIds.
+func (s *ReorderGridMetricsReq) SetMetricIds(val []uuid.UUID) {
+	s.MetricIds = val
+}
+
 type ResendAdminUserInvitationBadGateway Error
 
 func (*ResendAdminUserInvitationBadGateway) resendAdminUserInvitationRes() {}

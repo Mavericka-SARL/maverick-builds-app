@@ -172,3 +172,120 @@ func TestDimensionIntegrationRunsFromAWorkbook(t *testing.T) {
 		t.Error("DE was not added under EMEA")
 	}
 }
+
+// Sheets laid out for people name members by label ("Canada", not CA) and
+// periods by month ("Jan", not 2026-01). An import resolves a value that is
+// no member's code by the one member whose label it is, and on a monthly
+// time dimension by the one leaf period starting in that month; a label two
+// members share, or a month two periods start in, stays unknown.
+func TestFileImportResolvesLabelsAndMonthNames(t *testing.T) {
+	f := newSalesFileFixture(t)
+	_, do := f.serve(t, nil)
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := f.pool.QueryRow(f.ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("query %q: %v", sql, err)
+		}
+		return id
+	}
+	month := q(`INSERT INTO model.dimension_def (model_id, revision_id, name, dimension_type, time_granularity, fiscal_year_start_month)
+		VALUES ($1::uuid,$2::uuid,'month','time','month',1) RETURNING id::text`, f.modelID, f.revID)
+	for i, m := range []string{"2026-01", "2026-02"} {
+		q(`INSERT INTO model.dimension_member (dimension_id, code, label, period_start, period_end, time_index, sort_order)
+			VALUES ($1::uuid,$2,$2,$3::date,($3::date + interval '1 month - 1 day')::date,$4,$4) RETURNING id::text`, month, m, m+"-01", i)
+	}
+	geo := q(`SELECT id::text FROM model.dimension_def WHERE revision_id=$1::uuid AND name='geography'`, f.revID)
+	units := q(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input, agg_rule) VALUES ($1::uuid,$2::uuid,'units',true,'sum') RETURNING id::text`, f.modelID, f.revID)
+	grid := q(`INSERT INTO model.grid_def (model_id, revision_id, name) VALUES ($1::uuid,$2::uuid,'Monthly') RETURNING id::text`, f.modelID, f.revID)
+	for _, d := range []string{geo, month} {
+		q(`INSERT INTO model.grid_dimension (grid_id, dimension_id) VALUES ($1::uuid,$2::uuid) RETURNING grid_id::text`, grid, d)
+	}
+	q(`INSERT INTO model.grid_metric (grid_id, metric_id, sort_order) VALUES ($1::uuid,$2::uuid,0) RETURNING grid_id::text`, grid, units)
+
+	status, body := do(f.devSub, "POST", "/api/developer/integrations?revision_id="+f.revID, map[string]any{
+		"name": "Units by month", "type": "csv_import", "target_type": "grid", "target_id": grid})
+	if status != http.StatusOK {
+		t.Fatalf("create: %d %s", status, body)
+	}
+	var created struct{ ID string }
+	_ = json.Unmarshal(body, &created)
+	if status, body := do(f.devSub, "PATCH", "/api/developer/integrations/"+created.ID+"/config", map[string]any{"config": map[string]any{
+		"column_map": map[string]string{"Country": "geography", "Month": "month", "Units": "units"}, "import_mode": "replace"}}); status != http.StatusOK {
+		t.Fatalf("config: %d %s", status, body)
+	}
+	run := func(csv string) (int, string) {
+		t.Helper()
+		status, body := do(f.devSub, "POST", "/api/integrations/"+created.ID+"/run", map[string]any{"csv": csv})
+		return status, string(body)
+	}
+	value := func(geoCode, monthCode string) float64 {
+		t.Helper()
+		var v float64
+		if err := f.pool.QueryRow(f.ctx, `
+			SELECT fi.value::float8 FROM runtime.fact_input fi
+			WHERE fi.metric_id=$1::uuid AND fi.dim_members->>$2 = $3 AND fi.dim_members->>$4 = $5
+			ORDER BY fi.entered_at DESC LIMIT 1`, units, geo, geoCode, month, monthCode).Scan(&v); err != nil {
+			t.Fatalf("value %s/%s: %v", geoCode, monthCode, err)
+		}
+		return v
+	}
+
+	if status, body := run("Country,Month,Units\nCanada,Jan,5\nunited kingdom,February,7\nUS,2026-01,9\n"); status != http.StatusOK || !strings.Contains(body, `"error_rows":0`) {
+		t.Fatalf("labels and month names: %d %s", status, body)
+	}
+	if v := value("CA", "2026-01"); v != 5 {
+		t.Errorf("Canada/Jan = %v, want 5 at CA/2026-01", v)
+	}
+	if v := value("UK", "2026-02"); v != 7 {
+		t.Errorf("united kingdom/February = %v, want 7 at UK/2026-02", v)
+	}
+
+	// A label two members share is not a guess.
+	q(`INSERT INTO model.dimension_member (dimension_id, code, label, sort_order) VALUES ($1::uuid,'CA2','Canada',9) RETURNING id::text`, geo)
+	if _, body := run("Country,Month,Units\nCanada,Jan,6\n"); !strings.Contains(body, "UNKNOWN_MEMBER") {
+		t.Errorf("an ambiguous label must stay unknown: %s", body)
+	}
+	// Nor is a month two periods start in.
+	q(`INSERT INTO model.dimension_member (dimension_id, code, label, period_start, period_end, time_index, sort_order)
+		VALUES ($1::uuid,'2027-01','2027-01','2027-01-01','2027-01-31',2,2) RETURNING id::text`, month)
+	if _, body := run("Country,Month,Units\nUS,Jan,6\n"); !strings.Contains(body, "UNKNOWN_MEMBER") {
+		t.Errorf("an ambiguous month must stay unknown: %s", body)
+	}
+}
+
+// A column mapped to a dimension the target grid does not have is refused
+// with the fix, instead of being resolved as members and written as an
+// extra key on the grid's facts.
+func TestFileImportRefusesADimensionTheGridLacks(t *testing.T) {
+	f := newSalesFileFixture(t)
+	_, do := f.serve(t, nil)
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO model.dimension_def (model_id, revision_id, name, dimension_type) VALUES ($1::uuid,$2::uuid,'segment','standard')`, f.modelID, f.revID); err != nil {
+		t.Fatal(err)
+	}
+	status, body := do(f.devSub, "POST", "/api/developer/integrations?revision_id="+f.revID, map[string]any{
+		"name": "With segment", "type": "csv_import", "target_type": "grid", "target_id": f.grid})
+	if status != http.StatusOK {
+		t.Fatalf("create: %d %s", status, body)
+	}
+	var created struct{ ID string }
+	_ = json.Unmarshal(body, &created)
+	if status, body := do(f.devSub, "PATCH", "/api/developer/integrations/"+created.ID+"/config", map[string]any{"config": map[string]any{
+		"column_map": map[string]string{"Country": "geography", "Quarter": "period", "Segment": "segment", "Amount": "revenue"}}}); status != http.StatusOK {
+		t.Fatalf("config: %d %s", status, body)
+	}
+	status, body = do(f.devSub, "POST", "/api/integrations/"+created.ID+"/run", map[string]any{"csv": "Country,Quarter,Segment,Amount\nCA,Q1,SMB,5\n"})
+	if status != http.StatusBadRequest || !strings.Contains(string(body), `which grid \"Sales\" does not have`) {
+		t.Errorf("run: %d %s — want 400 naming the dimension the grid lacks", status, body)
+	}
+
+	// Nor may a grid dimension go without a column: the value has nowhere to go.
+	if status, body := do(f.devSub, "PATCH", "/api/developer/integrations/"+created.ID+"/config", map[string]any{"config": map[string]any{
+		"column_map": map[string]string{"Country": "geography", "Quarter": "ignore", "Amount": "revenue"}}}); status != http.StatusOK {
+		t.Fatalf("config: %d %s", status, body)
+	}
+	status, body = do(f.devSub, "POST", "/api/integrations/"+created.ID+"/run", map[string]any{"csv": "Country,Quarter,Amount\nCA,Q1,5\n"})
+	if status != http.StatusBadRequest || !strings.Contains(string(body), `no column maps to it`) {
+		t.Errorf("run without a period column: %d %s — want 400 naming the unmapped grid dimension", status, body)
+	}
+}

@@ -156,6 +156,14 @@ func (h *handler) runGridIntegration(w http.ResponseWriter, ctx context.Context,
 		fail(http.StatusForbidden, fmt.Errorf("this revision is system-managed and read-only"))
 		return
 	}
+	var gridID string
+	_ = h.db.QueryRow(ctx, `SELECT COALESCE(target_id::text,'') FROM model.integration_def WHERE id=$1::uuid AND target_type='grid'`, intID).Scan(&gridID)
+	if gridID != "" {
+		if err := importpkg.CheckGridColumns(ctx, h.db.For(ctx), gridID, header); err != nil {
+			fail(http.StatusBadRequest, err)
+			return
+		}
+	}
 	staged, importErrs, err := importpkg.ResolveRows(ctx, h.db.For(ctx), modelID, revisionID, header, rows)
 	if err != nil {
 		fail(http.StatusBadRequest, fmt.Errorf("%w — map the column to a metric or dimension name, \"metric\"/\"value\", or \"ignore\" in the integration's column map", err))

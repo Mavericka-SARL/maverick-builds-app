@@ -57,6 +57,9 @@ func (h *handler) aiCheckProposal(ctx context.Context, sessionID, modelID, revID
 		PostFormIntegration: func(ctx context.Context, mappingID string) (int, error) {
 			return checkFormPosting(ctx, tx, mappingID)
 		},
+		RecallPreview: func(ctx context.Context, file, sheet string) (aiassistant.FileImportRequest, bool) {
+			return h.recallCleanPreview(ctx, sessionID, file, sheet)
+		},
 	})
 	created := make([]string, len(steps))
 	blocked := map[int]bool{} // 0-based steps whose result later steps cannot use
@@ -64,6 +67,15 @@ func (h *handler) aiCheckProposal(ctx context.Context, sessionID, modelID, revID
 		if _, ok := usesBlockedStep(step.Params, blocked); ok {
 			blocked[i] = true
 			out.unchecked = append(out.unchecked, i+1)
+			continue
+		}
+		lintErr := aiassistant.LintProposalStep(step.Tool, storedParams(step.Params))
+		if lintErr == nil {
+			lintErr = percentUnitsLint(ctx, tx, modelID, revID, step)
+		}
+		if lintErr != nil {
+			blocked[i] = true
+			out.problems = append(out.problems, fmt.Sprintf("step %d (%s — %s): %v", i+1, step.Tool, step.Description, lintErr))
 			continue
 		}
 		sp, err := tx.Begin(ctx) // a savepoint: one failure must not poison the rest
@@ -137,9 +149,12 @@ func (h *handler) aiCheckImportFile(ctx context.Context, tx pgx.Tx, sessionID st
 	if err := tx.QueryRow(ctx, `SELECT model_id::text FROM model.revision WHERE id=$1::uuid`, req.RevisionID).Scan(&modelID); err != nil {
 		return "", fmt.Errorf("working revision not found")
 	}
+	if err := importpkg.CheckGridColumns(ctx, tx, req.TargetID, f.mapped); err != nil {
+		return "", fmt.Errorf("%w. %s", err, h.suggestColumnMap(ctx, req, f))
+	}
 	staged, importErrs, err := importpkg.ResolveRows(ctx, tx, modelID, req.RevisionID, f.mapped, f.rows)
 	if err != nil {
-		return "", fmt.Errorf("%w. Map each column to a model name or \"ignore\" in column_map", err)
+		return "", fmt.Errorf("%w. Map each column to a model name or \"ignore\" in column_map. %s", err, h.suggestColumnMap(ctx, req, f))
 	}
 	if len(importErrs) > 0 {
 		rows := make([]map[string]any, 0, len(importErrs))
@@ -151,6 +166,11 @@ func (h *handler) aiCheckImportFile(ctx context.Context, tx pgx.Tx, sessionID st
 	}
 	if len(staged) == 0 {
 		return "", fmt.Errorf("%s holds no values for any metric", f.describe())
+	}
+	// Fractions into a Percentage metric are refused here, not just warned
+	// of: the assistant imported 0.056 for 5.6% after previews that warned.
+	if w := h.percentFractionWarning(ctx, staged); w != "" && !req.ValuesArePercentUnits {
+		return "", fmt.Errorf("%s (if these really are percents under 1%%, pass \"values_are_percent_units\": true)", strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(w), "WARNING: ")))
 	}
 	return fmt.Sprintf("%d value(s) from %s resolve", len(staged), f.describe()), nil
 }
@@ -219,4 +239,38 @@ func joinInts(ns []int) string {
 		parts[i] = strconv.Itoa(n)
 	}
 	return strings.Join(parts, ", ")
+}
+
+// percentUnitsLint refuses a formula adding a Percentage metric to 1: the
+// metric holds percent units (5.6 for 5.6%), so the growth factor is
+// 1 + p / 100. The revision's metrics as the plan has left them so far are
+// visible on the dry run's transaction.
+func percentUnitsLint(ctx context.Context, tx pgx.Tx, modelID, revID string, step aiassistant.ProposalStep) error {
+	if step.Tool != "create_metric" && step.Tool != "update_metric" {
+		return nil
+	}
+	var p struct {
+		Name     string `json:"name"`
+		Formula  string `json:"formula"`
+		MetricID string `json:"metric_id"`
+	}
+	if json.Unmarshal(step.Params, &p) != nil || strings.TrimSpace(p.Formula) == "" {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT lower(name) FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid AND format='percentage'`, modelID, revID)
+	if err != nil {
+		return nil
+	}
+	pct := map[string]bool{}
+	for rows.Next() {
+		var n string
+		if rows.Scan(&n) == nil {
+			pct[n] = true
+		}
+	}
+	rows.Close()
+	if m := aiassistant.PercentUnitsMisuse(p.Formula, pct); m != "" {
+		return fmt.Errorf("%s is a Percentage metric, stored in percent units (5.6 for 5.6%%): a growth factor is 1 + %s / 100, not 1 + %s", m, m, m)
+	}
+	return nil
 }

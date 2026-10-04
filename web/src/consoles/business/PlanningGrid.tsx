@@ -559,15 +559,23 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
   // Initialise pivot config when dims first arrive or grid changes
   const dimsKey = (grid?.dimensions ?? []).map(d => d.id).join(",");
   useEffect(() => {
+    if (!gridMeta) return;
     const dims = grid?.dimensions ?? [];
-    if (!dims.length) return;
+    // A grid with no dimension (one setting, such as an actual-through
+    // month) has no pivot to set up, but its values still need the cells
+    // query: returning before marking it ready left the cell at "—" while
+    // the stored value drove every formula.
+    if (!dims.length) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- initialize pivot state when the grid's structure arrives
+      setPivotContextReady(true);
+      return;
+    }
     const allKnown = new Set([...pivotRows, ...pivotCols, ...pivotContext]);
     const needsInit = dims.some(d => !allKnown.has(d.id)) || allKnown.size === 0;
     if (!needsInit) return;
 
     const validId = (id: string) => id === METRICS_ID || dims.some(d => d.id === id);
     if (defaultView) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- initialize pivot from developer-set default
       setPivotRows(defaultView.rows.filter(validId));
       setPivotCols(defaultView.cols.filter(validId));
       setPivotContext(defaultView.context.filter(validId));
@@ -588,7 +596,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
     setContextMetric(cm => cm || (grid?.metrics[0]?.id ?? ""));
     setPivotContextReady(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dimsKey]);
+  }, [dimsKey, !!gridMeta]);
 
   // Must be called unconditionally on every render (rules of hooks), so
   // this sits before the early-return guards below. Uses raw

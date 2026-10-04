@@ -460,3 +460,66 @@ func TestCrossRevisionPropertyIDIsNotMisdirected(t *testing.T) {
 		t.Errorf("draft D declares %q, want fact:text", got)
 	}
 }
+
+// Live, the assistant set cost centers' values under "Region" and
+// "P&L_Line", then declared "region" and "p_and_l_line": SUMIFS over the
+// declared name read nothing and no step said so. A key no declaration
+// could ever name is refused where it is written; declaring a name adopts
+// values stored under it in another case; and a declaration no member has a
+// value under names the keys the members do carry.
+func TestMemberPropertyKeysMeetTheirDeclarations(t *testing.T) {
+	pool := setupWriteExecutorDB(t)
+	modelID := seedModel(t, pool)
+	revID := seedRevision(t, pool, modelID, "Rev A")
+	exec := aiassistant.NewWriteExecutor(pool, modelID, revID)
+	ctx := context.Background()
+	run := func(tool string, params map[string]any) (string, error) {
+		res, _, err := exec.Execute(ctx, tool, mustJSON(t, params))
+		return res, err
+	}
+
+	if _, err := run("create_dimension", map[string]any{"name": "Cost Center", "members": []map[string]any{
+		{"code": "MFG", "label": "MFG", "properties": map[string]string{"P&L_Line": "COGS"}},
+	}}); err == nil || !strings.Contains(err.Error(), metricformula.CodeInvalidPropertyName) || !strings.Contains(err.Error(), `"p_l_line"`) {
+		t.Fatalf("create_dimension with a P&L_Line key: err = %v, want %s suggesting p_l_line", err, metricformula.CodeInvalidPropertyName)
+	}
+	if _, err := run("create_dimension", map[string]any{"name": "Cost Center", "members": []map[string]any{
+		{"code": "MFG", "label": "MFG", "properties": map[string]string{"Region": "NA", "PL_Line": "COGS"}},
+	}}); err != nil {
+		t.Fatalf("create_dimension: %v", err)
+	}
+	if _, err := run("add_dimension_member", map[string]any{"dimension_id": "Cost Center", "code": "LOG", "label": "LOG",
+		"properties": map[string]string{"P&L Line": "Distribution"}}); err == nil || !strings.Contains(err.Error(), metricformula.CodeInvalidPropertyName) {
+		t.Fatalf("add_dimension_member with a P&L Line key: err = %v, want %s", err, metricformula.CodeInvalidPropertyName)
+	}
+
+	// Declaring "region" adopts the "Region" values.
+	res, err := run("add_dimension_property", map[string]any{"dimension_id": "Cost Center", "name": "region"})
+	if err != nil || !strings.Contains(res, "1 member(s) have a value") || strings.Contains(res, "WARNING") {
+		t.Fatalf("declare region: %q, %v", res, err)
+	}
+	var stored string
+	if err := pool.QueryRow(ctx, `SELECT m.properties::text FROM model.dimension_member m JOIN model.dimension_def d ON d.id=m.dimension_id
+		WHERE d.revision_id=$1::uuid AND m.code='MFG'`, revID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stored, `"region": "NA"`) || strings.Contains(stored, `"Region"`) {
+		t.Errorf("MFG properties = %s, want the value under the declared spelling region", stored)
+	}
+
+	// Declaring a name no member uses says which names they do use.
+	res, err = run("add_dimension_property", map[string]any{"dimension_id": "Cost Center", "name": "p_and_l_line"})
+	if err != nil || !strings.Contains(res, "0 member(s) have a value") || !strings.Contains(res, "WARNING") || !strings.Contains(res, "PL_Line") {
+		t.Fatalf("declare p_and_l_line: %q, %v — want a warning naming PL_Line", res, err)
+	}
+	// A key matching a declaration in another case is stored under it.
+	if _, err := run("update_dimension_member", map[string]any{"dimension_id": "Cost Center", "code": "MFG",
+		"properties": map[string]string{"P_AND_L_LINE": "COGS"}}); err != nil {
+		t.Fatalf("update MFG: %v", err)
+	}
+	_ = pool.QueryRow(ctx, `SELECT m.properties::text FROM model.dimension_member m JOIN model.dimension_def d ON d.id=m.dimension_id
+		WHERE d.revision_id=$1::uuid AND m.code='MFG'`, revID).Scan(&stored)
+	if !strings.Contains(stored, `"p_and_l_line": "COGS"`) {
+		t.Errorf("MFG properties = %s, want p_and_l_line set under its declared spelling", stored)
+	}
+}

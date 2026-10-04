@@ -808,11 +808,9 @@ func TestCreateGrid_WithMetricsAndDimensions(t *testing.T) {
 
 // TestCreateGrid_SkipsMetricAlreadyInAnotherGrid is a regression test: a
 // metric already belonging to another grid used to be silently dropped from
-// the new grid's INSERT (ON CONFLICT DO NOTHING against grid_metric's
-// UNIQUE(metric_id)) while the returned message still reported every
-// requested metric as attached. It must now report the real attached count
-// and name what was skipped, without corrupting the metric's existing
-// grid membership.
+// the new grid's INSERT while the message reported every requested metric
+// as attached. The step now fails as a whole, naming the grid that holds the
+// metric, and leaves the metric's grid membership as it was.
 func TestCreateGrid_SkipsMetricAlreadyInAnotherGrid(t *testing.T) {
 	pool := setupWriteExecutorDB(t)
 	modelID := seedModel(t, pool)
@@ -827,34 +825,22 @@ func TestCreateGrid_SkipsMetricAlreadyInAnotherGrid(t *testing.T) {
 		t.Fatalf("seed metric into existing grid: %v", err)
 	}
 
-	msg, newGridID, err := exec.Execute(ctx, "create_grid", mustJSON(t, map[string]any{
+	_, _, err := exec.Execute(ctx, "create_grid", mustJSON(t, map[string]any{
 		"name": "New Grid", "revision_id": revID,
 		"metric_ids": []string{metricID, freeMetricID},
 	}))
-	if err != nil {
-		t.Fatalf("create_grid: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "Existing Grid") {
+		t.Fatalf("create_grid err = %v, want a refusal naming the grid that already holds the metric", err)
 	}
-	if !strings.Contains(msg, "1/2 metrics attached") {
-		t.Errorf("message = %q, want it to report 1/2 metrics attached", msg)
-	}
-	if !strings.Contains(msg, "Existing Grid") {
-		t.Errorf("message = %q, want it to name the grid the conflicting metric already belongs to", msg)
-	}
-
-	var newGridCount, existingGridCount int
-	_ = pool.QueryRow(ctx, `SELECT count(*) FROM model.grid_metric WHERE grid_id=$1::uuid AND metric_id=$2::uuid`, newGridID, metricID).Scan(&newGridCount)
+	var newGrids, existingGridCount, freeAttached int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM model.grid_def WHERE revision_id=$1::uuid AND name='New Grid'`, revID).Scan(&newGrids)
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM model.grid_metric WHERE grid_id=$1::uuid AND metric_id=$2::uuid`, existingGrid, metricID).Scan(&existingGridCount)
-	if newGridCount != 0 {
-		t.Errorf("conflicting metric landed in the new grid too (count=%d), want 0 — one-grid-per-metric violated", newGridCount)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM model.grid_metric WHERE metric_id=$1::uuid`, freeMetricID).Scan(&freeAttached)
+	if newGrids != 0 || freeAttached != 0 {
+		t.Errorf("a failed create_grid left %d grid(s) and %d attachment(s) behind", newGrids, freeAttached)
 	}
 	if existingGridCount != 1 {
 		t.Errorf("conflicting metric no longer in its original grid (count=%d), want 1", existingGridCount)
-	}
-
-	var freeMetricCount int
-	_ = pool.QueryRow(ctx, `SELECT count(*) FROM model.grid_metric WHERE grid_id=$1::uuid AND metric_id=$2::uuid`, newGridID, freeMetricID).Scan(&freeMetricCount)
-	if freeMetricCount != 1 {
-		t.Errorf("the non-conflicting metric wasn't attached (count=%d), want 1", freeMetricCount)
 	}
 }
 

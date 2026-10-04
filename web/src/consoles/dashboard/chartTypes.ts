@@ -16,7 +16,9 @@ export function formatValue(value: number | null | undefined, format: string | u
     case "currency":
       return `${currencySymbol}${new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 2 }).format(value)}`;
     case "percent":
-      return new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 2 }).format(value);
+      // Percent units, as Percentage metrics are stored (5.6 = 5.6%) and the
+      // grid and KPI tiles show them — not a fraction to multiply by 100.
+      return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value)}%`;
     case "compact":
       return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 2 }).format(value);
     default:

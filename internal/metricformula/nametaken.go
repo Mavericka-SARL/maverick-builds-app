@@ -2,6 +2,7 @@ package metricformula
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -66,4 +67,47 @@ func MemberCodeTaken(err error, code string) error {
 	}
 	return invalidCode(CodeMemberCodeTaken,
 		"the dimension already has a member with code %q; choose another code", code)
+}
+
+// CodeInvalidMetricName refuses a metric name a formula cannot write as it
+// is.
+const CodeInvalidMetricName = "INVALID_METRIC_NAME"
+
+// ValidMetricName holds a new or renamed metric to the technical-name rule
+// the console states (snake_case): letters, digits and underscores, starting
+// with a letter or underscore. A name such as "Planning % for Revenue" is
+// only reachable from a formula as {Planning % for Revenue}; the assistant
+// named every metric that way and lost three rounds to parse errors. Metrics
+// that already carry such a name keep it.
+func ValidMetricName(name string) error {
+	if !propertyNamePattern.MatchString(name) {
+		return invalidCode(CodeInvalidMetricName,
+			"metric name %q is not a technical name: use letters, digits and underscores, starting with a letter or underscore, for example %q", name, identifierFor(name))
+	}
+	return nil
+}
+
+// CodeInvalidMetricFormat refuses a display format the console does not have.
+const CodeInvalidMetricFormat = "INVALID_METRIC_FORMAT"
+
+// MetricFormats are the display formats the console offers.
+var MetricFormats = []string{"number", "percentage", "currency", "boolean", "text"}
+
+// ValidMetricFormat refuses a format outside MetricFormats ("" keeps the
+// default, number). Any string used to be stored: the AI Developer wrote
+// "percent", which every grid then showed as a plain number.
+func ValidMetricFormat(format string) error {
+	if format == "" {
+		return nil
+	}
+	for _, f := range MetricFormats {
+		if format == f {
+			return nil
+		}
+	}
+	hint := ""
+	if strings.HasPrefix(strings.ToLower(format), "percent") {
+		hint = ` — did you mean "percentage"?`
+	}
+	return invalidCode(CodeInvalidMetricFormat, "format %q is not one of %s%s", format, strings.Join(MetricFormats, ", "), hint)
 }

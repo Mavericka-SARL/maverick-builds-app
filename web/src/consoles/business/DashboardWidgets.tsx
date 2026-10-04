@@ -238,13 +238,19 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps }: { metricId: stri
   const value: number | undefined = g?.withheld?.includes(metricId) ? undefined : g?.totals?.[metricId];
   const fmt = metric?.format ?? "number";
 
+  // The same reading as the grid (PlanningGrid's fmtMetric): a Percentage
+  // metric is stored in percent units (67.7 shows as 67.7%), and the metric's
+  // decimals apply. The tile used to multiply by 100 (67.7 → 6772.1%) and to
+  // round currency to whole units whatever the metric said.
+  const decimals = metric?.format_decimals ?? (fmt === "percentage" ? 1 : 0);
+  const digits = { minimumFractionDigits: decimals, maximumFractionDigits: decimals };
   const formatted = value === undefined
     ? "—"
     : fmt === "currency"
-    ? `${metric?.format_currency || "$"}${value.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+    ? `${value < 0 ? "-" : ""}${metric?.format_currency || "$"}${Math.abs(value).toLocaleString("en-US", digits)}`
     : fmt === "percentage"
-    ? `${(value * 100).toFixed(1)}%`
-    : value.toLocaleString("en-US");
+    ? `${value.toLocaleString("en-US", digits)}%`
+    : value.toLocaleString("en-US", decimals ? digits : undefined);
 
   // No fallback to scope.member_code: a member absent from all_dimensions/
   // dimensions is exactly what a hidden dimension_member access rule looks

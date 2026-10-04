@@ -174,6 +174,7 @@ function ToolIcon({ tool }: { tool: string }) {
     case "update_dashboard_folder":
     case "update_business_role": return <Pencil {...props} />;
     case "reorder_dimension_members": return <ArrowUpDown {...props} />;
+    case "reorder_grid_metrics": return <ArrowUpDown {...props} />;
     case "create_grid":
     case "add_grid_metric":
     case "add_grid_dimension":   return <Table2 {...props} />;
@@ -227,7 +228,7 @@ const TOOL_LABELS: Record<string, string> = {
   create_revision: "Create revision",
   delete_dimension: "Delete dimension", delete_dimension_member: "Delete dimension member",
   generate_time_members: "Generate time periods", update_grid: "Rename grid", delete_grid: "Delete grid",
-  remove_grid_metric: "Remove grid metric", remove_grid_dimension: "Remove grid dimension",
+  remove_grid_metric: "Remove grid metric", reorder_grid_metrics: "Reorder grid metrics", remove_grid_dimension: "Remove grid dimension",
   update_grid_dimension: "Set grid display level", create_dashboard_folder: "Create dashboard folder",
   update_dashboard_folder: "Update dashboard folder", delete_dashboard_folder: "Delete dashboard folder",
   update_dashboard: "Update dashboard", delete_dashboard: "Delete dashboard",

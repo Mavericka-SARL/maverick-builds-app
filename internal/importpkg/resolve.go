@@ -134,21 +134,41 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 	// rows — an import file typically repeats the same member codes many times.
 	type memberInfo struct {
 		id     string
+		code   string // the member's own code — differs from the file's value when it matched by label or month
 		isLeaf bool
 		ok     bool
 	}
 	memberCache := map[string]memberInfo{}
-	lookupMember := func(dimID, code string) memberInfo {
-		key := dimID + "\x00" + code
+	lookupMember := func(dimID, value string) memberInfo {
+		key := dimID + "\x00" + value
 		if v, ok := memberCache[key]; ok {
 			return v
 		}
 		var info memberInfo
 		var hasChildren bool
-		if err := pool.QueryRow(ctx, `
-			SELECT m.id::text, EXISTS(SELECT 1 FROM model.dimension_member c WHERE c.parent_member_id = m.id)
-			FROM model.dimension_member m WHERE m.dimension_id=$1::uuid AND m.code=$2
-		`, dimID, code).Scan(&info.id, &hasChildren); err == nil {
+		const pick = `SELECT m.id::text, m.code, EXISTS(SELECT 1 FROM model.dimension_member c WHERE c.parent_member_id = m.id)
+			FROM model.dimension_member m `
+		// A code first; then, only when exactly one member qualifies, the
+		// member's label (sheets laid out for people carry "North America",
+		// not NA), and on a monthly time dimension a month name ("Jan",
+		// "January") for the one leaf period starting in that month.
+		// Anything ambiguous stays unknown.
+		found := pool.QueryRow(ctx, pick+`WHERE m.dimension_id=$1::uuid AND m.code=$2`, dimID, value).
+			Scan(&info.id, &info.code, &hasChildren) == nil
+		if !found {
+			found = pool.QueryRow(ctx, pick+`WHERE m.dimension_id=$1::uuid AND lower(m.label)=lower($2)
+				AND (SELECT count(*) FROM model.dimension_member o WHERE o.dimension_id=$1::uuid AND lower(o.label)=lower($2)) = 1`,
+				dimID, value).Scan(&info.id, &info.code, &hasChildren) == nil
+		}
+		if month := monthNumber(value); !found && month > 0 {
+			found = pool.QueryRow(ctx, pick+`JOIN model.dimension_def d ON d.id = m.dimension_id
+				WHERE m.dimension_id=$1::uuid AND d.dimension_type='time' AND d.time_granularity='month'
+				  AND m.period_start IS NOT NULL AND EXTRACT(MONTH FROM m.period_start) = $2
+				  AND (SELECT count(*) FROM model.dimension_member o WHERE o.dimension_id=$1::uuid
+				       AND o.period_start IS NOT NULL AND EXTRACT(MONTH FROM o.period_start) = $2) = 1`,
+				dimID, month).Scan(&info.id, &info.code, &hasChildren) == nil
+		}
+		if found {
 			info.isLeaf = !hasChildren
 			info.ok = true
 		}
@@ -249,7 +269,7 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 				rowValid = false
 				continue
 			}
-			dimMembers[meta.id] = code
+			dimMembers[meta.id] = info.code
 		}
 		if !rowValid {
 			continue
@@ -288,4 +308,20 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 	}
 
 	return staged, errs, nil
+}
+
+// monthNumber reads an English month name or its three-letter abbreviation
+// ("Jan", "january", "Sep", "Sept") as 1-12, and anything else as 0.
+func monthNumber(s string) int {
+	s = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(s), "."))
+	if s == "sept" {
+		return 9
+	}
+	for i, name := range []string{"january", "february", "march", "april", "may", "june",
+		"july", "august", "september", "october", "november", "december"} {
+		if s == name || (len(s) == 3 && s == name[:3]) {
+			return i + 1
+		}
+	}
+	return 0
 }

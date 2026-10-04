@@ -173,7 +173,7 @@ func TestDeveloperRoutesKeepLegitimateReach(t *testing.T) {
 		{"ws-owner", "PUT", "/api/developer/dimensions/" + f.dimA + "/members/order", "", map[string]any{"member_ids": []string{f.memberA}}},
 		{"ws-owner", "PATCH", "/api/developer/dimensions/" + f.dimA, "", map[string]string{"name": "Region A"}},
 		{"ws-owner", "PATCH", "/api/developer/metrics/" + f.metricC, "", map[string]string{"name": "Sales C"}},
-		{"ws-owner", "POST", "/api/developer/metrics", f.app1, map[string]any{"name": "Owner metric", "is_input": true, "agg_rule": "sum", "revision_id": f.revA}},
+		{"ws-owner", "POST", "/api/developer/metrics", f.app1, map[string]any{"name": "owner_metric", "is_input": true, "agg_rule": "sum", "revision_id": f.revA}},
 		{"ws-owner", "GET", "/api/developer/integration-connections", f.app2, nil},
 		{"ws-owner", "GET", "/api/developer/integrations/google-service-account", f.app1, nil},
 		// A plain developer of ws1a reaches every workspace of its tenant.
@@ -190,7 +190,7 @@ func TestDeveloperRoutesKeepLegitimateReach(t *testing.T) {
 			// Its developer grant builds in tenant 1.
 			call{sub, "PUT", "/api/developer/dimensions/" + f.dimA + "/members/order", "", map[string]any{"member_ids": []string{f.memberA}}},
 			call{sub, "PATCH", "/api/developer/metrics/" + f.crossOwnSubs[sub], "", map[string]string{"name": f.one(t, `SELECT name FROM model.metric_def WHERE id=$1::uuid`, f.crossOwnSubs[sub])}},
-			call{sub, "POST", "/api/developer/metrics", f.app1, map[string]any{"name": "Cross metric " + sub, "is_input": true, "agg_rule": "sum", "revision_id": f.revA}},
+			call{sub, "POST", "/api/developer/metrics", f.app1, map[string]any{"name": "cross_metric_" + strings.ReplaceAll(sub, "-", "_"), "is_input": true, "agg_rule": "sum", "revision_id": f.revA}},
 			// Its tenant_admin grant still administers tenant 2 on the
 			// developer-or-administrator and administrator routes.
 			call{sub, "GET", "/api/developer/integrations/google-service-account", f.app3, nil},

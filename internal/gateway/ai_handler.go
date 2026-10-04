@@ -53,10 +53,28 @@ var providerDefaultModels = map[string]string{
 // LLM call caps (SOW Phase 4). Each Chat() invocation counts as one call,
 // including intermediate read-tool round-trips within a single chat turn —
 // enforced both before a turn starts and before each loop iteration inside it.
+// AI_MAX_CALLS_PER_SESSION and AI_MAX_CALLS_PER_DAY set them per deployment:
+// building a whole model with a small model (gpt-4o-mini previews every
+// sheet, and each preview is a call) ran past both defaults.
 const (
-	maxLLMCallsPerSession    = 50
-	maxLLMCallsPerUserPerDay = 200
+	defaultLLMCallsPerSession    = 50
+	defaultLLMCallsPerUserPerDay = 200
 )
+
+// llmCallCaps returns the per-session and per-user-per-day caps.
+func llmCallCaps() (perSession, perDay int) {
+	return envPositiveInt("AI_MAX_CALLS_PER_SESSION", defaultLLMCallsPerSession),
+		envPositiveInt("AI_MAX_CALLS_PER_DAY", defaultLLMCallsPerUserPerDay)
+}
+
+// envPositiveInt reads a positive whole number from the environment, or
+// returns def when the variable is unset or not one.
+func envPositiveInt(name string, def int) int {
+	if n, err := strconv.Atoi(strings.TrimSpace(os.Getenv(name))); err == nil && n > 0 {
+		return n
+	}
+	return def
+}
 
 // buildProvider constructs an LLM provider for the given (provider, apiKey).
 // Shared by the chat path and the settings-test endpoint.
@@ -316,6 +334,7 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("check daily rate limit: %w", err), http.StatusInternalServerError)
 		return
 	}
+	maxLLMCallsPerSession, maxLLMCallsPerUserPerDay := llmCallCaps()
 	if sessionCalls >= maxLLMCallsPerSession {
 		jsonErr(w, fmt.Errorf("this session has reached its limit of %d LLM calls — start a new session to continue", maxLLMCallsPerSession), http.StatusTooManyRequests)
 		return
@@ -422,6 +441,10 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("streaming not supported"), http.StatusInternalServerError)
 		return
 	}
+	// One turn runs several LLM calls, previews and plan checks; the
+	// server's 120 s WriteTimeout cut longer turns off mid-stream and the
+	// request context's cancel threw the turn's work away.
+	extendAIWriteDeadline(w)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -603,6 +626,25 @@ turn:
 			_, _ = store.SaveMessage(ctx, sessionID, "tool",
 				fmt.Sprintf("Proposal created (%d step(s)) — awaiting developer confirmation.", len(args.Steps)),
 				nil, tc.ID, tc.Name)
+			// Every sibling call in the same message needs a result too, or the
+			// next turn replays an unanswered tool call and the provider refuses
+			// the whole session. One proposal is shown per turn, so a second
+			// propose_actions is told to come back after this one is decided.
+			for _, other := range llmResp.Message.ToolCalls {
+				if other.ID == tc.ID {
+					continue
+				}
+				var result string
+				if aiassistant.IsWriteTool(other.Name) {
+					result = "Not created: only one proposal is shown per turn. After the developer confirms or rejects the proposal above, call propose_actions again with these steps."
+				} else {
+					var execErr error
+					if result, execErr = readExecutor.Execute(ctx, other.Name, other.Arguments); execErr != nil {
+						result = fmt.Sprintf("error: %v", execErr)
+					}
+				}
+				_, _ = store.SaveMessage(ctx, sessionID, "tool", result, nil, other.ID, other.Name)
+			}
 
 			allMsgs, _ := store.ListMessages(ctx, sessionID)
 			if allMsgs == nil {
@@ -663,6 +705,8 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
 		return
 	}
+	// Up to 50 steps, file imports and their recalculation included.
+	extendAIWriteDeadline(w)
 	ctx := r.Context()
 	a, err := h.resolveActor(ctx, r)
 	if err != nil {
@@ -751,6 +795,9 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 	hooks.ImportFile = func(ctx context.Context, req aiassistant.FileImportRequest) (string, error) {
 		return h.aiImportFile(ctx, a, sessionID, req)
 	}
+	hooks.RecallPreview = func(ctx context.Context, file, sheet string) (aiassistant.FileImportRequest, bool) {
+		return h.recallCleanPreview(ctx, sessionID, file, sheet)
+	}
 	executor := aiassistant.NewWriteExecutorWithActor(h.db.For(ctx), modelID, revID, a.UserID).WithHooks(hooks)
 	_ = pStore.SetStatus(ctx, proposalID, "confirmed")
 
@@ -789,6 +836,10 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 		finalStatus = "partial"
 	}
 	_ = pStore.SetStatus(ctx, proposalID, finalStatus)
+	// Calculated metrics the plan created, changed or placed on a grid get
+	// their results now, as they do when a developer saves one: an AI-built
+	// P&L stayed blank until an input happened to change.
+	go h.recalcRevisionCalculated(context.WithoutCancel(ctx), modelID, revID) //nolint:contextcheck
 
 	// Save a summary message into the chat.
 	summary := buildExecutionSummary(steps)
@@ -1808,4 +1859,14 @@ func (h *handler) aiWriteHooks(modelID, userID string) aiassistant.Hooks {
 			return h.backfillFormMapping(ctx, integrationID, userID)
 		},
 	}
+}
+
+// aiTurnWriteDeadline bounds one AI Developer turn or confirmation, in place
+// of the server's general WriteTimeout (120 s).
+const aiTurnWriteDeadline = 15 * time.Minute
+
+// extendAIWriteDeadline lets a long AI turn finish writing its response. A
+// writer that cannot take a deadline (a test recorder) is left as it is.
+func extendAIWriteDeadline(w http.ResponseWriter) {
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(aiTurnWriteDeadline))
 }

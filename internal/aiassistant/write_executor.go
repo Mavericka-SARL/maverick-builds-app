@@ -93,6 +93,12 @@ type Hooks struct {
 	// Import Wizard's pipeline (parse, column map, name resolution, write
 	// guard, plan limits, recalculation, audit) and returns a summary.
 	ImportFile func(ctx context.Context, req FileImportRequest) (string, error)
+	// RecallPreview returns the target, reshape and column map of this
+	// session's latest preview_file_import of a file's sheet that reported no
+	// errors. An import_file_data naming only the file and sheet repeats it:
+	// the assistant found a clean preview live and then proposed the import
+	// without the params it had just proven.
+	RecallPreview func(ctx context.Context, file, sheet string) (FileImportRequest, bool)
 }
 
 // WithHooks sets the executor's gateway hooks and returns it.
@@ -333,11 +339,25 @@ func (e *WriteExecutor) requireInModel(ctx context.Context, kind, id string) (st
 		if err := e.pool.QueryRow(ctx, q.counterpart, e.modelID, e.revID, id).Scan(&mapped); err == nil {
 			return mapped, nil
 		}
-		return "", fmt.Errorf("%s %q not found in the working revision — pass its exact name or id", kind, id)
+		return "", fmt.Errorf("%s %q not found in the working revision — pass its exact name or id%s", kind, id, e.availableNames(ctx, kind))
 	}
 	var owner, revision, identity string
 	if err := e.pool.QueryRow(ctx, q.lookup, id).Scan(&owner, &revision, &identity); err != nil {
-		return "", fmt.Errorf("%s %s not found in this model", kind, id)
+		// A UUID one or two characters off the id of exactly one of the
+		// model's grids (metrics, …) is that one: the model copies ids from
+		// list output and slips a character — live, "4d0b" for "4d0d", again
+		// after the error printed the right one. It is looked for across the
+		// model's revisions, because the plan was checked on the active
+		// revision and runs in the draft copied from it; the counterpart
+		// remap below then finds the draft's own.
+		near := e.nearID(ctx, kind, id)
+		if near == "" {
+			return "", fmt.Errorf("%s %s not found in this model%s", kind, id, e.availableNames(ctx, kind))
+		}
+		id = near
+		if err := e.pool.QueryRow(ctx, q.lookup, id).Scan(&owner, &revision, &identity); err != nil {
+			return "", fmt.Errorf("%s %s not found in this model%s", kind, id, e.availableNames(ctx, kind))
+		}
 	}
 	if owner != e.modelID {
 		return "", fmt.Errorf("%s %s belongs to a different model", kind, id)
@@ -467,6 +487,12 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 	}
 	if p.Name == "" {
 		return "", "", fmt.Errorf("name is required")
+	}
+	if err := metricformula.ValidMetricName(p.Name); err != nil {
+		return "", "", err
+	}
+	if err := metricformula.ValidMetricFormat(p.Format); err != nil {
+		return "", "", err
 	}
 	if !p.IsInput && p.Formula == "" {
 		return "", "", fmt.Errorf("formula is required for calculated metrics")
@@ -620,6 +646,15 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 	}
 	if p.Name == "" {
 		p.Name = storedName
+	} else if p.Name != storedName {
+		if err := metricformula.ValidMetricName(p.Name); err != nil {
+			return "", "", err
+		}
+	}
+	if has("format") {
+		if err := metricformula.ValidMetricFormat(p.Format); err != nil {
+			return "", "", err
+		}
 	}
 	formulaSent := has("formula") && p.Formula != ""
 	for _, k := range []struct {
@@ -833,6 +868,15 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 		return "", "", err
 	}
 
+	// A member property key no declaration could ever name is refused
+	// before anything is written: its values would be unreadable.
+	for _, m := range p.Members {
+		for k := range m.Properties {
+			if err := metricformula.CheckPropertyKey(strings.TrimSpace(k)); err != nil {
+				return "", "", fmt.Errorf("member %q: %w", m.Code, err)
+			}
+		}
+	}
 	var newID string
 	var granularity *string
 	var fiscalStart *int
@@ -1041,8 +1085,12 @@ func (e *WriteExecutor) addDimensionMember(ctx context.Context, raw json.RawMess
 		return "", "", err
 	}
 	p.DimensionID = mappedDimID
-	propsJSON := memberPropertiesJSON(p.Properties)
-	propNote := e.undeclaredPropertyNote(ctx, p.DimensionID, p.Properties)
+	props, err := metricformula.CheckMemberProperties(ctx, e.pool, p.DimensionID, p.Properties, nil)
+	if err != nil {
+		return "", "", err
+	}
+	propsJSON := memberPropertiesJSON(props)
+	propNote := e.undeclaredPropertyNote(ctx, p.DimensionID, props)
 	if err := e.checkMembers(ctx, p.DimensionID, 1); err != nil {
 		return "", "", err
 	}
@@ -1319,14 +1367,23 @@ func (e *WriteExecutor) updateDimensionMember(ctx context.Context, raw json.RawM
 	}
 
 	if len(p.Properties) > 0 {
-		propJSON, _ := json.Marshal(p.Properties)
+		var stored map[string]string
+		var storedJSON []byte
+		if err := e.pool.QueryRow(ctx, `SELECT COALESCE(properties,'{}'::jsonb) FROM model.dimension_member WHERE id=$1::uuid`, memberID).Scan(&storedJSON); err == nil {
+			_ = json.Unmarshal(storedJSON, &stored)
+		}
+		props, err := metricformula.CheckMemberProperties(ctx, e.pool, p.DimensionID, p.Properties, stored)
+		if err != nil {
+			return "", "", err
+		}
+		propJSON, _ := json.Marshal(props)
 		if _, err := e.pool.Exec(ctx, `
 			UPDATE model.dimension_member SET properties = COALESCE(properties,'{}'::jsonb) || $2::jsonb WHERE id=$1::uuid
 		`, memberID, string(propJSON)); err != nil {
 			return "", "", fmt.Errorf("merge properties: %w", err)
 		}
-		changed = append(changed, fmt.Sprintf("properties merged (%d)%s", len(p.Properties),
-			e.undeclaredPropertyNote(ctx, p.DimensionID, p.Properties)))
+		changed = append(changed, fmt.Sprintf("properties merged (%d)%s", len(props),
+			e.undeclaredPropertyNote(ctx, p.DimensionID, props)))
 	}
 	// What the developer's member edit does to stored data: a new code
 	// re-keys the facts, results and widget settings filed under the old
@@ -1382,8 +1439,17 @@ func (e *WriteExecutor) addDimensionProperty(ctx context.Context, raw json.RawMe
 	`, mappedDimID, p.Name, p.DataType).Scan(&newID); err != nil {
 		return "", "", fmt.Errorf("insert dimension property: %w", err)
 	}
-	return fmt.Sprintf("Property '%s' (%s) declared (id: %s) — formulas can now read it as <dimension>.%s",
-		p.Name, p.DataType, newID, p.Name), newID, nil
+	withValue, undeclared, err := metricformula.AdoptPropertyValues(ctx, e.pool, mappedDimID, p.Name)
+	if err != nil {
+		return "", "", fmt.Errorf("adopt property values: %w", err)
+	}
+	msg := fmt.Sprintf("Property '%s' (%s) declared (id: %s) — formulas can now read it as <dimension>.%s; %d member(s) have a value",
+		p.Name, p.DataType, newID, p.Name, withValue)
+	if withValue == 0 && len(undeclared) > 0 {
+		msg += fmt.Sprintf(". WARNING: the members' values are under %s, not '%s' — set them under '%s' with update_dimension_member, or declare the name they use, or every formula reading '%s' sees blanks",
+			strings.Join(undeclared, ", "), p.Name, p.Name, p.Name)
+	}
+	return msg, newID, nil
 }
 
 // ── update_dimension_property / delete_dimension_property ────────────────────
@@ -1663,7 +1729,7 @@ func (e *WriteExecutor) undeclaredPropertyNote(ctx context.Context, dimensionID 
 		return ""
 	}
 	sort.Strings(missing)
-	return fmt.Sprintf(" — note: %s not declared on this dimension; propose add_dimension_property to let formulas read it",
+	return fmt.Sprintf(" — note: %s not declared on this dimension; propose add_dimension_property with exactly that name to let formulas read it",
 		strings.Join(missing, ", "))
 }
 
@@ -1674,6 +1740,11 @@ type createGridParams struct {
 	RevisionID   string   `json:"revision_id"`
 	MetricIDs    []string `json:"metric_ids"`
 	DimensionIDs []string `json:"dimension_ids"`
+	// "metrics" and "dimensions" are what the model writes (by name): they
+	// used to be dropped without a word, leaving every grid it created with
+	// no metric and no dimension.
+	Metrics    []string `json:"metrics"`
+	Dimensions []string `json:"dimensions"`
 }
 
 func (e *WriteExecutor) createGrid(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -1684,6 +1755,8 @@ func (e *WriteExecutor) createGrid(ctx context.Context, raw json.RawMessage) (st
 	if p.Name == "" {
 		return "", "", fmt.Errorf("name is required")
 	}
+	p.MetricIDs = append(p.MetricIDs, p.Metrics...)
+	p.DimensionIDs = append(p.DimensionIDs, p.Dimensions...)
 	revID := e.effectiveRevision(p.RevisionID)
 
 	var newID string
@@ -1728,12 +1801,18 @@ func (e *WriteExecutor) createGrid(ctx context.Context, raw json.RawMessage) (st
 		attachedDims++
 	}
 
-	msg := fmt.Sprintf("Grid '%s' created (id: %s, %d/%d metrics attached, %d/%d dimensions attached)",
-		p.Name, newID, attachedMetrics, len(p.MetricIDs), attachedDims, len(p.DimensionIDs))
+	// All or nothing: a grid missing what the step listed is not the grid
+	// that was proposed. Reported as "not attached" it passed the plan check
+	// with formulas written in place of metric names.
 	if len(skipped) > 0 {
-		msg += " — not attached: " + strings.Join(skipped, "; ")
+		// The grid row and what did attach go with it (grid_metric and
+		// grid_dimension cascade): a failed step leaves nothing behind.
+		_, _ = e.pool.Exec(ctx, `DELETE FROM model.grid_def WHERE id=$1::uuid`, newID)
+		return "", "", fmt.Errorf("grid %q: could not attach %s — create each metric (create_metric) in an earlier step and list it here by name",
+			p.Name, strings.Join(skipped, "; "))
 	}
-	return msg, newID, nil
+	return fmt.Sprintf("Grid '%s' created (id: %s, %d metrics, %d dimensions attached)",
+		p.Name, newID, attachedMetrics, attachedDims), newID, nil
 }
 
 // ── add_grid_metric ───────────────────────────────────────────────────────────
@@ -1975,6 +2054,11 @@ func (e *WriteExecutor) addDashboardWidget(ctx context.Context, raw json.RawMess
 			return "", "", propErr
 		}
 		p.WidgetProps = remapped
+		if p.RefID != nil {
+			if err := modeledit.CheckChartMetrics(ctx, e.pool, *p.RefID, p.WidgetProps); err != nil {
+				return "", "", err
+			}
+		}
 	}
 	if p.SizeW < 20 {
 		p.SizeW = 200
@@ -3112,4 +3196,89 @@ func validationName(requested, stored string) string {
 		return requested
 	}
 	return stored
+}
+
+// availableNames lists what the working revision has of a kind, for a
+// not-found message: the assistant invented a grid id live and was told only
+// that it did not exist.
+func (e *WriteExecutor) availableNames(ctx context.Context, kind string) string {
+	table := map[string]string{"grid": "model.grid_def", "metric": "model.metric_def", "dimension": "model.dimension_def", "dashboard": "model.dashboard_def"}[kind]
+	if table == "" || e.revID == "" {
+		return ""
+	}
+	rows, err := e.pool.Query(ctx, `SELECT name, id::text FROM `+table+` WHERE model_id=$1::uuid AND revision_id=$2::uuid ORDER BY name LIMIT 40`, e.modelID, e.revID)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var name, id string
+		if rows.Scan(&name, &id) == nil {
+			items = append(items, fmt.Sprintf("%s (%s)", name, id))
+		}
+	}
+	if len(items) == 0 {
+		return fmt.Sprintf(" (the working revision has no %s yet)", kind)
+	}
+	return fmt.Sprintf(" — the working revision's %ss: %s", kind, strings.Join(items, "; "))
+}
+
+// nearID returns the one id of the model's resources of a kind (any
+// revision) within two edits of id, or "".
+func (e *WriteExecutor) nearID(ctx context.Context, kind, id string) string {
+	table := map[string]string{"grid": "model.grid_def", "metric": "model.metric_def", "dimension": "model.dimension_def", "dashboard": "model.dashboard_def"}[kind]
+	if table == "" {
+		return ""
+	}
+	rows, err := e.pool.Query(ctx, `SELECT id::text FROM `+table+` WHERE model_id=$1::uuid`, e.modelID)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	match := ""
+	for rows.Next() {
+		var cand string
+		if rows.Scan(&cand) != nil || editDistanceWithin(strings.ToLower(id), cand, 2) < 0 {
+			continue
+		}
+		if match != "" {
+			return "" // two near matches: not a slip, a guess
+		}
+		match = cand
+	}
+	return match
+}
+
+// editDistanceWithin is the edit distance of a and b when it is at most max,
+// else -1.
+func editDistanceWithin(a, b string, max int) int {
+	if d := len(a) - len(b); d > max || -d > max {
+		return -1
+	}
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur[0] = i
+		rowMin := cur[0]
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+			rowMin = min(rowMin, cur[j])
+		}
+		if rowMin > max {
+			return -1
+		}
+		prev, cur = cur, prev
+	}
+	if prev[len(b)] > max {
+		return -1
+	}
+	return prev[len(b)]
 }

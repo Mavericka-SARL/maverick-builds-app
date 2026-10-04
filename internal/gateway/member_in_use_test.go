@@ -60,7 +60,7 @@ func TestDefinitionNameTakenAndPartialMetricPatch(t *testing.T) {
 
 	body := f.metricBody("double", "revenue * 2")
 	body["agg_rule"] = "average"
-	body["format"] = "percent"
+	body["format"] = "percentage"
 	body["format_decimals"] = 2
 	body["time_summary"] = "last"
 	f.metric["double"] = f.call("POST", "/api/developer/metrics", body)
@@ -79,7 +79,7 @@ func TestDefinitionNameTakenAndPartialMetricPatch(t *testing.T) {
 		f.metric["double"]).Scan(&name, &formulaText, &agg, &format, &decimals, &summary); err != nil {
 		t.Fatal(err)
 	}
-	if name != "double" || formulaText != "revenue * 2 + 1" || agg != "average" || format != "percent" || decimals != 2 || summary != "last" {
+	if name != "double" || formulaText != "revenue * 2 + 1" || agg != "average" || format != "percentage" || decimals != 2 || summary != "last" {
 		t.Errorf("after a formula-only PATCH: name=%q formula=%q agg=%q format=%q decimals=%d summary=%q; want the formula changed and the rest kept",
 			name, formulaText, agg, format, decimals, summary)
 	}

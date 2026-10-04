@@ -28,6 +28,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode"
@@ -110,7 +111,7 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 		if errors.As(err, &ae) {
 			return nil, invalidCode(ae.Code, "%s", ae.Message)
 		}
-		return nil, invalid("formula does not parse: %v", err)
+		return nil, invalid("formula does not parse: %v%s", err, singleQuoteHint(req.Formula))
 	}
 
 	// 2. Every called function must exist.
@@ -144,6 +145,11 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 	rd, err := loadRevisionDims(ctx, pool, req.ModelID, req.RevisionID)
 	if err != nil {
 		return nil, err
+	}
+	if node, pErr := formula.Parse(req.Formula); pErr == nil {
+		if err := checkPeriodComparisons(node, rd); err != nil {
+			return nil, err
+		}
 	}
 	sourceIDs := map[string]string{} // UPPER-CASE referenced name -> metric ID
 	var edges []Edge
@@ -438,4 +444,17 @@ func looseName(s string) string {
 		}
 	}
 	return b.String()
+}
+
+var singleQuoted = regexp.MustCompile(`'[^']*'`)
+
+// singleQuoteHint names the fix when a formula quotes text with single
+// quotes: LOOKUP(x, Region, 'ALL_REGIONS') failed to parse with no word on
+// why (the AI Developer wrote it live).
+func singleQuoteHint(text string) string {
+	m := singleQuoted.FindString(text)
+	if m == "" {
+		return ""
+	}
+	return fmt.Sprintf(" — text goes in double quotes: write \"%s\", not %s", strings.Trim(m, "'"), m)
 }

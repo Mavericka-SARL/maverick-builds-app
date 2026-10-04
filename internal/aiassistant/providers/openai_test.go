@@ -132,6 +132,37 @@ func TestOpenAIProvider_Chat_ToolCallRoundtrip(t *testing.T) {
 	}
 }
 
+// A read tool on an empty revision returns "". Sent as-is, go-openai drops the
+// content field and OpenAI answers 400 "expected a string, got null"; the
+// stored history then replays it on every later turn of the session.
+func TestOpenAIProvider_Chat_EmptyToolResultStillHasContent(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&captured)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id": "c", "object": "chat.completion", "created": 1, "model": "gpt-4",
+			"choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "ok"}}]}`))
+	}))
+	defer server.Close()
+
+	p := NewOpenAICompatible("test-key", server.URL, "openai")
+	if _, err := p.Chat(t.Context(), ChatRequest{
+		Model: "gpt-4",
+		Messages: []Message{
+			{Role: "user", Content: "what dimensions are there?"},
+			{Role: "assistant", ToolCalls: []ToolCall{{ID: "call_1", Name: "list_dimensions", Arguments: json.RawMessage(`{}`)}}},
+			{Role: "tool", ToolCallID: "call_1", Content: ""},
+		},
+	}); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	msgs, _ := captured["messages"].([]any)
+	toolMsg := msgs[len(msgs)-1].(map[string]any)
+	if content, ok := toolMsg["content"].(string); !ok || content == "" {
+		t.Fatalf("tool message must carry non-empty string content, got %#v", toolMsg["content"])
+	}
+}
+
 func TestOpenAIProvider_Chat_EmptyChoicesErrors(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -304,5 +335,39 @@ func TestOpenAICompatible_BaseURLWithPathPrefix(t *testing.T) {
 	}
 	if len(resp.Message.ToolCalls) != 1 || resp.Message.ToolCalls[0].Name != "list_models" {
 		t.Fatalf("tool calls = %+v", resp.Message.ToolCalls)
+	}
+}
+
+// gpt-4o-mini sent the same propose_actions twice in one message (only one
+// proposal is shown per turn), so requests with tools ask OpenAI for one call
+// at a time. Other OpenAI-compatible vendors do not all accept the field.
+func TestOpenAIProvider_Chat_OneToolCallPerMessageOnOpenAIOnly(t *testing.T) {
+	for _, tc := range []struct {
+		label string
+		want  bool
+	}{{"openai", true}, {"mistral", false}} {
+		var captured map[string]any
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewDecoder(r.Body).Decode(&captured)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id": "c", "object": "chat.completion", "created": 1, "model": "m",
+				"choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "ok"}}]}`))
+		}))
+		p := NewOpenAICompatible("k", server.URL, tc.label)
+		if _, err := p.Chat(t.Context(), ChatRequest{
+			Model:    "m",
+			Messages: []Message{{Role: "user", Content: "hi"}},
+			Tools:    []ToolDef{{Name: "list_metrics", Parameters: json.RawMessage(`{"type":"object"}`)}},
+		}); err != nil {
+			t.Fatalf("%s: Chat: %v", tc.label, err)
+		}
+		server.Close()
+		v, present := captured["parallel_tool_calls"]
+		if tc.want && (!present || v != false) {
+			t.Errorf("%s: parallel_tool_calls = %v (present %v), want false", tc.label, v, present)
+		}
+		if !tc.want && present {
+			t.Errorf("%s: parallel_tool_calls sent (%v), want it left out", tc.label, v)
+		}
 	}
 }

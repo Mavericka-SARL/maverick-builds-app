@@ -19,6 +19,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
 	"github.com/mavericks-engine/mavericks/internal/aiassistant/providers"
@@ -343,5 +344,167 @@ func TestSendMessage_OversizedProposalRejectedThenBatched(t *testing.T) {
 	}
 	if stepCount != 50 {
 		t.Errorf("stored proposal has %d steps, want 50", stepCount)
+	}
+}
+
+// TestSendMessage_SiblingToolCallsAllAnswered: gpt-4o-mini issues parallel
+// tool calls — live, two propose_actions in one message. Only the first
+// becomes the proposal, but every call in that message must get a stored tool
+// result: a replayed history with an unanswered call is refused by the
+// provider ("tool_calls must be followed by tool messages"), which broke every
+// later turn of the session and silently dropped the second plan.
+func TestSendMessage_SiblingToolCallsAllAnswered(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.New(t, migrationfs.FS, ".")
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("query %q: %v", sql, err)
+		}
+		return id
+	}
+	custID := q(`INSERT INTO core.customer (name, plan) VALUES ('SiblingCo', 'enterprise') RETURNING id::text`)
+	wsID := q(`INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'ws') RETURNING id::text`, custID)
+	appID := q(`INSERT INTO core.application (workspace_id, customer_id, name, mode) VALUES ($1::uuid, $2::uuid, 'App', 'planning') RETURNING id::text`, wsID, custID)
+	modelID := q(`INSERT INTO core.model (application_id, name) VALUES ($1::uuid, 'M') RETURNING id::text`, appID)
+	revID := q(`INSERT INTO model.revision (model_id, name) VALUES ($1::uuid, 'Working') RETURNING id::text`, modelID)
+	if _, err := pool.Exec(ctx, `UPDATE core.model SET active_revision_id=$1::uuid, active_revision_name='Working' WHERE id=$2::uuid`, revID, modelID); err != nil {
+		t.Fatal(err)
+	}
+	devSub := "sibling-dev"
+	devID := q(`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ($1, 'dev@siblingco.com', 'Dev', $2::uuid) RETURNING id::text`, devSub, custID)
+	if _, err := pool.Exec(ctx, `INSERT INTO identity.role_assignment (user_id, role, workspace_id) VALUES ($1::uuid, 'developer', $2::uuid)`, devID, wsID); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := func(dim string) json.RawMessage {
+		b, _ := json.Marshal(map[string]any{"steps": []map[string]any{
+			{"tool": "create_dimension", "description": "Create " + dim, "params": map[string]any{"name": dim}},
+		}})
+		return b
+	}
+	fake := &scriptedProvider{resp: providers.ChatResponse{
+		FinishReason: "tool_calls",
+		Message: providers.Message{Role: "assistant", ToolCalls: []providers.ToolCall{
+			{ID: "call_a", Name: "propose_actions", Arguments: plan("Region")},
+			{ID: "call_b", Name: "propose_actions", Arguments: plan("Product")},
+			{ID: "call_c", Name: "list_metrics", Arguments: json.RawMessage(`{}`)},
+		}},
+	}}
+	t.Setenv("DEV_MODE", "true")
+	h := &handler{log: logger.New("test"), db: tenantdb.NewHandle(pool, nil), devMode: true, testProvider: fake}
+	mux := http.NewServeMux()
+	h.registerRoutes(mux, nil)
+	srv := httptest.NewServer(appIDMiddleware(mux))
+	t.Cleanup(srv.Close)
+
+	chatStore := aiassistant.NewChatStore(pool)
+	sess, err := chatStore.CreateSession(ctx, appID, modelID, devID, "openai", "gpt-4o-mini")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := chatStore.SetTitleIfEmpty(ctx, sess.ID, "pre-titled"); err != nil {
+		t.Fatalf("pre-title session: %v", err)
+	}
+	reqBody, _ := json.Marshal(map[string]string{"content": "add dimensions"})
+	req, _ := http.NewRequestWithContext(ctx, "POST", srv.URL+"/api/ai/sessions/"+sess.ID+"/messages", bytes.NewReader(reqBody))
+	req.Header.Set("X-Dev-User", devSub)
+	req.Header.Set("X-App-Id", appID)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	body := new(bytes.Buffer)
+	_, _ = body.ReadFrom(resp.Body)
+	_ = resp.Body.Close()
+	if !strings.Contains(body.String(), "event: proposal") {
+		t.Fatalf("no proposal event:\n%s", body.String())
+	}
+
+	msgs, err := chatStore.ListMessages(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	results := map[string]string{}
+	for _, m := range msgs {
+		if m.Role == "tool" {
+			results[m.ToolCallID] = m.Content
+		}
+	}
+	for _, id := range []string{"call_a", "call_b", "call_c"} {
+		if results[id] == "" {
+			t.Errorf("tool call %s has no stored result; stored: %v", id, results)
+		}
+	}
+	if !strings.Contains(results["call_b"], "propose_actions again") {
+		t.Errorf("second proposal's result should say to propose again later, got %q", results["call_b"])
+	}
+}
+
+// A calculated metric the assistant creates and places on a grid gets its
+// results when the plan is confirmed, as a developer's save does. An
+// AI-built P&L stayed blank until an input happened to change.
+func TestConfirmedCalculatedMetricIsCalculated(t *testing.T) {
+	f := newSalesFileFixture(t)
+	ctx, pool := f.ctx, f.pool
+	var revenueID, geoID, periodID string
+	_ = pool.QueryRow(ctx, `SELECT id::text FROM model.metric_def WHERE revision_id=$1::uuid AND name='revenue'`, f.revID).Scan(&revenueID)
+	_ = pool.QueryRow(ctx, `SELECT id::text FROM model.dimension_def WHERE revision_id=$1::uuid AND name='geography'`, f.revID).Scan(&geoID)
+	_ = pool.QueryRow(ctx, `SELECT id::text FROM model.dimension_def WHERE revision_id=$1::uuid AND name='period'`, f.revID).Scan(&periodID)
+	dm, _ := json.Marshal(map[string]string{geoID: "CA", periodID: "Q1"})
+	if _, err := pool.Exec(ctx, `INSERT INTO runtime.fact_input (model_id, revision_id, revision_name, metric_id, dim_members, value)
+		VALUES ($1::uuid,$2::uuid,'Working',$3::uuid,$4::jsonb,10)`, f.modelID, f.revID, revenueID, string(dm)); err != nil {
+		t.Fatal(err)
+	}
+	plan, _ := json.Marshal(map[string]any{"steps": []map[string]any{
+		proposeStep("create_metric", "double revenue", map[string]any{"name": "double_revenue", "formula": "revenue * 2", "is_input": false}),
+		proposeStep("add_grid_metric", "on the grid", map[string]any{"grid_id": "Sales", "metric_id": "<created in step 1>"}),
+	}})
+	fake := &scriptedProvider{resp: providers.ChatResponse{FinishReason: "tool_calls", Message: providers.Message{Role: "assistant",
+		ToolCalls: []providers.ToolCall{{ID: "call_1", Name: "propose_actions", Arguments: plan}}}}}
+	_, do := f.serve(t, fake)
+	chatStore := aiassistant.NewChatStore(pool)
+	sess, err := chatStore.CreateSession(ctx, f.appID, f.modelID, f.devID, "openai", "gpt-4o-mini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = chatStore.SetTitleIfEmpty(ctx, sess.ID, "pre-titled")
+	if status, out := do(f.devSub, "POST", "/api/ai/sessions/"+sess.ID+"/messages", map[string]string{"content": "double it"}); status != http.StatusOK {
+		t.Fatalf("message: %d %s", status, out)
+	}
+	pending, _ := aiassistant.NewProposalStore(pool).ListPendingProposals(ctx, sess.ID)
+	if len(pending) != 1 {
+		t.Fatalf("want one pending proposal, got %d", len(pending))
+	}
+	status, out := do(f.devSub, "POST", "/api/ai/sessions/"+sess.ID+"/proposals/"+pending[0].ID+"/confirm", nil)
+	if status != http.StatusOK {
+		t.Fatalf("confirm: %d %s", status, out)
+	}
+	var res struct {
+		Session struct {
+			DraftRevisionID string `json:"draft_revision_id"`
+		} `json:"session"`
+	}
+	_ = json.Unmarshal(out, &res)
+	draft := res.Session.DraftRevisionID
+	var gridID, metricID string
+	_ = pool.QueryRow(ctx, `SELECT id::text FROM model.grid_def WHERE revision_id=$1::uuid AND name='Sales'`, draft).Scan(&gridID)
+	_ = pool.QueryRow(ctx, `SELECT id::text FROM model.metric_def WHERE revision_id=$1::uuid AND name='double_revenue'`, draft).Scan(&metricID)
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		status, body := do(f.devSub, "GET", "/api/grid?grid_def_id="+gridID+"&revision_id="+draft, nil)
+		var g struct {
+			Totals map[string]float64 `json:"totals"`
+		}
+		_ = json.Unmarshal(body, &g)
+		if status == http.StatusOK && g.Totals[metricID] == 20 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("double_revenue total = %v in the draft after confirming, want 20 without any input change", g.Totals[metricID])
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 }

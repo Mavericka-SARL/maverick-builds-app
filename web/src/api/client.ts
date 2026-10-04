@@ -2243,6 +2243,8 @@ export const api = {
     apiFetch<{ status: string }>(`/api/developer/grids/${id}`, { method: "DELETE" }),
   addGridMetric: (gridId: string, metricId: string) =>
     apiFetch<{ status: string }>(`/api/developer/grids/${gridId}/metrics/${metricId}`, { method: "POST" }),
+  reorderGridMetrics: (gridId: string, metricIds: string[]) =>
+    apiFetch<{ status: string }>(`/api/developer/grids/${gridId}/metrics/order`, { method: "PUT", body: JSON.stringify({ metric_ids: metricIds }) }),
   removeGridMetric: (gridId: string, metricId: string) =>
     apiFetch<{ status: string }>(`/api/developer/grids/${gridId}/metrics/${metricId}`, { method: "DELETE" }),
   addGridDimension: (gridId: string, dimId: string) =>

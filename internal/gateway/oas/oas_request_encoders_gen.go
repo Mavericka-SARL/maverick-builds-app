@@ -642,6 +642,20 @@ func encodeReorderDimensionMembersRequest(
 	return nil
 }
 
+func encodeReorderGridMetricsRequest(
+	req *ReorderGridMetricsReq,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
 func encodeRunIntegrationRequest(
 	req *IntegrationRunRequest,
 	r *http.Request,

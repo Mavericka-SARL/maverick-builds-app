@@ -1265,6 +1265,14 @@ type Handler interface {
 	//
 	// PUT /api/developer/dimensions/{dimId}/members/order
 	ReorderDimensionMembers(ctx context.Context, req *ReorderDimensionMembersReq, params ReorderDimensionMembersParams) (ReorderDimensionMembersRes, error)
+	// ReorderGridMetrics implements reorderGridMetrics operation.
+	//
+	// Metric_ids must be exactly the grid's metrics, each once, in the wanted order — the row or
+	// column order of the grid, its grid widgets and exports. A metric added later is appended. Audited
+	// as grid.updated (metrics_reordered). A grid outside the caller's scope answers 404.
+	//
+	// PUT /api/developer/grids/{id}/metrics/order
+	ReorderGridMetrics(ctx context.Context, req *ReorderGridMetricsReq, params ReorderGridMetricsParams) (ReorderGridMetricsRes, error)
 	// ResendAdminUserInvitation implements resendAdminUserInvitation operation.
 	//
 	// Refused (403) to anyone but a platform admin unless the account's home is one of the caller's

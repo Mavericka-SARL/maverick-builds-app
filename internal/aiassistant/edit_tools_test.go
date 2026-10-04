@@ -98,25 +98,30 @@ func TestCreateGrid_AttachesThroughTheGridChecks(t *testing.T) {
 	h.must("create_metric", map[string]any{"name": "revenue", "is_input": true})
 	h.must("create_dimension", map[string]any{"name": "region"})
 
-	msg, gridID := h.must("create_grid", map[string]any{
+	// Another model's metric and another revision's are refused, and the
+	// step fails as a whole — a grid missing what was proposed is not built.
+	_, _, err := h.run("create_grid", map[string]any{
 		"name": "G", "metric_ids": []string{revBOnly, foreign, "revenue"}, "dimension_ids": []string{"region"},
 	})
-	attached := h.scalar(`SELECT COALESCE(string_agg(md.name, ',' ORDER BY md.name), '') FROM model.grid_metric gm
-		JOIN model.metric_def md ON md.id = gm.metric_id WHERE gm.grid_id=$1::uuid`, gridID)
-	if attached != "revenue" {
-		t.Errorf("attached metrics = %q, want only revenue (another model's and another revision's refused)", attached)
+	for _, want := range []string{"could not attach", "different model", "no counterpart"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("create_grid err = %v, want it to name %q", err, want)
+		}
+	}
+	if n := h.scalar(`SELECT count(*)::text FROM model.grid_def WHERE model_id=$1::uuid AND name='G'`, h.modelID); n != "0" {
+		t.Errorf("a failed create_grid left %s grid(s) behind", n)
+	}
+	if n := h.scalar(`SELECT count(*)::text FROM model.grid_metric WHERE metric_id=$1::uuid`, foreign); n != "0" {
+		t.Errorf("another model's metric was put on this model's grid")
+	}
+
+	// By name, and with what this revision has, it attaches.
+	msg, gridID := h.must("create_grid", map[string]any{"name": "G", "metrics": []string{"revenue"}, "dimensions": []string{"region"}})
+	if !strings.Contains(msg, "1 metrics, 1 dimensions attached") {
+		t.Errorf("result %q", msg)
 	}
 	if n := h.scalar(`SELECT count(*)::text FROM model.grid_dimension WHERE grid_id=$1::uuid`, gridID); n != "1" {
 		t.Errorf("attached dimensions = %s, want region", n)
-	}
-	for _, want := range []string{"1/3 metrics attached", "1/1 dimensions attached", "different model", "no counterpart"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("result %q lacks %q", msg, want)
-		}
-	}
-	// The other model's metric is still free for its own model's grids.
-	if n := h.scalar(`SELECT count(*)::text FROM model.grid_metric WHERE metric_id=$1::uuid`, foreign); n != "0" {
-		t.Errorf("another model's metric was put on this model's grid")
 	}
 }
 

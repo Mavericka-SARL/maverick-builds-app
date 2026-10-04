@@ -4733,6 +4733,48 @@ paths:
             application/json:
               schema: { type: object, properties: { status: { type: string } } }
 
+  /api/developer/grids/{id}/metrics/order:
+    put:
+      operationId: reorderGridMetrics
+      tags: [Developer Console]
+      summary: Set the order a grid shows its metrics in (developer only)
+      description: >-
+        metric_ids must be exactly the grid's metrics, each once, in the wanted order — the row or column order
+        of the grid, its grid widgets and exports. A metric added later is appended. Audited as grid.updated
+        (metrics_reordered). A grid outside the caller's scope answers 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [metric_ids]
+              properties:
+                metric_ids:
+                  type: array
+                  items: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Metrics reordered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+        "400":
+          description: metric_ids is not exactly the grid's metrics (one missing, listed twice, or not on the grid).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/developer/grids/{id}/metrics/{metricId}:
     post:
       operationId: addGridMetric

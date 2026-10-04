@@ -537,6 +537,10 @@ type ReorderDimensionMembersRes interface {
 	reorderDimensionMembersRes()
 }
 
+type ReorderGridMetricsRes interface {
+	reorderGridMetricsRes()
+}
+
 type ResendAdminUserInvitationRes interface {
 	resendAdminUserInvitationRes()
 }

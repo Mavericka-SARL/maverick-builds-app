@@ -218,6 +218,7 @@ var operationRolesBearerAuth = map[string][]string{
 	RemoveSsoOperation:                    []string{},
 	RenameAiSessionOperation:              []string{},
 	ReorderDimensionMembersOperation:      []string{},
+	ReorderGridMetricsOperation:           []string{},
 	ResendAdminUserInvitationOperation:    []string{},
 	RestoreWorkflowOperation:              []string{},
 	RevokeAdminUserAppAccessOperation:     []string{},

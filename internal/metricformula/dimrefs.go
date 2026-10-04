@@ -288,6 +288,16 @@ var PropertyDataTypes = []string{"text", "number", "date"}
 
 var propertyNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// ValidPropertyName refuses a property name a formula cannot write as
+// dimension.property.
+func ValidPropertyName(name string) error {
+	if !propertyNamePattern.MatchString(name) {
+		return invalidCode(CodeInvalidPropertyName,
+			"property name %q is not valid: use letters, digits and underscores, starting with a letter or underscore, so formulas can read it as dimension.%s", name, name)
+	}
+	return nil
+}
+
 // ValidatePropertyDeclaration checks a property declared (propertyID "")
 // or changed (propertyID set, excluded from the uniqueness check) on a
 // dimension by a developer or the AI assistant: the name must be an
@@ -296,9 +306,8 @@ var propertyNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // CSV and connector imports auto-declare any header name and do not call
 // this.
 func ValidatePropertyDeclaration(ctx context.Context, q Querier, dimensionID, propertyID, name, dataType string) error {
-	if !propertyNamePattern.MatchString(name) {
-		return invalidCode(CodeInvalidPropertyName,
-			"property name %q is not valid: use letters, digits and underscores, starting with a letter or underscore, so formulas can read it as dimension.%s", name, name)
+	if err := ValidPropertyName(name); err != nil {
+		return err
 	}
 	valid := false
 	for _, t := range PropertyDataTypes {

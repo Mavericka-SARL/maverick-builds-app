@@ -4,7 +4,7 @@
 > dependencies that are not fixed yet, with the evidence and what would close
 > each one.
 
-> **Last verified:** 2026-10-02
+> **Last verified:** 2026-10-04
 
 A finding that is not acted on in the change that found it is written down
 here, so it does not live only in a chat or a commit message. Each entry says
@@ -17,6 +17,103 @@ is recorded instead in `docs/OBSERVATIONS_PRIVATE.md`, which the public export
 leaves out, until it is fixed.
 
 ## Open
+
+### A chart plots only one grid's metrics
+
+- **Noticed:** 2026-10-03, rebuilding a CPG FP&A workbook.
+- **What:** a metric sits on one grid at most and a chart reads one grid, so a
+  plan-vs-prior-year chart over two grids needs copy metrics (`= other`) on a
+  third grid. The save now refuses the mixed chart (462a218).
+- **Why it matters:** a routine comparison costs duplicate metrics.
+- **How to check:** chart a rolling-forecast and a prior-year line kept on two grids.
+- **What closes it:** a decision on charts plotting metrics of several grids
+  that share the plotted dimension.
+
+### The AI Developer on gpt-4o-mini cannot finish a whole model alone
+
+- **Noticed:** 2026-10-03, and rerun 2026-10-04 after 462a218, driving the
+  AI Developer with the CPG workbook attached and confirming plans as a
+  developer.
+- **What:** after the fixes it built the dimensions, properties, inputs,
+  grids, all six data loads, the rolling forecasts and the rolling-forecast,
+  prior-year and variance P&L grids: 572 of 598 values match the workbook.
+  It still needed a developer's review on every stage — it dropped steps
+  between attempts, wrote `update_metric` for metrics it had not created,
+  set the EBITDA and operating-profit variance % to the variance itself, and
+  never reached the revenue summary or the dashboard. 209 LLM calls across
+  five sessions (calls are capped per session and per day; see
+  `AI_MAX_CALLS_PER_*`).
+- **Why it matters:** the checks now stop wrong plans, but a small model
+  needs many rounds of review for a model this size.
+- **How to check:** in AI Developer on an empty model with an OpenAI key,
+  attach the workbook, ask for the model stage by stage, and confirm each
+  plan that reaches you; compare with the workbook.
+- **What closes it:** a rerun on a stronger model to separate the model's
+  limits from the tools'; possibly a step that proposes a whole block of
+  look-alike metrics from one pattern.
+
+### Most AI write tools ignore keys they do not read
+
+- **Noticed:** 2026-10-04, the AI Developer rerun.
+- **What:** a step's params are decoded leniently, so a misspelt or invented
+  key is dropped without a word. Live: `create_grid`'s "metrics" (every grid
+  built empty), `create_metric`'s "value": 9, and "scale" inside "unpivot".
+  462a218 reads the aliases, checks `create_metric` and `create_grid` keys in
+  the plan check and reshape keys strictly; the other tools are unchecked.
+- **Why it matters:** a step that did less than it said passes the check.
+- **How to check:** propose `add_dashboard_widget` with an invented key.
+- **What closes it:** strict decoding (or a known-key list) for every write
+  tool, reported by the plan check.
+
+### SUMIFS across the metric's own grid dimension returned nothing
+
+- **Noticed:** 2026-10-04, looking for a share-of-total formula without a
+  parent member.
+- **What:** on the manual CPG model, `rev_rf / SUMIFS(rev_rf, region, "*")`
+  saved, sat on the Revenue grid with region, and showed no value at any cell
+  after 36 s, where `LOOKUP(rev_rf, region, "ALL_REGIONS")` works.
+- **Why it matters:** a share of a flat dimension's total has no expression
+  short of adding a parent member.
+- **How to check:** the formula above on a grid with region; read `/api/grid`.
+- **What closes it:** finding why the scheduler leaves it blank, or a refusal
+  that says so, and a documented share-of-total idiom.
+
+### Metrics have no display label
+
+- **Noticed:** 2026-10-03, same rebuild.
+- **What:** `model.metric_def` has no label column; the label is the title-cased
+  technical name, and the create route ignores a `label` field. Grid rows,
+  legends and KPI captions read "Rf Cogs", "Rnd", "Ga", "Varpct Ebitda Margin".
+- **Why it matters:** finance labels (R&D, G&A, D&A, EBITDA Margin) cannot be
+  shown, and two metrics for the same line in two blocks cannot share a caption.
+- **How to check:** create `rnd`; the grid row reads "Rnd".
+- **What closes it:** an editable label (revision-scoped, copied by revision
+  duplication and export) used everywhere a metric is captioned.
+
+### Grid widgets cannot choose their metrics or their default metric
+
+- **Noticed:** 2026-10-03, same rebuild.
+- **What:** a grid widget always shows every metric of its grid; a
+  `default_view.filter_sel` for `__metrics__` is ignored (the selector opens on
+  the first metric), and rows `[region, product]` render as product / region.
+- **Why it matters:** a summary table (RF, LY, Var, Var % by region) shows the
+  grid's input and helper metrics too, e.g. "share by product = 100%" per region.
+- **How to check:** a grid widget with `context: ["__metrics__"]` and
+  `filter_sel: {"__metrics__": <id>}`.
+- **What closes it:** a per-widget metric subset and honouring the saved defaults.
+
+### No dimension member can be computed from the others
+
+- **Noticed:** 2026-10-03, same rebuild.
+- **What:** a "Scenario" dimension with members RF, LY, Variance and Variance %
+  cannot compute Variance from RF and LY: a metric may not LOOKUP itself
+  ("a metric cannot read its own values at other members"). RF / LY / Var $ /
+  Var % of a 13-line P&L therefore took 52 metrics on four grids.
+- **Why it matters:** comparison layouts multiply metrics, labels and grids.
+- **How to check:** a formula `LOOKUP(m, scenario, "RF") - LOOKUP(m, scenario, "LY")`
+  inside `m`.
+- **What closes it:** a decision on computed dimension members (version-style
+  dimensions), or allowing self-LOOKUP across a dimension with no cycle.
 
 ### The chart resolver does not tell a withheld value from a missing one
 
@@ -2550,6 +2647,69 @@ leaves out, until it is fixed.
   `CheckMembers` before the first insert, for every caller.
 
 ## Closed
+
+### KPI tiles show a Percentage metric 100 times too large
+
+- **Noticed:** 2026-10-03, rebuilding a CPG FP&A workbook as a developer.
+- **What was wrong:** the grid (`fmtMetric` in `web/src/consoles/business/PlanningGrid.tsx`)
+  shows a `percentage` metric as the value followed by `%`; the KPI tile
+  (`DashboardWidgets.tsx`, `fmt === "percentage"`) multiplies by 100 first. An
+  EBITDA margin of 67.72 shows as 67.7% in the grid and 6772.1% on the tile;
+  either convention is wrong somewhere. The tile's currency branch also ignores
+  `format_decimals` (always 0), and charts' `percent` value format is `Intl`
+  percent (×100), a third reading.
+- **Closed by:** 462a218 — KPI tiles and the chart's percent format read percent units as the grid does, and tiles keep the metric's decimals.
+
+### A grid's metrics cannot be put in order
+
+- **Noticed:** 2026-10-03, same rebuild.
+- **What was wrong:** adding a metric to a grid inserts `model.grid_metric.sort_order = 0`
+  (`internal/gateway/handler.go`, developer grid metric add); there is no
+  reorder route or control, so rows come out alphabetically.
+- **Closed by:** 462a218 — metrics append in the order added; `PUT /api/developer/grids/{id}/metrics/order`, the Grids screen's arrows and `reorder_grid_metrics` reorder them (`TestGridMetricOrderIsTheDevelopersToSet`).
+
+### A grid with no dimensions shows its value as "—"
+
+- **Noticed:** 2026-10-03, same rebuild (a "Setup" grid holding Actual Through Month).
+- **What was wrong:** `/api/grid` for a zero-dimension grid returns the value in `totals`
+  but no `cells` entry, and the planning grid reads `cells`, so the one input
+  cell shows "—" although the stored 9 drives every formula.
+- **Closed by:** 462a218 — the planning grid marks a dimensionless grid ready, so its values query runs (checked in the browser on the Setup grid).
+
+### File imports match members by code only
+
+- **Noticed:** 2026-10-03, same rebuild.
+- **What was wrong:** `importpkg.ResolveRows` refuses "North America" for region member
+  `NA` whose label is "North America" (`UNKNOWN_MEMBER`). The only remedy is a
+  hand-written `value_map` per member in the Shape step.
+- **Closed by:** 462a218 — `ResolveRows` falls back to the one member with that label, and on a monthly time dimension to the one period starting in a named month (`TestFileImportResolvesLabelsAndMonthNames`).
+
+### Member properties: dropped on create, undeclared keys accepted elsewhere
+
+- **Noticed:** 2026-10-03, same rebuild and the AI Developer run.
+- **What was wrong:** `POST /api/developer/dimensions/{id}/members` has no `properties`
+  field, so values sent with a create are dropped while the call answers 200
+  (PATCH stores them). The AI's `add_dimension_member` / `update_dimension_member`
+  do store `properties`, but any key: the AI wrote `Region` and `P&L_Line`, then
+  declared `region` and `p_and_l_line`, and SUMIFS over the declared name reads
+  nothing. Related: "Imported property names are not checked" above.
+- **Closed by:** 462a218 — the create route stores `properties`; `metricformula.CheckMemberProperties` refuses keys no declaration could name and takes a declaration's spelling; declaring adopts case variants and warns when no member has a value (`TestMemberPropertyKeysMeetTheirDeclarations`). An identifier key may still be set before it is declared, by design.
+
+### Metric names are not held to identifiers
+
+- **Noticed:** 2026-10-03, the AI Developer run.
+- **What was wrong:** the developer route (and so the AI) accepts a metric named
+  `Planning % for Revenue`, though the manual calls the name snake_case. Such a
+  metric is only reachable as `{Planning % for Revenue}`; the parse error for the
+  bare name never mentions braces, and `"Planning % for Revenue" * 2` is accepted
+  (a text literal times 2).
+- **Closed by:** 462a218 — `ValidMetricName` and `ValidMetricFormat` on create and rename; a parse error names the double-quote fix for single-quoted text.
+
+### A chart widget saves metrics it can never read
+
+- **Noticed:** 2026-10-03, rebuilding a CPG FP&A workbook as a developer.
+- **What was wrong:** a chart whose `metric_ids` are on another grid than its `ref_id` saved, and every chart-data read then answered 403.
+- **Closed by:** 462a218 — `modeledit.CheckChartMetrics` refuses it on save, in the console and the AI tools (`TestChartWidgetRefusesAnotherGridsMetric`).
 
 ### Workflow, form, access-rule and import steps skipped the proposal check
 

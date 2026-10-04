@@ -123,7 +123,7 @@ var WriteToolNames = []string{
 	"reorder_dimension_members",
 	"add_dimension_property", "update_dimension_property", "delete_dimension_property",
 	"create_grid", "update_grid", "delete_grid",
-	"add_grid_metric", "remove_grid_metric", "add_grid_dimension", "update_grid_dimension", "remove_grid_dimension",
+	"add_grid_metric", "remove_grid_metric", "reorder_grid_metrics", "add_grid_dimension", "update_grid_dimension", "remove_grid_dimension",
 	"create_dashboard_folder", "update_dashboard_folder", "delete_dashboard_folder",
 	"create_dashboard", "update_dashboard", "delete_dashboard",
 	"add_dashboard_widget", "update_dashboard_widget", "delete_dashboard_widget",
@@ -203,6 +203,16 @@ func NewToolExecutor(pool *pgxpool.Pool, modelID, revID string) *ToolExecutor {
 
 // Execute dispatches a tool call by name and returns its text output.
 func (e *ToolExecutor) Execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
+	out, err := e.execute(ctx, name, args)
+	if err == nil && strings.TrimSpace(out) == "" {
+		// An empty answer reads as no answer: on an empty revision the model
+		// called list_dimensions three times running and was stopped as stuck.
+		return fmt.Sprintf("%s: nothing yet — the working revision has none.", name), nil
+	}
+	return out, err
+}
+
+func (e *ToolExecutor) execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
 	switch name {
 	case "get_workflow":
 		return e.getWorkflow(ctx, args)

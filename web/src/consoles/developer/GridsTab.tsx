@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { api, type GridDef, type DevDimension } from "../../api/client";
 import { Toolbar, ToolbarGroup, Button, Field, TextInput, SearchInput, EmptyState, IconButton, Checkbox, StatusBadge, Select, useConfirm } from "../../ui";
 
@@ -57,6 +57,20 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
     mutationFn: ({ gridId, metricId }: { gridId: string; metricId: string }) => api.removeGridMetric(gridId, metricId),
     onSuccess: inv,
   });
+  // The order a grid shows its metrics in (rows of a statement such as a
+  // P&L): swap a metric with its neighbour and send the whole order.
+  const reorderMetrics = useMutation({
+    mutationFn: ({ gridId, metricIds }: { gridId: string; metricIds: string[] }) => api.reorderGridMetrics(gridId, metricIds),
+    onSuccess: inv,
+  });
+  const moveMetric = (g: GridDef, metricId: string, delta: -1 | 1) => {
+    const ids = [...g.metric_ids];
+    const i = ids.indexOf(metricId);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    reorderMetrics.mutate({ gridId: g.id, metricIds: ids });
+  };
   const addDim = useMutation({
     mutationFn: ({ gridId, dimId }: { gridId: string; dimId: string }) => api.addGridDimension(gridId, dimId),
     onSuccess: inv,
@@ -160,7 +174,8 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
                         !q || (m.label || "").toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
                       const renderMetric = (m: typeof matches[number]) => {
                         const included = g.metric_ids.includes(m.id);
-                        return (
+                        const position = g.metric_ids.indexOf(m.id);
+                        const box = (
                           <Checkbox
                             key={m.id}
                             checked={included}
@@ -173,8 +188,27 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
                             }
                           />
                         );
+                        if (!included) return box;
+                        return (
+                          <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <div style={{ flex: 1 }}>{box}</div>
+                            <IconButton aria-label={`Move ${m.name} up`} title="Move up" size={24}
+                              disabled={position <= 0 || reorderMetrics.isPending}
+                              onClick={() => moveMetric(g, m.id, -1)}>
+                              <ArrowUp size={14} />
+                            </IconButton>
+                            <IconButton aria-label={`Move ${m.name} down`} title="Move down" size={24}
+                              disabled={position >= g.metric_ids.length - 1 || reorderMetrics.isPending}
+                              onClick={() => moveMetric(g, m.id, 1)}>
+                              <ArrowDown size={14} />
+                            </IconButton>
+                          </div>
+                        );
                       };
-                      const inGrid = matches.filter(m => g.metric_ids.includes(m.id));
+                      // In the grid's own order — the order its rows show in.
+                      const inGrid = g.metric_ids
+                        .map(id => matches.find(m => m.id === id))
+                        .filter((m): m is typeof matches[number] => m !== undefined);
                       const available = matches.filter(m => !g.metric_ids.includes(m.id));
                       return (
                         <>
