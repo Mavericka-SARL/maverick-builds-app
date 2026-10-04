@@ -345,7 +345,7 @@ func TestOpenAIProvider_Chat_OneToolCallPerMessageOnOpenAIOnly(t *testing.T) {
 	for _, tc := range []struct {
 		label string
 		want  bool
-	}{{"openai", true}, {"mistral", false}} {
+	}{{"openai", true}, {"mistral", false}, {"openai-o3", false}} {
 		var captured map[string]any
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewDecoder(r.Body).Decode(&captured)
@@ -353,9 +353,13 @@ func TestOpenAIProvider_Chat_OneToolCallPerMessageOnOpenAIOnly(t *testing.T) {
 			_, _ = w.Write([]byte(`{"id": "c", "object": "chat.completion", "created": 1, "model": "m",
 				"choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "ok"}}]}`))
 		}))
-		p := NewOpenAICompatible("k", server.URL, tc.label)
+		label, model := tc.label, "m"
+		if label == "openai-o3" { // the o-series refuse the field
+			label, model = "openai", "o3"
+		}
+		p := NewOpenAICompatible("k", server.URL, label)
 		if _, err := p.Chat(t.Context(), ChatRequest{
-			Model:    "m",
+			Model:    model,
 			Messages: []Message{{Role: "user", Content: "hi"}},
 			Tools:    []ToolDef{{Name: "list_metrics", Parameters: json.RawMessage(`{"type":"object"}`)}},
 		}); err != nil {

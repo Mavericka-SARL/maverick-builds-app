@@ -3,7 +3,6 @@ package metricformula
 import (
 	"context"
 
-
 	"github.com/mavericks-engine/mavericks/internal/rollup"
 )
 

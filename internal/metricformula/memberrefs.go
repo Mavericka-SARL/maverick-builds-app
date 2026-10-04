@@ -182,10 +182,37 @@ func CheckMemberNotInUse(ctx context.Context, q Querier, dimensionID, memberID s
 			readers = append(readers, m.name)
 		}
 	}
+	// A calculated member of the dimension reading the code would read 0.
+	calcRows, err := q.Query(ctx, `SELECT code, formula FROM model.dimension_member
+		WHERE dimension_id=$1::uuid AND id <> $2::uuid AND NULLIF(btrim(formula),'') IS NOT NULL ORDER BY code`, dimensionID, memberID)
+	if err != nil {
+		return err
+	}
+	for calcRows.Next() {
+		var calcCode, text string
+		if calcRows.Scan(&calcCode, &text) != nil {
+			continue
+		}
+		if node, perr := formula.Parse(text); perr == nil {
+			if refs, _ := memberFormulaRefs(node); containsFold(refs, code) {
+				readers = append(readers, "calculated member "+calcCode)
+			}
+		}
+	}
+	calcRows.Close()
 	if len(readers) > 0 {
 		return invalidCode(CodeMemberInUse,
-			"member %s of %s is named by the formulas of %s; change those formulas first, then delete the member",
+			"member %s of %s is read by %s; change those formulas first, then delete the member",
 			code, dimName, strings.Join(readers, ", "))
 	}
 	return nil
+}
+
+func containsFold(list []string, s string) bool {
+	for _, v := range list {
+		if strings.EqualFold(v, s) {
+			return true
+		}
+	}
+	return false
 }

@@ -27,6 +27,7 @@ import (
 //	default_view.cols[]       same
 //	default_view.context[]    same
 //	default_view.filter_sel   KEYS are dimension IDs, values are member codes
+//	metric_ids[]              the metrics a grid widget shows, in order
 //
 // A stale default_view is the quiet failure of the lot: the planning grid
 // filters its saved axes down to IDs it recognises, so the widget still
@@ -110,6 +111,19 @@ func RemapWidgetPropsIDs(props []byte, metricMap, dimMap map[string]string) ([]b
 		}
 
 		remapKeys(dimMap, chart, "context_defaults")
+	}
+
+	if ids, ok := root["metric_ids"].([]any); ok {
+		for i, raw := range ids {
+			old, ok := raw.(string)
+			if !ok {
+				continue
+			}
+			if next, ok := metricMap[old]; ok && next != old {
+				ids[i] = next
+				changed = true
+			}
+		}
 	}
 
 	if scope, ok := root["kpi_scope"].(map[string]any); ok {

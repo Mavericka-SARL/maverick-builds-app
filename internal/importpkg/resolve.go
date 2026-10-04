@@ -136,6 +136,7 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 		id     string
 		code   string // the member's own code — differs from the file's value when it matched by label or month
 		isLeaf bool
+		calc   bool // a calculated member: computed, takes no input
 		ok     bool
 	}
 	memberCache := map[string]memberInfo{}
@@ -146,7 +147,8 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 		}
 		var info memberInfo
 		var hasChildren bool
-		const pick = `SELECT m.id::text, m.code, EXISTS(SELECT 1 FROM model.dimension_member c WHERE c.parent_member_id = m.id)
+		const pick = `SELECT m.id::text, m.code, EXISTS(SELECT 1 FROM model.dimension_member c WHERE c.parent_member_id = m.id),
+			       NULLIF(btrim(m.formula),'') IS NOT NULL
 			FROM model.dimension_member m `
 		// A code first; then, only when exactly one member qualifies, the
 		// member's label (sheets laid out for people carry "North America",
@@ -154,11 +156,11 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 		// "January") for the one leaf period starting in that month.
 		// Anything ambiguous stays unknown.
 		found := pool.QueryRow(ctx, pick+`WHERE m.dimension_id=$1::uuid AND m.code=$2`, dimID, value).
-			Scan(&info.id, &info.code, &hasChildren) == nil
+			Scan(&info.id, &info.code, &hasChildren, &info.calc) == nil
 		if !found {
 			found = pool.QueryRow(ctx, pick+`WHERE m.dimension_id=$1::uuid AND lower(m.label)=lower($2)
 				AND (SELECT count(*) FROM model.dimension_member o WHERE o.dimension_id=$1::uuid AND lower(o.label)=lower($2)) = 1`,
-				dimID, value).Scan(&info.id, &info.code, &hasChildren) == nil
+				dimID, value).Scan(&info.id, &info.code, &hasChildren, &info.calc) == nil
 		}
 		if month := monthNumber(value); !found && month > 0 {
 			found = pool.QueryRow(ctx, pick+`JOIN model.dimension_def d ON d.id = m.dimension_id
@@ -166,7 +168,7 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 				  AND m.period_start IS NOT NULL AND EXTRACT(MONTH FROM m.period_start) = $2
 				  AND (SELECT count(*) FROM model.dimension_member o WHERE o.dimension_id=$1::uuid
 				       AND o.period_start IS NOT NULL AND EXTRACT(MONTH FROM o.period_start) = $2) = 1`,
-				dimID, month).Scan(&info.id, &info.code, &hasChildren) == nil
+				dimID, month).Scan(&info.id, &info.code, &hasChildren, &info.calc) == nil
 		}
 		if found {
 			info.isLeaf = !hasChildren
@@ -256,6 +258,15 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 					RowNumber: int32(row.RowNumber), Column: colName,
 					ErrorCode: "UNKNOWN_MEMBER", RawValue: code,
 					Message: "\"" + code + "\" is not a member of dimension \"" + meta.original + "\"",
+				})
+				rowValid = false
+				continue
+			}
+			if info.calc {
+				errs = append(errs, &importpkgv1.ImportError{
+					RowNumber: int32(row.RowNumber), Column: colName,
+					ErrorCode: "CALCULATED_MEMBER", RawValue: code,
+					Message: "\"" + code + "\" is a calculated member of \"" + meta.original + "\": its values are computed from the other members, so it takes no input",
 				})
 				rowValid = false
 				continue

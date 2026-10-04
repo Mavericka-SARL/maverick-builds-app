@@ -93,6 +93,10 @@ type Hooks struct {
 	// Import Wizard's pipeline (parse, column map, name resolution, write
 	// guard, plan limits, recalculation, audit) and returns a summary.
 	ImportFile func(ctx context.Context, req FileImportRequest) (string, error)
+	// WriteValues writes a write_input_values step's values through the same
+	// pipeline, as typed cells (write guard, plan limits, recalculation,
+	// audit), and returns a summary.
+	WriteValues func(ctx context.Context, req ValuesWriteRequest) (string, error)
 	// RecallPreview returns the target, reshape and column map of this
 	// session's latest preview_file_import of a file's sheet that reported no
 	// errors. An import_file_data naming only the file and sheet repeats it:
@@ -282,6 +286,47 @@ func (e *WriteExecutor) remapChartProps(ctx context.Context, raw json.RawMessage
 	return out, nil
 }
 
+// remapGridWidgetMetrics resolves a grid widget's metric_ids — the metrics
+// it shows, in order — into the executor's revision, by id or by name. The
+// list is also taken under "metrics", the name create_grid reads it by; left
+// there it would have been dropped without a word.
+func (e *WriteExecutor) remapGridWidgetMetrics(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	var props map[string]any
+	if err := json.Unmarshal(raw, &props); err != nil {
+		return nil, fmt.Errorf("widget_props is not a JSON object: %w", err)
+	}
+	if v, ok := props["metrics"]; ok {
+		if _, both := props["metric_ids"]; !both {
+			props["metric_ids"] = v
+		}
+		delete(props, "metrics")
+	}
+	v, ok := props["metric_ids"]
+	if !ok || v == nil {
+		return raw, nil
+	}
+	ids, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("metric_ids is the list of metrics the grid widget shows, in order (ids or names)")
+	}
+	for i, item := range ids {
+		id, _ := item.(string)
+		if id == "" {
+			return nil, fmt.Errorf("metric_ids[%d] is not a metric id or name", i)
+		}
+		mapped, err := e.requireInModel(ctx, "metric", id)
+		if err != nil {
+			return nil, fmt.Errorf("grid widget metric_ids[%d]: %w", i, err)
+		}
+		ids[i] = mapped
+	}
+	out, err := json.Marshal(props)
+	if err != nil {
+		return nil, fmt.Errorf("re-encode widget_props: %w", err)
+	}
+	return out, nil
+}
+
 // effectiveRevision decides which revision a create tool writes into. When
 // the executor is revision-scoped, its scope WINS over any caller-supplied
 // revision_id: the params come from a language model that echoes whatever
@@ -451,6 +496,8 @@ func (e *WriteExecutor) Execute(ctx context.Context, tool string, params json.Ra
 		return e.setUserAccessRules(ctx, params)
 	case "create_file_integration":
 		return e.createFileIntegration(ctx, params)
+	case "write_input_values":
+		return e.writeInputValues(ctx, params)
 	case "import_file_data":
 		return e.importFileData(ctx, params)
 	case "create_export_integration":
@@ -470,6 +517,7 @@ func (e *WriteExecutor) Execute(ctx context.Context, tool string, params json.Ra
 
 type createMetricParams struct {
 	Name           string `json:"name"`
+	Label          string `json:"label"` // display label; empty derives it from the name
 	Formula        string `json:"formula"`
 	IsInput        bool   `json:"is_input"`
 	Format         string `json:"format"`
@@ -490,7 +538,7 @@ type createMetricParams struct {
 
 func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p createMetricParams
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if p.Name == "" {
@@ -584,6 +632,11 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 		}
 		return "", "", fmt.Errorf("insert metric: %w", err)
 	}
+	if l := strings.TrimSpace(p.Label); l != "" {
+		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET label=$2 WHERE id=$1::uuid`, newID, l); err != nil {
+			return "", "", fmt.Errorf("set label: %w", err)
+		}
+	}
 
 	// Wire formula dependencies from the edges the validator resolved. It
 	// looked them up within the metric's own revision; the loop that used to
@@ -599,13 +652,15 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 // ── update_metric ─────────────────────────────────────────────────────────────
 
 type updateMetricParams struct {
-	MetricID       string `json:"metric_id"`
-	Name           string `json:"name"`
-	Formula        string `json:"formula"`
-	AggRule        string `json:"agg_rule"`
-	Format         string `json:"format"`
-	FormatDecimals int    `json:"format_decimals"`
-	FormatCurrency string `json:"format_currency"`
+	MetricID string `json:"metric_id"`
+	Name     string `json:"name"`
+	// Label: left out keeps it; "" clears it back to the derived label.
+	Label          *string `json:"label"`
+	Formula        string  `json:"formula"`
+	AggRule        string  `json:"agg_rule"`
+	Format         string  `json:"format"`
+	FormatDecimals int     `json:"format_decimals"`
+	FormatCurrency string  `json:"format_currency"`
 
 	AggNumeratorMetricID   string `json:"agg_numerator_metric_id"`
 	AggDenominatorMetricID string `json:"agg_denominator_metric_id"`
@@ -616,7 +671,7 @@ type updateMetricParams struct {
 
 func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p updateMetricParams
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if p.MetricID == "" {
@@ -745,6 +800,11 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 		}
 		return "", "", fmt.Errorf("update metric: %w", err)
 	}
+	if p.Label != nil {
+		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET label=NULLIF(btrim($2),'') WHERE id=$1::uuid`, p.MetricID, *p.Label); err != nil {
+			return "", "", fmt.Errorf("set label: %w", err)
+		}
+	}
 	// Re-wire dependencies when the formula changed.
 	if formulaSent {
 		if er := metricformula.WriteDependencies(ctx, e.pool, p.MetricID, formulaEdges); er != nil {
@@ -760,7 +820,11 @@ func (e *WriteExecutor) deleteMetric(ctx context.Context, raw json.RawMessage) (
 	var p struct {
 		MetricID string `json:"metric_id"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.MetricID == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.MetricID == "" {
 		return "", "", fmt.Errorf("metric_id is required")
 	}
 	mappedMetricID, err := e.requireInModel(ctx, "metric", p.MetricID)
@@ -820,6 +884,8 @@ type createDimensionParams struct {
 		// Properties are the member's property values, stored as the
 		// developer console's member PATCH stores them.
 		Properties map[string]string `json:"properties"`
+		// Formula makes it a calculated member ({RF} - {LY}).
+		Formula string `json:"formula"`
 	} `json:"members"`
 }
 
@@ -836,7 +902,7 @@ func (p *createDimensionParams) memberPropertyKeys() map[string]string {
 
 func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p createDimensionParams
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if p.Name == "" {
@@ -1032,6 +1098,13 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 			}
 		}
 	}
+	for _, m := range p.Members {
+		if strings.TrimSpace(m.Formula) != "" {
+			if err := modeledit.SetMemberFormula(ctx, e.pool, newID, m.Code, m.Formula); err != nil {
+				return "", "", fmt.Errorf("member %s: %w", m.Code, err)
+			}
+		}
+	}
 	return msg + e.undeclaredPropertyNote(ctx, newID, p.memberPropertyKeys()), newID, nil
 }
 
@@ -1082,8 +1155,10 @@ func (e *WriteExecutor) addDimensionMember(ctx context.Context, raw json.RawMess
 		// Properties are the member's property values, stored as the
 		// developer console's member PATCH stores them.
 		Properties map[string]string `json:"properties"`
+		// Formula makes it a calculated member ({RF} - {LY}).
+		Formula string `json:"formula"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if p.DimensionID == "" || p.Code == "" {
@@ -1241,6 +1316,12 @@ func (e *WriteExecutor) addDimensionMember(ctx context.Context, raw json.RawMess
 	if autoCreatedParent {
 		result += fmt.Sprintf(" — parent '%s' didn't exist yet, created it as a top-level member", p.ParentCode)
 	}
+	if strings.TrimSpace(p.Formula) != "" {
+		if err := modeledit.SetMemberFormula(ctx, e.pool, p.DimensionID, p.Code, p.Formula); err != nil {
+			return "", "", err
+		}
+		result += " as a calculated member = " + strings.TrimSpace(p.Formula)
+	}
 	return result + propNote, newID, nil
 }
 
@@ -1266,8 +1347,11 @@ func (e *WriteExecutor) updateDimensionMember(ctx context.Context, raw json.RawM
 		PeriodStart string            `json:"period_start"`
 		PeriodEnd   string            `json:"period_end"`
 		Properties  map[string]string `json:"properties"` // merged into existing
+		// Formula: left out keeps it; "" makes an ordinary member again;
+		// else a calculated member ({RF} - {LY}).
+		Formula *string `json:"formula"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if p.DimensionID == "" || p.Code == "" {
@@ -1289,8 +1373,8 @@ func (e *WriteExecutor) updateDimensionMember(ctx context.Context, raw json.RawM
 		return "", "", fmt.Errorf("member %q not found in dimension (call list_dimensions to see codes)", p.Code)
 	}
 	if p.Label == "" && p.NewCode == "" && p.ParentCode == "" && !p.ClearParent &&
-		p.PeriodStart == "" && p.PeriodEnd == "" && len(p.Properties) == 0 {
-		return "", "", fmt.Errorf("nothing to change: provide new_code, label, parent_code, clear_parent, period_start/period_end, or properties")
+		p.PeriodStart == "" && p.PeriodEnd == "" && len(p.Properties) == 0 && p.Formula == nil {
+		return "", "", fmt.Errorf("nothing to change: provide new_code, label, parent_code, clear_parent, period_start/period_end, properties or formula")
 	}
 
 	var changed []string
@@ -1406,6 +1490,20 @@ func (e *WriteExecutor) updateDimensionMember(ctx context.Context, raw json.RawM
 			return "", "", fmt.Errorf("move the parent's values to its first child: %w", err)
 		}
 	}
+	if p.Formula != nil {
+		code := p.Code
+		if strings.TrimSpace(p.NewCode) != "" {
+			code = strings.TrimSpace(p.NewCode)
+		}
+		if err := modeledit.SetMemberFormula(ctx, e.pool, p.DimensionID, code, *p.Formula); err != nil {
+			return "", "", err
+		}
+		if strings.TrimSpace(*p.Formula) == "" {
+			changed = append(changed, "no longer calculated")
+		} else {
+			changed = append(changed, "calculated = "+strings.TrimSpace(*p.Formula))
+		}
+	}
 	return fmt.Sprintf("Dimension member '%s' updated: %s", p.Code, strings.Join(changed, "; ")), memberID, nil
 }
 
@@ -1424,7 +1522,7 @@ func (e *WriteExecutor) addDimensionProperty(ctx context.Context, raw json.RawMe
 		Name        string `json:"name"`
 		DataType    string `json:"data_type"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if p.DimensionID == "" {
@@ -1608,7 +1706,7 @@ func (e *WriteExecutor) updateDimensionProperty(ctx context.Context, raw json.Ra
 		Name        string `json:"name"`
 		DataType    string `json:"data_type"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	prop, err := e.resolveDimensionProperty(ctx, p.DimensionID, p.Property)
@@ -1677,7 +1775,7 @@ func (e *WriteExecutor) deleteDimensionProperty(ctx context.Context, raw json.Ra
 		DimensionID string `json:"dimension_id"`
 		Property    string `json:"property"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	prop, err := e.resolveDimensionProperty(ctx, p.DimensionID, p.Property)
@@ -1758,7 +1856,7 @@ type createGridParams struct {
 
 func (e *WriteExecutor) createGrid(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p createGridParams
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if p.Name == "" {
@@ -1831,7 +1929,11 @@ func (e *WriteExecutor) addGridMetric(ctx context.Context, raw json.RawMessage) 
 		GridID   string `json:"grid_id"`
 		MetricID string `json:"metric_id"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.GridID == "" || p.MetricID == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.GridID == "" || p.MetricID == "" {
 		return "", "", fmt.Errorf("grid_id and metric_id are required")
 	}
 	// Both sides: the same-revision check below compares them to each other,
@@ -1911,7 +2013,11 @@ func (e *WriteExecutor) addGridDimension(ctx context.Context, raw json.RawMessag
 		GridID      string `json:"grid_id"`
 		DimensionID string `json:"dimension_id"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.GridID == "" || p.DimensionID == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.GridID == "" || p.DimensionID == "" {
 		return "", "", fmt.Errorf("grid_id and dimension_id are required")
 	}
 	mappedGridID, err := e.requireInModel(ctx, "grid", p.GridID)
@@ -1960,7 +2066,7 @@ func (e *WriteExecutor) setTags(ctx context.Context, raw json.RawMessage) (strin
 		ID   string    `json:"id"`
 		Tags *[]string `json:"tags"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	table, ok := tagTables[p.Kind]
@@ -1996,7 +2102,11 @@ func (e *WriteExecutor) createDashboard(ctx context.Context, raw json.RawMessage
 		RevisionID string   `json:"revision_id"`
 		Folder     string   `json:"folder"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.Name == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.Name == "" {
 		return "", "", fmt.Errorf("name is required")
 	}
 	p.Tags = tags.Clean(p.Tags)
@@ -2034,7 +2144,11 @@ func (e *WriteExecutor) addDashboardWidget(ctx context.Context, raw json.RawMess
 		SizeH       int             `json:"size_h"`
 		WidgetProps json.RawMessage `json:"widget_props"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.DashboardID == "" || p.WidgetType == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.DashboardID == "" || p.WidgetType == "" {
 		return "", "", fmt.Errorf("dashboard_id and widget_type are required")
 	}
 	mappedDashID, err := e.requireInModel(ctx, "dashboard", p.DashboardID)
@@ -2044,6 +2158,9 @@ func (e *WriteExecutor) addDashboardWidget(ctx context.Context, raw json.RawMess
 	p.DashboardID = mappedDashID
 	if p.WidgetType == "chart" {
 		p.RefID, p.WidgetProps = hoistChartGrid(p.RefID, p.WidgetProps)
+	}
+	if p.WidgetProps, err = e.checkWidgetProps(ctx, p.WidgetProps); err != nil {
+		return "", "", err
 	}
 	p.WidgetProps = widgetDefaults(p.WidgetType, p.WidgetProps)
 	// The typed refs get the same in-model + cross-revision resolution as the
@@ -2072,6 +2189,20 @@ func (e *WriteExecutor) addDashboardWidget(ctx context.Context, raw json.RawMess
 			gridRef = *p.RefID
 		}
 		if err := modeledit.CheckChartMetrics(ctx, e.pool, gridRef, p.WidgetProps); err != nil {
+			return "", "", err
+		}
+	}
+	if p.WidgetType == "grid" && len(p.WidgetProps) > 0 && string(p.WidgetProps) != "null" {
+		remapped, propErr := e.remapGridWidgetMetrics(ctx, p.WidgetProps)
+		if propErr != nil {
+			return "", "", propErr
+		}
+		p.WidgetProps = remapped
+		gridRef := ""
+		if p.RefID != nil {
+			gridRef = *p.RefID
+		}
+		if err := modeledit.CheckGridWidgetMetrics(ctx, e.pool, gridRef, p.WidgetProps); err != nil {
 			return "", "", err
 		}
 	}
@@ -2111,7 +2242,11 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 		Name             string `json:"name"`
 		SourceRevisionID string `json:"source_revision_id"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.Name == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.Name == "" {
 		return "", "", fmt.Errorf("name is required")
 	}
 
@@ -2146,8 +2281,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 	if srcID != "" {
 		// Copy metrics
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO model.metric_def (model_id, name, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id)
-			SELECT model_id, name, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id
+			INSERT INTO model.metric_def (model_id, name, label, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id)
+			SELECT model_id, name, label, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 		`, e.modelID, newID, srcID); err != nil {
 			return "", "", fmt.Errorf("copy metrics into new revision: %w", err)
@@ -2234,8 +2369,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 				WHERE o.model_id=$1::uuid AND o.revision_id=$3::uuid
 			),
 			new_members AS (
-				INSERT INTO model.dimension_member (dimension_id, code, label, properties, sort_order, period_start, period_end, time_index, lineage_id)
-				SELECT dm.new_id, m.code, m.label, m.properties, m.sort_order, m.period_start, m.period_end, m.time_index, m.lineage_id
+				INSERT INTO model.dimension_member (dimension_id, code, label, properties, sort_order, period_start, period_end, time_index, lineage_id, formula)
+				SELECT dm.new_id, m.code, m.label, m.properties, m.sort_order, m.period_start, m.period_end, m.time_index, m.lineage_id, m.formula
 				FROM model.dimension_member m
 				JOIN dim_map dm ON dm.old_id = m.dimension_id
 				RETURNING id
@@ -2857,7 +2992,7 @@ type createWorkflowDefParams struct {
 
 func (e *WriteExecutor) createWorkflowDef(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p createWorkflowDefParams
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if p.Name == "" {
@@ -2911,7 +3046,7 @@ type updateWorkflowDefParams struct {
 // because it didn't resupply them.
 func (e *WriteExecutor) updateWorkflowDef(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p updateWorkflowDefParams
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if p.WorkflowDefID == "" {
@@ -2994,7 +3129,7 @@ type createFormDefParams struct {
 
 func (e *WriteExecutor) createFormDef(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p createFormDefParams
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if p.Name == "" {
@@ -3030,7 +3165,7 @@ type updateFormDefParams struct {
 // not silently wipe its fields just because it didn't resupply them.
 func (e *WriteExecutor) updateFormDef(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p updateFormDefParams
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if p.FormID == "" {
@@ -3114,7 +3249,7 @@ type setUserAccessRulesParams struct {
 // wrong for the currently-active data anyway.
 func (e *WriteExecutor) setUserAccessRules(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p setUserAccessRulesParams
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if strings.TrimSpace(p.UserEmail) == "" {

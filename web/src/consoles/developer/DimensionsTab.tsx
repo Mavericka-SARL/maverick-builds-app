@@ -399,6 +399,9 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "",
   const [editMCode, setEditMCode] = useState("");
   const [editMLabel, setEditMLabel] = useState("");
   const [editMParent, setEditMParent] = useState("");
+  // A calculated member's formula ({RF} - {LY}); the original, to send only a change.
+  const [editMFormula, setEditMFormula] = useState("");
+  const [origMFormula, setOrigMFormula] = useState("");
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["dev-dimensions"] });
   // A refused delete (409 DIMENSION_IN_USE / MEMBER_IN_USE) names the
@@ -428,6 +431,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "",
     mutationFn: () => api.updateDimMember(dim.id, editMId!, {
       code: editMCode, label: editMLabel, parent_member_id: editMParent || null,
       ...(Object.keys(editProps).length ? { properties: editProps } : {}),
+      ...(editMFormula.trim() !== origMFormula ? { formula: editMFormula.trim() } : {}),
     }),
     onSuccess: () => { invalidate(); setEditMId(null); setEditProps({}); },
     onError: fail,
@@ -540,6 +544,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "",
 
   const startEdit = (m: DevDimensionMember) => {
     setEditMId(m.id); setEditMCode(m.code); setEditMLabel(m.label); setEditMParent(m.parent_member_id ?? ""); setEditProps({ ...(m.properties ?? {}) });
+    setEditMFormula(m.formula ?? ""); setOrigMFormula(m.formula ?? "");
     setAddingChildOf(null); setAddingRoot(false);
   };
 
@@ -671,9 +676,19 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "",
                   {/* Member column */}
                   <td style={{ paddingLeft: indent + 8 }}>
                     {isEditing ? (
-                      <TextInput value={editMLabel} onChange={(e) => setEditMLabel(e.target.value)}
-                        style={{ width: "100%" }}
-                        onKeyDown={(e) => e.key === "Enter" && updateMember.mutate()} autoFocus />
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <TextInput value={editMLabel} onChange={(e) => setEditMLabel(e.target.value)}
+                          style={{ width: "100%" }}
+                          onKeyDown={(e) => e.key === "Enter" && updateMember.mutate()} autoFocus />
+                        {/* A top-level member of a standard dimension can be
+                            calculated from its siblings, for every metric. */}
+                        {!parentDim && !sourceDim && node.level === 0 && node.childCount === 0 && (
+                          <TextInput value={editMFormula} onChange={(e) => setEditMFormula(e.target.value)}
+                            aria-label="Member formula" placeholder="calculated: e.g. {RF} - {LY} (optional)"
+                            style={{ width: "100%", fontFamily: "var(--font-mono)", fontSize: 12 }}
+                            onKeyDown={(e) => e.key === "Enter" && updateMember.mutate()} />
+                        )}
+                      </div>
                     ) : (
                       <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
                         {/* Chevron */}
@@ -694,6 +709,12 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "",
                           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {node.label}
                         </span>
+                        {node.formula && (
+                          <span className="mvx-admin-mono mvx-admin-muted" title="Calculated member: computed from the other members for every metric"
+                            style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            = {node.formula}
+                          </span>
+                        )}
                         {parentDim && (
                           <span className="mvx-admin-muted" style={{ flexShrink: 0 }}>
                             {parentLabelOf(node.parent_member_id) ? `→ ${parentLabelOf(node.parent_member_id)}` : "→ unassigned"}

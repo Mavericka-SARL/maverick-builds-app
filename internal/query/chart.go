@@ -490,7 +490,7 @@ func (r *ChartResolver) resolveCategoryChart(
 		}
 		series = append(series, GridChartSeries{
 			MetricID:       m.ID,
-			Label:          toLabel(m.Name),
+			Label:          m.Label,
 			Values:         values,
 			Format:         m.Format,
 			FormatDecimals: m.FormatDecimals,
@@ -564,8 +564,8 @@ func (r *ChartResolver) resolveScatterChart(
 	return &ScatterChartData{
 		ChartType:   string(cfg.ChartType),
 		AsOf:        asOf,
-		XMetric:     metricLabel{ID: xM.ID, Label: toLabel(xM.Name), Format: xM.Format, FormatDecimals: xM.FormatDecimals, FormatCurrency: xM.FormatCurrency},
-		YMetric:     metricLabel{ID: yM.ID, Label: toLabel(yM.Name), Format: yM.Format, FormatDecimals: yM.FormatDecimals, FormatCurrency: yM.FormatCurrency},
+		XMetric:     metricLabel{ID: xM.ID, Label: xM.Label, Format: xM.Format, FormatDecimals: xM.FormatDecimals, FormatCurrency: xM.FormatCurrency},
+		YMetric:     metricLabel{ID: yM.ID, Label: yM.Label, Format: yM.Format, FormatDecimals: yM.FormatDecimals, FormatCurrency: yM.FormatCurrency},
 		Points:      points,
 		ContextDims: contextDims,
 		Context:     effectiveCtx,
@@ -618,7 +618,7 @@ func (r *ChartResolver) resolveHistogramChart(
 	return &HistogramChartData{
 		ChartType:        string(cfg.ChartType),
 		AsOf:             asOf,
-		Metric:           metricLabel{ID: m.ID, Label: toLabel(m.Name), Format: m.Format, FormatDecimals: m.FormatDecimals, FormatCurrency: m.FormatCurrency},
+		Metric:           metricLabel{ID: m.ID, Label: m.Label, Format: m.Format, FormatDecimals: m.FormatDecimals, FormatCurrency: m.FormatCurrency},
 		ObservationCount: len(obs),
 		Bins:             bins,
 		ContextDims:      contextDims,
@@ -678,32 +678,60 @@ func (r *ChartResolver) resolveMetricPerMember(
 	cc *chartCalc,
 ) ([]*float64, error) {
 	results := make([]*float64, len(members))
-
-	if m.IsInput {
-		fetch := r.fetchInput(modelID, revisionID)
-		aggRule := rollup.AggRule(m.AggRule)
-		for i, member := range members {
-			combo := buildDimMembers(effectiveCtx, plottedDimID, member.Code)
-			val, ok, err := rollup.ResolveTime(ctx, allDims, m.ID, m.DimensionIDs, aggRule, rollup.TimeSummaryRule(m.TimeSummary), combo, fetch)
-			if err != nil || !ok {
+	fetch := r.fetchInput(modelID, revisionID)
+	aggRule := rollup.AggRule(m.AggRule)
+	// valueAt is the metric at one coordinate. A calculated member anywhere
+	// in it (plotted or a context pin) is its formula over the siblings at
+	// the same coordinate, each resolved here in turn — so a FY Variance %
+	// comes from the FY RF and LY, never from adding up months.
+	var valueAt func(combo map[string]string, depth int) (float64, bool)
+	valueAt = func(combo map[string]string, depth int) (float64, bool) {
+		for dimID, code := range combo {
+			calc, isCalc := allDims[dimID].CalculatedCode(code)
+			if !isCalc || depth > 8 {
 				continue
 			}
-			v := val
+			v, ok, _ := rollup.EvalCalculated(calc.Formula, m.Format, func(ref string) (float64, bool, error) {
+				sib := make(map[string]string, len(combo))
+				for k, v := range combo {
+					sib[k] = v
+				}
+				sib[dimID] = canonicalMemberCode(allDims[dimID], ref)
+				v, ok := valueAt(sib, depth+1)
+				return v, ok, nil
+			})
+			return v, ok
+		}
+		if m.IsInput {
+			v, ok, err := rollup.ResolveTime(ctx, allDims, m.ID, m.DimensionIDs, aggRule, rollup.TimeSummaryRule(m.TimeSummary), combo, fetch)
+			return v, err == nil && ok
+		}
+		v, ok, err := r.evalCalcMetric(ctx, m, combo, allDims, cc)
+		return v, err == nil && ok
+	}
+	for i, member := range members {
+		if v, ok := valueAt(buildDimMembers(effectiveCtx, plottedDimID, member.Code), 0); ok {
 			results[i] = &v
 		}
-		return results, nil
-	}
-
-	for i, member := range members {
-		combo := buildDimMembers(effectiveCtx, plottedDimID, member.Code)
-		val, ok, err := r.evalCalcMetric(ctx, m, combo, allDims, cc)
-		if err != nil || !ok {
-			continue
-		}
-		v := val
-		results[i] = &v
 	}
 	return results, nil
+}
+
+// canonicalMemberCode is the member code a calculated member's formula
+// names, as the dimension spells it (formula names match case-insensitively).
+func canonicalMemberCode(d *rollup.Dimension, ref string) string {
+	if d == nil {
+		return ref
+	}
+	for _, mb := range d.Members {
+		if strings.EqualFold(mb.Code, ref) {
+			return mb.Code
+		}
+	}
+	if c, ok := d.CalculatedCode(ref); ok {
+		return c.Code
+	}
+	return ref
 }
 
 // fetchInput returns a rollup.RawValue that serves an input metric's values
@@ -1214,7 +1242,7 @@ func (r *ChartResolver) loadGridMetrics(ctx context.Context, gridDefID, revision
 		return nil, err
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT rev.id::text, rev.name, rev.is_input, COALESCE(rev.formula,''), COALESCE(rev.agg_rule,'sum'),
+		SELECT rev.id::text, rev.name, COALESCE(btrim(rev.label),''), rev.is_input, COALESCE(rev.formula,''), COALESCE(rev.agg_rule,'sum'),
 		       rev.format, rev.format_decimals, rev.format_currency, rev.time_summary
 		FROM model.grid_metric gm
 		JOIN model.metric_def orig ON orig.id = gm.metric_id
@@ -1232,10 +1260,12 @@ func (r *ChartResolver) loadGridMetrics(ctx context.Context, gridDefID, revision
 	defs := make(map[string]*metricDef)
 	for rows.Next() {
 		var d metricDef
-		if err := rows.Scan(&d.ID, &d.Name, &d.IsInput, &d.Formula, &d.AggRule, &d.Format, &d.FormatDecimals, &d.FormatCurrency, &d.TimeSummary); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.Label, &d.IsInput, &d.Formula, &d.AggRule, &d.Format, &d.FormatDecimals, &d.FormatCurrency, &d.TimeSummary); err != nil {
 			return nil, err
 		}
-		d.Label = toLabel(d.Name)
+		if d.Label == "" {
+			d.Label = toLabel(d.Name)
+		}
 		d.DimensionIDs = metricDims[d.ID]
 		defs[d.ID] = &d
 	}
@@ -1284,7 +1314,7 @@ func (r *ChartResolver) loadAllDimensions(ctx context.Context, modelID, revision
 		SELECT d.id::text, COALESCE(d.parent_dimension_id::text,''),
 		       COALESCE(d.source_dimension_id::text,''), COALESCE(d.source_property,''),
 		       d.dimension_type = 'time', COALESCE(d.time_granularity,''), COALESCE(d.fiscal_year_start_month,0),
-		       m.id::text, m.code, m.properties, COALESCE(pm.code,'') AS parent_code, COALESCE(m.time_index,-1)
+		       m.id::text, m.code, m.properties, COALESCE(pm.code,'') AS parent_code, COALESCE(m.time_index,-1), COALESCE(btrim(m.formula),'')
 		FROM model.dimension_def d
 		JOIN model.dimension_member m ON m.dimension_id = d.id
 		LEFT JOIN model.dimension_member pm ON pm.id = m.parent_member_id
@@ -1305,8 +1335,9 @@ func (r *ChartResolver) loadAllDimensions(ctx context.Context, modelID, revision
 		var memberID, code, parentCode string
 		var properties []byte
 		var timeIndex int
+		var memberFormula string
 		if err := rows.Scan(&dimID, &parentDimID, &sourceDimID, &sourceProp, &isTime, &granularity, &fiscalStart,
-			&memberID, &code, &properties, &parentCode, &timeIndex); err != nil {
+			&memberID, &code, &properties, &parentCode, &timeIndex, &memberFormula); err != nil {
 			return nil, err
 		}
 		dim, ok := dims[dimID]
@@ -1316,6 +1347,11 @@ func (r *ChartResolver) loadAllDimensions(ctx context.Context, modelID, revision
 			dims[dimID] = dim
 		}
 		if dimRules[memberID] == "hidden" {
+			continue
+		}
+		if memberFormula != "" {
+			// Computed from its siblings at plot time (rollup.CalculatedMember).
+			dim.Calculated = append(dim.Calculated, rollup.CalculatedMember{Code: code, Formula: memberFormula})
 			continue
 		}
 		var props map[string]string

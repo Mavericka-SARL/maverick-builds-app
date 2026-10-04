@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
@@ -367,7 +368,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/cells/history", "any", cors(h.requireFeature(license.FeatureCellHistory, h.cellHistory)))
 	register("GET", "/api/tasks", "any", cors(h.tasks))
 	register("POST", "/api/tasks/{stepId}/complete", "any", cors(h.taskAction))
-	register("GET", "/api/grid", "any", cors(h.grid))
+	register("GET", "/api/grid", "any", cors(h.gridEntry))
 	register("GET", "/api/grid/export", "any", cors(h.gridExport))
 	// Generic grid reads for readers other than the grid screen (grid_reads.go).
 	register("GET", "/api/grids", "any", cors(h.gridCatalog))
@@ -1991,6 +1992,7 @@ func (h *handler) metrics(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
+	h.labelMetricRows(ctx, result)
 	if result == nil {
 		result = []metricRow{}
 	}
@@ -2822,6 +2824,9 @@ type gridDimMember struct {
 	ParentMemberID string          `json:"-"`                     // parent member's ID (own dimension or, when the owning dimension declares parent_dimension_id, cross-dimension); internal only, drives writeguard.ExpandHidden — the frontend uses ParentCode instead
 	Readonly       bool            `json:"readonly,omitempty"`    // true = "read" access rule applied
 	Properties     json.RawMessage `json:"properties,omitempty"`  // arbitrary per-member key/values (e.g. {"region":"LUX"}); consumed by property-derived dimensions (source_property below)
+	// Formula marks a calculated member: computed from its siblings for every
+	// metric (rollup.CalculatedMember), in no total, holding no input.
+	Formula string `json:"formula,omitempty"`
 }
 
 type gridDimension struct {
@@ -2929,6 +2934,10 @@ func toRollupDims(allDims []gridDimension) map[string]*rollup.Dimension {
 		}
 		rd.Members = make([]rollup.Member, 0, len(d.Members))
 		for _, m := range d.Members {
+			if m.Formula != "" {
+				rd.Calculated = append(rd.Calculated, rollup.CalculatedMember{Code: m.Code, Formula: m.Formula})
+				continue
+			}
 			var props map[string]string
 			if len(m.Properties) > 0 {
 				_ = json.Unmarshal(m.Properties, &props)
@@ -3053,7 +3062,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			       d.dimension_type, d.time_granularity, d.fiscal_year_start_month,
 			       m.id::text, m.code, m.label, m.properties,
 			       COALESCE(pm.code, '') AS parent_code, COALESCE(pm.id::text, '') AS parent_member_id,
-			       m.period_start::text, m.period_end::text, m.time_index
+			       m.period_start::text, m.period_end::text, m.time_index, COALESCE(btrim(m.formula),'')
 			FROM model.grid_dimension gd
 			JOIN model.dimension_def d ON d.id = gd.dimension_id
 			JOIN model.dimension_member m ON m.dimension_id = d.id
@@ -3076,7 +3085,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			       d.dimension_type, d.time_granularity, d.fiscal_year_start_month,
 			       m.id::text, m.code, m.label, m.properties,
 			       COALESCE(pm.code, '') AS parent_code, COALESCE(pm.id::text, '') AS parent_member_id,
-			       m.period_start::text, m.period_end::text, m.time_index
+			       m.period_start::text, m.period_end::text, m.time_index, COALESCE(btrim(m.formula),'')
 			FROM model.dimension_def d
 			JOIN model.dimension_member m ON m.dimension_id = d.id
 			LEFT JOIN model.dimension_member pm ON pm.id = m.parent_member_id
@@ -3101,9 +3110,10 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		var displayLevel, fiscalStart, timeIndex *int
 		var parentDimensionID, sourceDimensionID, sourceProperty, granularity, periodStart, periodEnd *string
 		var properties json.RawMessage
+		var memberFormula string
 		if err := dimRows.Scan(&dimID, &dimName, &displayLevel, &parentDimensionID, &sourceDimensionID, &sourceProperty,
 			&dimType, &granularity, &fiscalStart,
-			&memberID, &code, &label, &properties, &parentCode, &parentMemberID, &periodStart, &periodEnd, &timeIndex); err != nil {
+			&memberID, &code, &label, &properties, &parentCode, &parentMemberID, &periodStart, &periodEnd, &timeIndex, &memberFormula); err != nil {
 			dimRows.Close()
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
@@ -3115,7 +3125,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		}
 		dimMap[dimID].Members = append(dimMap[dimID].Members, gridDimMember{
 			ID: memberID, Code: code, Label: label, ParentCode: parentCode, ParentMemberID: parentMemberID, Properties: properties,
-			PeriodStart: periodStart, PeriodEnd: periodEnd, TimeIndex: timeIndex,
+			PeriodStart: periodStart, PeriodEnd: periodEnd, TimeIndex: timeIndex, Formula: memberFormula,
 		})
 	}
 	dimRows.Close()
@@ -3140,7 +3150,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			       d.dimension_type, d.time_granularity, d.fiscal_year_start_month,
 			       m.id::text, m.code, m.label, m.properties,
 			       COALESCE(pm.code, '') AS parent_code, COALESCE(pm.id::text, '') AS parent_member_id,
-			       m.period_start::text, m.period_end::text, m.time_index
+			       m.period_start::text, m.period_end::text, m.time_index, COALESCE(btrim(m.formula),'')
 			FROM model.dimension_def d
 			JOIN model.dimension_member m ON m.dimension_id = d.id
 			LEFT JOIN model.dimension_member pm ON pm.id = m.parent_member_id
@@ -3158,9 +3168,10 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			var parentDimensionID, sourceDimensionID, sourceProperty, granularity, periodStart, periodEnd *string
 			var fiscalStart, timeIndex *int
 			var properties json.RawMessage
+			var memberFormula string
 			if err := allDimRows.Scan(&dimID, &dimName, &parentDimensionID, &sourceDimensionID, &sourceProperty,
 				&dimType, &granularity, &fiscalStart,
-				&memberID, &code, &label, &properties, &parentCode, &parentMemberID, &periodStart, &periodEnd, &timeIndex); err != nil {
+				&memberID, &code, &label, &properties, &parentCode, &parentMemberID, &periodStart, &periodEnd, &timeIndex, &memberFormula); err != nil {
 				allDimRows.Close()
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
@@ -3172,7 +3183,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			}
 			allDimMap[dimID].Members = append(allDimMap[dimID].Members, gridDimMember{
 				ID: memberID, Code: code, Label: label, ParentCode: parentCode, ParentMemberID: parentMemberID, Properties: properties,
-				PeriodStart: periodStart, PeriodEnd: periodEnd, TimeIndex: timeIndex,
+				PeriodStart: periodStart, PeriodEnd: periodEnd, TimeIndex: timeIndex, Formula: memberFormula,
 			})
 		}
 		allDimRows.Close()
@@ -3297,7 +3308,9 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 				// above. Each dimension reached gets its own alternative in
 				// the fact filter and its own subtree for the combo trim.
 				alternatives := []string{}
+				var altDims []string // this pin's dimension and the child dimensions it reaches
 				addAlt := func(dimID string, codes []string) {
+					altDims = append(altDims, dimID)
 					scopeArgs = append(scopeArgs, dimID, codes)
 					n := len(scopeArgs)
 					// $2+n-1 = dimID, $2+n = codes (args after modelID=$1,
@@ -3334,6 +3347,13 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 					}
 					frontier = next
 				}
+				// A fact carrying none of these dimensions belongs to a metric
+				// not dimensioned by them (an input a line reads across a
+				// Scenario it lacks): the same at every member, so the pin
+				// leaves it in. Dropped, a line reading it under the pin read
+				// nothing (IF(scenario = "RF", rev_rf, rev_ly) was 0 at LY).
+				scopeArgs = append(scopeArgs, altDims)
+				alternatives = append(alternatives, fmt.Sprintf("NOT (dim_members ?| $%d::text[])", 2+len(scopeArgs)))
 				scopeConds = append(scopeConds, "("+strings.Join(alternatives, " OR ")+")")
 			}
 		}
@@ -3445,6 +3465,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
+	h.labelMetricRows(ctx, metrics)
 
 	// Each metric's OWN grid's dimension IDs (ordered like `dims` above), so the
 	// frontend can build that metric's native cell key instead of assuming the
@@ -3512,6 +3533,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
+		h.labelMetricRows(ctx, allMetrics)
 	} else {
 		// Whole-model call (no grid_def_id) — `metrics` wasn't run through the
 		// mr.DimensionIDs assignment above (that only happens in the gridDefID
@@ -3972,6 +3994,10 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		withheld = scopedWithheld
 	}
 
+	// Calculated members (Variance = {RF} - {LY}): computed at each leaf
+	// cell from their siblings' cells, after both paths above.
+	withheld = addCalculatedMemberCells(cells, withheld, allMetrics, metricDims, allDims, scopePinned)
+
 	// totals_only under a scope/hidden caller still had to build per-combo
 	// cells to aggregate the calc totals correctly — but the caller wants
 	// only the numbers, so drop the cells before serializing. (fastTotals
@@ -4371,8 +4397,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		-- 1. Copy metrics; capture old→new ID mapping via name join
 		new_metrics AS (
 			INSERT INTO model.metric_def
-			  (model_id, name, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, revision_id, lineage_id)
-			SELECT model_id, name, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, $2::uuid, lineage_id
+			  (model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, revision_id, lineage_id)
+			SELECT model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, $2::uuid, lineage_id
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 			RETURNING id AS new_id, name
 		),
@@ -4416,8 +4442,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		-- has to rebuild its own mapping for the same reason).
 		new_members AS (
 			INSERT INTO model.dimension_member
-			  (dimension_id, code, label, properties, sort_order, period_start, period_end, time_index, lineage_id)
-			SELECT dm.new_id, m.code, m.label, m.properties, m.sort_order, m.period_start, m.period_end, m.time_index, m.lineage_id
+			  (dimension_id, code, label, properties, sort_order, period_start, period_end, time_index, lineage_id, formula)
+			SELECT dm.new_id, m.code, m.label, m.properties, m.sort_order, m.period_start, m.period_end, m.time_index, m.lineage_id, m.formula
 			FROM model.dimension_member m
 			JOIN dim_map dm ON dm.old_id = m.dimension_id
 			RETURNING id
@@ -5303,6 +5329,7 @@ type devMetric struct {
 	ID             string  `json:"id"`
 	Name           string  `json:"name"`
 	Label          string  `json:"label"`
+	LabelSet       bool    `json:"label_set"` // a label stored on the metric, not derived from its name
 	IsInput        bool    `json:"is_input"`
 	Formula        *string `json:"formula,omitempty"`
 	AggRule        string  `json:"agg_rule"`
@@ -5422,6 +5449,19 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
+	{
+		ids := make([]string, len(metrics))
+		for i, m := range metrics {
+			ids[i] = m.ID
+		}
+		labels := h.storedMetricLabels(ctx, ids)
+		for i := range metrics {
+			if l, ok := labels[metrics[i].ID]; ok {
+				metrics[i].Label = l
+				metrics[i].LabelSet = true
+			}
+		}
+	}
 	if metrics == nil {
 		metrics = []devMetric{}
 	}
@@ -5437,7 +5477,10 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 // ── /api/developer/metrics ────────────────────────────────────────────────────
 
 type addMetricReq struct {
-	Name       string `json:"name"`
+	Name string `json:"name"`
+	// Label is the display label (migration 108); empty keeps the label
+	// derived from the name.
+	Label      string `json:"label"`
 	IsInput    bool   `json:"is_input"`
 	Formula    string `json:"formula"` // empty for input metrics
 	RevisionID string `json:"revision_id"`
@@ -5584,6 +5627,9 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 			RETURNING id::text
 		`, modelID, req.Name, formulaVal, req.IsInput, req.AggRule, req.Format, req.FormatDecimals, req.FormatCurrency,
 			req.AggNumeratorMetricID, req.AggDenominatorMetricID, req.TimeSummary, tags.Clean(req.Tags)).Scan(&newID)
+	}
+	if metricInsertErr == nil && strings.TrimSpace(req.Label) != "" {
+		_, metricInsertErr = tx.Exec(ctx, `UPDATE model.metric_def SET label=$2 WHERE id=$1::uuid`, newID, strings.TrimSpace(req.Label))
 	}
 	if metricInsertErr != nil {
 		if metricformula.IsUniqueViolation(metricInsertErr) {
@@ -6223,6 +6269,8 @@ type devMember struct {
 	Code           string  `json:"code"`
 	Label          string  `json:"label"`
 	ParentMemberID *string `json:"parent_member_id"`
+	// Formula marks a calculated member ({RF} - {LY}).
+	Formula string `json:"formula,omitempty"`
 	// Time members only (spec §3.2): the period and the server-owned
 	// chronological ordinal time functions move by.
 	PeriodStart *string `json:"period_start,omitempty"`
@@ -6474,7 +6522,7 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 		// in code order — the console shows periods as the engine walks them.
 		mRows, err := h.db.Query(ctx, `
 			SELECT id::text, code, label, parent_member_id::text, properties,
-			       period_start::text, period_end::text, time_index
+			       period_start::text, period_end::text, time_index, COALESCE(btrim(formula),'')
 			FROM model.dimension_member
 			WHERE dimension_id=$1::uuid ORDER BY time_index NULLS LAST, sort_order, code
 		`, d.ID)
@@ -6484,7 +6532,7 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 		for mRows.Next() {
 			var m devMember
 			var propsJSON []byte
-			if err := mRows.Scan(&m.ID, &m.Code, &m.Label, &m.ParentMemberID, &propsJSON, &m.PeriodStart, &m.PeriodEnd, &m.TimeIndex); err != nil {
+			if err := mRows.Scan(&m.ID, &m.Code, &m.Label, &m.ParentMemberID, &propsJSON, &m.PeriodStart, &m.PeriodEnd, &m.TimeIndex, &m.Formula); err != nil {
 				continue
 			}
 			if len(propsJSON) > 0 {
@@ -11239,6 +11287,9 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			TimeSummary            *string `json:"time_summary"`
 			// Omitted leaves the metric's tags as they are.
 			Tags *[]string `json:"tags"`
+			// Omitted leaves the label; "" clears it back to the label
+			// derived from the name.
+			Label *string `json:"label"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -11377,6 +11428,12 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		}
 		defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
 
+		if patch.Label != nil {
+			if _, err := tx.Exec(ctx, `UPDATE model.metric_def SET label=NULLIF(btrim($2),'') WHERE id=$1::uuid`, metricID, *patch.Label); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE model.metric_def
 			SET name=$2, formula=$3, agg_rule=$4, format=$5, format_decimals=$6, format_currency=$7,
@@ -11906,6 +11963,8 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				// properties like an edit's. They used to be dropped while the
 				// create answered 200.
 				Properties map[string]string `json:"properties"`
+				// Formula makes it a calculated member ({RF} - {LY}).
+				Formula string `json:"formula"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -11964,6 +12023,10 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 					jsonErr(w, metricformula.MemberCodeTaken(err, body.Code), http.StatusConflict)
 					return
 				}
+				if isCheckViolation(err) {
+					jsonErr(w, err, http.StatusBadRequest)
+					return
+				}
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -11971,6 +12034,13 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				propsJSON, _ := json.Marshal(props)
 				if _, err := h.db.Exec(ctx, `UPDATE model.dimension_member SET properties = $2::jsonb WHERE id=$1::uuid`, newID, string(propsJSON)); err != nil {
 					jsonErr(w, err, http.StatusInternalServerError)
+					return
+				}
+			}
+			if strings.TrimSpace(body.Formula) != "" {
+				if err := modeledit.SetMemberFormula(ctx, h.db.For(ctx), dimID, body.Code, body.Formula); err != nil {
+					_, _ = h.db.Exec(ctx, `DELETE FROM model.dimension_member WHERE id=$1::uuid`, newID)
+					jsonErr(w, err, http.StatusBadRequest)
 					return
 				}
 			}
@@ -12016,6 +12086,9 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				// merges over existing keys, so setting one property keeps the
 				// rest. Feeds property-derived dimensions and metric formulas.
 				Properties map[string]string `json:"properties"`
+				// Formula: nil leaves it; "" makes an ordinary member again;
+				// else a calculated member ({RF} - {LY}).
+				Formula *string `json:"formula"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -12083,6 +12156,10 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 					jsonErr(w, metricformula.MemberCodeTaken(err, body.Code), http.StatusConflict)
 					return
 				}
+				if isCheckViolation(err) {
+					jsonErr(w, err, http.StatusBadRequest)
+					return
+				}
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -12100,6 +12177,12 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 			// before: a failure here does not undo the rename.
 			if err := modeledit.RekeyMemberCode(ctx, h.db, dimID, oldCode, body.Code); err != nil {
 				h.log.Error().Err(err).Str("member_id", subID).Msg("re-key data after member rename")
+			}
+			if body.Formula != nil {
+				if err := modeledit.SetMemberFormula(ctx, h.db.For(ctx), dimID, body.Code, *body.Formula); err != nil {
+					jsonErr(w, err, http.StatusBadRequest)
+					return
+				}
 			}
 			if body.ParentMemberID != nil && prevParentID == nil {
 				var childCount int
@@ -14349,7 +14432,11 @@ func (h *handler) developerGrids(w http.ResponseWriter, r *http.Request) {
 		}
 		rows.Close()
 		for i, g := range grids {
-			mRows, _ := h.db.Query(ctx, `SELECT metric_id::text FROM model.grid_metric WHERE grid_id=$1::uuid ORDER BY sort_order`, g.ID)
+			// Ties broken as /api/grid breaks them, so the Grids tab lists a
+			// grid's metrics in the order the grid shows them.
+			mRows, _ := h.db.Query(ctx, `
+				SELECT gm.metric_id::text FROM model.grid_metric gm JOIN model.metric_def m ON m.id = gm.metric_id
+				WHERE gm.grid_id=$1::uuid ORDER BY gm.sort_order, m.is_input DESC, m.name`, g.ID)
 			if mRows != nil {
 				for mRows.Next() {
 					var id string
@@ -14558,6 +14645,7 @@ func (h *handler) developerGridAction(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			h.auditGridUpdated(ctx, r, gridID, "metric_attached", map[string]string{"metric_id": subID})
+			h.recalcGridMetrics(ctx, gridID)
 			jsonOK(w, map[string]string{"status": "ok"})
 		case r.Method == http.MethodDelete && subID != "":
 			if _, err := h.db.Exec(ctx,
@@ -14599,6 +14687,7 @@ func (h *handler) developerGridAction(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			h.auditGridUpdated(ctx, r, gridID, "dimension_attached", map[string]string{"dimension_id": subID})
+			h.recalcGridMetrics(ctx, gridID)
 			jsonOK(w, map[string]string{"status": "ok"})
 		case r.Method == http.MethodPatch && subID != "":
 			// Update display_level for this grid-dimension pair.
@@ -15290,12 +15379,12 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
-		if body.WidgetType == "chart" {
+		if body.WidgetType == "chart" || body.WidgetType == "grid" {
 			gridRef := ""
 			if body.RefID != nil {
 				gridRef = *body.RefID
 			}
-			if err := modeledit.CheckChartMetrics(ctx, h.db, gridRef, body.WidgetProps); err != nil {
+			if err := modeledit.CheckWidgetProps(ctx, h.db, body.WidgetType, gridRef, body.WidgetProps); err != nil {
 				jsonErr(w, err, http.StatusBadRequest)
 				return
 			}
@@ -15395,14 +15484,14 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 			var props []byte
 			if err := h.db.QueryRow(ctx,
 				`SELECT widget_type, COALESCE(ref_id::text,''), COALESCE(widget_props,'null'::jsonb) FROM model.dashboard_widget WHERE id=$1::uuid AND dashboard_id=$2::uuid`,
-				widgetID, dashID).Scan(&wType, &refID, &props); err == nil && wType == "chart" {
+				widgetID, dashID).Scan(&wType, &refID, &props); err == nil && (wType == "chart" || wType == "grid") {
 				if body.RefID != nil && *body.RefID != "" {
 					refID = *body.RefID
 				}
 				if len(body.WidgetProps) > 0 && string(body.WidgetProps) != "null" {
 					props = body.WidgetProps
 				}
-				if err := modeledit.CheckChartMetrics(ctx, h.db, refID, props); err != nil {
+				if err := modeledit.CheckWidgetProps(ctx, h.db, wType, refID, props); err != nil {
 					jsonErr(w, err, http.StatusBadRequest)
 					return
 				}
@@ -17962,4 +18051,50 @@ func (h *handler) dashboardWidgetAction(w http.ResponseWriter, r *http.Request) 
 	}
 
 	jsonOK(w, result)
+}
+
+// isCheckViolation reports a CHECK or trigger refusal (SQLSTATE 23514), such
+// as a member placed under a calculated member: the request's fault, a 400.
+func isCheckViolation(err error) bool {
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) && pe.Code == "23514"
+}
+
+// recalcGridMetrics calculates the grid's calculated metrics in the
+// background after its shape changed — a metric placed on it, a dimension
+// added — as the AI Developer's confirm does. A calculated metric created
+// after the data it reads stayed blank until an input changed (found
+// rebuilding a P&L by hand on a Scenario dimension).
+func (h *handler) recalcGridMetrics(ctx context.Context, gridID string) {
+	ctx = context.WithoutCancel(ctx)
+	go func() { //nolint:contextcheck // outlives the request
+		bg, done := h.backgroundRecalc(ctx, "recalculation after a grid change")
+		defer done()
+		var modelID, revisionID string
+		if err := h.db.QueryRow(bg, `SELECT model_id::text, COALESCE(revision_id::text,'') FROM model.grid_def WHERE id=$1::uuid`, gridID).
+			Scan(&modelID, &revisionID); err != nil || revisionID == "" {
+			return
+		}
+		rows, err := h.db.Query(bg, `
+			SELECT m.id::text FROM model.grid_metric gm JOIN model.metric_def m ON m.id = gm.metric_id
+			WHERE gm.grid_id=$1::uuid AND NOT m.is_input AND COALESCE(m.formula,'') <> ''`, gridID)
+		if err != nil {
+			return
+		}
+		var ids []string
+		for rows.Next() {
+			var id string
+			if rows.Scan(&id) == nil {
+				ids = append(ids, id)
+			}
+		}
+		rows.Close()
+		if len(ids) == 0 {
+			return
+		}
+		sched := calculation.NewScheduler(h.log, calculation.NewStore(h.db.For(bg)), nil)
+		if err := sched.RecalcSpecific(bg, modelID, revisionID, ids); err != nil {
+			h.log.Warn().Err(err).Str("grid", gridID).Msg("recalculation after a grid change failed")
+		}
+	}()
 }

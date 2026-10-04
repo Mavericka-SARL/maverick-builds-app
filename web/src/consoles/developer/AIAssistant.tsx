@@ -84,7 +84,7 @@ function SettingsPanel({ onClose, initialSettings }: { onClose: () => void; init
           <TextInput
             value={model}
             onChange={e => setModel(e.target.value)}
-            placeholder="Leave blank for the provider's default"
+            placeholder={initialSettings?.default_models?.[provider] ? `Blank runs ${initialSettings.default_models[provider]}` : "Leave blank for the provider's default"}
             aria-label="Model"
             autoComplete="off"
           />
@@ -243,7 +243,7 @@ const TOOL_LABELS: Record<string, string> = {
   delete_automation_rule: "Delete automation rule", create_business_role: "Create business role",
   create_form_integration: "Create form integration", update_form_integration: "Update form integration",
   delete_form_integration: "Delete form integration", set_user_access_rules: "Set user access rules",
-  create_file_integration: "Create Excel/CSV integration", import_file_data: "Import attached file",
+  create_file_integration: "Create Excel/CSV integration", import_file_data: "Import attached file", write_input_values: "Write input values",
   create_export_integration: "Create data export", update_integration: "Update integration",
   delete_integration: "Delete integration",
 };
@@ -1179,7 +1179,7 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
             </Button>
           </div>
           <div className="mvx-admin-muted" style={{ marginTop: 6, fontSize: 11 }}>
-            Provider: {settings?.provider ?? "openai"} · Model: {settings?.model ?? "gpt-4o-mini"}
+            Provider: {settings?.provider || "openai"} · Model: {settings?.model || settings?.default_models?.[settings?.provider || "openai"] || "provider default"}
           </div>
         </div>
       </div>

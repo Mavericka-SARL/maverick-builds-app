@@ -787,7 +787,7 @@ components:
       properties:
         id:              { type: string, format: uuid }
         name:            { type: string }
-        label:           { type: string }
+        label:           { type: string, description: "The stored display name, or one derived from name" }
         formula:         { type: string, nullable: true }
         is_input:        { type: boolean }
         agg_rule:        { type: string }
@@ -817,6 +817,7 @@ components:
         period_start:      { type: string, format: date, description: "Leaf periods of a time dimension only (YYYY-MM-DD); absent on an aggregate period (H1, FY26)" }
         period_end:        { type: string, format: date, description: "Leaf periods only (YYYY-MM-DD)" }
         time_index:        { type: integer, description: "Leaf periods only: server-owned chronological ordinal, read-only. Time functions move by this order, never by code or label; aggregate periods have none." }
+        formula:           { type: string, description: "A calculated member: its value, for every metric, is this formula over the dimension's other members ({RF} - {LY}); it holds no input and is in no total" }
 
     Dimension:
       type: object
@@ -861,6 +862,7 @@ components:
       required: [name, is_input]
       properties:
         name:            { type: string }
+        label:           { type: string, description: "Display name (\"R&D\"); omitted or blank derives it from name" }
         is_input:        { type: boolean }
         formula:         { type: string, description: "Required when is_input is false" }
         revision_id:     { type: string, format: uuid }
@@ -882,6 +884,7 @@ components:
       type: object
       properties:
         name:            { type: string }
+        label:           { type: string, description: "Omitted keeps the display name; \"\" clears it back to the name" }
         tags:            { type: array, items: { type: string }, description: "Omitted keeps the metric's tags" }
         formula:         { type: string }
         agg_rule:        { type: string }
@@ -967,6 +970,13 @@ components:
         parent_member_id:  { type: string, format: uuid, nullable: true, description: "On a time dimension the parent must be an aggregate (undated) period" }
         period_start:      { type: string, format: date, description: "Time dimensions: with period_end, makes the member a leaf period (YYYY-MM-DD); omit both for an aggregate period such as H1 or FY26" }
         period_end:        { type: string, format: date, description: "See period_start" }
+        formula:
+          type: string
+          description: >-
+            Makes a top-level member of a standard dimension a calculated member: a formula over the dimension's
+            other member codes ({RF} - {LY}) with IF, ABS, MIN, MAX, ROUND, AND, OR, NOT and METRICFORMAT().
+            Omitted on an update keeps it; "" makes an ordinary member again. Refused (400) for a member with
+            members under or above it, one holding values, an unknown member, or a cycle.
 
     GeneratePeriodsRequest:
       type: object

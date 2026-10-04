@@ -35,3 +35,36 @@ func RenameProperty(text, dim, oldProp, newProp string) (out string, changed boo
 	b.WriteString(string(src[last:]))
 	return b.String(), true
 }
+
+// RenameIdent rewrites every name reference to old (bare or in braces,
+// matched case-insensitively) to new, written as QuoteName writes it. A
+// function call of that name, string literals and everything else stay
+// byte-for-byte. It is how a calculated member's formula follows a renamed
+// member code.
+func RenameIdent(text, old, new string) (out string, changed bool) {
+	src := []rune(text)
+	toks := lex(text)
+	var b strings.Builder
+	last := 0
+	for i, tok := range toks {
+		if tok.Type != tokIdent || !strings.EqualFold(tok.Val, old) {
+			continue
+		}
+		if i+1 < len(toks) && toks[i+1].Type == tokLParen {
+			continue // a function, not a name
+		}
+		width := len([]rune(tok.Val))
+		if tok.Pos < len(src) && src[tok.Pos] == '{' {
+			width += 2
+		}
+		b.WriteString(string(src[last:tok.Pos]))
+		b.WriteString(QuoteName(new))
+		last = tok.Pos + width
+		changed = true
+	}
+	if !changed {
+		return text, false
+	}
+	b.WriteString(string(src[last:]))
+	return b.String(), true
+}

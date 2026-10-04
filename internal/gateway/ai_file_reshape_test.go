@@ -445,3 +445,66 @@ func TestPlanCheckRefusesFractionsIntoAPercentage(t *testing.T) {
 		t.Errorf("with values_are_percent_units the plan should be shown; got %q", r)
 	}
 }
+
+// A file previews into a grid the same proposal creates: preview_file_import
+// runs after_steps in a dry run first, and the target may be one of their
+// creations, by placeholder or by name. Nothing they make is kept. Without it,
+// loading data took a proposal of its own after the grid was confirmed.
+func TestPreviewIntoAGridThePlanCreates(t *testing.T) {
+	f := newSalesFileFixture(t)
+	ctx, pool := f.ctx, f.pool
+	steps := []map[string]any{
+		{"tool": "create_metric", "description": "Units", "params": map[string]any{"name": "units", "is_input": true}},
+		{"tool": "create_grid", "description": "Units grid", "params": map[string]any{"name": "Units Grid", "metrics": []string{"units"}, "dimensions": []string{"geography"}}},
+	}
+	tool := func(id string, a any) providers.ChatResponse {
+		b, _ := json.Marshal(a)
+		return providers.ChatResponse{FinishReason: "tool_calls", Message: providers.Message{Role: "assistant",
+			ToolCalls: []providers.ToolCall{{ID: id, Name: "preview_file_import", Arguments: b}}}}
+	}
+	fake := &multiScriptProvider{resps: []providers.ChatResponse{
+		tool("call_ref", map[string]any{"file": "units.csv", "target_id": "<created in step 2>", "after_steps": steps}),
+		tool("call_name", map[string]any{"file": "units.csv", "target_id": "Units Grid", "after_steps": steps}),
+		tool("call_bad", map[string]any{"file": "units.csv", "target_id": "Units Grid", "after_steps": []map[string]any{
+			{"tool": "create_grid", "description": "bad", "params": map[string]any{"name": "Units Grid", "metrics": []string{"no_such_metric"}}}}}),
+		{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: "Done."}},
+	}}
+	send, do := f.serve(t, fake)
+	chatStore := aiassistant.NewChatStore(pool)
+	sess, err := chatStore.CreateSession(ctx, f.appID, f.modelID, f.devID, "openai", "gpt-5-mini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = chatStore.SetTitleIfEmpty(ctx, sess.ID, "pre-titled")
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, _ := mw.CreateFormFile("file", "units.csv")
+	_, _ = fw.Write([]byte("geography,units\nCA,5\nUK,7\n"))
+	_ = mw.Close()
+	if status, out := send(f.devSub, "POST", "/api/ai/sessions/"+sess.ID+"/documents", mw.FormDataContentType(), body.Bytes()); status != http.StatusOK {
+		t.Fatalf("attach: %d %s", status, out)
+	}
+	if status, out := do(f.devSub, "POST", "/api/ai/sessions/"+sess.ID+"/messages", map[string]string{"content": "preview"}); status != http.StatusOK {
+		t.Fatalf("message: %d %s", status, out)
+	}
+	results := map[string]string{}
+	msgs, _ := chatStore.ListMessages(ctx, sess.ID)
+	for _, m := range msgs {
+		if m.Role == "tool" {
+			results[m.ToolCallID] = m.Content
+		}
+	}
+	for _, id := range []string{"call_ref", "call_name"} {
+		if r := results[id]; !strings.Contains(r, "No errors. Would import 2 value(s): units (2)") || !strings.Contains(r, "Previewed after the 2 step(s)") {
+			t.Errorf("%s: want a clean preview into the planned grid; got:\n%s", id, r)
+		}
+	}
+	if r := results["call_bad"]; !strings.Contains(r, "Nothing previewed: the after_steps would fail") {
+		t.Errorf("failing after_steps: got:\n%s", r)
+	}
+	var kept int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM model.grid_def WHERE name='Units Grid'`).Scan(&kept)
+	if kept != 0 {
+		t.Errorf("the dry run kept %d grid(s)", kept)
+	}
+}

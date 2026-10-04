@@ -420,7 +420,12 @@ func scopeCalcCells(
 			remaining = append(remaining, m)
 		}
 	}
-	for pass := 0; pass < len(remaining)+1 && len(remaining) > 0; pass++ {
+	// Bounded by the count at the start: the bound used to be the count
+	// still remaining, which shrinks as metrics resolve, so a chain deeper
+	// than what was left (operating_margin ← operating_profit ← ebitda …,
+	// evaluated in name order) stopped one pass short and its total vanished.
+	// A pass that resolves nothing ends it too: what is left cannot resolve.
+	for pass, maxPasses := 0, len(remaining)+1; pass < maxPasses && len(remaining) > 0; pass++ {
 		var unresolved []metricRow
 		for _, m := range remaining {
 			ownDims := metricDimIDs[m.ID]
@@ -461,6 +466,9 @@ func scopeCalcCells(
 			scopeOrdinaryMetric(ctx, m, ownDims, refs, byName, rollupDims, metricDimIDs, dimIDToName, sr, fetchFor,
 				cells, totals, working, withheld)
 			done[m.ID] = true
+		}
+		if len(unresolved) == len(remaining) {
+			break
 		}
 		remaining = unresolved
 	}

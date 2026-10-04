@@ -86,7 +86,11 @@ func (e *WriteExecutor) deleteWorkflowDef(ctx context.Context, raw json.RawMessa
 	var p struct {
 		WorkflowDefID string `json:"workflow_def_id"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.WorkflowDefID == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.WorkflowDefID == "" {
 		return "", "", fmt.Errorf("workflow_def_id is required")
 	}
 	id, err := resolveWorkflowDefRef(ctx, e.pool, e.modelID, e.revID, p.WorkflowDefID)
@@ -112,7 +116,11 @@ func (e *WriteExecutor) deleteFormDef(ctx context.Context, raw json.RawMessage) 
 	var p struct {
 		FormID string `json:"form_id"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.FormID == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.FormID == "" {
 		return "", "", fmt.Errorf("form_id is required")
 	}
 	id, err := resolveFormDefRef(ctx, e.pool, e.modelID, e.revID, p.FormID)
@@ -228,7 +236,7 @@ func schedule(p automationRuleParams) *workflow.ScheduleConfig {
 
 func (e *WriteExecutor) createAutomationRule(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p automationRuleParams
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if p.Name == "" {
@@ -270,7 +278,7 @@ func (e *WriteExecutor) createAutomationRule(ctx context.Context, raw json.RawMe
 
 func (e *WriteExecutor) updateAutomationRule(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p automationRuleParams
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if p.AutomationRuleID == "" {
@@ -334,7 +342,11 @@ func (e *WriteExecutor) deleteAutomationRule(ctx context.Context, raw json.RawMe
 	var p struct {
 		AutomationRuleID string `json:"automation_rule_id"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.AutomationRuleID == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.AutomationRuleID == "" {
 		return "", "", fmt.Errorf("automation_rule_id is required")
 	}
 	appID, err := e.applicationID(ctx)
@@ -364,7 +376,11 @@ func (e *WriteExecutor) createBusinessRole(ctx context.Context, raw json.RawMess
 	var p struct {
 		Name string `json:"name"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || strings.TrimSpace(p.Name) == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || strings.TrimSpace(p.Name) == "" {
 		return "", "", fmt.Errorf("name is required")
 	}
 	name := strings.TrimSpace(p.Name)
@@ -435,7 +451,7 @@ func (e *WriteExecutor) checkIntegrationFields(ctx context.Context, formID strin
 
 func (e *WriteExecutor) createFormIntegration(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p formIntegrationParams
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if p.FormID == "" || p.Name == "" || p.SourceField == "" || p.TargetMetricID == "" {
@@ -508,7 +524,7 @@ func (e *WriteExecutor) loadIntegration(ctx context.Context, id string) (formID,
 
 func (e *WriteExecutor) updateFormIntegration(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p formIntegrationParams
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if p.FormIntegrationID == "" {
@@ -593,7 +609,11 @@ func (e *WriteExecutor) deleteFormIntegration(ctx context.Context, raw json.RawM
 	var p struct {
 		FormIntegrationID string `json:"form_integration_id"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.FormIntegrationID == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.FormIntegrationID == "" {
 		return "", "", fmt.Errorf("form_integration_id is required")
 	}
 	_, name, err := e.loadIntegration(ctx, p.FormIntegrationID)

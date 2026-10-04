@@ -15,8 +15,11 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"net/http"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
@@ -162,9 +165,9 @@ func (h *handler) modelOfRevision(ctx context.Context, revisionID string) (strin
 }
 
 // modelNamesHint lists the names a grid import's columns may carry.
-func (h *handler) modelNamesHint(ctx context.Context, modelID, revisionID string) string {
+func (h *handler) modelNamesHint(ctx context.Context, q dbQuerier, modelID, revisionID string) string {
 	var metrics, dims []string
-	if rows, err := h.db.Query(ctx, `SELECT name FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid AND is_input ORDER BY name`, modelID, revisionID); err == nil {
+	if rows, err := q.Query(ctx, `SELECT name FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid AND is_input ORDER BY name`, modelID, revisionID); err == nil {
 		for rows.Next() {
 			var n string
 			if rows.Scan(&n) == nil {
@@ -173,7 +176,7 @@ func (h *handler) modelNamesHint(ctx context.Context, modelID, revisionID string
 		}
 		rows.Close()
 	}
-	if rows, err := h.db.Query(ctx, `SELECT name FROM model.dimension_def WHERE model_id=$1::uuid AND revision_id=$2::uuid ORDER BY name`, modelID, revisionID); err == nil {
+	if rows, err := q.Query(ctx, `SELECT name FROM model.dimension_def WHERE model_id=$1::uuid AND revision_id=$2::uuid ORDER BY name`, modelID, revisionID); err == nil {
 		for rows.Next() {
 			var n string
 			if rows.Scan(&n) == nil {
@@ -199,13 +202,13 @@ func importErrorLines(errs []map[string]any, limit int) string {
 }
 
 // resolveAttachedGrid runs ResolveRows: staged rows, or the problems.
-func (h *handler) resolveAttachedGrid(ctx context.Context, modelID, revisionID, gridID string, f *attachedFile) ([]importpkg.StagingRow, []map[string]any, error) {
-	if err := importpkg.CheckGridColumns(ctx, h.db.For(ctx), gridID, f.mapped); err != nil {
+func (h *handler) resolveAttachedGrid(ctx context.Context, q dbQuerier, modelID, revisionID, gridID string, f *attachedFile) ([]importpkg.StagingRow, []map[string]any, error) {
+	if err := importpkg.CheckGridColumns(ctx, q, gridID, f.mapped); err != nil {
 		return nil, nil, err
 	}
-	staged, importErrs, err := importpkg.ResolveRows(ctx, h.db.For(ctx), modelID, revisionID, f.mapped, f.rows)
+	staged, importErrs, err := importpkg.ResolveRows(ctx, q, modelID, revisionID, f.mapped, f.rows)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w. Map each column to a model name or \"ignore\" in column_map — %s", err, h.modelNamesHint(ctx, modelID, revisionID))
+		return nil, nil, fmt.Errorf("%w. Map each column to a model name or \"ignore\" in column_map — %s", err, h.modelNamesHint(ctx, q, modelID, revisionID))
 	}
 	errRows := make([]map[string]any, 0, len(importErrs))
 	for _, e := range importErrs {
@@ -239,9 +242,9 @@ func dimensionCSV(f *attachedFile) (*csv.Reader, map[string]int, error) {
 
 // newMemberCount is how many of a dimension file's rows would add a member
 // (a code not in the dimension yet, or no code — one is generated).
-func (h *handler) newMemberCount(ctx context.Context, dimensionID string, f *attachedFile) (added, updated int) {
+func (h *handler) newMemberCount(ctx context.Context, q dbQuerier, dimensionID string, f *attachedFile) (added, updated int) {
 	existing := map[string]bool{}
-	if rows, err := h.db.Query(ctx, `SELECT code FROM model.dimension_member WHERE dimension_id=$1::uuid`, dimensionID); err == nil {
+	if rows, err := q.Query(ctx, `SELECT code FROM model.dimension_member WHERE dimension_id=$1::uuid`, dimensionID); err == nil {
 		for rows.Next() {
 			var c string
 			if rows.Scan(&c) == nil {
@@ -266,7 +269,18 @@ func (h *handler) newMemberCount(ctx context.Context, dimensionID string, f *att
 	return added, updated
 }
 
+// dbQuerier is what the import preview and checks read with: the pool, or
+// the plan check's transaction, where earlier steps of a plan exist.
+type dbQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 func (h *handler) aiPreviewFileImport(ctx context.Context, sessionID string, req aiassistant.FileImportRequest) (string, error) {
+	return h.aiPreviewFileImportOn(ctx, h.db.For(ctx), sessionID, req)
+}
+
+func (h *handler) aiPreviewFileImportOn(ctx context.Context, q dbQuerier, sessionID string, req aiassistant.FileImportRequest) (string, error) {
 	f, err := h.loadAttachedFile(ctx, sessionID, req)
 	if err != nil {
 		return "", err
@@ -282,14 +296,14 @@ func (h *handler) aiPreviewFileImport(ctx context.Context, sessionID string, req
 		if _, _, err := dimensionCSV(f); err != nil {
 			return sb.String() + "Cannot import: " + err.Error(), nil
 		}
-		added, updated := h.newMemberCount(ctx, req.TargetID, f)
+		added, updated := h.newMemberCount(ctx, q, req.TargetID, f)
 		fmt.Fprintf(&sb, "Would add %d member(s) and update %d existing one(s). Rows with neither code nor label are skipped.\n", added, updated)
 		return sb.String(), nil
 	}
 
-	staged, errRows, err := h.resolveAttachedGrid(ctx, modelID, req.RevisionID, req.TargetID, f)
+	staged, errRows, err := h.resolveAttachedGrid(ctx, q, modelID, req.RevisionID, req.TargetID, f)
 	if err != nil {
-		return sb.String() + "Cannot import: " + err.Error() + "\n" + h.suggestColumnMap(ctx, req, f), nil
+		return sb.String() + "Cannot import: " + err.Error() + "\n" + h.suggestColumnMap(ctx, q, req, f), nil
 	}
 	if len(errRows) > 0 {
 		fmt.Fprintf(&sb, "%d value(s) fail validation — an import is all-or-nothing, so nothing would be imported until they are fixed:\n%s",
@@ -307,12 +321,12 @@ func (h *handler) aiPreviewFileImport(ctx context.Context, sessionID string, req
 	var parts []string
 	for id, n := range perMetric {
 		var name string
-		_ = h.db.QueryRow(ctx, `SELECT name FROM model.metric_def WHERE id=$1::uuid`, id).Scan(&name)
+		_ = q.QueryRow(ctx, `SELECT name FROM model.metric_def WHERE id=$1::uuid`, id).Scan(&name)
 		parts = append(parts, fmt.Sprintf("%s (%d)", name, n))
 	}
 	sort.Strings(parts)
 	fmt.Fprintf(&sb, "No errors. Would import %d value(s): %s.\n", len(staged), strings.Join(parts, ", "))
-	sb.WriteString(h.percentFractionWarning(ctx, staged))
+	sb.WriteString(h.percentFractionWarning(ctx, q, staged))
 	return sb.String(), nil
 }
 
@@ -346,6 +360,7 @@ func (f *attachedFile) layout(req aiassistant.FileImportRequest) string {
 }
 
 func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string, req aiassistant.FileImportRequest) (string, error) {
+	q := h.db.For(ctx)
 	f, err := h.loadAttachedFile(ctx, sessionID, req)
 	if err != nil {
 		return "", err
@@ -386,7 +401,7 @@ func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string
 			return fail(err)
 		}
 		if cid := h.customerOfModel(ctx, modelID); cid != "" && h.plans != nil {
-			added, _ := h.newMemberCount(ctx, req.TargetID, f)
+			added, _ := h.newMemberCount(ctx, q, req.TargetID, f)
 			if err := h.plans.CheckMembers(ctx, h.db.For(ctx), cid, req.TargetID, added); err != nil {
 				return fail(err)
 			}
@@ -417,7 +432,7 @@ func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string
 	if systemManaged {
 		return fail(fmt.Errorf("this revision is system-managed and read-only"))
 	}
-	staged, errRows, err := h.resolveAttachedGrid(ctx, modelID, req.RevisionID, req.TargetID, f)
+	staged, errRows, err := h.resolveAttachedGrid(ctx, q, modelID, req.RevisionID, req.TargetID, f)
 	if err != nil {
 		return fail(err)
 	}
@@ -438,7 +453,7 @@ func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string
 	}
 	audit(len(staged))
 	return fmt.Sprintf("Imported %d value(s) from %s into %d metric(s) (mode %s)", len(staged), f.describe(), len(metricIDs), mode) +
-		h.percentFractionWarning(ctx, staged), nil
+		h.percentFractionWarning(ctx, q, staged), nil
 }
 
 // aiPreviewExport renders an export spec for the assistant, as text.
@@ -477,9 +492,12 @@ func (h *handler) aiPreviewExport(r *http.Request, gridID, name string, spec dat
 }
 
 // aiReadHooks binds the read tools' gateway operations to this chat request.
-func (h *handler) aiReadHooks(r *http.Request, sessionID string) aiassistant.ReadHooks {
+func (h *handler) aiReadHooks(r *http.Request, sessionID, modelID, userID string) aiassistant.ReadHooks {
 	return aiassistant.ReadHooks{
 		PreviewFileImport: func(ctx context.Context, req aiassistant.FileImportRequest) (string, error) {
+			if len(req.AfterSteps) > 0 {
+				return h.aiPreviewAfterSteps(ctx, sessionID, modelID, userID, req)
+			}
 			return h.aiPreviewFileImport(ctx, sessionID, req)
 		},
 		PreviewExport: func(ctx context.Context, revisionID, gridID, name string, spec dataexport.Spec) (string, error) {
@@ -495,7 +513,7 @@ func (h *handler) aiReadHooks(r *http.Request, sessionID string) aiassistant.Rea
 // value lies between -1 and 1. A Percentage metric stores percent units
 // (5.6 shows as 5.6%, and formulas divide by 100); a spreadsheet stores the
 // fraction 0.056, which would show as 0.06% and be read as 0.056%.
-func (h *handler) percentFractionWarning(ctx context.Context, staged []importpkg.StagingRow) string {
+func (h *handler) percentFractionWarning(ctx context.Context, q dbQuerier, staged []importpkg.StagingRow) string {
 	maxAbs := map[string]float64{}
 	for _, s := range staged {
 		v := s.Value
@@ -512,7 +530,7 @@ func (h *handler) percentFractionWarning(ctx context.Context, staged []importpkg
 			continue
 		}
 		var name, format string
-		if h.db.QueryRow(ctx, `SELECT name, format FROM model.metric_def WHERE id=$1::uuid`, id).Scan(&name, &format) == nil && format == "percentage" {
+		if q.QueryRow(ctx, `SELECT name, format FROM model.metric_def WHERE id=$1::uuid`, id).Scan(&name, &format) == nil && format == "percentage" {
 			names = append(names, name)
 		}
 	}
@@ -532,13 +550,13 @@ func (h *handler) percentFractionWarning(ctx context.Context, staged []importpkg
 // amounts, which only the assistant can attribute to a metric. Each failed
 // preview costs the assistant an LLM call; the live run spent its session's
 // budget mapping "FY", "Source / Note" and "P&L Line" one at a time.
-func (h *handler) suggestColumnMap(ctx context.Context, req aiassistant.FileImportRequest, f *attachedFile) string {
+func (h *handler) suggestColumnMap(ctx context.Context, q dbQuerier, req aiassistant.FileImportRequest, f *attachedFile) string {
 	if req.TargetType != "grid" || req.TargetID == "" {
 		return ""
 	}
 	dims := map[string]string{} // lower name -> name
 	timeDim := ""
-	rows, err := h.db.Query(ctx, `SELECT d.name, d.dimension_type = 'time' FROM model.grid_dimension gd
+	rows, err := q.Query(ctx, `SELECT d.name, d.dimension_type = 'time' FROM model.grid_dimension gd
 		JOIN model.dimension_def d ON d.id = gd.dimension_id WHERE gd.grid_id = $1::uuid`, req.TargetID)
 	if err != nil {
 		return ""
@@ -555,7 +573,7 @@ func (h *handler) suggestColumnMap(ctx context.Context, req aiassistant.FileImpo
 	}
 	rows.Close()
 	metrics := map[string]bool{}
-	mrows, err := h.db.Query(ctx, `SELECT lower(m.name) FROM model.grid_metric gm JOIN model.metric_def m ON m.id = gm.metric_id WHERE gm.grid_id = $1::uuid`, req.TargetID)
+	mrows, err := q.Query(ctx, `SELECT lower(m.name) FROM model.grid_metric gm JOIN model.metric_def m ON m.id = gm.metric_id WHERE gm.grid_id = $1::uuid`, req.TargetID)
 	if err == nil {
 		for mrows.Next() {
 			var n string
@@ -634,3 +652,52 @@ func (h *handler) recallCleanPreview(ctx context.Context, sessionID, file, sheet
 	}
 	return aiassistant.FileImportRequest{}, false
 }
+
+// aiPreviewAfterSteps previews an import into what a plan's earlier steps
+// create: the steps run as the plan check runs them, in a transaction that
+// is rolled back, and the preview reads that transaction. Without it a file
+// could not be previewed into a grid or dimension the same proposal makes,
+// so loading data took a proposal of its own.
+func (h *handler) aiPreviewAfterSteps(ctx context.Context, sessionID, modelID, userID string, req aiassistant.FileImportRequest) (string, error) {
+	tx, err := h.db.For(ctx).Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	check, created, err := h.runStepsOn(ctx, tx, sessionID, modelID, req.RevisionID, userID, req.AfterSteps)
+	if err != nil {
+		return "", err
+	}
+	if len(check.problems) > 0 {
+		return "Nothing previewed: the after_steps would fail as they are —\n- " + strings.Join(check.problems, "\n- "), nil
+	}
+	target := req.TargetID
+	if m := afterStepRef.FindStringSubmatch(target); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		if n < 1 || n > len(created) || created[n-1] == "" {
+			return "", fmt.Errorf("target_id %q names no step of after_steps that creates something", target)
+		}
+		target = created[n-1]
+	}
+	table := "model.grid_def"
+	if req.TargetType == "dimension" {
+		table = "model.dimension_def"
+	}
+	var id string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM `+table+` WHERE revision_id=$1::uuid AND (id::text=$2 OR lower(name)=lower($2)) LIMIT 1`,
+		req.RevisionID, strings.TrimSpace(target)).Scan(&id); err != nil {
+		return "", fmt.Errorf("%s %q is neither in the working revision nor created by after_steps", req.TargetType, target)
+	}
+	req.TargetID = id
+	out, err := h.aiPreviewFileImportOn(ctx, tx, sessionID, req)
+	if err != nil {
+		return "", err
+	}
+	note := fmt.Sprintf("(Previewed after the %d step(s) of after_steps, in a dry run: nothing was kept. Propose those steps and the import together.)\n", len(req.AfterSteps))
+	if len(check.unchecked) > 0 {
+		note += fmt.Sprintf("(Step(s) %v could not run in a dry run; the preview does not include them.)\n", check.unchecked)
+	}
+	return note + out, nil
+}
+
+var afterStepRef = regexp.MustCompile(`^\s*<created in step (\d+)>\s*$`)

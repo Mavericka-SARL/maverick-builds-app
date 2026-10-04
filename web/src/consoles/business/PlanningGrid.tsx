@@ -6,6 +6,7 @@ import { CellHistoryDrawer, type CellRef } from "../../ee/cellhistory/CellHistor
 import { LoadingState, ErrorState, Toolbar, ToolbarGroup, Select, PropertyPanel, IconButton } from "../../ui";
 import { defaultLeafCode } from "../dashboardLayout";
 import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
+import { evalMemberFormula } from "./memberFormula";
 import { invalidateModelData } from "../modelDataQueries";
 import { useSelectorOwnership, useSyncSetter, useWidgetContextSync } from "../dashboardContextSync";
 import { downloadBlob } from "./blobUtils";
@@ -462,7 +463,16 @@ function combineTime(vals: number[], summary: string): number | undefined {
 
 const METRICS_ID = "__metrics__";
 
-export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, selectorsPosition }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition }) {
+// A widget's chosen metrics, in its order; none chosen, or none of them left
+// on the grid, shows all of the grid's.
+function pickMetrics<T extends { id: string }>(all: T[], ids?: string[]): T[] {
+  if (!ids || ids.length === 0) return all;
+  const byId = new Map(all.map(m => [m.id, m]));
+  const picked = ids.map(id => byId.get(id)).filter((m): m is T => m !== undefined);
+  return picked.length > 0 ? picked : all;
+}
+
+export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncContext, title, selectorsPosition }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; metricIds?: string[]; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition }) {
   const qc = useQueryClient();
 
   // Two-query split for server-side context scoping. The META query is cheap
@@ -523,15 +533,18 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
   // selection (or default). METRICS_ID isn't a real dimension, so it's
   // excluded. Empty → server returns the whole model (small grids with no
   // context dims keep working unchanged).
+  // A calculated member is not pinned: its values come from its siblings',
+  // so the whole dimension is read and the grid works them out (resolveCell).
   const scope = useMemo(() => {
     const s: Record<string, string> = {};
     for (const dimId of pivotContext) {
       if (dimId === METRICS_ID) continue;
       const code = filterSel[dimId];
-      if (code) s[dimId] = code;
+      const calculated = gridMeta?.dimensions.find(d => d.id === dimId)?.members.some(m => m.code === code && m.formula);
+      if (code && !calculated) s[dimId] = code;
     }
     return s;
-  }, [pivotContext, filterSel]);
+  }, [pivotContext, filterSel, gridMeta]);
   const scopeKey = JSON.stringify(scope);
 
   const { data: cellsData, error: cellsError } = useQuery({
@@ -593,7 +606,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
       // combo as touching an agg node instead of showing real data.
       setFilterSel(Object.fromEntries(dims.map(d => [d.id, defaultLeafCode(d) ?? ""])));
     }
-    setContextMetric(cm => cm || (grid?.metrics[0]?.id ?? ""));
+    setContextMetric(cm => cm || (pickMetrics(grid?.metrics ?? [], metricIds)[0]?.id ?? ""));
     setPivotContextReady(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dimsKey, !!gridMeta]);
@@ -661,16 +674,18 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
     // (the selected level is treated as flat — no further hierarchy).
     return { ...dim, display_level: null, members: filtered.map(m => ({ ...m, parent_code: undefined })) };
   }).map(dim => ({ ...dim, members: withAncestorMembers(g, dim) }));
-  const visibleMetrics = g.metrics ?? [];
+  const visibleMetrics = pickMetrics(g.metrics ?? [], metricIds);
   const metricsInRows    = pivotRows.includes(METRICS_ID);
   const metricsInContext = pivotContext.includes(METRICS_ID);
-  const rowDims  = dims.filter(d => pivotRows.includes(d.id));
-  const colDims  = dims.filter(d => pivotCols.includes(d.id));
-  const ctxDims  = dims.filter(d => pivotContext.includes(d.id));
+  // In the zone's own order (a saved layout's rows [region, product] are
+  // region then product), not the grid's.
+  const inZone = (zone: string[]) => zone.flatMap(id => dims.filter(d => d.id === id));
+  const rowDims  = inZone(pivotRows);
+  const colDims  = inZone(pivotCols);
+  const ctxDims  = inZone(pivotContext);
   // When metrics are in the context zone, only show the one selected metric in the grid
-  const gridMetrics = metricsInContext
-    ? visibleMetrics.filter(m => m.id === (contextMetric || visibleMetrics[0]?.id))
-    : visibleMetrics;
+  const ctxMetricId = visibleMetrics.some(v => v.id === contextMetric) ? contextMetric : (visibleMetrics[0]?.id ?? "");
+  const gridMetrics = metricsInContext ? visibleMetrics.filter(m => m.id === ctxMetricId) : visibleMetrics;
 
   // ── Hierarchy-aware dimension trees ────────────────────────────────────────
   // Trees are built only for single-dimension row/col zones; multi-dim zones
@@ -759,8 +774,23 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
   // server WITHHELD this cell or something it is built from (rendered "—"
   // too, and — unlike undefined — never counted as 0 by a parent or total:
   // a restricted viewer must not see a partial sum of what they can see).
-  function resolveCell(metricId: string, fc: DimMember[]): number | null | undefined {
+  function resolveCell(metricId: string, fc: DimMember[], depth = 0): number | null | undefined {
     if (dims.length === 0) return withheld.has(metricId) ? null : (g.totals[metricId] ?? 0);
+    // A calculated member, at any level of the other dimensions: its formula
+    // over its siblings at the same coordinate — the FY Variance % from the
+    // FY RF and LY, never the months' percentages added up. The server works
+    // out the same at the cells it sends (addCalculatedMemberCells).
+    const calcAt = fc.findIndex(m => !!m?.formula);
+    if (calcAt >= 0 && depth < 8) {
+      const metric = fullMetric(metricId) ?? g.metrics.find(m => m.id === metricId);
+      return evalMemberFormula(fc[calcAt].formula!, metric?.format ?? "number", (code) => {
+        const sibling = dims[calcAt].members.find(m => m.code.toUpperCase() === code.toUpperCase());
+        if (!sibling) return undefined;
+        const sfc = [...fc];
+        sfc[calcAt] = sibling;
+        return resolveCell(metricId, sfc, depth + 1);
+      });
+    }
     if (withheld.has(getKey(metricId, fc))) return null;
     // The grand total (every dimension at its root) is what the server's
     // `totals` answers; if the server withheld it, no client rollup of the
@@ -928,8 +958,9 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
   // any total built from it).
   function getVal(metricId: string, fc: DimMember[]): number | null | undefined {
     if (dims.length === 0) return withheld.has(metricId) ? null : g.totals[metricId];
-    // Parent combos always aggregate from children — stored direct values are stale and ignored
-    if (comboIsAgg(fc)) return resolveCell(metricId, fc);
+    // Parent combos always aggregate from children — stored direct values are
+    // stale and ignored; a calculated member is computed from its siblings.
+    if (comboIsAgg(fc) || fc.some(m => !!m?.formula)) return resolveCell(metricId, fc);
     const key = getKey(metricId, fc);
     if (withheld.has(key)) return null;
     const direct = g.cells[key];
@@ -1033,7 +1064,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
                 )}
                 {zone === "context" && isMetrics && (
                   <Select
-                    value={(contextMetric || visibleMetrics[0]?.id) ?? ""}
+                    value={ctxMetricId}
                     onChange={e => { e.stopPropagation(); setContextMetric(e.target.value); }}
                     onClick={e => e.stopPropagation()}
                     aria-label="Metric context"
@@ -1117,7 +1148,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
     // cross-dimension rollup (rollup_source_grid_id) — a rolled-up total
     // (e.g. a cost center's summed salary) isn't a real fact cell, so
     // there's nothing meaningful to write back.
-    const isReadOnly = isParent || !!m.readonly || fc.some(member => member.readonly) || !!g.rollup_source_grid_id;
+    const isReadOnly = isParent || !!m.readonly || fc.some(member => member.readonly || !!member.formula) || !!g.rollup_source_grid_id;
 
     if (isReadOnly) {
       return (
@@ -1204,7 +1235,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, syncContext, title, 
               <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                 <span style={{ fontSize: 12, color: "var(--color-brand-600)", fontWeight: 500 }}>Metric:</span>
                 <Select
-                  value={(contextMetric || visibleMetrics[0]?.id) ?? ""}
+                  value={ctxMetricId}
                   onChange={e => setContextMetric(e.target.value)}
                   aria-label="Metric context"
                 >
@@ -1489,8 +1520,9 @@ function fmtMetric(m: Metric, n: number | null | undefined): string {
     case "text":
       return String(n);
     case "currency": {
+      // The sign before the symbol, as the KPI tile writes it: -$40.47, not $-40.47.
       const sym = m.format_currency || "$";
-      return sym + n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+      return (n < 0 ? "-" : "") + sym + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
     }
     default:
       return n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });

@@ -205,6 +205,16 @@ func checkLiteralMembers(ctx context.Context, q Querier, metricName string, an *
 				return invalidCode(formula.CodeUnknownMember,
 					"%s: dimension %s has no member %q — add the member first (a total such as All Regions is a parent member: add it, then move the members under it)", where, d.name, code)
 			}
+			var calcFormula string
+			_ = q.QueryRow(ctx, `SELECT COALESCE(btrim(formula),'') FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2`, d.id, code).Scan(&calcFormula)
+			if calcFormula != "" {
+				where := call.Func
+				if metricName != "" {
+					where = call.Func + " in " + metricName
+				}
+				return invalidCode(formula.CodeUnknownMember,
+					"%s: %s of %s is a calculated member (= %s), computed from its siblings when shown — read those members instead", where, code, d.name, calcFormula)
+			}
 		}
 	}
 	return nil

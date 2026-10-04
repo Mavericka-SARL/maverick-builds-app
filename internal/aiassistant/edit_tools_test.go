@@ -228,6 +228,32 @@ func TestDeleteMetric_LeavesChartSeries(t *testing.T) {
 	}
 }
 
+// A grid widget picks which of its grid's metrics it shows, in order: by
+// name or id, under metric_ids or "metrics" (the key create_grid reads), on
+// add and on update; a metric of another grid is refused.
+func TestGridWidgetChosenMetrics(t *testing.T) {
+	h := newEditHarness(t)
+	_, rev := h.must("create_metric", map[string]any{"name": "revenue", "is_input": true})
+	_, cost := h.must("create_metric", map[string]any{"name": "cost", "is_input": true})
+	h.must("create_metric", map[string]any{"name": "stray", "is_input": true})
+	_, grid := h.must("create_grid", map[string]any{"name": "G", "metric_ids": []string{rev, cost}})
+	_, dash := h.must("create_dashboard", map[string]any{"name": "D"})
+	_, w := h.must("add_dashboard_widget", map[string]any{"dashboard_id": dash, "widget_type": "grid", "ref_id": grid,
+		"widget_props": map[string]any{"metrics": []string{"cost", "revenue"}}})
+	if s := h.scalar(`SELECT widget_props->>'metric_ids' FROM model.dashboard_widget WHERE id=$1::uuid`, w); s != fmt.Sprintf(`["%s", "%s"]`, cost, rev) {
+		t.Errorf("metric_ids = %s, want [cost revenue] as ids", s)
+	}
+	_, _, err := h.run("update_dashboard_widget", map[string]any{"widget_id": w, "widget_props": map[string]any{"metric_ids": []string{"stray"}}})
+	h.refused("a metric the grid does not hold", err, "does not hold stray")
+	h.must("update_dashboard_widget", map[string]any{"widget_id": w, "widget_props": map[string]any{"metrics": []string{"revenue"}}})
+	if s := h.scalar(`SELECT widget_props->>'metric_ids' FROM model.dashboard_widget WHERE id=$1::uuid`, w); s != fmt.Sprintf(`["%s"]`, rev) {
+		t.Errorf("after update: metric_ids = %s, want [revenue]", s)
+	}
+	if out, err := aiassistant.NewToolExecutor(h.pool, h.modelID, h.revID).Execute(context.Background(), "list_dashboards", nil); err != nil || !strings.Contains(out, "showing metrics revenue") {
+		t.Errorf("list_dashboards does not say which metrics the widget shows: %v\n%s", err, out)
+	}
+}
+
 // add_dashboard_widget checked the reference of KPI, chart and grid widgets
 // only; the developer endpoint checks every type that references something.
 func TestAddDashboardWidget_ChecksEveryReference(t *testing.T) {
@@ -563,4 +589,52 @@ func TestBackfillFormIntegration_UsesTheGatewayPosting(t *testing.T) {
 	h.exec.WithHooks(aiassistant.Hooks{})
 	_, _, err := h.run("backfill_form_integration", map[string]any{"form_integration_id": mapping})
 	h.refused("backfill without the gateway's posting", err, "not available")
+}
+
+// Calculated members through the AI Developer's tools, as the console sets
+// them: on create_dimension's members and add/update_dimension_member, shown
+// by list_dimensions, refused when the formula reads no sibling.
+func TestAICalculatedMembers(t *testing.T) {
+	h := newEditHarness(t)
+	_, dim := h.must("create_dimension", map[string]any{"name": "scenario", "members": []map[string]any{
+		{"code": "RF", "label": "Forecast"}, {"code": "LY", "label": "Prior year"},
+		{"code": "VAR", "label": "Variance", "formula": "{RF} - {LY}"}}})
+	h.must("add_dimension_member", map[string]any{"dimension_id": dim, "code": "VARPCT", "label": "Variance %",
+		"formula": "IF({LY} = 0, 0, ({RF} - {LY}) / ABS({LY}) * 100)"})
+	h.must("update_dimension_member", map[string]any{"dimension_id": dim, "code": "VAR", "formula": "{LY} - {RF}"})
+	if f := h.scalar(`SELECT formula FROM model.dimension_member WHERE dimension_id=$1::uuid AND code='VAR'`, dim); f != "{LY} - {RF}" {
+		t.Errorf("VAR = %q after update_dimension_member", f)
+	}
+	_, _, err := h.run("update_dimension_member", map[string]any{"dimension_id": dim, "code": "VAR", "formula": "{RF} - {BUDGET}"})
+	h.refused("a formula reading no member", err, "not a member of scenario")
+	out, err := aiassistant.NewToolExecutor(h.pool, h.modelID, h.revID).Execute(context.Background(), "list_dimensions", nil)
+	if err != nil || !strings.Contains(out, "= {LY} - {RF} (calculated member)") {
+		t.Errorf("list_dimensions does not show the formula: %v\n%s", err, out)
+	}
+}
+
+// A widget's props are checked, not stored blind: live, a KPI tile scoped
+// {"Scenario": "RF", "Month": "FY2026"} with mode "total" saved and showed the
+// whole model, and a chart's "pin" did nothing. A scope names its dimension
+// by id or name and pins the tile.
+func TestAIWidgetPropsAreChecked(t *testing.T) {
+	h := newEditHarness(t)
+	_, dim := h.must("create_dimension", map[string]any{"name": "scenario", "members": []map[string]any{{"code": "RF", "label": "RF"}, {"code": "LY", "label": "LY"}}})
+	_, rev := h.must("create_metric", map[string]any{"name": "revenue", "is_input": true})
+	_, grid := h.must("create_grid", map[string]any{"name": "G", "metric_ids": []string{rev}, "dimension_ids": []string{dim}})
+	_, dash := h.must("create_dashboard", map[string]any{"name": "D"})
+	kpi := func(props map[string]any) error {
+		_, _, err := h.run("add_dashboard_widget", map[string]any{"dashboard_id": dash, "widget_type": "metric_kpi", "ref_id": rev, "widget_props": props})
+		return err
+	}
+	h.refused("a scope map", kpi(map[string]any{"kpi_scope": map[string]any{"Scenario": "RF"}}), `kpi_scope is {"dimension_id"`)
+	h.refused("a scope with mode total", kpi(map[string]any{"kpi_scope": map[string]any{"dimension_id": "scenario", "member_code": "RF"}, "kpi_context_mode": "total"}), "contradicts kpi_scope")
+	_, _, err := h.run("add_dashboard_widget", map[string]any{"dashboard_id": dash, "widget_type": "chart", "ref_id": grid,
+		"widget_props": map[string]any{"pin": map[string]any{"scenario": "RF"}, "chart": map[string]any{"chart_type": "bar", "metric_ids": []string{rev}}}})
+	h.refused("an unknown key", err, `no key "pin"`)
+	_, w := h.must("add_dashboard_widget", map[string]any{"dashboard_id": dash, "widget_type": "metric_kpi", "ref_id": rev, "pos_y": 200,
+		"widget_props": map[string]any{"kpi_scope": map[string]any{"dimension_id": "scenario", "member_code": "RF"}}})
+	if got := h.scalar(`SELECT widget_props->>'kpi_context_mode' || ' ' || (widget_props->'kpi_scope'->>'dimension_id') FROM model.dashboard_widget WHERE id=$1::uuid`, w); got != "pin "+dim {
+		t.Errorf("stored mode and scope dimension = %q, want pin and the dimension's id", got)
+	}
 }

@@ -70,6 +70,12 @@ func TestRemapWidgetPropsIDs(t *testing.T) {
 			wantChanged: false,
 		},
 		{
+			name:        "a grid widget's chosen metrics keep their order",
+			in:          `{"metric_ids":["x-old","unmapped","m-old"],"default_view":{"rows":["__metrics__"],"cols":["d-old"],"context":[]}}`,
+			want:        `{"default_view":{"cols":["d-new"],"context":[],"rows":["__metrics__"]},"metric_ids":["x-new","unmapped","m-new"]}`,
+			wantChanged: true,
+		},
+		{
 			name:        "unrelated props are preserved and report no change",
 			in:          `{"font_size":14,"font_weight":"bold","button_color":"#fff","sync_context":true}`,
 			want:        `{"font_size":14,"font_weight":"bold","button_color":"#fff","sync_context":true}`,

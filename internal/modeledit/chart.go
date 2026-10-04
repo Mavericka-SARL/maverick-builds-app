@@ -7,6 +7,93 @@ import (
 	"strings"
 )
 
+// CheckWidgetProps refuses widget props naming metrics or dimensions the
+// widget's grid does not hold: a chart's series and plotted dimension
+// (CheckChartMetrics), a grid widget's chosen metrics (CheckGridWidgetMetrics).
+func CheckWidgetProps(ctx context.Context, db DB, widgetType, gridID string, widgetProps json.RawMessage) error {
+	switch widgetType {
+	case "chart":
+		return CheckChartMetrics(ctx, db, gridID, widgetProps)
+	case "grid":
+		return CheckGridWidgetMetrics(ctx, db, gridID, widgetProps)
+	}
+	return nil
+}
+
+// CheckGridWidgetMetrics refuses a grid widget whose metric_ids — the
+// metrics it shows, in that order; absent or empty, all of the grid's — name
+// a metric its grid does not hold, or one twice. A grid widget draws only its
+// grid's metrics, so any other id would just be left out of the table.
+func CheckGridWidgetMetrics(ctx context.Context, db DB, gridID string, widgetProps json.RawMessage) error {
+	if len(widgetProps) == 0 || string(widgetProps) == "null" {
+		return nil
+	}
+	var props map[string]json.RawMessage
+	if json.Unmarshal(widgetProps, &props) != nil {
+		return nil
+	}
+	raw, ok := props["metric_ids"]
+	if !ok || string(raw) == "null" {
+		return nil
+	}
+	var ids []string
+	if err := json.Unmarshal(raw, &ids); err != nil {
+		return fmt.Errorf("metric_ids is the list of metric ids the grid widget shows, in order: %w", err)
+	}
+	if len(ids) == 0 || gridID == "" {
+		return nil
+	}
+	var gridName string
+	if err := db.QueryRow(ctx, `SELECT name FROM model.grid_def WHERE id=$1::uuid`, gridID).Scan(&gridName); err != nil {
+		return nil // not a grid id: the widget's own ref check speaks to that
+	}
+	onGrid, err := gridMetricSet(ctx, db, gridID)
+	if err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	var missing []string
+	for _, id := range ids {
+		if seen[id] {
+			return fmt.Errorf("metric_ids names %s twice", metricName(ctx, db, id))
+		}
+		seen[id] = true
+		if !onGrid[id] {
+			missing = append(missing, metricName(ctx, db, id))
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("the grid widget shows grid %q, which does not hold %s: a grid widget shows only its own grid's metrics — "+
+			"add them to that grid first, or point the widget at the grid that holds them", gridName, strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+// gridMetricSet is the set of the grid's metric ids.
+func gridMetricSet(ctx context.Context, db DB, gridID string) (map[string]bool, error) {
+	onGrid := map[string]bool{}
+	rows, err := db.Query(ctx, `SELECT metric_id::text FROM model.grid_metric WHERE grid_id=$1::uuid`, gridID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		onGrid[id] = true
+	}
+	return onGrid, rows.Err()
+}
+
+// metricName names a metric id for a message; an unknown id stays as given.
+func metricName(ctx context.Context, db DB, id string) string {
+	name := id
+	_ = db.QueryRow(ctx, `SELECT name FROM model.metric_def WHERE id=$1::uuid`, id).Scan(&name)
+	return name
+}
+
 // CheckChartMetrics refuses a chart widget whose series are not on the grid
 // it reads. A chart is drawn from its grid alone: a metric of another grid
 // saved cleanly and every chart-data read then answered 403 ("metric … not
@@ -37,28 +124,16 @@ func CheckChartMetrics(ctx context.Context, db DB, gridID string, widgetProps js
 	if err := db.QueryRow(ctx, `SELECT name FROM model.grid_def WHERE id=$1::uuid`, gridID).Scan(&gridName); err != nil {
 		return nil // not a grid id: the widget's own ref check speaks to that
 	}
-	onGrid := map[string]bool{}
-	rows, err := db.Query(ctx, `SELECT metric_id::text FROM model.grid_metric WHERE grid_id=$1::uuid`, gridID)
+	onGrid, err := gridMetricSet(ctx, db, gridID)
 	if err != nil {
 		return err
 	}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return err
-		}
-		onGrid[id] = true
-	}
-	rows.Close()
 	var missing []string
 	for _, id := range append(append([]string{}, c.MetricIDs...), c.XMetricID, c.YMetricID) {
 		if id == "" || onGrid[id] {
 			continue
 		}
-		name := id
-		_ = db.QueryRow(ctx, `SELECT name FROM model.metric_def WHERE id=$1::uuid`, id).Scan(&name)
-		missing = append(missing, name)
+		missing = append(missing, metricName(ctx, db, id))
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("the chart reads grid %q, which does not hold %s: a chart plots only its own grid's metrics. "+

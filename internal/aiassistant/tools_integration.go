@@ -27,6 +27,10 @@ import (
 // references already resolved into the working revision.
 type FileImportRequest struct {
 	RevisionID string
+	// AfterSteps (preview only) are write steps run first in a dry run, so a
+	// file can be previewed into a grid or dimension the same proposal
+	// creates; TargetID may then name one of them.
+	AfterSteps []ProposalStep
 	// File is the attachment's file name (or document id) in this session.
 	File  string
 	Sheet string
@@ -81,7 +85,8 @@ func integrationToolDefs() []toolDef {
 				"target_type":{"type":"string","enum":["grid","dimension"]},
 				"target_id":{"type":"string","description":"The grid or dimension: id or exact name"},
 				"reshape":` + reshapeSchema + `,
-				"column_map":{"type":"object","description":"File column -> model field, applied AFTER reshape (see the File import section of your instructions); omit to use the headers as they are"}
+				"column_map":{"type":"object","description":"File column -> model field, applied AFTER reshape (see the File import section of your instructions); omit to use the headers as they are"},
+				"after_steps":{"type":"array","description":"Write steps of the proposal you are preparing, in propose_actions' step shape ({tool, description, params}), run first in a dry run (nothing is kept) so the file previews into a grid or dimension they create; target_id may then be \"<created in step N>\" or the new name","items":{"type":"object"}}
 			},"required":["file","target_id"]}`,
 		},
 		{
@@ -226,8 +231,9 @@ func (e *ToolExecutor) previewFileImport(ctx context.Context, raw json.RawMessag
 		TargetID   string             `json:"target_id"`
 		Reshape    *importpkg.Reshape `json:"reshape"`
 		ColumnMap  map[string]string  `json:"column_map"`
+		AfterSteps []ProposalStep     `json:"after_steps"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", fmt.Errorf("invalid params: %w", err)
 	}
 	if err := reshapeKeysChecked(raw); err != nil {
@@ -239,16 +245,34 @@ func (e *ToolExecutor) previewFileImport(ctx context.Context, raw json.RawMessag
 	if err := p.Reshape.Validate(); err != nil {
 		return "", err
 	}
+	req := FileImportRequest{RevisionID: e.revID, File: p.File, Sheet: p.Sheet, Reshape: p.Reshape, ColumnMap: p.ColumnMap}
+	if len(p.AfterSteps) > 0 {
+		// The target may be one of these steps' creations: it is resolved
+		// after they run, on the dry run's transaction.
+		req.TargetType, req.TargetID, req.AfterSteps = cmpOr(p.TargetType, "grid"), p.TargetID, p.AfterSteps
+		if req.TargetType != "grid" && req.TargetType != "dimension" {
+			return "", fmt.Errorf(`target_type is "grid" or "dimension"`)
+		}
+		if strings.TrimSpace(req.TargetID) == "" {
+			return "", fmt.Errorf("target_id is required: the grid or dimension's id, exact name, or \"<created in step N>\" of after_steps")
+		}
+		return e.hooks.PreviewFileImport(ctx, req)
+	}
 	kind, targetID, err := importTarget(p.TargetType, p.TargetID, func(kind, ref string) (string, error) {
 		return e.resolveRef(ctx, kind, ref)
 	})
 	if err != nil {
 		return "", err
 	}
-	return e.hooks.PreviewFileImport(ctx, FileImportRequest{
-		RevisionID: e.revID, File: p.File, Sheet: p.Sheet,
-		TargetType: kind, TargetID: targetID, Reshape: p.Reshape, ColumnMap: p.ColumnMap,
-	})
+	req.TargetType, req.TargetID = kind, targetID
+	return e.hooks.PreviewFileImport(ctx, req)
+}
+
+func cmpOr(v, def string) string {
+	if strings.TrimSpace(v) == "" {
+		return def
+	}
+	return v
 }
 
 func (e *ToolExecutor) prepareConvertedFile(ctx context.Context, raw json.RawMessage) (string, error) {
@@ -261,7 +285,7 @@ func (e *ToolExecutor) prepareConvertedFile(ctx context.Context, raw json.RawMes
 		Reshape   *importpkg.Reshape `json:"reshape"`
 		ColumnMap map[string]string  `json:"column_map"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", fmt.Errorf("invalid params: %w", err)
 	}
 	if err := reshapeKeysChecked(raw); err != nil {
@@ -302,7 +326,7 @@ func (e *ToolExecutor) previewExport(ctx context.Context, raw json.RawMessage) (
 		Name   string          `json:"name"`
 		Spec   dataexport.Spec `json:"spec"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", fmt.Errorf("invalid params (spec must be an object with the export fields): %w", err)
 	}
 	gridID, err := e.resolveRef(ctx, "grid", p.GridID)
@@ -419,7 +443,7 @@ func (e *WriteExecutor) createFileIntegration(ctx context.Context, raw json.RawM
 		ImportMode string             `json:"import_mode"`
 		Tags       []string           `json:"tags"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if err := reshapeKeysChecked(raw); err != nil {
@@ -494,7 +518,7 @@ func (e *WriteExecutor) createExportIntegration(ctx context.Context, raw json.Ra
 		Spec   dataexport.Spec `json:"spec"`
 		Tags   []string        `json:"tags"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params (spec must be an object with the export fields): %w", err)
 	}
 	p.Name = strings.TrimSpace(p.Name)
@@ -544,7 +568,7 @@ func (e *WriteExecutor) updateIntegration(ctx context.Context, raw json.RawMessa
 		Spec          json.RawMessage   `json:"spec"`
 		Status        *string           `json:"status"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if err := reshapeKeysChecked(raw); err != nil {
@@ -677,7 +701,7 @@ func (e *WriteExecutor) deleteIntegration(ctx context.Context, raw json.RawMessa
 	var p struct {
 		IntegrationID string `json:"integration_id"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	row, err := e.loadIntegrationDef(ctx, p.IntegrationID)
@@ -709,7 +733,7 @@ func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage)
 		// See FileImportRequest.ValuesArePercentUnits.
 		ValuesArePercentUnits bool `json:"values_are_percent_units"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if err := reshapeKeysChecked(raw); err != nil {

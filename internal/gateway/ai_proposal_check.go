@@ -41,18 +41,27 @@ type proposalCheck struct {
 // the transaction). A step that fails is a problem, and a step using its
 // result is not run; a step that panics is left to the confirmation.
 func (h *handler) aiCheckProposal(ctx context.Context, sessionID, modelID, revID, userID string, steps []aiassistant.ProposalStep) (proposalCheck, error) {
-	var out proposalCheck
 	tx, err := h.db.For(ctx).Begin(ctx)
 	if err != nil {
-		return out, err
+		return proposalCheck{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	out, _, err := h.runStepsOn(ctx, tx, sessionID, modelID, revID, userID, steps)
+	return out, err
+}
 
+// runStepsOn runs steps on tx as confirming them would and returns what each
+// created (by step; "" for a step that created nothing or did not run).
+func (h *handler) runStepsOn(ctx context.Context, tx pgx.Tx, sessionID, modelID, revID, userID string, steps []aiassistant.ProposalStep) (proposalCheck, []string, error) {
+	var out proposalCheck
 	live := h.aiWriteHooks(modelID, userID)
 	ex := aiassistant.NewDryRunWriteExecutor(tx, modelID, revID, userID).WithHooks(aiassistant.Hooks{
 		CheckMetrics: live.CheckMetrics, CheckMembers: live.CheckMembers,
 		ImportFile: func(ctx context.Context, req aiassistant.FileImportRequest) (string, error) {
 			return h.aiCheckImportFile(ctx, tx, sessionID, req)
+		},
+		WriteValues: func(ctx context.Context, req aiassistant.ValuesWriteRequest) (string, error) {
+			return h.aiCheckWriteValues(ctx, tx, req)
 		},
 		PostFormIntegration: func(ctx context.Context, mappingID string) (int, error) {
 			return checkFormPosting(ctx, tx, mappingID)
@@ -80,7 +89,7 @@ func (h *handler) aiCheckProposal(ctx context.Context, sessionID, modelID, revID
 		}
 		sp, err := tx.Begin(ctx) // a savepoint: one failure must not poison the rest
 		if err != nil {
-			return out, err
+			return out, created, err
 		}
 		id, stepErr := runChecked(ctx, ex, step.Tool, resolveParamRefs(storedParams(step.Params), created[:i]))
 		switch {
@@ -94,12 +103,12 @@ func (h *handler) aiCheckProposal(ctx context.Context, sessionID, modelID, revID
 			out.problems = append(out.problems, fmt.Sprintf("step %d (%s — %s): %v", i+1, step.Tool, step.Description, stepErr))
 		default:
 			if err := sp.Commit(ctx); err != nil {
-				return out, err
+				return out, created, err
 			}
 			created[i] = id
 		}
 	}
-	return out, nil
+	return out, created, nil
 }
 
 // storedParams is a step's params as confirming reads them back from the
@@ -150,11 +159,11 @@ func (h *handler) aiCheckImportFile(ctx context.Context, tx pgx.Tx, sessionID st
 		return "", fmt.Errorf("working revision not found")
 	}
 	if err := importpkg.CheckGridColumns(ctx, tx, req.TargetID, f.mapped); err != nil {
-		return "", fmt.Errorf("%w. %s", err, h.suggestColumnMap(ctx, req, f))
+		return "", fmt.Errorf("%w. %s", err, h.suggestColumnMap(ctx, tx, req, f))
 	}
 	staged, importErrs, err := importpkg.ResolveRows(ctx, tx, modelID, req.RevisionID, f.mapped, f.rows)
 	if err != nil {
-		return "", fmt.Errorf("%w. Map each column to a model name or \"ignore\" in column_map. %s", err, h.suggestColumnMap(ctx, req, f))
+		return "", fmt.Errorf("%w. Map each column to a model name or \"ignore\" in column_map. %s", err, h.suggestColumnMap(ctx, tx, req, f))
 	}
 	if len(importErrs) > 0 {
 		rows := make([]map[string]any, 0, len(importErrs))
@@ -169,7 +178,7 @@ func (h *handler) aiCheckImportFile(ctx context.Context, tx pgx.Tx, sessionID st
 	}
 	// Fractions into a Percentage metric are refused here, not just warned
 	// of: the assistant imported 0.056 for 5.6% after previews that warned.
-	if w := h.percentFractionWarning(ctx, staged); w != "" && !req.ValuesArePercentUnits {
+	if w := h.percentFractionWarning(ctx, tx, staged); w != "" && !req.ValuesArePercentUnits {
 		return "", fmt.Errorf("%s (if these really are percents under 1%%, pass \"values_are_percent_units\": true)", strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(w), "WARNING: ")))
 	}
 	return fmt.Sprintf("%d value(s) from %s resolve", len(staged), f.describe()), nil

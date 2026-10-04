@@ -66,6 +66,9 @@ type Member struct {
 	PeriodStart *string `json:"period_start,omitempty"`
 	PeriodEnd   *string `json:"period_end,omitempty"`
 	TimeIndex   *int    `json:"time_index,omitempty"`
+	// Formula marks a calculated member ({RF} - {LY}); it names member
+	// codes, which copy as they are.
+	Formula string `json:"formula,omitempty"`
 }
 
 type DimProperty struct {
@@ -104,6 +107,7 @@ type Metric struct {
 	// other revisions; absent in packages exported before it existed.
 	LineageID      string   `json:"lineage_id,omitempty"`
 	Name           string   `json:"name"`
+	Label          string   `json:"label,omitempty"` // display label (migration 108); absent = derived from the name
 	Formula        *string  `json:"formula,omitempty"`
 	StorageType    string   `json:"storage_type"`
 	IsInput        bool     `json:"is_input"`
@@ -389,7 +393,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for i := range pkg.Dimensions {
 		mrows, err := q.Query(ctx, `
 			SELECT id::text, code, label, parent_member_id::text, properties, sort_order,
-			       period_start::text, period_end::text, time_index, lineage_id::text
+			       period_start::text, period_end::text, time_index, lineage_id::text, COALESCE(btrim(formula),'')
 			FROM model.dimension_member WHERE dimension_id=$1::uuid ORDER BY time_index NULLS LAST, sort_order, code`,
 			pkg.Dimensions[i].ID)
 		if err != nil {
@@ -397,7 +401,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 		}
 		for mrows.Next() {
 			var m Member
-			if err := mrows.Scan(&m.ID, &m.Code, &m.Label, &m.ParentMemberID, &m.Properties, &m.SortOrder, &m.PeriodStart, &m.PeriodEnd, &m.TimeIndex, &m.LineageID); err != nil {
+			if err := mrows.Scan(&m.ID, &m.Code, &m.Label, &m.ParentMemberID, &m.Properties, &m.SortOrder, &m.PeriodStart, &m.PeriodEnd, &m.TimeIndex, &m.LineageID, &m.Formula); err != nil {
 				mrows.Close()
 				return nil, err
 			}
@@ -431,7 +435,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	rows, err = q.Query(ctx, `
 		SELECT id::text, name, formula, storage_type::text, is_input, agg_rule,
 		       COALESCE(format,''), COALESCE(format_decimals,0), COALESCE(format_currency,''), time_summary, tags, lineage_id::text,
-		       agg_numerator_metric_id::text, agg_denominator_metric_id::text
+		       agg_numerator_metric_id::text, agg_denominator_metric_id::text, COALESCE(label,'')
 		FROM model.metric_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -440,7 +444,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for rows.Next() {
 		var m Metric
 		if err := rows.Scan(&m.ID, &m.Name, &m.Formula, &m.StorageType, &m.IsInput, &m.AggRule, &m.Format, &m.FormatDecimals, &m.FormatCurrency, &m.TimeSummary, &m.Tags, &m.LineageID,
-			&m.AggNumeratorMetricID, &m.AggDenominatorMetricID); err != nil {
+			&m.AggNumeratorMetricID, &m.AggDenominatorMetricID, &m.Label); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -1664,11 +1668,11 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			}
 			var newMemberID string
 			if err = tx.QueryRow(ctx, `
-				INSERT INTO model.dimension_member (dimension_id, code, label, properties, sort_order, period_start, period_end, time_index, lineage_id)
-				VALUES ($1::uuid, $2, $3, COALESCE($4::jsonb,'{}'::jsonb), $5, $6::date, $7::date, $8, COALESCE($9::uuid, gen_random_uuid()))
+				INSERT INTO model.dimension_member (dimension_id, code, label, properties, sort_order, period_start, period_end, time_index, lineage_id, formula)
+				VALUES ($1::uuid, $2, $3, COALESCE($4::jsonb,'{}'::jsonb), $5, $6::date, $7::date, $8, COALESCE($9::uuid, gen_random_uuid()), NULLIF($10,''))
 				RETURNING id::text`,
 				newID, m.Code, m.Label, jsonArg(m.Properties), m.SortOrder, m.PeriodStart, m.PeriodEnd, timeIndex,
-				lineage(m.LineageID)).Scan(&newMemberID); err != nil {
+				lineage(m.LineageID), m.Formula).Scan(&newMemberID); err != nil {
 				return "", "", fmt.Errorf("member %q of %q: %w", m.Code, d.Name, err)
 			}
 			memberMap[m.ID] = newMemberID
@@ -1736,14 +1740,14 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			timeSummary = "sum"
 		}
 		if err = tx.QueryRow(ctx, `
-			INSERT INTO model.metric_def (model_id, revision_id, name, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, lineage_id)
+			INSERT INTO model.metric_def (model_id, revision_id, name, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, lineage_id, label)
 			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE(NULLIF($5::text,''),'oltp')::core.storage_type, $6,
 			        COALESCE(NULLIF($7::text,''),'sum'), COALESCE(NULLIF($8::text,''),'number'), $9,
 			        COALESCE(NULLIF($10::text,''),'$'), $11,
-			        COALESCE($12::text[],'{}'), COALESCE($13::uuid, gen_random_uuid()))
+			        COALESCE($12::text[],'{}'), COALESCE($13::uuid, gen_random_uuid()), NULLIF(btrim($14::text),''))
 			RETURNING id::text`,
 			modelID, revisionID, m.Name, m.Formula, m.StorageType, m.IsInput, m.AggRule, m.Format, m.FormatDecimals, m.FormatCurrency, timeSummary, m.Tags,
-			lineage(m.LineageID)).Scan(&newID); err != nil {
+			lineage(m.LineageID), m.Label).Scan(&newID); err != nil {
 			return "", "", fmt.Errorf("metric %q: %w", m.Name, err)
 		}
 		metricMap[m.ID] = newID

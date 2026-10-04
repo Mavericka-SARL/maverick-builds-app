@@ -220,6 +220,7 @@ function MetricRow({ m, modelId, allMetrics, dimNames, onTimeGrid, activeTag, on
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(m.name);
+  const [label, setLabel] = useState(m.label_set ? m.label : "");
   const [formula, setFormula] = useState(m.formula ?? "");
   const [aggRule, setAggRule] = useState(m.agg_rule ?? "sum");
   const [timeSummary, setTimeSummary] = useState<TimeSummary>(m.time_summary ?? "sum");
@@ -244,7 +245,7 @@ function MetricRow({ m, modelId, allMetrics, dimNames, onTimeGrid, activeTag, on
 
   const update = useMutation({
     mutationFn: () => api.updateMetric(m.id, {
-      name, formula, agg_rule: aggRule,
+      name, label, formula, agg_rule: aggRule,
       agg_numerator_metric_id: aggRule === "rate" ? numeratorId : "",
       agg_denominator_metric_id: aggRule === "rate" ? denominatorId : "",
       format, format_decimals: formatDecimals, format_currency: formatCurrency,
@@ -291,6 +292,8 @@ function MetricRow({ m, modelId, allMetrics, dimNames, onTimeGrid, activeTag, on
             <div className="mvx-admin-inline-form">
               <TextInput value={name} onChange={(e) => setName(e.target.value)}
                 style={{ width: 160 }} placeholder="name" />
+              <TextInput value={label} onChange={(e) => setLabel(e.target.value)} aria-label="Display name"
+                style={{ width: 160 }} placeholder="display name (optional)" />
               {!m.is_input && (
                 <TextInput value={formula} onChange={(e) => setFormula(e.target.value)}
                   error={invalidRefs.length > 0}
@@ -437,6 +440,7 @@ function MetricRow({ m, modelId, allMetrics, dimNames, onTimeGrid, activeTag, on
 function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revisionId?: string; onSuccess?: () => void }) {
   const qc = useQueryClient();
   const [name, setName] = useState("");
+  const [label, setLabel] = useState("");
   const [isInput, setIsInput] = useState(false);
   const [formula, setFormula] = useState("");
   const [timeSummary, setTimeSummary] = useState<TimeSummary>("sum");
@@ -454,7 +458,7 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
 
   const add = useMutation({
     mutationFn: () => api.addMetric({
-      name, is_input: isInput, formula, revision_id: revisionId, agg_rule: aggRule,
+      name, label, is_input: isInput, formula, revision_id: revisionId, agg_rule: aggRule,
       // Only sent for "rate"; any other rule has no operands and the server
       // rejects a pair it did not ask for.
       agg_numerator_metric_id: aggRule === "rate" ? numeratorId : "",
@@ -464,7 +468,7 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["dev-model"] });
-      setName(""); setFormula(""); setNumeratorId(""); setDenominatorId(""); setTimeSummary("sum"); setTags([]);
+      setName(""); setLabel(""); setFormula(""); setNumeratorId(""); setDenominatorId(""); setTimeSummary("sum"); setTags([]);
       onSuccess?.();
     },
   });
@@ -478,6 +482,10 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
           <TextInput value={name}
             onChange={(e) => setName(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_"))}
             placeholder="e.g. gross_margin" />
+        </Field>
+        <Field label="Display name" description="optional — shown in grids, charts and KPIs; defaults to the name">
+          <TextInput value={label} onChange={(e) => setLabel(e.target.value)}
+            placeholder="e.g. Gross Margin %" />
         </Field>
 
         <Field label="Type">

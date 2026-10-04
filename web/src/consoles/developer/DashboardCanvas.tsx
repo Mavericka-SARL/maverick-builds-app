@@ -1430,6 +1430,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                             value={zone}
                             onChange={e => assignZone(item.id, e.target.value as "rows" | "cols" | "context" | "none")}
                             aria-label={`Zone for ${item.label}`}
+                            style={{ width: 110, flexShrink: 0 }}
                           >
                             {(["rows", "cols", "context", "none"] as const).map(z => (
                               <option key={z} value={z}>{zoneLabel[z]}</option>
@@ -1439,6 +1440,60 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                       );
                     })}
                   </div>
+
+                  {/* Metrics shown: which of the grid's metrics this widget
+                      shows, in what order. All of them, in the grid's order,
+                      saves no list — the widget then follows the grid. */}
+                  {(() => {
+                    const all = selectedGridData.metrics ?? [];
+                    if (all.length < 2) return null;
+                    const allIds = all.map(m => m.id);
+                    const chosen = (wp.metric_ids ?? []).filter(id => allIds.includes(id));
+                    const shown = chosen.length > 0 ? chosen : allIds;
+                    const ordered = [...shown, ...allIds.filter(id => !shown.includes(id))];
+                    const labelOf = (id: string) => { const m = all.find(x => x.id === id); return m?.label || m?.name || id; };
+                    const setShown = (next: string[]) => {
+                      const isAll = next.length === allIds.length && next.every((id, i) => id === allIds[i]);
+                      const { metric_ids: _drop, ...rest } = wp;
+                      void _drop;
+                      setPropsDraft(prev => ({
+                        ...prev,
+                        [selectedWidget.id]: { ...prev[selectedWidget.id], widget_props: isAll ? rest : { ...rest, metric_ids: next } },
+                      }));
+                    };
+                    const move = (id: string, by: -1 | 1) => {
+                      const i = shown.indexOf(id), j = i + by;
+                      if (i < 0 || j < 0 || j >= shown.length) return;
+                      const next = [...shown];
+                      [next[i], next[j]] = [next[j], next[i]];
+                      setShown(next);
+                    };
+                    return (
+                      <>
+                        <div className="mvx-prop-section" style={{ marginTop: 12 }}>Metrics shown</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                          {ordered.map(id => {
+                            const on = shown.includes(id);
+                            const i = shown.indexOf(id);
+                            return (
+                              <div key={id} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <Checkbox label={labelOf(id)} checked={on} disabled={on && shown.length === 1}
+                                    onChange={() => setShown(on ? shown.filter(x => x !== id) : [...shown, id])} />
+                                </div>
+                                {on && (
+                                  <>
+                                    <IconButton size={22} aria-label={`Move ${labelOf(id)} up`} title="Move up" disabled={i === 0} onClick={() => move(id, -1)}>↑</IconButton>
+                                    <IconButton size={22} aria-label={`Move ${labelOf(id)} down`} title="Move down" disabled={i === shown.length - 1} onClick={() => move(id, 1)}>↓</IconButton>
+                                  </>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               );
             })()}

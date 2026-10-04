@@ -166,7 +166,7 @@ func PercentUnitsMisuse(text string, percentMetrics map[string]bool) string {
 // was dropped without a word: create_grid's "metrics" left every grid the
 // assistant built empty, and create_metric's "value": 9 left a setting blank.
 var knownParams = map[string][]string{
-	"create_metric": {"name", "formula", "is_input", "format", "format_decimals", "format_currency", "agg_rule", "revision_id",
+	"create_metric": {"name", "label", "formula", "is_input", "format", "format_decimals", "format_currency", "agg_rule", "revision_id",
 		"agg_numerator_metric_id", "agg_denominator_metric_id", "time_summary", "tags"},
 	"create_grid": {"name", "revision_id", "metric_ids", "dimension_ids", "metrics", "dimensions"},
 }

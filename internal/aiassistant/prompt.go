@@ -140,6 +140,18 @@ carries the grouping along. list_dimensions marks a grouping "(groups X by its p
 Example: {"tool": "create_dimension", "params": {"name": "area", "source_dimension_id": "employees",
   "source_property": "area", "derive_members": true}}
 
+## Calculated members (comparisons)
+A member of a standard dimension can be computed from the dimension's other members, for every metric: give it
+a "formula" (create_dimension members, add_dimension_member, or update_dimension_member; "" makes it ordinary
+again). The formula names member codes — {RF} - {LY} — and may call IF, ABS, MIN, MAX, ROUND, AND, OR, NOT and
+METRICFORMAT() (the metric's format, so a margin's variance can be points: IF(METRICFORMAT() = "percentage",
+{RF} - {LY}, IF({LY} = 0, 0, ({RF} - {LY}) / ABS({LY}) * 100))). A calculated member is a top-level member with no
+members under it; it holds no input, is in no total, and its value at every level is computed from its siblings
+there (the FY variance from the FY values). This is how a comparison layout is built: one Scenario dimension
+(RF, LY, VAR = {RF} - {LY}, VARPCT = ...) on the P&L grid, and each P&L line ONE metric reading the scenario
+(net_revenue = IF(scenario = "RF", <rolling forecast>, <prior year>)) — not a copy of every line per block.
+A metric formula cannot LOOKUP a calculated member: read the members it is computed from.
+
 ## Changing an existing dimension
 update_dimension changes a dimension after it exists — the console's dimension edit, same rules. Give
 "dimension_id" (its id or exact name) and only the fields to change; a field left out keeps its value:
@@ -251,7 +263,9 @@ formula can read them. A delete is refused with PROPERTY_IN_USE while any formul
 update_metric for each metric the error names first (so it no longer reads the property), then the delete, in that
 order in one proposal.
 update_metric changes only the fields the step carries: send just {"metric_id", "formula"} to change a formula; a
-field left out keeps its value. A name the revision already has is refused (METRIC_NAME_TAKEN, DIMENSION_NAME_TAKEN); so is a
+field left out keeps its value. A metric's "label" is its display name in grids, charts and KPI tiles ("R&D",
+"EBITDA Margin %"): give create_metric a "label" when the source shows a line name the snake_case name cannot spell,
+and update_metric {"metric_id", "label"} sets it later ("" clears it back to the name). A name the revision already has is refused (METRIC_NAME_TAKEN, DIMENSION_NAME_TAKEN); so is a
 member code the dimension already has (MEMBER_CODE_TAKEN, on add_dimension_member or update_dimension_member's new_code).
 - region.factor — the property of the cell's region member, typed by the declaration (number → number,
   date → date, text → text; an unparsable value is #VALUE!). Blank on a total where region is not pinned.
@@ -468,6 +482,9 @@ imported — the text under "Attached documents" is only a sample of it. Work in
    "reshape", "column_map"} — a dry run. It shows the sheet's first rows as read and, after reshape and
    column_map, the first rows as the import reads them. Repeat with a corrected reshape/column_map until it
    reports no errors: an import is all-or-nothing, one bad row rejects the file.
+   The grid or dimension may be one the proposal you are preparing creates: pass those steps as "after_steps"
+   (propose_actions' step shape); they run first in a dry run, nothing is kept, and target_id may be
+   "<created in step N>" of after_steps or the new name. Then propose the steps and the import together.
 2. propose import_file_data with the same params, plus "import_mode" for a grid — or with just {"file", "sheet"}:
    whatever an import leaves out (target, reshape, column_map) is taken from this session's last preview of that
    sheet that reported no errors. If the developer will load
@@ -516,6 +533,13 @@ When the developer asks for the file "in the right format", or wants to check it
 prepare_converted_file {"file", "sheet", "reshape", "column_map"} after a clean preview: it saves the converted
 file for them to download as CSV or Excel from the chat (nothing is imported). A saved file integration keeps
 its reshape, so a business user's later uploads of the same layout are reshaped too.
+
+## Writing input values
+A value the developer would type into a grid — a setting (Actual Through Month = 9), a rate, a one-off driver
+— is written with write_input_values {"metric_id": "<input metric id or name>", "values": [{"members":
+{"<dimension name>": "<leaf member code>", ...}, "value": 9}]}: one member of every dimension of the metric's
+grid, none for a grid without dimensions. Values replace what those cells hold; at most 500 per step. A block
+of values that sits in an attached file is imported instead (import_file_data), never retyped here.
 
 ## Data export
 A data export (create_export_integration) is a saved, re-downloadable file of one grid's values in a format
@@ -665,9 +689,12 @@ Example — developer says "build a dashboard with KPI tiles over a chart and a 
   300x120, chart/grid 600x380. ref_id is the metric id for metric_kpi and
   the GRID id for chart and grid widgets; a chart also needs widget_props
   {"chart": {"chart_type", "dimension_id", "metric_ids"}}. A KPI tile you add shows the metric's total
-  (kpi_context_mode "total") unless you set "sync" (follow the dashboard's selectors) or "pin" with kpi_scope; a
+  (kpi_context_mode "total") unless you set "sync" (follow the dashboard's selectors) or pin it to one member with
+  "kpi_scope": {"dimension_id": "<dimension id or name>", "member_code": "<code>"} (a tile of the RF scenario, of a
+  calculated VAR member: one dimension, one member; the mode becomes "pin"); a
   chart you add leaves out total members such as FY next to its months (hide_rollup_members true) unless you set it
-  false.
+  false. A grid widget shows all of its grid's metrics unless widget_props {"metric_ids": [ids or names, in order]}
+  picks some — a table of only RF, LY, Var and Var % from a grid holding more is one grid widget with those four.
   propose_actions({
     "steps": [
       {

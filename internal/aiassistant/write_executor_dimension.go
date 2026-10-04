@@ -82,9 +82,15 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 		AggRule       string    `json:"agg_rule"`
 		Tags          *[]string `json:"tags"`
 		DeriveMembers bool      `json:"derive_members"`
+		// Read from sent below: a string, or null to clear.
+		ParentDimensionID   json.RawMessage `json:"parent_dimension_id"`
+		ParentDimensionName json.RawMessage `json:"parent_dimension_name"`
+		SourceDimensionID   json.RawMessage `json:"source_dimension_id"`
+		SourceDimensionName json.RawMessage `json:"source_dimension_name"`
+		SourceProperty      json.RawMessage `json:"source_property"`
 	}
 	var sent map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if err := json.Unmarshal(raw, &sent); err != nil {

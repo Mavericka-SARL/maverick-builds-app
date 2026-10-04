@@ -1251,6 +1251,7 @@ type ModelDimensionMember struct {
 	PeriodEnd      pgtype.Date     `json:"period_end"`
 	TimeIndex      *int32          `json:"time_index"`
 	LineageID      uuid.UUID       `json:"lineage_id"`
+	Formula        *string         `json:"formula"`
 }
 
 type ModelDimensionProperty struct {
@@ -1440,6 +1441,7 @@ type ModelMetricDef struct {
 	TimeSummary            string          `json:"time_summary"`
 	Tags                   []string        `json:"tags"`
 	LineageID              uuid.UUID       `json:"lineage_id"`
+	Label                  *string         `json:"label"`
 }
 
 type ModelRevision struct {

@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -79,7 +80,11 @@ func (e *WriteExecutor) deleteDimension(ctx context.Context, raw json.RawMessage
 	var p struct {
 		DimensionID string `json:"dimension_id"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.DimensionID == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.DimensionID == "" {
 		return "", "", fmt.Errorf("dimension_id is required")
 	}
 	dimID, err := e.requireInModel(ctx, "dimension", p.DimensionID)
@@ -109,7 +114,11 @@ func (e *WriteExecutor) deleteDimensionMember(ctx context.Context, raw json.RawM
 		DimensionID string `json:"dimension_id"`
 		Code        string `json:"code"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.DimensionID == "" || p.Code == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.DimensionID == "" || p.Code == "" {
 		return "", "", fmt.Errorf("dimension_id and code are required")
 	}
 	dimID, err := e.requireInModel(ctx, "dimension", p.DimensionID)
@@ -148,7 +157,11 @@ func (e *WriteExecutor) reorderDimensionMembers(ctx context.Context, raw json.Ra
 		ParentCode  string   `json:"parent_code"`
 		Codes       []string `json:"codes"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.DimensionID == "" || p.Codes == nil {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.DimensionID == "" || p.Codes == nil {
 		return "", "", fmt.Errorf("dimension_id and codes (the level's member codes in the wanted order) are required")
 	}
 	dimID, err := e.requireInModel(ctx, "dimension", p.DimensionID)
@@ -208,7 +221,11 @@ func (e *WriteExecutor) reorderGridMetrics(ctx context.Context, raw json.RawMess
 		GridID  string   `json:"grid_id"`
 		Metrics []string `json:"metrics"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.GridID == "" || len(p.Metrics) == 0 {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.GridID == "" || len(p.Metrics) == 0 {
 		return "", "", fmt.Errorf("grid_id and metrics (every metric of the grid, in the wanted order) are required")
 	}
 	gridID, err := e.requireInModel(ctx, "grid", p.GridID)
@@ -244,7 +261,11 @@ func (e *WriteExecutor) generateTimeMembers(ctx context.Context, raw json.RawMes
 		End         string `json:"end"`
 		ParentCode  string `json:"parent_code"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.DimensionID == "" || p.Start == "" || p.End == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.DimensionID == "" || p.Start == "" || p.End == "" {
 		return "", "", fmt.Errorf("dimension_id, start and end (YYYY-MM-DD) are required")
 	}
 	dimID, err := e.requireInModel(ctx, "dimension", p.DimensionID)
@@ -333,7 +354,11 @@ func (e *WriteExecutor) updateGrid(ctx context.Context, raw json.RawMessage) (st
 		GridID string `json:"grid_id"`
 		Name   string `json:"name"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.GridID == "" || strings.TrimSpace(p.Name) == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.GridID == "" || strings.TrimSpace(p.Name) == "" {
 		return "", "", fmt.Errorf("grid_id and name are required")
 	}
 	gridID, err := e.requireInModel(ctx, "grid", p.GridID)
@@ -354,7 +379,11 @@ func (e *WriteExecutor) deleteGrid(ctx context.Context, raw json.RawMessage) (st
 	var p struct {
 		GridID string `json:"grid_id"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.GridID == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.GridID == "" {
 		return "", "", fmt.Errorf("grid_id is required")
 	}
 	gridID, err := e.requireInModel(ctx, "grid", p.GridID)
@@ -379,7 +408,11 @@ func (e *WriteExecutor) removeGridMetric(ctx context.Context, raw json.RawMessag
 		GridID   string `json:"grid_id"`
 		MetricID string `json:"metric_id"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.GridID == "" || p.MetricID == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.GridID == "" || p.MetricID == "" {
 		return "", "", fmt.Errorf("grid_id and metric_id are required")
 	}
 	gridID, err := e.requireInModel(ctx, "grid", p.GridID)
@@ -408,7 +441,11 @@ func (e *WriteExecutor) removeGridDimension(ctx context.Context, raw json.RawMes
 		GridID      string `json:"grid_id"`
 		DimensionID string `json:"dimension_id"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.GridID == "" || p.DimensionID == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.GridID == "" || p.DimensionID == "" {
 		return "", "", fmt.Errorf("grid_id and dimension_id are required")
 	}
 	gridID, err := e.requireInModel(ctx, "grid", p.GridID)
@@ -438,7 +475,11 @@ func (e *WriteExecutor) updateGridDimension(ctx context.Context, raw json.RawMes
 		DimensionID  string `json:"dimension_id"`
 		DisplayLevel *int   `json:"display_level"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.GridID == "" || p.DimensionID == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.GridID == "" || p.DimensionID == "" {
 		return "", "", fmt.Errorf("grid_id and dimension_id are required")
 	}
 	if !present(raw)["display_level"] {
@@ -491,7 +532,11 @@ func (e *WriteExecutor) updateDashboard(ctx context.Context, raw json.RawMessage
 		Name        string  `json:"name"`
 		Folder      *string `json:"folder"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.DashboardID == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.DashboardID == "" {
 		return "", "", fmt.Errorf("dashboard_id is required")
 	}
 	has := present(raw)
@@ -535,7 +580,11 @@ func (e *WriteExecutor) deleteDashboard(ctx context.Context, raw json.RawMessage
 	var p struct {
 		DashboardID string `json:"dashboard_id"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.DashboardID == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.DashboardID == "" {
 		return "", "", fmt.Errorf("dashboard_id is required")
 	}
 	dashID, err := e.requireInModel(ctx, "dashboard", p.DashboardID)
@@ -619,7 +668,11 @@ func (e *WriteExecutor) updateDashboardWidget(ctx context.Context, raw json.RawM
 		SizeW       *int            `json:"size_w"`
 		SizeH       *int            `json:"size_h"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.WidgetID == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.WidgetID == "" {
 		return "", "", fmt.Errorf("widget_id is required (list_dashboards shows each widget's id)")
 	}
 	widgetID, err := e.requireInModel(ctx, "dashboard_widget", p.WidgetID)
@@ -641,8 +694,17 @@ func (e *WriteExecutor) updateDashboardWidget(ctx context.Context, raw json.RawM
 		// replacing the props whole would have wiped both charts.
 		var stored []byte
 		_ = e.pool.QueryRow(ctx, `SELECT COALESCE(widget_props,'{}'::jsonb) FROM model.dashboard_widget WHERE id=$1::uuid`, widgetID).Scan(&stored)
+		// A scope given without a mode pins the tile, whatever mode it had.
+		var given map[string]any
+		if json.Unmarshal(p.WidgetProps, &given) == nil && given["kpi_scope"] != nil && given["kpi_context_mode"] == nil {
+			given["kpi_context_mode"] = "pin"
+			p.WidgetProps, _ = json.Marshal(given)
+		}
 		merged, mErr := mergeWidgetProps(widgetType, stored, p.WidgetProps)
 		if mErr != nil {
+			return "", "", mErr
+		}
+		if merged, mErr = e.checkWidgetProps(ctx, merged); mErr != nil {
 			return "", "", mErr
 		}
 		p.WidgetProps = merged
@@ -653,10 +715,17 @@ func (e *WriteExecutor) updateDashboardWidget(ctx context.Context, raw json.RawM
 			}
 			p.WidgetProps = remapped
 		}
+		if widgetType == "grid" {
+			remapped, err := e.remapGridWidgetMetrics(ctx, p.WidgetProps)
+			if err != nil {
+				return "", "", err
+			}
+			p.WidgetProps = remapped
+		}
 		s := string(p.WidgetProps)
 		props = &s
 	}
-	if widgetType == "chart" && (p.RefID != nil || props != nil) {
+	if (widgetType == "chart" || widgetType == "grid") && (p.RefID != nil || props != nil) {
 		// The chart as it will be: the new grid or props, else the stored ones.
 		var refID string
 		var stored []byte
@@ -667,7 +736,7 @@ func (e *WriteExecutor) updateDashboardWidget(ctx context.Context, raw json.RawM
 		if props != nil {
 			stored = []byte(*props)
 		}
-		if err := modeledit.CheckChartMetrics(ctx, e.pool, refID, stored); err != nil {
+		if err := modeledit.CheckWidgetProps(ctx, e.pool, widgetType, refID, stored); err != nil {
 			return "", "", err
 		}
 	}
@@ -694,7 +763,11 @@ func (e *WriteExecutor) deleteDashboardWidget(ctx context.Context, raw json.RawM
 	var p struct {
 		WidgetID string `json:"widget_id"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.WidgetID == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.WidgetID == "" {
 		return "", "", fmt.Errorf("widget_id is required (list_dashboards shows each widget's id)")
 	}
 	widgetID, err := e.requireInModel(ctx, "dashboard_widget", p.WidgetID)
@@ -732,7 +805,11 @@ func (e *WriteExecutor) createDashboardFolder(ctx context.Context, raw json.RawM
 		Name   string `json:"name"`
 		Parent string `json:"parent"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || strings.TrimSpace(p.Name) == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || strings.TrimSpace(p.Name) == "" {
 		return "", "", fmt.Errorf("name is required")
 	}
 	parentID, err := e.resolveFolder(ctx, p.Parent)
@@ -757,7 +834,11 @@ func (e *WriteExecutor) updateDashboardFolder(ctx context.Context, raw json.RawM
 		Name   string  `json:"name"`
 		Parent *string `json:"parent"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.Folder == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.Folder == "" {
 		return "", "", fmt.Errorf("folder (its id or exact name) is required")
 	}
 	has := present(raw)
@@ -805,7 +886,11 @@ func (e *WriteExecutor) deleteDashboardFolder(ctx context.Context, raw json.RawM
 	var p struct {
 		Folder string `json:"folder"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.Folder == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.Folder == "" {
 		return "", "", fmt.Errorf("folder (its id or exact name) is required")
 	}
 	folderID, err := e.requireInModel(ctx, "dashboard_folder", p.Folder)
@@ -842,6 +927,12 @@ func (e *WriteExecutor) workflowLifecycleRef(ctx context.Context, raw json.RawMe
 // archiveWorkflowDef is POST /api/developer/workflows/{id}/archive: a
 // workflow that has run is archived rather than deleted; it stops starting.
 func (e *WriteExecutor) archiveWorkflowDef(ctx context.Context, raw json.RawMessage) (string, string, error) {
+	var keys struct {
+		WorkflowDefID string `json:"workflow_def_id"`
+	}
+	if err := decodeParams(raw, &keys); isUnknownParam(err) {
+		return "", "", err
+	}
 	id, name, err := e.workflowLifecycleRef(ctx, raw)
 	if err != nil {
 		return "", "", err
@@ -855,6 +946,12 @@ func (e *WriteExecutor) archiveWorkflowDef(ctx context.Context, raw json.RawMess
 // restoreWorkflowDef is POST /api/developer/workflows/{id}/restore: an
 // archived workflow goes back to draft, to be published again by a developer.
 func (e *WriteExecutor) restoreWorkflowDef(ctx context.Context, raw json.RawMessage) (string, string, error) {
+	var keys struct {
+		WorkflowDefID string `json:"workflow_def_id"`
+	}
+	if err := decodeParams(raw, &keys); isUnknownParam(err) {
+		return "", "", err
+	}
 	id, name, err := e.workflowLifecycleRef(ctx, raw)
 	if err != nil {
 		return "", "", err
@@ -868,14 +965,17 @@ func (e *WriteExecutor) restoreWorkflowDef(ctx context.Context, raw json.RawMess
 // duplicateWorkflowDef is POST /api/developer/workflows/{id}/duplicate: a
 // draft copy under a new name.
 func (e *WriteExecutor) duplicateWorkflowDef(ctx context.Context, raw json.RawMessage) (string, string, error) {
+	var p struct {
+		WorkflowDefID string `json:"workflow_def_id"`
+		Name          string `json:"name"`
+	}
+	if err := decodeParams(raw, &p); isUnknownParam(err) {
+		return "", "", err
+	}
 	id, name, err := e.workflowLifecycleRef(ctx, raw)
 	if err != nil {
 		return "", "", err
 	}
-	var p struct {
-		Name string `json:"name"`
-	}
-	_ = json.Unmarshal(raw, &p)
 	if strings.TrimSpace(p.Name) == "" {
 		return "", "", fmt.Errorf("name (for the copy) is required")
 	}
@@ -937,7 +1037,11 @@ func (e *WriteExecutor) updateBusinessRole(ctx context.Context, raw json.RawMess
 		Role string `json:"role"`
 		Name string `json:"name"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.Role == "" || strings.TrimSpace(p.Name) == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.Role == "" || strings.TrimSpace(p.Name) == "" {
 		return "", "", fmt.Errorf("role (its name or id) and name are required")
 	}
 	id, old, _, err := e.resolveBusinessRole(ctx, p.Role)
@@ -960,7 +1064,11 @@ func (e *WriteExecutor) deleteBusinessRole(ctx context.Context, raw json.RawMess
 	var p struct {
 		Role string `json:"role"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.Role == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.Role == "" {
 		return "", "", fmt.Errorf("role (its name or id) is required")
 	}
 	id, name, _, err := e.resolveBusinessRole(ctx, p.Role)
@@ -983,7 +1091,11 @@ func (e *WriteExecutor) setRoleDashboards(ctx context.Context, raw json.RawMessa
 		Role       string   `json:"role"`
 		Dashboards []string `json:"dashboards"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.Role == "" || p.Dashboards == nil {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.Role == "" || p.Dashboards == nil {
 		return "", "", fmt.Errorf("role (its name or id) and dashboards (ids or exact names; [] for none) are required")
 	}
 	roleID, roleName, _, err := e.resolveBusinessRole(ctx, p.Role)
@@ -1032,7 +1144,11 @@ func (e *WriteExecutor) backfillFormIntegration(ctx context.Context, raw json.Ra
 	var p struct {
 		FormIntegrationID string `json:"form_integration_id"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.FormIntegrationID == "" {
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || p.FormIntegrationID == "" {
 		return "", "", fmt.Errorf("form_integration_id is required")
 	}
 	if _, _, err := e.loadIntegration(ctx, p.FormIntegrationID); err != nil {
@@ -1056,7 +1172,8 @@ var chartSettings = map[string]bool{"chart_type": true, "dimension_id": true, "m
 // mergeWidgetProps lays the given props over the stored ones: a key given
 // replaces the stored value, a null removes it, anything not given stays;
 // "chart" merges the same way one level down, and a chart setting given at
-// the top level of a chart widget's props goes under "chart".
+// the top level of a chart widget's props goes under "chart"; a grid
+// widget's "metrics" is its metric_ids.
 func mergeWidgetProps(widgetType string, stored, given json.RawMessage) (json.RawMessage, error) {
 	base := map[string]any{}
 	if len(stored) > 0 && string(stored) != "null" {
@@ -1065,6 +1182,15 @@ func mergeWidgetProps(widgetType string, stored, given json.RawMessage) (json.Ra
 	var patch map[string]any
 	if err := json.Unmarshal(given, &patch); err != nil {
 		return nil, fmt.Errorf("widget_props is not a JSON object: %w", err)
+	}
+	if v, ok := patch["metrics"]; ok && widgetType == "grid" {
+		// The list a grid widget shows goes by metric_ids; "metrics" (the
+		// name create_grid reads it by) would otherwise sit beside a stored
+		// metric_ids and lose to it.
+		if _, both := patch["metric_ids"]; !both {
+			patch["metric_ids"] = v
+		}
+		delete(patch, "metrics")
 	}
 	if widgetType == "chart" {
 		for k, v := range patch {
@@ -1102,4 +1228,78 @@ func mergeWidgetProps(widgetType string, stored, given json.RawMessage) (json.Ra
 		}
 	}
 	return json.Marshal(base)
+}
+
+// widgetPropKeys are the widget_props keys the console reads (WidgetProps in
+// web/src/api/client.ts). A key outside them was saved and never read: live,
+// a KPI tile scoped {"Scenario": "RF", "Month": "FY2026"} with mode "total"
+// showed the whole model's total, and a chart's "pin" did nothing.
+var widgetPropKeys = map[string]bool{"selectors_position": true, "background": true, "font_size": true, "font_weight": true,
+	"color": true, "font_family": true, "alt": true, "image_fit": true, "button_color": true, "default_view": true,
+	"metric_ids": true, "chart": true, "context": true, "kpi_scope": true, "kpi_context_mode": true, "confirm_text": true,
+	"sync_context": true}
+
+// checkWidgetProps refuses widget_props the console would not read — an
+// unknown key, at the top or under "chart"; a kpi_scope that is not one
+// member of one dimension; a scope with a mode other than "pin" — and
+// resolves the scope's dimension by id or name.
+func (e *WriteExecutor) checkWidgetProps(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return raw, nil
+	}
+	var props map[string]any
+	if err := json.Unmarshal(raw, &props); err != nil {
+		return nil, fmt.Errorf("widget_props is not a JSON object: %w", err)
+	}
+	sortedKeys := func(m map[string]bool) string {
+		keys := make([]string, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		return strings.Join(keys, ", ")
+	}
+	if v, ok := props["metrics"]; ok {
+		// A grid widget's list, under the name create_grid reads it by.
+		if _, both := props["metric_ids"]; !both {
+			props["metric_ids"] = v
+		}
+		delete(props, "metrics")
+	}
+	for k := range props {
+		if !widgetPropKeys[k] {
+			return nil, fmt.Errorf("widget_props has no key %q: its keys are %s", k, sortedKeys(widgetPropKeys))
+		}
+	}
+	if chart, ok := props["chart"].(map[string]any); ok {
+		for k := range chart {
+			if !chartSettings[k] {
+				return nil, fmt.Errorf("a chart's settings have no key %q: they are %s", k, sortedKeys(chartSettings))
+			}
+		}
+	}
+	mode, _ := props["kpi_context_mode"].(string)
+	if v, ok := props["kpi_context_mode"]; ok && v != nil && mode != "total" && mode != "sync" && mode != "pin" {
+		return nil, fmt.Errorf(`kpi_context_mode is "total" (the whole model), "sync" (the dashboard's selectors) or "pin" (with kpi_scope)`)
+	}
+	if v, ok := props["kpi_scope"]; ok && v != nil {
+		const shape = `kpi_scope is {"dimension_id": "<dimension id or name>", "member_code": "<member code>"} — one member of one dimension — with "kpi_context_mode": "pin"`
+		scope, ok := v.(map[string]any)
+		dim, _ := scope["dimension_id"].(string)
+		code, _ := scope["member_code"].(string)
+		if !ok || len(scope) != 2 || dim == "" || code == "" {
+			return nil, fmt.Errorf("%s", shape)
+		}
+		if mode == "" {
+			props["kpi_context_mode"] = "pin"
+		} else if mode != "pin" {
+			return nil, fmt.Errorf("kpi_context_mode %q contradicts kpi_scope: %s", mode, shape)
+		}
+		id, err := e.requireInModel(ctx, "dimension", dim)
+		if err != nil {
+			return nil, fmt.Errorf("kpi_scope: %w", err)
+		}
+		scope["dimension_id"] = id
+	}
+	return json.Marshal(props)
 }

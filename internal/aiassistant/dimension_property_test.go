@@ -313,7 +313,11 @@ func TestUpdateAndDeleteDimensionProperty(t *testing.T) {
 		{"another model's dimension", otherDim, "x", "different model"},
 	} {
 		for _, tool := range []string{"update_dimension_property", "delete_dimension_property"} {
-			if _, _, err := run(tool, map[string]any{"dimension_id": tc.dim, "property": tc.prop, "name": "renamed"}); err == nil || !strings.Contains(err.Error(), tc.want) {
+			params := map[string]any{"dimension_id": tc.dim, "property": tc.prop}
+			if tool == "update_dimension_property" {
+				params["name"] = "renamed"
+			}
+			if _, _, err := run(tool, params); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("%s via %s: err %v, want %q", tc.what, tool, err, tc.want)
 			}
 		}

@@ -408,7 +408,7 @@ func (s *Store) LoadAllDimensions(ctx context.Context, modelID, revisionID strin
 		       COALESCE(d.source_dimension_id::text,''), COALESCE(d.source_property,''),
 		       d.dimension_type = 'time', COALESCE(d.time_granularity,''), COALESCE(d.fiscal_year_start_month,0),
 		       m.id::text, m.code, m.properties, COALESCE(pm.code,'') AS parent_code,
-		       COALESCE(m.time_index,-1), m.period_start, m.period_end
+		       COALESCE(m.time_index,-1), m.period_start, m.period_end, COALESCE(btrim(m.formula),'')
 		FROM model.dimension_def d
 		JOIN model.dimension_member m ON m.dimension_id = d.id
 		LEFT JOIN model.dimension_member pm ON pm.id = m.parent_member_id
@@ -430,8 +430,9 @@ func (s *Store) LoadAllDimensions(ctx context.Context, modelID, revisionID strin
 		var properties []byte
 		var timeIndex int
 		var periodStart, periodEnd *time.Time
+		var memberFormula string
 		if err := rows.Scan(&dimID, &parentDimID, &sourceDimID, &sourceProp, &isTime, &granularity, &fiscalStart,
-			&memberID, &code, &properties, &parentCode, &timeIndex, &periodStart, &periodEnd); err != nil {
+			&memberID, &code, &properties, &parentCode, &timeIndex, &periodStart, &periodEnd, &memberFormula); err != nil {
 			return nil, err
 		}
 		dim, ok := dims[dimID]
@@ -439,6 +440,12 @@ func (s *Store) LoadAllDimensions(ctx context.Context, modelID, revisionID strin
 			dim = &rollup.Dimension{ID: dimID, ParentDimensionID: parentDimID, SourceDimensionID: sourceDimID, SourceProperty: sourceProp,
 				IsTime: isTime, TimeGranularity: granularity, FiscalYearStartMonth: fiscalStart}
 			dims[dimID] = dim
+		}
+		if memberFormula != "" {
+			// A calculated member is no leaf and no child: nothing is
+			// computed or stored at it, and no total includes it.
+			dim.Calculated = append(dim.Calculated, rollup.CalculatedMember{Code: code, Formula: memberFormula})
+			continue
 		}
 		var props map[string]string
 		if len(properties) > 0 {

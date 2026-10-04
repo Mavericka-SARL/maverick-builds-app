@@ -253,6 +253,10 @@ func RekeyMemberCode(ctx context.Context, db DB, dimID, oldCode, newCode string)
 			errs = append(errs, fmt.Errorf("re-key %s: %w", s.tag, err))
 		}
 	}
+	// The dimension's calculated members name it in their formulas.
+	if err := RewriteMemberFormulas(ctx, db, dimID, oldCode, newCode); err != nil {
+		errs = append(errs, fmt.Errorf("re-key calculated member formulas: %w", err))
+	}
 	return errors.Join(errs...)
 }
 
@@ -347,7 +351,7 @@ func SplitIfFirstChild(ctx context.Context, db DB, dimID, parentMemberID, childC
 // over a deleted resource showed a confident 0 or failed to load forever.
 // A chart names its metrics inside widget_props, not in ref_id: the id is
 // dropped from every chart's list, and a chart left plotting nothing is
-// removed. The errors of the statements that failed are joined.
+// removed; a grid widget's chosen metric_ids lose it too. The errors of the statements that failed are joined.
 func DropWidgetsReferencing(ctx context.Context, db DB, refID string) error {
 	if refID == "" {
 		return nil
@@ -375,6 +379,16 @@ func DropWidgetsReferencing(ctx context.Context, db DB, refID string) error {
 		}
 	}
 	rows.Close()
+	// A grid widget's chosen metrics lose the id too; one left with none
+	// shows all of its grid's again.
+	if _, err := db.Exec(ctx, `
+		UPDATE model.dashboard_widget
+		SET widget_props = CASE WHEN jsonb_array_length((widget_props->'metric_ids') - $1::text) = 0
+		                        THEN widget_props - 'metric_ids'
+		                        ELSE jsonb_set(widget_props, '{metric_ids}', (widget_props->'metric_ids') - $1::text) END
+		WHERE jsonb_typeof(widget_props->'metric_ids') = 'array' AND widget_props->'metric_ids' ? $1::text`, refID); err != nil {
+		errs = append(errs, fmt.Errorf("drop %s from grid widgets: %w", refID, err))
+	}
 	if len(emptied) > 0 {
 		if _, err := db.Exec(ctx, `DELETE FROM model.dashboard_widget WHERE id::text = ANY($1)`, emptied); err != nil {
 			errs = append(errs, fmt.Errorf("drop charts left without metrics: %w", err))

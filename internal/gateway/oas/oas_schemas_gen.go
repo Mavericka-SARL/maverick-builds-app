@@ -6021,8 +6021,10 @@ func (*CreateMetricOK) createMetricRes() {}
 
 // Ref: #/components/schemas/CreateMetricRequest
 type CreateMetricRequest struct {
-	Name    string `json:"name"`
-	IsInput bool   `json:"is_input"`
+	Name string `json:"name"`
+	// Display name ("R&D"); omitted or blank derives it from name.
+	Label   OptString `json:"label"`
+	IsInput bool      `json:"is_input"`
 	// Required when is_input is false.
 	Formula        OptString `json:"formula"`
 	RevisionID     OptUUID   `json:"revision_id"`
@@ -6040,6 +6042,11 @@ type CreateMetricRequest struct {
 // GetName returns the value of Name.
 func (s *CreateMetricRequest) GetName() string {
 	return s.Name
+}
+
+// GetLabel returns the value of Label.
+func (s *CreateMetricRequest) GetLabel() OptString {
+	return s.Label
 }
 
 // GetIsInput returns the value of IsInput.
@@ -6090,6 +6097,11 @@ func (s *CreateMetricRequest) GetTimeSummary() OptCreateMetricRequestTimeSummary
 // SetName sets the value of Name.
 func (s *CreateMetricRequest) SetName(val string) {
 	s.Name = val
+}
+
+// SetLabel sets the value of Label.
+func (s *CreateMetricRequest) SetLabel(val OptString) {
+	s.Label = val
 }
 
 // SetIsInput sets the value of IsInput.
@@ -7986,6 +7998,9 @@ type DimensionMember struct {
 	// Leaf periods only: server-owned chronological ordinal, read-only. Time functions move by this
 	// order, never by code or label; aggregate periods have none.
 	TimeIndex OptInt `json:"time_index"`
+	// A calculated member: its value, for every metric, is this formula over the dimension's other
+	// members ({RF} - {LY}); it holds no input and is in no total.
+	Formula OptString `json:"formula"`
 }
 
 // GetID returns the value of ID.
@@ -8023,6 +8038,11 @@ func (s *DimensionMember) GetTimeIndex() OptInt {
 	return s.TimeIndex
 }
 
+// GetFormula returns the value of Formula.
+func (s *DimensionMember) GetFormula() OptString {
+	return s.Formula
+}
+
 // SetID sets the value of ID.
 func (s *DimensionMember) SetID(val uuid.UUID) {
 	s.ID = val
@@ -8056,6 +8076,11 @@ func (s *DimensionMember) SetPeriodEnd(val OptDate) {
 // SetTimeIndex sets the value of TimeIndex.
 func (s *DimensionMember) SetTimeIndex(val OptInt) {
 	s.TimeIndex = val
+}
+
+// SetFormula sets the value of Formula.
+func (s *DimensionMember) SetFormula(val OptString) {
+	s.Formula = val
 }
 
 // Ref: #/components/schemas/DimensionProperty
@@ -13684,6 +13709,11 @@ type MemberRequest struct {
 	PeriodStart OptDate `json:"period_start"`
 	// See period_start.
 	PeriodEnd OptDate `json:"period_end"`
+	// Makes a top-level member of a standard dimension a calculated member: a formula over the
+	// dimension's other member codes ({RF} - {LY}) with IF, ABS, MIN, MAX, ROUND, AND, OR, NOT and
+	// METRICFORMAT(). Omitted on an update keeps it; "" makes an ordinary member again. Refused (400)
+	// for a member with members under or above it, one holding values, an unknown member, or a cycle.
+	Formula OptString `json:"formula"`
 }
 
 // GetCode returns the value of Code.
@@ -13711,6 +13741,11 @@ func (s *MemberRequest) GetPeriodEnd() OptDate {
 	return s.PeriodEnd
 }
 
+// GetFormula returns the value of Formula.
+func (s *MemberRequest) GetFormula() OptString {
+	return s.Formula
+}
+
 // SetCode sets the value of Code.
 func (s *MemberRequest) SetCode(val OptString) {
 	s.Code = val
@@ -13734,6 +13769,11 @@ func (s *MemberRequest) SetPeriodStart(val OptDate) {
 // SetPeriodEnd sets the value of PeriodEnd.
 func (s *MemberRequest) SetPeriodEnd(val OptDate) {
 	s.PeriodEnd = val
+}
+
+// SetFormula sets the value of Formula.
+func (s *MemberRequest) SetFormula(val OptString) {
+	s.Formula = val
 }
 
 // Ref: #/components/schemas/Metric
@@ -13812,8 +13852,9 @@ func (s *Metric) SetValue(val OptNilFloat64) {
 
 // Ref: #/components/schemas/MetricDef
 type MetricDef struct {
-	ID             uuid.UUID    `json:"id"`
-	Name           string       `json:"name"`
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+	// The stored display name, or one derived from name.
 	Label          string       `json:"label"`
 	Formula        OptNilString `json:"formula"`
 	IsInput        bool         `json:"is_input"`
@@ -24987,6 +25028,8 @@ func (s *UpdateMetricOKRecalcItem) SetValue(val OptNilFloat64) {
 // Ref: #/components/schemas/UpdateMetricRequest
 type UpdateMetricRequest struct {
 	Name OptString `json:"name"`
+	// Omitted keeps the display name; "" clears it back to the name.
+	Label OptString `json:"label"`
 	// Omitted keeps the metric's tags.
 	Tags           []string  `json:"tags"`
 	Formula        OptString `json:"formula"`
@@ -25003,6 +25046,11 @@ type UpdateMetricRequest struct {
 // GetName returns the value of Name.
 func (s *UpdateMetricRequest) GetName() OptString {
 	return s.Name
+}
+
+// GetLabel returns the value of Label.
+func (s *UpdateMetricRequest) GetLabel() OptString {
+	return s.Label
 }
 
 // GetTags returns the value of Tags.
@@ -25043,6 +25091,11 @@ func (s *UpdateMetricRequest) GetTimeSummary() OptUpdateMetricRequestTimeSummary
 // SetName sets the value of Name.
 func (s *UpdateMetricRequest) SetName(val OptString) {
 	s.Name = val
+}
+
+// SetLabel sets the value of Label.
+func (s *UpdateMetricRequest) SetLabel(val OptString) {
+	s.Label = val
 }
 
 // SetTags sets the value of Tags.

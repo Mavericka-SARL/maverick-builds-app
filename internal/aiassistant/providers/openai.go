@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -114,7 +115,7 @@ func (p *OpenAIProvider) buildRequest(req ChatRequest) openai.ChatCompletionRequ
 		// sends the same propose_actions twice in one message, and only one
 		// proposal is shown per turn. Other OpenAI-compatible vendors do not
 		// all accept the field, so it is left to their defaults.
-		if p.label == "openai" {
+		if p.label == "openai" && !openAIReasoningModel(req.Model) {
 			creq.ParallelToolCalls = false
 		}
 	}
@@ -222,4 +223,11 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest, onDelt
 		})
 	}
 	return out, nil
+}
+
+// openAIReasoningModel reports the o-series (o1, o3, o4-mini, …), which
+// refuse parallel_tool_calls with a 400.
+func openAIReasoningModel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	return len(m) >= 2 && m[0] == 'o' && m[1] >= '0' && m[1] <= '9'
 }

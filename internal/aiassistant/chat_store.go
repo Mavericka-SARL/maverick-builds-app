@@ -299,7 +299,8 @@ func (s *ChatStore) GetSettings(ctx context.Context, userID string) (LLMSettings
 	`, userID).Scan(&ls.Provider, &ls.Model, &apiKeyEnc)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return LLMSettings{Provider: "openai", Model: "gpt-4o-mini"}, nil
+			// No model: the gateway runs the provider's default.
+			return LLMSettings{Provider: "openai"}, nil
 		}
 		return LLMSettings{}, err
 	}

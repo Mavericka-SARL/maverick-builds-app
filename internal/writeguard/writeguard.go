@@ -437,6 +437,16 @@ func CheckWriteMetrics(ctx context.Context, pool *pgxpool.Pool, modelID, revisio
 		uniqueMembers = append(uniqueMembers, id)
 	}
 
+	// A calculated member takes no input: its value is computed from the
+	// other members of its dimension (dimension_member.formula).
+	if len(uniqueMembers) > 0 {
+		var calcCode string
+		if err := pool.QueryRow(ctx, `SELECT code FROM model.dimension_member WHERE id = ANY($1::uuid[]) AND NULLIF(btrim(formula),'') IS NOT NULL LIMIT 1`,
+			uniqueMembers).Scan(&calcCode); err == nil {
+			return fmt.Sprintf("%s is a calculated member: its values are computed from the other members of its dimension, so it takes no input", calcCode), nil
+		}
+	}
+
 	for _, memberID := range uniqueMembers {
 		access, err := HiddenAccess(ctx, pool, userID, memberID)
 		if err != nil {

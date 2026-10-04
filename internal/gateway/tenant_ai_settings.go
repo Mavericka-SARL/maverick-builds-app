@@ -142,7 +142,7 @@ func (h *handler) tenantAITestSettings(w http.ResponseWriter, r *http.Request) {
 
 	stored, _, _ := aikeys.NewStore(h.db.For(ctx)).Effective(ctx, scope.CustomerID)
 	provider := firstNonEmpty(req.Provider, stored.Provider, "openai")
-	model := firstNonEmpty(req.Model, stored.Model, providerDefaultModels[provider])
+	model := firstNonEmpty(req.Model, stored.Model, defaultModel(provider))
 	apiKey := strings.TrimSpace(req.APIKey)
 	if apiKey == "" {
 		// Nothing typed in the form: probe whatever applies already.

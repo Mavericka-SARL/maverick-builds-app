@@ -18,6 +18,16 @@ func TestAISettings_BlankModelStaysBlank_UnknownProviderRefused(t *testing.T) {
 	if status != http.StatusOK || body["provider"] != "google" || body["model"] != "" {
 		t.Fatalf("stored settings = %d %v, want provider google and a blank model", status, body)
 	}
+	// What blank runs is shown, not guessed by the screen.
+	defaults, _ := body["default_models"].(map[string]any)
+	if defaults["google"] != providerDefaultModels["google"] || defaults["openai"] != providerDefaultModels["openai"] {
+		t.Errorf("default_models = %v, want the gateway's provider defaults", body["default_models"])
+	}
+	// A deployment chooses its own default, without a code change.
+	t.Setenv("AI_DEFAULT_MODEL_OPENAI", "deployment-chosen-model")
+	if _, body := f.do(t, "GET", "/api/ai/settings", nil); body["default_models"].(map[string]any)["openai"] != "deployment-chosen-model" {
+		t.Errorf("AI_DEFAULT_MODEL_OPENAI not used: default_models = %v", body["default_models"])
+	}
 
 	if status, _ := f.do(t, "PUT", "/api/ai/settings", map[string]string{"provider": "google", "model": "gemini-99-ultra-tomorrow"}); status != http.StatusOK {
 		t.Fatalf("a model this code has never heard of must be accepted: status=%d", status)

@@ -3,7 +3,9 @@ import keycloak from "../auth/keycloak";
 export interface DevMetric {
   id: string;
   name: string;
+  // The display name: the stored one when label_set, otherwise derived from name.
   label: string;
+  label_set?: boolean;
   is_input: boolean;
   formula?: string;
   agg_rule?: string;
@@ -50,6 +52,8 @@ export interface DimMember {
   parent_code?: string; // set if this member rolls up to a parent; empty/absent = root
   readonly?: boolean;   // true = "read" access rule — visible but not editable
   properties?: Record<string, string>; // arbitrary per-member key/values (e.g. {"region":"LUX"}); consumed by dimensions with source_property set
+  /** A calculated member: its value, for every metric, is this formula over the dimension's other members ({RF} - {LY}). */
+  formula?: string;
 }
 
 export interface DimInfo {
@@ -505,6 +509,9 @@ export interface DevDimensionMember {
   time_index?: number;
   // Per-member property values (dimension_member.properties).
   properties?: Record<string, string>;
+  // A calculated member: its value, for every metric, is this formula over
+  // the dimension's other members ({RF} - {LY}).
+  formula?: string;
 }
 
 export interface DimProperty {
@@ -664,6 +671,8 @@ export interface WidgetProps {
   image_fit?: "contain" | "cover";
   button_color?: string;
   default_view?: GridDefaultView;
+  /** Grid widgets: the metrics shown, in this order. Absent or empty = all of the grid's. */
+  metric_ids?: string[];
   chart?: GridChartConfig;
   context?: Record<string, string>; // static workflow context merged in by automation_button widgets, e.g. {"target_revision_id": "<uuid>"}
   // metric_kpi: scope the shown value to one dimension member instead of
@@ -1513,6 +1522,8 @@ export interface AISettings {
   /** True when the tenant key is the only key used and personal keys are ignored. */
   tenant_enforced?: boolean;
   tenant_provider?: string;
+  /** The model each provider runs when the model setting is blank. */
+  default_models?: Record<string, string>;
 }
 
 /** The tenant-level AI provider key (enterprise). `api_key` is write-only:
@@ -1881,7 +1892,7 @@ export const api = {
   getDevDimensions: (revisionId?: string) =>
     apiFetch<DevDimension[]>(`/api/developer/dimensions${revisionId ? `?revision_id=${revisionId}` : ""}`),
 
-  addMetric: (body: { name: string; is_input: boolean; formula: string; revision_id?: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[] }) =>
+  addMetric: (body: { name: string; label?: string; is_input: boolean; formula: string; revision_id?: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[] }) =>
     apiFetch<{ id: string; status: string }>("/api/developer/metrics", {
       method: "POST",
       body: JSON.stringify(body),
@@ -2099,7 +2110,7 @@ export const api = {
 
   deleteMetric: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/metrics/${id}`, { method: "DELETE" }),
-  updateMetric: (id: string, body: { name: string; formula: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[] }) =>
+  updateMetric: (id: string, body: { name: string; label?: string; formula: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[] }) =>
     apiFetch<{ status: string; recalc: Array<{ revision_id: string; metric: string; value: number | null }> }>(
       `/api/developer/metrics/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 
@@ -2113,11 +2124,11 @@ export const api = {
     apiFetch<{ status: string; derived_members?: string[] }>(`/api/developer/dimensions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteDimension: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/dimensions/${id}`, { method: "DELETE" }),
-  addDimMember: (dimId: string, body: { code: string; label: string; parent_member_id?: string; period_start?: string; period_end?: string }) =>
+  addDimMember: (dimId: string, body: { code: string; label: string; parent_member_id?: string; period_start?: string; period_end?: string; formula?: string }) =>
     apiFetch<{ id: string }>(`/api/developer/dimensions/${dimId}/members`, { method: "POST", body: JSON.stringify(body) }),
   generateDimPeriods: (dimId: string, body: { start: string; end: string; parent_member_id?: string }) =>
     apiFetch<{ created: number }>(`/api/developer/dimensions/${dimId}/members/generate`, { method: "POST", body: JSON.stringify(body) }),
-  updateDimMember: (dimId: string, memberId: string, body: { code: string; label: string; parent_member_id?: string | null; period_start?: string; period_end?: string; properties?: Record<string, string> }) =>
+  updateDimMember: (dimId: string, memberId: string, body: { code: string; label: string; parent_member_id?: string | null; period_start?: string; period_end?: string; properties?: Record<string, string>; formula?: string }) =>
     apiFetch<{ status: string }>(`/api/developer/dimensions/${dimId}/members/${memberId}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteDimMember: (dimId: string, memberId: string) =>
     apiFetch<{ status: string }>(`/api/developer/dimensions/${dimId}/members/${memberId}`, { method: "DELETE" }),

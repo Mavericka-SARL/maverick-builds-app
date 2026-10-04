@@ -135,7 +135,7 @@ var WriteToolNames = []string{
 	"create_business_role", "update_business_role", "delete_business_role", "set_role_dashboards",
 	"create_form_integration", "update_form_integration", "delete_form_integration", "backfill_form_integration",
 	"set_user_access_rules",
-	"create_file_integration", "import_file_data", "create_export_integration", "update_integration", "delete_integration",
+	"create_file_integration", "import_file_data", "write_input_values", "create_export_integration", "update_integration", "delete_integration",
 }
 
 // proposeActionsTool is the single write-side tool the LLM can call.
@@ -313,7 +313,7 @@ func tagSuffix(tagList []string) string {
 
 func (e *ToolExecutor) listMetrics(ctx context.Context) (string, error) {
 	rows, err := e.pool.Query(ctx, `
-		SELECT name, is_input, COALESCE(formula,''), format, agg_rule, tags
+		SELECT name, is_input, COALESCE(formula,''), format, agg_rule, tags, COALESCE(label,'')
 		FROM model.metric_def
 		WHERE model_id=$1::uuid AND revision_id=$2::uuid
 		ORDER BY is_input DESC, name`, e.modelID, e.revID)
@@ -328,7 +328,11 @@ func (e *ToolExecutor) listMetrics(ctx context.Context) (string, error) {
 		var name, formula, format, agg string
 		var isInput bool
 		var tagList []string
-		_ = rows.Scan(&name, &isInput, &formula, &format, &agg, &tagList)
+		var label string
+		_ = rows.Scan(&name, &isInput, &formula, &format, &agg, &tagList, &label)
+		if label != "" {
+			name = fmt.Sprintf("%s \"%s\"", name, label)
+		}
 		if isInput {
 			fmt.Fprintf(&sb, "  [INPUT]  %s  (format:%s, agg:%s%s)\n", name, format, agg, tagSuffix(tagList))
 		} else {
@@ -401,7 +405,7 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 		SELECT d.name, COALESCE(m.code,''), COALESCE(m.label,''), COALESCE(pm.code,'') AS parent_code,
 		       COALESCE(m.properties,'{}'::jsonb)::text,
 		       d.dimension_type, COALESCE(d.time_granularity,''), COALESCE(d.fiscal_year_start_month,0),
-		       COALESCE(m.period_start::text,''), COALESCE(m.period_end::text,''), d.tags
+		       COALESCE(m.period_start::text,''), COALESCE(m.period_end::text,''), d.tags, COALESCE(btrim(m.formula),'')
 		FROM model.dimension_def d
 		LEFT JOIN model.dimension_member m ON m.dimension_id = d.id
 		LEFT JOIN model.dimension_member pm ON pm.id = m.parent_member_id
@@ -418,10 +422,10 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 	dimTags := map[string]string{}
 	var order []string
 	for rows.Next() {
-		var dname, code, label, parent, propsRaw, dimType, granularity, pStart, pEnd string
+		var dname, code, label, parent, propsRaw, dimType, granularity, pStart, pEnd, memberFormula string
 		var fiscalStart int
 		var tagList []string
-		_ = rows.Scan(&dname, &code, &label, &parent, &propsRaw, &dimType, &granularity, &fiscalStart, &pStart, &pEnd, &tagList)
+		_ = rows.Scan(&dname, &code, &label, &parent, &propsRaw, &dimType, &granularity, &fiscalStart, &pStart, &pEnd, &tagList, &memberFormula)
 		if len(tagList) > 0 {
 			dimTags[dname] = " [" + strings.TrimPrefix(tagSuffix(tagList), ", ") + "]"
 		}
@@ -454,6 +458,9 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 		if _, ok := dims[dname]; !ok {
 			order = append(order, dname)
 			dims[dname] = nil
+		}
+		if memberFormula != "" {
+			period += " = " + memberFormula + " (calculated member)"
 		}
 		if code != "" {
 			dims[dname] = append(dims[dname], member{code, label, parent, props, period})
@@ -515,8 +522,8 @@ func (e *ToolExecutor) listGrids(ctx context.Context) (string, error) {
 }
 
 // listDashboards lists the working revision's folders, then each dashboard
-// with its folder and every widget — id, type, what it shows, place and
-// size — so a widget can be named in update_dashboard_widget or
+// with its folder and every widget — id, type, what it shows (a grid
+// widget's chosen metrics too), place and size — so a widget can be named in update_dashboard_widget or
 // delete_dashboard_widget.
 func (e *ToolExecutor) listDashboards(ctx context.Context) (string, error) {
 	var sb strings.Builder
@@ -549,7 +556,11 @@ func (e *ToolExecutor) listDashboards(ctx context.Context) (string, error) {
 		SELECT d.id::text, d.name, d.tags, COALESCE(f.name, ''),
 		       w.id::text, COALESCE(w.widget_type, ''),
 		       COALESCE(md.name, gd.name, fd.name, w.ref_id, ''),
-		       COALESCE(w.pos_x, 0), COALESCE(w.pos_y, 0), COALESCE(w.size_w, 0), COALESCE(w.size_h, 0), COALESCE(w.title, '')
+		       COALESCE(w.pos_x, 0), COALESCE(w.pos_y, 0), COALESCE(w.size_w, 0), COALESCE(w.size_h, 0), COALESCE(w.title, ''),
+		       COALESCE((SELECT string_agg(m.name, ', ' ORDER BY o.ord)
+		                 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(w.widget_props->'metric_ids') = 'array'
+		                                                     THEN w.widget_props->'metric_ids' ELSE '[]'::jsonb END) WITH ORDINALITY o(id, ord)
+		                 JOIN model.metric_def m ON m.id::text = o.id), '')
 		FROM model.dashboard_def d
 		LEFT JOIN model.dashboard_folder f ON f.id = d.folder_id
 		LEFT JOIN model.dashboard_widget w ON w.dashboard_id = d.id
@@ -570,9 +581,9 @@ func (e *ToolExecutor) listDashboards(ctx context.Context) (string, error) {
 		var id, name, folder string
 		var tagList []string
 		var wid *string
-		var wtype, ref, title string
+		var wtype, ref, title, shows string
 		var x, y, w, h int
-		if err := rows.Scan(&id, &name, &tagList, &folder, &wid, &wtype, &ref, &x, &y, &w, &h, &title); err != nil {
+		if err := rows.Scan(&id, &name, &tagList, &folder, &wid, &wtype, &ref, &x, &y, &w, &h, &title, &shows); err != nil {
 			return "", err
 		}
 		if id != last {
@@ -594,6 +605,9 @@ func (e *ToolExecutor) listDashboards(ctx context.Context) (string, error) {
 		line += fmt.Sprintf(" at (%d,%d) size %dx%d", x, y, w, h)
 		if title != "" {
 			line += fmt.Sprintf(" title %q", title)
+		}
+		if shows != "" {
+			line += " showing metrics " + shows
 		}
 		sb.WriteString(line + "\n")
 	}

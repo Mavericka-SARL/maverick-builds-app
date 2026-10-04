@@ -63,6 +63,9 @@ type Dimension struct {
 	IsTime               bool
 	TimeGranularity      string
 	FiscalYearStartMonth int
+	// Calculated are the dimension's calculated members, kept out of
+	// Members (see CalculatedMember).
+	Calculated []CalculatedMember
 }
 
 // AggRule is how multiple resolved values combine into one.

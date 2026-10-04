@@ -175,10 +175,16 @@ which seals connector credentials and has no plaintext fallback at all
 (docs/HETZNER_DEPLOYMENT.md, step 6). The separate legacy gRPC assistant
 uses `ANTHROPIC_API_KEY`.
 
-`AI_MAX_CALLS_PER_SESSION` (default 50) and `AI_MAX_CALLS_PER_DAY` (default 200,
-per user, UTC day) cap the AI Developer's LLM calls; every call counts, read-tool
-round trips included. Building a whole model with a small model spends calls
-quickly, since each file preview is one, so raise them where that is expected.
+`AI_MAX_CALLS_PER_SESSION` (default 200) and `AI_MAX_CALLS_PER_DAY` (default
+1000, per user, UTC day) cap the AI Developer's LLM calls; every call counts,
+read-tool round trips included. A whole 13-sheet FP&A workbook took 74 to 78
+calls with the gpt-5 models; at the session cap, the developer is told to
+promote the session's draft and continue in a new session.
+
+The model is each developer's own choice (AI Developer → Settings, free text),
+or the tenant's when a tenant administrator sets the tenant key. When neither
+names one, the provider's default runs; `AI_DEFAULT_MODEL_<PROVIDER>` (for
+example `AI_DEFAULT_MODEL_OPENAI=gpt-5-mini`) sets that default per deployment.
 
 ## Migrations are frozen once released
 

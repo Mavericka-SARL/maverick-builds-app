@@ -41,25 +41,62 @@ const GeminiOpenAIBaseURL = "https://generativelanguage.googleapis.com/v1beta/op
 
 // providerDefaultModels is used when settings carry an empty model name. The
 // model itself is free text in both settings screens — providers ship new
-// models faster than a list here could follow — so these are only defaults.
+// models faster than a list here could follow — so these are only defaults,
+// and a deployment replaces any of them with AI_DEFAULT_MODEL_<PROVIDER>
+// (defaultModel).
 var providerDefaultModels = map[string]string{
-	"openai":    "gpt-4o-mini",
+	// gpt-5-mini built the 13-sheet CPG workbook stage by stage with the
+	// fewest developer corrections for its price (benchmark 2026-10-04:
+	// gpt-5.2 and o4-mini also passed every stage; gpt-4.1, gpt-4.1-mini and
+	// gpt-4o-mini did not finish).
+	"openai":    "gpt-5-mini",
 	"anthropic": "claude-opus-4-8",
 	"mistral":   "mistral-large-latest",
 	"deepseek":  "deepseek-chat",
 	"google":    "gemini-3.8-flash",
 }
 
+// defaultModel is the model a provider runs when neither the person's nor
+// the tenant's settings name one: AI_DEFAULT_MODEL_<PROVIDER> (for example
+// AI_DEFAULT_MODEL_OPENAI) when the deployment sets it, else the built-in one.
+func defaultModel(provider string) string {
+	if v := strings.TrimSpace(os.Getenv("AI_DEFAULT_MODEL_" + strings.ToUpper(provider))); v != "" {
+		return v
+	}
+	return providerDefaultModels[provider]
+}
+
+// defaultModels is defaultModel for every provider.
+func defaultModels() map[string]string {
+	out := make(map[string]string, len(providerDefaultModels))
+	for p := range providerDefaultModels {
+		out[p] = defaultModel(p)
+	}
+	return out
+}
+
 // LLM call caps (SOW Phase 4). Each Chat() invocation counts as one call,
 // including intermediate read-tool round-trips within a single chat turn —
 // enforced both before a turn starts and before each loop iteration inside it.
-// AI_MAX_CALLS_PER_SESSION and AI_MAX_CALLS_PER_DAY set them per deployment:
-// building a whole model with a small model (gpt-4o-mini previews every
-// sheet, and each preview is a call) ran past both defaults.
+// AI_MAX_CALLS_PER_SESSION and AI_MAX_CALLS_PER_DAY set them per deployment.
+// The defaults leave room for a whole model: rebuilding a 13-sheet FP&A
+// workbook took gpt-5.2 78 calls and gpt-5-mini 74 (each preview and list is
+// one), past the earlier 50 per session.
 const (
-	defaultLLMCallsPerSession    = 50
-	defaultLLMCallsPerUserPerDay = 200
+	defaultLLMCallsPerSession    = 200
+	defaultLLMCallsPerUserPerDay = 1000
 )
+
+// sessionCapMessage says what to do when a session has used its calls: the
+// confirmed work is in the session's AI draft, which a new session only
+// continues from once it is promoted.
+func sessionCapMessage(limit int, draftRevisionID string) string {
+	if draftRevisionID != "" {
+		return fmt.Sprintf("this session has reached its limit of %d LLM calls. Your confirmed changes are in its AI draft: "+
+			"promote the draft (Promote to Active), then start a new session to continue from it", limit)
+	}
+	return fmt.Sprintf("this session has reached its limit of %d LLM calls — start a new session to continue", limit)
+}
 
 // llmCallCaps returns the per-session and per-user-per-day caps.
 func llmCallCaps() (perSession, perDay int) {
@@ -152,7 +189,7 @@ func (h *handler) buildProviderForRequest(r *http.Request, act *actor) (provider
 		return nil, "", "", err
 	}
 	if model == "" {
-		model = providerDefaultModels[provider]
+		model = defaultModel(provider)
 	}
 	return p, provider, model, nil
 }
@@ -336,7 +373,7 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	maxLLMCallsPerSession, maxLLMCallsPerUserPerDay := llmCallCaps()
 	if sessionCalls >= maxLLMCallsPerSession {
-		jsonErr(w, fmt.Errorf("this session has reached its limit of %d LLM calls — start a new session to continue", maxLLMCallsPerSession), http.StatusTooManyRequests)
+		jsonErr(w, fmt.Errorf("%s", sessionCapMessage(maxLLMCallsPerSession, sess.DraftRevisionID)), http.StatusTooManyRequests)
 		return
 	}
 	if dailyCalls >= maxLLMCallsPerUserPerDay {
@@ -426,7 +463,7 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. Tool executors.
-	readExecutor := aiassistant.NewToolExecutor(h.db.For(ctx), modelID, revID).WithReadHooks(h.aiReadHooks(r, sessionID))
+	readExecutor := aiassistant.NewToolExecutor(h.db.For(ctx), modelID, revID).WithReadHooks(h.aiReadHooks(r, sessionID, modelID, a.UserID))
 	writeExecutor := aiassistant.NewWriteExecutor(h.db.For(ctx), modelID, revID)
 	proposalStore := aiassistant.NewProposalStore(h.db.For(ctx))
 	tools := aiassistant.AllTools()
@@ -477,7 +514,7 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 turn:
 	for {
 		if sessionCalls >= maxLLMCallsPerSession {
-			sendSSE("error", map[string]string{"error": fmt.Sprintf("this session has reached its limit of %d LLM calls — start a new session to continue", maxLLMCallsPerSession)})
+			sendSSE("error", map[string]string{"error": sessionCapMessage(maxLLMCallsPerSession, sess.DraftRevisionID)})
 			return
 		}
 		if dailyCalls >= maxLLMCallsPerUserPerDay {
@@ -794,6 +831,9 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 	hooks := h.aiWriteHooks(modelID, a.UserID)
 	hooks.ImportFile = func(ctx context.Context, req aiassistant.FileImportRequest) (string, error) {
 		return h.aiImportFile(ctx, a, sessionID, req)
+	}
+	hooks.WriteValues = func(ctx context.Context, req aiassistant.ValuesWriteRequest) (string, error) {
+		return h.aiWriteValues(ctx, a, req)
 	}
 	hooks.RecallPreview = func(ctx context.Context, file, sheet string) (aiassistant.FileImportRequest, bool) {
 		return h.recallCleanPreview(ctx, sessionID, file, sheet)
@@ -1280,6 +1320,7 @@ func (h *handler) aiGetSettings(w http.ResponseWriter, r *http.Request) {
 		TenantKey:      tenant.OK,
 		TenantEnforced: tenant.OK && tenant.Enforced,
 		TenantProvider: tenantProviderLabel(tenant),
+		DefaultModels:  defaultModels(),
 	})
 }
 
@@ -1291,6 +1332,8 @@ type aiSettingsResponse struct {
 	TenantKey      bool   `json:"tenant_key"`
 	TenantEnforced bool   `json:"tenant_enforced"`
 	TenantProvider string `json:"tenant_provider,omitempty"`
+	// DefaultModels is the model each provider runs when the setting is blank.
+	DefaultModels map[string]string `json:"default_models"`
 }
 
 func tenantProviderLabel(t tenantAIKeyResult) string {
@@ -1527,7 +1570,7 @@ func (h *handler) aiTestSettings(w http.ResponseWriter, r *http.Request) {
 		model = settings.Model
 	}
 	if model == "" {
-		model = providerDefaultModels[provider]
+		model = defaultModel(provider)
 	}
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 		Category: auditlog.CategoryAIAssistant, EventType: auditlog.EventAISettingsTested,

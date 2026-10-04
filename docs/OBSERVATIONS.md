@@ -26,44 +26,26 @@ leaves out, until it is fixed.
   third grid. The save now refuses the mixed chart (462a218).
 - **Why it matters:** a routine comparison costs duplicate metrics.
 - **How to check:** chart a rolling-forecast and a prior-year line kept on two grids.
+- **Also:** a chart's series are metrics, so with a Scenario dimension
+  (calculated members) a monthly RF-against-LY line is not one metric at two
+  members; a chart by scenario plots RF, LY and the variance as bars instead.
 - **What closes it:** a decision on charts plotting metrics of several grids
-  that share the plotted dimension.
+  that share the plotted dimension, or one metric at several members.
 
-### The AI Developer on gpt-4o-mini needs a developer's review at every stage
+### Pinned totals rarely take the slice fast path
 
-- **Noticed:** 2026-10-03, rerun 2026-10-04, driving the AI Developer with the
-  CPG workbook attached and confirming plans as a developer.
-- **What:** with the fixes it rebuilt the whole workbook: dimensions,
-  properties, all six data loads, rolling forecasts, the four P&L grids (676
-  of 676 values match), the revenue summary (shares and variance % match at
-  FY) and the management dashboard (KPIs and charts match). It took 275 LLM
-  calls over eight sessions and a review of every stage: it dropped steps
-  between attempts, repeated earlier work when the history grew long, slipped
-  characters in ids, and needed the variance rule and the parent-member idiom
-  spelled out once.
-- **Why it matters:** the checks now stop wrong plans, but a small model is a
-  slow way to build a model this size.
-- **How to check:** in AI Developer on an empty model with an OpenAI key,
-  attach the workbook, ask for the model stage by stage, and confirm each
-  plan that reaches you; compare with the workbook.
-- **What closes it:** a rerun on a stronger model to separate the model's
-  limits from the tools'; possibly a step that proposes a block of look-alike
-  metrics from one pattern.
-
-### Most AI write tools ignore keys they do not read
-
-- **Noticed:** 2026-10-04, the AI Developer rerun.
-- **What:** a step's params are decoded leniently, so a misspelt or invented
-  key is dropped without a word. Live: `create_grid`'s "metrics" (every grid
-  built empty), `create_metric`'s "value": 9, "scale" inside "unpivot",
-  "ref_id" inside a chart's props. Covered so far: aliases and known keys for
-  `create_metric` and `create_grid`, strict reshape keys, a chart's grid moved
-  up from its props, and widget props merged instead of replaced. The other
-  tools are unchecked.
-- **Why it matters:** a step that did less than it said passes the check.
-- **How to check:** propose `add_dimension_member` with an invented key.
-- **What closes it:** strict decoding (or a known-key list) for every write
-  tool, reported by the plan check.
+- **Noticed:** 2026-10-04, KPI tiles pinned to a scenario.
+- **What:** a totals read pinned to one member serves calculated metrics from
+  their persisted slice rows only when every other calculated metric of the
+  revision is dimensioned by the pinned dimension (or totals 0). One metric
+  elsewhere that is not (any P&L line on another grid) sends the read to the
+  scoped recompute, which evaluates every calculated metric of the revision.
+- **Why it matters:** correct (the recompute matches the slice rows), but each
+  pinned KPI tile costs a whole-revision evaluation on a large model.
+- **How to check:** a KPI tile pinned to `scenario = RF` in the manual CPG
+  model; the debug log line "slice fast path: non-pinned-dim metric".
+- **What closes it:** serving a metric not dimensioned by the pin from its
+  '{}' total when nothing it reads is, instead of giving up the fast path.
 
 ### KPI tiles follow the dashboard's selectors and charts plot total members by default
 
@@ -90,43 +72,6 @@ leaves out, until it is fixed.
 - **How to check:** the formula above on a grid with region; read `/api/grid`.
 - **What closes it:** finding why the scheduler leaves it blank, or a refusal
   that says so, and a documented share-of-total idiom.
-
-### Metrics have no display label
-
-- **Noticed:** 2026-10-03, same rebuild.
-- **What:** `model.metric_def` has no label column; the label is the title-cased
-  technical name, and the create route ignores a `label` field. Grid rows,
-  legends and KPI captions read "Rf Cogs", "Rnd", "Ga", "Varpct Ebitda Margin".
-- **Why it matters:** finance labels (R&D, G&A, D&A, EBITDA Margin) cannot be
-  shown, and two metrics for the same line in two blocks cannot share a caption.
-- **How to check:** create `rnd`; the grid row reads "Rnd".
-- **What closes it:** an editable label (revision-scoped, copied by revision
-  duplication and export) used everywhere a metric is captioned.
-
-### Grid widgets cannot choose their metrics or their default metric
-
-- **Noticed:** 2026-10-03, same rebuild.
-- **What:** a grid widget always shows every metric of its grid; a
-  `default_view.filter_sel` for `__metrics__` is ignored (the selector opens on
-  the first metric), and rows `[region, product]` render as product / region.
-- **Why it matters:** a summary table (RF, LY, Var, Var % by region) shows the
-  grid's input and helper metrics too, e.g. "share by product = 100%" per region.
-- **How to check:** a grid widget with `context: ["__metrics__"]` and
-  `filter_sel: {"__metrics__": <id>}`.
-- **What closes it:** a per-widget metric subset and honouring the saved defaults.
-
-### No dimension member can be computed from the others
-
-- **Noticed:** 2026-10-03, same rebuild.
-- **What:** a "Scenario" dimension with members RF, LY, Variance and Variance %
-  cannot compute Variance from RF and LY: a metric may not LOOKUP itself
-  ("a metric cannot read its own values at other members"). RF / LY / Var $ /
-  Var % of a 13-line P&L therefore took 52 metrics on four grids.
-- **Why it matters:** comparison layouts multiply metrics, labels and grids.
-- **How to check:** a formula `LOOKUP(m, scenario, "RF") - LOOKUP(m, scenario, "LY")`
-  inside `m`.
-- **What closes it:** a decision on computed dimension members (version-style
-  dimensions), or allowing self-LOOKUP across a dimension with no cycle.
 
 ### The chart resolver does not tell a withheld value from a missing one
 
@@ -213,13 +158,14 @@ leaves out, until it is fixed.
   `docker build deploy/docker/<name>` — and running a backup and a restore
   (see Backups and Restoring in [SELF_HOSTING.md](SELF_HOSTING.md)).
 
-### Nine Go files are not gofmt-formatted
+### Eight Go files are not gofmt-formatted
 
-- **Noticed:** 2026-09-27.
-- **What:** `gofmt -l cmd internal pkg` lists `internal/identity/jwks.go`,
-  `internal/importpkg/gsheets.go` and seven files in `internal/integration/`
-  (struct fields not aligned). CI's `Go lint` job passes regardless, so the
-  lint configuration does not enforce gofmt.
+- **Noticed:** 2026-09-27; re-checked 2026-10-04 (`jwks.go` has since been
+  formatted; `metricformula/aggrule.go` had drifted and was formatted).
+- **What:** `gofmt -l cmd internal pkg` lists `internal/importpkg/gsheets.go`
+  and seven files in `internal/integration/` (struct fields not aligned).
+  CI's `Go lint` job passes regardless, so the lint configuration does not
+  enforce gofmt.
 - **Why it matters:** only noise today, but every later edit to those files
   carries unrelated formatting changes in its diff.
 - **How to check:** `gofmt -l cmd internal pkg`.
@@ -2660,6 +2606,94 @@ leaves out, until it is fixed.
   `CheckMembers` before the first insert, for every caller.
 
 ## Closed
+
+### The AI Developer on gpt-4o-mini needs a developer's review at every stage
+
+- **Noticed:** 2026-10-03, rerun 2026-10-04, driving the AI Developer with the
+  CPG workbook attached and confirming plans as a developer.
+- **What was wrong:** gpt-4o-mini rebuilt the whole workbook only with a review
+  of every stage (275 LLM calls, eight sessions): dropped steps, repeated work,
+  slipped ids.
+- **Closed by:** a benchmark separating the model's limits from the tools'.
+  Every model got the same stage messages and generic follow-ups, each stage
+  checked against the workbook's values. First run: gpt-5.2, gpt-5-mini and
+  o4-mini passed all seven stages (8, 16 and 12 developer messages); gpt-4.1
+  stopped at a setup value, gpt-4.1-mini at the P&L, gpt-4o-mini at the FY
+  aggregate period. The model-independent gaps it showed were closed in be1193b
+  (`write_input_values`, strict tool params, preview into a planned grid, call
+  caps), a54c2e9 (calculated members) and 8f72297 (widget props checked).
+  Second run, with the P&L as one Scenario grid: gpt-5-mini built all six
+  stages in six messages and gpt-5.2 in seven (one a network retry), neither
+  needing a correction. 8f72297 makes gpt-5-mini the OpenAI default (a blank
+  setting; `AI_DEFAULT_MODEL_OPENAI` per deployment; each developer's own
+  setting first).
+
+### No dimension member can be computed from the others
+
+- **Noticed:** 2026-10-03, rebuilding a CPG FP&A workbook.
+- **What was wrong:** a Scenario member could not be computed from RF and LY
+  (a metric may not LOOKUP itself), so RF / LY / Var $ / Var % of a 13-line
+  P&L took 52 metrics on four grids.
+- **Closed by:** a54c2e9 — calculated members (migration 109): a top-level
+  member of a standard dimension with a formula over its siblings
+  (`{RF} - {LY}`, `METRICFORMAT()` for points on a margin), computed at every
+  level from the siblings there, in no total, taking no input. The manual CPG
+  model's P&L as one grid with a Scenario dimension and 13 metrics matches all
+  676 workbook values in the browser, and the 52 FY totals pinned per scenario
+  (`TestCalculatedMembers`, e2e `calculated-members`).
+
+### Most AI write tools ignore keys they do not read
+
+- **Noticed:** 2026-10-04, the AI Developer rerun.
+- **What was wrong:** a step's params were decoded leniently, so a misspelt or
+  invented key was dropped without a word and the step did less than it said.
+- **Closed by:** be1193b — every write tool decodes strictly (`decodeParams`),
+  at any depth its structs reach, and names the keys it reads;
+  `TestEveryWriteToolRefusesAKeyItDoesNotRead` covers every tool.
+
+### The AI Developer cannot write a single input value
+
+- **Noticed:** 2026-10-04, benchmarking OpenAI models on the CPG workbook.
+- **What was wrong:** the AI could only import a file; Actual Through Month = 9
+  took models several turns of import attempts, and gpt-4.1 never got past it.
+- **Closed by:** be1193b — `write_input_values`, through the import pipeline's
+  resolution and commit (write guard, plan limits, recalculation) and audited
+  as cell writes (`TestAIDeveloperWritesInputValues`). gpt-5-mini then set it
+  in one message.
+
+### The default AI call caps stop a whole-model build in one session
+
+- **Noticed:** 2026-10-04, same benchmark.
+- **What was wrong:** 50 calls per session against 74-78 for a whole workbook.
+- **Closed by:** be1193b — 200 per session and 1000 per day by default; at the
+  cap a session with a draft says to promote it and continue in a new session.
+
+### Metrics have no display label
+
+- **Noticed:** 2026-10-03, rebuilding a CPG FP&A workbook.
+- **What was wrong:** `model.metric_def` had no label; every caption was the
+  title-cased technical name ("Rf Cogs", "Rnd", "Varpct Ebitda Margin"), so a
+  P&L could not read R&D, G&A or EBITDA Margin.
+- **Closed by:** e7c8539 — an optional display label (migration 108), set on
+  the Metrics tab and by the AI Developer, read by every caption (grids,
+  charts, KPI tiles, forms) and carried by revision copies and export
+  (`TestMetricDisplayLabel`, `TestAIMetricLabel`). The manual CPG model's P&L
+  now reads as the workbook's.
+
+### Grid widgets cannot choose their metrics or their default metric
+
+- **Noticed:** 2026-10-03, same rebuild.
+- **What was wrong:** a grid widget showed every metric of its grid (a region
+  table of RF, LY, Var and Var % also showed the inputs and both share
+  helpers), the metric selector opened on the grid's first metric, and saved
+  rows `[region, product]` rendered as product / region.
+- **Closed by:** e7c8539 — `widget_props.metric_ids` picks the metrics and
+  their order (Dashboard designer: Metrics shown; the first is the selector's
+  default), checked on save, remapped by revision copies, carried by export and
+  dropped with a deleted metric; pivot zones keep their saved order
+  (`TestGridWidgetChosenMetrics`, e2e `grid-widget-metrics`). A
+  `filter_sel` entry for `__metrics__` is still not read: the chosen order
+  sets the default instead.
 
 ### Duplicating a revision pointed every KPI tile at one metric
 
