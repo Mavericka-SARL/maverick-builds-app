@@ -169,7 +169,7 @@ func (h *handler) aiCheckImportFile(ctx context.Context, tx pgx.Tx, sessionID st
 	}
 	staged, importErrs, err := importpkg.ResolveRows(ctx, tx, modelID, req.RevisionID, f.mapped, f.rows)
 	if err != nil {
-		return "", fmt.Errorf("%w. Map each column to a model name or \"ignore\" in column_map. %s", err, h.suggestColumnMap(ctx, tx, req, f))
+		return "", fmt.Errorf("%w. Map each column to a model name or \"ignore\" in column_map, or add \"*\": \"ignore\" to drop every column it does not name. %s", err, h.suggestColumnMap(ctx, tx, req, f))
 	}
 	if len(importErrs) > 0 {
 		rows := make([]map[string]any, 0, len(importErrs))

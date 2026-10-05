@@ -61,6 +61,9 @@ type ReadHooks struct {
 	// PrepareConversion saves an attachment's reshaped, column-mapped rows
 	// as a converted file the developer downloads from the chat.
 	PrepareConversion func(ctx context.Context, req FileImportRequest) (string, error)
+	// ReadAttachedSheet renders rows from..to of one sheet of an attached
+	// workbook, with those rows' whole formulas.
+	ReadAttachedSheet func(ctx context.Context, file, sheet string, fromRow, toRow int) (string, error)
 }
 
 // WithReadHooks sets the read executor's gateway hooks and returns it.
@@ -88,6 +91,16 @@ func integrationToolDefs() []toolDef {
 				"column_map":{"type":"object","description":"File column -> model field, applied AFTER reshape (see the File import section of your instructions); omit to use the headers as they are"},
 				"after_steps":{"type":"array","description":"Write steps of the proposal you are preparing, in propose_actions' step shape ({tool, description, params}), run first in a dry run (nothing is kept) so the file previews into a grid or dimension they create; target_id may then be \"<created in step N>\" or the new name","items":{"type":"object"}}
 			},"required":["file","target_id"]}`,
+		},
+		{
+			Name:        "read_attached_sheet",
+			Description: "Reads one sheet of a workbook the developer attached (.xlsx/.xlsm): its rows as stored (a percentage is a fraction), the WHOLE formulas of those rows (compressed into ranges that share a formula), its layout, drop-down lists, highlights and comments. The workbook text under Attached documents shows every sheet but only the first rows and clipped formulas of a large one, and says which call shows the rest. Read-only: call it whenever you need a sheet's rows or formulas — no permission needed.",
+			Parameters: `{"type":"object","properties":{
+				"file":{"type":"string","description":"The attached file's name, as listed under Attached documents"},
+				"sheet":{"type":"string","description":"Worksheet name"},
+				"from_row":{"type":"integer","description":"First row (1-based); omit for row 1"},
+				"to_row":{"type":"integer","description":"Last row; omit for the sheet's last"}
+			},"required":["file","sheet"]}`,
 		},
 		{
 			Name:        "prepare_converted_file",
@@ -266,6 +279,25 @@ func (e *ToolExecutor) previewFileImport(ctx context.Context, raw json.RawMessag
 	}
 	req.TargetType, req.TargetID = kind, targetID
 	return e.hooks.PreviewFileImport(ctx, req)
+}
+
+func (e *ToolExecutor) readAttachedSheet(ctx context.Context, raw json.RawMessage) (string, error) {
+	if e.hooks.ReadAttachedSheet == nil {
+		return "", fmt.Errorf("reading an attached workbook is not available here")
+	}
+	var p struct {
+		File    string `json:"file"`
+		Sheet   string `json:"sheet"`
+		FromRow int    `json:"from_row"`
+		ToRow   int    `json:"to_row"`
+	}
+	if err := decodeParams(raw, &p); err != nil {
+		return "", fmt.Errorf("invalid params: %w", err)
+	}
+	if strings.TrimSpace(p.File) == "" || strings.TrimSpace(p.Sheet) == "" {
+		return "", fmt.Errorf("file and sheet are required — the attached file's name and the worksheet's")
+	}
+	return e.hooks.ReadAttachedSheet(ctx, p.File, p.Sheet, p.FromRow, p.ToRow)
 }
 
 func cmpOr(v, def string) string {

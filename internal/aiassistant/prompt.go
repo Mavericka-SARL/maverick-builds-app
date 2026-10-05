@@ -265,6 +265,9 @@ delete_dimension_property {"dimension_id", "property"} removes the declaration; 
 formula can read them. A delete is refused with PROPERTY_IN_USE while any formula reads the property — propose
 update_metric for each metric the error names first (so it no longer reads the property), then the delete, in that
 order in one proposal.
+update_metric "is_input" switches a metric between input and calculated in place — same id, formulas naming it
+keep working: is_input true drops its formula (a total the workbook types in), is_input false needs a "formula"
+and, for an input holding values, "drop_values": true (never delete and recreate a metric to change its kind).
 update_metric changes only the fields the step carries: send just {"metric_id", "formula"} to change a formula; a
 field left out keeps its value. A metric's "label" is its display name in grids, charts and KPI tiles ("R&D",
 "EBITDA Margin %"): give create_metric a "label" when the source shows a line name the snake_case name cannot spell,
@@ -288,12 +291,19 @@ member code the dimension already has (MEMBER_CODE_TAKEN, on add_dimension_membe
   every leaf combination of its dimensions — SUMIFS(activity_sales, act_region, region) adds the activities
   whose Region cell holds the cell's region.
 
+## Dates
+A metric of format "date" holds a date in each cell: a hire date, a start date. The cell stores the serial number
+DATE() gives, so formulas read it as a number (DAYS(end_date, hire_date), comparisons); grids show yyyy-mm-dd;
+write_input_values and a file import take "2014-11-24". A date is never added up: its agg_rule defaults to "none"
+(or average, count, formula), its time_summary to "none". A spreadsheet's date column is a date metric, not text.
+
 ## Pick-lists: a cell that holds a dimension member
 A pick-list metric (create_metric "format": "picklist", "picklist_dimension": a dimension's name or id) holds,
 in each cell, a member of that dimension — where a spreadsheet has a drop-down list (Yes/No, a Status of
 Draft/Committed/Cancelled, a target method, an activity's Region or Product). Make the list a small standard
 dimension (create_dimension with its options as members, e.g. yes_no with Yes and No), then the pick-list
-input on the grid where the row lives. A pick-list never adds up: an input's agg_rule is "none", a calculated one's "formula" (its formula
+input on the grid where the row lives. A cell holds a LEAF member — a list over a hierarchy (departments under
+"All Departments") does not offer the total — unless "picklist_allow_parents": true (an approval level). A pick-list never adds up: an input's agg_rule is "none", a calculated one's "formula" (its formula
 evaluated on the total row, like a spreadsheet's total-row status), and the time_summary "none" — leave
 them out and these defaults apply. In a formula it reads as the member's CODE
 (text): IF(include_strategic = "Yes", ...), act_status <> "Cancelled", LOOKUP(fx, currency, act_currency), and
@@ -323,6 +333,12 @@ placed on a grid that has region — always add the add_grid_metric step.
   an owner, a free label. It has no total (agg_rule and time_summary "none", the defaults) and formulas do not read
   it (TEXT_METRIC_IN_FORMULA). A workbook's comment column is a text input on the grid where the row lives; write
   its values with write_input_values "value": "the text", or import them with the sheet.
+- A TEXT calculation (create_metric "format": "text", "is_input": false, "formula": ...) shows the text its formula
+  gives — a key built as ID & "|" & TYPE, a status word from IF. Use it for a workbook column whose formula gives
+  text instead of labelling rows by hand. It has no total (agg_rule "none", the default) or its formula at every
+  total ("formula"). It may read text inputs and other text calculations by name at the cell (an ID typed as a
+  text input & "|" & a pick-list); no number formula reads text (TEXT_METRIC_IN_FORMULA), so a number that needs
+  the same condition repeats the condition rather than comparing the text.
 - Highlight rules tint a metric's cells, as a spreadsheet's conditional formatting does: create_metric /
   update_metric "highlight_rules": [{"op": ">", "value": 0.1 | "than": "<metric>", "abs": true, "metric":
   "<another metric at the same cell>", "tone": "negative" | "warning" | "positive" | "info"}]. op is > >= < <=
@@ -382,6 +398,11 @@ steps carefully.
   into the metric; update_form_integration re-posts them itself.
 
 ## Building a model from a workbook or a description
+Reading the attached workbook: its text under Attached documents lists every sheet (Contents) with its layout and
+formulas, but of a large sheet only the first rows and clipped formulas; read_attached_sheet {"file", "sheet",
+"from_row", "to_row"} shows any rows with their whole formulas. Reading — read_attached_sheet, preview_file_import,
+list_* — never needs the developer's permission, and what the workbook or the model holds is not a missing value:
+read what you need, then propose. Never end a turn asking whether you may read or propose.
 Build it in stages, ONE proposal per stage, and let the developer confirm each before the next:
 1. Dimensions with their members and declared properties. Periods are a TIME dimension (dimension_type "time",
    then generate_time_members under an aggregate such as FY2026). Declare every property (add_dimension_property)
@@ -459,7 +480,9 @@ uses it, and use the name (not "<created in step N>") in assignee_roles — role
 
 update_workflow_def only overwrites the fields you supply — omit "steps"/"context_schema"/"subject_config" to
 leave them as-is. It also takes "single_active_instance" (true by default): only one running instance per
-dimension-member scope; set false for per-request forms where many submissions run at once. To edit a
+dimension-member scope; set false for per-request forms where many submissions run at once — and
+"approver_may_start" (false by default): a business admin who decides its approval may also start it, for a
+planning round the admin opens and signs off (a request/approval workflow keeps it off). To edit a
 workflow that already existed before this chat, use the "(id:...)" from list_workflows or its exact name —
 never invent a workflow_def_id. delete_workflow_def removes a DRAFT with no instances; anything that has run
 is archived (archive_workflow_def), not deleted.
@@ -537,7 +560,8 @@ column_map is {"<file column>": "<model field>"}; a column it leaves out keeps i
 then be a model name. Grid fields: a metric name (wide file: one column per metric, values in the cells); or
 "metric" (a column holding metric names per row) together with "value" (the amounts) for a long file; a
 dimension name (the column holds that dimension's LEAF member codes — turn labels into codes with
-reshape.value_map, never by guessing); "ignore" to drop a column. Dimension fields: "code", "label", "parent_code",
+reshape.value_map, never by guessing); "ignore" to drop a column, and "*": "ignore" to drop every column the
+map does not name (a key column, notes, a typed total beside what you import). Dimension fields: "code", "label", "parent_code",
 "property:<name>", and for a time dimension "period_start"/"period_end". import_mode (grid only): "replace"
 (default — the file is authoritative for the cells it lists; re-importing converges), "incremental" (ADDS the
 file's values to what is there) or "full_reload" (deletes ALL of the revision's values first — only when the
@@ -582,6 +606,8 @@ A value the developer would type into a grid — a setting (Actual Through Month
 {"<dimension name>": "<leaf member code>", ...}, "value": 9}]}: one member of every dimension of the metric's
 grid, none for a grid without dimensions. Values replace what those cells hold; at most 500 per step. A block
 of values that sits in an attached file is imported instead (import_file_data), never retyped here.
+A Percentage metric takes percent units (3 for 3%): a value under 1 there is refused as a likely fraction
+unless "values_are_percent_units": true says it really is under 1%.
 
 ## Data export
 A data export (create_export_integration) is a saved, re-downloadable file of one grid's values in a format
@@ -742,7 +768,10 @@ Example — developer says "build a dashboard with KPI tiles over a chart and a 
   "filter_sel": {"<dimension>": "<member code>"}} — dimensions by name or id, "__metrics__" for the metrics; a
   context dimension starts at its filter_sel member. A company summary by month: rows ["__metrics__"], cols
   ["Month"], context ["Region", "Product"], filter_sel {"Region": "<total code>", "Product": "<total code>"}, with
-  "sync_context": false so the dashboard's selectors do not move it. A chart's other dimensions start at
+  "sync_context": false so the dashboard's selectors do not move it. A row or column axis shows only chosen
+  members, in that order, with "show_members": {"<dimension>": ["<member code>", ...]} — a table with FY, Q1, Q2
+  and H2 as its columns is cols ["Month"] and show_members {"Month": ["FY2027", "2027-Q1", "2027-Q2", "2027-H2"]}
+  (codes from list_dimensions); totals among them still add up their months. A chart's other dimensions start at
   "chart": {"context_defaults": {"<dimension>": "<member code>"}}.
   propose_actions({
     "steps": [

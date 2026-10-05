@@ -588,6 +588,12 @@ func resolveDependency(ctx context.Context, dims map[string]*rollup.Dimension, d
 			}
 		}
 	}
+	// A dimension of the cell the source neither has nor relates to is
+	// ignored, not rolled up along: drv_global [cost_type] read at All
+	// Departments added its one rate up once per department.
+	if norm, err := rollup.NormalizeCombo(dims, srcDims, combo, nil); err == nil {
+		combo = norm
+	}
 	return rollup.ResolveTime(ctx, dims, dep.ID, srcDims, rollup.AggRule(dep.AggRule),
 		rollup.TimeSummaryRule(dep.TimeSummary), combo, fetch)
 }

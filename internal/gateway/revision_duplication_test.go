@@ -311,8 +311,9 @@ func TestGridDeleteCascadesWidgetsAndMemberRenameRekeysWidgetProps(t *testing.T)
 	props := fmt.Sprintf(`{
 		"default_view": {"rows": ["__metrics__"], "cols": [%q], "context": [], "filter_sel": {%q: "DEPT_A"}},
 		"chart": {"chart_type": "bar", "dimension_id": %q, "metric_ids": [%q], "context_defaults": {%q: "DEPT_A"}},
-		"kpi_scope": {"dimension_id": %q, "member_code": "DEPT_A"}
-	}`, f.deptsDimID, f.deptsDimID, f.deptsDimID, f.deptTotalMetricID, f.deptsDimID, f.deptsDimID)
+		"kpi_scope": {"dimension_id": %q, "member_code": "DEPT_A"},
+		"show_members": {%q: ["DEPT_B", "DEPT_A"]}
+	}`, f.deptsDimID, f.deptsDimID, f.deptsDimID, f.deptTotalMetricID, f.deptsDimID, f.deptsDimID, f.deptsDimID)
 	var gridWidgetID, kpiWidgetID string
 	if err := f.pool.QueryRow(ctx, `
 		INSERT INTO model.dashboard_widget (dashboard_id, widget_type, ref_id, sort_order, widget_props)
@@ -340,17 +341,21 @@ func TestGridDeleteCascadesWidgetsAndMemberRenameRekeysWidgetProps(t *testing.T)
 	if status != 200 {
 		t.Fatalf("member rename: status %d %v", status, body)
 	}
-	var fs, cd, ks string
+	var fs, cd, ks, sm string
 	if err := f.pool.QueryRow(ctx, `
 		SELECT widget_props #>> ARRAY['default_view','filter_sel',$2::text],
 		       widget_props #>> ARRAY['chart','context_defaults',$2::text],
-		       widget_props #>> ARRAY['kpi_scope','member_code']
+		       widget_props #>> ARRAY['kpi_scope','member_code'],
+		       widget_props #>> ARRAY['show_members',$2::text]
 		FROM model.dashboard_widget WHERE id=$1::uuid
-	`, gridWidgetID, f.deptsDimID).Scan(&fs, &cd, &ks); err != nil {
+	`, gridWidgetID, f.deptsDimID).Scan(&fs, &cd, &ks, &sm); err != nil {
 		t.Fatalf("read widget_props: %v", err)
 	}
 	if fs != "DEPT_ALPHA" || cd != "DEPT_ALPHA" || ks != "DEPT_ALPHA" {
 		t.Errorf("widget_props after rename: filter_sel=%q context_defaults=%q kpi_scope=%q, want DEPT_ALPHA in all three", fs, cd, ks)
+	}
+	if sm != `["DEPT_B", "DEPT_ALPHA"]` {
+		t.Errorf("show_members after rename = %s, want the renamed code in its place", sm)
 	}
 
 	// SYNC-01: deleting the grid drops the grid widget; the KPI widget

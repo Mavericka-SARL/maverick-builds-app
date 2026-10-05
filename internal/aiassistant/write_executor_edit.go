@@ -1355,6 +1355,36 @@ func (e *WriteExecutor) resolveWidgetLayout(ctx context.Context, props map[strin
 			dv["filter_sel"] = out
 		}
 	}
+	if v, ok := props["show_members"]; ok && v != nil {
+		const shape = `show_members is {"<dimension>": ["<member code>", ...]} — the members a grid widget's rows or columns show, in that order`
+		sm, ok := v.(map[string]any)
+		if !ok {
+			return errors.New(shape)
+		}
+		out := make(map[string]any, len(sm))
+		for k, raw := range sm {
+			id, err := dimID("show_members", k)
+			if err != nil {
+				return err
+			}
+			list, ok := raw.([]any)
+			if !ok || len(list) == 0 {
+				return errors.New(shape)
+			}
+			codes := make([]string, 0, len(list))
+			for _, item := range list {
+				code, _ := item.(string)
+				var found bool
+				_ = e.pool.QueryRow(ctx, `SELECT true FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2`, id, code).Scan(&found)
+				if !found {
+					return fmt.Errorf("show_members: %q is not a member code of %s (call list_dimensions to see codes)", code, k)
+				}
+				codes = append(codes, code)
+			}
+			out[id] = codes
+		}
+		props["show_members"] = out
+	}
 	if chart, ok := props["chart"].(map[string]any); ok {
 		if cd, ok := chart["context_defaults"].(map[string]any); ok {
 			out := make(map[string]any, len(cd))

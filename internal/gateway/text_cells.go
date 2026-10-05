@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mavericks-engine/mavericks/internal/formula"
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
 )
 
@@ -43,6 +44,17 @@ func (h *handler) resolveCellWrite(ctx context.Context, req writebackReq, format
 			return cellWrite{}, fmt.Errorf("a text cell holds at most %d characters (this one has %d)", maxCellText, len(t))
 		}
 		return cellWrite{text: &t}, nil
+	}
+	if format == metricformula.FormatDate && req.Text != nil {
+		// A date cell: the ISO date as its serial ("" clears the cell).
+		if strings.TrimSpace(*req.Text) == "" {
+			return cellWrite{clear: true}, nil
+		}
+		v, ok := formula.DateSerial(*req.Text)
+		if !ok {
+			return cellWrite{}, fmt.Errorf("%q is not a date — a date cell takes yyyy-mm-dd in \"text\", or its serial number in \"value\"", *req.Text)
+		}
+		return cellWrite{value: v}, nil
 	}
 	if req.Text != nil {
 		return cellWrite{}, fmt.Errorf("\"text\" is for a text metric; this metric's format is %q", cmp.Or(format, "number"))
@@ -114,6 +126,43 @@ func (h *handler) loadTextCells(ctx context.Context, modelID, revisionID string,
 		var dm map[string]string
 		if json.Unmarshal([]byte(dmJSON), &dm) != nil || factRowHidden(dm, hiddenByDim) || metricRules[metricID] == "hidden" || text == "" {
 			continue
+		}
+		if key, ok := textCellKey(metricID, metricDims[metricID], dm); ok {
+			out[key] = text
+		}
+	}
+	return out, rows.Err()
+}
+
+// loadCalcTextCells is loadTextCells for calculated text metrics: the text
+// each one's formula gave (calc_result.text_value), leaves and — for
+// agg_rule formula — totals by their member codes.
+func (h *handler) loadCalcTextCells(ctx context.Context, modelID, revisionID string, textCalcs []string,
+	metricDims map[string][]string, hiddenByDim map[string]map[string]bool, metricRules map[string]string) (map[string]string, error) {
+	if len(textCalcs) == 0 {
+		return nil, nil
+	}
+	rows, err := h.db.Query(ctx, `
+		SELECT metric_id::text, dim_members::text, text_value
+		FROM runtime.calc_result
+		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND text_value IS NOT NULL
+		  AND metric_id::text = ANY($3::text[])`, modelID, revisionID, textCalcs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var metricID, dmJSON, text string
+		if err := rows.Scan(&metricID, &dmJSON, &text); err != nil {
+			return nil, err
+		}
+		var dm map[string]string
+		if json.Unmarshal([]byte(dmJSON), &dm) != nil || factRowHidden(dm, hiddenByDim) || metricRules[metricID] == "hidden" {
+			continue
+		}
+		if len(dm) == 0 && len(metricDims[metricID]) > 0 {
+			continue // the total row: no cell of its own
 		}
 		if key, ok := textCellKey(metricID, metricDims[metricID], dm); ok {
 			out[key] = text

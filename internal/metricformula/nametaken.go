@@ -92,7 +92,7 @@ func ValidMetricName(name string) error {
 const CodeInvalidMetricFormat = "INVALID_METRIC_FORMAT"
 
 // MetricFormats are the display formats the console offers.
-var MetricFormats = []string{"number", "percentage", "currency", "boolean", "text", "picklist"}
+var MetricFormats = []string{"number", "percentage", "currency", "boolean", "text", "picklist", "date"}
 
 // ValidMetricFormat refuses a format outside MetricFormats ("" keeps the
 // default, number). Any string used to be stored: the AI Developer wrote

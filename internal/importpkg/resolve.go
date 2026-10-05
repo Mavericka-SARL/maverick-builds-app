@@ -183,8 +183,9 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 	// members of ("" for any other metric), looked up once per metric.
 	// isText reports a text metric, whose cells hold the file's text as is.
 	type metricKind struct {
-		picklistDim string
-		text        bool
+		picklistDim  string
+		allowParents bool // a pick-list that may hold a member with members under it
+		text         bool
 	}
 	kinds := map[string]metricKind{}
 	kindOf := func(metricID string) metricKind {
@@ -192,7 +193,7 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 			return k
 		}
 		var k metricKind
-		_ = pool.QueryRow(ctx, `SELECT COALESCE(picklist_dimension_id::text,''), (format = 'text' AND is_input) FROM model.metric_def WHERE id=$1::uuid`, metricID).Scan(&k.picklistDim, &k.text)
+		_ = pool.QueryRow(ctx, `SELECT COALESCE(picklist_dimension_id::text,''), picklist_allow_parents, (format = 'text' AND is_input) FROM model.metric_def WHERE id=$1::uuid`, metricID).Scan(&k.picklistDim, &k.allowParents, &k.text)
 		kinds[metricID] = k
 		return k
 	}
@@ -337,6 +338,14 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 					})
 					continue
 				}
+				if !info.isLeaf && !kindOf(metricID).allowParents {
+					errs = append(errs, &importpkgv1.ImportError{
+						RowNumber: int32(row.RowNumber), Column: ev.column,
+						ErrorCode: "PICKLIST_PARENT", RawValue: ev.valueRaw,
+						Message: "\"" + ev.valueRaw + "\" has members under it — a pick-list cell holds one of them (or allow parents on the metric)",
+					})
+					continue
+				}
 				memberCopy := make(map[string]string, len(dimMembers))
 				for k, v := range dimMembers {
 					memberCopy[k] = v
@@ -346,6 +355,9 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 				continue
 			}
 			val, perr := strconv.ParseFloat(ev.valueRaw, 64)
+			if serial, ok := dateSerial(ev.valueRaw); perr != nil && ok {
+				val, perr = serial, nil // a date cell into a number: its serial, as stored
+			}
 			if perr != nil {
 				errs = append(errs, &importpkgv1.ImportError{
 					RowNumber: int32(row.RowNumber), Column: ev.column,

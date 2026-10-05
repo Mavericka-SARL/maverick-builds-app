@@ -215,3 +215,69 @@ func TestPicklistMetrics(t *testing.T) {
 		t.Errorf("the copy's act_status: own dimension %v (%v), want the copy's activity_statuses", ownDim, err)
 	}
 }
+
+// A pick-list over a hierarchy holds leaves: "All Departments" is listed (a
+// cell that already holds it still shows it) but marked a parent, refused on
+// a write and in a file import — unless the metric allows parents.
+func TestPicklistHoldsLeavesUnlessParentsAllowed(t *testing.T) {
+	f := setupRoundTripFixture(t)
+	dev := "rollup-test-approver"
+	rev := f.workingRevID
+	call := func(method, path string, body any) (int, string) {
+		t.Helper()
+		return doAs(t, f.rollupFixture, method, path, dev, f.appID, body)
+	}
+	must := func(method, path string, body any) string {
+		t.Helper()
+		status, raw := call(method, path, body)
+		if status != http.StatusOK && status != http.StatusCreated {
+			t.Fatalf("%s %s: %d %s", method, path, status, raw)
+		}
+		var out struct {
+			ID string `json:"id"`
+		}
+		_ = json.Unmarshal([]byte(raw), &out)
+		return out.ID
+	}
+	dept := must("POST", "/api/developer/dimensions", map[string]any{"name": "org_dept", "revision_id": rev})
+	all := must("POST", "/api/developer/dimensions/"+dept+"/members", map[string]any{"code": "ALL", "label": "All Departments"})
+	for _, c := range []string{"SALES", "HR"} {
+		must("POST", "/api/developer/dimensions/"+dept+"/members", map[string]any{"code": c, "label": c, "parent_member_id": all})
+	}
+	staff := must("POST", "/api/developer/dimensions", map[string]any{"name": "org_staff", "revision_id": rev})
+	for _, c := range []string{"E1", "E2"} {
+		must("POST", "/api/developer/dimensions/"+staff+"/members", map[string]any{"code": c, "label": c})
+	}
+	empDept := must("POST", "/api/developer/metrics", map[string]any{"name": "emp_dept", "is_input": true, "format": "picklist", "picklist_dimension_id": dept, "revision_id": rev})
+	grid := must("POST", "/api/developer/grids", map[string]any{"name": "Staff list", "revision_id": rev})
+	must("POST", "/api/developer/grids/"+grid+"/dimensions/"+staff, nil)
+	must("POST", "/api/developer/grids/"+grid+"/metrics/"+empDept, nil)
+	write := func(emp, member string) (int, string) {
+		return call("POST", "/api/cells", map[string]any{"model_id": f.modelID, "revision_id": rev, "metric_id": empDept,
+			"dim_codes": map[string]string{staff: emp}, "member": member})
+	}
+	if status, raw := write("E1", "All Departments"); status != http.StatusBadRequest || !strings.Contains(raw, "has members under it") {
+		t.Errorf("a total into a leaf pick-list: %d %s, want 400", status, raw)
+	}
+	if status, raw := write("E1", "SALES"); status != http.StatusOK {
+		t.Fatalf("a leaf: %d %s", status, raw)
+	}
+	_, raw := call("GET", "/api/grid?grid_def_id="+grid+"&model_id="+f.modelID+"&revision_id="+rev, nil)
+	if !strings.Contains(raw, `"code":"ALL","label":"All Departments","parent":true`) {
+		t.Errorf("the grid's options do not mark All Departments a parent:\n%.600s", raw)
+	}
+
+	// A file import is held to the same rule.
+	integ := must("POST", "/api/developer/integrations?revision_id="+rev, map[string]any{"name": "Staff", "type": "csv_import", "target_type": "grid", "target_id": grid})
+	must("PATCH", "/api/developer/integrations/"+integ+"/config", map[string]any{"config": map[string]any{
+		"column_map": map[string]string{"Employee": "org_staff", "Department": "emp_dept"}, "import_mode": "replace"}})
+	status, raw := call("POST", "/api/integrations/"+integ+"/run", map[string]any{"csv": "Employee,Department\nE2,All Departments\n"})
+	if !strings.Contains(raw, "PICKLIST_PARENT") && !strings.Contains(raw, "has members under it") {
+		t.Errorf("a total imported into a leaf pick-list: %d %s, want the row refused", status, raw)
+	}
+
+	must("PATCH", "/api/developer/metrics/"+empDept, map[string]any{"picklist_allow_parents": true})
+	if status, raw := write("E2", "All Departments"); status != http.StatusOK {
+		t.Errorf("a total, parents allowed: %d %s", status, raw)
+	}
+}

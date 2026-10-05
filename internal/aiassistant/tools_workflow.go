@@ -34,6 +34,7 @@ func (e *ToolExecutor) getWorkflow(ctx context.Context, raw json.RawMessage) (st
 		"id": def.ID, "name": def.Name, "description": def.Description, "status": def.Status,
 		"trigger_event": def.TriggerEvent, "subject_type": def.SubjectType,
 		"single_active_instance": def.SingleActiveInstance,
+		"approver_may_start":     def.ApproverMayStart,
 		"subject_config":         rawOrNull(def.SubjectConfig),
 		"context_schema":         rawOrNull(def.ContextSchema),
 		"steps":                  rawOrNull(def.Steps),

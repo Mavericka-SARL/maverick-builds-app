@@ -254,6 +254,62 @@ func (s *ChatStore) CountLLMCallsToday(ctx context.Context, userID string) (int,
 // got one, so an old session stays usable.
 const unansweredToolCall = "No result was recorded for this call; it did not run."
 
+// Older turns' large tool results and tool-call arguments are shortened
+// before each model call. A session replays its whole history every call:
+// the HR rebuild's sixth stage failed with "Input tokens exceed the
+// configured limit of 272000 tokens" — 727k characters, 440k of them old
+// sheet reads and previews and most of the rest earlier plans, all decided.
+const (
+	// keptTurns: the current turn and the one before it stay whole — a
+	// correction ("rejected: use January") is about the plan just shown.
+	keptTurns = 2
+	// compactAbove: an older tool result or argument longer than this is
+	// shortened to its first compactKeep characters.
+	compactAbove = 1500
+	compactKeep  = 400
+)
+
+// CompactHistory returns msgs with the tool results and tool-call
+// arguments of turns before the last keptTurns shortened. A turn starts at
+// a developer message.
+func CompactHistory(msgs []ChatMessage) []ChatMessage {
+	turnsSeen, cut := 0, -1
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "user" {
+			turnsSeen++
+			if turnsSeen == keptTurns {
+				cut = i
+				break
+			}
+		}
+	}
+	if cut <= 0 {
+		return msgs
+	}
+	out := make([]ChatMessage, len(msgs))
+	copy(out, msgs)
+	for i := 0; i < cut; i++ {
+		m := out[i]
+		if m.Role == "tool" && len(m.Content) > compactAbove {
+			m.Content = fmt.Sprintf("%s\n… (an earlier result of %d characters, shortened — call the tool again if you need it)",
+				clipRunes(m.Content, compactKeep), len(m.Content))
+		}
+		if len(m.ToolCalls) > 0 {
+			calls := make([]providers.ToolCall, len(m.ToolCalls))
+			copy(calls, m.ToolCalls)
+			for k, tc := range calls {
+				if len(tc.Arguments) > compactAbove {
+					note, _ := json.Marshal(map[string]string{"omitted": fmt.Sprintf("an earlier %s call of %d characters, decided", tc.Name, len(tc.Arguments))})
+					calls[k].Arguments = note
+				}
+			}
+			m.ToolCalls = calls
+		}
+		out[i] = m
+	}
+	return out
+}
+
 // MessagesToProviderHistory converts DB messages to the provider format for the LLM.
 // A tool call with no stored result (sessions saved before every sibling call
 // was answered) gets a stand-in result right after its group: providers refuse

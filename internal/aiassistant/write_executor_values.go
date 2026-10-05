@@ -20,6 +20,9 @@ type ValuesWriteRequest struct {
 	MetricID   string
 	Header     []string // the grid's dimension names, then the metric's name
 	Rows       []importpkg.RawRow
+	// ValuesArePercentUnits says values under 1 into a Percentage metric
+	// really are percents under 1%, not fractions (the plan check's guard).
+	ValuesArePercentUnits bool
 }
 
 // maxValuesPerStep bounds one step: a block larger than this belongs in a
@@ -32,8 +35,9 @@ const maxValuesPerStep = 500
 // dimension of the metric's grid.
 func (e *WriteExecutor) writeInputValues(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p struct {
-		MetricID string `json:"metric_id"`
-		Values   []struct {
+		MetricID              string `json:"metric_id"`
+		ValuesArePercentUnits bool   `json:"values_are_percent_units"`
+		Values                []struct {
 			Members map[string]string `json:"members"`
 			// Value is a number, or text: for a pick-list the member it
 			// holds (code or label), for a text metric its note.
@@ -93,7 +97,8 @@ func (e *WriteExecutor) writeInputValues(ctx context.Context, raw json.RawMessag
 		dimNames[i] = d.name
 	}
 
-	req := ValuesWriteRequest{RevisionID: e.revID, GridID: gridID, MetricID: metricID, Header: append(append([]string{}, dimNames...), metricName)}
+	req := ValuesWriteRequest{RevisionID: e.revID, GridID: gridID, MetricID: metricID, Header: append(append([]string{}, dimNames...), metricName),
+		ValuesArePercentUnits: p.ValuesArePercentUnits}
 	for i, v := range p.Values {
 		text, err := valueText(v.Value)
 		if err != nil {

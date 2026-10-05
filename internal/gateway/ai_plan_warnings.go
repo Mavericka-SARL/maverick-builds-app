@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -29,6 +30,7 @@ func planWarnings(ctx context.Context, tx pgx.Tx, modelID, revID string, steps [
 		rows.Close()
 	}
 	var out []string
+	out = append(out, recurringMistakeWarnings(ctx, tx, modelID, revID, steps)...)
 	for i, step := range steps {
 		if step.Tool != "create_metric" && step.Tool != "update_metric" {
 			continue
@@ -132,4 +134,120 @@ func selfSumWarning(ctx context.Context, tx pgx.Tx, modelID, revID, metricID str
 	}
 	return fmt.Sprintf("%s(%s, %s, %s, ...) keeps the cell's own member of every other dimension too, so it is the cell's own value, not a total: the %s's total is LOOKUP(%s, %s)",
 		sum.Call, sum.Source, sum.Dims[0], sum.Dims[0], strings.Join(sum.Dims, "/"), sum.Source, strings.Join(rest, ", "))
+}
+
+// recurringMistakeWarnings are the AI Developer's mistakes seen rebuilding an
+// HR planning workbook (2026-10-05), each a plan that runs but is not what
+// was meant: an input typed full of 1s to count rows with SUMIFS (a row added
+// later counts only once someone types its 1); a headcount summed over the
+// months of a time grid (its FY shows twelve months added up); a summary
+// grid widget showing every metric of a large grid.
+func recurringMistakeWarnings(ctx context.Context, tx pgx.Tx, modelID, revID string, steps []aiassistant.ProposalStep) []string {
+	var out []string
+	levels := map[string]bool{}
+	for i, step := range steps {
+		at := fmt.Sprintf("step %d (%s)", i+1, step.Tool)
+		switch step.Tool {
+		case "write_input_values":
+			var p struct {
+				MetricID string `json:"metric_id"`
+				Values   []struct {
+					Value json.RawMessage `json:"value"`
+				} `json:"values"`
+			}
+			if json.Unmarshal(step.Params, &p) != nil || len(p.Values) < 5 {
+				continue
+			}
+			ones := true
+			for _, v := range p.Values {
+				if strings.TrimSpace(string(v.Value)) != "1" {
+					ones = false
+					break
+				}
+			}
+			if ones {
+				out = append(out, fmt.Sprintf("%s: every one of the %d values of %s is 1 — if it counts rows, count them with COUNTIFS(<pick-list or dimension>, <criterion>) instead: a typed 1 has to be typed again for every row added later",
+					at, len(p.Values), p.MetricID))
+			}
+		case "create_metric", "update_metric", "add_grid_metric":
+			var p struct {
+				Name     string `json:"name"`
+				MetricID string `json:"metric_id"`
+			}
+			if json.Unmarshal(step.Params, &p) == nil {
+				levels[strings.ToLower(cmp.Or(p.MetricID, p.Name))] = true
+			}
+		case "create_grid":
+			var p struct {
+				Metrics   []string `json:"metrics"`
+				MetricIDs []string `json:"metric_ids"`
+			}
+			if json.Unmarshal(step.Params, &p) == nil {
+				for _, m := range append(p.Metrics, p.MetricIDs...) {
+					levels[strings.ToLower(m)] = true
+				}
+			}
+		case "add_dashboard_widget":
+			var p struct {
+				WidgetType  string          `json:"widget_type"`
+				RefID       string          `json:"ref_id"`
+				Title       string          `json:"title"`
+				WidgetProps json.RawMessage `json:"widget_props"`
+			}
+			if json.Unmarshal(step.Params, &p) != nil || p.WidgetType != "grid" || p.RefID == "" {
+				continue
+			}
+			var props struct {
+				MetricIDs []string `json:"metric_ids"`
+			}
+			_ = json.Unmarshal(p.WidgetProps, &props)
+			if len(props.MetricIDs) > 0 {
+				continue
+			}
+			var gridName string
+			var metrics int
+			if tx.QueryRow(ctx, `
+				SELECT g.name, (SELECT count(*) FROM model.grid_metric gm WHERE gm.grid_id = g.id)
+				FROM model.grid_def g WHERE g.model_id=$1::uuid AND g.revision_id=$2::uuid AND (g.id::text=$3 OR lower(g.name)=lower($3))`,
+				modelID, revID, p.RefID).Scan(&gridName, &metrics) != nil {
+				continue
+			}
+			if metrics > 12 && p.Title != "" && !strings.EqualFold(strings.TrimSpace(p.Title), gridName) {
+				out = append(out, fmt.Sprintf("%s: the grid widget %q shows all %d metrics of %s — a summary lists the ones it shows in widget_props.metric_ids",
+					at, p.Title, metrics, gridName))
+			}
+		}
+	}
+	for ref := range levels {
+		var name, label, timeSummary, format string
+		var onTimeGrid bool
+		if tx.QueryRow(ctx, `
+			SELECT m.name, COALESCE(m.label,''), COALESCE(m.time_summary,'sum'), COALESCE(m.format,'number'),
+			       EXISTS (SELECT 1 FROM model.grid_metric gm JOIN model.grid_dimension gd ON gd.grid_id = gm.grid_id
+			               JOIN model.dimension_def d ON d.id = gd.dimension_id
+			               WHERE gm.metric_id = m.id AND d.dimension_type = 'time')
+			FROM model.metric_def m
+			WHERE m.model_id=$1::uuid AND m.revision_id=$2::uuid AND (m.id::text=$3 OR lower(m.name)=$3)`,
+			modelID, revID, ref).Scan(&name, &label, &timeSummary, &format, &onTimeGrid) != nil {
+			continue
+		}
+		if onTimeGrid && timeSummary == "sum" && format != "percentage" && looksLikeLevel(name, label) {
+			out = append(out, fmt.Sprintf("%s looks like a level (a headcount or a balance) and is summed over the months of its time grid: its FY is the months added up — set time_summary \"last\" (closing), \"first\" (opening) or \"average\"", name))
+		}
+	}
+	return out
+}
+
+// looksLikeLevel: a name or label word naming a stock rather than a flow.
+func looksLikeLevel(name, label string) bool {
+	words := strings.FieldsFunc(strings.ToLower(name+" "+label), func(r rune) bool {
+		return r == '_' || r == ' ' || r == '-' || r == '.' || r == '(' || r == ')'
+	})
+	for _, w := range words {
+		switch w {
+		case "hc", "headcount", "fte", "ftes", "balance", "closing", "ending", "opening", "inventory", "stock":
+			return true
+		}
+	}
+	return false
 }

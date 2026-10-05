@@ -20,6 +20,8 @@ export interface DevMetric {
   time_summary?: TimeSummary;
   // format "picklist": the dimension whose members the metric's cells hold.
   picklist_dimension_id?: string;
+  // Its cells may hold a member with members under it; off, a leaf.
+  picklist_allow_parents?: boolean;
   // How its cells are tinted (conditional highlighting).
   highlight_rules?: HighlightRule[];
   depends_on: string[];
@@ -102,6 +104,7 @@ export interface GridData {
     metrics:     Record<string, string>; // metricID  → "write"|"read"|"hidden"
   };
   rollup_source_grid_id?: string | null; // set = this grid mirrors another grid's metrics via cross-dimension rollup; its cells are read-only
+  recalc_pending?: boolean; // a write's dependents are still being recalculated: calculated cells are about to change
 }
 
 export interface Actor {
@@ -426,6 +429,7 @@ export interface Metric {
   // hold, and those members with the key a cell stores for each.
   picklist_dimension_id?: string;
   picklist_options?: PicklistOption[];
+  picklist_allow_parents?: boolean; // parents are offered too (else leaves only)
   // How its cells are tinted: the first rule that holds gives the tone.
   highlight_rules?: HighlightRule[];
   value: number | null;
@@ -444,6 +448,7 @@ export interface PicklistOption {
   key: number;
   code: string;
   label: string;
+  parent?: boolean; // has members under it: offered only where the metric allows parents
 }
 
 export interface Task {
@@ -571,6 +576,8 @@ export interface GridDef {
   dimension_levels: Record<string, number | null>; // dim_id → display_level
 }
 
+// A layout saved over the API may leave a zone out; readers treat a missing
+// zone as empty.
 export interface GridDefaultView {
   rows: string[];     // ordered IDs: "__metrics__" or dimension id
   cols: string[];
@@ -718,6 +725,9 @@ export interface WidgetProps {
   // shared with every other sync_context widget on the same dashboard,
   // matched by dimension id (see DashboardContextSyncProvider).
   sync_context?: boolean;
+  // grid: the members a row or column dimension shows, in that order, by
+  // dimension id. A dimension not listed shows all of its members.
+  show_members?: Record<string, string[]>;
 }
 
 
@@ -1360,6 +1370,9 @@ export interface WorkflowDef {
   /** One running instance per dimension-member scope (a second start with the
       same members is refused as a duplicate). Default true. */
   single_active_instance: boolean;
+  /** A business admin who decides its approval may also start it (a planning
+      round). Default false: approvers do not submit what they approve. */
+  approver_may_start?: boolean;
   created_at: string;
   updated_at: string;
   published_at?: string;
@@ -1883,8 +1896,10 @@ export const api = {
   getCellHistory: (params: { model_id: string; revision_id: string; metric_id: string; dim_codes: Record<string, string> }) =>
     apiFetch<CellHistoryEntry[]>(`/api/cells/history?model_id=${params.model_id}&revision_id=${params.revision_id}&metric_id=${params.metric_id}&dim_codes=${encodeURIComponent(JSON.stringify(params.dim_codes))}`),
   // A number in value, a text metric's note in text, or clear: true to empty the cell (blank, not 0).
-  writeback: (body: { model_id: string; revision_id: string; metric_id: string; dim_code?: string; dim_codes?: Record<string, string>; value?: number; text?: string; clear?: boolean }) =>
-    apiFetch<{ status: string }>("/api/cells", {
+  // recalc "background": answer once stored; the grid read reports
+  // recalc_pending until the dependents are recalculated.
+  writeback: (body: { model_id: string; revision_id: string; metric_id: string; dim_code?: string; dim_codes?: Record<string, string>; value?: number; text?: string; clear?: boolean; recalc?: "background" }) =>
+    apiFetch<{ status: string; recalculating?: boolean }>("/api/cells", {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -1951,7 +1966,7 @@ export const api = {
   getDevDimensions: (revisionId?: string) =>
     apiFetch<DevDimension[]>(`/api/developer/dimensions${revisionId ? `?revision_id=${revisionId}` : ""}`),
 
-  addMetric: (body: { name: string; label?: string; is_input: boolean; formula: string; revision_id?: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string; highlight_rules?: HighlightRule[] }) =>
+  addMetric: (body: { name: string; label?: string; is_input: boolean; formula: string; revision_id?: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string; picklist_allow_parents?: boolean; highlight_rules?: HighlightRule[] }) =>
     apiFetch<{ id: string; status: string }>("/api/developer/metrics", {
       method: "POST",
       body: JSON.stringify(body),
@@ -2169,7 +2184,8 @@ export const api = {
 
   deleteMetric: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/metrics/${id}`, { method: "DELETE" }),
-  updateMetric: (id: string, body: { name: string; label?: string; formula: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string; highlight_rules?: HighlightRule[] }) =>
+  updateMetric: (id: string, body: { name: string; label?: string; formula: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string; picklist_allow_parents?: boolean; highlight_rules?: HighlightRule[];
+    is_input?: boolean; drop_values?: boolean }) =>
     apiFetch<{ status: string; recalc: Array<{ revision_id: string; metric: string; value: number | null }> }>(
       `/api/developer/metrics/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 
@@ -2449,7 +2465,7 @@ export const api = {
     apiFetch<WorkflowDef>(`/api/developer/workflows?application_id=${encodeURIComponent(applicationId)}${revisionId ? `&revision_id=${encodeURIComponent(revisionId)}` : ""}`, {
       method: "POST", body: JSON.stringify(body),
     }),
-  updateWorkflowDef: (id: string, body: { name?: string; description?: string; trigger_event?: string; subject_type?: WorkflowSubjectType; subject_config?: Record<string, string>; steps?: WorkflowStepDef[]; context_schema?: ContextVariable[]; single_active_instance?: boolean }) =>
+  updateWorkflowDef: (id: string, body: { name?: string; description?: string; trigger_event?: string; subject_type?: WorkflowSubjectType; subject_config?: Record<string, string>; steps?: WorkflowStepDef[]; context_schema?: ContextVariable[]; single_active_instance?: boolean; approver_may_start?: boolean }) =>
     apiFetch<WorkflowDef>(`/api/developer/workflows/${id}`, {
       method: "PATCH", body: JSON.stringify(body),
     }),

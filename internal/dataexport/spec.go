@@ -129,6 +129,8 @@ type Metric struct {
 	Picklist map[float64]string
 	// Text marks a text metric: its cells are written as their text.
 	Text bool
+	// Date marks a date metric: its serials are written as yyyy-mm-dd.
+	Date bool
 }
 
 // Grid is a grid's structure: what a spec is validated against.

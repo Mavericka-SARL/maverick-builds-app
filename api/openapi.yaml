@@ -622,8 +622,11 @@ components:
           additionalProperties: { type: number }
         texts:
           type: object
-          description: "Text metrics' cells (format text), keyed as cells; a dimensionless one by its bare metric id. Omitted when empty."
+          description: "Text metrics' cells (format text: an input's notes, a calculation's text), keyed as cells; a dimensionless one by its bare metric id. Omitted when empty."
           additionalProperties: { type: string }
+        recalc_pending:
+          type: boolean
+          description: "A write answered before its recalculation (recalc background) is still being calculated: calculated cells are about to change. Omitted when false."
         totals:
           type: object
           description: "metricId to its aggregate across the grid"
@@ -695,7 +698,15 @@ components:
           type: string
           description: >-
             Text metrics (format text, an input) only, instead of value: the cell's note, at most 4000
-            characters; "" clears it. Refused for any other metric.
+            characters; "" clears it. A date metric (format date) takes its date as yyyy-mm-dd here,
+            stored as DATE()'s serial. Refused for any other metric.
+        recalc:
+          type: string
+          enum: [background]
+          description: >-
+            "background" answers once the cell is written (with "recalculating": true) and
+            recalculates its dependents afterwards; until that lands, GET /api/grid reports
+            recalc_pending. Omitted, the write answers after the recalculation.
         clear:
           type: boolean
           description: >-
@@ -825,6 +836,7 @@ components:
             other dimension): sum for flows, last for a closing balance, first for an opening balance,
             none when a time total is meaningless.
         picklist_dimension_id: { type: string, format: uuid, description: "format picklist: the dimension whose members the metric's cells hold" }
+        picklist_allow_parents: { type: boolean, description: "format picklist: a cell may hold a parent member too; false, leaf members only" }
         highlight_rules:
           type: array
           items: { $ref: "#/components/schemas/HighlightRule" }
@@ -926,7 +938,9 @@ components:
           description: >-
             Required for format picklist, refused for any other: a dimension of the revision (id or
             name) whose members the metric's cells hold. A pick-list's agg_rule is none (default) or,
-            calculated, formula; its time_summary none.
+            calculated, formula; its time_summary none. A calculated text (format text) has the same
+            rules; a date (format date) is never summed.
+        picklist_allow_parents: { type: boolean, default: false, description: "format picklist: a cell may hold a parent member; otherwise leaf members only" }
         highlight_rules:
           type: array
           items: { $ref: "#/components/schemas/HighlightRule" }
@@ -952,6 +966,14 @@ components:
         format_decimals: { type: integer }
         format_currency: { type: string }
         picklist_dimension_id: { type: string, description: "format picklist: the dimension (id or name) its cells hold members of; omitted keeps it while the format stays picklist" }
+        picklist_allow_parents: { type: boolean, description: "format picklist: a cell may hold a parent member; omitted keeps it" }
+        is_input:
+          type: boolean
+          description: >-
+            Switches the metric between input and calculated, keeping its id. To an input drops its
+            calculated results (send no formula); to a calculation needs formula and, for an input
+            holding values, drop_values (409 otherwise).
+        drop_values: { type: boolean, description: "With is_input false: delete the input's values (kept in the cell history)" }
         highlight_rules:
           type: array
           items: { $ref: "#/components/schemas/HighlightRule" }
@@ -1296,6 +1318,7 @@ components:
         steps:          { type: array, items: { type: object, additionalProperties: {} } }
         context_schema: { type: object, additionalProperties: {} }
         single_active_instance: { type: boolean, description: One running instance per dimension-member scope; a second start with the same members is refused as a duplicate. Default true. }
+        approver_may_start: { type: boolean, description: An approver of the workflow may start it (otherwise refused 403, separation of duties). Default false. }
         created_at:     { type: string, format: date-time }
         updated_at:     { type: string, format: date-time }
         published_at:   { type: string, format: date-time, nullable: true }
@@ -1320,6 +1343,7 @@ components:
         steps:          { type: array, items: { type: object, additionalProperties: {} } }
         context_schema: { type: object, additionalProperties: {} }
         single_active_instance: { type: boolean }
+        approver_may_start: { type: boolean }
 
     DuplicateWorkflowRequest:
       type: object

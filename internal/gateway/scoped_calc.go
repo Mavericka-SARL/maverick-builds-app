@@ -9,6 +9,7 @@ import (
 
 	"github.com/mavericks-engine/mavericks/internal/calculation"
 	"github.com/mavericks-engine/mavericks/internal/formula"
+	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/readset"
 	"github.com/mavericks-engine/mavericks/internal/rollup"
 	"github.com/mavericks-engine/mavericks/internal/writeguard"
@@ -61,6 +62,21 @@ type scopedReads struct {
 	Pinned  map[string]string
 	Trimmed map[string]bool
 	Dims    map[string]*rollup.Dimension
+}
+
+// totalCombo is where a formula/rate total is evaluated: at the scope's
+// pins, as the scheduler's slice rows are. At {} a dependency whose rule is
+// none read nothing even where the pin left it one leaf: drv_global on
+// [cost_type], read by a formula total in a cost_type=BASE_SALARY scope,
+// gave 0 while the slice row gave 2.5.
+func (sr *scopedReads) totalCombo() map[string]string {
+	out := map[string]string{}
+	if sr != nil {
+		for dimID, code := range sr.Pinned {
+			out[dimID] = code
+		}
+	}
+	return out
 }
 
 func (sr *scopedReads) served(metricID string) *servedMetric {
@@ -432,7 +448,9 @@ func scopeCalcCells(
 
 	var remaining []metricRow
 	for _, m := range universe {
-		if !m.IsInput && m.Formula != nil && *m.Formula != "" {
+		// A text calculation's cells are its stored texts (the grid's
+		// texts); a number evaluation of it would only fail.
+		if !m.IsInput && m.Formula != nil && *m.Formula != "" && m.Format != metricformula.FormatText {
 			remaining = append(remaining, m)
 		}
 	}
@@ -534,9 +552,16 @@ func scopeOrdinaryMetric(
 			}
 			// ResolveTime with the dependency's time summary, as the
 			// scheduler reads a plain reference (resolveDependency): an
-			// unpinned time dimension reduces by time_summary, not agg_rule.
+			// unpinned time dimension reduces by time_summary, not agg_rule;
+			// a pin on a dimension the dependency neither has nor relates to
+			// is dropped (drv_global [cost_type] at All Departments × FY 2027
+			// read 84 × 2.5 = 210).
+			at := combo
+			if norm, nErr := rollup.NormalizeCombo(rollupDims, metricDimIDs[refM.ID], combo, nil); nErr == nil {
+				at = norm
+			}
 			v, _, err := rollup.ResolveTime(ctx, rollupDims, refM.ID, metricDimIDs[refM.ID], rollup.AggRule(refM.AggRule),
-				rollup.TimeSummaryRule(refM.TimeSummary), combo, fetchFor(refM.ID))
+				rollup.TimeSummaryRule(refM.TimeSummary), at, fetchFor(refM.ID))
 			if err != nil {
 				return 0, err
 			}
@@ -618,7 +643,7 @@ func scopeOrdinaryMetric(
 	// row and slice rows — never a combination of the per-combo results.
 	// When that evaluation fails, the combined value computed above is NOT
 	// left standing: it is the very number the rule exists to avoid.
-	v, err := evalCombo(map[string]string{})
+	v, err := evalCombo(sr.totalCombo())
 	switch {
 	case errors.Is(err, errWithheld):
 		delete(totals, m.ID)

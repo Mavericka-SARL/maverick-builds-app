@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -30,8 +31,30 @@ func extractXLSX(data []byte) (string, error) {
 		return "", fmt.Errorf("xlsx parse failed: %w", err)
 	}
 	defer func() { _ = f.Close() }()
+	sheets := readSheets(f)
+	// The whole workbook first; then less of each sheet until it fits. Cut
+	// off at the end instead, a workbook whose data sheets came first lost
+	// every sheet after them: the HR model's text stopped in its fourth
+	// sheet's formulas, so Monthly_HR_Plan, Plan_Summary and Dashboard — the
+	// formulas to rebuild — never reached the AI Developer.
+	var out string
+	for _, lim := range overviewLimits {
+		out = renderWorkbook(f, sheets, lim)
+		if len(out) <= maxDocumentChars {
+			break
+		}
+	}
+	return out, nil
+}
 
-	var sb strings.Builder
+// sheetRows is one worksheet read as stored values.
+type sheetRows struct {
+	name string
+	rows [][]string
+}
+
+func readSheets(f *excelize.File) []sheetRows {
+	var out []sheetRows
 	for _, sheet := range f.GetSheetList() {
 		// Values as stored, not as displayed: a sheet showing 13.4 holds
 		// 13.36, and 6.0% is 0.06.
@@ -39,25 +62,130 @@ func extractXLSX(data []byte) (string, error) {
 		if err != nil {
 			continue
 		}
-		fmt.Fprintf(&sb, "## Sheet: %s (row number, then the cells from column A; values as stored — a percentage is a fraction)\n", sheet)
-		for i, row := range rows {
-			if i >= maxSheetRows {
-				fmt.Fprintf(&sb, "... (%d more rows omitted)\n", len(rows)-maxSheetRows)
-				break
-			}
-			if strings.TrimSpace(strings.Join(row, "")) == "" {
-				continue
-			}
-			fmt.Fprintf(&sb, "%d\t%s\n", i+1, strings.Join(row, "\t"))
-		}
-		writeLayout(&sb, f, sheet, rows)
-		writeFormulas(&sb, f, sheet, rows)
-		writeValidations(&sb, f, sheet)
-		writeConditionalFormats(&sb, f, sheet)
-		writeComments(&sb, f, sheet)
-		sb.WriteString("\n")
+		out = append(out, sheetRows{sheet, rows})
 	}
-	return sb.String(), nil
+	return out
+}
+
+// sheetLimits bound how much of a sheet the workbook text shows: its first
+// rows of values, each formula line's length and the number of formula
+// lines. Whatever is left out is named, with the read_attached_sheet call
+// that shows it.
+type sheetLimits struct {
+	rows, formulaChars, formulaLines int
+}
+
+var overviewLimits = []sheetLimits{
+	{maxSheetRows, 1 << 30, 1 << 30},
+	{200, 4000, 200}, {100, 2000, 120}, {60, 1500, 80}, {40, 1000, 60}, {30, 800, 50}, {25, 600, 40},
+	{20, 500, 35}, {15, 400, 30}, {12, 300, 25}, {8, 250, 20}, {5, 200, 15},
+}
+
+// smallSheetRows: a sheet this short (a README, a settings sheet, a short
+// lookup table) is always shown whole.
+const smallSheetRows = 30
+
+func renderWorkbook(f *excelize.File, sheets []sheetRows, lim sheetLimits) string {
+	var sb strings.Builder
+	sb.WriteString("## Contents (every sheet; rows the text below leaves out: read_attached_sheet)\n")
+	for _, s := range sheets {
+		fmt.Fprintf(&sb, "- %s: %d rows, %d formula cells\n", s.name, len(s.rows), countFormulas(f, s.name, s.rows))
+	}
+	sb.WriteString("\n")
+	for _, s := range sheets {
+		writeSheet(&sb, f, s.name, s.rows, 1, len(s.rows), lim)
+	}
+	return sb.String()
+}
+
+// writeSheet renders rows from..to of a sheet (1-based, inclusive), its
+// layout, the formulas of those rows, its drop-down lists, highlights and
+// comments.
+func writeSheet(sb *strings.Builder, f *excelize.File, sheet string, rows [][]string, from, to int, lim sheetLimits) {
+	fmt.Fprintf(sb, "## Sheet: %s (row number, then the cells from column A; values as stored — a percentage is a fraction)\n", sheet)
+	shown := 0
+	for i := from - 1; i < len(rows) && i < to; i++ {
+		if strings.TrimSpace(strings.Join(rows[i], "")) == "" {
+			continue
+		}
+		if shown >= lim.rows && len(rows) > smallSheetRows {
+			fmt.Fprintf(sb, "... rows %d-%d not shown: read_attached_sheet {\"sheet\": %q, \"from_row\": %d}\n", i+1, min(to, len(rows)), sheet, i+1)
+			break
+		}
+		fmt.Fprintf(sb, "%d\t%s\n", i+1, strings.Join(rows[i], "\t"))
+		shown++
+	}
+	writeLayout(sb, f, sheet, rows)
+	writeFormulas(sb, f, sheet, rows, from, to, lim)
+	writeValidations(sb, f, sheet)
+	writeConditionalFormats(sb, f, sheet)
+	writeComments(sb, f, sheet)
+	sb.WriteString("\n")
+}
+
+// clipRunes is s cut to at most n bytes without splitting a character.
+func clipRunes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
+func countFormulas(f *excelize.File, sheet string, rows [][]string) int {
+	n := 0
+	for r := range rows {
+		width := max(len(rows[r]), 30)
+		for c := 0; c < width; c++ {
+			name, _ := excelize.CoordinatesToCellName(c+1, r+1)
+			if text, err := f.GetCellFormula(sheet, name); err == nil && strings.TrimSpace(text) != "" {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// maxSheetReadChars caps one read_attached_sheet answer.
+const maxSheetReadChars = 60000
+
+// ExtractXLSXSheet renders one sheet of an attached workbook for the AI
+// Developer's read_attached_sheet: rows from..to (1-based; 0 = the first or
+// the last), the whole formulas of those rows, and the sheet's layout, lists,
+// highlights and comments.
+func ExtractXLSXSheet(data []byte, sheet string, from, to int) (string, error) {
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	if err != nil {
+		return "", fmt.Errorf("xlsx parse failed: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	sheets := readSheets(f)
+	var names []string
+	for _, s := range sheets {
+		names = append(names, s.name)
+		if !strings.EqualFold(s.name, strings.TrimSpace(sheet)) {
+			continue
+		}
+		if from <= 0 {
+			from = 1
+		}
+		if to <= 0 || to > len(s.rows) {
+			to = len(s.rows)
+		}
+		if from > to {
+			return "", fmt.Errorf("sheet %s has %d rows; from_row %d is past them", s.name, len(s.rows), from)
+		}
+		var sb strings.Builder
+		writeSheet(&sb, f, s.name, s.rows, from, to, sheetLimits{maxSheetRows, 1 << 30, 1 << 30})
+		out := sb.String()
+		if len(out) > maxSheetReadChars {
+			out = out[:maxSheetReadChars] + "\n(... cut: read fewer rows with from_row/to_row)"
+		}
+		return out, nil
+	}
+	return "", fmt.Errorf("the workbook has no sheet %q — its sheets are: %s", sheet, strings.Join(names, ", "))
 }
 
 // sheetRef finds the sheets a formula reads (Sheet!A1 or 'Sheet name'!A1).
@@ -179,11 +307,14 @@ type formulaCell struct {
 	pattern  string // the formula with every reference made relative to the cell
 }
 
-func writeFormulas(sb *strings.Builder, f *excelize.File, sheet string, rows [][]string) {
+func writeFormulas(sb *strings.Builder, f *excelize.File, sheet string, rows [][]string, from, to int, lim sheetLimits) {
 	var cells []formulaCell
 	for r := range rows {
 		if r >= maxSheetRows {
 			break
+		}
+		if r+1 < from || r+1 > to {
+			continue
 		}
 		width := len(rows[r])
 		if width < 30 {
@@ -249,7 +380,11 @@ func writeFormulas(sb *strings.Builder, f *excelize.File, sheet string, rows [][
 		return merged[i].col < merged[j].col
 	})
 	fmt.Fprintf(sb, "### Formulas on %s (a range shares the formula of its first cell; references move with the row and, across columns, with the column)\n", sheet)
-	for _, r := range merged {
+	for i, r := range merged {
+		if i >= lim.formulaLines {
+			fmt.Fprintf(sb, "... %d more formula ranges from row %d: read_attached_sheet {\"sheet\": %q, \"from_row\": %d}\n", len(merged)-i, r.row, sheet, r.row)
+			break
+		}
 		first, _ := excelize.CoordinatesToCellName(r.col, r.row)
 		where := first
 		if r.lastCol != r.col || r.lastRow != r.row {
@@ -274,7 +409,12 @@ func writeFormulas(sb *strings.Builder, f *excelize.File, sheet string, rows [][
 		if header != "" {
 			header = " [" + header + "]"
 		}
-		fmt.Fprintf(sb, "%s%s = %s\n", where, header, r.formula)
+		formula := r.formula
+		if len(formula) > lim.formulaChars {
+			formula = fmt.Sprintf("%s… (%d characters: read_attached_sheet {\"sheet\": %q, \"from_row\": %d, \"to_row\": %d} shows it whole)",
+				clipRunes(formula, lim.formulaChars), len(r.formula), sheet, r.row, r.row)
+		}
+		fmt.Fprintf(sb, "%s%s = %s\n", where, header, formula)
 	}
 }
 

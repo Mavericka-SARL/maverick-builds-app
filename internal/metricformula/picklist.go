@@ -15,6 +15,11 @@ const FormatPicklist = "picklist"
 // comment, an owner): stored in fact_input.text_value beside a 0.
 const FormatText = "text"
 
+// FormatDate is the format of a metric whose cells hold a date: the serial
+// number DATE() gives (days since 1899-12-30, the spreadsheet's), shown and
+// typed as yyyy-mm-dd. Formulas read the number (DAYS, comparisons).
+const FormatDate = "date"
+
 // Picklist is a metric's pick-list setting as resolved by ResolvePicklist:
 // the dimension (ID; "" for any other format) and the aggregation rule and
 // time summary to store.
@@ -41,6 +46,12 @@ func ResolvePicklist(ctx context.Context, q Querier, modelID, revisionID, format
 		}
 		if format == FormatText && isInput {
 			return textInput(aggRule, timeSummary)
+		}
+		if format == FormatText {
+			return textCalc(aggRule, timeSummary)
+		}
+		if format == FormatDate {
+			return dateMetric(aggRule, timeSummary)
 		}
 		return Picklist{AggRule: aggRule, TimeSummary: timeSummary}, nil
 	}
@@ -93,4 +104,40 @@ func textInput(aggRule, timeSummary string) (Picklist, error) {
 		return Picklist{}, invalid("a text metric's notes are never added up over time: its time_summary is \"none\", not %q", timeSummary)
 	}
 	return Picklist{AggRule: string(rollup.AggNone), TimeSummary: "none"}, nil
+}
+
+// textCalc is ResolvePicklist for a calculated text (an action key, a
+// status word): text is never added up. It has no total ("none", the
+// default) or its formula at every total ("formula": a status of the whole).
+func textCalc(aggRule, timeSummary string) (Picklist, error) {
+	switch aggRule {
+	case "":
+		aggRule = string(rollup.AggNone)
+	case string(rollup.AggNone), string(rollup.AggFormula):
+	default:
+		return Picklist{}, invalid("text is never added up: a calculated text's agg_rule is %q (no total) or %q (its formula at the total), not %q", rollup.AggNone, rollup.AggFormula, aggRule)
+	}
+	if timeSummary != "" && timeSummary != "none" {
+		return Picklist{}, invalid("text is never added up over time: a calculated text's time_summary is \"none\", not %q", timeSummary)
+	}
+	return Picklist{AggRule: aggRule, TimeSummary: "none"}, nil
+}
+
+// dateMetric is ResolvePicklist for a date: dates are never added up. With
+// no rule given a date has no total; the earliest, latest, average or count
+// of them are totals that mean something.
+func dateMetric(aggRule, timeSummary string) (Picklist, error) {
+	switch aggRule {
+	case "":
+		aggRule = string(rollup.AggNone)
+	case string(rollup.AggSum), string(rollup.AggRate):
+		return Picklist{}, invalid("dates are never added up: a date metric's agg_rule is none, average, count or formula, not %q", aggRule)
+	}
+	switch timeSummary {
+	case "":
+		timeSummary = "none"
+	case "sum":
+		return Picklist{}, invalid("dates are never added up over time: a date metric's time_summary is none, first, last, min, max or average, not \"sum\"")
+	}
+	return Picklist{AggRule: aggRule, TimeSummary: timeSummary}, nil
 }

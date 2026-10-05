@@ -1374,11 +1374,14 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
               ];
 
               const wp = { ...(selectedWidget.widget_props ?? {}), ...(propsDraft[selectedWidget.id]?.widget_props ?? {}) };
-              const dv: GridDefaultView = wp.default_view ?? {
-                rows: [METRICS_ID],
-                cols: dimItems.length > 0 ? [dimItems[0].id] : [],
-                context: dimItems.slice(1).map(d => d.id),
-              };
+              // A saved layout may leave a zone out (API, AI Developer): empty.
+              const dv: GridDefaultView = wp.default_view
+                ? { ...wp.default_view, rows: wp.default_view.rows ?? [], cols: wp.default_view.cols ?? [], context: wp.default_view.context ?? [] }
+                : {
+                    rows: [METRICS_ID],
+                    cols: dimItems.length > 0 ? [dimItems[0].id] : [],
+                    context: dimItems.slice(1).map(d => d.id),
+                  };
 
               function setDv(next: GridDefaultView) {
                 const wid = selectedWidget!.id;
@@ -1494,6 +1497,73 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                       </>
                     );
                   })()}
+
+                  {/* Members shown: a row or column dimension can show only
+                      chosen members, in a chosen order (FY, Q1, Q2, H2). All
+                      of them saves no list — the axis then follows the
+                      dimension, hierarchy and all. */}
+                  {[...dv.rows, ...dv.cols].filter(id => id !== METRICS_ID).map(dimId => {
+                    const dim = dimItems.find(d => d.id === dimId);
+                    if (!dim || dim.members.length < 2) return null;
+                    const allCodes = dim.members.map(m => m.code);
+                    const shownMap = wp.show_members ?? {};
+                    const chosen = (shownMap[dimId] ?? []).filter(c => allCodes.includes(c));
+                    const depth = (code: string) => {
+                      let d = 0, m = dim.members.find(x => x.code === code);
+                      while (m?.parent_code && d < 10) { d++; m = dim.members.find(x => x.code === m!.parent_code); }
+                      return d;
+                    };
+                    const labelOf = (code: string) => dim.members.find(m => m.code === code)?.label || code;
+                    const setChosen = (next: string[] | null) => {
+                      const { [dimId]: _drop, ...others } = shownMap;
+                      void _drop;
+                      const sm = next ? { ...others, [dimId]: next } : others;
+                      const { show_members: _old, ...rest } = wp;
+                      void _old;
+                      setPropsDraft(prev => ({
+                        ...prev,
+                        [selectedWidget.id]: { ...prev[selectedWidget.id], widget_props: Object.keys(sm).length > 0 ? { ...rest, show_members: sm } : rest },
+                      }));
+                    };
+                    const move = (code: string, by: -1 | 1) => {
+                      const i = chosen.indexOf(code), j = i + by;
+                      if (i < 0 || j < 0 || j >= chosen.length) return;
+                      const next = [...chosen];
+                      [next[i], next[j]] = [next[j], next[i]];
+                      setChosen(next);
+                    };
+                    const roots = dim.members.filter(m => !m.parent_code).map(m => m.code);
+                    const ordered = [...chosen, ...allCodes.filter(c => !chosen.includes(c))];
+                    return (
+                      <div key={dimId}>
+                        <div className="mvx-prop-section" style={{ marginTop: 12 }}>{dim.name} members shown</div>
+                        <Checkbox label="All members" checked={chosen.length === 0}
+                          onChange={e => setChosen(e.target.checked ? null : (roots.length > 0 ? roots : allCodes.slice(0, 1)))} />
+                        {chosen.length > 0 && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 240, overflowY: "auto", marginTop: 4 }}>
+                            {ordered.map(code => {
+                              const on = chosen.includes(code);
+                              const i = chosen.indexOf(code);
+                              return (
+                                <div key={code} style={{ display: "flex", alignItems: "center", gap: 4, paddingLeft: on ? 0 : depth(code) * 12 }}>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <Checkbox label={labelOf(code)} checked={on} disabled={on && chosen.length === 1}
+                                      onChange={() => setChosen(on ? chosen.filter(x => x !== code) : [...chosen, code])} />
+                                  </div>
+                                  {on && (
+                                    <>
+                                      <IconButton size={22} aria-label={`Move ${labelOf(code)} up`} title="Move up" disabled={i === 0} onClick={() => move(code, -1)}>↑</IconButton>
+                                      <IconButton size={22} aria-label={`Move ${labelOf(code)} down`} title="Move down" disabled={i === chosen.length - 1} onClick={() => move(code, 1)}>↓</IconButton>
+                                    </>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })()}

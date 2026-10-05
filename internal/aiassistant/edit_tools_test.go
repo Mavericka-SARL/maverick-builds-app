@@ -637,4 +637,19 @@ func TestAIWidgetPropsAreChecked(t *testing.T) {
 	if got := h.scalar(`SELECT widget_props->>'kpi_context_mode' || ' ' || (widget_props->'kpi_scope'->>'dimension_id') FROM model.dashboard_widget WHERE id=$1::uuid`, w); got != "pin "+dim {
 		t.Errorf("stored mode and scope dimension = %q, want pin and the dimension's id", got)
 	}
+
+	// show_members: dimension by name, stored by id; codes, not labels.
+	gridWidget := func(props map[string]any) (string, error) {
+		_, id, err := h.run("add_dashboard_widget", map[string]any{"dashboard_id": dash, "widget_type": "grid", "ref_id": grid, "pos_y": 400, "widget_props": props})
+		return id, err
+	}
+	_, err = gridWidget(map[string]any{"show_members": map[string]any{"scenario": []string{"RF", "Forecast"}}})
+	h.refused("a label for a code", err, `"Forecast" is not a member code`)
+	gw, err := gridWidget(map[string]any{"show_members": map[string]any{"scenario": []string{"LY", "RF"}}})
+	if err != nil {
+		t.Fatalf("grid widget with show_members: %v", err)
+	}
+	if got := h.scalar(`SELECT widget_props->'show_members'->>$2::text FROM model.dashboard_widget WHERE id=$1::uuid`, gw, dim); got != `["LY", "RF"]` {
+		t.Errorf("stored show_members for the dimension's id = %q, want [LY, RF] in order", got)
+	}
 }

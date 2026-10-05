@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { serialToISO } from "../dateSerial";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invalidateModelData } from "../modelDataQueries";
 import { Check as CheckIcon, Trash2, Plus as PlusIcon } from "lucide-react";
@@ -103,7 +104,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
     // goes INTO the grid's own toolbar row (beside the ··· actions) instead
     // of a separate header bar — see the show_title branch below, which
     // deliberately skips grid widgets.
-    inner = <PlanningGrid ctx={ctx} gridDefId={widget.ref_id} defaultView={widget.widget_props?.default_view} metricIds={widget.widget_props?.metric_ids} syncContext={widget.widget_props?.sync_context !== false} selectorsPosition={widget.widget_props?.selectors_position} title={widget.show_title && widget.title ? widget.title : undefined} />;
+    inner = <PlanningGrid ctx={ctx} gridDefId={widget.ref_id} defaultView={widget.widget_props?.default_view} metricIds={widget.widget_props?.metric_ids} showMembers={widget.widget_props?.show_members} syncContext={widget.widget_props?.sync_context !== false} selectorsPosition={widget.widget_props?.selectors_position} title={widget.show_title && widget.title ? widget.title : undefined} />;
   } else if (widget.widget_type === "text" && widget.content) {
     const wp = widget.widget_props ?? {};
     // Explanatory copy needs headings, emphasis, lists and links, so the
@@ -250,6 +251,8 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps }: { metricId: stri
     ? (value === 0 ? "—" : metric?.picklist_options?.find(o => o.key === value)?.label ?? "—")
     : fmt === "boolean"
     ? (value ? "Yes" : "No")
+    : fmt === "date"
+    ? (value === 0 ? "—" : serialToISO(value))
     : fmt === "currency"
     ? `${value < 0 ? "-" : ""}${metric?.format_currency || "$"}${Math.abs(value).toLocaleString("en-US", digits)}`
     : fmt === "percentage"

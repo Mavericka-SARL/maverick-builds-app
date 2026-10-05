@@ -55,7 +55,7 @@ func ReadTools() []providers.ToolDef {
 		},
 		{
 			Name:        "get_workflow",
-			Description: "Returns one workflow definition in full — steps, context_schema, subject, single_active_instance, the automation rules that start it, and the Validate verdict. Call it before update_workflow_def on an existing workflow: steps are replaced as a whole list, so you must resupply the current ones plus your change.",
+			Description: "Returns one workflow definition in full — steps, context_schema, subject, single_active_instance, approver_may_start, the automation rules that start it, and the Validate verdict. Call it before update_workflow_def on an existing workflow: steps are replaced as a whole list, so you must resupply the current ones plus your change.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"workflow_def_id":{"type":"string","description":"The workflow's id from list_workflows, or its exact name"}},"required":["workflow_def_id"]}`),
 		},
 		{
@@ -254,6 +254,8 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, args json.RawMe
 		return e.previewFileImport(ctx, args)
 	case "prepare_converted_file":
 		return e.prepareConvertedFile(ctx, args)
+	case "read_attached_sheet":
+		return e.readAttachedSheet(ctx, args)
 	case "preview_export":
 		return e.previewExport(ctx, args)
 	default:
@@ -730,7 +732,7 @@ func (e *ToolExecutor) listForms(ctx context.Context) (string, error) {
 // runs pre-flight (model-scoped, not revision-scoped).
 func (e *ToolExecutor) validateFormulas(ctx context.Context) (string, error) {
 	rows, err := e.pool.Query(ctx, `
-		SELECT id::text, name, formula FROM model.metric_def
+		SELECT id::text, name, formula, format = 'text' FROM model.metric_def
 		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND is_input=false AND formula IS NOT NULL
 		ORDER BY name`, e.modelID, e.revID)
 	if err != nil {
@@ -745,11 +747,14 @@ func (e *ToolExecutor) validateFormulas(ctx context.Context) (string, error) {
 	// Collect first, then validate: metricformula queries the same pool, and
 	// running those queries while this cursor is open would deadlock on a
 	// single-connection pool.
-	type metricRow struct{ id, name, formula string }
+	type metricRow struct {
+		id, name, formula string
+		text              bool
+	}
 	var found []metricRow
 	for rows.Next() {
 		var m metricRow
-		if rows.Scan(&m.id, &m.name, &m.formula) != nil {
+		if rows.Scan(&m.id, &m.name, &m.formula, &m.text) != nil {
 			continue
 		}
 		found = append(found, m)
@@ -772,7 +777,7 @@ func (e *ToolExecutor) validateFormulas(ctx context.Context) (string, error) {
 		// metric's own place in the graph — the recurrence it belongs to
 		// (contract C4) and its own grid placement.
 		if _, vErr := metricformula.Validate(ctx, e.pool, metricformula.Request{
-			ModelID: e.modelID, RevisionID: e.revID, MetricID: m.id, Name: m.name, Formula: m.formula,
+			ModelID: e.modelID, RevisionID: e.revID, MetricID: m.id, Name: m.name, Formula: m.formula, Text: m.text,
 		}); vErr != nil {
 			var invalid *metricformula.ValidationError
 			if !errors.As(vErr, &invalid) {

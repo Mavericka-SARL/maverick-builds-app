@@ -508,3 +508,52 @@ func TestPreviewIntoAGridThePlanCreates(t *testing.T) {
 		t.Errorf("the dry run kept %d grid(s)", kept)
 	}
 }
+
+// write_input_values is held to the same guard: 0.03 for a 3% threshold is
+// refused at the plan check with the way out, not warned of after the write.
+func TestPlanCheckRefusesFractionsWrittenIntoAPercentage(t *testing.T) {
+	f := newSalesFileFixture(t)
+	ctx, pool := f.ctx, f.pool
+	if _, err := pool.Exec(ctx, `
+		WITH m AS (INSERT INTO model.metric_def (model_id, revision_id, name, is_input, agg_rule, format)
+		           VALUES ($1::uuid,$2::uuid,'growth_pct',true,'average','percentage') RETURNING id)
+		INSERT INTO model.grid_metric (grid_id, metric_id, sort_order) SELECT $3::uuid, id, 9 FROM m`, f.modelID, f.revID, f.grid); err != nil {
+		t.Fatal(err)
+	}
+	step := func(confirmUnits bool) map[string]any {
+		p := map[string]any{"metric_id": "growth_pct", "values": []map[string]any{{"members": map[string]string{"geography": "CA", "period": "Q1"}, "value": 0.03}}}
+		if confirmUnits {
+			p["values_are_percent_units"] = true
+		}
+		return proposeStep("write_input_values", "Growth", p)
+	}
+	propose := func(id string, s map[string]any) providers.ChatResponse {
+		b, _ := json.Marshal(map[string]any{"steps": []map[string]any{s}})
+		return providers.ChatResponse{FinishReason: "tool_calls", Message: providers.Message{Role: "assistant",
+			ToolCalls: []providers.ToolCall{{ID: id, Name: "propose_actions", Arguments: b}}}}
+	}
+	fake := &multiScriptProvider{resps: []providers.ChatResponse{propose("call_fraction", step(false)), propose("call_units", step(true))}}
+	_, do := f.serve(t, fake)
+	chatStore := aiassistant.NewChatStore(pool)
+	sess, err := chatStore.CreateSession(ctx, f.appID, f.modelID, f.devID, "openai", "gpt-4o-mini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = chatStore.SetTitleIfEmpty(ctx, sess.ID, "pre-titled") // no titling call to use up the script
+	if status, out := do(f.devSub, "POST", "/api/ai/sessions/"+sess.ID+"/messages", map[string]string{"content": "set the growth"}); status != http.StatusOK {
+		t.Fatalf("message: %d %s", status, out)
+	}
+	results := map[string]string{}
+	msgs, _ := chatStore.ListMessages(ctx, sess.ID)
+	for _, m := range msgs {
+		if m.Role == "tool" {
+			results[m.ToolCallID] = m.Content
+		}
+	}
+	if r := results["call_fraction"]; !strings.Contains(r, "Proposal NOT shown") || !strings.Contains(r, "values_are_percent_units") {
+		t.Errorf("0.03 into growth_pct should be refused with the way out; got %q (all: %q)", r, results)
+	}
+	if r := results["call_units"]; !strings.Contains(r, "Proposal created") {
+		t.Errorf("with values_are_percent_units the plan should be shown; got %q", r)
+	}
+}

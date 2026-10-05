@@ -806,6 +806,39 @@ func TestCreateGrid_WithMetricsAndDimensions(t *testing.T) {
 	}
 }
 
+// A metric using a time function goes on a new grid together with the grid's
+// time dimension. The metrics were attached before the dimensions, so it was
+// refused with TIME_DIMENSION_REQUIRED by the very step adding the month (the
+// AI Developer's HR plan: Hires Cum. = COUNTIFS(…, "<=" & MONTH(START()))).
+func TestCreateGrid_TimeFunctionMetricWithItsTimeDimension(t *testing.T) {
+	pool := setupWriteExecutorDB(t)
+	modelID := seedModel(t, pool)
+	revID := seedRevision(t, pool, modelID, "Rev A")
+	exec := aiassistant.NewWriteExecutor(pool, modelID, revID)
+	ctx := context.Background()
+
+	_, monthID, err := exec.Execute(ctx, "create_dimension", mustJSON(t, map[string]any{"name": "month", "revision_id": revID,
+		"dimension_type": "time", "time_granularity": "month", "fiscal_year_start_month": 1}))
+	if err != nil {
+		t.Fatalf("create time dimension: %v", err)
+	}
+	if _, _, err := exec.Execute(ctx, "generate_time_members", mustJSON(t, map[string]any{"dimension_id": monthID,
+		"start": "2027-01-01", "end": "2027-03-31"})); err != nil {
+		t.Fatalf("generate_time_members: %v", err)
+	}
+	_, inputID, _ := exec.Execute(ctx, "create_metric", mustJSON(t, map[string]any{"name": "hc", "is_input": true, "revision_id": revID}))
+	_, calcID, err := exec.Execute(ctx, "create_metric", mustJSON(t, map[string]any{"name": "month_no", "is_input": false,
+		"formula": "hc * MONTH(START())", "revision_id": revID}))
+	if err != nil {
+		t.Fatalf("create_metric: %v", err)
+	}
+	if _, _, err := exec.Execute(ctx, "create_grid", mustJSON(t, map[string]any{
+		"name": "Monthly Plan", "revision_id": revID, "metric_ids": []string{inputID, calcID}, "dimension_ids": []string{monthID},
+	})); err != nil {
+		t.Fatalf("create_grid with a time-function metric and its time dimension: %v", err)
+	}
+}
+
 // TestCreateGrid_SkipsMetricAlreadyInAnotherGrid is a regression test: a
 // metric already belonging to another grid used to be silently dropped from
 // the new grid's INSERT while the message reported every requested metric

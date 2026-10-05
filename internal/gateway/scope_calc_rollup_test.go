@@ -50,3 +50,50 @@ func TestScopeCalcCellsEmitsScopedRollupCells(t *testing.T) {
 		t.Errorf("scoped total = %v, want 20", tot)
 	}
 }
+
+// A formula-rule total is evaluated at the scope's pins, as the scheduler's
+// slice rows are. At {} a rule-none dependency read nothing even where the
+// pin left it one leaf: the HR model's "Effective Global Note" (=drv_global,
+// rule formula, on [department, cost_type]) showed 0 on the Cost Type FY
+// Summary while its slice row held 2.5.
+func TestScopeCalcCellsFormulaTotalReadsRuleNoneDependencyAtThePin(t *testing.T) {
+	costID, deptID := "dim-cost", "dim-dept"
+	rollupDims := map[string]*rollup.Dimension{
+		// the scope's cost_type=BASE pin has trimmed the dimension to that member
+		costID: {ID: costID, Members: []rollup.Member{{ID: "c-base", Code: "BASE"}}},
+		deptID: {ID: deptID, Members: []rollup.Member{
+			{ID: "d-all", Code: "ALL"},
+			{ID: "d-x", Code: "X", ParentCode: "ALL"},
+			{ID: "d-y", Code: "Y", ParentCode: "ALL"},
+		}},
+	}
+	note := "drv_global"
+	pct := "IF(cost_ly = 0, 0, (plan - cost_ly) / cost_ly * 100)"
+	universe := []metricRow{
+		{ID: "drv", Name: "drv_global", IsInput: true, AggRule: "none"},
+		{ID: "ly", Name: "cost_ly", IsInput: true, AggRule: "sum"},
+		{ID: "plan", Name: "plan", IsInput: true, AggRule: "sum"},
+		{ID: "note", Name: "cost_global_pct", AggRule: "formula", Formula: &note},
+		{ID: "pct", Name: "cost_var_pct", AggRule: "formula", Formula: &pct},
+	}
+	metricDims := map[string][]string{"drv": {costID}, "ly": {deptID, costID}, "plan": {deptID, costID},
+		"note": {deptID, costID}, "pct": {deptID, costID}}
+	scoped := map[string]float64{"drv:BASE": 2.5, "ly:X:BASE": 100, "ly:Y:BASE": 100, "plan:X:BASE": 110, "plan:Y:BASE": 120}
+	sr := &scopedReads{Pinned: map[string]string{costID: "BASE"}}
+
+	cells, totals, _ := scopeCalcCells(context.Background(), rollupDims, metricDims,
+		map[string]string{costID: "cost_type", deptID: "department"}, universe, scoped, sr)
+
+	// The All Departments rollup cell reads the one rate, not the rate once
+	// per department (the browser showed 2.5 x 7, then x 12 months = 210%).
+	if got := cells["note:ALL:BASE"]; math.Abs(got-2.5) > 1e-9 {
+		t.Errorf("rollup cell at All Departments = %v, want 2.5", got)
+	}
+
+	if got := totals["note"]; math.Abs(got-2.5) > 1e-9 {
+		t.Errorf("formula total of a rule-none dependency = %v, want 2.5 (its value at the pinned leaf)", got)
+	}
+	if got := totals["pct"]; math.Abs(got-15) > 1e-9 {
+		t.Errorf("formula total = %v, want 15 ((230 - 200) / 200)", got)
+	}
+}

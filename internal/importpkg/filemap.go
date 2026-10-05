@@ -56,19 +56,31 @@ func parseXLSXSheet(data []byte, sheet string, rawValues bool) (header []string,
 // target means the same.
 const ColumnIgnored = "ignore"
 
+// ColumnOthers is the column_map key for every column the map does not name:
+// {"*": "ignore"} drops them. Without it a sheet laid out for people — a key
+// column, a note, a total beside the columns imported — needed every one of
+// them listed as "ignore", and an import naming only the columns it loads
+// failed on the first one left out ("Month #" matches no metric).
+const ColumnOthers = "*"
+
 // ApplyColumnMap renames a file's columns to the model fields a column_map
 // names, in place on rows, and returns the new header. The vocabulary is the
 // Import Wizard's: a metric or dimension name; "metric" + "value" for a long
 // file (one row per metric value — "metric" holds metric names or ids);
 // code / label / parent_code / property:<name> / period_start / period_end
 // for a dimension; "ignore" or "" to drop the column. A column the map does
-// not mention keeps its own header. "metric" is spelled "metric_id" for
+// not mention keeps its own header, or takes the "*" entry's target (only
+// "ignore" — ColumnOthers). "metric" is spelled "metric_id" for
 // ResolveRows, whose legacy metric_id+value pair accepts names as well as
 // ids. Two columns mapped to the same field is an error, not a silent
 // last-one-wins.
 func ApplyColumnMap(header []string, rows []RawRow, columnMap map[string]string) ([]string, error) {
 	if len(columnMap) == 0 {
 		return header, nil
+	}
+	others, hasOthers := columnMap[ColumnOthers]
+	if hasOthers && strings.TrimSpace(others) != "" && !strings.EqualFold(strings.TrimSpace(others), ColumnIgnored) {
+		return nil, fmt.Errorf(`column_map "*" stands for every column the map does not name and can only be %q`, ColumnIgnored)
 	}
 	lookup := func(col string) (string, bool) {
 		if v, ok := columnMap[col]; ok {
@@ -82,6 +94,9 @@ func ApplyColumnMap(header []string, rows []RawRow, columnMap map[string]string)
 			if strings.EqualFold(strings.TrimSpace(k), trimmed) {
 				return v, true
 			}
+		}
+		if hasOthers {
+			return ColumnIgnored, true
 		}
 		return "", false
 	}
@@ -146,6 +161,9 @@ func UnmatchedColumnMapKeys(header []string, columnMap map[string]string) []stri
 	}
 	var missing []string
 	for k := range columnMap {
+		if k == ColumnOthers {
+			continue
+		}
 		if !present[strings.ToLower(strings.TrimSpace(k))] {
 			missing = append(missing, k)
 		}

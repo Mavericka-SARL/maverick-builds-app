@@ -28,6 +28,8 @@ import (
 //	default_view.context[]    same
 //	default_view.filter_sel   KEYS are dimension IDs, values are member codes
 //	metric_ids[]              the metrics a grid widget shows, in order
+//	show_members              KEYS are dimension IDs, values the member codes
+//	                          a grid widget's axis shows, in order
 //
 // A stale default_view is the quiet failure of the lot: the planning grid
 // filters its saved axes down to IDs it recognises, so the widget still
@@ -152,6 +154,8 @@ func RemapWidgetPropsIDs(props []byte, metricMap, dimMap map[string]string) ([]b
 		}
 		remapKeys(dimMap, view, "filter_sel")
 	}
+
+	remapKeys(dimMap, root, "show_members")
 
 	if !changed {
 		return props, false

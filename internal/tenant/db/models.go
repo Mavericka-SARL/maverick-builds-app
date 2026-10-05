@@ -1447,6 +1447,7 @@ type ModelMetricDef struct {
 	Label                  *string         `json:"label"`
 	PicklistDimensionID    pgtype.UUID     `json:"picklist_dimension_id"`
 	HighlightRules         json.RawMessage `json:"highlight_rules"`
+	PicklistAllowParents   bool            `json:"picklist_allow_parents"`
 }
 
 type ModelRevision struct {
@@ -1544,6 +1545,14 @@ type PlatformUserDirectory struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+type RuntimeCalcEngineState struct {
+	ID        bool               `json:"id"`
+	Version   int32              `json:"version"`
+	ClaimedBy *string            `json:"claimed_by"`
+	ClaimedAt pgtype.Timestamptz `json:"claimed_at"`
+	UpdatedAt time.Time          `json:"updated_at"`
+}
+
 type RuntimeCalcResult struct {
 	ID           uuid.UUID       `json:"id"`
 	ModelID      uuid.UUID       `json:"model_id"`
@@ -1554,6 +1563,7 @@ type RuntimeCalcResult struct {
 	PartitionKey string          `json:"partition_key"`
 	CalcAt       time.Time       `json:"calc_at"`
 	RevisionID   uuid.UUID       `json:"revision_id"`
+	TextValue    *string         `json:"text_value"`
 }
 
 type RuntimeCalcResultDefault struct {
@@ -1640,6 +1650,13 @@ type RuntimeMetricPartitionState struct {
 	Error         *string                `json:"error"`
 	UpdatedAt     time.Time              `json:"updated_at"`
 	RevisionID    pgtype.UUID            `json:"revision_id"`
+}
+
+type RuntimeRevisionRecalcState struct {
+	RevisionID uuid.UUID `json:"revision_id"`
+	Requested  int64     `json:"requested"`
+	Done       int64     `json:"done"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type SecurityAbacRule struct {
@@ -1764,6 +1781,7 @@ type WorkflowWorkflowDef struct {
 	SubjectConfig        json.RawMessage    `json:"subject_config"`
 	RevisionID           pgtype.UUID        `json:"revision_id"`
 	SingleActiveInstance bool               `json:"single_active_instance"`
+	ApproverMayStart     bool               `json:"approver_may_start"`
 }
 
 type WorkflowWorkflowInstance struct {

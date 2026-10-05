@@ -388,6 +388,9 @@ func (s *Scheduler) executePartition(
 	// validation error, never a silent zero. An ordinary formula on a time
 	// dimension stays on the scalar path: its leaves are period-independent,
 	// and only how they reduce across time changes (time_summary, below).
+	if def.Text && !def.IsInput {
+		return s.executeText(ctx, def, modelID, revisionID, partitionKey, newEvalEnv(s, modelID, revisionID, allDims, metricDimIDs, dimIDToName, meta, allDefs))
+	}
 	axis, err := timeAxisFor(allDims, metricDimIDs[def.ID])
 	if err != nil {
 		return err
@@ -568,8 +571,10 @@ func (s *Scheduler) executePartition(
 		}
 		aggregate = total
 	}
-	if !rollup.Aggregates(rollup.AggRule(def.AggRule)) {
-		writeAggregate = false // agg_rule none: values at the leaves only
+	if !rollup.Aggregates(rollup.AggRule(def.AggRule)) && len(metricDimIDs[def.ID]) > 0 {
+		// agg_rule none: values at the leaves only. A metric with no
+		// dimensions has one value, its '{}' row, and keeps it.
+		writeAggregate = false
 	}
 	// The single-combo case (leafCombos collapsed to just {} above, or the
 	// metric has no declared dims at all) is already fully covered by the
@@ -623,6 +628,66 @@ func (s *Scheduler) executePartition(
 
 	if failures > 0 {
 		return fmt.Errorf("%d/%d combos failed to evaluate for metric %s (first error: %w)", failures, len(leafCombos)-skipped, def.Name, firstErr)
+	}
+	return nil
+}
+
+// executeText calculates a text metric (format text): its formula's text at
+// every leaf, stored in calc_result.text_value beside a 0. Text is never
+// added up: agg_rule "formula" evaluates the formula at every total too (a
+// status at the total), any other rule gives leaves only. A cell whose text
+// is "" (or blank, or without data) has no row.
+func (s *Scheduler) executeText(ctx context.Context, def *MetricDef, modelID, revisionID, partitionKey string, env *evalEnv) error {
+	evalText, err := env.textEvaluator(ctx, def)
+	if err != nil {
+		return err
+	}
+	dimIDs := env.metricDimIDs[def.ID]
+	combos := rollup.LeafCombos(env.allDims, dimIDs)
+	if len(combos) == 0 {
+		combos = []map[string]string{{}}
+	}
+	if def.AggRule == string(rollup.AggFormula) && len(dimIDs) > 0 {
+		combos = append(combos, rollup.RollupCombos(env.allDims, dimIDs, 20000)...)
+		combos = append(combos, map[string]string{})
+	}
+	var rows []CalcResultRow
+	var failures int
+	var firstErr error
+	for _, combo := range combos {
+		text, noData, err := evalText(combo)
+		if err != nil {
+			if noData || errors.Is(err, errBlankResult) {
+				continue
+			}
+			failures++
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if text == "" {
+			continue
+		}
+		rows = append(rows, CalcResultRow{DimMembers: combo, Text: &text})
+	}
+	if len(rows) == 0 && failures > 0 {
+		// Every cell failed: the last good rows stay, as for a number.
+		return fmt.Errorf("%d/%d combos failed to evaluate for metric %s (first error: %w)", failures, len(combos), def.Name, firstErr)
+	}
+	if err := s.store.InTx(ctx, func(tx pgx.Tx) error {
+		if err := s.store.ClearAggregateResultTx(ctx, tx, modelID, revisionID, def.ID); err != nil {
+			return fmt.Errorf("clear stale aggregate: %w", err)
+		}
+		if err := s.store.ClearPerComboResultsTx(ctx, tx, modelID, revisionID, def.ID); err != nil {
+			return fmt.Errorf("clear stale per-combo results: %w", err)
+		}
+		return s.store.WriteCalcResultsTx(ctx, tx, modelID, revisionID, def.ID, partitionKey, rows)
+	}); err != nil {
+		return err
+	}
+	if failures > 0 {
+		return fmt.Errorf("%d/%d combos failed to evaluate for metric %s (first error: %w)", failures, len(combos), def.Name, firstErr)
 	}
 	return nil
 }

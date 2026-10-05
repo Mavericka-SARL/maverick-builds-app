@@ -838,6 +838,16 @@ func serialToTime(serial float64) time.Time {
 	return excelEpoch.Add(time.Duration(serial * 24 * float64(time.Hour)))
 }
 
+// DateSerial reads an ISO date (2014-11-24) as the serial number DATE()
+// gives, what a date-format cell stores.
+func DateSerial(iso string) (float64, bool) {
+	t, err := time.Parse("2006-01-02", strings.TrimSpace(iso))
+	if err != nil {
+		return 0, false
+	}
+	return timeToSerial(t), true
+}
+
 func fnTODAY(ctx *EvalContext, args []Node) Value {
 	if ferr := requireArgCount("TODAY", args, 0, 0); ferr != nil {
 		return ErrorVal(ferr)

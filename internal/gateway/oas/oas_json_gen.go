@@ -15982,6 +15982,12 @@ func (s *CreateMetricRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.PicklistAllowParents.Set {
+			e.FieldStart("picklist_allow_parents")
+			s.PicklistAllowParents.Encode(e)
+		}
+	}
+	{
 		if s.HighlightRules != nil {
 			e.FieldStart("highlight_rules")
 			e.ArrStart()
@@ -15999,7 +16005,7 @@ func (s *CreateMetricRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfCreateMetricRequest = [13]string{
+var jsonFieldsNameOfCreateMetricRequest = [14]string{
 	0:  "name",
 	1:  "label",
 	2:  "is_input",
@@ -16011,8 +16017,9 @@ var jsonFieldsNameOfCreateMetricRequest = [13]string{
 	8:  "format_currency",
 	9:  "tags",
 	10: "picklist_dimension_id",
-	11: "highlight_rules",
-	12: "time_summary",
+	11: "picklist_allow_parents",
+	12: "highlight_rules",
+	13: "time_summary",
 }
 
 // Decode decodes CreateMetricRequest from json.
@@ -16147,6 +16154,16 @@ func (s *CreateMetricRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"picklist_dimension_id\"")
+			}
+		case "picklist_allow_parents":
+			if err := func() error {
+				s.PicklistAllowParents.Reset()
+				if err := s.PicklistAllowParents.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"picklist_allow_parents\"")
 			}
 		case "highlight_rules":
 			if err := func() error {
@@ -29027,6 +29044,12 @@ func (s *GridData) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.RecalcPending.Set {
+			e.FieldStart("recalc_pending")
+			s.RecalcPending.Encode(e)
+		}
+	}
+	{
 		e.FieldStart("totals")
 		s.Totals.Encode(e)
 	}
@@ -29054,7 +29077,7 @@ func (s *GridData) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfGridData = [12]string{
+var jsonFieldsNameOfGridData = [13]string{
 	0:  "revision_id",
 	1:  "metrics",
 	2:  "all_metrics",
@@ -29063,10 +29086,11 @@ var jsonFieldsNameOfGridData = [12]string{
 	5:  "departments",
 	6:  "cells",
 	7:  "texts",
-	8:  "totals",
-	9:  "withheld",
-	10: "access_rules",
-	11: "rollup_source_grid_id",
+	8:  "recalc_pending",
+	9:  "totals",
+	10: "withheld",
+	11: "access_rules",
+	12: "rollup_source_grid_id",
 }
 
 // Decode decodes GridData from json.
@@ -29198,8 +29222,18 @@ func (s *GridData) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"texts\"")
 			}
+		case "recalc_pending":
+			if err := func() error {
+				s.RecalcPending.Reset()
+				if err := s.RecalcPending.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"recalc_pending\"")
+			}
 		case "totals":
-			requiredBitSet[1] |= 1 << 0
+			requiredBitSet[1] |= 1 << 1
 			if err := func() error {
 				if err := s.Totals.Decode(d); err != nil {
 					return err
@@ -29258,7 +29292,7 @@ func (s *GridData) Decode(d *jx.Decoder) error {
 	var failures []validate.FieldError
 	for i, mask := range [2]uint8{
 		0b01101011,
-		0b00000001,
+		0b00000010,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -37401,6 +37435,12 @@ func (s *MetricDef) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.PicklistAllowParents.Set {
+			e.FieldStart("picklist_allow_parents")
+			s.PicklistAllowParents.Encode(e)
+		}
+	}
+	{
 		if s.HighlightRules != nil {
 			e.FieldStart("highlight_rules")
 			e.ArrStart()
@@ -37438,7 +37478,7 @@ func (s *MetricDef) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfMetricDef = [15]string{
+var jsonFieldsNameOfMetricDef = [16]string{
 	0:  "id",
 	1:  "name",
 	2:  "label",
@@ -37450,10 +37490,11 @@ var jsonFieldsNameOfMetricDef = [15]string{
 	8:  "format_currency",
 	9:  "time_summary",
 	10: "picklist_dimension_id",
-	11: "highlight_rules",
-	12: "depends_on",
-	13: "depended_by",
-	14: "tags",
+	11: "picklist_allow_parents",
+	12: "highlight_rules",
+	13: "depends_on",
+	14: "depended_by",
+	15: "tags",
 }
 
 // Decode decodes MetricDef from json.
@@ -37592,6 +37633,16 @@ func (s *MetricDef) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"picklist_dimension_id\"")
 			}
+		case "picklist_allow_parents":
+			if err := func() error {
+				s.PicklistAllowParents.Reset()
+				if err := s.PicklistAllowParents.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"picklist_allow_parents\"")
+			}
 		case "highlight_rules":
 			if err := func() error {
 				s.HighlightRules = make([]HighlightRule, 0)
@@ -37610,7 +37661,7 @@ func (s *MetricDef) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"highlight_rules\"")
 			}
 		case "depends_on":
-			requiredBitSet[1] |= 1 << 4
+			requiredBitSet[1] |= 1 << 5
 			if err := func() error {
 				s.DependsOn = make([]string, 0)
 				if err := d.Arr(func(d *jx.Decoder) error {
@@ -37630,7 +37681,7 @@ func (s *MetricDef) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"depends_on\"")
 			}
 		case "depended_by":
-			requiredBitSet[1] |= 1 << 5
+			requiredBitSet[1] |= 1 << 6
 			if err := func() error {
 				s.DependedBy = make([]string, 0)
 				if err := d.Arr(func(d *jx.Decoder) error {
@@ -37679,7 +37730,7 @@ func (s *MetricDef) Decode(d *jx.Decoder) error {
 	var failures []validate.FieldError
 	for i, mask := range [2]uint8{
 		0b11110111,
-		0b00110001,
+		0b01100001,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -43159,6 +43210,39 @@ func (s OptWritebackRequestDimCodes) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *OptWritebackRequestDimCodes) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes WritebackRequestRecalc as json.
+func (o OptWritebackRequestRecalc) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes WritebackRequestRecalc from json.
+func (o *OptWritebackRequestRecalc) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptWritebackRequestRecalc to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptWritebackRequestRecalc) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptWritebackRequestRecalc) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -59222,6 +59306,24 @@ func (s *UpdateMetricRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.PicklistAllowParents.Set {
+			e.FieldStart("picklist_allow_parents")
+			s.PicklistAllowParents.Encode(e)
+		}
+	}
+	{
+		if s.IsInput.Set {
+			e.FieldStart("is_input")
+			s.IsInput.Encode(e)
+		}
+	}
+	{
+		if s.DropValues.Set {
+			e.FieldStart("drop_values")
+			s.DropValues.Encode(e)
+		}
+	}
+	{
 		if s.HighlightRules != nil {
 			e.FieldStart("highlight_rules")
 			e.ArrStart()
@@ -59239,7 +59341,7 @@ func (s *UpdateMetricRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfUpdateMetricRequest = [11]string{
+var jsonFieldsNameOfUpdateMetricRequest = [14]string{
 	0:  "name",
 	1:  "label",
 	2:  "tags",
@@ -59249,8 +59351,11 @@ var jsonFieldsNameOfUpdateMetricRequest = [11]string{
 	6:  "format_decimals",
 	7:  "format_currency",
 	8:  "picklist_dimension_id",
-	9:  "highlight_rules",
-	10: "time_summary",
+	9:  "picklist_allow_parents",
+	10: "is_input",
+	11: "drop_values",
+	12: "highlight_rules",
+	13: "time_summary",
 }
 
 // Decode decodes UpdateMetricRequest from json.
@@ -59360,6 +59465,36 @@ func (s *UpdateMetricRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"picklist_dimension_id\"")
+			}
+		case "picklist_allow_parents":
+			if err := func() error {
+				s.PicklistAllowParents.Reset()
+				if err := s.PicklistAllowParents.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"picklist_allow_parents\"")
+			}
+		case "is_input":
+			if err := func() error {
+				s.IsInput.Reset()
+				if err := s.IsInput.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"is_input\"")
+			}
+		case "drop_values":
+			if err := func() error {
+				s.DropValues.Reset()
+				if err := s.DropValues.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"drop_values\"")
 			}
 		case "highlight_rules":
 			if err := func() error {
@@ -60382,9 +60517,15 @@ func (s *UpdateWorkflowRequest) encodeFields(e *jx.Encoder) {
 			s.SingleActiveInstance.Encode(e)
 		}
 	}
+	{
+		if s.ApproverMayStart.Set {
+			e.FieldStart("approver_may_start")
+			s.ApproverMayStart.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfUpdateWorkflowRequest = [8]string{
+var jsonFieldsNameOfUpdateWorkflowRequest = [9]string{
 	0: "name",
 	1: "description",
 	2: "trigger_event",
@@ -60393,6 +60534,7 @@ var jsonFieldsNameOfUpdateWorkflowRequest = [8]string{
 	5: "steps",
 	6: "context_schema",
 	7: "single_active_instance",
+	8: "approver_may_start",
 }
 
 // Decode decodes UpdateWorkflowRequest from json.
@@ -60489,6 +60631,16 @@ func (s *UpdateWorkflowRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"single_active_instance\"")
+			}
+		case "approver_may_start":
+			if err := func() error {
+				s.ApproverMayStart.Reset()
+				if err := s.ApproverMayStart.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"approver_may_start\"")
 			}
 		default:
 			return d.Skip()
@@ -61843,6 +61995,12 @@ func (s *WorkflowDefFull) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.ApproverMayStart.Set {
+			e.FieldStart("approver_may_start")
+			s.ApproverMayStart.Encode(e)
+		}
+	}
+	{
 		e.FieldStart("created_at")
 		json.EncodeDateTime(e, s.CreatedAt)
 	}
@@ -61864,7 +62022,7 @@ func (s *WorkflowDefFull) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfWorkflowDefFull = [15]string{
+var jsonFieldsNameOfWorkflowDefFull = [16]string{
 	0:  "id",
 	1:  "application_id",
 	2:  "name",
@@ -61876,10 +62034,11 @@ var jsonFieldsNameOfWorkflowDefFull = [15]string{
 	8:  "steps",
 	9:  "context_schema",
 	10: "single_active_instance",
-	11: "created_at",
-	12: "updated_at",
-	13: "published_at",
-	14: "archived_at",
+	11: "approver_may_start",
+	12: "created_at",
+	13: "updated_at",
+	14: "published_at",
+	15: "archived_at",
 }
 
 // Decode decodes WorkflowDefFull from json.
@@ -62021,8 +62180,18 @@ func (s *WorkflowDefFull) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"single_active_instance\"")
 			}
+		case "approver_may_start":
+			if err := func() error {
+				s.ApproverMayStart.Reset()
+				if err := s.ApproverMayStart.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"approver_may_start\"")
+			}
 		case "created_at":
-			requiredBitSet[1] |= 1 << 3
+			requiredBitSet[1] |= 1 << 4
 			if err := func() error {
 				v, err := json.DecodeDateTime(d)
 				s.CreatedAt = v
@@ -62034,7 +62203,7 @@ func (s *WorkflowDefFull) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"created_at\"")
 			}
 		case "updated_at":
-			requiredBitSet[1] |= 1 << 4
+			requiredBitSet[1] |= 1 << 5
 			if err := func() error {
 				v, err := json.DecodeDateTime(d)
 				s.UpdatedAt = v
@@ -62076,7 +62245,7 @@ func (s *WorkflowDefFull) Decode(d *jx.Decoder) error {
 	var failures []validate.FieldError
 	for i, mask := range [2]uint8{
 		0b11111111,
-		0b00011011,
+		0b00110011,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -63959,6 +64128,12 @@ func (s *WritebackRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.Recalc.Set {
+			e.FieldStart("recalc")
+			s.Recalc.Encode(e)
+		}
+	}
+	{
 		if s.Clear.Set {
 			e.FieldStart("clear")
 			s.Clear.Encode(e)
@@ -63966,7 +64141,7 @@ func (s *WritebackRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfWritebackRequest = [9]string{
+var jsonFieldsNameOfWritebackRequest = [10]string{
 	0: "model_id",
 	1: "revision_id",
 	2: "metric_id",
@@ -63975,7 +64150,8 @@ var jsonFieldsNameOfWritebackRequest = [9]string{
 	5: "value",
 	6: "member",
 	7: "text",
-	8: "clear",
+	8: "recalc",
+	9: "clear",
 }
 
 // Decode decodes WritebackRequest from json.
@@ -64070,6 +64246,16 @@ func (s *WritebackRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"text\"")
+			}
+		case "recalc":
+			if err := func() error {
+				s.Recalc.Reset()
+				if err := s.Recalc.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"recalc\"")
 			}
 		case "clear":
 			if err := func() error {
@@ -64190,6 +64376,44 @@ func (s WritebackRequestDimCodes) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *WritebackRequestDimCodes) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes WritebackRequestRecalc as json.
+func (s WritebackRequestRecalc) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes WritebackRequestRecalc from json.
+func (s *WritebackRequestRecalc) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode WritebackRequestRecalc to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch WritebackRequestRecalc(v) {
+	case WritebackRequestRecalcBackground:
+		*s = WritebackRequestRecalcBackground
+	default:
+		*s = WritebackRequestRecalc(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s WritebackRequestRecalc) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *WritebackRequestRecalc) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }

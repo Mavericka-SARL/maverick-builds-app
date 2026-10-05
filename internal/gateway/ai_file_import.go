@@ -208,7 +208,7 @@ func (h *handler) resolveAttachedGrid(ctx context.Context, q dbQuerier, modelID,
 	}
 	staged, importErrs, err := importpkg.ResolveRows(ctx, q, modelID, revisionID, f.mapped, f.rows)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w. Map each column to a model name or \"ignore\" in column_map — %s", err, h.modelNamesHint(ctx, q, modelID, revisionID))
+		return nil, nil, fmt.Errorf("%w. Map each column to a model name or \"ignore\" in column_map, or add \"*\": \"ignore\" to drop every column it does not name — %s", err, h.modelNamesHint(ctx, q, modelID, revisionID))
 	}
 	errRows := make([]map[string]any, 0, len(importErrs))
 	for _, e := range importErrs {
@@ -506,7 +506,24 @@ func (h *handler) aiReadHooks(r *http.Request, sessionID, modelID, userID string
 		PrepareConversion: func(ctx context.Context, req aiassistant.FileImportRequest) (string, error) {
 			return h.aiPrepareConversion(ctx, sessionID, req)
 		},
+		ReadAttachedSheet: func(ctx context.Context, file, sheet string, fromRow, toRow int) (string, error) {
+			return h.aiReadAttachedSheet(ctx, sessionID, file, sheet, fromRow, toRow)
+		},
 	}
+}
+
+// aiReadAttachedSheet renders rows of one sheet of a workbook attached to
+// the chat (read_attached_sheet).
+func (h *handler) aiReadAttachedSheet(ctx context.Context, sessionID, file, sheet string, fromRow, toRow int) (string, error) {
+	doc, raw, err := aiassistant.NewDocumentStore(h.db.For(ctx)).GetRaw(ctx, sessionID, strings.TrimSpace(file))
+	if err != nil {
+		return "", fmt.Errorf("no file named %q is attached to this chat", file)
+	}
+	name := strings.ToLower(doc.Filename)
+	if raw == nil || (!strings.HasSuffix(name, ".xlsx") && !strings.HasSuffix(name, ".xlsm")) {
+		return "", fmt.Errorf("%s is not a workbook kept whole (.xlsx or .xlsm attached since file import was added) — its text is under Attached documents", doc.Filename)
+	}
+	return aiassistant.ExtractXLSXSheet(raw, sheet, fromRow, toRow)
 }
 
 // percentFractionWarning names the Percentage metrics whose every staged

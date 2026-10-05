@@ -346,8 +346,15 @@ func (h *handler) businessDeleteMember(w http.ResponseWriter, r *http.Request, b
 		jsonErr(w, err, status)
 		return
 	}
-	go h.recalcAllInputsAcrossRevisions(context.WithoutCancel(ctx), bm.modelID) //nolint:contextcheck
-	go h.recalcDimensionDependents(context.WithoutCancel(ctx), bm.dimID)        //nolint:contextcheck
+	// The member's revision only (its dimension belongs to that one), marked
+	// pending until the pass lands: the grid shows the removed row's
+	// contribution as about to change instead of as current.
+	h.recalcInBackground(ctx, bm.revisionID, "recalculation after a member was removed", func(bg context.Context) {
+		if err := h.recalcRevisionFromInputs(bg, bm.modelID, bm.revisionID); err != nil {
+			h.log.Warn().Err(err).Str("revision", bm.revisionID).Msg("recalc after a member was removed")
+		}
+		h.recalcDimensionDependents(bg, bm.dimID)
+	})
 	h.auditDimensionUpdated(ctx, r, bm.dimID, "member_deleted", map[string]string{"member_id": memberID, "by": "business_user"})
 	jsonOK(w, map[string]string{"status": "deleted"})
 }

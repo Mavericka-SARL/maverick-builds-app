@@ -1,6 +1,8 @@
 package aiassistant
 
 import (
+	"bytes"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -77,3 +79,56 @@ func TestWorkbookExtractionReadsFormulasListsAndLayout(t *testing.T) {
 type writerAdapter struct{ sb *strings.Builder }
 
 func (w *writerAdapter) Write(p []byte) (int, error) { return w.sb.Write(p) }
+
+// A workbook whose data sheets come first still shows every sheet: the text
+// shortens each sheet to fit and says how to read the rest, and
+// read_attached_sheet shows a row's whole formula. Cut off at the end, the
+// HR workbook's text stopped in its fourth sheet and its plan formulas never
+// reached the AI Developer.
+func TestWorkbookTextShowsEverySheetWithinTheBudget(t *testing.T) {
+	f := excelize.NewFile()
+	data := f.GetSheetName(0)
+	_ = f.SetSheetName(data, "Drivers")
+	_ = f.SetCellValue("Drivers", "A1", "Level")
+	_ = f.SetCellValue("Drivers", "B1", "Increase %")
+	for r := 2; r <= 3000; r++ {
+		_ = f.SetCellValue("Drivers", fmt.Sprintf("A%d", r), fmt.Sprintf("Role %04d of a long list of roles", r))
+		_ = f.SetCellValue("Drivers", fmt.Sprintf("B%d", r), 0.025)
+	}
+	_, _ = f.NewSheet("Plan")
+	_ = f.SetCellValue("Plan", "A1", "Month")
+	_ = f.SetCellValue("Plan", "B1", "Applied TD")
+	long := "=" + strings.Repeat("SUMIFS(Drivers!$B$2:$B$3000,Drivers!$A$2:$A$3000,A2)+", 120) + "0"
+	for r := 2; r <= 13; r++ {
+		_ = f.SetCellValue("Plan", fmt.Sprintf("A%d", r), r-1)
+		// a factor of its own on each row: twelve formulas, none shared
+		_ = f.SetCellFormula("Plan", fmt.Sprintf("B%d", r), fmt.Sprintf("%s*%d", strings.Replace(long, "A2", fmt.Sprintf("A%d", r), -1)[1:], r))
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	text, _, truncated, err := ExtractDocumentText("hr.xlsx", buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if truncated || len(text) > maxDocumentChars {
+		t.Fatalf("text cut off (%d chars, truncated=%v)", len(text), truncated)
+	}
+	for _, want := range []string{"- Plan: 13 rows, 12 formula cells", "## Sheet: Plan", "B2 [Applied TD] = SUMIFS(", "B13 [Applied TD] = SUMIFS(",
+		`not shown: read_attached_sheet {"sheet": "Drivers", "from_row":`, `characters: read_attached_sheet {"sheet": "Plan", "from_row": 2, "to_row": 2} shows it whole`} {
+		if !strings.Contains(text, want) {
+			t.Errorf("workbook text lacks %q", want)
+		}
+	}
+	one, err := ExtractXLSXSheet(buf.Bytes(), "plan", 2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(one, "B2 [Applied TD] = "+long[1:]+"*2\n") || strings.Contains(one, "B3 ") {
+		t.Errorf("read_attached_sheet of row 2 lacks its whole formula or shows other rows:\n%.400s", one)
+	}
+	if _, err := ExtractXLSXSheet(buf.Bytes(), "Budget", 0, 0); err == nil || !strings.Contains(err.Error(), "Drivers, Plan") {
+		t.Errorf("an unknown sheet names the workbook's sheets: %v", err)
+	}
+}

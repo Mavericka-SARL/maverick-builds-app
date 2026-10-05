@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Snapshot is one user's view of a grid: its structure without the members
@@ -350,6 +351,9 @@ func Render(spec Spec, snap Snapshot) (*Table, error) {
 		if m.Text {
 			return Value{Text: r.texts[col]}
 		}
+		if m.Date && ok && v != 0 {
+			return Value{Text: dateText(v)}
+		}
 		if m.Picklist == nil || !ok {
 			return num(v, ok)
 		}
@@ -449,4 +453,9 @@ func (t *Table) TextRows(n int) [][]string {
 		out[i] = row
 	}
 	return out
+}
+
+// dateText writes a date serial (days since 1899-12-30) as yyyy-mm-dd.
+func dateText(serial float64) string {
+	return time.Date(1899, 12, 30, 0, 0, 0, 0, time.UTC).AddDate(0, 0, int(math.Round(serial))).Format("2006-01-02")
 }

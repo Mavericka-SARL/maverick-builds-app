@@ -63,6 +63,10 @@ type Request struct {
 	MetricID string
 	Name     string
 	Formula  string
+	// Text: the metric is a calculated text (format text). It may read a
+	// text metric's notes by a plain reference (wa_employee_id & "|" &
+	// wa_type); no other formula reads text.
+	Text bool
 }
 
 // ValidationError is a rejection a user can act on: it names what is wrong
@@ -165,17 +169,22 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 		// binds them; migration 100 keeps new names unique regardless of
 		// case, and an exact match wins where an older pair still exists.
 		var metricID string
-		var textInput bool
+		var textMetric bool
 		err := pool.QueryRow(ctx, `
-			SELECT id::text, (format = 'text' AND is_input) FROM model.metric_def
+			SELECT id::text, format = 'text' FROM model.metric_def
 			WHERE model_id=$1::uuid AND lower(name)=lower($2)
 			  AND (revision_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid OR revision_id IS NULL)
 			ORDER BY (name = $2) DESC
 			LIMIT 1
-		`, req.ModelID, ref.Name, req.RevisionID).Scan(&metricID, &textInput)
-		if err == nil && textInput {
-			// Its cells hold free text beside a 0: a formula would read 0.
-			return nil, invalidCode(CodeTextMetricInFormula, "%s is a text metric: its cells hold notes, which formulas do not read", ref.Name)
+		`, req.ModelID, ref.Name, req.RevisionID).Scan(&metricID, &textMetric)
+		readsText := req.Text && ref.IsDirect() && !ref.Dimensional && !criteriaRange(an, ref.Name)
+		if err == nil && textMetric && !readsText {
+			// Its cells hold text beside a 0 (a note, or a calculated
+			// text): a number formula would read 0.
+			if req.Text {
+				return nil, invalidCode(CodeTextMetricInFormula, "%s is a text metric: a text calculation reads it only by name at the cell (not through LOOKUP, *IFS or a time offset)", ref.Name)
+			}
+			return nil, invalidCode(CodeTextMetricInFormula, "%s is a text metric: its cells hold text, which only a calculation of format text reads", ref.Name)
 		}
 		if err == nil {
 			isSelf := metricID == req.MetricID || (req.MetricID == "" && strings.EqualFold(ref.Name, req.Name))
@@ -304,6 +313,18 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 		}
 	}
 	return &Result{DependsOnMetricIDs: edgeIDs, Edges: edges, UsesTimeSeries: an.UsesTimeSeries}, nil
+}
+
+// criteriaRange reports whether name is a criteria range of a *IFS call.
+func criteriaRange(an *formula.Analysis, name string) bool {
+	for _, call := range an.DimensionalCalls {
+		for _, c := range call.Criteria {
+			if strings.EqualFold(c.Dim, name) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // CodeTextMetricInFormula refuses a formula reading a text metric.

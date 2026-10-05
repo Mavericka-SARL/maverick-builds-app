@@ -6170,8 +6170,11 @@ type CreateMetricRequest struct {
 	Tags           []string  `json:"tags"`
 	// Required for format picklist, refused for any other: a dimension of the revision (id or name)
 	// whose members the metric's cells hold. A pick-list's agg_rule is none (default) or, calculated,
-	// formula; its time_summary none.
+	// formula; its time_summary none. A calculated text (format text) has the same rules; a date (format
+	// date) is never summed.
 	PicklistDimensionID OptString `json:"picklist_dimension_id"`
+	// Format picklist: a cell may hold a parent member; otherwise leaf members only.
+	PicklistAllowParents OptBool `json:"picklist_allow_parents"`
 	// How the metric's cells are tinted; the first rule that holds wins. [] removes them; omitted keeps
 	// them on PATCH.
 	HighlightRules []HighlightRule `json:"highlight_rules"`
@@ -6234,6 +6237,11 @@ func (s *CreateMetricRequest) GetTags() []string {
 // GetPicklistDimensionID returns the value of PicklistDimensionID.
 func (s *CreateMetricRequest) GetPicklistDimensionID() OptString {
 	return s.PicklistDimensionID
+}
+
+// GetPicklistAllowParents returns the value of PicklistAllowParents.
+func (s *CreateMetricRequest) GetPicklistAllowParents() OptBool {
+	return s.PicklistAllowParents
 }
 
 // GetHighlightRules returns the value of HighlightRules.
@@ -6299,6 +6307,11 @@ func (s *CreateMetricRequest) SetTags(val []string) {
 // SetPicklistDimensionID sets the value of PicklistDimensionID.
 func (s *CreateMetricRequest) SetPicklistDimensionID(val OptString) {
 	s.PicklistDimensionID = val
+}
+
+// SetPicklistAllowParents sets the value of PicklistAllowParents.
+func (s *CreateMetricRequest) SetPicklistAllowParents(val OptBool) {
+	s.PicklistAllowParents = val
 }
 
 // SetHighlightRules sets the value of HighlightRules.
@@ -11339,9 +11352,12 @@ type GridData struct {
 	// Composite key "metricId:code1[:code2...]" to value, where the codes are that metric's OWN grid
 	// dimensions in order — not a single dimension code.
 	Cells GridDataCells `json:"cells"`
-	// Text metrics' cells (format text), keyed as cells; a dimensionless one by its bare metric id.
-	// Omitted when empty.
+	// Text metrics' cells (format text: an input's notes, a calculation's text), keyed as cells; a
+	// dimensionless one by its bare metric id. Omitted when empty.
 	Texts OptGridDataTexts `json:"texts"`
+	// A write answered before its recalculation (recalc background) is still being calculated:
+	// calculated cells are about to change. Omitted when false.
+	RecalcPending OptBool `json:"recalc_pending"`
 	// MetricId to its aggregate across the grid.
 	Totals GridDataTotals `json:"totals"`
 	// Calculated values withheld from this caller because they read a dimension member the caller cannot
@@ -11392,6 +11408,11 @@ func (s *GridData) GetCells() GridDataCells {
 // GetTexts returns the value of Texts.
 func (s *GridData) GetTexts() OptGridDataTexts {
 	return s.Texts
+}
+
+// GetRecalcPending returns the value of RecalcPending.
+func (s *GridData) GetRecalcPending() OptBool {
+	return s.RecalcPending
 }
 
 // GetTotals returns the value of Totals.
@@ -11454,6 +11475,11 @@ func (s *GridData) SetTexts(val OptGridDataTexts) {
 	s.Texts = val
 }
 
+// SetRecalcPending sets the value of RecalcPending.
+func (s *GridData) SetRecalcPending(val OptBool) {
+	s.RecalcPending = val
+}
+
 // SetTotals sets the value of Totals.
 func (s *GridData) SetTotals(val GridDataTotals) {
 	s.Totals = val
@@ -11489,8 +11515,8 @@ func (s *GridDataCells) init() GridDataCells {
 	return m
 }
 
-// Text metrics' cells (format text), keyed as cells; a dimensionless one by its bare metric id.
-// Omitted when empty.
+// Text metrics' cells (format text: an input's notes, a calculation's text), keyed as cells; a
+// dimensionless one by its bare metric id. Omitted when empty.
 type GridDataTexts map[string]string
 
 func (s *GridDataTexts) init() GridDataTexts {
@@ -14428,6 +14454,8 @@ type MetricDef struct {
 	TimeSummary OptMetricDefTimeSummary `json:"time_summary"`
 	// Format picklist: the dimension whose members the metric's cells hold.
 	PicklistDimensionID OptUUID `json:"picklist_dimension_id"`
+	// Format picklist: a cell may hold a parent member too; false, leaf members only.
+	PicklistAllowParents OptBool `json:"picklist_allow_parents"`
 	// How the metric's cells are tinted; the first rule that holds wins. [] removes them; omitted keeps
 	// them on PATCH.
 	HighlightRules []HighlightRule `json:"highlight_rules"`
@@ -14492,6 +14520,11 @@ func (s *MetricDef) GetTimeSummary() OptMetricDefTimeSummary {
 // GetPicklistDimensionID returns the value of PicklistDimensionID.
 func (s *MetricDef) GetPicklistDimensionID() OptUUID {
 	return s.PicklistDimensionID
+}
+
+// GetPicklistAllowParents returns the value of PicklistAllowParents.
+func (s *MetricDef) GetPicklistAllowParents() OptBool {
+	return s.PicklistAllowParents
 }
 
 // GetHighlightRules returns the value of HighlightRules.
@@ -14567,6 +14600,11 @@ func (s *MetricDef) SetTimeSummary(val OptMetricDefTimeSummary) {
 // SetPicklistDimensionID sets the value of PicklistDimensionID.
 func (s *MetricDef) SetPicklistDimensionID(val OptUUID) {
 	s.PicklistDimensionID = val
+}
+
+// SetPicklistAllowParents sets the value of PicklistAllowParents.
+func (s *MetricDef) SetPicklistAllowParents(val OptBool) {
+	s.PicklistAllowParents = val
 }
 
 // SetHighlightRules sets the value of HighlightRules.
@@ -20235,6 +20273,52 @@ func (o OptWritebackRequestDimCodes) Or(d WritebackRequestDimCodes) WritebackReq
 	return d
 }
 
+// NewOptWritebackRequestRecalc returns new OptWritebackRequestRecalc with value set to v.
+func NewOptWritebackRequestRecalc(v WritebackRequestRecalc) OptWritebackRequestRecalc {
+	return OptWritebackRequestRecalc{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptWritebackRequestRecalc is optional WritebackRequestRecalc.
+type OptWritebackRequestRecalc struct {
+	Value WritebackRequestRecalc
+	Set   bool
+}
+
+// IsSet returns true if OptWritebackRequestRecalc was set.
+func (o OptWritebackRequestRecalc) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptWritebackRequestRecalc) Reset() {
+	var v WritebackRequestRecalc
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptWritebackRequestRecalc) SetTo(v WritebackRequestRecalc) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptWritebackRequestRecalc) Get() (v WritebackRequestRecalc, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptWritebackRequestRecalc) Or(d WritebackRequestRecalc) WritebackRequestRecalc {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // Ref: #/components/schemas/Plan
 type Plan struct {
 	Key         string     `json:"key"`
@@ -25793,6 +25877,14 @@ type UpdateMetricRequest struct {
 	// Format picklist: the dimension (id or name) its cells hold members of; omitted keeps it while the
 	// format stays picklist.
 	PicklistDimensionID OptString `json:"picklist_dimension_id"`
+	// Format picklist: a cell may hold a parent member; omitted keeps it.
+	PicklistAllowParents OptBool `json:"picklist_allow_parents"`
+	// Switches the metric between input and calculated, keeping its id. To an input drops its calculated
+	// results (send no formula); to a calculation needs formula and, for an input holding values,
+	// drop_values (409 otherwise).
+	IsInput OptBool `json:"is_input"`
+	// With is_input false: delete the input's values (kept in the cell history).
+	DropValues OptBool `json:"drop_values"`
 	// How the metric's cells are tinted; the first rule that holds wins. [] removes them; omitted keeps
 	// them on PATCH.
 	HighlightRules []HighlightRule `json:"highlight_rules"`
@@ -25845,6 +25937,21 @@ func (s *UpdateMetricRequest) GetFormatCurrency() OptString {
 // GetPicklistDimensionID returns the value of PicklistDimensionID.
 func (s *UpdateMetricRequest) GetPicklistDimensionID() OptString {
 	return s.PicklistDimensionID
+}
+
+// GetPicklistAllowParents returns the value of PicklistAllowParents.
+func (s *UpdateMetricRequest) GetPicklistAllowParents() OptBool {
+	return s.PicklistAllowParents
+}
+
+// GetIsInput returns the value of IsInput.
+func (s *UpdateMetricRequest) GetIsInput() OptBool {
+	return s.IsInput
+}
+
+// GetDropValues returns the value of DropValues.
+func (s *UpdateMetricRequest) GetDropValues() OptBool {
+	return s.DropValues
 }
 
 // GetHighlightRules returns the value of HighlightRules.
@@ -25900,6 +26007,21 @@ func (s *UpdateMetricRequest) SetFormatCurrency(val OptString) {
 // SetPicklistDimensionID sets the value of PicklistDimensionID.
 func (s *UpdateMetricRequest) SetPicklistDimensionID(val OptString) {
 	s.PicklistDimensionID = val
+}
+
+// SetPicklistAllowParents sets the value of PicklistAllowParents.
+func (s *UpdateMetricRequest) SetPicklistAllowParents(val OptBool) {
+	s.PicklistAllowParents = val
+}
+
+// SetIsInput sets the value of IsInput.
+func (s *UpdateMetricRequest) SetIsInput(val OptBool) {
+	s.IsInput = val
+}
+
+// SetDropValues sets the value of DropValues.
+func (s *UpdateMetricRequest) SetDropValues(val OptBool) {
+	s.DropValues = val
 }
 
 // SetHighlightRules sets the value of HighlightRules.
@@ -26389,6 +26511,7 @@ type UpdateWorkflowRequest struct {
 	Steps                []UpdateWorkflowRequestStepsItem      `json:"steps"`
 	ContextSchema        OptUpdateWorkflowRequestContextSchema `json:"context_schema"`
 	SingleActiveInstance OptBool                               `json:"single_active_instance"`
+	ApproverMayStart     OptBool                               `json:"approver_may_start"`
 }
 
 // GetName returns the value of Name.
@@ -26431,6 +26554,11 @@ func (s *UpdateWorkflowRequest) GetSingleActiveInstance() OptBool {
 	return s.SingleActiveInstance
 }
 
+// GetApproverMayStart returns the value of ApproverMayStart.
+func (s *UpdateWorkflowRequest) GetApproverMayStart() OptBool {
+	return s.ApproverMayStart
+}
+
 // SetName sets the value of Name.
 func (s *UpdateWorkflowRequest) SetName(val OptString) {
 	s.Name = val
@@ -26469,6 +26597,11 @@ func (s *UpdateWorkflowRequest) SetContextSchema(val OptUpdateWorkflowRequestCon
 // SetSingleActiveInstance sets the value of SingleActiveInstance.
 func (s *UpdateWorkflowRequest) SetSingleActiveInstance(val OptBool) {
 	s.SingleActiveInstance = val
+}
+
+// SetApproverMayStart sets the value of ApproverMayStart.
+func (s *UpdateWorkflowRequest) SetApproverMayStart(val OptBool) {
+	s.ApproverMayStart = val
 }
 
 type UpdateWorkflowRequestContextSchema map[string]jx.Raw
@@ -26908,11 +27041,13 @@ type WorkflowDefFull struct {
 	ContextSchema WorkflowDefFullContextSchema `json:"context_schema"`
 	// One running instance per dimension-member scope; a second start with the same members is refused
 	// as a duplicate. Default true.
-	SingleActiveInstance OptBool        `json:"single_active_instance"`
-	CreatedAt            time.Time      `json:"created_at"`
-	UpdatedAt            time.Time      `json:"updated_at"`
-	PublishedAt          OptNilDateTime `json:"published_at"`
-	ArchivedAt           OptNilDateTime `json:"archived_at"`
+	SingleActiveInstance OptBool `json:"single_active_instance"`
+	// An approver of the workflow may start it (otherwise refused 403.
+	ApproverMayStart OptBool        `json:"approver_may_start"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
+	PublishedAt      OptNilDateTime `json:"published_at"`
+	ArchivedAt       OptNilDateTime `json:"archived_at"`
 }
 
 // GetID returns the value of ID.
@@ -26968,6 +27103,11 @@ func (s *WorkflowDefFull) GetContextSchema() WorkflowDefFullContextSchema {
 // GetSingleActiveInstance returns the value of SingleActiveInstance.
 func (s *WorkflowDefFull) GetSingleActiveInstance() OptBool {
 	return s.SingleActiveInstance
+}
+
+// GetApproverMayStart returns the value of ApproverMayStart.
+func (s *WorkflowDefFull) GetApproverMayStart() OptBool {
+	return s.ApproverMayStart
 }
 
 // GetCreatedAt returns the value of CreatedAt.
@@ -27043,6 +27183,11 @@ func (s *WorkflowDefFull) SetContextSchema(val WorkflowDefFullContextSchema) {
 // SetSingleActiveInstance sets the value of SingleActiveInstance.
 func (s *WorkflowDefFull) SetSingleActiveInstance(val OptBool) {
 	s.SingleActiveInstance = val
+}
+
+// SetApproverMayStart sets the value of ApproverMayStart.
+func (s *WorkflowDefFull) SetApproverMayStart(val OptBool) {
+	s.ApproverMayStart = val
 }
 
 // SetCreatedAt sets the value of CreatedAt.
@@ -27839,8 +27984,13 @@ type WritebackRequest struct {
 	// refused with 400.
 	Member OptString `json:"member"`
 	// Text metrics (format text, an input) only, instead of value: the cell's note, at most 4000
-	// characters; "" clears it. Refused for any other metric.
+	// characters; "" clears it. A date metric (format date) takes its date as yyyy-mm-dd here, stored as
+	// DATE()'s serial. Refused for any other metric.
 	Text OptString `json:"text"`
+	// "background" answers once the cell is written (with "recalculating": true) and recalculates its
+	// dependents afterwards; until that lands, GET /api/grid reports recalc_pending. Omitted, the write
+	// answers after the recalculation.
+	Recalc OptWritebackRequestRecalc `json:"recalc"`
 	// Empties the cell — no value, not 0: its typed rows are deleted (kept in the cell history with
 	// the reason "cleared"); rows a form or an import posted stay. The answer's status is "cleared". A
 	// dim_codes code that is no member of the dimension is refused with 400, as for any write.
@@ -27885,6 +28035,11 @@ func (s *WritebackRequest) GetMember() OptString {
 // GetText returns the value of Text.
 func (s *WritebackRequest) GetText() OptString {
 	return s.Text
+}
+
+// GetRecalc returns the value of Recalc.
+func (s *WritebackRequest) GetRecalc() OptWritebackRequestRecalc {
+	return s.Recalc
 }
 
 // GetClear returns the value of Clear.
@@ -27932,6 +28087,11 @@ func (s *WritebackRequest) SetText(val OptString) {
 	s.Text = val
 }
 
+// SetRecalc sets the value of Recalc.
+func (s *WritebackRequest) SetRecalc(val OptWritebackRequestRecalc) {
+	s.Recalc = val
+}
+
 // SetClear sets the value of Clear.
 func (s *WritebackRequest) SetClear(val OptBool) {
 	s.Clear = val
@@ -27947,4 +28107,41 @@ func (s *WritebackRequestDimCodes) init() WritebackRequestDimCodes {
 		*s = m
 	}
 	return m
+}
+
+// "background" answers once the cell is written (with "recalculating": true) and recalculates its
+// dependents afterwards; until that lands, GET /api/grid reports recalc_pending. Omitted, the write
+// answers after the recalculation.
+type WritebackRequestRecalc string
+
+const (
+	WritebackRequestRecalcBackground WritebackRequestRecalc = "background"
+)
+
+// AllValues returns all WritebackRequestRecalc values.
+func (WritebackRequestRecalc) AllValues() []WritebackRequestRecalc {
+	return []WritebackRequestRecalc{
+		WritebackRequestRecalcBackground,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s WritebackRequestRecalc) MarshalText() ([]byte, error) {
+	switch s {
+	case WritebackRequestRecalcBackground:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *WritebackRequestRecalc) UnmarshalText(data []byte) error {
+	switch WritebackRequestRecalc(data) {
+	case WritebackRequestRecalcBackground:
+		*s = WritebackRequestRecalcBackground
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }

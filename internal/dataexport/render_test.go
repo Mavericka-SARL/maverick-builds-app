@@ -263,3 +263,21 @@ func TestTextMetricWritesItsNotes(t *testing.T) {
 		}
 	}
 }
+
+// A date metric exports its dates, not the serials it stores.
+func TestDateMetricExportsDates(t *testing.T) {
+	snap := fixtureSnapshot()
+	snap.Metrics = append(snap.Metrics, Metric{ID: "m-hired", Name: "hire_date", DimensionIDs: []string{geoID, periodID}, Date: true})
+	snap.Cells["m-hired:CA:Q1"] = 41967
+	tbl, err := Render(Spec{Metrics: []string{"hire_date"}}, snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := Write(&buf, tbl); err != nil {
+		t.Fatal(err)
+	}
+	if got := buf.String(); !strings.Contains(got, "CA,Q1,2014-11-24") {
+		t.Errorf("date export:\n%s", got)
+	}
+}

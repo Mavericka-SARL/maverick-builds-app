@@ -10,6 +10,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/mavericks-engine/mavericks/internal/aiassistant"
 )
 
 // One AI Developer turn: its time limit, what a stopped turn says, the
@@ -91,6 +93,34 @@ type planRetries struct {
 	// asked for: the developer is told them beside the proposal, whatever
 	// the model says.
 	leftOut []string
+	// partialOf is that plan: a step of it the passing plan does not have,
+	// failing or not, is named too — asked for "only the steps that pass",
+	// the model once dropped two whole dashboards and the note named two
+	// failing steps.
+	partialOf []aiassistant.ProposalStep
+}
+
+// proposeNudge is sent once to a model that ends a turn with a question
+// after its plan went back to be fixed: the developer is waiting for the
+// plan, and confirming it is how they say yes.
+const proposeNudge = "(Sent by the server, not the developer.) Your plan went back to be fixed and you ended without proposing. " +
+	"Do not ask the developer whether to propose — confirming the proposal is how they answer. Call propose_actions now with the whole corrected plan; " +
+	"if a step cannot be fixed, propose the steps that pass and say which you left out."
+
+// asksToPropose reports whether a reply asks the developer's leave to
+// propose — "Confirm and I will post it", "If you want me to proceed …",
+// "Shall I propose …?", as gpt-5-mini ended stage after stage — rather than
+// explaining why no plan can be made ("FR is not a country in the model"),
+// which is a fine end of a turn and is not nudged.
+func asksToPropose(reply string) bool {
+	r := strings.ToLower(reply)
+	for _, p := range []string{"confirm and i", "confirm you", "confirm if you", "shall i", "should i propose", "do you want me",
+		"would you like me", "if you want me to", "want me to proceed", "may i ", "ready to propose", "i will post", "i'll post"} {
+		if strings.Contains(r, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // maxFallingRejections caps the corrections while the failures keep falling.
@@ -138,7 +168,7 @@ func (r *planRetries) warnedBefore(warnings []string) bool {
 // look wrong.
 func warningResult(warnings []string) string {
 	var sb strings.Builder
-	sb.WriteString("Proposal NOT shown yet: it runs, but these formulas look wrong —\n")
+	sb.WriteString("Proposal NOT shown yet: it runs, but these steps look wrong —\n")
 	for _, w := range warnings {
 		sb.WriteString("- " + w + "\n")
 	}
@@ -148,12 +178,60 @@ func warningResult(warnings []string) string {
 
 // leftOutNote is the message saved beside a proposal of only the passing
 // steps: what the plan check refused, so the developer sees what is missing.
-func leftOutNote(problems []string) string {
+func leftOutNote(problems []string, dropped []string) string {
 	var sb strings.Builder
 	sb.WriteString("The plan check refused these steps, so they are left out of this proposal:\n")
 	for _, p := range problems {
 		sb.WriteString("- " + p + "\n")
 	}
+	if len(dropped) > 0 {
+		sb.WriteString("Also left out — they passed, or used a step that failed:\n")
+		for _, d := range dropped {
+			sb.WriteString("- " + d + "\n")
+		}
+	}
 	sb.WriteString("Confirm what is proposed, then say how to fix the rest.")
 	return sb.String()
+}
+
+// droppedSteps names the steps of the failing plan the passing plan lacks
+// (matched by tool and params), except the failing ones the problems name
+// already ("step N (…").
+func droppedSteps(failing, passing []aiassistant.ProposalStep, problems []string) []string {
+	key := func(s aiassistant.ProposalStep) string { return s.Tool + "\x00" + compactJSON(s.Params) }
+	kept := map[string]int{}
+	for _, s := range passing {
+		kept[key(s)]++
+	}
+	named := map[int]bool{}
+	for _, p := range problems {
+		var n int
+		if _, err := fmt.Sscanf(p, "step %d", &n); err == nil {
+			named[n] = true
+		}
+	}
+	var out []string
+	for i, s := range failing {
+		if kept[key(s)] > 0 {
+			kept[key(s)]--
+			continue
+		}
+		if named[i+1] {
+			continue
+		}
+		label := s.Description
+		if label == "" {
+			label = s.Tool
+		}
+		out = append(out, fmt.Sprintf("step %d (%s — %s)", i+1, s.Tool, label))
+	}
+	return out
+}
+
+func compactJSON(raw json.RawMessage) string {
+	var b bytes.Buffer
+	if json.Compact(&b, raw) != nil {
+		return string(raw)
+	}
+	return b.String()
 }

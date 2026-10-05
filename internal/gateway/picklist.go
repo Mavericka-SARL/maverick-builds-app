@@ -17,16 +17,21 @@ type picklistOption struct {
 	Key   float64 `json:"key"`
 	Code  string  `json:"code"`
 	Label string  `json:"label"`
+	// Parent: the member has members under it. Listed so a cell already
+	// holding one shows its label; offered and accepted only where the
+	// metric allows parents (picklist_allow_parents).
+	Parent bool `json:"parent,omitempty"`
 }
 
 // picklistMembers returns the members of dimID a pick-list cell can hold, in
 // the dimension's order. Calculated members hold no values and are left out.
 func (h *handler) picklistMembers(ctx context.Context, dimID string) ([]picklistOption, error) {
 	rows, err := h.db.Query(ctx, `
-		SELECT code, COALESCE(NULLIF(btrim(label),''), code)
-		FROM model.dimension_member
-		WHERE dimension_id = $1::uuid AND NULLIF(btrim(formula),'') IS NULL
-		ORDER BY time_index NULLS LAST, sort_order, code`, dimID)
+		SELECT m.code, COALESCE(NULLIF(btrim(m.label),''), m.code),
+		       EXISTS (SELECT 1 FROM model.dimension_member c WHERE c.parent_member_id = m.id)
+		FROM model.dimension_member m
+		WHERE m.dimension_id = $1::uuid AND NULLIF(btrim(m.formula),'') IS NULL
+		ORDER BY m.time_index NULLS LAST, m.sort_order, m.code`, dimID)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +39,7 @@ func (h *handler) picklistMembers(ctx context.Context, dimID string) ([]picklist
 	var out []picklistOption
 	for rows.Next() {
 		var o picklistOption
-		if err := rows.Scan(&o.Code, &o.Label); err != nil {
+		if err := rows.Scan(&o.Code, &o.Label, &o.Parent); err != nil {
 			return nil, err
 		}
 		o.Key = formula.PicklistKey(o.Code)
@@ -61,17 +66,18 @@ func (h *handler) attachPicklistOptions(ctx context.Context, rows []metricRow) {
 			cache[dimID] = opts
 		}
 		rows[i].PicklistOptions = opts
+		_ = h.db.QueryRow(ctx, `SELECT picklist_allow_parents FROM model.metric_def WHERE id = $1::uuid`, rows[i].ID).Scan(&rows[i].PicklistAllowParents)
 	}
 }
 
 // metricPicklist returns the dimension a pick-list metric's cells hold
 // members of, and its name; "" for any other metric.
-func (h *handler) metricPicklist(ctx context.Context, metricID string) (dimID, dimName string, err error) {
+func (h *handler) metricPicklist(ctx context.Context, metricID string) (dimID, dimName string, allowParents bool, err error) {
 	err = h.db.QueryRow(ctx, `
-		SELECT COALESCE(m.picklist_dimension_id::text,''), COALESCE(d.name,'')
+		SELECT COALESCE(m.picklist_dimension_id::text,''), COALESCE(d.name,''), m.picklist_allow_parents
 		FROM model.metric_def m LEFT JOIN model.dimension_def d ON d.id = m.picklist_dimension_id
-		WHERE m.id = $1::uuid`, metricID).Scan(&dimID, &dimName)
-	return dimID, dimName, err
+		WHERE m.id = $1::uuid`, metricID).Scan(&dimID, &dimName, &allowParents)
+	return dimID, dimName, allowParents, err
 }
 
 // picklistValue checks a value written to a pick-list metric and returns
@@ -80,7 +86,7 @@ func (h *handler) metricPicklist(ctx context.Context, metricID string) (dimID, d
 // cell. For any other metric member must be empty and value is returned as
 // it is.
 func (h *handler) picklistValue(ctx context.Context, metricID string, value float64, member *string) (float64, error) {
-	dimID, dimName, err := h.metricPicklist(ctx, metricID)
+	dimID, dimName, allowParents, err := h.metricPicklist(ctx, metricID)
 	if err != nil {
 		return 0, err
 	}
@@ -94,8 +100,19 @@ func (h *handler) picklistValue(ctx context.Context, metricID string, value floa
 	if err != nil {
 		return 0, err
 	}
+	parentOf := func(key float64) error {
+		for _, o := range opts {
+			if o.Key == key && o.Parent && !allowParents {
+				return fmt.Errorf("%s (%s) has members under it — a cell of this pick-list holds one of them, not a total (or allow parents on the metric)", o.Label, o.Code)
+			}
+		}
+		return nil
+	}
 	if member != nil {
 		if key, ok := matchPicklistOption(opts, *member); ok {
+			if err := parentOf(key); err != nil {
+				return 0, err
+			}
 			return key, nil
 		}
 		if strings.TrimSpace(*member) == "" {
@@ -108,6 +125,9 @@ func (h *handler) picklistValue(ctx context.Context, metricID string, value floa
 	}
 	for _, o := range opts {
 		if o.Key == value {
+			if err := parentOf(value); err != nil {
+				return 0, err
+			}
 			return value, nil
 		}
 	}

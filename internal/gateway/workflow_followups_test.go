@@ -58,6 +58,23 @@ func TestWorkflowFollowups(t *testing.T) {
 		}
 	})
 
+	t.Run("a workflow may let its approver start it", func(t *testing.T) {
+		defID := q(`SELECT wd.id::text FROM workflow.automation_rule r JOIN workflow.workflow_def wd
+			ON wd.id = r.workflow_def_id OR (r.workflow_def_id IS NULL AND wd.application_id = r.application_id AND wd.name = r.workflow_name)
+			WHERE r.id = $1::uuid LIMIT 1`, f.ruleID)
+		// Many rounds may run at once here: the subtest is about who starts one.
+		exec(`UPDATE workflow.workflow_def SET single_active_instance = false WHERE id = $1::uuid`, defID)
+		if status, body := f.do(t, "PATCH", "/api/developer/workflows/"+defID+"?application_id="+f.appID, devSub, map[string]any{"approver_may_start": true}); status != http.StatusOK || !strings.Contains(string(body), `"approver_may_start":true`) {
+			t.Fatalf("set approver_may_start: %d %s", status, body)
+		}
+		if status, body := f.do(t, "POST", "/api/automation/trigger/"+f.ruleID, adminOnlySub, map[string]any{"payload": map[string]string{}}); status != http.StatusOK {
+			t.Errorf("approver-only caller, the workflow allowing it, through the trigger: %d %s (want 200)", status, body)
+		}
+		if status, body := f.do(t, "POST", "/api/workflow/instances", adminOnlySub, map[string]any{"workflow_def_id": defID}); status != http.StatusOK && status != http.StatusCreated {
+			t.Errorf("approver-only caller, the workflow allowing it, through /api/workflow/instances: %d %s", status, body)
+		}
+	})
+
 	t.Run("business admins are listed as business users for role membership", func(t *testing.T) {
 		req, err := http.NewRequestWithContext(ctx, "GET", f.srv.URL+"/api/business-admin/users", nil)
 		if err != nil {

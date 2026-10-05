@@ -130,6 +130,9 @@ type Metric struct {
 	// ID remapped on import. Its values travel as stored: keys of member
 	// codes, which import keeps.
 	PicklistDimensionID *string `json:"picklist_dimension_id,omitempty"`
+	// PicklistAllowParents: its cells may hold a member with members under
+	// it (migration 115).
+	PicklistAllowParents bool `json:"picklist_allow_parents,omitempty"`
 	// HighlightRules tint its cells, naming metrics by name (migration 111).
 	HighlightRules json.RawMessage `json:"highlight_rules,omitempty"`
 }
@@ -249,6 +252,11 @@ type Workflow struct {
 	Steps         json.RawMessage `json:"steps"`
 	ContextSchema json.RawMessage `json:"context_schema"`
 	Status        string          `json:"status"`
+	// Definition settings; absent in an older package, each keeps its
+	// column default (one running instance per member; approvers do not
+	// start it).
+	SingleActiveInstance *bool `json:"single_active_instance,omitempty"`
+	ApproverMayStart     *bool `json:"approver_may_start,omitempty"`
 }
 
 type AutomationRule struct {
@@ -447,7 +455,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 		SELECT id::text, name, formula, storage_type::text, is_input, agg_rule,
 		       COALESCE(format,''), COALESCE(format_decimals,0), COALESCE(format_currency,''), time_summary, tags, lineage_id::text,
 		       agg_numerator_metric_id::text, agg_denominator_metric_id::text, COALESCE(label,''), picklist_dimension_id::text,
-		       NULLIF(highlight_rules, '[]'::jsonb)
+		       NULLIF(highlight_rules, '[]'::jsonb), picklist_allow_parents
 		FROM model.metric_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -456,7 +464,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for rows.Next() {
 		var m Metric
 		if err := rows.Scan(&m.ID, &m.Name, &m.Formula, &m.StorageType, &m.IsInput, &m.AggRule, &m.Format, &m.FormatDecimals, &m.FormatCurrency, &m.TimeSummary, &m.Tags, &m.LineageID,
-			&m.AggNumeratorMetricID, &m.AggDenominatorMetricID, &m.Label, &m.PicklistDimensionID, &m.HighlightRules); err != nil {
+			&m.AggNumeratorMetricID, &m.AggDenominatorMetricID, &m.Label, &m.PicklistDimensionID, &m.HighlightRules, &m.PicklistAllowParents); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -721,7 +729,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	rows, err = q.Query(ctx, `
 		SELECT wd.id::text, wd.name, COALESCE(wd.description,''), wd.trigger_event,
 		       COALESCE(wd.subject_type,''), COALESCE(wd.subject_config,'{}'::jsonb),
-		       wd.steps, wd.context_schema, wd.status
+		       wd.steps, wd.context_schema, wd.status, wd.single_active_instance, wd.approver_may_start
 		FROM workflow.workflow_def wd
 		WHERE wd.application_id = (SELECT application_id FROM core.model WHERE id=$1::uuid)
 		  AND (wd.revision_id=$2::uuid OR wd.revision_id IS NULL)
@@ -733,7 +741,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for rows.Next() {
 		var wf Workflow
 		if err := rows.Scan(&wf.ID, &wf.Name, &wf.Description, &wf.TriggerEvent,
-			&wf.SubjectType, &wf.SubjectConfig, &wf.Steps, &wf.ContextSchema, &wf.Status); err != nil {
+			&wf.SubjectType, &wf.SubjectConfig, &wf.Steps, &wf.ContextSchema, &wf.Status, &wf.SingleActiveInstance, &wf.ApproverMayStart); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -1055,8 +1063,9 @@ type jsonRefs struct {
 }
 
 // dimensionKeyedObjects are object fields keyed by dimension ID whose values
-// are member codes: a chart's context_defaults, a grid layout's filter_sel.
-var dimensionKeyedObjects = map[string]bool{"context_defaults": true, "filter_sel": true}
+// are member codes: a chart's context_defaults, a grid layout's filter_sel, a
+// grid widget's show_members (lists of codes).
+var dimensionKeyedObjects = map[string]bool{"context_defaults": true, "filter_sel": true, "show_members": true}
 
 // layoutAxes are the axis arrays of a grid widget's default_view: dimension
 // IDs in order, and the "__metrics__" sentinel.
@@ -1797,8 +1806,8 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			}
 		}
 		if picklistDim != "" {
-			if _, err = tx.Exec(ctx, `UPDATE model.metric_def SET picklist_dimension_id=$2::uuid WHERE id=$1::uuid`,
-				metricMap[m.ID], picklistDim); err != nil {
+			if _, err = tx.Exec(ctx, `UPDATE model.metric_def SET picklist_dimension_id=$2::uuid, picklist_allow_parents=$3 WHERE id=$1::uuid`,
+				metricMap[m.ID], picklistDim, m.PicklistAllowParents); err != nil {
 				return "", "", fmt.Errorf("metric %q pick-list dimension: %w", m.Name, err)
 			}
 		}
@@ -2007,12 +2016,13 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 		if err = tx.QueryRow(ctx, `
 			INSERT INTO workflow.workflow_def
 			  (application_id, revision_id, name, description, trigger_event, subject_type, subject_config,
-			   steps, context_schema, status, created_by, updated_by)
+			   steps, context_schema, status, created_by, updated_by, single_active_instance, approver_may_start)
 			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, COALESCE($7::jsonb,'{}'::jsonb),
-			        COALESCE($8::jsonb,'[]'::jsonb), COALESCE($9::jsonb,'[]'::jsonb), $10, $11::uuid, $11::uuid)
+			        COALESCE($8::jsonb,'[]'::jsonb), COALESCE($9::jsonb,'[]'::jsonb), $10, $11::uuid, $11::uuid,
+			        COALESCE($12::boolean, true), COALESCE($13::boolean, false))
 			RETURNING id::text`,
 			appID, revisionID, wf.Name, wf.Description, wf.TriggerEvent, wf.SubjectType, jsonArg(subject),
-			jsonArg(wf.Steps), jsonArg(schema), status, importerID).Scan(&newID); err != nil {
+			jsonArg(wf.Steps), jsonArg(schema), status, importerID, wf.SingleActiveInstance, wf.ApproverMayStart).Scan(&newID); err != nil {
 			return "", "", fmt.Errorf("workflow %q: %w", wf.Name, err)
 		}
 		wfMap[wf.ID] = newID

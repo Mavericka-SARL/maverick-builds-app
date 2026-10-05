@@ -2148,6 +2148,8 @@ tr:hover .mvx-member-label__actions,
 }
 
 .mvx-grid-status--saving { color: var(--color-brand-500); }
+/* A calculated cell whose recalculation is still running (recalc_pending). */
+.mvx-cell--pending { opacity: 0.45; transition: opacity 150ms ease-in; }
 .mvx-grid-status--error { color: var(--color-danger); }
 
 /* Pivot panel drop zones and draggable chips */

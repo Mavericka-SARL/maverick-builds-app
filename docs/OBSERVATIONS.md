@@ -18,6 +18,21 @@ leaves out, until it is fixed.
 
 ## Open
 
+### Changing a text input's format leaves its notes as zeros
+
+- **Noticed:** 2026-10-05, adding the Date format: the HR model's Hire Date is
+  a Text input holding ISO dates (`2014-11-24`). Its format can be changed to
+  Date (or Number) by `PATCH /api/developer/metrics/{id}`, but nothing
+  converts or refuses: every cell keeps its note in `text_value` beside a 0,
+  so the grid shows "—" (a date of 0) and formulas read 0.
+- **Why it matters:** the natural move after an import that brought dates in
+  as text loses them silently.
+- **How to check:** a text input holding `2026-12-01`, PATCH `format: "date"`,
+  read the grid.
+- **What closes it:** on a format change away from Text, converting the notes
+  that parse (ISO dates to serials, numbers to numbers) and refusing (409, or
+  `drop_values`) when some do not.
+
 ### Text metrics cannot be counted or read by formulas
 
 - **Noticed:** 2026-10-05, adding text cells: a formula naming one is refused
@@ -25,6 +40,10 @@ leaves out, until it is fixed.
   and the calculation engine loads numbers only.
 - **Why it matters:** `COUNTIFS(comment, "<>")` (how many rows are explained)
   is a natural spreadsheet idiom.
+- **Narrowed:** 2026-10-05, adding calculated text: a calculation of format
+  text now reads text metrics by name at the cell. Number formulas, and
+  LOOKUP / *IFS over a text metric (`COUNTIFS(comment, "<>")`), are still
+  refused.
 - **How to check:** save `COUNTIFS(act_comment, "<>")`.
 - **What closes it:** the fact loaders binding a text metric as text (as a
   pick-list's codec decodes keys), or a documented "use a pick-list" stance.
@@ -91,18 +110,6 @@ leaves out, until it is fixed.
   package import does not (an old package may carry them).
 - **What closes it:** dropping, with a note in the import result, the keys
   outside `modeledit.WidgetPropKeys`.
-
-### A business admin cannot start a round they approve
-
-- **Noticed:** 2026-10-04, running the "Sales Target Round" workflow.
-- **What:** the start answers 403 "approvers do not start approval workflows";
-  a business user starts the round and the admin decides it. In a target
-  round the corporate FP&A lead opens the round and approves it at the end.
-- **Why it matters:** the natural starter is refused; segregation of duties
-  is right for a request, less so for a planning cycle.
-- **How to check:** press "Start target round" as the business admin.
-- **What closes it:** a decision whether a workflow may allow its approver to
-  start it (a definition setting), or keeping the rule.
 
 ### A formula may name a dimension its metric is never on
 
@@ -2731,6 +2738,162 @@ leaves out, until it is fixed.
   `CheckMembers` before the first insert, for every caller.
 
 ## Closed
+
+### A grid layout without a zone breaks the grid widget
+
+- **Noticed:** 2026-10-05, asking the AI Developer to show FY, Q1, Q2 and H2
+  on the HR dashboard: it saved `default_view` `{"rows": [...], "cols":
+  [...]}` with no `context`, which the server accepts (API and AI alike), and
+  the widget showed "defaultView.context is not iterable" instead of the table.
+- **Closed by:** 82d36ea — the grid and the dashboard
+  designer read a missing zone as empty; a dimension in no zone becomes a
+  context selector as before. (e2e `grid-widget-members-shown`; live: the
+  AI-built model's workforce table renders FY2027, Q1, Q2, H2.)
+
+### Persisted results stay as an older engine computed them
+
+- **Noticed:** 2026-10-05, after fixing how a plain reference reads a
+  dimension its source lacks: the HR model's Effective Global Note kept
+  showing 210% (its pre-fix rollup rows) until its formula was saved again.
+- **Closed by:** 82d36ea — the user chose "at start-up, by version":
+  `calculation.EngineVersion` numbers the engine's arithmetic and
+  `runtime.calc_engine_state` (migration 112) records what the stored rows
+  were computed with. On start-up one replica claims the sweep (a lease,
+  renewed per revision; a lapsed claim is taken over), recalculates every
+  revision's calculated metrics and records the version. A change that alters
+  stored results bumps the constant. (`TestEngineUpgradeRecalculatesStoredResultsOnce`.)
+
+### Pick-lists over a hierarchy offer its parents
+
+- **Noticed:** 2026-10-05, the HR rebuild: an employee's Department pick-list
+  offers "All Departments" beside the seven departments (`picklistMembers`
+  lists every member but calculated ones).
+- **Closed by:** 82d36ea — a pick-list holds leaf members unless its
+  metric allows parents (`picklist_allow_parents`, migration 115; a checkbox
+  in the metric form, an AI `create_metric`/`update_metric` parameter). The
+  options mark parents, the grid lists leaves only, a cell write and a file
+  import (`PICKLIST_PARENT`) refuse a parent; carried by revision copies and
+  model export/import. (`TestPicklistHoldsLeavesUnlessParentsAllowed`.)
+
+### A calculation cannot give text
+
+- **Noticed:** 2026-10-05: Workforce_Actions' Action Key is
+  `=B5&"|"&D5`; a text result is #VALUE!, so the model labels each action
+  row with its key instead, and the label does not follow a changed
+  Employee ID.
+- **Closed by:** 82d36ea — a calculated metric of format text stores the
+  text its formula gives in `calc_result.text_value` (migration 116) beside a
+  0 (`Scheduler.executeText`); `/api/grid` returns it in `texts`, the grid and
+  file exports show it, a pick-list reads as its member code (`act_row & "|" &
+  act_type` gives `A1|HIRE`). Its totals rule is none (default) or formula. A
+  text calculation reads text inputs (their latest note) and other text
+  calculations by name at the cell — the workbook's key reads the Employee ID,
+  a text input — but not through LOOKUP, *IFS or a time offset; no number
+  formula reads text (TEXT_METRIC_IN_FORMULA). (`TestTextCalculations`.)
+
+### Metrics have no date format
+
+- **Noticed:** 2026-10-05: an employee's Hire Date is a Text input. Date
+  cells now import as ISO text (`2014-11-24`), but nothing validates or
+  compares them as dates.
+- **Closed by:** 82d36ea — metric format "date": the cell stores DATE()'s
+  serial (formulas read the number: `DAYS(DATE(2027,1,1), hire_date)`), the
+  grid shows and takes yyyy-mm-dd (a date input, `/api/cells` "text"), KPI
+  tiles and file exports show the date; never summed (agg none by default;
+  sum/rate refused). (`TestDateMetrics`, `TestDateMetricExportsDates`.)
+
+### A metric cannot change between input and calculated
+
+- **Noticed:** 2026-10-05: LY History's Total Personnel Cost had to become an
+  input (the workbook types it; it differs from the sum of its parts by up to
+  0.001). There is no `is_input` on update: the developer repoints the
+  dependent formula, deletes the metric, recreates it and restores the formula.
+- **Closed by:** 82d36ea — `PATCH /api/developer/metrics/{id}` and the
+  AI's `update_metric` take `is_input`, keeping the id
+  (`modeledit.SwitchMetricKind`): to an input drops its calculated rows and
+  dependency edges; to a calculation needs a formula and is refused (409) for
+  an input holding values unless `drop_values` is sent (archived with reason
+  `metric_became_calculated`). The metric form has a Kind select with a
+  confirm. (`TestMetricSwitchesBetweenInputAndCalculated`.)
+
+### Typing a value on a widely used input takes seconds
+
+- **Noticed:** 2026-10-05: a numeric write to a Workforce Actions cell takes
+  about 4 s (`POST /api/cells` recalculates the 128-metric plan before it
+  answers); text cells answer in 10 ms. Typing the workbook's 24 actions took
+  minutes.
+- **Closed by:** 82d36ea — `POST /api/cells` takes `"recalc":
+  "background"` (the console sends it): the write answers at once and the
+  dependents recalculate after it; `runtime.revision_recalc_state`
+  (migration 113) counts requested and finished passes, `/api/grid` reports
+  `recalc_pending`, and the grid tints calculated cells "Recalculating…" and
+  reloads until it clears. (`TestBackgroundRecalcAfterACellWrite`.)
+
+### Removing a row leaves totals stale for a while
+
+- **Noticed:** 2026-10-05: after a business user removed an added action, the
+  plan kept its contribution for about a minute — the delete recalculates in
+  the background (`businessDeleteMember` → `recalcAllInputsAcrossRevisions`).
+- **Closed by:** 82d36ea — a business user's member delete recalculates
+  that revision and the dimension's dependents through the same pending
+  mark, so the grid shows its calculated cells as recalculating until the
+  pass lands. (`TestBackgroundRecalcAfterACellWrite`.)
+
+### A business role named like another app's is a 500
+
+- **Noticed:** 2026-10-05: `POST /api/business-admin/roles` "HR Planners" for
+  a second app answered 500 `duplicate key … business_role_workspace_id_name_key`.
+- **Closed by:** 82d36ea — a duplicate role name on create or rename is a
+  409 naming the existing role. (`TestBusinessRoleNameTakenIsAConflict`.)
+
+### Steps that pass can drop more than the note names
+
+- **Noticed:** 2026-10-05: asked for "only the steps that pass", the AI
+  Developer proposed 32 of its 50 dashboard steps; the left-out note named two
+  failing steps, and two whole dashboards were missing without a word.
+- **Closed by:** 82d36ea — when a partial plan follows a failing one, the
+  left-out note compares the two and names every step that is gone, not only
+  the failing ones (`droppedSteps`). (`TestDroppedStepsNamesWhatThePartialPlanLacks`.)
+
+### Time hierarchies take four header rows in a grid widget
+
+- **Noticed:** 2026-10-05: a dashboard table of hires, promotions and
+  dismissals by period at 220 px showed only its FY › H › Q › month header.
+  The workbook's table shows FY, Q1, Q2 and H2 only; a grid widget cannot
+  choose levels or members.
+- **Closed by:** 82d36ea — a grid widget's `widget_props.show_members`
+  ({dimension id: [member codes]}) shows only those members on a row or
+  column axis, flat, in that order (FY, Q1, Q2, H2), totals still built from
+  their leaves; edited under "members shown" in the dashboard designer and by
+  the AI (dimension and codes checked); remapped by revision copies and model
+  export/import, re-keyed by a member-code rename. (`TestRemapWidgetPropsIDs`,
+  `TestGridDeleteCascadesWidgetsAndMemberRenameRekeysWidgetProps`,
+  `TestAIWidgetPropsAreChecked`.)
+
+### AI Developer weak spots seen on the HR rebuild (gpt-5-mini)
+
+- **Noticed:** 2026-10-05, eight stages: it invented a typed input `emp_count`
+  (=1 per employee) to count with SUMIFS; left time summaries, decimals,
+  grid layouts and widget `metric_ids` out until told; applied a correction
+  too widely ("January" for the salary base spread to LY expense); replaced a
+  README step and added a department context the round does not have.
+- **Closed by:** 82d36ea — plan warnings sent back to the model before a
+  proposal is shown (`recurringMistakeWarnings`): a `write_input_values` of
+  five or more 1s (count with COUNTIFS), a level-like metric (headcount,
+  balance, stock …) summed over time on a time grid, a grid widget without
+  `metric_ids` on a grid of more than twelve metrics. The prompt also covers
+  dates, leaf pick-lists, switching a metric's kind and approver-started
+  workflows. (`TestSendMessage_WarnsOfRecurringMistakes`.)
+
+### A business admin cannot start a round they approve
+
+- **Noticed:** 2026-10-04, running the "Sales Target Round" workflow.
+- **Closed by:** 82d36ea — the user chose a per-workflow setting:
+  `workflow_def.approver_may_start` (migration 114; "Who starts it" in the
+  workflow properties, `update_workflow` for the AI) lets an approver of the
+  workflow start it, from the console and from its automation trigger;
+  default off. Carried by revision copies, duplicates and model
+  export/import. (`TestWorkflowFollowups/a_workflow_may_let_its_approver_start_it`.)
 
 ### A workflow scoped to a member locks its data while a correction round runs
 

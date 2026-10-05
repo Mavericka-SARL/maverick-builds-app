@@ -2,7 +2,7 @@
 
 > **Classification:** Current — The assistant's tool surface and its limits.
 
-> **Last verified:** 2026-10-02
+> **Last verified:** 2026-10-05
 
 The AI Developer is the assistant inside the developer console. Its rule is
 parity: it can build, change and remove what a developer builds, changes and
@@ -60,6 +60,7 @@ posting runs the gateway's own posting code the same way.
 | `list_form_integrations` | which form field posts into which metric |
 | `list_integrations` | every data integration — Excel/CSV imports, Google Sheets, REST API, data exports — with its target, column map or export spec, and last run |
 | `preview_file_import` | a dry run of importing an attached spreadsheet: its first rows as read, its columns and first rows after the reshape and column map, every row that would fail and why, what would be imported. Writes nothing |
+| `read_attached_sheet` | one sheet of an attached workbook: any rows as stored, the whole formulas of those rows (compressed into ranges sharing a formula), its layout, drop-down lists, highlights and comments. Writes nothing |
 | `prepare_converted_file` | saves an attached spreadsheet reshaped and column-mapped into the import layout, for the developer to download as CSV or Excel from the chat. Imports nothing |
 | `preview_export` | an export spec rendered against the grid's current values — columns, first rows, row count — or every problem with the spec. Saves nothing |
 
@@ -102,6 +103,18 @@ name the revision already uses is refused on `create_metric`,
 `DIMENSION_NAME_TAKEN`, and a code the dimension already has on
 `add_dimension_member` with `MEMBER_CODE_TAKEN`. The assistant has no tool that deletes a dimension
 member; a developer deleting one a formula names gets `MEMBER_IN_USE`.
+
+`update_metric` also switches a metric between input and calculated with
+`is_input`, keeping its id: to a calculation it needs a `formula` and is
+refused for an input holding values unless `drop_values` is true. A metric's
+format may be `date` (the cell holds DATE()'s serial, typed and shown as
+yyyy-mm-dd, never summed) or, on a calculation, `text` (its formula's text,
+stored per cell; totals none or formula; it reads text inputs and other text
+calculations by name, and no number formula reads it). A pick-list
+holds leaf members unless `picklist_allow_parents` is true. A grid widget's
+`widget_props.show_members` (`{"<dimension>": ["<code>", …]}`) shows only
+those members on a row or column axis, in that order; `update_workflow`'s
+`approver_may_start` lets the workflow's approver start it.
 
 `add_dimension_property` declares a typed member property (`dimension_id`,
 `name`, `data_type`: text, number or date) under the same rules as the
@@ -179,6 +192,12 @@ Workflows and forms (added 2026-09-16, programme item 5):
 
 ## A plan is checked before the developer sees it
 
+Before anything else the plan's steps are put in dependency order
+(`aiassistant.OrderByDependencies`): a metric is created before the formulas,
+grids and attachments that name it, every other step keeps its place, a step
+of another kind is a fixed point nothing moves across, and a plan naming
+`<created in step N>` or holding a cycle is left as written.
+
 Every `propose_actions` call is first run exactly as confirming would run it —
 the same write executor, the same validation — inside a database transaction
 that is always rolled back (`internal/gateway/ai_proposal_check.go`,
@@ -189,10 +208,18 @@ times, and more (up to eight) while each attempt fails fewer steps
 (`planRetries`, `internal/gateway/ai_turn.go`). Then it is asked for the steps
 that pass, which are shown with a message listing what the check left out, and
 after that it stops and says what fails; it is never told to ask whether to go
-on. A plan that runs but has a formula looking like the model's typical
-mistakes (`planWarnings`: a Percentage metric multiplied in without dividing
-by 100, `SUMIFS(src, D, D)` on a cell carrying every dimension of `src`) goes
-back once with the warning; proposed again unchanged, it is shown with it. Unknown
+on; the message names every step the partial plan lacks, not only the
+failing ones (`droppedSteps`). A plan that runs but looks like the model's
+typical mistakes goes back once with the warning — a formula (`planWarnings`:
+a Percentage metric multiplied in without dividing by 100, `SUMIFS(src, D, D)`
+on a cell carrying every dimension of `src`) or a recurring modelling slip
+(`recurringMistakeWarnings`: five or more 1s written to count rows, which
+COUNTIFS counts; a headcount, balance or stock summed over time; a grid widget
+without `metric_ids` on a grid of more than twelve metrics); proposed again unchanged, it is shown with it — and
+so it is when the turn ends without a new plan. A model that ends a turn asking leave
+to propose after its plan went back ("confirm and I will post it",
+`asksToPropose`) is told once, by the server, to propose instead; one that
+explains why no plan can be made ends the turn as it is. Unknown
 names in formulas say what they most likely meant (`setup_item` → `{Setup
 Item}`; `p_and_l_line` → `{Cost Center}.p_and_l_line`), so one correction
 round usually suffices. Every tool is checked: the workflow, form,
@@ -201,6 +228,12 @@ calculation and notification stores are built on the transaction
 into it and one into a grid resolves its values against the model as the
 plan's earlier steps leave it, and a form integration's posting counts what
 it would post. A step that uses a failed step's result is not run.
+
+**The history** is replayed on every model call, so turns before the last two
+keep their messages but not their bulk: a tool result or tool-call argument
+over 1,500 characters is cut to its first 400 with a note
+(`aiassistant.CompactHistory`). A long build otherwise passed the provider's
+input limit (gpt-5-mini: 272,000 tokens) at its sixth stage.
 
 **A turn** runs at most `AI_TURN_TIMEOUT` (10 minutes); the console streams
 "progress" while the model writes a tool call (the providers report its
@@ -216,14 +249,21 @@ What ran before it stays in the draft.
 ## Attached spreadsheets and data exports
 
 A `.xlsx`, `.xlsm` or `.csv` file attached to the chat (up to 16 MB) keeps its
-original bytes (`ai_assistant.document.raw_data`) next to the text sample the
-language model reads, so the assistant imports the **whole** file, not the
-500 rows a sheet the model sees. `preview_file_import` and `import_file_data`
+original bytes (`ai_assistant.document.raw_data`) next to the text the
+language model reads, so the assistant imports the **whole** file. That text
+(60,000 characters at most) lists every sheet first, then each sheet's rows,
+layout, formulas, lists and highlights; when the whole workbook does not fit,
+each large sheet shows fewer rows and clipped formulas (a sheet of 30 rows or
+fewer is always whole) and says which `read_attached_sheet` call shows the
+rest. Cut off at the end instead, a workbook whose data sheets came first lost
+every later sheet — its calculation sheets. `preview_file_import` and `import_file_data`
 take the file's name, an optional sheet, a target (a grid — the metric values
 its columns name — or a dimension — members) and a `column_map` in the Import
 Wizard's vocabulary (a metric or dimension name; `metric` + `value` for a long
-file; `code`, `label`, `parent_code`, `property:<name>`; `ignore`), applied
-after an optional `reshape`. The import
+file; `code`, `label`, `parent_code`, `property:<name>`; `ignore`, and
+`"*": "ignore"` for every column the map does not name), applied after an
+optional `reshape`. A date-formatted cell reads as its ISO date
+(`2014-11-24`), and as its serial number into a numeric metric. The import
 is the developer's own pipeline, run by the gateway through the executor's
 `ImportFile` hook (`internal/gateway/ai_file_import.go`): stored cell values,
 not displayed ones (`1234.5`, not `"1,234.50"`), `importpkg.ResolveRows`, the

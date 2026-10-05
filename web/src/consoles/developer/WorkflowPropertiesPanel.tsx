@@ -276,6 +276,20 @@ export function WorkflowPropertiesPanel({ workflow, usage, onChange, application
                 One active instance per scope
               </label>
             </Field>
+            <Field label="Who starts it">
+              <p className="mvx-admin-muted" style={{ margin: "0 0 6px", fontSize: 12 }}>
+                A business admin decides approvals and does not submit them. Tick this for a planning round the admin opens and signs off.
+              </p>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  aria-label="Its approver may start it"
+                  checked={workflow.approver_may_start === true}
+                  onChange={e => onChange({ approver_may_start: e.target.checked })}
+                />
+                Its approver may start it
+              </label>
+            </Field>
             <Field label="Starts on">
               <TriggerEventSelect
                 applicationId={applicationId}

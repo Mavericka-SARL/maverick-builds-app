@@ -17,6 +17,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/mavericks-engine/mavericks/internal/calculation"
 	"github.com/mavericks-engine/mavericks/internal/gateway"
 	"github.com/mavericks-engine/mavericks/internal/identity"
 	"github.com/mavericks-engine/mavericks/internal/notification"
@@ -408,6 +409,9 @@ func main() {
 		// Plan limits: a tenant over its plan is marked read-only here,
 		// whichever path put it over (internal/plan).
 		go plan.RunSweep(schedCtx, dbPool, planEnforcer, planSweepInterval, blog)
+		// Results stored by an older calculation engine are recalculated
+		// once (internal/calculation.EngineVersion).
+		go calculation.RunEngineUpgrade(schedCtx, dbPool, blog)
 	}
 	if router != nil {
 		router.Watch(schedCtx, tenantWatchInterval, func(t tenantdb.Tenant, tpool *pgxpool.Pool) {

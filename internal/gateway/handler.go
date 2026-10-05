@@ -1887,6 +1887,9 @@ type metricRow struct {
 	// in /api/grid.
 	PicklistDimensionID string           `json:"picklist_dimension_id,omitempty"`
 	PicklistOptions     []picklistOption `json:"picklist_options,omitempty"`
+	// PicklistAllowParents: its cells may hold a member with members under
+	// it; otherwise the grid offers leaves only.
+	PicklistAllowParents bool `json:"picklist_allow_parents,omitempty"`
 	// HighlightRules tint the metric's cells (metricformula.HighlightRule).
 	// Only set in /api/grid.
 	HighlightRules json.RawMessage `json:"highlight_rules,omitempty"`
@@ -2060,6 +2063,11 @@ type writebackReq struct {
 	Text *string `json:"text,omitempty"`
 	// Clear empties the cell — no value, not 0 (text_cells.go).
 	Clear bool `json:"clear,omitempty"`
+	// Recalc "background" answers once the value is stored and recalculates
+	// its dependents after; the grid read reports recalc_pending meanwhile
+	// (recalc_state.go). Omitted, the write answers after the recalculation,
+	// so a script reading back calculated values sees the new ones.
+	Recalc string `json:"recalc,omitempty"`
 }
 
 func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
@@ -2239,11 +2247,16 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	store := calculation.NewStore(h.db.For(ctx))
-	calcLog := h.log.With().Str("op", "cells").Logger()
-	scheduler := calculation.NewScheduler(calcLog, store, nil)
-	if err := scheduler.RecalcAffected(ctx, req.ModelID, req.RevisionID, []string{req.MetricID}); err != nil {
-		h.log.Warn().Err(err).Msg("recalc failed after writeback")
+	recalc := func(ctx context.Context) {
+		calcLog := h.log.With().Str("op", "cells").Logger()
+		scheduler := calculation.NewScheduler(calcLog, calculation.NewStore(h.db.For(ctx)), nil)
+		if err := scheduler.RecalcAffected(ctx, req.ModelID, req.RevisionID, []string{req.MetricID}); err != nil {
+			h.log.Warn().Err(err).Msg("recalc failed after writeback")
+		}
+	}
+	background := req.Recalc == "background"
+	if !background {
+		recalc(ctx)
 	}
 
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
@@ -2253,10 +2266,11 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 		Metadata: cellWriteAudit(req, write),
 	})
 
-	// Dispatch grid_change automation rules fire-and-forget. The changed
-	// metric's owning grid (grid_metric is unique per metric) is passed as
-	// the event source so rules scoped via source_grid_id can match.
-	go func() {
+	// Dispatch grid_change automation rules fire-and-forget — after the
+	// recalculation, so a rule's condition reads the new calculated values.
+	// The changed metric's owning grid (grid_metric is unique per metric) is
+	// passed as the event source so rules scoped via source_grid_id can match.
+	dispatch := func() {
 		bgCtx := context.WithoutCancel(ctx)
 		appID, _ := h.appIDFromModelID(bgCtx, req.ModelID)
 		if appID != "" {
@@ -2273,13 +2287,21 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 			}
 			workflow.NewStore(h.db.For(ctx)).DispatchEventRules(bgCtx, appID, req.RevisionID, "grid_change", sourceGridID, a.UserID, payload)
 		}
-	}()
-
+	}
+	status := "ok"
 	if write.clear {
-		jsonOK(w, map[string]string{"status": "cleared"})
+		status = "cleared"
+	}
+	if background {
+		h.recalcInBackground(ctx, req.RevisionID, "recalculation after a cell write", func(bg context.Context) {
+			recalc(bg)
+			dispatch()
+		})
+		jsonOK(w, map[string]any{"status": status, "recalculating": true})
 		return
 	}
-	jsonOK(w, map[string]string{"status": "ok"})
+	go dispatch()
+	jsonOK(w, map[string]string{"status": status})
 }
 
 // contextVarSchema mirrors one entry of a workflow_def's context_schema —
@@ -3029,6 +3051,10 @@ type gridResponse struct {
 	Withheld           []string        `json:"withheld,omitempty"`
 	AccessRules        gridAccessRules `json:"access_rules"`
 	RollupSourceGridID *string         `json:"rollup_source_grid_id,omitempty"` // set = this grid mirrors another grid's metrics via cross-dimension rollup; its cells are read-only
+	// RecalcPending: a write answered before its dependents were
+	// recalculated and that pass has not landed — the calculated cells are
+	// about to change (recalc_state.go).
+	RecalcPending bool `json:"recalc_pending,omitempty"`
 }
 
 func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
@@ -3911,15 +3937,30 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		}
 		cellRows.Close()
 		if !totalsOnly {
-			var textMetrics []string
+			var textMetrics, textCalcs []string
 			for _, m := range allMetrics {
-				if m.IsInput && m.Format == metricformula.FormatText {
+				switch {
+				case m.Format != metricformula.FormatText:
+				case m.IsInput:
 					textMetrics = append(textMetrics, m.ID)
+				default:
+					textCalcs = append(textCalcs, m.ID)
 				}
 			}
 			if texts, err = h.loadTextCells(ctx, modelID, revisionID, textMetrics, metricDims, hiddenByDim, metricRules, scopeSQL, scopeArgs); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
+			}
+			calcTexts, err := h.loadCalcTextCells(ctx, modelID, revisionID, textCalcs, metricDims, hiddenByDim, metricRules)
+			if err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			for k, v := range calcTexts {
+				if texts == nil {
+					texts = map[string]string{}
+				}
+				texts[k] = v
 			}
 		}
 	}
@@ -4117,6 +4158,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		Withheld:           withheld,
 		AccessRules:        gridAccessRules{DimMembers: dimRules, Metrics: metricRules},
 		RollupSourceGridID: rollupSourceGridID,
+		RecalcPending:      h.recalcPending(ctx, revisionID),
 	})
 }
 
@@ -4477,8 +4519,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		-- 1. Copy metrics; capture old→new ID mapping via name join
 		new_metrics AS (
 			INSERT INTO model.metric_def
-			  (model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, revision_id, lineage_id, highlight_rules)
-			SELECT model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, $2::uuid, lineage_id, highlight_rules
+			  (model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, revision_id, lineage_id, highlight_rules, picklist_allow_parents)
+			SELECT model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, $2::uuid, lineage_id, highlight_rules, picklist_allow_parents
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 			RETURNING id AS new_id, name
 		),
@@ -4978,7 +5020,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		new_wfs AS (
 			INSERT INTO workflow.workflow_def
 			  (application_id, name, description, trigger_event, subject_type, subject_config, steps,
-			   status, created_by, updated_by, published_at, archived_at, context_schema, revision_id)
+			   status, created_by, updated_by, published_at, archived_at, context_schema, revision_id,
+			   single_active_instance, approver_may_start)
 			SELECT wd.application_id, wd.name, wd.description, wd.trigger_event, wd.subject_type,
 				-- subject_config binds the workflow to a form ({"form_id"}) or a
 				-- grid metric ({"grid_id","metric_id"}) of THIS revision; copied
@@ -5002,7 +5045,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 						ORDER BY e.ord)
 					FROM jsonb_array_elements(wd.context_schema) WITH ORDINALITY AS e(elem, ord)
 				), '[]'::jsonb),
-				$2::uuid
+				$2::uuid,
+				wd.single_active_instance, wd.approver_may_start
 			FROM workflow.workflow_def wd
 			WHERE wd.application_id = (SELECT application_id FROM app)
 			  AND wd.revision_id = $3::uuid
@@ -5430,6 +5474,8 @@ type devMetric struct {
 	// PicklistDimensionID: the dimension a pick-list metric's cells hold
 	// members of (format "picklist").
 	PicklistDimensionID string `json:"picklist_dimension_id,omitempty"`
+	// PicklistAllowParents: its cells may hold a member with members under it.
+	PicklistAllowParents bool `json:"picklist_allow_parents,omitempty"`
 	// HighlightRules tint its cells (metricformula.HighlightRule).
 	HighlightRules json.RawMessage `json:"highlight_rules"`
 	DependsOn      []string        `json:"depends_on"`
@@ -5483,7 +5529,7 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 		SELECT m.id::text, m.name, m.is_input, m.formula, m.agg_rule,
 		       COALESCE(m.agg_numerator_metric_id::text,''), COALESCE(m.agg_denominator_metric_id::text,''),
 		       m.format, m.format_decimals, m.format_currency, m.time_summary, m.tags,
-		       COALESCE(m.picklist_dimension_id::text,''), m.highlight_rules,
+		       COALESCE(m.picklist_dimension_id::text,''), m.picklist_allow_parents, m.highlight_rules,
 		       COALESCE(
 		           (SELECT string_agg(dep.name, ',')
 		            FROM model.calc_dependency cd
@@ -5515,7 +5561,7 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 		var dependsOnCSV, dependedByCSV string
 		if err := rows.Scan(&dm.ID, &dm.Name, &dm.IsInput, &dm.Formula, &dm.AggRule,
 			&dm.AggNumeratorMetricID, &dm.AggDenominatorMetricID,
-			&dm.Format, &dm.FormatDecimals, &dm.FormatCurrency, &dm.TimeSummary, &dm.Tags, &dm.PicklistDimensionID, &dm.HighlightRules, &dependsOnCSV, &dependedByCSV, &dm.CalcError); err != nil {
+			&dm.Format, &dm.FormatDecimals, &dm.FormatCurrency, &dm.TimeSummary, &dm.Tags, &dm.PicklistDimensionID, &dm.PicklistAllowParents, &dm.HighlightRules, &dependsOnCSV, &dependedByCSV, &dm.CalcError); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -5590,6 +5636,9 @@ type addMetricReq struct {
 	// PicklistDimensionID is the dimension (id or name) whose members a
 	// pick-list metric's cells hold; required for format "picklist".
 	PicklistDimensionID string `json:"picklist_dimension_id"`
+	// PicklistAllowParents lets its cells hold a member with members under
+	// it (an approval level); off, a cell holds a leaf.
+	PicklistAllowParents bool `json:"picklist_allow_parents"`
 	// HighlightRules tint its cells (metricformula.CheckHighlightRules).
 	HighlightRules json.RawMessage `json:"highlight_rules"`
 }
@@ -5658,6 +5707,7 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 	if !req.IsInput && req.Formula != "" {
 		res, vErr := metricformula.Validate(ctx, h.db.For(ctx), metricformula.Request{
 			ModelID: modelID, RevisionID: req.RevisionID, Name: req.Name, Formula: req.Formula,
+			Text: req.Format == metricformula.FormatText,
 		})
 		if vErr != nil {
 			var invalid *metricformula.ValidationError
@@ -5743,7 +5793,8 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 		_, metricInsertErr = tx.Exec(ctx, `UPDATE model.metric_def SET label=$2 WHERE id=$1::uuid`, newID, strings.TrimSpace(req.Label))
 	}
 	if metricInsertErr == nil && picklist.DimensionID != "" {
-		_, metricInsertErr = tx.Exec(ctx, `UPDATE model.metric_def SET picklist_dimension_id=$2::uuid WHERE id=$1::uuid`, newID, picklist.DimensionID)
+		_, metricInsertErr = tx.Exec(ctx, `UPDATE model.metric_def SET picklist_dimension_id=$2::uuid, picklist_allow_parents=$3 WHERE id=$1::uuid`,
+			newID, picklist.DimensionID, req.PicklistAllowParents)
 	}
 	if metricInsertErr == nil && string(highlights) != "[]" {
 		_, metricInsertErr = tx.Exec(ctx, `UPDATE model.metric_def SET highlight_rules=$2::jsonb WHERE id=$1::uuid`, newID, string(highlights))
@@ -6174,22 +6225,22 @@ func (h *handler) workflowStartInstance(w http.ResponseWriter, r *http.Request) 
 		jsonErr(w, fmt.Errorf("unauthorized"), http.StatusUnauthorized)
 		return
 	}
-	// Separation of duties (owner-decided): business ADMINS decide approval
-	// requests, they do not submit them. An actor whose business-facing role
-	// is only business_admin is refused; someone who also holds a submitter
-	// or builder role (business_user, developer, admins) legitimately wears
-	// that other hat.
-	if a.hasRole("business_admin") && !a.hasRole("business_user") && !a.hasRole("developer") && !a.hasRole("tenant_admin") && !a.hasRole("platform_admin") {
-		jsonErr(w, fmt.Errorf("approvers do not start approval workflows — a business user submits the request, you decide it"), http.StatusForbidden)
-		return
-	}
-
 	var body struct {
 		WorkflowDefID string            `json:"workflow_def_id"`
 		Context       map[string]string `json:"context"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.WorkflowDefID == "" {
 		jsonErr(w, fmt.Errorf("workflow_def_id is required"), http.StatusBadRequest)
+		return
+	}
+	// Separation of duties (owner-decided): business ADMINS decide approval
+	// requests, they do not submit them — unless the definition lets its
+	// approver start it (a planning round). An actor whose business-facing
+	// role is only business_admin is refused; someone who also holds a
+	// submitter or builder role (business_user, developer, admins)
+	// legitimately wears that other hat.
+	if onlyApprover(a) && !workflow.NewStore(h.db.For(ctx)).ApproverMayStart(ctx, body.WorkflowDefID) {
+		jsonErr(w, errApproverStarts, http.StatusForbidden)
 		return
 	}
 
@@ -11304,10 +11355,11 @@ func (h *handler) automationTrigger(w http.ResponseWriter, r *http.Request) {
 	// Same separation of duties as POST /api/workflow/instances: a caller who
 	// is ONLY an approver does not start approval workflows, whichever door
 	// they use — this one was left open (found by the 2026-09-13 scenario
-	// run). Holding business_user (an admin who is also a business user),
-	// developer or an admin role alongside lifts it, as it does there.
-	if act.hasRole("business_admin") && !act.hasRole("business_user") && !act.hasRole("developer") && !act.hasRole("tenant_admin") && !act.hasRole("platform_admin") {
-		jsonErr(w, fmt.Errorf("approvers do not start approval workflows — a business user submits the request, you decide it"), http.StatusForbidden)
+	// run) — unless the rule's workflow lets its approver start it. Holding
+	// business_user (an admin who is also a business user), developer or an
+	// admin role alongside lifts it, as it does there.
+	if onlyApprover(act) && !h.ruleApproverMayStart(ctx, ruleID) {
+		jsonErr(w, errApproverStarts, http.StatusForbidden)
 		return
 	}
 	var ruleAppID string
@@ -11423,6 +11475,8 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			// PicklistDimensionID: the dimension (id or name) a pick-list's
 			// cells hold members of; "" clears it.
 			PicklistDimensionID *string `json:"picklist_dimension_id"`
+			// PicklistAllowParents: omitted keeps it.
+			PicklistAllowParents *bool `json:"picklist_allow_parents"`
 			// Omitted leaves the metric's tags as they are.
 			Tags *[]string `json:"tags"`
 			// Omitted leaves the label; "" clears it back to the label
@@ -11430,6 +11484,12 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			Label *string `json:"label"`
 			// Omitted leaves the highlight rules; [] removes them.
 			HighlightRules *json.RawMessage `json:"highlight_rules"`
+			// IsInput switches the metric between input and calculated
+			// (modeledit.SwitchMetricKind); omitted keeps it. Becoming
+			// calculated takes a formula, and DropValues for an input that
+			// holds values.
+			IsInput    *bool `json:"is_input"`
+			DropValues bool  `json:"drop_values"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -11495,6 +11555,23 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		// Only a sent formula is validated and rewrites the dependency
 		// edges; an omitted one is left exactly as stored.
 		formulaSent := patch.Formula != nil && *patch.Formula != ""
+		switchKind := patch.IsInput != nil && *patch.IsInput != metricIsInput
+		if switchKind {
+			if *patch.IsInput {
+				if formulaSent {
+					jsonErr(w, fmt.Errorf("an input metric has no formula — send is_input true without one"), http.StatusBadRequest)
+					return
+				}
+				body.Formula = ""
+				if patch.AggRule == nil && (body.AggRule == string(rollup.AggFormula) || body.AggRule == string(rollup.AggRate)) {
+					body.AggRule = "sum" // an input's total adds up; say otherwise with agg_rule
+				}
+			} else if !formulaSent {
+				jsonErr(w, fmt.Errorf("a calculated metric needs a formula — send it with is_input false"), http.StatusBadRequest)
+				return
+			}
+			metricIsInput = *patch.IsInput
+		}
 		var highlights json.RawMessage // set when the request sends highlight_rules
 		{
 			// A pick-list keeps its dimension unless the request changes it;
@@ -11520,7 +11597,8 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 					ts = ""
 				}
 			}
-			if format == metricformula.FormatPicklist {
+			if format == metricformula.FormatPicklist || (format == metricformula.FormatText && !metricIsInput) {
+				// A pick-list's and a calculated text's totals are none or formula.
 				if patch.AggRule == nil && agg != string(rollup.AggNone) && agg != string(rollup.AggFormula) {
 					agg = ""
 				}
@@ -11573,9 +11651,8 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		if body.Formula != "" {
 			formulaPtr = &body.Formula
 		}
-		// is_input comes from the stored row, not the request: this endpoint
-		// cannot change it, so the request has no say in whether 'formula' is
-		// a legal rule here.
+		// is_input is the stored row's, or the one the request switches to
+		// (is_input): that decides whether 'formula' is a legal rule here.
 		if err := metricformula.ValidateAggRule(body.AggRule, metricIsInput, body.AggNumeratorMetricID, body.AggDenominatorMetricID, metricID); err != nil {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
@@ -11598,6 +11675,7 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			res, vErr := metricformula.Validate(ctx, h.db.For(ctx), metricformula.Request{
 				ModelID: modelID, RevisionID: metricRevisionID, MetricID: metricID,
 				Name: validateName, Formula: body.Formula,
+				Text: body.Format == metricformula.FormatText && !metricIsInput,
 			})
 			if vErr != nil {
 				var invalid *metricformula.ValidationError
@@ -11633,14 +11711,27 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 		}
+		if switchKind {
+			if err := modeledit.SwitchMetricKind(ctx, tx, metricID, metricIsInput, patch.DropValues); err != nil {
+				if errors.Is(err, modeledit.ErrMetricHoldsValues) {
+					jsonErr(w, err, http.StatusConflict)
+				} else {
+					jsonErr(w, err, http.StatusInternalServerError)
+				}
+				return
+			}
+		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE model.metric_def
 			SET name=$2, formula=$3, agg_rule=$4, format=$5, format_decimals=$6, format_currency=$7,
 			    agg_numerator_metric_id=NULLIF($8,'')::uuid, agg_denominator_metric_id=NULLIF($9,'')::uuid,
-			    time_summary=$10, tags=COALESCE($11, tags), picklist_dimension_id=NULLIF($12,'')::uuid
+			    time_summary=$10, tags=COALESCE($11, tags), picklist_dimension_id=NULLIF($12,'')::uuid,
+			    picklist_allow_parents = CASE WHEN NULLIF($12,'') IS NULL THEN false ELSE COALESCE($13, picklist_allow_parents) END,
+			    is_input=$14
 			WHERE id=$1::uuid`,
 			metricID, body.Name, formulaPtr, body.AggRule, body.Format, body.FormatDecimals, body.FormatCurrency,
-			body.AggNumeratorMetricID, body.AggDenominatorMetricID, body.TimeSummary, optionalTags(body.Tags), body.PicklistDimensionID); err != nil {
+			body.AggNumeratorMetricID, body.AggDenominatorMetricID, body.TimeSummary, optionalTags(body.Tags), body.PicklistDimensionID,
+			patch.PicklistAllowParents, metricIsInput); err != nil {
 			if metricformula.IsUniqueViolation(err) {
 				jsonErr(w, metricformula.MetricNameTaken(err, body.Name), http.StatusConflict)
 				return
@@ -16827,6 +16918,10 @@ func (h *handler) baRoles(w http.ResponseWriter, r *http.Request) {
 		err := h.db.QueryRow(ctx,
 			`INSERT INTO identity.business_role (workspace_id, name) VALUES ($1::uuid, $2) RETURNING id::text`,
 			wsID, body.Name).Scan(&newID)
+		if isUniqueViolation(err) {
+			jsonErr(w, roleNameTaken(body.Name), http.StatusConflict)
+			return
+		}
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
@@ -16900,7 +16995,10 @@ func (h *handler) baRoleAction(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if _, err := h.db.Exec(ctx,
-				`UPDATE identity.business_role SET name=$2 WHERE id=$1::uuid`, roleID, body.Name); err != nil {
+				`UPDATE identity.business_role SET name=$2 WHERE id=$1::uuid`, roleID, body.Name); isUniqueViolation(err) {
+				jsonErr(w, roleNameTaken(body.Name), http.StatusConflict)
+				return
+			} else if err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -17707,9 +17805,11 @@ func (h *handler) developerWorkflowAction(w http.ResponseWriter, r *http.Request
 			SubjectType   *string         `json:"subject_type"`
 			SubjectConfig json.RawMessage `json:"subject_config"`
 			// Per-definition dedup choice; absent = unchanged.
-			SingleActiveInstance *bool           `json:"single_active_instance"`
-			Steps                json.RawMessage `json:"steps"`
-			ContextSchema        json.RawMessage `json:"context_schema"`
+			SingleActiveInstance *bool `json:"single_active_instance"`
+			// Whether its approver may start it; absent = unchanged.
+			ApproverMayStart *bool           `json:"approver_may_start"`
+			Steps            json.RawMessage `json:"steps"`
+			ContextSchema    json.RawMessage `json:"context_schema"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, err, http.StatusBadRequest)
@@ -17744,6 +17844,13 @@ func (h *handler) developerWorkflowAction(w http.ResponseWriter, r *http.Request
 				return
 			}
 			updated.SingleActiveInstance = *body.SingleActiveInstance
+		}
+		if body.ApproverMayStart != nil && *body.ApproverMayStart != updated.ApproverMayStart {
+			if err := ws.SetWorkflowDefApproverMayStart(ctx, defID, *body.ApproverMayStart); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			updated.ApproverMayStart = *body.ApproverMayStart
 		}
 		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 			Category: auditlog.CategoryModelChange, EventType: auditlog.EventWorkflowDefUpdated,
@@ -18306,6 +18413,43 @@ func (h *handler) dashboardWidgetAction(w http.ResponseWriter, r *http.Request) 
 	}
 
 	jsonOK(w, result)
+}
+
+// errApproverStarts refuses an approver starting a workflow that does not
+// allow it.
+var errApproverStarts = fmt.Errorf("approvers do not start approval workflows — a business user submits the request, you decide it (a workflow whose approver may start it says so in its definition: approver_may_start)")
+
+// onlyApprover: the actor's business-facing role is business_admin alone —
+// no submitter or builder role beside it.
+func onlyApprover(a *actor) bool {
+	return a.hasRole("business_admin") && !a.hasRole("business_user") && !a.hasRole("developer") && !a.hasRole("tenant_admin") && !a.hasRole("platform_admin")
+}
+
+// ruleApproverMayStart reports whether the workflow a rule starts — by id,
+// else by name in the rule's application — lets its approver start it.
+func (h *handler) ruleApproverMayStart(ctx context.Context, ruleID string) bool {
+	var v bool
+	_ = h.db.QueryRow(ctx, `
+		SELECT COALESCE(wd.approver_may_start, false)
+		FROM workflow.automation_rule r
+		JOIN workflow.workflow_def wd ON wd.id = r.workflow_def_id
+		     OR (r.workflow_def_id IS NULL AND wd.application_id = r.application_id AND wd.name = r.workflow_name AND wd.status <> 'archived')
+		WHERE r.id = $1::uuid
+		ORDER BY (wd.id = r.workflow_def_id) DESC NULLS LAST
+		LIMIT 1`, ruleID).Scan(&v)
+	return v
+}
+
+// isUniqueViolation reports a unique constraint refusal (SQLSTATE 23505).
+func isUniqueViolation(err error) bool {
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) && pe.Code == "23505"
+}
+
+// roleNameTaken: business roles are the workspace's, shared by its apps, so
+// a name another app's role uses is taken (it was a raw 500).
+func roleNameTaken(name string) error {
+	return fmt.Errorf("a business role named %q already exists in this workspace — roles are shared by its applications: give this one another name, or reuse that role", name)
 }
 
 // isCheckViolation reports a CHECK or trigger refusal (SQLSTATE 23514), such

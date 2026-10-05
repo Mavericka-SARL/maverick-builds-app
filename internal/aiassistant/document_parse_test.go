@@ -130,8 +130,8 @@ func TestExtractDocumentText_XLSX_RowCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(text, "more rows omitted") {
-		t.Fatalf("expected row-cap notice in extracted text, got: %q", text)
+	if want := `... rows 501-510 not shown: read_attached_sheet {"sheet": "Sheet1", "from_row": 501}`; !strings.Contains(text, want) {
+		t.Fatalf("expected the row-cap notice %q in the extracted text (%d chars)", want, len(text))
 	}
 }
 

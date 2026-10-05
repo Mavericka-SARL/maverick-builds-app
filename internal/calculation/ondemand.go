@@ -221,6 +221,42 @@ func (env *evalEnv) loadDependencies(ctx context.Context, def *MetricDef) (map[s
 // combo — the evaluation executePartition runs at every leaf, rollup combo,
 // slice and total.
 func (env *evalEnv) cellEvaluator(ctx context.Context, def *MetricDef) (cellEval, error) {
+	evalValue, err := env.valueEvaluator(ctx, def)
+	if err != nil {
+		return nil, err
+	}
+	return func(combo map[string]string) (float64, bool, error) {
+		v, noData, err := evalValue(combo)
+		if err != nil {
+			return 0, noData, err
+		}
+		n, ok := v.Number()
+		if !ok {
+			return 0, noData, formula.ErrValue
+		}
+		return n, false, nil
+	}, nil
+}
+
+// textEvaluator is cellEvaluator for a text calculation: the formula's
+// result as text (a number as the spreadsheet writes it). "" is no text.
+func (env *evalEnv) textEvaluator(ctx context.Context, def *MetricDef) (func(combo map[string]string) (string, bool, error), error) {
+	evalValue, err := env.valueEvaluator(ctx, def)
+	if err != nil {
+		return nil, err
+	}
+	return func(combo map[string]string) (string, bool, error) {
+		v, noData, err := evalValue(combo)
+		if err != nil {
+			return "", noData, err
+		}
+		return v.String(), false, nil
+	}, nil
+}
+
+// valueEvaluator evaluates def's formula at one combo and gives its value as
+// the formula left it; the bool reports a failure where nothing was read.
+func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(combo map[string]string) (formula.Value, bool, error), error) {
 	allDims, allDefs, metricDimIDs, dimIDToName := env.allDims, env.allDefs, env.metricDimIDs, env.dimIDToName
 
 	// Bulk-prefetch each dependency's recorded values ONCE (not once per
@@ -253,6 +289,36 @@ func (env *evalEnv) cellEvaluator(ctx context.Context, def *MetricDef) (cellEval
 	}
 	reads := newDimReads(ctx, env.meta, def, allDefs, metricDimIDs, fetch, rows, true)
 
+	// A text calculation reads a text metric by a plain reference
+	// (wa_employee_id & "|" & wa_type): an input's note or a calculation's
+	// text at the cell's own members of that metric's dimensions. Validation
+	// allows it nowhere else.
+	texts := map[string]map[string]string{}
+	for _, depID := range def.DependsOnID {
+		if dep := allDefs[depID]; def.Text && dep.Text {
+			load := env.s.store.LoadInputTextMap
+			if !dep.IsInput {
+				load = env.s.store.LoadCalcTextMap
+			}
+			m, err := load(ctx, env.modelID, env.revisionID, depID)
+			if err != nil {
+				return nil, fmt.Errorf("load the text of %s: %w", dep.Name, err)
+			}
+			texts[depID] = m
+		}
+	}
+	noteAt := func(depID string, combo map[string]string) string {
+		own := make(map[string]string, len(metricDimIDs[depID]))
+		for _, dimID := range metricDimIDs[depID] {
+			code, ok := combo[dimID]
+			if !ok {
+				return ""
+			}
+			own[dimID] = code
+		}
+		return texts[depID][dimKey(own)]
+	}
+
 	// evalCell evaluates the formula at combo. Its second return is only
 	// meaningful alongside an error: true means the formula failed while
 	// EVERY value it read — its plain references at this combo and every
@@ -263,17 +329,22 @@ func (env *evalEnv) cellEvaluator(ctx context.Context, def *MetricDef) (cellEval
 	// absence cannot be told from zero here and doesn't need to be). The
 	// caller skips such combos instead of recording them as calculation
 	// failures.
-	evalCell := func(combo map[string]string, useMemo bool) (float64, bool, error) {
+	evalCell := func(combo map[string]string, useMemo bool) (formula.Value, bool, error) {
 		reads.data = false
 		values := make(map[string]float64, len(def.DependsOnID))
+		notes := map[string]string{}
 		for _, depID := range def.DependsOnID {
 			depDef := allDefs[depID]
 			if parseErr == nil && !plain[strings.ToUpper(depDef.Name)] {
 				continue // read only through LOOKUP / *IFS / *VALUE: never bound as a value
 			}
+			if _, ok := texts[depID]; ok {
+				notes[depDef.Name] = noteAt(depID, combo)
+				continue
+			}
 			v, _, err := resolveDependency(ctx, allDims, depDef, metricDimIDs[depID], combo, fetch[depID], rows[depID])
 			if err != nil {
-				return 0, false, fmt.Errorf("resolve %s: %w", depDef.Name, err)
+				return formula.Value{}, false, fmt.Errorf("resolve %s: %w", depDef.Name, err)
 			}
 			values[depDef.Name] = v // bind unconditionally: preserves "0 on miss" formula-variable semantics
 		}
@@ -289,12 +360,15 @@ func (env *evalEnv) cellEvaluator(ctx context.Context, def *MetricDef) (cellEval
 			return true
 		}
 		if parseErr != nil {
-			return 0, noData(), parseErr
+			return formula.Value{}, noData(), parseErr
 		}
 		// Upper-cased keys, as EvalWithContext does: EvalNode does not.
 		vars := make(map[string]formula.Value, len(values)+len(combo))
 		for name, v := range values {
 			vars[strings.ToUpper(name)] = formula.NumberVal(v)
+		}
+		for name, note := range notes {
+			vars[strings.ToUpper(name)] = formula.StringVal(note)
 		}
 		// Translate stored {dim_id: member_code} into named vars for the formula.
 		for dimID, memberCode := range combo {
@@ -307,20 +381,19 @@ func (env *evalEnv) cellEvaluator(ctx context.Context, def *MetricDef) (cellEval
 			// A blank or unknown member is a configuration problem at this
 			// cell, never an absence of data — even when nothing was read
 			// before the member check failed (a LOOKUP-only formula).
-			return 0, noData() && !formula.IsMemberNotAvailable(result.Err()), result.Err()
+			return formula.Value{}, noData() && !formula.IsMemberNotAvailable(result.Err()), result.Err()
 		}
 		if result.IsBlank() {
 			// Blank (YEARVALUE of a time_summary 'none' source, a bare
 			// unset property): no value, so no row — never a persisted 0.
-			return 0, true, errBlankResult
+			return formula.Value{}, true, errBlankResult
 		}
-		n, ok := result.Number()
-		if !ok {
-			return 0, noData(), formula.ErrValue
+		if _, ok := result.Number(); !ok && !def.Text {
+			return formula.Value{}, noData(), formula.ErrValue
 		}
-		return n, false, nil
+		return result, false, nil
 	}
-	return func(combo map[string]string) (float64, bool, error) {
+	return func(combo map[string]string) (formula.Value, bool, error) {
 		v, noData, err := evalCell(combo, true)
 		if err != nil && noData && hasConditional && !errors.Is(err, errBlankResult) {
 			// A memoised conditional aggregation answers without reading

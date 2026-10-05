@@ -47,6 +47,14 @@ func TestRemapWidgetPropsIDs(t *testing.T) {
 			wantChanged: true,
 		},
 		{
+			// show_members moves its keys; the lists of member codes copy
+			// verbatim, in order.
+			name:        "grid show_members keys are dimension ids",
+			in:          `{"show_members":{"d-old":["FY","Q1"],"unmapped":["X"]}}`,
+			want:        `{"show_members":{"d-new":["FY","Q1"],"unmapped":["X"]}}`,
+			wantChanged: true,
+		},
+		{
 			// A grid widget's saved layout: axis lists keep their order and
 			// the "__metrics__" sentinel; filter_sel moves its keys, not its
 			// member-code values. Metric IDs never appear here, so a metric

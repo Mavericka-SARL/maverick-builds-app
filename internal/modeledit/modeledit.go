@@ -254,6 +254,12 @@ func RekeyMemberCode(ctx context.Context, db DB, dimID, oldCode, newCode string)
 		{`UPDATE model.dashboard_widget
 		  SET widget_props = jsonb_set(widget_props, ARRAY['kpi_scope','member_code'], to_jsonb($2::text))
 		  WHERE widget_props->'kpi_scope'->>'dimension_id' = $1 AND widget_props->'kpi_scope'->>'member_code' = $3`, "widget kpi_scope"},
+		{`UPDATE model.dashboard_widget
+		  SET widget_props = jsonb_set(widget_props, ARRAY['show_members',$1::text],
+		      (SELECT jsonb_agg(CASE WHEN e = to_jsonb($3::text) THEN to_jsonb($2::text) ELSE e END ORDER BY o)
+		       FROM jsonb_array_elements(widget_props->'show_members'->$1::text) WITH ORDINALITY AS x(e, o)))
+		  WHERE jsonb_typeof(widget_props->'show_members'->$1::text) = 'array'
+		    AND widget_props->'show_members'->$1::text ? $3`, "widget show_members"},
 	} {
 		if _, err := db.Exec(ctx, s.q, dimID, newCode, oldCode); err != nil {
 			errs = append(errs, fmt.Errorf("re-key %s: %w", s.tag, err))

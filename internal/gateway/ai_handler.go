@@ -501,7 +501,7 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Loop to handle read tool calls. propose_actions (write gateway) breaks
 	// the loop and sends a "proposal" event to the frontend.
-	provMessages := aiassistant.MessagesToProviderHistory(history)
+	provMessages := aiassistant.MessagesToProviderHistory(aiassistant.CompactHistory(history))
 	var finalReply string
 
 	// Repeat-call breaker: gpt-4o-mini has been observed calling the SAME
@@ -532,6 +532,16 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 		return true
 	}
 	progress := &toolProgress{send: sendSSE}
+	// warnedPlan is the last plan that ran but went back for its warnings.
+	// A model asking "shall I propose it?" instead of proposing it again lost
+	// a plan that works (the HR rebuild's monthly plan, sent back once for a
+	// harmless SUMIFS); the turn ends showing it with those warnings instead.
+	var warnedPlan []aiassistant.ProposalStep
+	var warnedWarnings []string
+	// sentBack: a plan of this turn went back to be fixed. A model that then
+	// ends the turn asking leave to propose ("confirm and I will post it" —
+	// gpt-5-mini did, stage after stage) is told once to propose instead.
+	sentBack, nudged := false, false
 
 turn:
 	for {
@@ -575,6 +585,12 @@ turn:
 		}
 
 		if llmResp.FinishReason != "tool_calls" || len(llmResp.Message.ToolCalls) == 0 {
+			if sentBack && !nudged && asksToPropose(llmResp.Message.Content) {
+				nudged = true
+				_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, nil, "", "")
+				provMessages = append(provMessages, llmResp.Message, providers.Message{Role: "user", Content: proposeNudge})
+				continue
+			}
 			finalReply = llmResp.Message.Content
 			break
 		}
@@ -654,6 +670,9 @@ turn:
 				sendSSE("error", map[string]string{"error": "propose_actions: invalid steps"})
 				return
 			}
+			// Each metric before what names it, so a plan written in reading
+			// order is checked, shown and run in an order that works.
+			args.Steps = aiassistant.OrderByDependencies(args.Steps)
 			// Run the plan as confirming would (aiCheckProposal); one that
 			// would fail goes back to the model with its errors, not to the
 			// developer. A check that cannot run lets the plan through:
@@ -666,14 +685,21 @@ turn:
 			// A plan that runs but whose formulas look wrong goes back once;
 			// proposed again unchanged, it reaches the developer with them.
 			warnBack := cErr == nil && len(check.problems) == 0 && len(check.warnings) > 0 && !retries.warnedBefore(check.warnings)
+			if warnBack {
+				warnedPlan, warnedWarnings = args.Steps, check.warnings
+			}
 			if cErr != nil {
 				log.Printf("AI proposal check: %v", cErr)
 			} else if len(check.problems) > 0 || warnBack {
 				planResult := warningResult(check.warnings)
+				sentBack = true
 				if len(check.problems) > 0 {
 					mode := retries.next(len(check.problems))
 					if mode == retryPartial {
-						retries.leftOut = check.problems
+						retries.leftOut, retries.partialOf = check.problems, args.Steps
+					}
+					if mode == retryStop {
+						sentBack = false // told to stop and explain: no nudge
 					}
 					planResult = check.rejection(mode)
 				}
@@ -727,7 +753,7 @@ turn:
 			}
 
 			if len(retries.leftOut) > 0 {
-				_, _ = store.SaveMessage(ctx, sessionID, "assistant", leftOutNote(retries.leftOut), nil, "", "")
+				_, _ = store.SaveMessage(ctx, sessionID, "assistant", leftOutNote(retries.leftOut, droppedSteps(retries.partialOf, args.Steps, retries.leftOut)), nil, "", "")
 			}
 			allMsgs, _ := store.ListMessages(ctx, sessionID)
 			if allMsgs == nil {
@@ -761,6 +787,23 @@ turn:
 				ToolCallID: tc.ID,
 				ToolName:   tc.Name,
 			})
+		}
+	}
+
+	if warnedPlan != nil {
+		if proposal, pErr := proposalStore.CreateProposal(ctx, sessionID, warnedPlan); pErr == nil {
+			if strings.TrimSpace(finalReply) != "" {
+				_, _ = store.SaveMessage(ctx, sessionID, "assistant", finalReply, nil, "", "")
+			}
+			_, _ = store.SaveMessage(ctx, sessionID, "assistant", fmt.Sprintf(
+				"The plan below runs (%d step(s)); it is shown with the plan check's warnings, which were not answered: %s",
+				len(warnedPlan), strings.Join(warnedWarnings, " | ")), nil, "", "")
+			allMsgs, _ := store.ListMessages(ctx, sessionID)
+			if allMsgs == nil {
+				allMsgs = []aiassistant.ChatMessage{}
+			}
+			sendSSE("proposal", map[string]any{"proposal": proposal, "messages": allMsgs, "session": sess, "warnings": warnedWarnings})
+			return
 		}
 	}
 
@@ -1573,7 +1616,7 @@ func buildDocumentContext(docs []aiassistant.Document) string {
 		used += len(content)
 		fmt.Fprintf(&sb, "\n### %s\n", d.Filename)
 		if d.Importable {
-			sb.WriteString("(Spreadsheet kept whole: importable with preview_file_import / import_file_data — the text below is a sample, not the data.)\n")
+			sb.WriteString("(Spreadsheet kept whole: importable with preview_file_import / import_file_data, and any sheet's rows and whole formulas readable with read_attached_sheet — the text below is an overview, not the data.)\n")
 		}
 		sb.WriteString(content)
 		if clipped {

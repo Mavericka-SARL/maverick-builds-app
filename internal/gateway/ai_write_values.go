@@ -57,6 +57,11 @@ func (h *handler) aiCheckWriteValues(ctx context.Context, tx pgx.Tx, req aiassis
 	if err != nil {
 		return "", err
 	}
+	// Refused as a file import's are: the assistant wrote 0.03 for a 3%
+	// threshold, and the warning came only after the write.
+	if w := h.percentFractionWarning(ctx, tx, staged); w != "" && !req.ValuesArePercentUnits {
+		return "", fmt.Errorf("%s (if these really are percents under 1%%, pass \"values_are_percent_units\": true)", strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(w), "WARNING: ")))
+	}
 	return fmt.Sprintf("Would write %d value(s) into %s", len(staged), req.Header[len(req.Header)-1]), nil
 }
 

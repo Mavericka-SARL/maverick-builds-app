@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { serialToISO, isoToSerial } from "../dateSerial";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { GripVertical, Download, MoreVertical, Rows3, X as XIcon } from "lucide-react";
 import { api, type DemoContext, type GridData, type Metric, type DimMember, type DimInfo, type GridDefaultView , type SelectorsPosition, type HighlightRule, type HighlightTone } from "../../api/client";
@@ -473,7 +474,7 @@ function pickMetrics<T extends { id: string }>(all: T[], ids?: string[]): T[] {
   return picked.length > 0 ? picked : all;
 }
 
-export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncContext, title, selectorsPosition }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; metricIds?: string[]; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition }) {
+export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembers, syncContext, title, selectorsPosition }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; metricIds?: string[]; showMembers?: Record<string, string[]>; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition }) {
   const qc = useQueryClient();
 
   // Two-query split for server-side context scoping. The META query is cheap
@@ -500,7 +501,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
   const [pendingText, setPendingText] = useState<Record<string, string | null>>({});
   const writeback = useMutation({
     mutationFn: ({ metric_id, dim_codes, value, text, clear }: { cellKey: string; metric_id: string; dim_codes: Record<string, string>; value?: number; text?: string; clear?: boolean }) =>
-      api.writeback({ metric_id, dim_codes, value, text, clear, model_id: ctx.model_id, revision_id: ctx.revision_id }),
+      api.writeback({ metric_id, dim_codes, value, text, clear, model_id: ctx.model_id, revision_id: ctx.revision_id, recalc: "background" }),
     // Every fact-derived query on the page, not just this grid's own: the
     // KPI cards and charts beside it must show the new number too.
     // Returning the promise defers onSettled until those refetches complete.
@@ -562,6 +563,10 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
     placeholderData: (prev) => prev, // keep last slice visible while a new scope loads
   });
 
+  // A write answered before its dependents were recalculated: calculated
+  // cells show as pending until the grid's 2 s poll reports the pass landed.
+  const recalcPending = !!cellsData?.recalc_pending;
+
   // Merge cheap metadata with the scoped cells so everything downstream still
   // reads a single `grid` object (dimensions/metrics from meta, cells/totals
   // from the scoped query).
@@ -601,13 +606,16 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
 
     const validId = (id: string) => id === METRICS_ID || dims.some(d => d.id === id);
     if (defaultView) {
-      setPivotRows(defaultView.rows.filter(validId));
-      setPivotCols(defaultView.cols.filter(validId));
+      // A saved layout may leave a zone out ({"rows": [...], "cols": [...]}
+      // from the API or the AI Developer): a missing zone is empty.
+      const rows = defaultView.rows ?? [], cols = defaultView.cols ?? [], context = defaultView.context ?? [];
+      setPivotRows(rows.filter(validId));
+      setPivotCols(cols.filter(validId));
       // A dimension the saved layout puts in no zone (a layout naming only
       // its pins in filter_sel) is a context selector at its pinned member,
       // never dropped: dropped, every cell key missed it and read nothing.
-      const placed = new Set([...defaultView.rows, ...defaultView.cols, ...defaultView.context]);
-      setPivotContext([...defaultView.context.filter(validId), ...dims.filter(d => !placed.has(d.id)).map(d => d.id)]);
+      const placed = new Set([...rows, ...cols, ...context]);
+      setPivotContext([...context.filter(validId), ...dims.filter(d => !placed.has(d.id)).map(d => d.id)]);
       const baseSel = Object.fromEntries(dims.map(d => [d.id, defaultLeafCode(d) ?? ""]));
       setFilterSel({ ...baseSel, ...(defaultView.filter_sel ?? {}) });
     } else {
@@ -696,8 +704,17 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
   // In the zone's own order (a saved layout's rows [region, product] are
   // region then product), not the grid's.
   const inZone = (zone: string[]) => zone.flatMap(id => dims.filter(d => d.id === id));
-  const rowDims  = inZone(pivotRows);
-  const colDims  = inZone(pivotCols);
+  // A widget's show_members: the axis lists only those members, flat, in
+  // the order given (FY, Q1, Q2, H2). Only the axis changes — dims keeps
+  // the hierarchy, so a total among them still adds up its children.
+  const onAxis = (d: DimInfo): DimInfo => {
+    const codes = showMembers?.[d.id];
+    if (!codes || codes.length === 0) return d;
+    const picked = codes.flatMap(c => d.members.filter(m => m.code === c).map(m => ({ ...m, parent_code: undefined })));
+    return picked.length > 0 ? { ...d, members: picked } : d;
+  };
+  const rowDims  = inZone(pivotRows).map(onAxis);
+  const colDims  = inZone(pivotCols).map(onAxis);
   const ctxDims  = inZone(pivotContext);
   // When metrics are in the context zone, only show the one selected metric in the grid
   const ctxMetricId = visibleMetrics.some(v => v.id === contextMetric) ? contextMetric : (visibleMetrics[0]?.id ?? "");
@@ -1249,6 +1266,33 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
       );
     }
 
+    if (m.format === "date") {
+      // A date: picked, stored as its serial (what DATE() gives); emptied,
+      // the cell clears.
+      const iso = val != null && val !== 0 ? serialToISO(val) : "";
+      return (
+        <td className={tone || undefined} style={{ ...td, textAlign: "right", padding: "4px 5px", borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
+          <input
+            type="date"
+            className="mvx-cell-input"
+            aria-label={`${m.label ?? m.name} — date`}
+            value={iso}
+            onChange={e => {
+              const dim_codes: Record<string, string> = {};
+              dims.forEach((d, i) => { dim_codes[d.id] = fc[i]?.code ?? ""; });
+              if (e.target.value === "") {
+                setPending((p) => ({ ...p, [key]: null }));
+                writeback.mutate({ cellKey: key, metric_id: m.id, dim_codes, clear: true });
+                return;
+              }
+              setPending((p) => ({ ...p, [key]: isoToSerial(e.target.value) }));
+              writeback.mutate({ cellKey: key, metric_id: m.id, dim_codes, text: e.target.value });
+            }}
+          />
+        </td>
+      );
+    }
+
     if (m.format === "picklist") {
       // A pick-list cell holds one member of its dimension: chosen from a
       // list, written at once (the key; "—" clears it).
@@ -1273,7 +1317,8 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
             }}
           >
             <option value="">—</option>
-            {(m.picklist_options ?? []).map(o => <option key={o.code} value={String(o.key)}>{o.label}</option>)}
+            {(m.picklist_options ?? []).filter(o => !o.parent || m.picklist_allow_parents || String(o.key) === current)
+              .map(o => <option key={o.code} value={String(o.key)}>{o.label}</option>)}
             {current !== "" && !(m.picklist_options ?? []).some(o => String(o.key) === current) && (
               <option value={current}>(a member no longer there)</option>
             )}
@@ -1311,10 +1356,25 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
 
   function calcCell(m: Metric, fc: DimMember[], borderLeft?: string) {
     const isParent = comboIsAgg(fc);
+    if (m.format === "text") {
+      // A calculated text (an action key, a status): the text its formula
+      // gave at this cell, totals included when its agg_rule is formula.
+      const text = g.texts?.[getKey(m.id, fc)] ?? "";
+      return (
+        <td
+          className={["mvx-cell--calc", isParent ? "mvx-cell--agg" : "", text ? "" : "mvx-cell--empty", recalcPending ? "mvx-cell--pending" : "", toneClass(cellTone(m, fc, undefined))].filter(Boolean).join(" ")}
+          title={recalcPending ? "Recalculating — this value is about to change" : (text || undefined)}
+          style={{ ...td, textAlign: "left", borderLeft, ...textCellStyle }}
+        >
+          {text || "—"}
+        </td>
+      );
+    }
     const v = resolveCell(m.id, fc);
     return (
       <td
-        className={["mvx-cell--calc", isParent ? "mvx-cell--agg" : "", toneClass(cellTone(m, fc, v))].filter(Boolean).join(" ")}
+        className={["mvx-cell--calc", isParent ? "mvx-cell--agg" : "", recalcPending ? "mvx-cell--pending" : "", toneClass(cellTone(m, fc, v))].filter(Boolean).join(" ")}
+        title={recalcPending ? "Recalculating — this value is about to change" : undefined}
         style={{ ...td, textAlign: "right", borderLeft }}
       >
         {fmtMetric(m, v)}
@@ -1606,6 +1666,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
           {pushSync && <span>Click a row or column label to select it in synced widgets</span>}
         </div>
         {writeback.isPending && <p className="mvx-grid-status mvx-grid-status--saving">Saving…</p>}
+        {!writeback.isPending && recalcPending && <p className="mvx-grid-status mvx-grid-status--saving" role="status">Recalculating…</p>}
         {writeback.isError && <p className="mvx-grid-status mvx-grid-status--error">Save failed: {(writeback.error as Error).message}</p>}
         </div>
 
@@ -1679,10 +1740,10 @@ function ruleHolds(r: HighlightRule, s: Probe, read: (name: string) => Probe): b
   return false;
 }
 
-// A text metric holds notes (format "text", an input); a calculated one
-// keeps showing its number as before.
+// A text metric's cells hold text: an input's notes, or what a calculated
+// one's formula gave. Both are read from the grid's texts.
 function isTextMetric(m: Metric): boolean {
-  return m.format === "text" && !!m.is_input;
+  return m.format === "text";
 }
 
 const textCellStyle: React.CSSProperties = { maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
@@ -1703,6 +1764,7 @@ function overlay<T>(base: Record<string, T>, pending: Record<string, T | null>):
 
 function fmtMetric(m: Metric, n: number | null | undefined): string {
   if (n == null) return "—";
+  if (m.format === "date") return n === 0 ? "—" : serialToISO(n);
   const d = m.format_decimals ?? 0;
   // Float noise below the shown precision (a variance of -1e-16) is 0, not "-$0.00".
   if (m.format !== "picklist" && Math.abs(n) < 0.5 * Math.pow(10, -d)) n = 0;
@@ -1712,7 +1774,9 @@ function fmtMetric(m: Metric, n: number | null | undefined): string {
     case "boolean":
       return n ? "Yes" : "No";
     case "text":
-      return String(n);
+      // A calculated text's cell shows its text (calcCell); a number in
+      // its place is a total, which text has none of.
+      return m.is_input ? String(n) : "—";
     case "picklist": {
       // The member the cell holds; 0 is a cleared cell.
       if (n === 0) return "—";

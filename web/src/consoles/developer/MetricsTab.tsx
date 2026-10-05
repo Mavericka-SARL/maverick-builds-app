@@ -47,6 +47,7 @@ function fmtBadge(format: string, decimals: number, currency: string): string {
     case "boolean":    return "Y/N";
     case "text":       return "TXT";
     case "picklist":   return "LIST";
+    case "date":       return "DATE";
     default:           return decimals > 0 ? `#.${decimals}` : "#";
   }
 }
@@ -233,6 +234,10 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
   const [formatDecimals, setFormatDecimals] = useState(m.format_decimals ?? 0);
   const [formatCurrency, setFormatCurrency] = useState(m.format_currency ?? "$");
   const [picklistDim, setPicklistDim] = useState(m.picklist_dimension_id ?? "");
+  const [allowParents, setAllowParents] = useState(!!m.picklist_allow_parents);
+  // Input or calculated: switching keeps the metric's id and the formulas
+  // naming it (a total the workbook types in; a typed figure now derived).
+  const [isInput, setIsInput] = useState(m.is_input);
   const [tags, setTags] = useState<string[]>(m.tags ?? []);
   const [highlightRules, setHighlightRules] = useState<HighlightRule[]>(m.highlight_rules ?? []);
   const [recalcResults, setRecalcResults] = useState<RecalcRow[] | null>(null);
@@ -245,22 +250,27 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
   });
   const revisionLabel = (id: string) => modelRevisions.find(r => r.id === id)?.name ?? id.slice(0, 8);
 
-  const invalidRefs = useUnknownFormulaNames(formula, allMetrics.map(x => x.name), dimNames, !m.is_input);
+  const invalidRefs = useUnknownFormulaNames(formula, allMetrics.map(x => x.name), dimNames, !isInput);
   const isPicklist = format === "picklist";
   // A text input holds notes: never totalled, across members or time.
-  const isNotes = format === "text" && m.is_input;
-  const canSave = name.trim() !== "" && (m.is_input || formula.trim() !== "") && (!isPicklist || picklistDim !== "");
+  const isNotes = format === "text" && isInput;
+  const isCalcText = format === "text" && !isInput;
+  const canSave = name.trim() !== "" && (isInput || formula.trim() !== "") && (!isPicklist || picklistDim !== "");
+  const kindChanged = isInput !== m.is_input;
 
   const update = useMutation({
-    mutationFn: () => api.updateMetric(m.id, {
-      name, label, formula,
+    mutationFn: (opts?: { dropValues?: boolean }) => api.updateMetric(m.id, {
+      name, label, formula: isInput ? "" : formula,
+      ...(kindChanged ? { is_input: isInput, drop_values: !!opts?.dropValues } : {}),
       // A pick-list never totals: "none", or "formula" for a calculated one.
-      agg_rule: isNotes || (isPicklist && aggRule !== "formula") ? "none" : aggRule,
+      // Dates are never added up: Sum becomes None (no total).
+      agg_rule: isNotes || ((isPicklist || isCalcText) && aggRule !== "formula") || (format === "date" && (aggRule === "sum" || aggRule === "rate")) ? "none" : aggRule,
       agg_numerator_metric_id: aggRule === "rate" ? numeratorId : "",
       agg_denominator_metric_id: aggRule === "rate" ? denominatorId : "",
       format, format_decimals: formatDecimals, format_currency: formatCurrency,
-      time_summary: isPicklist || isNotes ? "none" : timeSummary, tags,
+      time_summary: isPicklist || isNotes || isCalcText || (format === "date" && timeSummary === "sum") ? "none" : timeSummary, tags,
       picklist_dimension_id: isPicklist ? picklistDim : "",
+      picklist_allow_parents: isPicklist ? allowParents : false,
       highlight_rules: highlightRules,
     }),
     onSuccess: (data) => {
@@ -268,6 +278,16 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
       invalidateModelData(qc);
       setEditing(false);
       if (data.recalc && data.recalc.length > 0) setRecalcResults(data.recalc);
+    },
+    // An input holding values becomes calculated only once they may go.
+    onError: (err) => {
+      if (kindChanged && !isInput && /drop_values/.test((err as Error).message)) {
+        confirm({
+          title: "Drop its values?",
+          body: `"${m.name}" holds typed values. Calculated from now on, it drops them (the cell history keeps them).`,
+          confirmLabel: "Drop values and calculate", onConfirm: () => update.mutate({ dropValues: true }),
+        });
+      }
     },
   });
   const del = useMutation({
@@ -306,7 +326,15 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
                 style={{ width: 160 }} placeholder="name" />
               <TextInput value={label} onChange={(e) => setLabel(e.target.value)} aria-label="Display name"
                 style={{ width: 160 }} placeholder="display name (optional)" />
-              {!m.is_input && (
+              <Select value={isInput ? "input" : "calc"} onChange={(e) => {
+                const toInput = e.target.value === "input";
+                setIsInput(toInput);
+                if (toInput && (aggRule === "formula" || aggRule === "rate")) setAggRule("sum");
+              }} style={{ width: 120 }} aria-label="Input or calculated">
+                <option value="input">Input</option>
+                <option value="calc">Calculated</option>
+              </Select>
+              {!isInput && (
                 <TextInput value={formula} onChange={(e) => setFormula(e.target.value)}
                   error={invalidRefs.length > 0}
                   style={{ width: 260, fontFamily: "var(--font-mono)" }} placeholder="formula" />
@@ -321,7 +349,7 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
                 {/* Calculated metrics only: "formula" means evaluating this
                     metric's formula at the total level, which an input metric
                     has none to do. The server rejects it for inputs too. */}
-                {!m.is_input && <option value="formula">Formula</option>}
+                {!isInput && <option value="formula">Formula</option>}
                 <option value="none">None (no total)</option>
               </Select>
               {aggRule === "rate" && (
@@ -337,7 +365,7 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
               {onTimeGrid && !isPicklist && <TimeSummarySelect value={timeSummary} onChange={setTimeSummary} />}
               <Select value={format} onChange={(e) => {
                 setFormat(e.target.value);
-                if (e.target.value === "picklist" && aggRule !== "formula" && aggRule !== "none") setAggRule(m.is_input ? "none" : "formula");
+                if (e.target.value === "picklist" && aggRule !== "formula" && aggRule !== "none") setAggRule(isInput ? "none" : "formula");
               }} style={{ width: 120 }} aria-label="Format">
                 <option value="number">Number</option>
                 <option value="percentage">Percentage</option>
@@ -345,9 +373,16 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
                 <option value="boolean">Boolean</option>
                 <option value="text">Text</option>
                 <option value="picklist">Pick-list</option>
+                <option value="date">Date</option>
               </Select>
               {isPicklist && (
                 <PicklistDimensionSelect dims={dims} value={picklistDim} onChange={setPicklistDim} />
+              )}
+              {isPicklist && (
+                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }} title="A cell may hold a member with members under it (a total)">
+                  <input type="checkbox" aria-label="Parents can be chosen" checked={allowParents} onChange={e => setAllowParents(e.target.checked)} />
+                  Parents too
+                </label>
               )}
               {(format === "number" || format === "percentage" || format === "currency") && (
                 <NumberInput min={0} max={4} value={formatDecimals}
@@ -498,23 +533,26 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
   const [numeratorId, setNumeratorId] = useState("");
   const [denominatorId, setDenominatorId] = useState("");
   const [picklistDim, setPicklistDim] = useState("");
+  const [allowParents, setAllowParents] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
   const isPicklist = format === "picklist";
   // A text input holds notes: never totalled, across members or time.
   const isNotes = format === "text" && isInput;
+  const isCalcText = format === "text" && !isInput;
 
   const add = useMutation({
     mutationFn: () => api.addMetric({
       name, label, is_input: isInput, formula, revision_id: revisionId,
       // A pick-list never totals: "none", or "formula" for a calculated one.
-      agg_rule: isNotes ? "none" : !isPicklist ? aggRule : isInput || aggRule === "none" ? "none" : "formula",
+      agg_rule: isNotes || (isCalcText && aggRule !== "formula") || (format === "date" && (aggRule === "sum" || aggRule === "rate")) ? "none" : !isPicklist ? aggRule : isInput || aggRule === "none" ? "none" : "formula",
       // Only sent for "rate"; any other rule has no operands and the server
       // rejects a pair it did not ask for.
       agg_numerator_metric_id: aggRule === "rate" ? numeratorId : "",
       agg_denominator_metric_id: aggRule === "rate" ? denominatorId : "",
       format, format_decimals: formatDecimals, format_currency: formatCurrency,
-      time_summary: isPicklist || isNotes ? "none" : timeSummary, tags,
+      time_summary: isPicklist || isNotes || isCalcText || (format === "date" && timeSummary === "sum") ? "none" : timeSummary, tags,
       picklist_dimension_id: isPicklist ? picklistDim : undefined,
+      picklist_allow_parents: isPicklist ? allowParents : undefined,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["dev-model"] });
@@ -560,6 +598,7 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
               { id: "boolean", label: "Boolean" },
               { id: "text", label: "Text" },
               { id: "picklist", label: "Pick-list" },
+              { id: "date", label: "Date" },
             ]}
             value={format}
             onChange={setFormat}
@@ -570,9 +609,18 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
             Each cell holds a note typed in the grid — a comment, an owner. Notes are never totalled, and formulas do not read them.
           </p>
         )}
+        {isCalcText && (
+          <p style={{ margin: 0, fontSize: "var(--font-size-caption)", color: "var(--color-text-muted)" }}>
+            Each cell shows the text its formula gives — a key such as <code>EMPLOYEE_ID &amp; "|" &amp; ACTION</code>, a status. Text is never added up (totals rule Formula evaluates it at the total), and formulas do not read it.
+          </p>
+        )}
         {isPicklist && (
           <Field label="Members of" description="each cell holds one member of this dimension — a drop-down list such as Yes/No, a status, or a region">
             <PicklistDimensionSelect dims={revisionDims} value={picklistDim} onChange={setPicklistDim} width={220} />
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 6 }}>
+              <input type="checkbox" aria-label="Parents can be chosen" checked={allowParents} onChange={e => setAllowParents(e.target.checked)} />
+              Parents can be chosen too (a total such as "All Departments"); otherwise a cell holds a leaf member
+            </label>
           </Field>
         )}
         {(format === "number" || format === "percentage" || format === "currency") && (

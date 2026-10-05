@@ -537,6 +537,9 @@ type createMetricParams struct {
 	// PicklistDimension (format "picklist"): the dimension, by name or id,
 	// whose members the metric's cells hold.
 	PicklistDimension string `json:"picklist_dimension"`
+	// PicklistAllowParents: its cells may hold a member with members under
+	// it; off, a cell holds a leaf.
+	PicklistAllowParents bool `json:"picklist_allow_parents"`
 	// HighlightRules tint its cells (metricformula.HighlightRule).
 	HighlightRules json.RawMessage `json:"highlight_rules"`
 }
@@ -614,6 +617,7 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 		// developer is refused.
 		res, vErr := metricformula.Validate(ctx, e.pool, metricformula.Request{
 			ModelID: e.modelID, RevisionID: revID, Name: p.Name, Formula: p.Formula,
+			Text: p.Format == metricformula.FormatText,
 		})
 		if vErr != nil {
 			return "", "", vErr
@@ -654,7 +658,7 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 		}
 	}
 	if picklist.DimensionID != "" {
-		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET picklist_dimension_id=$2::uuid WHERE id=$1::uuid`, newID, picklist.DimensionID); err != nil {
+		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET picklist_dimension_id=$2::uuid, picklist_allow_parents=$3 WHERE id=$1::uuid`, newID, picklist.DimensionID, p.PicklistAllowParents); err != nil {
 			return "", "", fmt.Errorf("set pick-list dimension: %w", err)
 		}
 	}
@@ -696,6 +700,13 @@ type updateMetricParams struct {
 	// PicklistDimension: the dimension (name or id) a pick-list's cells
 	// hold members of; left out keeps it while the format stays "picklist".
 	PicklistDimension string `json:"picklist_dimension"`
+	// PicklistAllowParents: left out keeps it.
+	PicklistAllowParents *bool `json:"picklist_allow_parents"`
+	// IsInput switches the metric between input and calculated in place
+	// (modeledit.SwitchMetricKind); left out keeps it. Becoming calculated
+	// takes a formula, and drop_values for an input holding values.
+	IsInput    *bool `json:"is_input"`
+	DropValues bool  `json:"drop_values"`
 	// HighlightRules: left out keeps them; [] removes them.
 	HighlightRules json.RawMessage `json:"highlight_rules"`
 }
@@ -724,8 +735,8 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 	// The metric's own revision is needed before validating, not after: refs
 	// resolve within it, and passing MetricID is what lets the validator
 	// reject a formula that references the metric being edited, directly or
-	// through a cycle. is_input is the stored one: update_metric does not
-	// carry the flag, and ValidateAggRule needs it to reject "formula" on an
+	// through a cycle. is_input is the stored one unless the step switches
+	// it (is_input): ValidateAggRule needs it to reject "formula" on an
 	// input metric.
 	var metricRev, storedName string
 	var metricIsInput bool
@@ -756,6 +767,21 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 		}
 	}
 	formulaSent := has("formula") && p.Formula != ""
+	switchKind := p.IsInput != nil && *p.IsInput != metricIsInput
+	if switchKind {
+		if *p.IsInput {
+			if formulaSent {
+				return "", "", fmt.Errorf("an input metric has no formula — send is_input true without one")
+			}
+			if !has("agg_rule") && (st.AggRule == string(rollup.AggFormula) || st.AggRule == string(rollup.AggRate)) {
+				st.AggRule = "sum"
+			}
+			st.Formula = ""
+		} else if !formulaSent {
+			return "", "", fmt.Errorf("a calculated metric needs a formula — send it with is_input false")
+		}
+		metricIsInput = *p.IsInput
+	}
 	for _, k := range []struct {
 		key      string
 		dst, src *string
@@ -796,7 +822,8 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 				p.TimeSummary = ""
 			}
 		}
-		if format == metricformula.FormatPicklist {
+		if format == metricformula.FormatPicklist || (format == metricformula.FormatText && !metricIsInput) {
+			// A pick-list's and a calculated text's totals are none or formula.
 			if !has("agg_rule") && p.AggRule != string(rollup.AggNone) && p.AggRule != string(rollup.AggFormula) {
 				p.AggRule = ""
 			}
@@ -853,20 +880,29 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 		res, vErr := metricformula.Validate(ctx, e.pool, metricformula.Request{
 			ModelID: e.modelID, RevisionID: metricRev, MetricID: p.MetricID,
 			Name: validationName(p.Name, storedName), Formula: p.Formula,
+			Text: p.Format == metricformula.FormatText && !metricIsInput,
 		})
 		if vErr != nil {
 			return "", "", vErr
 		}
 		formulaEdges = res.Edges
 	}
+	if switchKind {
+		if err := modeledit.SwitchMetricKind(ctx, e.pool, p.MetricID, metricIsInput, p.DropValues); err != nil {
+			return "", "", err
+		}
+	}
 	if _, err := e.pool.Exec(ctx, `
 		UPDATE model.metric_def
 		SET name=$2, formula=$3, agg_rule=$4, format=$5, format_decimals=$6, format_currency=$7,
 		    agg_numerator_metric_id=NULLIF($8,'')::uuid, agg_denominator_metric_id=NULLIF($9,'')::uuid,
-		    time_summary=$10, tags=COALESCE($11, tags), picklist_dimension_id=NULLIF($12,'')::uuid
+		    time_summary=$10, tags=COALESCE($11, tags), picklist_dimension_id=NULLIF($12,'')::uuid,
+		    picklist_allow_parents = CASE WHEN NULLIF($12,'') IS NULL THEN false ELSE COALESCE($13, picklist_allow_parents) END,
+		    is_input=$14
 		WHERE id=$1::uuid
 	`, p.MetricID, p.Name, formulaPtr, p.AggRule, p.Format, p.FormatDecimals, p.FormatCurrency,
-		p.AggNumeratorMetricID, p.AggDenominatorMetricID, p.TimeSummary, optionalTags(p.Tags), p.PicklistDimension); err != nil {
+		p.AggNumeratorMetricID, p.AggDenominatorMetricID, p.TimeSummary, optionalTags(p.Tags), p.PicklistDimension, p.PicklistAllowParents,
+		metricIsInput); err != nil {
 		if metricformula.IsUniqueViolation(err) {
 			return "", "", metricformula.MetricNameTaken(err, p.Name)
 		}
@@ -1986,16 +2022,11 @@ func (e *WriteExecutor) createGrid(ctx context.Context, raw json.RawMessage) (st
 	// validation. Raw inserts here once filed another model's metric, and a
 	// metric of a revision with no counterpart, under a new grid, refused
 	// metric names, and reported dimensions attached that were not.
+	// Dimensions before metrics: a metric using a time function attached to
+	// a grid that has no time dimension YET was refused
+	// (TIME_DIMENSION_REQUIRED) although the same step was adding one.
 	var attachedMetrics, attachedDims int
 	var skipped []string
-	for _, mid := range p.MetricIDs {
-		params, _ := json.Marshal(map[string]string{"grid_id": newID, "metric_id": mid})
-		if _, _, err := e.addGridMetric(ctx, params); err != nil {
-			skipped = append(skipped, fmt.Sprintf("metric %s: %v", mid, err))
-			continue
-		}
-		attachedMetrics++
-	}
 	for _, did := range p.DimensionIDs {
 		params, _ := json.Marshal(map[string]string{"grid_id": newID, "dimension_id": did})
 		if _, _, err := e.addGridDimension(ctx, params); err != nil {
@@ -2003,6 +2034,14 @@ func (e *WriteExecutor) createGrid(ctx context.Context, raw json.RawMessage) (st
 			continue
 		}
 		attachedDims++
+	}
+	for _, mid := range p.MetricIDs {
+		params, _ := json.Marshal(map[string]string{"grid_id": newID, "metric_id": mid})
+		if _, _, err := e.addGridMetric(ctx, params); err != nil {
+			skipped = append(skipped, fmt.Sprintf("metric %s: %v", mid, err))
+			continue
+		}
+		attachedMetrics++
 	}
 
 	// All or nothing: a grid missing what the step listed is not the grid
@@ -2385,8 +2424,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 	if srcID != "" {
 		// Copy metrics
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO model.metric_def (model_id, name, label, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules)
-			SELECT model_id, name, label, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules
+			INSERT INTO model.metric_def (model_id, name, label, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules, picklist_allow_parents)
+			SELECT model_id, name, label, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules, picklist_allow_parents
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 		`, e.modelID, newID, srcID); err != nil {
 			return "", "", fmt.Errorf("copy metrics into new revision: %w", err)
@@ -2882,7 +2921,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			new_wfs AS (
 				INSERT INTO workflow.workflow_def
 				  (application_id, name, description, trigger_event, subject_type, subject_config, steps,
-				   status, created_by, updated_by, published_at, archived_at, context_schema, revision_id)
+				   status, created_by, updated_by, published_at, archived_at, context_schema, revision_id,
+			   single_active_instance, approver_may_start)
 				SELECT wd.application_id, wd.name, wd.description, wd.trigger_event, wd.subject_type,
 					-- subject_config binds the workflow to a form ({"form_id"}) or a
 					-- grid metric ({"grid_id","metric_id"}) of THIS revision; copied
@@ -2906,7 +2946,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 							ORDER BY e.ord)
 						FROM jsonb_array_elements(wd.context_schema) WITH ORDINALITY AS e(elem, ord)
 					), '[]'::jsonb),
-					$2::uuid
+					$2::uuid,
+					wd.single_active_instance, wd.approver_may_start
 				FROM workflow.workflow_def wd
 				WHERE wd.application_id = (SELECT application_id FROM app)
 				  AND wd.revision_id = $3::uuid
@@ -3143,6 +3184,9 @@ type updateWorkflowDefParams struct {
 	// SingleActiveInstance mirrors the console's per-definition dedup
 	// switch; nil leaves it unchanged.
 	SingleActiveInstance *bool `json:"single_active_instance"`
+	// ApproverMayStart: its business-admin approver may also start it (a
+	// planning round); nil leaves it unchanged.
+	ApproverMayStart *bool `json:"approver_may_start"`
 }
 
 // updateWorkflowDef fetches the current row first for two reasons: (1) to
@@ -3205,6 +3249,12 @@ func (e *WriteExecutor) updateWorkflowDef(ctx context.Context, raw json.RawMessa
 			return "", "", fmt.Errorf("set single_active_instance: %w", err)
 		}
 		def.SingleActiveInstance = *p.SingleActiveInstance
+	}
+	if p.ApproverMayStart != nil && *p.ApproverMayStart != def.ApproverMayStart {
+		if err := ws.SetWorkflowDefApproverMayStart(ctx, p.WorkflowDefID, *p.ApproverMayStart); err != nil {
+			return "", "", fmt.Errorf("set approver_may_start: %w", err)
+		}
+		def.ApproverMayStart = *p.ApproverMayStart
 	}
 	var stepCount int
 	if arr, uErr := unmarshalArrayLen(def.Steps); uErr == nil {

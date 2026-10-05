@@ -100,7 +100,7 @@ func (h *handler) gridSnapshot(r *http.Request, gridID, revisionID string) (data
 	}
 	for _, m := range resp.Metrics {
 		em := dataexport.Metric{ID: m.ID, Name: m.Name, Label: m.Label, DimensionIDs: ownDims[m.ID],
-			Text: m.IsInput && m.Format == metricformula.FormatText}
+			Text: m.Format == metricformula.FormatText, Date: m.Format == metricformula.FormatDate}
 		if len(m.PicklistOptions) > 0 {
 			em.Picklist = make(map[float64]string, len(m.PicklistOptions))
 			for _, o := range m.PicklistOptions {

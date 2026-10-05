@@ -256,6 +256,9 @@ func readXLSXGrid(data []byte, sheet string, rawValues bool) ([][]string, error)
 	var grid [][]string
 	if rawValues {
 		grid, err = f.GetRows(name, excelize.Options{RawCellValue: true})
+		if err == nil {
+			isoDates(f, name, grid)
+		}
 	} else {
 		grid, err = f.GetRows(name)
 	}

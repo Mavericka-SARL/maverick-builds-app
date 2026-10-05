@@ -1807,6 +1807,10 @@ type WorkflowDefFull struct {
 	// duplicate). Right for "submit this department's budget", wrong for
 	// per-request forms — a per-definition choice, default on.
 	SingleActiveInstance bool `json:"single_active_instance"`
+	// ApproverMayStart lets a business admin who decides its approval also
+	// start it (a planning round); off, an approver does not submit what
+	// they approve (migration 114).
+	ApproverMayStart bool `json:"approver_may_start"`
 }
 
 // ListWorkflowDefs lists a revision's workflow defs plus revision-global
@@ -1844,12 +1848,12 @@ func (s *Store) GetWorkflowDefFull(ctx context.Context, defID string) (*Workflow
 	err := s.db.QueryRow(ctx, `
 		SELECT id::text, application_id::text, name, COALESCE(description,''),
 		       trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		       created_at, updated_at, published_at, archived_at, single_active_instance
+		       created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start
 		FROM workflow.workflow_def WHERE id = $1::uuid
 	`, defID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("workflow def %s not found", defID)
@@ -1877,11 +1881,11 @@ func (s *Store) CreateWorkflowDefFull(ctx context.Context, appID, revisionID, na
 		VALUES ($1::uuid, NULLIF($2,'')::uuid, $3, $4, $5, $6::uuid, $6::uuid)
 		RETURNING id::text, application_id::text, name, COALESCE(description,''),
 		          trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		          created_at, updated_at, published_at, archived_at, single_active_instance
+		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start
 	`, appID, revisionID, name, description, triggerEvent, userID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart,
 	)
 	if err != nil {
 		return nil, nameTaken(err)
@@ -1905,11 +1909,11 @@ func (s *Store) UpdateWorkflowDefFull(ctx context.Context, defID, name, descript
 		WHERE id = $1::uuid AND status != 'archived'
 		RETURNING id::text, application_id::text, name, COALESCE(description,''),
 		          trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		          created_at, updated_at, published_at, archived_at, single_active_instance
+		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start
 	`, defID, name, description, triggerEvent, subjectType, nullableJSON(subjectConfig), nullableJSON(steps), nullableJSON(contextSchema), userID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("%w: %s", ErrWorkflowDefNotEditable, defID)
@@ -1918,6 +1922,28 @@ func (s *Store) UpdateWorkflowDefFull(ctx context.Context, defID, name, descript
 		return nil, nameTaken(err)
 	}
 	return &w, nil
+}
+
+// SetWorkflowDefApproverMayStart sets whether the definition's approver may
+// start it (WorkflowDefFull.ApproverMayStart); archived definitions refuse.
+func (s *Store) SetWorkflowDefApproverMayStart(ctx context.Context, defID string, v bool) error {
+	tag, err := s.db.Exec(ctx, `
+		UPDATE workflow.workflow_def SET approver_may_start = $2, updated_at = now()
+		WHERE id = $1::uuid AND status <> 'archived'`, defID, v)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: %s", ErrWorkflowDefNotEditable, defID)
+	}
+	return nil
+}
+
+// ApproverMayStart reports whether defID's approver may start it.
+func (s *Store) ApproverMayStart(ctx context.Context, defID string) bool {
+	var v bool
+	_ = s.db.QueryRow(ctx, `SELECT approver_may_start FROM workflow.workflow_def WHERE id = $1::uuid`, defID).Scan(&v)
+	return v
 }
 
 // SetWorkflowDefSingleActiveInstance flips the per-definition dedup choice
@@ -1944,11 +1970,11 @@ func (s *Store) PublishWorkflowDef(ctx context.Context, defID, userID string) (*
 		WHERE id = $1::uuid AND status IN ('draft', 'invalid')
 		RETURNING id::text, application_id::text, name, COALESCE(description,''),
 		          trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		          created_at, updated_at, published_at, archived_at, single_active_instance
+		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start
 	`, defID, userID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("workflow def %s not found or not in publishable state", defID)
@@ -2018,11 +2044,11 @@ func (s *Store) ArchiveWorkflowDef(ctx context.Context, defID, userID string) (*
 		WHERE id = $1::uuid AND status != 'archived'
 		RETURNING id::text, application_id::text, name, COALESCE(description,''),
 		          trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		          created_at, updated_at, published_at, archived_at, single_active_instance
+		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start
 	`, defID, userID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("workflow def %s not found or already archived", defID)
@@ -2041,11 +2067,11 @@ func (s *Store) RestoreWorkflowDef(ctx context.Context, defID, userID string) (*
 		WHERE id = $1::uuid AND status = 'archived'
 		RETURNING id::text, application_id::text, name, COALESCE(description,''),
 		          trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		          created_at, updated_at, published_at, archived_at, single_active_instance
+		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start
 	`, defID, userID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("workflow def %s not found or not archived", defID)
@@ -2078,16 +2104,18 @@ func (s *Store) DuplicateWorkflowDef(ctx context.Context, defID, newName, userID
 	var w WorkflowDefFull
 	err := s.db.QueryRow(ctx, `
 		INSERT INTO workflow.workflow_def
-		    (application_id, revision_id, name, description, trigger_event, subject_type, subject_config, steps, context_schema, created_by, updated_by)
-		SELECT application_id, revision_id, $2, description, trigger_event, subject_type, subject_config, steps, context_schema, $3::uuid, $3::uuid
+		    (application_id, revision_id, name, description, trigger_event, subject_type, subject_config, steps, context_schema, created_by, updated_by,
+		     single_active_instance, approver_may_start)
+		SELECT application_id, revision_id, $2, description, trigger_event, subject_type, subject_config, steps, context_schema, $3::uuid, $3::uuid,
+		       single_active_instance, approver_may_start
 		FROM workflow.workflow_def WHERE id = $1::uuid
 		RETURNING id::text, application_id::text, name, COALESCE(description,''),
 		          trigger_event, COALESCE(subject_type,''), COALESCE(subject_config,'{}'), status, steps, context_schema,
-		          created_at, updated_at, published_at, archived_at, single_active_instance
+		          created_at, updated_at, published_at, archived_at, single_active_instance, approver_may_start
 	`, defID, newName, userID).Scan(
 		&w.ID, &w.ApplicationID, &w.Name, &w.Description,
 		&w.TriggerEvent, &w.SubjectType, &w.SubjectConfig, &w.Status, &w.Steps, &w.ContextSchema,
-		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance,
+		&w.CreatedAt, &w.UpdatedAt, &w.PublishedAt, &w.ArchivedAt, &w.SingleActiveInstance, &w.ApproverMayStart,
 	)
 	if err != nil {
 		return nil, nameTaken(err)

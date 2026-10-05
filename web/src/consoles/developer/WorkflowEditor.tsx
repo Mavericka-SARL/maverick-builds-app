@@ -99,6 +99,7 @@ export function WorkflowEditor({ defId, applicationId, revisionId, onBack }: Edi
         steps: d.steps,
         context_schema: d.context_schema,
         single_active_instance: d.single_active_instance,
+        approver_may_start: d.approver_may_start,
       }),
     onMutate: () => setSaveState("saving"),
     onSuccess: (saved) => {

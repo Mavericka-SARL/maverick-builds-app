@@ -197,7 +197,7 @@ func TestSendMessage_WarnsOnceThenShowsWithWarnings(t *testing.T) {
 		t.Fatalf("send: %d\n%s\ntool results: %q", status, sse, toolResults(t, env))
 	}
 	results := toolResults(t, env)
-	if len(results) < 1 || !strings.Contains(results[0], "Proposal NOT shown yet: it runs, but these formulas look wrong") {
+	if len(results) < 1 || !strings.Contains(results[0], "Proposal NOT shown yet: it runs, but these steps look wrong") {
 		t.Fatalf("the first plan was not sent back with warnings: %q", results)
 	}
 	for _, w := range []string{"growth_pct, a Percentage metric", "without dividing by 100",
@@ -208,6 +208,49 @@ func TestSendMessage_WarnsOnceThenShowsWithWarnings(t *testing.T) {
 	}
 	if !strings.Contains(sse, `"warnings":[`) || !strings.Contains(sse, "without dividing by 100") {
 		t.Errorf("the proposal event does not carry the warnings for the developer:\n%s", sse)
+	}
+}
+
+// A plan that runs goes back once for its warnings; a model that then asks
+// "shall I propose it?" instead of proposing it again does not lose it: the
+// turn ends showing that plan with its warnings.
+func TestSendMessage_WarnedPlanShownWhenTheModelOnlyAsks(t *testing.T) {
+	plan := []map[string]any{
+		turnMetricStep("weighted_base", map[string]any{"is_input": true}),
+		turnMetricStep("growth_pct", map[string]any{"is_input": true, "format": "percentage", "agg_rule": "average"}),
+		turnMetricStep("target", map[string]any{"formula": "weighted_base * growth_pct"}),
+	}
+	fake := &multiScriptProvider{resps: []providers.ChatResponse{
+		proposeResp("c1", plan...),
+		{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: "I'm ready to propose the full plan. Confirm and I will post it."}},
+	}}
+	env := newAITurnEnv(t, fake)
+	status, sse := env.send("build the targets")
+	if status != http.StatusOK || !strings.Contains(sse, "event: proposal") || !strings.Contains(sse, "without dividing by 100") {
+		t.Fatalf("the warned plan was not shown with its warnings: %d\n%s", status, sse)
+	}
+	msgs, _ := env.chat.ListMessages(context.Background(), env.session)
+	if last := msgs[len(msgs)-1]; last.Role != "assistant" || !strings.Contains(last.Content, "The plan below runs (3 step(s))") {
+		t.Errorf("the transcript ends with %q, want the note that the plan is shown with its warnings", last.Content)
+	}
+}
+
+// A plan that fails its check goes back; a model that then only asks is
+// told once to propose, and its corrected plan reaches the developer.
+func TestSendMessage_NudgedToProposeAfterASendBack(t *testing.T) {
+	base := turnMetricStep("base", map[string]any{"is_input": true})
+	fake := &multiScriptProvider{resps: []providers.ChatResponse{
+		proposeResp("c1", base, turnMetricStep("target", map[string]any{"formula": "no_such_metric * 2"})),
+		{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: "I will fix it. Confirm and I will post the plan."}},
+		proposeResp("c2", base, turnMetricStep("target", map[string]any{"formula": "base * 2"})),
+	}}
+	env := newAITurnEnv(t, fake)
+	status, sse := env.send("add the target")
+	if status != http.StatusOK || !strings.Contains(sse, "event: proposal") {
+		t.Fatalf("the corrected plan was not proposed after the nudge: %d calls=%d\n%s\nresults %q", status, fake.calls, sse, toolResults(t, env))
+	}
+	if fake.calls != 3 {
+		t.Errorf("model calls = %d, want 3 (plan, question, corrected plan)", fake.calls)
 	}
 }
 
@@ -241,5 +284,92 @@ func TestSendMessage_TurnTimeLimit(t *testing.T) {
 	msgs, _ := env.chat.ListMessages(context.Background(), env.session)
 	if last := msgs[len(msgs)-1]; last.Role != "assistant" || !strings.Contains(last.Content, "import_file_data") {
 		t.Errorf("the transcript ends with %q, want the stop and its advice", last.Content)
+	}
+}
+
+func TestAsksToPropose(t *testing.T) {
+	for reply, want := range map[string]bool{
+		"I'm ready to propose the full plan. Confirm and I will post it.":                      true,
+		"If you want me to proceed I will prepare a corrected proposal. Which would you like?": true,
+		"Confirm you still want me to proceed and I'll post the full proposal.":                true,
+		"FR is not a country in the model.":                                                    false,
+		"Those properties do not exist.":                                                       false,
+	} {
+		if got := asksToPropose(reply); got != want {
+			t.Errorf("asksToPropose(%q) = %v, want %v", reply, got, want)
+		}
+	}
+}
+
+// A passing plan that lacks more than the failing steps names the rest too.
+func TestDroppedStepsNamesWhatThePartialPlanLacks(t *testing.T) {
+	st := func(tool, desc, params string) aiassistant.ProposalStep {
+		return aiassistant.ProposalStep{Tool: tool, Description: desc, Params: json.RawMessage(params)}
+	}
+	failing := []aiassistant.ProposalStep{
+		st("create_dashboard", "README", `{"name": "README"}`),
+		st("update_dashboard_widget", "Move a note", `{"widget_id": "x", "dashboard_id": "y"}`),
+		st("create_dashboard", "Plan Summary", `{"name":"Plan Summary"}`),
+		st("create_dashboard", "HR Dashboard", `{"name":"HR Dashboard"}`),
+	}
+	passing := []aiassistant.ProposalStep{st("create_dashboard", "README", `{"name":"README"}`)}
+	got := droppedSteps(failing, passing, []string{`step 2 (update_dashboard_widget — Move a note): this tool does not read "dashboard_id"`})
+	want := []string{"step 3 (create_dashboard — Plan Summary)", "step 4 (create_dashboard — HR Dashboard)"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("dropped = %q, want %q", got, want)
+	}
+	if note := leftOutNote([]string{"step 2 (…)"}, got); !strings.Contains(note, "Also left out") || !strings.Contains(note, "HR Dashboard") {
+		t.Errorf("the note does not name the dropped steps:\n%s", note)
+	}
+}
+
+// The recurring mistakes of the HR rebuild go back once as warnings: a typed
+// counter of 1s, a headcount summed over months, a summary grid widget with
+// every metric of a large grid.
+func TestSendMessage_WarnsOfRecurringMistakes(t *testing.T) {
+	members := []map[string]any{}
+	for _, c := range []string{"E1", "E2", "E3", "E4", "E5"} {
+		members = append(members, map[string]any{"code": c, "label": c})
+	}
+	ones := []map[string]any{}
+	for _, c := range []string{"E1", "E2", "E3", "E4", "E5"} {
+		ones = append(ones, map[string]any{"members": map[string]string{"staff": c}, "value": 1})
+	}
+	many := []string{}
+	plan := []map[string]any{
+		{"tool": "create_dimension", "description": "Staff", "params": map[string]any{"name": "staff", "members": members}},
+		{"tool": "create_dimension", "description": "Months", "params": map[string]any{"name": "period", "dimension_type": "time",
+			"time_granularity": "month", "fiscal_year_start_month": 1, "members": []map[string]any{{"code": "FY27", "label": "FY27"}}}},
+		{"tool": "generate_time_members", "description": "Months", "params": map[string]any{"dimension_id": "period", "start": "2027-01-01", "end": "2027-03-31", "parent_code": "FY27"}},
+		turnMetricStep("emp_count", map[string]any{"is_input": true}),
+		{"tool": "create_grid", "description": "Staff", "params": map[string]any{"name": "Staff", "dimensions": []string{"staff"}, "metrics": []string{"emp_count"}}},
+		{"tool": "write_input_values", "description": "Count", "params": map[string]any{"metric_id": "emp_count", "values": ones}},
+		turnMetricStep("ending_hc", map[string]any{"is_input": true}),
+	}
+	for i := 0; i < 13; i++ {
+		n := fmt.Sprintf("plan_m%d", i)
+		many = append(many, n)
+		plan = append(plan, turnMetricStep(n, map[string]any{"is_input": true}))
+	}
+	plan = append(plan,
+		map[string]any{"tool": "create_grid", "description": "Plan", "params": map[string]any{"name": "Plan", "dimensions": []string{"period"}, "metrics": append([]string{"ending_hc"}, many...)}},
+		map[string]any{"tool": "create_dashboard", "description": "Summary", "params": map[string]any{"name": "Summary"}},
+		map[string]any{"tool": "add_dashboard_widget", "description": "Summary grid", "params": map[string]any{"dashboard_id": "Summary", "widget_type": "grid", "ref_id": "Plan",
+			"title": "Monthly Summary", "pos_x": 0, "pos_y": 0, "size_w": 600, "size_h": 300}},
+	)
+	fake := &multiScriptProvider{resps: []providers.ChatResponse{proposeResp("c1", plan...), proposeResp("c2", plan...)}}
+	env := newAITurnEnv(t, fake)
+	if status, sse := env.send("build it"); status != http.StatusOK || !strings.Contains(sse, "event: proposal") {
+		t.Fatalf("send: %d\n%s\ntool results: %q", status, sse, toolResults(t, env))
+	}
+	results := toolResults(t, env)
+	if len(results) < 1 {
+		t.Fatal("no tool result")
+	}
+	for _, w := range []string{"every one of the 5 values of emp_count is 1", "COUNTIFS",
+		"ending_hc looks like a level", `time_summary "last"`, `the grid widget "Monthly Summary" shows all 14 metrics of Plan`} {
+		if !strings.Contains(results[0], w) {
+			t.Errorf("the warnings lack %q:\n%s", w, results[0])
+		}
 	}
 }

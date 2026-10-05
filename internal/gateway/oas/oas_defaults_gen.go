@@ -101,6 +101,10 @@ func (s *CreateMetricRequest) setDefaults() {
 		s.FormatCurrency.SetTo(val)
 	}
 	{
+		val := bool(false)
+		s.PicklistAllowParents.SetTo(val)
+	}
+	{
 		val := CreateMetricRequestTimeSummary("sum")
 		s.TimeSummary.SetTo(val)
 	}

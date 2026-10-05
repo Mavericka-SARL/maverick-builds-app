@@ -199,6 +199,9 @@ type MetricDef struct {
 	// PicklistDimID is the dimension a pick-list metric's cells hold
 	// members of (format "picklist"); "" for every other metric.
 	PicklistDimID string
+	// Text: format "text". A calculated one stores its formula's text in
+	// calc_result.text_value (executeText); formulas never read it.
+	Text bool
 }
 
 // LoadModelMetrics loads all metric definitions + dependency edges for one
@@ -210,7 +213,7 @@ func (s *Store) LoadModelMetrics(ctx context.Context, modelID, revisionID string
 	rows, err := s.db.Query(ctx, `
 		SELECT id::text, name, COALESCE(formula,''), is_input, agg_rule,
 		       COALESCE(agg_numerator_metric_id::text,''), COALESCE(agg_denominator_metric_id::text,''),
-		       time_summary, COALESCE(picklist_dimension_id::text,'')
+		       time_summary, COALESCE(picklist_dimension_id::text,''), format = 'text'
 		FROM model.metric_def WHERE model_id = $1::uuid AND revision_id = $2::uuid
 	`, modelID, revisionID)
 	if err != nil {
@@ -221,7 +224,7 @@ func (s *Store) LoadModelMetrics(ctx context.Context, modelID, revisionID string
 	defs := make(map[string]*MetricDef)
 	for rows.Next() {
 		var d MetricDef
-		if err := rows.Scan(&d.ID, &d.Name, &d.Formula, &d.IsInput, &d.AggRule, &d.AggNumeratorID, &d.AggDenominatorID, &d.TimeSummary, &d.PicklistDimID); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.Formula, &d.IsInput, &d.AggRule, &d.AggNumeratorID, &d.AggDenominatorID, &d.TimeSummary, &d.PicklistDimID, &d.Text); err != nil {
 			return nil, err
 		}
 		defs[d.ID] = &d
@@ -560,6 +563,59 @@ func (s *Store) LoadInputValueMap(ctx context.Context, modelID, revisionID, metr
 	return scanDimValueMap(rows, err)
 }
 
+// LoadInputTextMap is LoadInputValueMap for a text input: each cell's
+// latest typed note, keyed by dimKey, as the grid shows it (loadTextCells).
+func (s *Store) LoadInputTextMap(ctx context.Context, modelID, revisionID, metricID string) (map[string]string, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT DISTINCT ON (dim_members) dim_members::text, COALESCE(text_value, '')
+		FROM runtime.fact_input
+		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid AND source_ref IS NULL
+		ORDER BY dim_members, entered_at DESC, id DESC
+	`, modelID, revisionID, metricID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]string)
+	for rows.Next() {
+		var raw, text string
+		if err := rows.Scan(&raw, &text); err != nil {
+			return nil, err
+		}
+		var dm map[string]string
+		if json.Unmarshal([]byte(raw), &dm) != nil || text == "" {
+			continue
+		}
+		out[dimKey(dm)] = text
+	}
+	return out, rows.Err()
+}
+
+// LoadCalcTextMap is LoadInputTextMap for a calculated text: the text its
+// formula gave at every cell, keyed by dimKey.
+func (s *Store) LoadCalcTextMap(ctx context.Context, modelID, revisionID, metricID string) (map[string]string, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT dim_members::text, text_value FROM runtime.calc_result
+		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid AND text_value IS NOT NULL
+	`, modelID, revisionID, metricID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]string)
+	for rows.Next() {
+		var raw, text string
+		if err := rows.Scan(&raw, &text); err != nil {
+			return nil, err
+		}
+		var dm map[string]string
+		if json.Unmarshal([]byte(raw), &dm) == nil {
+			out[dimKey(dm)] = text
+		}
+	}
+	return out, rows.Err()
+}
+
 // LoadCalcValueMap is LoadInputValueMap's runtime.calc_result analog.
 func (s *Store) LoadCalcValueMap(ctx context.Context, modelID, revisionID, metricID string) (map[string]float64, error) {
 	rows, err := s.db.Query(ctx, `
@@ -703,6 +759,7 @@ func scanDimValueMap(rows pgx.Rows, err error) (map[string]float64, error) {
 type CalcResultRow struct {
 	DimMembers map[string]string
 	Value      float64
+	Text       *string // a text calculation's result, beside a 0 Value
 }
 
 // ClearPerComboResultsTx deletes a metric's per-intersection calc_result rows
@@ -808,9 +865,9 @@ func writeCalcResults(ctx context.Context, w resultWriter, modelID, revisionID, 
 		dimJSON, _ := json.Marshal(r.DimMembers)
 		batch.Queue(`
 			INSERT INTO runtime.calc_result
-			    (model_id, revision_id, dim_members, metric_id, value, partition_key)
-			VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6)
-		`, modelID, revisionID, string(dimJSON), metricID, r.Value, partitionKey)
+			    (model_id, revision_id, dim_members, metric_id, value, partition_key, text_value)
+			VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7)
+		`, modelID, revisionID, string(dimJSON), metricID, r.Value, partitionKey, r.Text)
 	}
 	br := w.SendBatch(ctx, batch)
 	defer br.Close() //nolint:errcheck // any real failure already surfaces via br.Exec() below

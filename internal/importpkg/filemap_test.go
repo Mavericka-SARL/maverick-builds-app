@@ -120,3 +120,28 @@ func TestApplyColumnMap(t *testing.T) {
 		t.Errorf("unmatched keys = %v, want [Cuntry]", missing)
 	}
 }
+
+// "*": "ignore" drops every column the map does not name, so an import
+// lists only the columns it loads.
+func TestApplyColumnMapOthersIgnored(t *testing.T) {
+	header := []string{"Month #", "Month", "Department", "Active HC", "Base Salary", "Source / Note"}
+	rows := []RawRow{{RowNumber: 1, Cells: map[string]string{"Month #": "1", "Month": "Jan", "Department": "Sales",
+		"Active HC": "16", "Base Salary": "132.783", "Source / Note": "x"}}}
+	cmap := map[string]string{"Month": "month", "Department": "department", "Active HC": "ly_active_hc", "*": "ignore"}
+	got, err := ApplyColumnMap(header, rows, cmap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "month,department,ly_active_hc" {
+		t.Errorf("header = %v, want month, department, ly_active_hc", got)
+	}
+	if _, ok := rows[0].Cells["Base Salary"]; ok {
+		t.Error("an unnamed column was kept")
+	}
+	if missing := UnmatchedColumnMapKeys(header, cmap); len(missing) != 0 {
+		t.Errorf(`"*" reported as a column the file lacks: %v`, missing)
+	}
+	if _, err := ApplyColumnMap(header, rows, map[string]string{"Month": "month", "*": "ly_active_hc"}); err == nil {
+		t.Error(`"*" mapped to a field must be refused`)
+	}
+}
