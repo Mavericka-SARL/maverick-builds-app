@@ -591,7 +591,11 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
     if (defaultView) {
       setPivotRows(defaultView.rows.filter(validId));
       setPivotCols(defaultView.cols.filter(validId));
-      setPivotContext(defaultView.context.filter(validId));
+      // A dimension the saved layout puts in no zone (a layout naming only
+      // its pins in filter_sel) is a context selector at its pinned member,
+      // never dropped: dropped, every cell key missed it and read nothing.
+      const placed = new Set([...defaultView.rows, ...defaultView.cols, ...defaultView.context]);
+      setPivotContext([...defaultView.context.filter(validId), ...dims.filter(d => !placed.has(d.id)).map(d => d.id)]);
       const baseSel = Object.fromEntries(dims.map(d => [d.id, defaultLeafCode(d) ?? ""]));
       setFilterSel({ ...baseSel, ...(defaultView.filter_sel ?? {}) });
     } else {
@@ -798,6 +802,9 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
     if (withheld.has(metricId) && dims.every((dim, i) => isAggNode(dim, fc[i]) && !fc[i].parent_code)) return null;
     const metric = g.metrics.find(m => m.id === metricId);
     const aggRule = metric?.agg_rule ?? "sum";
+    // agg_rule none (an index, a pick-list): nothing above the leaves of
+    // its non-time dimensions, as the server answers.
+    if (aggRule === "none" && fc.some((m, i) => dims[i].dimension_type !== "time" && isAggNode(dims[i], m))) return undefined;
 
     // 'formula' and 'rate' cannot be derived from children at all. The first
     // is this metric's own expression re-evaluated against aggregated inputs;
@@ -1103,6 +1110,8 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
     if (spansGrid && withheld.has(metricId)) return null;
     const metric = g.metrics.find(m => m.id === metricId);
     const aggRule = metric?.agg_rule ?? "sum";
+    // agg_rule none has no total across a non-time row dimension.
+    if (aggRule === "none" && rowDims.some(dim => dim.dimension_type !== "time")) return undefined;
     // A pure-ratio average totalled across a non-time dimension is its
     // formula at the aggregate too (see resolveCell).
     const evaluatedAvg = aggRule === "average" && !!metric?.aggregate_evaluated &&
@@ -1159,6 +1168,34 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
           title={isParent ? undefined : "Right-click for history"}
         >
           {fmtMetric(m, val)}
+        </td>
+      );
+    }
+
+    if (m.format === "picklist") {
+      // A pick-list cell holds one member of its dimension: chosen from a
+      // list, written at once (the key; "—" clears it).
+      const current = val != null && val !== 0 ? String(val) : "";
+      return (
+        <td style={{ ...td, textAlign: "right", padding: "4px 5px", borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
+          <select
+            className="mvx-cell-input mvx-cell-select"
+            aria-label={`${m.label ?? m.name} — choose a member`}
+            value={current}
+            onChange={e => {
+              const value = e.target.value === "" ? 0 : Number(e.target.value);
+              const dim_codes: Record<string, string> = {};
+              dims.forEach((d, i) => { dim_codes[d.id] = fc[i]?.code ?? ""; });
+              setPending((p) => ({ ...p, [key]: value }));
+              writeback.mutate({ cellKey: key, metric_id: m.id, dim_codes, value });
+            }}
+          >
+            <option value="">—</option>
+            {(m.picklist_options ?? []).map(o => <option key={o.code} value={String(o.key)}>{o.label}</option>)}
+            {current !== "" && !(m.picklist_options ?? []).some(o => String(o.key) === current) && (
+              <option value={current}>(a member no longer there)</option>
+            )}
+          </select>
         </td>
       );
     }
@@ -1512,6 +1549,8 @@ const td: React.CSSProperties = { padding: "8px 12px", color: "var(--color-text)
 function fmtMetric(m: Metric, n: number | null | undefined): string {
   if (n == null) return "—";
   const d = m.format_decimals ?? 0;
+  // Float noise below the shown precision (a variance of -1e-16) is 0, not "-$0.00".
+  if (m.format !== "picklist" && Math.abs(n) < 0.5 * Math.pow(10, -d)) n = 0;
   switch (m.format) {
     case "percentage":
       return n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }) + "%";
@@ -1519,6 +1558,11 @@ function fmtMetric(m: Metric, n: number | null | undefined): string {
       return n ? "Yes" : "No";
     case "text":
       return String(n);
+    case "picklist": {
+      // The member the cell holds; 0 is a cleared cell.
+      if (n === 0) return "—";
+      return m.picklist_options?.find(o => o.key === n)?.label ?? "(a member no longer there)";
+    }
     case "currency": {
       // The sign before the symbol, as the KPI tile writes it: -$40.47, not $-40.47.
       const sym = m.format_currency || "$";

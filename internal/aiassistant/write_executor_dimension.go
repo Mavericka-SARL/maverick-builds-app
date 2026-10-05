@@ -166,6 +166,9 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 	}
 
 	name, aggRule := strings.TrimSpace(p.Name), strings.TrimSpace(p.AggRule)
+	if err := metricformula.CheckRenameFreeOfOtherKind(ctx, e.pool, dimID, name, "dimension"); err != nil {
+		return "", "", err
+	}
 	if name == "" && aggRule == "" && p.Tags == nil && !parentSent && !sourceSent && !propSent && !p.DeriveMembers {
 		return "", "", fmt.Errorf("nothing to change: provide name, agg_rule, tags, parent_dimension_id, " +
 			"source_dimension_id, source_property or derive_members")

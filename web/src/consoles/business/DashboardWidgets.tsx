@@ -246,6 +246,10 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps }: { metricId: stri
   const digits = { minimumFractionDigits: decimals, maximumFractionDigits: decimals };
   const formatted = value === undefined
     ? "—"
+    : fmt === "picklist"
+    ? (value === 0 ? "—" : metric?.picklist_options?.find(o => o.key === value)?.label ?? "—")
+    : fmt === "boolean"
+    ? (value ? "Yes" : "No")
     : fmt === "currency"
     ? `${value < 0 ? "-" : ""}${metric?.format_currency || "$"}${Math.abs(value).toLocaleString("en-US", digits)}`
     : fmt === "percentage"

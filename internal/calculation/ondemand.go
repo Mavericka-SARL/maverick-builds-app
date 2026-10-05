@@ -302,7 +302,7 @@ func (env *evalEnv) cellEvaluator(ctx context.Context, def *MetricDef) (cellEval
 				vars[strings.ToUpper(name)] = formula.StringVal(memberCode)
 			}
 		}
-		result := formula.EvalNode(&formula.EvalContext{Vars: vars, Dim: reads.context(combo, useMemo)}, node)
+		result := reads.meta.EncodeResult(def.Name, formula.EvalNode(&formula.EvalContext{Vars: vars, Dim: reads.context(combo, useMemo)}, node))
 		if result.IsError() {
 			// A blank or unknown member is a configuration problem at this
 			// cell, never an absence of data — even when nothing was read

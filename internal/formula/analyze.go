@@ -137,6 +137,13 @@ type Analysis struct {
 	DimensionalCalls []DimensionalCall
 	// TimeSums are the TIMESUM calls in source order (outer first).
 	TimeSums []TimeSumCall
+	// RangeNames are the criteria ranges written as a bare name, which are
+	// also DimensionArgs, de-duplicated case-insensitively. Analyze cannot
+	// tell a dimension from a metric: one that names a metric (and no
+	// dimension) is a metric range — SUMIFS(sales, act_region, region) —
+	// read at every leaf combination of its dimensions, a Dimensional
+	// reference to a consumer that resolves it.
+	RangeNames []string
 }
 
 // AnalysisError is a semantic rejection with a stable identifier.
@@ -183,6 +190,7 @@ type analyzer struct {
 	dimArgs        []string
 	dimCalls       []DimensionalCall
 	timeSums       []TimeSumCall
+	rangeNames     []string
 }
 
 // Analyze parses and analyzes a formula.
@@ -208,6 +216,7 @@ func AnalyzeNode(node Node) (*Analysis, error) {
 		DimensionArgs:    a.dimArgs,
 		DimensionalCalls: a.dimCalls,
 		TimeSums:         a.timeSums,
+		RangeNames:       a.rangeNames,
 	}
 	for _, key := range a.order {
 		out.References = append(out.References, *a.refs[key])
@@ -582,6 +591,8 @@ func (a *analyzer) walkDimCall(n *CallExpr, w window) error {
 		a.dimensionArg(ranges[i].dim)
 		if ranges[i].prop != "" {
 			a.propertyRef(ranges[i].dim, ranges[i].prop)
+		} else if !containsFold(a.rangeNames, ranges[i].dim) {
+			a.rangeNames = append(a.rangeNames, ranges[i].dim)
 		}
 		if err := a.walk(p[1], w); err != nil {
 			return err

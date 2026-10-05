@@ -12,12 +12,14 @@ export interface DevMetric {
   // Operands for agg_rule "rate": the total is numerator ÷ denominator.
   agg_numerator_metric_id?: string;
   agg_denominator_metric_id?: string;
-  format: string;           // "number" | "percentage" | "currency" | "boolean" | "text"
+  format: string;           // "number" | "percentage" | "currency" | "boolean" | "text" | "picklist"
   format_decimals: number;
   format_currency: string;
   // How the metric aggregates ACROSS a time dimension (agg_rule stays the rule
   // for every other dimension): sum for flows, last for a closing balance.
   time_summary?: TimeSummary;
+  // format "picklist": the dimension whose members the metric's cells hold.
+  picklist_dimension_id?: string;
   depends_on: string[];
   depended_by: string[];
   calc_error?: string;
@@ -410,10 +412,14 @@ export interface Metric {
   is_input: boolean;
   formula?: string;
   agg_rule: string;
-  format: string;           // "number" | "percentage" | "currency" | "boolean" | "text"
+  format: string;           // "number" | "percentage" | "currency" | "boolean" | "text" | "picklist"
   format_decimals: number;
   format_currency: string;
   time_summary?: TimeSummary;
+  // format "picklist" (/api/grid): the dimension whose members the cells
+  // hold, and those members with the key a cell stores for each.
+  picklist_dimension_id?: string;
+  picklist_options?: PicklistOption[];
   value: number | null;
   readonly?: boolean;   // true = "read" access rule — visible but not editable
   dimension_ids?: string[]; // this metric's OWN grid's dimension IDs, ordered (populated by /api/metrics and /api/grid's all_metrics)
@@ -422,6 +428,14 @@ export interface Metric {
   // average), as the scheduler computes it — never a combination of the
   // cells below, so its parents are read from the server's rows.
   aggregate_evaluated?: boolean;
+}
+
+// One member a pick-list cell can hold: the key the cell stores, the code
+// formulas read and the label people see.
+export interface PicklistOption {
+  key: number;
+  code: string;
+  label: string;
 }
 
 export interface Task {
@@ -1892,7 +1906,7 @@ export const api = {
   getDevDimensions: (revisionId?: string) =>
     apiFetch<DevDimension[]>(`/api/developer/dimensions${revisionId ? `?revision_id=${revisionId}` : ""}`),
 
-  addMetric: (body: { name: string; label?: string; is_input: boolean; formula: string; revision_id?: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[] }) =>
+  addMetric: (body: { name: string; label?: string; is_input: boolean; formula: string; revision_id?: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string }) =>
     apiFetch<{ id: string; status: string }>("/api/developer/metrics", {
       method: "POST",
       body: JSON.stringify(body),
@@ -2110,7 +2124,7 @@ export const api = {
 
   deleteMetric: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/metrics/${id}`, { method: "DELETE" }),
-  updateMetric: (id: string, body: { name: string; label?: string; formula: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[] }) =>
+  updateMetric: (id: string, body: { name: string; label?: string; formula: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string }) =>
     apiFetch<{ status: string; recalc: Array<{ revision_id: string; metric: string; value: number | null }> }>(
       `/api/developer/metrics/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 

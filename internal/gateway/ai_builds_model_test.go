@@ -185,8 +185,8 @@ func TestAIDeveloperBuildsAWholeModel(t *testing.T) {
 			map[string]any{"grid_id": ref(gridStep), "metric_id": ref(metricSteps[name])})
 	}
 
-	// The proposal cap is 50 steps (server-enforced batching), so the build
-	// ships as TWO proposals — which also makes this a parity test for the
+	// The build ships in batches of 50 (under the server-enforced cap of
+	// aiassistant.MaxProposalSteps) as TWO proposals — a parity test for the
 	// batch contract itself: a later batch cannot use "<created in step N>"
 	// placeholders for entities created in an earlier, already-executed
 	// batch; it references them by NAME, exactly as the prompt instructs the

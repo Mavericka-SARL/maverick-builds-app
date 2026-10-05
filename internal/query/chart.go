@@ -775,7 +775,7 @@ func (r *ChartResolver) loadInputFactMap(ctx context.Context, modelID, revisionI
 			SELECT DISTINCT ON (dim_members) value, dim_members
 			FROM runtime.fact_input
 			WHERE model_id=$1::uuid AND revision_id=$2::uuid
-			  AND metric_id=$3::uuid AND dim_members != '{}'::jsonb
+			  AND metric_id=$3::uuid
 			  AND source_ref IS NULL
 			ORDER BY dim_members, entered_at DESC, id DESC
 		) direct
@@ -791,7 +791,6 @@ func (r *ChartResolver) loadInputFactMap(ctx context.Context, modelID, revisionI
 		FROM runtime.fact_input
 		WHERE model_id=$1::uuid AND revision_id=$2::uuid
 		  AND metric_id=$3::uuid AND source_ref IS NOT NULL
-		  AND dim_members != '{}'::jsonb
 	`, modelID, revisionID, metricID)
 	if err != nil {
 		return nil, err
@@ -874,12 +873,16 @@ type fullMetricDef struct {
 	// field of the same name; needed here too since a calc metric's
 	// dependency may be a metric outside the current grid entirely.
 	DimensionIDs []string
+	// PicklistDimID is the dimension a pick-list metric's cells hold
+	// members of; "" for any other metric.
+	PicklistDimID string
 	DependsOnID  []string
 }
 
 func (r *ChartResolver) loadAllMetricDefs(ctx context.Context, modelID, revisionID string) (map[string]*fullMetricDef, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id::text, name, COALESCE(formula,''), is_input, COALESCE(agg_rule,'sum'), time_summary
+		SELECT id::text, name, COALESCE(formula,''), is_input, COALESCE(agg_rule,'sum'), time_summary,
+		       COALESCE(picklist_dimension_id::text,'')
 		FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid
 	`, modelID, revisionID)
 	if err != nil {
@@ -889,7 +892,7 @@ func (r *ChartResolver) loadAllMetricDefs(ctx context.Context, modelID, revision
 	defs := make(map[string]*fullMetricDef)
 	for rows.Next() {
 		var d fullMetricDef
-		if err := rows.Scan(&d.ID, &d.Name, &d.Formula, &d.IsInput, &d.AggRule, &d.TimeSummary); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.Formula, &d.IsInput, &d.AggRule, &d.TimeSummary, &d.PicklistDimID); err != nil {
 			return nil, err
 		}
 		defs[d.ID] = &d
@@ -992,6 +995,12 @@ func (r *ChartResolver) evalCalcMetricVisited(
 	if !ok {
 		return 0, false, fmt.Errorf("metric def not found")
 	}
+	// The scheduler computes a metric on its own dimensions: a point's
+	// member of any other dimension is ignored, unless it is related to one
+	// of them (a parent dimension, a property grouping). Without this, a
+	// setting on a dimensionless grid (a company target) read at a plotted
+	// region evaluated its own inputs at that region.
+	dimMembers = ownPoint(allDims, def.DimensionIDs, dimMembers)
 
 	visited[metricID] = true
 	defer func() { delete(visited, metricID) }()
@@ -1062,6 +1071,21 @@ func (r *ChartResolver) evalCalcMetricVisited(
 			rollup.TimeSummaryRule(def.TimeSummary), dimMembers, leaf)
 	}
 	return r.evalFormulaPoint(ctx, def, dimMembers, allDims, cc, visited)
+}
+
+// ownPoint keeps the members of point on the metric's own dimensions
+// (ownDims) and on dimensions related to one of them.
+func ownPoint(dims map[string]*rollup.Dimension, ownDims []string, point map[string]string) map[string]string {
+	out := make(map[string]string, len(point))
+	for dimID, code := range point {
+		for _, own := range ownDims {
+			if own == dimID || rollup.Relates(dims, own, dimID) {
+				out[dimID] = code
+				break
+			}
+		}
+	}
+	return out
 }
 
 // soleRoot reports whether code is the only top-level member of dim, so a
@@ -1145,7 +1169,7 @@ func (r *ChartResolver) evalFormulaPoint(
 	if def.Formula == "" {
 		return 0, false, fmt.Errorf("empty formula")
 	}
-	v, err := calculation.EvaluateWithDimContext(def.Formula, varValues, namedDims, cc.meta.CellContext(dimMembers))
+	v, err := calculation.EvaluateMetricWithDimContext(cc.meta, def.Name, def.Formula, varValues, namedDims, cc.meta.CellContext(dimMembers))
 	if errors.Is(err, calculation.ErrBlankResult) {
 		return 0, false, nil // no value there: no point, never a plotted 0
 	}
@@ -1206,6 +1230,9 @@ func (r *ChartResolver) loadChartCalc(ctx context.Context, modelID, revisionID s
 		return nil, err
 	}
 	meta := calculation.NewDimMetadata(unfiltered, names, schema)
+	for _, d := range defs {
+		meta.SetMetric(d.Name, d.DimensionIDs, d.PicklistDimID)
+	}
 	cc := &chartCalc{
 		defs: defs, dimNames: names, meta: meta,
 		fetchCalc:  r.fetchCalc(modelID, revisionID),

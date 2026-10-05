@@ -20,7 +20,7 @@ import (
 // metric its own numerator or denominator.
 func ValidateAggRule(rule string, isInput bool, numeratorID, denominatorID, metricID string) error {
 	switch rule {
-	case "", "sum", "average", "count":
+	case "", "sum", "average", "count", string(rollup.AggNone):
 		return nil
 	case string(rollup.AggFormula):
 		if isInput {
@@ -45,7 +45,7 @@ func ValidateAggRule(rule string, isInput bool, numeratorID, denominatorID, metr
 		}
 		return nil
 	default:
-		return invalid("unknown aggregation rule %q (expected sum, average, count, formula or rate)", rule)
+		return invalid("unknown aggregation rule %q (expected sum, average, count, formula, rate or none)", rule)
 	}
 }
 

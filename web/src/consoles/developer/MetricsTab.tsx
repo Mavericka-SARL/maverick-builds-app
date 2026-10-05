@@ -45,6 +45,7 @@ function fmtBadge(format: string, decimals: number, currency: string): string {
     case "currency":   return `${currency || "$"}${decimals > 0 ? `.${decimals}` : ""}`;
     case "boolean":    return "Y/N";
     case "text":       return "TXT";
+    case "picklist":   return "LIST";
     default:           return decimals > 0 ? `#.${decimals}` : "#";
   }
 }
@@ -148,11 +149,11 @@ export function MetricsTab({ model, revisionId }: { model: DevModel; revisionId?
             </tr>
           </thead>
           <tbody>
-            {inputs.map((m) => <MetricRow key={m.id} m={m} modelId={model.model_id} allMetrics={model.metrics} dimNames={dimNames} onTimeGrid={timeMetrics.has(m.id)} activeTag={filterTag} onTagClick={toggleTag} />)}
+            {inputs.map((m) => <MetricRow key={m.id} m={m} modelId={model.model_id} allMetrics={model.metrics} dimNames={dimNames} dims={revisionDims} onTimeGrid={timeMetrics.has(m.id)} activeTag={filterTag} onTagClick={toggleTag} />)}
             {inputs.length > 0 && calcs.length > 0 && (
               <tr><td colSpan={6} className="mvx-table__group-row">Calculated</td></tr>
             )}
-            {calcs.map((m) => <MetricRow key={m.id} m={m} modelId={model.model_id} allMetrics={model.metrics} dimNames={dimNames} onTimeGrid={timeMetrics.has(m.id)} activeTag={filterTag} onTagClick={toggleTag} />)}
+            {calcs.map((m) => <MetricRow key={m.id} m={m} modelId={model.model_id} allMetrics={model.metrics} dimNames={dimNames} dims={revisionDims} onTimeGrid={timeMetrics.has(m.id)} activeTag={filterTag} onTagClick={toggleTag} />)}
             {inputs.length === 0 && calcs.length === 0 && filtering && (
               <tr><td colSpan={6} style={{ padding: 20, textAlign: "center" }} className="mvx-admin-muted">
                 {q ? `No metrics match "${search.trim()}"${filterTag ? ` with tag "${filterTag}"` : ""}` : `No metrics have tag "${filterTag}"`}
@@ -208,11 +209,12 @@ function useUnknownFormulaNames(formula: string, metricNames: string[], dimNames
   return (data?.refs ?? []).filter(ref => !known.has(ref.toLowerCase()));
 }
 
-function MetricRow({ m, modelId, allMetrics, dimNames, onTimeGrid, activeTag, onTagClick }: {
+function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeTag, onTagClick }: {
   m: DevMetric;
   modelId: string;
   allMetrics: DevMetric[];
   dimNames: string[];
+  dims: { id: string; name: string }[];
   onTimeGrid: boolean;
   activeTag: string | null;
   onTagClick: (tag: string) => void;
@@ -229,6 +231,7 @@ function MetricRow({ m, modelId, allMetrics, dimNames, onTimeGrid, activeTag, on
   const [format, setFormat] = useState(m.format ?? "number");
   const [formatDecimals, setFormatDecimals] = useState(m.format_decimals ?? 0);
   const [formatCurrency, setFormatCurrency] = useState(m.format_currency ?? "$");
+  const [picklistDim, setPicklistDim] = useState(m.picklist_dimension_id ?? "");
   const [tags, setTags] = useState<string[]>(m.tags ?? []);
   const [recalcResults, setRecalcResults] = useState<RecalcRow[] | null>(null);
   // The recalc reports revision ids; the banner names them. Fetched only
@@ -241,15 +244,19 @@ function MetricRow({ m, modelId, allMetrics, dimNames, onTimeGrid, activeTag, on
   const revisionLabel = (id: string) => modelRevisions.find(r => r.id === id)?.name ?? id.slice(0, 8);
 
   const invalidRefs = useUnknownFormulaNames(formula, allMetrics.map(x => x.name), dimNames, !m.is_input);
-  const canSave = name.trim() !== "" && (m.is_input || formula.trim() !== "");
+  const isPicklist = format === "picklist";
+  const canSave = name.trim() !== "" && (m.is_input || formula.trim() !== "") && (!isPicklist || picklistDim !== "");
 
   const update = useMutation({
     mutationFn: () => api.updateMetric(m.id, {
-      name, label, formula, agg_rule: aggRule,
+      name, label, formula,
+      // A pick-list never totals: "none", or "formula" for a calculated one.
+      agg_rule: isPicklist && aggRule !== "formula" ? "none" : aggRule,
       agg_numerator_metric_id: aggRule === "rate" ? numeratorId : "",
       agg_denominator_metric_id: aggRule === "rate" ? denominatorId : "",
       format, format_decimals: formatDecimals, format_currency: formatCurrency,
-      time_summary: timeSummary, tags,
+      time_summary: isPicklist ? "none" : timeSummary, tags,
+      picklist_dimension_id: isPicklist ? picklistDim : "",
     }),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["dev-model"] });
@@ -300,14 +307,17 @@ function MetricRow({ m, modelId, allMetrics, dimNames, onTimeGrid, activeTag, on
                   style={{ width: 260, fontFamily: "var(--font-mono)" }} placeholder="formula" />
               )}
               <Select value={aggRule} onChange={(e) => setAggRule(e.target.value)} style={{ width: 130 }} aria-label="Aggregation rule">
-                <option value="sum">Sum</option>
-                <option value="average">Average</option>
-                <option value="count">Count</option>
-                <option value="rate">Rate</option>
+                {!isPicklist && <>
+                  <option value="sum">Sum</option>
+                  <option value="average">Average</option>
+                  <option value="count">Count</option>
+                  <option value="rate">Rate</option>
+                </>}
                 {/* Calculated metrics only: "formula" means evaluating this
                     metric's formula at the total level, which an input metric
                     has none to do. The server rejects it for inputs too. */}
                 {!m.is_input && <option value="formula">Formula</option>}
+                <option value="none">None (no total)</option>
               </Select>
               {aggRule === "rate" && (
                 <RatioOperands
@@ -319,14 +329,21 @@ function MetricRow({ m, modelId, allMetrics, dimNames, onTimeGrid, activeTag, on
                   onDenominator={setDenominatorId}
                 />
               )}
-              {onTimeGrid && <TimeSummarySelect value={timeSummary} onChange={setTimeSummary} />}
-              <Select value={format} onChange={(e) => setFormat(e.target.value)} style={{ width: 120 }} aria-label="Format">
+              {onTimeGrid && !isPicklist && <TimeSummarySelect value={timeSummary} onChange={setTimeSummary} />}
+              <Select value={format} onChange={(e) => {
+                setFormat(e.target.value);
+                if (e.target.value === "picklist" && aggRule !== "formula" && aggRule !== "none") setAggRule(m.is_input ? "none" : "formula");
+              }} style={{ width: 120 }} aria-label="Format">
                 <option value="number">Number</option>
                 <option value="percentage">Percentage</option>
                 <option value="currency">Currency</option>
                 <option value="boolean">Boolean</option>
                 <option value="text">Text</option>
+                <option value="picklist">Pick-list</option>
               </Select>
+              {isPicklist && (
+                <PicklistDimensionSelect dims={dims} value={picklistDim} onChange={setPicklistDim} />
+              )}
               {(format === "number" || format === "percentage" || format === "currency") && (
                 <NumberInput min={0} max={4} value={formatDecimals}
                   onChange={e => setFormatDecimals(Math.min(4, Math.max(0, parseInt(e.target.value) || 0)))}
@@ -437,6 +454,19 @@ function MetricRow({ m, modelId, allMetrics, dimNames, onTimeGrid, activeTag, on
   );
 }
 
+// The dimension whose members a pick-list's cells hold.
+function PicklistDimensionSelect({ dims, value, onChange, width = 160 }: {
+  dims: { id: string; name: string }[]; value: string; onChange: (v: string) => void; width?: number;
+}) {
+  return (
+    <Select value={value} onChange={(e) => onChange(e.target.value)} style={{ width }} aria-label="Pick-list dimension"
+      title="Each cell holds one member of this dimension">
+      <option value="">Members of…</option>
+      {dims.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+    </Select>
+  );
+}
+
 function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revisionId?: string; onSuccess?: () => void }) {
   const qc = useQueryClient();
   const [name, setName] = useState("");
@@ -454,21 +484,26 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
   const [aggRule, setAggRule] = useState("sum");
   const [numeratorId, setNumeratorId] = useState("");
   const [denominatorId, setDenominatorId] = useState("");
+  const [picklistDim, setPicklistDim] = useState("");
   const [tags, setTags] = useState<string[]>([]);
+  const isPicklist = format === "picklist";
 
   const add = useMutation({
     mutationFn: () => api.addMetric({
-      name, label, is_input: isInput, formula, revision_id: revisionId, agg_rule: aggRule,
+      name, label, is_input: isInput, formula, revision_id: revisionId,
+      // A pick-list never totals: "none", or "formula" for a calculated one.
+      agg_rule: !isPicklist ? aggRule : isInput || aggRule === "none" ? "none" : "formula",
       // Only sent for "rate"; any other rule has no operands and the server
       // rejects a pair it did not ask for.
       agg_numerator_metric_id: aggRule === "rate" ? numeratorId : "",
       agg_denominator_metric_id: aggRule === "rate" ? denominatorId : "",
       format, format_decimals: formatDecimals, format_currency: formatCurrency,
-      time_summary: timeSummary, tags,
+      time_summary: isPicklist ? "none" : timeSummary, tags,
+      picklist_dimension_id: isPicklist ? picklistDim : undefined,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["dev-model"] });
-      setName(""); setLabel(""); setFormula(""); setNumeratorId(""); setDenominatorId(""); setTimeSummary("sum"); setTags([]);
+      setName(""); setLabel(""); setFormula(""); setNumeratorId(""); setDenominatorId(""); setTimeSummary("sum"); setTags([]); setPicklistDim("");
       onSuccess?.();
     },
   });
@@ -509,11 +544,17 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
               { id: "currency", label: "Currency" },
               { id: "boolean", label: "Boolean" },
               { id: "text", label: "Text" },
+              { id: "picklist", label: "Pick-list" },
             ]}
             value={format}
             onChange={setFormat}
           />
         </Field>
+        {isPicklist && (
+          <Field label="Members of" description="each cell holds one member of this dimension — a drop-down list such as Yes/No, a status, or a region">
+            <PicklistDimensionSelect dims={revisionDims} value={picklistDim} onChange={setPicklistDim} width={220} />
+          </Field>
+        )}
         {(format === "number" || format === "percentage" || format === "currency") && (
           <div style={{ display: "flex", gap: 12 }}>
             <Field label="Decimal places">
@@ -543,26 +584,31 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
           </Field>
         )}
 
-        {!isInput && (
+        {!(isInput && isPicklist) && (
           <Field
             label="Aggregation rule"
             description={aggRule === "formula"
               ? "the total is this metric's formula evaluated against aggregated inputs — use for ratios and percentages, where summing members is meaningless"
               : aggRule === "rate"
               ? "the total is one metric divided by another, so it reflects weight rather than averaging members equally"
+              : aggRule === "none"
+              ? "no total: values at the members only, nothing on total rows — an index, a correction %, a pick-list"
               : "how per-member results combine into this metric's total"}
           >
             <Select value={aggRule} onChange={(e) => setAggRule(e.target.value)} style={{ width: 160 }} aria-label="Aggregation rule">
-              <option value="sum">Sum</option>
-              <option value="average">Average</option>
-              <option value="count">Count</option>
-              <option value="rate">Rate</option>
-              <option value="formula">Formula</option>
+              {!isPicklist && <>
+                <option value="sum">Sum</option>
+                <option value="average">Average</option>
+                <option value="count">Count</option>
+                <option value="rate">Rate</option>
+              </>}
+              {!isInput && <option value="formula">Formula</option>}
+              <option value="none">None (no total)</option>
             </Select>
           </Field>
         )}
 
-        {!isInput && aggRule === "rate" && (
+        {aggRule === "rate" && (
           <RatioOperands
             metrics={model.metrics}
             numeratorId={numeratorId}
@@ -572,7 +618,7 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
           />
         )}
 
-        {hasTimeDim && (
+        {hasTimeDim && !isPicklist && (
           <Field label="Time summary" description={`across the time dimension: ${TIME_SUMMARY_HELP[timeSummary]}`}>
             <TimeSummarySelect value={timeSummary} onChange={setTimeSummary} width={160} />
           </Field>
@@ -586,7 +632,7 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
           variant="primary"
           style={{ alignSelf: "flex-start" }}
           leadingIcon={add.isSuccess ? <Check size={14} /> : undefined}
-          disabled={!name || (!isInput && !formula) ||
+          disabled={!name || (!isInput && !formula) || (isPicklist && !picklistDim) ||
             (aggRule === "rate" && (!numeratorId || !denominatorId))}
           loading={add.isPending}
           loadingLabel="Adding…"

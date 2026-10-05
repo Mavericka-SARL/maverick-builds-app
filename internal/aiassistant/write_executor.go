@@ -534,6 +534,9 @@ type createMetricParams struct {
 	// | max | first | last | none). Empty = sum.
 	TimeSummary string   `json:"time_summary"`
 	Tags        []string `json:"tags"`
+	// PicklistDimension (format "picklist"): the dimension, by name or id,
+	// whose members the metric's cells hold.
+	PicklistDimension string `json:"picklist_dimension"`
 }
 
 func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -559,6 +562,15 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 	if p.FormatCurrency == "" {
 		p.FormatCurrency = "$"
 	}
+	revID := e.effectiveRevision(p.RevisionID)
+	if err := metricformula.CheckNameFreeOfOtherKind(ctx, e.pool, e.modelID, revID, p.Name, "metric"); err != nil {
+		return "", "", err
+	}
+	picklist, err := metricformula.ResolvePicklist(ctx, e.pool, e.modelID, revID, p.Format, p.PicklistDimension, p.AggRule, p.TimeSummary, p.IsInput)
+	if err != nil {
+		return "", "", err
+	}
+	p.AggRule, p.TimeSummary = picklist.AggRule, picklist.TimeSummary
 	if p.AggRule == "" {
 		p.AggRule = "sum"
 	}
@@ -568,7 +580,6 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 	if !timedim.ValidTimeSummary(p.TimeSummary) {
 		return "", "", fmt.Errorf("time_summary must be one of %s", strings.Join(timedim.TimeSummaries, ", "))
 	}
-	revID := e.effectiveRevision(p.RevisionID)
 
 	// The same two checks the developer role's metric handler runs. Neither
 	// ran here before, so the AI could save an aggregation rule the engine
@@ -608,7 +619,6 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 	}
 
 	var newID string
-	var err error
 	if revID != "" {
 		err = e.pool.QueryRow(ctx, `
 			INSERT INTO model.metric_def (model_id, name, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule,
@@ -635,6 +645,11 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 	if l := strings.TrimSpace(p.Label); l != "" {
 		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET label=$2 WHERE id=$1::uuid`, newID, l); err != nil {
 			return "", "", fmt.Errorf("set label: %w", err)
+		}
+	}
+	if picklist.DimensionID != "" {
+		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET picklist_dimension_id=$2::uuid WHERE id=$1::uuid`, newID, picklist.DimensionID); err != nil {
+			return "", "", fmt.Errorf("set pick-list dimension: %w", err)
 		}
 	}
 
@@ -667,6 +682,9 @@ type updateMetricParams struct {
 	TimeSummary            string `json:"time_summary"`
 	// Left out keeps the metric's tags; a list (even empty) replaces them.
 	Tags *[]string `json:"tags"`
+	// PicklistDimension: the dimension (name or id) a pick-list's cells
+	// hold members of; left out keeps it while the format stays "picklist".
+	PicklistDimension string `json:"picklist_dimension"`
 }
 
 func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -702,11 +720,15 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 	if err := e.pool.QueryRow(ctx, `
 		SELECT COALESCE(revision_id::text,''), is_input, name, COALESCE(formula,''), COALESCE(agg_rule,''),
 		       COALESCE(format,''), COALESCE(format_decimals,0), COALESCE(format_currency,''),
-		       COALESCE(agg_numerator_metric_id::text,''), COALESCE(agg_denominator_metric_id::text,''), COALESCE(time_summary,'')
+		       COALESCE(agg_numerator_metric_id::text,''), COALESCE(agg_denominator_metric_id::text,''), COALESCE(time_summary,''),
+		       COALESCE(picklist_dimension_id::text,'')
 		FROM model.metric_def WHERE id=$1::uuid`, p.MetricID).Scan(&metricRev, &metricIsInput, &storedName,
 		&st.Formula, &st.AggRule, &st.Format, &st.FormatDecimals, &st.FormatCurrency,
-		&st.AggNumeratorMetricID, &st.AggDenominatorMetricID, &st.TimeSummary); err != nil {
+		&st.AggNumeratorMetricID, &st.AggDenominatorMetricID, &st.TimeSummary, &st.PicklistDimension); err != nil {
 		return "", "", fmt.Errorf("load metric: %w", err)
+	}
+	if err := metricformula.CheckRenameFreeOfOtherKind(ctx, e.pool, p.MetricID, p.Name, "metric"); err != nil {
+		return "", "", err
 	}
 	if p.Name == "" {
 		p.Name = storedName
@@ -737,6 +759,34 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 	}
 	if !has("format_decimals") {
 		p.FormatDecimals = st.FormatDecimals
+	}
+	{
+		// A pick-list keeps its dimension unless the step changes it;
+		// leaving the format drops it. Becoming one takes the pick-list's
+		// own aggregation and time summary unless the step sets them.
+		format := p.Format
+		if format == "" {
+			format = "number"
+		}
+		if !has("picklist_dimension") {
+			p.PicklistDimension = st.PicklistDimension
+			if format != metricformula.FormatPicklist {
+				p.PicklistDimension = ""
+			}
+		}
+		if format == metricformula.FormatPicklist {
+			if !has("agg_rule") && p.AggRule != string(rollup.AggNone) && p.AggRule != string(rollup.AggFormula) {
+				p.AggRule = ""
+			}
+			if !has("time_summary") {
+				p.TimeSummary = ""
+			}
+		}
+		pl, err := metricformula.ResolvePicklist(ctx, e.pool, e.modelID, metricRev, format, p.PicklistDimension, p.AggRule, p.TimeSummary, metricIsInput)
+		if err != nil {
+			return "", "", err
+		}
+		p.PicklistDimension, p.AggRule, p.TimeSummary = pl.DimensionID, pl.AggRule, pl.TimeSummary
 	}
 	if p.AggRule == "" {
 		p.AggRule = "sum"
@@ -791,10 +841,10 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 		UPDATE model.metric_def
 		SET name=$2, formula=$3, agg_rule=$4, format=$5, format_decimals=$6, format_currency=$7,
 		    agg_numerator_metric_id=NULLIF($8,'')::uuid, agg_denominator_metric_id=NULLIF($9,'')::uuid,
-		    time_summary=$10, tags=COALESCE($11, tags)
+		    time_summary=$10, tags=COALESCE($11, tags), picklist_dimension_id=NULLIF($12,'')::uuid
 		WHERE id=$1::uuid
 	`, p.MetricID, p.Name, formulaPtr, p.AggRule, p.Format, p.FormatDecimals, p.FormatCurrency,
-		p.AggNumeratorMetricID, p.AggDenominatorMetricID, p.TimeSummary, optionalTags(p.Tags)); err != nil {
+		p.AggNumeratorMetricID, p.AggDenominatorMetricID, p.TimeSummary, optionalTags(p.Tags), p.PicklistDimension); err != nil {
 		if metricformula.IsUniqueViolation(err) {
 			return "", "", metricformula.MetricNameTaken(err, p.Name)
 		}
@@ -951,6 +1001,9 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 				return "", "", fmt.Errorf("member %q: %w", m.Code, err)
 			}
 		}
+	}
+	if err := metricformula.CheckNameFreeOfOtherKind(ctx, e.pool, e.modelID, revID, p.Name, "dimension"); err != nil {
+		return "", "", err
 	}
 	var newID string
 	var granularity *string
@@ -2143,6 +2196,10 @@ func (e *WriteExecutor) addDashboardWidget(ctx context.Context, raw json.RawMess
 		SizeW       int             `json:"size_w"`
 		SizeH       int             `json:"size_h"`
 		WidgetProps json.RawMessage `json:"widget_props"`
+		// Title: the widget's header text, shown with it (show_title, on
+		// by default when a title is given).
+		Title     *string `json:"title"`
+		ShowTitle *bool   `json:"show_title"`
 	}
 	perr := decodeParams(raw, &p)
 	if isUnknownParam(perr) {
@@ -2169,6 +2226,9 @@ func (e *WriteExecutor) addDashboardWidget(ctx context.Context, raw json.RawMess
 	// stale — the widget looks configured but resolves to nothing at render
 	// time. Widget types whose ref is not a metric/grid (forms, automation
 	// rules, integrations) pass through unchanged, as before.
+	if err := modeledit.CheckWidgetType(p.WidgetType); err != nil {
+		return "", "", err
+	}
 	if p.RefID, err = e.resolveWidgetRef(ctx, p.WidgetType, p.RefID); err != nil {
 		return "", "", err
 	}
@@ -2224,11 +2284,11 @@ func (e *WriteExecutor) addDashboardWidget(ctx context.Context, raw json.RawMess
 	var newID string
 	err = e.pool.QueryRow(ctx, `
 		INSERT INTO model.dashboard_widget
-		  (dashboard_id, widget_type, ref_id, content, pos_x, pos_y, size_w, size_h, widget_props, sort_order, col_start, col_span)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, 0, 1, 12)
+		  (dashboard_id, widget_type, ref_id, content, pos_x, pos_y, size_w, size_h, widget_props, sort_order, col_start, col_span, title, show_title)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, 0, 1, 12, NULLIF(btrim($10::text),''), $11)
 		RETURNING id::text
 	`, p.DashboardID, p.WidgetType, p.RefID, p.Content,
-		p.PosX, p.PosY, p.SizeW, p.SizeH, propsStr).Scan(&newID)
+		p.PosX, p.PosY, p.SizeW, p.SizeH, propsStr, p.Title, widgetShowTitle(p.Title, p.ShowTitle)).Scan(&newID)
 	if err != nil {
 		return "", "", fmt.Errorf("insert widget: %w", err)
 	}
@@ -2462,6 +2522,10 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			SELECT (SELECT count(*) FROM dim_parent_fix) + (SELECT count(*) FROM dim_source_fix) + (SELECT count(*) FROM member_parent_fix)
 		`, e.modelID, newID, srcID); err != nil {
 			return "", "", fmt.Errorf("remap dimension hierarchy into new revision: %w", err)
+		}
+		// A pick-list holds members of the copy's own dimension.
+		if err := modeledit.RemapPicklistDimensions(ctx, tx, e.modelID, newID, srcID); err != nil {
+			return "", "", err
 		}
 
 		// Remap rollup_source_grid_id now that both the referenced and
@@ -3589,4 +3653,13 @@ func widgetDefaults(widgetType string, props json.RawMessage) json.RawMessage {
 		return props
 	}
 	return out
+}
+
+// widgetShowTitle is a new widget's show_title: as sent, else on when it has
+// a title.
+func widgetShowTitle(title *string, show *bool) bool {
+	if show != nil {
+		return *show
+	}
+	return title != nil && strings.TrimSpace(*title) != ""
 }

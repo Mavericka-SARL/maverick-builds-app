@@ -286,7 +286,7 @@ func TestDeleteDimensionAndMember(t *testing.T) {
 	_, headcount := h.must("create_metric", map[string]any{"name": "headcount", "is_input": true})
 	_, region := h.must("create_dimension", map[string]any{"name": "region", "members": []map[string]any{
 		{"code": "EMEA", "label": "EMEA"}, {"code": "APAC", "label": "APAC"}, {"code": "UK", "label": "UK", "parent_code": "EMEA"}}})
-	h.must("create_metric", map[string]any{"name": "emea_heads", "formula": `SUMIFS(headcount, region, "EMEA")`})
+	h.must("create_metric", map[string]any{"name": "emea_heads", "formula": `LOOKUP(headcount, region, "EMEA")`})
 	h.fact(headcount, map[string]string{region: "APAC"}, 7)
 
 	_, _, err := h.run("delete_dimension_member", map[string]any{"dimension_id": "region", "code": "EMEA"})

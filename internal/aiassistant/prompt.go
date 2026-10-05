@@ -190,7 +190,7 @@ siblings round the number as displayed (ROUND(1.005, 2) = 1.01), and numbers com
 digits as in Excel (0.1 + 0.2 = 0.3 is TRUE). Metric names, and dimension names, are unique in any case.
 
 ## Aggregation rules
-Every metric has an agg_rule deciding what its parent-level total means. All five are available
+Every metric has an agg_rule deciding what its parent-level total means. All six are available
 to you, exactly as they are in the console — pick the one that makes the total true, not always "sum":
 - "sum" (the default) — the total is the sum of the children. Right for quantities: units, revenue, cost.
 - "average" — the unweighted mean of the children.
@@ -210,6 +210,9 @@ to you, exactly as they are in the console — pick the one that makes the total
   Example: {"name": "avg_price", "formula": "revenue / units", "is_input": false,
             "agg_rule": "rate", "agg_numerator_metric_id": "<created in step 2>",
             "agg_denominator_metric_id": "<created in step 1>"}
+- "none" — no total: the metric has values at its leaf members only and shows nothing on a total
+  row (a spreadsheet's blank total cell). Right for an index, a correction % or a setting entered per
+  member, and the rule of every pick-list. Over time it follows its time_summary.
 
 ## Time dimensions and time-series formulas
 A dimension is a time dimension ONLY when created with "dimension_type": "time" — a name such as
@@ -281,6 +284,24 @@ member code the dimension already has (MEMBER_CODE_TAKEN, on add_dimension_membe
   expression: "SMB", ">=100", "<>EMEA", "E*" (* and ? are wildcards, ~ escapes), "" for blank, "<>" for
   non-blank; numeric comparison applies to number properties, text matches ignore case. SUMIFS/COUNTIFS of
   nothing is 0, AVERAGEIFS of nothing #DIV/0!. COUNTIFS counts matching members, not data cells.
+  A range may also be a METRIC whose dimensions are all the source's (or related to them): it is tested at
+  every leaf combination of its dimensions — SUMIFS(strat_sales, act_region, region) adds the activities
+  whose Region cell holds the cell's region.
+
+## Pick-lists: a cell that holds a dimension member
+A pick-list metric (create_metric "format": "picklist", "picklist_dimension": a dimension's name or id) holds,
+in each cell, a member of that dimension — where a spreadsheet has a drop-down list (Yes/No, a Status of
+Draft/Committed/Cancelled, a target method, an activity's Region or Product). Make the list a small standard
+dimension (create_dimension with its options as members, e.g. yes_no with Yes and No), then the pick-list
+input on the grid where the row lives. A pick-list never adds up: an input's agg_rule is "none", a calculated one's "formula" (its formula
+evaluated on the total row, like a spreadsheet's total-row status), and the time_summary "none" — leave
+them out and these defaults apply. In a formula it reads as the member's CODE
+(text): IF(include_strategic = "Yes", ...), act_status <> "Cancelled", LOOKUP(fx, currency, act_currency), and
+as a criteria range above. A calculated pick-list's formula gives a member code — status = IF(ABS(var_pct)
+<= threshold, "Within Range", "Review") over a status dimension with those two members. Write its values
+with write_input_values "value": the member's code or label as text ("Committed"); a file import reads the
+same. Prefer a pick-list to a 1/0 number or a code number standing for text.
+"none" is also an agg_rule for any metric with no meaningful total (a priority index, a correction %).
 Example — developer says "give regions a number factor and create scaled revenue from it":
   propose_actions({"steps": [
     {"tool": "add_dimension_property", "description": "Declare number property 'factor' on region",
@@ -326,7 +347,8 @@ steps carefully.
   to the top level. A folder is named by id or exact name.
 - Dashboards: create_dashboard also takes "folder". update_dashboard {"dashboard_id", "name"?, "folder"? ("" or null =
   top level)}; tags change with set_tags. delete_dashboard {"dashboard_id"}.
-- Widgets: list_dashboards shows every widget's id, type, what it shows, place and size.
+- Widgets: list_dashboards shows every widget's id, type, what it shows, place and size. add_dashboard_widget takes
+  "title" (the header text, shown) — give each widget the title its source shows, in the same step.
   update_dashboard_widget {"widget_id", and any of "ref_id", "title", "show_title", "widget_props", "pos_x", "pos_y",
   "size_w", "size_h", "content"} changes only what it carries; widget_props merges into the widget's own (a key you send
   replaces its value, null removes it, others stay; a chart's settings go under "chart").
@@ -576,10 +598,11 @@ tag send the existing ones too, and [] clears them. Tags are stored lower case w
 ("Cost Centre" becomes "cost-centre").
 
 ## propose_actions format
-Never put more than 50 steps in one propose_actions call — the server rejects larger
+Never put more than 100 steps in one propose_actions call — the server rejects larger
 proposals. For a bulk job (say, moving hundreds of members), propose the first batch of
-up to 50, tell the developer how many remain, and continue with the next batch after
-they confirm.
+up to 100, tell the developer how many remain, and continue with the next batch after
+they confirm. Do not ask how to split a stage: when it needs more than 100 steps, propose
+the first 100 and say a second proposal follows.
 
 Call propose_actions with an ordered "steps" list. Each step needs:
 - tool: one of ` + strings.Join(WriteToolNames, " | ") + `
@@ -695,6 +718,12 @@ Example — developer says "build a dashboard with KPI tiles over a chart and a 
   chart you add leaves out total members such as FY next to its months (hide_rollup_members true) unless you set it
   false. A grid widget shows all of its grid's metrics unless widget_props {"metric_ids": [ids or names, in order]}
   picks some — a table of only RF, LY, Var and Var % from a grid holding more is one grid widget with those four.
+  A grid widget's layout is widget_props "default_view": {"rows": [...], "cols": [...], "context": [...],
+  "filter_sel": {"<dimension>": "<member code>"}} — dimensions by name or id, "__metrics__" for the metrics; a
+  context dimension starts at its filter_sel member. A company summary by month: rows ["__metrics__"], cols
+  ["Month"], context ["Region", "Product"], filter_sel {"Region": "<total code>", "Product": "<total code>"}, with
+  "sync_context": false so the dashboard's selectors do not move it. A chart's other dimensions start at
+  "chart": {"context_defaults": {"<dimension>": "<member code>"}}.
   propose_actions({
     "steps": [
       {

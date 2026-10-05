@@ -183,6 +183,9 @@ func checkDimensionNames(ctx context.Context, q Querier, an *formula.Analysis, r
 // activation, since a member can be deleted after the formula was saved.
 // metricName, when known, is named in the message.
 func checkLiteralMembers(ctx context.Context, q Querier, metricName string, an *formula.Analysis, rd *revisionDims) error {
+	if err := checkCriteriaLeaves(ctx, q, metricName, an, rd); err != nil {
+		return err
+	}
 	for _, call := range an.DimensionalCalls {
 		for _, m := range call.Members {
 			code, ok := m.LiteralCode()
@@ -256,6 +259,22 @@ func checkSourceDimensions(metricName string, an *formula.Analysis, rd *revision
 		for _, name := range call.Dims {
 			d := rd.lookup(name)
 			if d == nil {
+				// A metric criteria range (SUMIFS(sales, act_region, region))
+				// is read at the source's members: each of its dimensions
+				// must be one of the source's, or related to one.
+				rangeDims, placedRange := metricDims[sourceID(name)]
+				if sourceID(name) == "" || !placedRange {
+					continue
+				}
+				for _, id := range rangeDims {
+					rdim := rd.byID[id]
+					if rdim == nil || onSource(rd, srcDims, rdim) {
+						continue
+					}
+					return invalidCode(formula.CodeDimensionNotOnSource,
+						"%s in %s tests %s, which is dimensioned by %s, but %s is not one of %s's dimensions (%s) and is not related to one — a metric used as a criteria range must sit on the source's dimensions",
+						call.Func, metricName, name, rdim.name, rdim.name, call.Source, dimNames(rd, srcDims))
+				}
 				continue
 			}
 			if !onSource(rd, srcDims, d) {
@@ -378,4 +397,104 @@ func dimensionalSelfMessage(an *formula.Analysis, name string) string {
 		fn = "a dimensional function"
 	}
 	return fmt.Sprintf("formula reads the metric it defines (%q) through %s; a metric cannot read its own values at other members or periods this way", name, fn)
+}
+
+// resolveMetricRanges turns the criteria ranges of an that name a metric of
+// the revision (and no dimension) into what they are: a Dimensional
+// reference to that metric, read at every leaf combination of its
+// dimensions — a dependency, recalculating this metric when it changes —
+// instead of a dimension argument. A name that is neither stays a
+// dimension argument, for checkDimensionNames to report.
+func resolveMetricRanges(ctx context.Context, q Querier, req Request, an *formula.Analysis, rd *revisionDims) {
+	for _, name := range an.RangeNames {
+		if rd.lookup(name) != nil {
+			continue
+		}
+		var metricID string
+		if err := q.QueryRow(ctx, `
+			SELECT id::text FROM model.metric_def
+			WHERE model_id=$1::uuid AND lower(name)=lower($2)
+			  AND (revision_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid OR revision_id IS NULL)
+			ORDER BY (name = $2) DESC LIMIT 1
+		`, req.ModelID, name, req.RevisionID).Scan(&metricID); err != nil {
+			continue
+		}
+		// Its dimensions are ranged over: a time one makes the read
+		// unbounded past and future (overriddenTimeDim).
+		var over []string
+		if rows, err := q.Query(ctx, `
+			SELECT gd.dimension_id::text FROM model.grid_metric gm
+			JOIN model.grid_dimension gd ON gd.grid_id = gm.grid_id
+			WHERE gm.metric_id = $1::uuid`, metricID); err == nil {
+			for rows.Next() {
+				var id string
+				if rows.Scan(&id) == nil {
+					if d := rd.byID[id]; d != nil {
+						over = append(over, d.name)
+					}
+				}
+			}
+			rows.Close()
+		}
+		kept := an.DimensionArgs[:0]
+		for _, d := range an.DimensionArgs {
+			if !strings.EqualFold(d, name) {
+				kept = append(kept, d)
+			}
+		}
+		an.DimensionArgs = kept
+		found := false
+		for i := range an.References {
+			if strings.EqualFold(an.References[i].Name, name) {
+				an.References[i].Dimensional = true
+				an.References[i].OverriddenDims = append(an.References[i].OverriddenDims, over...)
+				found = true
+			}
+		}
+		if !found {
+			an.References = append(an.References, formula.ReferenceUse{Name: name, Dimensional: true, OverriddenDims: over})
+		}
+	}
+}
+
+// checkCriteriaLeaves refuses a criterion that is a literal code of a member
+// with members under it (SUMIFS(sales, month, "FY2027")): a criteria range
+// runs over its dimension's leaf members, so nothing matches and the result
+// is a silent 0 — the AI Developer wrote exactly this for a full-year total.
+// The message names the reads that do mean the total.
+func checkCriteriaLeaves(ctx context.Context, q Querier, metricName string, an *formula.Analysis, rd *revisionDims) error {
+	for _, call := range an.DimensionalCalls {
+		for _, c := range call.Criteria {
+			code, ok := c.LiteralCode()
+			if !ok || c.Property != "" {
+				continue
+			}
+			d := rd.lookup(c.Dim)
+			if d == nil {
+				continue // a metric range, or reported as a DimensionArg
+			}
+			var parent bool
+			if err := q.QueryRow(ctx, `
+				SELECT EXISTS (SELECT 1 FROM model.dimension_member p JOIN model.dimension_member ch ON ch.parent_member_id = p.id
+				               WHERE p.dimension_id = $1::uuid AND p.code = $2)`, d.id, code).Scan(&parent); err != nil {
+				return err
+			}
+			if !parent {
+				continue
+			}
+			where := call.Func
+			if metricName != "" {
+				where = call.Func + " in " + metricName
+			}
+			source := call.Source
+			if source == "" {
+				source = "<metric>"
+			}
+			return invalidCode(formula.CodeUnknownMember,
+				"%s: %s of %s has members under it, and a criteria range runs over leaf members only, so %q matches nothing — "+
+					"for its total read LOOKUP(%s, %s, %q), or %s itself on a grid without %s (it reads the total)",
+				where, code, d.name, code, source, d.name, code, source, d.name)
+		}
+	}
+	return nil
 }

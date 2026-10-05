@@ -162,6 +162,9 @@ func usesTimeSeries(formulaText string) bool {
 // to member subtrees per dimension (a slice). ok=false when there is nothing
 // to reduce or the time summary is 'none'.
 func summarizeOverTime(leaves []CalcResultRow, axis *timeAxis, aggRule, timeSummaryRule string, subtrees map[string]map[string]bool) (float64, bool) {
+	if !rollup.Aggregates(rollup.AggRule(aggRule)) {
+		return 0, false
+	}
 	perPeriod := map[int][]float64{}
 	for _, r := range leaves {
 		pos, ok := axis.index[r.DimMembers[axis.dim.ID]]
@@ -510,7 +513,7 @@ func (e *tsEvaluator) evalAtOnce(combo map[string]string, pos int) (float64, boo
 	if err != nil {
 		return 0, false, err
 	}
-	v := formula.EvalNode(ctx, e.node)
+	v := e.reads.meta.EncodeResult(e.def.Name, formula.EvalNode(ctx, e.node))
 	if v.IsError() {
 		// A blank or unknown member is never "no data" (see evalCell).
 		noData := len(e.def.DependsOnID) > 0 && !e.reads.data && !formula.IsMemberNotAvailable(v.Err())

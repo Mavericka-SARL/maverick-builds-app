@@ -4,7 +4,7 @@
 > dependencies that are not fixed yet, with the evidence and what would close
 > each one.
 
-> **Last verified:** 2026-10-04
+> **Last verified:** 2026-10-05
 
 A finding that is not acted on in the change that found it is written down
 here, so it does not live only in a chat or a commit message. Each entry says
@@ -17,6 +17,151 @@ is recorded instead in `docs/OBSERVATIONS_PRIVATE.md`, which the public export
 leaves out, until it is fixed.
 
 ## Open
+
+### Cells hold no free text
+
+- **Noticed:** 2026-10-04, rebuilding a sales target-setting workbook.
+- **What:** facts are numbers. Pick-lists (migration 110) now cover every
+  drop-down and status, but a per-row comment (the workbook's Regional
+  Comment and Local Comment columns), an activity's name, owner or note and
+  a free "Round 1" label have no cell to live in. The models keep names,
+  owners and notes as member labels and properties (developer-maintained)
+  and the comments as the workflow's required task comments.
+- **Why it matters:** a planner's explanation of a correction sits on the
+  round's task, not beside the number it explains, and is not exported with
+  the grid.
+- **How to check:** look for a text input on the Region Target grid.
+- **What closes it:** a decision on text-valued input metrics (stored beside
+  facts, shown and edited in the grid, carried by copies and exports), or
+  cell notes.
+
+### Planners cannot name a new strategic activity
+
+- **Noticed:** 2026-10-04, same rebuild.
+- **What:** activities are members of the activity dimension, and members,
+  their labels and their properties are developer-only. The models pre-create
+  the workbook's 20 rows as slots; a planner fills a free slot's pick-lists
+  and amounts, but its name stays "Open slot 5" until a developer renames it.
+  The user chose this split for the build.
+- **Why it matters:** in the workbook the planner types the activity's name
+  and owner on the row they add.
+- **How to check:** as a business user, try to rename STRAT-005.
+- **What closes it:** member maintenance for a dimension a developer marks as
+  business-maintained (a narrow business-admin route), or free-text cells.
+
+### A typed cell cannot be cleared
+
+- **Noticed:** 2026-10-04, restoring the workbook's sample data after a
+  scenario.
+- **What:** `POST /api/cells` writes a number; there is no way back to an
+  empty cell (the workbook's blank Absolute Target), only 0. A pick-list cell
+  can be cleared ("member": "").
+- **Why it matters:** blank and 0 differ for AVERAGEIFS, COUNTIFS and the
+  "no value" display.
+- **How to check:** write a cell, then try to empty it in the grid.
+- **What closes it:** a clear that deletes the cell's fact (kept in
+  fact_input_history), from the grid and the API.
+
+### A business admin cannot start a round they approve
+
+- **Noticed:** 2026-10-04, running the "Sales Target Round" workflow.
+- **What:** the start answers 403 "approvers do not start approval workflows";
+  a business user starts the round and the admin decides it. In a target
+  round the corporate FP&A lead opens the round and approves it at the end.
+- **Why it matters:** the natural starter is refused; segregation of duties
+  is right for a request, less so for a planning cycle.
+- **How to check:** press "Start target round" as the business admin.
+- **What closes it:** a decision whether a workflow may allow its approver to
+  start it (a definition setting), or keeping the rule.
+
+### A formula may name a dimension its metric is never on
+
+- **Noticed:** 2026-10-04: `used_target` saved while `target_method` was
+  still only a dimension (the metric of that name came later) read the
+  dimension's code — blank on a grid without it — and always took the
+  absolute-target branch, with no error. The clash is now refused
+  (NAME_IS_OTHER_KIND), but a bare dimension name on a metric whose grid
+  does not carry the dimension still saves.
+- **Why it matters:** such a formula reads blank everywhere, silently.
+- **How to check:** `IF(region = "NA", 1, 0)` on a grid without region.
+- **What closes it:** a warning (or refusal) when a formula names, bare, a
+  dimension that is neither on its grid nor related to one of its dimensions.
+
+### A replace import leaves rows the file does not have
+
+- **Noticed:** 2026-10-04, re-importing Strategic_Activities after a
+  scenario added an activity in a free slot.
+- **What:** "replace" overwrites the intersections the file carries; the
+  slot's pick-lists and amounts, absent from the file, stayed.
+- **Why it matters:** "replace" reads like "make the grid the file".
+- **How to check:** add a value at a member the file lacks, run the import.
+- **What closes it:** a documented mode that clears the target's other cells,
+  or a clearer name.
+
+### An AI turn that writes a huge proposal shows nothing for minutes
+
+- **Noticed:** 2026-10-04, the AI Developer asked for every input with its
+  values: one model call ran more than 15 minutes (gpt-5-mini writing the
+  240 prior-year values into a proposal), with no progress, no time limit
+  and no way to stop it short of restarting the gateway.
+- **Why it matters:** the developer cannot tell a long turn from a hung one.
+- **How to check:** ask for a stage whose values are typed into the proposal.
+- **What closes it:** a per-turn time limit with a clear message, streamed
+  progress while a tool call is being written, and a stop button; the prompt
+  now says sheet data is imported, not typed.
+
+### Pick-list cells leave some readers as keys
+
+- **Noticed:** 2026-10-04, adding pick-lists.
+- **What:** the grid, KPI tiles, file imports and exports, `/api/cells` and
+  the AI's writes speak members; the chat connector, cell history and the
+  audit log still show a pick-list cell as its key (a 16-digit number), and a
+  chart cannot plot one (refused on save). The grid file export wrote keys
+  too; it now writes the member's label (checked on the Strategic
+  Activities grid).
+- **Why it matters:** a history or a connector answer about an activity's
+  status is unreadable.
+- **How to check:** open a pick-list cell's history.
+- **What closes it:** the member's code or label wherever a cell value
+  leaves the grid.
+
+### The AI plan check stops after three refusals and the model asks instead
+
+- **Noticed:** 2026-10-04, the AI Developer rebuild: after a third refused
+  plan the check's own message says "Do not propose again in this turn …
+  ask how to proceed" (maxProposalRejections = 3), and gpt-5-mini then
+  ended five turns with "shall I propose it?" questions; once it claimed work
+  existed that no proposal had made.
+- **Why it matters:** each costs the developer a message and minutes; a
+  long stage needs four or five corrected attempts.
+- **How to check:** a stage message whose first plans fail the check.
+- **What closes it:** a higher limit while the number of failing steps
+  falls, and a prompt rule that a stage the developer asked for is proposed,
+  not asked about.
+
+### A session goes on checking against its base after its draft is promoted
+
+- **Noticed:** 2026-10-04: after "Promote to Active", the same session's
+  plans were checked against its original, empty base revision ("the working
+  revision has no metric yet") while its read tools listed the promoted
+  metrics.
+- **Why it matters:** the developer sees the AI fail on metrics it just
+  listed; the designed path is a new session, which nothing says.
+- **How to check:** promote a session's draft, then ask it for an
+  update_metric.
+- **What closes it:** the session continuing on the promoted revision (a new
+  draft from it), or the promote answer and the next turn saying a new
+  session is needed.
+
+### The developer API stores widget_props keys the console never reads
+
+- **Noticed:** 2026-10-04: the manual build sent `button_label` and
+  `confirm_message`; the console reads `content` and `confirm_text`, so the
+  button said "Trigger" with no confirmation, and the save said nothing.
+  The AI's tool refuses unknown keys (widgetPropKeys); the console API does
+  not.
+- **How to check:** POST a widget with widget_props {"button_lable": "x"}.
+- **What closes it:** the AI's key check on the developer API too.
 
 ### A chart plots only one grid's metrics
 
@@ -2606,6 +2751,124 @@ leaves out, until it is fixed.
   `CheckMembers` before the first insert, for every caller.
 
 ## Closed
+
+### Cells cannot hold a member of a dimension (no pick-lists)
+
+- **Noticed:** 2026-10-04, rebuilding a sales target-setting workbook whose
+  drop-downs (target method, Include?, an activity's Region, Product, Type
+  and Status) and Within Range / Review statuses had no representation.
+- **What was wrong:** cells hold numbers only, and only forms had dimension
+  fields; a Yes/No became a 1/0, a status a code number, an activity's region
+  a developer-maintained property.
+- **Closed by:** 3294cb9 — the pick-list format (migration 110): a metric whose cells
+  hold members of a chosen dimension, stored as the member code's key, read
+  in formulas as the code (comparisons, LOOKUP, and as a SUMIFS criteria
+  range: `SUMIFS(strat, act_region, region)`), returned by a calculated
+  pick-list, chosen from a list in the grid, written by member code or label
+  (`/api/cells` "member", file imports, `write_input_values`), re-keyed on a
+  member code rename, guarded on member and dimension delete, carried by both
+  revision copies and model export/import, and available to the AI Developer
+  (`create_metric` "picklist_dimension"). A metric may now also be a criteria
+  range in the SUMIFS family. (`TestPicklistMetrics`, `TestPicklist*` and
+  `TestMetricCriteriaRanges` in internal/formula.)
+
+### No aggregation rule leaves a total blank
+
+- **Noticed:** same rebuild: the workbook's priority index and correction %
+  columns have blank Company Total cells; the engine summed them.
+- **Closed by:** 3294cb9 — agg_rule "none" — values at the metric's own leaf members
+  only, through rollup, the scheduler, scoped reads, the chart and the grid
+  (`TestAggNoneHasNoTotal`); the default of a pick-list input (a calculated
+  pick-list defaults to "formula").
+
+### A chart read settings on a grid without dimensions as nothing
+
+- **Noticed:** same rebuild: the region bar chart showed Top-Down Total 0
+  while the grid showed 837.
+- **What was wrong:** the chart's input loader skipped facts stored at no
+  members, so any setting on a dimensionless grid (a growth %, a company
+  target) read 0 in every chart; and a dimensionless calculated metric (a
+  company total) read at a plotted region evaluated its inputs at that
+  region. Both predate pick-lists: the CPG model's Actual Through Month was
+  such a setting.
+- **Closed by:** 3294cb9 — the loader reads dimensionless facts, and a calculated
+  metric is evaluated on its own (and related) dimensions only
+  (`TestChartReadsSettingsAndCompanyTotals`, which fails without either).
+
+### A metric and a dimension may share a name
+
+- **Noticed:** same rebuild: `used_target`, saved while `target_method` was a
+  dimension only, stayed bound to the dimension after the metric was added
+  and always took the wrong branch.
+- **Closed by:** 3294cb9 — NAME_IS_OTHER_KIND on creating or renaming a metric named
+  like a dimension of its revision, or the reverse (console and AI
+  Developer); existing pairs, revision copies and imports are left alone.
+
+### A SUMIFS criterion naming a parent member matched nothing
+
+- **Noticed:** same rebuild: the AI Developer wrote
+  `SUMIFS(sales_base_ly, Month, "FY2027")` for the full year, which is 0
+  (criteria ranges run over leaf members).
+- **Closed by:** 3294cb9 — refused at save, naming LOOKUP or a plain reference as the
+  read that means the total.
+
+### The AI Developer read an attached workbook as values only
+
+- **Noticed:** same rebuild: it proposed three of seven activity types (the
+  ones in use), no target-method list, and had to reverse-engineer every
+  formula; values were the displayed ones (13.4 for 13.36).
+- **Closed by:** 3294cb9 — the workbook reader gives stored values with row numbers,
+  each sheet's layout (headers, which rows hold inputs, text or formulas, the
+  sheets its formulas read), its formulas compressed by block (a column or a
+  month band of one formula is one line), drop-down lists, conditional
+  highlights and comments (`TestWorkbookExtractionReadsFormulasListsAndLayout`).
+  The 13-sheet sales workbook reads in 42,709 of the 60,000 characters.
+
+### A turn cut off at the stream deadline broke the AI session
+
+- **Noticed:** 2026-10-04: an AI turn ran past the 15-minute stream deadline;
+  every later message of the session answered "LLM request failed: openai:
+  400 … Invalid value for 'content': expected a string, got null".
+- **What was wrong:** the cut turn is stored as an assistant message with no
+  text and no tool calls; the OpenAI provider sent it with null content
+  (go-openai's omitempty), which OpenAI refuses, on every replay of the
+  history. The Anthropic provider already skipped such turns.
+- **Closed by:** 3294cb9 — the OpenAI provider leaves an empty assistant turn out of
+  the history (`TestOpenAIProvider_Chat_EmptyAssistantTurnLeftOut`).
+
+### A grid widget layout that pins a dimension in no zone showed zeros
+
+- **Noticed:** 2026-10-04: the AI's month table set filter_sel for Region
+  and Product but put them in no zone; the grid dropped them and every cell
+  read 0.
+- **Closed by:** 3294cb9 — a dimension a saved layout puts in no zone is a context
+  selector at its pinned member (PlanningGrid), checked in the browser.
+
+### Widgets of an unknown type saved and drew nothing
+
+- **Noticed:** 2026-10-04: the AI added "workflow_button" widgets; the plan
+  check passed and the dashboard would have shown nothing.
+- **Closed by:** 3294cb9 — modeledit.CheckWidgetType on the developer API and the AI
+  tool, naming automation_button for a workflow start (`TestPicklistMetrics`).
+
+### Float noise showed as "-$0.00"
+
+- **Closed by:** 3294cb9 — the grid shows a value below its shown precision as 0.
+
+### AI proposals were capped at 50 steps
+
+- **Closed by:** 3294cb9 — `aiassistant.MaxProposalSteps` = 100; the prompt says to
+  propose the first batch instead of asking how to split.
+
+### Widgets took a title only after placement; the AI could not lay out a grid widget
+
+- **What was wrong:** `POST .../widgets` and the AI's add_dashboard_widget
+  had no title (a second call set it); the AI's widget props accepted
+  `default_view` but did not resolve its dimension names and the prompt never
+  described it, so the AI invented keys to pin a company summary.
+- **Closed by:** 3294cb9 — title / show_title at creation (API and AI); default_view
+  and chart context_defaults take dimension names, resolved to ids, and are
+  described in the AI prompt.
 
 ### The AI Developer on gpt-4o-mini needs a developer's review at every stage
 

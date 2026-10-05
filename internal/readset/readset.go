@@ -426,6 +426,23 @@ func (b *builder) follow(x *Metric, sx map[string]spec, u use, depth int) {
 	if len(argDims) > 0 {
 		b.add(argDims, argSpecs)
 	}
+	// A criteria range that names a metric (SUMIFS(sales, act_region,
+	// region)) is read at every leaf combination of its dimensions.
+	for _, a := range u.args {
+		if len(s.dimsByNm[strings.ToUpper(a.dim)]) > 0 {
+			continue
+		}
+		if rm := s.byName[strings.ToUpper(a.dim)]; rm != nil {
+			all := make(map[string]spec, len(rm.Dims))
+			for _, e := range rm.Dims {
+				all[e] = spec{kind: kindAll}
+			}
+			b.visit(rm, all, depth+1)
+			if b.fp.unknown {
+				return
+			}
+		}
+	}
 	r := s.byName[strings.ToUpper(u.source)]
 	if u.source == "" || r == nil {
 		return // COUNTIFS (member-only), or a bare dimension name

@@ -71,6 +71,15 @@ type DimEvalContext struct {
 	// pass. The same map must be shared by every context of that pass,
 	// time-shifted children included. nil disables memoisation.
 	Memo map[string]Value
+	// Picklist returns the codec of a metric whose format is "picklist"
+	// (its cells hold members of one dimension); ok is false for any other
+	// metric. nil: no metric is a pick-list.
+	Picklist func(metric string) (PicklistCodec, bool)
+	// MetricDims returns the dimension names of a metric, for a metric
+	// written as a criteria range (SUMIFS(sales, act_region, region)); ok
+	// is false for a name that is not a metric. nil: criteria ranges are
+	// dimensions only.
+	MetricDims func(metric string) (dims []string, ok bool)
 }
 
 // Error identifiers for dimensional references (contract C10). Kept as the
@@ -346,9 +355,15 @@ func fnLOOKUP(ctx *EvalContext, args []Node) Value {
 		}
 		overrides[dim] = canonical
 	}
-	val, _, ferr := d.Resolve(source, overrides)
+	val, found, ferr := d.Resolve(source, overrides)
 	if ferr != nil {
 		return ErrorVal(ferr)
+	}
+	if codec, ok := d.picklist(source); ok {
+		if !found {
+			return BlankVal()
+		}
+		return decodeKey(codec, source, val)
 	}
 	return NumberVal(val)
 }
@@ -369,7 +384,7 @@ func rangeArg(node Node, fn string) (criteriaRange, *FormulaError) {
 		return criteriaRange{dim: n.Dim, prop: n.Property}, nil
 	}
 	return criteriaRange{}, &FormulaError{Code: CodeDimensionArgRequired,
-		Message: fmt.Sprintf("%s: a criteria range must be a dimension or dimension.property, got %s", fn, describeNode(node))}
+		Message: fmt.Sprintf("%s: a criteria range must be a dimension, dimension.property or a metric, got %s", fn, describeNode(node))}
 }
 
 // conditionalShape splits a conditional call's arguments into its source
@@ -410,6 +425,33 @@ type evaluatedCriterion struct {
 	rng  criteriaRange
 	crit criterion
 	raw  Value
+	// metricDims is set for a metric range (rng.dim names a metric): the
+	// metric's dimensions, at whose every leaf combination its value is
+	// tested.
+	metricDims []string
+}
+
+// isDimension reports whether name is a dimension of the cell's revision.
+func isDimension(d *DimEvalContext, name string) bool {
+	if d.Current != nil {
+		_, _, ferr := d.Current(name)
+		return ferr == nil
+	}
+	if d.Leaves != nil {
+		_, ferr := d.Leaves(name)
+		return ferr == nil
+	}
+	return true
+}
+
+// metricRange returns the dimensions of a criteria range that names a
+// metric rather than a dimension (a dimension wins a shared name); ok is
+// false for a dimension, a dim.property range or an unknown name.
+func metricRange(d *DimEvalContext, r criteriaRange) ([]string, bool) {
+	if r.prop != "" || d.MetricDims == nil || isDimension(d, r.dim) {
+		return nil, false
+	}
+	return d.MetricDims(r.dim)
 }
 
 // conditional implements the *IFS/*IF family (contract C3).
@@ -446,6 +488,16 @@ func conditional(ctx *EvalContext, fn string, args []Node) Value {
 			return v
 		}
 		crits[i] = evaluatedCriterion{rng: ranges[i], crit: parseCriterion(v), raw: v}
+		if dims, ok := metricRange(d, ranges[i]); ok {
+			// A metric range ranges over every dimension of the metric.
+			crits[i].metricDims = dims
+			for _, dim := range dims {
+				if !containsFold(dimOrder, dim) {
+					dimOrder = append(dimOrder, dim)
+				}
+			}
+			continue
+		}
 		if !containsFold(dimOrder, ranges[i].dim) {
 			dimOrder = append(dimOrder, ranges[i].dim)
 		}
@@ -479,6 +531,15 @@ func conditional(ctx *EvalContext, fn string, args []Node) Value {
 }
 
 func conditionalCompute(d *DimEvalContext, fn, source string, dimOrder []string, crits []evaluatedCriterion) Value {
+	if _, ok := d.picklist(source); ok {
+		return ErrorVal(errValue(fmt.Sprintf("%s: %s is a pick-list, whose members cannot be added up or compared as numbers — count them with COUNTIFS(%s, ...)", fn, source, source)))
+	}
+	var metricCrits []evaluatedCriterion
+	for _, c := range crits {
+		if c.metricDims != nil {
+			metricCrits = append(metricCrits, c)
+		}
+	}
 	// Every range dimension's leaves are fetched before any filtering, so
 	// an unknown dimension is an error whatever the argument order — never
 	// hidden behind an earlier range that matched nothing.
@@ -501,7 +562,7 @@ func conditionalCompute(d *DimEvalContext, fn, source string, dimOrder []string,
 		for _, m := range leavesOf[i] {
 			keep := true
 			for _, c := range crits {
-				if !strings.EqualFold(c.rng.dim, dim) {
+				if c.metricDims != nil || !strings.EqualFold(c.rng.dim, dim) {
 					continue
 				}
 				candidate := StringVal(m.Code)
@@ -527,11 +588,15 @@ func conditionalCompute(d *DimEvalContext, fn, source string, dimOrder []string,
 		}
 	}
 
-	if fn == conditionalCountIf || fn == conditionalCountIfs {
+	counting := fn == conditionalCountIf || fn == conditionalCountIfs
+	if counting && len(metricCrits) == 0 {
 		return NumberVal(float64(tuples))
 	}
+	if len(metricCrits) > 0 && d.Resolve == nil {
+		return ErrorVal(dimCallbackMissing(fn, "dimensional reads"))
+	}
 	var sum, lo, hi float64
-	found := 0
+	found, counted := 0, 0
 	if tuples > 0 {
 		idx := make([]int, len(dimOrder))
 		overrides := make(map[string]string, len(dimOrder))
@@ -539,9 +604,19 @@ func conditionalCompute(d *DimEvalContext, fn, source string, dimOrder []string,
 			for i, dim := range dimOrder {
 				overrides[dim] = matches[i][idx[i]]
 			}
-			v, ok, ferr := d.Resolve(source, overrides)
+			keep, ferr := metricCriteriaMatch(d, metricCrits, overrides)
 			if ferr != nil {
 				return ErrorVal(ferr)
+			}
+			var v float64
+			var ok bool
+			if keep && counting {
+				counted++
+			} else if keep {
+				v, ok, ferr = d.Resolve(source, overrides)
+				if ferr != nil {
+					return ErrorVal(ferr)
+				}
 			}
 			if ok {
 				if found == 0 || v < lo {
@@ -567,6 +642,9 @@ func conditionalCompute(d *DimEvalContext, fn, source string, dimOrder []string,
 			}
 		}
 	}
+	if counting {
+		return NumberVal(float64(counted))
+	}
 	switch fn {
 	case conditionalAverageIfs, conditionalAverageIf:
 		if found == 0 {
@@ -587,6 +665,37 @@ func conditionalCompute(d *DimEvalContext, fn, source string, dimOrder []string,
 		return NumberVal(hi)
 	}
 	return NumberVal(sum)
+}
+
+// metricCriteriaMatch tests every metric-range criterion at one member
+// combination: the range metric is read there (on its own dimensions), a
+// pick-list as its member's code, nothing recorded as a blank.
+func metricCriteriaMatch(d *DimEvalContext, crits []evaluatedCriterion, overrides map[string]string) (bool, *FormulaError) {
+	for _, c := range crits {
+		own := make(map[string]string, len(c.metricDims))
+		for _, dim := range c.metricDims {
+			for k, code := range overrides {
+				if strings.EqualFold(k, dim) {
+					own[k] = code
+				}
+			}
+		}
+		v, found, ferr := d.Resolve(c.rng.dim, own)
+		if ferr != nil {
+			return false, ferr
+		}
+		candidate := BlankVal()
+		if found {
+			candidate = NumberVal(v)
+			if codec, ok := d.picklist(c.rng.dim); ok {
+				candidate = decodeKey(codec, c.rng.dim, v)
+			}
+		}
+		if !c.crit.matches(candidate) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func memberProperty(m DimMember, prop string) Value {

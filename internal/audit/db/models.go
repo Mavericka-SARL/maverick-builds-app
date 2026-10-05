@@ -1647,6 +1647,7 @@ type ModelMetricDef struct {
 	Tags                   []string        `json:"tags"`
 	LineageID              uuid.UUID       `json:"lineage_id"`
 	Label                  *string         `json:"label"`
+	PicklistDimensionID    pgtype.UUID     `json:"picklist_dimension_id"`
 }
 
 type ModelRevision struct {

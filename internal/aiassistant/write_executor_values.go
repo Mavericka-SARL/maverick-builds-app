@@ -35,7 +35,9 @@ func (e *WriteExecutor) writeInputValues(ctx context.Context, raw json.RawMessag
 		MetricID string `json:"metric_id"`
 		Values   []struct {
 			Members map[string]string `json:"members"`
-			Value   *float64          `json:"value"`
+			// Value is a number, or for a pick-list the member it holds
+			// (code or label) as text.
+			Value json.RawMessage `json:"value"`
 		} `json:"values"`
 	}
 	if err := decodeParams(raw, &p); err != nil {
@@ -93,10 +95,11 @@ func (e *WriteExecutor) writeInputValues(ctx context.Context, raw json.RawMessag
 
 	req := ValuesWriteRequest{RevisionID: e.revID, GridID: gridID, MetricID: metricID, Header: append(append([]string{}, dimNames...), metricName)}
 	for i, v := range p.Values {
-		if v.Value == nil {
-			return "", "", fmt.Errorf("values[%d] has no value", i)
+		text, err := valueText(v.Value)
+		if err != nil {
+			return "", "", fmt.Errorf("values[%d]: %w", i, err)
 		}
-		cells := map[string]string{metricName: strconv.FormatFloat(*v.Value, 'f', -1, 64)}
+		cells := map[string]string{metricName: text}
 		for key, code := range v.Members {
 			d, ok := matchDim(dims, key, func(d dim) (string, string) { return d.id, d.name })
 			if !ok {
@@ -121,6 +124,24 @@ func (e *WriteExecutor) writeInputValues(ctx context.Context, raw json.RawMessag
 		return "", "", err
 	}
 	return result, "", nil
+}
+
+// valueText is a write_input_values value as the import pipeline reads a
+// cell: a number in full, or text — a pick-list's member by code or label.
+func valueText(raw json.RawMessage) (string, error) {
+	t := strings.TrimSpace(string(raw))
+	if t == "" || t == "null" {
+		return "", fmt.Errorf("no value")
+	}
+	var n float64
+	if err := json.Unmarshal(raw, &n); err == nil {
+		return strconv.FormatFloat(n, 'f', -1, 64), nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil && strings.TrimSpace(s) != "" {
+		return strings.TrimSpace(s), nil
+	}
+	return "", fmt.Errorf("value must be a number, or for a pick-list metric the member's code or label as text")
 }
 
 // matchDim finds a dimension by id or by name, ignoring case.

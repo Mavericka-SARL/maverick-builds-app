@@ -658,7 +658,7 @@ components:
 
     WritebackRequest:
       type: object
-      required: [model_id, metric_id, value]
+      required: [model_id, metric_id]
       description: >-
         Identify the cell with `dim_codes` (one member code per dimension). `dim_code` is the
         older single-code form, still accepted: it writes to the one dimension of the request's
@@ -679,7 +679,13 @@ components:
             Older single-code form, used when dim_codes is absent: writes to the one dimension of
             the request's revision that has a member with this code among the metric's own
             dimensions; 400 when none or several have it.
-        value:       { type: number }
+        value:       { type: number, description: "For a pick-list metric, the key of a member of its dimension (0 clears the cell); or send member" }
+        member:
+          type: string
+          description: >-
+            Pick-list metrics only, instead of value: the member the cell holds, by code or label
+            (exact, then ignoring case); "" clears it. Anything that is not a member of the
+            pick-list's dimension is refused with 400.
 
     SubmitBudgetRequest:
       type: object
@@ -802,6 +808,7 @@ components:
             How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every
             other dimension): sum for flows, last for a closing balance, first for an opening balance,
             none when a time total is meaningless.
+        picklist_dimension_id: { type: string, format: uuid, description: "format picklist: the dimension whose members the metric's cells hold" }
         depends_on:      { type: array, items: { type: string }, description: "Names of metrics/dimensions this formula references" }
         depended_by:     { type: array, items: { type: string }, description: "Names of metrics whose formula references this one" }
         tags:            { type: array, items: { type: string }, description: "Free-form labels the developer console filters by" }
@@ -871,6 +878,12 @@ components:
         format_decimals: { type: integer }
         format_currency: { type: string, default: "$" }
         tags:            { type: array, items: { type: string } }
+        picklist_dimension_id:
+          type: string
+          description: >-
+            Required for format picklist, refused for any other: a dimension of the revision (id or
+            name) whose members the metric's cells hold. A pick-list's agg_rule is none (default) or,
+            calculated, formula; its time_summary none.
         time_summary:
           type: string
           enum: [sum, average, min, max, first, last, none]
@@ -891,6 +904,7 @@ components:
         format:          { type: string }
         format_decimals: { type: integer }
         format_currency: { type: string }
+        picklist_dimension_id: { type: string, description: "format picklist: the dimension (id or name) its cells hold members of; omitted keeps it while the format stays picklist" }
         time_summary:
           type: string
           enum: [sum, average, min, max, first, last, none]
@@ -1107,6 +1121,8 @@ components:
         size_w:       { type: integer, description: "Minimum enforced by the server is 20; values below that are clamped to a 200 default." }
         size_h:       { type: integer, description: "Minimum enforced by the server is 20; values below that are clamped to a 60 default." }
         widget_props: { type: object, additionalProperties: {} }
+        title:        { type: string, description: "Header text; shown unless show_title is false" }
+        show_title:   { type: boolean, description: "Defaults to true when a title is given" }
 
     UpdateWidgetRequest:
       type: object

@@ -284,6 +284,7 @@ func (s *Scheduler) recalcMetricIDs(ctx context.Context, modelID, revisionID str
 		schema = nil
 	}
 	meta := NewDimMetadata(allDims, dimIDToName, schema)
+	DescribeMetrics(meta, defs, metricDimIDs)
 
 	for _, comp := range components {
 		if comp.Recurrence {
@@ -567,6 +568,9 @@ func (s *Scheduler) executePartition(
 		}
 		aggregate = total
 	}
+	if !rollup.Aggregates(rollup.AggRule(def.AggRule)) {
+		writeAggregate = false // agg_rule none: values at the leaves only
+	}
 	// The single-combo case (leafCombos collapsed to just {} above, or the
 	// metric has no declared dims at all) is already fully covered by the
 	// aggregate row and must not be double-written.
@@ -583,8 +587,10 @@ func (s *Scheduler) executePartition(
 	// a large model). Combined exactly as scopeCalcCells (the live scoped
 	// read) does, so the fast path and the recompute fallback never disagree.
 	dimConditional := FormulaReferencesDims(def.Formula, dimIDToName)
-	perComboRows = append(perComboRows, oneDimSliceRows(def.AggRule, dimConditional, metricDimIDs[def.ID], allDims, results, evalOne, axis, def.TimeSummary)...)
-	perComboRows = append(perComboRows, aggregatePeriodRows(def.AggRule, metricDimIDs[def.ID], results, axis, def.TimeSummary)...)
+	if rollup.Aggregates(rollup.AggRule(def.AggRule)) {
+		perComboRows = append(perComboRows, oneDimSliceRows(def.AggRule, dimConditional, metricDimIDs[def.ID], allDims, results, evalOne, axis, def.TimeSummary)...)
+		perComboRows = append(perComboRows, aggregatePeriodRows(def.AggRule, metricDimIDs[def.ID], results, axis, def.TimeSummary)...)
+	}
 
 	// Replace the metric's result set in ONE transaction: the '{}' total
 	// (or the clear of a stale one — time_summary 'none', a blank total),

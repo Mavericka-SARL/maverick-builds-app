@@ -163,6 +163,43 @@ func TestOpenAIProvider_Chat_EmptyToolResultStillHasContent(t *testing.T) {
 	}
 }
 
+// A turn cut off at the stream deadline is stored as an assistant message
+// with no text and no tool calls. Sent, go-openai drops its content and
+// OpenAI answers 400 "expected a string, got null" on every later turn of
+// the session; it is left out of the history instead.
+func TestOpenAIProvider_Chat_EmptyAssistantTurnLeftOut(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&captured)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id": "c", "object": "chat.completion", "created": 1, "model": "gpt-4",
+			"choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "ok"}}]}`))
+	}))
+	defer server.Close()
+
+	p := NewOpenAICompatible("test-key", server.URL, "openai")
+	if _, err := p.Chat(t.Context(), ChatRequest{
+		Model: "gpt-4",
+		Messages: []Message{
+			{Role: "user", Content: "build the dashboards"},
+			{Role: "assistant", Content: ""},
+			{Role: "user", Content: "that reply was cut off; again"},
+		},
+	}); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	msgs, _ := captured["messages"].([]any)
+	for _, raw := range msgs {
+		m := raw.(map[string]any)
+		if m["role"] == "assistant" {
+			t.Fatalf("the empty assistant turn was sent: %#v", m)
+		}
+	}
+	if len(msgs) != 2 {
+		t.Errorf("sent %d messages, want the two user messages", len(msgs))
+	}
+}
+
 func TestOpenAIProvider_Chat_EmptyChoicesErrors(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -95,7 +95,54 @@ const (
 	// and the scheduler owns the arithmetic; combineAgg below is only reached
 	// at intermediate rollup levels.
 	AggRate AggRule = "rate"
+
+	// AggNone gives no total: the metric has a value at its own leaf
+	// intersections only, and nothing above them along its non-time
+	// dimensions (time follows its time summary). An index or a correction
+	// percentage entered per region has no meaningful company total, and a
+	// pick-list's members are never added up.
+	AggNone AggRule = "none"
 )
+
+// Aggregates reports whether rule gives totals at all (every rule but
+// AggNone).
+func Aggregates(rule AggRule) bool { return rule != AggNone }
+
+// leafCombo reports whether combo names one leaf intersection of the
+// metric's own non-time dimensions: each pinned to a member with nothing
+// under it, and no related dimension (a parent dimension, a grouping)
+// pinned in its place. Time is left to the time summary.
+func leafCombo(dims map[string]*Dimension, metricDimIDs []string, combo map[string]string) bool {
+	own := make(map[string]bool, len(metricDimIDs))
+	for _, id := range metricDimIDs {
+		d := dims[id]
+		if d != nil && d.IsTime {
+			continue
+		}
+		own[id] = true
+		code, pinned := combo[id]
+		if !pinned {
+			return false
+		}
+		if d != nil && len(childrenOf(d, code)) > 0 {
+			return false
+		}
+	}
+	for id := range combo {
+		if own[id] {
+			continue
+		}
+		if d := dims[id]; d == nil || d.IsTime {
+			continue
+		}
+		for o := range own {
+			if Relates(dims, o, id) {
+				return false
+			}
+		}
+	}
+	return true
+}
 
 // RawValue fetches metricID's recorded value at an exact combo (dimension ID
 // -> member code, covering exactly metricID's own dimensions, no more, no
@@ -187,6 +234,9 @@ func Resolve(
 	combo map[string]string,
 	fetch RawValue,
 ) (float64, bool, error) {
+	if aggRule == AggNone && !leafCombo(dims, metricDimIDs, combo) {
+		return 0, false, nil
+	}
 	if flatRule(aggRule, false) {
 		v, ok, _, err := resolveFlat(ctx, dims, metricID, metricDimIDs, aggRule, combo, fetch, false)
 		return v, ok, err
@@ -962,6 +1012,9 @@ func resolveTime(
 	fetch RawValue,
 	flatSum bool,
 ) (float64, bool, error) {
+	if aggRule == AggNone && !leafCombo(dims, metricDimIDs, combo) {
+		return 0, false, nil
+	}
 	flat := flatRule(aggRule, flatSum)
 	// one resolves combo with its time dimension (if any) at a leaf period
 	// or absent; recorded reports whether a leaf read had a recorded value.

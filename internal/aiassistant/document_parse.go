@@ -11,7 +11,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/dslipak/pdf"
-	"github.com/xuri/excelize/v2"
 )
 
 // maxDocumentChars caps the extracted text stored per document so a single
@@ -80,33 +79,6 @@ func extractPDF(data []byte) (out string, err error) {
 	var sb strings.Builder
 	if _, err := io.Copy(&sb, plain); err != nil {
 		return "", fmt.Errorf("pdf text extraction failed: %w", err)
-	}
-	return sb.String(), nil
-}
-
-func extractXLSX(data []byte) (string, error) {
-	f, err := excelize.OpenReader(bytes.NewReader(data))
-	if err != nil {
-		return "", fmt.Errorf("xlsx parse failed: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	var sb strings.Builder
-	for _, sheet := range f.GetSheetList() {
-		rows, err := f.GetRows(sheet)
-		if err != nil {
-			continue
-		}
-		fmt.Fprintf(&sb, "## Sheet: %s\n", sheet)
-		for i, row := range rows {
-			if i >= maxSheetRows {
-				fmt.Fprintf(&sb, "... (%d more rows omitted)\n", len(rows)-maxSheetRows)
-				break
-			}
-			sb.WriteString(strings.Join(row, "\t"))
-			sb.WriteString("\n")
-		}
-		sb.WriteString("\n")
 	}
 	return sb.String(), nil
 }

@@ -135,6 +135,21 @@ func CheckChartMetrics(ctx context.Context, db DB, gridID string, widgetProps js
 		}
 		missing = append(missing, metricName(ctx, db, id))
 	}
+	var picklists []string
+	for _, id := range append(append([]string{}, c.MetricIDs...), c.XMetricID, c.YMetricID) {
+		if id == "" {
+			continue
+		}
+		var isPicklist bool
+		_ = db.QueryRow(ctx, `SELECT picklist_dimension_id IS NOT NULL FROM model.metric_def WHERE id=$1::uuid`, id).Scan(&isPicklist)
+		if isPicklist {
+			picklists = append(picklists, metricName(ctx, db, id))
+		}
+	}
+	if len(picklists) > 0 {
+		return fmt.Errorf("%s holds dimension members (a pick-list), not quantities, so a chart cannot plot it — "+
+			"chart a number that counts or sums by it instead (COUNTIFS / SUMIFS over the pick-list)", strings.Join(picklists, ", "))
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("the chart reads grid %q, which does not hold %s: a chart plots only its own grid's metrics. "+
 			"Point it at the grid that holds them, or give that grid a metric reading each one (formula = the other metric) and plot those%s",
@@ -183,4 +198,23 @@ func seriesGrids(ctx context.Context, db DB, metricIDs []string) string {
 	}
 	return fmt.Sprintf(". The series are on different grids (%s): make a grid whose only dimension is the plotted one (a grid with more dimensions would repeat each copy per member), put on it a metric for each series that reads it (formula = that metric), and chart that grid",
 		strings.Join(parts, "; "))
+}
+
+// WidgetTypes are the dashboard widget types the console renders
+// (DashboardWidgets.tsx). Another type saved, drew nothing, and said
+// nothing: the AI Developer added "workflow_button" widgets for a trigger.
+var WidgetTypes = []string{"grid", "chart", "form", "metric_kpi", "automation_button", "integration_button", "text", "image", "import"}
+
+// CheckWidgetType refuses a widget type the console does not render.
+func CheckWidgetType(t string) error {
+	for _, w := range WidgetTypes {
+		if t == w {
+			return nil
+		}
+	}
+	hint := ""
+	if strings.Contains(t, "button") || strings.Contains(t, "workflow") || strings.Contains(t, "trigger") {
+		hint = ` — a button that starts a workflow is "automation_button" over a manual automation rule (ref_id: the rule)`
+	}
+	return fmt.Errorf("there is no widget type %q: the types are %s%s", t, strings.Join(WidgetTypes, ", "), hint)
 }

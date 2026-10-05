@@ -15578,6 +15578,12 @@ func (s *CreateMetricRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.PicklistDimensionID.Set {
+			e.FieldStart("picklist_dimension_id")
+			s.PicklistDimensionID.Encode(e)
+		}
+	}
+	{
 		if s.TimeSummary.Set {
 			e.FieldStart("time_summary")
 			s.TimeSummary.Encode(e)
@@ -15585,7 +15591,7 @@ func (s *CreateMetricRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfCreateMetricRequest = [11]string{
+var jsonFieldsNameOfCreateMetricRequest = [12]string{
 	0:  "name",
 	1:  "label",
 	2:  "is_input",
@@ -15596,7 +15602,8 @@ var jsonFieldsNameOfCreateMetricRequest = [11]string{
 	7:  "format_decimals",
 	8:  "format_currency",
 	9:  "tags",
-	10: "time_summary",
+	10: "picklist_dimension_id",
+	11: "time_summary",
 }
 
 // Decode decodes CreateMetricRequest from json.
@@ -15721,6 +15728,16 @@ func (s *CreateMetricRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"tags\"")
+			}
+		case "picklist_dimension_id":
+			if err := func() error {
+				s.PicklistDimensionID.Reset()
+				if err := s.PicklistDimensionID.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"picklist_dimension_id\"")
 			}
 		case "time_summary":
 			if err := func() error {
@@ -16811,9 +16828,21 @@ func (s *CreateWidgetRequest) encodeFields(e *jx.Encoder) {
 			s.WidgetProps.Encode(e)
 		}
 	}
+	{
+		if s.Title.Set {
+			e.FieldStart("title")
+			s.Title.Encode(e)
+		}
+	}
+	{
+		if s.ShowTitle.Set {
+			e.FieldStart("show_title")
+			s.ShowTitle.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfCreateWidgetRequest = [11]string{
+var jsonFieldsNameOfCreateWidgetRequest = [13]string{
 	0:  "widget_type",
 	1:  "ref_id",
 	2:  "content",
@@ -16825,6 +16854,8 @@ var jsonFieldsNameOfCreateWidgetRequest = [11]string{
 	8:  "size_w",
 	9:  "size_h",
 	10: "widget_props",
+	11: "title",
+	12: "show_title",
 }
 
 // Decode decodes CreateWidgetRequest from json.
@@ -16947,6 +16978,26 @@ func (s *CreateWidgetRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"widget_props\"")
+			}
+		case "title":
+			if err := func() error {
+				s.Title.Reset()
+				if err := s.Title.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"title\"")
+			}
+		case "show_title":
+			if err := func() error {
+				s.ShowTitle.Reset()
+				if err := s.ShowTitle.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"show_title\"")
 			}
 		default:
 			return d.Skip()
@@ -36391,6 +36442,12 @@ func (s *MetricDef) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.PicklistDimensionID.Set {
+			e.FieldStart("picklist_dimension_id")
+			s.PicklistDimensionID.Encode(e)
+		}
+	}
+	{
 		e.FieldStart("depends_on")
 		e.ArrStart()
 		for _, elem := range s.DependsOn {
@@ -36418,7 +36475,7 @@ func (s *MetricDef) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfMetricDef = [13]string{
+var jsonFieldsNameOfMetricDef = [14]string{
 	0:  "id",
 	1:  "name",
 	2:  "label",
@@ -36429,9 +36486,10 @@ var jsonFieldsNameOfMetricDef = [13]string{
 	7:  "format_decimals",
 	8:  "format_currency",
 	9:  "time_summary",
-	10: "depends_on",
-	11: "depended_by",
-	12: "tags",
+	10: "picklist_dimension_id",
+	11: "depends_on",
+	12: "depended_by",
+	13: "tags",
 }
 
 // Decode decodes MetricDef from json.
@@ -36560,8 +36618,18 @@ func (s *MetricDef) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"time_summary\"")
 			}
+		case "picklist_dimension_id":
+			if err := func() error {
+				s.PicklistDimensionID.Reset()
+				if err := s.PicklistDimensionID.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"picklist_dimension_id\"")
+			}
 		case "depends_on":
-			requiredBitSet[1] |= 1 << 2
+			requiredBitSet[1] |= 1 << 3
 			if err := func() error {
 				s.DependsOn = make([]string, 0)
 				if err := d.Arr(func(d *jx.Decoder) error {
@@ -36581,7 +36649,7 @@ func (s *MetricDef) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"depends_on\"")
 			}
 		case "depended_by":
-			requiredBitSet[1] |= 1 << 3
+			requiredBitSet[1] |= 1 << 4
 			if err := func() error {
 				s.DependedBy = make([]string, 0)
 				if err := d.Arr(func(d *jx.Decoder) error {
@@ -36630,7 +36698,7 @@ func (s *MetricDef) Decode(d *jx.Decoder) error {
 	var failures []validate.FieldError
 	for i, mask := range [2]uint8{
 		0b11110111,
-		0b00001101,
+		0b00011001,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -57935,6 +58003,12 @@ func (s *UpdateMetricRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.PicklistDimensionID.Set {
+			e.FieldStart("picklist_dimension_id")
+			s.PicklistDimensionID.Encode(e)
+		}
+	}
+	{
 		if s.TimeSummary.Set {
 			e.FieldStart("time_summary")
 			s.TimeSummary.Encode(e)
@@ -57942,7 +58016,7 @@ func (s *UpdateMetricRequest) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfUpdateMetricRequest = [9]string{
+var jsonFieldsNameOfUpdateMetricRequest = [10]string{
 	0: "name",
 	1: "label",
 	2: "tags",
@@ -57951,7 +58025,8 @@ var jsonFieldsNameOfUpdateMetricRequest = [9]string{
 	5: "format",
 	6: "format_decimals",
 	7: "format_currency",
-	8: "time_summary",
+	8: "picklist_dimension_id",
+	9: "time_summary",
 }
 
 // Decode decodes UpdateMetricRequest from json.
@@ -58051,6 +58126,16 @@ func (s *UpdateMetricRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"format_currency\"")
+			}
+		case "picklist_dimension_id":
+			if err := func() error {
+				s.PicklistDimensionID.Reset()
+				if err := s.PicklistDimensionID.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"picklist_dimension_id\"")
 			}
 		case "time_summary":
 			if err := func() error {
@@ -62615,18 +62700,27 @@ func (s *WritebackRequest) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
-		e.FieldStart("value")
-		e.Float64(s.Value)
+		if s.Value.Set {
+			e.FieldStart("value")
+			s.Value.Encode(e)
+		}
+	}
+	{
+		if s.Member.Set {
+			e.FieldStart("member")
+			s.Member.Encode(e)
+		}
 	}
 }
 
-var jsonFieldsNameOfWritebackRequest = [6]string{
+var jsonFieldsNameOfWritebackRequest = [7]string{
 	0: "model_id",
 	1: "revision_id",
 	2: "metric_id",
 	3: "dim_codes",
 	4: "dim_code",
 	5: "value",
+	6: "member",
 }
 
 // Decode decodes WritebackRequest from json.
@@ -62693,16 +62787,24 @@ func (s *WritebackRequest) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"dim_code\"")
 			}
 		case "value":
-			requiredBitSet[0] |= 1 << 5
 			if err := func() error {
-				v, err := d.Float64()
-				s.Value = float64(v)
-				if err != nil {
+				s.Value.Reset()
+				if err := s.Value.Decode(d); err != nil {
 					return err
 				}
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"value\"")
+			}
+		case "member":
+			if err := func() error {
+				s.Member.Reset()
+				if err := s.Member.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"member\"")
 			}
 		default:
 			return d.Skip()
@@ -62714,7 +62816,7 @@ func (s *WritebackRequest) Decode(d *jx.Decoder) error {
 	// Validate required fields.
 	var failures []validate.FieldError
 	for i, mask := range [1]uint8{
-		0b00100101,
+		0b00000101,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.

@@ -6033,6 +6033,10 @@ type CreateMetricRequest struct {
 	FormatDecimals OptInt    `json:"format_decimals"`
 	FormatCurrency OptString `json:"format_currency"`
 	Tags           []string  `json:"tags"`
+	// Required for format picklist, refused for any other: a dimension of the revision (id or name)
+	// whose members the metric's cells hold. A pick-list's agg_rule is none (default) or, calculated,
+	// formula; its time_summary none.
+	PicklistDimensionID OptString `json:"picklist_dimension_id"`
 	// How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
 	// dimension): sum for flows, last for a closing balance, first for an opening balance, none when a
 	// time total is meaningless.
@@ -6089,6 +6093,11 @@ func (s *CreateMetricRequest) GetTags() []string {
 	return s.Tags
 }
 
+// GetPicklistDimensionID returns the value of PicklistDimensionID.
+func (s *CreateMetricRequest) GetPicklistDimensionID() OptString {
+	return s.PicklistDimensionID
+}
+
 // GetTimeSummary returns the value of TimeSummary.
 func (s *CreateMetricRequest) GetTimeSummary() OptCreateMetricRequestTimeSummary {
 	return s.TimeSummary
@@ -6142,6 +6151,11 @@ func (s *CreateMetricRequest) SetFormatCurrency(val OptString) {
 // SetTags sets the value of Tags.
 func (s *CreateMetricRequest) SetTags(val []string) {
 	s.Tags = val
+}
+
+// SetPicklistDimensionID sets the value of PicklistDimensionID.
+func (s *CreateMetricRequest) SetPicklistDimensionID(val OptString) {
+	s.PicklistDimensionID = val
 }
 
 // SetTimeSummary sets the value of TimeSummary.
@@ -6500,6 +6514,10 @@ type CreateWidgetRequest struct {
 	// Minimum enforced by the server is 20; values below that are clamped to a 60 default.
 	SizeH       OptInt                            `json:"size_h"`
 	WidgetProps OptCreateWidgetRequestWidgetProps `json:"widget_props"`
+	// Header text; shown unless show_title is false.
+	Title OptString `json:"title"`
+	// Defaults to true when a title is given.
+	ShowTitle OptBool `json:"show_title"`
 }
 
 // GetWidgetType returns the value of WidgetType.
@@ -6557,6 +6575,16 @@ func (s *CreateWidgetRequest) GetWidgetProps() OptCreateWidgetRequestWidgetProps
 	return s.WidgetProps
 }
 
+// GetTitle returns the value of Title.
+func (s *CreateWidgetRequest) GetTitle() OptString {
+	return s.Title
+}
+
+// GetShowTitle returns the value of ShowTitle.
+func (s *CreateWidgetRequest) GetShowTitle() OptBool {
+	return s.ShowTitle
+}
+
 // SetWidgetType sets the value of WidgetType.
 func (s *CreateWidgetRequest) SetWidgetType(val string) {
 	s.WidgetType = val
@@ -6610,6 +6638,16 @@ func (s *CreateWidgetRequest) SetSizeH(val OptInt) {
 // SetWidgetProps sets the value of WidgetProps.
 func (s *CreateWidgetRequest) SetWidgetProps(val OptCreateWidgetRequestWidgetProps) {
 	s.WidgetProps = val
+}
+
+// SetTitle sets the value of Title.
+func (s *CreateWidgetRequest) SetTitle(val OptString) {
+	s.Title = val
+}
+
+// SetShowTitle sets the value of ShowTitle.
+func (s *CreateWidgetRequest) SetShowTitle(val OptBool) {
+	s.ShowTitle = val
 }
 
 type CreateWidgetRequestWidgetProps map[string]jx.Raw
@@ -13866,6 +13904,8 @@ type MetricDef struct {
 	// dimension): sum for flows, last for a closing balance, first for an opening balance, none when a
 	// time total is meaningless.
 	TimeSummary OptMetricDefTimeSummary `json:"time_summary"`
+	// Format picklist: the dimension whose members the metric's cells hold.
+	PicklistDimensionID OptUUID `json:"picklist_dimension_id"`
 	// Names of metrics/dimensions this formula references.
 	DependsOn []string `json:"depends_on"`
 	// Names of metrics whose formula references this one.
@@ -13922,6 +13962,11 @@ func (s *MetricDef) GetFormatCurrency() string {
 // GetTimeSummary returns the value of TimeSummary.
 func (s *MetricDef) GetTimeSummary() OptMetricDefTimeSummary {
 	return s.TimeSummary
+}
+
+// GetPicklistDimensionID returns the value of PicklistDimensionID.
+func (s *MetricDef) GetPicklistDimensionID() OptUUID {
+	return s.PicklistDimensionID
 }
 
 // GetDependsOn returns the value of DependsOn.
@@ -13987,6 +14032,11 @@ func (s *MetricDef) SetFormatCurrency(val string) {
 // SetTimeSummary sets the value of TimeSummary.
 func (s *MetricDef) SetTimeSummary(val OptMetricDefTimeSummary) {
 	s.TimeSummary = val
+}
+
+// SetPicklistDimensionID sets the value of PicklistDimensionID.
+func (s *MetricDef) SetPicklistDimensionID(val OptUUID) {
+	s.PicklistDimensionID = val
 }
 
 // SetDependsOn sets the value of DependsOn.
@@ -25037,6 +25087,9 @@ type UpdateMetricRequest struct {
 	Format         OptString `json:"format"`
 	FormatDecimals OptInt    `json:"format_decimals"`
 	FormatCurrency OptString `json:"format_currency"`
+	// Format picklist: the dimension (id or name) its cells hold members of; omitted keeps it while the
+	// format stays picklist.
+	PicklistDimensionID OptString `json:"picklist_dimension_id"`
 	// How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
 	// dimension): sum for flows, last for a closing balance, first for an opening balance, none when a
 	// time total is meaningless.
@@ -25083,6 +25136,11 @@ func (s *UpdateMetricRequest) GetFormatCurrency() OptString {
 	return s.FormatCurrency
 }
 
+// GetPicklistDimensionID returns the value of PicklistDimensionID.
+func (s *UpdateMetricRequest) GetPicklistDimensionID() OptString {
+	return s.PicklistDimensionID
+}
+
 // GetTimeSummary returns the value of TimeSummary.
 func (s *UpdateMetricRequest) GetTimeSummary() OptUpdateMetricRequestTimeSummary {
 	return s.TimeSummary
@@ -25126,6 +25184,11 @@ func (s *UpdateMetricRequest) SetFormatDecimals(val OptInt) {
 // SetFormatCurrency sets the value of FormatCurrency.
 func (s *UpdateMetricRequest) SetFormatCurrency(val OptString) {
 	s.FormatCurrency = val
+}
+
+// SetPicklistDimensionID sets the value of PicklistDimensionID.
+func (s *UpdateMetricRequest) SetPicklistDimensionID(val OptString) {
+	s.PicklistDimensionID = val
 }
 
 // SetTimeSummary sets the value of TimeSummary.
@@ -27053,7 +27116,12 @@ type WritebackRequest struct {
 	// request's revision that has a member with this code among the metric's own dimensions; 400 when
 	// none or several have it.
 	DimCode OptString `json:"dim_code"`
-	Value   float64   `json:"value"`
+	// For a pick-list metric, the key of a member of its dimension (0 clears the cell); or send member.
+	Value OptFloat64 `json:"value"`
+	// Pick-list metrics only, instead of value: the member the cell holds, by code or label (exact, then
+	// ignoring case); "" clears it. Anything that is not a member of the pick-list's dimension is
+	// refused with 400.
+	Member OptString `json:"member"`
 }
 
 // GetModelID returns the value of ModelID.
@@ -27082,8 +27150,13 @@ func (s *WritebackRequest) GetDimCode() OptString {
 }
 
 // GetValue returns the value of Value.
-func (s *WritebackRequest) GetValue() float64 {
+func (s *WritebackRequest) GetValue() OptFloat64 {
 	return s.Value
+}
+
+// GetMember returns the value of Member.
+func (s *WritebackRequest) GetMember() OptString {
+	return s.Member
 }
 
 // SetModelID sets the value of ModelID.
@@ -27112,8 +27185,13 @@ func (s *WritebackRequest) SetDimCode(val OptString) {
 }
 
 // SetValue sets the value of Value.
-func (s *WritebackRequest) SetValue(val float64) {
+func (s *WritebackRequest) SetValue(val OptFloat64) {
 	s.Value = val
+}
+
+// SetMember sets the value of Member.
+func (s *WritebackRequest) SetMember(val OptString) {
+	s.Member = val
 }
 
 // DimensionId to member code — the preferred, N-dimensional form.

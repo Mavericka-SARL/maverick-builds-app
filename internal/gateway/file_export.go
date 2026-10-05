@@ -98,7 +98,14 @@ func (h *handler) gridSnapshot(r *http.Request, gridID, revisionID string) (data
 		ownDims[m.ID] = m.DimensionIDs
 	}
 	for _, m := range resp.Metrics {
-		snap.Metrics = append(snap.Metrics, dataexport.Metric{ID: m.ID, Name: m.Name, Label: m.Label, DimensionIDs: ownDims[m.ID]})
+		em := dataexport.Metric{ID: m.ID, Name: m.Name, Label: m.Label, DimensionIDs: ownDims[m.ID]}
+		if len(m.PicklistOptions) > 0 {
+			em.Picklist = make(map[float64]string, len(m.PicklistOptions))
+			for _, o := range m.PicklistOptions {
+				em.Picklist[o.Key] = o.Label
+			}
+		}
+		snap.Metrics = append(snap.Metrics, em)
 	}
 	return snap, nil
 }

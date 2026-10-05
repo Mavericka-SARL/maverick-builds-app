@@ -87,7 +87,7 @@ func (ctx *EvalContext) eval(node Node) Value {
 		return BoolVal(n.Val)
 	case *Ident:
 		if v, ok := ctx.lookup(n.Name); ok {
-			return v
+			return ctx.decodePicklist(n.Name, v)
 		}
 		if v, ok := ctx.unboundDimension(n.Name); ok {
 			return v

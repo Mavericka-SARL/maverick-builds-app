@@ -23,6 +23,7 @@ package importpkg
 
 import (
 	"context"
+	"github.com/mavericks-engine/mavericks/internal/formula"
 	"regexp"
 	"strconv"
 	"strings"
@@ -178,6 +179,18 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 		return info
 	}
 
+	// picklistOf returns the dimension a pick-list metric's cells hold
+	// members of ("" for any other metric), looked up once per metric.
+	picklistDims := map[string]string{}
+	picklistOf := func(metricID string) string {
+		if d, ok := picklistDims[metricID]; ok {
+			return d
+		}
+		var d string
+		_ = pool.QueryRow(ctx, `SELECT COALESCE(picklist_dimension_id::text,'') FROM model.metric_def WHERE id=$1::uuid`, metricID).Scan(&d)
+		picklistDims[metricID] = d
+		return d
+	}
 	metricNameToID := map[string]string{} // populated lazily for legacy metric_id-as-name references
 	resolveMetricRef := func(ref string) (id string, ok bool) {
 		if looksLikeUUID.MatchString(ref) {
@@ -294,6 +307,26 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 					ErrorCode: "UNKNOWN_METRIC", RawValue: ev.metricRef,
 					Message: "\"" + ev.metricRef + "\" does not match any metric in this model",
 				})
+				continue
+			}
+			if dimID := picklistOf(metricID); dimID != "" {
+				// A pick-list cell holds a member: the file names it by code
+				// or label, and its key is stored.
+				info := lookupMember(dimID, ev.valueRaw)
+				if !info.ok || info.calc {
+					errs = append(errs, &importpkgv1.ImportError{
+						RowNumber: int32(row.RowNumber), Column: ev.column,
+						ErrorCode: "UNKNOWN_MEMBER", RawValue: ev.valueRaw,
+						Message: "\"" + ev.valueRaw + "\" is not a member of the dimension whose members this pick-list holds",
+					})
+					continue
+				}
+				memberCopy := make(map[string]string, len(dimMembers))
+				for k, v := range dimMembers {
+					memberCopy[k] = v
+				}
+				staged = append(staged, StagingRow{MetricID: metricID, DimMembers: memberCopy,
+					Value: formula.PicklistKey(info.code), RowNumber: row.RowNumber})
 				continue
 			}
 			val, perr := strconv.ParseFloat(ev.valueRaw, 64)

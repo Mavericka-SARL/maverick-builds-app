@@ -123,6 +123,11 @@ type Metric struct {
 	// they were carried.
 	AggNumeratorMetricID   *string `json:"agg_numerator_metric_id,omitempty"`
 	AggDenominatorMetricID *string `json:"agg_denominator_metric_id,omitempty"`
+	// PicklistDimensionID is the dimension a pick-list metric's cells hold
+	// members of (format "picklist", migration 110), as a package dimension
+	// ID remapped on import. Its values travel as stored: keys of member
+	// codes, which import keeps.
+	PicklistDimensionID *string `json:"picklist_dimension_id,omitempty"`
 }
 
 type Dependency struct {
@@ -435,7 +440,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	rows, err = q.Query(ctx, `
 		SELECT id::text, name, formula, storage_type::text, is_input, agg_rule,
 		       COALESCE(format,''), COALESCE(format_decimals,0), COALESCE(format_currency,''), time_summary, tags, lineage_id::text,
-		       agg_numerator_metric_id::text, agg_denominator_metric_id::text, COALESCE(label,'')
+		       agg_numerator_metric_id::text, agg_denominator_metric_id::text, COALESCE(label,''), picklist_dimension_id::text
 		FROM model.metric_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -444,7 +449,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for rows.Next() {
 		var m Metric
 		if err := rows.Scan(&m.ID, &m.Name, &m.Formula, &m.StorageType, &m.IsInput, &m.AggRule, &m.Format, &m.FormatDecimals, &m.FormatCurrency, &m.TimeSummary, &m.Tags, &m.LineageID,
-			&m.AggNumeratorMetricID, &m.AggDenominatorMetricID, &m.Label); err != nil {
+			&m.AggNumeratorMetricID, &m.AggDenominatorMetricID, &m.Label, &m.PicklistDimensionID); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -1767,6 +1772,16 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 		}
 		if err = metricformula.ValidateAggRule(m.AggRule, m.IsInput, num, den, metricMap[m.ID]); err != nil {
 			return "", "", fmt.Errorf("metric %q: %w", m.Name, err)
+		}
+		picklistDim, err := packageRef(dimMap, m.PicklistDimensionID)
+		if err != nil {
+			return "", "", fmt.Errorf("metric %q: pick-list dimension %w", m.Name, err)
+		}
+		if picklistDim != "" {
+			if _, err = tx.Exec(ctx, `UPDATE model.metric_def SET picklist_dimension_id=$2::uuid WHERE id=$1::uuid`,
+				metricMap[m.ID], picklistDim); err != nil {
+				return "", "", fmt.Errorf("metric %q pick-list dimension: %w", m.Name, err)
+			}
 		}
 		if num == "" && den == "" {
 			continue

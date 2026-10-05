@@ -151,6 +151,7 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 			return nil, err
 		}
 	}
+	resolveMetricRanges(ctx, pool, req, an, rd)
 	sourceIDs := map[string]string{} // UPPER-CASE referenced name -> metric ID
 	var edges []Edge
 	var edgeIDs []string

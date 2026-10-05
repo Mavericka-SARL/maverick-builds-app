@@ -573,7 +573,7 @@ turn:
 		// fits it's a single unreviewable blob for the developer. Every
 		// sibling tool call in the same message still gets a real result
 		// (providers reject a follow-up turn with unanswered tool calls).
-		const maxProposalSteps = 50
+		const maxProposalSteps = aiassistant.MaxProposalSteps
 		oversized := 0
 		for _, tc := range llmResp.Message.ToolCalls {
 			if !aiassistant.IsWriteTool(tc.Name) {
@@ -742,7 +742,8 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
 		return
 	}
-	// Up to 50 steps, file imports and their recalculation included.
+	// Up to aiassistant.MaxProposalSteps steps, file imports and their
+	// recalculation included.
 	extendAIWriteDeadline(w)
 	ctx := r.Context()
 	a, err := h.resolveActor(ctx, r)

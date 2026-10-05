@@ -123,6 +123,10 @@ type Metric struct {
 	// DimensionIDs orders the codes of this metric's cell keys
 	// ("metricID:code1:code2…"), the way /api/grid keys `cells`.
 	DimensionIDs []string
+	// Picklist maps a pick-list metric's stored keys to the labels of the
+	// members they hold (nil for any other metric): an export writes the
+	// member, never the key, and an emptied cell (key 0) as empty.
+	Picklist map[float64]string
 }
 
 // Grid is a grid's structure: what a spec is validated against.

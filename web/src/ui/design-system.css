@@ -2041,6 +2041,14 @@
   color: var(--color-text-strong);
 }
 
+/* A pick-list cell: a member chosen from a list. */
+.mvx-cell-select {
+  width: auto;
+  min-width: 110px;
+  max-width: 220px;
+  text-align: left;
+}
+
 .mvx-cell-input:hover {
   border-color: var(--color-grid-input-hover-border);
 }

@@ -176,6 +176,12 @@ func DeleteMember(ctx context.Context, db DB, dimID, memberID string) error {
 		FROM model.dimension_member m JOIN model.dimension_def d ON d.id = m.dimension_id
 		WHERE m.id=$1::uuid AND m.dimension_id=$2::uuid
 	`, memberID, dimID).Scan(&code, &modelID)
+	if err == nil {
+		// A pick-list cell holding the member would name nothing.
+		if perr := CheckMemberDeletable(ctx, tx, dimID, code); perr != nil {
+			return perr
+		}
+	}
 	switch {
 	case err == nil:
 		filter, _ := json.Marshal(map[string]string{dimID: code})
@@ -252,6 +258,10 @@ func RekeyMemberCode(ctx context.Context, db DB, dimID, oldCode, newCode string)
 		if _, err := db.Exec(ctx, s.q, dimID, newCode, oldCode); err != nil {
 			errs = append(errs, fmt.Errorf("re-key %s: %w", s.tag, err))
 		}
+	}
+	// Pick-list cells holding the member store its code's key.
+	if err := rekeyPicklistValues(ctx, db, dimID, oldCode, newCode); err != nil {
+		errs = append(errs, err)
 	}
 	// The dimension's calculated members name it in their formulas.
 	if err := RewriteMemberFormulas(ctx, db, dimID, oldCode, newCode); err != nil {

@@ -196,6 +196,9 @@ type MetricDef struct {
 	// DependsOn carries each dependency with the time offsets it is read at
 	// (the same IDs as DependsOnID, in the same order).
 	DependsOn []metricformula.Edge
+	// PicklistDimID is the dimension a pick-list metric's cells hold
+	// members of (format "picklist"); "" for every other metric.
+	PicklistDimID string
 }
 
 // LoadModelMetrics loads all metric definitions + dependency edges for one
@@ -207,7 +210,7 @@ func (s *Store) LoadModelMetrics(ctx context.Context, modelID, revisionID string
 	rows, err := s.db.Query(ctx, `
 		SELECT id::text, name, COALESCE(formula,''), is_input, agg_rule,
 		       COALESCE(agg_numerator_metric_id::text,''), COALESCE(agg_denominator_metric_id::text,''),
-		       time_summary
+		       time_summary, COALESCE(picklist_dimension_id::text,'')
 		FROM model.metric_def WHERE model_id = $1::uuid AND revision_id = $2::uuid
 	`, modelID, revisionID)
 	if err != nil {
@@ -218,7 +221,7 @@ func (s *Store) LoadModelMetrics(ctx context.Context, modelID, revisionID string
 	defs := make(map[string]*MetricDef)
 	for rows.Next() {
 		var d MetricDef
-		if err := rows.Scan(&d.ID, &d.Name, &d.Formula, &d.IsInput, &d.AggRule, &d.AggNumeratorID, &d.AggDenominatorID, &d.TimeSummary); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.Formula, &d.IsInput, &d.AggRule, &d.AggNumeratorID, &d.AggDenominatorID, &d.TimeSummary, &d.PicklistDimID); err != nil {
 			return nil, err
 		}
 		defs[d.ID] = &d

@@ -57,6 +57,14 @@ func (p *OpenAIProvider) buildRequest(req ChatRequest) openai.ChatCompletionRequ
 				Content: m.Content,
 			})
 		case "assistant":
+			if strings.TrimSpace(m.Content) == "" && len(m.ToolCalls) == 0 {
+				// An empty turn (one cut off at the stream deadline is stored
+				// so) carries nothing, and OpenAI refuses an assistant
+				// message with neither text nor tool calls with 400
+				// "expected a string, got null" — on every later turn of the
+				// session, since the history replays it.
+				continue
+			}
 			msg := openai.ChatCompletionMessage{
 				Role:    openai.ChatMessageRoleAssistant,
 				Content: m.Content,

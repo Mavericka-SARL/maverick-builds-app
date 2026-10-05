@@ -81,6 +81,14 @@ func (sr *scopedReads) cellContext(combo map[string]string) *formula.DimEvalCont
 	return sr.Meta.CellContext(combo)
 }
 
+// metadata is the member metadata of the scoped reads, nil without one.
+func (sr *scopedReads) metadata() *calculation.DimMetadata {
+	if sr == nil {
+		return nil
+	}
+	return sr.Meta
+}
+
 func comboKey(combo map[string]string) string {
 	b, _ := json.Marshal(combo)
 	return string(b)
@@ -133,6 +141,14 @@ type leafValue struct {
 // false when there is nothing to reduce or the summary is 'none'.
 func combineLeaves(leaves []leafValue, axis *rollup.Dimension, aggRule, timeSummary string) (float64, bool) {
 	if len(leaves) == 0 {
+		return 0, false
+	}
+	if !rollup.Aggregates(rollup.AggRule(aggRule)) {
+		// agg_rule none: a scope of one leaf is that leaf, anything wider
+		// has no total.
+		if len(leaves) == 1 {
+			return leaves[0].value, true
+		}
 		return 0, false
 	}
 	if axis == nil {
@@ -534,7 +550,7 @@ func scopeOrdinaryMetric(
 		}
 		// The member-metadata context (UNFILTERED): dim.property and PARENT
 		// compute exactly as in the scheduler.
-		return calculation.EvaluateWithDimContext(*m.Formula, values, namedDims, sr.cellContext(combo))
+		return calculation.EvaluateMetricWithDimContext(sr.metadata(), m.Name, *m.Formula, values, namedDims, sr.cellContext(combo))
 	}
 
 	var leaves []leafValue
@@ -572,13 +588,9 @@ func scopeOrdinaryMetric(
 			totals[m.ID] = v
 			working[m.ID] = v
 		}
-	} else {
-		vals := make([]float64, len(leaves))
-		for i, l := range leaves {
-			vals[i] = l.value
-		}
-		totals[m.ID] = rollup.CombineAgg(vals, rollup.AggRule(m.AggRule))
-		working[m.ID] = totals[m.ID]
+	} else if v, ok := combineLeaves(leaves, nil, m.AggRule, m.TimeSummary); ok {
+		totals[m.ID] = v
+		working[m.ID] = v
 	}
 
 	if !isFormulaRule(m.AggRule) {
@@ -649,6 +661,9 @@ func (h *handler) loadScopedReads(
 		return nil, err
 	}
 	meta := calculation.NewDimMetadata(unfiltered, dimIDToName, schema)
+	for _, m := range revisionMetrics {
+		meta.SetMetric(m.Name, metricDims[m.ID], m.PicklistDimensionID)
+	}
 	sr := &scopedReads{
 		Served:  map[string]*servedMetric{},
 		Meta:    meta,

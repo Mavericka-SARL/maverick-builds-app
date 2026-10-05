@@ -36,6 +36,21 @@ type DimMetadata struct {
 
 	mu     sync.Mutex
 	leaves map[string][]formula.DimMember
+
+	// names maps a dimension ID to its name; metrics describes the
+	// revision's metrics for pick-lists and metric criteria ranges
+	// (SetMetric), keyed by UPPER(name).
+	names   map[string]string
+	metrics map[string]metricShape
+	codecs  map[string]formula.PicklistCodec // pick-list dimension ID -> codec, built once
+}
+
+// metricShape is what a formula needs to know about a metric it names
+// outside its own value: its dimensions (a criteria range) and, for a
+// pick-list, the dimension whose members its cells hold.
+type metricShape struct {
+	dimIDs        []string
+	picklistDimID string
 }
 
 // NewDimMetadata indexes dims (UNFILTERED: every member, hidden ones
@@ -51,6 +66,9 @@ func NewDimMetadata(dims map[string]*rollup.Dimension, dimIDToName map[string]st
 		props:   map[string]map[string]PropertyDecl{},
 		members: make(map[string]map[string]*rollup.Member, len(dims)),
 		leaves:  map[string][]formula.DimMember{},
+		names:   dimIDToName,
+		metrics: map[string]metricShape{},
+		codecs:  map[string]formula.PicklistCodec{},
 	}
 	var owned map[string]bool
 	if schema != nil {
@@ -79,6 +97,99 @@ func NewDimMetadata(dims map[string]*rollup.Dimension, dimIDToName map[string]st
 		m.members[id] = idx
 	}
 	return m
+}
+
+// SetMetric describes one metric of the revision: its dimensions (as
+// placed on its grid) and, when its format is "picklist", the dimension its
+// cells hold members of (else ""). Formulas then read the pick-list as its
+// member's code and may use the metric as a criteria range. Call it for
+// every metric before the first CellContext.
+func (m *DimMetadata) SetMetric(name string, dimIDs []string, picklistDimID string) {
+	m.metrics[strings.ToUpper(name)] = metricShape{dimIDs: dimIDs, picklistDimID: picklistDimID}
+}
+
+// DescribeMetrics calls SetMetric for every definition, with its dimensions
+// from metricDimIDs (metric ID -> dimension IDs).
+func DescribeMetrics(m *DimMetadata, defs map[string]*MetricDef, metricDimIDs map[string][]string) {
+	for id, d := range defs {
+		m.SetMetric(d.Name, metricDimIDs[id], d.PicklistDimID)
+	}
+}
+
+// PicklistDimension returns the dimension ID of a pick-list metric, "" for
+// any other.
+func (m *DimMetadata) PicklistDimension(name string) string {
+	return m.metrics[strings.ToUpper(name)].picklistDimID
+}
+
+// Picklist returns the codec of a pick-list metric.
+func (m *DimMetadata) Picklist(name string) (formula.PicklistCodec, bool) {
+	dimID := m.PicklistDimension(name)
+	if dimID == "" {
+		return formula.PicklistCodec{}, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if c, ok := m.codecs[dimID]; ok {
+		return c, true
+	}
+	byKey := map[float64]string{}
+	exact := m.members[dimID]
+	fold := make(map[string]string, len(exact))
+	for code := range exact {
+		byKey[formula.PicklistKey(code)] = code
+		if _, dup := fold[strings.ToUpper(code)]; !dup {
+			fold[strings.ToUpper(code)] = code
+		}
+	}
+	c := formula.PicklistCodec{
+		Dim: m.names[dimID],
+		Code: func(key float64) (string, bool) {
+			code, ok := byKey[key]
+			return code, ok
+		},
+		Key: func(code string) (float64, bool) {
+			if _, ok := exact[code]; ok {
+				return formula.PicklistKey(code), true
+			}
+			if stored, ok := fold[strings.ToUpper(code)]; ok {
+				return formula.PicklistKey(stored), true
+			}
+			return 0, false
+		},
+	}
+	m.codecs[dimID] = c
+	return c, true
+}
+
+// metricDimNames returns the dimension names of a metric SetMetric
+// described.
+func (m *DimMetadata) metricDimNames(name string) ([]string, bool) {
+	shape, ok := m.metrics[strings.ToUpper(name)]
+	if !ok {
+		return nil, false
+	}
+	out := make([]string, 0, len(shape.dimIDs))
+	for _, id := range shape.dimIDs {
+		if n := m.names[id]; n != "" {
+			out = append(out, n)
+		}
+	}
+	return out, true
+}
+
+// EncodeResult converts the formula result of metric into the value its
+// cell stores: a pick-list's member code becomes its key
+// (formula.PicklistResult); every other metric's result is unchanged.
+func (m *DimMetadata) EncodeResult(metric string, v formula.Value) formula.Value {
+	if m == nil {
+		return v
+	}
+	codec, ok := m.Picklist(metric)
+	if !ok {
+		return v
+	}
+	return formula.PicklistResult(codec, metric, v)
 }
 
 // dimID maps a dimension name as written in a formula to its ID.
@@ -231,6 +342,8 @@ func (m *DimMetadata) CellContext(combo map[string]string) *formula.DimEvalConte
 		CoordKey: func(exclude []string) string {
 			return coordKey(m, combo, exclude)
 		},
+		Picklist:   m.Picklist,
+		MetricDims: m.metricDimNames,
 	}
 }
 

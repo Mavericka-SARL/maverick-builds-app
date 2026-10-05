@@ -64,7 +64,7 @@
 <tr><td class="sig">COUNTIF(range, criterion)</td><td>COUNTIFS with one criterion</td><td>0</td></tr>
 </table>
 <ul>
-  <li>A <b>range</b> is a dimension (its member codes are tested) or <code>dimension.property</code> (the members' typed property values are tested).</li>
+  <li>A <b>range</b> is a dimension (its member codes are tested), <code>dimension.property</code> (the members' typed property values are tested), or a <b>metric</b> whose dimensions are all the source's or related to them (its value is tested at every leaf combination of its dimensions; see <i>A metric as the range</i> below). A name that is both a dimension and a metric is the dimension.</li>
   <li>They run over the <b>leaf</b> members of each range dimension (for a time dimension, its dated periods). Criteria on several dimensions combine every matching member of one with every matching member of the other. Dimensions without a criterion stay at the cell's own members: in the March row, <code>SUMIFS(sales, region.segment, "Enterprise")</code> adds up March.</li>
   <li>AVERAGEIFS, MINIFS and MAXIFS skip members with nothing recorded; SUMIFS counts them as 0. <b>COUNTIFS counts members, not data cells</b> (Excel counts cells).</li>
   <li>The source must be a metric; each range dimension must be the source's or related to it (COUNTIFS, having no source, may use any dimension of the model). Criteria matching more than 1,000,000 combinations give <code>#NUM!</code>. Not allowed in an opening/closing recurrence.</li>
@@ -94,3 +94,17 @@
 <tr><td>ROUND(sales / SUMIFS(sales, region, "*") * 100, 3)</td><td>share of all regions</td><td>30.387 for DE in Jan</td></tr>
 <tr><td>SUMIFS(sales, period, "&lt;=" &amp; period)</td><td>running total along time</td><td>same as <code>YEARTODATE(sales)</code> here</td></tr>
 </table>
+
+<h3>A metric as the range; pick-lists</h3>
+<p>A pick-list metric (format <b>Pick-list</b>) holds, in each cell, a member of one dimension. In a formula it reads as that member's <b>code</b>, as text — blank where nothing is chosen — so it compares and joins like a bare dimension name and can name a LOOKUP member. Adding it up is <code>#VALUE!</code>; count it with COUNTIFS. A calculated pick-list's formula gives a member code, stored as that member; a code the dimension does not have is <code>#N/A</code>.</p>
+<p>The example: an <code>activity</code> dimension (A1, A2, A3) carries the pick-lists <code>act_region</code> (a member of <code>region</code>) and <code>act_status</code> (of a dimension with Draft and Cancelled) and the input <code>strat</code>: A1 is US, Draft, 10; A2 US, Cancelled, 5; A3 DE, Draft, 7. A metric on <code>[region]</code>:</p>
+<table>
+<tr><th>Formula</th><th>What it reads</th><th>Result</th></tr>
+<tr><td>SUMIFS(strat, act_region, region)</td><td>the activities whose Region cell holds the row's region</td><td>15 for US, 7 for DE</td></tr>
+<tr><td>SUMIFS(strat, act_region, region, act_status, "&lt;&gt;Cancelled")</td><td>…that are not cancelled</td><td>10 for US</td></tr>
+<tr><td>COUNTIFS(act_status, "Draft")</td><td>activities whose status is Draft</td><td>2</td></tr>
+<tr><td>IF(act_status = "Cancelled", 0, strat)</td><td>on <code>[activity]</code>: the cell's own status</td><td>0 for A2</td></tr>
+<tr><td>IF(by_region &gt; 12, "Review", "Within_Range")</td><td>a calculated pick-list over a status dimension</td><td>Review for US</td></tr>
+</table>
+<p>A metric range ranges over every dimension of its metric — like a criterion on each — and, being read at other members, is a dependency of the formula: changing an activity's Region recalculates the total. A numeric metric can be a range too: <code>SUMIFS(sales, sales, "&gt;=100")</code>.</p>
+

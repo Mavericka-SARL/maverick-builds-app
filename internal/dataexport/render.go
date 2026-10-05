@@ -339,6 +339,12 @@ func Render(spec Spec, snap Snapshot) (*Table, error) {
 		}
 		return Value{Num: v, IsNum: true}
 	}
+	cell := func(m Metric, v float64, ok bool) Value {
+		if m.Picklist == nil || !ok {
+			return num(v, ok)
+		}
+		return Value{Text: m.Picklist[v]}
+	}
 
 	var metricsInOrder []Metric
 	for _, m := range p.metrics {
@@ -361,7 +367,7 @@ func Render(spec Spec, snap Snapshot) (*Table, error) {
 				if !ok && !s.IncludeEmptyRows {
 					continue
 				}
-				row := append(dimCells(r), Value{Text: p.metricText(m)}, num(v, ok))
+				row := append(dimCells(r), Value{Text: p.metricText(m)}, cell(m, v, ok))
 				if err := emit(row); err != nil {
 					return nil, err
 				}
@@ -376,7 +382,7 @@ func Render(spec Spec, snap Snapshot) (*Table, error) {
 				for _, leaf := range p.pivotLeaves() {
 					v, ok := r.vals[m.ID+"\x1f"+leaf.Code]
 					found = found || ok
-					row = append(row, num(v, ok))
+					row = append(row, cell(m, v, ok))
 				}
 				if !found && !s.IncludeEmptyRows {
 					continue
@@ -389,7 +395,7 @@ func Render(spec Spec, snap Snapshot) (*Table, error) {
 			row := dimCells(r)
 			for _, m := range p.metrics {
 				v, ok := r.vals[m.ID]
-				row = append(row, num(v, ok))
+				row = append(row, cell(m, v, ok))
 			}
 			if err := emit(row); err != nil {
 				return nil, err

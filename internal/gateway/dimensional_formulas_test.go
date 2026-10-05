@@ -196,7 +196,9 @@ func TestDimensionalFormulasOverHTTP(t *testing.T) {
 		{`revenue * region.colour`, formula.CodeUnknownProperty},
 		{`LOOKUP(revenue, region, "Atlantis")`, formula.CodeUnknownMember},
 		{`LOOKUP(region, region, "EMEA")`, formula.CodeSourceMustBeMetric},
-		{`SUMIFS(revenue, revenue, "x")`, formula.CodeDimensionArgRequired},
+		// A metric may be a criteria range (a pick-list's members, a
+		// number); a name that is neither a dimension nor a metric is not.
+		{`SUMIFS(revenue, revenu, "x")`, formula.CodeDimensionArgRequired},
 		{`PARENT(revenue)`, formula.CodeDimensionArgRequired},
 	} {
 		f.refused(tc.text, "POST", "/api/developer/metrics", f.metricBody("bad", tc.text), tc.code)

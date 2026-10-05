@@ -214,7 +214,7 @@ func TestSendMessage_ProposeActionsToolCallCreatesRealProposal(t *testing.T) {
 }
 
 // multiScriptProvider returns a different canned response per call — enough
-// to script "model proposes 60 steps → server rejects → model re-proposes 50".
+// to script "model proposes 120 steps → server rejects → model re-proposes 100".
 type multiScriptProvider struct {
 	calls int
 	resps []providers.ChatResponse
@@ -229,9 +229,9 @@ func (p *multiScriptProvider) Chat(_ context.Context, _ providers.ChatRequest) (
 }
 
 // TestSendMessage_OversizedProposalRejectedThenBatched: server-side proposal
-// batching. A propose_actions call with more than 50 steps must NOT become a
+// batching. A propose_actions call with more than 100 steps must NOT become a
 // proposal — the constraint goes back to the model as the tool result, and
-// the model's follow-up batch of exactly 50 becomes the proposal the
+// the model's follow-up batch of exactly 100 becomes the proposal the
 // developer sees. Bulk jobs (500-member re-parents) otherwise ride on the
 // model's output limit and truncate mid-JSON on smaller models.
 func TestSendMessage_OversizedProposalRejectedThenBatched(t *testing.T) {
@@ -284,8 +284,8 @@ func TestSendMessage_OversizedProposalRejectedThenBatched(t *testing.T) {
 		}
 	}
 	fake := &multiScriptProvider{resps: []providers.ChatResponse{
-		toolResp("call_big", mkSteps(60)),   // rejected server-side
-		toolResp("call_batch", mkSteps(50)), // accepted
+		toolResp("call_big", mkSteps(120)),  // rejected server-side
+		toolResp("call_batch", mkSteps(100)), // accepted
 	}}
 
 	t.Setenv("DEV_MODE", "true")
@@ -319,7 +319,7 @@ func TestSendMessage_OversizedProposalRejectedThenBatched(t *testing.T) {
 	sseText := body.String()
 
 	if fake.calls != 2 {
-		t.Errorf("provider.Chat called %d time(s), want 2 (oversized rejected, then the 50-step batch)", fake.calls)
+		t.Errorf("provider.Chat called %d time(s), want 2 (oversized rejected, then the 100-step batch)", fake.calls)
 	}
 	if !strings.Contains(sseText, "event: proposal") {
 		t.Fatalf("no proposal event — the batched retry never became a proposal:\n%s", sseText)
@@ -328,22 +328,22 @@ func TestSendMessage_OversizedProposalRejectedThenBatched(t *testing.T) {
 	msgs, _ := chatStore.ListMessages(ctx, sess.ID)
 	rejected := false
 	for _, m := range msgs {
-		if m.Role == "tool" && strings.Contains(m.Content, "Proposal rejected: 60 steps") {
+		if m.Role == "tool" && strings.Contains(m.Content, "Proposal rejected: 120 steps") {
 			rejected = true
 		}
 	}
 	if !rejected {
 		t.Error("no 'Proposal rejected' tool message in the transcript — the constraint never reached the model")
 	}
-	// The proposal that exists has exactly 50 steps.
+	// The proposal that exists has exactly 100 steps.
 	var stepCount int
 	if err := pool.QueryRow(ctx, `
 		SELECT jsonb_array_length(steps) FROM ai_assistant.proposal p WHERE p.session_id=$1::uuid
 	`, sess.ID).Scan(&stepCount); err != nil {
 		t.Fatalf("read proposal steps: %v", err)
 	}
-	if stepCount != 50 {
-		t.Errorf("stored proposal has %d steps, want 50", stepCount)
+	if stepCount != aiassistant.MaxProposalSteps {
+		t.Errorf("stored proposal has %d steps, want %d", stepCount, aiassistant.MaxProposalSteps)
 	}
 }
 

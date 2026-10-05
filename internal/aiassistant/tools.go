@@ -313,10 +313,11 @@ func tagSuffix(tagList []string) string {
 
 func (e *ToolExecutor) listMetrics(ctx context.Context) (string, error) {
 	rows, err := e.pool.Query(ctx, `
-		SELECT name, is_input, COALESCE(formula,''), format, agg_rule, tags, COALESCE(label,'')
-		FROM model.metric_def
-		WHERE model_id=$1::uuid AND revision_id=$2::uuid
-		ORDER BY is_input DESC, name`, e.modelID, e.revID)
+		SELECT m.name, m.is_input, COALESCE(m.formula,''), m.format, m.agg_rule, m.tags, COALESCE(m.label,''),
+		       COALESCE((SELECT d.name FROM model.dimension_def d WHERE d.id = m.picklist_dimension_id),'')
+		FROM model.metric_def m
+		WHERE m.model_id=$1::uuid AND m.revision_id=$2::uuid
+		ORDER BY m.is_input DESC, m.name`, e.modelID, e.revID)
 	if err != nil {
 		return "", err
 	}
@@ -328,8 +329,11 @@ func (e *ToolExecutor) listMetrics(ctx context.Context) (string, error) {
 		var name, formula, format, agg string
 		var isInput bool
 		var tagList []string
-		var label string
-		_ = rows.Scan(&name, &isInput, &formula, &format, &agg, &tagList, &label)
+		var label, picklist string
+		_ = rows.Scan(&name, &isInput, &formula, &format, &agg, &tagList, &label, &picklist)
+		if picklist != "" {
+			format += " of " + picklist
+		}
 		if label != "" {
 			name = fmt.Sprintf("%s \"%s\"", name, label)
 		}
@@ -925,3 +929,9 @@ func (e *ToolExecutor) listUsers(ctx context.Context) (string, error) {
 	}
 	return b.String(), nil
 }
+
+// MaxProposalSteps is the most steps one propose_actions call may carry;
+// the gateway rejects a larger plan before it becomes a proposal and tells
+// the model to send the first batch. A whole workbook stage (a sheet's
+// inputs, grids and values) fits in one at 100; it was 50.
+const MaxProposalSteps = 100

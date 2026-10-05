@@ -99,6 +99,9 @@ func (e *WriteExecutor) deleteDimension(ctx context.Context, raw json.RawMessage
 	if err := metricformula.CheckDimensionNotGrouped(ctx, e.pool, dimID); err != nil {
 		return "", "", err
 	}
+	if err := modeledit.CheckDimensionDeletable(ctx, e.pool, dimID); err != nil {
+		return "", "", err
+	}
 	if _, err := e.pool.Exec(ctx, `DELETE FROM model.dimension_def WHERE id=$1::uuid`, dimID); err != nil {
 		return "", "", fmt.Errorf("delete dimension: %w", err)
 	}
@@ -1301,5 +1304,83 @@ func (e *WriteExecutor) checkWidgetProps(ctx context.Context, raw json.RawMessag
 		}
 		scope["dimension_id"] = id
 	}
+	if err := e.resolveWidgetLayout(ctx, props); err != nil {
+		return nil, err
+	}
 	return json.Marshal(props)
+}
+
+// resolveWidgetLayout resolves the dimensions a grid widget's default_view
+// and a chart's context_defaults name — by name or id, as the console stores
+// them by id — and refuses a default_view key the grid does not read.
+// Without it a layout naming "Region" saved and the grid opened in its
+// default layout.
+func (e *WriteExecutor) resolveWidgetLayout(ctx context.Context, props map[string]any) error {
+	dimID := func(where, ref string) (string, error) {
+		id, err := e.requireInModel(ctx, "dimension", ref)
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", where, err)
+		}
+		return id, nil
+	}
+	if v, ok := props["default_view"]; ok && v != nil {
+		dv, ok := v.(map[string]any)
+		if !ok {
+			return fmt.Errorf(`default_view is {"rows": [...], "cols": [...], "context": [...], "filter_sel": {"<dimension>": "<member code>"}}`)
+		}
+		for k := range dv {
+			switch k {
+			case "rows", "cols", "context", "filter_sel":
+			default:
+				return fmt.Errorf("default_view has no key %q: its keys are rows, cols, context and filter_sel", k)
+			}
+		}
+		for _, zone := range []string{"rows", "cols", "context"} {
+			list, _ := dv[zone].([]any)
+			for i, item := range list {
+				ref, _ := item.(string)
+				if ref == "" || ref == "__metrics__" {
+					continue
+				}
+				if strings.EqualFold(ref, "metrics") {
+					list[i] = "__metrics__"
+					continue
+				}
+				id, err := dimID("default_view."+zone, ref)
+				if err != nil {
+					return err
+				}
+				list[i] = id
+			}
+		}
+		if fs, ok := dv["filter_sel"].(map[string]any); ok {
+			out := make(map[string]any, len(fs))
+			for k, code := range fs {
+				if k == "__metrics__" {
+					out[k] = code
+					continue
+				}
+				id, err := dimID("default_view.filter_sel", k)
+				if err != nil {
+					return err
+				}
+				out[id] = code
+			}
+			dv["filter_sel"] = out
+		}
+	}
+	if chart, ok := props["chart"].(map[string]any); ok {
+		if cd, ok := chart["context_defaults"].(map[string]any); ok {
+			out := make(map[string]any, len(cd))
+			for k, code := range cd {
+				id, err := dimID("chart.context_defaults", k)
+				if err != nil {
+					return err
+				}
+				out[id] = code
+			}
+			chart["context_defaults"] = out
+		}
+	}
+	return nil
 }

@@ -1873,6 +1873,12 @@ type metricRow struct {
 	// cells below. Only set in /api/grid, so the client reads those parents
 	// from the server's rows instead of reducing its own leaf cells.
 	AggregateEvaluated bool `json:"aggregate_evaluated,omitempty"`
+	// PicklistDimensionID is the dimension a pick-list metric's cells hold
+	// members of (format "picklist"); PicklistOptions are its members, in
+	// the dimension's order, with the key a cell stores for each. Only set
+	// in /api/grid.
+	PicklistDimensionID string           `json:"picklist_dimension_id,omitempty"`
+	PicklistOptions     []picklistOption `json:"picklist_options,omitempty"`
 }
 
 // aggregateEvaluated reports metricRow.AggregateEvaluated for m — the
@@ -2036,6 +2042,9 @@ type writebackReq struct {
 	DimCode    string            `json:"dim_code"`  // legacy: single dim code
 	DimCodes   map[string]string `json:"dim_codes"` // preferred: {dimId -> memberCode}
 	Value      float64           `json:"value"`
+	// Member names the member a pick-list cell holds, by code or label,
+	// instead of its key in Value ("" clears the cell).
+	Member *string `json:"member,omitempty"`
 }
 
 func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
@@ -2178,6 +2187,13 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 	if len(resolvedDims) > 0 {
 		b, _ := json.Marshal(resolvedDims)
 		dimMembers = string(b)
+	}
+
+	// A pick-list cell holds a member of its dimension: the value must be
+	// one's key, or Member names one.
+	if req.Value, err = h.picklistValue(ctx, req.MetricID, req.Value, req.Member); err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
+		return
 	}
 
 	_, err = h.db.Exec(ctx, `
@@ -3428,7 +3444,8 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		// not the revision the grid was originally built against.
 		metricRows2, err = h.db.Query(ctx, `
 			SELECT rev.id::text, rev.name, rev.is_input, rev.formula, rev.agg_rule,
-			       rev.format, rev.format_decimals, rev.format_currency, rev.time_summary
+			       rev.format, rev.format_decimals, rev.format_currency, rev.time_summary,
+			       COALESCE(rev.picklist_dimension_id::text,'')
 			FROM model.grid_metric gm
 			JOIN model.metric_def orig ON orig.id = gm.metric_id
 			JOIN model.metric_def rev
@@ -3441,7 +3458,8 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	} else {
 		metricRows2, err = h.db.Query(ctx, `
 			SELECT id::text, name, is_input, formula, agg_rule,
-			       format, format_decimals, format_currency, time_summary
+			       format, format_decimals, format_currency, time_summary,
+			       COALESCE(picklist_dimension_id::text,'')
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid
 			ORDER BY is_input DESC, name
 		`, modelID, revisionID)
@@ -3452,7 +3470,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	}
 	for metricRows2.Next() {
 		var mr metricRow
-		if err := metricRows2.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary); err != nil {
+		if err := metricRows2.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID); err != nil {
 			metricRows2.Close()
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
@@ -3466,6 +3484,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.labelMetricRows(ctx, metrics)
+	h.attachPicklistOptions(ctx, metrics)
 
 	// Each metric's OWN grid's dimension IDs (ordered like `dims` above), so the
 	// frontend can build that metric's native cell key instead of assuming the
@@ -3509,7 +3528,8 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	if gridDefID != "" {
 		allRows, aErr := h.db.Query(ctx, `
 			SELECT id::text, name, is_input, formula, agg_rule,
-			       format, format_decimals, format_currency, time_summary
+			       format, format_decimals, format_currency, time_summary,
+			       COALESCE(picklist_dimension_id::text,'')
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid
 			ORDER BY is_input DESC, name
 		`, modelID, revisionID)
@@ -3519,7 +3539,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		}
 		for allRows.Next() {
 			var mr metricRow
-			if err := allRows.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary); err != nil {
+			if err := allRows.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID); err != nil {
 				allRows.Close()
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
@@ -3534,6 +3554,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.labelMetricRows(ctx, allMetrics)
+		h.attachPicklistOptions(ctx, allMetrics)
 	} else {
 		// Whole-model call (no grid_def_id) — `metrics` wasn't run through the
 		// mr.DimensionIDs assignment above (that only happens in the gridDefID
@@ -4560,6 +4581,10 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 	`, srcArgs...); err != nil {
 		return "", fmt.Errorf("revision ratio-operand remap failed: %w", err)
 	}
+	// Step A4: a pick-list holds members of the copy's own dimension.
+	if err := modeledit.RemapPicklistDimensions(ctx, tx, modelID, newID, srcRevID); err != nil {
+		return "", err
+	}
 
 	// Step B: fact copy (user-entered values). dim_map must be rebuilt here
 	// via a join since it's not shared across Exec calls. source_ref and
@@ -5343,8 +5368,11 @@ type devMetric struct {
 	// the ratio currently divides.
 	AggNumeratorMetricID   string   `json:"agg_numerator_metric_id,omitempty"`
 	AggDenominatorMetricID string   `json:"agg_denominator_metric_id,omitempty"`
-	DependsOn              []string `json:"depends_on"`
-	DependedBy             []string `json:"depended_by"`
+	// PicklistDimensionID: the dimension a pick-list metric's cells hold
+	// members of (format "picklist").
+	PicklistDimensionID string   `json:"picklist_dimension_id,omitempty"`
+	DependsOn           []string `json:"depends_on"`
+	DependedBy          []string `json:"depended_by"`
 	// Tags: free-form labels the developer console filters by.
 	Tags []string `json:"tags"`
 	// CalcError is set when this metric's most recent calculation attempt
@@ -5394,6 +5422,7 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 		SELECT m.id::text, m.name, m.is_input, m.formula, m.agg_rule,
 		       COALESCE(m.agg_numerator_metric_id::text,''), COALESCE(m.agg_denominator_metric_id::text,''),
 		       m.format, m.format_decimals, m.format_currency, m.time_summary, m.tags,
+		       COALESCE(m.picklist_dimension_id::text,''),
 		       COALESCE(
 		           (SELECT string_agg(dep.name, ',')
 		            FROM model.calc_dependency cd
@@ -5425,7 +5454,7 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 		var dependsOnCSV, dependedByCSV string
 		if err := rows.Scan(&dm.ID, &dm.Name, &dm.IsInput, &dm.Formula, &dm.AggRule,
 			&dm.AggNumeratorMetricID, &dm.AggDenominatorMetricID,
-			&dm.Format, &dm.FormatDecimals, &dm.FormatCurrency, &dm.TimeSummary, &dm.Tags, &dependsOnCSV, &dependedByCSV, &dm.CalcError); err != nil {
+			&dm.Format, &dm.FormatDecimals, &dm.FormatCurrency, &dm.TimeSummary, &dm.Tags, &dm.PicklistDimensionID, &dependsOnCSV, &dependedByCSV, &dm.CalcError); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -5497,6 +5526,9 @@ type addMetricReq struct {
 	// defaults to sum.
 	TimeSummary string   `json:"time_summary"`
 	Tags        []string `json:"tags"`
+	// PicklistDimensionID is the dimension (id or name) whose members a
+	// pick-list metric's cells hold; required for format "picklist".
+	PicklistDimensionID string `json:"picklist_dimension_id"`
 }
 
 func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
@@ -5537,6 +5569,17 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusBadRequest)
 		return
 	}
+	if err := metricformula.CheckNameFreeOfOtherKind(ctx, h.db.For(ctx), modelID, req.RevisionID, req.Name, "metric"); err != nil {
+		nameKindErr(w, err)
+		return
+	}
+	picklist, err := metricformula.ResolvePicklist(ctx, h.db.For(ctx), modelID, req.RevisionID, req.Format,
+		req.PicklistDimensionID, req.AggRule, req.TimeSummary, req.IsInput)
+	if err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
+		return
+	}
+	req.AggRule, req.TimeSummary = picklist.AggRule, picklist.TimeSummary
 
 	// Validate the formula before inserting — parse, function names,
 	// self-reference, cycles and revision-scoped references, in one shared
@@ -5630,6 +5673,9 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	if metricInsertErr == nil && strings.TrimSpace(req.Label) != "" {
 		_, metricInsertErr = tx.Exec(ctx, `UPDATE model.metric_def SET label=$2 WHERE id=$1::uuid`, newID, strings.TrimSpace(req.Label))
+	}
+	if metricInsertErr == nil && picklist.DimensionID != "" {
+		_, metricInsertErr = tx.Exec(ctx, `UPDATE model.metric_def SET picklist_dimension_id=$2::uuid WHERE id=$1::uuid`, newID, picklist.DimensionID)
 	}
 	if metricInsertErr != nil {
 		if metricformula.IsUniqueViolation(metricInsertErr) {
@@ -6387,6 +6433,10 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 			}
 		} else if body.DeriveMembers {
 			jsonErr(w, fmt.Errorf("%s: derive_members needs source_dimension_id and source_property", metricformula.CodeInvalidGrouping), http.StatusBadRequest)
+			return
+		}
+		if err := metricformula.CheckNameFreeOfOtherKind(ctx, h.db.For(ctx), modelID, body.RevisionID, body.Name, "dimension"); err != nil {
+			nameKindErr(w, err)
 			return
 		}
 		var newID string
@@ -11285,6 +11335,9 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			FormatDecimals         *int    `json:"format_decimals"`
 			FormatCurrency         *string `json:"format_currency"`
 			TimeSummary            *string `json:"time_summary"`
+			// PicklistDimensionID: the dimension (id or name) a pick-list's
+			// cells hold members of; "" clears it.
+			PicklistDimensionID *string `json:"picklist_dimension_id"`
 			// Omitted leaves the metric's tags as they are.
 			Tags *[]string `json:"tags"`
 			// Omitted leaves the label; "" clears it back to the label
@@ -11304,23 +11357,28 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			Format, FormatCurrency, TimeSummary                                  string
 			FormatDecimals                                                       int
 			Tags                                                                 *[]string
+			PicklistDimensionID                                                  string
 		}
 		if err := h.db.QueryRow(ctx, `
 			SELECT md.model_id::text, COALESCE(md.revision_id::text,''), COALESCE(m.application_id::text,''), md.is_input, md.name,
 			       COALESCE(md.formula,''), COALESCE(md.agg_rule,''), COALESCE(md.agg_numerator_metric_id::text,''),
 			       COALESCE(md.agg_denominator_metric_id::text,''), COALESCE(md.format,''), COALESCE(md.format_decimals,0),
-			       COALESCE(md.format_currency,''), COALESCE(md.time_summary,'')
+			       COALESCE(md.format_currency,''), COALESCE(md.time_summary,''), COALESCE(md.picklist_dimension_id::text,'')
 			FROM model.metric_def md JOIN core.model m ON m.id = md.model_id
 			WHERE md.id = $1::uuid`, metricID,
 		).Scan(&modelID, &metricRevisionID, &metricAppID, &metricIsInput, &storedName,
 			&body.Formula, &body.AggRule, &body.AggNumeratorMetricID, &body.AggDenominatorMetricID,
-			&body.Format, &body.FormatDecimals, &body.FormatCurrency, &body.TimeSummary); err != nil {
+			&body.Format, &body.FormatDecimals, &body.FormatCurrency, &body.TimeSummary, &body.PicklistDimensionID); err != nil {
 			jsonErr(w, fmt.Errorf("metric not found"), http.StatusNotFound)
 			return
 		}
 		body.Name = storedName
 		if patch.Name != nil && *patch.Name != "" {
 			body.Name = *patch.Name
+			if err := metricformula.CheckRenameFreeOfOtherKind(ctx, h.db.For(ctx), metricID, body.Name, "metric"); err != nil {
+				nameKindErr(w, err)
+				return
+			}
 			if body.Name != storedName {
 				if err := metricformula.ValidMetricName(body.Name); err != nil {
 					jsonErr(w, err, http.StatusBadRequest)
@@ -11350,6 +11408,36 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		// Only a sent formula is validated and rewrites the dependency
 		// edges; an omitted one is left exactly as stored.
 		formulaSent := patch.Formula != nil && *patch.Formula != ""
+		{
+			// A pick-list keeps its dimension unless the request changes it;
+			// leaving the format drops it. Becoming one takes the pick-list's
+			// own aggregation and time summary unless the request sets them.
+			format := body.Format
+			if format == "" {
+				format = "number"
+			}
+			if patch.PicklistDimensionID != nil {
+				body.PicklistDimensionID = *patch.PicklistDimensionID
+			} else if format != metricformula.FormatPicklist {
+				body.PicklistDimensionID = ""
+			}
+			agg, ts := body.AggRule, body.TimeSummary
+			if format == metricformula.FormatPicklist {
+				if patch.AggRule == nil && agg != string(rollup.AggNone) && agg != string(rollup.AggFormula) {
+					agg = ""
+				}
+				if patch.TimeSummary == nil {
+					ts = ""
+				}
+			}
+			pl, err := metricformula.ResolvePicklist(ctx, h.db.For(ctx), modelID, metricRevisionID, format,
+				body.PicklistDimensionID, agg, ts, metricIsInput)
+			if err != nil {
+				jsonErr(w, err, http.StatusBadRequest)
+				return
+			}
+			body.PicklistDimensionID, body.AggRule, body.TimeSummary = pl.DimensionID, pl.AggRule, pl.TimeSummary
+		}
 		if body.AggRule == "" {
 			body.AggRule = "sum"
 		}
@@ -11438,10 +11526,10 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			UPDATE model.metric_def
 			SET name=$2, formula=$3, agg_rule=$4, format=$5, format_decimals=$6, format_currency=$7,
 			    agg_numerator_metric_id=NULLIF($8,'')::uuid, agg_denominator_metric_id=NULLIF($9,'')::uuid,
-			    time_summary=$10, tags=COALESCE($11, tags)
+			    time_summary=$10, tags=COALESCE($11, tags), picklist_dimension_id=NULLIF($12,'')::uuid
 			WHERE id=$1::uuid`,
 			metricID, body.Name, formulaPtr, body.AggRule, body.Format, body.FormatDecimals, body.FormatCurrency,
-			body.AggNumeratorMetricID, body.AggDenominatorMetricID, body.TimeSummary, optionalTags(body.Tags)); err != nil {
+			body.AggNumeratorMetricID, body.AggDenominatorMetricID, body.TimeSummary, optionalTags(body.Tags), body.PicklistDimensionID); err != nil {
 			if metricformula.IsUniqueViolation(err) {
 				jsonErr(w, metricformula.MetricNameTaken(err, body.Name), http.StatusConflict)
 				return
@@ -11819,6 +11907,10 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				return
 			}
 			_, parentSent := sent["parent_dimension_id"]
+			if err := metricformula.CheckRenameFreeOfOtherKind(ctx, h.db.For(ctx), dimID, body.Name, "dimension"); err != nil {
+				nameKindErr(w, err)
+				return
+			}
 			if body.ParentDimensionID != nil {
 				// The shared rules (metricformula.ValidateParentDimension, also
 				// the AI Developer's): same model AND revision, not itself, no
@@ -11903,6 +11995,15 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 			// And while a property grouping groups its members.
 			if err := metricformula.CheckDimensionNotGrouped(ctx, h.db.For(ctx), dimID); err != nil {
 				groupingDeleteErr(w, err)
+				return
+			}
+			// And while pick-lists hold its members.
+			if err := modeledit.CheckDimensionDeletable(ctx, h.db.For(ctx), dimID); err != nil {
+				status := http.StatusInternalServerError
+				if errors.Is(err, modeledit.ErrDimensionHasPicklists) {
+					status = http.StatusConflict
+				}
+				jsonErr(w, err, status)
 				return
 			}
 			if _, err := h.db.Exec(ctx, `DELETE FROM model.dimension_def WHERE id=$1::uuid`, dimID); err != nil {
@@ -12230,7 +12331,11 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				return
 			}
 			if err := h.deleteMemberReindexed(ctx, dimID, subID); err != nil {
-				jsonErr(w, err, http.StatusInternalServerError)
+				status := http.StatusInternalServerError
+				if errors.Is(err, modeledit.ErrMemberInPicklist) {
+					status = http.StatusConflict
+				}
+				jsonErr(w, err, status)
 				return
 			}
 			// Every aggregate calc metric declared over this dimension
@@ -15360,6 +15465,11 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 			SizeW       int             `json:"size_w"`
 			SizeH       int             `json:"size_h"`
 			WidgetProps json.RawMessage `json:"widget_props"`
+			// Title and ShowTitle set the header at placement (it used to
+			// take a PATCH after the POST); show_title defaults to on with
+			// a title.
+			Title     *string `json:"title"`
+			ShowTitle *bool   `json:"show_title"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.WidgetType == "" {
 			jsonErr(w, fmt.Errorf("widget_type required"), http.StatusBadRequest)
@@ -15370,6 +15480,10 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 		}
 		if body.SizeH < 20 {
 			body.SizeH = 60
+		}
+		if err := modeledit.CheckWidgetType(body.WidgetType); err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
 		}
 		if err := h.validateWidgetRef(ctx, dashID, body.WidgetType, body.RefID); err != nil {
 			jsonErr(w, err, http.StatusBadRequest)
@@ -15397,11 +15511,12 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 		var newID string
 		if err := h.db.QueryRow(ctx,
 			`INSERT INTO model.dashboard_widget
-			  (dashboard_id, widget_type, ref_id, content, sort_order, col_start, col_span, pos_x, pos_y, size_w, size_h, widget_props)
-			 VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb) RETURNING id::text`,
+			  (dashboard_id, widget_type, ref_id, content, sort_order, col_start, col_span, pos_x, pos_y, size_w, size_h, widget_props, title, show_title)
+			 VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb, NULLIF(btrim($13::text),''), $14) RETURNING id::text`,
 			dashID, body.WidgetType, body.RefID, body.Content,
 			body.SortOrder, body.ColStart, body.ColSpan,
-			body.PosX, body.PosY, body.SizeW, body.SizeH, widgetPropsForInsert).Scan(&newID); err != nil {
+			body.PosX, body.PosY, body.SizeW, body.SizeH, widgetPropsForInsert,
+			body.Title, body.ShowTitle != nil && *body.ShowTitle || body.ShowTitle == nil && body.Title != nil && strings.TrimSpace(*body.Title) != "").Scan(&newID); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -15846,7 +15961,9 @@ func (h *handler) applyInputAggregation(
 		if len(ownDims) == 0 {
 			continue // one value: its total is that value
 		}
-		flat := m.AggRule == string(rollup.AggAverage) || m.AggRule == string(rollup.AggCount)
+		// none (an index, a pick-list) is reduced here too: no total above
+		// one leaf (combineLeaves).
+		flat := m.AggRule == string(rollup.AggAverage) || m.AggRule == string(rollup.AggCount) || m.AggRule == string(rollup.AggNone)
 		axis := timeAxisOf(rdims, ownDims)
 		timeReduced := axis != nil && m.TimeSummary != "" && m.TimeSummary != "sum"
 		if !flat && !timeReduced {
