@@ -18,12 +18,12 @@ func activityModel() *fakeModel {
 		metricDims: map[string][]string{
 			"ACT_REGION": {"ACTIVITY"},
 			"ACT_STATUS": {"ACTIVITY"},
-			"STRAT":      {"ACTIVITY"},
+			"SPEND":      {"ACTIVITY"},
 		},
 		data: map[string]float64{
 			"ACT_REGION|A1": key("NA"), "ACT_REGION|A2": key("EU"), "ACT_REGION|A3": key("NA"),
 			"ACT_STATUS|A1": key("Committed"), "ACT_STATUS|A2": key("Draft"), "ACT_STATUS|A3": key("Cancelled"),
-			"STRAT|A1": 10, "STRAT|A2": 20, "STRAT|A3": 5, "STRAT|A4": 7,
+			"SPEND|A1": 10, "SPEND|A2": 20, "SPEND|A3": 5, "SPEND|A4": 7,
 		},
 	}
 }
@@ -66,7 +66,7 @@ func picklistCtx(m *fakeModel, cell map[string]string, picklists map[string]stri
 	}
 	// The cell's own metric values, as evaluators bind them: numbers.
 	if a, ok := cell["activity"]; ok {
-		for _, metric := range []string{"ACT_REGION", "ACT_STATUS", "STRAT"} {
+		for _, metric := range []string{"ACT_REGION", "ACT_STATUS", "SPEND"} {
 			if v, ok := m.data[metric+"|"+a]; ok {
 				ctx.Vars[metric] = NumberVal(v)
 			}
@@ -82,7 +82,7 @@ func TestPicklistKeyIsStableAndLarge(t *testing.T) {
 	if PicklistKey("NA") == PicklistKey("na") {
 		t.Fatal("PicklistKey ignores case; codes are stored exactly")
 	}
-	for _, code := range []string{"", "Yes", "No", "STRAT-001", "North America"} {
+	for _, code := range []string{"", "Yes", "No", "SPEND-001", "North America"} {
 		k := PicklistKey(code)
 		if k < 1<<50 || k >= 1<<51 || k != float64(int64(k)) {
 			t.Fatalf("PicklistKey(%q) = %v, want an integer in [2^50, 2^51)", code, k)
@@ -100,11 +100,11 @@ func TestPicklistReadsAsMemberCode(t *testing.T) {
 	}{
 		{`act_region`, StringVal("NA")},
 		{`act_status = "committed"`, BoolVal(true)},
-		{`IF(AND(act_status <> "Cancelled", act_region = "NA"), strat, 0)`, NumberVal(10)},
+		{`IF(AND(act_status <> "Cancelled", act_region = "NA"), spend, 0)`, NumberVal(10)},
 		{`act_region & "-" & act_status`, StringVal("NA-Committed")},
 		{`LOOKUP(act_status, activity, "A3")`, StringVal("Cancelled")},
 		{`LOOKUP(act_status, activity, "A4")`, BlankVal()}, // nothing chosen
-		{`LOOKUP(strat, activity, "A2")`, NumberVal(20)},
+		{`LOOKUP(spend, activity, "A2")`, NumberVal(20)},
 	} {
 		if got := evalIn(t, ctx, c.formula); got != c.want {
 			t.Errorf("%s = %v (%v), want %v", c.formula, got, got.Kind(), c.want)
@@ -126,16 +126,16 @@ func TestMetricCriteriaRanges(t *testing.T) {
 		formula string
 		want    float64
 	}{
-		{`SUMIFS(strat, act_region, region)`, 15},                         // A1 + A3
-		{`SUMIFS(strat, act_region, region, act_status, "<>Cancelled")`, 10}, // A1
-		{`SUMIFS(strat, act_region, "EU")`, 20},
-		{`SUMIFS(strat, act_region, "")`, 7},      // A4 has no region
+		{`SUMIFS(spend, act_region, region)`, 15},                         // A1 + A3
+		{`SUMIFS(spend, act_region, region, act_status, "<>Cancelled")`, 10}, // A1
+		{`SUMIFS(spend, act_region, "EU")`, 20},
+		{`SUMIFS(spend, act_region, "")`, 7},      // A4 has no region
 		{`COUNTIFS(act_region, "NA")`, 2},          // counts activities
 		{`COUNTIFS(act_status, "<>Cancelled")`, 3}, // blank status included
-		{`SUMIFS(strat, strat, ">=10")`, 30},       // a numeric metric range
-		{`SUMIF(act_region, "NA", strat)`, 15},
-		{`AVERAGEIFS(strat, act_region, "NA")`, 7.5},
-		{`MAXIFS(strat, act_status, "<>Cancelled")`, 20},
+		{`SUMIFS(spend, spend, ">=10")`, 30},       // a numeric metric range
+		{`SUMIF(act_region, "NA", spend)`, 15},
+		{`AVERAGEIFS(spend, act_region, "NA")`, 7.5},
+		{`MAXIFS(spend, act_status, "<>Cancelled")`, 20},
 	} {
 		got := evalIn(t, ctx, c.formula)
 		if n, ok := got.Number(); !ok || got.IsError() || n != c.want {
@@ -143,7 +143,7 @@ func TestMetricCriteriaRanges(t *testing.T) {
 		}
 	}
 	// A dimension wins a name it shares with a metric, as everywhere.
-	if got := evalIn(t, ctx, `SUMIFS(strat, activity, "A4")`); got != NumberVal(7) {
+	if got := evalIn(t, ctx, `SUMIFS(spend, activity, "A4")`); got != NumberVal(7) {
 		t.Errorf("dimension range = %v, want 7", got)
 	}
 	// A pick-list is not a number to add up.
@@ -174,7 +174,7 @@ func TestPicklistResult(t *testing.T) {
 }
 
 func TestAnalyzeRangeNames(t *testing.T) {
-	an, err := Analyze(`SUMIFS(strat, act_region, region, region.segment, "x") + COUNTIF(act_status, "Draft")`)
+	an, err := Analyze(`SUMIFS(spend, act_region, region, region.segment, "x") + COUNTIF(act_status, "Draft")`)
 	if err != nil {
 		t.Fatal(err)
 	}

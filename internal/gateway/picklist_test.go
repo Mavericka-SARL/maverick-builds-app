@@ -53,14 +53,14 @@ func TestPicklistMetrics(t *testing.T) {
 	}
 	actStatus := metric(map[string]any{"name": "act_status", "is_input": true, "format": "picklist", "picklist_dimension_id": "activity_statuses"})
 	actRegion := metric(map[string]any{"name": "act_region", "is_input": true, "format": "picklist", "picklist_dimension_id": region})
-	strat := metric(map[string]any{"name": "strat", "is_input": true, "format": "currency"})
+	spend := metric(map[string]any{"name": "spend", "is_input": true, "format": "currency"})
 	gAct := must("POST", "/api/developer/grids", map[string]any{"name": "Activities", "revision_id": rev})
-	for _, p := range []string{"/dimensions/" + activity, "/metrics/" + actStatus, "/metrics/" + actRegion, "/metrics/" + strat} {
+	for _, p := range []string{"/dimensions/" + activity, "/metrics/" + actStatus, "/metrics/" + actRegion, "/metrics/" + spend} {
 		must("POST", "/api/developer/grids/"+gAct+p, nil)
 	}
 	gReg := must("POST", "/api/developer/grids", map[string]any{"name": "Regions", "revision_id": rev})
 	must("POST", "/api/developer/grids/"+gReg+"/dimensions/"+region, nil)
-	byRegion := metric(map[string]any{"name": "by_region", "formula": `SUMIFS(strat, act_region, sales_region, act_status, "<>Cancelled")`})
+	byRegion := metric(map[string]any{"name": "by_region", "formula": `SUMIFS(spend, act_region, sales_region, act_status, "<>Cancelled")`})
 	regStatus := metric(map[string]any{"name": "region_status", "format": "picklist", "picklist_dimension_id": statuses, "agg_rule": "formula",
 		"formula": `IF(by_region > 15, "Cancelled", "Draft")`})
 	for _, m := range []string{byRegion, regStatus} {
@@ -81,7 +81,7 @@ func TestPicklistMetrics(t *testing.T) {
 				t.Fatalf("write %s %s: %d %s", w.act, v, status, raw)
 			}
 		}
-		if status, raw := write(strat, w.act, map[string]any{"value": w.amount}); status != http.StatusOK {
+		if status, raw := write(spend, w.act, map[string]any{"value": w.amount}); status != http.StatusOK {
 			t.Fatalf("write amount: %d %s", status, raw)
 		}
 	}
@@ -180,7 +180,7 @@ func TestPicklistMetrics(t *testing.T) {
 	period := must("POST", "/api/developer/dimensions", map[string]any{"name": "period_x", "revision_id": rev})
 	fy := must("POST", "/api/developer/dimensions/"+period+"/members", map[string]any{"code": "FY", "label": "FY"})
 	must("POST", "/api/developer/dimensions/"+period+"/members", map[string]any{"code": "M1", "label": "M1", "parent_member_id": fy})
-	st, raw = call("POST", "/api/developer/metrics", map[string]any{"name": "fy_strat", "formula": `SUMIFS(strat, period_x, "FY")`, "revision_id": rev})
+	st, raw = call("POST", "/api/developer/metrics", map[string]any{"name": "fy_spend", "formula": `SUMIFS(spend, period_x, "FY")`, "revision_id": rev})
 	refused("a SUMIFS criterion naming a parent", st, raw, http.StatusBadRequest, "matches nothing")
 	st, raw = call("DELETE", "/api/developer/dimensions/"+statuses, nil)
 	refused("deleting a dimension pick-lists hold", st, raw, http.StatusConflict, "act_status")

@@ -246,14 +246,16 @@ func Resolve(
 
 // flatRule reports whether aggRule combines its leaves flat (resolveFlat)
 // rather than level by level (resolve): average and count always; sum too
-// when flatSum (ResolveTimeFlat); formula and rate never.
+// when flatSum (ResolveTimeFlat); formula and rate never. none reaches here
+// only at a leaf intersection (Resolve answers nothing above), where it
+// reads as sum does.
 func flatRule(aggRule AggRule, flatSum bool) bool {
 	switch aggRule {
 	case AggAverage, AggCount:
 		return true
 	case AggFormula, AggRate:
 		return false
-	case AggSum:
+	case AggSum, AggNone:
 		return flatSum
 	}
 	return flatSum

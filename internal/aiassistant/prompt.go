@@ -285,7 +285,7 @@ member code the dimension already has (MEMBER_CODE_TAKEN, on add_dimension_membe
   non-blank; numeric comparison applies to number properties, text matches ignore case. SUMIFS/COUNTIFS of
   nothing is 0, AVERAGEIFS of nothing #DIV/0!. COUNTIFS counts matching members, not data cells.
   A range may also be a METRIC whose dimensions are all the source's (or related to them): it is tested at
-  every leaf combination of its dimensions — SUMIFS(strat_sales, act_region, region) adds the activities
+  every leaf combination of its dimensions — SUMIFS(activity_sales, act_region, region) adds the activities
   whose Region cell holds the cell's region.
 
 ## Pick-lists: a cell that holds a dimension member
