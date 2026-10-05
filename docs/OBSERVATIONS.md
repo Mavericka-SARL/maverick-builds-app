@@ -18,20 +18,6 @@ leaves out, until it is fixed.
 
 ## Open
 
-### A workflow scoped to a member locks its data while a correction round runs
-
-- **Noticed:** 2026-10-05, testing "variance over threshold → another round":
-  an instance whose context has a Dimension member variable locks that
-  member's data for as long as it runs (writeguard.WorkflowLockReason), so
-  the round's own correction task cannot correct anything at the member.
-- **Why it matters:** a target round scoped to a region is the natural shape
-  of "regional corrections, then review"; today it has to carry no member
-  variable (the manual model's round has none) to stay editable.
-- **How to check:** start a round with `{"region": "NA"}` and write an NA
-  cell: 403 "NA is locked by an in-progress … workflow".
-- **What closes it:** a decision on locking per step (lock during approvals,
-  not during tasks assigned to correct the data), or a definition setting.
-
 ### Text metrics cannot be counted or read by formulas
 
 - **Noticed:** 2026-10-05, adding text cells: a formula naming one is refused
@@ -2745,6 +2731,19 @@ leaves out, until it is fixed.
   `CheckMembers` before the first insert, for every caller.
 
 ## Closed
+
+### A workflow scoped to a member locks its data while a correction round runs
+
+- **Noticed:** 2026-10-05, testing "variance over threshold → another round":
+  a running instance with a Dimension member variable locked that member for
+  its whole run, so the round's own correction tasks could correct nothing.
+- **Closed by:** ee15741 — the user chose "lock only while approving": a running
+  instance locks its scope while one of its approval steps is open, read
+  from the definition it started with; at a task, condition or notification
+  the scope stays editable, a reject back to a task opens it again, and an
+  approved instance stays locked. (`TestWorkflowLocksOnlyWhileAwaitingApproval`;
+  live: a Europe round on the manual model — editable during the correction
+  task, 403 during the review and after the approval.)
 
 ### Cells hold no free text
 

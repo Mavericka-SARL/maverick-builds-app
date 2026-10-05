@@ -119,7 +119,7 @@
 <h3>Visibility and locks</h3>
 <ul>
   <li><b>Access rules</b> per user and per dimension member or metric: <b>write</b> (default), <b>read</b> (visible, not editable) or <b>hidden</b> (removed from grids, charts, selectors and totals shown to that user). A rule on a parent member cascades to its descendants. Rules are applied on the server; hidden data never reaches the browser.</li>
-  <li><b>Workflow locks.</b> While a workflow instance about a grid, metric or member scope is in progress or approved, that scope is locked: typing and imports are refused with "… is locked by an in-progress or approved workflow".</li>
+  <li><b>Workflow locks.</b> While a workflow instance about a grid, metric or member scope waits at an approval step, and after it was approved, that scope is locked: typing and imports are refused with "… is locked: a workflow about it is awaiting approval or was approved". While it is at a task, a condition or a notification the scope stays editable, so a correction round's tasks can correct the data they are about; a reject that sends it back to a task opens it again, and a rejection or cancellation releases it.</li>
   <li><b>Calculated metrics</b> are always read-only. <b>System-managed revisions</b> are read-only for everyone.</li>
 </ul>
 <h3>Workflows, triggers and notifications</h3>

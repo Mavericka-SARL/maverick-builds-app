@@ -261,11 +261,12 @@ func TestMetricScopedWorkflowLockCrossing(t *testing.T) {
 		t.Error("id-shaped metric scope must still leave other metrics writable")
 	}
 
-	// A NEWER instance without metric scope supersedes for its members and
-	// locks everything at CA (running → locked regardless of decision).
-	allID := q(`INSERT INTO workflow.workflow_instance (workflow_def_id, status, context, started_at, started_by)
-	            VALUES ($1::uuid, 'running', '{"country":"CA"}'::jsonb, now() + interval '1 minute', $2::uuid) RETURNING id::text`, defID, f.userID)
-	_ = allID
+	// A NEWER instance without metric scope supersedes for its members and,
+	// awaiting its approval, locks everything at CA.
+	allID := q(`INSERT INTO workflow.workflow_instance (workflow_def_id, status, context, started_at, started_by, steps_snapshot)
+	            VALUES ($1::uuid, 'running', '{"country":"CA"}'::jsonb, now() + interval '1 minute', $2::uuid,
+	                    '[{"id":"r1","type":"approval"}]'::jsonb) RETURNING id::text`, defID, f.userID)
+	q(`INSERT INTO workflow.workflow_step (instance_id, step_def_id, status) VALUES ($1::uuid, 'r1', 'in_progress') RETURNING id::text`, allID)
 	if locked, _ := check([]string{caID}, []string{costID}); !locked {
 		t.Error("a newer all-metric instance must lock CA×cost too")
 	}
@@ -310,5 +311,75 @@ func TestCancelledApprovedInstanceUnlocks(t *testing.T) {
 	}
 	if locked {
 		t.Error("a cancelled (formerly approved) instance still locks its scope — cancelled must unlock")
+	}
+}
+
+// TestWorkflowLocksOnlyWhileAwaitingApproval: a running instance locks its
+// scope while an approval step is open, not while it is at a task — a
+// correction round's tasks change the data they are about (found running a
+// sales target round scoped to a region, 2026-10-05). An approved instance
+// stays locked; a running one past an earlier approval, back at a task (a
+// rework), does not.
+func TestWorkflowLocksOnlyWhileAwaitingApproval(t *testing.T) {
+	pool, cleanup := setupWriteguardDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	f := seedFixture(t, pool)
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("query %q: %v", sql, err)
+		}
+		return id
+	}
+	dimID := q(`INSERT INTO model.dimension_def (model_id, revision_id, name) VALUES ($1::uuid, $2::uuid, 'sales_region') RETURNING id::text`, f.modelID, f.revisionID)
+	euID := q(`INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid, 'EU', 'Europe') RETURNING id::text`, dimID)
+	var appID string
+	if err := pool.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, f.modelID).Scan(&appID); err != nil {
+		t.Fatal(err)
+	}
+	schema := `[{"key":"region","data_type":"Dimension member","dimension_id":"` + dimID + `"}]`
+	steps := `[{"id":"correct","type":"task"},{"id":"check","type":"condition"},{"id":"review","type":"approval"}]`
+	defID := q(`INSERT INTO workflow.workflow_def (application_id, name, trigger_event, steps, context_schema, status)
+	            VALUES ($1::uuid, 'Target round', 'manual', $2::jsonb, $3::jsonb, 'published') RETURNING id::text`, appID, steps, schema)
+	inst := q(`INSERT INTO workflow.workflow_instance (workflow_def_id, status, context, started_by, steps_snapshot)
+	           VALUES ($1::uuid, 'running', '{"region":"EU"}'::jsonb, $2::uuid, $3::jsonb) RETURNING id::text`, defID, f.userID, steps)
+	correct := q(`INSERT INTO workflow.workflow_step (instance_id, step_def_id, status) VALUES ($1::uuid, 'correct', 'in_progress') RETURNING id::text`, inst)
+	review := q(`INSERT INTO workflow.workflow_step (instance_id, step_def_id, status) VALUES ($1::uuid, 'review', 'pending') RETURNING id::text`, inst)
+	locked := func() bool {
+		t.Helper()
+		l, _, err := WorkflowLockReason(ctx, pool, f.modelID, []string{euID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return l
+	}
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if locked() {
+		t.Error("EU is locked while the round is at its correction task")
+	}
+	exec(`UPDATE workflow.workflow_step SET status='completed', decision='complete', completed_at=now() WHERE id=$1::uuid`, correct)
+	exec(`UPDATE workflow.workflow_step SET status='in_progress' WHERE id=$1::uuid`, review)
+	if !locked() {
+		t.Error("EU is not locked while its review awaits a decision")
+	}
+	// Rejected: back to the task for another round — editable again.
+	exec(`UPDATE workflow.workflow_step SET status='completed', decision='reject', completed_at=now() WHERE id=$1::uuid`, review)
+	q(`INSERT INTO workflow.workflow_step (instance_id, step_def_id, status) VALUES ($1::uuid, 'correct', 'in_progress') RETURNING id::text`, inst)
+	if locked() {
+		t.Error("EU is locked after the review sent the round back to its task")
+	}
+	// Approved and completed: locked.
+	exec(`UPDATE workflow.workflow_step SET status='completed', decision='complete', completed_at=now() WHERE instance_id=$1::uuid AND status='in_progress'`, inst)
+	q(`INSERT INTO workflow.workflow_step (instance_id, step_def_id, status, decision, completed_at) VALUES ($1::uuid, 'review', 'completed', 'approve', now() + interval '1 second') RETURNING id::text`, inst)
+	exec(`UPDATE workflow.workflow_instance SET status='completed' WHERE id=$1::uuid`, inst)
+	if !locked() {
+		t.Error("EU is not locked after its round was approved")
 	}
 }

@@ -133,13 +133,14 @@ func TestWorkflowConditionReadsTheModel(t *testing.T) {
 		t.Errorf("after the variance comes within the threshold the instance is %q, want completed", instStatus)
 	}
 	// Pinned by the instance's region: NA alone is 9, over 5, while the
-	// company is within it.
-	write(variance, "NA", 9)
+	// company is within it. The round is about NA, and its task may still
+	// correct NA: only an open approval locks the round's scope.
 	write(variance, "EU", -8)
 	inst3, err := store.StartWorkflow(ctx, def.ID, f.managerID, map[string]string{"region": "NA"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	write(variance, "NA", 9)
 	completeTask(inst3.Id)
 	if st, _, comment, _ := stepOf(inst3.Id, "correct"); st != "in_progress" || !strings.Contains(comment, "rework") {
 		t.Errorf("NA variance 9 vs 5 (company 1): the task is %q (%q), want sent back — the region pins the point", st, comment)

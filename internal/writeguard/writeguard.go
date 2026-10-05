@@ -202,7 +202,7 @@ type contextVarDef struct {
 
 // WorkflowLockReason reports whether any of memberIDs (or one of their
 // ancestors) is the declared scope of a workflow instance on modelID's
-// application that's either still running or was approved — and if so, a
+// application that's either awaiting an approval or was approved — and if so, a
 // human-readable reason. Entirely generic: driven by "Dimension member" +
 // dimension_id context_schema declarations, not any specific dimension or
 // workflow by name, so it's a no-op for any model/workflow that doesn't use
@@ -211,7 +211,9 @@ type contextVarDef struct {
 // A terminal instance's lock state is derived from its last decided step's
 // decision, not just the instance status, because the workflow engine always
 // leaves a completed instance at status "completed" regardless of decision:
-// running = locked (awaiting decision), a terminal instance whose last
+// a running instance with an approval step open = locked (awaiting the
+// decision), a running instance at a task, condition or notification =
+// unlocked (its tasks may change the data), a terminal instance whose last
 // decision was "approve" = locked (permanently, until a new instance
 // starts), anything else (rejected, cancelled, no decision) = unlocked.
 //
@@ -239,8 +241,20 @@ func WorkflowLockReasonForMetrics(ctx context.Context, pool *pgxpool.Pool, model
 		return false, "", err
 	}
 
+	// awaiting_approval: an approval step of the instance is open, read
+	// from the definition the instance started with (steps_snapshot, else
+	// the definition's steps). A step's type is spelled as the workflow
+	// store reads it (workflowStepTypeFromJSON): "approval",
+	// "STEP_TYPE_APPROVAL", or the enum's number, 2.
 	rows, err := pool.Query(ctx, `
-		SELECT wi.context, wd.context_schema, wi.status::text, ws.decision
+		SELECT wi.context, wd.context_schema, wi.status::text, ws.decision,
+		       EXISTS (
+		           SELECT 1 FROM workflow.workflow_step s,
+		                jsonb_array_elements(CASE WHEN jsonb_typeof(COALESCE(wi.steps_snapshot, wd.steps)) = 'array'
+		                                          THEN COALESCE(wi.steps_snapshot, wd.steps) ELSE '[]'::jsonb END) d
+		           WHERE s.instance_id = wi.id AND s.status = 'in_progress'
+		             AND d->>'id' = s.step_def_id AND lower(d->>'type') IN ('approval', 'step_type_approval', '2')
+		       ) AS awaiting_approval
 		FROM workflow.workflow_instance wi
 		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
 		LEFT JOIN LATERAL (
@@ -270,7 +284,8 @@ func WorkflowLockReasonForMetrics(ctx context.Context, pool *pgxpool.Pool, model
 		var ctxJSON, schemaJSON []byte
 		var status string
 		var decision *string
-		if scanErr := rows.Scan(&ctxJSON, &schemaJSON, &status, &decision); scanErr != nil {
+		var awaitingApproval bool
+		if scanErr := rows.Scan(&ctxJSON, &schemaJSON, &status, &decision, &awaitingApproval); scanErr != nil {
 			return false, "", fmt.Errorf("scan workflow instance: %w", scanErr)
 		}
 		var inst scopedInstance
@@ -290,15 +305,21 @@ func WorkflowLockReasonForMetrics(ctx context.Context, pool *pgxpool.Pool, model
 				}
 			}
 		}
-		// running = locked (awaiting decision); a terminal instance is locked
-		// only if its last decision was approve AND it wasn't later
-		// cancelled/failed. The status guard is what the doc comment above
-		// always promised ("cancelled = unlocked") but the code omitted: an
-		// admin cancelling an already-approved instance left the approve
-		// decision on the step, so the lock persisted forever (found live —
-		// a cancelled approval kept blocking writes to its scope).
-		terminalApproved := status != "cancelled" && status != "failed" && decision != nil && *decision == "approve"
-		inst.locked = status == "running" || terminalApproved
+		// A running instance locks its scope only while one of its approval
+		// steps is open: the approver decides on numbers that cannot move
+		// under them, while its tasks — a correction round's "enter
+		// regional corrections" — can change the data they are about. Until
+		// 2026-10-05 a running instance locked for its whole run, so a round
+		// scoped to a region refused every correction its own tasks asked
+		// for. A terminal instance is locked only if its last decision was
+		// approve AND it wasn't later cancelled/failed. The status guard is
+		// what the doc comment above always promised ("cancelled =
+		// unlocked") but the code omitted: an admin cancelling an
+		// already-approved instance left the approve decision on the step,
+		// so the lock persisted forever (found live — a cancelled approval
+		// kept blocking writes to its scope).
+		terminalApproved := status != "running" && status != "cancelled" && status != "failed" && decision != nil && *decision == "approve"
+		inst.locked = (status == "running" && awaitingApproval) || terminalApproved
 		instances = append(instances, inst)
 	}
 	if err := rows.Err(); err != nil {
@@ -391,9 +412,9 @@ func WorkflowLockReasonForMetrics(ctx context.Context, pool *pgxpool.Pool, model
 					}
 					if inst.locked {
 						if len(inst.metricNames) > 0 && wm.display != "" {
-							return true, fmt.Sprintf("%s · %s is locked by an in-progress or approved workflow", anc.Code, wm.display), nil
+							return true, fmt.Sprintf("%s · %s is locked: a workflow about it is awaiting approval or was approved", anc.Code, wm.display), nil
 						}
-						return true, fmt.Sprintf("%s is locked by an in-progress or approved workflow", anc.Code), nil
+						return true, fmt.Sprintf("%s is locked: a workflow about it is awaiting approval or was approved", anc.Code), nil
 					}
 					break
 				}

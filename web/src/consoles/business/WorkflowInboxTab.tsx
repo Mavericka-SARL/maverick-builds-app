@@ -217,8 +217,8 @@ function StartWorkflowDialog({ def, dims, onClose }: { def: WorkflowDefPublic; d
           <>
             <InlineAlert tone="success">
               {start.data === 1
-                ? "Submitted — the request is now awaiting its approver, and the scoped data is locked until a decision is made."
-                : `${start.data} requests submitted — each is awaiting its approver, and each scope is locked until its own decision.`}
+                ? "Submitted. Its data is locked while an approval of it is open, and stays locked once approved."
+                : `${start.data} requests submitted. Each one's data is locked while an approval of it is open, and stays locked once approved.`}
             </InlineAlert>
             <Button variant="primary" onClick={onClose}>Done</Button>
           </>

@@ -329,7 +329,7 @@ You decide requests; you do not submit them — business users do. An account th
 
 		baText(`## Locks keep agreed numbers still
 
-A request about part of the model — Oslo's budget, say — locks those numbers while it waits. Once approved, it keeps them locked so an agreed figure does not drift, but only if the approval is its last step: a step after it, such as a notification, releases them when it finishes. Anyone who types there, you included, sees **Save failed** with the reason: the cell is locked by an in-progress or approved workflow. A rejected or cancelled request releases them.`, 152),
+A request about part of the model — Oslo's budget, say — locks those numbers while it waits for your approval; while it is at a task (a planner correcting Oslo, say), they stay editable. Once approved, it keeps them locked so an agreed figure does not drift, but only if the approval is its last step: a step after it, such as a notification, releases them when it finishes. Anyone who types there while it is locked, you included, sees **Save failed** with the reason: the cell is locked because a workflow about it is awaiting approval or was approved. A rejected or cancelled request releases them.`, 152),
 
 		baText(`## History
 
