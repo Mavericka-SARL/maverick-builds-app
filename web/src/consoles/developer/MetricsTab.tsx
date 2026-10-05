@@ -399,7 +399,7 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
                 disabled={!canSave}
                 loading={update.isPending}
                 loadingLabel="Saving…"
-                onClick={() => update.mutate()}
+                onClick={() => update.mutate({})}
               >
                 Save
               </Button>
