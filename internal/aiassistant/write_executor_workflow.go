@@ -72,8 +72,8 @@ func (e *WriteExecutor) workspaceID(ctx context.Context) (string, error) {
 // The write is not refused on problems — the developer console saves an
 // incomplete draft too and only Publish refuses — but the model is told, the
 // same way the editor's Validate button tells a person.
-func validationNote(def *workflow.WorkflowDefFull) string {
-	errs := workflow.ValidateDef(def)
+func (e *WriteExecutor) validationNote(ctx context.Context, def *workflow.WorkflowDefFull) string {
+	errs := append(workflow.ValidateDef(def), workflow.NewStoreOn(e.pool).CheckConditionNames(ctx, def)...)
 	if len(errs) == 0 {
 		return "validation: OK — a developer can publish it"
 	}

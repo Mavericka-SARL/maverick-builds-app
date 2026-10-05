@@ -293,14 +293,14 @@ func SplitParentFacts(ctx context.Context, db DB, dimID, parentMemberID, childCo
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO runtime.fact_input (model_id, revision_id, metric_id, dim_members, value, entered_by)
+		INSERT INTO runtime.fact_input (model_id, revision_id, metric_id, dim_members, value, entered_by, text_value)
 		SELECT model_id, revision_id, metric_id,
 		       jsonb_set(dim_members, ARRAY[$1::text], to_jsonb($2::text)),
 		       value::float8,
-		       entered_by
+		       entered_by, text_value
 		FROM (
 			SELECT DISTINCT ON (revision_id, metric_id, dim_members)
-			    model_id, revision_id, metric_id, dim_members, value, entered_by
+			    model_id, revision_id, metric_id, dim_members, value, entered_by, text_value
 			FROM runtime.fact_input
 			WHERE model_id=$3::uuid AND dim_members @> $4::jsonb
 			ORDER BY revision_id, metric_id, dim_members, entered_at DESC, id DESC

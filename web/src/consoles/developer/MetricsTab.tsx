@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invalidateModelData } from "../modelDataQueries";
 import { Plus, X, Pencil, Trash2, Check, AlertTriangle } from "lucide-react";
-import { api, type DevModel, type DevMetric, type TimeSummary, TIME_SUMMARIES } from "../../api/client";
+import { api, type DevModel, type DevMetric, type TimeSummary, type HighlightRule, TIME_SUMMARIES } from "../../api/client";
+import { HighlightRulesEditor } from "./HighlightRulesEditor";
 import { Toolbar, ToolbarGroup, SearchInput, Button, TextInput, Select, NumberInput, StatusBadge, IconButton, useConfirm, Field, SegmentedControl, FilterChip, TagInput, TagFilter } from "../../ui";
 
 // Time summary (how a metric totals ACROSS its time dimension) is only
@@ -233,6 +234,7 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
   const [formatCurrency, setFormatCurrency] = useState(m.format_currency ?? "$");
   const [picklistDim, setPicklistDim] = useState(m.picklist_dimension_id ?? "");
   const [tags, setTags] = useState<string[]>(m.tags ?? []);
+  const [highlightRules, setHighlightRules] = useState<HighlightRule[]>(m.highlight_rules ?? []);
   const [recalcResults, setRecalcResults] = useState<RecalcRow[] | null>(null);
   // The recalc reports revision ids; the banner names them. Fetched only
   // while a banner is showing, for this metric's own model.
@@ -245,18 +247,21 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
 
   const invalidRefs = useUnknownFormulaNames(formula, allMetrics.map(x => x.name), dimNames, !m.is_input);
   const isPicklist = format === "picklist";
+  // A text input holds notes: never totalled, across members or time.
+  const isNotes = format === "text" && m.is_input;
   const canSave = name.trim() !== "" && (m.is_input || formula.trim() !== "") && (!isPicklist || picklistDim !== "");
 
   const update = useMutation({
     mutationFn: () => api.updateMetric(m.id, {
       name, label, formula,
       // A pick-list never totals: "none", or "formula" for a calculated one.
-      agg_rule: isPicklist && aggRule !== "formula" ? "none" : aggRule,
+      agg_rule: isNotes || (isPicklist && aggRule !== "formula") ? "none" : aggRule,
       agg_numerator_metric_id: aggRule === "rate" ? numeratorId : "",
       agg_denominator_metric_id: aggRule === "rate" ? denominatorId : "",
       format, format_decimals: formatDecimals, format_currency: formatCurrency,
-      time_summary: isPicklist ? "none" : timeSummary, tags,
+      time_summary: isPicklist || isNotes ? "none" : timeSummary, tags,
       picklist_dimension_id: isPicklist ? picklistDim : "",
+      highlight_rules: highlightRules,
     }),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["dev-model"] });
@@ -369,6 +374,11 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
               <span className="mvx-admin-muted">Tags:</span>
               <TagInput value={tags} onChange={setTags} inputWidth={110} />
             </div>
+            <div style={{ marginTop: 8 }}>
+              <div className="mvx-admin-muted" style={{ marginBottom: 4 }}>Highlight cells (the first rule that holds tints the cell):</div>
+              <HighlightRulesEditor rules={highlightRules} onChange={setHighlightRules}
+                metricNames={allMetrics.filter(x => x.id !== m.id).map(x => x.name)} />
+            </div>
             {invalidRefs.length > 0 && (
               <p className="mvx-admin-muted" style={{ marginTop: 4 }}>
                 Not a metric or dimension in this revision: {invalidRefs.join(", ")}
@@ -407,6 +417,9 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
               </span>
             )}
             <StatusBadge tone="warning">{fmtBadge(m.format ?? "number", m.format_decimals ?? 0, m.format_currency ?? "$")}</StatusBadge>
+            {(m.highlight_rules ?? []).length > 0 && (
+              <StatusBadge tone="danger">{m.highlight_rules!.length === 1 ? "1 highlight" : `${m.highlight_rules!.length} highlights`}</StatusBadge>
+            )}
           </div>
         </td>
         <td className="mvx-admin-mono mvx-admin-muted">
@@ -487,18 +500,20 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
   const [picklistDim, setPicklistDim] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const isPicklist = format === "picklist";
+  // A text input holds notes: never totalled, across members or time.
+  const isNotes = format === "text" && isInput;
 
   const add = useMutation({
     mutationFn: () => api.addMetric({
       name, label, is_input: isInput, formula, revision_id: revisionId,
       // A pick-list never totals: "none", or "formula" for a calculated one.
-      agg_rule: !isPicklist ? aggRule : isInput || aggRule === "none" ? "none" : "formula",
+      agg_rule: isNotes ? "none" : !isPicklist ? aggRule : isInput || aggRule === "none" ? "none" : "formula",
       // Only sent for "rate"; any other rule has no operands and the server
       // rejects a pair it did not ask for.
       agg_numerator_metric_id: aggRule === "rate" ? numeratorId : "",
       agg_denominator_metric_id: aggRule === "rate" ? denominatorId : "",
       format, format_decimals: formatDecimals, format_currency: formatCurrency,
-      time_summary: isPicklist ? "none" : timeSummary, tags,
+      time_summary: isPicklist || isNotes ? "none" : timeSummary, tags,
       picklist_dimension_id: isPicklist ? picklistDim : undefined,
     }),
     onSuccess: () => {
@@ -550,6 +565,11 @@ function AddMetricForm({ model, revisionId, onSuccess }: { model: DevModel; revi
             onChange={setFormat}
           />
         </Field>
+        {isNotes && (
+          <p style={{ margin: 0, fontSize: "var(--font-size-caption)", color: "var(--color-text-muted)" }}>
+            Each cell holds a note typed in the grid — a comment, an owner. Notes are never totalled, and formulas do not read them.
+          </p>
+        )}
         {isPicklist && (
           <Field label="Members of" description="each cell holds one member of this dimension — a drop-down list such as Yes/No, a status, or a region">
             <PicklistDimensionSelect dims={revisionDims} value={picklistDim} onChange={setPicklistDim} width={220} />

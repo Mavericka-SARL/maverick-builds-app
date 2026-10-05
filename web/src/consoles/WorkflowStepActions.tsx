@@ -35,8 +35,12 @@ export function WorkflowStepActions({ stepType, completionLabel, condition, disa
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <div className="mvx-admin-muted" style={{ fontSize: 13 }}>
           This condition could not be evaluated automatically
-          {condition?.left ? <> — the request has no value for <code>{condition.left}</code></> : null}
-          {condition ? <> (rule: <code>{condition.left} {condition.operator} {String(condition.right)}</code>)</> : null}. Choose the branch to continue.
+          {condition?.formula
+            ? <> (formula: <code>{condition.formula}</code>)</>
+            : <>
+                {condition?.left ? <> — the request has no value for <code>{condition.left}</code></> : null}
+                {condition ? <> (rule: <code>{condition.left} {condition.operator} {String(condition.right)}</code>)</> : null}
+              </>}. Choose the branch to continue.
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <Button variant="primary" size={size} style={{ flex: 1 }} disabled={disabled} onClick={() => onDecide("true")}>Continue as true</Button>

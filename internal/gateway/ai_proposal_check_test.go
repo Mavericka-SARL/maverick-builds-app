@@ -235,13 +235,35 @@ func TestConfirmStopsAtTheFirstFailingStep(t *testing.T) {
 	}
 }
 
-func TestRejectionStopsAfterThreeTries(t *testing.T) {
+// A failing plan is corrected three times, and more while each attempt
+// fails fewer steps (up to maxFallingRejections); then the model proposes
+// the steps that pass, and then it stops and says what fails. It is never
+// told to ask how to proceed.
+func TestRejectionPolicy(t *testing.T) {
 	c := proposalCheck{problems: []string{"step 1 (create_metric — x): boom"}, unchecked: []int{3}}
-	if r := c.rejection(1); !strings.Contains(r, "call propose_actions again") || !strings.Contains(r, "Steps 3 could not be checked") {
-		t.Errorf("first rejection: %s", r)
+	if r := c.rejection(retryFix); !strings.Contains(r, "call propose_actions again") || !strings.Contains(r, "Steps 3 could not be checked") {
+		t.Errorf("a fix: %s", r)
 	}
-	if r := c.rejection(maxProposalRejections); !strings.Contains(r, "Do not propose again in this turn") {
-		t.Errorf("last rejection: %s", r)
+	if r := c.rejection(retryPartial); !strings.Contains(r, "ONLY the steps that pass") || strings.Contains(r, "ask how") {
+		t.Errorf("the passing steps: %s", r)
+	}
+	if r := c.rejection(retryStop); !strings.Contains(r, "Do not propose again in this turn") || !strings.Contains(r, "do not ask whether") {
+		t.Errorf("the stop: %s", r)
+	}
+	for _, tc := range []struct {
+		problems []int
+		want     []retryMode
+	}{
+		{[]int{5, 5, 5, 5, 5}, []retryMode{retryFix, retryFix, retryPartial, retryStop, retryStop}},
+		{[]int{5, 4, 3, 2, 1, 1, 1}, []retryMode{retryFix, retryFix, retryFix, retryFix, retryFix, retryPartial, retryStop}},
+		{[]int{9, 8, 7, 6, 5, 4, 3, 2, 1}, []retryMode{retryFix, retryFix, retryFix, retryFix, retryFix, retryFix, retryFix, retryPartial, retryStop}},
+	} {
+		var r planRetries
+		for i, n := range tc.problems {
+			if got := r.next(n); got != tc.want[i] {
+				t.Errorf("failures %v: attempt %d gives %v, want %v", tc.problems, i+1, got, tc.want[i])
+			}
+		}
 	}
 }
 

@@ -228,7 +228,7 @@ func TestCalcMetricPlacedAfterItsDataIsCalculated(t *testing.T) {
 	ctx := context.Background()
 	dev := "rollup-test-approver"
 	status, raw := doAs(t, f, "POST", "/api/cells", dev, f.appID, map[string]any{"model_id": f.modelID, "revision_id": f.workingRevID,
-		"metric_id": f.amountMetricID, "dim_codes": map[string]string{f.staffDimID: "A1"}, "value": 40})
+		"metric_id": f.amountMetricID, "dim_codes": map[string]string{f.staffDimID: "STAFF_A1"}, "value": 40})
 	if status != http.StatusOK {
 		t.Fatalf("write: %d %s", status, raw)
 	}
@@ -285,7 +285,7 @@ func TestPinKeepsInputsWithoutThePinnedDimension(t *testing.T) {
 	must("POST", "/api/developer/grids/"+grid+"/metrics/"+line, nil)
 	// amount has no scenario; 40 recorded.
 	must("POST", "/api/cells", map[string]any{"model_id": f.modelID, "revision_id": f.workingRevID, "metric_id": f.amountMetricID,
-		"dim_codes": map[string]string{f.staffDimID: "A1"}, "value": 40})
+		"dim_codes": map[string]string{f.staffDimID: "STAFF_A1"}, "value": 40})
 	total := func(code string) (float64, bool) {
 		b, _ := json.Marshal(map[string]string{scen: code})
 		_, raw := doAs(t, f, "GET", "/api/grid?grid_id="+grid+"&totals_only=1&scope="+url.QueryEscape(string(b)), dev, f.appID, nil)

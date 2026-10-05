@@ -620,6 +620,10 @@ components:
             Composite key "metricId:code1[:code2...]" to value, where the codes are that
             metric's OWN grid dimensions in order — not a single dimension code.
           additionalProperties: { type: number }
+        texts:
+          type: object
+          description: "Text metrics' cells (format text), keyed as cells; a dimensionless one by its bare metric id. Omitted when empty."
+          additionalProperties: { type: string }
         totals:
           type: object
           description: "metricId to its aggregate across the grid"
@@ -649,6 +653,7 @@ components:
         dimension_type:          { type: string, enum: [standard, time] }
         time_granularity:        { type: string, enum: [day, week, month, quarter, half_year, year, custom], description: "Time dimensions only" }
         fiscal_year_start_month: { type: integer, minimum: 1, maximum: 12, description: "Time dimensions only" }
+        business_maintained: { type: boolean, description: "Business users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members)" }
         members: { type: array, items: { $ref: "#/components/schemas/Department" } }
 
     GridAccessRules:
@@ -686,6 +691,17 @@ components:
             Pick-list metrics only, instead of value: the member the cell holds, by code or label
             (exact, then ignoring case); "" clears it. Anything that is not a member of the
             pick-list's dimension is refused with 400.
+        text:
+          type: string
+          description: >-
+            Text metrics (format text, an input) only, instead of value: the cell's note, at most 4000
+            characters; "" clears it. Refused for any other metric.
+        clear:
+          type: boolean
+          description: >-
+            Empties the cell — no value, not 0: its typed rows are deleted (kept in the cell history with
+            the reason "cleared"); rows a form or an import posted stay. The answer's status is "cleared".
+            A dim_codes code that is no member of the dimension is refused with 400, as for any write.
 
     SubmitBudgetRequest:
       type: object
@@ -809,6 +825,10 @@ components:
             other dimension): sum for flows, last for a closing balance, first for an opening balance,
             none when a time total is meaningless.
         picklist_dimension_id: { type: string, format: uuid, description: "format picklist: the dimension whose members the metric's cells hold" }
+        highlight_rules:
+          type: array
+          items: { $ref: "#/components/schemas/HighlightRule" }
+          description: "How the metric's cells are tinted; the first rule that holds wins. [] removes them; omitted keeps them on PATCH."
         depends_on:      { type: array, items: { type: string }, description: "Names of metrics/dimensions this formula references" }
         depended_by:     { type: array, items: { type: string }, description: "Names of metrics whose formula references this one" }
         tags:            { type: array, items: { type: string }, description: "Free-form labels the developer console filters by" }
@@ -843,7 +863,30 @@ components:
         tags:                 { type: array, items: { type: string }, description: "Free-form labels the developer console filters by; omitted when empty" }
         source_dimension_id:  { type: string, format: uuid, description: "A property grouping: this dimension's members group this dimension's members by their source_property value (developer endpoint; omitted when none)" }
         source_property:      { type: string, description: "The declared property of source_dimension_id whose value names the group (a member's code)" }
+        business_maintained:  { type: boolean, description: "Business users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members); not for a time dimension or a property grouping" }
         members:              { type: array, items: { $ref: "#/components/schemas/DimensionMember" }, description: "Time members in chronological order" }
+
+    HighlightRule:
+      type: object
+      required: [op, tone]
+      properties:
+        metric: { type: string, description: "Test this metric at the same cell instead of the cell's own value" }
+        abs:    { type: boolean, description: "Compare the absolute value" }
+        op:     { type: string, enum: [">", ">=", "<", "<=", "=", "<>", between, not_between, blank, not_blank] }
+        value:
+          description: "The constant compared with: a number, or for = and <> a text (a pick-list member's code, a note)"
+          oneOf: [{ type: number }, { type: string }]
+        value2: { type: number, description: "between / not_between: the upper bound" }
+        than:   { type: string, description: "Compare with this metric instead of value: at the same cell when it is on the grid, else its total (a threshold setting)" }
+        tone:   { type: string, enum: [negative, warning, positive, info] }
+
+    BusinessMemberRequest:
+      type: object
+      properties:
+        label:            { type: string, description: "The name the member shows; required on create" }
+        code:             { type: string, description: "Create only; generated when omitted: the next of the dimension's numbered codes (STRAT-021), else the label in capitals" }
+        parent_member_id: { type: string, format: uuid, description: "Create only: the member it goes under" }
+        properties:       { type: object, additionalProperties: { type: string }, description: "Values of the dimension's declared properties" }
 
     DimensionProperty:
       type: object
@@ -884,6 +927,10 @@ components:
             Required for format picklist, refused for any other: a dimension of the revision (id or
             name) whose members the metric's cells hold. A pick-list's agg_rule is none (default) or,
             calculated, formula; its time_summary none.
+        highlight_rules:
+          type: array
+          items: { $ref: "#/components/schemas/HighlightRule" }
+          description: "How the metric's cells are tinted; the first rule that holds wins. [] removes them; omitted keeps them on PATCH."
         time_summary:
           type: string
           enum: [sum, average, min, max, first, last, none]
@@ -905,6 +952,10 @@ components:
         format_decimals: { type: integer }
         format_currency: { type: string }
         picklist_dimension_id: { type: string, description: "format picklist: the dimension (id or name) its cells hold members of; omitted keeps it while the format stays picklist" }
+        highlight_rules:
+          type: array
+          items: { $ref: "#/components/schemas/HighlightRule" }
+          description: "How the metric's cells are tinted; the first rule that holds wins. [] removes them; omitted keeps them on PATCH."
         time_summary:
           type: string
           enum: [sum, average, min, max, first, last, none]
@@ -941,6 +992,7 @@ components:
             refused with INVALID_GROUPING otherwise.
         source_property:      { type: string, description: "A property DECLARED on source_dimension_id (any case; stored as declared)" }
         derive_members:       { type: boolean, default: false, description: "Also add one member (code = label = the value) per distinct non-blank value of the property" }
+        business_maintained:  { type: boolean, description: "Business users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members); not for a time dimension or a property grouping" }
         dimension_type:
           type: string
           enum: [standard, time]
@@ -975,6 +1027,7 @@ components:
             the source is refused with 409 DIMENSION_IN_USE while a formula names the dimension.
         source_property:      { type: string, description: "Change the grouping's property; recalculates the metrics reading through it" }
         derive_members:       { type: boolean, description: "Add a member for every value of the property that has none yet (e.g. after a new value appears)" }
+        business_maintained:  { type: boolean, description: "Business users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members); not for a time dimension or a property grouping" }
 
     MemberRequest:
       type: object
@@ -1762,6 +1815,7 @@ components:
         title:             { type: string, description: "Human name; auto-generated from the first request, renameable. Empty = unnamed." }
         draft_revision_id: { type: string, format: uuid, description: "Set once this session's first confirmed proposal lazily creates an isolated draft revision" }
         created_at:        { type: string, format: date-time }
+        promoted_at:       { type: string, format: date-time, description: "Set once its draft was promoted: the session is finished and refuses messages (409 SESSION_PROMOTED)" }
 
     AiConversion:
       type: object
@@ -7179,11 +7233,18 @@ paths:
         cannot consume this operation and callers should use a raw fetch/
         EventSource instead. Named events: "delta" ({content}) for each
         streamed token; "tool_status" ({tool}) before executing a read tool;
-        "proposal" ({proposal: AiProposal, messages, session}) when the model
+        "progress" ({tool, chars, steps}) at most once a second while the
+        model writes a tool call (steps: of a proposal so far);
+        "proposal" ({proposal: AiProposal, messages, session, warnings}) when the model
         calls a write tool and a proposal is created instead of executing
-        immediately; "error" ({error}) on any failure (rate limit, provider
-        error, invalid proposal); "done" ({reply: AiChatMessage, messages,
-        session}) on normal completion. Rate-limited to 50 LLM calls per
+        immediately — warnings are the plan check's (a Percentage metric
+        multiplied in without / 100, SUMIFS(src, D, D) where a LOOKUP gives the
+        total); "error" ({error}) on any failure (rate limit, provider
+        error, invalid proposal, the turn's time limit AI_TURN_TIMEOUT —
+        10 minutes by default — or the request closed by Stop, each also
+        saved as the session's last message); "done" ({reply: AiChatMessage, messages,
+        session}) on normal completion. 409 SESSION_PROMOTED once the
+        session's draft was promoted: start a new session. Rate-limited to 50 LLM calls per
         session and 200 per user per day (429 if exceeded before any
         streaming has started — after streaming begins, limit hits are only
         reported via an "error" event since the HTTP status is already sent).
@@ -7808,6 +7869,72 @@ paths:
                 items: { $ref: "#/components/schemas/Dimension" }
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/dimensions/{dimId}/members:
+    post:
+      operationId: addBusinessMember
+      tags: [CRUD Forms]
+      summary: A business user adds a member to a business-maintained dimension
+      description: >-
+        For a dimension the developer marked business_maintained (403 otherwise), on the open revision. The
+        write guard applies to the parent: a hidden or read-only parent, a system-managed revision or a
+        workflow lock refuses it (403).
+      parameters:
+        - { name: dimId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BusinessMemberRequest" }
+      responses:
+        "200":
+          description: The member
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:   { type: string, format: uuid }
+                  code: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "The code is taken, or the member has members under it, is named by a formula or held by a pick-list cell" }
+
+  /api/dimensions/{dimId}/members/{memberId}:
+    patch:
+      operationId: updateBusinessMember
+      tags: [CRUD Forms]
+      summary: A business user renames a member of a business-maintained dimension, or sets its properties
+      description: Label and properties only; a code or parent sent is refused with 400 (they are the developer's).
+      parameters:
+        - { name: dimId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: memberId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BusinessMemberRequest" }
+      responses:
+        "200": { description: Done }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteBusinessMember
+      tags: [CRUD Forms]
+      summary: A business user removes a member of a business-maintained dimension
+      description: >-
+        A member with members under it, one a formula names (MEMBER_IN_USE) or a pick-list cell holds is
+        refused with 409. Its values go with it, kept in the cell history.
+      parameters:
+        - { name: dimId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: memberId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Done }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "The code is taken, or the member has members under it, is named by a formula or held by a pick-list cell" }
 
   /api/forms:
     get:

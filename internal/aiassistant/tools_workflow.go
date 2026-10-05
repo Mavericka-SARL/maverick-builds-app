@@ -43,7 +43,7 @@ func (e *ToolExecutor) getWorkflow(ctx context.Context, raw json.RawMessage) (st
 	b, _ := json.MarshalIndent(out, "", "  ")
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Workflow '%s' (id:%s, status:%s):\n%s\n", def.Name, def.ID, def.Status, b)
-	if errs := workflow.ValidateDef(def); len(errs) > 0 {
+	if errs := append(workflow.ValidateDef(def), workflow.NewStore(e.pool).CheckConditionNames(ctx, def)...); len(errs) > 0 {
 		fmt.Fprintf(&sb, "Validation: %d issue(s) — %s\n", len(errs), strings.Join(errs, "; "))
 	} else {
 		sb.WriteString("Validation: OK\n")
@@ -331,7 +331,7 @@ func (e *ToolExecutor) validateWorkflow(ctx context.Context, raw json.RawMessage
 	if len(p.ContextSchema) > 0 {
 		def.ContextSchema = p.ContextSchema
 	}
-	errs := workflow.ValidateDef(def)
+	errs := append(workflow.ValidateDef(def), workflow.NewStore(e.pool).CheckConditionNames(ctx, def)...)
 	if len(errs) == 0 {
 		return fmt.Sprintf("Workflow '%s' is valid — a developer could publish it as is.", def.Name), nil
 	}

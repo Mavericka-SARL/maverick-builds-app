@@ -13,6 +13,10 @@ type AddBARoleMemberRes interface {
 	addBARoleMemberRes()
 }
 
+type AddBusinessMemberRes interface {
+	addBusinessMemberRes()
+}
+
 type AddGridDimensionRes interface {
 	addGridDimensionRes()
 }
@@ -167,6 +171,10 @@ type DeleteAiSessionRes interface {
 
 type DeleteBARoleRes interface {
 	deleteBARoleRes()
+}
+
+type DeleteBusinessMemberRes interface {
+	deleteBusinessMemberRes()
 }
 
 type DeleteDimensionMemberRes interface {
@@ -715,6 +723,10 @@ type UpdateBARoleRes interface {
 
 type UpdateBrandingRes interface {
 	updateBrandingRes()
+}
+
+type UpdateBusinessMemberRes interface {
+	updateBusinessMemberRes()
 }
 
 type UpdateDashboardRes interface {

@@ -167,7 +167,7 @@ func PercentUnitsMisuse(text string, percentMetrics map[string]bool) string {
 // assistant built empty, and create_metric's "value": 9 left a setting blank.
 var knownParams = map[string][]string{
 	"create_metric": {"name", "label", "formula", "is_input", "format", "format_decimals", "format_currency", "agg_rule", "revision_id",
-		"agg_numerator_metric_id", "agg_denominator_metric_id", "time_summary", "tags", "picklist_dimension"},
+		"agg_numerator_metric_id", "agg_denominator_metric_id", "time_summary", "tags", "picklist_dimension", "highlight_rules"},
 	"create_grid": {"name", "revision_id", "metric_ids", "dimension_ids", "metrics", "dimensions"},
 }
 
@@ -199,4 +199,165 @@ func unknownParams(tool string, params json.RawMessage) error {
 			"leave it out and tell the developer which value to enter (it reads: %s)", strings.Join(known, ", "))
 	}
 	return fmt.Errorf("%s does not read %s — it reads: %s", tool, strings.Join(unknown, ", "), strings.Join(known, ", "))
+}
+
+// PercentFactorMisuse finds a product in text that multiplies a Percentage
+// metric (stored in percent units — 6 for 6%) without dividing by 100, and
+// returns that metric, or "". Each percentage factor counts +1, a × 100
+// +1, a ÷ 100 (or × 0.01) −1 and a percentage divisor −1; a product whose
+// count is above what its result holds — 1 for a Percentage result, else 0 —
+// is a misuse: target = base × growth_pct is 100 times too large. Live, the
+// assistant wrote ly_sales × growth_pct over values such as 6.
+func PercentFactorMisuse(text string, percentMetrics map[string]bool, resultIsPercent bool) string {
+	node, err := formula.Parse(strings.TrimPrefix(strings.TrimSpace(text), "="))
+	if err != nil {
+		return ""
+	}
+	want := 0
+	if resultIsPercent {
+		want = 1
+	}
+	isChain := func(n formula.Node) bool {
+		b, ok := n.(*formula.BinaryExpr)
+		return ok && (b.Op == "*" || b.Op == "/")
+	}
+	// count walks one chain of × and ÷; others collects what lies beyond it.
+	var count func(n formula.Node, num bool, pct *[]string, power *int, others *[]formula.Node)
+	count = func(n formula.Node, num bool, pct *[]string, power *int, others *[]formula.Node) {
+		sign := 1
+		if !num {
+			sign = -1
+		}
+		switch v := n.(type) {
+		case *formula.BinaryExpr:
+			if v.Op == "*" {
+				count(v.Left, num, pct, power, others)
+				count(v.Right, num, pct, power, others)
+				return
+			}
+			if v.Op == "/" {
+				count(v.Left, num, pct, power, others)
+				count(v.Right, !num, pct, power, others)
+				return
+			}
+			*others = append(*others, v)
+		case *formula.NumberLit:
+			switch v.Val {
+			case 100:
+				*power += sign
+			case 0.01:
+				*power -= sign
+			}
+		case *formula.Ident:
+			if percentMetrics[strings.ToLower(v.Name)] {
+				*power += sign
+				if num {
+					*pct = append(*pct, v.Name)
+				}
+			}
+		default:
+			*others = append(*others, v)
+		}
+	}
+	var walk func(n formula.Node) string
+	walk = func(n formula.Node) string {
+		if isChain(n) {
+			var pct []string
+			var others []formula.Node
+			power := 0
+			count(n, true, &pct, &power, &others)
+			if len(pct) > 0 && power > want {
+				return pct[0]
+			}
+			for _, o := range others {
+				if s := walk(o); s != "" {
+					return s
+				}
+			}
+			return ""
+		}
+		switch v := n.(type) {
+		case *formula.BinaryExpr:
+			if s := walk(v.Left); s != "" {
+				return s
+			}
+			return walk(v.Right)
+		case *formula.UnaryExpr:
+			return walk(v.Expr)
+		case *formula.CallExpr:
+			for _, a := range v.Args {
+				if s := walk(a); s != "" {
+					return s
+				}
+			}
+		}
+		return ""
+	}
+	return walk(node)
+}
+
+// SelfCriteriaSum is a conditional aggregation whose every criterion is a
+// dimension compared with itself — SUMIFS(src, Region, Region): it keeps
+// the cell's own member of every dimension, so on a cell carrying all of the
+// source's dimensions it is just the cell's own value.
+type SelfCriteriaSum struct {
+	Call   string   // the function, as written
+	Source string   // the summed metric
+	Dims   []string // the dimensions compared with themselves
+}
+
+// SelfCriteriaSums finds them in text. Live, the assistant divided by
+// SUMIFS(weighted_base_product, Region, Region) for the region's total and
+// every product's share came out 100%; the total is LOOKUP over the other
+// dimension's total member.
+func SelfCriteriaSums(text string) []SelfCriteriaSum {
+	node, err := formula.Parse(strings.TrimPrefix(strings.TrimSpace(text), "="))
+	if err != nil {
+		return nil
+	}
+	var out []SelfCriteriaSum
+	var walk func(n formula.Node)
+	walk = func(n formula.Node) {
+		switch v := n.(type) {
+		case *formula.BinaryExpr:
+			walk(v.Left)
+			walk(v.Right)
+		case *formula.UnaryExpr:
+			walk(v.Expr)
+		case *formula.CallExpr:
+			for _, a := range v.Args {
+				walk(a)
+			}
+			var source formula.Node
+			var pairs []formula.Node
+			switch strings.ToUpper(v.Name) {
+			case "SUMIFS", "AVERAGEIFS", "MINIFS", "MAXIFS":
+				if len(v.Args) >= 3 && len(v.Args)%2 == 1 {
+					source, pairs = v.Args[0], v.Args[1:]
+				}
+			case "SUMIF", "AVERAGEIF":
+				if len(v.Args) == 3 {
+					source, pairs = v.Args[2], v.Args[:2]
+				}
+			}
+			src, ok := source.(*formula.Ident)
+			if !ok {
+				return
+			}
+			var dims []string
+			for i := 0; i+1 < len(pairs); i += 2 {
+				r, rok := pairs[i].(*formula.Ident)
+				c, cok := pairs[i+1].(*formula.Ident)
+				if !rok || !cok || !strings.EqualFold(r.Name, c.Name) {
+					return
+				}
+				dims = append(dims, r.Name)
+			}
+			if len(dims) > 0 {
+				out = append(out, SelfCriteriaSum{Call: v.Name, Source: src.Name, Dims: dims})
+			}
+		}
+	}
+	walk(node)
+	return out
 }

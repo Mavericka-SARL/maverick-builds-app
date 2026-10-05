@@ -165,7 +165,9 @@ type StagingRow struct {
 	MetricID   string
 	DimMembers map[string]string
 	Value      float64
-	RowNumber  int
+	// Text is a text metric's cell (migration 111); nil for a number.
+	Text      *string
+	RowNumber int
 }
 
 // StageRows inserts validated rows into import.import_staging and records errors.
@@ -180,9 +182,9 @@ func (s *Store) StageRows(ctx context.Context, jobID string, rows []StagingRow, 
 	for _, row := range rows {
 		dimJSON, _ := json.Marshal(row.DimMembers)
 		_, err = tx.Exec(ctx, `
-			INSERT INTO import.import_staging (job_id, metric_id, dim_members, value, row_number)
-			VALUES ($1::uuid, $2::uuid, $3, $4, $5)
-		`, jobID, row.MetricID, dimJSON, row.Value, row.RowNumber)
+			INSERT INTO import.import_staging (job_id, metric_id, dim_members, value, row_number, text_value)
+			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)
+		`, jobID, row.MetricID, dimJSON, row.Value, row.RowNumber, row.Text)
 		if err != nil {
 			return fmt.Errorf("stage row %d: %w", row.RowNumber, err)
 		}
@@ -384,15 +386,16 @@ func (s *Store) CommitImport(ctx context.Context, jobID, modelID, revisionID, us
 		// every prior row above, replace leaves untouched cells alone and
 		// relies on latest-wins to make the new row authoritative.
 		_, err = tx.Exec(ctx, `
-			INSERT INTO runtime.fact_input (model_id, revision_id, metric_id, dim_members, value, entered_by)
-			SELECT $1::uuid, NULLIF($2,'')::uuid, metric_id, dim_members, value, $3::uuid
+			INSERT INTO runtime.fact_input (model_id, revision_id, metric_id, dim_members, value, entered_by, text_value)
+			SELECT $1::uuid, NULLIF($2,'')::uuid, metric_id, dim_members, value, $3::uuid, text_value
 			FROM import.import_staging WHERE job_id = $4::uuid
 		`, modelID, revisionID, userID, jobID)
 	default: // ModeIncremental
 		_, err = tx.Exec(ctx, `
-			INSERT INTO runtime.fact_input (model_id, revision_id, metric_id, dim_members, value, entered_by)
+			INSERT INTO runtime.fact_input (model_id, revision_id, metric_id, dim_members, value, entered_by, text_value)
 			SELECT $1::uuid, NULLIF($2,'')::uuid, s.metric_id, s.dim_members,
-			       s.value + COALESCE((
+			       -- A text replaces the cell's text; only numbers add up.
+			       CASE WHEN s.text_value IS NOT NULL THEN 0 ELSE s.value + COALESCE((
 			           SELECT fi.value FROM runtime.fact_input fi
 			           WHERE fi.model_id   = $1::uuid
 			             AND fi.revision_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid
@@ -400,8 +403,8 @@ func (s *Store) CommitImport(ctx context.Context, jobID, modelID, revisionID, us
 			             AND fi.dim_members = s.dim_members
 			           ORDER BY fi.entered_at DESC
 			           LIMIT 1
-			       ), 0),
-			       $3::uuid
+			       ), 0) END,
+			       $3::uuid, s.text_value
 			FROM import.import_staging s
 			WHERE s.job_id = $4::uuid
 		`, modelID, revisionID, userID, jobID)

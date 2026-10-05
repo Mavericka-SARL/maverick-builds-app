@@ -35,8 +35,8 @@ func (e *WriteExecutor) writeInputValues(ctx context.Context, raw json.RawMessag
 		MetricID string `json:"metric_id"`
 		Values   []struct {
 			Members map[string]string `json:"members"`
-			// Value is a number, or for a pick-list the member it holds
-			// (code or label) as text.
+			// Value is a number, or text: for a pick-list the member it
+			// holds (code or label), for a text metric its note.
 			Value json.RawMessage `json:"value"`
 		} `json:"values"`
 	}
@@ -127,7 +127,8 @@ func (e *WriteExecutor) writeInputValues(ctx context.Context, raw json.RawMessag
 }
 
 // valueText is a write_input_values value as the import pipeline reads a
-// cell: a number in full, or text — a pick-list's member by code or label.
+// cell: a number in full, or text — a pick-list's member by code or label,
+// a text metric's note.
 func valueText(raw json.RawMessage) (string, error) {
 	t := strings.TrimSpace(string(raw))
 	if t == "" || t == "null" {
@@ -141,7 +142,7 @@ func valueText(raw json.RawMessage) (string, error) {
 	if err := json.Unmarshal(raw, &s); err == nil && strings.TrimSpace(s) != "" {
 		return strings.TrimSpace(s), nil
 	}
-	return "", fmt.Errorf("value must be a number, or for a pick-list metric the member's code or label as text")
+	return "", fmt.Errorf("value must be a number, or text: a pick-list metric's member (code or label), a text metric's note")
 }
 
 // matchDim finds a dimension by id or by name, ignoring case.

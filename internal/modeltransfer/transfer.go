@@ -91,12 +91,14 @@ type Dimension struct {
 	SourceProperty    *string         `json:"source_property,omitempty"`
 	// Time marker (spec §3.1). Empty DimensionType reads as "standard" so
 	// packages exported before time dimensions existed import unchanged.
-	DimensionType   string        `json:"dimension_type,omitempty"`
-	TimeGranularity *string       `json:"time_granularity,omitempty"`
-	FiscalYearStart *int          `json:"fiscal_year_start_month,omitempty"`
-	Tags            []string      `json:"tags,omitempty"`
-	Members         []Member      `json:"members"`
-	TypedProperties []DimProperty `json:"typed_properties,omitempty"`
+	DimensionType   string   `json:"dimension_type,omitempty"`
+	TimeGranularity *string  `json:"time_granularity,omitempty"`
+	FiscalYearStart *int     `json:"fiscal_year_start_month,omitempty"`
+	Tags            []string `json:"tags,omitempty"`
+	// BusinessMaintained: business users keep its members (migration 111).
+	BusinessMaintained bool          `json:"business_maintained,omitempty"`
+	Members            []Member      `json:"members"`
+	TypedProperties    []DimProperty `json:"typed_properties,omitempty"`
 }
 
 type Metric struct {
@@ -128,6 +130,8 @@ type Metric struct {
 	// ID remapped on import. Its values travel as stored: keys of member
 	// codes, which import keeps.
 	PicklistDimensionID *string `json:"picklist_dimension_id,omitempty"`
+	// HighlightRules tint its cells, naming metrics by name (migration 111).
+	HighlightRules json.RawMessage `json:"highlight_rules,omitempty"`
 }
 
 type Dependency struct {
@@ -269,6 +273,8 @@ type Fact struct {
 	MetricID   string          `json:"metric_id"`
 	DimMembers json.RawMessage `json:"dim_members"`
 	Value      float64         `json:"value"`
+	// Text is a text metric's cell (migration 111); nil for a number.
+	Text *string `json:"text,omitempty"`
 	// SourceMappingID is the FormMapping.ID that posted this fact, or nil
 	// for a direct (manually entered) fact. See FactsPolicy.
 	SourceMappingID *string `json:"source_mapping_id,omitempty"`
@@ -375,7 +381,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	// Dimensions + members + typed properties.
 	rows, err := q.Query(ctx, `
 		SELECT id::text, name, agg_rule, properties, parent_dimension_id::text, source_dimension_id::text, source_property,
-		       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id::text
+		       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id::text, business_maintained
 		FROM model.dimension_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -384,7 +390,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for rows.Next() {
 		var d Dimension
 		if err := rows.Scan(&d.ID, &d.Name, &d.AggRule, &d.Properties, &d.ParentDimensionID, &d.SourceDimensionID, &d.SourceProperty,
-			&d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart, &d.Tags, &d.LineageID); err != nil {
+			&d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart, &d.Tags, &d.LineageID, &d.BusinessMaintained); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -440,7 +446,8 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	rows, err = q.Query(ctx, `
 		SELECT id::text, name, formula, storage_type::text, is_input, agg_rule,
 		       COALESCE(format,''), COALESCE(format_decimals,0), COALESCE(format_currency,''), time_summary, tags, lineage_id::text,
-		       agg_numerator_metric_id::text, agg_denominator_metric_id::text, COALESCE(label,''), picklist_dimension_id::text
+		       agg_numerator_metric_id::text, agg_denominator_metric_id::text, COALESCE(label,''), picklist_dimension_id::text,
+		       NULLIF(highlight_rules, '[]'::jsonb)
 		FROM model.metric_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -449,7 +456,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for rows.Next() {
 		var m Metric
 		if err := rows.Scan(&m.ID, &m.Name, &m.Formula, &m.StorageType, &m.IsInput, &m.AggRule, &m.Format, &m.FormatDecimals, &m.FormatCurrency, &m.TimeSummary, &m.Tags, &m.LineageID,
-			&m.AggNumeratorMetricID, &m.AggDenominatorMetricID, &m.Label, &m.PicklistDimensionID); err != nil {
+			&m.AggNumeratorMetricID, &m.AggDenominatorMetricID, &m.Label, &m.PicklistDimensionID, &m.HighlightRules); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -775,7 +782,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 		// data on import. See FactsPolicy.
 		rows, err = q.Query(ctx, `
 			SELECT DISTINCT ON (metric_id, dim_members)
-			       metric_id::text, dim_members, value
+			       metric_id::text, dim_members, value, text_value
 			FROM runtime.fact_input
 			WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) AND source_ref IS NULL
 			ORDER BY metric_id, dim_members, entered_at DESC, id DESC`,
@@ -785,7 +792,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 		}
 		for rows.Next() {
 			var f Fact
-			if err := rows.Scan(&f.MetricID, &f.DimMembers, &f.Value); err != nil {
+			if err := rows.Scan(&f.MetricID, &f.DimMembers, &f.Value, &f.Text); err != nil {
 				rows.Close()
 				return nil, err
 			}
@@ -1652,12 +1659,13 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 		}
 		if err = tx.QueryRow(ctx, `
 			INSERT INTO model.dimension_def (model_id, revision_id, name, agg_rule, properties, source_property,
-			                                 dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id)
+			                                 dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained)
 			VALUES ($1::uuid, $2::uuid, $3, COALESCE(NULLIF($4::text,''),'sum'), COALESCE($5::jsonb,'[]'::jsonb), $6, $7, $8, $9,
-			        COALESCE($10::text[],'{}'), COALESCE($11::uuid, gen_random_uuid()))
+			        COALESCE($10::text[],'{}'), COALESCE($11::uuid, gen_random_uuid()), $12)
 			RETURNING id::text`,
 			modelID, revisionID, d.Name, d.AggRule, jsonArg(d.Properties), d.SourceProperty,
-			dimType, d.TimeGranularity, d.FiscalYearStart, d.Tags, lineage(d.LineageID)).Scan(&newID); err != nil {
+			dimType, d.TimeGranularity, d.FiscalYearStart, d.Tags, lineage(d.LineageID),
+			d.BusinessMaintained && dimType != timedim.TypeTime).Scan(&newID); err != nil {
 			return "", "", fmt.Errorf("dimension %q: %w", d.Name, err)
 		}
 		dimMap[d.ID] = newID
@@ -1776,6 +1784,17 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 		picklistDim, err := packageRef(dimMap, m.PicklistDimensionID)
 		if err != nil {
 			return "", "", fmt.Errorf("metric %q: pick-list dimension %w", m.Name, err)
+		}
+		if len(m.HighlightRules) > 0 {
+			// Held to the rules every metric writer applies, now that every
+			// metric a rule may name exists.
+			rules, hErr := metricformula.CheckHighlightRules(ctx, tx, modelID, revisionID, m.Name, m.HighlightRules)
+			if hErr != nil {
+				return "", "", fmt.Errorf("metric %q: %w", m.Name, hErr)
+			}
+			if _, err = tx.Exec(ctx, `UPDATE model.metric_def SET highlight_rules=$2::jsonb WHERE id=$1::uuid`, metricMap[m.ID], string(rules)); err != nil {
+				return "", "", fmt.Errorf("metric %q highlight rules: %w", m.Name, err)
+			}
 		}
 		if picklistDim != "" {
 			if _, err = tx.Exec(ctx, `UPDATE model.metric_def SET picklist_dimension_id=$2::uuid WHERE id=$1::uuid`,
@@ -2114,10 +2133,10 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 		}
 		dimMembers := refs.cellDoc(f.DimMembers)
 		if _, err = tx.Exec(ctx, `
-			INSERT INTO runtime.fact_input (model_id, revision_id, revision_name, metric_id, dim_members, value, entered_by, source_ref)
-			VALUES ($1::uuid, $2::uuid, $3, $4::uuid, COALESCE($5::jsonb,'{}'::jsonb), $6, $7::uuid, $8::uuid)`,
+			INSERT INTO runtime.fact_input (model_id, revision_id, revision_name, metric_id, dim_members, value, entered_by, source_ref, text_value)
+			VALUES ($1::uuid, $2::uuid, $3, $4::uuid, COALESCE($5::jsonb,'{}'::jsonb), $6, $7::uuid, $8::uuid, $9)`,
 			modelID, revisionID, revisionName, mid,
-			jsonArg(dimMembers), f.Value, importerID, sourceRef); err != nil {
+			jsonArg(dimMembers), f.Value, importerID, sourceRef, f.Text); err != nil {
 			return "", "", fmt.Errorf("fact: %w", err)
 		}
 	}

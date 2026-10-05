@@ -1612,6 +1612,31 @@ func (s *CreateMetricRequest) Validate() error {
 
 	var failures []validate.FieldError
 	if err := func() error {
+		var failures []validate.FieldError
+		for i, elem := range s.HighlightRules {
+			if err := func() error {
+				if err := elem.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				failures = append(failures, validate.FieldError{
+					Name:  fmt.Sprintf("[%d]", i),
+					Error: err,
+				})
+			}
+		}
+		if len(failures) > 0 {
+			return &validate.Error{Fields: failures}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "highlight_rules",
+			Error: err,
+		})
+	}
+	if err := func() error {
 		if value, ok := s.TimeSummary.Get(); ok {
 			if err := func() error {
 				if err := value.Validate(); err != nil {
@@ -3235,6 +3260,132 @@ func (s GridDimensionTimeGranularity) Validate() error {
 	}
 }
 
+func (s *HighlightRule) Validate() error {
+	if s == nil {
+		return validate.ErrNilPointer
+	}
+
+	var failures []validate.FieldError
+	if err := func() error {
+		if err := s.Op.Validate(); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "op",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		if value, ok := s.Value.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "value",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		if value, ok := s.Value2.Get(); ok {
+			if err := func() error {
+				if err := (validate.Float{}).Validate(float64(value)); err != nil {
+					return errors.Wrap(err, "float")
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "value2",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		if err := s.Tone.Validate(); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "tone",
+			Error: err,
+		})
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
+func (s HighlightRuleOp) Validate() error {
+	switch s {
+	case ">":
+		return nil
+	case ">=":
+		return nil
+	case "<":
+		return nil
+	case "<=":
+		return nil
+	case "=":
+		return nil
+	case "<>":
+		return nil
+	case "between":
+		return nil
+	case "not_between":
+		return nil
+	case "blank":
+		return nil
+	case "not_blank":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
+}
+
+func (s HighlightRuleTone) Validate() error {
+	switch s {
+	case "negative":
+		return nil
+	case "warning":
+		return nil
+	case "positive":
+		return nil
+	case "info":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
+}
+
+func (s HighlightRuleValue) Validate() error {
+	switch s.Type {
+	case Float64HighlightRuleValue:
+		if err := (validate.Float{}).Validate(float64(s.Float64)); err != nil {
+			return errors.Wrap(err, "float")
+		}
+		return nil
+	case StringHighlightRuleValue:
+		return nil // no validation needed
+	default:
+		return errors.Errorf("invalid type %q", s.Type)
+	}
+}
+
 func (s *HistogramBin) Validate() error {
 	if s == nil {
 		return validate.ErrNilPointer
@@ -4312,6 +4463,31 @@ func (s *MetricDef) Validate() error {
 	}(); err != nil {
 		failures = append(failures, validate.FieldError{
 			Name:  "time_summary",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		var failures []validate.FieldError
+		for i, elem := range s.HighlightRules {
+			if err := func() error {
+				if err := elem.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				failures = append(failures, validate.FieldError{
+					Name:  fmt.Sprintf("[%d]", i),
+					Error: err,
+				})
+			}
+		}
+		if len(failures) > 0 {
+			return &validate.Error{Fields: failures}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "highlight_rules",
 			Error: err,
 		})
 	}
@@ -5599,6 +5775,31 @@ func (s *UpdateMetricRequest) Validate() error {
 	}
 
 	var failures []validate.FieldError
+	if err := func() error {
+		var failures []validate.FieldError
+		for i, elem := range s.HighlightRules {
+			if err := func() error {
+				if err := elem.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				failures = append(failures, validate.FieldError{
+					Name:  fmt.Sprintf("[%d]", i),
+					Error: err,
+				})
+			}
+		}
+		if len(failures) > 0 {
+			return &validate.Error{Fields: failures}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "highlight_rules",
+			Error: err,
+		})
+	}
 	if err := func() error {
 		if value, ok := s.TimeSummary.Get(); ok {
 			if err := func() error {

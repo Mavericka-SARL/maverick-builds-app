@@ -712,10 +712,10 @@ func (s *Store) runOnApproveCopy(ctx context.Context, tx pgx.Tx, instanceID, use
 	_ = tx.QueryRow(ctx, `SELECT name FROM model.revision WHERE id=$1::uuid`, targetRevisionID).Scan(&targetRevisionName)
 
 	rows, err := tx.Query(ctx, `
-		INSERT INTO runtime.fact_input (model_id, revision_id, revision_name, metric_id, dim_members, value, entered_by)
-		SELECT model_id, $1::uuid, $2, metric_id, dim_members, value, entered_by
+		INSERT INTO runtime.fact_input (model_id, revision_id, revision_name, metric_id, dim_members, value, entered_by, text_value)
+		SELECT model_id, $1::uuid, $2, metric_id, dim_members, value, entered_by, text_value
 		FROM (
-			SELECT DISTINCT ON (metric_id, dim_members) model_id, metric_id, dim_members, value, entered_by
+			SELECT DISTINCT ON (metric_id, dim_members) model_id, metric_id, dim_members, value, entered_by, text_value
 			FROM runtime.fact_input
 			WHERE model_id=$3::uuid AND revision_id=$4::uuid
 			  AND EXISTS (
@@ -1064,7 +1064,21 @@ func (s *Store) processAutoStep(ctx context.Context, instanceID string, def *ste
 		s.activateNextSteps(ctx, instanceID, def.ID, "sent", stepDefs)
 
 	case workflowv1.StepType_STEP_TYPE_CONDITION:
-		result, evaluated := evalStepCondition(def.Condition, s.instanceContextVars(ctx, instanceID))
+		var result, evaluated bool
+		if text := conditionFormula(def.Condition); text != "" {
+			// A formula reads the model (condition_formula.go); one that
+			// cannot be evaluated is left for a person, saying why.
+			var why string
+			if result, evaluated, why = s.evalConditionFormula(ctx, instanceID, text); !evaluated {
+				_, _ = s.db.Exec(ctx, `
+					UPDATE workflow.workflow_step SET comment = $3
+					WHERE instance_id = $1::uuid AND step_def_id = $2 AND status = 'in_progress'
+				`, instanceID, def.ID, "The condition could not be evaluated: "+why)
+				return
+			}
+		} else {
+			result, evaluated = evalStepCondition(def.Condition, s.instanceContextVars(ctx, instanceID))
+		}
 		if !evaluated {
 			return
 		}

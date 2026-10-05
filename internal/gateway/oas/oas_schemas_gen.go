@@ -197,6 +197,50 @@ func (s *AddBARoleMemberOK) SetStatus(val OptString) {
 
 func (*AddBARoleMemberOK) addBARoleMemberRes() {}
 
+type AddBusinessMemberBadRequest Error
+
+func (*AddBusinessMemberBadRequest) addBusinessMemberRes() {}
+
+// AddBusinessMemberConflict is response for AddBusinessMember operation.
+type AddBusinessMemberConflict struct{}
+
+func (*AddBusinessMemberConflict) addBusinessMemberRes() {}
+
+type AddBusinessMemberForbidden Error
+
+func (*AddBusinessMemberForbidden) addBusinessMemberRes() {}
+
+type AddBusinessMemberNotFound Error
+
+func (*AddBusinessMemberNotFound) addBusinessMemberRes() {}
+
+type AddBusinessMemberOK struct {
+	ID   OptUUID   `json:"id"`
+	Code OptString `json:"code"`
+}
+
+// GetID returns the value of ID.
+func (s *AddBusinessMemberOK) GetID() OptUUID {
+	return s.ID
+}
+
+// GetCode returns the value of Code.
+func (s *AddBusinessMemberOK) GetCode() OptString {
+	return s.Code
+}
+
+// SetID sets the value of ID.
+func (s *AddBusinessMemberOK) SetID(val OptUUID) {
+	s.ID = val
+}
+
+// SetCode sets the value of Code.
+func (s *AddBusinessMemberOK) SetCode(val OptString) {
+	s.Code = val
+}
+
+func (*AddBusinessMemberOK) addBusinessMemberRes() {}
+
 type AddGridDimensionOK struct {
 	Status OptString `json:"status"`
 }
@@ -2053,6 +2097,9 @@ type AiSession struct {
 	// Set once this session's first confirmed proposal lazily creates an isolated draft revision.
 	DraftRevisionID OptUUID   `json:"draft_revision_id"`
 	CreatedAt       time.Time `json:"created_at"`
+	// Set once its draft was promoted: the session is finished and refuses messages (409
+	// SESSION_PROMOTED).
+	PromotedAt OptDateTime `json:"promoted_at"`
 }
 
 // GetID returns the value of ID.
@@ -2100,6 +2147,11 @@ func (s *AiSession) GetCreatedAt() time.Time {
 	return s.CreatedAt
 }
 
+// GetPromotedAt returns the value of PromotedAt.
+func (s *AiSession) GetPromotedAt() OptDateTime {
+	return s.PromotedAt
+}
+
 // SetID sets the value of ID.
 func (s *AiSession) SetID(val uuid.UUID) {
 	s.ID = val
@@ -2143,6 +2195,11 @@ func (s *AiSession) SetDraftRevisionID(val OptUUID) {
 // SetCreatedAt sets the value of CreatedAt.
 func (s *AiSession) SetCreatedAt(val time.Time) {
 	s.CreatedAt = val
+}
+
+// SetPromotedAt sets the value of PromotedAt.
+func (s *AiSession) SetPromotedAt(val OptDateTime) {
+	s.PromotedAt = val
 }
 
 // Ref: #/components/schemas/AiTestSettingsRequest
@@ -3914,6 +3971,71 @@ func (s *BusinessDashboardSummary) SetFolderID(val OptNilUUID) {
 	s.FolderID = val
 }
 
+// Ref: #/components/schemas/BusinessMemberRequest
+type BusinessMemberRequest struct {
+	// The name the member shows; required on create.
+	Label OptString `json:"label"`
+	// Create only; generated when omitted: the next of the dimension's numbered codes (STRAT-021), else
+	// the label in capitals.
+	Code OptString `json:"code"`
+	// Create only: the member it goes under.
+	ParentMemberID OptUUID `json:"parent_member_id"`
+	// Values of the dimension's declared properties.
+	Properties OptBusinessMemberRequestProperties `json:"properties"`
+}
+
+// GetLabel returns the value of Label.
+func (s *BusinessMemberRequest) GetLabel() OptString {
+	return s.Label
+}
+
+// GetCode returns the value of Code.
+func (s *BusinessMemberRequest) GetCode() OptString {
+	return s.Code
+}
+
+// GetParentMemberID returns the value of ParentMemberID.
+func (s *BusinessMemberRequest) GetParentMemberID() OptUUID {
+	return s.ParentMemberID
+}
+
+// GetProperties returns the value of Properties.
+func (s *BusinessMemberRequest) GetProperties() OptBusinessMemberRequestProperties {
+	return s.Properties
+}
+
+// SetLabel sets the value of Label.
+func (s *BusinessMemberRequest) SetLabel(val OptString) {
+	s.Label = val
+}
+
+// SetCode sets the value of Code.
+func (s *BusinessMemberRequest) SetCode(val OptString) {
+	s.Code = val
+}
+
+// SetParentMemberID sets the value of ParentMemberID.
+func (s *BusinessMemberRequest) SetParentMemberID(val OptUUID) {
+	s.ParentMemberID = val
+}
+
+// SetProperties sets the value of Properties.
+func (s *BusinessMemberRequest) SetProperties(val OptBusinessMemberRequestProperties) {
+	s.Properties = val
+}
+
+// Values of the dimension's declared properties.
+type BusinessMemberRequestProperties map[string]string
+
+func (s *BusinessMemberRequestProperties) init() BusinessMemberRequestProperties {
+	m := *s
+	if m == nil {
+		m = map[string]string{}
+		*s = m
+	}
+	return m
+}
+
 type CancelIntegrationRunConflict Error
 
 func (*CancelIntegrationRunConflict) cancelIntegrationRunRes() {}
@@ -5312,6 +5434,9 @@ type CreateDimensionRequest struct {
 	SourceProperty OptString `json:"source_property"`
 	// Also add one member (code = label = the value) per distinct non-blank value of the property.
 	DeriveMembers OptBool `json:"derive_members"`
+	// Business users add, rename and remove this dimension's members (POST/PATCH/DELETE
+	// /api/dimensions/{dimId}/members); not for a time dimension or a property grouping.
+	BusinessMaintained OptBool `json:"business_maintained"`
 	// Omitted defaults to standard. Only a dimension created as time supports time-series formulas; the
 	// name never implies it. Immutable after creation.
 	DimensionType OptCreateDimensionRequestDimensionType `json:"dimension_type"`
@@ -5359,6 +5484,11 @@ func (s *CreateDimensionRequest) GetSourceProperty() OptString {
 // GetDeriveMembers returns the value of DeriveMembers.
 func (s *CreateDimensionRequest) GetDeriveMembers() OptBool {
 	return s.DeriveMembers
+}
+
+// GetBusinessMaintained returns the value of BusinessMaintained.
+func (s *CreateDimensionRequest) GetBusinessMaintained() OptBool {
+	return s.BusinessMaintained
 }
 
 // GetDimensionType returns the value of DimensionType.
@@ -5414,6 +5544,11 @@ func (s *CreateDimensionRequest) SetSourceProperty(val OptString) {
 // SetDeriveMembers sets the value of DeriveMembers.
 func (s *CreateDimensionRequest) SetDeriveMembers(val OptBool) {
 	s.DeriveMembers = val
+}
+
+// SetBusinessMaintained sets the value of BusinessMaintained.
+func (s *CreateDimensionRequest) SetBusinessMaintained(val OptBool) {
+	s.BusinessMaintained = val
 }
 
 // SetDimensionType sets the value of DimensionType.
@@ -6037,6 +6172,9 @@ type CreateMetricRequest struct {
 	// whose members the metric's cells hold. A pick-list's agg_rule is none (default) or, calculated,
 	// formula; its time_summary none.
 	PicklistDimensionID OptString `json:"picklist_dimension_id"`
+	// How the metric's cells are tinted; the first rule that holds wins. [] removes them; omitted keeps
+	// them on PATCH.
+	HighlightRules []HighlightRule `json:"highlight_rules"`
 	// How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
 	// dimension): sum for flows, last for a closing balance, first for an opening balance, none when a
 	// time total is meaningless.
@@ -6098,6 +6236,11 @@ func (s *CreateMetricRequest) GetPicklistDimensionID() OptString {
 	return s.PicklistDimensionID
 }
 
+// GetHighlightRules returns the value of HighlightRules.
+func (s *CreateMetricRequest) GetHighlightRules() []HighlightRule {
+	return s.HighlightRules
+}
+
 // GetTimeSummary returns the value of TimeSummary.
 func (s *CreateMetricRequest) GetTimeSummary() OptCreateMetricRequestTimeSummary {
 	return s.TimeSummary
@@ -6156,6 +6299,11 @@ func (s *CreateMetricRequest) SetTags(val []string) {
 // SetPicklistDimensionID sets the value of PicklistDimensionID.
 func (s *CreateMetricRequest) SetPicklistDimensionID(val OptString) {
 	s.PicklistDimensionID = val
+}
+
+// SetHighlightRules sets the value of HighlightRules.
+func (s *CreateMetricRequest) SetHighlightRules(val []HighlightRule) {
+	s.HighlightRules = val
 }
 
 // SetTimeSummary sets the value of TimeSummary.
@@ -7322,6 +7470,24 @@ func (s *DeleteBARoleOK) SetStatus(val OptString) {
 
 func (*DeleteBARoleOK) deleteBARoleRes() {}
 
+// DeleteBusinessMemberConflict is response for DeleteBusinessMember operation.
+type DeleteBusinessMemberConflict struct{}
+
+func (*DeleteBusinessMemberConflict) deleteBusinessMemberRes() {}
+
+type DeleteBusinessMemberForbidden Error
+
+func (*DeleteBusinessMemberForbidden) deleteBusinessMemberRes() {}
+
+type DeleteBusinessMemberNotFound Error
+
+func (*DeleteBusinessMemberNotFound) deleteBusinessMemberRes() {}
+
+// DeleteBusinessMemberOK is response for DeleteBusinessMember operation.
+type DeleteBusinessMemberOK struct{}
+
+func (*DeleteBusinessMemberOK) deleteBusinessMemberRes() {}
+
 type DeleteDashboardOK struct {
 	Status OptString `json:"status"`
 }
@@ -7867,6 +8033,9 @@ type Dimension struct {
 	SourceDimensionID OptUUID `json:"source_dimension_id"`
 	// The declared property of source_dimension_id whose value names the group (a member's code).
 	SourceProperty OptString `json:"source_property"`
+	// Business users add, rename and remove this dimension's members (POST/PATCH/DELETE
+	// /api/dimensions/{dimId}/members); not for a time dimension or a property grouping.
+	BusinessMaintained OptBool `json:"business_maintained"`
 	// Time members in chronological order.
 	Members []DimensionMember `json:"members"`
 }
@@ -7919,6 +8088,11 @@ func (s *Dimension) GetSourceDimensionID() OptUUID {
 // GetSourceProperty returns the value of SourceProperty.
 func (s *Dimension) GetSourceProperty() OptString {
 	return s.SourceProperty
+}
+
+// GetBusinessMaintained returns the value of BusinessMaintained.
+func (s *Dimension) GetBusinessMaintained() OptBool {
+	return s.BusinessMaintained
 }
 
 // GetMembers returns the value of Members.
@@ -7974,6 +8148,11 @@ func (s *Dimension) SetSourceDimensionID(val OptUUID) {
 // SetSourceProperty sets the value of SourceProperty.
 func (s *Dimension) SetSourceProperty(val OptString) {
 	s.SourceProperty = val
+}
+
+// SetBusinessMaintained sets the value of BusinessMaintained.
+func (s *Dimension) SetBusinessMaintained(val OptBool) {
+	s.BusinessMaintained = val
 }
 
 // SetMembers sets the value of Members.
@@ -11160,6 +11339,9 @@ type GridData struct {
 	// Composite key "metricId:code1[:code2...]" to value, where the codes are that metric's OWN grid
 	// dimensions in order — not a single dimension code.
 	Cells GridDataCells `json:"cells"`
+	// Text metrics' cells (format text), keyed as cells; a dimensionless one by its bare metric id.
+	// Omitted when empty.
+	Texts OptGridDataTexts `json:"texts"`
 	// MetricId to its aggregate across the grid.
 	Totals GridDataTotals `json:"totals"`
 	// Calculated values withheld from this caller because they read a dimension member the caller cannot
@@ -11205,6 +11387,11 @@ func (s *GridData) GetDepartments() []Department {
 // GetCells returns the value of Cells.
 func (s *GridData) GetCells() GridDataCells {
 	return s.Cells
+}
+
+// GetTexts returns the value of Texts.
+func (s *GridData) GetTexts() OptGridDataTexts {
+	return s.Texts
 }
 
 // GetTotals returns the value of Totals.
@@ -11262,6 +11449,11 @@ func (s *GridData) SetCells(val GridDataCells) {
 	s.Cells = val
 }
 
+// SetTexts sets the value of Texts.
+func (s *GridData) SetTexts(val OptGridDataTexts) {
+	s.Texts = val
+}
+
 // SetTotals sets the value of Totals.
 func (s *GridData) SetTotals(val GridDataTotals) {
 	s.Totals = val
@@ -11292,6 +11484,19 @@ func (s *GridDataCells) init() GridDataCells {
 	m := *s
 	if m == nil {
 		m = map[string]float64{}
+		*s = m
+	}
+	return m
+}
+
+// Text metrics' cells (format text), keyed as cells; a dimensionless one by its bare metric id.
+// Omitted when empty.
+type GridDataTexts map[string]string
+
+func (s *GridDataTexts) init() GridDataTexts {
+	m := *s
+	if m == nil {
+		m = map[string]string{}
 		*s = m
 	}
 	return m
@@ -11400,8 +11605,11 @@ type GridDimension struct {
 	// Time dimensions only.
 	TimeGranularity OptGridDimensionTimeGranularity `json:"time_granularity"`
 	// Time dimensions only.
-	FiscalYearStartMonth OptInt       `json:"fiscal_year_start_month"`
-	Members              []Department `json:"members"`
+	FiscalYearStartMonth OptInt `json:"fiscal_year_start_month"`
+	// Business users add, rename and remove this dimension's members (POST/PATCH/DELETE
+	// /api/dimensions/{dimId}/members).
+	BusinessMaintained OptBool      `json:"business_maintained"`
+	Members            []Department `json:"members"`
 }
 
 // GetID returns the value of ID.
@@ -11427,6 +11635,11 @@ func (s *GridDimension) GetTimeGranularity() OptGridDimensionTimeGranularity {
 // GetFiscalYearStartMonth returns the value of FiscalYearStartMonth.
 func (s *GridDimension) GetFiscalYearStartMonth() OptInt {
 	return s.FiscalYearStartMonth
+}
+
+// GetBusinessMaintained returns the value of BusinessMaintained.
+func (s *GridDimension) GetBusinessMaintained() OptBool {
+	return s.BusinessMaintained
 }
 
 // GetMembers returns the value of Members.
@@ -11457,6 +11670,11 @@ func (s *GridDimension) SetTimeGranularity(val OptGridDimensionTimeGranularity) 
 // SetFiscalYearStartMonth sets the value of FiscalYearStartMonth.
 func (s *GridDimension) SetFiscalYearStartMonth(val OptInt) {
 	s.FiscalYearStartMonth = val
+}
+
+// SetBusinessMaintained sets the value of BusinessMaintained.
+func (s *GridDimension) SetBusinessMaintained(val OptBool) {
+	s.BusinessMaintained = val
 }
 
 // SetMembers sets the value of Members.
@@ -11610,6 +11828,310 @@ func (s *HealthzOK) GetStatus() OptString {
 // SetStatus sets the value of Status.
 func (s *HealthzOK) SetStatus(val OptString) {
 	s.Status = val
+}
+
+// Ref: #/components/schemas/HighlightRule
+type HighlightRule struct {
+	// Test this metric at the same cell instead of the cell's own value.
+	Metric OptString `json:"metric"`
+	// Compare the absolute value.
+	Abs OptBool         `json:"abs"`
+	Op  HighlightRuleOp `json:"op"`
+	// The constant compared with: a number, or for = and <> a text (a pick-list member's code, a note).
+	Value OptHighlightRuleValue `json:"value"`
+	// Between / not_between: the upper bound.
+	Value2 OptFloat64 `json:"value2"`
+	// Compare with this metric instead of value: at the same cell when it is on the grid, else its total
+	// (a threshold setting).
+	Than OptString         `json:"than"`
+	Tone HighlightRuleTone `json:"tone"`
+}
+
+// GetMetric returns the value of Metric.
+func (s *HighlightRule) GetMetric() OptString {
+	return s.Metric
+}
+
+// GetAbs returns the value of Abs.
+func (s *HighlightRule) GetAbs() OptBool {
+	return s.Abs
+}
+
+// GetOp returns the value of Op.
+func (s *HighlightRule) GetOp() HighlightRuleOp {
+	return s.Op
+}
+
+// GetValue returns the value of Value.
+func (s *HighlightRule) GetValue() OptHighlightRuleValue {
+	return s.Value
+}
+
+// GetValue2 returns the value of Value2.
+func (s *HighlightRule) GetValue2() OptFloat64 {
+	return s.Value2
+}
+
+// GetThan returns the value of Than.
+func (s *HighlightRule) GetThan() OptString {
+	return s.Than
+}
+
+// GetTone returns the value of Tone.
+func (s *HighlightRule) GetTone() HighlightRuleTone {
+	return s.Tone
+}
+
+// SetMetric sets the value of Metric.
+func (s *HighlightRule) SetMetric(val OptString) {
+	s.Metric = val
+}
+
+// SetAbs sets the value of Abs.
+func (s *HighlightRule) SetAbs(val OptBool) {
+	s.Abs = val
+}
+
+// SetOp sets the value of Op.
+func (s *HighlightRule) SetOp(val HighlightRuleOp) {
+	s.Op = val
+}
+
+// SetValue sets the value of Value.
+func (s *HighlightRule) SetValue(val OptHighlightRuleValue) {
+	s.Value = val
+}
+
+// SetValue2 sets the value of Value2.
+func (s *HighlightRule) SetValue2(val OptFloat64) {
+	s.Value2 = val
+}
+
+// SetThan sets the value of Than.
+func (s *HighlightRule) SetThan(val OptString) {
+	s.Than = val
+}
+
+// SetTone sets the value of Tone.
+func (s *HighlightRule) SetTone(val HighlightRuleTone) {
+	s.Tone = val
+}
+
+type HighlightRuleOp string
+
+const (
+	HighlightRuleOpGreater     HighlightRuleOp = ">"
+	HighlightRuleOpGreaterEq   HighlightRuleOp = ">="
+	HighlightRuleOpLess        HighlightRuleOp = "<"
+	HighlightRuleOpLessEq      HighlightRuleOp = "<="
+	HighlightRuleOpEq          HighlightRuleOp = "="
+	HighlightRuleOpLessGreater HighlightRuleOp = "<>"
+	HighlightRuleOpBetween     HighlightRuleOp = "between"
+	HighlightRuleOpNotBetween  HighlightRuleOp = "not_between"
+	HighlightRuleOpBlank       HighlightRuleOp = "blank"
+	HighlightRuleOpNotBlank    HighlightRuleOp = "not_blank"
+)
+
+// AllValues returns all HighlightRuleOp values.
+func (HighlightRuleOp) AllValues() []HighlightRuleOp {
+	return []HighlightRuleOp{
+		HighlightRuleOpGreater,
+		HighlightRuleOpGreaterEq,
+		HighlightRuleOpLess,
+		HighlightRuleOpLessEq,
+		HighlightRuleOpEq,
+		HighlightRuleOpLessGreater,
+		HighlightRuleOpBetween,
+		HighlightRuleOpNotBetween,
+		HighlightRuleOpBlank,
+		HighlightRuleOpNotBlank,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s HighlightRuleOp) MarshalText() ([]byte, error) {
+	switch s {
+	case HighlightRuleOpGreater:
+		return []byte(s), nil
+	case HighlightRuleOpGreaterEq:
+		return []byte(s), nil
+	case HighlightRuleOpLess:
+		return []byte(s), nil
+	case HighlightRuleOpLessEq:
+		return []byte(s), nil
+	case HighlightRuleOpEq:
+		return []byte(s), nil
+	case HighlightRuleOpLessGreater:
+		return []byte(s), nil
+	case HighlightRuleOpBetween:
+		return []byte(s), nil
+	case HighlightRuleOpNotBetween:
+		return []byte(s), nil
+	case HighlightRuleOpBlank:
+		return []byte(s), nil
+	case HighlightRuleOpNotBlank:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *HighlightRuleOp) UnmarshalText(data []byte) error {
+	switch HighlightRuleOp(data) {
+	case HighlightRuleOpGreater:
+		*s = HighlightRuleOpGreater
+		return nil
+	case HighlightRuleOpGreaterEq:
+		*s = HighlightRuleOpGreaterEq
+		return nil
+	case HighlightRuleOpLess:
+		*s = HighlightRuleOpLess
+		return nil
+	case HighlightRuleOpLessEq:
+		*s = HighlightRuleOpLessEq
+		return nil
+	case HighlightRuleOpEq:
+		*s = HighlightRuleOpEq
+		return nil
+	case HighlightRuleOpLessGreater:
+		*s = HighlightRuleOpLessGreater
+		return nil
+	case HighlightRuleOpBetween:
+		*s = HighlightRuleOpBetween
+		return nil
+	case HighlightRuleOpNotBetween:
+		*s = HighlightRuleOpNotBetween
+		return nil
+	case HighlightRuleOpBlank:
+		*s = HighlightRuleOpBlank
+		return nil
+	case HighlightRuleOpNotBlank:
+		*s = HighlightRuleOpNotBlank
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type HighlightRuleTone string
+
+const (
+	HighlightRuleToneNegative HighlightRuleTone = "negative"
+	HighlightRuleToneWarning  HighlightRuleTone = "warning"
+	HighlightRuleTonePositive HighlightRuleTone = "positive"
+	HighlightRuleToneInfo     HighlightRuleTone = "info"
+)
+
+// AllValues returns all HighlightRuleTone values.
+func (HighlightRuleTone) AllValues() []HighlightRuleTone {
+	return []HighlightRuleTone{
+		HighlightRuleToneNegative,
+		HighlightRuleToneWarning,
+		HighlightRuleTonePositive,
+		HighlightRuleToneInfo,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s HighlightRuleTone) MarshalText() ([]byte, error) {
+	switch s {
+	case HighlightRuleToneNegative:
+		return []byte(s), nil
+	case HighlightRuleToneWarning:
+		return []byte(s), nil
+	case HighlightRuleTonePositive:
+		return []byte(s), nil
+	case HighlightRuleToneInfo:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *HighlightRuleTone) UnmarshalText(data []byte) error {
+	switch HighlightRuleTone(data) {
+	case HighlightRuleToneNegative:
+		*s = HighlightRuleToneNegative
+		return nil
+	case HighlightRuleToneWarning:
+		*s = HighlightRuleToneWarning
+		return nil
+	case HighlightRuleTonePositive:
+		*s = HighlightRuleTonePositive
+		return nil
+	case HighlightRuleToneInfo:
+		*s = HighlightRuleToneInfo
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// The constant compared with: a number, or for = and <> a text (a pick-list member's code, a note).
+// HighlightRuleValue represents sum type.
+type HighlightRuleValue struct {
+	Type    HighlightRuleValueType // switch on this field
+	Float64 float64
+	String  string
+}
+
+// HighlightRuleValueType is oneOf type of HighlightRuleValue.
+type HighlightRuleValueType string
+
+// Possible values for HighlightRuleValueType.
+const (
+	Float64HighlightRuleValue HighlightRuleValueType = "float64"
+	StringHighlightRuleValue  HighlightRuleValueType = "string"
+)
+
+// IsFloat64 reports whether HighlightRuleValue is float64.
+func (s HighlightRuleValue) IsFloat64() bool { return s.Type == Float64HighlightRuleValue }
+
+// IsString reports whether HighlightRuleValue is string.
+func (s HighlightRuleValue) IsString() bool { return s.Type == StringHighlightRuleValue }
+
+// SetFloat64 sets HighlightRuleValue to float64.
+func (s *HighlightRuleValue) SetFloat64(v float64) {
+	s.Type = Float64HighlightRuleValue
+	s.Float64 = v
+}
+
+// GetFloat64 returns float64 and true boolean if HighlightRuleValue is float64.
+func (s HighlightRuleValue) GetFloat64() (v float64, ok bool) {
+	if !s.IsFloat64() {
+		return v, false
+	}
+	return s.Float64, true
+}
+
+// NewFloat64HighlightRuleValue returns new HighlightRuleValue from float64.
+func NewFloat64HighlightRuleValue(v float64) HighlightRuleValue {
+	var s HighlightRuleValue
+	s.SetFloat64(v)
+	return s
+}
+
+// SetString sets HighlightRuleValue to string.
+func (s *HighlightRuleValue) SetString(v string) {
+	s.Type = StringHighlightRuleValue
+	s.String = v
+}
+
+// GetString returns string and true boolean if HighlightRuleValue is string.
+func (s HighlightRuleValue) GetString() (v string, ok bool) {
+	if !s.IsString() {
+		return v, false
+	}
+	return s.String, true
+}
+
+// NewStringHighlightRuleValue returns new HighlightRuleValue from string.
+func NewStringHighlightRuleValue(v string) HighlightRuleValue {
+	var s HighlightRuleValue
+	s.SetString(v)
+	return s
 }
 
 // Ref: #/components/schemas/HistogramBin
@@ -13906,6 +14428,9 @@ type MetricDef struct {
 	TimeSummary OptMetricDefTimeSummary `json:"time_summary"`
 	// Format picklist: the dimension whose members the metric's cells hold.
 	PicklistDimensionID OptUUID `json:"picklist_dimension_id"`
+	// How the metric's cells are tinted; the first rule that holds wins. [] removes them; omitted keeps
+	// them on PATCH.
+	HighlightRules []HighlightRule `json:"highlight_rules"`
 	// Names of metrics/dimensions this formula references.
 	DependsOn []string `json:"depends_on"`
 	// Names of metrics whose formula references this one.
@@ -13967,6 +14492,11 @@ func (s *MetricDef) GetTimeSummary() OptMetricDefTimeSummary {
 // GetPicklistDimensionID returns the value of PicklistDimensionID.
 func (s *MetricDef) GetPicklistDimensionID() OptUUID {
 	return s.PicklistDimensionID
+}
+
+// GetHighlightRules returns the value of HighlightRules.
+func (s *MetricDef) GetHighlightRules() []HighlightRule {
+	return s.HighlightRules
 }
 
 // GetDependsOn returns the value of DependsOn.
@@ -14037,6 +14567,11 @@ func (s *MetricDef) SetTimeSummary(val OptMetricDefTimeSummary) {
 // SetPicklistDimensionID sets the value of PicklistDimensionID.
 func (s *MetricDef) SetPicklistDimensionID(val OptUUID) {
 	s.PicklistDimensionID = val
+}
+
+// SetHighlightRules sets the value of HighlightRules.
+func (s *MetricDef) SetHighlightRules(val []HighlightRule) {
+	s.HighlightRules = val
 }
 
 // SetDependsOn sets the value of DependsOn.
@@ -15447,6 +15982,52 @@ func (o OptBool) Get() (v bool, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptBool) Or(d bool) bool {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptBusinessMemberRequestProperties returns new OptBusinessMemberRequestProperties with value set to v.
+func NewOptBusinessMemberRequestProperties(v BusinessMemberRequestProperties) OptBusinessMemberRequestProperties {
+	return OptBusinessMemberRequestProperties{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptBusinessMemberRequestProperties is optional BusinessMemberRequestProperties.
+type OptBusinessMemberRequestProperties struct {
+	Value BusinessMemberRequestProperties
+	Set   bool
+}
+
+// IsSet returns true if OptBusinessMemberRequestProperties was set.
+func (o OptBusinessMemberRequestProperties) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptBusinessMemberRequestProperties) Reset() {
+	var v BusinessMemberRequestProperties
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptBusinessMemberRequestProperties) SetTo(v BusinessMemberRequestProperties) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptBusinessMemberRequestProperties) Get() (v BusinessMemberRequestProperties, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptBusinessMemberRequestProperties) Or(d BusinessMemberRequestProperties) BusinessMemberRequestProperties {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -17109,6 +17690,52 @@ func (o OptGridAccessRules) Or(d GridAccessRules) GridAccessRules {
 	return d
 }
 
+// NewOptGridDataTexts returns new OptGridDataTexts with value set to v.
+func NewOptGridDataTexts(v GridDataTexts) OptGridDataTexts {
+	return OptGridDataTexts{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGridDataTexts is optional GridDataTexts.
+type OptGridDataTexts struct {
+	Value GridDataTexts
+	Set   bool
+}
+
+// IsSet returns true if OptGridDataTexts was set.
+func (o OptGridDataTexts) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGridDataTexts) Reset() {
+	var v GridDataTexts
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGridDataTexts) SetTo(v GridDataTexts) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGridDataTexts) Get() (v GridDataTexts, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGridDataTexts) Or(d GridDataTexts) GridDataTexts {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptGridDimensionTimeGranularity returns new OptGridDimensionTimeGranularity with value set to v.
 func NewOptGridDimensionTimeGranularity(v GridDimensionTimeGranularity) OptGridDimensionTimeGranularity {
 	return OptGridDimensionTimeGranularity{
@@ -17149,6 +17776,52 @@ func (o OptGridDimensionTimeGranularity) Get() (v GridDimensionTimeGranularity, 
 
 // Or returns value if set, or given parameter if does not.
 func (o OptGridDimensionTimeGranularity) Or(d GridDimensionTimeGranularity) GridDimensionTimeGranularity {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptHighlightRuleValue returns new OptHighlightRuleValue with value set to v.
+func NewOptHighlightRuleValue(v HighlightRuleValue) OptHighlightRuleValue {
+	return OptHighlightRuleValue{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptHighlightRuleValue is optional HighlightRuleValue.
+type OptHighlightRuleValue struct {
+	Value HighlightRuleValue
+	Set   bool
+}
+
+// IsSet returns true if OptHighlightRuleValue was set.
+func (o OptHighlightRuleValue) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptHighlightRuleValue) Reset() {
+	var v HighlightRuleValue
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptHighlightRuleValue) SetTo(v HighlightRuleValue) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptHighlightRuleValue) Get() (v HighlightRuleValue, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptHighlightRuleValue) Or(d HighlightRuleValue) HighlightRuleValue {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -24402,6 +25075,23 @@ type UpdateBrandingForbidden struct{}
 
 func (*UpdateBrandingForbidden) updateBrandingRes() {}
 
+type UpdateBusinessMemberBadRequest Error
+
+func (*UpdateBusinessMemberBadRequest) updateBusinessMemberRes() {}
+
+type UpdateBusinessMemberForbidden Error
+
+func (*UpdateBusinessMemberForbidden) updateBusinessMemberRes() {}
+
+type UpdateBusinessMemberNotFound Error
+
+func (*UpdateBusinessMemberNotFound) updateBusinessMemberRes() {}
+
+// UpdateBusinessMemberOK is response for UpdateBusinessMember operation.
+type UpdateBusinessMemberOK struct{}
+
+func (*UpdateBusinessMemberOK) updateBusinessMemberRes() {}
+
 type UpdateDashboardOK struct {
 	Status OptString `json:"status"`
 }
@@ -24576,6 +25266,9 @@ type UpdateDimensionRequest struct {
 	SourceProperty OptString `json:"source_property"`
 	// Add a member for every value of the property that has none yet (e.g. after a new value appears).
 	DeriveMembers OptBool `json:"derive_members"`
+	// Business users add, rename and remove this dimension's members (POST/PATCH/DELETE
+	// /api/dimensions/{dimId}/members); not for a time dimension or a property grouping.
+	BusinessMaintained OptBool `json:"business_maintained"`
 }
 
 // GetName returns the value of Name.
@@ -24613,6 +25306,11 @@ func (s *UpdateDimensionRequest) GetDeriveMembers() OptBool {
 	return s.DeriveMembers
 }
 
+// GetBusinessMaintained returns the value of BusinessMaintained.
+func (s *UpdateDimensionRequest) GetBusinessMaintained() OptBool {
+	return s.BusinessMaintained
+}
+
 // SetName sets the value of Name.
 func (s *UpdateDimensionRequest) SetName(val OptString) {
 	s.Name = val
@@ -24646,6 +25344,11 @@ func (s *UpdateDimensionRequest) SetSourceProperty(val OptString) {
 // SetDeriveMembers sets the value of DeriveMembers.
 func (s *UpdateDimensionRequest) SetDeriveMembers(val OptBool) {
 	s.DeriveMembers = val
+}
+
+// SetBusinessMaintained sets the value of BusinessMaintained.
+func (s *UpdateDimensionRequest) SetBusinessMaintained(val OptBool) {
+	s.BusinessMaintained = val
 }
 
 type UpdateFolderOK struct {
@@ -25090,6 +25793,9 @@ type UpdateMetricRequest struct {
 	// Format picklist: the dimension (id or name) its cells hold members of; omitted keeps it while the
 	// format stays picklist.
 	PicklistDimensionID OptString `json:"picklist_dimension_id"`
+	// How the metric's cells are tinted; the first rule that holds wins. [] removes them; omitted keeps
+	// them on PATCH.
+	HighlightRules []HighlightRule `json:"highlight_rules"`
 	// How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
 	// dimension): sum for flows, last for a closing balance, first for an opening balance, none when a
 	// time total is meaningless.
@@ -25141,6 +25847,11 @@ func (s *UpdateMetricRequest) GetPicklistDimensionID() OptString {
 	return s.PicklistDimensionID
 }
 
+// GetHighlightRules returns the value of HighlightRules.
+func (s *UpdateMetricRequest) GetHighlightRules() []HighlightRule {
+	return s.HighlightRules
+}
+
 // GetTimeSummary returns the value of TimeSummary.
 func (s *UpdateMetricRequest) GetTimeSummary() OptUpdateMetricRequestTimeSummary {
 	return s.TimeSummary
@@ -25189,6 +25900,11 @@ func (s *UpdateMetricRequest) SetFormatCurrency(val OptString) {
 // SetPicklistDimensionID sets the value of PicklistDimensionID.
 func (s *UpdateMetricRequest) SetPicklistDimensionID(val OptString) {
 	s.PicklistDimensionID = val
+}
+
+// SetHighlightRules sets the value of HighlightRules.
+func (s *UpdateMetricRequest) SetHighlightRules(val []HighlightRule) {
+	s.HighlightRules = val
 }
 
 // SetTimeSummary sets the value of TimeSummary.
@@ -27122,6 +27838,13 @@ type WritebackRequest struct {
 	// ignoring case); "" clears it. Anything that is not a member of the pick-list's dimension is
 	// refused with 400.
 	Member OptString `json:"member"`
+	// Text metrics (format text, an input) only, instead of value: the cell's note, at most 4000
+	// characters; "" clears it. Refused for any other metric.
+	Text OptString `json:"text"`
+	// Empties the cell — no value, not 0: its typed rows are deleted (kept in the cell history with
+	// the reason "cleared"); rows a form or an import posted stay. The answer's status is "cleared". A
+	// dim_codes code that is no member of the dimension is refused with 400, as for any write.
+	Clear OptBool `json:"clear"`
 }
 
 // GetModelID returns the value of ModelID.
@@ -27159,6 +27882,16 @@ func (s *WritebackRequest) GetMember() OptString {
 	return s.Member
 }
 
+// GetText returns the value of Text.
+func (s *WritebackRequest) GetText() OptString {
+	return s.Text
+}
+
+// GetClear returns the value of Clear.
+func (s *WritebackRequest) GetClear() OptBool {
+	return s.Clear
+}
+
 // SetModelID sets the value of ModelID.
 func (s *WritebackRequest) SetModelID(val uuid.UUID) {
 	s.ModelID = val
@@ -27192,6 +27925,16 @@ func (s *WritebackRequest) SetValue(val OptFloat64) {
 // SetMember sets the value of Member.
 func (s *WritebackRequest) SetMember(val OptString) {
 	s.Member = val
+}
+
+// SetText sets the value of Text.
+func (s *WritebackRequest) SetText(val OptString) {
+	s.Text = val
+}
+
+// SetClear sets the value of Clear.
+func (s *WritebackRequest) SetClear(val OptBool) {
+	s.Clear = val
 }
 
 // DimensionId to member code — the preferred, N-dimensional form.

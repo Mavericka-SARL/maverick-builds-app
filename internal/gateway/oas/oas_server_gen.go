@@ -29,6 +29,14 @@ type Handler interface {
 	//
 	// POST /api/business-admin/roles/{id}/members
 	AddBARoleMember(ctx context.Context, req *AddRoleMemberRequest, params AddBARoleMemberParams) (AddBARoleMemberRes, error)
+	// AddBusinessMember implements addBusinessMember operation.
+	//
+	// For a dimension the developer marked business_maintained (403 otherwise), on the open revision.
+	// The write guard applies to the parent: a hidden or read-only parent, a system-managed revision or
+	// a workflow lock refuses it (403).
+	//
+	// POST /api/dimensions/{dimId}/members
+	AddBusinessMember(ctx context.Context, req *BusinessMemberRequest, params AddBusinessMemberParams) (AddBusinessMemberRes, error)
 	// AddGridDimension implements addGridDimension operation.
 	//
 	// Add a dimension to a grid.
@@ -364,6 +372,13 @@ type Handler interface {
 	//
 	// DELETE /api/business-admin/roles/{id}
 	DeleteBARole(ctx context.Context, params DeleteBARoleParams) (DeleteBARoleRes, error)
+	// DeleteBusinessMember implements deleteBusinessMember operation.
+	//
+	// A member with members under it, one a formula names (MEMBER_IN_USE) or a pick-list cell holds is
+	// refused with 409. Its values go with it, kept in the cell history.
+	//
+	// DELETE /api/dimensions/{dimId}/members/{memberId}
+	DeleteBusinessMember(ctx context.Context, params DeleteBusinessMemberParams) (DeleteBusinessMemberRes, error)
 	// DeleteDashboard implements deleteDashboard operation.
 	//
 	// Delete a dashboard.
@@ -1425,10 +1440,15 @@ type Handler interface {
 	//
 	// Response is text/event-stream, not JSON — ogen/generated clients cannot consume this operation
 	// and callers should use a raw fetch/ EventSource instead. Named events: "delta" ({content}) for
-	// each streamed token; "tool_status" ({tool}) before executing a read tool; "proposal" ({proposal:
-	// AiProposal, messages, session}) when the model calls a write tool and a proposal is created
-	// instead of executing immediately; "error" ({error}) on any failure (rate limit, provider error,
-	// invalid proposal); "done" ({reply: AiChatMessage, messages, session}) on normal completion.
+	// each streamed token; "tool_status" ({tool}) before executing a read tool; "progress" ({tool, chars,
+	//  steps}) at most once a second while the model writes a tool call (steps: of a proposal so far);
+	// "proposal" ({proposal: AiProposal, messages, session, warnings}) when the model calls a write tool
+	// and a proposal is created instead of executing immediately — warnings are the plan check's (a
+	// Percentage metric multiplied in without / 100, SUMIFS(src, D, D) where a LOOKUP gives the total);
+	// "error" ({error}) on any failure (rate limit, provider error, invalid proposal, the turn's time
+	// limit AI_TURN_TIMEOUT — 10 minutes by default — or the request closed by Stop, each also saved
+	// as the session's last message); "done" ({reply: AiChatMessage, messages, session}) on normal
+	// completion. 409 SESSION_PROMOTED once the session's draft was promoted: start a new session.
 	// Rate-limited to 50 LLM calls per session and 200 per user per day (429 if exceeded before any
 	// streaming has started — after streaming begins, limit hits are only reported via an "error"
 	// event since the HTTP status is already sent).
@@ -1621,6 +1641,12 @@ type Handler interface {
 	//
 	// PUT /api/admin/branding
 	UpdateBranding(ctx context.Context, req *Branding) (UpdateBrandingRes, error)
+	// UpdateBusinessMember implements updateBusinessMember operation.
+	//
+	// Label and properties only; a code or parent sent is refused with 400 (they are the developer's).
+	//
+	// PATCH /api/dimensions/{dimId}/members/{memberId}
+	UpdateBusinessMember(ctx context.Context, req *BusinessMemberRequest, params UpdateBusinessMemberParams) (UpdateBusinessMemberRes, error)
 	// UpdateDashboard implements updateDashboard operation.
 	//
 	// Rename, retag, or move a dashboard between folders.

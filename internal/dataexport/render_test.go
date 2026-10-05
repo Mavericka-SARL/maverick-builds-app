@@ -240,3 +240,26 @@ func TestFileNameAndDescribe(t *testing.T) {
 		t.Errorf("describe = %q", d)
 	}
 }
+
+// A text metric's cells (migration 111) are written as their notes, in the
+// wide and the long layout, never as the 0 the fact row holds.
+func TestTextMetricWritesItsNotes(t *testing.T) {
+	const noteID = "m-note"
+	snap := fixtureSnapshot()
+	snap.Metrics = append(snap.Metrics, Metric{ID: noteID, Name: "comment", Label: "Comment", DimensionIDs: []string{geoID, periodID}, Text: true})
+	snap.Cells[noteID+":CA:Q1"] = 0
+	snap.Texts = map[string]string{noteID + ":CA:Q1": "Retailer confirmed"}
+	for _, layout := range []string{LayoutWide, LayoutLong} {
+		tbl, err := Render(Spec{Layout: layout}, snap)
+		if err != nil {
+			t.Fatalf("render: %v", err)
+		}
+		var buf bytes.Buffer
+		if err := Write(&buf, tbl); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(buf.String(), "Retailer confirmed") {
+			t.Errorf("%s export lacks the note:\n%s", layout, buf.String())
+		}
+	}
+}

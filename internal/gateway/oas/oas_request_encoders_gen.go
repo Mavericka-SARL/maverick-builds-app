@@ -42,6 +42,20 @@ func encodeAddBARoleMemberRequest(
 	return nil
 }
 
+func encodeAddBusinessMemberRequest(
+	req *BusinessMemberRequest,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
 func encodeApplyMigrationRequest(
 	req *MigrationApplyRequest,
 	r *http.Request,
@@ -1066,6 +1080,20 @@ func encodeUpdateBARoleRequest(
 
 func encodeUpdateBrandingRequest(
 	req *Branding,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
+func encodeUpdateBusinessMemberRequest(
+	req *BusinessMemberRequest,
 	r *http.Request,
 ) error {
 	const contentType = "application/json"

@@ -151,14 +151,25 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest, onD
 	defer func() { _ = stream.Close() }()
 
 	acc := anthropic.Message{}
+	var toolName string
+	var toolArgs []byte
 	for stream.Next() {
 		event := stream.Current()
 		if err := acc.Accumulate(event); err != nil {
 			return ChatResponse{}, fmt.Errorf("anthropic: %w", err)
 		}
-		if delta, ok := event.AsAny().(anthropic.ContentBlockDeltaEvent); ok {
-			if text := delta.Delta.Text; text != "" {
+		switch ev := event.AsAny().(type) {
+		case anthropic.ContentBlockStartEvent:
+			if tu, ok := ev.ContentBlock.AsAny().(anthropic.ToolUseBlock); ok {
+				toolName, toolArgs = tu.Name, toolArgs[:0]
+			}
+		case anthropic.ContentBlockDeltaEvent:
+			if text := ev.Delta.Text; text != "" {
 				onDelta(text)
+			}
+			if part := ev.Delta.PartialJSON; part != "" && req.OnToolArgs != nil {
+				toolArgs = append(toolArgs, part...)
+				req.OnToolArgs(toolName, toolArgs)
 			}
 		}
 	}

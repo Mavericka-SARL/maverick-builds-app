@@ -11,6 +11,10 @@ import (
 // dimension (formula.PicklistKey).
 const FormatPicklist = "picklist"
 
+// FormatText is the format of an input metric whose cells hold free text (a
+// comment, an owner): stored in fact_input.text_value beside a 0.
+const FormatText = "text"
+
 // Picklist is a metric's pick-list setting as resolved by ResolvePicklist:
 // the dimension (ID; "" for any other format) and the aggregation rule and
 // time summary to store.
@@ -34,6 +38,9 @@ func ResolvePicklist(ctx context.Context, q Querier, modelID, revisionID, format
 	if format != FormatPicklist {
 		if dimension != "" {
 			return Picklist{}, invalid("picklist_dimension is for a metric whose format is %q; this metric's format is %q", FormatPicklist, format)
+		}
+		if format == FormatText && isInput {
+			return textInput(aggRule, timeSummary)
 		}
 		return Picklist{AggRule: aggRule, TimeSummary: timeSummary}, nil
 	}
@@ -74,4 +81,16 @@ func ResolvePicklist(ctx context.Context, q Querier, modelID, revisionID, format
 		return Picklist{}, invalid("a pick-list's members are never added up over time: its time_summary is \"none\", not %q", timeSummary)
 	}
 	return Picklist{DimensionID: dimID, AggRule: aggRule, TimeSummary: timeSummary}, nil
+}
+
+// textInput is ResolvePicklist for a text input: notes are never added up,
+// across members or time.
+func textInput(aggRule, timeSummary string) (Picklist, error) {
+	if aggRule != "" && aggRule != string(rollup.AggNone) {
+		return Picklist{}, invalid("a text metric's notes are never added up: its agg_rule is %q, not %q", rollup.AggNone, aggRule)
+	}
+	if timeSummary != "" && timeSummary != "none" {
+		return Picklist{}, invalid("a text metric's notes are never added up over time: its time_summary is \"none\", not %q", timeSummary)
+	}
+	return Picklist{AggRule: string(rollup.AggNone), TimeSummary: "none"}, nil
 }

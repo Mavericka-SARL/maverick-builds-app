@@ -107,4 +107,5 @@
 <tr><td>IF(by_region &gt; 12, "Review", "Within_Range")</td><td>a calculated pick-list over a status dimension</td><td>Review for US</td></tr>
 </table>
 <p>A metric range ranges over every dimension of its metric — like a criterion on each — and, being read at other members, is a dependency of the formula: changing an activity's Region recalculates the total. A numeric metric can be a range too: <code>SUMIFS(sales, sales, "&gt;=100")</code>.</p>
+<p>Two readings to tell apart on a cell that carries every dimension of the source — say a Region × Product grid. <code>SUMIFS(weighted_base, Region, Region)</code> keeps the cell's own Product too, so it is the cell's own value, not the region's total; the region's total over products is <code>LOOKUP(weighted_base, Product, "All Products")</code>, the source at the products' total member. The AI Developer's plan check warns of the first.</p>
 

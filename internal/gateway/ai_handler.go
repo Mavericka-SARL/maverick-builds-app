@@ -355,6 +355,10 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("session not found"), http.StatusNotFound)
 		return
 	}
+	if sess.PromotedAt != nil {
+		jsonCodeErr(w, http.StatusConflict, "SESSION_PROMOTED", sessionPromotedError)
+		return
+	}
 
 	// Rate limits (SOW Phase 4): checked up front so an already-exhausted
 	// caller fails before we save their message or spend a provider round-trip.
@@ -509,10 +513,31 @@ func (h *handler) aiSendMessage(w http.ResponseWriter, r *http.Request) {
 	const maxIdenticalCalls = 3
 	var lastCallSig string
 	identicalCalls := 0
-	rejections := 0 // plans sent back by aiCheckProposal this turn
+	var retries planRetries // plans sent back by aiCheckProposal this turn
+
+	// The turn's time limit, and Stop: the developer's console closes the
+	// request, which cancels ctx. Messages about either are saved on a
+	// context that outlives them.
+	turnLimit := aiTurnTimeout()
+	turnCtx, cancelTurn := context.WithTimeoutCause(ctx, turnLimit, errTurnTimeLimit)
+	defer cancelTurn()
+	saveCtx := context.WithoutCancel(ctx)
+	stopTurn := func() bool {
+		msg := stoppedTurn(turnCtx, turnLimit)
+		if msg == "" {
+			return false
+		}
+		_, _ = store.SaveMessage(saveCtx, sessionID, "assistant", msg, nil, "", "")
+		sendSSE("error", map[string]string{"error": msg})
+		return true
+	}
+	progress := &toolProgress{send: sendSSE}
 
 turn:
 	for {
+		if stopTurn() {
+			return
+		}
 		if sessionCalls >= maxLLMCallsPerSession {
 			sendSSE("error", map[string]string{"error": sessionCapMessage(maxLLMCallsPerSession, sess.DraftRevisionID)})
 			return
@@ -529,14 +554,18 @@ turn:
 			SystemPrompt: systemPrompt,
 			Messages:     provMessages,
 			Tools:        tools,
+			OnToolArgs:   progress.onArgs,
 		}
 		var llmResp providers.ChatResponse
 		if sp, streamable := llmProvider.(providers.StreamingProvider); streamable {
-			llmResp, err = sp.ChatStream(ctx, chatReq, func(delta string) {
+			llmResp, err = sp.ChatStream(turnCtx, chatReq, func(delta string) {
 				sendSSE("delta", map[string]string{"content": delta})
 			})
 		} else {
-			llmResp, err = llmProvider.Chat(ctx, chatReq)
+			llmResp, err = llmProvider.Chat(turnCtx, chatReq)
+		}
+		if err != nil && stopTurn() {
+			return
 		}
 		if err != nil {
 			_, _ = store.SaveMessage(ctx, sessionID, "assistant",
@@ -629,18 +658,30 @@ turn:
 			// would fail goes back to the model with its errors, not to the
 			// developer. A check that cannot run lets the plan through:
 			// confirming still stops at the first failing step.
-			check, cErr := h.aiCheckProposal(ctx, sessionID, modelID, revID, a.UserID, args.Steps)
+			sendSSE("tool_status", map[string]string{"tool": "checking the plan"})
+			check, cErr := h.aiCheckProposal(turnCtx, sessionID, modelID, revID, a.UserID, args.Steps)
+			if stopTurn() {
+				return
+			}
+			// A plan that runs but whose formulas look wrong goes back once;
+			// proposed again unchanged, it reaches the developer with them.
+			warnBack := cErr == nil && len(check.problems) == 0 && len(check.warnings) > 0 && !retries.warnedBefore(check.warnings)
 			if cErr != nil {
 				log.Printf("AI proposal check: %v", cErr)
-			} else if len(check.problems) > 0 {
-				rejections++
+			} else if len(check.problems) > 0 || warnBack {
+				planResult := warningResult(check.warnings)
+				if len(check.problems) > 0 {
+					mode := retries.next(len(check.problems))
+					if mode == retryPartial {
+						retries.leftOut = check.problems
+					}
+					planResult = check.rejection(mode)
+				}
 				_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content, llmResp.Message.ToolCalls, "", "")
 				provMessages = append(provMessages, llmResp.Message)
 				for _, call := range llmResp.Message.ToolCalls {
-					var result string
-					if aiassistant.IsWriteTool(call.Name) {
-						result = check.rejection(rejections)
-					} else {
+					result := planResult
+					if !aiassistant.IsWriteTool(call.Name) {
 						var execErr error
 						if result, execErr = readExecutor.Execute(ctx, call.Name, call.Arguments); execErr != nil {
 							result = fmt.Sprintf("error: %v", execErr)
@@ -660,9 +701,11 @@ turn:
 			// Save the assistant's tool-call message and a placeholder tool result.
 			_, _ = store.SaveMessage(ctx, sessionID, "assistant", llmResp.Message.Content,
 				llmResp.Message.ToolCalls, "", "")
-			_, _ = store.SaveMessage(ctx, sessionID, "tool",
-				fmt.Sprintf("Proposal created (%d step(s)) — awaiting developer confirmation.", len(args.Steps)),
-				nil, tc.ID, tc.Name)
+			created := fmt.Sprintf("Proposal created (%d step(s)) — awaiting developer confirmation.", len(args.Steps))
+			if len(check.warnings) > 0 {
+				created += " Shown with the plan check's warnings: " + strings.Join(check.warnings, " | ")
+			}
+			_, _ = store.SaveMessage(ctx, sessionID, "tool", created, nil, tc.ID, tc.Name)
 			// Every sibling call in the same message needs a result too, or the
 			// next turn replays an unanswered tool call and the provider refuses
 			// the whole session. One proposal is shown per turn, so a second
@@ -683,6 +726,9 @@ turn:
 				_, _ = store.SaveMessage(ctx, sessionID, "tool", result, nil, other.ID, other.Name)
 			}
 
+			if len(retries.leftOut) > 0 {
+				_, _ = store.SaveMessage(ctx, sessionID, "assistant", leftOutNote(retries.leftOut), nil, "", "")
+			}
 			allMsgs, _ := store.ListMessages(ctx, sessionID)
 			if allMsgs == nil {
 				allMsgs = []aiassistant.ChatMessage{}
@@ -691,6 +737,7 @@ turn:
 				"proposal": proposal,
 				"messages": allMsgs,
 				"session":  sess,
+				"warnings": check.warnings,
 			})
 			_ = writeExecutor // suppress unused warning until confirm path uses it
 			return
@@ -1090,9 +1137,17 @@ func (h *handler) aiPromoteDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess.DraftRevisionID = ""
+	// The session is finished: its plans would go on being checked against
+	// the base it started from, not the promoted revision.
+	promotedAt, err := h.aiChatStore(ctx).MarkPromoted(ctx, sessionID)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	sess.PromotedAt = &promotedAt
 
 	chatStore := h.aiChatStore(ctx)
-	_, _ = chatStore.SaveMessage(ctx, sessionID, "assistant", "Promoted the draft to the active revision — it's now the live model.", nil, "", "")
+	_, _ = chatStore.SaveMessage(ctx, sessionID, "assistant", promotedMessage, nil, "", "")
 	allMsgs, _ := chatStore.ListMessages(ctx, sessionID)
 	if allMsgs == nil {
 		allMsgs = []aiassistant.ChatMessage{}

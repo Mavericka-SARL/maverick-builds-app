@@ -15,6 +15,8 @@ import (
 type Snapshot struct {
 	Grid
 	Cells map[string]float64
+	// Texts are the text metrics' cells, keyed as Cells.
+	Texts map[string]string
 }
 
 // Value is one cell of a rendered table: text (a member code, label or
@@ -153,6 +155,7 @@ func splitCodes(rest string, dims []Dimension) ([]string, bool) {
 type rowData struct {
 	codes map[string]string  // dimension ID -> leaf code
 	vals  map[string]float64 // metric ID, or metric ID + "\x1f" + pivot code
+	texts map[string]string  // a text metric's cells, keyed as vals
 }
 
 // Render lays a snapshot out as the spec describes. A spec naming a metric
@@ -240,7 +243,7 @@ func Render(spec Spec, snap Snapshot) (*Table, error) {
 		rk := rowKey(codes)
 		r := rows[rk]
 		if r == nil {
-			r = &rowData{codes: codes, vals: map[string]float64{}}
+			r = &rowData{codes: codes, vals: map[string]float64{}, texts: map[string]string{}}
 			rows[rk] = r
 		}
 		col := m.ID
@@ -248,6 +251,9 @@ func Render(spec Spec, snap Snapshot) (*Table, error) {
 			col += "\x1f" + codes[p.pivotDim.ID]
 		}
 		r.vals[col] = v
+		if m.Text {
+			r.texts[col] = snap.Texts[key]
+		}
 	}
 
 	// Row order: each row dimension's display order, outermost first.
@@ -339,7 +345,11 @@ func Render(spec Spec, snap Snapshot) (*Table, error) {
 		}
 		return Value{Num: v, IsNum: true}
 	}
-	cell := func(m Metric, v float64, ok bool) Value {
+	cell := func(m Metric, r *rowData, col string) Value {
+		v, ok := r.vals[col]
+		if m.Text {
+			return Value{Text: r.texts[col]}
+		}
 		if m.Picklist == nil || !ok {
 			return num(v, ok)
 		}
@@ -363,11 +373,11 @@ func Render(spec Spec, snap Snapshot) (*Table, error) {
 		switch s.Layout {
 		case LayoutLong:
 			for _, m := range metricsInOrder {
-				v, ok := r.vals[m.ID]
+				_, ok := r.vals[m.ID]
 				if !ok && !s.IncludeEmptyRows {
 					continue
 				}
-				row := append(dimCells(r), Value{Text: p.metricText(m)}, cell(m, v, ok))
+				row := append(dimCells(r), Value{Text: p.metricText(m)}, cell(m, r, m.ID))
 				if err := emit(row); err != nil {
 					return nil, err
 				}
@@ -380,9 +390,9 @@ func Render(spec Spec, snap Snapshot) (*Table, error) {
 				}
 				found := false
 				for _, leaf := range p.pivotLeaves() {
-					v, ok := r.vals[m.ID+"\x1f"+leaf.Code]
+					_, ok := r.vals[m.ID+"\x1f"+leaf.Code]
 					found = found || ok
-					row = append(row, cell(m, v, ok))
+					row = append(row, cell(m, r, m.ID+"\x1f"+leaf.Code))
 				}
 				if !found && !s.IncludeEmptyRows {
 					continue
@@ -394,8 +404,7 @@ func Render(spec Spec, snap Snapshot) (*Table, error) {
 		default:
 			row := dimCells(r)
 			for _, m := range p.metrics {
-				v, ok := r.vals[m.ID]
-				row = append(row, cell(m, v, ok))
+				row = append(row, cell(m, r, m.ID))
 			}
 			if err := emit(row); err != nil {
 				return nil, err

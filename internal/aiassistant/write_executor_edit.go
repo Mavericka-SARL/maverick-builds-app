@@ -1167,11 +1167,6 @@ func (e *WriteExecutor) backfillFormIntegration(ctx context.Context, raw json.Ra
 	return fmt.Sprintf("Posted %d form record(s) into the integration's metric", n), "", nil
 }
 
-// chartSettings are the keys that live under a chart widget's "chart".
-var chartSettings = map[string]bool{"chart_type": true, "dimension_id": true, "metric_ids": true, "x_metric_id": true,
-	"y_metric_id": true, "context_defaults": true, "bin_count": true, "show_legend": true, "show_values": true,
-	"value_format": true, "refresh_seconds": true, "hide_rollup_members": true}
-
 // mergeWidgetProps lays the given props over the stored ones: a key given
 // replaces the stored value, a null removes it, anything not given stays;
 // "chart" merges the same way one level down, and a chart setting given at
@@ -1197,7 +1192,7 @@ func mergeWidgetProps(widgetType string, stored, given json.RawMessage) (json.Ra
 	}
 	if widgetType == "chart" {
 		for k, v := range patch {
-			if chartSettings[k] {
+			if modeledit.ChartSettingKeys[k] {
 				c, _ := patch["chart"].(map[string]any)
 				if c == nil {
 					c = map[string]any{}
@@ -1233,15 +1228,6 @@ func mergeWidgetProps(widgetType string, stored, given json.RawMessage) (json.Ra
 	return json.Marshal(base)
 }
 
-// widgetPropKeys are the widget_props keys the console reads (WidgetProps in
-// web/src/api/client.ts). A key outside them was saved and never read: live,
-// a KPI tile scoped {"Scenario": "RF", "Month": "FY2026"} with mode "total"
-// showed the whole model's total, and a chart's "pin" did nothing.
-var widgetPropKeys = map[string]bool{"selectors_position": true, "background": true, "font_size": true, "font_weight": true,
-	"color": true, "font_family": true, "alt": true, "image_fit": true, "button_color": true, "default_view": true,
-	"metric_ids": true, "chart": true, "context": true, "kpi_scope": true, "kpi_context_mode": true, "confirm_text": true,
-	"sync_context": true}
-
 // checkWidgetProps refuses widget_props the console would not read — an
 // unknown key, at the top or under "chart"; a kpi_scope that is not one
 // member of one dimension; a scope with a mode other than "pin" — and
@@ -1270,14 +1256,14 @@ func (e *WriteExecutor) checkWidgetProps(ctx context.Context, raw json.RawMessag
 		delete(props, "metrics")
 	}
 	for k := range props {
-		if !widgetPropKeys[k] {
-			return nil, fmt.Errorf("widget_props has no key %q: its keys are %s", k, sortedKeys(widgetPropKeys))
+		if !modeledit.WidgetPropKeys[k] {
+			return nil, fmt.Errorf("widget_props has no key %q: its keys are %s", k, sortedKeys(modeledit.WidgetPropKeys))
 		}
 	}
 	if chart, ok := props["chart"].(map[string]any); ok {
 		for k := range chart {
-			if !chartSettings[k] {
-				return nil, fmt.Errorf("a chart's settings have no key %q: they are %s", k, sortedKeys(chartSettings))
+			if !modeledit.ChartSettingKeys[k] {
+				return nil, fmt.Errorf("a chart's settings have no key %q: they are %s", k, sortedKeys(modeledit.ChartSettingKeys))
 			}
 		}
 	}

@@ -657,6 +657,14 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 
 	// CRUD forms + automation (authenticated users)
 	register("GET", "/api/dimensions", "any", cors(h.publicDimensions))
+	// A business-maintained dimension's members, kept by business users
+	// (business_members.go). Narrow: these three routes only.
+	bizMembers := func(fn http.HandlerFunc) http.HandlerFunc {
+		return cors(h.guard(fn, "business_user", "business_admin"))
+	}
+	register("POST", "/api/dimensions/{dimId}/members", "business_user_or_admin", bizMembers(h.businessMemberAction))
+	register("PATCH", "/api/dimensions/{dimId}/members/{memberId}", "business_user_or_admin", bizMembers(h.businessMemberAction))
+	register("DELETE", "/api/dimensions/{dimId}/members/{memberId}", "business_user_or_admin", bizMembers(h.businessMemberAction))
 	// Form *schema* CRUD (create/edit/delete the form definition itself) is
 	// developer-only, matching the Business Console's own empty-state text
 	// ("Ask a Developer to create a form"). Record-level endpoints below
@@ -1879,6 +1887,9 @@ type metricRow struct {
 	// in /api/grid.
 	PicklistDimensionID string           `json:"picklist_dimension_id,omitempty"`
 	PicklistOptions     []picklistOption `json:"picklist_options,omitempty"`
+	// HighlightRules tint the metric's cells (metricformula.HighlightRule).
+	// Only set in /api/grid.
+	HighlightRules json.RawMessage `json:"highlight_rules,omitempty"`
 }
 
 // aggregateEvaluated reports metricRow.AggregateEvaluated for m — the
@@ -2045,6 +2056,10 @@ type writebackReq struct {
 	// Member names the member a pick-list cell holds, by code or label,
 	// instead of its key in Value ("" clears the cell).
 	Member *string `json:"member,omitempty"`
+	// Text is a text metric's cell ("" clears it).
+	Text *string `json:"text,omitempty"`
+	// Clear empties the cell — no value, not 0 (text_cells.go).
+	Clear bool `json:"clear,omitempty"`
 }
 
 func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
@@ -2116,9 +2131,10 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 	// without the model_id predicate, an is_input metric from a completely
 	// different tenant's model would otherwise pass.
 	var isInput bool
+	var metricFormat string
 	if err := h.db.QueryRow(ctx,
-		`SELECT is_input FROM model.metric_def WHERE id=$1::uuid AND model_id=$2::uuid`, req.MetricID, req.ModelID,
-	).Scan(&isInput); err != nil || !isInput {
+		`SELECT is_input, COALESCE(format,'') FROM model.metric_def WHERE id=$1::uuid AND model_id=$2::uuid`, req.MetricID, req.ModelID,
+	).Scan(&isInput, &metricFormat); err != nil || !isInput {
 		jsonErr(w, fmt.Errorf("metric is not writable"), http.StatusForbidden)
 		return
 	}
@@ -2148,15 +2164,26 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 		resolvedDims = map[string]string{dimID: req.DimCode}
 	}
 
-	// Resolve each written dim_code into its dimension_member id.
+	// Resolve each written dim_code into its dimension_member id. A code no
+	// member of this model's dimension has is refused: the value used to be
+	// stored at it, where no grid, total or formula would ever read it
+	// (found live: "Snacks" for the member SNACKS).
 	writtenMemberIDs := make([]string, 0, len(resolvedDims))
 	for dimID, code := range resolvedDims {
-		var memberID string
-		if err := h.db.QueryRow(ctx,
-			`SELECT id::text FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2`,
-			dimID, code,
-		).Scan(&memberID); err != nil {
-			continue // unknown member: nothing to restrict here
+		var memberID, dimName string
+		err := h.db.QueryRow(ctx, `
+			SELECT COALESCE(m.id::text,''), d.name FROM model.dimension_def d
+			LEFT JOIN model.dimension_member m ON m.dimension_id = d.id AND m.code = $2
+			WHERE d.id = $1::uuid AND d.model_id = $3::uuid`,
+			dimID, code, req.ModelID,
+		).Scan(&memberID, &dimName)
+		if err != nil {
+			jsonErr(w, fmt.Errorf("dim_codes names %q, which is no dimension of this model", dimID), http.StatusBadRequest)
+			return
+		}
+		if memberID == "" {
+			jsonErr(w, fmt.Errorf("there is no member %q in %s (member codes match exactly)", code, dimName), http.StatusBadRequest)
+			return
 		}
 		writtenMemberIDs = append(writtenMemberIDs, memberID)
 	}
@@ -2176,7 +2203,16 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if cid := h.customerOfModel(ctx, req.ModelID); cid != "" && h.plans != nil {
+	// A pick-list cell holds a member of its dimension (the value must be
+	// one's key, or Member names one), a text metric's cell its text, and
+	// a clear empties the cell.
+	write, err := h.resolveCellWrite(ctx, req, metricFormat)
+	if err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
+		return
+	}
+
+	if cid := h.customerOfModel(ctx, req.ModelID); cid != "" && h.plans != nil && !write.clear {
 		if err := cmp.Or(h.plans.CheckFactRows(ctx, h.db.For(ctx), cid, req.ModelID, 1), h.plans.CheckStorage(ctx, h.db.For(ctx), cid)); err != nil {
 			h.jsonLimitErr(w, err)
 			return
@@ -2189,18 +2225,15 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 		dimMembers = string(b)
 	}
 
-	// A pick-list cell holds a member of its dimension: the value must be
-	// one's key, or Member names one.
-	if req.Value, err = h.picklistValue(ctx, req.MetricID, req.Value, req.Member); err != nil {
-		jsonErr(w, err, http.StatusBadRequest)
-		return
+	if write.clear {
+		err = h.clearCell(ctx, req.ModelID, req.RevisionID, req.MetricID, dimMembers)
+	} else {
+		_, err = h.db.Exec(ctx, `
+			INSERT INTO runtime.fact_input
+			    (model_id, revision_id, metric_id, dim_members, value, entered_by, text_value)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::uuid, $7)
+		`, req.ModelID, req.RevisionID, req.MetricID, dimMembers, write.value, a.UserID, write.text)
 	}
-
-	_, err = h.db.Exec(ctx, `
-		INSERT INTO runtime.fact_input
-		    (model_id, revision_id, metric_id, dim_members, value, entered_by)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::uuid)
-	`, req.ModelID, req.RevisionID, req.MetricID, dimMembers, req.Value, a.UserID)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
@@ -2217,7 +2250,7 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 		Category: auditlog.CategoryDataChange, EventType: auditlog.EventCellWritten,
 		ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
 		ResourceType: "metric", ResourceID: req.MetricID, RevisionID: req.RevisionID,
-		Metadata: map[string]string{"model_id": req.ModelID, "revision_id": req.RevisionID},
+		Metadata: cellWriteAudit(req, write),
 	})
 
 	// Dispatch grid_change automation rules fire-and-forget. The changed
@@ -2242,6 +2275,10 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	if write.clear {
+		jsonOK(w, map[string]string{"status": "cleared"})
+		return
+	}
 	jsonOK(w, map[string]string{"status": "ok"})
 }
 
@@ -2846,16 +2883,19 @@ type gridDimMember struct {
 }
 
 type gridDimension struct {
-	ID                string          `json:"id"`
-	Name              string          `json:"name"`
-	DimensionType     string          `json:"dimension_type"`                    // "standard" | "time"
-	TimeGranularity   *string         `json:"time_granularity,omitempty"`        // time dimensions only
-	FiscalYearStart   *int            `json:"fiscal_year_start_month,omitempty"` // time dimensions only
-	DisplayLevel      *int            `json:"display_level"`                     // null=all, 0=roots, -1=leaves, n=depth n
-	ParentDimensionID *string         `json:"parent_dimension_id"`
-	SourceDimensionID *string         `json:"source_dimension_id,omitempty"` // set = this dimension's members are a grouping of SourceDimensionID's members by their properties[SourceProperty] value
-	SourceProperty    *string         `json:"source_property,omitempty"`
-	Members           []gridDimMember `json:"members"`
+	ID                string  `json:"id"`
+	Name              string  `json:"name"`
+	DimensionType     string  `json:"dimension_type"`                    // "standard" | "time"
+	TimeGranularity   *string `json:"time_granularity,omitempty"`        // time dimensions only
+	FiscalYearStart   *int    `json:"fiscal_year_start_month,omitempty"` // time dimensions only
+	DisplayLevel      *int    `json:"display_level"`                     // null=all, 0=roots, -1=leaves, n=depth n
+	ParentDimensionID *string `json:"parent_dimension_id"`
+	SourceDimensionID *string `json:"source_dimension_id,omitempty"` // set = this dimension's members are a grouping of SourceDimensionID's members by their properties[SourceProperty] value
+	SourceProperty    *string `json:"source_property,omitempty"`
+	// BusinessMaintained: business users add, rename and remove this
+	// dimension's members (business_members.go).
+	BusinessMaintained bool            `json:"business_maintained,omitempty"`
+	Members            []gridDimMember `json:"members"`
 }
 
 type gridAccessRules struct {
@@ -2977,7 +3017,10 @@ type gridResponse struct {
 	AllDimensions []gridDimension    `json:"all_dimensions"` // every dimension in the revision, regardless of grid — lets cross-dimension formula refs resolve hierarchy/members outside this grid
 	Departments   []deptRow          `json:"departments"`    // = first dim members (compat)
 	Cells         map[string]float64 `json:"cells"`          // "metricId:code1[:code2...]" composite key, keyed per each metric's OWN grid dims
-	Totals        map[string]float64 `json:"totals"`         // "metricId" -> aggregate
+	// Texts holds the text metrics' cells, keyed as cells (a dimensionless
+	// one by its bare ID). Omitted when empty.
+	Texts  map[string]string  `json:"texts,omitempty"`
+	Totals map[string]float64 `json:"totals"` // "metricId" -> aggregate
 	// Withheld lists the calculated values withheld from this caller
 	// (contract C7): cell keys in the cells format, and bare metric IDs for
 	// totals. Such a value exists but reads a member the caller cannot see;
@@ -3153,6 +3196,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	for _, id := range dimOrder {
 		dims = append(dims, *dimMap[id])
 	}
+	h.markBusinessMaintained(ctx, dims)
 
 	// ── all_dimensions: every dimension in the revision, regardless of grid ──
 	// Needed so cross-dimension formula references (e.g. a Department metric
@@ -3211,6 +3255,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		for _, id := range allDimOrder {
 			allDims = append(allDims, *allDimMap[id])
 		}
+		h.markBusinessMaintained(ctx, allDims)
 	} else {
 		allDims = dims
 	}
@@ -3445,7 +3490,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		metricRows2, err = h.db.Query(ctx, `
 			SELECT rev.id::text, rev.name, rev.is_input, rev.formula, rev.agg_rule,
 			       rev.format, rev.format_decimals, rev.format_currency, rev.time_summary,
-			       COALESCE(rev.picklist_dimension_id::text,'')
+			       COALESCE(rev.picklist_dimension_id::text,''), rev.highlight_rules
 			FROM model.grid_metric gm
 			JOIN model.metric_def orig ON orig.id = gm.metric_id
 			JOIN model.metric_def rev
@@ -3459,7 +3504,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		metricRows2, err = h.db.Query(ctx, `
 			SELECT id::text, name, is_input, formula, agg_rule,
 			       format, format_decimals, format_currency, time_summary,
-			       COALESCE(picklist_dimension_id::text,'')
+			       COALESCE(picklist_dimension_id::text,''), highlight_rules
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid
 			ORDER BY is_input DESC, name
 		`, modelID, revisionID)
@@ -3470,7 +3515,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	}
 	for metricRows2.Next() {
 		var mr metricRow
-		if err := metricRows2.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID); err != nil {
+		if err := metricRows2.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID, &mr.HighlightRules); err != nil {
 			metricRows2.Close()
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
@@ -3529,7 +3574,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		allRows, aErr := h.db.Query(ctx, `
 			SELECT id::text, name, is_input, formula, agg_rule,
 			       format, format_decimals, format_currency, time_summary,
-			       COALESCE(picklist_dimension_id::text,'')
+			       COALESCE(picklist_dimension_id::text,''), highlight_rules
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid
 			ORDER BY is_input DESC, name
 		`, modelID, revisionID)
@@ -3539,7 +3584,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		}
 		for allRows.Next() {
 			var mr metricRow
-			if err := allRows.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID); err != nil {
+			if err := allRows.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID, &mr.HighlightRules); err != nil {
 				allRows.Close()
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
@@ -3616,6 +3661,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	// `totals` for is_input metrics. One pass, one source of truth: a fact
 	// row a hidden-member caller can't see contributes to neither.
 	cells := make(map[string]float64)
+	var texts map[string]string // text metrics' cells (text_cells.go)
 	totals := make(map[string]float64)
 	var withheld []string // calculated values withheld from this caller (contract C7)
 	// meta_only skips ALL cell/calc work — the client fetches dimensions and
@@ -3864,6 +3910,18 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			cells[metricID+":"+strings.Join(codes, ":")] = val
 		}
 		cellRows.Close()
+		if !totalsOnly {
+			var textMetrics []string
+			for _, m := range allMetrics {
+				if m.IsInput && m.Format == metricformula.FormatText {
+					textMetrics = append(textMetrics, m.ID)
+				}
+			}
+			if texts, err = h.loadTextCells(ctx, modelID, revisionID, textMetrics, metricDims, hiddenByDim, metricRules, scopeSQL, scopeArgs); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+		}
 	}
 
 	// Inputs total by their agg_rule (average and count combine the leaves
@@ -4054,6 +4112,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		AllDimensions:      allDims,
 		Departments:        depts,
 		Cells:              cells,
+		Texts:              texts,
 		Totals:             totals,
 		Withheld:           withheld,
 		AccessRules:        gridAccessRules{DimMembers: dimRules, Metrics: metricRules},
@@ -4418,8 +4477,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		-- 1. Copy metrics; capture old→new ID mapping via name join
 		new_metrics AS (
 			INSERT INTO model.metric_def
-			  (model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, revision_id, lineage_id)
-			SELECT model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, $2::uuid, lineage_id
+			  (model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, revision_id, lineage_id, highlight_rules)
+			SELECT model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, $2::uuid, lineage_id, highlight_rules
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 			RETURNING id AS new_id, name
 		),
@@ -4443,9 +4502,9 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		new_dims AS (
 			INSERT INTO model.dimension_def
 			  (model_id, name, agg_rule, properties, revision_id, source_property,
-			   dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id)
+			   dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained)
 			SELECT model_id, name, agg_rule, properties, $2::uuid, source_property,
-			       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id
+			       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained
 			FROM model.dimension_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 			RETURNING id AS new_id, name
 		),
@@ -4597,7 +4656,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 	// by name (FactsPolicy) and avoids it.
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO runtime.fact_input
-		  (model_id, revision_name, metric_id, dim_members, value, entered_by, revision_id, source_ref, entered_at)
+		  (model_id, revision_name, metric_id, dim_members, value, entered_by, revision_id, source_ref, entered_at, text_value)
 		SELECT
 			fi.model_id, fi.revision_name,
 			new_m.id,
@@ -4609,7 +4668,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 			                               AND new_d.revision_id = $2::uuid),
 			fi.value, fi.entered_by,
 			$2::uuid,
-			fi.source_ref, fi.entered_at
+			fi.source_ref, fi.entered_at, fi.text_value
 		FROM runtime.fact_input fi
 		JOIN model.metric_def old_m ON old_m.id = fi.metric_id
 		JOIN model.metric_def new_m ON new_m.model_id = old_m.model_id
@@ -5366,13 +5425,15 @@ type devMetric struct {
 	TimeSummary string `json:"time_summary"`
 	// Operands for agg_rule "rate", so the console can show which two metrics
 	// the ratio currently divides.
-	AggNumeratorMetricID   string   `json:"agg_numerator_metric_id,omitempty"`
-	AggDenominatorMetricID string   `json:"agg_denominator_metric_id,omitempty"`
+	AggNumeratorMetricID   string `json:"agg_numerator_metric_id,omitempty"`
+	AggDenominatorMetricID string `json:"agg_denominator_metric_id,omitempty"`
 	// PicklistDimensionID: the dimension a pick-list metric's cells hold
 	// members of (format "picklist").
-	PicklistDimensionID string   `json:"picklist_dimension_id,omitempty"`
-	DependsOn           []string `json:"depends_on"`
-	DependedBy          []string `json:"depended_by"`
+	PicklistDimensionID string `json:"picklist_dimension_id,omitempty"`
+	// HighlightRules tint its cells (metricformula.HighlightRule).
+	HighlightRules json.RawMessage `json:"highlight_rules"`
+	DependsOn      []string        `json:"depends_on"`
+	DependedBy     []string        `json:"depended_by"`
 	// Tags: free-form labels the developer console filters by.
 	Tags []string `json:"tags"`
 	// CalcError is set when this metric's most recent calculation attempt
@@ -5422,7 +5483,7 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 		SELECT m.id::text, m.name, m.is_input, m.formula, m.agg_rule,
 		       COALESCE(m.agg_numerator_metric_id::text,''), COALESCE(m.agg_denominator_metric_id::text,''),
 		       m.format, m.format_decimals, m.format_currency, m.time_summary, m.tags,
-		       COALESCE(m.picklist_dimension_id::text,''),
+		       COALESCE(m.picklist_dimension_id::text,''), m.highlight_rules,
 		       COALESCE(
 		           (SELECT string_agg(dep.name, ',')
 		            FROM model.calc_dependency cd
@@ -5454,7 +5515,7 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 		var dependsOnCSV, dependedByCSV string
 		if err := rows.Scan(&dm.ID, &dm.Name, &dm.IsInput, &dm.Formula, &dm.AggRule,
 			&dm.AggNumeratorMetricID, &dm.AggDenominatorMetricID,
-			&dm.Format, &dm.FormatDecimals, &dm.FormatCurrency, &dm.TimeSummary, &dm.Tags, &dm.PicklistDimensionID, &dependsOnCSV, &dependedByCSV, &dm.CalcError); err != nil {
+			&dm.Format, &dm.FormatDecimals, &dm.FormatCurrency, &dm.TimeSummary, &dm.Tags, &dm.PicklistDimensionID, &dm.HighlightRules, &dependsOnCSV, &dependedByCSV, &dm.CalcError); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -5529,6 +5590,8 @@ type addMetricReq struct {
 	// PicklistDimensionID is the dimension (id or name) whose members a
 	// pick-list metric's cells hold; required for format "picklist".
 	PicklistDimensionID string `json:"picklist_dimension_id"`
+	// HighlightRules tint its cells (metricformula.CheckHighlightRules).
+	HighlightRules json.RawMessage `json:"highlight_rules"`
 }
 
 func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
@@ -5580,6 +5643,11 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.AggRule, req.TimeSummary = picklist.AggRule, picklist.TimeSummary
+	highlights, err := metricformula.CheckHighlightRules(ctx, h.db.For(ctx), modelID, req.RevisionID, req.Name, req.HighlightRules)
+	if err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
+		return
+	}
 
 	// Validate the formula before inserting — parse, function names,
 	// self-reference, cycles and revision-scoped references, in one shared
@@ -5676,6 +5744,9 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	if metricInsertErr == nil && picklist.DimensionID != "" {
 		_, metricInsertErr = tx.Exec(ctx, `UPDATE model.metric_def SET picklist_dimension_id=$2::uuid WHERE id=$1::uuid`, newID, picklist.DimensionID)
+	}
+	if metricInsertErr == nil && string(highlights) != "[]" {
+		_, metricInsertErr = tx.Exec(ctx, `UPDATE model.metric_def SET highlight_rules=$2::jsonb WHERE id=$1::uuid`, newID, string(highlights))
 	}
 	if metricInsertErr != nil {
 		if metricformula.IsUniqueViolation(metricInsertErr) {
@@ -6339,9 +6410,11 @@ type devDimension struct {
 	Tags              []string `json:"tags,omitempty"` // developer endpoint only
 	// A property grouping: members group SourceDimensionID's members by
 	// their SourceProperty value (developer endpoint only).
-	SourceDimensionID *string     `json:"source_dimension_id,omitempty"`
-	SourceProperty    *string     `json:"source_property,omitempty"`
-	Members           []devMember `json:"members"`
+	SourceDimensionID *string `json:"source_dimension_id,omitempty"`
+	SourceProperty    *string `json:"source_property,omitempty"`
+	// BusinessMaintained: business users add, rename and remove members.
+	BusinessMaintained bool        `json:"business_maintained"`
+	Members            []devMember `json:"members"`
 }
 
 func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
@@ -6374,9 +6447,15 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 			SourceDimensionID *string `json:"source_dimension_id"`
 			SourceProperty    string  `json:"source_property"`
 			DeriveMembers     bool    `json:"derive_members"`
+			// Business users maintain its members (business_members.go).
+			BusinessMaintained bool `json:"business_maintained"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
+			return
+		}
+		if body.BusinessMaintained && (body.DimensionType == timedim.TypeTime || body.SourceDimensionID != nil) {
+			jsonErr(w, fmt.Errorf("a time dimension or a property grouping cannot be business-maintained: its members are not typed"), http.StatusBadRequest)
 			return
 		}
 		if body.Name == "" {
@@ -6469,6 +6548,12 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("insert dimension: %w", dimInsertErr), http.StatusInternalServerError)
 			return
 		}
+		if body.BusinessMaintained {
+			if _, err := h.db.Exec(ctx, `UPDATE model.dimension_def SET business_maintained = true WHERE id=$1::uuid`, newID); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+		}
 		var derived []string
 		if len(groupValues) > 0 {
 			var dErr error
@@ -6514,7 +6599,7 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 	}
 	dimRows, err := h.db.Query(ctx,
 		`SELECT id::text, name, agg_rule, parent_dimension_id::text, dimension_type, time_granularity, fiscal_year_start_month, tags,
-		        source_dimension_id::text, source_property
+		        source_dimension_id::text, source_property, business_maintained
 		 FROM model.dimension_def WHERE model_id=$1::uuid AND `+dimFilter+` ORDER BY created_at`,
 		dimArgs...)
 	if err != nil {
@@ -6527,7 +6612,7 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 	for dimRows.Next() {
 		var d devDimension
 		if err := dimRows.Scan(&d.ID, &d.Name, &d.AggRule, &d.ParentDimensionID, &d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart, &d.Tags,
-			&d.SourceDimensionID, &d.SourceProperty); err != nil {
+			&d.SourceDimensionID, &d.SourceProperty, &d.BusinessMaintained); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -11343,6 +11428,8 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			// Omitted leaves the label; "" clears it back to the label
 			// derived from the name.
 			Label *string `json:"label"`
+			// Omitted leaves the highlight rules; [] removes them.
+			HighlightRules *json.RawMessage `json:"highlight_rules"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -11408,6 +11495,7 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		// Only a sent formula is validated and rewrites the dependency
 		// edges; an omitted one is left exactly as stored.
 		formulaSent := patch.Formula != nil && *patch.Formula != ""
+		var highlights json.RawMessage // set when the request sends highlight_rules
 		{
 			// A pick-list keeps its dimension unless the request changes it;
 			// leaving the format drops it. Becoming one takes the pick-list's
@@ -11422,6 +11510,16 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 				body.PicklistDimensionID = ""
 			}
 			agg, ts := body.AggRule, body.TimeSummary
+			// A text input's notes have no total: an old one's stored rule
+			// gives way unless the request sets one.
+			if format == metricformula.FormatText && metricIsInput {
+				if patch.AggRule == nil {
+					agg = ""
+				}
+				if patch.TimeSummary == nil {
+					ts = ""
+				}
+			}
 			if format == metricformula.FormatPicklist {
 				if patch.AggRule == nil && agg != string(rollup.AggNone) && agg != string(rollup.AggFormula) {
 					agg = ""
@@ -11437,6 +11535,13 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 			body.PicklistDimensionID, body.AggRule, body.TimeSummary = pl.DimensionID, pl.AggRule, pl.TimeSummary
+			if patch.HighlightRules != nil {
+				var hErr error
+				if highlights, hErr = metricformula.CheckHighlightRules(ctx, h.db.For(ctx), modelID, metricRevisionID, body.Name, *patch.HighlightRules); hErr != nil {
+					jsonErr(w, hErr, http.StatusBadRequest)
+					return
+				}
+			}
 		}
 		if body.AggRule == "" {
 			body.AggRule = "sum"
@@ -11518,6 +11623,12 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 
 		if patch.Label != nil {
 			if _, err := tx.Exec(ctx, `UPDATE model.metric_def SET label=NULLIF(btrim($2),'') WHERE id=$1::uuid`, metricID, *patch.Label); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+		}
+		if highlights != nil {
+			if _, err := tx.Exec(ctx, `UPDATE model.metric_def SET highlight_rules=$2::jsonb WHERE id=$1::uuid`, metricID, string(highlights)); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -11899,6 +12010,8 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				AggRule           string    `json:"agg_rule"`
 				ParentDimensionID *string   `json:"parent_dimension_id"`
 				Tags              *[]string `json:"tags"`
+				// Business users maintain its members (business_members.go).
+				BusinessMaintained *bool `json:"business_maintained"`
 			}
 			var sent map[string]json.RawMessage
 			raw, err := io.ReadAll(r.Body)
@@ -11934,6 +12047,18 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 			grouping, ok := h.planGroupingPatch(ctx, w, dimID, raw, sent, parentSent, body.ParentDimensionID)
 			if !ok {
 				return
+			}
+			if body.BusinessMaintained != nil {
+				if *body.BusinessMaintained {
+					if err := metricformula.CheckBusinessMaintainable(ctx, h.db.For(ctx), dimID); err != nil {
+						jsonErr(w, err, http.StatusBadRequest)
+						return
+					}
+				}
+				if _, err := h.db.Exec(ctx, `UPDATE model.dimension_def SET business_maintained=$2 WHERE id=$1::uuid`, dimID, *body.BusinessMaintained); err != nil {
+					jsonErr(w, err, http.StatusInternalServerError)
+					return
+				}
 			}
 			// dimension_type / time_granularity / fiscal_year_start_month are
 			// deliberately not updatable: they are immutable after creation
@@ -15485,6 +15610,10 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
+		if err := modeledit.CheckWidgetPropKeys(body.WidgetProps, nil); err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		}
 		if err := h.validateWidgetRef(ctx, dashID, body.WidgetType, body.RefID); err != nil {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
@@ -15589,6 +15718,15 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 				}
 			}
 			if err := validateWidgetContent(existingType, body.Content); err != nil {
+				jsonErr(w, err, http.StatusBadRequest)
+				return
+			}
+		}
+		if len(body.WidgetProps) > 0 && string(body.WidgetProps) != "null" {
+			var stored []byte
+			_ = h.db.QueryRow(ctx, `SELECT COALESCE(widget_props,'null'::jsonb) FROM model.dashboard_widget WHERE id=$1::uuid AND dashboard_id=$2::uuid`,
+				widgetID, dashID).Scan(&stored)
+			if err := modeledit.CheckWidgetPropKeys(body.WidgetProps, stored); err != nil {
 				jsonErr(w, err, http.StatusBadRequest)
 				return
 			}
@@ -17375,7 +17513,7 @@ func (h *handler) developerWorkflowAction(w http.ResponseWriter, r *http.Request
 				def.ContextSchema = draft.ContextSchema
 			}
 		}
-		verrs := workflow.ValidateDef(def)
+		verrs := append(workflow.ValidateDef(def), ws.CheckConditionNames(ctx, def)...)
 		jsonOK(w, map[string]any{"valid": len(verrs) == 0, "errors": verrs})
 		return
 
@@ -17389,7 +17527,7 @@ func (h *handler) developerWorkflowAction(w http.ResponseWriter, r *http.Request
 			jsonErr(w, err, http.StatusNotFound)
 			return
 		}
-		if verrs := workflow.ValidateDef(def); len(verrs) > 0 {
+		if verrs := append(workflow.ValidateDef(def), ws.CheckConditionNames(ctx, def)...); len(verrs) > 0 {
 			jsonErr(w, fmt.Errorf("workflow has validation errors: %s", strings.Join(verrs, "; ")), http.StatusBadRequest)
 			return
 		}

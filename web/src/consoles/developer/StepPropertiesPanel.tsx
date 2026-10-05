@@ -302,30 +302,58 @@ export function StepPropertiesPanel({ step, allSteps, applicationId, onChange, o
         {step.type === "condition" && (
           <>
             <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text-quiet)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Condition</div>
-            <Field label="Context field">
-              <input
-                value={step.condition?.left ?? ""}
-                onChange={e => onChange({ condition: { ...step.condition!, left: e.target.value } })}
-                placeholder="e.g. amount"
-                style={inputStyle}
-              />
-            </Field>
-            <Field label="Operator">
+            <Field label="Tests">
               <select
-                value={step.condition?.operator ?? "equals"}
-                onChange={e => onChange({ condition: { ...step.condition!, operator: e.target.value } })}
+                aria-label="Condition tests"
+                value={step.condition?.formula !== undefined ? "formula" : "context"}
+                onChange={e => onChange({ condition: e.target.value === "formula" ? { formula: "" } : { left: "", operator: "equals", right: "" } })}
                 style={inputStyle}>
-                {CONDITION_OPERATORS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                <option value="context">A context field</option>
+                <option value="formula">The model (a formula)</option>
               </select>
             </Field>
-            <Field label="Value">
-              <input
-                value={String(step.condition?.right ?? "")}
-                onChange={e => onChange({ condition: { ...step.condition!, right: e.target.value } })}
-                placeholder="e.g. 10000"
-                style={inputStyle}
-              />
-            </Field>
+            {step.condition?.formula !== undefined ? (
+              <Field label="Formula">
+                <textarea
+                  aria-label="Condition formula"
+                  value={step.condition.formula}
+                  onChange={e => onChange({ condition: { formula: e.target.value } })}
+                  placeholder="e.g. ABS(company_var_pct) > variance_threshold"
+                  rows={3}
+                  style={{ ...inputStyle, fontFamily: "var(--font-mono, monospace)", resize: "vertical" }}
+                />
+                <div style={{ fontSize: 11, color: "var(--color-text-quiet)", marginTop: 4 }}>
+                  Metrics are read at the workflow's members (its dimension-member fields), every other dimension at its total; context fields by name. True takes the "If true" route.
+                </div>
+              </Field>
+            ) : (
+              <>
+                <Field label="Context field">
+                  <input
+                    value={step.condition?.left ?? ""}
+                    onChange={e => onChange({ condition: { ...step.condition!, left: e.target.value } })}
+                    placeholder="e.g. amount"
+                    style={inputStyle}
+                  />
+                </Field>
+                <Field label="Operator">
+                  <select
+                    value={step.condition?.operator ?? "equals"}
+                    onChange={e => onChange({ condition: { ...step.condition!, operator: e.target.value } })}
+                    style={inputStyle}>
+                    {CONDITION_OPERATORS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </Field>
+                <Field label="Value">
+                  <input
+                    value={String(step.condition?.right ?? "")}
+                    onChange={e => onChange({ condition: { ...step.condition!, right: e.target.value } })}
+                    placeholder="e.g. 10000"
+                    style={inputStyle}
+                  />
+                </Field>
+              </>
+            )}
             <Field label="If true →">
               <select value={step.routes?.true ?? ""} onChange={e => setRoute("true", e.target.value)} style={inputStyle}>
                 {routeOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}

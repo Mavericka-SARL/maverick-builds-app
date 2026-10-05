@@ -210,6 +210,71 @@ func decodeAddBARoleMemberParams(args [1]string, argsEscaped bool, r *http.Reque
 	return params, nil
 }
 
+// AddBusinessMemberParams is parameters of addBusinessMember operation.
+type AddBusinessMemberParams struct {
+	DimId uuid.UUID
+}
+
+func unpackAddBusinessMemberParams(packed middleware.Parameters) (params AddBusinessMemberParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "dimId",
+			In:   "path",
+		}
+		params.DimId = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeAddBusinessMemberParams(args [1]string, argsEscaped bool, r *http.Request) (params AddBusinessMemberParams, _ error) {
+	// Decode path: dimId.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "dimId",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.DimId = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "dimId",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // AddGridDimensionParams is parameters of addGridDimension operation.
 type AddGridDimensionParams struct {
 	ID    uuid.UUID
@@ -2462,6 +2527,124 @@ func decodeDeleteBARoleParams(args [1]string, argsEscaped bool, r *http.Request)
 	}(); err != nil {
 		return params, &ogenerrors.DecodeParamError{
 			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// DeleteBusinessMemberParams is parameters of deleteBusinessMember operation.
+type DeleteBusinessMemberParams struct {
+	DimId    uuid.UUID
+	MemberId uuid.UUID
+}
+
+func unpackDeleteBusinessMemberParams(packed middleware.Parameters) (params DeleteBusinessMemberParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "dimId",
+			In:   "path",
+		}
+		params.DimId = packed[key].(uuid.UUID)
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "memberId",
+			In:   "path",
+		}
+		params.MemberId = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeDeleteBusinessMemberParams(args [2]string, argsEscaped bool, r *http.Request) (params DeleteBusinessMemberParams, _ error) {
+	// Decode path: dimId.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "dimId",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.DimId = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "dimId",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	// Decode path: memberId.
+	if err := func() error {
+		param := args[1]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[1])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "memberId",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.MemberId = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "memberId",
 			In:   "path",
 			Err:  err,
 		}
@@ -13493,6 +13676,124 @@ func decodeUpdateBARoleParams(args [1]string, argsEscaped bool, r *http.Request)
 	}(); err != nil {
 		return params, &ogenerrors.DecodeParamError{
 			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// UpdateBusinessMemberParams is parameters of updateBusinessMember operation.
+type UpdateBusinessMemberParams struct {
+	DimId    uuid.UUID
+	MemberId uuid.UUID
+}
+
+func unpackUpdateBusinessMemberParams(packed middleware.Parameters) (params UpdateBusinessMemberParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "dimId",
+			In:   "path",
+		}
+		params.DimId = packed[key].(uuid.UUID)
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "memberId",
+			In:   "path",
+		}
+		params.MemberId = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeUpdateBusinessMemberParams(args [2]string, argsEscaped bool, r *http.Request) (params UpdateBusinessMemberParams, _ error) {
+	// Decode path: dimId.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "dimId",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.DimId = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "dimId",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	// Decode path: memberId.
+	if err := func() error {
+		param := args[1]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[1])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "memberId",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.MemberId = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "memberId",
 			In:   "path",
 			Err:  err,
 		}

@@ -20,6 +20,8 @@ export interface DevMetric {
   time_summary?: TimeSummary;
   // format "picklist": the dimension whose members the metric's cells hold.
   picklist_dimension_id?: string;
+  // How its cells are tinted (conditional highlighting).
+  highlight_rules?: HighlightRule[];
   depends_on: string[];
   depended_by: string[];
   calc_error?: string;
@@ -68,6 +70,8 @@ export interface DimInfo {
   parent_dimension_id?: string | null; // set when this whole dimension is a declared child of another (e.g. Cabinet -> Department)
   source_dimension_id?: string | null; // set when this dimension's members are a grouping of source_dimension_id's members by their properties[source_property] value
   source_property?: string | null;
+  // Business users add, rename and remove its members (from the grid).
+  business_maintained?: boolean;
   members: DimMember[];
 }
 
@@ -81,6 +85,8 @@ export interface GridData {
   departments: Department[];       // = first dim members (compat)
   cells: Record<string, number>;   // "metricId:code1[:code2...]" composite key, keyed per each metric's OWN grid dims
   totals: Record<string, number>;  // "metricId" -> aggregate
+  /** Text metrics' cells (format "text"), keyed as `cells`; a dimensionless one by its bare id. */
+  texts?: Record<string, string>;
   /**
    * Cells the server refuses to show this viewer because computing them reads
    * a member the viewer cannot see (fail-closed, FORMULA_CALCULATION_INSTRUCTIONS
@@ -420,6 +426,8 @@ export interface Metric {
   // hold, and those members with the key a cell stores for each.
   picklist_dimension_id?: string;
   picklist_options?: PicklistOption[];
+  // How its cells are tinted: the first rule that holds gives the tone.
+  highlight_rules?: HighlightRule[];
   value: number | null;
   readonly?: boolean;   // true = "read" access rule — visible but not editable
   dimension_ids?: string[]; // this metric's OWN grid's dimension IDs, ordered (populated by /api/metrics and /api/grid's all_metrics)
@@ -548,6 +556,8 @@ export interface DevDimension {
   // their value of the declared property source_property.
   source_dimension_id?: string;
   source_property?: string;
+  // Business users add, rename and remove its members.
+  business_maintained?: boolean;
   members: DevDimensionMember[];       // time members in chronological order
 }
 
@@ -1268,10 +1278,14 @@ export type WorkflowStatus = "draft" | "published" | "archived" | "invalid";
 
 export type StepType = "task" | "approval" | "notification" | "condition" | "join";
 
+// A condition tests a context field ({left, operator, right}) or, with
+// formula, the model: "ABS(company_var_pct) > variance_threshold" — metrics
+// read at the workflow's members, context fields by name.
 export interface StepCondition {
-  left: string;
-  operator: string;
-  right: string | number | boolean;
+  left?: string;
+  operator?: string;
+  right?: string | number | boolean;
+  formula?: string;
 }
 
 export interface StepNotification {
@@ -1502,6 +1516,9 @@ export interface AISession {
   // Auto-generated from the first request; renameable. Empty = unnamed.
   title?: string;
   created_at: string;
+  // Set once its draft was promoted: the session is finished (a new one
+  // works on the promoted revision).
+  promoted_at?: string;
 }
 
 export interface AIMessage {
@@ -1616,13 +1633,31 @@ export interface AIProposalWithSummary extends AIProposal {
   summary: string;
 }
 
+// A highlight rule (conditional highlighting, metricformula.HighlightRule):
+// compares the cell's value — or, with metric, another metric's at the same
+// cell — with value or with metric than (its value at the cell when it is
+// on the grid, else its total), and tints the cell with tone.
+export type HighlightTone = "negative" | "warning" | "positive" | "info";
+export interface HighlightRule {
+  metric?: string;
+  abs?: boolean;
+  op: ">" | ">=" | "<" | "<=" | "=" | "<>" | "between" | "not_between" | "blank" | "not_blank";
+  value?: number | string;
+  value2?: number;
+  than?: string;
+  tone: HighlightTone;
+}
+
 // One SSE event from the streaming /messages endpoint. Fields are populated
 // according to `type` — see internal/gateway/ai_handler.go's sendSSE calls
 // for the exact payload shape per event type.
 export interface AISendMessageEvent {
-  type: "delta" | "tool_status" | "proposal" | "done" | "error";
+  type: "delta" | "tool_status" | "progress" | "proposal" | "done" | "error";
   content?: string; // delta
-  tool?: string; // tool_status
+  tool?: string; // tool_status | progress
+  chars?: number; // progress: how much of the tool call is written
+  steps?: number; // progress: steps of a proposal written so far
+  warnings?: string[]; // proposal: formulas the plan check thinks look wrong
   error?: string; // error
   proposal?: AIProposal; // proposal
   reply?: AIMessage; // done
@@ -1782,6 +1817,7 @@ async function streamSSE(
   path: string,
   body: unknown,
   onEvent: (event: AISendMessageEvent) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const appId = localStorage.getItem("selected_app_id") ?? "";
   const modelId = localStorage.getItem("selected_model_id") ?? "";
@@ -1796,10 +1832,11 @@ async function streamSSE(
       ...(modelId ? { "X-Model-Id": modelId } : {}),
     },
     body: JSON.stringify(body),
+    signal,
   });
   if (!res.ok) {
     const errBody = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(`${res.status}: ${errBody.error ?? res.statusText}`);
+    throw Object.assign(new Error(`${res.status}: ${errBody.error ?? res.statusText}`), { code: errBody.code as string | undefined });
   }
   if (!res.body) {
     throw new Error("streaming is not supported in this browser");
@@ -1836,9 +1873,17 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  // A business-maintained dimension's members, kept by business users.
+  addBusinessMember: (dimId: string, body: { label: string; code?: string; parent_member_id?: string; properties?: Record<string, string> }) =>
+    apiFetch<{ id: string; code: string }>(`/api/dimensions/${dimId}/members`, { method: "POST", body: JSON.stringify(body) }),
+  updateBusinessMember: (dimId: string, memberId: string, body: { label?: string; properties?: Record<string, string> }) =>
+    apiFetch<{ status: string }>(`/api/dimensions/${dimId}/members/${memberId}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteBusinessMember: (dimId: string, memberId: string) =>
+    apiFetch<{ status: string }>(`/api/dimensions/${dimId}/members/${memberId}`, { method: "DELETE" }),
   getCellHistory: (params: { model_id: string; revision_id: string; metric_id: string; dim_codes: Record<string, string> }) =>
     apiFetch<CellHistoryEntry[]>(`/api/cells/history?model_id=${params.model_id}&revision_id=${params.revision_id}&metric_id=${params.metric_id}&dim_codes=${encodeURIComponent(JSON.stringify(params.dim_codes))}`),
-  writeback: (body: { model_id: string; revision_id: string; metric_id: string; dim_code?: string; dim_codes?: Record<string, string>; value: number }) =>
+  // A number in value, a text metric's note in text, or clear: true to empty the cell (blank, not 0).
+  writeback: (body: { model_id: string; revision_id: string; metric_id: string; dim_code?: string; dim_codes?: Record<string, string>; value?: number; text?: string; clear?: boolean }) =>
     apiFetch<{ status: string }>("/api/cells", {
       method: "POST",
       body: JSON.stringify(body),
@@ -1906,7 +1951,7 @@ export const api = {
   getDevDimensions: (revisionId?: string) =>
     apiFetch<DevDimension[]>(`/api/developer/dimensions${revisionId ? `?revision_id=${revisionId}` : ""}`),
 
-  addMetric: (body: { name: string; label?: string; is_input: boolean; formula: string; revision_id?: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string }) =>
+  addMetric: (body: { name: string; label?: string; is_input: boolean; formula: string; revision_id?: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string; highlight_rules?: HighlightRule[] }) =>
     apiFetch<{ id: string; status: string }>("/api/developer/metrics", {
       method: "POST",
       body: JSON.stringify(body),
@@ -2124,7 +2169,7 @@ export const api = {
 
   deleteMetric: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/metrics/${id}`, { method: "DELETE" }),
-  updateMetric: (id: string, body: { name: string; label?: string; formula: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string }) =>
+  updateMetric: (id: string, body: { name: string; label?: string; formula: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string; highlight_rules?: HighlightRule[] }) =>
     apiFetch<{ status: string; recalc: Array<{ revision_id: string; metric: string; value: number | null }> }>(
       `/api/developer/metrics/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 
@@ -2134,7 +2179,7 @@ export const api = {
   // A partial update: a field left out keeps its value; parent_dimension_id: null detaches,
   // source_dimension_id: null clears a property grouping.
   updateDimension: (id: string, body: { name?: string; agg_rule?: string; parent_dimension_id?: string | null; tags?: string[];
-    source_dimension_id?: string | null; source_property?: string; derive_members?: boolean }) =>
+    source_dimension_id?: string | null; source_property?: string; derive_members?: boolean; business_maintained?: boolean }) =>
     apiFetch<{ status: string; derived_members?: string[] }>(`/api/developer/dimensions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteDimension: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/dimensions/${id}`, { method: "DELETE" }),
@@ -2496,8 +2541,9 @@ export const api = {
   // revisionId pins WHICH model+revision the assistant works in (multi-model
   // apps resolve to the newest model otherwise) — pass the console's working
   // revision so the session touches what the console shows.
-  aiSendMessage: (sessionId: string, content: string, onEvent: (event: AISendMessageEvent) => void, revisionId?: string) =>
-    streamSSE(`/api/ai/sessions/${sessionId}/messages${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, { content }, onEvent),
+  // signal stops the turn: the server sees the request close and saves "Stopped".
+  aiSendMessage: (sessionId: string, content: string, onEvent: (event: AISendMessageEvent) => void, revisionId?: string, signal?: AbortSignal) =>
+    streamSSE(`/api/ai/sessions/${sessionId}/messages${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, { content }, onEvent, signal),
   aiConfirmProposal: (sessionId: string, proposalId: string, revisionId?: string) =>
     apiFetch<{ proposal: AIProposal; messages: AIMessage[]; session?: AISession }>(
       `/api/ai/sessions/${sessionId}/proposals/${proposalId}/confirm${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`,

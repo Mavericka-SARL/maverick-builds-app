@@ -165,13 +165,18 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 		// binds them; migration 100 keeps new names unique regardless of
 		// case, and an exact match wins where an older pair still exists.
 		var metricID string
+		var textInput bool
 		err := pool.QueryRow(ctx, `
-			SELECT id::text FROM model.metric_def
+			SELECT id::text, (format = 'text' AND is_input) FROM model.metric_def
 			WHERE model_id=$1::uuid AND lower(name)=lower($2)
 			  AND (revision_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid OR revision_id IS NULL)
 			ORDER BY (name = $2) DESC
 			LIMIT 1
-		`, req.ModelID, ref.Name, req.RevisionID).Scan(&metricID)
+		`, req.ModelID, ref.Name, req.RevisionID).Scan(&metricID, &textInput)
+		if err == nil && textInput {
+			// Its cells hold free text beside a 0: a formula would read 0.
+			return nil, invalidCode(CodeTextMetricInFormula, "%s is a text metric: its cells hold notes, which formulas do not read", ref.Name)
+		}
 		if err == nil {
 			isSelf := metricID == req.MetricID || (req.MetricID == "" && strings.EqualFold(ref.Name, req.Name))
 			if isSelf && ref.Dimensional {
@@ -300,6 +305,9 @@ func Validate(ctx context.Context, pool Querier, req Request) (*Result, error) {
 	}
 	return &Result{DependsOnMetricIDs: edgeIDs, Edges: edges, UsesTimeSeries: an.UsesTimeSeries}, nil
 }
+
+// CodeTextMetricInFormula refuses a formula reading a text metric.
+const CodeTextMetricInFormula = "TEXT_METRIC_IN_FORMULA"
 
 // SelfReference is the Edge.To value of a time-shifted self-reference on a
 // metric that does not exist yet (create). WriteDependencies substitutes the

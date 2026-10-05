@@ -297,10 +297,17 @@ func TestOpenAIProvider_ChatStream_ReassemblesToolCallFragments(t *testing.T) {
 	defer server.Close()
 
 	p := NewOpenAICompatible("test-key", server.URL, "openai")
+	// The arguments are reported as they grow: a long proposal shows
+	// progress while it is being written.
+	var progress []string
 	resp, err := p.ChatStream(t.Context(), ChatRequest{
-		Model:    "gpt-4",
-		Messages: []Message{{Role: "user", Content: "create a revenue metric"}},
+		Model:      "gpt-4",
+		Messages:   []Message{{Role: "user", Content: "create a revenue metric"}},
+		OnToolArgs: func(name string, args []byte) { progress = append(progress, name+" "+string(args)) },
 	}, func(string) {})
+	if strings.Join(progress, " | ") != `create_metric {"name": | create_metric {"name":"revenue"}` {
+		t.Errorf("progress = %q, want each growth of the arguments under the call's name", progress)
+	}
 	if err != nil {
 		t.Fatalf("ChatStream: %v", err)
 	}

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { GripVertical, Download, MoreVertical, Rows3, X as XIcon } from "lucide-react";
-import { api, type DemoContext, type GridData, type Metric, type DimMember, type DimInfo, type GridDefaultView , type SelectorsPosition } from "../../api/client";
+import { api, type DemoContext, type GridData, type Metric, type DimMember, type DimInfo, type GridDefaultView , type SelectorsPosition, type HighlightRule, type HighlightTone } from "../../api/client";
 import { CellHistoryDrawer, type CellRef } from "../../ee/cellhistory/CellHistoryDrawer";
+import { AddMemberRow, MemberLabel } from "./BusinessMemberControls";
 import { LoadingState, ErrorState, Toolbar, ToolbarGroup, Select, PropertyPanel, IconButton } from "../../ui";
 import { defaultLeafCode } from "../dashboardLayout";
 import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
@@ -493,15 +494,21 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
   // it the cell snapped back to the OLD server value for the whole round
   // trip — the write plus a synchronous recalc is a second or two on a real
   // model — and only then jumped to the new one.
-  const [pending, setPending] = useState<Record<string, number>>({});
+  // A cleared cell is pending as null (blank until the refetch); a text
+  // cell's pending note sits in pendingText.
+  const [pending, setPending] = useState<Record<string, number | null>>({});
+  const [pendingText, setPendingText] = useState<Record<string, string | null>>({});
   const writeback = useMutation({
-    mutationFn: ({ metric_id, dim_codes, value }: { cellKey: string; metric_id: string; dim_codes: Record<string, string>; value: number }) =>
-      api.writeback({ metric_id, dim_codes, value, model_id: ctx.model_id, revision_id: ctx.revision_id }),
+    mutationFn: ({ metric_id, dim_codes, value, text, clear }: { cellKey: string; metric_id: string; dim_codes: Record<string, string>; value?: number; text?: string; clear?: boolean }) =>
+      api.writeback({ metric_id, dim_codes, value, text, clear, model_id: ctx.model_id, revision_id: ctx.revision_id }),
     // Every fact-derived query on the page, not just this grid's own: the
     // KPI cards and charts beside it must show the new number too.
     // Returning the promise defers onSettled until those refetches complete.
     onSuccess: () => invalidateModelData(qc),
-    onSettled: (_data, _err, { cellKey: k }) => setPending((p) => { if (!(k in p)) return p; const n = { ...p }; delete n[k]; return n; }),
+    onSettled: (_data, _err, { cellKey: k }) => {
+      setPending((p) => { if (!(k in p)) return p; const n = { ...p }; delete n[k]; return n; });
+      setPendingText((p) => { if (!(k in p)) return p; const n = { ...p }; delete n[k]; return n; });
+    },
   });
 
   // Export requires a specific grid_def_id (the raw fact_input values are
@@ -560,8 +567,13 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
   // from the scoped query).
   const grid = useMemo(() => {
     if (!gridMeta) return undefined;
-    return { ...gridMeta, cells: { ...(cellsData?.cells ?? {}), ...pending }, totals: cellsData?.totals ?? {} };
-  }, [gridMeta, cellsData, pending]);
+    return {
+      ...gridMeta,
+      cells: overlay(cellsData?.cells ?? {}, pending),
+      texts: overlay(cellsData?.texts ?? {}, pendingText),
+      totals: cellsData?.totals ?? {},
+    };
+  }, [gridMeta, cellsData, pending, pendingText]);
   // Cells (and totals, by bare metric id) the server withholds from this
   // viewer — fail-closed, see GridData.withheld. Everything that would be
   // built from one renders blank.
@@ -984,14 +996,29 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
     const key = getKey(metric.id, fc);
     const raw = editing[key];
     if (raw === undefined) return;
+    setEditing(e => { const n = { ...e }; delete n[key]; return n; });
+    const dim_codes: Record<string, string> = {};
+    dims.forEach((d, i) => { dim_codes[d.id] = fc[i]?.code ?? ""; });
+    if (isTextMetric(metric)) {
+      // A note: written as typed; emptied, the cell is cleared.
+      const text = raw.trim();
+      if (text === (g.texts?.[key] ?? "")) return;
+      setPendingText((p) => ({ ...p, [key]: text === "" ? null : text }));
+      writeback.mutate({ cellKey: key, metric_id: metric.id, dim_codes, ...(text === "" ? { clear: true } : { text }) });
+      return;
+    }
+    if (raw.trim() === "") {
+      // Emptied: the cell goes back to blank (no value, not 0).
+      if (g.cells[key] === undefined) return;
+      setPending((p) => ({ ...p, [key]: null }));
+      writeback.mutate({ cellKey: key, metric_id: metric.id, dim_codes, clear: true });
+      return;
+    }
     const value = parseFloat(raw.replace(/,/g, ""));
     if (!isNaN(value)) {
-      const dim_codes: Record<string, string> = {};
-      dims.forEach((d, i) => { dim_codes[d.id] = fc[i]?.code ?? ""; });
       setPending((p) => ({ ...p, [key]: value }));
       writeback.mutate({ cellKey: key, metric_id: metric.id, dim_codes, value });
     }
-    setEditing(e => { const n = { ...e }; delete n[key]; return n; });
   }
 
   // Move an item to a zone (removes from any previous zone first)
@@ -1146,6 +1173,36 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
           ]))
     : [];
 
+  // A business-maintained row dimension: business users add, rename and
+  // remove its rows here (the server holds each change to their access).
+  const maintainedRowDim = rowDims.length === 1 && rowDims[0].business_maintained && !g.rollup_source_grid_id ? rowDims[0] : null;
+
+  // ── Highlight rules ───────────────────────────────────────────────────────
+  // A metric's rules tint its cells (the first rule that holds). A metric a
+  // rule names is read at the same cell when it is on this grid, else its
+  // total (a threshold setting); a pick-list reads as its member's code, a
+  // text metric as its note.
+  const metricByName = new Map<string, Metric>();
+  for (const x of [...(g.all_metrics ?? []), ...g.metrics]) metricByName.set(x.name.toLowerCase(), x);
+  const onGrid = new Set(g.metrics.map(x => x.id));
+  function probeAt(m: Metric, num: number | null | undefined, key?: string): Probe {
+    if (isTextMetric(m)) return { num: undefined, text: key ? g.texts?.[key] : undefined };
+    if (m.format === "picklist") return { num, text: num ? m.picklist_options?.find(o => o.key === num)?.code : undefined };
+    return { num };
+  }
+  function cellTone(m: Metric, fc: DimMember[], num: number | null | undefined, atTotal?: (id: string) => number | null | undefined): HighlightTone | null {
+    if (!m.highlight_rules?.length) return null;
+    const read = (name: string): Probe => {
+      const other = metricByName.get(name.toLowerCase());
+      if (!other) return { num: undefined };
+      if (!onGrid.has(other.id)) return probeAt(other, withheld.has(other.id) ? null : g.totals[other.id]);
+      if (atTotal) return probeAt(other, atTotal(other.id));
+      return probeAt(other, getVal(other.id, fc), getKey(other.id, fc));
+    };
+    return ruleTone(m.highlight_rules, probeAt(m, num, atTotal ? undefined : getKey(m.id, fc)), read);
+  }
+  const toneClass = (t: HighlightTone | null) => (t ? `mvx-cell--tone-${t}` : "");
+
   // ── Shared cell renderers ─────────────────────────────────────────────────
   function inputCell(m: Metric, fc: DimMember[], borderLeft?: string) {
     const isParent = comboIsAgg(fc);
@@ -1159,15 +1216,35 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
     // there's nothing meaningful to write back.
     const isReadOnly = isParent || !!m.readonly || fc.some(member => member.readonly || !!member.formula) || !!g.rollup_source_grid_id;
 
+    const isText = isTextMetric(m);
+    const note = isText ? (g.texts?.[key] ?? "") : "";
+    const tone = toneClass(cellTone(m, fc, val));
     if (isReadOnly) {
       return (
         <td
-          className={[isParent ? "mvx-cell--agg" : "mvx-cell--readonly", val == null ? "mvx-cell--empty" : ""].filter(Boolean).join(" ")}
-          style={{ ...td, textAlign: "right", borderLeft }}
+          className={[isParent ? "mvx-cell--agg" : "mvx-cell--readonly", val == null && !note ? "mvx-cell--empty" : "", tone].filter(Boolean).join(" ")}
+          style={{ ...td, textAlign: isText ? "left" : "right", borderLeft, ...(isText ? textCellStyle : {}) }}
           onContextMenu={isParent ? undefined : (e) => openHistory(e, m, fc)}
-          title={isParent ? undefined : "Right-click for history"}
+          title={isParent ? undefined : (note ? `${note}\n\nRight-click for history` : "Right-click for history")}
         >
-          {fmtMetric(m, val)}
+          {isText ? (isParent ? "" : note || (val ? fmtMetric(m, val) : "—")) : fmtMetric(m, val)}
+        </td>
+      );
+    }
+
+    if (isText) {
+      // A note (a comment, an owner): typed as text; emptied, it clears.
+      const isActive = editing[key] !== undefined;
+      return (
+        <td className={tone || undefined} style={{ ...td, textAlign: "left", padding: "4px 5px", borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title={note ? `${note}\n\nRight-click for history` : "Right-click for history"}>
+          <input
+            value={isActive ? editing[key] : note} placeholder="—"
+            aria-label={`${m.label ?? m.name} — note`}
+            className={["mvx-cell-input", "mvx-cell-input--text", isActive ? "mvx-cell-input--active" : ""].filter(Boolean).join(" ")}
+            onChange={e => setEditing(p => ({ ...p, [key]: e.target.value }))}
+            onBlur={() => commitCell(m, fc)}
+            onKeyDown={e => e.key === "Enter" && commitCell(m, fc)}
+          />
         </td>
       );
     }
@@ -1177,15 +1254,20 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
       // list, written at once (the key; "—" clears it).
       const current = val != null && val !== 0 ? String(val) : "";
       return (
-        <td style={{ ...td, textAlign: "right", padding: "4px 5px", borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
+        <td className={tone || undefined} style={{ ...td, textAlign: "right", padding: "4px 5px", borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
           <select
             className="mvx-cell-input mvx-cell-select"
             aria-label={`${m.label ?? m.name} — choose a member`}
             value={current}
             onChange={e => {
-              const value = e.target.value === "" ? 0 : Number(e.target.value);
               const dim_codes: Record<string, string> = {};
               dims.forEach((d, i) => { dim_codes[d.id] = fc[i]?.code ?? ""; });
+              if (e.target.value === "") {
+                setPending((p) => ({ ...p, [key]: null }));
+                writeback.mutate({ cellKey: key, metric_id: m.id, dim_codes, clear: true });
+                return;
+              }
+              const value = Number(e.target.value);
               setPending((p) => ({ ...p, [key]: value }));
               writeback.mutate({ cellKey: key, metric_id: m.id, dim_codes, value });
             }}
@@ -1205,7 +1287,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
       ? editing[key]
       : (val != null ? fmtMetric(m, val) : "");
     return (
-      <td style={{ ...td, textAlign: "right", padding: "4px 5px", borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
+      <td className={tone || undefined} style={{ ...td, textAlign: "right", padding: "4px 5px", borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
         <input
           value={dispVal} placeholder="—"
           className={["mvx-cell-input", isActive ? "mvx-cell-input--active" : ""].filter(Boolean).join(" ")}
@@ -1229,12 +1311,13 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
 
   function calcCell(m: Metric, fc: DimMember[], borderLeft?: string) {
     const isParent = comboIsAgg(fc);
+    const v = resolveCell(m.id, fc);
     return (
       <td
-        className={["mvx-cell--calc", isParent ? "mvx-cell--agg" : ""].filter(Boolean).join(" ")}
+        className={["mvx-cell--calc", isParent ? "mvx-cell--agg" : "", toneClass(cellTone(m, fc, v))].filter(Boolean).join(" ")}
         style={{ ...td, textAlign: "right", borderLeft }}
       >
-        {fmtMetric(m, resolveCell(m.id, fc))}
+        {fmtMetric(m, v)}
       </td>
     );
   }
@@ -1457,7 +1540,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
                             fontWeight: isLeaf ? 400 : 700,
                             color: "var(--color-text-strong)" }}>
                             {level > 0 && <span style={{ color: "var(--color-border-muted)", marginRight: 4, fontSize: 11 }}>└</span>}
-                            {member.label}
+                            {maintainedRowDim && isLeaf && !member.formula ? <MemberLabel dim={maintainedRowDim} member={member} /> : member.label}
                           </td>
                           {effectiveColCombos.flatMap((cc, ci) => {
                             const fc = fullCombo(rc, cc);
@@ -1475,7 +1558,10 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
                       <tr key={comboKey(rc) || `row-${ri}`}
                         style={{ borderBottom: "1px solid var(--color-surface-muted)", background: ri % 2 === 1 ? "var(--color-grid-row-alt-bg)" : undefined }}>
                         <td {...pickComboProps(rc, rowDims)} style={{ ...td, fontWeight: 600, color: rc.length === 0 ? "var(--color-disabled)" : "var(--color-text-strong)" }}>
-                          {rc.length === 0 ? "All" : rc.map(m => m.label).join(" / ")}
+                          {rc.length === 0 ? "All"
+                            : maintainedRowDim && rc.length === 1 && !rc[0].formula && !maintainedRowDim.members.some(x => x.parent_code === rc[0].code)
+                              ? <MemberLabel dim={maintainedRowDim} member={rc[0]} />
+                              : rc.map(m => m.label).join(" / ")}
                         </td>
                         {effectiveColCombos.flatMap((cc, ci) => {
                           const fc = fullCombo(rc, cc);
@@ -1489,16 +1575,19 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
                       </tr>
                     ))
                 )}
+                {maintainedRowDim && <AddMemberRow dim={maintainedRowDim} colSpan={1 + effectiveColCombos.length * gridMetrics.length} />}
                 {!hasRowHierarchy && rowCombos.length > 1 && (
                   <tr style={{ borderTop: "2px solid var(--color-border)", background: "var(--color-surface-faint)" }}>
                     <td style={{ ...td, fontWeight: 700 }}>Total</td>
                     {effectiveColCombos.flatMap((cc, ci) =>
                       gridMetrics.map(m => {
                         const bl = hasColDims && ci > 0 && gridMetrics[0]?.id === m.id ? "1px solid var(--color-border)" : undefined;
+                        const total = colTotal(m.id, cc);
                         return (
                           <td key={`tot-${comboKey(cc)}-${m.id}`}
+                            className={toneClass(cellTone(m, cc, total, id => colTotal(id, cc))) || undefined}
                             style={{ ...td, textAlign: "right", fontWeight: 700, color: m.is_input ? "var(--color-text-strong)" : "var(--color-grid-calc-text)", borderLeft: bl }}>
-                            {fmtMetric(m, colTotal(m.id, cc))}
+                            {fmtMetric(m, total)}
                           </td>
                         );
                       })
@@ -1545,6 +1634,72 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, syncConte
 
 const th: React.CSSProperties = { padding: "10px 12px", textAlign: "left", fontWeight: 600, fontSize: 12, color: "var(--color-text-strong)", whiteSpace: "nowrap" };
 const td: React.CSSProperties = { padding: "8px 12px", color: "var(--color-text)" };
+
+// Probe is a value a highlight rule tests: a number, or text (a pick-list's
+// member code, a note).
+interface Probe { num: number | null | undefined; text?: string }
+
+// ruleTone is the tone of the first rule that holds (metricformula's
+// HighlightRule): blank tests nothing, text compares ignoring case, numbers
+// as stored (abs: their absolute value).
+function ruleTone(rules: HighlightRule[], own: Probe, read: (name: string) => Probe): HighlightTone | null {
+  for (const r of rules) {
+    if (ruleHolds(r, r.metric ? read(r.metric) : own, read)) return r.tone;
+  }
+  return null;
+}
+
+function ruleHolds(r: HighlightRule, s: Probe, read: (name: string) => Probe): boolean {
+  const blank = s.num == null && !s.text;
+  if (r.op === "blank") return blank;
+  if (r.op === "not_blank") return !blank;
+  if (blank) return false;
+  if (typeof r.value === "string") {
+    const t = (s.text ?? String(s.num ?? "")).toLowerCase();
+    const v = r.value.toLowerCase();
+    return r.op === "=" ? t === v : r.op === "<>" ? t !== v : false;
+  }
+  if (s.num == null) return false;
+  const x = r.abs ? Math.abs(s.num) : s.num;
+  if (r.op === "between" || r.op === "not_between") {
+    const lo = Math.min(Number(r.value), Number(r.value2)), hi = Math.max(Number(r.value), Number(r.value2));
+    const inside = x >= lo && x <= hi;
+    return r.op === "between" ? inside : !inside;
+  }
+  const y = r.than ? read(r.than).num : typeof r.value === "number" ? r.value : undefined;
+  if (y == null) return false;
+  switch (r.op) {
+    case ">": return x > y;
+    case ">=": return x >= y;
+    case "<": return x < y;
+    case "<=": return x <= y;
+    case "=": return x === y;
+    case "<>": return x !== y;
+  }
+  return false;
+}
+
+// A text metric holds notes (format "text", an input); a calculated one
+// keeps showing its number as before.
+function isTextMetric(m: Metric): boolean {
+  return m.format === "text" && !!m.is_input;
+}
+
+const textCellStyle: React.CSSProperties = { maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+
+// overlay applies pending writes over the server's cells: a value replaces
+// the cell, null (a clear) removes it.
+function overlay<T>(base: Record<string, T>, pending: Record<string, T | null>): Record<string, T> {
+  const keys = Object.keys(pending);
+  if (keys.length === 0) return base;
+  const out = { ...base };
+  for (const k of keys) {
+    const v = pending[k];
+    if (v === null) delete out[k];
+    else out[k] = v;
+  }
+  return out;
+}
 
 function fmtMetric(m: Metric, n: number | null | undefined): string {
   if (n == null) return "—";

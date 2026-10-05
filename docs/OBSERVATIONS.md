@@ -18,49 +18,93 @@ leaves out, until it is fixed.
 
 ## Open
 
-### Cells hold no free text
+### A workflow scoped to a member locks its data while a correction round runs
 
-- **Noticed:** 2026-10-04, rebuilding a sales target-setting workbook.
-- **What:** facts are numbers. Pick-lists (migration 110) now cover every
-  drop-down and status, but a per-row comment (the workbook's Regional
-  Comment and Local Comment columns), an activity's name, owner or note and
-  a free "Round 1" label have no cell to live in. The models keep names,
-  owners and notes as member labels and properties (developer-maintained)
-  and the comments as the workflow's required task comments.
-- **Why it matters:** a planner's explanation of a correction sits on the
-  round's task, not beside the number it explains, and is not exported with
-  the grid.
-- **How to check:** look for a text input on the Region Target grid.
-- **What closes it:** a decision on text-valued input metrics (stored beside
-  facts, shown and edited in the grid, carried by copies and exports), or
-  cell notes.
+- **Noticed:** 2026-10-05, testing "variance over threshold → another round":
+  an instance whose context has a Dimension member variable locks that
+  member's data for as long as it runs (writeguard.WorkflowLockReason), so
+  the round's own correction task cannot correct anything at the member.
+- **Why it matters:** a target round scoped to a region is the natural shape
+  of "regional corrections, then review"; today it has to carry no member
+  variable (the manual model's round has none) to stay editable.
+- **How to check:** start a round with `{"region": "NA"}` and write an NA
+  cell: 403 "NA is locked by an in-progress … workflow".
+- **What closes it:** a decision on locking per step (lock during approvals,
+  not during tasks assigned to correct the data), or a definition setting.
 
-### Planners cannot name a new strategic activity
+### Text metrics cannot be counted or read by formulas
 
-- **Noticed:** 2026-10-04, same rebuild.
-- **What:** activities are members of the activity dimension, and members,
-  their labels and their properties are developer-only. The models pre-create
-  the workbook's 20 rows as slots; a planner fills a free slot's pick-lists
-  and amounts, but its name stays "Open slot 5" until a developer renames it.
-  The user chose this split for the build.
-- **Why it matters:** in the workbook the planner types the activity's name
-  and owner on the row they add.
-- **How to check:** as a business user, try to rename STRAT-005.
-- **What closes it:** member maintenance for a dimension a developer marks as
-  business-maintained (a narrow business-admin route), or free-text cells.
+- **Noticed:** 2026-10-05, adding text cells: a formula naming one is refused
+  (TEXT_METRIC_IN_FORMULA), because the fact row carries the note beside a 0
+  and the calculation engine loads numbers only.
+- **Why it matters:** `COUNTIFS(comment, "<>")` (how many rows are explained)
+  is a natural spreadsheet idiom.
+- **How to check:** save `COUNTIFS(act_comment, "<>")`.
+- **What closes it:** the fact loaders binding a text metric as text (as a
+  pick-list's codec decodes keys), or a documented "use a pick-list" stance.
 
-### A typed cell cannot be cleared
+### The AI Developer cannot clear a cell
 
-- **Noticed:** 2026-10-04, restoring the workbook's sample data after a
-  scenario.
-- **What:** `POST /api/cells` writes a number; there is no way back to an
-  empty cell (the workbook's blank Absolute Target), only 0. A pick-list cell
-  can be cleared ("member": "").
-- **Why it matters:** blank and 0 differ for AVERAGEIFS, COUNTIFS and the
-  "no value" display.
-- **How to check:** write a cell, then try to empty it in the grid.
-- **What closes it:** a clear that deletes the cell's fact (kept in
-  fact_input_history), from the grid and the API.
+- **Noticed:** 2026-10-05: `write_input_values` goes through the import
+  pipeline, which writes values; `"value": null` is refused.
+- **Why it matters:** the console and the API can clear (`"clear": true`);
+  the assistant cannot, so "empty the absolute target" needs the developer.
+- **What closes it:** a clear in `write_input_values` (null) through the same
+  `clearCell` path.
+
+### Highlight rules tint grid cells only
+
+- **Noticed:** 2026-10-05: rules are evaluated in the browser's grid
+  (`ruleTone` in PlanningGrid.tsx); KPI tiles, charts, file exports and the
+  chat connector show the value untinted.
+- **Why it matters:** a dashboard's KPI of the company variance % does not
+  turn red where its grid row does.
+- **What closes it:** the same rule evaluation on KPI tiles (the value is at
+  hand), and a decision for exports (an xlsx fill).
+
+### Renaming or deleting a metric leaves highlight rules and workflow conditions naming it
+
+- **Noticed:** 2026-10-05: both name metrics as formulas do, but the delete
+  guard (METRIC_IN_USE) and renames look at formulas only.
+- **Why it matters:** the rule silently stops matching; the condition parks
+  its step for a person ("is no metric and no context variable").
+- **How to check:** delete `threshold_pct` on the manual model.
+- **What closes it:** the guard and the rename covering `highlight_rules`
+  and workflow condition formulas.
+
+### Planners maintain members from the grid only as its single row dimension
+
+- **Noticed:** 2026-10-05: the Add / Rename / Remove controls appear when the
+  business-maintained dimension is the grid's only row dimension; member
+  properties are settable over the API but have no planner screen.
+- **What closes it:** the controls on any row axis carrying the dimension,
+  and property inputs in the rename row.
+
+### Orphan facts written at unknown member codes may remain
+
+- **Noticed:** 2026-10-05: `/api/cells` stored a value at any code until this
+  change refused unknown members; such rows count toward storage and no reader
+  shows them.
+- **How to check:** `SELECT count(*) FROM runtime.fact_input f WHERE EXISTS
+  (SELECT 1 FROM jsonb_each_text(f.dim_members) kv WHERE NOT EXISTS (SELECT 1
+  FROM model.dimension_member m WHERE m.dimension_id::text = kv.key AND m.code
+  = kv.value))` on a deployment.
+- **What closes it:** a one-off clean-up migration (archived with a reason),
+  after counting what a real deployment holds.
+
+### Plan-check warnings are not kept with the proposal
+
+- **Noticed:** 2026-10-05: warnings reach the console in the turn's
+  "proposal" event and the saved tool message; reopening the session shows
+  the proposal without them.
+- **What closes it:** storing them on the proposal row.
+
+### Model import keeps widget_props keys the console does not read
+
+- **Noticed:** 2026-10-05: the developer API now refuses unknown keys, the
+  package import does not (an old package may carry them).
+- **What closes it:** dropping, with a note in the import result, the keys
+  outside `modeledit.WidgetPropKeys`.
 
 ### A business admin cannot start a round they approve
 
@@ -98,18 +142,6 @@ leaves out, until it is fixed.
 - **What closes it:** a documented mode that clears the target's other cells,
   or a clearer name.
 
-### An AI turn that writes a huge proposal shows nothing for minutes
-
-- **Noticed:** 2026-10-04, the AI Developer asked for every input with its
-  values: one model call ran more than 15 minutes (gpt-5-mini writing the
-  240 prior-year values into a proposal), with no progress, no time limit
-  and no way to stop it short of restarting the gateway.
-- **Why it matters:** the developer cannot tell a long turn from a hung one.
-- **How to check:** ask for a stage whose values are typed into the proposal.
-- **What closes it:** a per-turn time limit with a clear message, streamed
-  progress while a tool call is being written, and a stop button; the prompt
-  now says sheet data is imported, not typed.
-
 ### Pick-list cells leave some readers as keys
 
 - **Noticed:** 2026-10-04, adding pick-lists.
@@ -124,44 +156,6 @@ leaves out, until it is fixed.
 - **How to check:** open a pick-list cell's history.
 - **What closes it:** the member's code or label wherever a cell value
   leaves the grid.
-
-### The AI plan check stops after three refusals and the model asks instead
-
-- **Noticed:** 2026-10-04, the AI Developer rebuild: after a third refused
-  plan the check's own message says "Do not propose again in this turn …
-  ask how to proceed" (maxProposalRejections = 3), and gpt-5-mini then
-  ended five turns with "shall I propose it?" questions; once it claimed work
-  existed that no proposal had made.
-- **Why it matters:** each costs the developer a message and minutes; a
-  long stage needs four or five corrected attempts.
-- **How to check:** a stage message whose first plans fail the check.
-- **What closes it:** a higher limit while the number of failing steps
-  falls, and a prompt rule that a stage the developer asked for is proposed,
-  not asked about.
-
-### A session goes on checking against its base after its draft is promoted
-
-- **Noticed:** 2026-10-04: after "Promote to Active", the same session's
-  plans were checked against its original, empty base revision ("the working
-  revision has no metric yet") while its read tools listed the promoted
-  metrics.
-- **Why it matters:** the developer sees the AI fail on metrics it just
-  listed; the designed path is a new session, which nothing says.
-- **How to check:** promote a session's draft, then ask it for an
-  update_metric.
-- **What closes it:** the session continuing on the promoted revision (a new
-  draft from it), or the promote answer and the next turn saying a new
-  session is needed.
-
-### The developer API stores widget_props keys the console never reads
-
-- **Noticed:** 2026-10-04: the manual build sent `button_label` and
-  `confirm_message`; the console reads `content` and `confirm_text`, so the
-  button said "Trigger" with no confirmation, and the save said nothing.
-  The AI's tool refuses unknown keys (widgetPropKeys); the console API does
-  not.
-- **How to check:** POST a widget with widget_props {"button_lable": "x"}.
-- **What closes it:** the AI's key check on the developer API too.
 
 ### A chart plots only one grid's metrics
 
@@ -2751,6 +2745,80 @@ leaves out, until it is fixed.
   `CheckMembers` before the first insert, for every caller.
 
 ## Closed
+
+### Cells hold no free text
+
+- **Noticed:** 2026-10-04, rebuilding a sales target-setting workbook: its
+  Regional and Local Comment columns, and an activity's Owner and Source /
+  Note, had no cell; the comments lived as workflow task comments.
+- **Closed by:** da5f7f7 — text input metrics (format "text"): the note is
+  stored in `fact_input.text_value` beside a 0, typed in the grid (emptied, it
+  clears), returned as `texts` by `/api/grid`, written by `/api/cells` "text",
+  file imports and `write_input_values`, rendered by data exports, kept by the
+  cell history, carried by both revision copies, splits, on-approve copies and
+  model export/import; never totalled, refused in formulas
+  (TEXT_METRIC_IN_FORMULA). (`TestTextCellsClearsHighlightsAndBusinessMembers`,
+  `TestTextMetricWritesItsNotes`, e2e grid-notes-highlights-rows; live on the
+  manual model's Region Target, Product Target and Strategic Activities.)
+
+### Planners cannot name a new strategic activity
+
+- **Noticed:** 2026-10-04, same rebuild: members were developer-only, so the
+  models pre-created 20 "Open slot" activities.
+- **Closed by:** da5f7f7 — a dimension a developer marks `business_maintained`
+  (console checkbox, developer API, AI `create_dimension`/`update_dimension`,
+  copies and export) lets business users add, rename and remove its members
+  from the grid (`POST/PATCH/DELETE /api/dimensions/{dimId}/members`, a
+  narrow business-role guard), held to the open revision and the write guard;
+  codes generated from the dimension's sequence (STRAT-021). Live: Priya named
+  STRAT-005 "Loyalty programme", added and removed STRAT-021.
+
+### A typed cell cannot be cleared
+
+- **Noticed:** 2026-10-04, restoring the workbook's sample data.
+- **Closed by:** da5f7f7 — `/api/cells` "clear": true (and an emptied number,
+  note or pick-list in the grid) deletes the cell's typed rows, archived with
+  the reason "cleared"; form-posted rows stay. The same change refuses a write
+  naming a member code its dimension does not have (it was stored where
+  nothing read it; found live writing "Snacks" for SNACKS).
+
+### An AI turn that writes a huge proposal shows nothing for minutes
+
+- **Noticed:** 2026-10-04: turns past 15 minutes with no feedback or stop.
+- **Closed by:** da5f7f7 — a per-turn time limit (`AI_TURN_TIMEOUT`, 10 minutes)
+  with a saved message, "progress" events while a tool call is written
+  (OpenAI and Anthropic stream the arguments to `ChatRequest.OnToolArgs`),
+  the turn's running time, and a Stop button that closes the request, saved
+  as "⏹ Stopped by the developer." (`TestSendMessage_TurnTimeLimit`, e2e
+  ai-turn-controls; live: Stop after 4 progress events.)
+
+### The AI plan check stops after three refusals and the model asks instead
+
+- **Noticed:** 2026-10-04: five turns ended "shall I propose it?".
+- **Closed by:** da5f7f7 — `planRetries`: three corrections, more (up to eight)
+  while the failures fall, then the passing steps (the chat lists what was
+  left out), then a stop that tells the model not to ask; the prompt says a
+  requested stage is proposed. Plan-check warnings for the two typical
+  formula errors (a Percentage metric multiplied in without / 100;
+  `SUMIFS(src, D, D)` where a LOOKUP gives the total) go back once and are
+  shown with the proposal. (`TestSendMessage_RetriesWhileFailuresFall…`,
+  `…PassingStepsComeWithWhatWasLeftOut`, `…WarnsOnceThenShowsWithWarnings`,
+  `TestPercentFactorMisuse`, `TestSelfCriteriaSums`.)
+
+### A session goes on checking against its base after its draft is promoted
+
+- **Noticed:** 2026-10-04.
+- **Closed by:** da5f7f7 — promote marks the session finished (`promoted_at`,
+  migration 111) and says a new session is needed; its next message is
+  refused (409 SESSION_PROMOTED) and the console closes the message box with
+  a New session button. (`TestSendMessage_PromotedSessionIsFinished`; live.)
+
+### The developer API stores widget_props keys the console never reads
+
+- **Noticed:** 2026-10-04: `button_label` saved silently.
+- **Closed by:** da5f7f7 — the AI tool's key lists moved to
+  `modeledit.WidgetPropKeys`/`ChartSettingKeys`; the developer widget POST and
+  PATCH refuse an unknown key (a key already stored stays editable).
 
 ### Cells cannot hold a member of a dimension (no pick-lists)
 

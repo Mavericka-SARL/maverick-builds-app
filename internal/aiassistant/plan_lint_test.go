@@ -67,3 +67,57 @@ func TestPercentUnitsMisuse(t *testing.T) {
 		}
 	}
 }
+
+// The AI Developer's two typical formula errors, found rebuilding a sales
+// target-setting workbook: a Percentage metric multiplied in as if it were a
+// fraction, and SUMIFS(src, D, D) for "the total of my region".
+func TestPercentFactorMisuse(t *testing.T) {
+	pct := map[string]bool{"growth_pct": true, "share_pct": true}
+	for _, c := range []struct {
+		formula string
+		isPct   bool
+		want    string
+	}{
+		{"ly_sales * growth_pct", false, "growth_pct"},
+		{"ly_sales * growth_pct / 100", false, ""},
+		{"ly_sales * (growth_pct / 100)", false, ""},
+		{"ly_sales * growth_pct * 0.01", false, ""},
+		{"ROUND(ly_sales * growth_pct, 2)", false, "growth_pct"},
+		{"IF(x > 0, base * share_pct, 0)", false, "share_pct"},
+		{"growth_pct * share", true, ""},               // percent × a fraction is a percent
+		{"growth_pct * share_pct", true, "growth_pct"}, // percent × percent is not
+		{"growth_pct * share_pct / 100", true, ""},
+		{"var / base * 100", true, ""},
+		{"growth_pct - share_pct", true, ""},
+		{"growth_pct > 5", false, ""},
+		{"base * (1 + growth_pct / 100)", false, ""},
+		{"a / growth_pct", false, ""},
+	} {
+		if got := PercentFactorMisuse(c.formula, pct, c.isPct); got != c.want {
+			t.Errorf("PercentFactorMisuse(%q, pct result %v) = %q, want %q", c.formula, c.isPct, got, c.want)
+		}
+	}
+}
+
+func TestSelfCriteriaSums(t *testing.T) {
+	for _, c := range []struct {
+		formula string
+		want    string
+	}{
+		{"weighted_base / SUMIFS(weighted_base, Region, Region)", "SUMIFS weighted_base Region"},
+		{"SUMIFS(x, region, region, product, PRODUCT)", "SUMIFS x region,product"},
+		{"SUMIF(region, region, x)", "SUMIF x region"},
+		{`SUMIFS(x, region, "NA")`, ""},
+		{"SUMIFS(x, region, product)", ""},
+		{"SUMIFS(x, region, region, product, \"SN\")", ""},
+		{"LOOKUP(x, product, \"ALL\")", ""},
+	} {
+		var got []string
+		for _, s := range SelfCriteriaSums(c.formula) {
+			got = append(got, s.Call+" "+s.Source+" "+strings.Join(s.Dims, ","))
+		}
+		if strings.Join(got, ";") != c.want {
+			t.Errorf("SelfCriteriaSums(%q) = %q, want %q", c.formula, got, c.want)
+		}
+	}
+}

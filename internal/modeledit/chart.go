@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -217,4 +218,61 @@ func CheckWidgetType(t string) error {
 		hint = ` — a button that starts a workflow is "automation_button" over a manual automation rule (ref_id: the rule)`
 	}
 	return fmt.Errorf("there is no widget type %q: the types are %s%s", t, strings.Join(WidgetTypes, ", "), hint)
+}
+
+// WidgetPropKeys are the widget_props keys the console reads (WidgetProps in
+// web/src/api/client.ts), and ChartSettingKeys those of widget_props.chart.
+// A key outside them was saved and never read: live, a KPI tile scoped
+// {"Scenario": "RF", "Month": "FY2026"} showed the whole model's total, and
+// a button's "button_label" left it saying "Trigger".
+var (
+	WidgetPropKeys = map[string]bool{"selectors_position": true, "background": true, "font_size": true, "font_weight": true,
+		"color": true, "font_family": true, "alt": true, "image_fit": true, "button_color": true, "default_view": true,
+		"metric_ids": true, "chart": true, "context": true, "kpi_scope": true, "kpi_context_mode": true, "confirm_text": true,
+		"sync_context": true}
+	ChartSettingKeys = map[string]bool{"chart_type": true, "dimension_id": true, "metric_ids": true, "x_metric_id": true,
+		"y_metric_id": true, "context_defaults": true, "bin_count": true, "show_legend": true, "show_values": true,
+		"value_format": true, "refresh_seconds": true, "hide_rollup_members": true}
+)
+
+// CheckWidgetPropKeys refuses a widget_props key — at the top or under
+// "chart" — the console does not read. A key already in stored (a widget
+// saved before this check) passes, so an old widget stays editable.
+func CheckWidgetPropKeys(props, stored json.RawMessage) error {
+	if len(props) == 0 || string(props) == "null" {
+		return nil
+	}
+	var p map[string]json.RawMessage
+	if err := json.Unmarshal(props, &p); err != nil {
+		return fmt.Errorf("widget_props is not a JSON object: %w", err)
+	}
+	var s map[string]json.RawMessage
+	_ = json.Unmarshal(stored, &s)
+	for k := range p {
+		if _, old := s[k]; !WidgetPropKeys[k] && !old {
+			return fmt.Errorf("widget_props has no key %q: its keys are %s", k, sortedKeys(WidgetPropKeys))
+		}
+	}
+	if raw, ok := p["chart"]; ok && string(raw) != "null" {
+		var chart, storedChart map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &chart); err != nil {
+			return fmt.Errorf("widget_props.chart is not a JSON object: %w", err)
+		}
+		_ = json.Unmarshal(s["chart"], &storedChart)
+		for k := range chart {
+			if _, old := storedChart[k]; !ChartSettingKeys[k] && !old {
+				return fmt.Errorf("a chart's settings have no key %q: they are %s", k, sortedKeys(ChartSettingKeys))
+			}
+		}
+	}
+	return nil
+}
+
+func sortedKeys(m map[string]bool) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ", ")
 }

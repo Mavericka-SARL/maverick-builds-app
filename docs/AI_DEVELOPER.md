@@ -184,8 +184,15 @@ the same write executor, the same validation — inside a database transaction
 that is always rolled back (`internal/gateway/ai_proposal_check.go`,
 `aiassistant.NewDryRunWriteExecutor`). A plan with a failing step goes back to
 the model as the tool result, listing each failing step with its error, and is
-never shown; the model corrects it and proposes the whole plan again, at most
-three times in one turn before it must explain the problem instead. Unknown
+never shown; the model corrects it and proposes the whole plan again — three
+times, and more (up to eight) while each attempt fails fewer steps
+(`planRetries`, `internal/gateway/ai_turn.go`). Then it is asked for the steps
+that pass, which are shown with a message listing what the check left out, and
+after that it stops and says what fails; it is never told to ask whether to go
+on. A plan that runs but has a formula looking like the model's typical
+mistakes (`planWarnings`: a Percentage metric multiplied in without dividing
+by 100, `SUMIFS(src, D, D)` on a cell carrying every dimension of `src`) goes
+back once with the warning; proposed again unchanged, it is shown with it. Unknown
 names in formulas say what they most likely meant (`setup_item` → `{Setup
 Item}`; `p_and_l_line` → `{Cost Center}.p_and_l_line`), so one correction
 round usually suffices. Every tool is checked: the workflow, form,
@@ -194,6 +201,13 @@ calculation and notification stores are built on the transaction
 into it and one into a grid resolves its values against the model as the
 plan's earlier steps leave it, and a form integration's posting counts what
 it would post. A step that uses a failed step's result is not run.
+
+**A turn** runs at most `AI_TURN_TIMEOUT` (10 minutes); the console streams
+"progress" while the model writes a tool call (the providers report its
+arguments as they arrive) and offers Stop, which closes the request; both end
+with a saved message. Promoting a session's draft finishes the session: its
+next message is refused with 409 `SESSION_PROMOTED`, and a new session works on
+the promoted revision.
 
 Confirming runs the steps in order and **stops at the first failure**: the
 steps after it are marked *not run*, because they are usually built on it.

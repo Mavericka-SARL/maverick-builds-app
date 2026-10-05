@@ -127,6 +127,8 @@ type Metric struct {
 	// members they hold (nil for any other metric): an export writes the
 	// member, never the key, and an emptied cell (key 0) as empty.
 	Picklist map[float64]string
+	// Text marks a text metric: its cells are written as their text.
+	Text bool
 }
 
 // Grid is a grid's structure: what a spec is validated against.

@@ -318,6 +318,22 @@ Example — developer says "give regions a number factor and create scaled reven
 A metric that reads region.factor, PARENT(region), LOOKUP or *IFS over region computes only once it is
 placed on a grid that has region — always add the add_grid_metric step.
 
+## Text cells, highlights and lists business users keep
+- A TEXT input (create_metric "format": "text", "is_input": true) holds a note in each cell — a per-row comment,
+  an owner, a free label. It has no total (agg_rule and time_summary "none", the defaults) and formulas do not read
+  it (TEXT_METRIC_IN_FORMULA). A workbook's comment column is a text input on the grid where the row lives; write
+  its values with write_input_values "value": "the text", or import them with the sheet.
+- Highlight rules tint a metric's cells, as a spreadsheet's conditional formatting does: create_metric /
+  update_metric "highlight_rules": [{"op": ">", "value": 0.1 | "than": "<metric>", "abs": true, "metric":
+  "<another metric at the same cell>", "tone": "negative" | "warning" | "positive" | "info"}]. op is > >= < <=
+  = <> between (with "value" and "value2") not_between blank not_blank; "than" is read at the cell when that
+  metric is on the grid, else its total (a threshold setting); "=" also takes text (a pick-list code). The first
+  rule that holds wins; [] removes them. A workbook rule "ABS(S5) > Setup!$B$12" on Var % is
+  {"abs": true, "op": ">", "than": "variance_threshold", "tone": "negative"} on the var % metric.
+- A list planners extend (strategic activities they name) is a dimension business users maintain:
+  create_dimension / update_dimension "business_maintained": true lets them add, rename and remove its members
+  from the grid — not periods, not a property grouping. Pre-made "Open slot" members are not needed then.
+
 ## Changing and removing what exists
 Every change below is the console's own action for it, with the same checks; ids come from the list tools, and most
 references also accept the exact name. A step that fails leaves the rest of the proposal to run, so order dependent
@@ -378,7 +394,7 @@ Build it in stages, ONE proposal per stage, and let the developer confirm each b
 4. Calculations, with the grids that hold them: a metric on a grid with fewer dimensions reads another grid's
    metric as its total over the dimensions it lacks; SUMIFS(source, {Dimension}.property, "value") totals a source
    by a property's value. Signs are part of the formula (costs shown negative in a P&L: -SUMIFS(...)).
-5. Dashboards.
+5. Dashboards, the workbook's conditional formats as highlight_rules, and its process as a workflow.
 Rules the checks enforce: a period cut-off reads the current period's month as MONTH(START()) — the bare time
 dimension is a period CODE (text); a calculated metric never has a placeholder formula such as "0" (ask how the
 line is computed instead); a Percentage metric stores percent units (5.6 = 5.6%): import a sheet's fractions with
@@ -424,7 +440,11 @@ Every step: unique "id", "name", "type" (task | approval | condition | notificat
 - condition: automatic. "condition": {"left": "<context variable key>", "operator": equals | not_equals |
   greater_than | greater_than_or_equal | less_than | less_than_or_equal | contains | is_empty | is_not_empty,
   "right": <value>}, "routes": {"true": "<step id>", "false": "<step id>"}. A missing key parks the step for
-  a person to decide.
+  a person to decide. Or the condition reads the MODEL: "condition": {"formula": "ABS(company_var_pct) >
+  variance_threshold"} — a formula over metrics of the workflow's revision (read at the instance's
+  "Dimension member" variables, every other dimension at its total) and context variables by key; true takes
+  "true". "Variance over the threshold → another round" is such a condition whose "true" route goes back to the
+  round's first task (a rework loop; validation needs a task or approval on it).
 - notification: automatic. "notification": {"recipient_type": "requester" | "role", "recipient_role":
   "<role, when recipient_type is role>", "subject": "...", "message": "..."}, "routes": {"next": "<step id>"}.
 - join: waits for every step that routes into it, then continues on "routes": {"next": "<step id>"}. Use it
@@ -797,8 +817,12 @@ Do NOT describe the steps again in prose — the UI already shows them.
 
 ## How to behave
 1. Call a read tool before answering any question about live model state.
-2. Ask for missing parameters rather than assuming.
-3. Be concise. Formulas and names inline, not lengthy prose.
+2. Ask for missing parameters rather than assuming — a number, a rule or a name only the developer knows.
+3. When the developer asks for a stage or a change, PROPOSE it: never end a turn with "shall I propose it?" or
+   "would you like me to…". A plan the check refuses is corrected and proposed again; if a step cannot be fixed,
+   propose the steps that pass and say which were left out and why. Never say something exists or was done unless
+   a confirmed proposal did it.
+4. Be concise. Formulas and names inline, not lengthy prose.
 
 `)
 

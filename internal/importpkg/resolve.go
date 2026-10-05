@@ -181,16 +181,23 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 
 	// picklistOf returns the dimension a pick-list metric's cells hold
 	// members of ("" for any other metric), looked up once per metric.
-	picklistDims := map[string]string{}
-	picklistOf := func(metricID string) string {
-		if d, ok := picklistDims[metricID]; ok {
-			return d
-		}
-		var d string
-		_ = pool.QueryRow(ctx, `SELECT COALESCE(picklist_dimension_id::text,'') FROM model.metric_def WHERE id=$1::uuid`, metricID).Scan(&d)
-		picklistDims[metricID] = d
-		return d
+	// isText reports a text metric, whose cells hold the file's text as is.
+	type metricKind struct {
+		picklistDim string
+		text        bool
 	}
+	kinds := map[string]metricKind{}
+	kindOf := func(metricID string) metricKind {
+		if k, ok := kinds[metricID]; ok {
+			return k
+		}
+		var k metricKind
+		_ = pool.QueryRow(ctx, `SELECT COALESCE(picklist_dimension_id::text,''), (format = 'text' AND is_input) FROM model.metric_def WHERE id=$1::uuid`, metricID).Scan(&k.picklistDim, &k.text)
+		kinds[metricID] = k
+		return k
+	}
+	picklistOf := func(metricID string) string { return kindOf(metricID).picklistDim }
+	isText := func(metricID string) bool { return kindOf(metricID).text }
 	metricNameToID := map[string]string{} // populated lazily for legacy metric_id-as-name references
 	resolveMetricRef := func(ref string) (id string, ok bool) {
 		if looksLikeUUID.MatchString(ref) {
@@ -307,6 +314,15 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 					ErrorCode: "UNKNOWN_METRIC", RawValue: ev.metricRef,
 					Message: "\"" + ev.metricRef + "\" does not match any metric in this model",
 				})
+				continue
+			}
+			if isText(metricID) {
+				memberCopy := make(map[string]string, len(dimMembers))
+				for k, v := range dimMembers {
+					memberCopy[k] = v
+				}
+				text := ev.valueRaw
+				staged = append(staged, StagingRow{MetricID: metricID, DimMembers: memberCopy, Text: &text, RowNumber: row.RowNumber})
 				continue
 			}
 			if dimID := picklistOf(metricID); dimID != "" {

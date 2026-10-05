@@ -314,7 +314,8 @@ func tagSuffix(tagList []string) string {
 func (e *ToolExecutor) listMetrics(ctx context.Context) (string, error) {
 	rows, err := e.pool.Query(ctx, `
 		SELECT m.name, m.is_input, COALESCE(m.formula,''), m.format, m.agg_rule, m.tags, COALESCE(m.label,''),
-		       COALESCE((SELECT d.name FROM model.dimension_def d WHERE d.id = m.picklist_dimension_id),'')
+		       COALESCE((SELECT d.name FROM model.dimension_def d WHERE d.id = m.picklist_dimension_id),''),
+		       CASE WHEN m.highlight_rules = '[]'::jsonb THEN '' ELSE m.highlight_rules::text END
 		FROM model.metric_def m
 		WHERE m.model_id=$1::uuid AND m.revision_id=$2::uuid
 		ORDER BY m.is_input DESC, m.name`, e.modelID, e.revID)
@@ -329,10 +330,13 @@ func (e *ToolExecutor) listMetrics(ctx context.Context) (string, error) {
 		var name, formula, format, agg string
 		var isInput bool
 		var tagList []string
-		var label, picklist string
-		_ = rows.Scan(&name, &isInput, &formula, &format, &agg, &tagList, &label, &picklist)
+		var label, picklist, highlights string
+		_ = rows.Scan(&name, &isInput, &formula, &format, &agg, &tagList, &label, &picklist, &highlights)
 		if picklist != "" {
 			format += " of " + picklist
+		}
+		if highlights != "" {
+			agg += ", highlight_rules: " + highlights
 		}
 		if label != "" {
 			name = fmt.Sprintf("%s \"%s\"", name, label)
@@ -409,7 +413,8 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 		SELECT d.name, COALESCE(m.code,''), COALESCE(m.label,''), COALESCE(pm.code,'') AS parent_code,
 		       COALESCE(m.properties,'{}'::jsonb)::text,
 		       d.dimension_type, COALESCE(d.time_granularity,''), COALESCE(d.fiscal_year_start_month,0),
-		       COALESCE(m.period_start::text,''), COALESCE(m.period_end::text,''), d.tags, COALESCE(btrim(m.formula),'')
+		       COALESCE(m.period_start::text,''), COALESCE(m.period_end::text,''), d.tags, COALESCE(btrim(m.formula),''),
+		       d.business_maintained
 		FROM model.dimension_def d
 		LEFT JOIN model.dimension_member m ON m.dimension_id = d.id
 		LEFT JOIN model.dimension_member pm ON pm.id = m.parent_member_id
@@ -429,9 +434,13 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 		var dname, code, label, parent, propsRaw, dimType, granularity, pStart, pEnd, memberFormula string
 		var fiscalStart int
 		var tagList []string
-		_ = rows.Scan(&dname, &code, &label, &parent, &propsRaw, &dimType, &granularity, &fiscalStart, &pStart, &pEnd, &tagList, &memberFormula)
+		var businessMaintained bool
+		_ = rows.Scan(&dname, &code, &label, &parent, &propsRaw, &dimType, &granularity, &fiscalStart, &pStart, &pEnd, &tagList, &memberFormula, &businessMaintained)
 		if len(tagList) > 0 {
 			dimTags[dname] = " [" + strings.TrimPrefix(tagSuffix(tagList), ", ") + "]"
+		}
+		if businessMaintained && !strings.Contains(dimTags[dname], "business-maintained") {
+			dimTags[dname] += " [business-maintained: business users add, rename and remove its members]"
 		}
 		period := ""
 		if dimType == "time" {

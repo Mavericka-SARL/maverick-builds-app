@@ -88,6 +88,8 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 		SourceDimensionID   json.RawMessage `json:"source_dimension_id"`
 		SourceDimensionName json.RawMessage `json:"source_dimension_name"`
 		SourceProperty      json.RawMessage `json:"source_property"`
+		// Business users add, rename and remove its members.
+		BusinessMaintained *bool `json:"business_maintained"`
 	}
 	var sent map[string]json.RawMessage
 	if err := decodeParams(raw, &p); err != nil {
@@ -204,11 +206,29 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 		return "", "", fmt.Errorf("update dimension: %w", err)
 	}
 
+	if p.BusinessMaintained != nil {
+		if *p.BusinessMaintained {
+			if err := metricformula.CheckBusinessMaintainable(ctx, e.pool, dimID); err != nil {
+				return "", "", err
+			}
+		}
+		if _, err := e.pool.Exec(ctx, `UPDATE model.dimension_def SET business_maintained=$2 WHERE id=$1::uuid`, dimID, *p.BusinessMaintained); err != nil {
+			return "", "", fmt.Errorf("update dimension: %w", err)
+		}
+	}
+
 	display := curName
 	if name != "" {
 		display = name
 	}
 	var changes []string
+	if p.BusinessMaintained != nil {
+		if *p.BusinessMaintained {
+			changes = append(changes, "business users now maintain its members")
+		} else {
+			changes = append(changes, "its members are the developer's again")
+		}
+	}
 	if name != "" && name != curName {
 		changes = append(changes, fmt.Sprintf("renamed from '%s'", curName))
 	}

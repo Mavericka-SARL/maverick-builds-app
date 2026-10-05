@@ -574,6 +574,16 @@ function ActivityPanel({ sessionId, onClose }: { sessionId: string; onClose: () 
   );
 }
 
+// MAX_PROPOSAL_STEPS mirrors aiassistant.MaxProposalSteps: a confirmed
+// batch this long very likely continues.
+const MAX_PROPOSAL_STEPS = 100;
+
+// formatElapsed is a running turn's time, m:ss.
+function formatElapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
 // ── Main AIAssistant component ────────────────────────────────────────────────
 
 export function AIAssistant({ revisionId, revisionName }: { revisionId?: string; revisionName?: string } = {}) {
@@ -586,6 +596,15 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
   const [thinking, setThinking]     = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
   const [toolStatus, setToolStatus] = useState<string | null>(null);
+  // A long turn shows how long it has run and how much of a proposal the
+  // model has written; Stop closes the request, and the server saves
+  // "Stopped". proposalWarnings are the plan check's warnings on the
+  // proposal shown.
+  const [progress, setProgress] = useState<{ tool?: string; chars?: number; steps?: number } | null>(null);
+  const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const [proposalWarnings, setProposalWarnings] = useState<string[]>([]);
+  const abortRef = useRef<AbortController | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [error, setError]           = useState<string | null>(null);
   const [hoveredSession, setHoveredSession] = useState<string | null>(null);
@@ -633,6 +652,12 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
     queryKey: ["ai-settings"],
     queryFn: api.aiGetSettings,
   });
+
+  useEffect(() => {
+    if (turnStartedAt == null) return;
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [turnStartedAt]);
 
   // Auto-scroll to bottom when messages change.
   useEffect(() => {
@@ -776,7 +801,7 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
     }
   };
 
-  // Auto-continue: when a confirmed proposal executes ALL 50 steps (the
+  // Auto-continue: when a confirmed proposal executes ALL 100 steps (the
   // server-side batch cap), the plan almost certainly has more batches —
   // send the follow-up automatically instead of making the developer type
   // "continue" between every batch. Each batch still lands as a proposal
@@ -834,6 +859,11 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
 
     setStreamingContent("");
     setToolStatus(null);
+    setProgress(null);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setTurnStartedAt(Date.now());
+    setNowTick(Date.now());
 
     try {
       await api.aiSendMessage(sid, content, (event) => {
@@ -843,13 +873,19 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
             break;
           case "tool_status":
             setToolStatus(event.tool ?? null);
+            setProgress(null);
             setStreamingContent(""); // a fresh LLM turn is starting
+            break;
+          case "progress":
+            setProgress({ tool: event.tool, chars: event.chars, steps: event.steps });
             break;
           case "proposal":
             setStreamingContent("");
             setToolStatus(null);
+            setProgress(null);
             setMessages(event.messages ?? []);
             setPendingProposal(event.proposal ?? null);
+            setProposalWarnings(event.warnings ?? []);
             if (event.session) setCurrentSession(event.session);
             qc.invalidateQueries({ queryKey: ["ai-proposals", sid] });
             break;
@@ -865,7 +901,7 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
             setMessages(prev => prev.filter(m => m.id !== optimistic.id));
             break;
         }
-      }, revisionId);
+      }, revisionId, ctrl.signal);
       // The auto-generated title lands asynchronously shortly after the
       // first send — refetch the list now and once more after the namer's
       // window so the "Session" placeholder becomes the real name.
@@ -873,16 +909,33 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
       qc.invalidateQueries({ queryKey: ["ai-conversions", sid] });
       setTimeout(() => qc.invalidateQueries({ queryKey: ["ai-sessions"] }), 5000);
     } catch (e) {
-      setError((e as Error).message);
-      // Remove optimistic message on failure.
-      setMessages(prev => prev.filter(m => m.id !== optimistic.id));
+      if (ctrl.signal.aborted) {
+        // Stopped: the server saved what it had and "Stopped by the developer".
+        setTimeout(() => {
+          api.aiGetSession(sid).then(data => setMessages(data.messages ?? [])).catch(() => undefined);
+        }, 800);
+      } else if ((e as { code?: string }).code === "SESSION_PROMOTED") {
+        setCurrentSession(prev => (prev ? { ...prev, promoted_at: prev.promoted_at ?? new Date().toISOString() } : prev));
+        setMessages(prev => prev.filter(m => m.id !== optimistic.id));
+        setInput(content);
+      } else {
+        setError((e as Error).message);
+        // Remove optimistic message on failure.
+        setMessages(prev => prev.filter(m => m.id !== optimistic.id));
+      }
     } finally {
+      abortRef.current = null;
+      setTurnStartedAt(null);
+      setProgress(null);
       setThinking(false);
       setStreamingContent("");
       setToolStatus(null);
       inputRef.current?.focus();
     }
   };
+  const stopTurn = () => abortRef.current?.abort();
+  const elapsed = turnStartedAt == null ? "" : formatElapsed(nowTick - turnStartedAt);
+  const promoted = !!currentSession?.promoted_at;
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -1072,6 +1125,16 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
           ))}
 
           {/* Pending proposal — show after the last assistant message */}
+          {pendingProposal && sessionId && proposalWarnings.length > 0 && (
+            <div className="mvx-chat-row">
+              <div className="mvx-chat-bubble" role="note" style={{ border: "1px solid var(--color-warning-border)", background: "var(--color-warning-bg)", color: "var(--color-warning-text)" }}>
+                <strong>The plan check warns:</strong>
+                <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                  {proposalWarnings.map((w, i) => <li key={i}>{w}</li>)}
+                </ul>
+              </div>
+            </div>
+          )}
           {pendingProposal && sessionId && (
             <ProposalPanel
               proposal={pendingProposal}
@@ -1086,7 +1149,7 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
                 // likely continues — ask for the next batch automatically.
                 if (
                   updated.status === "executed" &&
-                  (updated.steps?.length ?? 0) >= 50 &&
+                  (updated.steps?.length ?? 0) >= MAX_PROPOSAL_STEPS &&
                   autoContinueRounds.current < AUTO_CONTINUE_LIMIT
                 ) {
                   autoContinueRounds.current += 1;
@@ -1098,7 +1161,7 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
 
           {thinking && streamingContent && (
             <div className="mvx-chat-row">
-              <div className="mvx-chat-bubble">{streamingContent}</div>
+              <div className="mvx-chat-bubble">{streamingContent}{elapsed && <span className="mvx-admin-muted" style={{ marginLeft: 8 }}>{elapsed}</span>}</div>
             </div>
           )}
 
@@ -1106,8 +1169,13 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
             <div className="mvx-chat-row">
               <div className="mvx-chat-bubble mvx-chat-bubble--pending">
                 <span style={{ animation: "pulse 1s infinite" }}>
-                  {toolStatus ? `Calling ${toolStatus}…` : "Thinking…"}
+                  {progress?.tool === "propose_actions"
+                    ? `Writing the proposal — ${progress.steps ?? 0} step${progress.steps === 1 ? "" : "s"} so far (${Math.max(1, Math.round((progress.chars ?? 0) / 1024))} KB)…`
+                    : progress?.tool
+                      ? `Writing ${progress.tool} (${Math.max(1, Math.round((progress.chars ?? 0) / 1024))} KB)…`
+                      : toolStatus ? `Calling ${toolStatus}…` : "Thinking…"}
                 </span>
+                {elapsed && <span className="mvx-admin-muted" style={{ marginLeft: 8 }}>{elapsed}</span>}
               </div>
             </div>
           )}
@@ -1119,6 +1187,13 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
 
         {/* Input bar */}
         <div style={{ padding: "12px 24px 20px", borderTop: "1px solid var(--color-border)" }}>
+          {promoted && (
+            <div role="status" style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, padding: "8px 12px", borderRadius: 8,
+              border: "1px solid var(--color-info-border)", background: "var(--color-info-bg)" }}>
+              <span style={{ flex: 1 }}>This session's draft was promoted, so the session is finished. Start a new session to keep building — it works on the promoted revision.</span>
+              <Button size="sm" variant="primary" disabled={newSession.isPending} onClick={() => newSession.mutate()}>New session</Button>
+            </div>
+          )}
           {sessionId && <SessionExports sessionId={sessionId} />}
           {sessionId && <SessionConversions sessionId={sessionId} />}
           {/* Attached document chips */}
@@ -1163,20 +1238,31 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder={sessionId ? "Ask about your model… (Enter to send, Shift+Enter for newline)" : "Start a new session to begin chatting"}
-              disabled={thinking}
+              placeholder={promoted ? "This session is finished — start a new session" : sessionId ? "Ask about your model… (Enter to send, Shift+Enter for newline)" : "Start a new session to begin chatting"}
+              disabled={thinking || promoted}
               rows={2}
               style={{ flex: 1, resize: "none" }}
               aria-label="Message"
             />
-            <Button
-              variant="primary"
-              disabled={!input.trim() || thinking}
-              onClick={sendMessage}
-              style={{ flexShrink: 0, height: 42 }}
-            >
-              Send
-            </Button>
+            {thinking ? (
+              <Button
+                variant="dangerSecondary"
+                onClick={stopTurn}
+                style={{ flexShrink: 0, height: 42 }}
+                aria-label="Stop the turn"
+              >
+                Stop
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                disabled={!input.trim() || promoted}
+                onClick={sendMessage}
+                style={{ flexShrink: 0, height: 42 }}
+              >
+                Send
+              </Button>
+            )}
           </div>
           <div className="mvx-admin-muted" style={{ marginTop: 6, fontSize: 11 }}>
             Provider: {settings?.provider || "openai"} · Model: {settings?.model || settings?.default_models?.[settings?.provider || "openai"] || "provider default"}

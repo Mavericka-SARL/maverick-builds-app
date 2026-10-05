@@ -17,6 +17,7 @@
 <tr><td><code>sales * region.nope</code></td><td>UNKNOWN_PROPERTY: … declare it on the dimension first</td><td>Declare the property (Dimensions › Dimension Properties)</td></tr>
 <tr><td><code>LOOKUP(sales, region.segment, "SMB")</code></td><td>DIMENSION_ARGUMENT_REQUIRED: expected a dimension name</td><td>Use a bare dimension; filter by property with SUMIFS</td></tr>
 <tr><td><code>LOOKUP(sales, currency, "EUR")</code></td><td>DIMENSION_NOT_ON_SOURCE: … currency is not one of sales's dimensions</td><td>Look up along a dimension the source has</td></tr>
+<tr><td><code>LEN(act_comment)</code>, <code>COUNTIFS(act_comment, "&lt;&gt;")</code></td><td>TEXT_METRIC_IN_FORMULA: act_comment is a text metric: its cells hold notes, which formulas do not read</td><td>Keep the notes for people; count with a pick-list or a number beside them</td></tr>
 <tr><td><code>LAG(sales, 1.5, 0)</code></td><td>TIME_OFFSET_NOT_INTEGER: the offset must be a whole number</td><td>Whole numbers only</td></tr>
 <tr><td><code>MOVINGSUM(sales, lag_n, 0)</code></td><td>MOVING_WINDOW_NOT_LITERAL</td><td>Window bounds are literals</td></tr>
 <tr><td><code>MOVINGSUM(sales, -1, 0, MEDIAN)</code></td><td>#VALUE!: unknown keyword MEDIAN (expected one of SUM, AVERAGE, MIN, MAX)</td><td>Use one of the keywords</td></tr>

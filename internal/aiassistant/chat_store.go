@@ -35,6 +35,9 @@ type Session struct {
 	// request, renameable. Empty = unnamed (client falls back to the date).
 	Title     string    `json:"title"`
 	CreatedAt time.Time `json:"created_at"`
+	// PromotedAt is set once the session's draft was promoted: the session
+	// is finished, and its next message is refused (start a new session).
+	PromotedAt *time.Time `json:"promoted_at,omitempty"`
 }
 
 // CreateSession starts a session in modelID, a model of appID — a model of
@@ -48,9 +51,9 @@ func (s *ChatStore) CreateSession(ctx context.Context, appID, modelID, userID, p
 		INSERT INTO ai_assistant.session (application_id, model_id, user_id, llm_provider, llm_model)
 		SELECT m.application_id, m.id, $3::uuid, $4, $5
 		FROM core.model m WHERE m.id = $2::uuid AND m.application_id = $1::uuid
-		RETURNING id::text, application_id::text, model_id::text, user_id::text, llm_provider, llm_model, draft_revision_id::text, title, created_at
+		RETURNING id::text, application_id::text, model_id::text, user_id::text, llm_provider, llm_model, draft_revision_id::text, title, created_at, promoted_at
 	`, appID, modelID, userID, provider, model).Scan(
-		&sess.ID, &sess.AppID, &sess.ModelID, &sess.UserID, &sess.LLMProvider, &sess.LLMModel, &draftRevID, &sess.Title, &sess.CreatedAt,
+		&sess.ID, &sess.AppID, &sess.ModelID, &sess.UserID, &sess.LLMProvider, &sess.LLMModel, &draftRevID, &sess.Title, &sess.CreatedAt, &sess.PromotedAt,
 	)
 	if draftRevID != nil {
 		sess.DraftRevisionID = *draftRevID
@@ -61,7 +64,7 @@ func (s *ChatStore) CreateSession(ctx context.Context, appID, modelID, userID, p
 // ListSessions lists the user's sessions in one model, newest first.
 func (s *ChatStore) ListSessions(ctx context.Context, modelID, userID string) ([]Session, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id::text, application_id::text, model_id::text, user_id::text, llm_provider, llm_model, draft_revision_id::text, title, created_at
+		SELECT id::text, application_id::text, model_id::text, user_id::text, llm_provider, llm_model, draft_revision_id::text, title, created_at, promoted_at
 		FROM ai_assistant.session
 		WHERE model_id=$1::uuid AND user_id=$2::uuid
 		ORDER BY created_at DESC LIMIT 20
@@ -74,7 +77,7 @@ func (s *ChatStore) ListSessions(ctx context.Context, modelID, userID string) ([
 	for rows.Next() {
 		var sess Session
 		var draftRevID *string
-		if rows.Scan(&sess.ID, &sess.AppID, &sess.ModelID, &sess.UserID, &sess.LLMProvider, &sess.LLMModel, &draftRevID, &sess.Title, &sess.CreatedAt) == nil {
+		if rows.Scan(&sess.ID, &sess.AppID, &sess.ModelID, &sess.UserID, &sess.LLMProvider, &sess.LLMModel, &draftRevID, &sess.Title, &sess.CreatedAt, &sess.PromotedAt) == nil {
 			if draftRevID != nil {
 				sess.DraftRevisionID = *draftRevID
 			}
@@ -88,9 +91,9 @@ func (s *ChatStore) GetSession(ctx context.Context, sessionID string) (Session, 
 	var sess Session
 	var draftRevID *string
 	err := s.pool.QueryRow(ctx, `
-		SELECT id::text, application_id::text, model_id::text, user_id::text, llm_provider, llm_model, draft_revision_id::text, title, created_at
+		SELECT id::text, application_id::text, model_id::text, user_id::text, llm_provider, llm_model, draft_revision_id::text, title, created_at, promoted_at
 		FROM ai_assistant.session WHERE id=$1::uuid
-	`, sessionID).Scan(&sess.ID, &sess.AppID, &sess.ModelID, &sess.UserID, &sess.LLMProvider, &sess.LLMModel, &draftRevID, &sess.Title, &sess.CreatedAt)
+	`, sessionID).Scan(&sess.ID, &sess.AppID, &sess.ModelID, &sess.UserID, &sess.LLMProvider, &sess.LLMModel, &draftRevID, &sess.Title, &sess.CreatedAt, &sess.PromotedAt)
 	if err != nil {
 		return Session{}, fmt.Errorf("session not found: %w", err)
 	}
@@ -111,6 +114,14 @@ func (s *ChatStore) SetDraftRevisionID(ctx context.Context, sessionID, revisionI
 		UPDATE ai_assistant.session SET draft_revision_id=NULLIF($2,'')::uuid WHERE id=$1::uuid
 	`, sessionID, revisionID)
 	return err
+}
+
+// MarkPromoted records that the session's draft was promoted: the session
+// is finished.
+func (s *ChatStore) MarkPromoted(ctx context.Context, sessionID string) (time.Time, error) {
+	var at time.Time
+	err := s.pool.QueryRow(ctx, `UPDATE ai_assistant.session SET promoted_at=now() WHERE id=$1::uuid RETURNING promoted_at`, sessionID).Scan(&at)
+	return at, err
 }
 
 // RenameSession sets the session's title (owner-scoped, like delete).

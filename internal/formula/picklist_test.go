@@ -126,10 +126,10 @@ func TestMetricCriteriaRanges(t *testing.T) {
 		formula string
 		want    float64
 	}{
-		{`SUMIFS(spend, act_region, region)`, 15},                         // A1 + A3
+		{`SUMIFS(spend, act_region, region)`, 15},                            // A1 + A3
 		{`SUMIFS(spend, act_region, region, act_status, "<>Cancelled")`, 10}, // A1
 		{`SUMIFS(spend, act_region, "EU")`, 20},
-		{`SUMIFS(spend, act_region, "")`, 7},      // A4 has no region
+		{`SUMIFS(spend, act_region, "")`, 7},       // A4 has no region
 		{`COUNTIFS(act_region, "NA")`, 2},          // counts activities
 		{`COUNTIFS(act_status, "<>Cancelled")`, 3}, // blank status included
 		{`SUMIFS(spend, spend, ">=10")`, 30},       // a numeric metric range

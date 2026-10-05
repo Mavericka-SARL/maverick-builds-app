@@ -22,8 +22,10 @@ import (
 
 // Entry is one value the cell held.
 type Entry struct {
-	ID        string    `json:"id"`
-	Value     float64   `json:"value"`
+	ID    string  `json:"id"`
+	Value float64 `json:"value"`
+	// Text is what a text metric's cell held (migration 111).
+	Text      *string   `json:"text,omitempty"`
 	EnteredAt time.Time `json:"entered_at"`
 	// EnteredBy is the account that wrote the row; empty for rows whose
 	// author no longer exists.
@@ -84,13 +86,13 @@ func History(ctx context.Context, pool *pgxpool.Pool, modelID, revisionID, metri
 		SELECT x.id::text, x.value::float8, x.entered_at, COALESCE(x.entered_by::text,''), COALESCE(x.source_ref::text,''),
 		       x.deleted_at, x.delete_reason,
 		       COALESCE(u.display_name,''), COALESCE(u.email,''),
-		       COALESCE(fm.name,'')
+		       COALESCE(fm.name,''), x.text_value
 		FROM (
-		    SELECT id, value, entered_at, entered_by, source_ref, NULL::timestamptz AS deleted_at, '' AS delete_reason
+		    SELECT id, value, entered_at, entered_by, source_ref, NULL::timestamptz AS deleted_at, '' AS delete_reason, text_value
 		    FROM runtime.fact_input
 		    WHERE model_id = $1::uuid AND revision_id = $2::uuid AND metric_id = $3::uuid AND dim_members = $4::jsonb
 		    UNION ALL
-		    SELECT id, value, entered_at, entered_by, source_ref, deleted_at, delete_reason
+		    SELECT id, value, entered_at, entered_by, source_ref, deleted_at, delete_reason, text_value
 		    FROM runtime.fact_input_history
 		    WHERE model_id = $1::uuid AND revision_id = $2::uuid AND metric_id = $3::uuid AND dim_members = $4::jsonb
 		) x
@@ -107,7 +109,7 @@ func History(ctx context.Context, pool *pgxpool.Pool, modelID, revisionID, metri
 	for rows.Next() {
 		var e Entry
 		var by, ref, name, email, mapping string
-		if err := rows.Scan(&e.ID, &e.Value, &e.EnteredAt, &by, &ref, &e.DeletedAt, &e.DeleteReason, &name, &email, &mapping); err != nil {
+		if err := rows.Scan(&e.ID, &e.Value, &e.EnteredAt, &by, &ref, &e.DeletedAt, &e.DeleteReason, &name, &email, &mapping, &e.Text); err != nil {
 			return nil, err
 		}
 		e.EnteredBy.ID, e.EnteredBy.Name, e.EnteredBy.Email = by, name, email

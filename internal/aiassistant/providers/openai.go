@@ -158,10 +158,10 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (ChatRespons
 }
 
 // ChatStream mirrors Chat but calls onDelta with each incremental text
-// fragment as it arrives. Tool-call arguments are NOT streamed incrementally
-// (they're JSON meant for the executor, not for display) — they're
-// reassembled from indexed fragments per OpenAI's streaming tool-call
-// format and only appear in the final returned ChatResponse.
+// fragment as it arrives. Tool-call arguments are not shown as text (they're
+// JSON meant for the executor) — they're reassembled from indexed fragments
+// per OpenAI's streaming tool-call format, reported to req.OnToolArgs as
+// they grow, and returned whole in the final ChatResponse.
 func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest, onDelta func(string)) (ChatResponse, error) {
 	stream, err := p.client.CreateChatCompletionStream(ctx, p.buildRequest(req))
 	if err != nil {
@@ -215,6 +215,9 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest, onDelt
 				acc.name = tc.Function.Name
 			}
 			acc.args = append(acc.args, tc.Function.Arguments...)
+			if req.OnToolArgs != nil && tc.Function.Arguments != "" {
+				req.OnToolArgs(acc.name, acc.args)
+			}
 		}
 	}
 

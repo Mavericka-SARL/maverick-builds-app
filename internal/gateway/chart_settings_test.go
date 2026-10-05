@@ -38,7 +38,10 @@ func TestChartReadsSettingsAndCompanyTotals(t *testing.T) {
 	for _, c := range []string{"NA", "EU"} {
 		must("POST", "/api/developer/dimensions/"+region+"/members", map[string]any{"code": c, "label": c})
 	}
-	metric := func(body map[string]any) string { body["revision_id"] = rev; return must("POST", "/api/developer/metrics", body) }
+	metric := func(body map[string]any) string {
+		body["revision_id"] = rev
+		return must("POST", "/api/developer/metrics", body)
+	}
 	growth := metric(map[string]any{"name": "growth_pct", "is_input": true, "format": "percentage", "agg_rule": "none"})
 	base := metric(map[string]any{"name": "base_sales", "is_input": true})
 	company := metric(map[string]any{"name": "company_sales", "formula": "base_sales"})

@@ -876,7 +876,7 @@ type fullMetricDef struct {
 	// PicklistDimID is the dimension a pick-list metric's cells hold
 	// members of; "" for any other metric.
 	PicklistDimID string
-	DependsOnID  []string
+	DependsOnID   []string
 }
 
 func (r *ChartResolver) loadAllMetricDefs(ctx context.Context, modelID, revisionID string) (map[string]*fullMetricDef, error) {

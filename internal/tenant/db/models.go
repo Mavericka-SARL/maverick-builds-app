@@ -878,15 +878,16 @@ type AiAssistantProposal struct {
 }
 
 type AiAssistantSession struct {
-	ID              uuid.UUID   `json:"id"`
-	ApplicationID   uuid.UUID   `json:"application_id"`
-	UserID          uuid.UUID   `json:"user_id"`
-	CreatedAt       time.Time   `json:"created_at"`
-	LlmProvider     string      `json:"llm_provider"`
-	LlmModel        string      `json:"llm_model"`
-	DraftRevisionID pgtype.UUID `json:"draft_revision_id"`
-	Title           string      `json:"title"`
-	ModelID         uuid.UUID   `json:"model_id"`
+	ID              uuid.UUID          `json:"id"`
+	ApplicationID   uuid.UUID          `json:"application_id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	CreatedAt       time.Time          `json:"created_at"`
+	LlmProvider     string             `json:"llm_provider"`
+	LlmModel        string             `json:"llm_model"`
+	DraftRevisionID pgtype.UUID        `json:"draft_revision_id"`
+	Title           string             `json:"title"`
+	ModelID         uuid.UUID          `json:"model_id"`
+	PromotedAt      pgtype.Timestamptz `json:"promoted_at"`
 }
 
 type AiAssistantTenantLlmSetting struct {
@@ -1166,6 +1167,7 @@ type ImportImportStaging struct {
 	Value      pgtype.Numeric  `json:"value"`
 	RowNumber  int32           `json:"row_number"`
 	CreatedAt  time.Time       `json:"created_at"`
+	TextValue  *string         `json:"text_value"`
 }
 
 type ModelCalcDependency struct {
@@ -1235,6 +1237,7 @@ type ModelDimensionDef struct {
 	FiscalYearStartMonth *int16          `json:"fiscal_year_start_month"`
 	Tags                 []string        `json:"tags"`
 	LineageID            uuid.UUID       `json:"lineage_id"`
+	BusinessMaintained   bool            `json:"business_maintained"`
 }
 
 type ModelDimensionMember struct {
@@ -1443,6 +1446,7 @@ type ModelMetricDef struct {
 	LineageID              uuid.UUID       `json:"lineage_id"`
 	Label                  *string         `json:"label"`
 	PicklistDimensionID    pgtype.UUID     `json:"picklist_dimension_id"`
+	HighlightRules         json.RawMessage `json:"highlight_rules"`
 }
 
 type ModelRevision struct {
@@ -1575,6 +1579,7 @@ type RuntimeFactInput struct {
 	EnteredAt    time.Time       `json:"entered_at"`
 	RevisionID   uuid.UUID       `json:"revision_id"`
 	SourceRef    pgtype.UUID     `json:"source_ref"`
+	TextValue    *string         `json:"text_value"`
 }
 
 type RuntimeFactInputDefault struct {
@@ -1601,6 +1606,7 @@ type RuntimeFactInputHistory struct {
 	SourceRef    pgtype.UUID     `json:"source_ref"`
 	DeletedAt    time.Time       `json:"deleted_at"`
 	DeleteReason string          `json:"delete_reason"`
+	TextValue    *string         `json:"text_value"`
 }
 
 type RuntimeFormRecord struct {

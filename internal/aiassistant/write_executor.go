@@ -537,6 +537,8 @@ type createMetricParams struct {
 	// PicklistDimension (format "picklist"): the dimension, by name or id,
 	// whose members the metric's cells hold.
 	PicklistDimension string `json:"picklist_dimension"`
+	// HighlightRules tint its cells (metricformula.HighlightRule).
+	HighlightRules json.RawMessage `json:"highlight_rules"`
 }
 
 func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -571,6 +573,10 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 		return "", "", err
 	}
 	p.AggRule, p.TimeSummary = picklist.AggRule, picklist.TimeSummary
+	highlights, err := metricformula.CheckHighlightRules(ctx, e.pool, e.modelID, revID, p.Name, p.HighlightRules)
+	if err != nil {
+		return "", "", err
+	}
 	if p.AggRule == "" {
 		p.AggRule = "sum"
 	}
@@ -652,6 +658,11 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 			return "", "", fmt.Errorf("set pick-list dimension: %w", err)
 		}
 	}
+	if string(highlights) != "[]" {
+		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET highlight_rules=$2::jsonb WHERE id=$1::uuid`, newID, string(highlights)); err != nil {
+			return "", "", fmt.Errorf("set highlight rules: %w", err)
+		}
+	}
 
 	// Wire formula dependencies from the edges the validator resolved. It
 	// looked them up within the metric's own revision; the loop that used to
@@ -685,6 +696,8 @@ type updateMetricParams struct {
 	// PicklistDimension: the dimension (name or id) a pick-list's cells
 	// hold members of; left out keeps it while the format stays "picklist".
 	PicklistDimension string `json:"picklist_dimension"`
+	// HighlightRules: left out keeps them; [] removes them.
+	HighlightRules json.RawMessage `json:"highlight_rules"`
 }
 
 func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -774,6 +787,15 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 				p.PicklistDimension = ""
 			}
 		}
+		if format == metricformula.FormatText && metricIsInput {
+			// A text input's notes have no total.
+			if !has("agg_rule") {
+				p.AggRule = ""
+			}
+			if !has("time_summary") {
+				p.TimeSummary = ""
+			}
+		}
 		if format == metricformula.FormatPicklist {
 			if !has("agg_rule") && p.AggRule != string(rollup.AggNone) && p.AggRule != string(rollup.AggFormula) {
 				p.AggRule = ""
@@ -855,6 +877,15 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 			return "", "", fmt.Errorf("set label: %w", err)
 		}
 	}
+	if has("highlight_rules") {
+		highlights, err := metricformula.CheckHighlightRules(ctx, e.pool, e.modelID, metricRev, p.Name, p.HighlightRules)
+		if err != nil {
+			return "", "", err
+		}
+		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET highlight_rules=$2::jsonb WHERE id=$1::uuid`, p.MetricID, string(highlights)); err != nil {
+			return "", "", fmt.Errorf("set highlight rules: %w", err)
+		}
+	}
 	// Re-wire dependencies when the formula changed.
 	if formulaSent {
 		if er := metricformula.WriteDependencies(ctx, e.pool, p.MetricID, formulaEdges); er != nil {
@@ -916,6 +947,8 @@ type createDimensionParams struct {
 	TimeGranularity string   `json:"time_granularity"`
 	FiscalYearStart int      `json:"fiscal_year_start_month"`
 	Tags            []string `json:"tags"`
+	// BusinessMaintained: business users add, rename and remove its members.
+	BusinessMaintained bool `json:"business_maintained"`
 	// A property grouping (metricformula.ValidateGrouping, the developer
 	// console's rules): this dimension's members group the source
 	// dimension's members by their value of the declared property
@@ -964,6 +997,9 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 	timeCfg := timedim.Config{Type: p.DimensionType, Granularity: p.TimeGranularity, FiscalYearStartMonth: p.FiscalYearStart}
 	if err := timedim.ValidateConfig(&timeCfg); err != nil {
 		return "", "", err
+	}
+	if p.BusinessMaintained && (timeCfg.Type == timedim.TypeTime || p.SourceDimensionID != "" || p.SourceDimensionName != "") {
+		return "", "", fmt.Errorf("a time dimension or a property grouping cannot be business-maintained: its members are not typed")
 	}
 	revID := e.effectiveRevision(p.RevisionID)
 
@@ -1126,6 +1162,14 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 		}
 	}
 
+	if p.BusinessMaintained {
+		if err := metricformula.CheckBusinessMaintainable(ctx, e.pool, newID); err != nil {
+			return "", "", err
+		}
+		if _, err := e.pool.Exec(ctx, `UPDATE model.dimension_def SET business_maintained = true WHERE id=$1::uuid`, newID); err != nil {
+			return "", "", fmt.Errorf("set business_maintained: %w", err)
+		}
+	}
 	msg := fmt.Sprintf("Dimension '%s' created (id: %s)", p.Name, newID)
 	if len(p.Members) > 0 {
 		msg += fmt.Sprintf(" with %d member(s)", len(p.Members))
@@ -2341,8 +2385,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 	if srcID != "" {
 		// Copy metrics
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO model.metric_def (model_id, name, label, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id)
-			SELECT model_id, name, label, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id
+			INSERT INTO model.metric_def (model_id, name, label, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules)
+			SELECT model_id, name, label, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 		`, e.modelID, newID, srcID); err != nil {
 			return "", "", fmt.Errorf("copy metrics into new revision: %w", err)
@@ -2416,9 +2460,9 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			WITH
 			new_dims AS (
 				INSERT INTO model.dimension_def (model_id, name, agg_rule, properties, revision_id, source_property,
-				                                 dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id)
+				                                 dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained)
 				SELECT model_id, name, agg_rule, properties, $2::uuid, source_property,
-				       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id
+				       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained
 				FROM model.dimension_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 				RETURNING id AS new_id, name
 			),
@@ -2576,7 +2620,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 		// input metric blank.
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO runtime.fact_input
-			  (model_id, revision_name, metric_id, dim_members, value, entered_by, revision_id, source_ref, entered_at)
+			  (model_id, revision_name, metric_id, dim_members, value, entered_by, revision_id, source_ref, entered_at, text_value)
 			SELECT
 				fi.model_id, fi.revision_name,
 				new_m.id,
@@ -2588,7 +2632,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 				                               AND new_d.revision_id = $2::uuid),
 				fi.value, fi.entered_by,
 				$2::uuid,
-				fi.source_ref, fi.entered_at
+				fi.source_ref, fi.entered_at, fi.text_value
 			FROM runtime.fact_input fi
 			JOIN model.metric_def old_m ON old_m.id = fi.metric_id
 			JOIN model.metric_def new_m ON new_m.model_id = old_m.model_id
@@ -3170,7 +3214,7 @@ func (e *WriteExecutor) updateWorkflowDef(ctx context.Context, raw json.RawMessa
 	// Validate verdict next to it, so the model learns what a developer
 	// would still have to fix rather than discovering it at publish.
 	return fmt.Sprintf("Workflow '%s' updated (status: %s, %d step(s), single_active_instance: %v) — %s",
-		def.Name, def.Status, stepCount, def.SingleActiveInstance, validationNote(def)), "", nil
+		def.Name, def.Status, stepCount, def.SingleActiveInstance, e.validationNote(ctx, def)), "", nil
 }
 
 // unmarshalArrayLen returns len(raw) when raw is a JSON array, else an error.

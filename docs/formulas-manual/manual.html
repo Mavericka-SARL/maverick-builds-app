@@ -107,6 +107,7 @@
   <li>A metric sits on <b>one grid</b>. The grid's dimensions are the metric's dimensions: a metric on <i>Plan [region, period]</i> has a value per region and period.</li>
   <li>A formula may read a metric on another grid (see chapter 2, "Reading a metric from another grid").</li>
   <li>Formulas belong to a <b>revision</b>. Editing a formula in a working revision does not touch the active one until you activate it.</li>
+  <li>One other place takes a formula: a workflow's <b>condition step</b> (Workflows › Condition › Tests: The model). It is evaluated once, when the step is reached, over the workflow's revision: <code>ABS(cr_var_pct) &gt; threshold_pct</code> reads each metric at the instance's members (its Dimension member fields), every other dimension at its total, and a name that is no metric reads the instance's context field of that key. True or non-zero takes the true route.</li>
 </ul>
 
 <h3>The Metrics screen</h3>
@@ -439,6 +440,7 @@
 <tr><td>IF(by_region &gt; 12, "Review", "Within_Range")</td><td>a calculated pick-list over a status dimension</td><td>Review for US</td></tr>
 </table>
 <p>A metric range ranges over every dimension of its metric — like a criterion on each — and, being read at other members, is a dependency of the formula: changing an activity's Region recalculates the total. A numeric metric can be a range too: <code>SUMIFS(sales, sales, "&gt;=100")</code>.</p>
+<p>Two readings to tell apart on a cell that carries every dimension of the source — say a Region × Product grid. <code>SUMIFS(weighted_base, Region, Region)</code> keeps the cell's own Product too, so it is the cell's own value, not the region's total; the region's total over products is <code>LOOKUP(weighted_base, Product, "All Products")</code>, the source at the products' total member. The AI Developer's plan check warns of the first.</p>
 
 
 <h2>14. Time series</h2>
@@ -619,6 +621,7 @@ closing = opening + flow           time summary: last</pre>
 <tr><td><code>sales * region.nope</code></td><td>UNKNOWN_PROPERTY: … declare it on the dimension first</td><td>Declare the property (Dimensions › Dimension Properties)</td></tr>
 <tr><td><code>LOOKUP(sales, region.segment, "SMB")</code></td><td>DIMENSION_ARGUMENT_REQUIRED: expected a dimension name</td><td>Use a bare dimension; filter by property with SUMIFS</td></tr>
 <tr><td><code>LOOKUP(sales, currency, "EUR")</code></td><td>DIMENSION_NOT_ON_SOURCE: … currency is not one of sales's dimensions</td><td>Look up along a dimension the source has</td></tr>
+<tr><td><code>LEN(act_comment)</code>, <code>COUNTIFS(act_comment, "&lt;&gt;")</code></td><td>TEXT_METRIC_IN_FORMULA: act_comment is a text metric: its cells hold notes, which formulas do not read</td><td>Keep the notes for people; count with a pick-list or a number beside them</td></tr>
 <tr><td><code>LAG(sales, 1.5, 0)</code></td><td>TIME_OFFSET_NOT_INTEGER: the offset must be a whole number</td><td>Whole numbers only</td></tr>
 <tr><td><code>MOVINGSUM(sales, lag_n, 0)</code></td><td>MOVING_WINDOW_NOT_LITERAL</td><td>Window bounds are literals</td></tr>
 <tr><td><code>MOVINGSUM(sales, -1, 0, MEDIAN)</code></td><td>#VALUE!: unknown keyword MEDIAN (expected one of SUM, AVERAGE, MIN, MAX)</td><td>Use one of the keywords</td></tr>

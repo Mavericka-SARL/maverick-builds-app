@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/mavericks-engine/mavericks/internal/dataexport"
+	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 )
 
@@ -83,7 +84,7 @@ func (h *handler) gridSnapshot(r *http.Request, gridID, revisionID string) (data
 			msg: "this grid mirrors another grid through a cross-dimension rollup and has no values of its own — export the source grid"}
 	}
 
-	snap := dataexport.Snapshot{Cells: resp.Cells}
+	snap := dataexport.Snapshot{Cells: resp.Cells, Texts: resp.Texts}
 	for _, d := range resp.Dimensions {
 		dim := dataexport.Dimension{ID: d.ID, Name: d.Name}
 		for _, m := range d.Members {
@@ -98,7 +99,8 @@ func (h *handler) gridSnapshot(r *http.Request, gridID, revisionID string) (data
 		ownDims[m.ID] = m.DimensionIDs
 	}
 	for _, m := range resp.Metrics {
-		em := dataexport.Metric{ID: m.ID, Name: m.Name, Label: m.Label, DimensionIDs: ownDims[m.ID]}
+		em := dataexport.Metric{ID: m.ID, Name: m.Name, Label: m.Label, DimensionIDs: ownDims[m.ID],
+			Text: m.IsInput && m.Format == metricformula.FormatText}
 		if len(m.PicklistOptions) > 0 {
 			em.Picklist = make(map[float64]string, len(m.PicklistOptions))
 			for _, o := range m.PicklistOptions {

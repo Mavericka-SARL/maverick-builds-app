@@ -44,7 +44,7 @@
 <tr><td>All</td><td><b>Step name</b> (required), <b>Instructions</b> shown to the person acting.</td></tr>
 <tr><td><b>Task</b></td><td><b>Assignee roles</b> (platform roles business_admin and business_user, plus named roles from the Business Admin console; a hint says where to create one), <b>SLA hours</b>, <b>Require comment</b>, <b>Completion button label</b> (default "Complete"), <b>Next step</b> or <b>Parallel branches</b> (add with <b>+ parallel</b>).</td></tr>
 <tr><td><b>Approval</b></td><td><b>Approver roles</b>, <b>SLA hours</b>, <b>Require comment</b>, <b>On approve →</b>, <b>On reject →</b>.</td></tr>
-<tr><td><b>Condition</b></td><td><b>Context field</b>, <b>Operator</b> (equals, not equals, greater than, ≥, less than, ≤, contains, is empty, is not empty), <b>Value</b>, <b>If true →</b>, <b>If false →</b>. Evaluated automatically; if the value is missing the inbox asks a person to pick the branch.</td></tr>
+<tr><td><b>Condition</b></td><td><b>Context field</b>, <b>Operator</b> (equals, not equals, greater than, ≥, less than, ≤, contains, is empty, is not empty), <b>Value</b>, <b>If true →</b>, <b>If false →</b>. Evaluated automatically; if the value is missing the inbox asks a person to pick the branch. <b>Tests</b> chooses between <b>A context field</b> (the above) and <b>The model (a formula)</b>: a formula in the model's language over its metrics and the context fields, such as <code>ABS(cr_var_pct) &gt; threshold_pct</code> — "the collected target is outside the correction threshold → another round". Metrics are read in the workflow's revision at the instance's members (each Dimension member field pins its dimension), every other dimension at its total; a context field is read by its key. True takes <b>If true</b>; a formula that cannot be evaluated parks the step for a person and its comment says why. Over the API the condition is <code>{"formula": "…"}</code>.</td></tr>
 <tr><td><b>Notification</b></td><td><b>Recipient</b>: Requester or Specific role (then <b>Recipient role</b>), <b>Subject</b>, <b>Message</b>, then Next step or parallel branches. Unconfigured notifications complete without notifying anyone; a warning says so.</td></tr>
 <tr><td><b>Join</b></td><td>Waits for parallel branches, then <b>Next step</b>.</td></tr>
 </table>
@@ -54,6 +54,7 @@
 <ul>
   <li>Name present, at least one step, every step named and typed.</li>
   <li>Tasks and approvals have a role; approvals have both routes; conditions have a condition and both routes; a notification to a role names the role.</li>
+  <li>A condition's formula parses, and every name in it is a metric of the workflow's revision or a context field.</li>
   <li>Routes point at existing steps; every step is reachable from the first; some path reaches an end.</li>
   <li>A loop is allowed only if a task or approval sits on it ("nobody could ever stop it" otherwise).</li>
 </ul>

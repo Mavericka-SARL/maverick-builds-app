@@ -91,6 +91,10 @@ func ValidateDef(def *WorkflowDefFull) []string {
 		case "condition":
 			if s["condition"] == nil {
 				errs = append(errs, fmt.Sprintf("Condition step %q missing condition", label))
+			} else if raw, _ := json.Marshal(s["condition"]); conditionFormula(raw) != "" {
+				if e := checkConditionFormula(label, conditionFormula(raw)); e != "" {
+					errs = append(errs, e)
+				}
 			}
 			if routes["true"] == nil {
 				errs = append(errs, fmt.Sprintf("Condition step %q missing true route", label))

@@ -34,6 +34,10 @@ type ChatRequest struct {
 	SystemPrompt string
 	Messages     []Message
 	Tools        []ToolDef
+	// OnToolArgs, when set, is called by ChatStream as a tool call's
+	// arguments arrive, with the call's name and its arguments so far: a
+	// long proposal can show progress while it is being written.
+	OnToolArgs func(name string, args []byte)
 }
 
 // ChatResponse is what the LLM returns.

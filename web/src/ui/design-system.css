@@ -2041,6 +2041,24 @@
   color: var(--color-text-strong);
 }
 
+/* Highlight rules (a metric's conditional highlighting): the cell's tone. */
+.mvx-cell--tone-negative { background: var(--color-danger-bg) !important; color: var(--color-danger) !important; font-weight: 600; }
+.mvx-cell--tone-warning  { background: var(--color-warning-bg) !important; color: var(--color-warning-text) !important; font-weight: 600; }
+.mvx-cell--tone-positive { background: var(--color-success-bg) !important; color: var(--color-success) !important; font-weight: 600; }
+.mvx-cell--tone-info     { background: var(--color-info-bg) !important; color: var(--color-info) !important; font-weight: 600; }
+[class*="mvx-cell--tone-"] .mvx-cell-input { background: transparent; color: inherit; font-weight: inherit; }
+
+/* A business-maintained row's rename / remove, shown on hover or focus. */
+.mvx-member-label__actions { display: inline-flex; gap: 2px; opacity: 0; transition: opacity 0.1s; }
+tr:hover .mvx-member-label__actions,
+.mvx-member-label__actions:focus-within { opacity: 1; }
+
+/* A text cell: a note, typed. */
+.mvx-cell-input--text {
+  width: 200px;
+  text-align: left;
+}
+
 /* A pick-list cell: a member chosen from a list. */
 .mvx-cell-select {
   width: auto;

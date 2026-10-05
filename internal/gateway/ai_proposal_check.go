@@ -25,14 +25,17 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
 )
 
-// maxProposalRejections is how many failing plans the assistant may send
-// back in one turn before it has to stop and explain.
+// maxProposalRejections is how many failing plans the assistant may always
+// send back in one turn; more while the failures keep falling (planRetries).
 const maxProposalRejections = 3
 
 // proposalCheck is what a dry run of a proposal found.
 type proposalCheck struct {
 	problems  []string // one line per step that would fail
 	unchecked []int    // 1-based steps a dry run cannot run (or that use their results)
+	// warnings: formulas that run but look wrong (planWarnings) — only
+	// looked for once nothing fails.
+	warnings []string
 }
 
 // aiCheckProposal runs steps on modelID/revID as confirming them would, in
@@ -47,6 +50,9 @@ func (h *handler) aiCheckProposal(ctx context.Context, sessionID, modelID, revID
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	out, _, err := h.runStepsOn(ctx, tx, sessionID, modelID, revID, userID, steps)
+	if err == nil && len(out.problems) == 0 {
+		out.warnings = planWarnings(ctx, tx, modelID, revID, steps)
+	}
 	return out, err
 }
 
@@ -225,7 +231,7 @@ func usesBlockedStep(params json.RawMessage, blocked map[int]bool) (int, bool) {
 
 // rejection is the tool result a failing plan gets: what fails, and what to
 // do about it.
-func (c proposalCheck) rejection(attempt int) string {
+func (c proposalCheck) rejection(mode retryMode) string {
 	var sb strings.Builder
 	sb.WriteString("Proposal NOT shown to the developer: run against the model exactly as confirming would, it fails —\n")
 	for _, p := range c.problems {
@@ -234,9 +240,12 @@ func (c proposalCheck) rejection(attempt int) string {
 	if len(c.unchecked) > 0 {
 		fmt.Fprintf(&sb, "(Steps %s could not be checked: they use the result of a step that failed.)\n", joinInts(c.unchecked))
 	}
-	if attempt >= maxProposalRejections {
-		sb.WriteString("Do not propose again in this turn. Tell the developer which steps fail and why, and ask how to proceed.")
-	} else {
+	switch mode {
+	case retryPartial:
+		sb.WriteString("Call propose_actions once more with ONLY the steps that pass — leave out the failing steps and the steps that use them — so the developer can confirm that much now. Do not ask whether to: propose it, and in your reply list the steps left out and why they fail.")
+	case retryStop:
+		sb.WriteString("Do not propose again in this turn. Tell the developer, in a short list, which steps fail and why, and what you would change; do not ask whether to propose — their next message says how to go on.")
+	default:
 		sb.WriteString("Fix every failing step — read the current names with list_metrics / list_dimensions if needed — and call propose_actions again with the WHOLE corrected plan.")
 	}
 	return sb.String()

@@ -284,7 +284,7 @@ func TestSendMessage_OversizedProposalRejectedThenBatched(t *testing.T) {
 		}
 	}
 	fake := &multiScriptProvider{resps: []providers.ChatResponse{
-		toolResp("call_big", mkSteps(120)),  // rejected server-side
+		toolResp("call_big", mkSteps(120)),   // rejected server-side
 		toolResp("call_batch", mkSteps(100)), // accepted
 	}}
 

@@ -7,6 +7,7 @@
   <li>A metric sits on <b>one grid</b>. The grid's dimensions are the metric's dimensions: a metric on <i>Plan [region, period]</i> has a value per region and period.</li>
   <li>A formula may read a metric on another grid (see chapter 2, "Reading a metric from another grid").</li>
   <li>Formulas belong to a <b>revision</b>. Editing a formula in a working revision does not touch the active one until you activate it.</li>
+  <li>One other place takes a formula: a workflow's <b>condition step</b> (Workflows › Condition › Tests: The model). It is evaluated once, when the step is reached, over the workflow's revision: <code>ABS(cr_var_pct) &gt; threshold_pct</code> reads each metric at the instance's members (its Dimension member fields), every other dimension at its total, and a name that is no metric reads the instance's context field of that key. True or non-zero takes the true route.</li>
 </ul>
 
 <h3>The Metrics screen</h3>
