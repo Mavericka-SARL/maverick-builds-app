@@ -22,6 +22,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/identity"
 	"github.com/mavericks-engine/mavericks/internal/notification"
 	"github.com/mavericks-engine/mavericks/internal/plan"
+	"github.com/mavericks-engine/mavericks/internal/startersync"
 	"github.com/mavericks-engine/mavericks/internal/workflow"
 	"github.com/rs/zerolog"
 
@@ -412,6 +413,9 @@ func main() {
 		// Results stored by an older calculation engine are recalculated
 		// once (internal/calculation.EngineVersion).
 		go calculation.RunEngineUpgrade(schedCtx, dbPool, blog)
+		// Tenants that signed up earlier get the starter models they lack,
+		// and the current content of those they have (internal/startersync).
+		go startersync.Run(schedCtx, dbPool, blog)
 	}
 	if router != nil {
 		router.Watch(schedCtx, tenantWatchInterval, func(t tenantdb.Tenant, tpool *pgxpool.Pool) {

@@ -285,3 +285,74 @@ func replaceRules(ctx context.Context, tx Execer, userID string, rules []RuleInp
 	}
 	return nil
 }
+
+// RemapRulesToRevision re-points identity.user_access_rule rows at the
+// newly-activated revision's rows, matched by lineage (migration 099): the
+// member or metric of the rule's ref_lineage_id in that revision.
+//
+// Rules store raw ref_id UUIDs, and every revision copy re-mints those UUIDs
+// — so before this, each activation quietly stranded every member- and
+// metric-level access rule on the previous revision's rows. Enforcement no
+// longer depends on the stored ref_id (every path resolves the rule by its
+// lineage in whichever revision is read, writeguard.RulesForRevision); the
+// remap keeps ref_id pointing at the live row for the admin's rule listing.
+//
+// A rule whose lineage has no row in the new revision (its member or metric
+// was deleted there) is left untouched: it keeps pointing at the old row
+// and keeps its lineage, so the old revisions stay restricted. A row
+// re-added under the same code or name is a new lineage and is not
+// restricted until an admin sets a rule on it.
+//
+// Every activation runs it: the gateway's Set active and AI promotion,
+// and internal/startersync bringing a guide model up to date.
+func RemapRulesToRevision(ctx context.Context, db Execer, modelID, revisionID string) error {
+	// Every rule writer sets ref_lineage_id; a rule stored without one (the
+	// resolver's belt-and-braces case) takes the lineage of the row its
+	// ref_id points at, here as in writeguard.RulesForRevision, so it is
+	// moved too.
+	if _, err := db.Exec(ctx, `
+		UPDATE identity.user_access_rule r
+		SET ref_lineage_id = COALESCE(
+		        (SELECT m.lineage_id FROM model.dimension_member m
+		         WHERE r.rule_type = 'dimension_member' AND m.id = CASE WHEN r.ref_id ~* `+UUIDPatternSQL+` THEN r.ref_id::uuid END),
+		        (SELECT md.lineage_id FROM model.metric_def md
+		         WHERE r.rule_type = 'metric' AND md.id = CASE WHEN r.ref_id ~* `+UUIDPatternSQL+` THEN r.ref_id::uuid END))
+		WHERE r.ref_lineage_id IS NULL AND r.rule_type IN ('dimension_member', 'metric')`); err != nil {
+		return fmt.Errorf("rule lineages: %w", err)
+	}
+	// One rule per (user, lineage) is moved — the strictest — and never
+	// onto a row the user already has a rule for: (user_id, rule_type,
+	// ref_id) is unique. A rule left behind still applies by lineage, and
+	// the stricter access wins wherever two land on the same row.
+	for _, q := range []struct{ kind, target string }{
+		{"dimension_member", `model.dimension_member nm
+				JOIN model.dimension_def nd ON nd.id = nm.dimension_id
+				 AND nd.model_id = $1::uuid AND nd.revision_id = $2::uuid`},
+		{"metric", `model.metric_def nm`},
+	} {
+		scope := ""
+		if q.kind == "metric" {
+			scope = "AND nm.model_id = $1::uuid AND nm.revision_id = $2::uuid"
+		}
+		if _, err := db.Exec(ctx, `
+			UPDATE identity.user_access_rule r
+			SET ref_id = c.new_ref
+			FROM (
+				SELECT DISTINCT ON (o.user_id, o.ref_lineage_id) o.id, nm.id::text AS new_ref
+				FROM identity.user_access_rule o
+				JOIN `+q.target+` ON nm.lineage_id = o.ref_lineage_id
+				WHERE o.rule_type = $3::text `+scope+`
+				  AND o.ref_id <> nm.id::text
+				  AND NOT EXISTS (
+				      SELECT 1 FROM identity.user_access_rule x
+				      WHERE x.user_id = o.user_id AND x.rule_type = o.rule_type AND x.ref_id = nm.id::text)
+				ORDER BY o.user_id, o.ref_lineage_id,
+				         CASE o.access WHEN 'hidden' THEN 0 WHEN 'read' THEN 1 ELSE 2 END, o.id
+			) c
+			WHERE r.id = c.id
+		`, modelID, revisionID, q.kind); err != nil {
+			return fmt.Errorf("%s rules: %w", q.kind, err)
+		}
+	}
+	return nil
+}

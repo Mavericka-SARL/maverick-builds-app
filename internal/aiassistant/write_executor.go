@@ -1985,6 +1985,7 @@ type createGridParams struct {
 	// no metric and no dimension.
 	Metrics    []string `json:"metrics"`
 	Dimensions []string `json:"dimensions"`
+	Tags       []string `json:"tags"`
 }
 
 func (e *WriteExecutor) createGrid(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -2003,14 +2004,14 @@ func (e *WriteExecutor) createGrid(ctx context.Context, raw json.RawMessage) (st
 	var err error
 	if revID != "" {
 		err = e.pool.QueryRow(ctx, `
-			INSERT INTO model.grid_def (model_id, name, revision_id)
-			VALUES ($1::uuid, $2, $3::uuid) RETURNING id::text
-		`, e.modelID, p.Name, revID).Scan(&newID)
+			INSERT INTO model.grid_def (model_id, name, revision_id, tags)
+			VALUES ($1::uuid, $2, $3::uuid, $4) RETURNING id::text
+		`, e.modelID, p.Name, revID, tags.Clean(p.Tags)).Scan(&newID)
 	} else {
 		err = e.pool.QueryRow(ctx, `
-			INSERT INTO model.grid_def (model_id, name)
-			VALUES ($1::uuid, $2) RETURNING id::text
-		`, e.modelID, p.Name).Scan(&newID)
+			INSERT INTO model.grid_def (model_id, name, tags)
+			VALUES ($1::uuid, $2, $3) RETURNING id::text
+		`, e.modelID, p.Name, tags.Clean(p.Tags)).Scan(&newID)
 	}
 	if err != nil {
 		return "", "", fmt.Errorf("insert grid: %w", err)
@@ -2183,6 +2184,7 @@ var tagTables = map[string]string{
 	"metric":    "model.metric_def",
 	"dimension": "model.dimension_def",
 	"dashboard": "model.dashboard_def",
+	"grid":      "model.grid_def",
 }
 
 // optionalTags is tags.Clean for an optional field: nil (not sent) stays nil
@@ -2194,8 +2196,8 @@ func optionalTags(in *[]string) []string {
 	return tags.Clean(*in)
 }
 
-// setTags replaces the tags on an existing metric, dimension or dashboard —
-// the tag editor the console has on each. An empty list clears them.
+// setTags replaces the tags on an existing metric, dimension, dashboard or
+// grid — the tag editor the console has on each. An empty list clears them.
 func (e *WriteExecutor) setTags(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p struct {
 		Kind string    `json:"kind"`
@@ -2207,7 +2209,7 @@ func (e *WriteExecutor) setTags(ctx context.Context, raw json.RawMessage) (strin
 	}
 	table, ok := tagTables[p.Kind]
 	if !ok {
-		return "", "", fmt.Errorf(`kind must be "metric", "dimension" or "dashboard"`)
+		return "", "", fmt.Errorf(`kind must be "metric", "dimension", "dashboard" or "grid"`)
 	}
 	if p.ID == "" {
 		return "", "", fmt.Errorf("id is required (the %s's id or exact name)", p.Kind)
@@ -2519,8 +2521,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 				RETURNING id
 			),
 			new_grids AS (
-				INSERT INTO model.grid_def (model_id, name, revision_id)
-				SELECT model_id, name, $2::uuid
+				INSERT INTO model.grid_def (model_id, name, revision_id, tags)
+				SELECT model_id, name, $2::uuid, tags
 				FROM model.grid_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 				RETURNING id AS new_id, name
 			),

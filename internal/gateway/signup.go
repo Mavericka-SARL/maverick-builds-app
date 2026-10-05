@@ -13,6 +13,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/modeltransfer"
 	"github.com/mavericks-engine/mavericks/internal/plan"
 	"github.com/mavericks-engine/mavericks/internal/starter"
+	"github.com/mavericks-engine/mavericks/internal/startersync"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 )
 
@@ -33,7 +34,7 @@ import (
 const (
 	signupRate     = 1.0 / 300 // one attempt per five minutes per address, sustained
 	signupBurst    = 3
-	signupAppName  = "Getting started"
+	signupAppName  = startersync.AppName
 	signupMaxField = 80
 )
 
@@ -206,7 +207,7 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 	//    transaction on the tenant's database: all of them or none.
 	type imported struct{ modelID, revisionID string }
 	var userID, appID string
-	var models []imported // starter.Packages order: the tour first
+	var models []imported // starter.Starters order: the tour first
 	err = pgx.BeginFunc(tctx, h.db.For(tctx), func(tx pgx.Tx) error {
 		if err := tx.QueryRow(tctx, `
 			INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id)
@@ -228,10 +229,15 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 			customerID, workspaceID, signupAppName).Scan(&appID); err != nil {
 			return fmt.Errorf("create application: %w", err)
 		}
-		for _, pkg := range starter.Packages() {
-			mID, rID, err := modeltransfer.Import(tctx, tx, modeltransfer.ImportRequest{ApplicationID: appID, Package: pkg}, userID)
+		for _, s := range starter.Starters() {
+			mID, rID, err := modeltransfer.Import(tctx, tx, modeltransfer.ImportRequest{ApplicationID: appID, Package: s.Package}, userID)
 			if err != nil {
-				return fmt.Errorf("starter model %q: %w", pkg.ModelName, err)
+				return fmt.Errorf("starter model %q: %w", s.Package.ModelName, err)
+			}
+			// Recorded, so later content reaches this tenant as a new
+			// revision (internal/startersync) rather than not at all.
+			if err := startersync.Record(tctx, tx, customerID, s.Key, mID, rID, startersync.Hash(s.Package)); err != nil {
+				return fmt.Errorf("record starter model %q: %w", s.Package.ModelName, err)
 			}
 			models = append(models, imported{mID, rID})
 		}

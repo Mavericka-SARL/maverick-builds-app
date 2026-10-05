@@ -2462,7 +2462,7 @@ func (UnimplementedHandler) UpdateFormRecord(ctx context.Context, req *UpdateRec
 
 // UpdateGrid implements updateGrid operation.
 //
-// Rename a grid.
+// Rename or retag a grid.
 //
 // PATCH /api/developer/grids/{id}
 func (UnimplementedHandler) UpdateGrid(ctx context.Context, req *UpdateGridRequest, params UpdateGridParams) (r UpdateGridRes, _ error) {

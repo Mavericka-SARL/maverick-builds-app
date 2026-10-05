@@ -3,10 +3,11 @@
  * each form GET /api/forms lists: sync (POST /api/forms/{id}/sync, an
  * administrator's) and create_statuses (the statuses a new record may take:
  * draft and submitted for anyone who reaches the form, every status for an
- * administrator). Run › Forms and the dashboard form widget offer exactly
- * that: "Sync to grid" only with sync, a status choice on a new record only
- * among create_statuses and only when there is more than one, and nothing at
- * all from an older server that sends no permissions; Import, which creates
+ * administrator). The dashboard form widget — the one place business users
+ * and business admins work on records; there is no Forms screen — offers
+ * exactly that: "Sync to grid" only with sync, a status choice on a new record
+ * only among create_statuses and only when there is more than one, and nothing
+ * at all from an older server that sends no permissions; Import, which creates
  * records too, only with create_statuses. A sync the server refuses anyway
  * (403) says why in plain words, as a failure, and reloads the forms list so
  * "Sync to grid" follows the server's current answer.
@@ -65,24 +66,19 @@ async function serveForm(page: Page, perms: FormPerms | undefined, syncStatus = 
 
 const row = (page: Page, text: string) => page.getByRole("row").filter({ hasText: text });
 
-async function openRunForms(page: Page) {
-  await loadAs(page, "finance");
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Forms" }).click();
-  await page.getByRole("button", { name: "Purchase Request" }).click();
-  await expect(row(page, "Acme Cloud")).toBeVisible();
-}
-
-async function openFormDashboard(page: Page) {
-  await loadAs(page, "dept_head");
+// The form widget on a dashboard, as a business user (dept_head) and as a
+// business admin (finance) open it. What it offers follows the server's
+// permissions, not the persona: each test serves the permissions it means.
+const openFormDashboard = (persona: string) => async (page: Page) => {
+  await loadAs(page, persona);
   await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Dashboards" }).click();
   await page.getByRole("button", { name: "OPEX form 2" }).first().click();
   await expect(row(page, "Acme Cloud")).toBeVisible();
-}
+};
 
-// hasImport: the surface offers Import (Run › Forms; the widget has none).
 const surfaces = [
-  { name: "Run › Forms", open: openRunForms, hasImport: true },
-  { name: "dashboard form widget", open: openFormDashboard, hasImport: false },
+  { name: "form widget (business user)", open: openFormDashboard("dept_head") },
+  { name: "form widget (business admin)", open: openFormDashboard("finance") },
 ];
 
 async function optionsOf(select: ReturnType<Page["getByLabel"]>) {
@@ -95,8 +91,9 @@ const alert = (page: Page, tone: "success" | "danger", text: string | RegExp) =>
 
 async function fillNewRecord(page: Page) {
   await page.getByRole("button", { name: "New record" }).click();
-  const panel = page.locator(".mvx-panel").filter({ has: page.getByRole("button", { name: "Save" }) });
-  await panel.getByRole("textbox").first().fill("Beta Soft");
+  // By its label: Field ties the label to the control FormFieldInput renders.
+  await page.getByLabel("Vendor").fill("Beta Soft");
+  await expect(page.getByLabel("Amount")).toHaveAttribute("type", "number");
 }
 
 for (const s of surfaces) {
@@ -106,7 +103,8 @@ for (const s of surfaces) {
     await s.open(page);
 
     await expect(page.getByRole("button", { name: "Sync to grid" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Import" })).toHaveCount(s.hasImport ? 1 : 0);
+    await expect(page.getByRole("button", { name: "Import" })).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Export" })).toHaveCount(1);
 
     await fillNewRecord(page);
     const status = page.getByLabel("Status");

@@ -1090,11 +1090,12 @@ components:
 
     GridDef:
       type: object
-      required: [id, name, revision_id, metric_ids, dimension_ids, dimension_levels]
+      required: [id, name, revision_id, tags, metric_ids, dimension_ids, dimension_levels]
       properties:
         id:           { type: string, format: uuid }
         name:         { type: string }
         revision_id:  { type: string }
+        tags:         { type: array, items: { type: string } }
         metric_ids:   { type: array, items: { type: string, format: uuid } }
         dimension_ids: { type: array, items: { type: string, format: uuid } }
         dimension_levels:
@@ -1108,12 +1109,14 @@ components:
       properties:
         name:        { type: string }
         revision_id: { type: string, format: uuid }
+        tags:        { type: array, items: { type: string }, description: "Stored lower case, white space as hyphens, repeats dropped" }
 
     UpdateGridRequest:
       type: object
-      required: [name]
+      description: "Partial: an omitted field keeps the grid's own; at least one must be sent."
       properties:
-        name: { type: string }
+        name: { type: string, minLength: 1 }
+        tags: { type: array, items: { type: string }, description: "Replaces the whole list; [] clears it" }
 
     GridDimensionRequest:
       type: object
@@ -1175,10 +1178,10 @@ components:
 
     UpdateDashboardRequest:
       type: object
-      required: [name]
+      description: "Partial: an omitted field keeps the dashboard's own; at least one must be sent."
       properties:
-        name:      { type: string }
-        tags:      { type: array, items: { type: string } }
+        name:      { type: string, minLength: 1 }
+        tags:      { type: array, items: { type: string }, description: "Replaces the whole list; [] clears it. Stored lower case, white space as hyphens, repeats dropped" }
         folder_id: { type: string, nullable: true, description: "Omit to leave the dashboard where it is; null or an empty string moves it to the root; a folder UUID files it under that folder. Not format:uuid because the empty string is an accepted value." }
 
     CreateWidgetRequest:
@@ -4803,7 +4806,7 @@ paths:
     patch:
       operationId: updateGrid
       tags: [Developer Console]
-      summary: Rename a grid
+      summary: Rename or retag a grid
       parameters:
         - name: id
           in: path

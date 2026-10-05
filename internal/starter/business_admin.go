@@ -152,9 +152,8 @@ Five pages, in order. The fourth has a small model of its own to try things on.`
 
 **Run** is where the day's work happens:
 
-- **Dashboards** — every dashboard of the model you have open, with grids you can type into
+- **Dashboards** — every dashboard of the model you have open, with grids you can type into, and forms whose records you review
 - **Workflow Inbox** — the requests waiting for your decision
-- **Forms** — the records people have entered through the model's forms
 
 **Business Admin** is where you set things up:
 
@@ -184,11 +183,11 @@ func baTheModel() modeltransfer.Dashboard {
 	return baPage("ba-dash-2-model", "2 · The model you work in",
 		baText(`# The model you work in
 
-**Dashboards**, **Forms**, **Roles** and **Access Rules** work on one model at a time: the one you have open. An application can hold several — *Getting started* holds the tour and a guide for each role — so before you change who sees what, check which model you are in. The inbox and **History** are different: they list requests from every model at once.`, 136),
+**Dashboards** (with the forms on them), **Roles** and **Access Rules** work on one model at a time: the one you have open. An application can hold several — *Getting started* holds the tour and a guide for each role — so before you change who sees what, check which model you are in. The inbox and **History** are different: they list requests from every model at once.`, 136),
 
 		baText(`## Switching models
 
-Open **Business Admin › Models**. Each card is an application. Inside it, each model has a row with the name of its live revision: **Working here** marks the one you have open, and **Open** switches to another. The console reloads on that model's **Run › Dashboards**.
+The quickest way is the **Model** list at the top of **Run › Dashboards**: pick another model and its dashboards appear. **Business Admin › Models** shows the same models with more detail: each card is an application, and inside it each model has a row with the name of its live revision. **Working here** marks the one you have open, and **Open** switches to another; the console reloads on that model's **Run › Dashboards**.
 
 The row marked **default** is the model everyone lands on until they choose another; a developer decides which one that is. Your own choice is remembered in this browser only.`, 164),
 
@@ -342,9 +341,9 @@ Open steps are listed under **Pending Actions**, where you can decide the ones a
 
 		baText(`## Forms
 
-**Run › Forms** has a tab for each form a developer has built, with the records entered so far. **New record** adds one. The pencil edits one, including its **Status**: draft, submitted, approved or rejected. Changing the status is a decision in its own right: moving a record to submitted or approved can start a workflow, if a developer set one to listen for it.
+Forms have no screen of their own: a developer places each one on a dashboard as a **Form** widget, and you work on its records there, under **Run › Dashboards**, as business users do. The widget lists the records entered so far. **New record** adds one. The pencil edits one, and the status list on its row changes its **Status**: draft, submitted, approved or rejected. Changing the status is a decision in its own right: moving a record to submitted or approved can start a workflow, if a developer set one to listen for it.
 
-**Export** downloads the records as Excel; **Import** reads CSV or Excel. **Sync to grid** posts the records into the model through the form's mappings.`, 188),
+**Export** downloads the records as Excel; **Import** reads CSV or Excel. **Sync to grid** posts the records into the model through the form's mappings. A form that is on no dashboard cannot be reached; ask a developer to place it.`, 188),
 
 		baText(`## Notifications and cell history
 

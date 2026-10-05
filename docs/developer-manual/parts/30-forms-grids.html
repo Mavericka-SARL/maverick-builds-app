@@ -1,6 +1,6 @@
 <h2>Forms</h2>
 <p class="path">Sidebar: Build › Forms</p>
-<p>A form is a structured record type that business users fill in: a purchase request, an expense claim, a headcount change. This screen defines the <em>schema</em> only. Records are entered and reviewed by business users in their console; posting form values into planning cells is configured under Integrations › Form Records.</p>
+<p>A form is a structured record type that business users fill in: a purchase request, an expense claim, a headcount change. This screen defines the <em>schema</em> only. Records are entered and reviewed through a <b>Form</b> widget on a dashboard; posting form values into planning cells is configured under Integrations › Form Records.</p>
 <figure><img src="img/04-forms.png" alt="Forms screen listing the Purchase Request form with six fields"><figcaption>The form list. Each card shows the display label, the technical name, the field count and the field labels.</figcaption></figure>
 <h3>Controls</h3>
 <table class="ctl">
@@ -21,9 +21,9 @@
   <li><b>Forms are per revision.</b> The list and the create action use the selected revision. Editing never moves a form to another revision.</li>
   <li><b>Same name overwrites.</b> Creating a form whose technical name already exists in the revision silently replaces that form's label and fields. Pick a new name for a new form.</li>
   <li><b>Delete cascades.</b> Deleting a form removes every dashboard widget that shows it and every record ever submitted to it.</li>
-  <li><b>Records live in the business console.</b> Business users create, view and export records there (CSV and XLSX). The developer screen has no record controls.</li>
+  <li><b>Records live on dashboards.</b> Business users and business admins work on records only in a dashboard <b>Form</b> widget: <b>New record</b>, the pencil to edit one, the status list, delete, <b>Export</b> and <b>Import</b> (CSV and XLSX), and, for an administrator, <b>Sync to grid</b> — each offered only when the server allows it to that person. There is no Forms screen in the Run group. The developer screen has no record controls.</li>
   <li><b>Posting to cells is a separate object.</b> A form mapping (Integrations › Form Records) decides which field feeds which input metric, at which dimension members, for which record statuses. Metric and Dimension field types exist so the mapping has something to read.</li>
-  <li><b>Where forms appear.</b> Business users open a form through a dashboard <b>Form</b> widget. A form that is on no dashboard is not reachable by them.</li>
+  <li><b>Where forms appear.</b> Business users and business admins open a form through a dashboard <b>Form</b> widget. A form that is on no dashboard is not reachable by them: place every form people fill in on a dashboard their business role is granted.</li>
 </ul>
 <figure><img src="img/23-form-editor.png" alt="Inline form editor with field rows, types and Required checkboxes"><figcaption>The inline editor. Field rows carry a name, a label, a type and a Required flag; a Metric field shows its By ID / By name choice below the row.</figcaption></figure>
 
@@ -34,9 +34,11 @@
 <h3>Controls</h3>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
-<tr><td><b>Search grids, metrics, dimensions…</b></td><td>Keeps the grids whose name matches, or that hold a matching metric or dimension. The open grid stays in view.</td></tr>
-<tr><td><b>New grid</b> / <b>Cancel</b></td><td>Shows the create row. <b>Grid name</b> is free text (placeholder <code>OPEX Budget</code>); <b>Create</b> is enabled once it is filled.</td></tr>
-<tr><td>Card header</td><td>Name and "n metrics · n dimensions".</td></tr>
+<tr><td><b>Search grids, tags, metrics, dimensions…</b></td><td>Keeps the grids whose name or a tag matches, or that hold a matching metric or dimension. The open grid stays in view.</td></tr>
+<tr><td>Tag chips</td><td>One chip per tag in use, on a row under the toolbar; click to filter, click again to clear. A tag chip on a card filters the same way.</td></tr>
+<tr><td><b>New grid</b> / <b>Cancel</b></td><td>Shows the create row. <b>Grid name</b> is free text (placeholder <code>OPEX Budget</code>); <b>Tags</b> (Enter or comma adds a tag; tags are lowercased and spaces become hyphens); <b>Create</b> is enabled once the name is filled.</td></tr>
+<tr><td>Card header</td><td>Name, its tags, and "n metrics · n dimensions".</td></tr>
+<tr><td>Pencil (<b>Edit name and tags</b>)</td><td>Edits the card's name and tags inline: click a tag to remove it, type in <b>Add tag…</b> to add one. <b>Save</b> writes both; <b>Cancel</b> discards.</td></tr>
 <tr><td><b>Configure</b> / <b>Done</b></td><td>Expands one grid at a time. Done just collapses; nothing is pending.</td></tr>
 <tr><td><b>Search metrics…</b></td><td>Filters by display label or technical name.</td></tr>
 <tr><td>Metric checkboxes</td><td>Ticked = in this grid. Each metric shows an <b>Input</b> or <b>Calc</b> badge. Sections <b>In this grid (n)</b> and <b>Available (n)</b>.</td></tr>
@@ -50,7 +52,7 @@
   <li><b>One grid per metric.</b> Ticking a metric that already belongs to another grid is refused by the server and the box stays unticked after refresh. Untick it in the other grid first. Dimensions can be shared freely.</li>
   <li><b>Same revision.</b> Metrics and grid must be in the selected revision; a mismatch is refused.</li>
   <li><b>Deleting a grid deletes its widgets.</b> Every dashboard widget that showed the grid disappears; the dashboards themselves stay.</li>
-  <li><b>No rename.</b> The screen has no rename control; create a new grid if the name must change.</li>
+  <li><b>Rename and tags.</b> The pencil renames a grid and edits its tags; widgets that show the grid keep showing it. Tags travel with the grid: a new revision and a model export copy them.</li>
   <li><b>Where the table comes from.</b> A grid becomes visible to users through a dashboard <b>Grid</b> widget (Dashboards chapter). The widget decides which dimension is rows, columns or a selector; the grid only decides the ingredients.</li>
   <li><b>Level display.</b> Choosing <b>Leaves only</b> hides parent members from the axis; totals for parents are still computed and appear where the widget shows them.</li>
 </ul>

@@ -161,8 +161,9 @@ a page promising something else. One request creates:
 3. in one transaction on the tenant's database: the person (with the same
    three roles, `business_admin` scoped to the default workspace), an
    application named "Getting started", and the **starter models** —
-   `starter.Packages()` in `internal/starter`, four models in that one
-   application:
+   `starter.Starters()` in `internal/starter`, four models in that one
+   application, each recorded in `core.starter_model` with its key and a
+   hash of its content (see *Starter models after sign-up* below):
    - **Learn the platform**, the guided tour: dashboards of prose and
      diagrams taught on a deliberately tiny example (two teams, four
      quarters, three metrics of which one calculated) so that the grid, the
@@ -210,6 +211,38 @@ flagged `self_service`.
 
 On the dev stack (no identity provider) the response carries `dev_persona`,
 and the page offers to open the console as the new account.
+
+### Starter models after sign-up
+
+A tenant keeps the starter models of the day it signed up unless something
+brings them forward, and tenants that signed up before the guides existed
+(a "Budget vs Actual" model until 2026-09-20, the tour alone until
+2026-09-29) never had them. `internal/startersync` runs on every gateway
+start, once per database, for every tenant that signed up for itself (its
+`tenant.signed_up` audit event, or a `core.starter_model` record). Per
+starter key:
+
+- **never had it** — imported into the tenant's "Getting started"
+  application (made again in its first workspace if it was deleted), as by
+  sign-up; the tour becomes the application's default when it has none;
+- **content changed since** (the recorded hash differs) — the current
+  content is imported as a new revision of the same model, named "Updated
+  <date>", and made live the way Set active does it: the time check, the
+  access rules moved by lineage (the new revision takes the lineage of the
+  live revision's dimensions, members and metrics, by name and code), the
+  business roles' dashboard grants carried by dashboard name. The old
+  revision stays, with anything typed into it;
+- **deleted by the tenant** (`model_id` gone NULL) — not put back;
+- **another revision made live by the tenant** — left alone: the model is
+  theirs now.
+
+A starter model a tenant got before records were kept is found by its name
+in "Getting started" and treated as content changed. Each tenant is one
+transaction under an advisory lock, so replicas starting together do the
+work once; installs and updates are audit events (`model.imported`,
+`revision.activated`) with actor role `platform(starter sync)`, and every
+changed revision is recalculated. A deploy that changes no starter content
+changes nothing.
 
 ## Administration
 

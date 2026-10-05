@@ -571,6 +571,7 @@ export interface GridDef {
   id: string;
   name: string;
   revision_id: string;
+  tags?: string[];
   metric_ids: string[];
   dimension_ids: string[];
   dimension_levels: Record<string, number | null>; // dim_id → display_level
@@ -2323,8 +2324,11 @@ export const api = {
 
   listGrids: (revisionId?: string) =>
     apiFetch<GridDef[]>(`/api/developer/grids${revisionId ? `?revision_id=${revisionId}` : ""}`),
-  createGrid: (body: { name: string; revision_id?: string }) =>
+  createGrid: (body: { name: string; revision_id?: string; tags?: string[] }) =>
     apiFetch<{ id: string }>("/api/developer/grids", { method: "POST", body: JSON.stringify(body) }),
+  // Partial: a field left out keeps the grid's own; tags replace the list.
+  updateGrid: (id: string, body: { name?: string; tags?: string[] }) =>
+    apiFetch<{ status: string }>(`/api/developer/grids/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteGrid: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/grids/${id}`, { method: "DELETE" }),
   addGridMetric: (gridId: string, metricId: string) =>
@@ -2346,9 +2350,10 @@ export const api = {
     apiFetch<DashboardDef[]>(`/api/developer/dashboards${revisionId ? `?revision_id=${revisionId}` : ""}`),
   createDashboard: (body: { name: string; tags?: string[]; revision_id?: string; folder_id?: string }) =>
     apiFetch<{ id: string }>("/api/developer/dashboards", { method: "POST", body: JSON.stringify(body) }),
-  // folder_id: omit to leave the dashboard where it is, "" or null to move it
-  // to the root, an id to file it under that folder.
-  updateDashboard: (id: string, body: { name: string; tags?: string[]; folder_id?: string | null }) =>
+  // Partial: a field left out keeps the dashboard's own; tags replace the
+  // list. folder_id: omit to leave the dashboard where it is, "" or null to
+  // move it to the root, an id to file it under that folder.
+  updateDashboard: (id: string, body: { name?: string; tags?: string[]; folder_id?: string | null }) =>
     apiFetch<{ status: string }>(`/api/developer/dashboards/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 
   // ── Dashboard folders ────────────────────────────────────────────────────

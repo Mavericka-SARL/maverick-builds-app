@@ -115,6 +115,78 @@ test("metrics: tag chips and search filter by tag", async ({ page }) => {
   await expect(rows).toHaveCount(1);
 });
 
+test("grids: tag chips filter, and the edit form sends the name with the tags", async ({ page }) => {
+  await mockApi(page);
+  const gridRows = [
+    { id: "g1", name: "OPEX Planning Grid", tags: ["opex", "plan"], revision_id: "rev-1", metric_ids: [], dimension_ids: [], dimension_levels: {} },
+    { id: "g2", name: "Headcount Grid", tags: ["people"], revision_id: "rev-1", metric_ids: [], dimension_ids: [], dimension_levels: {} },
+  ];
+  let patched: unknown = null;
+  await page.route((url) => url.pathname === "/api/developer/grids", (route) => route.fulfill({ json: gridRows }));
+  await page.route((url) => url.pathname === "/api/developer/grids/g1", async (route) => {
+    patched = route.request().postDataJSON();
+    await route.fulfill({ json: { status: "ok" } });
+  });
+  await loadAs(page, "developer");
+  await nav(page, "Grids").click();
+  const names = page.locator(".mvx-admin-object__name");
+  await expect(names).toHaveText(["OPEX Planning Grid", "Headcount Grid"]);
+
+  // The toolbar's tag chips filter; so does search on a tag.
+  await page.locator(".mvx-toolbar").getByRole("button", { name: "people" }).click();
+  await expect(names).toHaveText(["Headcount Grid"]);
+  await page.locator(".mvx-toolbar").getByRole("button", { name: "people" }).click();
+  await page.getByPlaceholder("Search grids, tags, metrics, dimensions…").fill("opex");
+  await expect(names).toHaveText(["OPEX Planning Grid"]);
+  await page.getByPlaceholder("Search grids, tags, metrics, dimensions…").fill("");
+
+  // Add one tag, remove another.
+  await page.getByRole("button", { name: "Edit grid OPEX Planning Grid" }).click();
+  await page.getByRole("button", { name: "Remove tag plan" }).click();
+  const tag = page.getByRole("textbox", { name: "Add tag" });
+  await tag.fill("Board Pack");
+  await tag.press("Enter");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => patched).toEqual({ name: "OPEX Planning Grid", tags: ["opex", "board-pack"] });
+});
+
+test("grids: a new grid is created with its tags", async ({ page }) => {
+  await mockApi(page);
+  let posted: unknown = null;
+  await page.route((url) => url.pathname === "/api/developer/grids", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    posted = route.request().postDataJSON();
+    await route.fulfill({ json: { id: "g-new", status: "created" } });
+  });
+  await loadAs(page, "developer");
+  await nav(page, "Grids").click();
+  await page.getByRole("button", { name: "New grid" }).click();
+  await page.getByPlaceholder("OPEX Budget").fill("Capex Grid");
+  const tag = page.getByRole("textbox", { name: "Add tag" });
+  await tag.fill("capex");
+  await tag.press("Enter");
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await expect.poll(() => posted).toMatchObject({ name: "Capex Grid", tags: ["capex"] });
+});
+
+test("dashboards: the edit button adds and removes tags", async ({ page }) => {
+  await mockApi(page);
+  let patched: unknown = null;
+  await page.route((url) => url.pathname === "/api/developer/dashboards/dash-2", async (route) => {
+    patched = route.request().postDataJSON();
+    await route.fulfill({ json: { status: "ok" } });
+  });
+  await loadAs(page, "developer");
+  await nav(page, "Dashboards").click();
+  await page.getByRole("button", { name: "Edit dashboard OPEX Dashboard" }).click();
+  await page.getByRole("button", { name: "Remove tag actuals" }).click();
+  const tag = page.getByRole("textbox", { name: "Add tag" });
+  await tag.fill("Monthly Close");
+  await tag.press("Enter");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => patched).toEqual({ name: "OPEX Dashboard", tags: ["finance", "monthly-close"] });
+});
+
 test("users: search by name, e-mail or role", async ({ page }) => {
   await mockApi(page);
   await loadAs(page, "developer");
@@ -161,4 +233,8 @@ test("business admin sidebar groups read Run and Business Admin", async ({ page 
   await loadAs(page, "finance");
   const labels = page.locator(".mvx-sidebar-nav__group-label");
   await expect(labels).toHaveText(["Run", "Business Admin"], { useInnerText: false });
+  // Forms have no screen of their own: records are worked on in a
+  // dashboard's form widget.
+  await expect(page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Dashboards" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Forms" })).toHaveCount(0);
 });

@@ -1205,6 +1205,15 @@ type CoreSchemaVersion struct {
 	CreatedAt     time.Time          `json:"created_at"`
 }
 
+type CoreStarterModel struct {
+	CustomerID  uuid.UUID   `json:"customer_id"`
+	StarterKey  string      `json:"starter_key"`
+	ModelID     pgtype.UUID `json:"model_id"`
+	RevisionID  pgtype.UUID `json:"revision_id"`
+	ContentHash string      `json:"content_hash"`
+	UpdatedAt   time.Time   `json:"updated_at"`
+}
+
 type CoreTenantCredential struct {
 	CustomerID uuid.UUID       `json:"customer_id"`
 	Kind       string          `json:"kind"`
@@ -1503,6 +1512,7 @@ type ModelGridDef struct {
 	CreatedAt          time.Time   `json:"created_at"`
 	RevisionID         pgtype.UUID `json:"revision_id"`
 	RollupSourceGridID pgtype.UUID `json:"rollup_source_grid_id"`
+	Tags               []string    `json:"tags"`
 }
 
 type ModelGridDimension struct {

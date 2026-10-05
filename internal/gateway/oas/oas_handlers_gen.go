@@ -46575,7 +46575,7 @@ func (s *Server) handleUpdateFormRecordRequest(args [1]string, argsEscaped bool,
 
 // handleUpdateGridRequest handles updateGrid operation.
 //
-// Rename a grid.
+// Rename or retag a grid.
 //
 // PATCH /api/developer/grids/{id}
 func (s *Server) handleUpdateGridRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -46726,7 +46726,7 @@ func (s *Server) handleUpdateGridRequest(args [1]string, argsEscaped bool, w htt
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    UpdateGridOperation,
-			OperationSummary: "Rename a grid",
+			OperationSummary: "Rename or retag a grid",
 			OperationID:      "updateGrid",
 			Body:             request,
 			RawBody:          rawBody,

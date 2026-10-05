@@ -4725,8 +4725,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 	if _, err := tx.Exec(ctx, `
 		WITH
 		new_grids AS (
-			INSERT INTO model.grid_def (model_id, name, revision_id)
-			SELECT model_id, name, $2::uuid
+			INSERT INTO model.grid_def (model_id, name, revision_id, tags)
+			SELECT model_id, name, $2::uuid, tags
 			FROM model.grid_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 			RETURNING id AS new_id, name
 		),
@@ -5298,72 +5298,10 @@ func (h *handler) activateRevision(ctx context.Context, revisionID string) (mode
 	return modelID, nil
 }
 
-// remapAccessRulesToRevision re-points identity.user_access_rule rows at the
-// newly-activated revision's rows, matched by lineage (migration 099): the
-// member or metric of the rule's ref_lineage_id in that revision.
-//
-// Rules store raw ref_id UUIDs, and every revision copy re-mints those UUIDs
-// — so before this, each activation quietly stranded every member- and
-// metric-level access rule on the previous revision's rows. Enforcement no
-// longer depends on the stored ref_id (every path resolves the rule by its
-// lineage in whichever revision is read, writeguard.RulesForRevision); the
-// remap keeps ref_id pointing at the live row for the admin's rule listing.
-//
-// A rule whose lineage has no row in the new revision (its member or metric
-// was deleted there) is left untouched: it keeps pointing at the old row
-// and keeps its lineage, so the old revisions stay restricted. A row
-// re-added under the same code or name is a new lineage and is not
-// restricted until an admin sets a rule on it.
+// remapAccessRulesToRevision is writeguard.RemapRulesToRevision on the
+// request's database.
 func (h *handler) remapAccessRulesToRevision(ctx context.Context, modelID, revisionID string) error {
-	// Every rule writer sets ref_lineage_id; a rule stored without one (the
-	// resolver's belt-and-braces case) takes the lineage of the row its
-	// ref_id points at, here as in writeguard.RulesForRevision, so it is
-	// moved too.
-	if _, err := h.db.Exec(ctx, `
-		UPDATE identity.user_access_rule r
-		SET ref_lineage_id = COALESCE(
-		        (SELECT m.lineage_id FROM model.dimension_member m
-		         WHERE r.rule_type = 'dimension_member' AND m.id = CASE WHEN r.ref_id ~* `+writeguard.UUIDPatternSQL+` THEN r.ref_id::uuid END),
-		        (SELECT md.lineage_id FROM model.metric_def md
-		         WHERE r.rule_type = 'metric' AND md.id = CASE WHEN r.ref_id ~* `+writeguard.UUIDPatternSQL+` THEN r.ref_id::uuid END))
-		WHERE r.ref_lineage_id IS NULL AND r.rule_type IN ('dimension_member', 'metric')`); err != nil {
-		return fmt.Errorf("rule lineages: %w", err)
-	}
-	// One rule per (user, lineage) is moved — the strictest — and never
-	// onto a row the user already has a rule for: (user_id, rule_type,
-	// ref_id) is unique. A rule left behind still applies by lineage, and
-	// the stricter access wins wherever two land on the same row.
-	for _, q := range []struct{ kind, target string }{
-		{"dimension_member", `model.dimension_member nm
-				JOIN model.dimension_def nd ON nd.id = nm.dimension_id
-				 AND nd.model_id = $1::uuid AND nd.revision_id = $2::uuid`},
-		{"metric", `model.metric_def nm`},
-	} {
-		scope := ""
-		if q.kind == "metric" {
-			scope = "AND nm.model_id = $1::uuid AND nm.revision_id = $2::uuid"
-		}
-		if _, err := h.db.Exec(ctx, `
-			UPDATE identity.user_access_rule r
-			SET ref_id = c.new_ref
-			FROM (
-				SELECT DISTINCT ON (o.user_id, o.ref_lineage_id) o.id, nm.id::text AS new_ref
-				FROM identity.user_access_rule o
-				JOIN `+q.target+` ON nm.lineage_id = o.ref_lineage_id
-				WHERE o.rule_type = $3::text `+scope+`
-				  AND o.ref_id <> nm.id::text
-				  AND NOT EXISTS (
-				      SELECT 1 FROM identity.user_access_rule x
-				      WHERE x.user_id = o.user_id AND x.rule_type = o.rule_type AND x.ref_id = nm.id::text)
-				ORDER BY o.user_id, o.ref_lineage_id,
-				         CASE o.access WHEN 'hidden' THEN 0 WHEN 'read' THEN 1 ELSE 2 END, o.id
-			) c
-			WHERE r.id = c.id
-		`, modelID, revisionID, q.kind); err != nil {
-			return fmt.Errorf("%s rules: %w", q.kind, err)
-		}
-	}
-	return nil
+	return writeguard.RemapRulesToRevision(ctx, h.db.For(ctx), modelID, revisionID)
 }
 
 func (h *handler) developerRevisionAction(w http.ResponseWriter, r *http.Request) {
@@ -14695,6 +14633,7 @@ type gridDefResponse struct {
 	ID              string          `json:"id"`
 	Name            string          `json:"name"`
 	RevisionID      string          `json:"revision_id"`
+	Tags            []string        `json:"tags"`
 	MetricIDs       []string        `json:"metric_ids"`
 	DimensionIDs    []string        `json:"dimension_ids"`
 	DimensionLevels map[string]*int `json:"dimension_levels"` // dim_id → display_level (null=all)
@@ -14731,10 +14670,10 @@ func (h *handler) developerGrids(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		gridQ := `SELECT id::text, name, COALESCE(revision_id::text,'') FROM model.grid_def WHERE model_id=$1::uuid ORDER BY created_at`
+		gridQ := `SELECT id::text, name, COALESCE(revision_id::text,''), tags FROM model.grid_def WHERE model_id=$1::uuid ORDER BY created_at`
 		gridArgs := []any{modelID}
 		if revisionID != "" {
-			gridQ = `SELECT id::text, name, COALESCE(revision_id::text,'') FROM model.grid_def WHERE model_id=$1::uuid AND revision_id=$2::uuid ORDER BY created_at`
+			gridQ = `SELECT id::text, name, COALESCE(revision_id::text,''), tags FROM model.grid_def WHERE model_id=$1::uuid AND revision_id=$2::uuid ORDER BY created_at`
 			gridArgs = []any{modelID, revisionID}
 		}
 		rows, err := h.db.Query(ctx, gridQ, gridArgs...)
@@ -14746,7 +14685,7 @@ func (h *handler) developerGrids(w http.ResponseWriter, r *http.Request) {
 		var grids []gridDefResponse
 		for rows.Next() {
 			var g gridDefResponse
-			if err := rows.Scan(&g.ID, &g.Name, &g.RevisionID); err != nil {
+			if err := rows.Scan(&g.ID, &g.Name, &g.RevisionID, &g.Tags); err != nil {
 				continue
 			}
 			grids = append(grids, g)
@@ -14792,8 +14731,9 @@ func (h *handler) developerGrids(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var body struct {
-			Name       string `json:"name"`
-			RevisionID string `json:"revision_id"`
+			Name       string   `json:"name"`
+			RevisionID string   `json:"revision_id"`
+			Tags       []string `json:"tags"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
 			jsonErr(w, fmt.Errorf("name required"), http.StatusBadRequest)
@@ -14810,12 +14750,12 @@ func (h *handler) developerGrids(w http.ResponseWriter, r *http.Request) {
 		var gridErr error
 		if body.RevisionID != "" {
 			gridErr = h.db.QueryRow(ctx,
-				`INSERT INTO model.grid_def (model_id, name, revision_id) VALUES ($1::uuid,$2,$3::uuid) RETURNING id::text`,
-				modelID, body.Name, body.RevisionID).Scan(&newID)
+				`INSERT INTO model.grid_def (model_id, name, revision_id, tags) VALUES ($1::uuid,$2,$3::uuid,$4) RETURNING id::text`,
+				modelID, body.Name, body.RevisionID, tags.Clean(body.Tags)).Scan(&newID)
 		} else {
 			gridErr = h.db.QueryRow(ctx,
-				`INSERT INTO model.grid_def (model_id, name) VALUES ($1::uuid,$2) RETURNING id::text`,
-				modelID, body.Name).Scan(&newID)
+				`INSERT INTO model.grid_def (model_id, name, tags) VALUES ($1::uuid,$2,$3) RETURNING id::text`,
+				modelID, body.Name, tags.Clean(body.Tags)).Scan(&newID)
 		}
 		if gridErr != nil {
 			jsonErr(w, gridErr, http.StatusInternalServerError)
@@ -14885,18 +14825,37 @@ func (h *handler) developerGridAction(w http.ResponseWriter, r *http.Request) {
 	if len(parts) == 1 {
 		switch r.Method {
 		case http.MethodPatch:
+			// Partial: an omitted name or tags field keeps what the grid
+			// has, so a rename cannot drop its tags nor a retag its name.
 			var body struct {
-				Name string `json:"name"`
+				Name *string   `json:"name"`
+				Tags *[]string `json:"tags"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
-				jsonErr(w, fmt.Errorf("name required"), http.StatusBadRequest)
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				jsonErr(w, fmt.Errorf("invalid JSON body"), http.StatusBadRequest)
 				return
 			}
-			if _, err := h.db.Exec(ctx, `UPDATE model.grid_def SET name=$2 WHERE id=$1::uuid`, gridID, body.Name); err != nil {
+			if body.Name == nil && body.Tags == nil {
+				jsonErr(w, fmt.Errorf("nothing to change: send name and/or tags"), http.StatusBadRequest)
+				return
+			}
+			if body.Name != nil && strings.TrimSpace(*body.Name) == "" {
+				jsonErr(w, fmt.Errorf("name must not be empty"), http.StatusBadRequest)
+				return
+			}
+			if _, err := h.db.Exec(ctx, `UPDATE model.grid_def SET name=COALESCE($2, name), tags=COALESCE($3, tags) WHERE id=$1::uuid`,
+				gridID, body.Name, optionalTags(body.Tags)); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
-			h.auditGridUpdated(ctx, r, gridID, "grid", map[string]string{"name": body.Name})
+			meta := map[string]string{}
+			if body.Name != nil {
+				meta["name"] = *body.Name
+			}
+			if body.Tags != nil {
+				meta["tags"] = strings.Join(optionalTags(body.Tags), ",")
+			}
+			h.auditGridUpdated(ctx, r, gridID, "grid", meta)
 			jsonOK(w, map[string]string{"status": "ok"})
 		case http.MethodDelete:
 			gridRevisionID, gridAppID := h.gridScope(ctx, gridID)
@@ -15375,9 +15334,7 @@ func (h *handler) developerDashboards(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("name required"), http.StatusBadRequest)
 			return
 		}
-		if body.Tags == nil {
-			body.Tags = []string{}
-		}
+		body.Tags = tags.Clean(body.Tags)
 		if !h.requireRevisionInModel(w, r, body.RevisionID, modelID) {
 			return
 		}
@@ -15577,9 +15534,11 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 	if len(parts) == 1 {
 		switch r.Method {
 		case http.MethodPatch:
+			// Partial: an omitted field keeps what the dashboard has, so
+			// adding a tag cannot rename it, nor a rename drop its tags.
 			var body struct {
-				Name string   `json:"name"`
-				Tags []string `json:"tags"`
+				Name *string   `json:"name"`
+				Tags *[]string `json:"tags"`
 				// RawMessage, not *string: encoding/json can't tell an absent
 				// field from an explicit null through a pointer, and all three
 				// cases mean different things here — omitted leaves the
@@ -15587,12 +15546,17 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 				// ID files it in that folder.
 				FolderID json.RawMessage `json:"folder_id"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
-				jsonErr(w, fmt.Errorf("name required"), http.StatusBadRequest)
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				jsonErr(w, fmt.Errorf("invalid JSON body"), http.StatusBadRequest)
 				return
 			}
-			if body.Tags == nil {
-				body.Tags = []string{}
+			if body.Name == nil && body.Tags == nil && len(body.FolderID) == 0 {
+				jsonErr(w, fmt.Errorf("nothing to change: send name, tags and/or folder_id"), http.StatusBadRequest)
+				return
+			}
+			if body.Name != nil && strings.TrimSpace(*body.Name) == "" {
+				jsonErr(w, fmt.Errorf("name must not be empty"), http.StatusBadRequest)
+				return
 			}
 			moveFolder, folderTarget := false, ""
 			if len(body.FolderID) > 0 {
@@ -15617,16 +15581,22 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 			}
 			if _, err := h.db.Exec(ctx,
 				`UPDATE model.dashboard_def
-				 SET name=$2, tags=$3,
+				 SET name=COALESCE($2, name), tags=COALESCE($3, tags),
 				     folder_id = CASE WHEN $4::boolean THEN NULLIF($5,'')::uuid ELSE folder_id END
 				 WHERE id=$1::uuid`,
-				dashID, body.Name, body.Tags, moveFolder, folderTarget); err != nil {
+				dashID, body.Name, optionalTags(body.Tags), moveFolder, folderTarget); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
 			if a, e := h.resolveActor(ctx, r); e == nil {
 				revisionID, appID := h.dashboardScope(ctx, dashID)
-				meta := map[string]string{"name": body.Name}
+				meta := map[string]string{}
+				if body.Name != nil {
+					meta["name"] = *body.Name
+				}
+				if body.Tags != nil {
+					meta["tags"] = strings.Join(optionalTags(body.Tags), ",")
+				}
 				if moveFolder {
 					meta["folder_id"] = folderTarget
 				}

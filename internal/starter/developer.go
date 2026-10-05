@@ -256,9 +256,9 @@ A member or a property that a formula names cannot be deleted, and renaming a pr
 
 Open **Build › Metrics** and press **Add metric**:
 
-- **Metric name** — snake_case, such as `+devCode("gross_margin")+`. Names ignore case: `+devCode("Revenue")+` and `+devCode("revenue")+` count as the same name.
+- **Metric name** — snake_case, such as `+devCode("gross_margin")+`. Names ignore case: `+devCode("Revenue")+` and `+devCode("revenue")+` count as the same name. **Display name**, if you give one, is what grids and charts show instead.
 - **Type** — **Input** is typed or imported. **Calc** has a **Formula** and is worked out by the platform whenever an input changes. The type cannot be changed afterwards.
-- **Format** — Number, Percentage, Currency, Boolean or Text, with decimal places and a currency symbol.
+- **Format** — Number, Percentage, Currency, Boolean, Text, **Pick-list** (each cell holds a member of the dimension chosen under **Members of**, picked from a list in the grid) or **Date**, with decimal places and a currency symbol where they apply.
 - **Aggregation rule** and **Time summary** — how its totals are made, below.
 - **Tags** — for the tag filter and the *Search metrics…* box.
 
@@ -270,10 +270,10 @@ To change a metric later, use **Edit** on its row. After a formula change, a *Re
 
 A formula works out the leaf cells: one product, one quarter. Every total above them comes from two settings on the metric.
 
-- **Aggregation rule**, across ordinary dimensions. **Sum** adds the members. **Average** takes the mean of the members that have a value. **Count** counts the members holding a value other than 0. **Formula** works the metric's own formula out again on the totals of what it reads — the right choice for a ratio or a percentage. **Rate** divides the total of one metric by the total of another.
+- **Aggregation rule**, across ordinary dimensions. **Sum** adds the members. **Average** takes the mean of the members that have a value. **Count** counts the members holding a value other than 0. **Formula** works the metric's own formula out again on the totals of what it reads — the right choice for a ratio or a percentage. **Rate** divides the total of one metric by the total of another. **None** leaves the totals empty, for a figure that does not add up — a date, a setting.
 - **Time summary**, across a time dimension — offered by **Add metric** once the revision has one, and by **Edit** once the metric's grid has one: *sum* for flows such as revenue, *last* for a closing balance, *first* for an opening balance, *average*, *min*, *max*, or *none* where a total over time means nothing.
 
-A new input metric totals by Sum; pick another rule with **Edit** on its row. Formula is for calculated metrics only.`, 268),
+A new metric totals by Sum unless you pick another rule, and **Edit** on its row changes it later. Formula is for calculated metrics only.`, 268),
 
 		devPicture(devTotals(), "Revenue for two products over four quarters: the All products row comes from the aggregation rule, the FY 2026 column from the time summary", 760, 250),
 
@@ -381,7 +381,7 @@ A grid decides which numbers belong together; a dashboard decides how people see
 
 ## A grid
 
-Open **Build › Grids**, press **New grid**, name it and press **Create**. Then press **Configure** on its card and move metrics and dimensions from *Available* to *In this grid*. For each dimension, **Show:** picks all levels, the root only, one level, or the leaves only. Every change is saved as you make it; **Done** closes the card.
+Open **Build › Grids**, press **New grid**, name it — **Tags** too, if you like — and press **Create**. Then press **Configure** on its card and move metrics and dimensions from *Available* to *In this grid*. For each dimension, **Show:** picks all levels, the root only, one level, or the leaves only. Every change is saved as you make it; **Done** closes the card.
 
 A grid has no layout of its own. Where each dimension sits — rows, columns or a selector — is set on each dashboard that shows it.`, 252),
 
@@ -398,6 +398,7 @@ A grid has no layout of its own. Where each dimension sits — rows, columns or 
 Click a widget in Design and **Widget Properties** opens beside it:
 
 - **Default view** (grids) — place *Metrics* and each dimension in a Row, a Column or the Context. Without one, a grid shows metrics in rows, one dimension across the columns and the rest as selectors.
+- **Metrics shown** (grids) — which of the grid's metrics this widget shows, and in what order; and, for a row or column dimension, which of its members (*All members* by default).
 - **Context sync** (grids and charts) — on by default: widgets that share a dimension share one selector, so choosing a product once moves them all. Untick it to give a widget selectors of its own.
 - **Default context** (Metric KPI) — **Whole-model total**, **Follow dashboard selectors**, or **Pin to a member**.
 - **Chart configuration**, **Header**, **Appearance**, where the **Selectors** sit, and an exact **Position** and **Size**.`, 244),
@@ -425,7 +426,7 @@ Beside the dashboard's name, switch from **Design** to **Preview** to use the pa
 
 ## Keep them findable
 
-**New folder** groups dashboards. Once a folder exists, each row gets a list that files it in a folder, and an *All folders* list above the rows narrows the view; the tag chips and *Search dashboards…* narrow it too. Metrics and dimensions carry tags as well, and the Metrics, Dimensions, Forms, Grids and Workflows lists each have a search box.
+**New folder** groups dashboards. Once a folder exists, each row gets a list that files it in a folder, and an *All folders* list above the rows narrows the view; the tag chips and *Search dashboards…* narrow it too. The pencil on a row edits its name and tags. Metrics, dimensions and grids carry tags as well, and the Metrics, Dimensions, Forms, Grids and Workflows lists each have a search box.
 
 ---
 Next: **5 · Data in, workflows**.`, 340),
@@ -442,7 +443,7 @@ Numbers do not only arrive by typing into a grid. Forms collect entries, integra
 
 		devText(`## Forms
 
-**Build › Forms** → **New form**: a **Form name**, a **Display label**, then the fields — **Add field** for each: Text, Number, Date, Select, Boolean, Metric, or one of the model's dimensions — and **Create form**. People fill it in through a **Form** widget on a dashboard; a business admin also has **Run › Forms**.
+**Build › Forms** → **New form**: a **Form name**, a **Display label**, then the fields — **Add field** for each: Text, Number, Date, Select, Boolean, Metric, or one of the model's dimensions — and **Create form**. People — business users and business admins alike — work on its records only through a **Form** widget on a dashboard, so place each form on a dashboard their role can open: there they add, edit, export and import records, and an administrator changes their status and syncs them.
 
 A form on its own only stores its records. To post their numbers into the model, map it: **Build › Integrations** → **Form Records** → **New integration**. Choose the **Source form**, the **Target grid** and its **Target input metric**, the **Source value field**, how records combine (**Aggregation**), which statuses post (**Post when status is**), and the **Dimension field mappings**. With **Live update** on, a record posts as soon as it reaches one of those statuses; **Backfill** posts the ones already there.`, 232),
 
@@ -464,10 +465,11 @@ A **Trigger** widget on a dashboard runs a manual rule that is enabled. Until a 
 
 Everything that brings data in is under **Build › Integrations**:
 
-- **Excel / CSV Import** — **New Import** opens a wizard: upload the file and choose what it fills (a grid, a form, or a dimension's members), map its columns, validate, and commit. **Save as Integration** keeps the mapping for the next file.
+- **Excel / CSV Import** — **New Import** opens a wizard: upload the file and choose what it fills (a grid, a form, or a dimension's members), **Shape** a sheet laid out for people (titles, merged headers, months across) into rows, map its columns, validate, and commit. **Save as Integration** keeps the mapping for the next file.
 - **Google Sheets** — **Import from Sheet**, paste the sheet's link, **Fetch sheet**. A sheet shared as *Anyone with the link* works as it is. A private one needs a Google service account: store its key under *Private sheets*, and share the sheet with that account. A saved sheet refreshes with **Sync Now**.
 - **REST API** — **New integration** walks through six steps, from *Basics* to *Run & schedule*, and **Activate** turns it on. It runs by hand or on a schedule.
 - **Form Records** — the form mapping above.
+- **Data Export** — **New export** saves a fixed download of a grid's values as CSV, Excel or JSON: which metrics, which dimensions as columns, and which members.
 
 On a dashboard, an **Integration** widget runs a saved integration from a button, and an **Import** widget gives people an upload box for a grid, with a template to download.
 
@@ -500,7 +502,7 @@ Three kinds of change are not revision-scoped and take effect as soon as you con
 
 ## What stays with you
 
-Publishing and test-running workflows, making a revision live or deleting one, the business default, who is in a role, users, the REST API and Google Sheets connectors and their runs, and the business data itself. [What the AI Developer can and cannot do](`+publicDocs+`AI_DEVELOPER.md) lists it all.`, 304),
+Publishing and test-running workflows, making a revision live or deleting one, the business default, who is in a role, users, the REST API and Google Sheets connectors and their runs, and the business data itself — except that it imports a spreadsheet you attach to the chat, and writes single input values such as a setting, into its draft. [What the AI Developer can and cannot do](`+publicDocs+`AI_DEVELOPER.md) lists it all.`, 304),
 
 		devText(`## Going live
 

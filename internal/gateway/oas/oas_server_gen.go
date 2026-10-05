@@ -1706,7 +1706,7 @@ type Handler interface {
 	UpdateFormRecord(ctx context.Context, req *UpdateRecordRequest, params UpdateFormRecordParams) (UpdateFormRecordRes, error)
 	// UpdateGrid implements updateGrid operation.
 	//
-	// Rename a grid.
+	// Rename or retag a grid.
 	//
 	// PATCH /api/developer/grids/{id}
 	UpdateGrid(ctx context.Context, req *UpdateGridRequest, params UpdateGridParams) (UpdateGridRes, error)

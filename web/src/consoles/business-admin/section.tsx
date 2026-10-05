@@ -1,20 +1,18 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { LayoutDashboard, Inbox, FileText, History, Shield, KeyRound, Boxes } from "lucide-react";
+import { LayoutDashboard, Inbox, History, Shield, KeyRound, Boxes } from "lucide-react";
 import { api, type DemoContext } from "../../api/client";
 import { DashboardsView } from "../business/DashboardsView";
 import { AppsTab } from "../business/AppsTab";
-import { FormsTab } from "../business/FormsTab";
 import { PageLayout, LoadingState } from "../../ui";
 import { tabId, localTab, type ConsoleSection, type SectionId, type SectionInput } from "../../router/sections";
 import { WorkflowInbox, WorkflowHistory, RolesTab, AccessRulesTab } from "./BusinessAdminConsole";
 
-type Tab = "dashboards" | "inbox" | "forms" | "history" | "roles" | "access" | "models";
+type Tab = "dashboards" | "inbox" | "history" | "roles" | "access" | "models";
 
 const TAB_LABELS: Record<Tab, string> = {
   dashboards: "Dashboards",
   inbox: "Workflow Inbox",
-  forms: "Forms",
   history: "History",
   roles: "Roles",
   access: "Access Rules",
@@ -24,8 +22,10 @@ const TAB_LABELS: Record<Tab, string> = {
 const SECTION: SectionId = "business-admin";
 
 /**
- * The business_admin section of the console: Plan › Dashboards, Workflow
- * Inbox, Forms and Admin › History, Roles, Access Rules, Models. A tenant
+ * The business_admin section of the console: Run › Dashboards, Workflow
+ * Inbox and Business Admin › History, Roles, Access Rules, Models. Forms have
+ * no screen of their own: their records are worked on through the form
+ * widgets a developer places on dashboards, as business users do. A tenant
  * admin's own group (Applications with model export/import, Users, Audit
  * Log) comes from the platform-admin module and appears right after these.
  */
@@ -43,7 +43,6 @@ export function useBusinessAdminSection({ enabled, setTab }: SectionInput): Cons
         items: [
           { id: t("dashboards"), label: "Dashboards", icon: <LayoutDashboard size={16} /> },
           { id: t("inbox"), label: "Workflow Inbox", icon: <Inbox size={16} /> },
-          { id: t("forms"), label: "Forms", icon: <FileText size={16} /> },
         ],
       },
       {
@@ -67,10 +66,9 @@ export function useBusinessAdminSection({ enabled, setTab }: SectionInput): Cons
       const cur = localTab(active) as Tab;
       return (
         <PageLayout title={cur === "dashboards" ? undefined : TAB_LABELS[cur]}>
-          {ctxLoading && (cur === "dashboards" || cur === "forms") && <LoadingState label="Connecting…" />}
+          {ctxLoading && cur === "dashboards" && <LoadingState label="Connecting…" />}
           {cur === "dashboards" && ctx && <DashboardsView ctx={ctx as DemoContext} />}
           {cur === "inbox" && <WorkflowInbox />}
-          {cur === "forms" && ctx && <FormsTab />}
           {cur === "history" && <WorkflowHistory focusInstanceId={focusInstanceId} />}
           {cur === "roles" && <RolesTab />}
           {cur === "access" && <AccessRulesTab />}

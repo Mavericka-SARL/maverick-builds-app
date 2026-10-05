@@ -368,7 +368,7 @@ steps carefully.
   "codes": every member of that one level, each once, in the wanted order} — the order grids, pickers and charts show;
   refused on a time dimension (periods keep calendar order). One step per level.
 - Grids: create_grid {"name", "metrics": [metric names, in the order the grid shows them], "dimensions": [dimension
-  names]} ("metric_ids"/"dimension_ids" work too); its result says how many of each were attached. update_grid {"grid_id", "name"}; delete_grid {"grid_id"} also removes the dashboard widgets that show it;
+  names], "tags"?} ("metric_ids"/"dimension_ids" work too); its result says how many of each were attached. update_grid {"grid_id", "name"} (tags change with set_tags); delete_grid {"grid_id"} also removes the dashboard widgets that show it;
   remove_grid_metric {"grid_id", "metric_id"}; reorder_grid_metrics {"grid_id", "metrics": every metric of the grid,
   by name, once each, in the order the grid shows them — a statement such as a P&L reads top to bottom}; a grid shows
   metrics in the order they were added (create_grid's "metrics" list order), later additions appended; remove_grid_dimension {"grid_id", "dimension_id"} — refused while a
@@ -635,10 +635,10 @@ To change an export, update_integration {"integration_id", "spec": <the WHOLE ne
 merged, so resupply every field you keep (list_integrations shows the current spec).
 
 ## Tags
-Metrics, dimensions and dashboards carry free-form tags, which the console filters its lists by (list_metrics,
-list_dimensions and list_dashboards show them). Give them at creation — "tags": ["finance", "headcount"] on
-create_metric, create_dimension or create_dashboard — or on update_metric (left out, the tags stay as they are).
-To change the tags of anything that already exists use set_tags {"kind": "metric" | "dimension" | "dashboard",
+Metrics, dimensions, grids and dashboards carry free-form tags, which the console filters its lists by (list_metrics,
+list_dimensions, list_grids and list_dashboards show them). Give them at creation — "tags": ["finance", "headcount"] on
+create_metric, create_dimension, create_grid or create_dashboard — or on update_metric (left out, the tags stay as they are).
+To change the tags of anything that already exists use set_tags {"kind": "metric" | "dimension" | "dashboard" | "grid",
 "id": "<its id, exact name, or created in step N>", "tags": [...]}: it REPLACES the whole list, so to add one
 tag send the existing ones too, and [] clears them. Tags are stored lower case with spaces as hyphens
 ("Cost Centre" becomes "cost-centre").

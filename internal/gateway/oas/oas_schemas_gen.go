@@ -5959,6 +5959,8 @@ func (*CreateGridOK) createGridRes() {}
 type CreateGridRequest struct {
 	Name       string  `json:"name"`
 	RevisionID OptUUID `json:"revision_id"`
+	// Stored lower case, white space as hyphens, repeats dropped.
+	Tags []string `json:"tags"`
 }
 
 // GetName returns the value of Name.
@@ -5971,6 +5973,11 @@ func (s *CreateGridRequest) GetRevisionID() OptUUID {
 	return s.RevisionID
 }
 
+// GetTags returns the value of Tags.
+func (s *CreateGridRequest) GetTags() []string {
+	return s.Tags
+}
+
 // SetName sets the value of Name.
 func (s *CreateGridRequest) SetName(val string) {
 	s.Name = val
@@ -5979,6 +5986,11 @@ func (s *CreateGridRequest) SetName(val string) {
 // SetRevisionID sets the value of RevisionID.
 func (s *CreateGridRequest) SetRevisionID(val OptUUID) {
 	s.RevisionID = val
+}
+
+// SetTags sets the value of Tags.
+func (s *CreateGridRequest) SetTags(val []string) {
+	s.Tags = val
 }
 
 type CreateIntegrationBadRequest Error
@@ -11545,6 +11557,7 @@ type GridDef struct {
 	ID           uuid.UUID   `json:"id"`
 	Name         string      `json:"name"`
 	RevisionID   string      `json:"revision_id"`
+	Tags         []string    `json:"tags"`
 	MetricIds    []uuid.UUID `json:"metric_ids"`
 	DimensionIds []uuid.UUID `json:"dimension_ids"`
 	// Dimension_id -> display level; null means all levels shown.
@@ -11564,6 +11577,11 @@ func (s *GridDef) GetName() string {
 // GetRevisionID returns the value of RevisionID.
 func (s *GridDef) GetRevisionID() string {
 	return s.RevisionID
+}
+
+// GetTags returns the value of Tags.
+func (s *GridDef) GetTags() []string {
+	return s.Tags
 }
 
 // GetMetricIds returns the value of MetricIds.
@@ -11594,6 +11612,11 @@ func (s *GridDef) SetName(val string) {
 // SetRevisionID sets the value of RevisionID.
 func (s *GridDef) SetRevisionID(val string) {
 	s.RevisionID = val
+}
+
+// SetTags sets the value of Tags.
+func (s *GridDef) SetTags(val []string) {
+	s.Tags = val
 }
 
 // SetMetricIds sets the value of MetricIds.
@@ -25192,9 +25215,11 @@ func (s *UpdateDashboardOK) SetStatus(val OptString) {
 
 func (*UpdateDashboardOK) updateDashboardRes() {}
 
+// Partial: an omitted field keeps the dashboard's own; at least one must be sent.
 // Ref: #/components/schemas/UpdateDashboardRequest
 type UpdateDashboardRequest struct {
-	Name string   `json:"name"`
+	Name OptString `json:"name"`
+	// Replaces the whole list; [] clears it. Stored lower case, white space as hyphens, repeats dropped.
 	Tags []string `json:"tags"`
 	// Omit to leave the dashboard where it is; null or an empty string moves it to the root; a folder
 	// UUID files it under that folder. Not format:uuid because the empty string is an accepted value.
@@ -25202,7 +25227,7 @@ type UpdateDashboardRequest struct {
 }
 
 // GetName returns the value of Name.
-func (s *UpdateDashboardRequest) GetName() string {
+func (s *UpdateDashboardRequest) GetName() OptString {
 	return s.Name
 }
 
@@ -25217,7 +25242,7 @@ func (s *UpdateDashboardRequest) GetFolderID() OptNilString {
 }
 
 // SetName sets the value of Name.
-func (s *UpdateDashboardRequest) SetName(val string) {
+func (s *UpdateDashboardRequest) SetName(val OptString) {
 	s.Name = val
 }
 
@@ -25671,19 +25696,32 @@ func (s *UpdateGridOK) SetStatus(val OptString) {
 
 func (*UpdateGridOK) updateGridRes() {}
 
+// Partial: an omitted field keeps the grid's own; at least one must be sent.
 // Ref: #/components/schemas/UpdateGridRequest
 type UpdateGridRequest struct {
-	Name string `json:"name"`
+	Name OptString `json:"name"`
+	// Replaces the whole list; [] clears it.
+	Tags []string `json:"tags"`
 }
 
 // GetName returns the value of Name.
-func (s *UpdateGridRequest) GetName() string {
+func (s *UpdateGridRequest) GetName() OptString {
 	return s.Name
 }
 
+// GetTags returns the value of Tags.
+func (s *UpdateGridRequest) GetTags() []string {
+	return s.Tags
+}
+
 // SetName sets the value of Name.
-func (s *UpdateGridRequest) SetName(val string) {
+func (s *UpdateGridRequest) SetName(val OptString) {
 	s.Name = val
+}
+
+// SetTags sets the value of Tags.
+func (s *UpdateGridRequest) SetTags(val []string) {
+	s.Tags = val
 }
 
 type UpdateIntegrationConfigOK struct {

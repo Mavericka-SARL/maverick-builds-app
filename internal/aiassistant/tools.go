@@ -513,7 +513,7 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 
 func (e *ToolExecutor) listGrids(ctx context.Context) (string, error) {
 	rows, err := e.pool.Query(ctx, `
-		SELECT g.id::text, g.name,
+		SELECT g.id::text, g.name, g.tags,
 		       COALESCE((SELECT string_agg(md.name,', ') FROM model.grid_metric gm JOIN model.metric_def md ON md.id=gm.metric_id WHERE gm.grid_id=g.id),''),
 		       COALESCE((SELECT string_agg(dd.name || COALESCE(' (display level ' || gdim.display_level || ')', ''), ', ')
 		                 FROM model.grid_dimension gdim JOIN model.dimension_def dd ON dd.id=gdim.dimension_id WHERE gdim.grid_id=g.id),'')
@@ -530,8 +530,9 @@ func (e *ToolExecutor) listGrids(ctx context.Context) (string, error) {
 	sb.WriteString("Grids:\n")
 	for rows.Next() {
 		var id, name, metrics, dims string
-		_ = rows.Scan(&id, &name, &metrics, &dims)
-		fmt.Fprintf(&sb, "  %s (id:%s)\n    metrics: %s\n    dims: %s\n", name, id, metrics, dims)
+		var tagList []string
+		_ = rows.Scan(&id, &name, &tagList, &metrics, &dims)
+		fmt.Fprintf(&sb, "  %s (id:%s%s)\n    metrics: %s\n    dims: %s\n", name, id, tagSuffix(tagList), metrics, dims)
 	}
 	return sb.String(), rows.Err()
 }

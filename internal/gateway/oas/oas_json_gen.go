@@ -15102,11 +15102,22 @@ func (s *CreateGridRequest) encodeFields(e *jx.Encoder) {
 			s.RevisionID.Encode(e)
 		}
 	}
+	{
+		if s.Tags != nil {
+			e.FieldStart("tags")
+			e.ArrStart()
+			for _, elem := range s.Tags {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
 }
 
-var jsonFieldsNameOfCreateGridRequest = [2]string{
+var jsonFieldsNameOfCreateGridRequest = [3]string{
 	0: "name",
 	1: "revision_id",
+	2: "tags",
 }
 
 // Decode decodes CreateGridRequest from json.
@@ -15139,6 +15150,25 @@ func (s *CreateGridRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"revision_id\"")
+			}
+		case "tags":
+			if err := func() error {
+				s.Tags = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Tags = append(s.Tags, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"tags\"")
 			}
 		default:
 			return d.Skip()
@@ -29528,6 +29558,14 @@ func (s *GridDef) encodeFields(e *jx.Encoder) {
 		e.Str(s.RevisionID)
 	}
 	{
+		e.FieldStart("tags")
+		e.ArrStart()
+		for _, elem := range s.Tags {
+			e.Str(elem)
+		}
+		e.ArrEnd()
+	}
+	{
 		e.FieldStart("metric_ids")
 		e.ArrStart()
 		for _, elem := range s.MetricIds {
@@ -29549,13 +29587,14 @@ func (s *GridDef) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfGridDef = [6]string{
+var jsonFieldsNameOfGridDef = [7]string{
 	0: "id",
 	1: "name",
 	2: "revision_id",
-	3: "metric_ids",
-	4: "dimension_ids",
-	5: "dimension_levels",
+	3: "tags",
+	4: "metric_ids",
+	5: "dimension_ids",
+	6: "dimension_levels",
 }
 
 // Decode decodes GridDef from json.
@@ -29603,8 +29642,28 @@ func (s *GridDef) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"revision_id\"")
 			}
-		case "metric_ids":
+		case "tags":
 			requiredBitSet[0] |= 1 << 3
+			if err := func() error {
+				s.Tags = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Tags = append(s.Tags, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"tags\"")
+			}
+		case "metric_ids":
+			requiredBitSet[0] |= 1 << 4
 			if err := func() error {
 				s.MetricIds = make([]uuid.UUID, 0)
 				if err := d.Arr(func(d *jx.Decoder) error {
@@ -29624,7 +29683,7 @@ func (s *GridDef) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"metric_ids\"")
 			}
 		case "dimension_ids":
-			requiredBitSet[0] |= 1 << 4
+			requiredBitSet[0] |= 1 << 5
 			if err := func() error {
 				s.DimensionIds = make([]uuid.UUID, 0)
 				if err := d.Arr(func(d *jx.Decoder) error {
@@ -29644,7 +29703,7 @@ func (s *GridDef) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"dimension_ids\"")
 			}
 		case "dimension_levels":
-			requiredBitSet[0] |= 1 << 5
+			requiredBitSet[0] |= 1 << 6
 			if err := func() error {
 				if err := s.DimensionLevels.Decode(d); err != nil {
 					return err
@@ -29663,7 +29722,7 @@ func (s *GridDef) Decode(d *jx.Decoder) error {
 	// Validate required fields.
 	var failures []validate.FieldError
 	for i, mask := range [1]uint8{
-		0b00111111,
+		0b01111111,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -56555,8 +56614,10 @@ func (s *UpdateDashboardRequest) Encode(e *jx.Encoder) {
 // encodeFields encodes fields.
 func (s *UpdateDashboardRequest) encodeFields(e *jx.Encoder) {
 	{
-		e.FieldStart("name")
-		e.Str(s.Name)
+		if s.Name.Set {
+			e.FieldStart("name")
+			s.Name.Encode(e)
+		}
 	}
 	{
 		if s.Tags != nil {
@@ -56587,16 +56648,13 @@ func (s *UpdateDashboardRequest) Decode(d *jx.Decoder) error {
 	if s == nil {
 		return errors.New("invalid: unable to decode UpdateDashboardRequest to nil")
 	}
-	var requiredBitSet [1]uint8
 
 	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
 		switch string(k) {
 		case "name":
-			requiredBitSet[0] |= 1 << 0
 			if err := func() error {
-				v, err := d.Str()
-				s.Name = string(v)
-				if err != nil {
+				s.Name.Reset()
+				if err := s.Name.Decode(d); err != nil {
 					return err
 				}
 				return nil
@@ -56638,38 +56696,6 @@ func (s *UpdateDashboardRequest) Decode(d *jx.Decoder) error {
 		return nil
 	}); err != nil {
 		return errors.Wrap(err, "decode UpdateDashboardRequest")
-	}
-	// Validate required fields.
-	var failures []validate.FieldError
-	for i, mask := range [1]uint8{
-		0b00000001,
-	} {
-		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
-			// Mask only required fields and check equality to mask using XOR.
-			//
-			// If XOR result is not zero, result is not equal to expected, so some fields are missed.
-			// Bits of fields which would be set are actually bits of missed fields.
-			missed := bits.OnesCount8(result)
-			for bitN := 0; bitN < missed; bitN++ {
-				bitIdx := bits.TrailingZeros8(result)
-				fieldIdx := i*8 + bitIdx
-				var name string
-				if fieldIdx < len(jsonFieldsNameOfUpdateDashboardRequest) {
-					name = jsonFieldsNameOfUpdateDashboardRequest[fieldIdx]
-				} else {
-					name = strconv.Itoa(fieldIdx)
-				}
-				failures = append(failures, validate.FieldError{
-					Name:  name,
-					Error: validate.ErrFieldRequired,
-				})
-				// Reset bit.
-				result &^= 1 << bitIdx
-			}
-		}
-	}
-	if len(failures) > 0 {
-		return &validate.Error{Fields: failures}
 	}
 
 	return nil
@@ -58354,13 +58380,26 @@ func (s *UpdateGridRequest) Encode(e *jx.Encoder) {
 // encodeFields encodes fields.
 func (s *UpdateGridRequest) encodeFields(e *jx.Encoder) {
 	{
-		e.FieldStart("name")
-		e.Str(s.Name)
+		if s.Name.Set {
+			e.FieldStart("name")
+			s.Name.Encode(e)
+		}
+	}
+	{
+		if s.Tags != nil {
+			e.FieldStart("tags")
+			e.ArrStart()
+			for _, elem := range s.Tags {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
 	}
 }
 
-var jsonFieldsNameOfUpdateGridRequest = [1]string{
+var jsonFieldsNameOfUpdateGridRequest = [2]string{
 	0: "name",
+	1: "tags",
 }
 
 // Decode decodes UpdateGridRequest from json.
@@ -58368,21 +58407,37 @@ func (s *UpdateGridRequest) Decode(d *jx.Decoder) error {
 	if s == nil {
 		return errors.New("invalid: unable to decode UpdateGridRequest to nil")
 	}
-	var requiredBitSet [1]uint8
 
 	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
 		switch string(k) {
 		case "name":
-			requiredBitSet[0] |= 1 << 0
 			if err := func() error {
-				v, err := d.Str()
-				s.Name = string(v)
-				if err != nil {
+				s.Name.Reset()
+				if err := s.Name.Decode(d); err != nil {
 					return err
 				}
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"name\"")
+			}
+		case "tags":
+			if err := func() error {
+				s.Tags = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Tags = append(s.Tags, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"tags\"")
 			}
 		default:
 			return d.Skip()
@@ -58390,38 +58445,6 @@ func (s *UpdateGridRequest) Decode(d *jx.Decoder) error {
 		return nil
 	}); err != nil {
 		return errors.Wrap(err, "decode UpdateGridRequest")
-	}
-	// Validate required fields.
-	var failures []validate.FieldError
-	for i, mask := range [1]uint8{
-		0b00000001,
-	} {
-		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
-			// Mask only required fields and check equality to mask using XOR.
-			//
-			// If XOR result is not zero, result is not equal to expected, so some fields are missed.
-			// Bits of fields which would be set are actually bits of missed fields.
-			missed := bits.OnesCount8(result)
-			for bitN := 0; bitN < missed; bitN++ {
-				bitIdx := bits.TrailingZeros8(result)
-				fieldIdx := i*8 + bitIdx
-				var name string
-				if fieldIdx < len(jsonFieldsNameOfUpdateGridRequest) {
-					name = jsonFieldsNameOfUpdateGridRequest[fieldIdx]
-				} else {
-					name = strconv.Itoa(fieldIdx)
-				}
-				failures = append(failures, validate.FieldError{
-					Name:  name,
-					Error: validate.ErrFieldRequired,
-				})
-				// Reset bit.
-				result &^= 1 << bitIdx
-			}
-		}
-	}
-	if len(failures) > 0 {
-		return &validate.Error{Fields: failures}
 	}
 
 	return nil

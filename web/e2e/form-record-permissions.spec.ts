@@ -5,8 +5,9 @@
  * edit or delete it and move it between draft and submitted while it is
  * undecided; a business admin of the workspace may do anything; everyone else
  * who reaches the form only reads). The UI offers exactly that and no more:
- * Run › Forms and the dashboard form widget both follow the server's answer,
- * and a record without an answer (an older server) gets no actions at all.
+ * the dashboard form widget — the one place records are worked on — follows
+ * the server's answer, and a record without an answer (an older server) gets
+ * no actions at all.
  *
  * The fixtures are the shapes a real server sends: permsFor mirrors
  * crudapp.RecordAccess.Permissions, whose set_status never holds the
@@ -90,12 +91,6 @@ const row = (page: Page, vendor: string) => page.getByRole("row").filter({ hasTe
 
 async function optionsOf(select: ReturnType<Page["getByLabel"]>) {
   return select.locator("option").evaluateAll((els) => els.map((e) => (e as HTMLOptionElement).value));
-}
-
-async function openRunForms(page: Page, firstVendor: string) {
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Forms" }).click();
-  await page.getByRole("button", { name: "Purchase Request" }).click();
-  await expect(row(page, firstVendor)).toBeVisible();
 }
 
 async function openFormDashboard(page: Page, firstVendor: string) {
@@ -249,14 +244,14 @@ test("dashboard form widget: the error shown is the latest failed action's", asy
   await expect(alert).toHaveText("Record not deleted — 409: the record changed since it was read; reload it and try again");
 });
 
-test("Run › Forms: the edit pencil, delete and statuses follow the record's permissions", async ({ page }) => {
+test("dashboard form widget: the edit pencil, delete and statuses follow the record's permissions", async ({ page }) => {
   await mockApi(page);
-  // The Forms tab is in the business-admin group; what the server says about
-  // each record is what counts (here: the caller is only a business user of
-  // the application these records belong to).
+  // A business admin persona; what the server says about each record is
+  // what counts (here: the caller is only a business user of the
+  // application these records belong to).
   const server = await serveRecords(page, asSubmitter());
   await loadAs(page, "finance");
-  await openRunForms(page, "Own Vendor");
+  await openFormDashboard(page, "Own Vendor");
 
   for (const vendor of ["Other Vendor", "Decided Vendor", "Legacy Vendor"]) {
     const r = row(page, vendor);
@@ -288,12 +283,12 @@ test("Run › Forms: the edit pencil, delete and statuses follow the record's pe
   expect(server.sent[1]).toMatchObject({ method: "PUT", path: "/api/records/rec-own", body: { status: "draft" } });
 });
 
-test("Run › Forms: a refusal from the server is shown in the editor", async ({ page }) => {
+test("dashboard form widget: a refusal from the server is shown in the editor", async ({ page }) => {
   await mockApi(page);
   const server = await serveRecords(page, asSubmitter());
   server.refuse = () => ({ status: 403, error: "forbidden: you may not change this record" });
   await loadAs(page, "finance");
-  await openRunForms(page, "Own Vendor");
+  await openFormDashboard(page, "Own Vendor");
 
   await row(page, "Own Vendor").getByRole("button", { name: "Edit record" }).click();
   await page.getByRole("button", { name: "Save" }).click();
@@ -304,7 +299,7 @@ test("a business admin may edit, set any status on and delete every record", asy
   await mockApi(page);
   const server = await serveRecords(page, asAdmin());
   await loadAs(page, "finance");
-  await openRunForms(page, "Own Vendor");
+  await openFormDashboard(page, "Own Vendor");
 
   for (const vendor of ["Own Vendor", "Other Vendor", "Decided Vendor", "Rejected Vendor"]) {
     const r = row(page, vendor);
@@ -330,19 +325,17 @@ test("a business admin may edit, set any status on and delete every record", asy
   await expect.poll(() => server.sent.length).toBe(2);
   expect(server.sent[1]).toMatchObject({ method: "DELETE", path: "/api/records/rec-decided" });
 
-  // The dashboard form widget offers the same.
-  await openFormDashboard(page, "Own Vendor");
+  // The list's own status control offers every status too.
   const rejected = row(page, "Rejected Vendor").getByLabel("Record status");
   await expect(rejected).toHaveValue("rejected");
   expect(await optionsOf(rejected)).toEqual(ALL_STATUSES);
-  await expect(row(page, "Other Vendor").getByRole("button", { name: "Delete record" })).toBeVisible();
 });
 
-test("Run › Forms: a save does not undo a decision made while the editor was open", async ({ page }) => {
+test("dashboard form widget: a save does not undo a decision made while the editor was open", async ({ page }) => {
   await mockApi(page);
   const server = await serveRecords(page, asAdmin());
   await loadAs(page, "finance");
-  await openRunForms(page, "Own Vendor");
+  await openFormDashboard(page, "Own Vendor");
 
   await row(page, "Other Vendor").getByRole("button", { name: "Edit record" }).click();
   const status = page.getByLabel("Status", { exact: true });
@@ -361,7 +354,7 @@ test("Run › Forms: a save does not undo a decision made while the editor was o
   expect(server.sent[1].body).not.toHaveProperty("status");
 });
 
-test("Run › Forms: losing the right to edit closes the editor with a notice, and it does not come back", async ({ page }) => {
+test("dashboard form widget: losing the right to edit closes the editor with a notice, and it does not come back", async ({ page }) => {
   await mockApi(page);
   const server = await serveRecords(page, [
     { id: "rec-own", vendor: "Own Vendor", status: "submitted", createdBy: "u-1", caller: "creator" },
@@ -369,7 +362,7 @@ test("Run › Forms: losing the right to edit closes the editor with a notice, a
     { id: "rec-own-3", vendor: "Contoso Parts", status: "draft", createdBy: "u-1", caller: "creator" },
   ]);
   await loadAs(page, "finance");
-  await openRunForms(page, "Own Vendor");
+  await openFormDashboard(page, "Own Vendor");
 
   await row(page, "Own Vendor").getByRole("button", { name: "Edit record" }).click();
   await editor(page).getByRole("textbox").first().fill("Unsaved change");
@@ -393,14 +386,14 @@ test("Run › Forms: losing the right to edit closes the editor with a notice, a
 
 // Not shapes the server sends (with edit, set_status is never empty and never
 // holds the current status); kept so an unexpected answer degrades safely.
-test("Run › Forms edit dialog, defensive: status read-only when only the current one is allowed, hidden when none is", async ({ page }) => {
+test("dashboard form widget edit dialog, defensive: status read-only when only the current one is allowed, hidden when none is", async ({ page }) => {
   await mockApi(page);
   await serveRecords(page, [
     { id: "rec-fixed", vendor: "Fixed Status Vendor", status: "submitted", createdBy: "u-1", permissions: { edit: true, delete: false, set_status: ["submitted"] } },
     { id: "rec-fields", vendor: "Fields Only Vendor", status: "draft", createdBy: "u-1", permissions: { edit: true, delete: false, set_status: [] } },
   ]);
   await loadAs(page, "finance");
-  await openRunForms(page, "Fixed Status Vendor");
+  await openFormDashboard(page, "Fixed Status Vendor");
 
   await row(page, "Fixed Status Vendor").getByRole("button", { name: "Edit record" }).click();
   const status = page.getByLabel("Status", { exact: true });

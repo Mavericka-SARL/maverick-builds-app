@@ -1,5 +1,5 @@
 // Package tags holds the one rule for the free-form labels developers put
-// on dashboards, dimensions and metrics.
+// on dashboards, grids, dimensions and metrics.
 package tags
 
 import "strings"

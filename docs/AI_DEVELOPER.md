@@ -174,10 +174,10 @@ recalculates the metrics reading a changed grouping, promoting the draft
 recomputes every calculated metric of the revision.
 
 Tags mirror the console's tag editors: `create_metric`, `update_metric`,
-`create_dimension` and `create_dashboard` take `tags`, and `set_tags`
-(`kind`: metric, dimension or dashboard; `id`: id or exact name; `tags`)
-replaces the tags of one that already exists. `list_metrics`,
-`list_dimensions` and `list_dashboards` show them.
+`create_dimension`, `create_grid` and `create_dashboard` take `tags`, and
+`set_tags` (`kind`: metric, dimension, grid or dashboard; `id`: id or exact
+name; `tags`) replaces the tags of one that already exists. `list_metrics`,
+`list_dimensions`, `list_grids` and `list_dashboards` show them.
 
 Workflows and forms (added 2026-09-16, programme item 5):
 

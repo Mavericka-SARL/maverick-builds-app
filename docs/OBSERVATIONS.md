@@ -1655,22 +1655,6 @@ leaves out, until it is fixed.
   the create does, or a decision that an import is silent, said in the
   manual.
 
-### Form record field labels are not tied to their inputs
-
-- **Noticed:** 2026-09-29, writing the form record Playwright specs.
-- **What:** `Field` clones a generated id onto its single child
-  (`web/src/ui/Field.tsx:41`), but `FormFieldInput`
-  (`web/src/consoles/business/FormsTab.tsx:33`) neither accepts nor
-  forwards `id`, so the label (for example "Vendor") is not tied to the
-  input or select it renders, in Run › Forms and in the dashboard form
-  widget (`web/src/consoles/business/DashboardWidgets.tsx`).
-- **Why it matters:** screen readers do not announce the label, and
-  `getByLabel('Vendor')` does not find the input.
-- **How to check:** open a form record editor and inspect the input: no
-  `id` matching the label's `for`.
-- **What closes it:** `FormFieldInput` taking an `id` and passing it to the
-  element it renders.
-
 ### The forms list can show a form whose records the caller does not reach
 
 - **Noticed:** 2026-09-29, adding permissions to the forms list; not
@@ -1682,8 +1666,8 @@ leaves out, until it is fixed.
   caller does not reach a listed form, the UI hides New record and the
   records list answers 404. Whether the two decisions can differ (per-user
   application or model grants, the application header) was not checked.
-- **Why it matters:** a user could see a form tab with no records and no
-  actions.
+- **Why it matters:** a user could see a dashboard form widget with no
+  records and no actions.
 - **How to check:** a test where a user's access grants exclude the model
   but the application header still resolves it.
 - **What closes it:** the forms list leaving out forms the scope does not
@@ -2738,6 +2722,17 @@ leaves out, until it is fixed.
   `CheckMembers` before the first insert, for every caller.
 
 ## Closed
+
+### Form record field labels are not tied to their inputs
+
+- **Noticed:** 2026-09-29, writing the form record Playwright specs:
+  `FormFieldInput` neither accepted nor forwarded the id `Field` clones onto
+  its child, so a field's label (for example "Vendor") named no control.
+- **Closed by:** c5a7dd0 (2026-10-05), when the form widget became the one
+  place records are worked on (Run › Forms removed). `FormFieldInput`
+  (`web/src/consoles/business/FormPanel.tsx`) takes `id` and passes it to the
+  control it renders. e2e `form-permissions` fills the new record by
+  `getByLabel("Vendor")`, which timed out before.
 
 ### A grid layout without a zone breaks the grid widget
 

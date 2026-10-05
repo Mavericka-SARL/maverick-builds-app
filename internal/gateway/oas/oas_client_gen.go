@@ -1726,7 +1726,7 @@ type Invoker interface {
 	UpdateFormRecord(ctx context.Context, request *UpdateRecordRequest, params UpdateFormRecordParams) (UpdateFormRecordRes, error)
 	// UpdateGrid invokes updateGrid operation.
 	//
-	// Rename a grid.
+	// Rename or retag a grid.
 	//
 	// PATCH /api/developer/grids/{id}
 	UpdateGrid(ctx context.Context, request *UpdateGridRequest, params UpdateGridParams) (UpdateGridRes, error)
@@ -33042,7 +33042,7 @@ func (c *Client) sendUpdateFormRecord(ctx context.Context, request *UpdateRecord
 
 // UpdateGrid invokes updateGrid operation.
 //
-// Rename a grid.
+// Rename or retag a grid.
 //
 // PATCH /api/developer/grids/{id}
 func (c *Client) UpdateGrid(ctx context.Context, request *UpdateGridRequest, params UpdateGridParams) (UpdateGridRes, error) {

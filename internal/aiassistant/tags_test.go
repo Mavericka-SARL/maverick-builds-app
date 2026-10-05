@@ -51,6 +51,10 @@ func TestAITags(t *testing.T) {
 	if got := tagsOf("model.dashboard_def", dashID); !slices.Equal(got, []string{"board-pack"}) {
 		t.Errorf("create_dashboard tags = %v", got)
 	}
+	_, gridID := run("create_grid", map[string]any{"name": "Sales plan", "tags": []string{"Plan Grid", "plan-grid"}})
+	if got := tagsOf("model.grid_def", gridID); !slices.Equal(got, []string{"plan-grid"}) {
+		t.Errorf("create_grid tags = %v", got)
+	}
 
 	// update_metric keeps the tags when it says nothing about them, replaces
 	// them when it does.
@@ -72,6 +76,10 @@ func TestAITags(t *testing.T) {
 	if got := tagsOf("model.dashboard_def", dashID); !slices.Equal(got, []string{"exec"}) {
 		t.Errorf("set_tags dashboard by id = %v", got)
 	}
+	run("set_tags", map[string]any{"kind": "grid", "id": "Sales plan", "tags": []string{"Quarterly", "plan-grid"}})
+	if got := tagsOf("model.grid_def", gridID); !slices.Equal(got, []string{"quarterly", "plan-grid"}) {
+		t.Errorf("set_tags grid by name = %v", got)
+	}
 	result, _ := run("set_tags", map[string]any{"kind": "metric", "id": "units", "tags": []string{}})
 	if got := tagsOf("model.metric_def", metricID); len(got) != 0 || !strings.Contains(result, "cleared") {
 		t.Errorf("set_tags [] = %v (%q)", got, result)
@@ -86,7 +94,7 @@ func TestAITags(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, params := range map[string]map[string]any{
-		"unknown kind":  {"kind": "grid", "id": "x", "tags": []string{"a"}},
+		"unknown kind":  {"kind": "form", "id": "x", "tags": []string{"a"}},
 		"no id":         {"kind": "metric", "tags": []string{"a"}},
 		"no tags":       {"kind": "metric", "id": metricID},
 		"foreign model": {"kind": "metric", "id": foreignMetric, "tags": []string{"a"}},
@@ -108,6 +116,7 @@ func TestAITags(t *testing.T) {
 		"list_metrics":    "tags: ops",
 		"list_dimensions": "tags: go-to-market, sales",
 		"list_dashboards": "tags: exec",
+		"list_grids":      "tags: quarterly, plan-grid",
 	} {
 		out, err := reader.Execute(ctx, tool, nil)
 		if err != nil {

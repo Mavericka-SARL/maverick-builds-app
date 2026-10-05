@@ -168,7 +168,7 @@ func PercentUnitsMisuse(text string, percentMetrics map[string]bool) string {
 var knownParams = map[string][]string{
 	"create_metric": {"name", "label", "formula", "is_input", "format", "format_decimals", "format_currency", "agg_rule", "revision_id",
 		"agg_numerator_metric_id", "agg_denominator_metric_id", "time_summary", "tags", "picklist_dimension", "picklist_allow_parents", "highlight_rules"},
-	"create_grid": {"name", "revision_id", "metric_ids", "dimension_ids", "metrics", "dimensions"},
+	"create_grid": {"name", "revision_id", "metric_ids", "dimension_ids", "metrics", "dimensions", "tags"},
 }
 
 func unknownParams(tool string, params json.RawMessage) error {

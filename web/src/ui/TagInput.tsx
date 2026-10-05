@@ -11,10 +11,11 @@ interface TagInputProps {
 }
 
 /**
- * An editable list of tags: each one a removable chip, then a field that
- * adds what is typed on Enter, comma or leaving the field. Tags are stored
- * the way dashboards always stored them: trimmed, lower case, spaces as
- * hyphens. Backspace in the empty field removes the last one.
+ * An editable list of tags: each one a chip that removes it when chosen
+ * (click, Enter or Space), then a field that adds what is typed on Enter,
+ * comma or leaving the field. Tags are stored the way dashboards always
+ * stored them: trimmed, lower case, spaces as hyphens. Backspace in the
+ * empty field removes the last one.
  */
 export function TagInput({ value, onChange, inputWidth = 120, className }: TagInputProps) {
   const [draft, setDraft] = useState("");
@@ -23,10 +24,11 @@ export function TagInput({ value, onChange, inputWidth = 120, className }: TagIn
     if (tag && !value.includes(tag)) onChange([...value, tag]);
     setDraft("");
   };
+  const remove = (tag: string) => onChange(value.filter((x) => x !== tag));
   return (
     <div className={["mvx-tag-input", className].filter(Boolean).join(" ")}>
       {value.map((t) => (
-        <FilterChip key={t} onClear={() => onChange(value.filter((x) => x !== t))}>
+        <FilterChip key={t} onClick={() => remove(t)} onClear={() => remove(t)} aria-label={`Remove tag ${t}`} title="Remove tag">
           {t}
         </FilterChip>
       ))}

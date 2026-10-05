@@ -16,6 +16,7 @@ import (
 
 	"github.com/mavericks-engine/mavericks/internal/modeltransfer"
 	"github.com/mavericks-engine/mavericks/internal/starter"
+	"github.com/mavericks-engine/mavericks/internal/startersync"
 	"github.com/mavericks-engine/mavericks/internal/testdb"
 	migrationfs "github.com/mavericks-engine/mavericks/migrations"
 	"github.com/mavericks-engine/mavericks/pkg/logger"
@@ -251,6 +252,19 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 	}
 	if auditModel != modelID || auditGuides != strings.Join(guideIDs, ",") {
 		t.Fatalf("audit metadata: model_id=%q guide_model_ids=%q, want %q and %q", auditModel, auditGuides, modelID, strings.Join(guideIDs, ","))
+	}
+	// Each starter is recorded with the content it was imported with, so a
+	// later change reaches this tenant as a new revision (startersync).
+	wantModels := append([]string{modelID}, guideIDs...)
+	for i, st := range starter.Starters() {
+		var recModel, recHash string
+		if err := pool.QueryRow(ctx, `SELECT model_id::text, content_hash FROM core.starter_model WHERE customer_id=$1::uuid AND starter_key=$2`,
+			tenantID, st.Key).Scan(&recModel, &recHash); err != nil {
+			t.Fatalf("starter record %s: %v", st.Key, err)
+		}
+		if recModel != wantModels[i] || recHash != startersync.Hash(st.Package) {
+			t.Errorf("starter record %s: model %s hash %s…, want model %s and the current content", st.Key, recModel, recHash[:8], wantModels[i])
+		}
 	}
 	// The tour's calculated metric is worked out from its own figures, not
 	// left blank: the first screen has to show a real number.

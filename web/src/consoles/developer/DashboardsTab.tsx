@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, LayoutDashboard, Trash2, FolderPlus, Folder } from "lucide-react";
+import { Plus, LayoutDashboard, Trash2, FolderPlus, Folder, Pencil } from "lucide-react";
 import { api, type DashboardDef, type DashboardFolder } from "../../api/client";
 import { Toolbar, ToolbarGroup, SearchInput, FilterChip, TagInput, TagFilter, Button, Field, TextInput, Select, EmptyState, IconButton, useConfirm } from "../../ui";
 import { DashboardCanvas } from "./DashboardCanvas";
@@ -106,10 +106,11 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["dev-dashboards"] }); setEditingDashId(null); },
   });
   // Moving is its own mutation rather than a flag on saveDashboard: it fires
-  // straight from the row's select, with no rename in flight.
+  // straight from the row's select, with no rename in flight. The PATCH is
+  // partial, so it sends the folder alone.
   const moveDashboard = useMutation({
     mutationFn: ({ dash, folderID }: { dash: DashboardDef; folderID: string }) =>
-      api.updateDashboard(dash.id, { name: dash.name, tags: dash.tags ?? [], folder_id: folderID }),
+      api.updateDashboard(dash.id, { folder_id: folderID }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["dev-dashboards"] }),
   });
   const deleteDashboard = useMutation({
@@ -304,12 +305,13 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
                         <span className="mvx-admin-muted">Tags:</span>
                         <TagInput value={editDashTags} onChange={setEditDashTags} inputWidth={110} />
                       </div>
+                      {saveDashboard.isError && <p className="mvx-admin-error">{(saveDashboard.error as Error).message}</p>}
                     </div>
                   ) : (
                     <>
                       <button
                         type="button"
-                        title="Click to rename"
+                        title="Click to edit the name and tags"
                         className="mvx-rename-target"
                         onClick={() => { setEditingDashId(dash.id); setEditDashName(dash.name); setEditDashTags([...(dash.tags ?? [])]); }}
                       >{dash.name}</button>
@@ -336,6 +338,13 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
                           onClick={() => { setCanvasDashId(dash.id); setCanvasDashName(dash.name); }}>
                           Design
                         </Button>
+                        <IconButton
+                          aria-label={`Edit dashboard ${dash.name}`}
+                          title="Edit name and tags"
+                          onClick={() => { saveDashboard.reset(); setEditingDashId(dash.id); setEditDashName(dash.name); setEditDashTags([...(dash.tags ?? [])]); }}
+                        >
+                          <Pencil size={14} />
+                        </IconButton>
                         <IconButton
                           aria-label={`Delete dashboard ${dash.name}`}
                           title="Delete dashboard"

@@ -42,11 +42,39 @@ const (
 	publicDocs      = "https://github.com/Mavericka-SARL/maverick-builds-app/blob/main/docs/"
 )
 
-// Packages is everything sign-up creates, in order: the tour first — it is
+// Starter is one starter package and the key that names it for good.
+// internal/startersync records, per tenant, which model holds each key and
+// the content it was last brought to; the key is what survives a rename of
+// the model, so it never changes.
+type Starter struct {
+	Key     string
+	Package modeltransfer.Package
+}
+
+// TourKey is the tour's key: the starter a new tenant lands on.
+const TourKey = "tour"
+
+// Starters is everything sign-up creates, in order: the tour first — it is
 // the model a new tenant lands on — then one guide for each role that builds
-// or runs the workspace.
+// or runs the workspace. Workspaces that signed up before a starter existed,
+// or before its content last changed, are brought up to date by
+// internal/startersync.
+func Starters() []Starter {
+	return []Starter{
+		{Key: TourKey, Package: Package()},
+		{Key: "developer_guide", Package: DeveloperGuide()},
+		{Key: "business_admin_guide", Package: BusinessAdminGuide()},
+		{Key: "tenant_admin_guide", Package: TenantAdminGuide()},
+	}
+}
+
+// Packages is Starters without their keys.
 func Packages() []modeltransfer.Package {
-	return []modeltransfer.Package{Package(), DeveloperGuide(), BusinessAdminGuide(), TenantAdminGuide()}
+	var out []modeltransfer.Package
+	for _, s := range Starters() {
+		out = append(out, s.Package)
+	}
+	return out
 }
 
 // Placeholder ids: Import allocates real ones and remaps every reference.
@@ -254,7 +282,7 @@ To build one, open **Build › Dashboards**, press **New dashboard**, give it a 
 
 A **revision** is a complete copy of the model: its dimensions, metrics, grids, dashboards, forms, workflows and the numbers entered so far. One revision is *live*: it is what everyone else sees.
 
-Right now this model has one revision, and it is live, so a change you make here shows at once. For anything bigger, press **New revision** under this model in **Build › Models**, name it and press **Save**: you get a copy to work in, out of everyone's way. Change it as much as you like, then press **Set active** beside it when it is right.
+The revision you are reading is the live one, so a change you make here shows at once. For anything bigger, press **New revision** under this model in **Build › Models**, name it and press **Save**: you get a copy to work in, out of everyone's way. Change it as much as you like, then press **Set active** beside it when it is right.
 
 Every change to a model belongs to a revision; people, roles and access rules sit outside revisions and apply to every one. A workflow that is already running keeps the definition it started with.`, 240)
 
@@ -394,7 +422,7 @@ Press **Save as Integration** while mapping a file or a sheet to keep the mappin
 
 	p.text(`## Asking people for numbers
 
-A **form** collects structured entries — an expense, a request, a headcount change. Forms are designed under **Build › Forms**. A business admin makes entries under **Run › Forms**; business users make them through a form placed on a dashboard. To turn entries into numbers, add a **Form Records** integration under **Build › Integrations**: it posts each record into an input metric once the record reaches a status you choose, such as approved.
+A **form** collects structured entries — an expense, a request, a headcount change. Forms are designed under **Build › Forms**, and people — business users and business admins alike — make entries through a **Form** widget placed on a dashboard. To turn entries into numbers, add a **Form Records** integration under **Build › Integrations**: it posts each record into an input metric once the record reaches a status you choose, such as approved.
 
 ## Getting things agreed
 
@@ -418,7 +446,7 @@ Access can be narrower still. Under **Business Admin › Access Rules**, pick a 
 
 	p.text(`## Three more guides
 
-Next to this model sit three more, one for each role your account holds: **Developer guide**, **Business admin guide** and **Tenant admin guide**. To open one, go to **Business Admin › Models** and press **Open** beside its name; its pages then appear under **Run › Dashboards**. To come back here, press **Open** beside *Learn the platform*.
+Next to this model sit three more, one for each role your account holds: **Developer guide**, **Business admin guide** and **Tenant admin guide**. To open one, pick it in the **Model** list at the top of **Run › Dashboards** — or press **Open** beside its name under **Business Admin › Models** — and its pages appear. To come back here, pick *Learn the platform* the same way.
 
 For the whole story, the [developer manual](`+developerManual+`) covers the Build screens and the [formulas manual](`+formulasManual+`) every function.
 

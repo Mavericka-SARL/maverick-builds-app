@@ -24,7 +24,7 @@ const VIEWPORTS = [
 
 const PERSONAS: { persona: string; screens: string[] }[] = [
   { persona: "dept_head", screens: ["Dashboards", "Workflow Inbox", "My History", "Models"] },
-  { persona: "finance", screens: ["Dashboards", "Workflow Inbox", "Forms", "History", "Roles", "Access Rules"] },
+  { persona: "finance", screens: ["Dashboards", "Workflow Inbox", "History", "Roles", "Access Rules"] },
   { persona: "developer", screens: ["Models", "Metrics", "Dimensions", "Grids", "Dashboards", "Triggers", "Integrations"] },
   { persona: "platform_admin", screens: ["Applications", "Users", "Audit Log"] },
 ];
@@ -133,7 +133,7 @@ const HEX_BUDGETS: Record<string, number> = {
   "consoles/business/BusinessConsole.tsx": 0,
   "consoles/business/PlanningGrid.tsx": 0,
   "consoles/business/WorkflowInboxTab.tsx": 0,
-  "consoles/business/FormsTab.tsx": 0,
+  "consoles/business/FormPanel.tsx": 0,
   "consoles/business/DashboardsView.tsx": 0,
   "consoles/business/DashboardWidgets.tsx": 0,
   "consoles/business/ImportWidget.tsx": 0,

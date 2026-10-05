@@ -161,6 +161,7 @@ type Grid struct {
 	ID                 string          `json:"id"`
 	Name               string          `json:"name"`
 	RollupSourceGridID *string         `json:"rollup_source_grid_id,omitempty"`
+	Tags               []string        `json:"tags,omitempty"`
 	Metrics            []GridMetric    `json:"metrics"`
 	Dimensions         []GridDimension `json:"dimensions"`
 }
@@ -505,7 +506,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 
 	// Grids with their metric/dimension membership.
 	rows, err = q.Query(ctx, `
-		SELECT id::text, name, rollup_source_grid_id::text
+		SELECT id::text, name, rollup_source_grid_id::text, tags
 		FROM model.grid_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -513,7 +514,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 	for rows.Next() {
 		var g Grid
-		if err := rows.Scan(&g.ID, &g.Name, &g.RollupSourceGridID); err != nil {
+		if err := rows.Scan(&g.ID, &g.Name, &g.RollupSourceGridID, &g.Tags); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -869,16 +870,18 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 //
 //   - a missing or malformed lineage (a package from before migration 099,
 //     or a hand-edited one);
-//   - a lineage some row in this database already carries. Import always
-//     creates a NEW model, so such a row belongs to another model — most
-//     often the very model the package was exported from, re-imported as a
-//     copy in the same tenant. A lineage is one model's identity: shared
-//     across models, a rule on one model's member would also restrict its
-//     twin in the other.
+//   - a lineage a row of ANOTHER model in this database already carries —
+//     most often the very model the package was exported from, re-imported
+//     as a copy in the same tenant. A lineage is one model's identity:
+//     shared across models, a rule on one model's member would also
+//     restrict its twin in the other. Rows of modelID itself do not count:
+//     Import's model is new and has none, and ImportRevision's package is
+//     the next revision of that model, whose rows keep their lineage as a
+//     revision copy's do.
 //
 // A re-minted lineage is re-minted consistently: every row of the package
 // that carried it gets the same new value.
-func importLineages(ctx context.Context, tx pgx.Tx, pkg *Package) (func(string) *string, error) {
+func importLineages(ctx context.Context, tx pgx.Tx, pkg *Package, modelID string) (func(string) *string, error) {
 	var ids []string
 	for _, d := range pkg.Dimensions {
 		ids = append(ids, d.LineageID)
@@ -903,9 +906,10 @@ func importLineages(ctx context.Context, tx pgx.Tx, pkg *Package) (func(string) 
 	}
 	if len(valid) > 0 {
 		rows, err := tx.Query(ctx, `
-			SELECT lineage_id::text FROM model.dimension_def WHERE lineage_id = ANY($1::uuid[])
-			UNION SELECT lineage_id::text FROM model.dimension_member WHERE lineage_id = ANY($1::uuid[])
-			UNION SELECT lineage_id::text FROM model.metric_def WHERE lineage_id = ANY($1::uuid[])`, valid)
+			SELECT lineage_id::text FROM model.dimension_def WHERE lineage_id = ANY($1::uuid[]) AND model_id <> $2::uuid
+			UNION SELECT m.lineage_id::text FROM model.dimension_member m JOIN model.dimension_def d ON d.id = m.dimension_id
+			      WHERE m.lineage_id = ANY($1::uuid[]) AND d.model_id <> $2::uuid
+			UNION SELECT lineage_id::text FROM model.metric_def WHERE lineage_id = ANY($1::uuid[]) AND model_id <> $2::uuid`, valid, modelID)
 		if err != nil {
 			return nil, fmt.Errorf("check package lineages: %w", err)
 		}
@@ -1628,15 +1632,44 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 		req.ApplicationID, modelName, storageType).Scan(&modelID); err != nil {
 		return "", "", fmt.Errorf("create model: %w", err)
 	}
+	if revisionID, err = importRevision(ctx, tx, modelID, revisionName, pkg, importerID); err != nil {
+		return "", "", err
+	}
+	// A freshly imported model needs an active revision to be usable.
+	if _, err = tx.Exec(ctx, `
+		UPDATE core.model SET active_revision_id=$2::uuid, active_revision_name=$3
+		WHERE id=$1::uuid`,
+		modelID, revisionID, revisionName); err != nil {
+		return "", "", err
+	}
+	return modelID, revisionID, nil
+}
+
+// ImportRevision imports a package as a new revision of an existing model,
+// named revisionName (unique within the model, as every revision name is).
+// It does not make the revision live: activation is the caller's, with the
+// checks and remaps that go with it. A package lineage that the model's own
+// rows carry is kept (importLineages), so a package whose lineages were
+// taken from the model's live revision lines up with it, as a revision copy
+// does, and access rules follow its members and metrics.
+func ImportRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string, pkg Package, importerID string) (revisionID string, err error) {
+	if revisionName == "" {
+		return "", fmt.Errorf("revision name required")
+	}
+	return importRevision(ctx, tx, modelID, revisionName, &pkg, importerID)
+}
+
+// importRevision writes a package's rows into a new revision of modelID.
+func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string, pkg *Package, importerID string) (revisionID string, err error) {
 	if err = tx.QueryRow(ctx,
 		`INSERT INTO model.revision (model_id, name, description) VALUES ($1::uuid, $2, 'Imported from package') RETURNING id::text`,
 		modelID, revisionName).Scan(&revisionID); err != nil {
-		return "", "", fmt.Errorf("create revision: %w", err)
+		return "", fmt.Errorf("create revision: %w", err)
 	}
 
-	lineage, err := importLineages(ctx, tx, pkg)
+	lineage, err := importLineages(ctx, tx, pkg, modelID)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 
 	// Dimensions (parents/sources remapped after all rows exist), members,
@@ -1664,7 +1697,7 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			timeCfg.FiscalYearStartMonth = *d.FiscalYearStart
 		}
 		if err = timedim.ValidateConfig(&timeCfg); err != nil {
-			return "", "", fmt.Errorf("dimension %q: %w", d.Name, err)
+			return "", fmt.Errorf("dimension %q: %w", d.Name, err)
 		}
 		if err = tx.QueryRow(ctx, `
 			INSERT INTO model.dimension_def (model_id, revision_id, name, agg_rule, properties, source_property,
@@ -1675,7 +1708,7 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			modelID, revisionID, d.Name, d.AggRule, jsonArg(d.Properties), d.SourceProperty,
 			dimType, d.TimeGranularity, d.FiscalYearStart, d.Tags, lineage(d.LineageID),
 			d.BusinessMaintained && dimType != timedim.TypeTime).Scan(&newID); err != nil {
-			return "", "", fmt.Errorf("dimension %q: %w", d.Name, err)
+			return "", fmt.Errorf("dimension %q: %w", d.Name, err)
 		}
 		dimMap[d.ID] = newID
 		for i, m := range d.Members {
@@ -1695,7 +1728,7 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 				RETURNING id::text`,
 				newID, m.Code, m.Label, jsonArg(m.Properties), m.SortOrder, m.PeriodStart, m.PeriodEnd, timeIndex,
 				lineage(m.LineageID), m.Formula).Scan(&newMemberID); err != nil {
-				return "", "", fmt.Errorf("member %q of %q: %w", m.Code, d.Name, err)
+				return "", fmt.Errorf("member %q of %q: %w", m.Code, d.Name, err)
 			}
 			memberMap[m.ID] = newMemberID
 		}
@@ -1704,42 +1737,42 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			if _, err = tx.Exec(ctx,
 				`INSERT INTO model.dimension_property (dimension_id, name, data_type) VALUES ($1::uuid, $2, COALESCE(NULLIF($3::text,''),'text'))`,
 				newID, p.Name, p.DataType); err != nil {
-				return "", "", fmt.Errorf("dimension property %q: %w", p.Name, err)
+				return "", fmt.Errorf("dimension property %q: %w", p.Name, err)
 			}
 		}
 	}
 	for _, d := range pkg.Dimensions {
 		parent, err := optionalPackageRef(dimMap, d.ParentDimensionID)
 		if err != nil {
-			return "", "", fmt.Errorf("dimension %q: parent_dimension_id %w", d.Name, err)
+			return "", fmt.Errorf("dimension %q: parent_dimension_id %w", d.Name, err)
 		}
 		if parent != nil {
 			if _, err = tx.Exec(ctx, `UPDATE model.dimension_def SET parent_dimension_id=$2::uuid WHERE id=$1::uuid`,
 				dimMap[d.ID], parent); err != nil {
-				return "", "", fmt.Errorf("dimension parent of %q: %w", d.Name, err)
+				return "", fmt.Errorf("dimension parent of %q: %w", d.Name, err)
 			}
 		}
 		source, err := optionalPackageRef(dimMap, d.SourceDimensionID)
 		if err != nil {
-			return "", "", fmt.Errorf("dimension %q: source_dimension_id %w", d.Name, err)
+			return "", fmt.Errorf("dimension %q: source_dimension_id %w", d.Name, err)
 		}
 		if source != nil {
 			if _, err = tx.Exec(ctx, `UPDATE model.dimension_def SET source_dimension_id=$2::uuid WHERE id=$1::uuid`,
 				dimMap[d.ID], source); err != nil {
-				return "", "", fmt.Errorf("dimension source of %q: %w", d.Name, err)
+				return "", fmt.Errorf("dimension source of %q: %w", d.Name, err)
 			}
 		}
 		for _, m := range d.Members {
 			parent, err := optionalPackageRef(memberMap, m.ParentMemberID)
 			if err != nil {
-				return "", "", fmt.Errorf("member %q of %q: parent_member_id %w", m.Code, d.Name, err)
+				return "", fmt.Errorf("member %q of %q: parent_member_id %w", m.Code, d.Name, err)
 			}
 			if parent == nil {
 				continue
 			}
 			if _, err = tx.Exec(ctx, `UPDATE model.dimension_member SET parent_member_id=$2::uuid WHERE id=$1::uuid`,
 				memberMap[m.ID], parent); err != nil {
-				return "", "", fmt.Errorf("member parent of %q: %w", m.Code, err)
+				return "", fmt.Errorf("member parent of %q: %w", m.Code, err)
 			}
 		}
 		// Re-validate and re-index (parents now in place) rather than trust
@@ -1748,7 +1781,7 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 		// is also where a standard dimension is refused dated members,
 		// which the time_index placeholder above would otherwise let in.
 		if err = timedim.ValidateAndReindex(ctx, tx, dimMap[d.ID]); err != nil {
-			return "", "", fmt.Errorf("dimension %q: %w", d.Name, err)
+			return "", fmt.Errorf("dimension %q: %w", d.Name, err)
 		}
 	}
 
@@ -1770,7 +1803,7 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			RETURNING id::text`,
 			modelID, revisionID, m.Name, m.Formula, m.StorageType, m.IsInput, m.AggRule, m.Format, m.FormatDecimals, m.FormatCurrency, timeSummary, m.Tags,
 			lineage(m.LineageID), m.Label).Scan(&newID); err != nil {
-			return "", "", fmt.Errorf("metric %q: %w", m.Name, err)
+			return "", fmt.Errorf("metric %q: %w", m.Name, err)
 		}
 		metricMap[m.ID] = newID
 	}
@@ -1781,34 +1814,34 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 	for _, m := range pkg.Metrics {
 		num, err := packageRef(metricMap, m.AggNumeratorMetricID)
 		if err != nil {
-			return "", "", fmt.Errorf("metric %q: numerator %w", m.Name, err)
+			return "", fmt.Errorf("metric %q: numerator %w", m.Name, err)
 		}
 		den, err := packageRef(metricMap, m.AggDenominatorMetricID)
 		if err != nil {
-			return "", "", fmt.Errorf("metric %q: denominator %w", m.Name, err)
+			return "", fmt.Errorf("metric %q: denominator %w", m.Name, err)
 		}
 		if err = metricformula.ValidateAggRule(m.AggRule, m.IsInput, num, den, metricMap[m.ID]); err != nil {
-			return "", "", fmt.Errorf("metric %q: %w", m.Name, err)
+			return "", fmt.Errorf("metric %q: %w", m.Name, err)
 		}
 		picklistDim, err := packageRef(dimMap, m.PicklistDimensionID)
 		if err != nil {
-			return "", "", fmt.Errorf("metric %q: pick-list dimension %w", m.Name, err)
+			return "", fmt.Errorf("metric %q: pick-list dimension %w", m.Name, err)
 		}
 		if len(m.HighlightRules) > 0 {
 			// Held to the rules every metric writer applies, now that every
 			// metric a rule may name exists.
 			rules, hErr := metricformula.CheckHighlightRules(ctx, tx, modelID, revisionID, m.Name, m.HighlightRules)
 			if hErr != nil {
-				return "", "", fmt.Errorf("metric %q: %w", m.Name, hErr)
+				return "", fmt.Errorf("metric %q: %w", m.Name, hErr)
 			}
 			if _, err = tx.Exec(ctx, `UPDATE model.metric_def SET highlight_rules=$2::jsonb WHERE id=$1::uuid`, metricMap[m.ID], string(rules)); err != nil {
-				return "", "", fmt.Errorf("metric %q highlight rules: %w", m.Name, err)
+				return "", fmt.Errorf("metric %q highlight rules: %w", m.Name, err)
 			}
 		}
 		if picklistDim != "" {
 			if _, err = tx.Exec(ctx, `UPDATE model.metric_def SET picklist_dimension_id=$2::uuid, picklist_allow_parents=$3 WHERE id=$1::uuid`,
 				metricMap[m.ID], picklistDim, m.PicklistAllowParents); err != nil {
-				return "", "", fmt.Errorf("metric %q pick-list dimension: %w", m.Name, err)
+				return "", fmt.Errorf("metric %q pick-list dimension: %w", m.Name, err)
 			}
 		}
 		if num == "" && den == "" {
@@ -1817,7 +1850,7 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 		if _, err = tx.Exec(ctx, `
 			UPDATE model.metric_def SET agg_numerator_metric_id=NULLIF($2,'')::uuid, agg_denominator_metric_id=NULLIF($3,'')::uuid
 			WHERE id=$1::uuid`, metricMap[m.ID], num, den); err != nil {
-			return "", "", fmt.Errorf("metric %q operands: %w", m.Name, err)
+			return "", fmt.Errorf("metric %q operands: %w", m.Name, err)
 		}
 	}
 	for _, dep := range pkg.Dependencies {
@@ -1831,7 +1864,7 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			    (metric_id, depends_on_metric_id, min_time_offset, max_time_offset, unbounded_past, unbounded_future)
 			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
 			from, to, dep.MinTimeOffset, dep.MaxTimeOffset, dep.UnboundedPast, dep.UnboundedFuture); err != nil {
-			return "", "", fmt.Errorf("dependency: %w", err)
+			return "", fmt.Errorf("dependency: %w", err)
 		}
 	}
 
@@ -1841,21 +1874,21 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 	for _, g := range pkg.Grids {
 		var newID string
 		if err = tx.QueryRow(ctx,
-			`INSERT INTO model.grid_def (model_id, revision_id, name) VALUES ($1::uuid, $2::uuid, $3) RETURNING id::text`,
-			modelID, revisionID, g.Name).Scan(&newID); err != nil {
-			return "", "", fmt.Errorf("grid %q: %w", g.Name, err)
+			`INSERT INTO model.grid_def (model_id, revision_id, name, tags) VALUES ($1::uuid, $2::uuid, $3, COALESCE($4::text[],'{}')) RETURNING id::text`,
+			modelID, revisionID, g.Name, g.Tags).Scan(&newID); err != nil {
+			return "", fmt.Errorf("grid %q: %w", g.Name, err)
 		}
 		gridMap[g.ID] = newID
 	}
 	for _, g := range pkg.Grids {
 		rollup, err := optionalPackageRef(gridMap, g.RollupSourceGridID)
 		if err != nil {
-			return "", "", fmt.Errorf("grid %q: rollup_source_grid_id %w", g.Name, err)
+			return "", fmt.Errorf("grid %q: rollup_source_grid_id %w", g.Name, err)
 		}
 		if rollup != nil {
 			if _, err = tx.Exec(ctx, `UPDATE model.grid_def SET rollup_source_grid_id=$2::uuid WHERE id=$1::uuid`,
 				gridMap[g.ID], rollup); err != nil {
-				return "", "", fmt.Errorf("grid rollup source of %q: %w", g.Name, err)
+				return "", fmt.Errorf("grid rollup source of %q: %w", g.Name, err)
 			}
 		}
 		for _, gm := range g.Metrics {
@@ -1866,7 +1899,7 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			if _, err = tx.Exec(ctx,
 				`INSERT INTO model.grid_metric (grid_id, metric_id, sort_order) VALUES ($1::uuid, $2::uuid, $3)`,
 				gridMap[g.ID], mid, gm.SortOrder); err != nil {
-				return "", "", fmt.Errorf("grid metric: %w", err)
+				return "", fmt.Errorf("grid metric: %w", err)
 			}
 		}
 		for _, gd := range g.Dimensions {
@@ -1877,7 +1910,7 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			if _, err = tx.Exec(ctx,
 				`INSERT INTO model.grid_dimension (grid_id, dimension_id, display_level) VALUES ($1::uuid, $2::uuid, $3)`,
 				gridMap[g.ID], did, gd.DisplayLevel); err != nil {
-				return "", "", fmt.Errorf("grid dimension: %w", err)
+				return "", fmt.Errorf("grid dimension: %w", err)
 			}
 		}
 	}
@@ -1893,7 +1926,7 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE($5::jsonb,'[]'::jsonb))
 			RETURNING id::text`,
 			modelID, revisionID, f.Name, f.Label, jsonArg(fields)).Scan(&newID); err != nil {
-			return "", "", fmt.Errorf("form %q: %w", f.Name, err)
+			return "", fmt.Errorf("form %q: %w", f.Name, err)
 		}
 		formMap[f.ID] = newID
 	}
@@ -1908,7 +1941,7 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			INSERT INTO runtime.form_record (form_id, data, status, created_by)
 			VALUES ($1::uuid, COALESCE($2::jsonb,'{}'::jsonb), COALESCE(NULLIF($3::text,''),'draft')::runtime.record_status, $4::uuid)`,
 			fid, jsonArg(rec.Data), rec.Status, importerID); err != nil {
-			return "", "", fmt.Errorf("form record: %w", err)
+			return "", fmt.Errorf("form record: %w", err)
 		}
 	}
 	// mappingMap correlates each exported mapping's original ID to its
@@ -1927,7 +1960,7 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 		}
 		gridID, err := optionalPackageRef(gridMap, m.GridID)
 		if err != nil {
-			return "", "", fmt.Errorf("form mapping %q: grid_id %w", m.Name, err)
+			return "", fmt.Errorf("form mapping %q: grid_id %w", m.Name, err)
 		}
 		dimMappings := refs.cellDoc(m.DimensionMappings)
 		var newMappingID string
@@ -1941,7 +1974,7 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			modelID, revisionID, fid, gridID, m.Name, m.SourceField, mid,
 			m.Aggregation, m.PostingStatuses, jsonArg(dimMappings), m.LivePosting,
 		).Scan(&newMappingID); err != nil {
-			return "", "", fmt.Errorf("form mapping %q: %w", m.Name, err)
+			return "", fmt.Errorf("form mapping %q: %w", m.Name, err)
 		}
 		if m.ID != "" {
 			mappingMap[m.ID] = newMappingID
@@ -1956,21 +1989,21 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 		if err = tx.QueryRow(ctx,
 			`INSERT INTO model.dashboard_folder (model_id, revision_id, name) VALUES ($1::uuid, $2::uuid, $3) RETURNING id::text`,
 			modelID, revisionID, f.Name).Scan(&newID); err != nil {
-			return "", "", fmt.Errorf("folder %q: %w", f.Name, err)
+			return "", fmt.Errorf("folder %q: %w", f.Name, err)
 		}
 		folderMap[f.ID] = newID
 	}
 	for _, f := range pkg.Folders {
 		parent, err := optionalPackageRef(folderMap, f.ParentID)
 		if err != nil {
-			return "", "", fmt.Errorf("folder %q: parent_id %w", f.Name, err)
+			return "", fmt.Errorf("folder %q: parent_id %w", f.Name, err)
 		}
 		if parent == nil {
 			continue
 		}
 		if _, err = tx.Exec(ctx, `UPDATE model.dashboard_folder SET parent_id=$2::uuid WHERE id=$1::uuid`,
 			folderMap[f.ID], parent); err != nil {
-			return "", "", fmt.Errorf("folder parent of %q: %w", f.Name, err)
+			return "", fmt.Errorf("folder parent of %q: %w", f.Name, err)
 		}
 	}
 
@@ -1989,7 +2022,7 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			VALUES ($1::uuid, $2::uuid, $3, COALESCE($4::text[],'{}'), $5, $6::uuid)
 			RETURNING id::text`,
 			modelID, revisionID, d.Name, d.Tags, d.Category, folderID).Scan(&newID); err != nil {
-			return "", "", fmt.Errorf("dashboard %q: %w", d.Name, err)
+			return "", fmt.Errorf("dashboard %q: %w", d.Name, err)
 		}
 		dashMap[d.ID] = newID
 	}
@@ -1999,7 +2032,7 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 	refs.add("workflow", wfMap)
 	var appID string
 	if err = tx.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, modelID).Scan(&appID); err != nil {
-		return "", "", err
+		return "", err
 	}
 	for _, wf := range pkg.Workflows {
 		schema := refs.doc(wf.ContextSchema, jsonRefs{})
@@ -2023,7 +2056,7 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			RETURNING id::text`,
 			appID, revisionID, wf.Name, wf.Description, wf.TriggerEvent, wf.SubjectType, jsonArg(subject),
 			jsonArg(wf.Steps), jsonArg(schema), status, importerID, wf.SingleActiveInstance, wf.ApproverMayStart).Scan(&newID); err != nil {
-			return "", "", fmt.Errorf("workflow %q: %w", wf.Name, err)
+			return "", fmt.Errorf("workflow %q: %w", wf.Name, err)
 		}
 		wfMap[wf.ID] = newID
 	}
@@ -2063,7 +2096,7 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			RETURNING id::text`,
 			appID, revisionID, ar.Name, ar.Description, ar.TriggerType, ar.WorkflowName, ar.Enabled,
 			wfID, formID, gridID).Scan(&newRuleID); err != nil {
-			return "", "", fmt.Errorf("automation rule %q: %w", ar.Name, err)
+			return "", fmt.Errorf("automation rule %q: %w", ar.Name, err)
 		}
 		if ar.ID != "" {
 			ruleMap[ar.ID] = newRuleID
@@ -2092,7 +2125,7 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			VALUES ($1::uuid, $2::uuid, $3, COALESCE(NULLIF($4::text,''),'csv_import'), $5, $6::uuid, COALESCE($7::jsonb,'{}'::jsonb))
 			RETURNING id::text`,
 			modelID, revisionID, ig.Name, ig.Type, targetType, target, jsonArg(config)).Scan(&newIntegrationID); err != nil {
-			return "", "", fmt.Errorf("integration %q: %w", ig.Name, err)
+			return "", fmt.Errorf("integration %q: %w", ig.Name, err)
 		}
 		if ig.ID != "" {
 			integrationMap[ig.ID] = newIntegrationID
@@ -2118,7 +2151,7 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 				VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 				dashMap[d.ID], wd.WidgetType, refID, wd.Content, wd.SortOrder, colStart, colSpan,
 				boxes[i].x, boxes[i].y, boxes[i].w, boxes[i].h, wd.Title, wd.ShowTitle, jsonArg(props)); err != nil {
-				return "", "", fmt.Errorf("widget on %q: %w", d.Name, err)
+				return "", fmt.Errorf("widget on %q: %w", d.Name, err)
 			}
 		}
 	}
@@ -2147,17 +2180,9 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 			VALUES ($1::uuid, $2::uuid, $3, $4::uuid, COALESCE($5::jsonb,'{}'::jsonb), $6, $7::uuid, $8::uuid, $9)`,
 			modelID, revisionID, revisionName, mid,
 			jsonArg(dimMembers), f.Value, importerID, sourceRef, f.Text); err != nil {
-			return "", "", fmt.Errorf("fact: %w", err)
+			return "", fmt.Errorf("fact: %w", err)
 		}
 	}
 
-	// A freshly imported model needs an active revision to be usable.
-	if _, err = tx.Exec(ctx, `
-		UPDATE core.model SET active_revision_id=$2::uuid, active_revision_name=$3
-		WHERE id=$1::uuid`,
-		modelID, revisionID, revisionName); err != nil {
-		return "", "", err
-	}
-
-	return modelID, revisionID, nil
+	return revisionID, nil
 }

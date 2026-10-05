@@ -11020,7 +11020,7 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 												return r, true
 											case "PATCH":
 												r.name = UpdateGridOperation
-												r.summary = "Rename a grid"
+												r.summary = "Rename or retag a grid"
 												r.operationID = "updateGrid"
 												r.operationGroup = ""
 												r.pathPattern = "/api/developer/grids/{id}"

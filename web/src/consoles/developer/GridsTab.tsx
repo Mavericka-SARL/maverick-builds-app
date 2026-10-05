@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
 import { api, type GridDef, type DevDimension } from "../../api/client";
-import { Toolbar, ToolbarGroup, Button, Field, TextInput, SearchInput, EmptyState, IconButton, Checkbox, StatusBadge, Select, useConfirm } from "../../ui";
+import { Toolbar, ToolbarGroup, Button, Field, TextInput, SearchInput, EmptyState, IconButton, Checkbox, StatusBadge, Select, FilterChip, TagInput, TagFilter, useConfirm } from "../../ui";
 
 /**
  * A grid's picker lists every metric and dimension in the model. At a hundred
@@ -23,10 +23,40 @@ function PickerSection({ label, count, children }: { label: string; count: numbe
   );
 }
 
+// A grid's header in edit mode: its name and its tags, as a dimension's and a
+// dashboard's header edit theirs.
+function GridHeaderEditor({ grid, revisionId, onClose }: { grid: GridDef; revisionId?: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [name, setName] = useState(grid.name);
+  const [tags, setTags] = useState<string[]>(grid.tags ?? []);
+  const save = useMutation({
+    mutationFn: () => api.updateGrid(grid.id, { name, tags }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["dev-grids", revisionId] }); onClose(); },
+  });
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+      <div className="mvx-admin-inline-form">
+        <TextInput value={name} onChange={(e) => setName(e.target.value)} style={{ width: 240 }} aria-label="Grid name" autoFocus
+          onKeyDown={(e) => e.key === "Enter" && name.trim() && save.mutate()} />
+        <Button variant="primary" size="sm" disabled={!name.trim()} loading={save.isPending} onClick={() => save.mutate()}>Save</Button>
+        <Button size="sm" onClick={onClose}>Cancel</Button>
+      </div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <span className="mvx-admin-muted">Tags:</span>
+        <TagInput value={tags} onChange={setTags} inputWidth={110} />
+      </div>
+      {save.isError && <p className="mvx-admin-error">{(save.error as Error).message}</p>}
+    </div>
+  );
+}
+
 export function GridsTab({ revisionId }: { revisionId?: string }) {
   const qc = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newTags, setNewTags] = useState<string[]>([]);
+  const [editingGrid, setEditingGrid] = useState<string | null>(null);
+  const [filterTag, setFilterTag] = useState<string | null>(null);
   const [expandedGrid, setExpandedGrid] = useState<string | null>(null);
   // One pair of filters, not one per grid: only a single grid is open at a
   // time, and carrying a stale search into the next one you open would hide
@@ -42,8 +72,8 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
   const inv = () => qc.invalidateQueries({ queryKey: ["dev-grids", revisionId] });
 
   const createGrid = useMutation({
-    mutationFn: () => api.createGrid({ name: newName, revision_id: revisionId }),
-    onSuccess: () => { inv(); setNewName(""); setShowCreate(false); },
+    mutationFn: () => api.createGrid({ name: newName, revision_id: revisionId, tags: newTags }),
+    onSuccess: () => { inv(); setNewName(""); setNewTags([]); setShowCreate(false); },
   });
   const deleteGrid = useMutation({
     mutationFn: (id: string) => api.deleteGrid(id),
@@ -86,16 +116,20 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
   });
   const { confirm, confirmElement } = useConfirm();
 
-  // A grid matches by its own name or by a metric or dimension it holds;
-  // the open one stays in view.
+  // A grid matches by its own name, a tag, or a metric or dimension it
+  // holds; the open one stays in view. A chosen tag narrows the list first.
   const [search, setSearch] = useState("");
   const q = search.trim().toLowerCase();
+  const allTags = useMemo(() => [...new Set((grids as GridDef[]).flatMap(g => g.tags ?? []))].sort(), [grids]);
   const metricName = new Map((model?.metrics ?? []).map(m => [m.id, `${m.name} ${m.label}`.toLowerCase()]));
   const dimName = new Map((dims as DevDimension[]).map(d => [d.id, d.name.toLowerCase()]));
-  const shownGrids = (grids as GridDef[]).filter(g => !q || g.id === expandedGrid
+  const shownGrids = (grids as GridDef[]).filter(g => g.id === expandedGrid || (
+    (!filterTag || (g.tags ?? []).includes(filterTag)) && (!q
     || g.name.toLowerCase().includes(q)
+    || (g.tags ?? []).some(t => t.includes(q))
     || g.metric_ids.some(id => metricName.get(id)?.includes(q))
-    || g.dimension_ids.some(id => dimName.get(id)?.includes(q)));
+    || g.dimension_ids.some(id => dimName.get(id)?.includes(q)))));
+  const narrowed = [q ? `"${search.trim()}"` : "", filterTag ? `the tag "${filterTag}"` : ""].filter(Boolean).join(" and ");
 
   return (
     <div>
@@ -107,17 +141,28 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
         </ToolbarGroup>
         <ToolbarGroup align="end">
           <SearchInput value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search grids, metrics, dimensions…" width={300} />
-          <Button leadingIcon={showCreate ? undefined : <Plus size={14} />} onClick={() => setShowCreate((v) => !v)}>
+            placeholder="Search grids, tags, metrics, dimensions…" width={300} />
+          <Button leadingIcon={showCreate ? undefined : <Plus size={14} />} onClick={() => { setShowCreate((v) => !v); setNewName(""); setNewTags([]); }}>
             {showCreate ? "Cancel" : "New grid"}
           </Button>
         </ToolbarGroup>
       </Toolbar>
+      {allTags.length > 0 && (
+        <Toolbar className="mvx-toolbar--spaced">
+          <ToolbarGroup>
+            <span className="mvx-admin-muted">Tags:</span>
+            <TagFilter tags={allTags} active={filterTag} onChange={setFilterTag} />
+          </ToolbarGroup>
+        </Toolbar>
+      )}
 
       {showCreate && (
-        <div className="mvx-admin-inline-form" style={{ marginBottom: 20, alignItems: "flex-end" }}>
+        <div className="mvx-admin-inline-form" style={{ marginBottom: 20, alignItems: "flex-end", flexWrap: "wrap" }}>
           <Field label="Grid name">
             <TextInput value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="OPEX Budget" style={{ width: 280 }} />
+          </Field>
+          <Field label="Tags">
+            <TagInput value={newTags} onChange={setNewTags} />
           </Field>
           <Button variant="primary" disabled={!newName} loading={createGrid.isPending} onClick={() => createGrid.mutate()}>
             Create
@@ -128,16 +173,33 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
       {(grids as GridDef[]).length === 0 ? (
         <EmptyState label="No grids yet. Create one above." />
       ) : shownGrids.length === 0 ? (
-        <EmptyState label={`No grids match "${search.trim()}".`} />
+        <EmptyState label={`No grids match ${narrowed}.`} />
       ) : (
         <div className="mvx-admin-stack">
           {shownGrids.map((g) => (
             <div key={g.id} className="mvx-admin-object">
               <div className="mvx-admin-object__header" style={expandedGrid === g.id ? undefined : { borderBottom: "none" }}>
+                {editingGrid === g.id ? (
+                  <GridHeaderEditor grid={g} revisionId={revisionId} onClose={() => setEditingGrid(null)} />
+                ) : (
                 <div className="mvx-admin-object__title">
-                  <span className="mvx-admin-object__name">{g.name}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span className="mvx-admin-object__name">{g.name}</span>
+                    {(g.tags ?? []).map(t => (
+                      <FilterChip key={t} active={t === filterTag} onClick={() => setFilterTag(t === filterTag ? null : t)}
+                        title={t === filterTag ? "Clear tag filter" : "Filter by this tag"}>
+                        {t}
+                      </FilterChip>
+                    ))}
+                  </div>
                   <div className="mvx-admin-object__meta">{g.metric_ids.length} metrics · {g.dimension_ids.length} dimensions</div>
                 </div>
+                )}
+                {editingGrid !== g.id && (
+                  <IconButton aria-label={`Edit grid ${g.name}`} title="Edit name and tags" onClick={() => setEditingGrid(g.id)}>
+                    <Pencil size={14} />
+                  </IconButton>
+                )}
                 {/* "Done", not "Close": every change here is written as it is
                     made, so there is nothing pending and nothing to discard —
                     "Close" next to a delete button reads as though there might
