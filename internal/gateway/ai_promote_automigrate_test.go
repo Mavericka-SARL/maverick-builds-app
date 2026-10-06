@@ -34,7 +34,7 @@ func TestPromoteDraftTriggersAutoMigrate(t *testing.T) {
 	pStore := aiassistant.NewProposalStore(f.pool)
 	proposal, err := pStore.CreateProposal(ctx, sess.ID, []aiassistant.ProposalStep{
 		{Tool: "create_metric", Description: "Create input metric 'revenue'", Params: params},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create proposal: %v", err)
 	}

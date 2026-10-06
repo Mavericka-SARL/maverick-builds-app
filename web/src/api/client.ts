@@ -1638,6 +1638,8 @@ export interface AIProposal {
   status: "pending" | "confirmed" | "rejected" | "executed" | "partial";
   created_at: string;
   executed_at?: string;
+  /** The plan check's warnings the proposal was shown with. */
+  warnings?: string[];
 }
 
 // AIProposal plus a human-readable one-liner — what GET .../proposals (the
@@ -1771,6 +1773,14 @@ async function apiFetch<T>(path: string, init?: RequestInit, retrying = false): 
       localStorage.removeItem("selected_app_id");
       return apiFetch<T>(path, init, true);
     }
+    // A selected model the caller may not open (deleted, its access
+    // revoked, another account signed in) is refused rather than silently
+    // replaced by the application's default: drop it and retry once, which
+    // opens the default as before.
+    if (res.status === 404 && modelId && !retrying && body.code === "MODEL_NOT_OPEN") {
+      localStorage.removeItem("selected_model_id");
+      return apiFetch<T>(path, init, true);
+    }
     // Structured error bodies (e.g. import's per-row validation errors) are
     // attached to the thrown Error rather than discarded, so any caller that
     // needs more than the message can read err.body — generic to every
@@ -1789,11 +1799,13 @@ export interface ApiError extends Error {
 // apiFetchBlob is apiFetch's counterpart for file-download endpoints (CSV/
 // XLSX export): same auth headers, but returns the raw Blob plus whatever
 // filename the server chose (Content-Disposition), instead of parsing JSON.
-async function apiFetchBlob(path: string): Promise<{ blob: Blob; filename: string }> {
+async function apiFetchBlob(path: string, body?: unknown): Promise<{ blob: Blob; filename: string }> {
   const appId = localStorage.getItem("selected_app_id") ?? "";
   const modelId = localStorage.getItem("selected_model_id") ?? "";
   const res = await fetch(path, {
+    ...(body !== undefined ? { method: "POST", body: JSON.stringify(body) } : {}),
     headers: {
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
       "X-Dev-User": persona(),
       ...tenantHeader(),
       ...authHeader(),
@@ -2083,6 +2095,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  // A workbook's sheets and one sheet's cells, read by the gateway as the
+  // upload reads them — the browser parses no workbook.
+  parseWorkbook: (xlsxBase64: string, sheet?: string) =>
+    apiFetch<{ sheets: string[]; sheet: string; headers: string[]; rows: string[][] }>("/api/import/parse-workbook", {
+      method: "POST",
+      body: JSON.stringify({ xlsx_base64: xlsxBase64, ...(sheet ? { sheet } : {}) }),
+    }),
+  // The given rows (header first) as a one-sheet .xlsx, written by the gateway.
+  importTemplateWorkbook: (rows: (string | number)[][], filename?: string) =>
+    apiFetchBlob("/api/import/template-workbook", { rows, ...(filename ? { filename } : {}) }),
   fetchSheetPreview: (sheetUrl: string) =>
     apiFetch<{ csv: string; spreadsheet_id: string; gid: string }>("/api/import/sheets/fetch", {
       method: "POST",

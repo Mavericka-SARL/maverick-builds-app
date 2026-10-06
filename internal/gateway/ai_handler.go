@@ -210,7 +210,7 @@ func (h *handler) aiCreateSession(w http.ResponseWriter, r *http.Request) {
 
 	modelID, err := h.resolveDemoModelID(ctx, r)
 	if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
+		jsonAccessErr(w, err, "resolve model")
 		return
 	}
 	var appID string
@@ -243,7 +243,7 @@ func (h *handler) aiListSessions(w http.ResponseWriter, r *http.Request) {
 
 	modelID, err := h.resolveDemoModelID(ctx, r)
 	if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
+		jsonAccessErr(w, err, "resolve model")
 		return
 	}
 	sessions, err := h.aiChatStore(ctx).ListSessions(ctx, modelID, a.UserID)
@@ -719,7 +719,7 @@ turn:
 				sendSSE("tool_status", map[string]string{"tool": "checking the plan"})
 				continue turn
 			}
-			proposal, pErr := proposalStore.CreateProposal(ctx, sessionID, args.Steps)
+			proposal, pErr := proposalStore.CreateProposal(ctx, sessionID, args.Steps, check.warnings)
 			if pErr != nil {
 				sendSSE("error", map[string]string{"error": fmt.Sprintf("save proposal: %v", pErr)})
 				return
@@ -791,7 +791,7 @@ turn:
 	}
 
 	if warnedPlan != nil {
-		if proposal, pErr := proposalStore.CreateProposal(ctx, sessionID, warnedPlan); pErr == nil {
+		if proposal, pErr := proposalStore.CreateProposal(ctx, sessionID, warnedPlan, warnedWarnings); pErr == nil {
 			if strings.TrimSpace(finalReply) != "" {
 				_, _ = store.SaveMessage(ctx, sessionID, "assistant", finalReply, nil, "", "")
 			}

@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -172,6 +173,56 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 		return
 	}
 
+	created, errs, err := h.importFormRows(ctx, act, scope, form, header, rawRows)
+	if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	if len(errs) > 0 {
+		jsonFormRowErrs(w, errs)
+		return
+	}
+	if created == 0 {
+		jsonErr(w, fmt.Errorf("file contained no usable data rows"), http.StatusBadRequest)
+		return
+	}
+
+	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+		Category: auditlog.CategoryDataChange, EventType: auditlog.EventFormImported,
+		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
+		ApplicationID: scope.appID, ResourceType: "form", ResourceID: formID,
+		Metadata: map[string]string{"records_created": strconv.Itoa(created)},
+	})
+	jsonOK(w, map[string]any{"status": "ok", "records_created": created})
+}
+
+// formRowError is one row a form import refuses.
+type formRowError struct {
+	Row     int    `json:"row"`
+	Column  string `json:"column"`
+	Message string `json:"message"`
+}
+
+// jsonFormRowErrs answers a refused form import: 422, nothing created.
+func jsonFormRowErrs(w http.ResponseWriter, errs []formRowError) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error":      fmt.Sprintf("import rejected: %d row(s) failed validation, nothing was imported", len(errs)),
+		"error_rows": len(errs),
+		"errors":     errs,
+	})
+}
+
+// importFormRows creates a record of form for each row and posts it through
+// the form's mappings — the one path for POST /api/forms/{id}/import and a
+// saved csv_import or google_sheets integration whose target is a form.
+// Validation is whole-file atomic: when errs is not empty nothing was
+// created. A row's status column, when there is one, must be a status the
+// caller may create (scope); otherwise a record starts as a draft.
+func (h *handler) importFormRows(ctx context.Context, act *actor, scope formRecordScope, form *crudapp.FormDef, header []string, rawRows []importpkg.RawRow) (created int, errs []formRowError, err error) {
+	store := crudapp.NewStore(h.db.For(ctx))
+
 	// Match each column header to a form field by name, then by label
 	// (case-insensitive) — mirrors how an exported file names its columns.
 	// Columns matching neither (e.g. this form's own "id"/"created_at"
@@ -192,17 +243,12 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 		}
 	}
 
-	type rowErr struct {
-		Row     int    `json:"row"`
-		Column  string `json:"column"`
-		Message string `json:"message"`
-	}
 	type stagedRecord struct {
 		data   map[string]any
 		status string
 	}
-	var errs []rowErr
 	var staged []stagedRecord
+	memberLeaves := map[string]map[string]bool{} // dimension id → code → leaf
 
 	for _, row := range rawRows {
 		data := map[string]any{}
@@ -211,24 +257,35 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 			raw := strings.TrimSpace(row.Cells[col])
 			if raw == "" {
 				if field.Required {
-					errs = append(errs, rowErr{Row: row.RowNumber, Column: col, Message: fmt.Sprintf("%q is required", field.Label)})
+					errs = append(errs, formRowError{Row: row.RowNumber, Column: col, Message: fmt.Sprintf("%q is required", field.Label)})
 					rowValid = false
 				}
 				continue
 			}
-			switch field.Type {
-			case "number":
+			if field.Type == "dimension" && field.DimensionID != "" {
+				if msg, mErr := h.formMemberProblem(ctx, field, raw, memberLeaves); mErr != nil {
+					return 0, nil, mErr
+				} else if msg != "" {
+					errs = append(errs, formRowError{Row: row.RowNumber, Column: col, Message: msg})
+					rowValid = false
+					continue
+				}
+			}
+			switch {
+			// A metric field bound to a metric holds its amount, entered as a
+			// number on screen; stored as text it was never posted.
+			case field.Type == "number", field.Type == "metric" && field.MetricID != "":
 				v, pErr := strconv.ParseFloat(raw, 64)
 				if pErr != nil {
-					errs = append(errs, rowErr{Row: row.RowNumber, Column: col, Message: fmt.Sprintf("cannot parse %q as a number", raw)})
+					errs = append(errs, formRowError{Row: row.RowNumber, Column: col, Message: fmt.Sprintf("cannot parse %q as a number", raw)})
 					rowValid = false
 					continue
 				}
 				data[field.Name] = v
-			case "boolean":
+			case field.Type == "boolean":
 				v, pErr := strconv.ParseBool(raw)
 				if pErr != nil {
-					errs = append(errs, rowErr{Row: row.RowNumber, Column: col, Message: fmt.Sprintf("cannot parse %q as true/false", raw)})
+					errs = append(errs, formRowError{Row: row.RowNumber, Column: col, Message: fmt.Sprintf("cannot parse %q as true/false", raw)})
 					rowValid = false
 					continue
 				}
@@ -243,10 +300,10 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 		status := "draft"
 		if s := strings.ToLower(strings.TrimSpace(row.Cells["status"])); s != "" {
 			if !crudapp.ValidRecordStatus(s) {
-				errs = append(errs, rowErr{Row: row.RowNumber, Column: "status", Message: fmt.Sprintf("%q is not a valid status (draft, submitted, approved, rejected)", s)})
+				errs = append(errs, formRowError{Row: row.RowNumber, Column: "status", Message: fmt.Sprintf("%q is not a valid status (draft, submitted, approved, rejected)", s)})
 				rowValid = false
 			} else if !scope.createAccess().CanCreate(s) {
-				errs = append(errs, rowErr{Row: row.RowNumber, Column: "status", Message: fmt.Sprintf("only an administrator of this application imports a record as %s", s)})
+				errs = append(errs, formRowError{Row: row.RowNumber, Column: "status", Message: fmt.Sprintf("only an administrator of this application imports a record as %s", s)})
 				rowValid = false
 			} else {
 				status = s
@@ -259,39 +316,70 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 	}
 
 	if len(errs) > 0 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"error":      fmt.Sprintf("import rejected: %d row(s) failed validation, nothing was imported", len(errs)),
-			"error_rows": len(errs),
-			"errors":     errs,
-		})
-		return
-	}
-	if len(staged) == 0 {
-		jsonErr(w, fmt.Errorf("file contained no usable data rows"), http.StatusBadRequest)
-		return
+		return 0, errs, nil
 	}
 
 	userID := act.UserID
 	for _, sr := range staged {
-		rec, cErr := store.CreateRecordWithStatus(ctx, formID, userID, sr.status, sr.data)
+		rec, cErr := store.CreateRecordWithStatus(ctx, form.ID, userID, sr.status, sr.data)
 		if cErr != nil {
-			jsonErr(w, fmt.Errorf("create record: %w", cErr), http.StatusInternalServerError)
-			return
+			return created, nil, fmt.Errorf("create record: %w", cErr)
 		}
+		created++
 		bgCtx := context.WithoutCancel(ctx)
 		recID, status, data := rec.ID, sr.status, sr.data
-		go func() { _ = h.applyFormMappings(bgCtx, recID, formID, status, data, userID) }()
+		go func() { _ = h.applyFormMappings(bgCtx, recID, form.ID, status, data, userID) }()
+		// The rules a record created by hand fires: an automation that
+		// starts a workflow per submitted expense did not start for
+		// imported ones.
+		h.dispatchRecordCreated(ctx, scope.appID, scope.revisionID, form.ID, recID, status, userID)
 	}
+	return created, nil, nil
+}
 
-	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
-		Category: auditlog.CategoryDataChange, EventType: auditlog.EventFormImported,
-		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
-		ApplicationID: scope.appID, ResourceType: "form", ResourceID: formID,
-		Metadata: map[string]string{"records_created": strconv.Itoa(len(staged))},
-	})
-	jsonOK(w, map[string]any{"status": "ok", "records_created": len(staged)})
+// formMemberProblem says why raw is no member a dimension field of a record
+// can hold — a code its dimension does not have, a parent member, one the
+// field's allowed members leave out — or "" when it is one. The form's own
+// member picker offers leaves only; a record naming another code was
+// created but its posting went where no grid reads. leaves caches each
+// dimension's codes (true for a leaf) across the file.
+func (h *handler) formMemberProblem(ctx context.Context, field crudapp.FormField, raw string, leaves map[string]map[string]bool) (string, error) {
+	codes, ok := leaves[field.DimensionID]
+	if !ok {
+		codes = map[string]bool{}
+		rows, err := h.db.Query(ctx, `
+			SELECT m.code, NOT EXISTS (SELECT 1 FROM model.dimension_member c
+			                           WHERE c.parent_member_id = m.id AND c.dimension_id = m.dimension_id)
+			FROM model.dimension_member m
+			WHERE m.dimension_id = $1::uuid AND NULLIF(btrim(m.formula),'') IS NULL`, field.DimensionID)
+		if err != nil {
+			return "", fmt.Errorf("read members of %s: %w", field.Label, err)
+		}
+		for rows.Next() {
+			var code string
+			var leaf bool
+			if err := rows.Scan(&code, &leaf); err != nil {
+				rows.Close()
+				return "", err
+			}
+			codes[code] = leaf
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return "", err
+		}
+		leaves[field.DimensionID] = codes
+	}
+	leaf, known := codes[raw]
+	switch {
+	case !known:
+		return fmt.Sprintf("%q is not a member of %s (member codes match exactly)", raw, field.Label), nil
+	case !leaf:
+		return fmt.Sprintf("%q is not a leaf member of %s (has child members)", raw, field.Label), nil
+	case len(field.AllowedMembers) > 0 && !slices.Contains(field.AllowedMembers, raw):
+		return fmt.Sprintf("%q is not one of the members %s allows", raw, field.Label), nil
+	}
+	return "", nil
 }
 
 // filterFormRecords excludes any record touching a dimension member or

@@ -365,8 +365,16 @@ type ImportModelRes interface {
 	importModelRes()
 }
 
+type ImportParseWorkbookRes interface {
+	importParseWorkbookRes()
+}
+
 type ImportSheetFetchRes interface {
 	importSheetFetchRes()
+}
+
+type ImportTemplateWorkbookRes interface {
+	importTemplateWorkbookRes()
 }
 
 type ImportUploadRes interface {

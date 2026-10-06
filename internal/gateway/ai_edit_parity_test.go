@@ -61,7 +61,7 @@ func newAIParityFixture(t *testing.T, planKey, limits string) (context.Context, 
 // A plan capped at one metric and two members per dimension refuses the
 // assistant exactly where it refuses the developer.
 func TestAIWriteHooks_PlanLimitsHoldTheAssistant(t *testing.T) {
-	ctx, srv, ai, _, ids := newAIParityFixture(t, "tiny", `{"max_metrics_per_model": 1, "max_members_per_dimension": 2}`)
+	ctx, srv, ai, q, ids := newAIParityFixture(t, "tiny", `{"max_metrics_per_model": 1, "max_members_per_dimension": 2}`)
 	app, rev := ids["app"], ids["rev"]
 	run := func(tool string, params map[string]any) (string, error) {
 		t.Helper()
@@ -93,6 +93,23 @@ func TestAIWriteHooks_PlanLimitsHoldTheAssistant(t *testing.T) {
 	}
 	if _, err := run("add_dimension_member", map[string]any{"dimension_id": "region", "code": "C", "label": "C"}); err == nil {
 		t.Error("assistant added a third member on a 2-member plan")
+	}
+	// The developer's member file is held to the same limit: it passed it
+	// by any number of members. A file that only updates existing members
+	// still goes through.
+	dim := q(`SELECT id::text FROM model.dimension_def WHERE revision_id=$1::uuid AND name='region'`, rev)
+	code, body = callJSON(t, srv, "parity-dev", http.MethodPost, "/api/import/dimension-members",
+		map[string]any{"dimension_id": dim, "csv": "code,label\nC,C\nD,D\n"}, "X-App-Id", app)
+	if code != http.StatusPaymentRequired {
+		t.Errorf("developer's file of 2 new members: %d %v, want 402", code, body)
+	}
+	if n := q(`SELECT count(*)::text FROM model.dimension_member WHERE dimension_id=$1::uuid`, dim); n != "2" {
+		t.Errorf("%s members after the refused file, want 2", n)
+	}
+	code, body = callJSON(t, srv, "parity-dev", http.MethodPost, "/api/import/dimension-members",
+		map[string]any{"dimension_id": dim, "csv": "code,label\nA,Alpha\nB,Beta\n"}, "X-App-Id", app)
+	if code != http.StatusOK {
+		t.Errorf("developer's file updating 2 members: %d %v, want 200", code, body)
 	}
 }
 

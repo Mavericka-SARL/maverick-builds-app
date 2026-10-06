@@ -51,10 +51,10 @@ type RequestConfig struct {
 	BodyRaw     string `json:"body_raw,omitempty"`
 	ContentType string `json:"content_type,omitempty"` // raw mode only
 
-	TimeoutSeconds int  `json:"timeout_seconds,omitempty"` // default 30, max 120
-	MaxRetries     int  `json:"max_retries,omitempty"`     // safe methods only unless idempotency key set
-	RetryBackoffMS int  `json:"retry_backoff_ms,omitempty"`
-	RateLimitRPS   int  `json:"rate_limit_rps,omitempty"` // requests/second ceiling within a run
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"` // default 30, max 120
+	MaxRetries     int `json:"max_retries,omitempty"`     // safe methods only unless idempotency key set
+	RetryBackoffMS int `json:"retry_backoff_ms,omitempty"`
+	RateLimitRPS   int `json:"rate_limit_rps,omitempty"` // requests/second ceiling within a run
 	// IdempotencyKeyHeader, when set on a mutation method, is sent with a
 	// per-request UUID and unlocks retries for that method.
 	IdempotencyKeyHeader string `json:"idempotency_key_header,omitempty"`

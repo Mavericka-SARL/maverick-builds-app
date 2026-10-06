@@ -60,6 +60,9 @@ func (s *Server) Writeback(ctx context.Context, req *queryv1.WritebackRequest) (
 		if errors.Is(err, ErrWriteDenied) {
 			return nil, status.Error(codes.PermissionDenied, err.Error())
 		}
+		if errors.Is(err, ErrInvalidMember) {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
 		s.log.Error().Err(err).Msg("writeback")
 		return nil, status.Error(codes.Internal, err.Error())
 	}

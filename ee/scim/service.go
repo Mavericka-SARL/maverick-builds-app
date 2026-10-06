@@ -72,7 +72,15 @@ type Service struct {
 	// CanCreateUser, when set, is asked before a user is created; an error
 	// refuses the creation with its message (the tenant's plan limit).
 	CanCreateUser func(ctx context.Context) error
-	Log           zerolog.Logger
+	// RemoveFromTenant, when set, takes away what userID — a member the
+	// tenant does not own — holds in this tenant, as Remove from this tenant
+	// on the Users screen does, and leaves the account. A SCIM delete of
+	// such a member answered 403 and left its roles in place, so
+	// off-boarding through the identity provider did not off-board it.
+	// removed is false when the removal is refused (a role only a platform
+	// admin may take away).
+	RemoveFromTenant func(ctx context.Context, userID string) (removed bool, err error)
+	Log              zerolog.Logger
 }
 
 const (
@@ -336,6 +344,21 @@ func (s *Service) memberHere(ctx context.Context, cur userRow) (bool, error) {
 		return false, internal(err)
 	}
 	return held, nil
+}
+
+// removableMember reports whether userID, a member the tenant does not own,
+// may lose its place here through this directory: not a platform admin here
+// and not someone the control plane holds with platform reach.
+func (s *Service) removableMember(ctx context.Context, userID string) (bool, error) {
+	var platformAdmin bool
+	if err := s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM identity.role_assignment
+		WHERE user_id = $1::uuid AND role = 'platform_admin')`, userID).Scan(&platformAdmin); err != nil {
+		return false, internal(err)
+	}
+	if platformAdmin {
+		return false, nil
+	}
+	return s.notPlatformAccount(ctx, userID)
 }
 
 // notOwned is the refusal for an account the directory lists but may not
@@ -782,6 +805,21 @@ func (s *Service) deleteUser(ctx context.Context, cur userRow) error {
 			return err
 		}
 		if !member {
+			// Not the tenant's account: its place in the tenant is. A
+			// platform account's is not the directory's to touch.
+			if s.RemoveFromTenant != nil {
+				if ok, err := s.removableMember(ctx, cur.ID); err != nil {
+					return err
+				} else if ok {
+					removed, err := s.RemoveFromTenant(ctx, cur.ID)
+					if err != nil {
+						return internal(err)
+					}
+					if removed {
+						return nil
+					}
+				}
+			}
 			return notOwned(cur.Email)
 		}
 	}

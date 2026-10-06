@@ -249,21 +249,21 @@ func (s *Store) OpenCredential(ctx context.Context, appID, id string) (authType 
 // ── Definitions ──────────────────────────────────────────────────────────────
 
 type Definition struct {
-	ID             string    `json:"id"`
-	ModelID        string    `json:"model_id"`
-	RevisionID     string    `json:"revision_id,omitempty"`
-	Name           string    `json:"name"`
-	Description    string    `json:"description"`
-	Status         string    `json:"status"` // draft | active
-	Tags           []string  `json:"tags"`
-	Direction      Direction `json:"direction"`
-	Enabled        bool      `json:"enabled"`
-	ConnectionID   string    `json:"connection_id,omitempty"`
-	Config         *Config   `json:"config,omitempty"`
-	ConfigVersion  int       `json:"config_version"`
-	LastTestedHash string    `json:"last_tested_hash,omitempty"`
+	ID             string     `json:"id"`
+	ModelID        string     `json:"model_id"`
+	RevisionID     string     `json:"revision_id,omitempty"`
+	Name           string     `json:"name"`
+	Description    string     `json:"description"`
+	Status         string     `json:"status"` // draft | active
+	Tags           []string   `json:"tags"`
+	Direction      Direction  `json:"direction"`
+	Enabled        bool       `json:"enabled"`
+	ConnectionID   string     `json:"connection_id,omitempty"`
+	Config         *Config    `json:"config,omitempty"`
+	ConfigVersion  int        `json:"config_version"`
+	LastTestedHash string     `json:"last_tested_hash,omitempty"`
 	LastTestedAt   *time.Time `json:"last_tested_at,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
+	CreatedAt      time.Time  `json:"created_at"`
 }
 
 // Tested reports whether the CURRENT config passed its test.
@@ -409,27 +409,27 @@ func (s *Store) GetDefinition(ctx context.Context, modelID, id string) (*Definit
 // ── Run queue ────────────────────────────────────────────────────────────────
 
 type Run struct {
-	ID            string     `json:"id"`
-	IntegrationID string     `json:"integration_id"`
-	Status        string     `json:"status"`
-	TriggerType   string     `json:"trigger_type"`
-	DryRun        bool       `json:"dry_run"`
-	RunBy         string     `json:"run_by,omitempty"`
-	ScheduledFor  *time.Time `json:"scheduled_for,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	StartedAt     *time.Time `json:"started_at,omitempty"`
-	FinishedAt    *time.Time `json:"finished_at,omitempty"`
-	HTTPStatus    int        `json:"http_status,omitempty"`
-	DurationMS    int        `json:"duration_ms"`
-	Pages         int        `json:"pages"`
-	Requests      int        `json:"requests"`
-	Retries       int        `json:"retries"`
-	RecordsRead   int        `json:"records_read"`
-	RecordsWritten int       `json:"records_written"`
-	RecordsSkipped int       `json:"records_skipped"`
-	ErrorCode     string     `json:"error_code,omitempty"`
-	Message       string     `json:"message,omitempty"`
-	Meta          json.RawMessage `json:"meta,omitempty"`
+	ID             string          `json:"id"`
+	IntegrationID  string          `json:"integration_id"`
+	Status         string          `json:"status"`
+	TriggerType    string          `json:"trigger_type"`
+	DryRun         bool            `json:"dry_run"`
+	RunBy          string          `json:"run_by,omitempty"`
+	ScheduledFor   *time.Time      `json:"scheduled_for,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
+	StartedAt      *time.Time      `json:"started_at,omitempty"`
+	FinishedAt     *time.Time      `json:"finished_at,omitempty"`
+	HTTPStatus     int             `json:"http_status,omitempty"`
+	DurationMS     int             `json:"duration_ms"`
+	Pages          int             `json:"pages"`
+	Requests       int             `json:"requests"`
+	Retries        int             `json:"retries"`
+	RecordsRead    int             `json:"records_read"`
+	RecordsWritten int             `json:"records_written"`
+	RecordsSkipped int             `json:"records_skipped"`
+	ErrorCode      string          `json:"error_code,omitempty"`
+	Message        string          `json:"message,omitempty"`
+	Meta           json.RawMessage `json:"meta,omitempty"`
 }
 
 // Enqueue inserts a queued run and returns its ID. scheduledFor non-nil makes
@@ -498,14 +498,14 @@ func (s *Store) Heartbeat(ctx context.Context, runID, workerID string, leaseFor 
 
 // RunResult carries everything Finish persists.
 type RunResult struct {
-	Status         string // success | partial | failed | cancelled
-	HTTPStatus     int
-	DurationMS     int
-	Pages, Requests, Retries int
+	Status                                      string // success | partial | failed | cancelled
+	HTTPStatus                                  int
+	DurationMS                                  int
+	Pages, Requests, Retries                    int
 	RecordsRead, RecordsWritten, RecordsSkipped int
-	ErrorCode      string
-	Message        string // MUST already be sanitized by the caller
-	Meta           map[string]string
+	ErrorCode                                   string
+	Message                                     string // MUST already be sanitized by the caller
+	Meta                                        map[string]string
 }
 
 func (s *Store) Finish(ctx context.Context, runID string, r RunResult) error {

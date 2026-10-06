@@ -20,7 +20,7 @@ function session(promoted: boolean) {
   };
 }
 
-async function mockAi(page: Page, opts: { promoted: boolean; messages?: unknown[] }) {
+async function mockAi(page: Page, opts: { promoted: boolean; messages?: unknown[]; proposals?: unknown[] }) {
   const json = (body: unknown) => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
   await page.route("**/api/ai/sessions", (route) =>
     route.request().method() === "GET" ? route.fulfill(json([session(opts.promoted)])) : route.fallback());
@@ -29,7 +29,7 @@ async function mockAi(page: Page, opts: { promoted: boolean; messages?: unknown[
     route.request().method() === "GET"
       ? route.fulfill(json({ session: session(opts.promoted), messages: opts.messages ?? [], documents: [] }))
       : route.fallback());
-  await page.route(`**/api/ai/sessions/${SESSION_ID}/proposals`, (route) => route.fulfill(json([])));
+  await page.route(`**/api/ai/sessions/${SESSION_ID}/proposals`, (route) => route.fulfill(json(opts.proposals ?? [])));
 }
 
 async function openSession(page: Page) {
@@ -99,5 +99,18 @@ test("a proposal shows the plan check's warnings", async ({ page }) => {
   await page.getByLabel("Message").fill("create the target");
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByText("The plan check warns:")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(/without dividing by 100/)).toBeVisible();
+});
+
+test("a reopened session shows a proposal's warnings in Activity", async ({ page }) => {
+  await mockApi(page);
+  const warning = "step 1 (create_metric target): the formula multiplies growth_pct, a Percentage metric stored in percent units (6 for 6%), without dividing by 100";
+  await mockAi(page, { promoted: false, proposals: [{
+    id: "prop-w", session_id: SESSION_ID, status: "pending", created_at: "2026-10-05T09:02:00Z", summary: "Create target",
+    steps: [{ tool: "create_metric", description: "Create target", params: { name: "target" } }], warnings: [warning],
+  }] });
+  await openSession(page);
+  await page.getByRole("button", { name: "Activity" }).click();
+  await expect(page.getByText("The plan check warned:")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText(/without dividing by 100/)).toBeVisible();
 });

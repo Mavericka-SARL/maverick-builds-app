@@ -234,12 +234,24 @@ func statusFromString(s string) notificationv1.NotificationStatus {
 	}
 }
 
+// ErrRecipientDisabled is Notify's answer for a disabled recipient: nothing
+// was queued.
+var ErrRecipientDisabled = errors.New("the recipient's account is disabled")
+
 // Notify is what producers should call: it writes the in-app notification
 // every recipient always gets, and, for each outbound channel this database
 // has turned on, one more row for the dispatcher to deliver. A settings read
 // that fails is logged nowhere and simply yields in-app only — a notification
 // that reached the console is better than none.
+//
+// A disabled account is notified of nothing (ErrRecipientDisabled): a
+// person removed from the tenant kept receiving workflow mail, which carries
+// the workflow's name and message.
 func (s *Store) Notify(ctx context.Context, recipientUserID, templateID string, templateVars map[string]string, resourceType, resourceID string) (string, error) {
+	var disabled bool
+	if err := s.db.QueryRow(ctx, `SELECT disabled_at IS NOT NULL FROM identity.user WHERE id = $1::uuid`, recipientUserID).Scan(&disabled); err == nil && disabled {
+		return "", ErrRecipientDisabled
+	}
 	id, err := s.Send(ctx, recipientUserID, templateID,
 		notificationv1.NotificationChannel_NOTIFICATION_CHANNEL_IN_APP, templateVars, resourceType, resourceID)
 	if err != nil {

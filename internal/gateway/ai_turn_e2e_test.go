@@ -25,9 +25,10 @@ import (
 )
 
 type aiTurnEnv struct {
-	chat    *aiassistant.ChatStore
-	session string
-	send    func(content string) (int, string)
+	chat      *aiassistant.ChatStore
+	proposals *aiassistant.ProposalStore
+	session   string
+	send      func(content string) (int, string)
 }
 
 func newAITurnEnv(t *testing.T, provider providers.Provider) aiTurnEnv {
@@ -67,7 +68,7 @@ func newAITurnEnv(t *testing.T, provider providers.Provider) aiTurnEnv {
 		t.Fatal(err)
 	}
 	_ = chat.SetTitleIfEmpty(ctx, sess.ID, "pre-titled")
-	return aiTurnEnv{chat: chat, session: sess.ID, send: func(content string) (int, string) {
+	return aiTurnEnv{chat: chat, proposals: aiassistant.NewProposalStore(pool), session: sess.ID, send: func(content string) (int, string) {
 		t.Helper()
 		body, _ := json.Marshal(map[string]string{"content": content})
 		req, _ := http.NewRequestWithContext(ctx, "POST", srv.URL+"/api/ai/sessions/"+sess.ID+"/messages", bytes.NewReader(body))
@@ -209,6 +210,20 @@ func TestSendMessage_WarnsOnceThenShowsWithWarnings(t *testing.T) {
 	if !strings.Contains(sse, `"warnings":[`) || !strings.Contains(sse, "without dividing by 100") {
 		t.Errorf("the proposal event does not carry the warnings for the developer:\n%s", sse)
 	}
+	env.storedWarnings(t, "without dividing by 100")
+}
+
+// storedWarnings checks that the session's proposal keeps the plan check's
+// warnings, so a reopened session shows them with it.
+func (e aiTurnEnv) storedWarnings(t *testing.T, want string) {
+	t.Helper()
+	ps, err := e.proposals.ListProposals(context.Background(), e.session)
+	if err != nil || len(ps) != 1 {
+		t.Fatalf("proposals: %d (err %v), want 1", len(ps), err)
+	}
+	if !strings.Contains(strings.Join(ps[0].Warnings, "\n"), want) {
+		t.Errorf("the stored proposal's warnings %q lack %q", ps[0].Warnings, want)
+	}
 }
 
 // A plan that runs goes back once for its warnings; a model that then asks
@@ -233,6 +248,7 @@ func TestSendMessage_WarnedPlanShownWhenTheModelOnlyAsks(t *testing.T) {
 	if last := msgs[len(msgs)-1]; last.Role != "assistant" || !strings.Contains(last.Content, "The plan below runs (3 step(s))") {
 		t.Errorf("the transcript ends with %q, want the note that the plan is shown with its warnings", last.Content)
 	}
+	env.storedWarnings(t, "without dividing by 100")
 }
 
 // A plan that fails its check goes back; a model that then only asks is

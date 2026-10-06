@@ -29,18 +29,18 @@ func TestListProposals_ReturnsEveryStatusMostRecentFirst(t *testing.T) {
 		return []aiassistant.ProposalStep{{Tool: "create_dimension", Description: "Create dimension '" + name + "'", Params: params}}
 	}
 
-	pending, err := pStore.CreateProposal(ctx, sess.ID, mkStep("Pending"))
+	pending, err := pStore.CreateProposal(ctx, sess.ID, mkStep("Pending"), nil)
 	if err != nil {
 		t.Fatalf("create pending proposal: %v", err)
 	}
-	rejected, err := pStore.CreateProposal(ctx, sess.ID, mkStep("Rejected"))
+	rejected, err := pStore.CreateProposal(ctx, sess.ID, mkStep("Rejected"), nil)
 	if err != nil {
 		t.Fatalf("create rejected proposal: %v", err)
 	}
 	if err := pStore.SetStatus(ctx, rejected.ID, "rejected"); err != nil {
 		t.Fatalf("set rejected status: %v", err)
 	}
-	executed, err := pStore.CreateProposal(ctx, sess.ID, mkStep("Executed"))
+	executed, err := pStore.CreateProposal(ctx, sess.ID, mkStep("Executed"), nil)
 	if err != nil {
 		t.Fatalf("create executed proposal: %v", err)
 	}

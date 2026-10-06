@@ -31953,11 +31953,22 @@ func (s *ImportModelOK) encodeFields(e *jx.Encoder) {
 			s.RevisionID.Encode(e)
 		}
 	}
+	{
+		if s.Notes != nil {
+			e.FieldStart("notes")
+			e.ArrStart()
+			for _, elem := range s.Notes {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
 }
 
-var jsonFieldsNameOfImportModelOK = [2]string{
+var jsonFieldsNameOfImportModelOK = [3]string{
 	0: "model_id",
 	1: "revision_id",
+	2: "notes",
 }
 
 // Decode decodes ImportModelOK from json.
@@ -31988,6 +31999,25 @@ func (s *ImportModelOK) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"revision_id\"")
 			}
+		case "notes":
+			if err := func() error {
+				s.Notes = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Notes = append(s.Notes, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"notes\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -32008,6 +32038,360 @@ func (s *ImportModelOK) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *ImportModelOK) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ImportParseWorkbookBadRequest as json.
+func (s *ImportParseWorkbookBadRequest) Encode(e *jx.Encoder) {
+	unwrapped := (*Error)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes ImportParseWorkbookBadRequest from json.
+func (s *ImportParseWorkbookBadRequest) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ImportParseWorkbookBadRequest to nil")
+	}
+	var unwrapped Error
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = ImportParseWorkbookBadRequest(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *ImportParseWorkbookBadRequest) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ImportParseWorkbookBadRequest) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *ImportParseWorkbookOK) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *ImportParseWorkbookOK) encodeFields(e *jx.Encoder) {
+	{
+		if s.Sheets != nil {
+			e.FieldStart("sheets")
+			e.ArrStart()
+			for _, elem := range s.Sheets {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.Sheet.Set {
+			e.FieldStart("sheet")
+			s.Sheet.Encode(e)
+		}
+	}
+	{
+		if s.Headers != nil {
+			e.FieldStart("headers")
+			e.ArrStart()
+			for _, elem := range s.Headers {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.Rows != nil {
+			e.FieldStart("rows")
+			e.ArrStart()
+			for _, elem := range s.Rows {
+				e.ArrStart()
+				for _, elem := range elem {
+					e.Str(elem)
+				}
+				e.ArrEnd()
+			}
+			e.ArrEnd()
+		}
+	}
+}
+
+var jsonFieldsNameOfImportParseWorkbookOK = [4]string{
+	0: "sheets",
+	1: "sheet",
+	2: "headers",
+	3: "rows",
+}
+
+// Decode decodes ImportParseWorkbookOK from json.
+func (s *ImportParseWorkbookOK) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ImportParseWorkbookOK to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "sheets":
+			if err := func() error {
+				s.Sheets = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Sheets = append(s.Sheets, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"sheets\"")
+			}
+		case "sheet":
+			if err := func() error {
+				s.Sheet.Reset()
+				if err := s.Sheet.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"sheet\"")
+			}
+		case "headers":
+			if err := func() error {
+				s.Headers = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Headers = append(s.Headers, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"headers\"")
+			}
+		case "rows":
+			if err := func() error {
+				s.Rows = make([][]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem []string
+					elem = make([]string, 0)
+					if err := d.Arr(func(d *jx.Decoder) error {
+						var elemElem string
+						v, err := d.Str()
+						elemElem = string(v)
+						if err != nil {
+							return err
+						}
+						elem = append(elem, elemElem)
+						return nil
+					}); err != nil {
+						return err
+					}
+					s.Rows = append(s.Rows, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"rows\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode ImportParseWorkbookOK")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *ImportParseWorkbookOK) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ImportParseWorkbookOK) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *ImportParseWorkbookReq) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *ImportParseWorkbookReq) encodeFields(e *jx.Encoder) {
+	{
+		e.FieldStart("xlsx_base64")
+		e.Str(s.XlsxBase64)
+	}
+	{
+		if s.Sheet.Set {
+			e.FieldStart("sheet")
+			s.Sheet.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfImportParseWorkbookReq = [2]string{
+	0: "xlsx_base64",
+	1: "sheet",
+}
+
+// Decode decodes ImportParseWorkbookReq from json.
+func (s *ImportParseWorkbookReq) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ImportParseWorkbookReq to nil")
+	}
+	var requiredBitSet [1]uint8
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "xlsx_base64":
+			requiredBitSet[0] |= 1 << 0
+			if err := func() error {
+				v, err := d.Str()
+				s.XlsxBase64 = string(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"xlsx_base64\"")
+			}
+		case "sheet":
+			if err := func() error {
+				s.Sheet.Reset()
+				if err := s.Sheet.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"sheet\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode ImportParseWorkbookReq")
+	}
+	// Validate required fields.
+	var failures []validate.FieldError
+	for i, mask := range [1]uint8{
+		0b00000001,
+	} {
+		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
+			// Mask only required fields and check equality to mask using XOR.
+			//
+			// If XOR result is not zero, result is not equal to expected, so some fields are missed.
+			// Bits of fields which would be set are actually bits of missed fields.
+			missed := bits.OnesCount8(result)
+			for bitN := 0; bitN < missed; bitN++ {
+				bitIdx := bits.TrailingZeros8(result)
+				fieldIdx := i*8 + bitIdx
+				var name string
+				if fieldIdx < len(jsonFieldsNameOfImportParseWorkbookReq) {
+					name = jsonFieldsNameOfImportParseWorkbookReq[fieldIdx]
+				} else {
+					name = strconv.Itoa(fieldIdx)
+				}
+				failures = append(failures, validate.FieldError{
+					Name:  name,
+					Error: validate.ErrFieldRequired,
+				})
+				// Reset bit.
+				result &^= 1 << bitIdx
+			}
+		}
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *ImportParseWorkbookReq) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ImportParseWorkbookReq) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ImportParseWorkbookUnauthorized as json.
+func (s *ImportParseWorkbookUnauthorized) Encode(e *jx.Encoder) {
+	unwrapped := (*Error)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes ImportParseWorkbookUnauthorized from json.
+func (s *ImportParseWorkbookUnauthorized) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ImportParseWorkbookUnauthorized to nil")
+	}
+	var unwrapped Error
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = ImportParseWorkbookUnauthorized(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *ImportParseWorkbookUnauthorized) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ImportParseWorkbookUnauthorized) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
@@ -32277,6 +32661,238 @@ func (s *ImportSheetFetchReq) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *ImportSheetFetchReq) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ImportTemplateWorkbookBadRequest as json.
+func (s *ImportTemplateWorkbookBadRequest) Encode(e *jx.Encoder) {
+	unwrapped := (*Error)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes ImportTemplateWorkbookBadRequest from json.
+func (s *ImportTemplateWorkbookBadRequest) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ImportTemplateWorkbookBadRequest to nil")
+	}
+	var unwrapped Error
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = ImportTemplateWorkbookBadRequest(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *ImportTemplateWorkbookBadRequest) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ImportTemplateWorkbookBadRequest) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *ImportTemplateWorkbookReq) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *ImportTemplateWorkbookReq) encodeFields(e *jx.Encoder) {
+	{
+		if s.Sheet.Set {
+			e.FieldStart("sheet")
+			s.Sheet.Encode(e)
+		}
+	}
+	{
+		if s.Filename.Set {
+			e.FieldStart("filename")
+			s.Filename.Encode(e)
+		}
+	}
+	{
+		e.FieldStart("rows")
+		e.ArrStart()
+		for _, elem := range s.Rows {
+			e.ArrStart()
+			for _, elem := range elem {
+				if len(elem) != 0 {
+					e.Raw(elem)
+				}
+			}
+			e.ArrEnd()
+		}
+		e.ArrEnd()
+	}
+}
+
+var jsonFieldsNameOfImportTemplateWorkbookReq = [3]string{
+	0: "sheet",
+	1: "filename",
+	2: "rows",
+}
+
+// Decode decodes ImportTemplateWorkbookReq from json.
+func (s *ImportTemplateWorkbookReq) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ImportTemplateWorkbookReq to nil")
+	}
+	var requiredBitSet [1]uint8
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "sheet":
+			if err := func() error {
+				s.Sheet.Reset()
+				if err := s.Sheet.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"sheet\"")
+			}
+		case "filename":
+			if err := func() error {
+				s.Filename.Reset()
+				if err := s.Filename.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"filename\"")
+			}
+		case "rows":
+			requiredBitSet[0] |= 1 << 2
+			if err := func() error {
+				s.Rows = make([][]jx.Raw, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem []jx.Raw
+					elem = make([]jx.Raw, 0)
+					if err := d.Arr(func(d *jx.Decoder) error {
+						var elemElem jx.Raw
+						v, err := d.RawAppend(nil)
+						elemElem = jx.Raw(v)
+						if err != nil {
+							return err
+						}
+						elem = append(elem, elemElem)
+						return nil
+					}); err != nil {
+						return err
+					}
+					s.Rows = append(s.Rows, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"rows\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode ImportTemplateWorkbookReq")
+	}
+	// Validate required fields.
+	var failures []validate.FieldError
+	for i, mask := range [1]uint8{
+		0b00000100,
+	} {
+		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
+			// Mask only required fields and check equality to mask using XOR.
+			//
+			// If XOR result is not zero, result is not equal to expected, so some fields are missed.
+			// Bits of fields which would be set are actually bits of missed fields.
+			missed := bits.OnesCount8(result)
+			for bitN := 0; bitN < missed; bitN++ {
+				bitIdx := bits.TrailingZeros8(result)
+				fieldIdx := i*8 + bitIdx
+				var name string
+				if fieldIdx < len(jsonFieldsNameOfImportTemplateWorkbookReq) {
+					name = jsonFieldsNameOfImportTemplateWorkbookReq[fieldIdx]
+				} else {
+					name = strconv.Itoa(fieldIdx)
+				}
+				failures = append(failures, validate.FieldError{
+					Name:  name,
+					Error: validate.ErrFieldRequired,
+				})
+				// Reset bit.
+				result &^= 1 << bitIdx
+			}
+		}
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *ImportTemplateWorkbookReq) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ImportTemplateWorkbookReq) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes ImportTemplateWorkbookUnauthorized as json.
+func (s *ImportTemplateWorkbookUnauthorized) Encode(e *jx.Encoder) {
+	unwrapped := (*Error)(s)
+
+	unwrapped.Encode(e)
+}
+
+// Decode decodes ImportTemplateWorkbookUnauthorized from json.
+func (s *ImportTemplateWorkbookUnauthorized) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ImportTemplateWorkbookUnauthorized to nil")
+	}
+	var unwrapped Error
+	if err := func() error {
+		if err := unwrapped.Decode(d); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = ImportTemplateWorkbookUnauthorized(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *ImportTemplateWorkbookUnauthorized) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ImportTemplateWorkbookUnauthorized) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }

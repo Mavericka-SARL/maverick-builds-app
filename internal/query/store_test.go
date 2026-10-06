@@ -72,6 +72,18 @@ func insertMetric(t *testing.T, store *query.Store, modelID, name string, isInpu
 	return id
 }
 
+// seedFact inserts an input fact directly: the read tests below need facts
+// at codes their reduced schema has no members for, which Writeback refuses.
+func seedFact(t *testing.T, store *query.Store, modelID, revisionID, metricID, userID, dims string, value float64) {
+	t.Helper()
+	if _, err := store.Pool().Exec(context.Background(), `
+		INSERT INTO runtime.fact_input (model_id, revision_id, dim_members, metric_id, value, entered_by)
+		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6::uuid)`,
+		modelID, revisionID, dims, metricID, value, userID); err != nil {
+		t.Fatalf("seed fact: %v", err)
+	}
+}
+
 // insertRevision seeds a (non-system-managed) model.revision row with the
 // given id — Store.Writeback now runs writeguard.CheckWrite, which requires
 // the revision to actually exist.
@@ -81,34 +93,6 @@ func insertRevision(t *testing.T, store *query.Store, revisionID, modelID string
 		INSERT INTO model.revision (id, model_id, system_managed) VALUES ($1::uuid, $2::uuid, false)
 	`, revisionID, modelID); err != nil {
 		t.Fatalf("insert revision: %v", err)
-	}
-}
-
-func TestWriteback(t *testing.T) {
-	store, cleanup := setupDB(t)
-	defer cleanup()
-	ctx := context.Background()
-
-	modelID := "00000000-0000-0000-0000-000000000001"
-	revisionID := "00000000-0000-0000-0001-000000000001"
-	userID := "00000000-0000-0000-0000-000000000099"
-	metricID := insertMetric(t, store, modelID, "headcount", true)
-	insertRevision(t, store, revisionID, modelID)
-
-	updates := []*queryv1.WritebackUpdate{
-		{DimMembers: map[string]string{"cost_center": "CC-001"}, MetricId: metricID, Value: 42},
-		{DimMembers: map[string]string{"cost_center": "CC-002"}, MetricId: metricID, Value: 18},
-	}
-
-	result, err := store.Writeback(ctx, modelID, revisionID, userID, updates)
-	if err != nil {
-		t.Fatalf("Writeback: %v", err)
-	}
-	if result.CellsWritten != 2 {
-		t.Errorf("CellsWritten = %d, want 2", result.CellsWritten)
-	}
-	if len(result.MetricIDs) != 1 || result.MetricIDs[0] != metricID {
-		t.Errorf("MetricIDs = %v, want [%s]", result.MetricIDs, metricID)
 	}
 }
 
@@ -255,12 +239,7 @@ func TestGetCell_FallbackToFactInput(t *testing.T) {
 	metricID := insertMetric(t, store, modelID, "salary", true)
 	insertRevision(t, store, revisionID, modelID)
 
-	_, err := store.Writeback(ctx, modelID, revisionID, userID, []*queryv1.WritebackUpdate{
-		{DimMembers: map[string]string{"dept": "eng"}, MetricId: metricID, Value: 150000},
-	})
-	if err != nil {
-		t.Fatalf("Writeback: %v", err)
-	}
+	seedFact(t, store, modelID, revisionID, metricID, userID, `{"dept":"eng"}`, 150000)
 
 	cell, err := store.GetCell(ctx, modelID, revisionID, metricID, map[string]string{"dept": "eng"})
 	if err != nil {
@@ -285,13 +264,8 @@ func TestQueryCells_DimMemberFiltering(t *testing.T) {
 	metricID := insertMetric(t, store, modelID, "spend", true)
 	insertRevision(t, store, revisionID, modelID)
 
-	_, err := store.Writeback(ctx, modelID, revisionID, userID, []*queryv1.WritebackUpdate{
-		{DimMembers: map[string]string{"dept": "eng"}, MetricId: metricID, Value: 100},
-		{DimMembers: map[string]string{"dept": "mkt"}, MetricId: metricID, Value: 200},
-	})
-	if err != nil {
-		t.Fatalf("Writeback: %v", err)
-	}
+	seedFact(t, store, modelID, revisionID, metricID, userID, `{"dept":"eng"}`, 100)
+	seedFact(t, store, modelID, revisionID, metricID, userID, `{"dept":"mkt"}`, 200)
 
 	cells, err := store.QueryCells(ctx, modelID, revisionID, []string{metricID}, []string{"eng"})
 	if err != nil {

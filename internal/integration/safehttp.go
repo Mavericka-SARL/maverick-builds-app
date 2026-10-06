@@ -59,15 +59,15 @@ var forbiddenV4 = []netip.Prefix{
 }
 
 var forbiddenV6 = []netip.Prefix{
-	netip.MustParsePrefix("::/128"),      // unspecified
-	netip.MustParsePrefix("::1/128"),     // loopback
+	netip.MustParsePrefix("::/128"),        // unspecified
+	netip.MustParsePrefix("::1/128"),       // loopback
 	netip.MustParsePrefix("::ffff:0:0/96"), // v4-mapped — checked as v4 too, belt and braces
 	netip.MustParsePrefix("64:ff9b::/96"),  // NAT64
-	netip.MustParsePrefix("100::/64"),    // discard
+	netip.MustParsePrefix("100::/64"),      // discard
 	netip.MustParsePrefix("2001:db8::/32"), // documentation
-	netip.MustParsePrefix("fc00::/7"),    // unique-local (incl. fd00::/8 metadata variants)
-	netip.MustParsePrefix("fe80::/10"),   // link-local
-	netip.MustParsePrefix("ff00::/8"),    // multicast
+	netip.MustParsePrefix("fc00::/7"),      // unique-local (incl. fd00::/8 metadata variants)
+	netip.MustParsePrefix("fe80::/10"),     // link-local
+	netip.MustParsePrefix("ff00::/8"),      // multicast
 }
 
 var forbiddenHostSuffixes = []string{

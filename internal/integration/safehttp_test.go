@@ -2,9 +2,9 @@ package integration
 
 import (
 	"context"
-	"net/netip"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"

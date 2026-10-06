@@ -182,6 +182,7 @@ func (h *handler) adminModelImport(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
 
+	notes := req.Package.StripUnreadWidgetProps()
 	modelID, revisionID, err := modeltransfer.Import(ctx, tx, req, act.UserID)
 	if err != nil {
 		jsonErr(w, fmt.Errorf("import failed: %w", err), http.StatusBadRequest)
@@ -207,7 +208,11 @@ func (h *handler) adminModelImport(w http.ResponseWriter, r *http.Request) {
 		ResourceType:  "model", ResourceID: modelID, RevisionID: revisionID,
 		Metadata: map[string]string{"application_id": req.ApplicationID, "revision": req.Package.RevisionName},
 	})
-	jsonOK(w, map[string]string{"model_id": modelID, "revision_id": revisionID})
+	out := map[string]any{"model_id": modelID, "revision_id": revisionID}
+	if len(notes) > 0 {
+		out["notes"] = notes
+	}
+	jsonOK(w, out)
 }
 
 // recalcRevisionFromInputs runs the calculation scheduler over every input

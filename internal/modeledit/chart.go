@@ -268,6 +268,50 @@ func CheckWidgetPropKeys(props, stored json.RawMessage) error {
 	return nil
 }
 
+// StripUnreadWidgetProps drops the widget_props keys — at the top or under
+// "chart" — the console does not read, and names them ("chart.<key>" for a
+// chart setting). The developer API refuses such a key (CheckWidgetPropKeys);
+// a model package, older or edited by hand, may still carry one. Props that
+// are not a JSON object are returned as they are.
+func StripUnreadWidgetProps(props json.RawMessage) (json.RawMessage, []string) {
+	var p map[string]json.RawMessage
+	if len(props) == 0 || json.Unmarshal(props, &p) != nil || p == nil {
+		return props, nil
+	}
+	var dropped []string
+	for k := range p {
+		if !WidgetPropKeys[k] {
+			dropped = append(dropped, k)
+			delete(p, k)
+		}
+	}
+	if raw, ok := p["chart"]; ok {
+		var chart map[string]json.RawMessage
+		if json.Unmarshal(raw, &chart) == nil && chart != nil {
+			changed := false
+			for k := range chart {
+				if !ChartSettingKeys[k] {
+					dropped = append(dropped, "chart."+k)
+					delete(chart, k)
+					changed = true
+				}
+			}
+			if changed {
+				p["chart"], _ = json.Marshal(chart)
+			}
+		}
+	}
+	if len(dropped) == 0 {
+		return props, nil
+	}
+	sort.Strings(dropped)
+	out, err := json.Marshal(p)
+	if err != nil {
+		return props, nil
+	}
+	return out, dropped
+}
+
 func sortedKeys(m map[string]bool) string {
 	keys := make([]string, 0, len(m))
 	for k := range m {

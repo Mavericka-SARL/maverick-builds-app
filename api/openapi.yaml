@@ -6289,6 +6289,10 @@ paths:
                 properties:
                   model_id:    { type: string, format: uuid }
                   revision_id: { type: string, format: uuid }
+                  notes:
+                    type: array
+                    items: { type: string }
+                    description: What the import left out of the package, such as widget_props keys the console does not read. Absent when nothing was.
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -7767,6 +7771,79 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "502":
           description: Google or the network failed while exporting the sheet
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/import/parse-workbook:
+    post:
+      operationId: importParseWorkbook
+      tags: [Import & Integrations]
+      summary: Read an .xlsx workbook's sheet names and one sheet's header and rows, as POST /api/import/upload reads them (cells as displayed, plain numbers as stored), for the Import wizard to preview and map; nothing is stored
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [xlsx_base64]
+              properties:
+                xlsx_base64: { type: string, description: The workbook, base64-encoded (at most 16 MB of request) }
+                sheet:       { type: string, description: The sheet to read (case-insensitive); the first when empty }
+      responses:
+        "200":
+          description: The workbook's sheets and the chosen sheet's cells
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sheets:  { type: array, items: { type: string } }
+                  sheet:   { type: string }
+                  headers: { type: array, items: { type: string } }
+                  rows:    { type: array, items: { type: array, items: { type: string } } }
+        "400":
+          description: Not a workbook, or no such sheet
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/import/template-workbook:
+    post:
+      operationId: importTemplateWorkbook
+      tags: [Import & Integrations]
+      summary: Write the given rows (a header first, then example rows; at most 100) as a one-sheet .xlsx to download — the business Import widget's template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rows]
+              properties:
+                sheet:    { type: string, description: Sheet name; "Import" when empty }
+                filename: { type: string, description: Download name; import-template.xlsx when empty }
+                rows:
+                  type: array
+                  items: { type: array, items: {} }
+      responses:
+        "200":
+          description: The workbook
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        "400":
+          description: No rows, too many, or an unusable sheet name
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: Not signed in
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

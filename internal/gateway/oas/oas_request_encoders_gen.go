@@ -544,8 +544,36 @@ func encodeImportModelRequest(
 	return nil
 }
 
+func encodeImportParseWorkbookRequest(
+	req *ImportParseWorkbookReq,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
 func encodeImportSheetFetchRequest(
 	req *ImportSheetFetchReq,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
+func encodeImportTemplateWorkbookRequest(
+	req *ImportTemplateWorkbookReq,
 	r *http.Request,
 ) error {
 	const contentType = "application/json"

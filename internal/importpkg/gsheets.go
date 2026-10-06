@@ -34,7 +34,7 @@ var (
 	// Spreadsheet IDs are base64url-ish tokens (typically 44 chars); the
 	// 20-char minimum keeps a bare pasted ID distinguishable from ordinary
 	// words while never rejecting a real ID.
-	sheetIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{20,}$`)
+	sheetIDPattern  = regexp.MustCompile(`^[A-Za-z0-9_-]{20,}$`)
 	sheetGidPattern = regexp.MustCompile(`^[0-9]{1,19}$`)
 )
 

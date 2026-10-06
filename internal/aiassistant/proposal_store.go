@@ -22,12 +22,14 @@ type ProposalStep struct {
 
 // Proposal holds an ordered list of steps awaiting developer confirmation.
 type Proposal struct {
-	ID         string         `json:"id"`
-	SessionID  string         `json:"session_id"`
-	Steps      []ProposalStep `json:"steps"`
-	Status     string         `json:"status"` // pending|confirmed|rejected|executed|partial
-	CreatedAt  time.Time      `json:"created_at"`
-	ExecutedAt *time.Time     `json:"executed_at,omitempty"`
+	ID        string         `json:"id"`
+	SessionID string         `json:"session_id"`
+	Steps     []ProposalStep `json:"steps"`
+	Status    string         `json:"status"` // pending|confirmed|rejected|executed|partial
+	// Warnings are the plan check's warnings the proposal was shown with.
+	Warnings   []string   `json:"warnings,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ExecutedAt *time.Time `json:"executed_at,omitempty"`
 }
 
 // ProposalStore handles proposal persistence.
@@ -40,7 +42,7 @@ func NewProposalStore(pool *pgxpool.Pool) *ProposalStore {
 }
 
 // CreateProposal inserts a new pending proposal.
-func (s *ProposalStore) CreateProposal(ctx context.Context, sessionID string, steps []ProposalStep) (Proposal, error) {
+func (s *ProposalStore) CreateProposal(ctx context.Context, sessionID string, steps []ProposalStep, warnings []string) (Proposal, error) {
 	stepsJSON, err := json.Marshal(steps)
 	if err != nil {
 		return Proposal{}, fmt.Errorf("marshal steps: %w", err)
@@ -48,10 +50,10 @@ func (s *ProposalStore) CreateProposal(ctx context.Context, sessionID string, st
 	var p Proposal
 	var stepsRaw []byte
 	err = s.pool.QueryRow(ctx, `
-		INSERT INTO ai_assistant.proposal (session_id, steps)
-		VALUES ($1::uuid, $2::jsonb)
-		RETURNING id::text, session_id::text, steps, status, created_at
-	`, sessionID, stepsJSON).Scan(&p.ID, &p.SessionID, &stepsRaw, &p.Status, &p.CreatedAt)
+		INSERT INTO ai_assistant.proposal (session_id, steps, warnings)
+		VALUES ($1::uuid, $2::jsonb, COALESCE($3::text[], '{}'))
+		RETURNING id::text, session_id::text, steps, status, created_at, warnings
+	`, sessionID, stepsJSON, warnings).Scan(&p.ID, &p.SessionID, &stepsRaw, &p.Status, &p.CreatedAt, &p.Warnings)
 	if err != nil {
 		return Proposal{}, err
 	}
@@ -64,9 +66,9 @@ func (s *ProposalStore) GetProposal(ctx context.Context, proposalID string) (Pro
 	var p Proposal
 	var stepsRaw []byte
 	err := s.pool.QueryRow(ctx, `
-		SELECT id::text, session_id::text, steps, status, created_at, executed_at
+		SELECT id::text, session_id::text, steps, status, created_at, executed_at, warnings
 		FROM ai_assistant.proposal WHERE id=$1::uuid
-	`, proposalID).Scan(&p.ID, &p.SessionID, &stepsRaw, &p.Status, &p.CreatedAt, &p.ExecutedAt)
+	`, proposalID).Scan(&p.ID, &p.SessionID, &stepsRaw, &p.Status, &p.CreatedAt, &p.ExecutedAt, &p.Warnings)
 	if err != nil {
 		return Proposal{}, fmt.Errorf("proposal not found: %w", err)
 	}
@@ -77,7 +79,7 @@ func (s *ProposalStore) GetProposal(ctx context.Context, proposalID string) (Pro
 // ListPendingProposals returns all pending proposals for a session.
 func (s *ProposalStore) ListPendingProposals(ctx context.Context, sessionID string) ([]Proposal, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id::text, session_id::text, steps, status, created_at, executed_at
+		SELECT id::text, session_id::text, steps, status, created_at, executed_at, warnings
 		FROM ai_assistant.proposal
 		WHERE session_id=$1::uuid AND status='pending'
 		ORDER BY created_at DESC
@@ -90,7 +92,7 @@ func (s *ProposalStore) ListPendingProposals(ctx context.Context, sessionID stri
 	for rows.Next() {
 		var p Proposal
 		var stepsRaw []byte
-		_ = rows.Scan(&p.ID, &p.SessionID, &stepsRaw, &p.Status, &p.CreatedAt, &p.ExecutedAt)
+		_ = rows.Scan(&p.ID, &p.SessionID, &stepsRaw, &p.Status, &p.CreatedAt, &p.ExecutedAt, &p.Warnings)
 		_ = json.Unmarshal(stepsRaw, &p.Steps)
 		out = append(out, p)
 	}
@@ -103,7 +105,7 @@ func (s *ProposalStore) ListPendingProposals(ctx context.Context, sessionID stri
 // awaiting confirmation.
 func (s *ProposalStore) ListProposals(ctx context.Context, sessionID string) ([]Proposal, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id::text, session_id::text, steps, status, created_at, executed_at
+		SELECT id::text, session_id::text, steps, status, created_at, executed_at, warnings
 		FROM ai_assistant.proposal
 		WHERE session_id=$1::uuid
 		ORDER BY created_at DESC
@@ -116,7 +118,7 @@ func (s *ProposalStore) ListProposals(ctx context.Context, sessionID string) ([]
 	for rows.Next() {
 		var p Proposal
 		var stepsRaw []byte
-		_ = rows.Scan(&p.ID, &p.SessionID, &stepsRaw, &p.Status, &p.CreatedAt, &p.ExecutedAt)
+		_ = rows.Scan(&p.ID, &p.SessionID, &stepsRaw, &p.Status, &p.CreatedAt, &p.ExecutedAt, &p.Warnings)
 		_ = json.Unmarshal(stepsRaw, &p.Steps)
 		out = append(out, p)
 	}

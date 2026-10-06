@@ -181,12 +181,91 @@ func (s *Store) UpdateForm(ctx context.Context, formID, name, label string, fiel
 	return err
 }
 
-func (s *Store) DeleteForm(ctx context.Context, formID string) error {
+// DeleteForm deletes a form, its records and its mappings, and the totals
+// its mappings posted into their metrics, returning the metrics whose cells
+// changed for the caller to recalculate.
+func (s *Store) DeleteForm(ctx context.Context, formID string) ([]PostedMetric, error) {
+	var mappingIDs []string
+	rows, err := s.db.Query(ctx, `SELECT id::text FROM model.form_metric_mapping WHERE form_id=$1::uuid`, formID)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		mappingIDs = append(mappingIDs, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	posted, err := s.DeleteMappingPostings(ctx, mappingIDs, "")
+	if err != nil {
+		return nil, err
+	}
 	// SYNC-01 cascade: drop form widgets referencing this form (ref_id is
 	// bare TEXT, no FK — a dangling form widget rendered an empty error box).
 	_, _ = s.db.Exec(ctx, `DELETE FROM model.dashboard_widget WHERE ref_id = $1`, formID)
-	_, err := s.db.Exec(ctx, `DELETE FROM model.form_def WHERE id=$1::uuid`, formID)
-	return err
+	_, err = s.db.Exec(ctx, `DELETE FROM model.form_def WHERE id=$1::uuid`, formID)
+	return posted, err
+}
+
+// PostedMetric is a metric of a revision a form mapping posted into.
+type PostedMetric struct{ ModelID, RevisionID, MetricID string }
+
+// DeleteMappingPostings removes the totals the mappings posted: the
+// runtime.fact_input rows tagged with a mapping's id (source_ref, which has
+// no foreign key). Deleting a mapping or its form used to leave them, so a
+// metric went on showing money from a mapping that no longer existed, and
+// nothing in the console could take it out. exceptMetricID keeps that
+// metric's rows: a mapping retargeted to it posts there again. The
+// mappings' own posting rows go with the mapping (ON DELETE CASCADE).
+func (s *Store) DeleteMappingPostings(ctx context.Context, mappingIDs []string, exceptMetricID string) ([]PostedMetric, error) {
+	if len(mappingIDs) == 0 {
+		return nil, nil
+	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	// The archive trigger on runtime.fact_input records the reason.
+	if _, err := tx.Exec(ctx, `SET LOCAL mvx.delete_reason = 'form_mapping_removed'`); err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, `
+		WITH gone AS (
+			DELETE FROM runtime.fact_input
+			WHERE source_ref = ANY($1::uuid[]) AND ($2 = '' OR metric_id <> NULLIF($2,'')::uuid)
+			RETURNING model_id, revision_id, metric_id)
+		SELECT DISTINCT model_id::text, revision_id::text, metric_id::text FROM gone`,
+		mappingIDs, exceptMetricID)
+	if err != nil {
+		return nil, fmt.Errorf("delete mapping postings: %w", err)
+	}
+	var posted []PostedMetric
+	for rows.Next() {
+		var p PostedMetric
+		if err := rows.Scan(&p.ModelID, &p.RevisionID, &p.MetricID); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		posted = append(posted, p)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// On a store built on a transaction Begin is a savepoint, and SET LOCAL
+	// would outlive it: later deletes in that transaction would be archived
+	// under this reason.
+	if _, err := tx.Exec(ctx, `SELECT set_config('mvx.delete_reason', '', true)`); err != nil {
+		return nil, err
+	}
+	return posted, tx.Commit(ctx)
 }
 
 // CreateRecord creates a draft record.

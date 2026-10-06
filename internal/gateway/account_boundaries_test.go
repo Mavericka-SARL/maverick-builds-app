@@ -214,8 +214,8 @@ func TestRemoveAccountFromTenant(t *testing.T) {
 	if got := f.accountRow(t, m); got != before {
 		t.Errorf("the account itself changed: %q → %q", before, got)
 	}
-	if n := f.one(t, `SELECT count(*)::text FROM audit.audit_event WHERE event_type='user.role_revoked' AND resource_id=$1
-		AND metadata->>'action'='removed_from_tenant' AND metadata->>'app_access'='2' AND metadata->>'access_rules'='2'`, m); n != "1" {
+	if n := f.one(t, `SELECT count(*)::text FROM audit.audit_event WHERE event_type='user.removed_from_tenant' AND resource_id=$1
+		AND metadata->>'app_access'='2' AND metadata->>'access_rules'='2'`, m); n != "1" {
 		t.Errorf("%s removal audit events, want 1", n)
 	}
 	// It is no longer the tenant's to see.
@@ -304,6 +304,25 @@ func TestInviteExistingAccountAddsItToTheTenant(t *testing.T) {
 	}
 	f.renameMetric(t, "ab-existing", f.metricD, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound)
 
+	// Disabled by its own tenant, the account is told nothing: a disabled
+	// account is notified of nothing (it cannot sign in, and workflow mail
+	// reached people removed from a tenant).
+	if n := f.one(t, `SELECT count(*)::text FROM notification.notification WHERE recipient_user_id=$1::uuid`, ex); n != "0" {
+		t.Errorf("%s notification(s) for the disabled account, want none", n)
+	}
+	audited := f.one(t, `SELECT count(*)::text FROM audit.audit_event WHERE event_type='user.role_granted' AND resource_id=$1
+		AND metadata->>'existing_account'='true' AND metadata->>'granted'='true'`, ex)
+	refusals := f.one(t, `SELECT count(*)::text FROM audit.audit_event WHERE resource_id=$1
+		AND (event_type='user.invitation_refused' OR metadata->>'granted'='false')`, ex)
+
+	// Enabled again, removed and added back: now it is told.
+	if _, err := f.pool.Exec(ctx, `UPDATE identity.user SET disabled_at = NULL WHERE id=$1::uuid`, ex); err != nil {
+		t.Fatal(err)
+	}
+	f.expect(t, ta, "DELETE", "/api/admin/users/"+ex+"/tenant-access", "", nil, http.StatusOK)
+	invite("ab-existing@gb.test", "business_user", f.ws1b, http.StatusOK)
+	invite("ab-existing@gb.test", "developer", f.ws1a, http.StatusOK)
+
 	// Told, in the notification centre, where it was given access, in the
 	// platform's words.
 	if got := f.one(t, `SELECT count(*)::text||'|'||min(template_vars->>'subject')||'|'||min(template_vars->>'message') FROM notification.notification
@@ -315,15 +334,13 @@ func TestInviteExistingAccountAddsItToTheTenant(t *testing.T) {
 		WHERE recipient_user_id=$1::uuid AND template_id='access_granted' AND channel='email'`, ex); n != "2" {
 		t.Errorf("%s access-granted e-mails queued, want 2 (tenant 1 sends e-mail)", n)
 	}
-	if n := f.one(t, `SELECT count(*)::text FROM audit.audit_event WHERE event_type='user.role_granted' AND resource_id=$1
-		AND metadata->>'existing_account'='true' AND metadata->>'granted'='true'`, ex); n != "2" {
-		t.Errorf("%s audited additions, want 2", n)
+	if audited != "2" {
+		t.Errorf("%s audited additions, want 2", audited)
 	}
 	// Refused before the address was looked at, nothing about the account
 	// was recorded.
-	if n := f.one(t, `SELECT count(*)::text FROM audit.audit_event WHERE event_type='user.role_granted' AND resource_id=$1
-		AND metadata->>'granted'='false'`, ex); n != "0" {
-		t.Errorf("%s audited refusals without a workspace, want none", n)
+	if refusals != "0" {
+		t.Errorf("%s audited refusals without a workspace, want none", refusals)
 	}
 
 	// Added, removed and added again: told once a day per workspace.
@@ -381,8 +398,8 @@ func TestInviteExistingAccountAddsItToTheTenant(t *testing.T) {
 	if n := f.one(t, `SELECT count(*)::text FROM notification.notification WHERE recipient_user_id=$1::uuid`, pa); n != "0" {
 		t.Errorf("platform admin was notified of a grant it did not get")
 	}
-	if n := f.one(t, `SELECT count(*)::text FROM audit.audit_event WHERE event_type='user.role_granted' AND resource_id=$1
-		AND metadata->>'existing_account'='true' AND metadata->>'granted'='false' AND metadata->>'refused' <> ''`, pa); n != "1" {
+	if n := f.one(t, `SELECT count(*)::text FROM audit.audit_event WHERE event_type='user.invitation_refused' AND resource_id=$1
+		AND metadata->>'existing_account'='true' AND metadata->>'refused' <> ''`, pa); n != "1" {
 		t.Errorf("%s audited refusals, want 1", n)
 	}
 	// Shown to the platform, not to the tenant: it said whose the address was.

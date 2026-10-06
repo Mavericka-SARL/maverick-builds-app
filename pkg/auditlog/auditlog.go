@@ -89,6 +89,12 @@ const (
 	EventUserAppAccessRevoked   EventType = "user.app_access_revoked"
 	EventUserModelAccessGranted EventType = "user.model_access_granted"
 	EventUserModelAccessRevoked EventType = "user.model_access_revoked"
+	// A person's every grant in one tenant taken away, the account left;
+	// recorded as user.role_revoked (action=removed_from_tenant) until 2026-10.
+	EventUserRemovedFromTenant EventType = "user.removed_from_tenant"
+	// An invitation of an existing account refused (metadata refused: why);
+	// recorded as user.role_granted (granted=false) until 2026-10.
+	EventUserInvitationRefused EventType = "user.invitation_refused"
 
 	// Batch 2 — Business Admin (/api/business-admin/roles/...). role.created/
 	// updated/deleted already existed; these close the remaining gaps in the

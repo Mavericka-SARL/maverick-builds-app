@@ -178,7 +178,7 @@ export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInpu
           {isLoading && <LoadingState />}
           {error && <ErrorState message={(error as Error).message} />}
           {cur === "applications" && <DevApplicationsTab revisionId={effectiveRevisionId} revisionName={effectiveRevisionName} defaultRevisionPending={autoRevisionsLoading} onSelect={handleSelectRevision} />}
-          {!isLoading && !error && cur === "users" && <UsersPanel users={users} tenants={userTenants} assignableRoles={computeAssignableRoles(me?.roles ?? [])} canManageResourceAccess={canManageResourceAccess(me?.roles ?? [])} currentUserId={me?.user_id} />}
+          {!isLoading && !error && cur === "users" && <UsersPanel users={users} tenants={userTenants} assignableRoles={computeAssignableRoles(me?.roles ?? [])} canManageResourceAccess={canManageResourceAccess(me?.roles ?? [])} currentUserId={me?.user_id} rolesLoading={!me} />}
           {!isLoading && !error && cur === "metrics" && model && <MetricsTab model={model} revisionId={effectiveRevisionId || undefined} />}
           {!isLoading && !error && cur === "dimensions" && dims && <DimensionsView dims={dims} revisionId={effectiveRevisionId || undefined} />}
           {!isLoading && !error && cur === "graph" && model && <DepGraph model={model} grids={graphGrids} dims={dims ?? []} />}

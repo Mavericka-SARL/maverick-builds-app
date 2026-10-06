@@ -146,7 +146,10 @@ test("recordStatusOptions: the current status and the allowed ones, in lifecycle
   ].map((c) => ({ id: "r", form_id: "f", data: {}, created_by: null, created_at: "", updated_at: "", ...c }));
 
   const got = await page.evaluate(async (recs) => {
-    const mod = await import("/src/api/client.ts");
+    // Vite serves the module at this path in the browser; the type is the
+    // source file's.
+    const path = "/src/api/client.ts";
+    const mod = (await import(/* @vite-ignore */ path)) as typeof import("../src/api/client.ts");
     return recs.map((r) => mod.recordStatusOptions(r));
   }, cases);
 

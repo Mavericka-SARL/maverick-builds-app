@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -663,6 +664,37 @@ func TestScimProvisioningLifecycle(t *testing.T) {
 	}
 	if code, _ := scimCall(http.MethodDelete, "/Groups/"+gid, nil); code != http.StatusNoContent {
 		t.Fatalf("delete group: %d", code)
+	}
+
+	// A member the tenant does not own — another organisation's account
+	// with a role here: a delete takes its place in the tenant, as Remove
+	// from this tenant does, and leaves the account. It answered 403 and
+	// left the role.
+	otherCust := ""
+	if err := f.pool.QueryRow(ctx, `INSERT INTO core.customer (name, plan) VALUES ('Globex', 'enterprise') RETURNING id::text`).Scan(&otherCust); err != nil {
+		t.Fatal(err)
+	}
+	var guestID string
+	if err := f.pool.QueryRow(ctx, `INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id)
+		VALUES ('kc-guest', 'guest@globex.test', 'Guest', $1::uuid) RETURNING id::text`, otherCust).Scan(&guestID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO identity.role_assignment (user_id, role, workspace_id) VALUES ($1::uuid, 'business_user', $2::uuid)`, guestID, f.wsID); err != nil {
+		t.Fatal(err)
+	}
+	if code, res := scimCall(http.MethodDelete, "/Users/"+guestID, nil); code != http.StatusNoContent {
+		t.Fatalf("delete a member the tenant does not own: %d %v; want 204", code, res)
+	}
+	var roles, accounts, audited int
+	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM identity.role_assignment WHERE user_id = $1::uuid`, guestID).Scan(&roles)
+	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM identity.user WHERE id = $1::uuid`, guestID).Scan(&accounts)
+	_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM audit.audit_event WHERE event_type = 'user.removed_from_tenant'
+		AND resource_id = $1 AND actor_role = 'scim'`, guestID).Scan(&audited)
+	if roles != 0 || accounts != 1 || audited != 1 {
+		t.Errorf("after the delete: %d role(s), %d account row(s), %d audit event(s); want 0, 1, 1", roles, accounts, audited)
+	}
+	if slices.Contains(f.broker.deleted, "kc-guest") {
+		t.Error("the delete removed the other organisation's identity-provider account")
 	}
 
 	// Revocation is immediate.

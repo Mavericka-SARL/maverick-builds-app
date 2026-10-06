@@ -157,8 +157,9 @@ test("editor follow-ups: one name field, rule badge, trigger fields in Context, 
   await expect(page.getByText("Steps", { exact: true })).toBeVisible({ timeout: 15_000 });
   // One name field: the toolbar shows the name as text, Properties edits it.
   await expect(page.getByRole("textbox").filter({ hasNot: page.locator("[placeholder]") }).filter({ has: page.locator(':scope') }).locator('xpath=self::input[@value="Audit flow"]')).toHaveCount(1);
-  // The badge reports rules, not the event.
-  await expect(page.getByText("No rule yet")).toBeVisible();
+  // The badge reports rules, not the event; a manual workflow needs none.
+  await expect(page.getByText("Started by hand", { exact: true })).toBeVisible();
+  await expect(page.getByText("No rule yet")).toHaveCount(0);
   await expect(page.getByText("No trigger", { exact: true })).toHaveCount(0);
   // "Starts on" replaces "Trigger event"; the payload fields live in Context.
   await expect(page.getByText("Starts on", { exact: true })).toBeVisible();

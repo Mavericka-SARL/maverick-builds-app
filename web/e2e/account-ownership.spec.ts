@@ -85,6 +85,10 @@ type Replies = {
   invite?: Json[]; revoke?: Json; tenantAccess?: Json; deleteModel?: Json; deleteApp?: Json; users?: Json[];
   /** Who is signed in; a tenant admin unless said otherwise. */
   persona?: "tenant_admin" | "platform_admin";
+  /** /api/admin/me answers only once this settles (the caller's roles still loading). */
+  holdAdminMe?: Promise<void>;
+  /** Filled by openConsole: relist() lists every account again, as after a re-grant. */
+  control?: { relist?: () => void };
 };
 
 // What the gateway answers anyone but a platform admin inviting without both —
@@ -98,6 +102,7 @@ async function openConsole(page: Page, replies: Replies = {}) {
   // what listed an account in this tenant at all.
   let listed: Json[] = [...(replies.users ?? users)];
   const unlist = (ids: string[]) => { listed = listed.filter((u) => !ids.includes(u.id as string)); };
+  if (replies.control) replies.control.relist = () => { listed = [...(replies.users ?? users)]; };
   const revokedIds = (reply: Json | undefined) => ((reply?.revoked as { user_id: string }[] | undefined) ?? []).map((g) => g.user_id);
   const persona = replies.persona ?? "tenant_admin";
   await page.addInitScript((p) => localStorage.setItem("dev_persona", p), persona);
@@ -107,7 +112,10 @@ async function openConsole(page: Page, replies: Replies = {}) {
     route.fulfill(json(route.request().method() === "GET" ? [] : {})));
   const me = { user_id: SELF_ID, email: "admin@acme.test", display_name: "Ada Admin", roles: [persona] };
   await page.route("**/api/me", (route) => route.fulfill(json(me)));
-  await page.route("**/api/admin/me", (route) => route.fulfill(json(me)));
+  await page.route("**/api/admin/me", async (route) => {
+    await replies.holdAdminMe;
+    await route.fulfill(json(me));
+  });
   await page.route("**/api/admin/tenants", (route) => route.fulfill(json([{
     id: TENANT_ID, name: "Acme", plan: "enterprise", created_at: "2026-09-01T00:00:00Z",
     applications: [{
@@ -309,6 +317,37 @@ test("a revoke that also took a developer grant says so, after the account has l
   // the editor it held — leaves on the refetch; the notice stays.
   await expect(page.getByRole("row").filter({ hasText: "Nora None" })).toHaveCount(0);
   await expect(page.getByRole("status").filter({ hasText: REVOKED_NOTICE })).toBeVisible();
+});
+
+test("an account that left the list while being edited comes back closed", async ({ page }) => {
+  const control: { relist?: () => void } = {};
+  await openConsole(page, { revoke: { status: "ok", revoked: REVOKED }, control });
+  await openUsers(page);
+  await page.getByLabel("Edit Nora None").click();
+  await page.getByRole("checkbox", { name: /Planning App/ }).click();
+  await expect(page.getByRole("row").filter({ hasText: "Nora None" })).toHaveCount(0);
+  // Listed again (a later grant elsewhere), and the list refetched by an
+  // unrelated change — removing Fred: her row used to reopen in edit mode.
+  control.relist!();
+  await page.getByLabel("Remove Fred Foreign from this tenant").click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Remove from this tenant" }).click();
+  await expect(page.getByRole("row").filter({ hasText: "Fred Foreign" })).toHaveCount(0);
+  await expect(page.getByLabel("Edit Nora None")).toBeVisible();
+});
+
+test("the invite form says it is loading the caller's roles, then offers them", async ({ page }) => {
+  let release!: () => void;
+  await openConsole(page, { holdAdminMe: new Promise<void>((r) => { release = r; }) });
+  await openUsers(page);
+  await page.getByRole("button", { name: "Invite user" }).click();
+  await expect(page.getByText("Loading the roles you can give…")).toBeVisible();
+  await page.getByLabel("Email").fill("jane@new.test");
+  await page.getByLabel("First name").fill("Jane");
+  await page.getByLabel("Last name").fill("Smith");
+  await expect(page.getByRole("button", { name: "Create user" })).toBeDisabled();
+  release();
+  await expect(page.getByLabel("Initial Role")).toBeVisible();
+  await expect(page.getByText("Loading the roles you can give…")).toHaveCount(0);
 });
 
 test("a revoke that took nothing else says nothing more", async ({ page }) => {

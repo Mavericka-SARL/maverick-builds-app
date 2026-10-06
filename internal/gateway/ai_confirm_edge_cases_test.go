@@ -40,7 +40,7 @@ func TestConfirmProposal_PartialFailureLeavesDraftUsable(t *testing.T) {
 	proposal, err := pStore.CreateProposal(ctx, sess.ID, []aiassistant.ProposalStep{
 		{Tool: "create_dimension", Description: "Create dimension 'Region'", Params: dimParams},
 		{Tool: "create_metric", Description: "Create calc metric 'bogus_calc'", Params: badMetricParams},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create proposal: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestConfirmProposal_PartialFailureLeavesDraftUsable(t *testing.T) {
 	dim2Params, _ := json.Marshal(map[string]any{"name": "Channel"})
 	proposal2, err := pStore.CreateProposal(ctx, sess.ID, []aiassistant.ProposalStep{
 		{Tool: "create_dimension", Description: "Create dimension 'Channel'", Params: dim2Params},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create proposal 2: %v", err)
 	}

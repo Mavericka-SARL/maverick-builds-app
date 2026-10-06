@@ -175,6 +175,7 @@ export function UsersPanel({
   canManageResourceAccess = false,
   currentUserId,
   tenantId = "",
+  rolesLoading = false,
 }: {
   users: AdminUser[];
   tenants: AdminTenant[];
@@ -193,6 +194,12 @@ export function UsersPanel({
    * controls that would end their own access — see isLastOwnAdminGrant().
    */
   currentUserId?: string;
+  /**
+   * The caller's own roles have not arrived yet (/api/me): assignableRoles is
+   * empty only for now, and the invite form says so instead of hiding its
+   * role field and leaving Create user disabled without a reason.
+   */
+  rolesLoading?: boolean;
   /**
    * The dedicated tenant whose people these are, for a platform admin: every
    * call the panel makes is addressed to its database (X-Tenant-Id). Empty
@@ -216,6 +223,14 @@ export function UsersPanel({
   const [showCreate, setShowCreate] = useState(false);
   const [newUser, setNewUser] = useState({ email: "", first_name: "", last_name: "", role: "", workspace_id: "" });
   const [editId, setEditId] = useState<string | null>(null);
+  // An account a revoke or a removal takes out of the list stops being
+  // edited: its row used to reopen in edit mode if it was listed again later.
+  const listedIds = users.map(u => u.id).join(",");
+  const [seenIds, setSeenIds] = useState(listedIds);
+  if (listedIds !== seenIds) {
+    setSeenIds(listedIds);
+    if (editId && !users.some(u => u.id === editId)) setEditId(null);
+  }
   const [editUser, setEditUser] = useState({ email: "", display_name: "" });
   const [search, setSearch] = useState("");
   const [addPlatformRole, setAddPlatformRole] = useState("");
@@ -403,7 +418,12 @@ export function UsersPanel({
                 <TextInput value={newUser.last_name} onChange={e => setNewUser(u => ({ ...u, last_name: e.target.value }))}
                   placeholder="Smith" />
               </Field>
-              {assignableRoles.length > 0 && (
+              {rolesLoading && (
+                <Field label="Initial Role">
+                  <span role="status" className="mvx-admin-muted" style={{ fontSize: 13 }}>Loading the roles you can give…</span>
+                </Field>
+              )}
+              {!rolesLoading && assignableRoles.length > 0 && (
                 <Field label="Initial Role" required={inviteNeedsRoleAndWorkspace}>
                   <Select
                     value={newUser.role}
@@ -454,7 +474,7 @@ export function UsersPanel({
             <Button
               variant="primary"
               onClick={() => createUser.mutate(newUser)}
-              disabled={!newUser.email || !newUser.first_name || !newUser.last_name ||
+              disabled={rolesLoading || !newUser.email || !newUser.first_name || !newUser.last_name ||
                 (inviteNeedsRoleAndWorkspace && !newUser.role) ||
                 (inviteNeedsWorkspace(newUser.role) && !newUser.workspace_id)}
               loading={createUser.isPending}

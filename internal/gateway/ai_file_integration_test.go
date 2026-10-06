@@ -219,7 +219,7 @@ func TestAIDeveloperImportsAttachedFileAndDefinesAnExport(t *testing.T) {
 			proposeStep("import_file_data", "Import bad.csv", map[string]any{
 				"file": "bad.csv", "target_type": "grid", "target_id": "Sales", "column_map": columnMap}),
 		}}),
-		providers.ChatResponse{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: "FR is not a country in the model."}},
+		{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: "FR is not a country in the model."}},
 		// Turn 3: preview an export, then propose it.
 		tool("preview_export", map[string]any{"grid_id": "Sales", "name": "Sales to ERP", "spec": spec}),
 		tool("propose_actions", map[string]any{"steps": []map[string]any{

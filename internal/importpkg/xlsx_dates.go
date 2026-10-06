@@ -112,3 +112,71 @@ func dateSerial(s string) (float64, bool) {
 	}
 	return 0, false
 }
+
+// storedNumbers puts back a plain number cell's stored value into a grid
+// read as displayed: "1,234.50" for a #,##0.00 value was refused by the
+// number check, so a finance workbook's upload failed on every value row.
+// A date cell keeps its displayed text (a member code may be written that
+// way), and so does a percentage, whose scale the engine has not settled
+// (0.25 reads 0.25% in a grid and 25% on a KPI). raw is the same sheet read
+// as stored values.
+func storedNumbers(f *excelize.File, sheet string, displayed, raw [][]string) {
+	keep := map[int]bool{} // style id → keeps its displayed text
+	for r, row := range displayed {
+		if r >= len(raw) {
+			return
+		}
+		for c, shown := range row {
+			if c >= len(raw[r]) || raw[r][c] == shown {
+				continue
+			}
+			if _, err := strconv.ParseFloat(strings.TrimSpace(raw[r][c]), 64); err != nil {
+				continue
+			}
+			ref, err := excelize.CoordinatesToCellName(c+1, r+1)
+			if err != nil {
+				continue
+			}
+			id, err := f.GetCellStyle(sheet, ref)
+			if err != nil {
+				continue
+			}
+			k, seen := keep[id]
+			if !seen {
+				if st, err := f.GetStyle(id); err == nil {
+					custom := ""
+					if st.CustomNumFmt != nil {
+						custom = *st.CustomNumFmt
+					}
+					k = isDateFormat(st.NumFmt, custom) || isPercentFormat(st.NumFmt, custom)
+				}
+				keep[id] = k
+			}
+			if !k {
+				displayed[r][c] = raw[r][c]
+			}
+		}
+	}
+}
+
+// isPercentFormat reports whether a number format shows a percentage: the
+// built-in 0% and 0.00%, or a custom one with % outside quoted text.
+func isPercentFormat(numFmt int, custom string) bool {
+	if numFmt == 9 || numFmt == 10 {
+		return true
+	}
+	inQuote, escaped := false, false
+	for _, ch := range custom {
+		switch {
+		case escaped:
+			escaped = false
+		case ch == '\\':
+			escaped = true
+		case ch == '"':
+			inQuote = !inQuote
+		case !inQuote && ch == '%':
+			return true
+		}
+	}
+	return false
+}

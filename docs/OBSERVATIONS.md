@@ -4,7 +4,7 @@
 > dependencies that are not fixed yet, with the evidence and what would close
 > each one.
 
-> **Last verified:** 2026-10-05
+> **Last verified:** 2026-10-06
 
 A finding that is not acted on in the change that found it is written down
 here, so it does not live only in a chat or a commit message. Each entry says
@@ -48,15 +48,6 @@ leaves out, until it is fixed.
 - **What closes it:** the fact loaders binding a text metric as text (as a
   pick-list's codec decodes keys), or a documented "use a pick-list" stance.
 
-### The AI Developer cannot clear a cell
-
-- **Noticed:** 2026-10-05: `write_input_values` goes through the import
-  pipeline, which writes values; `"value": null` is refused.
-- **Why it matters:** the console and the API can clear (`"clear": true`);
-  the assistant cannot, so "empty the absolute target" needs the developer.
-- **What closes it:** a clear in `write_input_values` (null) through the same
-  `clearCell` path.
-
 ### Highlight rules tint grid cells only
 
 - **Noticed:** 2026-10-05: rules are evaluated in the browser's grid
@@ -84,32 +75,6 @@ leaves out, until it is fixed.
   properties are settable over the API but have no planner screen.
 - **What closes it:** the controls on any row axis carrying the dimension,
   and property inputs in the rename row.
-
-### Orphan facts written at unknown member codes may remain
-
-- **Noticed:** 2026-10-05: `/api/cells` stored a value at any code until this
-  change refused unknown members; such rows count toward storage and no reader
-  shows them.
-- **How to check:** `SELECT count(*) FROM runtime.fact_input f WHERE EXISTS
-  (SELECT 1 FROM jsonb_each_text(f.dim_members) kv WHERE NOT EXISTS (SELECT 1
-  FROM model.dimension_member m WHERE m.dimension_id::text = kv.key AND m.code
-  = kv.value))` on a deployment.
-- **What closes it:** a one-off clean-up migration (archived with a reason),
-  after counting what a real deployment holds.
-
-### Plan-check warnings are not kept with the proposal
-
-- **Noticed:** 2026-10-05: warnings reach the console in the turn's
-  "proposal" event and the saved tool message; reopening the session shows
-  the proposal without them.
-- **What closes it:** storing them on the proposal row.
-
-### Model import keeps widget_props keys the console does not read
-
-- **Noticed:** 2026-10-05: the developer API now refuses unknown keys, the
-  package import does not (an old package may carry them).
-- **What closes it:** dropping, with a note in the import result, the keys
-  outside `modeledit.WidgetPropKeys`.
 
 ### A formula may name a dimension its metric is never on
 
@@ -219,22 +184,6 @@ leaves out, until it is fixed.
 - **What closes it:** A per-point state in `GridChartSeries`, read by the
   connector and the chart widget.
 
-### A foreign X-Model-Id silently selects another model
-
-- **Noticed:** 2026-10-02, pinning the connector's read context.
-- **What:** `headerModelInApp` returns "" for an `X-Model-Id` the caller may
-  not open, and `resolveDemoModelID` then falls back to the application's
-  default model. Every model-scoped business route therefore answers for a
-  different model than the one named, without saying so.
-- **Why it matters:** Nothing is disclosed — the fallback is a model the caller
-  opens — but a client that labels results by the model it asked for labels
-  them wrongly. The connector guards against it: it confirms the model against
-  `/api/apps` and against `/api/demo`'s resolved context before every read.
-- **How to check:** `GET /api/demo` with `X-Model-Id` of a model the caller may
-  not open: the answer names another `model_id`.
-- **What closes it:** Refuse an explicit model the caller may not open (404),
-  after checking which console paths rely on the fallback.
-
 ### The load-test password grant needs its client allowed
 
 - **Noticed:** 2026-10-02, when the REST API began accepting console tokens
@@ -247,62 +196,6 @@ leaves out, until it is fixed.
 - **How to check:** Run `cmd/loadtest` with `-keycloak -username -password`.
 - **What closes it:** A dedicated load-test client allowed only on the
   deployments being tested, or a `-token` obtained through the console client.
-
-### SheetJS is outside Dependabot's and npm audit's view
-
-- **Noticed:** 2026-09-27, while closing the public repository's Dependabot alerts (`0a74995`).
-- **What:** `web/package.json` installs `xlsx` from the vendor's CDN,
-  `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`. The npm registry copy
-  stops at 0.18.5 and never received the fixes for prototype pollution
-  (CVE-2023-30533) and ReDoS (CVE-2024-22363), so the registry version cannot be
-  used. Neither Dependabot nor `npm audit` tracks a tarball URL: a future SheetJS
-  advisory raises no alert.
-- **Why it matters:** `web/src/consoles/developer/ImportWizard.tsx` parses the
-  workbook a developer chooses, in the browser (`XLSX.read`, `sheet_to_json`).
-  `web/src/consoles/business/ImportWidget.tsx` only writes the template workbook.
-- **How to check:** compare the installed version with the vendor's latest —
-  `curl -sL https://cdn.sheetjs.com/xlsx-latest/package/package.json | jq -r .version`
-  against the version in `web/package.json` — and search the
-  [GitHub Advisory Database](https://github.com/advisories?query=sheetjs) for
-  SheetJS. Do it at every dependency review.
-- **What closes it:** SheetJS publishing fixed versions to npm again, or the
-  wizard handing the file to the gateway, which already parses uploaded `.xlsx`
-  with excelize (`internal/importpkg/xlsx.go`), and the browser parser going.
-
-### Three tool images are compiled with an unsupported Go
-
-- **Noticed:** 2026-09-27, same review.
-- **What:** `deploy/docker/pg-backup/Dockerfile` (`mc`),
-  `deploy/docker/minio/Dockerfile` (the MinIO server) and
-  `deploy/docker/postgres-walg/Dockerfile` (`wal-g` and `mc`) build those tools
-  from source `FROM golang:1.25`. Go supports only the two newest releases,
-  1.27.x and 1.26.x as of this date (`https://go.dev/dl/?mode=json`), so 1.25 no
-  longer gets security fixes and these binaries keep whatever standard-library
-  flaws its last release had.
-- **Why it matters:** the backup and point-in-time-recovery images hold the
-  database and object-store credentials. No scanner covers this: Dependabot and
-  `govulncheck` look at this repository's own Go module, not at third-party
-  sources compiled inside a Dockerfile.
-- **How to check:** `grep -rn "FROM golang" deploy/docker/`, against the
-  supported releases at `https://go.dev/dl/?mode=json`.
-- **What closes it:** raising the three Dockerfiles to a supported Go (1.26 or
-  1.27), building each image — the publish job does, or
-  `docker build deploy/docker/<name>` — and running a backup and a restore
-  (see Backups and Restoring in [SELF_HOSTING.md](SELF_HOSTING.md)).
-
-### Eight Go files are not gofmt-formatted
-
-- **Noticed:** 2026-09-27; re-checked 2026-10-04 (`jwks.go` has since been
-  formatted; `metricformula/aggrule.go` had drifted and was formatted).
-- **What:** `gofmt -l cmd internal pkg` lists `internal/importpkg/gsheets.go`
-  and seven files in `internal/integration/` (struct fields not aligned).
-  CI's `Go lint` job passes regardless, so the lint configuration does not
-  enforce gofmt.
-- **Why it matters:** only noise today, but every later edit to those files
-  carries unrelated formatting changes in its diff.
-- **How to check:** `gofmt -l cmd internal pkg`.
-- **What closes it:** `gofmt -w` on those files, and enabling the `gofmt`
-  formatter in the golangci-lint configuration so it cannot drift again.
 
 ### The home page's dashboard illustration copies the console's widgets
 
@@ -331,6 +224,9 @@ leaves out, until it is fixed.
   role the person holds and whichever screen they open.
 - **How to check:** `cd web && npx vite build`, then the size of
   `dist/assets/index-*.js`.
+- **Re-checked:** 2026-10-06: 1.89 MB (`web/dist/assets/index-*.js`)
+  before SheetJS left the bundle, 1.40 MB after (see the closed "SheetJS is
+  outside Dependabot's and npm audit's view"); still over Vite's warning.
 - **What closes it:** loading the heavier screens lazily (for example the
   developer console, the workflow canvas, the import wizard with SheetJS, and
   charts) so the entry chunk falls under Vite's warning.
@@ -877,23 +773,6 @@ leaves out, until it is fixed.
   scheduler's persisted leaf and slice rows (`servedFetch`) where the
   viewer's read set allows it.
 
-### An unauthenticated /api/grid answers 500 instead of 401/404
-
-- **Noticed:** 2026-09-28, checking production after the formula deploy
-  (8c04baa). This predates that change: `grid()` is unchanged from 0a74995.
-- **What:** `grid()` looks up the model before resolving the caller. Without
-  a token, `GET /api/grid` answers 500 `resolve model: missing Bearer token`.
-  With an unknown `grid_def_id`, it answers 500 `resolve grid def: no rows in
-  result set`. With an existing one, it answers 401. Every other endpoint
-  answers 401 first.
-- **Why it matters:** the status codes are wrong, 500 alerts fire on normal
-  traffic, and an unauthenticated caller can tell an existing grid ID (401)
-  from an unknown one (500). IDs are random UUIDs and no data is served, so
-  this is not a leak.
-- **How to check:** `curl -s -w '%{http_code}' https://app.maverickbuilds.app/api/grid`.
-- **What closes it:** resolve the actor first (401), and answer an unknown
-  grid with 404.
-
 ### A person who holds only tenant_admin cannot open the Tenant admin guide
 
 - **Noticed:** 2026-09-29, adding the getting-started guides.
@@ -1119,29 +998,6 @@ leaves out, until it is fixed.
 - **What closes it:** open decision: reserve those names on create and
   rename on all three paths, and rename the rows the query finds.
 
-### Some workflow notifications reach disabled accounts, and a failed recipient query is silent
-
-- **Noticed:** 2026-09-29, while giving workflow assignment one predicate.
-- **What:** role recipients and SLA reminders now leave out disabled
-  accounts (`assignee.SQL`). Three paths notify one known user without that
-  check: a notification step's "requester" recipient
-  (`internal/workflow/store.go:1409-1413`), the rework notice to the starter
-  (`:1004`) and `notifyStartFailure` (`:2805`). `notification.Store.Notify`
-  (`internal/notification/store.go:228`) checks nothing either, and the
-  dispatcher's `claimOutbound` (`internal/notification/dispatch.go:397`)
-  e-mails or posts rows queued before the recipient was disabled.
-  Separately, `resolveNotificationRecipients` returns no recipients when its
-  query fails (`internal/workflow/store.go:1428-1431`), so a broken query
-  notifies nobody and logs nothing.
-- **Why it matters:** a person removed from the tenant can keep receiving
-  workflow e-mails, which carry the workflow's name and message; a recipient
-  query broken by a schema change fails unseen.
-- **How to check:** disable the starter of an instance, send one of its
-  steps back for rework, and look for an e-mail row queued for them.
-- **What closes it:** `Notify` skipping a disabled recipient,
-  `claimOutbound` dropping or cancelling their pending rows, and the
-  recipient query's error logged.
-
 ### An overdue step that names no role reminds nobody
 
 - **Noticed:** 2026-09-29, while giving workflow assignment one predicate.
@@ -1273,17 +1129,6 @@ leaves out, until it is fixed.
   catalogue, so an event workflow can carry them, or the full choice for a
   manual workflow.
 
-### A published manual workflow shows "No rule yet" as a warning
-
-- **Noticed:** 2026-09-29, writing the Developer guide.
-- **What:** the workflow editor shows a warning-toned "No rule yet" badge
-  whenever no automation rule uses the workflow
-  (`web/src/consoles/developer/WorkflowEditor.tsx:252-253`), including a
-  published manual workflow, which people start by hand without any rule.
-- **Why it matters:** it presents a working setup as a problem.
-- **How to check:** publish a manual workflow with no rule and open it.
-- **What closes it:** no badge, or a neutral one, for a manual workflow.
-
 ### A business admin who hides a row from themselves cannot undo it
 
 - **Noticed:** 2026-09-29, writing the Business admin guide.
@@ -1302,22 +1147,6 @@ leaves out, until it is fixed.
   reopen your own rules.
 - **What closes it:** listing the caller's own hidden rows when they edit
   their own rules, or refusing Hidden on oneself.
-
-### Access-rule changes reach an open grid only on its 30-second refresh
-
-- **Noticed:** 2026-09-29, writing the Business admin guide.
-- **What:** saving rules refreshes only the rules list
-  (`["ba-access-rules", user]`,
-  `web/src/consoles/business-admin/BusinessAdminConsole.tsx:651`). An open
-  grid picks the change up through grid-meta's 30 s stale time and refetch
-  (`web/src/consoles/business/PlanningGrid.tsx:477`, `web/src/main.tsx:13`),
-  even in the admin's own browser. The guide says "within half a minute, or
-  at once if you reload".
-- **Why it matters:** an admin who changes their own rules sees the old ones
-  for up to half a minute.
-- **How to check:** change your own rules with a grid open in another tab.
-- **What closes it:** invalidating the grid-meta and KPI queries when rules
-  are saved; other users' grids keep the 30 s refresh.
 
 ### History › Pending Actions ignores required comments and completion labels
 
@@ -1578,45 +1407,6 @@ leaves out, until it is fixed.
 - **What closes it:** one shared helper, for example in `internal/modeledit`,
   which both packages can import.
 
-### A saved CSV or Sheets import into a form imports nothing
-
-- **Noticed:** 2026-09-29.
-- **What:** `integrationRun`'s form branch inserts into `model.form_record`
-  (`internal/gateway/handler.go:8306`), a table no migration creates; form
-  records live in `runtime.form_record` (`migrations/017_crud_forms.sql:15`).
-  Every row fails, and the run answers 200 with `error_rows` counting them.
-- **Why it matters:** a saved csv_import or google_sheets integration with a
-  form target has never worked, and says so only in its counts.
-- **How to check:** `grep -n 'model.form_record' internal/gateway/handler.go`;
-  run such an integration: `{"error_rows":1,"rows_imported":0}`.
-- **What closes it:** writing through the path the form submit endpoint uses
-  (`runtime.form_record`, with its posting and recalculation), and a test
-  that a saved CSV-to-form run imports its rows.
-
-### Deleting a form mapping or a form leaves its posted totals in the metric
-
-- **Noticed:** 2026-09-29, reviewing record deletes; read, not run.
-- **What:** a form-to-metric mapping keeps its aggregate in
-  `runtime.fact_input` rows tagged `source_ref` = the mapping's id, which
-  have no foreign key (`migrations/035_form_metric_mapping.sql:45`).
-  `DELETE /api/developer/form-integrations/{id}` deletes the mapping
-  (`internal/gateway/handler.go:8797-8809`), and deleting a form cascades
-  to its mappings (`internal/crudapp/store.go:170-176`); the posting rows
-  go, the `fact_input` rows stay, and the grid still sums them. A `PATCH`
-  that changes a mapping's target metric leaves the old metric's rows the
-  same way: the recompute deletes only the new target's (`:9168`). A
-  record delete now takes its postings out (`retractPostings`,
-  `internal/gateway/form_record_access.go:193`, pinned by
-  `TestFormRecordRetractionTakesValueOut`).
-- **Why it matters:** a metric keeps showing money from a form or mapping
-  that no longer exists, and nothing in the console can remove it.
-- **How to check:** post records through a mapping, delete the mapping,
-  and read the metric's cell: the total is unchanged.
-- **What closes it:** the mapping delete, the form delete and a retargeting
-  `PATCH` deleting the mapping's `source_ref` rows (for the old target) and
-  recalculating the metrics that read them, in one shared helper, with a
-  test.
-
 ### The posting write guard runs as whoever changed the record
 
 - **Noticed:** 2026-09-29, reviewing the form record permissions; read, not
@@ -1637,24 +1427,6 @@ leaves out, until it is fixed.
   submitter's, the approver's, or both), then one rule in
   `applyFormMappings` with a test.
 
-### Form import creates submitted and approved records without their rules
-
-- **Noticed:** 2026-09-29, reviewing the form record permissions; read, not
-  run.
-- **What:** `POST /api/forms/{id}/import` creates each record in the status
-  it is allowed (`internal/gateway/form_transfer.go:277-286`) and posts it,
-  but does not call `DispatchEventRules`. A record created or moved through
-  `POST /api/forms/{id}/records` or `PUT /api/records/{id}` fires the
-  form's `form_submit` and `form_approval` rules
-  (`internal/gateway/handler.go:10389-10396`, `:10565-10571`).
-- **Why it matters:** an automation that starts a workflow for each
-  submitted expense does not start for imported ones.
-- **How to check:** a `form_submit` rule on a form; import a CSV of two
-  submitted records; no instance starts.
-- **What closes it:** the import dispatching the same rules per record as
-  the create does, or a decision that an import is silent, said in the
-  manual.
-
 ### The forms list can show a form whose records the caller does not reach
 
 - **Noticed:** 2026-09-29, adding permissions to the forms list; not
@@ -1672,43 +1444,6 @@ leaves out, until it is fixed.
   but the application header still resolves it.
 - **What closes it:** the forms list leaving out forms the scope does not
   reach, or showing them that way on purpose.
-
-### The cell write accepts a value on a parent member
-
-- **Noticed:** 2026-09-29, by the tour's reviewer; not re-run.
-- **What:** `POST /api/cells` does not check that each member is a leaf;
-  `writeguard.IsLeafMember` (`internal/writeguard/writeguard.go:77`) has no
-  callers. The import path refuses a parent member
-  (`internal/importpkg/resolve.go:238`). The reviewer reports that a value
-  stored on a parent is ignored by the grid but counted by a pinned KPI.
-- **Why it matters:** the grid and a KPI can disagree about the same total.
-- **How to check:** `POST /api/cells` with a parent member's code, then read
-  the grid and a KPI pinned to that member.
-- **What closes it:** refusing a non-leaf member in `cells()`, as the import
-  does.
-
-### The cell write stores a value for a member code that does not exist
-
-- **Noticed:** 2026-09-29, reviewing the cell write; read, not run.
-- **What:** `POST /api/cells` resolves each `dim_codes` entry to a member
-  for the write guard and skips an unknown code ("nothing to restrict
-  here", `internal/gateway/handler.go:2057`), then inserts the fact with the
-  codes as sent (`:2090-2094`). The gRPC `QueryService.Writeback` does the
-  same (`internal/query/store.go:74`, insert at `:107`), and so does a form
-  posting whose record names an unknown member
-  (`internal/gateway/handler.go:9028`). The dimension ids in `dim_codes`
-  are not checked against the revision either. The import refuses an
-  unknown code (`internal/importpkg/resolve.go:229`).
-- **Why it matters:** the fact is stored but no grid, chart or total reads
-  it, and it counts against the plan's fact rows. A member created later
-  with that code picks the value up, though no write guard checked it
-  against that member.
-- **How to check:** `POST /api/cells` with `dim_codes` naming a code the
-  dimension does not have: 200, and a `runtime.fact_input` row with that
-  code.
-- **What closes it:** one shared resolver for `cells()`, the gRPC write and
-  the form posting that refuses an unknown member code, and a dimension
-  that is not the revision's, with a 400 naming them, as the import does.
 
 ### Grid layouts copied before 2026-09-29 name the source revision's dimensions
 
@@ -1805,6 +1540,9 @@ leaves out, until it is fixed.
   avoid the Percentage format for this reason.
 - **How to check:** a metric with the Percentage format and value 0.25 on a
   grid and a KPI.
+- **Also:** 2026-10-06: the .xlsx upload keeps a percentage-formatted cell
+  as displayed ("25.00%", refused as not a number) until this is settled;
+  the AI Developer's attachment import reads its stored 0.25.
 - **What closes it:** one shared formatter with one percentage convention,
   honouring `format_decimals`.
 
@@ -1868,27 +1606,6 @@ leaves out, until it is fixed.
   102 backfills. Not yet run on any deployment.
 - **What closes it:** a platform-admin action that sets an account's tenant,
   audited; or the refusal naming what to do instead.
-
-### A SCIM delete of a member the tenant does not own leaves the member's access
-
-- **Noticed:** 2026-09-30, limiting SCIM writes to the tenant's own
-  accounts.
-- **What:** a tenant's SCIM token lists everyone who holds a role in its
-  workspaces, but changes and deletes only the tenant's own accounts, never a
-  platform admin (`ownedSQL`, `ee/scim/service.go:257`). For the others it
-  answers 403 (a request that changes nothing is answered as it is), so an
-  identity provider that pushes changes for them logs 403s, and a SCIM delete
-  no longer removes such a member's access in the tenant: the tenant admin
-  removes it with Remove from this tenant on the Users screen (`DELETE
-  /api/admin/users/{id}/tenant-access`, since 2026-09-30).
-- **Why it matters:** off-boarding through the identity provider leaves
-  these members' roles in place until an administrator removes them.
-- **How to check:** `TestSCIMChangesOnlyTheTenantsOwnAccounts`
-  (`internal/gateway/global_builder_escalation_test.go`).
-- **What closes it:** a SCIM delete of a member the tenant does not own
-  removes what that member holds in this tenant, as Remove from this tenant
-  does (`removeTenantAccess`, `internal/gateway/account_boundaries.go:351`),
-  and leaves the account.
 
 ### Inviting an existing address still shows afterwards that it had an account
 
@@ -2118,25 +1835,6 @@ leaves out, until it is fixed.
 - **What closes it:** button rules that name their model, so that a removal
   takes them too.
 
-### Removal from a tenant and a refused invitation have no audit event types of their own
-
-- **Noticed:** 2026-09-30, adding existing accounts to a tenant.
-- **What:** `pkg/auditlog` has no event type for either. Removal from a
-  tenant is recorded as `user.role_revoked` with metadata
-  `action=removed_from_tenant` (`adminRemoveFromTenant`,
-  `internal/gateway/account_boundaries.go:415`), and a refused invitation of
-  an existing account as `user.role_granted` with `granted=false` and
-  `refused` naming the reason (`refuseExistingAccount`, `:600`). The refusal
-  also carries `visibility=platform`, a new generic marker that `auditScope`
-  (`internal/gateway/handler.go:7098`) leaves out for tenant viewers, in
-  `GET /api/admin/audit` and the enterprise audit export alike.
-- **Why it matters:** an audit reader filtering by event type sees a removal
-  as one revoke, and a refusal as a grant.
-- **How to check:** `grep -n 'removed_from_tenant\|"granted"'
-  internal/gateway/account_boundaries.go`.
-- **What closes it:** `user.removed_from_tenant` and a refusal event type in
-  `pkg/auditlog`, used here.
-
 ### Audit events are written after the change commits
 
 - **Noticed:** 2026-09-30, auditing the developer grants a grant removal
@@ -2204,37 +1902,6 @@ leaves out, until it is fixed.
 - **What closes it:** `BrandName` taking the message's tenant instead of the
   recipient, so each tenant's mail carries its own brand.
 
-### The Users screen can reopen a removed account in edit mode
-
-- **Noticed:** 2026-09-30, adding Remove from this tenant.
-- **What:** when a revoke or a removal from the tenant takes the account
-  being edited out of the list, `editId` in
-  `web/src/consoles/admin/UsersPanel.tsx` still points at it. Nothing
-  happens unless the account is listed again later in the same session: its
-  row then reopens in edit mode.
-- **Why it matters:** low: a surprise, not a wrong write.
-- **How to check:** edit an account of another tenant, remove it from the
-  tenant, then invite it again.
-- **What closes it:** clearing `editId` when its account leaves the list.
-
-### The invite form cannot be sent while the caller's roles load, and says nothing
-
-- **Noticed:** 2026-09-30, making the invite form ask for a role and a
-  workspace (`f0f8986`).
-- **What:** until `/api/me` answers, `assignableRoles` is empty, so the
-  Users screen's invite form treats the caller as someone other than a
-  platform admin (`inviteNeedsRoleAndWorkspace`,
-  `web/src/consoles/admin/UsersPanel.tsx:322`) and hides Initial Role,
-  which it renders only when `assignableRoles` is not empty (`:372`). The
-  Workspace field shows, and Create user stays disabled with no role to pick
-  and no reason given.
-- **Why it matters:** low: nothing wrong is sent, but on a slow `/api/me`
-  the form looks broken.
-- **How to check:** slow `/api/me` down in the browser's network tools and
-  open the invite form.
-- **What closes it:** the form showing that it is loading, or saying why
-  Create user is disabled, until the roles arrive.
-
 ### The invite e2e spec mocks a refusal the gateway words differently
 
 - **Noticed:** 2026-09-30, making the invite form ask for a role and a
@@ -2254,35 +1921,6 @@ leaves out, until it is fixed.
 - **How to check:** compare the two strings.
 - **What closes it:** the mock using the gateway's wording, or a case in the
   real-Keycloak e2e job.
-
-### The Playwright specs are not type-checked
-
-- **Noticed:** 2026-09-30, editing `web/e2e/account-ownership.spec.ts`.
-- **What:** `web/tsconfig.json` references only `tsconfig.app.json`
-  (`include: ["src"]`) and `tsconfig.node.json` (`vite.config.ts`), so
-  neither `npm run build` (`tsc -b && vite build`) nor CI's `npx tsc -b
-  --noEmit` (`.github/workflows/ci.yml:342`) type-checks
-  `web/e2e/*.spec.ts`. Playwright strips their types without checking them.
-- **Why it matters:** a type error in a spec shows only when the spec runs,
-  if at all.
-- **How to check:** `grep -n include web/tsconfig.*.json`.
-- **What closes it:** a `tsconfig` for `web/e2e` referenced from
-  `web/tsconfig.json`, so `tsc -b` checks the specs too.
-
-### Field descriptions and errors are not tied to their controls
-
-- **Noticed:** 2026-09-30, adding the invite form's workspace hint.
-- **What:** `Field` (`web/src/ui/Field.tsx:26`) ties its label to the
-  control by id, but renders `description` and `error` as plain spans with
-  no id, and sets no `aria-describedby` on the control. The invite form's
-  "People are always added to a workspace", and every other field's hint or
-  error, is not announced with its control.
-- **Why it matters:** a screen-reader user misses hints and validation
-  errors on every form built on `Field`.
-- **How to check:** inspect the invite form's Workspace select: it has no
-  `aria-describedby`.
-- **What closes it:** `Field` giving the description and the error ids and
-  setting `aria-describedby` on the control, as it sets `id`.
 
 ### A tenant cannot create a second workspace
 
@@ -2478,21 +2116,11 @@ leaves out, until it is fixed.
 - **Why it matters:** a reduced schema can pass a query that fails against
   the real one, or fail one that works.
 - **How to check:** `ls internal/*/testdata/*.sql`.
+- **Narrowed:** 2026-10-06: `internal/query`'s Writeback tests moved onto
+  the real migrations (`writeback_test.go`, `testdb`); the reduced schema had
+  no `core.model`, which the write guard reads once a write names members.
 - **What closes it:** those packages' test setup moved onto the real
   migrations (`testdb` with `migrationfs`).
-
-### business_role_member has no index on user_id
-
-- **Noticed:** 2026-09-29, while giving workflow assignment one predicate.
-- **What:** `identity.business_role_member`'s only index is its primary key,
-  role then user (`migrations/020_business_roles_access.sql:19-23`). Every
-  per-user business-role check (inbox, eligibility, notification recipients,
-  reminders) filters on `user_id`, and resolving a role's recipients
-  evaluates the check once for every user.
-- **Why it matters:** slow on large tenants; not measured.
-- **How to check:** `EXPLAIN` the recipient query of
-  `resolveNotificationRecipients` on a large database.
-- **What closes it:** an index on `user_id`, in a new migration.
 
 ### Loose ends in the getting-started guides
 
@@ -2519,23 +2147,6 @@ leaves out, until it is fixed.
   accepting it; a precise sentence; a starter test comparing each picture's
   aspect ratio with its `viewBox` (within about 2%); an e2e check of a
   titled KPI's rendered height.
-
-### An AI member add that creates its parent can pass the member limit by one
-
-- **Noticed:** 2026-09-29, re-checking the AI Developer's plan-limit hooks.
-- **What:** `add_dimension_member` checks the plan for one new member
-  (`internal/aiassistant/write_executor.go:1011`). When its parent code names
-  no member of the same dimension, it then creates that parent
-  (`:1113-1118`) and inserts the member (`:1129`): two rows for a check of
-  one. Seen by reading; not yet exercised live.
-- **Why it matters:** a dimension one member below
-  `max_members_per_dimension` can end one above it. The next add is refused,
-  so the overshoot stays at one.
-- **How to check:** on a plan with a member limit, fill a dimension to one
-  below it, ask the assistant to add a member under a parent code that does
-  not exist yet, and count the members.
-- **What closes it:** a `checkMembers` for the parent before it is created,
-  with a case in `TestPlanLimitHooks`.
 
 ### A docs-only edit runs the whole Go gate
 
@@ -2570,6 +2181,8 @@ leaves out, until it is fixed.
 - **Why it matters:** a local run can report a failure that is not one.
 - **How to check:** stop Vite, clear `web/node_modules/.vite`, and run the
   five specs with `--workers=3`.
+- **Seen again:** 2026-10-06: the first run of `account-identity` after a
+  web change retried three tests, which passed on retry and on a second run.
 - **What closes it:** a reproduction that names the step; if it is the
   cold compile, a warm-up (a global setup that loads the console once)
   before the tests.
@@ -2681,47 +2294,313 @@ leaves out, until it is fixed.
   says it would remove most of it), or splitting `internal/gateway`'s tests
   so they spread over the four parallel slots.
 
+### Exporting a revision that copied an application-level workflow carries it twice
+
+- **Noticed:** 2026-10-06, extending `TestTextCellsClearsHighlightsAndBusinessMembers`:
+  a model imported into an application that has a revision-less workflow
+  ("Test Approval") gets a revision copy of it; exporting that revision lists
+  both, and importing the package into the same application fails with
+  `workflow_def_rev_name_uq`.
+- **Why it matters:** a tenant admin's export of an imported model cannot be
+  imported again, and the package says the workflow twice.
+- **How to check:** import a package into an application with a
+  revision-less workflow, export the new revision, and import it.
+- **What closes it:** the export leaving out a revision-less workflow the
+  revision has its own copy of (by lineage or name), or the import merging
+  them, with a test.
+
+### The cell write does not check that a dimension is the metric's
+
+- **Noticed:** 2026-10-06, adding the shared write coordinate check: a
+  write's `dim_codes` must name dimensions of the revision, but not
+  dimensions the metric is on; a value written with an extra dimension is
+  stored where no grid of the metric reads it.
+- **Why it matters:** the same unread facts the coordinate check refuses
+  for unknown codes, by another door.
+- **How to check:** `POST /api/cells` for a metric on a staff grid with
+  `dim_codes` naming a region dimension too: 200.
+- **What closes it:** refusing a dimension outside the metric's grid (its
+  rollup source's for a rollup grid), after listing which writers send fewer
+  or other dimensions on purpose.
+
+### A reopened AI session shows its pending proposal only in Activity
+
+- **Noticed:** 2026-10-06, keeping plan-check warnings with the proposal:
+  `loadSession` (`web/src/consoles/developer/AIAssistant.tsx`) clears the
+  pending proposal and never sets it from the session; read, not run.
+- **Why it matters:** a developer who leaves a session with a proposal
+  waiting may find no Confirm on it when they come back.
+- **How to check:** propose, switch sessions, switch back.
+- **What closes it:** the session answer (or the proposals list) restoring
+  the newest pending proposal and its warnings into the chat.
+
+### A member another dimension points at cannot become calculated
+
+- **Noticed:** 2026-10-06: `metricformula`'s calculated-member check counts
+  children in any dimension (`calcmember.go`), unlike the write, import and
+  pick-list checks, which now count only the member's own dimension.
+- **Why it matters:** probably intended — a department its staff point at
+  would stop being an input for them — but it is the one place left with the
+  other rule.
+- **What closes it:** a decision, recorded here, or the same-dimension rule.
+
+## Closed
+
+### The cell write accepts a value on a parent member
+
+- **Noticed:** 2026-09-29, by the tour's reviewer; not re-run.
+- **Closed by:** 59669c3 (2026-10-06), with the next entry: one coordinate check,
+  `writeguard.ResolveWriteMembers` (`internal/writeguard/members.go`), shared
+  by `POST /api/cells`, the gRPC `Writeback` and form postings, refuses a
+  parent member (`NOT_LEAF`) and a calculated one (`CALCULATED_MEMBER`).
+  Leaf-ness is within the member's own dimension: a department its staff
+  point at through `parent_dimension_id` is not a parent, and the file import
+  and pick-lists, which counted those staff as children, now agree (the
+  import refused a department-level value the grid let a planner type).
+  `TestCellWriteCoordinates`.
+
+### The cell write stores a value for a member code that does not exist
+
+- **Noticed:** 2026-09-29, reviewing the cell write; read, not run.
+- **Closed by:** 59669c3 (2026-10-06), with the previous entry. The HTTP write
+  had already refused an unknown code; it now also refuses a dimension of
+  another revision (`UNKNOWN_DIMENSION`). The gRPC `Writeback` answers
+  `InvalidArgument` for all of them (`TestWritebackRefusesUnreadCoordinates`,
+  on the real migrations), and a form record naming no leaf member posts
+  nothing and retracts its earlier posting, logged. Facts stored earlier at
+  unknown codes go with migration 121 — see "Orphan facts written at unknown
+  member codes may remain".
+
+### A saved CSV or Sheets import into a form imports nothing
+
+- **Noticed:** 2026-09-29.
+- **Closed by:** 59669c3 (2026-10-06): the run goes through the form import's own
+  path, `importFormRows` (`internal/gateway/form_transfer.go`) — typed and
+  required fields, statuses the caller may create, each record posted through
+  its mappings — and answers 422 naming the rows when any fails. A record
+  starts as a draft unless the file has a status column (the never-working
+  insert said `submitted`). The same path now parses a metric field bound to
+  a metric as a number (stored as text it was never posted) and refuses a
+  dimension field naming no leaf member. `TestFormPostingsFollowRunsAndDeletes`.
+
+### Deleting a form mapping or a form leaves its posted totals in the metric
+
+- **Noticed:** 2026-09-29, reviewing record deletes; read, not run.
+- **Closed by:** 59669c3 (2026-10-06): `crudapp.Store.DeleteMappingPostings`
+  removes a mapping's `source_ref` facts (archived as `form_mapping_removed`)
+  on the mapping delete, the form delete and a retargeting `PATCH` (which
+  keeps only the new target's), for the developer's routes and the AI
+  Developer's tools alike, and the gateway recalculates what they fed.
+  `TestFormPostingsFollowRunsAndDeletes`, which fails with the delete's
+  withdrawal taken out.
+
 ### The .xlsx upload reads cells as displayed, so formatted numbers are refused
 
 - **Noticed:** 2026-10-02, same change.
-- **What:** `importpkg.ParseXLSXRows` (`POST /api/import/upload` with
-  `xlsx_base64`, used by the business Import widget) reads each cell as Excel
-  displays it. A value formatted `#,##0.00` arrives as `"1,234.50"`, which
-  `ResolveRows` refuses as not a number, and the whole workbook is rejected.
-  `importpkg.ParseTabularFile` (the AI Developer's attachment import) reads
-  stored values instead; the upload endpoint was left as it was because a
-  date-formatted cell used as a member code would change from its displayed
-  text to Excel's serial number.
-- **Why it matters:** finance workbooks nearly always format numbers with
-  thousands separators, so a business user's upload of one fails with a
-  validation error on every value row.
-- **How to check:** upload a workbook whose value cells use number format 4
-  through the business Import widget; the response is 422 with
-  `"1,234.50"`-style raw values. `TestParseTabularFileReadsStoredValuesAndPicksSheet`
-  shows the two readings side by side.
-- **What closes it:** reading stored values for value columns (or all
-  columns, after deciding what a date-typed member-code cell should become),
-  then `ParseXLSXRows` can call `parseXLSXSheet(data, "", true)`.
+- **Closed by:** 59669c3 (2026-10-06): `ParseXLSXRows` reads a plain number cell
+  as stored (`storedNumbers`, `internal/importpkg/xlsx_dates.go`); a date cell
+  keeps its displayed text, as a member code may be written that way, and so
+  does a percentage until the engine's percent scale is settled (see "Grid,
+  KPI and chart format the same metric differently").
+  `TestParseXLSXRowsReadsStoredNumbers`.
+
+### Three tool images are compiled with an unsupported Go
+
+- **Noticed:** 2026-09-27, same review.
+- **Closed by:** 59669c3 (2026-10-06): `golang:1.26` in the minio, pg-backup and
+  postgres-walg Dockerfiles. Built locally; `go version` on the binaries
+  reads go1.26.8 (minio, mc twice, wal-g). A scratch pg-backup backup then
+  restore against the new MinIO dropped a row added after the backup, and a
+  wal-g `backup-push`, `backup-fetch` and a server started from it returned
+  every row.
+
+### Eight Go files are not gofmt-formatted
+
+- **Noticed:** 2026-09-27; re-checked 2026-10-04 (`jwks.go` has since been
+  formatted; `metricformula/aggrule.go` had drifted and was formatted).
+- **Closed by:** 59669c3 (2026-10-06): the eight files formatted (and one more
+  that `gofmt -s` simplifies), and `.golangci.yml` enables the `gofmt`
+  formatter, so `golangci-lint run` reports drift; ogen's `_gen.go` output is
+  left to `make oas`.
+
+### business_role_member has no index on user_id
+
+- **Noticed:** 2026-09-29, while giving workflow assignment one predicate.
+- **Closed by:** 59669c3 (2026-10-06): migration 119
+  (`business_role_member_user_idx`). Still not measured on a large tenant.
+
+### The Playwright specs are not type-checked
+
+- **Noticed:** 2026-09-30, editing `web/e2e/account-ownership.spec.ts`.
+- **Closed by:** 59669c3 (2026-10-06): `web/tsconfig.e2e.json` (the specs and
+  both Playwright configs), referenced from `web/tsconfig.json`, so `tsc -b`
+  checks them. It found one error: a browser-side import of a Vite path,
+  now typed against its source module.
+
+### Field descriptions and errors are not tied to their controls
+
+- **Noticed:** 2026-09-30, adding the invite form's workspace hint.
+- **Closed by:** 59669c3 (2026-10-06): `Field` gives the description and the
+  error ids and sets `aria-describedby` (and `aria-invalid` with an error) on
+  its single child, whether or not the child brought its own id. Checked by
+  type and lint only; no spec reads the description through the control yet.
+
+### A published manual workflow shows "No rule yet" as a warning
+
+- **Noticed:** 2026-09-29, writing the Developer guide.
+- **Closed by:** 59669c3 (2026-10-06): a manual workflow with no rule shows a
+  neutral "Started by hand"; one that waits for an event keeps the warning.
+  e2e `workflow-editor`, `build-model-revision-scope`; the developer manual's
+  toolbar row says both.
+
+### The Users screen can reopen a removed account in edit mode
+
+- **Noticed:** 2026-09-30, adding Remove from this tenant.
+- **Closed by:** 59669c3 (2026-10-06): the panel stops editing an account once
+  the list no longer has it. e2e `account-ownership` ("an account that left
+  the list while being edited comes back closed"), which fails without it.
+
+### The invite form cannot be sent while the caller's roles load, and says nothing
+
+- **Noticed:** 2026-09-30, making the invite form ask for a role and a
+  workspace (`f0f8986`).
+- **Closed by:** 59669c3 (2026-10-06): both consoles pass
+  `rolesLoading`; the form says "Loading the roles you can give…" in place of
+  Initial Role and keeps Create user disabled until the roles arrive. e2e
+  `account-ownership`, holding `/api/admin/me`.
+
+### The AI Developer cannot clear a cell
+
+- **Noticed:** 2026-10-05: `write_input_values` goes through the import
+  pipeline, which writes values; `"value": null` is refused.
+- **Closed by:** 59669c3 (2026-10-06): `"value": null` in `write_input_values`
+  empties the cell through the write guard and `clearCell` (archived as
+  `cleared`), alone or mixed with values in one step, and the plan check
+  resolves it the same way. `TestAIDeveloperWritesInputValues`.
+
+### Plan-check warnings are not kept with the proposal
+
+- **Noticed:** 2026-10-05: warnings reach the console in the turn's
+  "proposal" event and the saved tool message; reopening the session shows
+  the proposal without them.
+- **Closed by:** 59669c3 (2026-10-06): migration 120 stores them on the proposal
+  row; the Activity panel shows them for every proposal. Go:
+  `TestSendMessage_WarnsOnceThenShowsWithWarnings` and
+  `…WarnedPlanShownWhenTheModelOnlyAsks`; e2e `ai-turn-controls`.
+
+### Model import keeps widget_props keys the console does not read
+
+- **Noticed:** 2026-10-05: the developer API now refuses unknown keys, the
+  package import does not (an old package may carry them).
+- **Closed by:** 59669c3 (2026-10-06): every import strips them
+  (`Package.StripUnreadWidgetProps`), and `POST /api/admin/models/import`
+  names what it dropped in `notes`. `TestTextCellsClearsHighlightsAndBusinessMembers`.
+
+### Access-rule changes reach an open grid only on its 30-second refresh
+
+- **Noticed:** 2026-09-29, writing the Business admin guide.
+- **Closed by:** 59669c3 (2026-10-06): saving rules invalidates the grid,
+  KPI and chart queries (`invalidateModelData`), so the admin's own console
+  reads them again at once. Another browser tab still waits for its own
+  refresh. e2e `access-rules-refresh`, which fails without it.
+
+### Removal from a tenant and a refused invitation have no audit event types of their own
+
+- **Noticed:** 2026-09-30, adding existing accounts to a tenant.
+- **Closed by:** 59669c3 (2026-10-06):
+  `user.removed_from_tenant` and `user.invitation_refused`, with the same
+  metadata as before (`TestRemoveAccountFromTenant`,
+  `TestInviteExistingAccountAddsItToTheTenant`). Events written earlier keep
+  their old types.
+
+### Some workflow notifications reach disabled accounts, and a failed recipient query is silent
+
+- **Noticed:** 2026-09-29, while giving workflow assignment one predicate.
+- **Closed by:** 59669c3 (2026-10-06): `notification.Store.Notify`
+  queues nothing for a disabled account (`ErrRecipientDisabled`), which
+  covers the requester, rework and start-failure notices, and the
+  dispatcher fails the outbound rows queued before the account was disabled
+  ("the recipient's account is disabled") instead of sending them. The
+  recipient query's failure is logged: the gateway's workflow stores now log
+  through its logger (`h.workflowStore`). `TestDisabledRecipientsAreNotNotified`.
+
+### A SCIM delete of a member the tenant does not own leaves the member's access
+
+- **Noticed:** 2026-09-30, limiting SCIM writes to the tenant's own
+  accounts.
+- **Closed by:** 59669c3 (2026-10-06): such a delete takes the member's
+  place in the tenant — what Remove from this tenant takes, through the same
+  `removeFromTenant` — leaves the account and its identity-provider sign-in,
+  and is audited as `user.removed_from_tenant` with actor role `scim`. A
+  platform account, or a role only a platform admin may remove, is still
+  refused (403). `TestScimProvisioningLifecycle`.
 
 ### Dimension member imports are not held to the plan's member limit
 
 - **Noticed:** 2026-10-02, same change.
-- **What:** `importDimensionMembersCSV` (`POST /api/import/dimension-members`
-  and a `csv_import` integration run with a dimension target) adds members
-  without `plan.Enforcer.CheckMembers`, which the member endpoints and the AI
-  Developer's member tools run. The AI Developer's attachment import counts
-  the new members first and checks them (`newMemberCount` in
-  `internal/gateway/ai_file_import.go`); the developer's own imports do not.
-- **Why it matters:** on a plan with a member limit, an import passes it by
-  any number of members.
-- **How to check:** on a customer whose plan limits members, import a CSV with
-  more new codes than the remaining allowance through the Import Wizard — it
-  succeeds.
-- **What closes it:** counting the file's new codes in
-  `importDimensionMembersCSV` (as `newMemberCount` does) and calling
-  `CheckMembers` before the first insert, for every caller.
+- **Closed by:** 59669c3 (2026-10-06): `importDimensionMembersCSV` counts the
+  file's new codes (and coded-on-import labels) and calls `CheckMembers`
+  before writing, for the developer's upload and a saved integration run
+  alike, answering 402. `TestAIWriteHooks_PlanLimitsHoldTheAssistant`.
 
-## Closed
+### An AI member add that creates its parent can pass the member limit by one
+
+- **Noticed:** 2026-09-29, re-checking the AI Developer's plan-limit hooks.
+- **Closed by:** 59669c3 (2026-10-06): creating the missing parent asks the
+  plan for two members first. `TestPlanLimitHooks`.
+
+### An unauthenticated /api/grid answers 500 instead of 401/404
+
+- **Noticed:** 2026-09-28, checking production after the formula deploy
+  (8c04baa). This predates that change: `grid()` is unchanged from 0a74995.
+- **Closed by:** 59669c3 (2026-10-06): `grid()` resolves the caller first (401
+  for every unauthenticated read), and an unknown or malformed
+  `grid_def_id` is 404. `TestGridAndModelRefusals`.
+
+### A foreign X-Model-Id silently selects another model
+
+- **Noticed:** 2026-10-02, pinning the connector's read context.
+- **Closed by:** 59669c3 (2026-10-06): `headerModelInApp` refuses an id the
+  caller may not open in the application with `errModelNotOpen`, which
+  `jsonAccessErr` answers 404 `MODEL_NOT_OPEN`, on every model-scoped
+  business route and the business-admin scope. The console relied on the
+  fallback for a stale choice (a deleted model, revoked access, another
+  account signed in): `apiFetch` drops the stored model on that answer and
+  retries once, opening the default as before. `TestGridAndModelRefusals`;
+  e2e `stale-model-selection`, which fails without the retry.
+
+### SheetJS is outside Dependabot's and npm audit's view
+
+- **Noticed:** 2026-09-27, while closing the public repository's Dependabot alerts (`0a74995`).
+- **Closed by:** 59669c3 (2026-10-06), the user's choice "remove it entirely":
+  the Import Wizard reads a workbook through `POST /api/import/parse-workbook`
+  (excelize, the upload's own reading) and the Import widget's template comes
+  from `POST /api/import/template-workbook`; `xlsx` is gone from
+  `web/package.json`, and the entry bundle went from 1.89 MB to 1.40 MB.
+  `npm audit` then showed one build-time advisory (source-map-js 1.2.1 under
+  vite and tailwind), cleared by updating it to 1.2.2. `TestImportWorkbookEndpoints`;
+  e2e `import-wizard-workbook`, `import-widget-template`.
+
+### Orphan facts written at unknown member codes may remain
+
+- **Noticed:** 2026-10-05: `/api/cells` stored a value at any code until this
+  change refused unknown members; such rows count toward storage and no reader
+  shows them.
+- **Closed by:** 59669c3 (2026-10-06), the user's choice "a clean-up migration
+  now": migration 121 deletes input facts naming an existing dimension with a
+  code it does not have (archived with the reason `orphan_member_code`, and
+  their count raised as a notice), leaving rows filed under a deleted
+  dimension or a key that is no dimension id. `TestCleanup121OrphanMemberFacts`.
+  How many a deployment held is in its migration log, not counted beforehand.
+
+### Form import creates submitted and approved records without their rules
+
+- **Noticed:** 2026-09-29, reviewing the form record permissions; read, not
+  run.
+- **Closed by:** 59669c3 (2026-10-06), the user's choice "fire the rules": a form
+  import, and a saved CSV or Sheets run into a form, dispatch each record's
+  `form_submit` (and `form_approval`) rules as a record created by hand
+  does (`dispatchRecordCreated`). `TestFormPostingsFollowRunsAndDeletes`.
 
 ### Form record field labels are not tied to their inputs
 

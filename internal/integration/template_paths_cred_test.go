@@ -17,7 +17,7 @@ func TestValidateTemplate_ClosedNamespace(t *testing.T) {
 	}
 	bad := []string{
 		"{{secrets.api_key}}", "{{env.HOME}}", "{{context.password}}",
-		"{{row.amount}}",        // row.* outside push
+		"{{row.amount}}", // row.* outside push
 		"{{", "}}", "{{}}", "x{{y",
 	}
 	for _, s := range bad {
@@ -149,9 +149,14 @@ func TestConfigValidate(t *testing.T) {
 		func(c *Config) { c.Request.Method = "GET"; c.Request.BodyMode = BodyJSON; c.Request.BodyJSON = "{}" },
 		func(c *Config) { c.Request.Headers = []KV{{Key: "Host", Value: "evil", Enabled: true}} },
 		func(c *Config) { c.Request.Headers = []KV{{Key: "X-A", Value: "a\r\nb", Enabled: true}} },
-		func(c *Config) { c.Request.MaxRetries = 3; c.Request.Method = "POST"; c.Request.BodyMode = BodyJSON; c.Request.BodyJSON = "{}" }, // retry w/o idempotency
-		func(c *Config) { c.Auth = AuthPlacement{Type: "api_key"} },                                                                       // no placement
-		func(c *Config) { c.Pagination = PaginationConfig{Mode: PageCursor} },                                                             // no cursor path
+		func(c *Config) {
+			c.Request.MaxRetries = 3
+			c.Request.Method = "POST"
+			c.Request.BodyMode = BodyJSON
+			c.Request.BodyJSON = "{}"
+		}, // retry w/o idempotency
+		func(c *Config) { c.Auth = AuthPlacement{Type: "api_key"} },           // no placement
+		func(c *Config) { c.Pagination = PaginationConfig{Mode: PageCursor} }, // no cursor path
 		func(c *Config) { c.Response.RecordsPath = "$..x" },
 		func(c *Config) { c.Kind = "other" },
 		func(c *Config) { c.Request.Query = []KV{{Key: "k", Value: "{{env.X}}", Enabled: true}} },

@@ -122,6 +122,7 @@ export function useAdminSection({ enabled, tab, scope }: SectionInput & { scope:
               assignableRoles={computeAssignableRoles(roles)}
               canManageResourceAccess={canManageResourceAccess(roles)}
               currentUserId={me?.user_id}
+              rolesLoading={!me}
             />
           )}
           {!isLoading && !error && cur === "audit" && audit && <AuditView events={audit} />}

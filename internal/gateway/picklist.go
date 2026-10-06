@@ -28,7 +28,7 @@ type picklistOption struct {
 func (h *handler) picklistMembers(ctx context.Context, dimID string) ([]picklistOption, error) {
 	rows, err := h.db.Query(ctx, `
 		SELECT m.code, COALESCE(NULLIF(btrim(m.label),''), m.code),
-		       EXISTS (SELECT 1 FROM model.dimension_member c WHERE c.parent_member_id = m.id)
+		       EXISTS (SELECT 1 FROM model.dimension_member c WHERE c.parent_member_id = m.id AND c.dimension_id = m.dimension_id)
 		FROM model.dimension_member m
 		WHERE m.dimension_id = $1::uuid AND NULLIF(btrim(m.formula),'') IS NULL
 		ORDER BY m.time_index NULLS LAST, m.sort_order, m.code`, dimID)

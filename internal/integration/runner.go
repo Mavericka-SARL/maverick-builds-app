@@ -823,7 +823,10 @@ func (rn *Runner) executePush(ctx context.Context, run *Run, def *Definition, ap
 }
 
 // rateGate is a minimal per-run RPS ceiling.
-type rateGate struct{ interval time.Duration; last time.Time }
+type rateGate struct {
+	interval time.Duration
+	last     time.Time
+}
 
 func newRateGate(rps int) *rateGate {
 	if rps <= 0 {

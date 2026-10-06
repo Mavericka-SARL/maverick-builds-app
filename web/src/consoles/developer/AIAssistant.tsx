@@ -567,6 +567,15 @@ function ActivityPanel({ sessionId, onClose }: { sessionId: string; onClose: () 
             <div className="mvx-admin-muted" style={{ fontSize: 11, marginTop: 2 }}>
               {p.steps.length} step{p.steps.length !== 1 ? "s" : ""} · {p.created_at.slice(0, 16).replace("T", " ")}
             </div>
+            {/* Kept with the proposal, so a reopened session still shows them. */}
+            {(p.warnings?.length ?? 0) > 0 && (
+              <div role="note" style={{ fontSize: 11, marginTop: 4, color: "var(--color-warning-text)" }}>
+                <strong>The plan check warned:</strong>
+                <ul style={{ margin: "2px 0 0", paddingLeft: 16 }}>
+                  {p.warnings!.map((w, i) => <li key={i}>{w}</li>)}
+                </ul>
+              </div>
+            )}
           </div>
         </div>
       ))}

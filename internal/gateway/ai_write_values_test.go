@@ -22,6 +22,9 @@ func TestAIDeveloperWritesInputValues(t *testing.T) {
 		proposeStep("write_input_values", "Actual Through Month = 9", map[string]any{"metric_id": "actual_through_month", "values": []map[string]any{{"value": 9}}}),
 		proposeStep("write_input_values", "Prices", map[string]any{"metric_id": "price", "values": []map[string]any{
 			{"members": map[string]string{"region": "EU"}, "value": 10}, {"members": map[string]string{"Region": "US"}, "value": 12.5}}}),
+		// null empties a cell, as the grid's clear does; one step may mix both.
+		proposeStep("write_input_values", "EU 11, US cleared", map[string]any{"metric_id": "price", "values": []map[string]any{
+			{"members": map[string]string{"region": "EU"}, "value": 11}, {"members": map[string]string{"region": "US"}, "value": nil}}}),
 	})
 	latest := func(metric, code string) string {
 		t.Helper()
@@ -33,8 +36,17 @@ func TestAIDeveloperWritesInputValues(t *testing.T) {
 	if v := latest("actual_through_month", ""); v != "9" {
 		t.Errorf("actual_through_month = %s, want 9", v)
 	}
-	if eu, us := latest("price", "EU"), latest("price", "US"); eu != "10" || us != "12.5" {
-		t.Errorf("price EU/US = %s/%s, want 10/12.5", eu, us)
+	if eu := latest("price", "EU"); eu != "11" {
+		t.Errorf("price EU = %s, want 11", eu)
+	}
+	if n := b.q(`
+		SELECT count(*)::text FROM runtime.fact_input f JOIN model.metric_def m ON m.id = f.metric_id
+		WHERE f.revision_id=$1::uuid AND m.name='price'
+		  AND f.dim_members->>(SELECT d.id::text FROM model.dimension_def d WHERE d.revision_id=$1::uuid AND d.name='region') = 'US'`, b.draft); n != "0" {
+		t.Errorf("price US has %s fact row(s) after the clear, want none", n)
+	}
+	if n := b.q(`SELECT count(*)::text FROM runtime.fact_input_history WHERE revision_id=$1::uuid AND delete_reason='cleared'`, b.draft); n == "0" {
+		t.Error("the clear left no history row with reason 'cleared'")
 	}
 
 	for what, tc := range map[string]struct {
@@ -42,6 +54,7 @@ func TestAIDeveloperWritesInputValues(t *testing.T) {
 		want   string
 	}{
 		"a total member":      {map[string]any{"metric_id": "price", "values": []map[string]any{{"members": map[string]string{"region": "ALL"}, "value": 1}}}, "has members under it"},
+		"a total's clear":     {map[string]any{"metric_id": "price", "values": []map[string]any{{"members": map[string]string{"region": "ALL"}, "value": nil}}}, "has members under it"},
 		"a missing member":    {map[string]any{"metric_id": "price", "values": []map[string]any{{"value": 1}}}, "names no member of region"},
 		"a calculated metric": {map[string]any{"metric_id": "double_price", "values": []map[string]any{{"members": map[string]string{"region": "EU"}, "value": 1}}}, "is calculated"},
 	} {

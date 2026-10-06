@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Plus, Pencil, Trash2, X } from "lucide-react";
 import { api, type Task, type HistoryInstance, type BARole, type BAUser, type BAAvailableItem, type UserAccessRule } from "../../api/client";
 import { TaskContextSummary } from "../TaskContextSummary";
+import { invalidateModelData } from "../modelDataQueries";
 import { WorkflowStepActions } from "../WorkflowStepActions";
 import {
   Button,
@@ -649,6 +650,10 @@ export function AccessRulesTab() {
     mutationFn: (rules: UserAccessRule[]) => api.putUserAccessRules(selectedUser, rules),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["ba-access-rules", selectedUser] });
+      // What a grid, KPI or chart shows depends on the viewer's rules: an
+      // admin who changed their own saw the old ones for up to the 30 s
+      // refresh. (Other people's consoles keep that refresh.)
+      void invalidateModelData(qc);
       setDirty(false);
     },
   });

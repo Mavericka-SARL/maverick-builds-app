@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -437,6 +438,8 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	// the read half of an import any cell-writer may perform; the commit
 	// that follows is what writeguard polices.
 	register("POST", "/api/import/sheets/fetch", "any", cors(h.importSheetFetch))
+	register("POST", "/api/import/parse-workbook", "any", cors(h.importParseWorkbook))
+	register("POST", "/api/import/template-workbook", "any", cors(h.importTemplateWorkbook))
 	register("GET", "/api/import/jobs", "any", cors(h.importJobs))
 	register("DELETE", "/api/import/jobs/{id}", "any", cors(h.importJobAction))
 	register("GET", "/api/developer/debug/facts", "developer", dev(h.debugFacts))
@@ -757,6 +760,14 @@ type actor struct {
 
 var errAccessDenied = errors.New("access denied")
 
+// errModelNotOpen refuses an X-Model-Id the caller may not open in the
+// request's application (another application's, deleted, or one its
+// user_model_access leaves out). It used to fall back silently to the
+// application's default model, so a client labelling results by the model
+// it asked for labelled them wrongly. The console drops the stale choice
+// and retries (apiFetch).
+var errModelNotOpen = errors.New("the selected model is not one you can open in this application")
+
 func (a *actor) hasRole(role string) bool {
 	if a == nil {
 		return false
@@ -1061,6 +1072,10 @@ func (h *handler) requireRole(w http.ResponseWriter, r *http.Request, roles ...s
 // so it currently behaves as sum. Rejecting it here would break saving those
 // metrics, which is a product decision rather than a validation one.
 func jsonAccessErr(w http.ResponseWriter, err error, label string) {
+	if errors.Is(err, errModelNotOpen) {
+		jsonCodeErr(w, http.StatusNotFound, "MODEL_NOT_OPEN", err.Error())
+		return
+	}
 	if errors.Is(err, errAccessDenied) {
 		jsonErr(w, fmt.Errorf("forbidden: %s", label), http.StatusForbidden)
 		return
@@ -2173,27 +2188,24 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve each written dim_code into its dimension_member id. A code no
-	// member of this model's dimension has is refused: the value used to be
-	// stored at it, where no grid, total or formula would ever read it
-	// (found live: "Snacks" for the member SNACKS).
-	writtenMemberIDs := make([]string, 0, len(resolvedDims))
-	for dimID, code := range resolvedDims {
-		var memberID, dimName string
-		err := h.db.QueryRow(ctx, `
-			SELECT COALESCE(m.id::text,''), d.name FROM model.dimension_def d
-			LEFT JOIN model.dimension_member m ON m.dimension_id = d.id AND m.code = $2
-			WHERE d.id = $1::uuid AND d.model_id = $3::uuid`,
-			dimID, code, req.ModelID,
-		).Scan(&memberID, &dimName)
-		if err != nil {
-			jsonErr(w, fmt.Errorf("dim_codes names %q, which is no dimension of this model", dimID), http.StatusBadRequest)
-			return
-		}
-		if memberID == "" {
-			jsonErr(w, fmt.Errorf("there is no member %q in %s (member codes match exactly)", code, dimName), http.StatusBadRequest)
-			return
-		}
-		writtenMemberIDs = append(writtenMemberIDs, memberID)
+	// member of this revision's dimension has, a parent member and a
+	// calculated one are refused: a value stored there is never read by a
+	// grid (found live: "Snacks" for the member SNACKS).
+	// A read-only revision is refused as such first, whatever the write names.
+	if systemManaged, smErr := writeguard.SystemManaged(ctx, h.db.For(ctx), req.RevisionID); smErr != nil {
+		jsonErr(w, fmt.Errorf("check system-managed: %w", smErr), http.StatusInternalServerError)
+		return
+	} else if systemManaged {
+		jsonErr(w, fmt.Errorf("this revision is system-managed and read-only"), http.StatusForbidden)
+		return
+	}
+	writtenMemberIDs, err := writeguard.ResolveWriteMembers(ctx, h.db.For(ctx), req.ModelID, req.RevisionID, resolvedDims)
+	if me := (*writeguard.MemberError)(nil); errors.As(err, &me) {
+		jsonCodeErr(w, http.StatusBadRequest, me.Code, me.Message)
+		return
+	} else if err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
 	}
 
 	// Generic write guard: system-managed revision, hidden/read-only access
@@ -2285,7 +2297,7 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 				"metric_id":   req.MetricID,
 				"grid_id":     sourceGridID,
 			}
-			workflow.NewStore(h.db.For(ctx)).DispatchEventRules(bgCtx, appID, req.RevisionID, "grid_change", sourceGridID, a.UserID, payload)
+			h.workflowStore(ctx).DispatchEventRules(bgCtx, appID, req.RevisionID, "grid_change", sourceGridID, a.UserID, payload)
 		}
 	}
 	status := "ok"
@@ -2737,7 +2749,7 @@ func (h *handler) taskAction(w http.ResponseWriter, r *http.Request) {
 	// approve branch's steps. For an approval, this also atomically runs
 	// the step's declared on_approve action (fact copy + dirty-marking), if
 	// any — a no-op for any step with no such config.
-	if _, err := workflow.NewStore(h.db.For(ctx)).WithLogger(h.log).CompleteStep(ctx, stepID, a.UserID, req.Decision, req.Comment); err != nil {
+	if _, err := h.workflowStore(ctx).CompleteStep(ctx, stepID, a.UserID, req.Decision, req.Comment); err != nil {
 		status := http.StatusInternalServerError
 		if strings.Contains(err.Error(), "cannot complete") {
 			status = http.StatusConflict
@@ -3062,12 +3074,28 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 
 	gridDefID := r.URL.Query().Get("grid_def_id")
 
+	// The caller first, as every other route: an unauthenticated read
+	// answered 500 (and 401 only for a grid that exists, telling the two
+	// apart).
+	act, err := h.resolveActor(ctx, r)
+	if err != nil {
+		jsonErr(w, err, http.StatusUnauthorized)
+		return
+	}
+
 	// ── resolve model ID ─────────────────────────────────────────────────────
 	var modelID string
 	if gridDefID != "" {
+		if uuid.Validate(gridDefID) != nil {
+			jsonErr(w, fmt.Errorf("grid not found"), http.StatusNotFound)
+			return
+		}
 		if err := h.db.QueryRow(ctx,
 			`SELECT model_id::text FROM model.grid_def WHERE id=$1::uuid`, gridDefID,
-		).Scan(&modelID); err != nil {
+		).Scan(&modelID); errors.Is(err, pgx.ErrNoRows) {
+			jsonErr(w, fmt.Errorf("grid not found"), http.StatusNotFound)
+			return
+		} else if err != nil {
 			jsonErr(w, fmt.Errorf("resolve grid def: %w", err), http.StatusInternalServerError)
 			return
 		}
@@ -3078,11 +3106,6 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			jsonAccessErr(w, mErr, "resolve model")
 			return
 		}
-	}
-	act, err := h.resolveActor(ctx, r)
-	if err != nil {
-		jsonErr(w, err, http.StatusUnauthorized)
-		return
 	}
 	canAccessModel, err := h.actorCanAccessModel(ctx, act, modelID)
 	if err != nil {
@@ -4247,7 +4270,7 @@ func (h *handler) workflowSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ws := workflow.NewStore(h.db.For(ctx))
+	ws := h.workflowStore(ctx)
 	resolvedContext, err := ws.ResolveStartContext(ctx, wfDefID, a.UserID, map[string]string{
 		"revision_id": req.RevisionID,
 		"model_id":    req.ModelID,
@@ -6177,12 +6200,12 @@ func (h *handler) workflowStartInstance(w http.ResponseWriter, r *http.Request) 
 	// role is only business_admin is refused; someone who also holds a
 	// submitter or builder role (business_user, developer, admins)
 	// legitimately wears that other hat.
-	if onlyApprover(a) && !workflow.NewStore(h.db.For(ctx)).ApproverMayStart(ctx, body.WorkflowDefID) {
+	if onlyApprover(a) && !h.workflowStore(ctx).ApproverMayStart(ctx, body.WorkflowDefID) {
 		jsonErr(w, errApproverStarts, http.StatusForbidden)
 		return
 	}
 
-	ws := workflow.NewStore(h.db.For(ctx))
+	ws := h.workflowStore(ctx)
 
 	if body.Context == nil {
 		body.Context = map[string]string{}
@@ -8174,7 +8197,10 @@ func (h *handler) importDimensionMembers(w http.ResponseWriter, r *http.Request)
 		colIdx[strings.ToLower(strings.TrimSpace(col))] = i
 	}
 	imported, errs, importErr := h.importDimensionMembersCSV(ctx, body.DimensionID, cr, colIdx)
-	if importErr != nil {
+	if le := (*plan.LimitError)(nil); errors.As(importErr, &le) {
+		h.jsonLimitErr(w, importErr)
+		return
+	} else if importErr != nil {
 		// A time dimension imports as one unit: an invalid period set
 		// (overlap, gap, bad boundary) rejects the whole file.
 		jsonErr(w, importErr, http.StatusBadRequest)
@@ -8196,6 +8222,10 @@ func (h *handler) importDimensionMembers(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID string, cr *csv.Reader, colIdx map[string]int) (imported, errs int, fatal error) {
+	cr, err := h.checkMemberImport(ctx, dimensionID, cr, colIdx)
+	if err != nil {
+		return 0, 0, err
+	}
 	imported, errs, isTime, fatal := h.importDimensionMembersOn(ctx, h.db.For(ctx), dimensionID, cr, colIdx)
 	if fatal != nil || imported == 0 {
 		return imported, errs, fatal
@@ -8212,6 +8242,75 @@ func (h *handler) importDimensionMembersCSV(ctx context.Context, dimensionID str
 		go h.recalcDimensionDependents(context.WithoutCancel(ctx), dimensionID) //nolint:contextcheck
 	}
 	return imported, errs, nil
+}
+
+// checkMemberImport holds a dimension file to the plan's member limit, as
+// the member routes and the AI Developer's tools are held: the file's new
+// codes (and its rows with a label but no code, which get one) are counted
+// before anything is written. A file passed the limit by any number of
+// members. It reads the rows the import would (up to the first unreadable
+// one) and returns a reader over them.
+func (h *handler) checkMemberImport(ctx context.Context, dimensionID string, cr *csv.Reader, colIdx map[string]int) (*csv.Reader, error) {
+	var records [][]string
+	for {
+		rec, err := cr.Read()
+		if err != nil {
+			break
+		}
+		records = append(records, rec)
+	}
+	var buf bytes.Buffer
+	cw := csv.NewWriter(&buf)
+	_ = cw.WriteAll(records)
+	again := csv.NewReader(&buf)
+	if h.plans == nil {
+		return again, nil
+	}
+	var modelID string
+	if err := h.db.QueryRow(ctx, `SELECT model_id::text FROM model.dimension_def WHERE id=$1::uuid`, dimensionID).Scan(&modelID); err != nil {
+		return again, nil //nolint:nilerr // an unknown dimension is the import's to refuse
+	}
+	cid := h.customerOfModel(ctx, modelID)
+	if cid == "" {
+		return again, nil
+	}
+	existing := map[string]bool{}
+	rows, err := h.db.Query(ctx, `SELECT code FROM model.dimension_member WHERE dimension_id=$1::uuid`, dimensionID)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var c string
+		if rows.Scan(&c) == nil {
+			existing[c] = true
+		}
+	}
+	rows.Close()
+	codeCol, hasCode := colIdx["code"]
+	labelCol, hasLabel := colIdx["label"]
+	added, seen := 0, map[string]bool{}
+	for _, rec := range records {
+		code := ""
+		if hasCode && codeCol < len(rec) {
+			code = strings.TrimSpace(rec[codeCol])
+		}
+		switch {
+		case code == "":
+			if hasLabel && labelCol < len(rec) && strings.TrimSpace(rec[labelCol]) != "" {
+				added++ // a code is made for it
+			}
+		case !existing[code] && !seen[code]:
+			added++
+		}
+		seen[code] = true
+	}
+	if added == 0 {
+		return again, nil
+	}
+	if err := h.plans.CheckMembers(ctx, h.db.For(ctx), cid, dimensionID, added); err != nil {
+		return nil, err
+	}
+	return again, nil
 }
 
 // importDimensionMembersOn writes a dimension file's members through db — the
@@ -9027,35 +9126,37 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 
 	switch intg.TargetType {
 	case "form":
-		cr, colIdx, cErr := rowsCSV(header, rows)
-		if cErr != nil {
-			jsonErr(w, cErr, http.StatusBadRequest)
+		// The form import's own path: fields typed and required, statuses
+		// the caller may create, each record posted through its mappings.
+		// The run used to insert into a table no migration creates, so
+		// every row failed while the run answered 200.
+		scope, sErr := h.resolveFormRecordScope(ctx, act, intg.TargetID)
+		if sErr != nil {
+			jsonErr(w, sErr, http.StatusInternalServerError)
 			return
 		}
-		imported, errs := 0, 0
-		for {
-			record, err := cr.Read()
-			if err != nil {
-				break
-			}
-			data := make(map[string]any, len(header))
-			for col, idx := range colIdx {
-				if idx < len(record) {
-					data[col] = strings.TrimSpace(record[idx])
-				}
-			}
-			if _, err := h.db.Exec(ctx,
-				`INSERT INTO model.form_record (form_id, data, status, created_by)
-				 VALUES ($1::uuid, $2, 'submitted', $3::uuid)`,
-				intg.TargetID, mustJSON(data), act.UserID,
-			); err != nil {
-				errs++
-			} else {
-				imported++
-			}
+		if !scope.reach {
+			jsonRecordErr(w, errRecordNotReached, "form")
+			return
 		}
-		h.recordIntegrationRun(ctx, intID, act.UserID, imported, errs, "success", "")
-		jsonOK(w, map[string]any{"rows_imported": imported, "error_rows": errs})
+		form, fErr := crudapp.NewStore(h.db.For(ctx)).GetForm(ctx, intg.TargetID)
+		if fErr != nil {
+			jsonErr(w, fmt.Errorf("form not found"), http.StatusNotFound)
+			return
+		}
+		imported, rowErrs, iErr := h.importFormRows(ctx, act, scope, form, header, rows)
+		if iErr != nil {
+			h.recordIntegrationRun(ctx, intID, act.UserID, imported, 0, "error", iErr.Error())
+			jsonErr(w, iErr, http.StatusInternalServerError)
+			return
+		}
+		if len(rowErrs) > 0 {
+			h.recordIntegrationRun(ctx, intID, act.UserID, 0, len(rowErrs), "error", "rows failed validation, nothing was imported")
+			jsonFormRowErrs(w, rowErrs)
+			return
+		}
+		h.recordIntegrationRun(ctx, intID, act.UserID, imported, 0, "success", "")
+		jsonOK(w, map[string]any{"rows_imported": imported, "error_rows": 0})
 
 	case "dimension":
 		cr, colIdx, cErr := rowsCSV(header, rows)
@@ -9066,6 +9167,10 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		imported, errs, importErr := h.importDimensionMembersCSV(ctx, intg.TargetID, cr, colIdx)
 		if importErr != nil {
 			h.recordIntegrationRun(ctx, intID, act.UserID, 0, 0, "error", importErr.Error())
+			if le := (*plan.LimitError)(nil); errors.As(importErr, &le) {
+				h.jsonLimitErr(w, importErr)
+				return
+			}
 			jsonErr(w, importErr, http.StatusBadRequest)
 			return
 		}
@@ -9085,11 +9190,6 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		}
 		h.runGridIntegration(w, ctx, act, intID, intModelID, intRevisionID, header, rows, mode, intg.Type)
 	}
-}
-
-func mustJSON(v any) []byte {
-	b, _ := json.Marshal(v)
-	return b
 }
 
 // recordIntegrationRun appends one row of a saved integration's run history
@@ -9293,6 +9393,14 @@ func (h *handler) developerFormIntegrationAction(w http.ResponseWriter, r *http.
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
+		// A new target metric: the old one's posted totals go (the re-post
+		// below writes only the new target's).
+		posted, err := crudapp.NewStore(h.db.For(ctx)).DeleteMappingPostings(ctx, []string{mappingID}, body.TargetMetricID)
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		h.recalcWithdrawnPostings(ctx, posted)
 		// Re-apply immediately so changes (aggregation, posting statuses, etc.) take effect.
 		// Resolve actor/scope synchronously (before spawning) so the
 		// goroutine below can log the backfill it performs — this write is
@@ -9327,10 +9435,16 @@ func (h *handler) developerFormIntegrationAction(w http.ResponseWriter, r *http.
 		jsonOK(w, map[string]string{"status": "ok"})
 	case http.MethodDelete:
 		revisionID, appID := h.formIntegrationScope(ctx, mappingID)
+		posted, err := crudapp.NewStore(h.db.For(ctx)).DeleteMappingPostings(ctx, []string{mappingID}, "")
+		if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
 		if _, err := h.db.Exec(ctx, `DELETE FROM model.form_metric_mapping WHERE id=$1::uuid`, mappingID); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
+		h.recalcWithdrawnPostings(ctx, posted)
 		if a, e := h.resolveActor(ctx, r); e == nil {
 			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 				Category: auditlog.CategoryModelChange, EventType: auditlog.EventFormIntegrationDeleted,
@@ -9342,6 +9456,24 @@ func (h *handler) developerFormIntegrationAction(w http.ResponseWriter, r *http.
 	default:
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
 	}
+}
+
+// recalcWithdrawnPostings recalculates, in the background, the metrics a
+// deleted or retargeted mapping's posted totals were taken out of.
+func (h *handler) recalcWithdrawnPostings(ctx context.Context, posted []crudapp.PostedMetric) {
+	if len(posted) == 0 {
+		return
+	}
+	byModel := map[string][]struct{ RevisionID, MetricID string }{}
+	for _, p := range posted {
+		byModel[p.ModelID] = append(byModel[p.ModelID], struct{ RevisionID, MetricID string }{p.RevisionID, p.MetricID})
+	}
+	bg := context.WithoutCancel(ctx)
+	go func() {
+		for modelID, affected := range byModel {
+			h.recalcAfterDimChange(bg, modelID, affected)
+		}
+	}()
 }
 
 // formIntegrationScope resolves the revision_id/application_id a
@@ -9549,16 +9681,33 @@ func (h *handler) applyFormMappings(ctx context.Context, recordID, formID, statu
 			h.log.Warn().Str("mapping_id", m.id).Str("metric_id", m.targetMetricID).Msg("applyFormMappings: posting rejected, caller lacks write access to metric")
 			continue
 		}
-		memberIDs := make([]string, 0, len(dimMembers))
-		for dimID, code := range dimMembers {
-			var memberID string
-			if err := h.db.QueryRow(ctx,
-				`SELECT id::text FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2`,
-				dimID, code,
-			).Scan(&memberID); err != nil {
-				continue // unknown member: nothing to restrict here, mirrors cells()
+		// A record naming a code the dimension does not have, a parent or a
+		// calculated member posts nowhere: the posting used to be stored at
+		// that code, where no grid or total reads it. Its earlier posting is
+		// retracted, as for a record with no value — the record no longer
+		// names that coordinate.
+		var memberIDs []string
+		var refused error
+		if rErr := retryTransient(ctx, 3, func() error {
+			ids, e := writeguard.ResolveWriteMembers(ctx, h.db.For(ctx), m.modelID, revisionID, dimMembers)
+			memberIDs = ids
+			if writeguard.IsMemberError(e) {
+				refused = e // a refusal, not a failed read: no retry
+				return nil
 			}
-			memberIDs = append(memberIDs, memberID)
+			return e
+		}); refused != nil {
+			h.log.Warn().Err(refused).Str("mapping_id", m.id).Str("record_id", recordID).Msg("applyFormMappings: record names no leaf member — nothing posted")
+			_, _ = h.db.Exec(ctx,
+				`DELETE FROM runtime.form_record_posting WHERE mapping_id=$1::uuid AND form_record_id=$2::uuid`,
+				m.id, recordID)
+			h.recomputeFactInput(ctx, m.id, m.targetMetricID, m.aggregation, m.modelID, revisionID, userID)
+			affected = append(affected, struct{ RevisionID, MetricID string }{revisionID, m.targetMetricID})
+			affectedModelID = m.modelID
+			continue
+		} else if rErr != nil {
+			h.log.Error().Err(rErr).Str("mapping_id", m.id).Str("record_id", recordID).Msg("applyFormMappings: member lookup kept failing — posting dropped, aggregate now under-counts")
+			continue
 		}
 		var reason string
 		if gErr := retryTransient(ctx, 3, func() error {
@@ -10407,7 +10556,11 @@ func (h *handler) resolveDemoModelID(ctx context.Context, r *http.Request) (stri
 		// caller's user_model_access — a foreign or inaccessible model id
 		// changes nothing. The revision pin below still wins when a request
 		// names a revision (the developer console's more specific signal).
-		if hdrModel := h.headerModelInApp(ctx, r, appID, act.UserID); hdrModel != "" {
+		hdrModel, hErr := h.headerModelInApp(ctx, r, appID, act.UserID)
+		if hErr != nil {
+			return "", hErr
+		}
+		if hdrModel != "" {
 			modelID = hdrModel
 		}
 		modelID = h.pinModelForRevision(ctx, act.UserID, appID, modelID, r.URL.Query().Get("revision_id"))
@@ -10495,12 +10648,13 @@ func (h *handler) resolveDemoModelID(ctx context.Context, r *http.Request) (stri
 
 // headerModelInApp returns the model the request's X-Model-Id names (the
 // model switcher's choice) when it is a model of appID the user may open,
-// else "" — a foreign or inaccessible id changes nothing. The caller has
-// already authorized appID.
-func (h *handler) headerModelInApp(ctx context.Context, r *http.Request, appID, userID string) string {
+// "" when the request names none, and errModelNotOpen for any other id: a
+// foreign or inaccessible id is refused, never replaced by the default. The
+// caller has already authorized appID.
+func (h *handler) headerModelInApp(ctx context.Context, r *http.Request, appID, userID string) (string, error) {
 	hdrModel := r.Header.Get("X-Model-Id")
 	if hdrModel == "" {
-		return ""
+		return "", nil
 	}
 	var ok bool
 	if err := h.db.QueryRow(ctx, `
@@ -10512,10 +10666,12 @@ func (h *handler) headerModelInApp(ctx context.Context, r *http.Request, appID, 
 			      OR EXISTS (SELECT 1 FROM identity.user_model_access WHERE user_id=$3::uuid AND model_id=m.id)
 			  )
 		)
-	`, hdrModel, appID, userID).Scan(&ok); err != nil || !ok {
-		return ""
+	`, hdrModel, appID, userID).Scan(&ok); err != nil {
+		return "", err
+	} else if !ok {
+		return "", errModelNotOpen
 	}
-	return hdrModel
+	return hdrModel, nil
 }
 
 // resolveDemoAppID resolves the application for a request, the one whose
@@ -10931,16 +11087,7 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			appID, revisionID := scope.appID, scope.revisionID
 			// Apply form-metric mappings (status-based posting rules).
 			go func() { _ = h.applyFormMappings(bgCtx, rec.ID, formID, rec.Status, body.Data, userID) }()
-			// Dispatch form_submit automation rules (DispatchEventRules
-			// fires them for a submitted record only), and form_approval
-			// for a record an administrator creates approved.
-			go func() {
-				payload := map[string]string{"form_id": formID, "record_id": rec.ID, "status": rec.Status}
-				workflow.NewStore(h.db.For(ctx)).DispatchEventRules(bgCtx, appID, revisionID, "form_submit", formID, userID, payload)
-				if rec.Status == crudapp.StatusApproved {
-					workflow.NewStore(h.db.For(ctx)).DispatchEventRules(bgCtx, appID, revisionID, "form_approval", formID, userID, payload)
-				}
-			}()
+			h.dispatchRecordCreated(ctx, appID, revisionID, formID, rec.ID, rec.Status, userID)
 			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 				Category: auditlog.CategoryDataChange, EventType: auditlog.EventFormRecordCreated,
 				ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
@@ -11014,10 +11161,12 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]string{"status": "ok"})
 	case http.MethodDelete:
 		appID, _ := h.appIDFromFormID(ctx, formID)
-		if err := store.DeleteForm(ctx, formID); err != nil {
+		posted, err := store.DeleteForm(ctx, formID)
+		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
+		h.recalcWithdrawnPostings(ctx, posted)
 		if a, e := h.resolveActor(ctx, r); e == nil {
 			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 				Category: auditlog.CategoryModelChange, EventType: auditlog.EventFormDeleted,
@@ -11029,6 +11178,21 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 	default:
 		jsonErr(w, fmt.Errorf("not found"), http.StatusNotFound)
 	}
+}
+
+// dispatchRecordCreated fires, in the background, the form_submit automation
+// rules for a new record (DispatchEventRules fires them for a submitted
+// record only), and form_approval for one created approved — for a record
+// created through the API and one a form import creates alike.
+func (h *handler) dispatchRecordCreated(ctx context.Context, appID, revisionID, formID, recordID, status, userID string) {
+	bgCtx := context.WithoutCancel(ctx)
+	go func() {
+		payload := map[string]string{"form_id": formID, "record_id": recordID, "status": status}
+		h.workflowStore(ctx).DispatchEventRules(bgCtx, appID, revisionID, "form_submit", formID, userID, payload)
+		if status == crudapp.StatusApproved {
+			h.workflowStore(ctx).DispatchEventRules(bgCtx, appID, revisionID, "form_approval", formID, userID, payload)
+		}
+	}()
 }
 
 // recordAction handles /api/records/{recordId} (GET, PUT, DELETE).
@@ -11112,11 +11276,11 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 		payload := map[string]string{"form_id": formID, "record_id": recordID, "status": newStatus}
 		// form_submit fires when the record transitions INTO submitted.
 		if statusChanged && newStatus == crudapp.StatusSubmitted {
-			go workflow.NewStore(h.db.For(ctx)).DispatchEventRules(bgCtx, appID, revisionID, "form_submit", formID, userID, payload)
+			go h.workflowStore(ctx).DispatchEventRules(bgCtx, appID, revisionID, "form_submit", formID, userID, payload)
 		}
 		// form_approval fires when the record transitions INTO approved.
 		if statusChanged && newStatus == crudapp.StatusApproved {
-			go workflow.NewStore(h.db.For(ctx)).DispatchEventRules(bgCtx, appID, revisionID, "form_approval", formID, userID, payload)
+			go h.workflowStore(ctx).DispatchEventRules(bgCtx, appID, revisionID, "form_approval", formID, userID, payload)
 		}
 		meta := map[string]string{"form_id": formID, "status": newStatus, "fields_changed": strconv.FormatBool(body.Data != nil)}
 		if statusChanged {
@@ -11186,7 +11350,7 @@ func (h *handler) resolveUserID(r *http.Request) string {
 
 func (h *handler) automationRules(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	store := workflow.NewStore(h.db.For(ctx))
+	store := h.workflowStore(ctx)
 
 	appID, err := h.resolveDemoAppID(ctx, r)
 	if err != nil {
@@ -11270,7 +11434,7 @@ func (h *handler) automationTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	ruleID := strings.TrimPrefix(r.URL.Path, "/api/automation/trigger/")
-	store := workflow.NewStore(h.db.For(ctx))
+	store := h.workflowStore(ctx)
 
 	// Ownership guard: this route is deliberately "any" (AutomationButtonWidget
 	// puts a real business-user-facing "run this automation" button on
@@ -11360,7 +11524,7 @@ func (h *handler) automationTrigger(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) automationExecutions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	store := workflow.NewStore(h.db.For(ctx))
+	store := h.workflowStore(ctx)
 
 	appID, err := h.resolveDemoAppID(ctx, r)
 	if err != nil {
@@ -14506,7 +14670,7 @@ func (h *handler) adminUserAction(w http.ResponseWriter, r *http.Request) {
 func (h *handler) automationRuleAction(w http.ResponseWriter, r *http.Request) {
 	ruleID := strings.TrimPrefix(r.URL.Path, "/api/automation/rules/")
 	ctx := r.Context()
-	store := workflow.NewStore(h.db.For(ctx))
+	store := h.workflowStore(ctx)
 
 	// Ownership guard: the route's dev() gate only confirms the caller
 	// holds "developer" globally — it says nothing about which tenant/app
@@ -16369,6 +16533,14 @@ func (h *handler) memberHasAncestor(ctx context.Context, startID, targetID strin
 	return false
 }
 
+// workflowStore is a workflow store on ctx's database that logs its
+// best-effort failures through the gateway's logger: a recipient query that
+// fails, a recalculation it may not fail the request for. Built bare, the
+// store discarded them, so a broken query notified nobody unseen.
+func (h *handler) workflowStore(ctx context.Context) *workflow.Store {
+	return workflow.NewStore(h.db.For(ctx)).WithLogger(h.log)
+}
+
 // recalcAfterDimChange triggers RecalcAffected for every (revision, input-metric) pair that
 // was touched by a dimension-member change, ensuring calc results stay consistent.
 // backgroundRecalc guards a recalculation that runs after its request has
@@ -16530,7 +16702,11 @@ func (h *handler) baWorkspaceModelFor(ctx context.Context, r *http.Request, allo
 		`, appID).Scan(&appWorkspaceID, &customerID, &modelID); err != nil {
 			return "", "", err
 		}
-		if hdrModel := h.headerModelInApp(ctx, r, appID, act.UserID); hdrModel != "" {
+		hdrModel, hErr := h.headerModelInApp(ctx, r, appID, act.UserID)
+		if hErr != nil {
+			return "", "", hErr
+		}
+		if hdrModel != "" {
 			modelID = hdrModel
 		}
 		if appWorkspaceID != nil {
@@ -17465,7 +17641,7 @@ func (h *handler) developerWorkflows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ws := workflow.NewStore(h.db.For(ctx))
+	ws := h.workflowStore(ctx)
 
 	switch r.Method {
 	case http.MethodGet:
@@ -17545,7 +17721,7 @@ func (h *handler) developerWorkflowAction(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	ws := workflow.NewStore(h.db.For(ctx))
+	ws := h.workflowStore(ctx)
 
 	switch action {
 	case "validate":

@@ -21,9 +21,10 @@ func ParseCSVRows(data []byte) (header []string, rows []RawRow, err error) {
 
 // ParseXLSXRows reads header + data rows from the first sheet of a native
 // Excel workbook. Blank trailing rows (common in exported/templated sheets)
-// are skipped rather than staged as empty. Cells are read as DISPLAYED (see
-// docs/OBSERVATIONS.md: a "#,##0" value arrives as "1,234" and fails the
-// number check); ParseTabularFile reads stored values instead.
+// are skipped rather than staged as empty. Cells are read as displayed,
+// except a plain number cell, which is read as stored ("#,##0.00" shows
+// "1,234.50"; the number check takes 1234.5) — see storedNumbers.
+// ParseTabularFile reads stored values throughout.
 func ParseXLSXRows(data []byte) (header []string, rows []RawRow, err error) {
 	return parseXLSXSheet(data, "", false)
 }

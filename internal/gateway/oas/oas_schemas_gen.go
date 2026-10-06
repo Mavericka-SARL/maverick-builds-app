@@ -12676,6 +12676,9 @@ func (*ImportModelForbidden) importModelRes() {}
 type ImportModelOK struct {
 	ModelID    OptUUID `json:"model_id"`
 	RevisionID OptUUID `json:"revision_id"`
+	// What the import left out of the package, such as widget_props keys the console does not read.
+	// Absent when nothing was.
+	Notes []string `json:"notes"`
 }
 
 // GetModelID returns the value of ModelID.
@@ -12688,6 +12691,11 @@ func (s *ImportModelOK) GetRevisionID() OptUUID {
 	return s.RevisionID
 }
 
+// GetNotes returns the value of Notes.
+func (s *ImportModelOK) GetNotes() []string {
+	return s.Notes
+}
+
 // SetModelID sets the value of ModelID.
 func (s *ImportModelOK) SetModelID(val OptUUID) {
 	s.ModelID = val
@@ -12698,7 +12706,96 @@ func (s *ImportModelOK) SetRevisionID(val OptUUID) {
 	s.RevisionID = val
 }
 
+// SetNotes sets the value of Notes.
+func (s *ImportModelOK) SetNotes(val []string) {
+	s.Notes = val
+}
+
 func (*ImportModelOK) importModelRes() {}
+
+type ImportParseWorkbookBadRequest Error
+
+func (*ImportParseWorkbookBadRequest) importParseWorkbookRes() {}
+
+type ImportParseWorkbookOK struct {
+	Sheets  []string   `json:"sheets"`
+	Sheet   OptString  `json:"sheet"`
+	Headers []string   `json:"headers"`
+	Rows    [][]string `json:"rows"`
+}
+
+// GetSheets returns the value of Sheets.
+func (s *ImportParseWorkbookOK) GetSheets() []string {
+	return s.Sheets
+}
+
+// GetSheet returns the value of Sheet.
+func (s *ImportParseWorkbookOK) GetSheet() OptString {
+	return s.Sheet
+}
+
+// GetHeaders returns the value of Headers.
+func (s *ImportParseWorkbookOK) GetHeaders() []string {
+	return s.Headers
+}
+
+// GetRows returns the value of Rows.
+func (s *ImportParseWorkbookOK) GetRows() [][]string {
+	return s.Rows
+}
+
+// SetSheets sets the value of Sheets.
+func (s *ImportParseWorkbookOK) SetSheets(val []string) {
+	s.Sheets = val
+}
+
+// SetSheet sets the value of Sheet.
+func (s *ImportParseWorkbookOK) SetSheet(val OptString) {
+	s.Sheet = val
+}
+
+// SetHeaders sets the value of Headers.
+func (s *ImportParseWorkbookOK) SetHeaders(val []string) {
+	s.Headers = val
+}
+
+// SetRows sets the value of Rows.
+func (s *ImportParseWorkbookOK) SetRows(val [][]string) {
+	s.Rows = val
+}
+
+func (*ImportParseWorkbookOK) importParseWorkbookRes() {}
+
+type ImportParseWorkbookReq struct {
+	// The workbook.
+	XlsxBase64 string `json:"xlsx_base64"`
+	// The sheet to read (case-insensitive); the first when empty.
+	Sheet OptString `json:"sheet"`
+}
+
+// GetXlsxBase64 returns the value of XlsxBase64.
+func (s *ImportParseWorkbookReq) GetXlsxBase64() string {
+	return s.XlsxBase64
+}
+
+// GetSheet returns the value of Sheet.
+func (s *ImportParseWorkbookReq) GetSheet() OptString {
+	return s.Sheet
+}
+
+// SetXlsxBase64 sets the value of XlsxBase64.
+func (s *ImportParseWorkbookReq) SetXlsxBase64(val string) {
+	s.XlsxBase64 = val
+}
+
+// SetSheet sets the value of Sheet.
+func (s *ImportParseWorkbookReq) SetSheet(val OptString) {
+	s.Sheet = val
+}
+
+type ImportParseWorkbookUnauthorized Error
+
+func (*ImportParseWorkbookUnauthorized) importParseWorkbookRes() {}
 
 type ImportSheetFetchBadGateway Error
 
@@ -12760,6 +12857,68 @@ func (s *ImportSheetFetchReq) GetSheetURL() string {
 func (s *ImportSheetFetchReq) SetSheetURL(val string) {
 	s.SheetURL = val
 }
+
+type ImportTemplateWorkbookBadRequest Error
+
+func (*ImportTemplateWorkbookBadRequest) importTemplateWorkbookRes() {}
+
+type ImportTemplateWorkbookOK struct {
+	Data io.Reader
+}
+
+// Read reads data from the Data reader.
+//
+// Kept to satisfy the io.Reader interface.
+func (s ImportTemplateWorkbookOK) Read(p []byte) (n int, err error) {
+	if s.Data == nil {
+		return 0, io.EOF
+	}
+	return s.Data.Read(p)
+}
+
+func (*ImportTemplateWorkbookOK) importTemplateWorkbookRes() {}
+
+type ImportTemplateWorkbookReq struct {
+	// Sheet name; "Import" when empty.
+	Sheet OptString `json:"sheet"`
+	// Download name; import-template.xlsx when empty.
+	Filename OptString  `json:"filename"`
+	Rows     [][]jx.Raw `json:"rows"`
+}
+
+// GetSheet returns the value of Sheet.
+func (s *ImportTemplateWorkbookReq) GetSheet() OptString {
+	return s.Sheet
+}
+
+// GetFilename returns the value of Filename.
+func (s *ImportTemplateWorkbookReq) GetFilename() OptString {
+	return s.Filename
+}
+
+// GetRows returns the value of Rows.
+func (s *ImportTemplateWorkbookReq) GetRows() [][]jx.Raw {
+	return s.Rows
+}
+
+// SetSheet sets the value of Sheet.
+func (s *ImportTemplateWorkbookReq) SetSheet(val OptString) {
+	s.Sheet = val
+}
+
+// SetFilename sets the value of Filename.
+func (s *ImportTemplateWorkbookReq) SetFilename(val OptString) {
+	s.Filename = val
+}
+
+// SetRows sets the value of Rows.
+func (s *ImportTemplateWorkbookReq) SetRows(val [][]jx.Raw) {
+	s.Rows = val
+}
+
+type ImportTemplateWorkbookUnauthorized Error
+
+func (*ImportTemplateWorkbookUnauthorized) importTemplateWorkbookRes() {}
 
 type ImportUploadBadRequest Error
 

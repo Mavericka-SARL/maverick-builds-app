@@ -178,7 +178,7 @@ func TestAISession_FollowsTheConsoleModel(t *testing.T) {
 	dimParams, _ := json.Marshal(map[string]any{"name": "Region"})
 	proposal, err := aiassistant.NewProposalStore(pool).CreateProposal(ctx, tourSess.ID, []aiassistant.ProposalStep{
 		{Tool: "create_dimension", Description: "Create dimension 'Region'", Params: dimParams},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create proposal: %v", err)
 	}

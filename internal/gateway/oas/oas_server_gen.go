@@ -836,6 +836,14 @@ type Handler interface {
 	//
 	// POST /api/admin/models/import
 	ImportModel(ctx context.Context, req *ModelImportRequest) (ImportModelRes, error)
+	// ImportParseWorkbook implements importParseWorkbook operation.
+	//
+	// Read an .xlsx workbook's sheet names and one sheet's header and rows, as POST /api/import/upload
+	// reads them (cells as displayed, plain numbers as stored), for the Import wizard to preview and map;
+	//  nothing is stored.
+	//
+	// POST /api/import/parse-workbook
+	ImportParseWorkbook(ctx context.Context, req *ImportParseWorkbookReq) (ImportParseWorkbookRes, error)
 	// ImportSheetFetch implements importSheetFetch operation.
 	//
 	// Fetch a link-shared Google Sheet as CSV text (server-side — Google's export endpoint sends no
@@ -843,6 +851,13 @@ type Handler interface {
 	//
 	// POST /api/import/sheets/fetch
 	ImportSheetFetch(ctx context.Context, req *ImportSheetFetchReq) (ImportSheetFetchRes, error)
+	// ImportTemplateWorkbook implements importTemplateWorkbook operation.
+	//
+	// Write the given rows (a header first, then example rows; at most 100) as a one-sheet .xlsx to
+	// download — the business Import widget's template.
+	//
+	// POST /api/import/template-workbook
+	ImportTemplateWorkbook(ctx context.Context, req *ImportTemplateWorkbookReq) (ImportTemplateWorkbookRes, error)
 	// ImportUpload implements importUpload operation.
 	//
 	// Import facts from a CSV or XLSX file (atomic — any row failing validation rejects the whole file).

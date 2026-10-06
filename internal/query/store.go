@@ -20,6 +20,11 @@ import (
 // distinction HTTP /api/cells already makes (403 vs 500).
 var ErrWriteDenied = errors.New("write denied")
 
+// ErrInvalidMember wraps a write coordinate no reader reads (an unknown
+// dimension or member code, a parent or a calculated member); the server
+// answers it as InvalidArgument.
+var ErrInvalidMember = errors.New("invalid member")
+
 type Store struct {
 	pool *pgxpool.Pool
 }
@@ -46,6 +51,12 @@ func (s *Store) Writeback(ctx context.Context, modelID, revisionID, userID strin
 	// previously the only authorization here was a per-metric Policy
 	// Service permission check, a materially weaker and different surface
 	// than the HTTP path.
+	// A read-only revision is refused as such first, whatever the write names.
+	if systemManaged, err := writeguard.SystemManaged(ctx, s.pool, revisionID); err != nil {
+		return nil, fmt.Errorf("check system-managed: %w", err)
+	} else if systemManaged {
+		return nil, fmt.Errorf("%w: this revision is system-managed and read-only", ErrWriteDenied)
+	}
 	var allMemberIDs []string
 	for _, u := range updates {
 		var isInput bool
@@ -65,16 +76,15 @@ func (s *Store) Writeback(ctx context.Context, modelID, revisionID, userID strin
 		} else if access == "hidden" || access == "read" {
 			return nil, fmt.Errorf("%w: access denied: the write references a metric outside your access scope", ErrWriteDenied)
 		}
-		for dimID, code := range u.DimMembers {
-			var memberID string
-			if err := s.pool.QueryRow(ctx,
-				`SELECT id::text FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2`,
-				dimID, code,
-			).Scan(&memberID); err != nil {
-				continue // unknown member: nothing to restrict — matches HTTP cells()'s exact behavior
-			}
-			allMemberIDs = append(allMemberIDs, memberID)
+		// The same coordinate check as HTTP cells(): an unknown code, a
+		// parent or a calculated member is refused, not stored unread.
+		memberIDs, err := writeguard.ResolveWriteMembers(ctx, s.pool, modelID, revisionID, u.DimMembers)
+		if writeguard.IsMemberError(err) {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidMember, err)
+		} else if err != nil {
+			return nil, err
 		}
+		allMemberIDs = append(allMemberIDs, memberIDs...)
 	}
 	writtenMetricIDs := make([]string, 0, len(updates))
 	seenMetric := map[string]bool{}

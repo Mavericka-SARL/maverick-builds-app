@@ -3,6 +3,7 @@ package notification
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -332,4 +333,47 @@ func tenantOf(t *testing.T, store *Store, userID string) string {
 		t.Fatal("fixture user has no tenant")
 	}
 	return cid
+}
+
+// A person disabled after a notification was queued is not mailed it, and
+// is notified of nothing afterwards: a person removed from the tenant kept
+// receiving workflow e-mails carrying the workflow's name and message.
+func TestDisabledRecipientsAreNotNotified(t *testing.T) {
+	ctx := context.Background()
+	store, pool, userID := setupStore(t)
+	if _, err := store.UpdateSettings(ctx, tenantOf(t, store, userID), Settings{EmailEnabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Notify(ctx, userID, "t", map[string]string{"subject": "Queued before"}, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE identity.user SET disabled_at = now() WHERE id = $1::uuid`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Notify(ctx, userID, "t", map[string]string{"subject": "After"}, "", ""); !errors.Is(err, ErrRecipientDisabled) {
+		t.Errorf("Notify for a disabled account: %v, want ErrRecipientDisabled", err)
+	}
+	mailer := &fakeMailer{}
+	d := &Dispatcher{Store: store, Mailer: mailer, Log: logger.New("test")}
+	if _, err := d.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if sent := mailer.all(); len(sent) != 0 {
+		t.Errorf("mailed a disabled account: %+v", sent)
+	}
+	var rows int
+	var lastErr string
+	if err := pool.QueryRow(ctx, `SELECT count(*), max(last_error) FROM notification.notification WHERE recipient_user_id = $1::uuid AND channel = 'email' AND status = 'failed'`, userID).Scan(&rows, &lastErr); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 || !strings.Contains(lastErr, "disabled") {
+		t.Errorf("%d failed e-mail row(s), reason %q; want the one queued before, failed as disabled", rows, lastErr)
+	}
+	var total int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM notification.notification WHERE recipient_user_id = $1::uuid`, userID).Scan(&total); err != nil {
+		t.Fatal(err)
+	}
+	if total != 2 {
+		t.Errorf("%d notification rows, want 2 (the in-app and e-mail of the one queued before)", total)
+	}
 }

@@ -299,6 +299,35 @@ func TestTextCellsClearsHighlightsAndBusinessMembers(t *testing.T) {
 	}
 	st, raw = call("PATCH", "/api/developer/dashboards/"+dash+"/widgets/"+widget, map[string]any{"widget_props": map[string]any{"confirm_txt": "Sure?"}})
 	refused("a new unknown key on PATCH", st, raw, http.StatusBadRequest, "confirm_txt")
+
+	// ── A model import drops it, and says so ──
+	// On a widget of the exported revision's "Buttons" dashboard, as a widget
+	// saved before the check, or an edited package, carries it.
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE model.dashboard_widget w SET widget_props = COALESCE(w.widget_props, '{}'::jsonb) || '{"legacy_key": 1, "background": "#fff"}'::jsonb
+		FROM model.dashboard_def d WHERE d.id = w.dashboard_id AND d.revision_id=$1::uuid AND d.name='Buttons'`, rev); err != nil {
+		t.Fatal(err)
+	}
+	status, pkg = f.do(t, "GET", "/api/admin/models/"+f.modelID+"/export?revision_id="+rev, f.taPersona, nil)
+	if status != http.StatusOK {
+		t.Fatalf("export: %d %v", status, pkg)
+	}
+	status, res = f.do(t, "POST", "/api/admin/models/import", f.taPersona, map[string]any{"application_id": f.appID, "model_name": "Imported widgets", "package": pkg})
+	if status != http.StatusOK {
+		t.Fatalf("import: %d %v", status, res)
+	}
+	if notes, _ := json.Marshal(res["notes"]); !strings.Contains(string(notes), "legacy_key") || !strings.Contains(string(notes), "Buttons") {
+		t.Errorf("the import's notes %s do not name the dropped legacy_key on Buttons", notes)
+	}
+	var leftover int
+	if err := f.pool.QueryRow(ctx, `
+		SELECT count(*) FROM model.dashboard_widget w JOIN model.dashboard_def d ON d.id = w.dashboard_id
+		WHERE d.revision_id=$1::uuid AND d.name='Buttons' AND (w.widget_props ? 'legacy_key' OR NOT w.widget_props ? 'background')`, res["revision_id"]).Scan(&leftover); err != nil {
+		t.Fatal(err)
+	}
+	if leftover != 0 {
+		t.Errorf("%d imported Buttons widget(s) kept legacy_key or lost background", leftover)
+	}
 }
 
 func TestNextMemberCode(t *testing.T) {

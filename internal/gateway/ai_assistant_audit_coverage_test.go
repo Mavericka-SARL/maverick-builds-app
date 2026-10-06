@@ -159,7 +159,7 @@ func (f *aiAuditFixture) createProposal(t *testing.T, sessionID, dimName string)
 	params, _ := json.Marshal(map[string]string{"name": dimName})
 	proposal, err := aiassistant.NewProposalStore(f.pool).CreateProposal(context.Background(), sessionID, []aiassistant.ProposalStep{
 		{Tool: "create_dimension", Description: "Create dimension '" + dimName + "'", Params: params},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create proposal: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestAIDimensionPropertyToolsAreAudited(t *testing.T) {
 		{Tool: "add_dimension_property", Description: "Declare text property 'tier'", Params: tierParams},
 		{Tool: "update_dimension_property", Description: "Rename 'fact' to 'factor', typed number", Params: renameParams},
 		{Tool: "delete_dimension_property", Description: "Delete property 'tier'", Params: deleteParams},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create proposal: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestAIUpdateDimensionIsAudited(t *testing.T) {
 		{Tool: "create_dimension", Description: "Create dimension 'region'", Params: regionParams},
 		{Tool: "create_dimension", Description: "Create dimension 'city'", Params: cityParams},
 		{Tool: "update_dimension", Description: "Rename 'city' to 'town', average it, under region", Params: updateParams},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create proposal: %v", err)
 	}

@@ -26,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
+	"github.com/mavericks-engine/mavericks/internal/modeledit"
 	"github.com/mavericks-engine/mavericks/internal/timedim"
 )
 
@@ -1660,7 +1661,36 @@ func ImportRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 }
 
 // importRevision writes a package's rows into a new revision of modelID.
+// StripUnreadWidgetProps drops, in place, the widget_props keys the console
+// does not read (modeledit.WidgetPropKeys) from every widget of the package,
+// and says what it dropped. Every import does it; the gateway calls it first
+// to tell the importer. The developer API refuses such keys, but an older or
+// hand-edited package may carry them, and they were imported to be saved and
+// never read.
+func (pkg *Package) StripUnreadWidgetProps() []string {
+	var notes []string
+	for di := range pkg.Dashboards {
+		d := &pkg.Dashboards[di]
+		for wi := range d.Widgets {
+			w := &d.Widgets[wi]
+			props, dropped := modeledit.StripUnreadWidgetProps(w.Props)
+			if len(dropped) == 0 {
+				continue
+			}
+			w.Props = props
+			name := w.WidgetType
+			if w.Title != nil && *w.Title != "" {
+				name = *w.Title
+			}
+			notes = append(notes, fmt.Sprintf("dashboard %q, widget %q: dropped widget_props %s, which the console does not read",
+				d.Name, name, strings.Join(dropped, ", ")))
+		}
+	}
+	return notes
+}
+
 func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string, pkg *Package, importerID string) (revisionID string, err error) {
+	pkg.StripUnreadWidgetProps()
 	if err = tx.QueryRow(ctx,
 		`INSERT INTO model.revision (model_id, name, description) VALUES ($1::uuid, $2, 'Imported from package') RETURNING id::text`,
 		modelID, revisionName).Scan(&revisionID); err != nil {

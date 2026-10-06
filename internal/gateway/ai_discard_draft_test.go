@@ -101,7 +101,7 @@ func TestDiscardDraftThenNextProposalStartsFresh(t *testing.T) {
 	pStore := aiassistant.NewProposalStore(f.pool)
 	proposal2, err := pStore.CreateProposal(context.Background(), sessionID, []aiassistant.ProposalStep{
 		{Tool: "create_dimension", Description: "Create dimension 'Second'", Params: params},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create proposal 2: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestListProposalsEndpoint_ReturnsFullHistoryWithSummary(t *testing.T) {
 	pStore := aiassistant.NewProposalStore(f.pool)
 	if _, err := pStore.CreateProposal(context.Background(), sessionID, []aiassistant.ProposalStep{
 		{Tool: "create_dimension", Description: "Create dimension 'Pending2'", Params: params},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("create second (pending) proposal: %v", err)
 	}
 

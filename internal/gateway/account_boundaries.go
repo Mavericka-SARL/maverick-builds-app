@@ -566,65 +566,90 @@ func (h *handler) adminRemoveFromTenant(ctx context.Context, w http.ResponseWrit
 		return
 	}
 
-	tx, err := h.db.Begin(ctx)
-	if err != nil {
+	removed, revoked, err := h.removeFromTenant(ctx, f.ID, f.CustomerID, scope)
+	var ue *unrevocableRolesErr
+	if errors.As(err, &ue) {
+		jsonErr(w, err, http.StatusForbidden)
+		return
+	} else if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
+	}
+	h.auditRemovedFromTenant(ctx, act, f.ID, f.Email, home, scope, removed, revoked)
+	jsonOK(w, withRevoked(map[string]any{"status": "removed"}, revoked))
+}
+
+// unrevocableRolesErr refuses a removal from a tenant: the account holds a
+// role there that only a platform admin can remove.
+type unrevocableRolesErr struct{ roles []string }
+
+func (e *unrevocableRolesErr) Error() string {
+	return "forbidden: this account holds a role in your tenant that only a platform admin can remove (" + strings.Join(e.roles, ", ") + ")"
+}
+
+// removeFromTenant takes away, in one transaction, what userID holds in the
+// tenants of scope (removeTenantAccess) and a developer grant that would be
+// left unnarrowed (revokeUnnarrowed), and leaves the account. customerID is
+// the account's own tenant. Remove from this tenant on the Users screen and a
+// SCIM delete of a member the tenant does not own both remove this way.
+func (h *handler) removeFromTenant(ctx context.Context, userID, customerID string, scope []string) (tenantAccessRemoval, []revokedGrant, error) {
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		return tenantAccessRemoval{}, nil, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	// Locked as removeGrants locks: a concurrent removal of the same
 	// account's grants waits, and then sees these gone.
-	if _, err := tx.Exec(ctx, `SELECT 1 FROM identity."user" WHERE id = $1::uuid FOR NO KEY UPDATE`, f.ID); err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM identity."user" WHERE id = $1::uuid FOR NO KEY UPDATE`, userID); err != nil {
+		return tenantAccessRemoval{}, nil, err
 	}
-	// Read again under the lock: a role granted since is removed only if the
-	// caller may revoke it.
+	// Read again under the lock: a role granted since is removed only if a
+	// tenant admin may revoke it.
 	var unrevocable []string
 	if err := tx.QueryRow(ctx, `
 		SELECT ARRAY(SELECT DISTINCT ra.role::text FROM identity.role_assignment ra JOIN core.workspace w ON w.id = ra.workspace_id
-		             WHERE ra.user_id = $1::uuid AND w.customer_id::text = ANY($2::text[]))`, f.ID, scope).Scan(&unrevocable); err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
+		             WHERE ra.user_id = $1::uuid AND w.customer_id::text = ANY($2::text[]))`, userID, scope).Scan(&unrevocable); err != nil {
+		return tenantAccessRemoval{}, nil, err
 	}
 	unrevocable = slices.DeleteFunc(unrevocable, func(r string) bool { return roleIsAssignableBy([]string{"tenant_admin"}, r) })
 	if len(unrevocable) > 0 {
-		jsonErr(w, fmt.Errorf("forbidden: this account holds a role in your tenant that only a platform admin can remove (%s)",
-			strings.Join(unrevocable, ", ")), http.StatusForbidden)
-		return
+		return tenantAccessRemoval{}, nil, &unrevocableRolesErr{roles: unrevocable}
 	}
-	removed, err := removeTenantAccess(ctx, tx, f.ID, scope)
+	removed, err := removeTenantAccess(ctx, tx, userID, scope)
 	if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
+		return tenantAccessRemoval{}, nil, err
 	}
-	revoked, err := revokeUnnarrowed(ctx, tx, []string{f.ID})
+	revoked, err := revokeUnnarrowed(ctx, tx, []string{userID})
 	if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
+		return tenantAccessRemoval{}, nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
+		return tenantAccessRemoval{}, nil, err
 	}
 	// In a dedicated tenant's database the removal took everything the
 	// member held in it, so the directory stops routing them here: the
 	// tenant left their list, empty, and stayed there. The row stays, as in
 	// one database, for what they wrote; adding them again restores the
 	// entry (addExistingAccount).
-	if f.CustomerID == "" && tenantdb.TenantFrom(ctx) != "" {
+	if customerID == "" && tenantdb.TenantFrom(ctx) != "" {
 		var sub string
-		if err := h.db.QueryRow(ctx, `SELECT keycloak_sub FROM identity."user" WHERE id = $1::uuid`, f.ID).Scan(&sub); err == nil {
+		if err := h.db.QueryRow(ctx, `SELECT keycloak_sub FROM identity."user" WHERE id = $1::uuid`, userID).Scan(&sub); err == nil {
 			h.forgetUser(ctx, sub)
 		}
 	}
+	return removed, revoked, nil
+}
+
+// auditRemovedFromTenant records a removal from the tenants of scope, and the
+// developer grants it also took (auditRevoked).
+func (h *handler) auditRemovedFromTenant(ctx context.Context, act *actor, userID, email, home string, scope []string, removed tenantAccessRemoval, revoked []revokedGrant) {
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
-		Category: auditlog.CategoryAdmin, EventType: auditlog.EventUserRoleRevoked,
+		Category: auditlog.CategoryAdmin, EventType: auditlog.EventUserRemovedFromTenant,
 		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
-		ResourceType: "identity_user", ResourceID: f.ID,
+		ResourceType: "identity_user", ResourceID: userID,
 		Metadata: map[string]string{
 			"action":         "removed_from_tenant",
-			"email":          f.Email,
+			"email":          email,
 			"home_tenant":    home,
 			"customer_ids":   strings.Join(scope, ","),
 			"roles":          strings.Join(removed.Roles, ","),
@@ -635,7 +660,6 @@ func (h *handler) adminRemoveFromTenant(ctx context.Context, w http.ResponseWrit
 		},
 	})
 	h.auditRevoked(ctx, act, revoked, map[string]string{"cause": "removed_from_tenant"})
-	jsonOK(w, withRevoked(map[string]any{"status": "removed"}, revoked))
 }
 
 // ── Inviting an address that already has an account ─────────────────────────
@@ -897,7 +921,7 @@ var errInviteNeedsRoleAndWorkspace = errors.New("role and workspace_id are both 
 // it said which addresses had accounts, and which were platform admins'.
 func (h *handler) refuseExistingAccount(ctx context.Context, w http.ResponseWriter, act *actor, userID, email, role, workspaceID, reason string) {
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
-		Category: auditlog.CategoryAdmin, EventType: auditlog.EventUserRoleGranted,
+		Category: auditlog.CategoryAdmin, EventType: auditlog.EventUserInvitationRefused,
 		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
 		ResourceType: "identity_user", ResourceID: userID,
 		Metadata: map[string]string{"email": email, "role": role, "workspace_id": workspaceID,

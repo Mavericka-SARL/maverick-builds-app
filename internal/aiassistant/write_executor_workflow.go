@@ -132,7 +132,8 @@ func (e *WriteExecutor) deleteFormDef(ctx context.Context, raw json.RawMessage) 
 	_ = e.pool.QueryRow(ctx, `SELECT name FROM model.form_def WHERE id=$1::uuid`, id).Scan(&name)
 	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM runtime.form_record WHERE form_id=$1::uuid`, id).Scan(&records)
 	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM model.form_metric_mapping WHERE form_id=$1::uuid`, id).Scan(&integrations)
-	if err := crudapp.NewStoreOn(e.pool).DeleteForm(ctx, id); err != nil {
+	// Its posted totals go too; promoting the draft recalculates them.
+	if _, err := crudapp.NewStoreOn(e.pool).DeleteForm(ctx, id); err != nil {
 		return "", "", fmt.Errorf("delete form: %w", err)
 	}
 	note := ""
@@ -619,6 +620,11 @@ func (e *WriteExecutor) deleteFormIntegration(ctx context.Context, raw json.RawM
 	_, name, err := e.loadIntegration(ctx, p.FormIntegrationID)
 	if err != nil {
 		return "", "", err
+	}
+	// Its posted totals go too, as on the developer's delete; promoting the
+	// draft recalculates them.
+	if _, err := crudapp.NewStoreOn(e.pool).DeleteMappingPostings(ctx, []string{p.FormIntegrationID}, ""); err != nil {
+		return "", "", fmt.Errorf("delete form integration: %w", err)
 	}
 	if _, err := e.pool.Exec(ctx, `DELETE FROM model.form_metric_mapping WHERE id=$1::uuid`, p.FormIntegrationID); err != nil {
 		return "", "", fmt.Errorf("delete form integration: %w", err)

@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -163,6 +164,9 @@ func (h *handler) scimEndpoint(w http.ResponseWriter, r *http.Request) {
 			return reach[sub], err
 		},
 		OwnDatabase: tenantdb.TenantFrom(tctx) == customerID,
+		RemoveFromTenant: func(c context.Context, userID string) (bool, error) {
+			return h.scimRemoveFromTenant(c, customerID, userID)
+		},
 	}
 	if h.kc != nil {
 		svc.IdP = h.kc
@@ -172,4 +176,34 @@ func (h *handler) scimEndpoint(w http.ResponseWriter, r *http.Request) {
 		svc.CanCreateUser = func(c context.Context) error { return h.plans.CheckUsers(c, pool, customerID, 1) }
 	}
 	svc.ServeHTTP(w, r.WithContext(tctx))
+}
+
+// scimRemoveFromTenant is a tenant's SCIM delete of a member it does not own:
+// what Remove from this tenant takes (removeFromTenant), audited with the
+// directory as the actor. A role only a platform admin may remove refuses it.
+func (h *handler) scimRemoveFromTenant(ctx context.Context, customerID, userID string) (bool, error) {
+	var email, own string
+	var platform bool
+	// A platform admin or a platform-wide builder is never a tenant
+	// directory's to change, in its own database too: removing its place
+	// would revoke the developer grant it builds everywhere with.
+	if err := h.db.QueryRow(ctx, `SELECT u.email, COALESCE(u.customer_id::text, ''),
+		       EXISTS (SELECT 1 FROM identity.role_assignment pa WHERE pa.user_id = u.id AND pa.role = 'platform_admin')
+		       OR `+platformWideBuilderSQL("u.id")+`
+		FROM identity."user" u WHERE u.id = $1::uuid`, userID).Scan(&email, &own, &platform); err != nil {
+		return false, err
+	}
+	if platform {
+		return false, nil
+	}
+	scope := []string{customerID}
+	removed, revoked, err := h.removeFromTenant(ctx, userID, own, scope)
+	var ue *unrevocableRolesErr
+	if errors.As(err, &ue) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	h.auditRemovedFromTenant(ctx, &actor{Roles: []string{"scim"}}, userID, email, homeTenant(own, false, scope), scope, removed, revoked)
+	return true, nil
 }

@@ -1452,6 +1452,10 @@ func (s *Store) resolveNotificationRecipients(ctx context.Context, appID, starte
 		WHERE `+assignee.SQL("$1::uuid", "jsonb_build_array($2::text)", "u.id"),
 		appID, cfg.RecipientRole)
 	if err != nil {
+		// Said, not swallowed: a query a schema change broke notified
+		// nobody, unseen.
+		s.log.Error().Err(err).Str("application_id", appID).Str("role", cfg.RecipientRole).
+			Msg("workflow notification: recipient query failed; nobody notified")
 		return nil
 	}
 	defer rows.Close()

@@ -22,12 +22,31 @@ interface FieldProps {
  * The id is injected into a single element child that does not already carry
  * one, so a control with its own id or aria-label keeps it and nothing that
  * renders several children is touched.
+ *
+ * The description and the error are tied to that child the same way
+ * (aria-describedby, and aria-invalid while there is an error), whether or
+ * not it brought its own id: a screen reader used to read neither the hint
+ * nor the validation message of any form built on Field.
  */
+type ControlProps = { id?: string; "aria-describedby"?: string; "aria-invalid"?: boolean };
+
 export function Field({ label, required, description, error, children, style }: FieldProps) {
   const generatedId = useId();
   const only = React.Children.count(children) === 1 ? React.Children.only(children) : null;
-  const target = React.isValidElement<{ id?: string }>(only) && !only.props.id ? only : null;
+  const control = React.isValidElement<ControlProps>(only) ? only : null;
+  const target = control && !control.props.id ? control : null;
   const controlId = target ? generatedId : undefined;
+  const descriptionId = `${generatedId}-description`;
+  const errorId = `${generatedId}-error`;
+  const describedBy = [control?.props["aria-describedby"], error ? errorId : description ? descriptionId : undefined]
+    .filter(Boolean).join(" ") || undefined;
+  const controlled = control
+    ? React.cloneElement(control, {
+        ...(target ? { id: controlId } : {}),
+        "aria-describedby": describedBy,
+        ...(error ? { "aria-invalid": true } : {}),
+      })
+    : children;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4, ...style }}>
@@ -38,12 +57,12 @@ export function Field({ label, required, description, error, children, style }: 
         {label}
         {required && <span style={{ color: "var(--color-danger)" }}>*</span>}
       </label>
-      {target ? React.cloneElement(target, { id: controlId }) : children}
+      {controlled}
       {description && !error && (
-        <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{description}</span>
+        <span id={descriptionId} style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{description}</span>
       )}
       {error && (
-        <span style={{ fontSize: 11, color: "var(--color-danger)" }}>{error}</span>
+        <span id={errorId} style={{ fontSize: 11, color: "var(--color-danger)" }}>{error}</span>
       )}
     </div>
   );

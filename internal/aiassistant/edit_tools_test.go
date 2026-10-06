@@ -205,6 +205,25 @@ func TestPlanLimitHooks(t *testing.T) {
 	if n := h.scalar(`SELECT count(*)::text FROM model.dimension_member dm JOIN model.dimension_def d ON d.id=dm.dimension_id WHERE d.model_id=$1::uuid`, h.modelID); n != "0" {
 		t.Errorf("%s member(s) written past the limit", n)
 	}
+	// One member below the limit: an add that must create its parent adds
+	// two, and is refused before either is written.
+	memberAsks = nil
+	h.exec.WithHooks(aiassistant.Hooks{CheckMembers: func(_ context.Context, _ string, n int) error {
+		memberAsks = append(memberAsks, n)
+		if n > 1 {
+			return limit
+		}
+		return nil
+	}})
+	_, _, err = h.run("add_dimension_member", map[string]any{"dimension_id": "region", "code": "EMEA", "label": "EMEA", "parent_code": "WORLD"})
+	h.refused("add_dimension_member creating its parent at the limit", err, "plan limit")
+	if fmt.Sprint(memberAsks) != "[1 2]" {
+		t.Errorf("plan asks for a member with a new parent: %v, want [1 2]", memberAsks)
+	}
+	if n := h.scalar(`SELECT count(*)::text FROM model.dimension_member dm JOIN model.dimension_def d ON d.id=dm.dimension_id WHERE d.model_id=$1::uuid`, h.modelID); n != "0" {
+		t.Errorf("%s member(s) written past the limit", n)
+	}
+	h.must("add_dimension_member", map[string]any{"dimension_id": "region", "code": "EMEA", "label": "EMEA"})
 }
 
 // delete_metric now also takes the metric out of every chart's series, as

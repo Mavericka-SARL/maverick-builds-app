@@ -23,6 +23,9 @@ type ValuesWriteRequest struct {
 	// ValuesArePercentUnits says values under 1 into a Percentage metric
 	// really are percents under 1%, not fractions (the plan check's guard).
 	ValuesArePercentUnits bool
+	// Clears are the cells a "value": null empties, as the console's and
+	// the API's clear does: each {dimension id: member code}.
+	Clears []map[string]string
 }
 
 // maxValuesPerStep bounds one step: a block larger than this belongs in a
@@ -100,11 +103,17 @@ func (e *WriteExecutor) writeInputValues(ctx context.Context, raw json.RawMessag
 	req := ValuesWriteRequest{RevisionID: e.revID, GridID: gridID, MetricID: metricID, Header: append(append([]string{}, dimNames...), metricName),
 		ValuesArePercentUnits: p.ValuesArePercentUnits}
 	for i, v := range p.Values {
-		text, err := valueText(v.Value)
-		if err != nil {
-			return "", "", fmt.Errorf("values[%d]: %w", i, err)
+		clear := isNullValue(v.Value)
+		text := ""
+		if !clear {
+			t, err := valueText(v.Value)
+			if err != nil {
+				return "", "", fmt.Errorf("values[%d]: %w", i, err)
+			}
+			text = t
 		}
 		cells := map[string]string{metricName: text}
+		byID := map[string]string{}
 		for key, code := range v.Members {
 			d, ok := matchDim(dims, key, func(d dim) (string, string) { return d.id, d.name })
 			if !ok {
@@ -115,12 +124,17 @@ func (e *WriteExecutor) writeInputValues(ctx context.Context, raw json.RawMessag
 				return "", "", fmt.Errorf("values[%d]: %w", i, err)
 			}
 			cells[d.name] = code
+			byID[d.id] = code
 		}
 		for _, d := range dims {
 			if _, ok := cells[d.name]; !ok {
 				return "", "", fmt.Errorf("values[%d] names no member of %s: a value goes on one member of every dimension of %s's grid (%s)",
 					i, d.name, metricName, listOrNone(dimNames))
 			}
+		}
+		if clear {
+			req.Clears = append(req.Clears, byID)
+			continue
 		}
 		req.Rows = append(req.Rows, importpkg.RawRow{RowNumber: i + 1, Cells: cells})
 	}
@@ -129,6 +143,11 @@ func (e *WriteExecutor) writeInputValues(ctx context.Context, raw json.RawMessag
 		return "", "", err
 	}
 	return result, "", nil
+}
+
+// isNullValue reports a "value": null, which empties the cell.
+func isNullValue(raw json.RawMessage) bool {
+	return strings.TrimSpace(string(raw)) == "null"
 }
 
 // valueText is a write_input_values value as the import pipeline reads a

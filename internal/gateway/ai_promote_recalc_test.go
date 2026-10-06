@@ -54,7 +54,7 @@ func assertActivationRecalculatesAIDraft(t *testing.T, activate func(f *promoteF
 	params, _ := json.Marshal(map[string]any{"dimension_id": "region", "code": "EMEA", "properties": map[string]string{"factor": "7"}})
 	proposal, err := aiassistant.NewProposalStore(f.pool).CreateProposal(ctx, sess.ID, []aiassistant.ProposalStep{
 		{Tool: "update_dimension_member", Description: "Set EMEA's factor to 7", Params: params},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create proposal: %v", err)
 	}

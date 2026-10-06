@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import * as XLSX from "xlsx";
 import { Download, Upload } from "lucide-react";
 import { api, type DemoContext, type GridData, type ImportModeParam, type ImportRowError, type ApiError, type ImportJob } from "../../api/client";
 import { SectionHeader, Button, Field, Select, Textarea, InlineAlert, StatusBadge, type DesignTone } from "../../ui";
@@ -17,7 +16,9 @@ const IMPORT_STATUS_TONE: Record<number, DesignTone> = { 1: "warning", 2: "draft
 // security scoping (see internal/gateway grid()) means a cost-center
 // manager's template already only lists their own dimension members as the
 // example row's codes.
-function buildImportTemplateWorkbook(grid: GridData): Blob {
+// The gateway writes the workbook (POST /api/import/template-workbook): the
+// browser no longer carries SheetJS.
+async function buildImportTemplateWorkbook(grid: GridData): Promise<Blob> {
   const dimNames = grid.dimensions.map(d => d.name);
   const metricNames = grid.metrics.filter(m => m.is_input && !m.readonly).map(m => m.name);
   const header = [...dimNames, ...metricNames];
@@ -25,11 +26,8 @@ function buildImportTemplateWorkbook(grid: GridData): Blob {
     ...grid.dimensions.map(d => d.members.find(m => !d.members.some(o => o.parent_code === m.code))?.code ?? d.members[0]?.code ?? ""),
     ...metricNames.map(() => 0),
   ];
-  const ws = XLSX.utils.aoa_to_sheet([header, exampleRow]);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Import");
-  const out = XLSX.write(wb, { type: "array", bookType: "xlsx" });
-  return new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const { blob } = await api.importTemplateWorkbook([header, exampleRow]);
+  return blob;
 }
 
 export function ImportWidget({ gridDefId, ctx }: { gridDefId: string; ctx: DemoContext }) {
@@ -49,6 +47,13 @@ export function ImportWidget({ gridDefId, ctx }: { gridDefId: string; ctx: DemoC
   });
 
   const inv = () => qc.invalidateQueries({ queryKey: ["import-jobs"] });
+
+  const template = useMutation({
+    mutationFn: async () => {
+      if (!grid) return;
+      downloadBlob(await buildImportTemplateWorkbook(grid), "import-template.xlsx");
+    },
+  });
 
   const uploadCsv = useMutation({
     mutationFn: () => api.uploadImport(csv, ctx.revision_id, mode),
@@ -79,11 +84,18 @@ export function ImportWidget({ gridDefId, ctx }: { gridDefId: string; ctx: DemoC
         subtitle={<>Upload a native <code>.xlsx</code> workbook or paste CSV for revision <strong>{ctx.revision}</strong>. Column headers are dimension or metric <em>names</em> from this grid — no internal IDs required.</>}
       />
 
+      {template.isError && (
+        <div style={{ marginBottom: 12 }}>
+          <InlineAlert tone="danger">The template could not be prepared: {(template.error as Error).message}</InlineAlert>
+        </div>
+      )}
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
         <Button
           leadingIcon={<Download size={14} />}
           disabled={!grid}
-          onClick={() => grid && downloadBlob(buildImportTemplateWorkbook(grid), "import-template.xlsx")}
+          loading={template.isPending}
+          loadingLabel="Preparing…"
+          onClick={() => template.mutate()}
         >
           Download .xlsx template
         </Button>

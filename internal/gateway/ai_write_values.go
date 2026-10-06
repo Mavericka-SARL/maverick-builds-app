@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
+	"github.com/mavericks-engine/mavericks/internal/calculation"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
 	"github.com/mavericks-engine/mavericks/internal/writeguard"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
@@ -30,20 +32,96 @@ func (h *handler) aiWriteValues(ctx context.Context, act *actor, req aiassistant
 	if systemManaged {
 		return "", fmt.Errorf("this revision is system-managed and read-only")
 	}
-	staged, err := resolveValueRows(ctx, h.db.For(ctx), modelID, req)
+	clears, err := resolveClears(ctx, h.db.For(ctx), modelID, req)
 	if err != nil {
 		return "", err
 	}
-	if _, err := h.commitGridRows(ctx, act, modelID, req.RevisionID, staged, importpkg.ModeReplace, "ai_values"); err != nil {
-		return "", err
+	var staged []importpkg.StagingRow
+	if len(req.Rows) > 0 || len(clears) == 0 {
+		if staged, err = resolveValueRows(ctx, h.db.For(ctx), modelID, req); err != nil {
+			return "", err
+		}
+	}
+	if len(clears) > 0 {
+		if err := h.aiClearCells(ctx, act, modelID, req, clears); err != nil {
+			return "", err
+		}
+	}
+	if len(staged) > 0 {
+		if _, err := h.commitGridRows(ctx, act, modelID, req.RevisionID, staged, importpkg.ModeReplace, "ai_values"); err != nil {
+			return "", err
+		}
 	}
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 		Category: auditlog.CategoryDataChange, EventType: auditlog.EventCellWritten,
 		ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
 		ResourceType: "metric", ResourceID: req.MetricID, RevisionID: req.RevisionID,
-		Metadata: map[string]string{"model_id": modelID, "revision_id": req.RevisionID, "source": "ai_values", "values": strconv.Itoa(len(staged))},
+		Metadata: map[string]string{"model_id": modelID, "revision_id": req.RevisionID, "source": "ai_values",
+			"values": strconv.Itoa(len(staged)), "cleared": strconv.Itoa(len(clears))},
 	})
-	return fmt.Sprintf("Wrote %d value(s) into %s", len(staged), req.Header[len(req.Header)-1]) + h.percentFractionWarning(ctx, h.db.For(ctx), staged), nil
+	return valuesSummary(len(staged), len(clears), req) + h.percentFractionWarning(ctx, h.db.For(ctx), staged), nil
+}
+
+// valuesSummary says what a write_input_values step wrote and emptied.
+func valuesSummary(written, cleared int, req aiassistant.ValuesWriteRequest) string {
+	metric := req.Header[len(req.Header)-1]
+	switch {
+	case cleared == 0:
+		return fmt.Sprintf("Wrote %d value(s) into %s", written, metric)
+	case written == 0:
+		return fmt.Sprintf("Cleared %d cell(s) of %s", cleared, metric)
+	}
+	return fmt.Sprintf("Wrote %d value(s) into %s and cleared %d cell(s)", written, metric, cleared)
+}
+
+// clearTarget is one cell a write_input_values step empties: its
+// dim_members as stored, and its members for the write guard.
+type clearTarget struct {
+	dimMembers string
+	memberIDs  []string
+}
+
+// resolveClears resolves the cells a "value": null empties, with the cell
+// write's own coordinate check.
+func resolveClears(ctx context.Context, q writeguard.QueryRower, modelID string, req aiassistant.ValuesWriteRequest) ([]clearTarget, error) {
+	out := make([]clearTarget, 0, len(req.Clears))
+	for i, dims := range req.Clears {
+		ids, err := writeguard.ResolveWriteMembers(ctx, q, modelID, req.RevisionID, dims)
+		if err != nil {
+			return nil, fmt.Errorf("clear %d: %w", i+1, err)
+		}
+		dm := "{}"
+		if len(dims) > 0 {
+			b, _ := json.Marshal(dims)
+			dm = string(b)
+		}
+		out = append(out, clearTarget{dimMembers: dm, memberIDs: ids})
+	}
+	return out, nil
+}
+
+// aiClearCells empties cells as POST /api/cells' clear does: the write
+// guard first, then clearCell, then the metric's dependents recalculated.
+func (h *handler) aiClearCells(ctx context.Context, act *actor, modelID string, req aiassistant.ValuesWriteRequest, clears []clearTarget) error {
+	var memberIDs []string
+	for _, c := range clears {
+		memberIDs = append(memberIDs, c.memberIDs...)
+	}
+	if reason, err := writeguard.CheckWriteMetrics(ctx, h.db.For(ctx), modelID, req.RevisionID, act.UserID, memberIDs, []string{req.MetricID}); err != nil {
+		return fmt.Errorf("write guard: %w", err)
+	} else if reason != "" {
+		return fmt.Errorf("%s", reason)
+	}
+	for _, c := range clears {
+		if err := h.clearCell(ctx, modelID, req.RevisionID, req.MetricID, c.dimMembers); err != nil {
+			return fmt.Errorf("clear: %w", err)
+		}
+	}
+	scheduler := calculation.NewScheduler(h.log, calculation.NewStore(h.db.For(ctx)), nil)
+	if err := scheduler.RecalcAffected(ctx, modelID, req.RevisionID, []string{req.MetricID}); err != nil {
+		h.log.Warn().Err(err).Msg("recalc failed after an AI clear")
+	}
+	return nil
 }
 
 // aiCheckWriteValues is aiWriteValues for the plan check: the same
@@ -52,6 +130,13 @@ func (h *handler) aiCheckWriteValues(ctx context.Context, tx pgx.Tx, req aiassis
 	var modelID string
 	if err := tx.QueryRow(ctx, `SELECT model_id::text FROM model.revision WHERE id=$1::uuid`, req.RevisionID).Scan(&modelID); err != nil {
 		return "", fmt.Errorf("revision: %w", err)
+	}
+	clears, err := resolveClears(ctx, tx, modelID, req)
+	if err != nil {
+		return "", err
+	}
+	if len(req.Rows) == 0 && len(clears) > 0 {
+		return fmt.Sprintf("Would clear %d cell(s) of %s", len(clears), req.Header[len(req.Header)-1]), nil
 	}
 	staged, err := resolveValueRows(ctx, tx, modelID, req)
 	if err != nil {

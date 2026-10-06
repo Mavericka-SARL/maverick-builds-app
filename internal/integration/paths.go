@@ -17,7 +17,7 @@ import (
 
 type pathStep struct {
 	key   string
-	index int  // used when isIdx
+	index int // used when isIdx
 	isIdx bool
 }
 

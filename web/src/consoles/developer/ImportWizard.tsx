@@ -1,6 +1,5 @@
 import { useState, useCallback, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import * as XLSX from "xlsx";
 import { FileSpreadsheet, FileText, FolderOpen, ArrowLeft, ArrowRight, History, Pencil, Trash2, Play, Plus as PlusIcon, X as XIcon } from "lucide-react";
 import { Button, IconButton, TextInput, Select, Field, StatusBadge, Stepper, InlineAlert, FilterChip, useConfirm, type DesignTone } from "../../ui";
 import { GoogleServiceAccountPanel } from "./GoogleServiceAccountPanel";
@@ -115,15 +114,12 @@ function parseCSVText(text: string): { headers: string[]; rows: string[][] } {
 async function parseFile(file: File, sheet?: string): Promise<ParsedFile> {
   const isXlsx = /\.(xlsx|xls)$/i.test(file.name);
   if (isXlsx) {
-    const buf = await file.arrayBuffer();
-    const wb = XLSX.read(buf, { type: "array" });
-    const activeSheet = sheet ?? wb.SheetNames[0];
-    const ws = wb.Sheets[activeSheet];
-    const data = ws ? XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: "" }) : [];
-    const headers = data.length ? (data[0] as unknown[]).map(v => String(v ?? "").trim()) : [];
-    const rows = data.slice(1).map(r => (r as unknown[]).map(v => String(v ?? "").trim()));
-    return { name: file.name, ext: "xlsx", sheets: wb.SheetNames, activeSheet, headers, rows,
-      source: { xlsx_base64: await fileToBase64(file), sheet: activeSheet } };
+    // Read by the gateway, as the import itself reads it: the browser used
+    // to parse the chosen workbook with SheetJS, which no scanner covers.
+    const xlsxBase64 = await fileToBase64(file);
+    const wb = await api.parseWorkbook(xlsxBase64, sheet);
+    return { name: file.name, ext: "xlsx", sheets: wb.sheets, activeSheet: wb.sheet, headers: wb.headers, rows: wb.rows,
+      source: { xlsx_base64: xlsxBase64, sheet: wb.sheet } };
   } else {
     const text = await file.text();
     const { headers, rows } = parseCSVText(text);

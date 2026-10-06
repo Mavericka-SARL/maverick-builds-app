@@ -37,6 +37,17 @@ func TestRevisionsBeyondTheActiveOneAreTheBuilders(t *testing.T) {
 	}
 	var draftMetric string
 	_ = d.pool.QueryRow(ctx, `SELECT id::text FROM model.metric_def WHERE revision_id=$1::uuid AND name='revenue'`, draft).Scan(&draftMetric)
+	// The draft's copy of an active-revision dimension: a write names the
+	// dimensions of the revision it writes into (an active one's is refused).
+	inDraft := func(activeDim string) string {
+		t.Helper()
+		var id string
+		if err := d.pool.QueryRow(ctx, `SELECT n.id::text FROM model.dimension_def o JOIN model.dimension_def n ON n.name = o.name
+			WHERE o.id=$1::uuid AND n.revision_id=$2::uuid`, activeDim, draft).Scan(&id); err != nil {
+			t.Fatalf("the draft's copy of %s: %v", activeDim, err)
+		}
+		return id
+	}
 	// A dashboard, a chart and a form that exist only in the draft.
 	dash := idOf(d.call("POST", "/api/developer/dashboards", d.dev, map[string]any{"name": "Draft board", "revision_id": draft}))
 	chart := idOf(d.call("POST", "/api/developer/dashboards/"+dash+"/widgets", d.dev, map[string]any{
@@ -70,7 +81,7 @@ func TestRevisionsBeyondTheActiveOneAreTheBuilders(t *testing.T) {
 		{"automation rules", "GET", "/api/automation/rules" + q(draftQ), nil},
 		{"a write into the draft", "POST", "/api/cells", map[string]any{
 			"model_id": d.modelID, "revision_id": draft, "metric_id": draftMetric,
-			"dim_codes": map[string]string{d.geoDim: "UK", d.prodDim: "LAPTOP", d.periodDim: "Q1"}, "value": 1}},
+			"dim_codes": map[string]string{inDraft(d.geoDim): "UK", inDraft(d.prodDim): "LAPTOP", inDraft(d.periodDim): "Q1"}, "value": 1}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

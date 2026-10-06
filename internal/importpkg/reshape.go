@@ -230,17 +230,30 @@ func readCSVGrid(data []byte, delim rune) ([][]string, error) {
 }
 
 func readXLSXGrid(data []byte, sheet string, rawValues bool) ([][]string, error) {
+	_, _, grid, err := readXLSXSheetGrid(data, sheet, rawValues)
+	return grid, err
+}
+
+// ReadXLSXSheet is a workbook's sheet names, the sheet read (the first when
+// sheet is empty) and its cells as the upload reads them (ParseXLSXRows:
+// as displayed, plain numbers as stored) — what the Import Wizard previews
+// and maps, so the browser parses no workbook.
+func ReadXLSXSheet(data []byte, sheet string) (sheets []string, name string, grid [][]string, err error) {
+	return readXLSXSheetGrid(data, sheet, false)
+}
+
+func readXLSXSheetGrid(data []byte, sheet string, rawValues bool) (sheets []string, name string, grid [][]string, err error) {
 	f, err := excelize.OpenReader(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("open xlsx: %w", err)
+		return nil, "", nil, fmt.Errorf("open xlsx: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 
-	sheets := f.GetSheetList()
+	sheets = f.GetSheetList()
 	if len(sheets) == 0 {
-		return nil, fmt.Errorf("workbook has no sheets")
+		return nil, "", nil, fmt.Errorf("workbook has no sheets")
 	}
-	name := sheets[0]
+	name = sheets[0]
 	if sheet != "" {
 		name = ""
 		for _, s := range sheets {
@@ -250,10 +263,9 @@ func readXLSXGrid(data []byte, sheet string, rawValues bool) ([][]string, error)
 			}
 		}
 		if name == "" {
-			return nil, fmt.Errorf("workbook has no sheet %q — its sheets are: %s", sheet, strings.Join(sheets, ", "))
+			return sheets, "", nil, fmt.Errorf("workbook has no sheet %q — its sheets are: %s", sheet, strings.Join(sheets, ", "))
 		}
 	}
-	var grid [][]string
 	if rawValues {
 		grid, err = f.GetRows(name, excelize.Options{RawCellValue: true})
 		if err == nil {
@@ -261,14 +273,20 @@ func readXLSXGrid(data []byte, sheet string, rawValues bool) ([][]string, error)
 		}
 	} else {
 		grid, err = f.GetRows(name)
+		if err == nil {
+			var raw [][]string
+			if raw, err = f.GetRows(name, excelize.Options{RawCellValue: true}); err == nil {
+				storedNumbers(f, name, grid, raw)
+			}
+		}
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read sheet %q: %w", name, err)
+		return sheets, name, nil, fmt.Errorf("read sheet %q: %w", name, err)
 	}
 	if len(grid) == 0 {
-		return nil, fmt.Errorf("sheet %q has no header row", name)
+		return sheets, name, nil, fmt.Errorf("sheet %q has no header row", name)
 	}
-	return grid, nil
+	return sheets, name, grid, nil
 }
 
 // ShapeGrid turns a sheet's rows into an import's header and rows, applying

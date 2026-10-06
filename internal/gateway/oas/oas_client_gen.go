@@ -856,6 +856,14 @@ type Invoker interface {
 	//
 	// POST /api/admin/models/import
 	ImportModel(ctx context.Context, request *ModelImportRequest) (ImportModelRes, error)
+	// ImportParseWorkbook invokes importParseWorkbook operation.
+	//
+	// Read an .xlsx workbook's sheet names and one sheet's header and rows, as POST /api/import/upload
+	// reads them (cells as displayed, plain numbers as stored), for the Import wizard to preview and map;
+	//  nothing is stored.
+	//
+	// POST /api/import/parse-workbook
+	ImportParseWorkbook(ctx context.Context, request *ImportParseWorkbookReq) (ImportParseWorkbookRes, error)
 	// ImportSheetFetch invokes importSheetFetch operation.
 	//
 	// Fetch a link-shared Google Sheet as CSV text (server-side — Google's export endpoint sends no
@@ -863,6 +871,13 @@ type Invoker interface {
 	//
 	// POST /api/import/sheets/fetch
 	ImportSheetFetch(ctx context.Context, request *ImportSheetFetchReq) (ImportSheetFetchRes, error)
+	// ImportTemplateWorkbook invokes importTemplateWorkbook operation.
+	//
+	// Write the given rows (a header first, then example rows; at most 100) as a one-sheet .xlsx to
+	// download — the business Import widget's template.
+	//
+	// POST /api/import/template-workbook
+	ImportTemplateWorkbook(ctx context.Context, request *ImportTemplateWorkbookReq) (ImportTemplateWorkbookRes, error)
 	// ImportUpload invokes importUpload operation.
 	//
 	// Import facts from a CSV or XLSX file (atomic — any row failing validation rejects the whole file).
@@ -17322,6 +17337,119 @@ func (c *Client) sendImportModel(ctx context.Context, request *ModelImportReques
 	return result, nil
 }
 
+// ImportParseWorkbook invokes importParseWorkbook operation.
+//
+// Read an .xlsx workbook's sheet names and one sheet's header and rows, as POST /api/import/upload
+// reads them (cells as displayed, plain numbers as stored), for the Import wizard to preview and map;
+//
+//	nothing is stored.
+//
+// POST /api/import/parse-workbook
+func (c *Client) ImportParseWorkbook(ctx context.Context, request *ImportParseWorkbookReq) (ImportParseWorkbookRes, error) {
+	res, err := c.sendImportParseWorkbook(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendImportParseWorkbook(ctx context.Context, request *ImportParseWorkbookReq) (res ImportParseWorkbookRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("importParseWorkbook"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/import/parse-workbook"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ImportParseWorkbookOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/import/parse-workbook"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeImportParseWorkbookRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ImportParseWorkbookOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeImportParseWorkbookResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // ImportSheetFetch invokes importSheetFetch operation.
 //
 // Fetch a link-shared Google Sheet as CSV text (server-side — Google's export endpoint sends no
@@ -17426,6 +17554,117 @@ func (c *Client) sendImportSheetFetch(ctx context.Context, request *ImportSheetF
 
 	stage = "DecodeResponse"
 	result, err := decodeImportSheetFetchResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// ImportTemplateWorkbook invokes importTemplateWorkbook operation.
+//
+// Write the given rows (a header first, then example rows; at most 100) as a one-sheet .xlsx to
+// download — the business Import widget's template.
+//
+// POST /api/import/template-workbook
+func (c *Client) ImportTemplateWorkbook(ctx context.Context, request *ImportTemplateWorkbookReq) (ImportTemplateWorkbookRes, error) {
+	res, err := c.sendImportTemplateWorkbook(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendImportTemplateWorkbook(ctx context.Context, request *ImportTemplateWorkbookReq) (res ImportTemplateWorkbookRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("importTemplateWorkbook"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/import/template-workbook"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ImportTemplateWorkbookOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/import/template-workbook"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeImportTemplateWorkbookRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ImportTemplateWorkbookOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeImportTemplateWorkbookResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

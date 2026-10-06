@@ -703,8 +703,22 @@ func TestSCIMChangesOnlyTheTenantsOwnAccounts(t *testing.T) {
 		}, bearer); code != http.StatusForbidden {
 			t.Errorf("PATCH e-mail of %s: %d %s, want 403", sub, code, body)
 		}
-		if code, body := f.do(t, f.srv, http.MethodDelete, "/api/scim/v2/Users/"+id, nil, bearer); code != http.StatusForbidden {
-			t.Errorf("DELETE %s: %d %s, want 403", sub, code, body)
+		// A delete takes a member's place in the tenant (Remove from this
+		// tenant) and leaves the account; a platform account is refused.
+		wantDelete := http.StatusNoContent
+		if sub == "kc-pw" || sub == "kc-pa" {
+			wantDelete = http.StatusForbidden
+		}
+		if code, body := f.do(t, f.srv, http.MethodDelete, "/api/scim/v2/Users/"+id, nil, bearer); code != wantDelete {
+			t.Errorf("DELETE %s: %d %s, want %d", sub, code, body, wantDelete)
+		}
+		var roles int
+		_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM identity.role_assignment WHERE user_id=$1::uuid AND workspace_id=$2::uuid`, id, f.wsID).Scan(&roles)
+		if wantDelete == http.StatusNoContent && roles != 0 {
+			t.Errorf("%s keeps %d role(s) in the tenant after the delete", sub, roles)
+		}
+		if wantDelete == http.StatusForbidden && roles != 1 {
+			t.Errorf("%s lost its role in the tenant to a refused delete", sub)
 		}
 		var got string
 		if err := f.pool.QueryRow(ctx, `SELECT email||'|'||display_name||'|'||(disabled_at IS NULL)::text FROM identity.user WHERE id=$1::uuid`, id).Scan(&got); err != nil {

@@ -70,3 +70,46 @@ func TestIsDateFormat(t *testing.T) {
 		}
 	}
 }
+
+// The upload reads a plain number cell as stored ("1,234.50" was refused by
+// the number check) and keeps a date's and a percentage's displayed text.
+func TestParseXLSXRowsReadsStoredNumbers(t *testing.T) {
+	f := excelize.NewFile()
+	sheet := f.GetSheetName(0)
+	_ = f.SetSheetRow(sheet, "A1", &[]any{"period", "revenue", "share", "code"})
+	_ = f.SetSheetRow(sheet, "A2", &[]any{46037, 1234.5, 0.25, 1001})
+	style := func(numFmt int) int {
+		id, err := f.NewStyle(&excelize.Style{NumFmt: numFmt})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	_ = f.SetCellStyle(sheet, "A2", "A2", style(14)) // m/d/yy
+	_ = f.SetCellStyle(sheet, "B2", "B2", style(4))  // #,##0.00
+	_ = f.SetCellStyle(sheet, "C2", "C2", style(10)) // 0.00%
+	_ = f.SetCellStyle(sheet, "D2", "D2", style(3))  // #,##0
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+
+	_, rows, err := ParseXLSXRows(buf.Bytes())
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("parse: %v, %d rows", err, len(rows))
+	}
+	cells := rows[0].Cells
+	if cells["revenue"] != "1234.5" {
+		t.Errorf("revenue = %q, want the stored 1234.5", cells["revenue"])
+	}
+	if cells["code"] != "1001" {
+		t.Errorf("code = %q, want the stored 1001", cells["code"])
+	}
+	if cells["share"] != "25.00%" {
+		t.Errorf("share = %q, want its displayed 25.00%%", cells["share"])
+	}
+	if p := cells["period"]; p == "46037" || p == "2026-01-15" {
+		t.Errorf("period = %q, want its displayed text", p)
+	}
+}

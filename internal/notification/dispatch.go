@@ -425,6 +425,16 @@ func (d *Dispatcher) postWebhook(ctx context.Context, settings Settings, m Messa
 // are separate: a crash after claiming costs a delay, never a duplicate
 // storm.
 func (s *Store) claimOutbound(ctx context.Context, limit int) ([]Message, error) {
+	// Mail and posts queued for someone since disabled are not sent: their
+	// rows fail, saying why (Notify queues nothing new for them).
+	if _, err := s.db.Exec(ctx, `
+		UPDATE notification.notification n
+		SET status = 'failed', last_error = 'the recipient''s account is disabled'
+		FROM identity.user u
+		WHERE u.id = n.recipient_user_id AND u.disabled_at IS NOT NULL
+		  AND n.status = 'pending' AND n.channel <> 'in_app'`); err != nil {
+		return nil, fmt.Errorf("drop disabled recipients' notifications: %w", err)
+	}
 	rows, err := s.db.Query(ctx, `
 		WITH due AS (
 		    SELECT id FROM notification.notification

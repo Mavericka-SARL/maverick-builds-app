@@ -181,7 +181,7 @@ test("Create Trigger on a workflow row and in Usage creates the rule in the work
 
   // The editor's Usage panel.
   await page.getByRole("button", { name: manualWf.name, exact: true }).first().click();
-  await page.getByRole("button", { name: /No rule yet/ }).click();
+  await page.getByRole("button", { name: /Started by hand/ }).click();
   await page.getByRole("button", { name: "+ Create Trigger", exact: true }).click();
   await page.getByRole("button", { name: "Create Trigger", exact: true }).click();
   await expect.poll(() => posted).toEqual([OTHER_DRAFT.id, OTHER_DRAFT.id]);

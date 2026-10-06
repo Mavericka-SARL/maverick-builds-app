@@ -4,7 +4,7 @@ import { StatusBadge as UiStatusBadge, useConfirm } from "../../ui";
 import { api } from "../../api/client";
 import type { WorkflowDef, WorkflowStepDef, StepType, WorkflowDefUsage, WorkflowSubjectType } from "../../api/client";
 import { StepTypeIcon, StatusBadge, Modal, Field, IconBtn } from "./WorkflowShared";
-import { STEP_TYPE_LABELS, inputStyle, btnPrimary, btnSecondary } from "./workflowConstants";
+import { STEP_TYPE_LABELS, inputStyle, btnPrimary, btnSecondary, triggerTypeFromWorkflow } from "./workflowConstants";
 import { ProcessCanvas } from "./WorkflowCanvas";
 import { StepPropertiesPanel } from "./StepPropertiesPanel";
 import { WorkflowPropertiesPanel } from "./WorkflowPropertiesPanel";
@@ -77,6 +77,7 @@ export function WorkflowEditor({ defId, applicationId, revisionId, onBack }: Edi
 
   // Initialise draft from server data
   const effective = draft ?? def;
+  const manual = triggerTypeFromWorkflow(effective?.trigger_event ?? "") === "manual";
 
   const setEffective = useCallback((updater: (prev: WorkflowDef) => WorkflowDef) => {
     setDraft(prev => {
@@ -244,14 +245,22 @@ export function WorkflowEditor({ defId, applicationId, revisionId, onBack }: Edi
             track of once you're editing an individual step. */}
         <button
           onClick={() => { setSelectedStepId(null); setPropertiesSection("usage"); }}
-          title={usage.length === 0 ? "No automation rule starts this workflow yet — click to create one" : "View/edit the rules that start this workflow"}
+          title={usage.length === 0
+            ? manual
+              ? "People start this workflow by hand; a rule can also start it — click to create one"
+              : "No automation rule starts this workflow yet — click to create one"
+            : "View/edit the rules that start this workflow"}
           style={{
             display: "flex", alignItems: "center", gap: 6, border: "none", cursor: "pointer",
             background: "transparent", padding: "4px 6px", borderRadius: 6,
           }}
         >
           {usage.length === 0 ? (
-            <UiStatusBadge tone="warning">⚡ No rule yet</UiStatusBadge>
+            // A manual workflow is started by hand and needs no rule: a
+            // warning presented a working setup as a problem.
+            manual
+              ? <UiStatusBadge tone="neutral">Started by hand</UiStatusBadge>
+              : <UiStatusBadge tone="warning">⚡ No rule yet</UiStatusBadge>
           ) : (
             usage.map(u => (
               <UiStatusBadge key={u.rule_id} tone={u.enabled ? "info" : "warning"}>

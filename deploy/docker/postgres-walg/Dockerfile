@@ -8,7 +8,7 @@
 # sidecar's image — deliberately minimal, no unrelated tooling, unlike
 # deploy/docker/pg-backup/ (logical pg_dump/pg_restore backups, a
 # separate, complementary mechanism).
-FROM golang:1.25 AS walg-builder
+FROM golang:1.26 AS walg-builder
 ARG WALG_VERSION=v3.0.8
 RUN git clone --depth 1 --branch ${WALG_VERSION} https://github.com/wal-g/wal-g.git /src
 WORKDIR /src/main/pg
@@ -33,7 +33,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /wal-g .
 # carried, so the binary is the one these scripts were verified against.
 # CGO_ENABLED=0 for the same reason as every other builder stage here: this
 # is glibc, the final image is musl.
-FROM golang:1.25 AS mc
+FROM golang:1.26 AS mc
 ARG MC_VERSION=RELEASE.2025-08-13T08-35-41Z
 RUN git clone --depth 1 --branch ${MC_VERSION} https://github.com/minio/mc.git /src
 WORKDIR /src

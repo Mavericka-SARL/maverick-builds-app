@@ -211,7 +211,7 @@ func TestConfirmStopsAtTheFirstFailingStep(t *testing.T) {
 		b, _ := json.Marshal(s["params"])
 		steps = append(steps, aiassistant.ProposalStep{Tool: s["tool"].(string), Description: s["description"].(string), Params: b})
 	}
-	p, err := f.proposals.CreateProposal(f.ctx, sess.ID, steps)
+	p, err := f.proposals.CreateProposal(f.ctx, sess.ID, steps, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

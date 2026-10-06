@@ -1410,6 +1410,12 @@ func (e *WriteExecutor) addDimensionMember(ctx context.Context, raw json.RawMess
 			// e.g. Cabinet -> Department) are never auto-created: that parent
 			// belongs to a different, presumably already-populated dimension,
 			// so a miss there is a real error, not an ordering gap.
+			// Two new rows, the parent and the member: the plan check above
+			// asked for one, and a dimension one member below its limit
+			// ended one above it.
+			if err := e.checkMembers(ctx, lookupDim, 2); err != nil {
+				return "", "", err
+			}
 			if cerr := e.pool.QueryRow(ctx, `
 				INSERT INTO model.dimension_member (dimension_id, code, label, sort_order)
 				VALUES ($1::uuid, $2, $2, (

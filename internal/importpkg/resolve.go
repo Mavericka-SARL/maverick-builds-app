@@ -11,10 +11,11 @@ package importpkg
 // legacy sentinel columns ("metric_id", "value") are still accepted for
 // backward compatibility with existing raw-UUID imports.
 //
-// Every referenced dimension member is validated as a leaf (no children) —
-// structurally, not by dimension name, so a hierarchy parent (e.g. a year in
-// a months dimension) is rejected for any demo's any dimension with no
-// per-dimension configuration — and every value must be a number. Negative
+// Every referenced dimension member is validated as a leaf (no children in
+// its own dimension) — structurally, not by dimension name, so a hierarchy
+// parent (e.g. a year in a months dimension) is rejected for any demo's any
+// dimension with no per-dimension configuration, while a department its
+// staff point at from another dimension is not a parent — and every value must be a number. Negative
 // values are values (credits, losses, variances), as they are when typed into
 // a cell or pulled by a connector; an import once refused them, a rule from
 // the July 2026 salary demo. ResolveRows returns every row's outcome (staged or errored); the
@@ -148,7 +149,7 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 		}
 		var info memberInfo
 		var hasChildren bool
-		const pick = `SELECT m.id::text, m.code, EXISTS(SELECT 1 FROM model.dimension_member c WHERE c.parent_member_id = m.id),
+		const pick = `SELECT m.id::text, m.code, EXISTS(SELECT 1 FROM model.dimension_member c WHERE c.parent_member_id = m.id AND c.dimension_id = m.dimension_id),
 			       NULLIF(btrim(m.formula),'') IS NOT NULL
 			FROM model.dimension_member m `
 		// A code first; then, only when exactly one member qualifies, the

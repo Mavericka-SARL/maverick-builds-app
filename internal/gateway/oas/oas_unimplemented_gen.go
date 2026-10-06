@@ -1212,6 +1212,18 @@ func (UnimplementedHandler) ImportModel(ctx context.Context, req *ModelImportReq
 	return r, ht.ErrNotImplemented
 }
 
+// ImportParseWorkbook implements importParseWorkbook operation.
+//
+// Read an .xlsx workbook's sheet names and one sheet's header and rows, as POST /api/import/upload
+// reads them (cells as displayed, plain numbers as stored), for the Import wizard to preview and map;
+//
+//	nothing is stored.
+//
+// POST /api/import/parse-workbook
+func (UnimplementedHandler) ImportParseWorkbook(ctx context.Context, req *ImportParseWorkbookReq) (r ImportParseWorkbookRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // ImportSheetFetch implements importSheetFetch operation.
 //
 // Fetch a link-shared Google Sheet as CSV text (server-side — Google's export endpoint sends no
@@ -1219,6 +1231,16 @@ func (UnimplementedHandler) ImportModel(ctx context.Context, req *ModelImportReq
 //
 // POST /api/import/sheets/fetch
 func (UnimplementedHandler) ImportSheetFetch(ctx context.Context, req *ImportSheetFetchReq) (r ImportSheetFetchRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// ImportTemplateWorkbook implements importTemplateWorkbook operation.
+//
+// Write the given rows (a header first, then example rows; at most 100) as a one-sheet .xlsx to
+// download — the business Import widget's template.
+//
+// POST /api/import/template-workbook
+func (UnimplementedHandler) ImportTemplateWorkbook(ctx context.Context, req *ImportTemplateWorkbookReq) (r ImportTemplateWorkbookRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 

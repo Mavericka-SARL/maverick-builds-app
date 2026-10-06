@@ -28,7 +28,7 @@ func TestConfirmProposal_CreateAndUpdateWorkflowDefLandsAfterPromote(t *testing.
 	pStore := aiassistant.NewProposalStore(f.pool)
 	proposal, err := pStore.CreateProposal(ctx, sess.ID, []aiassistant.ProposalStep{
 		{Tool: "create_workflow_def", Description: "Create workflow 'Manager Approval'", Params: createParams},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create proposal: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestConfirmProposal_CreateAndUpdateWorkflowDefLandsAfterPromote(t *testing.
 	})
 	proposal2, err := pStore.CreateProposal(ctx, sess.ID, []aiassistant.ProposalStep{
 		{Tool: "update_workflow_def", Description: "Add approval step", Params: updateParams},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create proposal 2: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestConfirmProposal_UpdateWorkflowDefEditsPreSessionWorkflow(t *testing.T) 
 	pStore := aiassistant.NewProposalStore(f.pool)
 	proposal1, err := pStore.CreateProposal(ctx, sess.ID, []aiassistant.ProposalStep{
 		{Tool: "create_dimension", Description: "Create dimension 'Unrelated'", Params: dimParams},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create proposal 1: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestConfirmProposal_UpdateWorkflowDefEditsPreSessionWorkflow(t *testing.T) 
 	})
 	proposal2, err := pStore.CreateProposal(ctx, sess.ID, []aiassistant.ProposalStep{
 		{Tool: "update_workflow_def", Description: "Update 'Expense Approval' description", Params: updateParams},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create proposal 2: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestConfirmProposal_CreateFormDefLandsAfterPromote(t *testing.T) {
 	pStore := aiassistant.NewProposalStore(f.pool)
 	proposal, err := pStore.CreateProposal(ctx, sess.ID, []aiassistant.ProposalStep{
 		{Tool: "create_form_def", Description: "Create form 'expense_request'", Params: createParams},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create proposal: %v", err)
 	}

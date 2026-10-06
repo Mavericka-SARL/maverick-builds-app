@@ -126,7 +126,7 @@ func (f *promoteFixture) createSessionWithProposal(t *testing.T, ownerID, dimNam
 	pStore := aiassistant.NewProposalStore(f.pool)
 	proposal, err := pStore.CreateProposal(ctx, sess.ID, []aiassistant.ProposalStep{
 		{Tool: "create_dimension", Description: "Create dimension '" + dimName + "'", Params: params},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create proposal: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestPromoteDraftGivesNextProposalAFreshDraft(t *testing.T) {
 	params, _ := json.Marshal(map[string]string{"name": "Second"})
 	proposal2, err := pStore.CreateProposal(context.Background(), sessionID, []aiassistant.ProposalStep{
 		{Tool: "create_dimension", Description: "Create dimension 'Second'", Params: params},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create proposal 2: %v", err)
 	}

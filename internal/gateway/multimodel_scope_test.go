@@ -243,13 +243,17 @@ func TestBusinessAdminWorksInTheSelectedModel(t *testing.T) {
 	const ba = "mm-ba1"
 
 	t.Run("pickers list the selected model, else the default", func(t *testing.T) {
+		// Another tenant's model is refused (404 MODEL_NOT_OPEN): it used to
+		// be replaced by the default without a word.
+		if status, raw := f.do(t, "GET", "/api/business-admin/available?type=dashboards", ba, f.app1, f.modelD, nil); status != http.StatusNotFound || !strings.Contains(string(raw), "MODEL_NOT_OPEN") {
+			t.Errorf("dashboards with another tenant's X-Model-Id: status %d %s, want 404 MODEL_NOT_OPEN", status, raw)
+		}
 		for _, tc := range []struct {
 			kind, model string
 			want        string
 		}{
 			{"dashboards", "", f.dashA},
 			{"dashboards", f.modelB, f.dashB},
-			{"dashboards", f.modelD, f.dashA}, // another tenant's model changes nothing
 			{"dimension_members", "", f.memberA},
 			{"dimension_members", f.modelB, f.memberB},
 			{"metrics", f.modelB, f.metricB},
