@@ -875,6 +875,7 @@ type AiAssistantProposal struct {
 	Status     string             `json:"status"`
 	CreatedAt  time.Time          `json:"created_at"`
 	ExecutedAt pgtype.Timestamptz `json:"executed_at"`
+	Warnings   []string           `json:"warnings"`
 }
 
 type AiAssistantSession struct {
