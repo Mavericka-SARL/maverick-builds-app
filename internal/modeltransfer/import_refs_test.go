@@ -106,7 +106,7 @@ func tenantTarget(t *testing.T, ctx context.Context, pool *pgxpool.Pool, name st
 		}
 		return id
 	}
-	cust := q(`INSERT INTO core.customer (name, plan) VALUES ($1, 'test') RETURNING id::text`, name)
+	cust := q(`INSERT INTO core.customer (name, plan) VALUES ($1, 'community') RETURNING id::text`, name)
 	ws := q(`INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'Default') RETURNING id::text`, cust)
 	app = q(`INSERT INTO core.application (customer_id, workspace_id, name, mode) VALUES ($1::uuid, $2::uuid, $3, 'planning') RETURNING id::text`, cust, ws, name)
 	user = q(`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ($1, $1 || '@import.test', $1, $2::uuid) RETURNING id::text`,

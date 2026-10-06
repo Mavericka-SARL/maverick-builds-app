@@ -44,7 +44,7 @@ func (f fixture) exec(sql string, args ...any) {
 // signed up (and the audit event that says so), and its "Getting started"
 // application, empty unless withApp is false (then there is none).
 func (f fixture) signedUp(name string, withApp bool) (cust, user, app string) {
-	cust = f.one(`INSERT INTO core.customer (name, plan) VALUES ($1, 'test') RETURNING id::text`, name)
+	cust = f.one(`INSERT INTO core.customer (name, plan) VALUES ($1, 'community') RETURNING id::text`, name)
 	ws := f.one(`INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'Default') RETURNING id::text`, cust)
 	user = f.one(`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ($1, $1 || '@example.test', 'Owner', $2::uuid) RETURNING id::text`,
 		"owner-"+strings.ToLower(strings.ReplaceAll(name, " ", "-")), cust)
@@ -225,7 +225,8 @@ func TestSyncLeavesWhatTheTenantChose(t *testing.T) {
 }
 
 // TestSyncRemakesTheApplication: a tenant that deleted its "Getting started"
-// application gets it again, with every starter and the tour as default.
+// application gets it again, with every starter and the landing one (the
+// developer guide) as default.
 func TestSyncRemakesTheApplication(t *testing.T) {
 	ctx := context.Background()
 	f := fixture{t: t, ctx: ctx, pool: testdb.New(t, migrationfs.FS, ".")}
@@ -233,9 +234,9 @@ func TestSyncRemakesTheApplication(t *testing.T) {
 	if got := f.sync(cust, starter.Starters()); len(got) != 4 {
 		t.Fatalf("installed %d, want 4", len(got))
 	}
-	tour := f.one(`SELECT model_id::text FROM core.starter_model WHERE customer_id=$1::uuid AND starter_key=$2`, cust, starter.TourKey)
-	if def := f.one(`SELECT COALESCE(default_model_id::text, '') FROM core.application WHERE customer_id=$1::uuid AND name=$2`, cust, AppName); def != tour {
-		t.Errorf("default model %q, want the tour %s", def, tour)
+	landing := f.one(`SELECT model_id::text FROM core.starter_model WHERE customer_id=$1::uuid AND starter_key=$2`, cust, starter.LandingKey)
+	if def := f.one(`SELECT COALESCE(default_model_id::text, '') FROM core.application WHERE customer_id=$1::uuid AND name=$2`, cust, AppName); def != landing {
+		t.Errorf("default model %q, want the landing model %s", def, landing)
 	}
 }
 

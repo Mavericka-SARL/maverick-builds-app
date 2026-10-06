@@ -17,7 +17,7 @@
 A person connects ChatGPT or Claude to maverickbuilds.app once. The assistant
 can then read the grids of the models they open, as them, and make tables,
 charts, comparisons and reports in the conversation. On the hosted service it
-is available to every workspace, the free Basic workspace included, and to
+is available to every workspace, the free Community plan included, and to
 every person in it: the account menu (top right) → **Connect ChatGPT or
 Claude** shows the connector URL and each host's client ID and secret.
 

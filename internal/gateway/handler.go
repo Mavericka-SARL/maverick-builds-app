@@ -6837,7 +6837,7 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if body.Plan == "" {
-			body.Plan = "standard"
+			body.Plan = "commercial"
 		}
 		var id, wsID string
 		if h.db.Dedicated() {

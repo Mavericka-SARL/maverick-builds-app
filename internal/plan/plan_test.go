@@ -3,6 +3,7 @@ package plan
 import (
 	"context"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -73,24 +74,27 @@ func TestCatalogChecksAndSweep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var test Plan
+	// Three plans since 123, named like the editions.
+	var keys []string
+	var community Plan
 	for _, p := range plans {
-		if p.Key == "trial" {
-			t.Fatalf("the trial plan is gone since 090, but the catalog has %+v", p)
-		}
-		if p.Key == "test" {
-			test = p
+		keys = append(keys, p.Key)
+		if p.Key == "community" {
+			community = p
 		}
 	}
-	// Sign-up offers the basic workspace: no end date, bounded by storage.
-	if test.Key == "" || !test.SelfService || test.Limits.MaxStorageMB != 100 || test.Limits.MaxModels != 0 || !strings.Contains(test.LimitNote, "own infrastructure") {
-		t.Fatalf("seeded test-workspace plan = %+v", test)
+	if !slices.Equal(keys, []string{"community", "commercial", "enterprise"}) {
+		t.Fatalf("plan catalog = %v, want community, commercial, enterprise", keys)
 	}
-	// 096 renamed the seeded wording; the key stays "test".
-	if test.Name != "Basic workspace" || !strings.HasPrefix(test.LimitNote, "A basic workspace holds") || !strings.HasPrefix(test.Description, "Use the platform") {
-		t.Fatalf("sign-up plan wording = %q / %q / %q", test.Name, test.Description, test.LimitNote)
+	// Sign-up offers Community: no end date, and 100 MB of data is its only
+	// limit (123 dropped the AI-message and integration-run ones).
+	if !community.SelfService || community.Limits != (Limits{MaxStorageMB: 100}) || !strings.Contains(community.LimitNote, "own infrastructure") {
+		t.Fatalf("seeded community plan = %+v", community)
 	}
-	if ss, ok, err := SelfService(ctx, pool); err != nil || !ok || ss.Key != "test" {
+	if community.Name != "Community" || !strings.HasPrefix(community.LimitNote, "A Community workspace holds") || !strings.HasPrefix(community.Description, "Use the platform") {
+		t.Fatalf("sign-up plan wording = %q / %q / %q", community.Name, community.Description, community.LimitNote)
+	}
+	if ss, ok, err := SelfService(ctx, pool); err != nil || !ok || ss.Key != "community" {
 		t.Fatalf("self-service plan = %+v ok=%v err=%v", ss, ok, err)
 	}
 	if _, err := Get(ctx, pool, "nope"); !errors.Is(err, ErrUnknownPlan) {

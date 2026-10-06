@@ -114,7 +114,7 @@ func runChecks(ctx context.Context, pool *pgxpool.Pool, ports map[string]int) []
 	tc := tenantv1.NewTenantServiceClient(tconn)
 
 	since := time.Now()
-	cust, err := tc.CreateCustomer(ctx, &tenantv1.CreateCustomerRequest{Name: "verify-topology", Plan: "test"})
+	cust, err := tc.CreateCustomer(ctx, &tenantv1.CreateCustomerRequest{Name: "verify-topology", Plan: "community"})
 	results = append(results, check("tenant", "tenant.create_customer", "admin", ctx, pool, since, err))
 	if err != nil {
 		fatalf("tenant.CreateCustomer: %v (cannot continue — every later check depends on this chain)", err)

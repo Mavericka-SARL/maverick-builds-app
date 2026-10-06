@@ -83,7 +83,7 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 		t.Fatalf("options: %d %v", code, opts)
 	}
 	// What sign-up offers is the basic workspace: no trial, 100 MB of storage.
-	if p, _ := opts["plan"].(map[string]any); p["key"] != "test" || p["limits"].(map[string]any)["max_storage_mb"] != float64(100) {
+	if p, _ := opts["plan"].(map[string]any); p["key"] != "community" || p["limits"].(map[string]any)["max_storage_mb"] != float64(100) {
 		t.Fatalf("options plan: %v", opts["plan"])
 	}
 
@@ -93,13 +93,14 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 	}
 	// 2nd: success.
 	code, out := callJSON(t, srv, "", http.MethodPost, "/api/signup", map[string]any{"company": "Acme Test", "first_name": "Ann", "last_name": "Lee", "email": "Ann@Acme.test"})
-	if code != 200 || out["status"] != "created" || out["plan"] != "test" || out["dev_persona"] != "signup-ann@acme.test" {
+	if code != 200 || out["status"] != "created" || out["plan"] != "community" || out["dev_persona"] != "signup-ann@acme.test" {
 		t.Fatalf("signup: %d %v", code, out)
 	}
 	if _, has := out["trial_ends_at"]; has {
 		t.Fatalf("a basic workspace has no trial end: %v", out)
 	}
-	tenantID, modelID := out["tenant_id"].(string), out["model_id"].(string)
+	// model_id is the model the tenant lands on: the starter.LandingKey one.
+	tenantID, landingID := out["tenant_id"].(string), out["model_id"].(string)
 
 	// The new person sees their plan, their roles and their application.
 	code, me := callJSON(t, srv, "signup-ann@acme.test", http.MethodGet, "/api/me", nil)
@@ -111,21 +112,31 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 		t.Fatalf("roles = %v", roles)
 	}
 	st, _ := me["plan"].(map[string]any)
-	if _, has := st["trial"]; has || st["read_only"] != false || st["plan"].(map[string]any)["key"] != "test" {
+	if _, has := st["trial"]; has || st["read_only"] != false || st["plan"].(map[string]any)["key"] != "community" {
 		t.Fatalf("me.plan = %v", st)
 	}
 	code, apps := callJSONList(t, srv, "signup-ann@acme.test", "/api/apps")
 	if code != 200 || len(apps) != 1 || apps[0]["name"] != signupAppName {
 		t.Fatalf("apps: %d %v", code, apps)
 	}
-	// Every starter package is a model of that one application: the tour
-	// first — it is the application's default, so the model switcher lists
-	// it first and the application card names it — then the guides.
-	// Expectations come from starter.Packages() itself, so the guides'
-	// contents can change without this test knowing them.
+	// Every starter package is a model of that one application. The one a
+	// new tenant lands on (starter.LandingKey, the developer guide) is the
+	// application's default, so the model switcher lists it first and the
+	// application card names it. Expectations come from starter.Starters()
+	// itself, so the guides' contents can change without this test knowing
+	// them.
 	pkgs := starter.Packages()
+	var landingPkg, tourPkg modeltransfer.Package
+	for _, st := range starter.Starters() {
+		switch st.Key {
+		case starter.LandingKey:
+			landingPkg = st.Package
+		case starter.TourKey:
+			tourPkg = st.Package
+		}
+	}
 	appModels, _ := apps[0]["models"].([]any)
-	if len(appModels) != len(pkgs) || apps[0]["model_name"] != pkgs[0].ModelName {
+	if len(appModels) != len(pkgs) || apps[0]["model_name"] != landingPkg.ModelName {
 		t.Fatalf("app models: %d of %d, card names %v: %v", len(appModels), len(pkgs), apps[0]["model_name"], appModels)
 	}
 	modelIDByName := make(map[string]string, len(appModels))
@@ -138,23 +149,26 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 			t.Fatalf("model %d (%s) is_default = %v, want %v", i, name, m["is_default"], wantDefault)
 		}
 	}
-	if first, _ := appModels[0].(map[string]any); first["id"] != modelID || first["name"] != pkgs[0].ModelName {
-		t.Fatalf("first model = %v, want the tour %s (%s)", first, pkgs[0].ModelName, modelID)
+	if first, _ := appModels[0].(map[string]any); first["id"] != landingID || first["name"] != landingPkg.ModelName {
+		t.Fatalf("first model = %v, want the landing model %s (%s)", first, landingPkg.ModelName, landingID)
 	}
+	// guideIDs: every other starter, in starter.Starters order (the tour
+	// among them), as the sign-up's audit record lists them.
 	guideIDs := make([]string, 0, len(pkgs)-1)
-	for i, p := range pkgs {
+	for _, p := range pkgs {
 		id := modelIDByName[p.ModelName]
 		if id == "" {
 			t.Fatalf("package %q has no model (models: %v)", p.ModelName, modelIDByName)
 		}
-		if i > 0 {
+		if p.ModelName != landingPkg.ModelName {
 			guideIDs = append(guideIDs, id)
 		}
 	}
+	tourID := modelIDByName[tourPkg.ModelName]
 	var defaultModel string
 	_ = pool.QueryRow(ctx, `SELECT COALESCE(default_model_id::text,'') FROM core.application WHERE id=$1::uuid`, appID(apps)).Scan(&defaultModel)
-	if defaultModel != modelID {
-		t.Fatalf("application default model = %q, want the tour %s", defaultModel, modelID)
+	if defaultModel != landingID {
+		t.Fatalf("application default model = %q, want the landing model %s", defaultModel, landingID)
 	}
 	// The account is its tenant's developer, not a platform-level one: with
 	// another tenant's larger model in the database, the console's first
@@ -171,31 +185,32 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 	// With no application chosen yet the resolution picks among the
 	// tenant's own models only, never the other tenant's larger one. The
 	// console then chooses the application (AppPicker) and every request
-	// carries it: that is where the default decides, and it is the tour.
+	// carries it: that is where the default decides, and it is the landing
+	// model.
 	code, demo := callJSON(t, srv, "signup-ann@acme.test", http.MethodGet, "/api/demo", nil)
 	resolved, _ := demo["model_id"].(string)
-	if ownModel := resolved == modelID || slices.Contains(guideIDs, resolved); code != 200 || !ownModel || demo["revision"] != starter.RevisionName {
+	if ownModel := resolved == landingID || slices.Contains(guideIDs, resolved); code != 200 || !ownModel || demo["revision"] != starter.RevisionName {
 		t.Fatalf("first screen resolved model %v (%v), want one of the tenant's own models", demo["model_id"], demo["revision"])
 	}
 	code, demo = callJSON(t, srv, "signup-ann@acme.test", http.MethodGet, "/api/demo", nil, "X-App-Id", appID(apps))
-	if code != 200 || demo["model_id"] != modelID || demo["revision"] != starter.RevisionName {
-		t.Fatalf("application's model resolved %v (%v), want the tour %s", demo["model_id"], demo["revision"], modelID)
+	if code != 200 || demo["model_id"] != landingID || demo["revision"] != starter.RevisionName {
+		t.Fatalf("application's model resolved %v (%v), want the landing model %s", demo["model_id"], demo["revision"], landingID)
 	}
 	code, tenantsSeen := callJSONList(t, srv, "signup-ann@acme.test", "/api/admin/tenants")
 	if code != 200 || len(tenantsSeen) != 1 || tenantsSeen[0]["id"] != tenantID {
 		t.Fatalf("tenant list for the new account: %d %v", code, tenantsSeen)
 	}
 	code, dashboards := callJSONList(t, srv, "signup-ann@acme.test", "/api/developer/dashboards", "X-App-Id", appID(apps))
-	if code != 200 || len(dashboards) != len(starter.Package().Dashboards) || dashboards[0]["name"] != starter.DashboardName {
+	if code != 200 || len(dashboards) != len(landingPkg.Dashboards) || dashboards[0]["name"] != landingPkg.Dashboards[0].Name {
 		names := make([]any, 0, len(dashboards))
 		for _, d := range dashboards {
 			names = append(names, d["name"])
 		}
 		t.Fatalf("developer dashboards: %d %v", code, names)
 	}
-	// Each guide is what the developer and the business consoles show when
+	// Each starter is what the developer and the business consoles show when
 	// the model switcher names it: all of its dashboards, and only its own.
-	for _, p := range pkgs[1:] {
+	for _, p := range pkgs {
 		want := make([]string, 0, len(p.Dashboards))
 		for _, d := range p.Dashboards {
 			want = append(want, d.Name)
@@ -235,35 +250,34 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 		}
 	}
 	var metrics, members, facts, calc, audit int
-	_ = pool.QueryRow(ctx, `SELECT count(*) FROM model.metric_def WHERE model_id=$1::uuid`, modelID).Scan(&metrics)
-	_ = pool.QueryRow(ctx, `SELECT count(*) FROM model.dimension_member m JOIN model.dimension_def d ON d.id=m.dimension_id WHERE d.model_id=$1::uuid`, modelID).Scan(&members)
-	_ = pool.QueryRow(ctx, `SELECT count(*) FROM runtime.fact_input WHERE model_id=$1::uuid`, modelID).Scan(&facts)
-	_ = pool.QueryRow(ctx, `SELECT count(*) FROM runtime.calc_result WHERE model_id=$1::uuid`, modelID).Scan(&calc)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM model.metric_def WHERE model_id=$1::uuid`, tourID).Scan(&metrics)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM model.dimension_member m JOIN model.dimension_def d ON d.id=m.dimension_id WHERE d.model_id=$1::uuid`, tourID).Scan(&members)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM runtime.fact_input WHERE model_id=$1::uuid`, tourID).Scan(&facts)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM runtime.calc_result WHERE model_id=$1::uuid`, tourID).Scan(&calc)
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit.audit_event WHERE event_type='tenant.signed_up' AND resource_id=$1`, tenantID).Scan(&audit)
 	if metrics != 3 || members != 8 || facts != 16 || calc == 0 || audit != 1 {
 		t.Fatalf("starter model: metrics=%d members=%d facts=%d calc=%d audit=%d", metrics, members, facts, calc, audit)
 	}
-	// The sign-up's audit record names the tour as its model and lists the
-	// guides beside it.
+	// The sign-up's audit record names the landing model as its model and
+	// lists the other starters beside it.
 	var auditModel, auditGuides string
 	if err := pool.QueryRow(ctx, `SELECT metadata->>'model_id', COALESCE(metadata->>'guide_model_ids','') FROM audit.audit_event
 		WHERE event_type='tenant.signed_up' AND resource_id=$1`, tenantID).Scan(&auditModel, &auditGuides); err != nil {
 		t.Fatal(err)
 	}
-	if auditModel != modelID || auditGuides != strings.Join(guideIDs, ",") {
-		t.Fatalf("audit metadata: model_id=%q guide_model_ids=%q, want %q and %q", auditModel, auditGuides, modelID, strings.Join(guideIDs, ","))
+	if auditModel != landingID || auditGuides != strings.Join(guideIDs, ",") {
+		t.Fatalf("audit metadata: model_id=%q guide_model_ids=%q, want %q and %q", auditModel, auditGuides, landingID, strings.Join(guideIDs, ","))
 	}
 	// Each starter is recorded with the content it was imported with, so a
 	// later change reaches this tenant as a new revision (startersync).
-	wantModels := append([]string{modelID}, guideIDs...)
-	for i, st := range starter.Starters() {
+	for _, st := range starter.Starters() {
 		var recModel, recHash string
 		if err := pool.QueryRow(ctx, `SELECT model_id::text, content_hash FROM core.starter_model WHERE customer_id=$1::uuid AND starter_key=$2`,
 			tenantID, st.Key).Scan(&recModel, &recHash); err != nil {
 			t.Fatalf("starter record %s: %v", st.Key, err)
 		}
-		if recModel != wantModels[i] || recHash != startersync.Hash(st.Package) {
-			t.Errorf("starter record %s: model %s hash %s…, want model %s and the current content", st.Key, recModel, recHash[:8], wantModels[i])
+		if want := modelIDByName[st.Package.ModelName]; recModel != want || recHash != startersync.Hash(st.Package) {
+			t.Errorf("starter record %s: model %s hash %s…, want model %s and the current content", st.Key, recModel, recHash[:8], want)
 		}
 	}
 	// The tour's calculated metric is worked out from its own figures, not
@@ -271,7 +285,7 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 	var cost float64
 	if err := pool.QueryRow(ctx, `SELECT cr.value FROM runtime.calc_result cr JOIN model.metric_def m ON m.id=cr.metric_id
 		WHERE cr.model_id=$1::uuid AND m.name='cost' AND cr.dim_members->>(SELECT id::text FROM model.dimension_def WHERE model_id=$1::uuid AND name='team')='SALES'
-		  AND cr.dim_members->>(SELECT id::text FROM model.dimension_def WHERE model_id=$1::uuid AND name='quarter')='Q1' LIMIT 1`, modelID).Scan(&cost); err != nil {
+		  AND cr.dim_members->>(SELECT id::text FROM model.dimension_def WHERE model_id=$1::uuid AND name='quarter')='Q1' LIMIT 1`, tourID).Scan(&cost); err != nil {
 		t.Fatalf("cost cell: %v", err)
 	}
 	if cost != 48000 { // 4 people at 12,000
@@ -283,8 +297,8 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 	// package; the figures are the tour's own. Total cost for the year is
 	// Sales 4+4+5+5 at 12,000 plus Engineering 6+6+7+8 at 15,000 = 621,000;
 	// headcount at the end of Q4 is 5 + 8 = 13.
-	tour := pkgs[0]
-	tourRevID := q(`SELECT active_revision_id::text FROM core.model WHERE id=$1::uuid`, modelID)
+	tour := tourPkg
+	tourRevID := q(`SELECT active_revision_id::text FROM core.model WHERE id=$1::uuid`, tourID)
 	// The package names things by placeholder id; the database by its own.
 	tourIDs, byName := map[string]string{}, map[string]string{}
 	metricNames := map[string]string{}
@@ -371,7 +385,7 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 		if tn["id"] == tenantID {
 			found = true
 			ps, _ := tn["plan_state"].(map[string]any)
-			if tn["plan"] != "test" || ps["limit_state"] != "ok" {
+			if tn["plan"] != "community" || ps["limit_state"] != "ok" {
 				t.Fatalf("tenant listing: %v", tn)
 			}
 		}
@@ -400,9 +414,9 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 	}
 	// Business Admin › Access Rules offers the dashboards of the model the
 	// admin has open: the switcher's choice, else the default.
-	for i, p := range pkgs {
+	for _, p := range pkgs {
 		headers := []string{"X-App-Id", tourApp}
-		if i > 0 {
+		if p.ModelName != landingPkg.ModelName {
 			headers = append(headers, "X-Model-Id", modelIDByName[p.ModelName])
 		}
 		want := make([]string, 0, len(p.Dashboards))
@@ -423,31 +437,32 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 	}
 	// With no application chosen yet, the application and the model resolve
 	// alike. A second application of the tenant, larger than any starter
-	// model, loses to the tour for both, so an automation-rules request that
-	// names the tour's revision is not refused as another application's.
+	// model, loses to the landing model for both, so an automation-rules
+	// request that names its revision is not refused as another
+	// application's.
 	tourWs := q(`SELECT workspace_id::text FROM core.application WHERE id=$1::uuid`, tourApp)
-	tourRev := q(`SELECT active_revision_id::text FROM core.model WHERE id=$1::uuid`, modelID)
+	landingRev := q(`SELECT active_revision_id::text FROM core.model WHERE id=$1::uuid`, landingID)
 	bigApp := q(`INSERT INTO core.application (customer_id, workspace_id, name, mode) VALUES ($1::uuid, $2::uuid, 'Larger', 'planning') RETURNING id::text`, tenantID, tourWs)
 	bigModel := q(`INSERT INTO core.model (application_id, name) VALUES ($1::uuid, 'Larger') RETURNING id::text`, bigApp)
 	bigRev := q(`INSERT INTO model.revision (model_id, name) VALUES ($1::uuid, 'Working') RETURNING id::text`, bigModel)
 	for i := 0; i < 12; i++ {
 		q(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input, agg_rule) VALUES ($1::uuid, $2::uuid, $3, true, 'sum') RETURNING id::text`, bigModel, bigRev, "m"+strconv.Itoa(i))
 	}
-	if code, demo := callJSON(t, srv, persona, http.MethodGet, "/api/demo", nil); code != 200 || demo["model_id"] != modelID {
-		t.Fatalf("no application chosen, beside a larger one: resolved %v, want the tour %s", demo["model_id"], modelID)
+	if code, demo := callJSON(t, srv, persona, http.MethodGet, "/api/demo", nil); code != 200 || demo["model_id"] != landingID {
+		t.Fatalf("no application chosen, beside a larger one: resolved %v, want the landing model %s", demo["model_id"], landingID)
 	}
-	if code, _ := callJSONList(t, srv, persona, "/api/automation/rules?revision_id="+tourRev); code != 200 {
-		t.Fatalf("automation rules on the tour's revision, no application chosen: %d", code)
+	if code, _ := callJSONList(t, srv, persona, "/api/automation/rules?revision_id="+landingRev); code != 200 {
+		t.Fatalf("automation rules on the landing model's revision, no application chosen: %d", code)
 	}
 	if _, err := pool.Exec(ctx, `DELETE FROM core.application WHERE id=$1::uuid`, bigApp); err != nil {
 		t.Fatal(err)
 	}
 
 	// The default stays an ordinary setting: Build › Models › "Set as
-	// business default" moves it to a guide (the same statement sign-up
-	// ran), and back.
+	// business default" moves it to another starter (the same statement
+	// sign-up ran), and back.
 	if len(guideIDs) > 0 {
-		for _, target := range []string{guideIDs[0], modelID} {
+		for _, target := range []string{guideIDs[0], landingID} {
 			if code, body := callJSON(t, srv, "signup-ann@acme.test", http.MethodPost, "/api/developer/models/"+target+"/set-default", nil); code != 200 {
 				t.Fatalf("set default to %s: %d %v", target, code, body)
 			}
@@ -461,22 +476,24 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 		}
 	}
 
-	// The tour ends by suggesting its model be deleted. The default then
-	// clears, and models created in one transaction tie on created_at: the
-	// listing and the resolution must still come out the same every time —
-	// by name — and no model may drop out of the switcher.
-	if code, body := callJSON(t, srv, "signup-ann@acme.test", http.MethodDelete, "/api/admin/models/"+modelID, nil); code != 200 {
-		t.Fatalf("delete the tour: %d %v", code, body)
+	// Each guide ends by saying it can be deleted. Deleting the default one
+	// clears the default, and models created in one transaction tie on
+	// created_at: the listing and the resolution must still come out the
+	// same every time — by name — and no model may drop out of the switcher.
+	if code, body := callJSON(t, srv, "signup-ann@acme.test", http.MethodDelete, "/api/admin/models/"+landingID, nil); code != 200 {
+		t.Fatalf("delete the landing model: %d %v", code, body)
 	}
 	guideNames := make([]string, 0, len(pkgs)-1)
-	for _, p := range pkgs[1:] {
-		guideNames = append(guideNames, p.ModelName)
+	for _, p := range pkgs {
+		if p.ModelName != landingPkg.ModelName {
+			guideNames = append(guideNames, p.ModelName)
+		}
 	}
 	slices.Sort(guideNames)
 	for attempt := 0; attempt < 3; attempt++ {
 		code, apps := callJSONList(t, srv, "signup-ann@acme.test", "/api/apps")
 		if code != 200 || len(apps) != 1 {
-			t.Fatalf("apps after deleting the tour: %d %v", code, apps)
+			t.Fatalf("apps after deleting the landing model: %d %v", code, apps)
 		}
 		listed, _ := apps[0]["models"].([]any)
 		names := make([]string, 0, len(listed))
@@ -489,7 +506,7 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 			}
 		}
 		if !slices.Equal(names, guideNames) {
-			t.Fatalf("models after deleting the tour: %v, want %v", names, guideNames)
+			t.Fatalf("models after deleting the landing model: %v, want %v", names, guideNames)
 		}
 		if len(guideNames) == 0 {
 			break

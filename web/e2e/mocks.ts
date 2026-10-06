@@ -330,9 +330,9 @@ const smallLimits = { ...noLimits, max_users: 5, max_applications: 2, max_models
 
 /** GET /api/admin/plans as the seeded catalog answers it. */
 export const adminPlans = [
-  { key: "test", name: "Basic workspace", description: "Use the platform for as long as you like, with up to 100 MB of data.", self_service: true, limits: testLimits, limit_note: testNote, sort_order: 5, updated_at: "2026-09-19T00:00:00Z" },
+  { key: "community", name: "Community", description: "Use the platform for as long as you like, with up to 100 MB of data.", self_service: true, limits: testLimits, limit_note: testNote, sort_order: 5, updated_at: "2026-09-19T00:00:00Z" },
   { key: "small", name: "Small", description: "A handful of everything.", self_service: false, limits: smallLimits, limit_note: "", sort_order: 10, updated_at: "2026-09-17T00:00:00Z" },
-  { key: "starter", name: "Starter", description: "", self_service: false, limits: noLimits, limit_note: "", sort_order: 20, updated_at: "2026-09-17T00:00:00Z" },
+  { key: "commercial", name: "Commercial", description: "", self_service: false, limits: noLimits, limit_note: "", sort_order: 20, updated_at: "2026-09-17T00:00:00Z" },
   { key: "enterprise", name: "Enterprise", description: "No limits.", self_service: false, limits: noLimits, limit_note: "", sort_order: 40, updated_at: "2026-09-17T00:00:00Z" },
 ];
 
@@ -364,14 +364,14 @@ export const legalUnpublished = {
 /** GET /api/signup/options with sign-up open: the basic workspace, as seeded. */
 export const signupOptions = {
   enabled: true, contact_url: "https://example.test/pricing",
-  plan: { key: "test", name: "Basic workspace", description: "Use the platform for as long as you like, with up to 100 MB of data.", limits: testLimits, limit_note: testNote },
+  plan: { key: "community", name: "Community", description: "Use the platform for as long as you like, with up to 100 MB of data.", limits: testLimits, limit_note: testNote },
 };
 
 /** A test-workspace tenant that has filled its 100 MB. */
 export function overStoragePlanState() {
   return {
     plan: adminPlans[0], plan_known: true, read_only: true, code: "over_limit", limit_state: "over",
-    reason: `This tenant is over its plan's limits (The Basic workspace plan allows 100 MB of storage; this tenant uses 104 MB. ${testNote}). The workspace is read-only, except for deleting, until it is back within them.`,
+    reason: `This tenant is over its plan's limits (The Community plan allows 100 MB of storage; this tenant uses 104 MB. ${testNote}). The workspace is read-only, except for deleting, until it is back within them.`,
   };
 }
 
@@ -473,7 +473,7 @@ export async function mockApi(page: Page, overrides: { license?: unknown; tenant
     }
     if (method === "POST" && path === "/api/signup") {
       const body = route.request().postDataJSON() as { email: string };
-      return ok({ status: "invited", invited: true, email: body.email, tenant_id: "t-new", application_id: "app-new", model_id: "model-new", plan: "test" });
+      return ok({ status: "invited", invited: true, email: body.email, tenant_id: "t-new", application_id: "app-new", model_id: "model-new", plan: "community" });
     }
     if (method === "PUT" && path.startsWith("/api/admin/plans/")) {
       return ok({ key: path.split("/").pop(), updated_at: "2026-09-17T00:00:00Z", ...(route.request().postDataJSON() as object) });
@@ -484,7 +484,7 @@ export async function mockApi(page: Page, overrides: { license?: unknown; tenant
     if (path === "/api/admin/usage") return ok({ period_days: 30, since: "2026-08-17T00:00:00Z", tenants: [
       { customer_id: "t-1", name: "Acme Corp", plan: "enterprise", created_at: "2026-01-01T00:00:00Z", users: 12, active_users: 7, applications: 2, models: 3, revisions: 9,
         fact_rows: 10119, calc_rows: 31168, form_records: 10, object_bytes: 0, db_bytes: 41943040, integration_runs: 4, workflow_instances: 94, ai_messages: 0, audit_events: 2975, last_activity_at: "2026-09-16T20:00:00Z" },
-      { customer_id: "t-2", name: "Meridian Industries", plan: "starter", created_at: "2026-03-01T00:00:00Z", users: 3, active_users: 0, applications: 1, models: 1, revisions: 1,
+      { customer_id: "t-2", name: "Meridian Industries", plan: "commercial", created_at: "2026-03-01T00:00:00Z", users: 3, active_users: 0, applications: 1, models: 1, revisions: 1,
         fact_rows: 0, calc_rows: 0, form_records: 0, object_bytes: 0, db_bytes: 0, integration_runs: 0, workflow_instances: 0, ai_messages: 0, audit_events: 0 },
     ] });
     if (path === "/api/admin/sso") return ok(overrides.sso ?? ssoSettings);

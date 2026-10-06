@@ -37,7 +37,7 @@ func TestPlanGuardAndLimits(t *testing.T) {
 		}
 	}
 	// Tenant A: the last sweep found it over its plan. Tenant B: starter, unlimited.
-	custA := q(`INSERT INTO core.customer (name, plan, limit_state, limit_reason) VALUES ('Over Co', 'test', 'over', 'storage 120 MB of 100') RETURNING id::text`)
+	custA := q(`INSERT INTO core.customer (name, plan, limit_state, limit_reason) VALUES ('Over Co', 'community', 'over', 'storage 120 MB of 100') RETURNING id::text`)
 	wsA := q(`INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'Default') RETURNING id::text`, custA)
 	adminA := q(`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ('guard-a', 'a@ended.test', 'A', $1::uuid) RETURNING id::text`, custA)
 	exec(`INSERT INTO identity.role_assignment (user_id, role) VALUES ($1::uuid, 'tenant_admin'), ($1::uuid, 'developer')`, adminA)
@@ -78,16 +78,16 @@ func TestPlanGuardAndLimits(t *testing.T) {
 	})
 
 	t.Run("only the platform admin changes a plan; the next sweep judges the tenant by it", func(t *testing.T) {
-		if code, _ := callJSON(t, srv, "guard-a", http.MethodPatch, "/api/admin/tenants/"+custA, map[string]any{"plan": "standard"}); code != 402 {
+		if code, _ := callJSON(t, srv, "guard-a", http.MethodPatch, "/api/admin/tenants/"+custA, map[string]any{"plan": "commercial"}); code != 402 {
 			// The guard refuses before the handler's own 403: the tenant is read-only.
 			t.Fatalf("tenant admin lifting own limits: %d", code)
 		}
-		if code, body := callJSON(t, srv, "guard-padmin", http.MethodPatch, "/api/admin/tenants/"+custA, map[string]any{"plan": "standard"}, tenantHeader, custA); code != 200 {
+		if code, body := callJSON(t, srv, "guard-padmin", http.MethodPatch, "/api/admin/tenants/"+custA, map[string]any{"plan": "commercial"}, tenantHeader, custA); code != 200 {
 			t.Fatalf("plan change: %d %v", code, body)
 		}
 		_, me := callJSON(t, srv, "guard-a", http.MethodGet, "/api/me", nil)
 		st, _ := me["plan"].(map[string]any)
-		if st["plan"].(map[string]any)["key"] != "standard" {
+		if st["plan"].(map[string]any)["key"] != "commercial" {
 			t.Fatalf("me after plan change: %v", st)
 		}
 		// The unlimited plan has nothing to be over: the sweep clears the
@@ -105,7 +105,7 @@ func TestPlanGuardAndLimits(t *testing.T) {
 
 	t.Run("the catalog: read by admins, written by the platform admin, validated", func(t *testing.T) {
 		code, plans := callJSONList(t, srv, "guard-b", "/api/admin/plans")
-		if code != 200 || len(plans) < 4 || plans[0]["key"] != "test" {
+		if code != 200 || len(plans) < 3 || plans[0]["key"] != "community" {
 			t.Fatalf("list: %d %v", code, plans)
 		}
 		if code, _ := callJSON(t, srv, "guard-b", http.MethodPut, "/api/admin/plans/starter", map[string]any{"name": "Starter"}); code != 403 {

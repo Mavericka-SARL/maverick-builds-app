@@ -18,7 +18,7 @@ func TestTenantAdminSeesStorageSpace(t *testing.T) {
 	ann := call{persona: "kc-ann"}
 
 	// The hosted plan: 100 MB, set the way the platform admin sets it.
-	if code, body := do(t, f.srv, f.pa, http.MethodPatch, "/api/admin/tenants/"+acme, map[string]string{"plan": "test"}); code != http.StatusOK {
+	if code, body := do(t, f.srv, f.pa, http.MethodPatch, "/api/admin/tenants/"+acme, map[string]string{"plan": "community"}); code != http.StatusOK {
 		t.Fatalf("move Acme to the test plan: %d %s", code, body)
 	}
 

@@ -194,7 +194,9 @@ func devFirstModelPage() modeltransfer.Dashboard {
 
 This guide is for the person who builds models. This page goes from nothing to a model people can type numbers into, in eight steps; the pages after it explain each step in depth.
 
-The guide is a model too, *Developer guide*, with a small example — two products over four quarters — that page 4 uses. Open it in the Build screens and change it as much as you like, in a revision of your own.`, 164),
+The guide is a model too, *Developer guide*, with a small example — two products over four quarters — that page 4 uses. Open it in the Build screens and change it as much as you like, in a revision of your own.
+
+Not building models? Start with the tour instead: pick *Learn the platform* in the **Model** list at the top of this page.`, 196),
 
 		devPicture(devFirstModel(), "A tenant admin creates the application and the model; you add a revision, dimensions and metrics, a grid and a dashboard, then press Set active", 860, 190),
 

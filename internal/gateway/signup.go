@@ -19,8 +19,9 @@ import (
 
 // Self-service sign-up: a visitor with a company name and a work address
 // gets a tenant on the self-service plan, an application holding the
-// starter models (starter.Packages: the "Learn the platform" tour, which is
-// the application's default, and one guide per role), and an invitation to
+// starter models (starter.Packages: the "Learn the platform" tour and one
+// guide per role — the developer guide, starter.LandingKey, is the
+// application's default and what they first see), and an invitation to
 // set their password. They arrive as the tenant's administrator, developer
 // and business administrator, which is everything a trial needs to be
 // evaluated by one person.
@@ -205,9 +206,10 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 
 	// 3. The person, the application and the starter models, in one
 	//    transaction on the tenant's database: all of them or none.
-	type imported struct{ modelID, revisionID string }
+	type imported struct{ key, modelID, revisionID string }
 	var userID, appID string
-	var models []imported // starter.Starters order: the tour first
+	var models []imported // starter.Starters order
+	landing := -1         // the one sign-up makes the default: starter.LandingKey
 	err = pgx.BeginFunc(tctx, h.db.For(tctx), func(tx pgx.Tx) error {
 		if err := tx.QueryRow(tctx, `
 			INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id)
@@ -239,16 +241,19 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 			if err := startersync.Record(tctx, tx, customerID, s.Key, mID, rID, startersync.Hash(s.Package)); err != nil {
 				return fmt.Errorf("record starter model %q: %w", s.Package.ModelName, err)
 			}
-			models = append(models, imported{mID, rID})
+			if s.Key == starter.LandingKey {
+				landing = len(models)
+			}
+			models = append(models, imported{s.Key, mID, rID})
 		}
-		if len(models) == 0 {
-			return fmt.Errorf("no starter models to import")
+		if landing < 0 {
+			return fmt.Errorf("no starter %q to land on", starter.LandingKey)
 		}
 		// They share one created_at (the transaction's), so "newest
-		// model" cannot pick the one to land on: name the tour as the
+		// model" cannot pick the one to land on: name it as the
 		// application's default, the same setting a developer changes later
 		// under Build › Models.
-		if _, err := setApplicationDefaultModel(tctx, tx, models[0].modelID); err != nil {
+		if _, err := setApplicationDefaultModel(tctx, tx, models[landing].modelID); err != nil {
 			return fmt.Errorf("set default model: %w", err)
 		}
 		return nil
@@ -257,10 +262,14 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 		fail(http.StatusInternalServerError, err)
 		return
 	}
-	modelID := models[0].modelID
+	// model_id is the model the tenant lands on; guide_model_ids the other
+	// starters, in starter.Starters order.
+	modelID := models[landing].modelID
 	guideIDs := make([]string, 0, len(models)-1)
-	for _, m := range models[1:] {
-		guideIDs = append(guideIDs, m.modelID)
+	for i, m := range models {
+		if i != landing {
+			guideIDs = append(guideIDs, m.modelID)
+		}
 	}
 	h.noteUser(tctx, sub, req.Email)
 	h.noteApplication(tctx, appID)

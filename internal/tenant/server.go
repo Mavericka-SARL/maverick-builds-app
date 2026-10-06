@@ -28,7 +28,7 @@ func (s *Server) CreateCustomer(ctx context.Context, req *tenantv1.CreateCustome
 	}
 	plan := req.Plan
 	if plan == "" {
-		plan = "starter"
+		plan = "commercial"
 	}
 	c, err := s.store.CreateCustomer(ctx, req.Name, plan)
 	if err != nil {

@@ -52,7 +52,7 @@ func TestPackagesImportWhole(t *testing.T) {
 		}
 		return id
 	}
-	cust := q(`INSERT INTO core.customer (name, plan) VALUES ('Starter Co', 'test') RETURNING id::text`)
+	cust := q(`INSERT INTO core.customer (name, plan) VALUES ('Starter Co', 'community') RETURNING id::text`)
 	ws := q(`INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'Default') RETURNING id::text`, cust)
 	app := q(`INSERT INTO core.application (customer_id, workspace_id, name, mode) VALUES ($1::uuid, $2::uuid, 'Getting started', 'planning') RETURNING id::text`, cust, ws)
 	user := q(`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ('starter-dev', 'dev@starter.test', 'Dev', $1::uuid) RETURNING id::text`, cust)

@@ -43,7 +43,7 @@ func setupReminder(t *testing.T, dueOffset string, testRun bool) reminderFixture
 		}
 		return id
 	}
-	customer := one(`INSERT INTO core.customer (name, plan) VALUES ('Reminders Inc', 'standard') RETURNING id::text`)
+	customer := one(`INSERT INTO core.customer (name, plan) VALUES ('Reminders Inc', 'commercial') RETURNING id::text`)
 	ws := one(`INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'Finance') RETURNING id::text`, customer)
 	app := one(`INSERT INTO core.application (workspace_id, customer_id, name, mode)
 	            VALUES ($1::uuid, $2::uuid, 'Planning', 'planning') RETURNING id::text`, ws, customer)

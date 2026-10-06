@@ -104,7 +104,7 @@ func TestAdminMutationsAreAudited(t *testing.T) {
 	f := setupAdminAuditFixture(t)
 
 	// ── tenant ──────────────────────────────────────────────────────────
-	status, body := f.do(t, "POST", "/api/admin/tenants", map[string]string{"name": "AuditCo", "plan": "standard"})
+	status, body := f.do(t, "POST", "/api/admin/tenants", map[string]string{"name": "AuditCo", "plan": "commercial"})
 	if status != http.StatusOK {
 		t.Fatalf("create tenant: status=%d body=%v", status, body)
 	}

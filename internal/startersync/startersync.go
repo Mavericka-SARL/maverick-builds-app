@@ -305,7 +305,7 @@ func (t *tenant) install(ctx context.Context, s starter.Starter, hash string) (C
 	if err != nil {
 		return Change{}, err
 	}
-	if s.Key == starter.TourKey {
+	if s.Key == starter.LandingKey {
 		if _, err := t.tx.Exec(ctx, `
 			UPDATE core.application SET default_model_id = $2::uuid
 			WHERE id = $1::uuid AND default_model_id IS NULL`, appID, modelID); err != nil {

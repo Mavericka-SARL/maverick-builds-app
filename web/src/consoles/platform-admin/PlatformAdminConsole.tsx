@@ -572,7 +572,7 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
   const qc = useQueryClient();
   const [addTenant, setAddTenant] = useState(false);
   const [tenantName, setTenantName] = useState("");
-  const [tenantPlan, setTenantPlan] = useState("standard");
+  const [tenantPlan, setTenantPlan] = useState("commercial");
   // The plans a new tenant can start on come from the catalog (Platform › Plans).
   const { data: plans } = useQuery({ queryKey: ["admin-plans"], queryFn: api.getPlans, enabled: isPlatformAdmin });
 
@@ -580,7 +580,7 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
 
   const createTenant = useMutation({
     mutationFn: () => api.createAdminTenant({ name: tenantName, plan: tenantPlan }),
-    onSuccess: () => { inv(); setAddTenant(false); setTenantName(""); setTenantPlan("standard"); },
+    onSuccess: () => { inv(); setAddTenant(false); setTenantName(""); setTenantPlan("commercial"); },
   });
   const deleteTenant = useMutation({
     mutationFn: (id: string) => api.deleteAdminTenant(id),
@@ -608,7 +608,7 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
             onKeyDown={e => { if (e.key === "Enter" && tenantName) createTenant.mutate(); }}
           />
           <Select value={tenantPlan} onChange={e => setTenantPlan(e.target.value)} style={{ width: 160 }} aria-label="Plan of the new tenant">
-            {(plans ?? [{ key: "standard", name: "Standard" }]).map(p => <option key={p.key} value={p.key}>{p.name}</option>)}
+            {(plans ?? [{ key: "commercial", name: "Commercial" }]).map(p => <option key={p.key} value={p.key}>{p.name}</option>)}
           </Select>
           <Button
             variant="primary"

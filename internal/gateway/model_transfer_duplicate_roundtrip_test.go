@@ -85,7 +85,7 @@ func TestModelExportOfDuplicatedRevisionImportsBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("export: %v", err)
 	}
-	cust := q(`INSERT INTO core.customer (name, plan) VALUES ('Other Co', 'test') RETURNING id::text`)
+	cust := q(`INSERT INTO core.customer (name, plan) VALUES ('Other Co', 'community') RETURNING id::text`)
 	ws := q(`INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'Default') RETURNING id::text`, cust)
 	otherApp := q(`INSERT INTO core.application (customer_id, workspace_id, name, mode) VALUES ($1::uuid, $2::uuid, 'Other', 'planning') RETURNING id::text`, cust, ws)
 	otherUser := q(`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ('other-importer', 'other@import.test', 'Other', $1::uuid) RETURNING id::text`, cust)

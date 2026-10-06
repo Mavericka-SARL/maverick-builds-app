@@ -36,9 +36,9 @@ func TestMyPreferences(t *testing.T) {
 	}
 
 	// One healthy tenant, one that is read-only because it is over its plan.
-	cust := q(`INSERT INTO core.customer (name, plan) VALUES ('Pref Co', 'starter') RETURNING id::text`)
+	cust := q(`INSERT INTO core.customer (name, plan) VALUES ('Pref Co', 'commercial') RETURNING id::text`)
 	ws := q(`INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'Default') RETURNING id::text`, cust)
-	over := q(`INSERT INTO core.customer (name, plan, limit_state, limit_reason) VALUES ('Full Co', 'test', 'over', 'storage 120 MB of 100') RETURNING id::text`)
+	over := q(`INSERT INTO core.customer (name, plan, limit_state, limit_reason) VALUES ('Full Co', 'community', 'over', 'storage 120 MB of 100') RETURNING id::text`)
 
 	users := map[string]string{} // sub -> id
 	addUser := func(sub, customer string, roles ...string) {

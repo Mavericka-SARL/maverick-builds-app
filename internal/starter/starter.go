@@ -51,18 +51,29 @@ type Starter struct {
 	Package modeltransfer.Package
 }
 
-// TourKey is the tour's key: the starter a new tenant lands on.
+// TourKey is the tour's key.
 const TourKey = "tour"
 
-// Starters is everything sign-up creates, in order: the tour first — it is
-// the model a new tenant lands on — then one guide for each role that builds
-// or runs the workspace. Workspaces that signed up before a starter existed,
-// or before its content last changed, are brought up to date by
-// internal/startersync.
+// DeveloperGuideKey is the developer guide's key.
+const DeveloperGuideKey = "developer_guide"
+
+// LandingKey names the starter a new tenant lands on: sign-up makes it the
+// application's business default, which every console screen opens until
+// someone picks another model, and its first dashboard is the page they see.
+// The developer guide, whose first page builds a first model (since
+// 2026-10-06; migration 122 moved existing tenants whose default was still
+// the tour). It was the tour before.
+const LandingKey = DeveloperGuideKey
+
+// Starters is everything sign-up creates, in order: the tour, then one guide
+// for each role that builds or runs the workspace. Which of them a tenant
+// lands on is LandingKey's, not the order's. Workspaces that signed up before
+// a starter existed, or before its content last changed, are brought up to
+// date by internal/startersync.
 func Starters() []Starter {
 	return []Starter{
 		{Key: TourKey, Package: Package()},
-		{Key: "developer_guide", Package: DeveloperGuide()},
+		{Key: DeveloperGuideKey, Package: DeveloperGuide()},
 		{Key: "business_admin_guide", Package: BusinessAdminGuide()},
 		{Key: "tenant_admin_guide", Package: TenantAdminGuide()},
 	}

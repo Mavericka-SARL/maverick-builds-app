@@ -321,7 +321,7 @@ func importTarget(t *testing.T, ctx context.Context, pool *pgxpool.Pool) (app, u
 		}
 		return id
 	}
-	cust := q(`INSERT INTO core.customer (name, plan) VALUES ('Import Co', 'test') RETURNING id::text`)
+	cust := q(`INSERT INTO core.customer (name, plan) VALUES ('Import Co', 'community') RETURNING id::text`)
 	ws := q(`INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'Default') RETURNING id::text`, cust)
 	app = q(`INSERT INTO core.application (customer_id, workspace_id, name, mode) VALUES ($1::uuid, $2::uuid, 'Imports', 'planning') RETURNING id::text`, cust, ws)
 	user = q(`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ('importer', 'importer@import.test', 'Importer', $1::uuid) RETURNING id::text`, cust)

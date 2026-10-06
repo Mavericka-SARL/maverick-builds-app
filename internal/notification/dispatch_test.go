@@ -49,7 +49,7 @@ func setupStore(t *testing.T) (*Store, *pgxpool.Pool, string) {
 	// The user belongs to a tenant: outbound channels are the tenant's
 	// settings (migration 091), and a user of no tenant gets in-app only.
 	if err := pool.QueryRow(context.Background(),
-		`WITH c AS (INSERT INTO core.customer (name, plan) VALUES ('Notify Co', 'standard') RETURNING id)
+		`WITH c AS (INSERT INTO core.customer (name, plan) VALUES ('Notify Co', 'commercial') RETURNING id)
 		 INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id)
 		 SELECT 'notif-user', 'jo@example.test', 'Jo Planner', c.id FROM c RETURNING id::text`).Scan(&userID); err != nil {
 		t.Fatal(err)

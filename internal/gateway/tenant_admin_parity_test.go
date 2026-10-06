@@ -167,7 +167,7 @@ func TestTenantAdminParity(t *testing.T) {
 		if code, _ := call(ta, "PATCH", "/api/admin/tenants/"+custA, map[string]any{"plan": "enterprise"}); code != 403 {
 			t.Errorf("tenant admin changing own plan: %d", code)
 		}
-		if code, _ := call(ta, "POST", "/api/admin/tenants", map[string]any{"name": "Mine too", "plan": "starter"}); code != 403 {
+		if code, _ := call(ta, "POST", "/api/admin/tenants", map[string]any{"name": "Mine too", "plan": "commercial"}); code != 403 {
 			t.Errorf("tenant admin creating a tenant: %d", code)
 		}
 		if code, _ := call(ta, "DELETE", "/api/admin/tenants/"+custA, nil); code != 403 {

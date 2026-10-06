@@ -2,14 +2,19 @@
 
 > **Classification:** Current — How a tenant's plan is defined and enforced, and how a visitor becomes a tenant.
 
-> **Last verified:** 2026-09-20 (tests; migration 090 removed trials)
+> **Last verified:** 2026-10-06 (tests; migration 123: three plans, Community, Commercial and Enterprise)
 
 A tenant is on one **plan**. The plan says how much the tenant may use
 (limits) and whether a visitor may pick it at public **sign-up**. A plan
 bounds how much, never for how long: **there is no trial** (migration 090
 removed the concept). Plans are rows the platform administrators — the
 operator's own people, with reach over every tenant — edit in the console,
-not constants in code: tuning the basic workspace is an edit, not a release.
+not constants in code: tuning the Community plan is an edit, not a release.
+
+There are three plans, named like the editions: **Community** (where a
+self-service sign-up lands; its one limit is 100 MB of data), **Commercial**
+(where a tenant an administrator creates starts) and **Enterprise**. The
+names are shared; the concepts are not, as below.
 
 This is a community feature: a deployment with no license key has plans too,
 because a sign-up funnel is not an enterprise capability. The license key
@@ -17,10 +22,10 @@ because a sign-up funnel is not an enterprise capability. The license key
 commercial (white-labelling and the right to commercial use) or enterprise,
 keys sent by e-mail on request; a plan decides how much *one tenant* may use.
 
-On the hosted service the two never meet: sign-up hands out the test
-workspace, whose only limit is its size, and a sign-up account is never a
+On the hosted service the two never meet: sign-up hands out the Community
+plan, whose only limit is its size, and a sign-up account is never a
 platform administrator — that role is the operator's, and whoever they
-delegate it to. Everything beyond the basic workspace is a licence key and
+delegate it to. Everything beyond the Community plan is a licence key and
 running the platform yourself.
 
 ## The catalog
@@ -48,13 +53,20 @@ no end date, `max_storage_mb: 100` plus the two daily caps — and makes it
 the self-service plan. Migration 090 drops the fourteen-day `trial` plan 085
 had seeded, together with `trial_days` and `core.customer.trial_ends_at`;
 a tenant that had been put on it by hand moves to the basic workspace.
-Sign-up offers the first `self_service` plan by `sort_order`.
+Migration 123 leaves three plans: `test` becomes `community` ("Community",
+`max_storage_mb: 100` only — the two daily caps go), `standard` becomes
+`commercial` ("Commercial"), `enterprise` stays; tenants on `starter` move
+to `commercial` and the plan goes, a leftover `trial` tenant moves to
+`community`, and both places a tenant names its plan (`core.customer.plan`,
+`platform.tenant_database.plan`) now default to `commercial`. Keys were
+renamed in place, so each plan kept whatever the platform administrator had
+set on it. Sign-up offers the first `self_service` plan by `sort_order`.
 
 **Where to go from here** is data too: `limit_note`. Every refusal ends with
 it — the 402 body, the read-only reason in the banner, the terms of service
 — in place of the engine's default "Change the plan to add more." A
 deployment whose answer to a full workspace is another plan leaves it empty;
-the basic workspace's note says to run the platform on your own
+the Community plan's note says to run the platform on your own
 infrastructure (free and unlimited for non-commercial use, under a
 commercial licence otherwise) or to get the enterprise edition. The console
 shows the plan's `contact_url` link as "Learn more" when a note is set and
@@ -173,18 +185,22 @@ a page promising something else. One request creates:
      guide**, one per role that builds or runs the workspace, each a model
      of its own dashboards.
 
-   The tour is made the application's **default model**
+   The **Developer guide** is made the application's **default model**
    (`core.application.default_model_id`, the same setting as Build › Models ›
-   "Set as business default"), so it is what the console opens on; the
-   guides are reached through the model switcher (Run › Models or Business
-   Admin › Models). The four are created in one transaction and share a
-   creation time, so the default — not "newest model" — is what decides;
-   if the tour is later deleted the default clears, and listings and
-   resolution fall back to name order. The same tie-break picks the model
-   behind what an application keeps against its oldest model when a
-   request names no revision — automation rules, workflow definitions, the
-   workflow trigger events: the tour, until the default moves (what was
-   made there stays with the tour). Each model is created through
+   "Set as business default"; `starter.LandingKey`), so it is what the
+   console opens on, at its first page, *1 · Your first model*, and that
+   page points anyone who does not build models to the tour. The tour and
+   the other guides are reached through the model switcher (Run › Models or
+   Business Admin › Models). Until 2026-10-06 the tour was the default;
+   migration 122 moved every existing tenant whose default was still the
+   tour, and left any default someone had changed. The four are created in
+   one transaction and share a creation time, so the default — not "newest
+   model" — is what decides; if the default model is later deleted the
+   default clears, and listings and resolution fall back to name order. The
+   same tie-break picks the model behind what an application keeps against
+   its oldest model when a request names no revision — automation rules,
+   workflow definitions, the workflow trigger events: the default model,
+   until the default moves (what was made there stays with that model). Each model is created through
    `modeltransfer.Import`, the same path a package import takes, and after
    the transaction commits every calculated metric of every model is
    recalculated, so each first screen shows real numbers. Nothing about them

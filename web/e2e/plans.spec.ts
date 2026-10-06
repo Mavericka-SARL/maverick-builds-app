@@ -57,9 +57,9 @@ test("platform admin: Plans lists the catalog and saves a changed limit", async 
   await loadAs(page, "platform_admin");
   await page.getByRole("button", { name: "Plans", exact: true }).click();
   const tab = page.getByTestId("plans-tab");
-  await expect(tab.getByTestId("plan-test")).toContainText("Basic workspace");
-  await expect(tab.getByLabel("Storage (MB) limit of test")).toHaveValue("100");
-  await expect(tab.getByLabel("Limit note of test")).toHaveValue(/own infrastructure/);
+  await expect(tab.getByTestId("plan-community")).toContainText("Community");
+  await expect(tab.getByLabel("Storage (MB) limit of community")).toHaveValue("100");
+  await expect(tab.getByLabel("Limit note of community")).toHaveValue(/own infrastructure/);
   await expect(tab.getByTestId("plan-small")).toContainText("Small");
   await expect(tab.getByTestId("plan-enterprise")).toContainText("Enterprise");
   await expect(tab).not.toContainText(/trial/i);
