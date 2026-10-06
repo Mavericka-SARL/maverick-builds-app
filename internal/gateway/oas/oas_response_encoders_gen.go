@@ -9463,6 +9463,12 @@ func encodeUpsertPlanResponse(response UpsertPlanRes, w http.ResponseWriter, spa
 
 		return nil
 
+	case *UpsertPlanNotFound:
+		w.WriteHeader(404)
+		span.SetStatus(codes.Error, http.StatusText(404))
+
+		return nil
+
 	default:
 		return errors.Errorf("unexpected response type: %T", response)
 	}

@@ -3292,7 +3292,7 @@ paths:
     put:
       operationId: upsertPlan
       tags: [Admin]
-      summary: Create or change a plan — name, self-service flag and limits (platform_admin; applies to every tenant on the plan within a minute)
+      summary: Change a plan — name, self-service flag and limits (platform_admin; applies to every tenant on the plan within a minute). Adds none — the catalog is Community, Commercial and Enterprise; an unknown key is 404
       parameters:
         - name: key
           in: path
@@ -3311,6 +3311,7 @@ paths:
               schema: { $ref: "#/components/schemas/Plan" }
         "400": { description: Invalid plan }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: No plan with that key }
 
   /api/apps:
     get:

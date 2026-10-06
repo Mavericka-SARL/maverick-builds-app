@@ -15,15 +15,10 @@ const LIMIT_FIELDS: { key: keyof PlanLimits; label: string }[] = [
   { key: "max_storage_mb", label: "Storage (MB)" },
 ];
 
-const EMPTY_LIMITS: PlanLimits = {
-  max_users: 0, max_applications: 0, max_models: 0, max_metrics_per_model: 0,
-  max_members_per_dimension: 0, max_fact_rows_per_model: 0, max_ai_messages_per_day: 0, max_integration_runs_per_day: 0,
-  max_storage_mb: 0,
-};
-
 /**
- * Platform › Plans: the catalog every tenant's plan points at, kept by the
- * platform administrators for every tenant. A plan bounds how much a tenant
+ * Platform › Plans: the catalog every tenant's plan points at — Community,
+ * Commercial and Enterprise, no more (migration 123; there is no way to add
+ * a plan) — tuned by the platform administrators for every tenant. A plan bounds how much a tenant
  * may use — never for how long: there is no trial. Limits are numbers here
  * rather than constants in code, so tuning the Community plan is an edit,
  * not a release. 0 means unlimited. A change applies to every tenant on the
@@ -43,7 +38,6 @@ export function PlansTab() {
         deployment runs is its licence key (Platform › License); a plan only bounds one tenant.
       </p>
       {(data ?? []).map((p) => <PlanCard key={p.key} plan={p} />)}
-      <NewPlan />
     </div>
   );
 }
@@ -97,26 +91,5 @@ function PlanCard({ plan }: { plan: PlanDef }) {
         </div>
       </div>
     </Card>
-  );
-}
-
-function NewPlan() {
-  const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const [key, setKey] = useState("");
-  const [name, setName] = useState("");
-  const create = useMutation({
-    mutationFn: () => api.updatePlan(key.trim(), { name: name.trim(), description: "", self_service: false, limits: EMPTY_LIMITS, limit_note: "", sort_order: 100 }),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["admin-plans"] }); setOpen(false); setKey(""); setName(""); },
-  });
-  if (!open) return <Button size="sm" variant="ghost" onClick={() => setOpen(true)} style={{ alignSelf: "flex-start" }}>New plan</Button>;
-  return (
-    <div className="mvx-admin-inline-form mvx-admin-inline-form--boxed">
-      <TextInput value={key} onChange={(e) => setKey(e.target.value)} placeholder="key (e.g. team)" aria-label="New plan key" style={{ width: 160 }} autoFocus />
-      <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" aria-label="New plan name" style={{ width: 200 }} />
-      <Button variant="primary" size="sm" disabled={!key.trim() || !name.trim()} loading={create.isPending} loadingLabel="Creating…" onClick={() => create.mutate()}>Create</Button>
-      <Button size="sm" onClick={() => setOpen(false)}>Cancel</Button>
-      {create.isError && <span className="mvx-admin-error">{(create.error as Error).message}</span>}
-    </div>
   );
 }

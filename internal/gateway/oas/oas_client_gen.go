@@ -1831,8 +1831,9 @@ type Invoker interface {
 	UploadAiDocument(ctx context.Context, request *UploadAiDocumentReq, params UploadAiDocumentParams) (UploadAiDocumentRes, error)
 	// UpsertPlan invokes upsertPlan operation.
 	//
-	// Create or change a plan — name, self-service flag and limits (platform_admin; applies to every
-	// tenant on the plan within a minute).
+	// Change a plan — name, self-service flag and limits (platform_admin; applies to every tenant on
+	// the plan within a minute). Adds none — the catalog is Community, Commercial and Enterprise; an
+	// unknown key is 404.
 	//
 	// PUT /api/admin/plans/{key}
 	UpsertPlan(ctx context.Context, request *PlanInput, params UpsertPlanParams) (UpsertPlanRes, error)
@@ -35028,8 +35029,9 @@ func (c *Client) sendUploadAiDocument(ctx context.Context, request *UploadAiDocu
 
 // UpsertPlan invokes upsertPlan operation.
 //
-// Create or change a plan — name, self-service flag and limits (platform_admin; applies to every
-// tenant on the plan within a minute).
+// Change a plan — name, self-service flag and limits (platform_admin; applies to every tenant on
+// the plan within a minute). Adds none — the catalog is Community, Commercial and Enterprise; an
+// unknown key is 404.
 //
 // PUT /api/admin/plans/{key}
 func (c *Client) UpsertPlan(ctx context.Context, request *PlanInput, params UpsertPlanParams) (UpsertPlanRes, error) {

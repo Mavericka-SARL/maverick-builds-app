@@ -63,6 +63,8 @@ test("platform admin: Plans lists the catalog and saves a changed limit", async 
   await expect(tab.getByTestId("plan-small")).toContainText("Small");
   await expect(tab.getByTestId("plan-enterprise")).toContainText("Enterprise");
   await expect(tab).not.toContainText(/trial/i);
+  // The catalog is Community, Commercial and Enterprise: nothing adds a plan.
+  await expect(tab.getByRole("button", { name: "New plan" })).toHaveCount(0);
   const models = tab.getByLabel("Models limit of small");
   await expect(models).toHaveValue("3");
   await models.fill("5");

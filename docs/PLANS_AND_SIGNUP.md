@@ -263,9 +263,10 @@ changes nothing.
 ## Administration
 
 - **Platform › Plans** (`GET/PUT /api/admin/plans[/{key}]`): edit names,
-  descriptions, the self-service flag and every limit; add a
-  plan. Plans cannot be deleted while tenants may name them; zero the limits
-  or rename instead. Tenant administrators can read the catalog (to see what
+  descriptions, the self-service flag and every limit of the three plans —
+  Community, Commercial and Enterprise. Nothing adds or deletes a plan (the
+  PUT changes an existing key and answers 404 for any other; the console
+  has no "New plan" since 2026-10-06). Tenant administrators can read the catalog (to see what
   an upgrade is) but not change it.
 - **Applications › tenant card**: the meta line shows the plan and
   "read-only" when it applies. Below it, the storage the last sweep measured:

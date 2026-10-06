@@ -26861,6 +26861,11 @@ type UpsertPlanBadRequest struct{}
 
 func (*UpsertPlanBadRequest) upsertPlanRes() {}
 
+// UpsertPlanNotFound is response for UpsertPlan operation.
+type UpsertPlanNotFound struct{}
+
+func (*UpsertPlanNotFound) upsertPlanRes() {}
+
 // Ref: #/components/schemas/UserAccessRule
 type UserAccessRule struct {
 	RuleType string `json:"rule_type"`

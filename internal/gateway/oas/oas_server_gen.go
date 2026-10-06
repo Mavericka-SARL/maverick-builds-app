@@ -1811,8 +1811,9 @@ type Handler interface {
 	UploadAiDocument(ctx context.Context, req *UploadAiDocumentReq, params UploadAiDocumentParams) (UploadAiDocumentRes, error)
 	// UpsertPlan implements upsertPlan operation.
 	//
-	// Create or change a plan — name, self-service flag and limits (platform_admin; applies to every
-	// tenant on the plan within a minute).
+	// Change a plan — name, self-service flag and limits (platform_admin; applies to every tenant on
+	// the plan within a minute). Adds none — the catalog is Community, Commercial and Enterprise; an
+	// unknown key is 404.
 	//
 	// PUT /api/admin/plans/{key}
 	UpsertPlan(ctx context.Context, req *PlanInput, params UpsertPlanParams) (UpsertPlanRes, error)

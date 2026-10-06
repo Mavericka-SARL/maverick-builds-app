@@ -175,20 +175,25 @@ func SelfService(ctx context.Context, db DB) (p Plan, ok bool, err error) {
 	return p, true, nil
 }
 
-// Upsert stores a plan (insert or update by key) and returns the row.
-func Upsert(ctx context.Context, db DB, p Plan) (Plan, error) {
+// Update changes an existing plan and returns the row; a key with no row is
+// ErrUnknownPlan. Nothing adds a plan: the catalog is the three migration 123
+// left — Community, Commercial and Enterprise, named like the editions
+// (2026-10-06) — and the platform administrator tunes them, not their number.
+func Update(ctx context.Context, db DB, p Plan) (Plan, error) {
 	if err := p.Validate(); err != nil {
 		return Plan{}, err
 	}
 	limits, _ := json.Marshal(p.Limits)
-	return scanPlan(db.QueryRow(ctx, `
-		INSERT INTO platform.plan (key, name, description, self_service, limits, limit_note, sort_order, updated_at)
-		VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, now())
-		ON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description,
-		    self_service = EXCLUDED.self_service, limits = EXCLUDED.limits,
-		    limit_note = EXCLUDED.limit_note, sort_order = EXCLUDED.sort_order, updated_at = now()
+	saved, err := scanPlan(db.QueryRow(ctx, `
+		UPDATE platform.plan SET name = $2, description = $3, self_service = $4, limits = $5::jsonb,
+		    limit_note = $6, sort_order = $7, updated_at = now()
+		WHERE key = $1
 		RETURNING `+planColumns,
 		p.Key, strings.TrimSpace(p.Name), strings.TrimSpace(p.Description), p.SelfService, limits, strings.TrimSpace(p.LimitNote), p.SortOrder))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Plan{}, fmt.Errorf("%w: %q", ErrUnknownPlan, p.Key)
+	}
+	return saved, err
 }
 
 // Tenant is the plan-related part of one core.customer row.

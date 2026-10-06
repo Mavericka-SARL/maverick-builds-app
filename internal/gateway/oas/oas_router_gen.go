@@ -8167,7 +8167,7 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 									switch method {
 									case "PUT":
 										r.name = UpsertPlanOperation
-										r.summary = "Create or change a plan — name, self-service flag and limits (platform_admin; applies to every tenant on the plan within a minute)"
+										r.summary = "Change a plan — name, self-service flag and limits (platform_admin; applies to every tenant on the plan within a minute). Adds none — the catalog is Community, Commercial and Enterprise; an unknown key is 404"
 										r.operationID = "upsertPlan"
 										r.operationGroup = ""
 										r.pathPattern = "/api/admin/plans/{key}"

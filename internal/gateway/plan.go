@@ -254,9 +254,11 @@ func (h *handler) adminPlans(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, plans)
 }
 
-// adminPlanAction serves PUT /api/admin/plans/{key}: create or change a
-// plan (platform administrator). Every tenant on the plan feels the new
-// limits within a minute; the read-only verdict follows at the next sweep.
+// adminPlanAction serves PUT /api/admin/plans/{key}: change a plan
+// (platform administrator). It adds none — an unknown key is a 404; the
+// catalog is Community, Commercial and Enterprise (plan.Update). Every tenant
+// on the plan feels the new limits within a minute; the read-only verdict
+// follows at the next sweep.
 func (h *handler) adminPlanAction(w http.ResponseWriter, r *http.Request) {
 	act, ok := h.requireRole(w, r, "platform_admin")
 	if !ok {
@@ -274,7 +276,11 @@ func (h *handler) adminPlanAction(w http.ResponseWriter, r *http.Request) {
 	}
 	body.Key = key
 	ctx := r.Context()
-	saved, err := plan.Upsert(ctx, h.db.Control(), body)
+	saved, err := plan.Update(ctx, h.db.Control(), body)
+	if errors.Is(err, plan.ErrUnknownPlan) {
+		jsonErr(w, err, http.StatusNotFound)
+		return
+	}
 	if err != nil {
 		jsonErr(w, err, http.StatusBadRequest)
 		return

@@ -22356,6 +22356,9 @@ func decodeUpsertPlanResponse(resp *http.Response) (res UpsertPlanRes, _ error) 
 		default:
 			return res, validate.InvalidContentType(ct)
 		}
+	case 404:
+		// Code 404.
+		return &UpsertPlanNotFound{}, nil
 	}
 	return res, validate.UnexpectedStatusCodeWithResponse(resp)
 }

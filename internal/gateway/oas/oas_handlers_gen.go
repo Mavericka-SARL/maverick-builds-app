@@ -49731,8 +49731,9 @@ func (s *Server) handleUploadAiDocumentRequest(args [1]string, argsEscaped bool,
 
 // handleUpsertPlanRequest handles upsertPlan operation.
 //
-// Create or change a plan — name, self-service flag and limits (platform_admin; applies to every
-// tenant on the plan within a minute).
+// Change a plan — name, self-service flag and limits (platform_admin; applies to every tenant on
+// the plan within a minute). Adds none — the catalog is Community, Commercial and Enterprise; an
+// unknown key is 404.
 //
 // PUT /api/admin/plans/{key}
 func (s *Server) handleUpsertPlanRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -49883,7 +49884,7 @@ func (s *Server) handleUpsertPlanRequest(args [1]string, argsEscaped bool, w htt
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    UpsertPlanOperation,
-			OperationSummary: "Create or change a plan — name, self-service flag and limits (platform_admin; applies to every tenant on the plan within a minute)",
+			OperationSummary: "Change a plan — name, self-service flag and limits (platform_admin; applies to every tenant on the plan within a minute). Adds none — the catalog is Community, Commercial and Enterprise; an unknown key is 404",
 			OperationID:      "upsertPlan",
 			Body:             request,
 			RawBody:          rawBody,

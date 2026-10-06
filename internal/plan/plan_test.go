@@ -2,6 +2,7 @@ package plan
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strconv"
@@ -100,17 +101,19 @@ func TestCatalogChecksAndSweep(t *testing.T) {
 	if _, err := Get(ctx, pool, "nope"); !errors.Is(err, ErrUnknownPlan) {
 		t.Fatalf("unknown plan err = %v", err)
 	}
-	saved, err := Upsert(ctx, pool, Plan{Key: "team", Name: " Team ", Limits: Limits{MaxUsers: 10}, SortOrder: 25})
-	if err != nil || saved.Name != "Team" || saved.Limits.MaxUsers != 10 {
-		t.Fatalf("upsert = %+v err=%v", saved, err)
+	// The platform administrator changes a plan; nothing adds one.
+	saved, err := Update(ctx, pool, Plan{Key: "commercial", Name: " Commercial ", Limits: Limits{MaxUsers: 10}, SortOrder: 30})
+	if err != nil || saved.Name != "Commercial" || saved.Limits.MaxUsers != 10 {
+		t.Fatalf("update = %+v err=%v", saved, err)
+	}
+	if _, err := Update(ctx, pool, Plan{Key: "team", Name: "Team"}); !errors.Is(err, ErrUnknownPlan) {
+		t.Fatalf("update of a plan that does not exist: err = %v, want ErrUnknownPlan", err)
 	}
 	// A small plan with every object-count limit set, so each check has a
-	// number to cross.
-	if _, err := Upsert(ctx, pool, Plan{Key: "small", Name: "Small", SortOrder: 26, Limits: Limits{
+	// number to cross. A test fixture: the catalog itself never grows.
+	fixturePlan(t, pool, Plan{Key: "small", Name: "Small", SortOrder: 26, Limits: Limits{
 		MaxUsers: 5, MaxApplications: 2, MaxModels: 3, MaxMetricsPerModel: 50, MaxMembersPerDimension: 500,
-		MaxFactRowsPerModel: 100000, MaxAIMessagesPerDay: 100, MaxIntegrationRunsPerDay: 50}}); err != nil {
-		t.Fatal(err)
-	}
+		MaxFactRowsPerModel: 100000, MaxAIMessagesPerDay: 100, MaxIntegrationRunsPerDay: 50}})
 
 	// A tenant on the small plan with two users, one app and one model.
 	cust := q(`INSERT INTO core.customer (name, plan) VALUES ('Smallco', 'small') RETURNING id::text`)
@@ -207,9 +210,7 @@ func TestCatalogChecksAndSweep(t *testing.T) {
 	// Storage: the test database is shared, so the tenant's bytes are an
 	// estimate — its data rows times the table's bytes per row (200 while
 	// there are no statistics). A 1 MB plan holds 5242 such rows; 20000 is over on any statistics.
-	if _, err := Upsert(ctx, pool, Plan{Key: "tiny", Name: "Tiny", Limits: Limits{MaxStorageMB: 1}, SortOrder: 26}); err != nil {
-		t.Fatal(err)
-	}
+	fixturePlan(t, pool, Plan{Key: "tiny", Name: "Tiny", Limits: Limits{MaxStorageMB: 1}, SortOrder: 26})
 	if err := SetPlan(ctx, pool, cust, "tiny"); err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +235,7 @@ func TestCatalogChecksAndSweep(t *testing.T) {
 	}
 	// A plan with a note says that instead of "change the plan", in every
 	// refusal and in the read-only reason.
-	if _, err := Upsert(ctx, pool, Plan{Key: "tiny", Name: "Tiny", Limits: Limits{MaxStorageMB: 1}, LimitNote: "Run it yourself for more.", SortOrder: 26}); err != nil {
+	if _, err := Update(ctx, pool, Plan{Key: "tiny", Name: "Tiny", Limits: Limits{MaxStorageMB: 1}, LimitNote: "Run it yourself for more.", SortOrder: 26}); err != nil {
 		t.Fatal(err)
 	}
 	e.InvalidateAll()
@@ -296,5 +297,18 @@ func TestCatalogChecksAndSweep(t *testing.T) {
 	e.Invalidate(cust)
 	if st, _ := e.State(ctx, pool, cust); st.Plan.Key != "team" {
 		t.Fatalf("state after SetPlan = %+v", st)
+	}
+}
+
+// fixturePlan inserts a plan for a test to put a tenant on. Tests only: the
+// catalog has no way to grow (Update changes, never adds).
+func fixturePlan(t *testing.T, db DB, p Plan) {
+	t.Helper()
+	limits, _ := json.Marshal(p.Limits)
+	if _, err := db.Exec(context.Background(), `
+		INSERT INTO platform.plan (key, name, description, self_service, limits, limit_note, sort_order)
+		VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
+		p.Key, p.Name, p.Description, p.SelfService, limits, p.LimitNote, p.SortOrder); err != nil {
+		t.Fatalf("fixture plan %s: %v", p.Key, err)
 	}
 }

@@ -36,13 +36,14 @@ func TestPlanGuardAndLimits(t *testing.T) {
 			t.Fatalf("%s: %v", sql, err)
 		}
 	}
-	// Tenant A: the last sweep found it over its plan. Tenant B: starter, unlimited.
+	// Tenant A: the last sweep found it over its plan. Tenant B: enterprise,
+	// unlimited until the platform admin gives that plan a limit below.
 	custA := q(`INSERT INTO core.customer (name, plan, limit_state, limit_reason) VALUES ('Over Co', 'community', 'over', 'storage 120 MB of 100') RETURNING id::text`)
 	wsA := q(`INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'Default') RETURNING id::text`, custA)
 	adminA := q(`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ('guard-a', 'a@ended.test', 'A', $1::uuid) RETURNING id::text`, custA)
 	exec(`INSERT INTO identity.role_assignment (user_id, role) VALUES ($1::uuid, 'tenant_admin'), ($1::uuid, 'developer')`, adminA)
 	exec(`INSERT INTO identity.role_assignment (user_id, role, workspace_id) VALUES ($1::uuid, 'business_admin', $2::uuid)`, adminA, wsA)
-	custB := q(`INSERT INTO core.customer (name, plan) VALUES ('Beta Co', 'starter') RETURNING id::text`)
+	custB := q(`INSERT INTO core.customer (name, plan) VALUES ('Beta Co', 'enterprise') RETURNING id::text`)
 	wsB := q(`INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'Default') RETURNING id::text`, custB)
 	adminB := q(`INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id) VALUES ('guard-b', 'b@beta.test', 'B', $1::uuid) RETURNING id::text`, custB)
 	exec(`INSERT INTO identity.role_assignment (user_id, role) VALUES ($1::uuid, 'tenant_admin'), ($1::uuid, 'developer')`, adminB)
@@ -108,15 +109,20 @@ func TestPlanGuardAndLimits(t *testing.T) {
 		if code != 200 || len(plans) < 3 || plans[0]["key"] != "community" {
 			t.Fatalf("list: %d %v", code, plans)
 		}
-		if code, _ := callJSON(t, srv, "guard-b", http.MethodPut, "/api/admin/plans/starter", map[string]any{"name": "Starter"}); code != 403 {
+		if code, _ := callJSON(t, srv, "guard-b", http.MethodPut, "/api/admin/plans/enterprise", map[string]any{"name": "Enterprise"}); code != 403 {
 			t.Fatalf("tenant admin editing a plan: %d", code)
 		}
 		if code, body := callJSON(t, srv, "guard-padmin", http.MethodPut, "/api/admin/plans/Bad%20Key", map[string]any{"name": "x"}); code != 400 || !strings.Contains(body["error"].(string), "plan key") {
 			t.Fatalf("bad key: %d %v", code, body)
 		}
-		code, saved := callJSON(t, srv, "guard-padmin", http.MethodPut, "/api/admin/plans/starter",
-			map[string]any{"name": "Starter", "description": "One model", "limits": map[string]int{"max_models": 1}, "sort_order": 20})
-		if code != 200 || saved["key"] != "starter" || saved["limits"].(map[string]any)["max_models"] != float64(1) {
+		// The catalog is the three plans: a key that is not one of them is
+		// not created.
+		if code, body := callJSON(t, srv, "guard-padmin", http.MethodPut, "/api/admin/plans/starter", map[string]any{"name": "Starter"}); code != 404 || !strings.Contains(body["error"].(string), "unknown plan") {
+			t.Fatalf("a new plan key: %d %v, want 404 unknown plan", code, body)
+		}
+		code, saved := callJSON(t, srv, "guard-padmin", http.MethodPut, "/api/admin/plans/enterprise",
+			map[string]any{"name": "Enterprise", "description": "One model", "limits": map[string]int{"max_models": 1}, "sort_order": 40})
+		if code != 200 || saved["key"] != "enterprise" || saved["limits"].(map[string]any)["max_models"] != float64(1) {
 			t.Fatalf("save: %d %v", code, saved)
 		}
 	})
@@ -127,7 +133,7 @@ func TestPlanGuardAndLimits(t *testing.T) {
 		}
 		code, body := callJSON(t, srv, "guard-b", http.MethodPost, "/api/admin/models", map[string]any{"application_id": appB, "name": "Second"})
 		if code != http.StatusPaymentRequired || body["code"] != "plan_limit" || body["limit"] != "max_models" || body["max"] != float64(1) || body["current"] != float64(1) ||
-			!strings.Contains(body["error"].(string), "The Starter plan allows 1 model; this tenant has 1") {
+			!strings.Contains(body["error"].(string), "The Enterprise plan allows 1 model; this tenant has 1") {
 			t.Fatalf("second model: %d %v", code, body)
 		}
 	})
