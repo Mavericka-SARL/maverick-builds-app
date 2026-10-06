@@ -202,7 +202,7 @@ func (s *Store) DeleteForm(ctx context.Context, formID string) ([]PostedMetric, 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	posted, err := s.DeleteMappingPostings(ctx, mappingIDs, "")
+	posted, err := s.DeleteMappings(ctx, mappingIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -215,6 +215,33 @@ func (s *Store) DeleteForm(ctx context.Context, formID string) ([]PostedMetric, 
 
 // PostedMetric is a metric of a revision a form mapping posted into.
 type PostedMetric struct{ ModelID, RevisionID, MetricID string }
+
+// DeleteMappings deletes the mappings and withdraws the totals they posted,
+// in one transaction. Deleting the rows first takes their row locks: a
+// recompute still running for one of them holds the row FOR SHARE, so it
+// finishes before the totals are withdrawn, and one that starts later finds
+// the mapping gone and writes nothing. Withdrawing in one statement and
+// deleting in another left a window in which a re-apply still in flight
+// posted the total back under the id of a mapping that no longer existed,
+// where nothing could take it out (public CI, 2026-10-06).
+func (s *Store) DeleteMappings(ctx context.Context, mappingIDs []string) ([]PostedMetric, error) {
+	if len(mappingIDs) == 0 {
+		return nil, nil
+	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, `DELETE FROM model.form_metric_mapping WHERE id = ANY($1::uuid[])`, mappingIDs); err != nil {
+		return nil, fmt.Errorf("delete mappings: %w", err)
+	}
+	posted, err := NewStoreOn(tx).DeleteMappingPostings(ctx, mappingIDs, "")
+	if err != nil {
+		return nil, err
+	}
+	return posted, tx.Commit(ctx)
+}
 
 // DeleteMappingPostings removes the totals the mappings posted: the
 // runtime.fact_input rows tagged with a mapping's id (source_ref, which has

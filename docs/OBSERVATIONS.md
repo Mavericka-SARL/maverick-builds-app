@@ -2459,6 +2459,27 @@ leaves out, until it is fixed.
 
 ## Closed
 
+### A mapping deleted while its re-apply runs keeps its posted total
+
+- **Noticed:** 2026-10-06, public CI run 37463974172 (snapshot 51f9604):
+  `TestFormPostingsFollowRunsAndDeletes` failed with "posted after the
+  mapping delete = 17, want 0" and stayed so for the 10 s the test polls; the
+  same commit passed locally and in private CI. A PATCH re-applies the
+  mapping in a background `backfillFormMapping`; the delete withdrew the
+  mapping's totals in one statement and deleted the mapping in another, and
+  `runtime.fact_input.source_ref` has no foreign key, so a recompute that had
+  already read the mapping committed its total in between, under the id of a
+  mapping that no longer existed — where nothing could take it out.
+- **Closed by:** 57bf3dc (2026-10-06): `crudapp.DeleteMappings` deletes the
+  mapping rows and withdraws their totals in one transaction, rows first (the
+  developer's delete, the AI Developer's and form delete use it), and
+  `recomputeFactInput` holds the mapping row `FOR SHARE` and reads its
+  target, aggregation and model from it — so a delete waits for a write in
+  flight, a recompute after it writes nothing, and a stale re-apply after a
+  retarget writes the current target. `TestMappingDeleteWaitsForAnInFlightRecompute`
+  holds a recompute's transaction open across the delete; with the old order
+  it fails with the CI's 17.
+
 ### The cell write accepts a value on a parent member
 
 - **Noticed:** 2026-09-29, by the tour's reviewer; not re-run.

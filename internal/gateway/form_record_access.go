@@ -188,14 +188,14 @@ func (h *handler) reachRecord(ctx context.Context, act *actor, store *crudapp.St
 // recordPosting is one metric contribution a form record holds through a
 // form-to-metric mapping.
 type recordPosting struct {
-	mappingID, targetMetricID, aggregation, modelID, revisionID string
+	mappingID, targetMetricID, modelID, revisionID string
 }
 
 // recordPostings lists the postings recordID holds, read before the record
 // is deleted so retractPostings can take them back out of the metrics.
 func (h *handler) recordPostings(ctx context.Context, recordID string) ([]recordPosting, error) {
 	rows, err := h.db.Query(ctx, `
-		SELECT p.mapping_id::text, m.target_metric_id::text, m.aggregation,
+		SELECT p.mapping_id::text, m.target_metric_id::text,
 		       m.model_id::text, COALESCE(p.revision_id::text, '')
 		FROM runtime.form_record_posting p
 		JOIN model.form_metric_mapping m ON m.id = p.mapping_id
@@ -207,7 +207,7 @@ func (h *handler) recordPostings(ctx context.Context, recordID string) ([]record
 	var out []recordPosting
 	for rows.Next() {
 		var p recordPosting
-		if err := rows.Scan(&p.mappingID, &p.targetMetricID, &p.aggregation, &p.modelID, &p.revisionID); err != nil {
+		if err := rows.Scan(&p.mappingID, &p.targetMetricID, &p.modelID, &p.revisionID); err != nil {
 			return nil, fmt.Errorf("read record postings: %w", err)
 		}
 		out = append(out, p)
@@ -223,7 +223,7 @@ func (h *handler) recordPostings(ctx context.Context, recordID string) ([]record
 func (h *handler) retractPostings(ctx context.Context, ps []recordPosting, userID string) {
 	affected := map[string][]struct{ RevisionID, MetricID string }{}
 	for _, p := range ps {
-		h.recomputeFactInput(ctx, p.mappingID, p.targetMetricID, p.aggregation, p.modelID, p.revisionID, userID)
+		h.recomputeFactInput(ctx, p.mappingID, p.revisionID, userID)
 		affected[p.modelID] = append(affected[p.modelID], struct{ RevisionID, MetricID string }{p.revisionID, p.targetMetricID})
 	}
 	for modelID, a := range affected {

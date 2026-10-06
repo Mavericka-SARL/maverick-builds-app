@@ -9435,12 +9435,8 @@ func (h *handler) developerFormIntegrationAction(w http.ResponseWriter, r *http.
 		jsonOK(w, map[string]string{"status": "ok"})
 	case http.MethodDelete:
 		revisionID, appID := h.formIntegrationScope(ctx, mappingID)
-		posted, err := crudapp.NewStore(h.db.For(ctx)).DeleteMappingPostings(ctx, []string{mappingID}, "")
+		posted, err := crudapp.NewStore(h.db.For(ctx)).DeleteMappings(ctx, []string{mappingID})
 		if err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
-		}
-		if _, err := h.db.Exec(ctx, `DELETE FROM model.form_metric_mapping WHERE id=$1::uuid`, mappingID); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -9634,7 +9630,7 @@ func (h *handler) applyFormMappings(ctx context.Context, recordID, formID, statu
 			_, _ = h.db.Exec(ctx,
 				`DELETE FROM runtime.form_record_posting WHERE mapping_id=$1::uuid AND form_record_id=$2::uuid`,
 				m.id, recordID)
-			h.recomputeFactInput(ctx, m.id, m.targetMetricID, m.aggregation, m.modelID, revisionID, userID)
+			h.recomputeFactInput(ctx, m.id, revisionID, userID)
 			affected = append(affected, struct{ RevisionID, MetricID string }{revisionID, m.targetMetricID})
 			affectedModelID = m.modelID
 			continue
@@ -9701,7 +9697,7 @@ func (h *handler) applyFormMappings(ctx context.Context, recordID, formID, statu
 			_, _ = h.db.Exec(ctx,
 				`DELETE FROM runtime.form_record_posting WHERE mapping_id=$1::uuid AND form_record_id=$2::uuid`,
 				m.id, recordID)
-			h.recomputeFactInput(ctx, m.id, m.targetMetricID, m.aggregation, m.modelID, revisionID, userID)
+			h.recomputeFactInput(ctx, m.id, revisionID, userID)
 			affected = append(affected, struct{ RevisionID, MetricID string }{revisionID, m.targetMetricID})
 			affectedModelID = m.modelID
 			continue
@@ -9728,6 +9724,9 @@ func (h *handler) applyFormMappings(ctx context.Context, recordID, formID, statu
 		// under-counts a total: the posting row IS the record's contribution,
 		// so losing it loses that record's value until something else happens
 		// to re-post it. ON CONFLICT DO UPDATE makes the retry idempotent.
+		// A foreign key refusal is not a failure: the mapping (or the record)
+		// was deleted after this call read it, and there is nothing to post.
+		gone := false
 		if postErr := retryTransient(ctx, 3, func() error {
 			_, e := h.db.Exec(ctx, `
 				INSERT INTO runtime.form_record_posting
@@ -9737,13 +9736,19 @@ func (h *handler) applyFormMappings(ctx context.Context, recordID, formID, statu
 				  SET target_metric_id=$3::uuid, revision_id=NULLIF($4,'')::uuid,
 				      dim_members=$5, posted_value=$6, posted_at=now()`,
 				m.id, recordID, m.targetMetricID, revisionID, dimJSON, val)
+			if isForeignKeyViolation(e) {
+				gone = true
+				return nil
+			}
 			return e
-		}); postErr != nil {
+		}); gone {
+			continue
+		} else if postErr != nil {
 			h.log.Error().Err(postErr).Str("mapping_id", m.id).Str("record_id", recordID).Msg("form posting insert kept failing — this record's value is missing from the metric total")
 			continue
 		}
 
-		h.recomputeFactInput(ctx, m.id, m.targetMetricID, m.aggregation, m.modelID, revisionID, userID)
+		h.recomputeFactInput(ctx, m.id, revisionID, userID)
 
 		affected = append(affected, struct{ RevisionID, MetricID string }{revisionID, m.targetMetricID})
 		affectedModelID = m.modelID
@@ -9787,15 +9792,21 @@ func (h *handler) applyFormMappings(ctx context.Context, recordID, formID, statu
 // recompute wrote — silently stale, indistinguishable from a correct total.
 // The whole operation is idempotent (it derives the value from ground truth
 // inside one transaction), so re-running it is always safe.
-func (h *handler) recomputeFactInput(ctx context.Context, mappingID, targetMetricID, aggregation, modelID, revisionID, userID string) {
+//
+// It takes the mapping's target, aggregation and model from the mapping row
+// itself, not from its caller: a re-apply runs in the background, and a
+// retarget or a delete can land between the moment its caller read the
+// mapping and this write. revisionID is only the fallback for legacy
+// postings that carry none.
+func (h *handler) recomputeFactInput(ctx context.Context, mappingID, revisionID, userID string) {
 	if err := retryTransient(ctx, 3, func() error {
-		return h.recomputeFactInputOnce(ctx, mappingID, targetMetricID, aggregation, modelID, revisionID, userID)
+		return h.recomputeFactInputOnce(ctx, mappingID, revisionID, userID)
 	}); err != nil {
-		h.log.Error().Err(err).Str("mapping_id", mappingID).Str("metric_id", targetMetricID).Msg("recomputeFactInput kept failing — this metric's form-posted total is now stale")
+		h.log.Error().Err(err).Str("mapping_id", mappingID).Msg("recomputeFactInput kept failing — this metric's form-posted total is now stale")
 	}
 }
 
-func (h *handler) recomputeFactInputOnce(ctx context.Context, mappingID, targetMetricID, aggregation, modelID, revisionID, userID string) error {
+func (h *handler) recomputeFactInputOnce(ctx context.Context, mappingID, revisionID, userID string) error {
 	tx, err := h.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -9804,6 +9815,24 @@ func (h *handler) recomputeFactInputOnce(ctx context.Context, mappingID, targetM
 
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, mappingID); err != nil {
 		return fmt.Errorf("advisory lock: %w", err)
+	}
+
+	// The mapping as it is now, held FOR SHARE until this commits, so its
+	// delete (crudapp.DeleteMappings, which deletes the row before it
+	// withdraws the totals) waits for this write instead of withdrawing
+	// under it. A mapping already gone posts nothing: a re-apply still in
+	// flight when it was deleted used to post its total back, under the id
+	// of a mapping that no longer existed, where nothing could take it out.
+	var targetMetricID, aggregation, modelID string
+	err = tx.QueryRow(ctx, `
+		SELECT target_metric_id::text, COALESCE(aggregation, ''), model_id::text
+		FROM model.form_metric_mapping WHERE id=$1::uuid FOR SHARE`, mappingID,
+	).Scan(&targetMetricID, &aggregation, &modelID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read mapping: %w", err)
 	}
 
 	rows, err := tx.Query(ctx, `
@@ -18596,6 +18625,12 @@ func isUniqueViolation(err error) bool {
 // a name another app's role uses is taken (it was a raw 500).
 func roleNameTaken(name string) error {
 	return fmt.Errorf("a business role named %q already exists in this workspace — roles are shared by its applications: give this one another name, or reuse that role", name)
+}
+
+// isForeignKeyViolation reports a foreign key refusal (SQLSTATE 23503).
+func isForeignKeyViolation(err error) bool {
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) && pe.Code == "23503"
 }
 
 // isCheckViolation reports a CHECK or trigger refusal (SQLSTATE 23514), such
