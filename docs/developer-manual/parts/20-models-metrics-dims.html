@@ -9,13 +9,14 @@
 <tr><td>Revision row</td><td>Click to select it. The row gets a <b>Working</b> badge; a <b>live</b> badge marks the model's active revision.</td></tr>
 <tr><td><b>Set active</b></td><td>On a non-active revision. Confirm <b>Set as active revision?</b>: the revision "becomes the live revision everyone sees. This can be changed again later."</td></tr>
 <tr><td>Delete revision icon</td><td>On a non-active revision. Confirm <b>Delete revision?</b>: "This permanently removes the revision. This cannot be undone." The active revision cannot be deleted.</td></tr>
+<tr><td><b>New application</b> / <b>New model</b></td><td>At the top of the screen, only for someone who is also tenant (or platform) admin, and only in the tenants they administer. <b>New application</b> asks for an <b>Application name</b>; <b>Create application</b> opens the model form next, with that application chosen. <b>New model</b> asks for the <b>Application</b> and a <b>Model name</b>. A new model is empty, with no revision: press <b>New revision</b> under it to start.</td></tr>
 <tr><td><b>New revision</b></td><td>Type a name, press Enter or <b>Save</b>. The new revision is a full copy of the model's current state (see Concepts › Revisions).</td></tr>
 <tr><td><b>Set as business default</b> / badge <b>business default</b></td><td>Business consoles (dashboards, workflows, grids) open the default model of an application. With several models in one application, pick which one users get.</td></tr>
 </table>
 <h3>Rules and behaviour</h3>
 <ul>
   <li><b>Selection is per session and not saved.</b> On a fresh sign-in the console pre-selects the most recently created revision, and if you skip this screen it falls back to a default revision that may belong to another application. Check the header (<b>Model</b> and <b>Revision</b>) before creating anything.</li>
-  <li><b>Applications and models are created by administrators</b> (Applications screen of the tenant or platform admin). A developer creates revisions, not applications.</li>
+  <li><b>Applications and models are created by administrators</b>: on the Applications screen of the tenant or platform admin, or at the top of this screen for a developer who is also one. A developer alone creates revisions, not applications or models.</li>
   <li><b>Active means live.</b> Business users always see the active revision. Build and test in a non-active revision, then <b>Set active</b>.</li>
 </ul>
 

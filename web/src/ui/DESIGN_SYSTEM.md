@@ -70,7 +70,7 @@ colour lives, so:
 - `AppPicker.tsx`: shared application selector contract; exported but not wired
   into the current consoles.
 - `AppShell.tsx`: global role-agnostic product shell.
-- `SidebarNav.tsx`: grouped navigation.
+- `SidebarNav.tsx`: grouped navigation; a group header folds its group away (remembered per browser, `mvx.sidebar.foldedGroups`), except in the icon-only rail.
 - `ContextBar.tsx`: application/model/revision/status context.
 - `PageLayout.tsx`: page and section headers.
 - `Toolbar.tsx`: toolbars, filter bars, filter chips.

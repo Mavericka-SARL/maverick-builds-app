@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { AuditExportPanel } from "../../ee/auditexport/AuditExportPanel";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Plus, Pencil, Trash2, Download, Upload, Package, Braces } from "lucide-react";
 import { api, withTenant, CONTROL_PLANE, type AccessRemovalResult, type AdminTenant, type AdminModel, type AdminApp, type AdminAuditEvent, type AdminRevision, type ModelExportPackage } from "../../api/client";
 import { downloadJSON } from "../../api/download";
@@ -29,6 +29,13 @@ import {
  * grant in the same step and says so in its reply (accessRemovalNotice).
  * Users are refetched either way: their access lists named what was deleted.
  */
+// Build › Models lists the same applications, models and revisions under its
+// own key; a change made here shows there at once, not when its cache ages.
+function invalidateTenancy(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ["admin-tenants"] });
+  qc.invalidateQueries({ queryKey: ["dev-applications"] });
+}
+
 function RemovalNotice({ result }: { result?: AccessRemovalResult }) {
   const message = accessRemovalNotice(result);
   if (!message) return null;
@@ -46,7 +53,7 @@ function ModelRevisionsSection({ model, tenantId, canTransferModels }: { model: 
   const [addRevision, setAddRevision] = useState(false);
   const [revisionName, setRevisionName] = useState("");
 
-  const inv = () => qc.invalidateQueries({ queryKey: ["admin-tenants"] });
+  const inv = () => invalidateTenancy(qc);
   // Export of ONE specific revision (the model-level button exports the
   // active one). The server accepts ?revision_id= for exactly this; without
   // a per-revision button here a tenant admin had no way to export a
@@ -182,7 +189,7 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
   const [importError, setImportError] = useState<string | null>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
 
-  const inv = () => qc.invalidateQueries({ queryKey: ["admin-tenants"] });
+  const inv = () => invalidateTenancy(qc);
 
   const createModel = useMutation({
     mutationFn: () => withTenant(tenantId, () => api.createAdminModel({ application_id: app.id, name: modelName, storage_type: "oltp" })),
@@ -244,47 +251,6 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
       </div>
 
       <div className="mvx-admin-object__body">
-        {app.models.length === 0 && <p className="mvx-admin-muted">No models yet.</p>}
-        {app.models.map(m => (
-          <div key={m.id} className="mvx-admin-model">
-            <div className="mvx-admin-model__header">
-              <span className="mvx-admin-model__name">{m.name}</span>
-              {canTransferModels && (
-                <IconButton
-                  aria-label={`Export model ${m.name}`}
-                  title="Export model (active revision)"
-                  size={26}
-                  onClick={() => exportModel.mutate(m)}
-                >
-                  <Download size={13} />
-                </IconButton>
-              )}
-              {canTransferModels && (
-                <IconButton
-                  aria-label={`Download deployment package for ${m.name}`}
-                  title="Download standalone deployment package (data + migrations + manifest)"
-                  size={26}
-                  onClick={() => exportModelPackage.mutate(m)}
-                >
-                  <Package size={13} />
-                </IconButton>
-              )}
-              <IconButton
-                aria-label={`Delete model ${m.name}`}
-                title="Delete model"
-                danger
-                size={26}
-                onClick={() => confirm({ title: "Delete model?", body: `This removes "${m.name}" and all its revisions.`, confirmLabel: "Delete model", onConfirm: () => deleteModel.mutate(m.id) })}
-              >
-                <Trash2 size={13} />
-              </IconButton>
-            </div>
-            <ModelRevisionsSection model={m} tenantId={tenantId} canTransferModels={canTransferModels} />
-          </div>
-        ))}
-        {deleteModel.isError && <p className="mvx-admin-error" role="alert">{(deleteModel.error as Error).message}</p>}
-        {deleteModel.isSuccess && <RemovalNotice result={deleteModel.data} />}
-
         {addModel ? (
           <div className="mvx-admin-inline-form">
             <TextInput
@@ -339,6 +305,47 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
           </div>
         )}
         {importError && <p className="mvx-admin-muted" role="alert">Import failed: {importError}</p>}
+        {app.models.length === 0 && <p className="mvx-admin-muted">No models yet.</p>}
+        {app.models.map(m => (
+          <div key={m.id} className="mvx-admin-model">
+            <div className="mvx-admin-model__header">
+              <span className="mvx-admin-model__name">{m.name}</span>
+              {canTransferModels && (
+                <IconButton
+                  aria-label={`Export model ${m.name}`}
+                  title="Export model (active revision)"
+                  size={26}
+                  onClick={() => exportModel.mutate(m)}
+                >
+                  <Download size={13} />
+                </IconButton>
+              )}
+              {canTransferModels && (
+                <IconButton
+                  aria-label={`Download deployment package for ${m.name}`}
+                  title="Download standalone deployment package (data + migrations + manifest)"
+                  size={26}
+                  onClick={() => exportModelPackage.mutate(m)}
+                >
+                  <Package size={13} />
+                </IconButton>
+              )}
+              <IconButton
+                aria-label={`Delete model ${m.name}`}
+                title="Delete model"
+                danger
+                size={26}
+                onClick={() => confirm({ title: "Delete model?", body: `This removes "${m.name}" and all its revisions.`, confirmLabel: "Delete model", onConfirm: () => deleteModel.mutate(m.id) })}
+              >
+                <Trash2 size={13} />
+              </IconButton>
+            </div>
+            <ModelRevisionsSection model={m} tenantId={tenantId} canTransferModels={canTransferModels} />
+          </div>
+        ))}
+        {deleteModel.isError && <p className="mvx-admin-error" role="alert">{(deleteModel.error as Error).message}</p>}
+        {deleteModel.isSuccess && <RemovalNotice result={deleteModel.data} />}
+
       </div>
       {confirmElement}
     </div>
@@ -440,7 +447,7 @@ function TenantSection({ tenant, onDelete, isPlatformAdmin, canTransferModels }:
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(tenant.name);
 
-  const inv = () => qc.invalidateQueries({ queryKey: ["admin-tenants"] });
+  const inv = () => invalidateTenancy(qc);
 
   const createApp = useMutation({
     mutationFn: () => api.createAdminApplication({ customer_id: tenant.id, name: appName, mode: "planning" }),
@@ -517,15 +524,6 @@ function TenantSection({ tenant, onDelete, isPlatformAdmin, canTransferModels }:
 
       <div className="mvx-admin-object__body">
         {isPlatformAdmin && <TenantPlanControls key={tenant.plan} tenant={tenant} />}
-        {(tenant.applications ?? []).length === 0 && (
-          <p className="mvx-admin-muted">No applications yet.</p>
-        )}
-        {(tenant.applications ?? []).map(app => (
-          <AppSection key={app.id} app={app} tenantId={tenant.id} onDelete={() => deleteApp.mutate(app.id)} canTransferModels={canTransferModels} />
-        ))}
-        {deleteApp.isError && <p className="mvx-admin-error">{(deleteApp.error as Error).message}</p>}
-        {deleteApp.isSuccess && <RemovalNotice result={deleteApp.data} />}
-
         {addApp ? (
           <div className="mvx-admin-inline-form mvx-admin-inline-form--boxed">
             <TextInput
@@ -553,6 +551,15 @@ function TenantSection({ tenant, onDelete, isPlatformAdmin, canTransferModels }:
             New application
           </Button>
         )}
+        {(tenant.applications ?? []).length === 0 && (
+          <p className="mvx-admin-muted">No applications yet.</p>
+        )}
+        {(tenant.applications ?? []).map(app => (
+          <AppSection key={app.id} app={app} tenantId={tenant.id} onDelete={() => deleteApp.mutate(app.id)} canTransferModels={canTransferModels} />
+        ))}
+        {deleteApp.isError && <p className="mvx-admin-error">{(deleteApp.error as Error).message}</p>}
+        {deleteApp.isSuccess && <RemovalNotice result={deleteApp.data} />}
+
       </div>
       {confirmElement}
     </div>
@@ -569,7 +576,7 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
   // The plans a new tenant can start on come from the catalog (Platform › Plans).
   const { data: plans } = useQuery({ queryKey: ["admin-plans"], queryFn: api.getPlans, enabled: isPlatformAdmin });
 
-  const inv = () => qc.invalidateQueries({ queryKey: ["admin-tenants"] });
+  const inv = () => invalidateTenancy(qc);
 
   const createTenant = useMutation({
     mutationFn: () => api.createAdminTenant({ name: tenantName, plan: tenantPlan }),
@@ -589,10 +596,6 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
           onAction={isPlatformAdmin ? () => { setAddTenant(true); setTenantName(""); } : undefined}
         />
       )}
-
-      {tenants.map(tenant => (
-        <TenantSection key={tenant.id} tenant={tenant} onDelete={() => deleteTenant.mutate(tenant.id)} isPlatformAdmin={isPlatformAdmin} canTransferModels={canTransferModels} />
-      ))}
 
       {isPlatformAdmin && addTenant ? (
         <div className="mvx-admin-inline-form mvx-admin-inline-form--boxed">
@@ -624,6 +627,11 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
           New tenant
         </Button>
       ) : null}
+
+      {tenants.map(tenant => (
+        <TenantSection key={tenant.id} tenant={tenant} onDelete={() => deleteTenant.mutate(tenant.id)} isPlatformAdmin={isPlatformAdmin} canTransferModels={canTransferModels} />
+      ))}
+
     </div>
   );
 }

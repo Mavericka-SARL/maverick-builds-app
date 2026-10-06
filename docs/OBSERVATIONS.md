@@ -18,6 +18,22 @@ leaves out, until it is fixed.
 
 ## Open
 
+### New revision still sits below each model's revision list
+
+- **Noticed:** 2026-10-06, moving New application and New model to the top of
+  Build › Models and Tenant admin › Applications (and New tenant above the
+  tenants). **New revision** was not part of that request and still follows
+  each model's revisions in both screens, so on a model with many revisions
+  it is the one create control left at the bottom.
+- **Why it matters:** the two screens now put creation first everywhere
+  except here, and a long revision list pushes it out of view.
+- **How to check:** a model with ten revisions in Build › Models; the button
+  is under the tenth.
+- **What closes it:** the same move for `DevModelRevisions`
+  (web/src/consoles/developer/ApplicationsTab.tsx) and
+  `ModelRevisionsSection` (PlatformAdminConsole.tsx), if wanted — or a
+  decision that revisions read better with New revision last.
+
 ### Changing a text input's format leaves its notes as zeros
 
 - **Noticed:** 2026-10-05, adding the Date format: the HR model's Hire Date is
@@ -45,6 +61,8 @@ leaves out, until it is fixed.
   LOOKUP / *IFS over a text metric (`COUNTIFS(comment, "<>")`), are still
   refused.
 - **How to check:** save `COUNTIFS(act_comment, "<>")`.
+- **Decision:** 2026-10-06, the user: support LOOKUP and the *IFS family over
+  text metrics (bound as text); number arithmetic on text stays refused.
 - **What closes it:** the fact loaders binding a text metric as text (as a
   pick-list's codec decodes keys), or a documented "use a pick-list" stance.
 
@@ -55,6 +73,8 @@ leaves out, until it is fixed.
   chat connector show the value untinted.
 - **Why it matters:** a dashboard's KPI of the company variance % does not
   turn red where its grid row does.
+- **Decision:** 2026-10-06, the user: the same rules tint KPI tiles, and grid
+  exports carry them as cell fills.
 - **What closes it:** the same rule evaluation on KPI tiles (the value is at
   hand), and a decision for exports (an xlsx fill).
 
@@ -97,6 +117,9 @@ leaves out, until it is fixed.
   slot's pick-lists and amounts, absent from the file, stayed.
 - **Why it matters:** "replace" reads like "make the grid the file".
 - **How to check:** add a value at a member the file lacks, run the import.
+- **Decision:** 2026-10-06, the user: add a full-reload mode that clears the
+  target's cells the file does not have (archived); replace keeps its
+  behaviour and its label says what it does.
 - **What closes it:** a documented mode that clears the target's other cells,
   or a clearer name.
 
@@ -126,6 +149,8 @@ leaves out, until it is fixed.
 - **Also:** a chart's series are metrics, so with a Scenario dimension
   (calculated members) a monthly RF-against-LY line is not one metric at two
   members; a chart by scenario plots RF, LY and the variance as bars instead.
+- **Decision:** 2026-10-06, the user: not now: a chart plots one grid's
+  metrics; a comparison is a calculated metric on one grid.
 - **What closes it:** a decision on charts plotting metrics of several grids
   that share the plotted dimension, or one metric at several members.
 
@@ -155,6 +180,8 @@ leaves out, until it is fixed.
 - **Why it matters:** a headline tile shows a slice, and a monthly line ends
   in a spike, until someone changes the settings.
 - **How to check:** add a KPI tile and a monthly line chart in the console.
+- **Decision:** 2026-10-06, the user: a new KPI tile shows the model total
+  unless scoped, and a new chart hides rollup members.
 - **What closes it:** a product decision on the editor's defaults.
 
 ### SUMIFS across the metric's own grid dimension returned nothing
@@ -261,6 +288,10 @@ leaves out, until it is fixed.
   the first one in sorted order.
 - **How to check:** import a dimension CSV with a `property:Sales Segment`
   column, then list `GET /api/developer/dimensions/{id}/properties`.
+- **Decision:** 2026-10-06, the user: one normalisation for every importer: a
+  header becomes an identifier ("Sales Segment" → `sales_segment`) with the
+  header kept as its label, and a declaration differing only in case is
+  reused.
 - **What closes it:** a decision on imports. Either refuse a non-identifier
   header, or map it to an identifier and keep the header as a label. Either
   way, reuse the existing declaration when only the case differs.
@@ -288,6 +319,9 @@ leaves out, until it is fixed.
   working revision can compute wrong numbers until then.
 - **How to check:** put a `LAG(x, 1)` metric on a grid with a time dimension,
   then `DELETE` the time dimension from the grid. It returns 200.
+- **Decision:** 2026-10-06, the user: refuse (409, naming the formulas and
+  time rules) while something reads it, as a metric delete is; a dimensional
+  read of an unplaced source is an error.
 - **What closes it:** deciding whether removals should refuse or only warn for
   the time rules, then running `ValidateGridTime` on them as well; for an
   unplaced source, deciding whether a dimensional read of it is an error.
@@ -389,6 +423,8 @@ leaves out, until it is fixed.
 - **How to check:** pull `property:Segment` through a REST connector and
   import the same header by CSV into another dimension, then compare
   `model.dimension_property.name`.
+- **Decision:** 2026-10-06, the user: as in "Imported property names are not
+  checked": one normalisation, identifier plus label, case-insensitive reuse.
 - **What closes it:** one header normalisation shared by both importers,
   decided together with the "Imported property names are not checked" entry.
 
@@ -622,6 +658,8 @@ leaves out, until it is fixed.
   guidance is a narrow, purpose-scoped guard.
 - **How to check:** as a developer without `business_admin`,
   `POST /api/business-admin/roles/{id}/members` answers 200.
+- **Decision:** 2026-10-06, the user: developers keep the API, and their
+  console gets the control.
 - **What closes it:** deciding whether developers manage membership; if not,
   `ba()` on the two member routes.
 
@@ -676,6 +714,8 @@ leaves out, until it is fixed.
   because the child is not deleted (correctly).
 - **How to check:** delete a parent member with children over HTTP and list
   the dimension's members.
+- **Decision:** 2026-10-06, the user: a delete moves the member's children up
+  to its own parent; the dialog and the manual say so.
 - **What closes it:** deciding which is intended, then aligning the dialog
   and manual text, or the delete, with it.
 
@@ -721,6 +761,9 @@ leaves out, until it is fixed.
 - **How to check:** `TestResolveAverageAndCountAreFlatOverLeaves` (FR
   recorded as 0 counts 2 at EMEA); the Playwright case "a calculated leaf is
   its own value; count skips zeros; a pure ratio is the server's".
+- **Decision:** 2026-10-06, the user: a formula that saw no inputs at a leaf
+  writes no row; count counts every recorded value, a typed 0 included, and
+  averages leave the no-data leaves out.
 - **What closes it:** a user decision. Either confirm the non-zero count and
   the 0-row average as they are, or have the scheduler write no row where
   every input is missing (then count can count every recorded value,
@@ -747,6 +790,8 @@ leaves out, until it is fixed.
   number.
 - **How to check:** `TestPureRatioAverageReadsTheSchedulersAggregate`
   (`internal/gateway`): EMEA × 2026-02 of `prva` has no row.
+- **Decision:** 2026-10-06, the user: the scheduler persists its rollup
+  combinations, as for formula and rate metrics.
 - **What closes it:** the scheduler persisting the rollup combos for this
   rule as it does for formula and rate (`RollupCombos` in
   `tsEvaluator.finish` and `executePartition`), and the collapsed case
@@ -791,6 +836,7 @@ leaves out, until it is fixed.
 - **Decision:** accepted by the user on 2026-09-29: no separate dashboard
   screen for tenant admins for now. The guide is read by the sign-up owner,
   who holds more roles, and by anyone also given a business role.
+- **Decision:** 2026-10-06, the user: keep the decision of 2026-09-29.
 - **What closes it:** only if that decision changes: a read-only dashboard
   view in the Tenant admin group, or the guide delivered some other way.
 
@@ -806,6 +852,9 @@ leaves out, until it is fixed.
 - **How to check:** list the models of an application created before this
   change.
 - **Decision:** accepted by the user on 2026-09-29: new sign-ups only.
+- **Decision:** 2026-10-06, the user: the starter sync (c5a7dd0) already gives
+  self-service tenants their starters whenever they signed up; it should give
+  them to tenants a platform admin created too.
 - **What closes it:** only if that decision changes: a published export
   package of each guide, imported with the tenant admin's model import.
 
@@ -822,6 +871,7 @@ leaves out, until it is fixed.
   admins; business users may be shown pages about roles and access rules.
 - **How to check:** invite a business user, put them in no role, and open
   the Business admin guide model as them.
+- **Decision:** 2026-10-06, the user: keep: they see the guides.
 - **What closes it:** a decision whether business users should see the
   guides; if not, sign-up granting the guide dashboards to named roles, or
   model-access restrictions.
@@ -897,6 +947,8 @@ leaves out, until it is fixed.
   order business users see in grids.
 - **How to check:** a child dimension with members added across two
   parents in alternating order; compare Build with `GET /api/dimensions`.
+- **Decision:** 2026-10-06, the user: Build's order is right: renumbering
+  keeps each parent's group together in the parent dimension's order.
 - **What closes it:** a decision on which order is right. Either the flat
   readers order such a dimension by its parent's order first, or the
   renumbering places each group together in the parent dimension's order,
@@ -919,6 +971,9 @@ leaves out, until it is fixed.
   puts a button on one can no longer make a new revision of the model.
 - **How to check:** two connectors with one name, an integration button on
   one of them, then Build › Models › New revision.
+- **Decision:** 2026-10-06, the user: names unique per revision: a migration
+  renames existing duplicates ("Name (2)"), and create and rename answer 409
+  on every path.
 - **What closes it:** open decision: connector names unique per revision (a
   migration and a 409 on create and rename), or copies that carry old-to-new
   ids instead of matching names.
@@ -943,6 +998,9 @@ leaves out, until it is fixed.
 - **How to check:** a schedule rule, New revision, Set active on the copy,
   then `SELECT revision_id, next_fire_at FROM workflow.automation_rule WHERE
   trigger_type = 'schedule'`.
+- **Decision:** 2026-10-06, the user: only the active revision's schedule
+  rules and connector schedules fire; making a revision live arms its
+  schedules and disarms the previous one's.
 - **What closes it:** open decision: whether schedules follow the active
   revision (arm the active revision's rules on activation and disarm the
   rest, or have the scheduler fire active revisions only), and the same for
@@ -995,6 +1053,9 @@ leaves out, until it is fixed.
 - **How to check:** on each deployment, `SELECT workspace_id, name FROM
   identity.business_role WHERE name IN (SELECT
   unnest(enum_range(NULL::identity.user_role))::text);`.
+- **Decision:** 2026-10-06, the user: reserved: refused on create and rename
+  on every path (business admin, AI, SCIM groups), and existing ones renamed
+  with a suffix by a migration.
 - **What closes it:** open decision: reserve those names on create and
   rename on all three paths, and rename the rows the query finds.
 
@@ -1009,6 +1070,8 @@ leaves out, until it is fixed.
   waiting for a person, is never chased.
 - **How to check:** a step with `sla_hours` and no assignee role, past its
   due time: no reminder row is written.
+- **Decision:** 2026-10-06, the user: it reminds the business admins of the
+  workflow's application.
 - **What closes it:** a product decision on whom such a step reminds, if
   anyone (for example the application's business admins).
 
@@ -1027,6 +1090,9 @@ leaves out, until it is fixed.
   requester) does not keep the agreed figures locked.
 - **How to check:** a workflow of an approval step then a notification step
   over some cells; approve it, then write one of those cells: 200.
+- **Decision:** 2026-10-06, the user: a finished, not cancelled instance whose
+  last approval step approved stays locked, whatever notification, task or
+  condition steps follow it.
 - **What closes it:** locking a finished, not cancelled instance whose last
   approval step approved, whatever notification, task or condition steps
   follow it; then the qualifier can leave the guide
@@ -1046,6 +1112,8 @@ leaves out, until it is fixed.
   live one.
 - **How to check:** on a new tenant, open Build, change a metric, and read
   the badge; the change shows in Run.
+- **Decision:** 2026-10-06, the user: the revision badge shows the live tone,
+  and the first edit to the live revision in a session asks for confirmation.
 - **What closes it:** the badge in the live tone when the working revision
   is the active one, and a product decision on a warning or a confirmation
   for edits to it.
@@ -1087,6 +1155,8 @@ leaves out, until it is fixed.
   dashboard is hidden from every role at the moment it goes live.
 - **How to check:** sign in with `developer` and `business_admin`, add a
   dashboard in a working revision, and look for a way to grant it.
+- **Decision:** 2026-10-06, the user: Business Admin › Roles offers the
+  working revision too, for someone who also builds the model.
 - **What closes it:** a decision, since it touches the one-console rule:
   Business Admin › Roles offering the working revision to a developer, or
   Build › Roles shown, scoped to the working revision, when `business_admin`
@@ -1106,6 +1176,8 @@ leaves out, until it is fixed.
   undone without notice at the next go-live.
 - **How to check:** make a working copy, change a grant on the live
   revision, make a new revision from the working copy, and compare grants.
+- **Decision:** 2026-10-06, the user: a copy takes the live revision's grants
+  for the dashboards that exist there, the source's for the others.
 - **What closes it:** a decision on which grants a copy takes (for example
   the live revision's, for the dashboards that exist there).
 
@@ -1178,6 +1250,8 @@ leaves out, until it is fixed.
   narrowed to an application it never chose there.
 - **How to check:** a workspace with two applications that both have
   running requests, one of them open.
+- **Decision:** 2026-10-06, the user: History follows the selected
+  application, as the Inbox does, and names it on screen.
 - **What closes it:** a decision whether History follows the selected
   application; if it does, the screen naming it.
 
@@ -1196,6 +1270,8 @@ leaves out, until it is fixed.
   workspace and is not affected.
 - **How to check:** two workspaces with a business admin each, one
   tenant-level application; compare their Roles screens.
+- **Decision:** 2026-10-06, the user: the business roles of the tenant's first
+  workspace govern them; the code uses exactly that rule.
 - **What closes it:** a decision: give such applications a workspace, or
   define whose roles govern them.
 
@@ -1216,6 +1292,8 @@ leaves out, until it is fixed.
 - **How to check:** as mm-dev in a `setupDevRouteFixture` test, `GET
   /api/developer/workflows?application_id=<a model-less tenant-1
   application>`.
+- **Decision:** 2026-10-06, the user: open it: the model clause applies only
+  when the application has a model.
 - **What closes it:** the user's decision: opening model-less applications
   to the tenant's developers widens a shared predicate. If agreed, the
   model clause applies only when the application has a model, with a test.
@@ -1290,6 +1368,7 @@ leaves out, until it is fixed.
 - **Why it matters:** an administrator who narrows an owner's applications
   narrows what the owner sees in the business console, not what it builds.
 - **How to check:** run that test.
+- **Decision:** 2026-10-06, the user: keep the decision as it stands.
 - **What closes it:** nothing while the decision stands. If grants should
   narrow owners too, change that test, and make `/api/apps` and
   `/api/developer/applications` list the same set to such accounts.
@@ -1309,6 +1388,8 @@ leaves out, until it is fixed.
   different models.
 - **How to check:** `GET /api/automation/rules` with `X-Model-Id` of a guide
   model and no `revision_id`.
+- **Decision:** 2026-10-06, the user: they come from the selected model
+  (`X-Model-Id`), as everything else does.
 - **What closes it:** a decision: honouring `X-Model-Id` there changes which
   rules existing multi-model applications show.
 
@@ -1362,6 +1443,9 @@ leaves out, until it is fixed.
   copies, or for runs generally.
 - **How to check:** duplicate a revision holding an active connector and run
   the copy.
+- **Decision:** 2026-10-06, the user: a copy whose only change is the remapped
+  target keeps its source's test; any other change needs a new test, and runs
+  enforce the gate.
 - **What closes it:** a decision: reset a remapped copy to draft, or accept
   the source's test across a pure target remap; and whether runs enforce the
   gate.
@@ -1387,6 +1471,9 @@ leaves out, until it is fixed.
 - **How to check:** `POST /api/developer/integrations?revision_id=<working>`
   with `config.target_id` set to a grid of the active revision: the save
   succeeds, and a run writes into that grid.
+- **Decision:** 2026-10-06, the user: a connector's target must be in its own
+  revision, checked on save and before each run; the copy's fallback to an
+  unmapped target goes.
 - **What closes it:** a decision to require the target in the connector's
   own revision (or a revision-less row) on save and before each run, with
   the copy's unmapped-target fallback cleared.
@@ -1423,6 +1510,8 @@ leaves out, until it is fixed.
 - **How to check:** a business user with a read-only access rule on member
   M submits a record naming M; a business admin with no rule approves it;
   the value is posted.
+- **Decision:** 2026-10-06, the user: a posting follows the submitter's access
+  (the record's creator); an approver needs no write access where it posts.
 - **What closes it:** a decision whose access a posting follows (the
   submitter's, the approver's, or both), then one rule in
   `applyFormMappings` with a test.
@@ -1442,6 +1531,8 @@ leaves out, until it is fixed.
   records and no actions.
 - **How to check:** a test where a user's access grants exclude the model
   but the application header still resolves it.
+- **Decision:** 2026-10-06, the user: the list and the form widget leave out
+  forms the caller's record scope does not reach.
 - **What closes it:** the forms list leaving out forms the scope does not
   reach, or showing them that way on purpose.
 
@@ -1543,6 +1634,9 @@ leaves out, until it is fixed.
 - **Also:** 2026-10-06: the .xlsx upload keeps a percentage-formatted cell
   as displayed ("25.00%", refused as not a number) until this is settled;
   the AI Developer's attachment import reads its stored 0.25.
+- **Decision:** 2026-10-06, the user: percent units everywhere (3 is 3%): KPI
+  tiles and charts format as the grid does, every view honours
+  `format_decimals`, and the .xlsx upload reads a "25%" cell as 25.
 - **What closes it:** one shared formatter with one percentage convention,
   honouring `format_decimals`.
 
@@ -1637,6 +1731,7 @@ leaves out, until it is fixed.
   address stay as they are. The users list's `home_tenant` was not part of
   the decision; the foreign-account note and Remove from this tenant read
   it.
+- **Decision:** 2026-10-06, the user: keep the decision as it stands.
 - **What closes it:** only if that decision changes: the flag left out of
   the event the tenant reads, and the invitation's mail sent asynchronously,
   which conflicts with the rule that a failed invitation rolls the whole
@@ -1668,6 +1763,8 @@ leaves out, until it is fixed.
   without a platform admin.
 - **How to check:** `TestAccountActionsNeedEveryRoleRevocable`
   (`internal/gateway/account_boundaries_test.go:434`).
+- **Decision:** 2026-10-06, the user: allowed for another tenant admin of its
+  own tenant, never itself or the tenant's last one, audited.
 - **What closes it:** the user's confirmation of the rule as it is, or a
   narrower one (for example, a tenant admin may delete a fellow tenant admin
   of its own tenant, audited).
@@ -1685,6 +1782,8 @@ leaves out, until it is fixed.
   /api/admin/users/{id}/roles`), which is not capped, still can.
 - **How to check:** a tenant at its user limit; invite the address of one of
   its members with a role in another workspace.
+- **Decision:** 2026-10-06, the user: the cap counts accounts new to the
+  tenant only; giving an existing member another role is never refused by it.
 - **What closes it:** a decision: counting only accounts new to the tenant
   makes the two paths answer differently at the cap, so the cost may be
   accepted and recorded as intended.
@@ -1773,6 +1872,9 @@ leaves out, until it is fixed.
   (`internal/gateway/admin_tiers_test.go:104`) covers the reach it has; for
   the gaps, grant such an account an application with no model, open it,
   and read its workflow history.
+- **Decision:** 2026-10-06, the user: the same grant reach everywhere
+  (`rolesReachApp` and the workflow-admin scope read what the Admin list
+  reads).
 - **What closes it:** `rolesReachApp` and `resolveWorkflowAdminScope`
   reading the same grant reach as `GET /api/admin/applications`
   (`grantedAppSQL`, `internal/gateway/admin_tiers.go:234`); or a decision
@@ -1866,6 +1968,8 @@ leaves out, until it is fixed.
   suspend one.
 - **How to check:** look for a disable route in
   `internal/gateway/handler.go`.
+- **Decision:** 2026-10-06, the user: add disable and re-enable, allowed where
+  `permissions.disable` says, with the Users-screen control, audited.
 - **What closes it:** a decision whether administrators disable accounts; if
   so, a disable and re-enable route refused as `permissions.disable` says,
   and its control on the Users screen shown only when that is true.
@@ -1934,6 +2038,8 @@ leaves out, until it is fixed.
   cannot reach.
 - **How to check:** look for a workspace create route in
   `internal/gateway/handler.go`.
+- **Decision:** 2026-10-06, the user: not now: one workspace per tenant stays
+  the product's shape.
 - **What closes it:** a decision whether tenants manage workspaces; if so, a
   create and rename route and screen for the tenant admin.
 
@@ -2162,6 +2268,8 @@ leaves out, until it is fixed.
   trade-off was made on purpose and is recorded nowhere else.
 - **How to check:** the change-detection step (`ci.yml:83-103`); a push that
   touches only `docs/OBSERVATIONS.md` starts Go test.
+- **Decision:** 2026-10-06, the user: a change touching only documents runs
+  only the tests that read them.
 - **What closes it:** a docs-only change running only the tests that read
   the documents (`go test -run 'TestDocs|TestManuals' .` and
   `go test -run TestFormulasManualIndexMatchesEngine ./internal/formula`),
@@ -2221,6 +2329,9 @@ leaves out, until it is fixed.
   shared and in a dedicated tenant.
 - **How to check:** a workflow in a dedicated tenant with a step naming
   `developer`; the platform-wide builder's inbox.
+- **Decision:** 2026-10-06, the user: platform-level accounts are never
+  assignees of a tenant's steps, in a shared database or a dedicated one; the
+  shared case is made to match.
 - **What closes it:** a decision whether platform-level accounts should be
   assignees in tenants at all; stand-ins are never mailed.
 
@@ -2342,6 +2453,8 @@ leaves out, until it is fixed.
 - **Why it matters:** probably intended — a department its staff point at
   would stop being an input for them — but it is the one place left with the
   other rule.
+- **Decision:** 2026-10-06, the user: the same-dimension rule: only children
+  in its own dimension prevent a member becoming calculated.
 - **What closes it:** a decision, recorded here, or the same-dimension rule.
 
 ## Closed

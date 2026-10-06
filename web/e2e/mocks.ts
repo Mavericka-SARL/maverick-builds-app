@@ -21,6 +21,8 @@ const personaRoles: Record<string, string[]> = {
   finance: ["business_admin"],
   platform_admin: ["platform_admin"],
   tenant_admin: ["tenant_admin"],
+  // A self-service sign-up holds both: it builds, and it owns the tenant.
+  dev_admin: ["developer", "tenant_admin"],
 };
 
 function demoContextFor(persona: string) {

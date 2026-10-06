@@ -169,7 +169,7 @@ Your company is one **tenant**. Everything else sits inside it.`, 88),
 
 They are the **Tenant admin** group in the sidebar:
 
-- **Applications** — your tenant's applications, models and revisions: export, import and delete
+- **Applications** — your tenant's applications, models and revisions: create (at the top), export, import and delete
 - **Users** — invite people, give them roles, decide what they reach
 - **Audit Log** — who did what, and when
 - **Usage** — activity and size over a period *(Enterprise)*

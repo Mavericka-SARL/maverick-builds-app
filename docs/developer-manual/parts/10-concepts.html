@@ -20,7 +20,7 @@
 <tr><td>CRUD</td><td>Forms, form-to-metric posting, imports, integrations</td><td>Submit and manage records that feed the plan</td></tr>
 <tr><td>Execution</td><td>Workflows, triggers, notifications</td><td>Start approvals, act on tasks in their inbox, get notified</td></tr>
 </table>
-<p>The console is one application with one sidebar. Roles are additive: each role adds groups to the sidebar, never a second console. A developer sees the <b>Build</b> group (Models, Metrics, Dimensions, Forms, Grids, Dashboards, Workflows, Roles, Triggers, Integrations, Dependency Graph, AI Developer) and the <b>Govern</b> group (Users). A developer who also holds business_admin sees the business <b>Run</b> and <b>Business Admin</b> groups as well; a tenant or platform administrator sees the administration groups.</p>
+<p>The console is one application with one sidebar. Roles are additive: each role adds groups to the sidebar, never a second console. A developer sees the <b>Build</b> group (AI Developer, Metrics, Dimensions, Forms, Grids, Dashboards, Workflows, Roles, Triggers, Integrations, Dependency Graph, Models) and the <b>Govern</b> group (Users). A developer who also holds business_admin sees the business <b>Run</b> and <b>Business Admin</b> groups as well; a tenant or platform administrator sees the administration groups.</p>
 <h3>The five roles</h3>
 <table>
 <tr><th style="width:18%">Role</th><th>What it does</th><th style="width:34%">Relation to the developer</th></tr>
@@ -135,7 +135,7 @@
 <figure><img src="img/13-account-menu.png" alt="Developer console with the account menu open showing email, roles and Sign out"><figcaption>The shell: sidebar groups on the left, the context bar at the top with Model and Revision, the notification bell and the account menu.</figcaption></figure>
 <table class="ctl">
 <tr><th>Element</th><th>What it does</th></tr>
-<tr><td>Sidebar</td><td>Groups by role: <b>Build</b> and <b>Govern</b> for a developer. The collapse icon narrows it. Its top shows the product mark, or the tenant's own logo when white-labelled.</td></tr>
+<tr><td>Sidebar</td><td>Groups by role: <b>Build</b> and <b>Govern</b> for a developer. Click a group's name to fold it away and again to unfold it; the browser remembers which groups are folded. The collapse icon narrows it. Its top shows the product mark, or the tenant's own logo when white-labelled.</td></tr>
 <tr><td>Context bar: <b>Model</b></td><td>"application · model" of the revision you are editing.</td></tr>
 <tr><td>Context bar: <b>Revision</b></td><td>The revision name, or an orange <b>No revision selected</b>.</td></tr>
 <tr><td>Bell</td><td>Notifications with an unread count. Clicking an entry marks it read and, when it points at an object such as a workflow instance, opens it.</td></tr>

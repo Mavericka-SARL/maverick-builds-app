@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { ChevronDown } from "lucide-react";
 import type { NavGroup, NavItem } from "./types";
 
 interface SidebarNavProps {
@@ -10,25 +12,76 @@ interface SidebarNavProps {
   collapsed?: boolean;
 }
 
+// Which groups are folded, by id or label. Like the sidebar's own collapse
+// it is about the person's screen, not one console, so it is one key.
+const FOLDED_GROUPS_KEY = "mvx.sidebar.foldedGroups";
+
+function readFolded(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(FOLDED_GROUPS_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((k): k is string => typeof k === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export function SidebarNav({ groups, activeId, onSelect, className, collapsed }: SidebarNavProps) {
+  const [folded, setFolded] = useState<string[]>(readFolded);
+
+  const toggleFolded = (key: string) => {
+    setFolded((prev) => {
+      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+      try {
+        localStorage.setItem(FOLDED_GROUPS_KEY, JSON.stringify(next));
+      } catch {
+        // Private-mode storage failures just lose persistence, not the fold.
+      }
+      return next;
+    });
+  };
+
   return (
     <nav className={["mvx-sidebar-nav", className].filter(Boolean).join(" ")} aria-label="Primary">
-      {groups.map((group, index) => (
-        <div key={group.id ?? group.label ?? index} className="mvx-sidebar-nav__group">
-          {group.label && <div className="mvx-sidebar-nav__group-label">{group.label}</div>}
-          <div className="mvx-sidebar-nav__items">
-            {group.items.map((item) => (
-              <SidebarNavItem
-                key={item.id}
-                item={item}
-                active={item.id === activeId}
-                onSelect={onSelect}
-                collapsed={collapsed}
-              />
+      {groups.map((group, index) => {
+        const key = group.id ?? group.label;
+        // The rail has no group headers to unfold with, so it shows every item.
+        const isFolded = !collapsed && !!key && folded.includes(key);
+        const itemsId = `mvx-sidebar-group-${index}`;
+        // A folded group still says it holds the screen that is open.
+        const holdsActive = isFolded && group.items.some((item) => item.id === activeId);
+        return (
+          <div key={key ?? index} className="mvx-sidebar-nav__group">
+            {group.label && (collapsed ? (
+              <div className="mvx-sidebar-nav__group-label">{group.label}</div>
+            ) : (
+              <button
+                type="button"
+                className={["mvx-sidebar-nav__group-label", "mvx-sidebar-nav__group-toggle", holdsActive ? "mvx-sidebar-nav__group-label--active" : ""].filter(Boolean).join(" ")}
+                aria-expanded={!isFolded}
+                aria-controls={itemsId}
+                title={isFolded ? `Show ${group.label}` : `Hide ${group.label}`}
+                onClick={() => key && toggleFolded(key)}
+              >
+                {group.label}
+                <ChevronDown size={12} aria-hidden="true" className="mvx-sidebar-nav__group-chevron" />
+              </button>
             ))}
+            {!isFolded && (
+              <div id={itemsId} className="mvx-sidebar-nav__items">
+                {group.items.map((item) => (
+                  <SidebarNavItem
+                    key={item.id}
+                    item={item}
+                    active={item.id === activeId}
+                    onSelect={onSelect}
+                    collapsed={collapsed}
+                  />
+                ))}
+              </div>
+            )}
           </div>
-        </div>
-      ))}
+        );
+      })}
     </nav>
   );
 }

@@ -1,8 +1,8 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Trash2, Plus } from "lucide-react";
-import { api, withTenant, type AdminModel } from "../../api/client";
-import { Button, IconButton, TextInput, LoadingState, EmptyState, StatusBadge, RevisionBadge, useConfirm } from "../../ui";
+import { api, withTenant, type AdminModel, type AdminTenant } from "../../api/client";
+import { Button, IconButton, TextInput, Select, Field, Toolbar, ToolbarGroup, LoadingState, EmptyState, StatusBadge, RevisionBadge, useConfirm } from "../../ui";
 
 function DevModelRevisions({
   model,
@@ -33,6 +33,8 @@ function DevModelRevisions({
 
   const inv = () => {
     qc.invalidateQueries({ queryKey: ["dev-applications"] });
+    // Tenant admin › Applications lists the same revisions.
+    qc.invalidateQueries({ queryKey: ["admin-tenants"] });
     qc.invalidateQueries({ queryKey: ["dev-model"] });
     qc.invalidateQueries({ queryKey: ["dev-dimensions"] });
   };
@@ -159,10 +161,108 @@ function DevModelRevisions({
   );
 }
 
+/**
+ * New application and New model, at the top of Build › Models. Creating them
+ * belongs to the tenant admin (and platform admin): the bar offers only the
+ * tenants of this list that the person administers, and is absent for a
+ * developer alone, whose guide sends them to their tenant admin.
+ */
+function CreateBar({ tenants }: { tenants: AdminTenant[] }) {
+  const qc = useQueryClient();
+  const { data: adminTenants = [] } = useQuery({ queryKey: ["admin-tenants"], queryFn: api.getAdminTenants });
+  const administered = new Set(adminTenants.map((t) => t.id));
+  const own = tenants.filter((t) => administered.has(t.id));
+  const apps = own.flatMap((t) => (t.applications ?? []).map((a) => ({ id: a.id, name: a.name, tenantId: t.id, tenantName: t.name })));
+
+  const [open, setOpen] = useState<"" | "app" | "model">("");
+  const [name, setName] = useState("");
+  const [tenantId, setTenantId] = useState("");
+  const [appId, setAppId] = useState("");
+
+  const inv = () => {
+    qc.invalidateQueries({ queryKey: ["dev-applications"] });
+    qc.invalidateQueries({ queryKey: ["admin-tenants"] });
+  };
+  const show = (which: "app" | "model", app = "") => {
+    setOpen((cur) => (cur === which && !app ? "" : which));
+    setName("");
+    setTenantId(own[0]?.id ?? "");
+    setAppId(app || apps[0]?.id || "");
+  };
+  const createApp = useMutation({
+    mutationFn: () => api.createAdminApplication({ customer_id: tenantId || own[0].id, name: name.trim(), mode: "planning" }),
+    // A new application is empty: go straight on to its first model.
+    onSuccess: (data) => { inv(); show("model", data.id); },
+  });
+  const createModel = useMutation({
+    mutationFn: () => {
+      const app = apps.find((a) => a.id === appId);
+      return withTenant(app?.tenantId ?? "", () => api.createAdminModel({ application_id: appId, name: name.trim(), storage_type: "oltp" }));
+    },
+    onSuccess: () => { inv(); setOpen(""); setName(""); },
+  });
+
+  if (own.length === 0) return null;
+  const pending = open === "app" ? createApp : createModel;
+  const submit = () => { if (name.trim() && (open === "app" || appId)) pending.mutate(); };
+  const multiTenant = own.length > 1;
+
+  return (
+    <>
+      <Toolbar>
+        <ToolbarGroup align="end">
+          <Button leadingIcon={open === "app" ? undefined : <Plus size={14} />} onClick={() => show("app")}>
+            {open === "app" ? "Cancel" : "New application"}
+          </Button>
+          <Button leadingIcon={open === "model" ? undefined : <Plus size={14} />} disabled={apps.length === 0 && open !== "model"} onClick={() => show("model")}>
+            {open === "model" ? "Cancel" : "New model"}
+          </Button>
+        </ToolbarGroup>
+      </Toolbar>
+      {open && (
+        <div className="mvx-panel" style={{ padding: 16 }}>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+            {open === "app" && multiTenant && (
+              <Field label="Tenant">
+                <Select value={tenantId} onChange={(e) => setTenantId(e.target.value)} style={{ width: 200 }}>
+                  {own.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </Select>
+              </Field>
+            )}
+            {open === "model" && (
+              <Field label="Application">
+                <Select value={appId} onChange={(e) => setAppId(e.target.value)} style={{ width: 220 }}>
+                  {apps.map((a) => <option key={a.id} value={a.id}>{multiTenant ? `${a.tenantName} · ${a.name}` : a.name}</option>)}
+                </Select>
+              </Field>
+            )}
+            <Field label={open === "app" ? "Application name" : "Model name"}>
+              <TextInput
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") setOpen(""); }}
+                placeholder={open === "app" ? "e.g. Finance" : "e.g. Budget 2027"}
+                style={{ width: 220 }}
+                autoFocus
+              />
+            </Field>
+            <Button variant="primary" disabled={!name.trim() || (open === "model" && !appId)} loading={pending.isPending} loadingLabel="Creating…" onClick={submit}>
+              {open === "app" ? "Create application" : "Create model"}
+            </Button>
+          </div>
+          {open === "model" && <p className="mvx-admin-muted" style={{ margin: "10px 0 0" }}>A new model starts empty. Press <strong>New revision</strong> under it to start building.</p>}
+          {pending.isError && <p className="mvx-admin-error" role="alert">{(pending.error as Error).message}</p>}
+        </div>
+      )}
+    </>
+  );
+}
+
 export function DevApplicationsTab({
   revisionId,
   revisionName,
   defaultRevisionPending = false,
+  canCreate = false,
   onSelect,
 }: {
   revisionId: string;
@@ -170,6 +270,9 @@ export function DevApplicationsTab({
   /** The console is still asking for the default model's revisions; until it
       answers, revisionId is "" only because the answer has not arrived. */
   defaultRevisionPending?: boolean;
+  /** The person holds tenant or platform admin, so may create applications
+      and models (in the tenants they administer). */
+  canCreate?: boolean;
   onSelect: (id: string, name: string) => void;
 }) {
   const { data: tenants = [], isLoading } = useQuery({
@@ -211,10 +314,13 @@ export function DevApplicationsTab({
   }, [isLoading, defaultRevisionPending]);
 
   if (isLoading) return <LoadingState />;
-  if (apps.length === 0) return <EmptyState label="No applications found." />;
+  const createBar = canCreate ? <CreateBar tenants={tenants} /> : null;
+  if (apps.length === 0) return <div className="mvx-admin-stack">{createBar}<EmptyState label="No applications found." /></div>;
 
   return (
     <div className="mvx-admin-stack">
+      {createBar}
+
       {/* Current working revision banner */}
       {revisionId ? (
         <div className="mvx-context-banner">

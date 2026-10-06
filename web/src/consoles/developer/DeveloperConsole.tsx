@@ -118,7 +118,7 @@ export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInpu
     {
       label: "Build",
       items: [
-        { id: t("applications"), label: TAB_LABELS.applications, icon: <Boxes size={16} /> },
+        { id: t("ai"), label: TAB_LABELS.ai, icon: <Sparkles size={16} /> },
         { id: t("metrics"), label: TAB_LABELS.metrics, icon: <Sigma size={16} /> },
         { id: t("dimensions"), label: TAB_LABELS.dimensions, icon: <ListTree size={16} /> },
         { id: t("forms"), label: TAB_LABELS.forms, icon: <FileText size={16} /> },
@@ -131,7 +131,7 @@ export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInpu
         { id: t("automation"), label: TAB_LABELS.automation, icon: <Zap size={16} /> },
         { id: t("integrations"), label: TAB_LABELS.integrations, icon: <Plug size={16} /> },
         { id: t("graph"), label: TAB_LABELS.graph, icon: <GitBranch size={16} /> },
-        { id: t("ai"), label: TAB_LABELS.ai, icon: <Sparkles size={16} /> },
+        { id: t("applications"), label: TAB_LABELS.applications, icon: <Boxes size={16} /> },
       ],
     },
   ];
@@ -177,7 +177,7 @@ export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInpu
         <PageLayout title={TAB_LABELS[cur]}>
           {isLoading && <LoadingState />}
           {error && <ErrorState message={(error as Error).message} />}
-          {cur === "applications" && <DevApplicationsTab revisionId={effectiveRevisionId} revisionName={effectiveRevisionName} defaultRevisionPending={autoRevisionsLoading} onSelect={handleSelectRevision} />}
+          {cur === "applications" && <DevApplicationsTab revisionId={effectiveRevisionId} revisionName={effectiveRevisionName} defaultRevisionPending={autoRevisionsLoading} canCreate={roles.includes("tenant_admin") || roles.includes("platform_admin")} onSelect={handleSelectRevision} />}
           {!isLoading && !error && cur === "users" && <UsersPanel users={users} tenants={userTenants} assignableRoles={computeAssignableRoles(me?.roles ?? [])} canManageResourceAccess={canManageResourceAccess(me?.roles ?? [])} currentUserId={me?.user_id} rolesLoading={!me} />}
           {!isLoading && !error && cur === "metrics" && model && <MetricsTab model={model} revisionId={effectiveRevisionId || undefined} />}
           {!isLoading && !error && cur === "dimensions" && dims && <DimensionsView dims={dims} revisionId={effectiveRevisionId || undefined} />}

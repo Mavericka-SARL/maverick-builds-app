@@ -346,6 +346,7 @@
 .mvx-tabs__button:focus-visible,
 .mvx-segmented__button:focus-visible,
 .mvx-sidebar-nav__item:focus-visible,
+.mvx-sidebar-nav__group-toggle:focus-visible,
 /* Canvas widgets and their resize handles are focusable so they can be
    selected, moved and resized from the keyboard; the widget previously set
    `outline: none` inline, leaving a focusable element with no focus state. */
@@ -960,6 +961,40 @@
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+/* The header folds its group away; the chevron points right while folded. */
+.mvx-sidebar-nav__group-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border: 0;
+  border-radius: var(--radius-button);
+  background: transparent;
+  font-family: var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--motion-fast);
+}
+
+.mvx-sidebar-nav__group-toggle:hover {
+  color: var(--color-text);
+}
+
+.mvx-sidebar-nav__group-chevron {
+  flex-shrink: 0;
+  transition: transform var(--motion-fast);
+}
+
+.mvx-sidebar-nav__group-toggle[aria-expanded="false"] .mvx-sidebar-nav__group-chevron {
+  transform: rotate(-90deg);
+}
+
+/* Folded, yet holding the open screen. */
+.mvx-sidebar-nav__group-label--active {
+  color: var(--color-brand-700);
 }
 
 .mvx-sidebar-nav__items {

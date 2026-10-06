@@ -7,15 +7,16 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/modeltransfer"
 )
 
-// The developer guide: six pages for the person who builds models — working
-// in a revision, dimensions and metrics, formulas, grids and dashboards,
-// forms/workflows/integrations, and the AI Developer.
+// The developer guide: seven pages for the person who builds models — a
+// first model from nothing, working in a revision, dimensions and metrics,
+// formulas, grids and dashboards, forms/workflows/integrations, and the AI
+// Developer.
 //
 // It carries its own example, as small as the tour's: two products over the
 // four quarters of a Time dimension, two inputs and three calculated metrics.
 // Each calculated metric is there to show one thing the prose explains — a
 // plain product, the Formula aggregation rule against a plain average, and a
-// time function with a time summary — and page 3's grid and chart are that
+// time function with a time summary — and page 4's grid and chart are that
 // example, live, so what the page says can be checked by typing a number.
 //
 // Private identifiers carry the "dev" prefix so the guides, written side by
@@ -163,7 +164,7 @@ func DeveloperGuide() modeltransfer.Package {
 		Dimensions: []modeltransfer.Dimension{product, period}, Metrics: metrics, Dependencies: deps,
 		Grids: []modeltransfer.Grid{grid},
 		Dashboards: []modeltransfer.Dashboard{
-			devRevisionsPage(), devModelPage(), devFormulasPage(), devScreensPage(), devFlowPage(), devAIPage(),
+			devFirstModelPage(), devRevisionsPage(), devModelPage(), devFormulasPage(), devScreensPage(), devFlowPage(), devAIPage(),
 		},
 		Facts: devFacts(),
 	}
@@ -187,13 +188,63 @@ func devDashboard(id, name string, rows ...[]modeltransfer.Widget) modeltransfer
 	return modeltransfer.Dashboard{ID: id, Name: name, Tags: []string{"guide"}, Category: "Getting started", Widgets: devStack(rows...)}
 }
 
+func devFirstModelPage() modeltransfer.Dashboard {
+	return devDashboard("dev-dash-1-first-model", "1 · Your first model",
+		devText(`# Your first model
+
+This guide is for the person who builds models. This page goes from nothing to a model people can type numbers into, in eight steps; the pages after it explain each step in depth.
+
+The guide is a model too, *Developer guide*, with a small example — two products over four quarters — that page 4 uses. Open it in the Build screens and change it as much as you like, in a revision of your own.`, 164),
+
+		devPicture(devFirstModel(), "A tenant admin creates the application and the model; you add a revision, dimensions and metrics, a grid and a dashboard, then press Set active", 860, 190),
+
+		devText(`## 1–2 · An application and a model
+
+An **application** groups related models; a **model** holds what you build. Creating them belongs to the **tenant admin**. If you signed up for this workspace yourself, that is you: your account is tenant admin, developer and business admin at once. If it is not, ask your tenant admin for the two, and start at step 3.
+
+1. Open **Build › Models** and press **New application** at the top of the page. Type a name, such as *Sales*, and press **Create application**.
+2. The model form opens next, with the new application already chosen. Type a name, such as *Sales plan*, and press **Create model**. For another model in an application you already have, press **New model** instead.
+
+**Tenant admin › Applications** does the same: **New application** at the top of your tenant, **Add model** at the top of each application.`, 244),
+
+		devText(`## 3 · A revision to build in
+
+A new model is empty and has no revision yet. Under it in **Build › Models**, press **New revision**, type a name — *Working*, say — and press **Save**. It becomes your working revision: the bar at the top names the model and the revision, and every Build screen now changes them. Page 2 covers revisions.`, 132),
+
+		devText(`## 4 · Dimensions
+
+**Build › Dimensions** → **New dimension**. Make a **Standard** one for what you slice by — products, regions, teams — and give it members with **Add root member**. If your numbers run over time, add a **Time** one as well; **Generate periods…** fills it. Page 3.
+
+## 5 · Metrics
+
+**Build › Metrics** → **Add metric**. First what people type, Type **Input** — `+devCode("units")+` and `+devCode("price")+`, say. Then what is worked out from them, Type **Calc**, with a **Formula** such as `+devCode("=units * price")+`. Pages 3 and 4.
+
+## 6 · A grid
+
+**Build › Grids** → **New grid**, name it, **Create**. Press **Configure** on its card, move your metrics and dimensions to *In this grid*, and press **Done**. A metric takes its dimensions from the grid it sits on. Page 5.
+
+## 7 · A dashboard
+
+**Build › Dashboards** → **New dashboard**, name it, **Create**, then **Design** on its row. Click **Grid** in the palette, choose your grid, press **Add widget**, then **Save**. Switch to **Preview** and type a few numbers: the calculated metrics and the totals follow at once. Page 5.`, 366),
+
+		devText(`## 8 · Make it live
+
+Back in **Build › Models**, press **Set active** on your revision: from now on it is what people see in this model. Press **Set as business default** if people should open this model first, and give business roles its dashboards — page 5 shows where. Before a later change goes live, page 7 has a short checklist.
+
+## Or describe it to the AI Developer
+
+After step 3 you can hand steps 4 to 7 to **Build › AI Developer**. Describe the model in plain words — *products and quarters; units and price typed in; revenue is units times price; a grid and a dashboard to type into* — and confirm the plan it proposes. Its changes land in a draft revision of their own, which **Promote to Active** makes live. Page 7.
+
+---
+Next: **2 · Revisions**.`, 284),
+	)
+}
+
 func devRevisionsPage() modeltransfer.Dashboard {
-	return devDashboard("dev-dash-1-revisions", "1 · Revisions",
+	return devDashboard("dev-dash-2-revisions", "2 · Revisions",
 		devText(`# Work in a revision of your own
 
-This guide is for the person who builds models. Everything you build — dimensions, metrics, grids, dashboards, forms, workflows, triggers, integrations — belongs to a **revision** of a model: a complete copy of it, including the numbers entered so far. One revision is *live*: it is what everyone else sees. Build in a copy, and make it live when it is ready.
-
-The guide is a model too, *Developer guide*, with a small example — two products over four quarters — that page 3 uses. Open it in the Build screens and change it as much as you like, in a revision of your own.`, 192),
+Everything you build — dimensions, metrics, grids, dashboards, forms, workflows, triggers, integrations — belongs to a **revision** of a model: a complete copy of it, including the numbers entered so far. One revision is *live*: it is what everyone else sees. Build in a copy, and make it live when it is ready.`, 132),
 
 		devText(`## Check where you are
 
@@ -223,16 +274,16 @@ An application can hold several models: *Getting started* holds the tour and thr
 
 		devText(`## Two more things to know
 
-- The **AI Developer** puts its model changes into a revision of its own, named *AI Draft* and the date, which the first change you confirm creates. Page 6 covers it, and the few kinds of change that take effect at once.
+- The **AI Developer** puts its model changes into a revision of its own, named *AI Draft* and the date, which the first change you confirm creates. Page 7 covers it, and the few kinds of change that take effect at once.
 - People, business roles and access rules belong to the whole workspace, not to a revision. A workflow that is already running keeps the definition it started with, whatever you change afterwards.
 
 ---
-Next: **2 · Dimensions, metrics**.`, 204),
+Next: **3 · Dimensions, metrics**.`, 204),
 	)
 }
 
 func devModelPage() modeltransfer.Dashboard {
-	return devDashboard("dev-dash-2-model", "2 · Dimensions, metrics",
+	return devDashboard("dev-dash-3-model", "3 · Dimensions, metrics",
 		devText(`# Dimensions and metrics
 
 A model is built from two lists: the ways you slice numbers — **dimensions** — and the things you measure — **metrics**. Grids, formulas and charts all read them, so they are worth getting right first.`, 112),
@@ -262,7 +313,7 @@ Open **Build › Metrics** and press **Add metric**:
 - **Aggregation rule** and **Time summary** — how its totals are made, below.
 - **Tags** — for the tag filter and the *Search metrics…* box.
 
-A metric has no dimensions of its own: it takes those of the grid it sits on (page 4), and sits on one grid at most. Until it is on a grid it has none, and a time function has nothing to move along.
+A metric has no dimensions of its own: it takes those of the grid it sits on (page 5), and sits on one grid at most. Until it is on a grid it has none, and a time function has nothing to move along.
 
 To change a metric later, use **Edit** on its row. After a formula change, a *Recalc results* banner shows the new values.`, 336),
 
@@ -282,7 +333,7 @@ A new metric totals by Sum unless you pick another rule, and **Edit** on its row
 A metric that another metric reads cannot be deleted: the **Used by** column shows who reads it, and the delete is refused until those formulas change. The same protects a dimension member or property that a formula names.
 
 ---
-Next: **3 · Formulas**.`, 156),
+Next: **4 · Formulas**.`, 156),
 	)
 }
 
@@ -305,7 +356,7 @@ func devFormulasPage() modeltransfer.Dashboard {
 		"sync_context": true,
 	})
 
-	return devDashboard("dev-dash-3-formulas", "3 · Formulas",
+	return devDashboard("dev-dash-4-formulas", "4 · Formulas",
 		devText(`# Formulas
 
 A calculated metric is one line of formula. The platform works it out for every cell, and again whenever an input changes: there is nothing to refresh, and nobody can type over the result.
@@ -366,7 +417,7 @@ The formulas manual describes every function with examples the engine computed, 
 [Open the formulas manual](`+formulasManual+`)
 
 ---
-Next: **4 · Grids, dashboards**.`, 188),
+Next: **5 · Grids, dashboards**.`, 188),
 	)
 }
 
@@ -374,7 +425,7 @@ func devScreensPage() modeltransfer.Dashboard {
 	total := devJSON(map[string]any{"kpi_context_mode": "total"})
 	pinned := devJSON(map[string]any{"kpi_context_mode": "pin", "kpi_scope": map[string]string{"dimension_id": devDimProduct, "member_code": "COFFEE"}})
 
-	return devDashboard("dev-dash-4-screens", "4 · Grids, dashboards",
+	return devDashboard("dev-dash-5-screens", "5 · Grids, dashboards",
 		devText(`# Grids and dashboards
 
 A grid decides which numbers belong together; a dashboard decides how people see them. Business users never open a grid on its own — they meet it inside a dashboard.
@@ -416,7 +467,7 @@ Click a widget in Design and **Widget Properties** opens beside it:
 			},
 		},
 
-		devText(`The left card's **Default context** is **Whole-model total**: revenue for both products over the whole year. The right one is pinned to Coffee. Change a number on page 3 and both follow.`, 84),
+		devText(`The left card's **Default context** is **Whole-model total**: revenue for both products over the whole year. The right one is pinned to Coffee. Change a number on page 4 and both follow.`, 84),
 
 		devText(`## Preview, and who sees it
 
@@ -429,12 +480,12 @@ Beside the dashboard's name, switch from **Design** to **Preview** to use the pa
 **New folder** groups dashboards. Once a folder exists, each row gets a list that files it in a folder, and an *All folders* list above the rows narrows the view; the tag chips and *Search dashboards…* narrow it too. The pencil on a row edits its name and tags. Metrics, dimensions and grids carry tags as well, and the Metrics, Dimensions, Forms, Grids and Workflows lists each have a search box.
 
 ---
-Next: **5 · Data in, workflows**.`, 340),
+Next: **6 · Data in, workflows**.`, 340),
 	)
 }
 
 func devFlowPage() modeltransfer.Dashboard {
-	return devDashboard("dev-dash-5-flow", "5 · Data in, workflows",
+	return devDashboard("dev-dash-6-flow", "6 · Data in, workflows",
 		devText(`# Forms, workflows and integrations
 
 Numbers do not only arrive by typing into a grid. Forms collect entries, integrations bring data in from files and other systems, and workflows move a request through the people who must agree to it. Each is built in its own Build screen and belongs to the revision like everything else.`, 136),
@@ -474,12 +525,12 @@ Everything that brings data in is under **Build › Integrations**:
 On a dashboard, an **Integration** widget runs a saved integration from a button, and an **Import** widget gives people an upload box for a grid, with a template to download.
 
 ---
-Next: **6 · AI and going live**.`, 388),
+Next: **7 · AI and going live**.`, 388),
 	)
 }
 
 func devAIPage() modeltransfer.Dashboard {
-	return devDashboard("dev-dash-6-ai", "6 · AI and going live",
+	return devDashboard("dev-dash-7-ai", "7 · AI and going live",
 		devText(`# The AI Developer, and going live
 
 **Build › AI Developer** builds with you. Describe a change in plain words and it proposes the steps — dimensions, metrics, grids, dashboards, forms, workflows — for you to confirm. It works under the same checks as the Build screens, and nothing is written until you confirm.
@@ -544,6 +595,37 @@ func devLabel(x, y int, s string, anchor string) string {
 func devPill(x, y int, s string) string {
 	return `<rect x="` + itoa(x) + `" y="` + itoa(y) + `" width="48" height="22" rx="11" fill="#dcfce7" stroke="#16a34a"/>` +
 		`<text x="` + itoa(x+24) + `" y="` + itoa(y+12) + `" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="#15803d">` + s + `</text>`
+}
+
+// devFirstModel: who makes what, in the order the first page's steps go.
+func devFirstModel() string {
+	s := svgHead(860, 190) + devCard(860, 190)
+	steps := []struct{ step, label, sub string }{
+		{"1", "Application", "groups models"},
+		{"2", "Model", "empty at first"},
+		{"3", "Revision", "where you build"},
+		{"4–5", "Dimensions", "and metrics"},
+		{"6", "Grid", "numbers together"},
+		{"7", "Dashboard", "what people use"},
+	}
+	const x0, w, gap, y, h = 21, 118, 22, 52, 64
+	for i, st := range steps {
+		x := x0 + i*(w+gap)
+		s += devLabel(x+w/2, y-12, "step "+st.step, "middle")
+		s += box(x, y, w, h, st.label, st.sub, i >= 2)
+		if i+1 < len(steps) {
+			s += arrow(x+w+2, y+h/2, gap-4)
+		}
+	}
+	// Brackets under who does which part.
+	bracket := func(from, to int, text string) string {
+		x1, x2, by := x0+from*(w+gap), x0+to*(w+gap)+w, y+h+16
+		return `<path d="M` + itoa(x1) + ` ` + itoa(by-6) + `v6h` + itoa(x2-x1) + `v-6" fill="none" stroke="` + muted + `" stroke-width="1.5"/>` +
+			devLabel((x1+x2)/2, by+20, text, "middle")
+	}
+	s += bracket(0, 1, "a tenant admin creates these")
+	s += bracket(2, 5, "you build these — then Set active (step 8) makes them live")
+	return s + `</svg>`
 }
 
 // devRevisionFlow: the safe way to change a model.
