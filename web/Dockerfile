@@ -17,8 +17,11 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
-# Runs `tsc -b && vite build` — a type error fails the image build, which is
-# deliberate: a bundle that doesn't typecheck should never reach a registry.
+# Type-checks what ships (tsconfig.app.json, tsconfig.node.json), then
+# `vite build` — a type error fails the image build, which is deliberate: a
+# bundle that doesn't typecheck should never reach a registry. The e2e
+# project is not in this context (.dockerignore) and is checked by CI's own
+# `tsc -b --noEmit`; naming it here failed every image build (TS18003).
 RUN npm run build
 
 # Guard: a --build-context named "docs" replaces this stage entirely, so it

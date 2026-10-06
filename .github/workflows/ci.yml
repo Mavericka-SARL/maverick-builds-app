@@ -771,8 +771,8 @@ jobs:
   docker-publish-web:
     name: Publish image (web)
     # Gated on the FRONTEND checks, not the Go ones: this image contains no Go
-    # code, and its own build runs `tsc -b && vite build` so a type error fails
-    # it regardless. Without this job the console had no deployable artifact at
+    # code, and its own build type-checks what ships (app + node projects) before
+    # `vite build`, so a type error fails it regardless. Without this job the console had no deployable artifact at
     # all — CI built web/dist and uploaded it as an artifact nothing consumed.
     needs: [web-lint, web-typecheck, web-build, web-e2e, web-e2e-keycloak]
     if: (github.event_name == 'workflow_dispatch' && inputs.publish_images) || startsWith(github.ref, 'refs/tags/')
