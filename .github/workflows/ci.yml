@@ -141,8 +141,19 @@ jobs:
     # its Postgres container running: about 20 per run, the gateway's alone
     # near 6G, kept until an hour-old reaper removed them. Two runs within an
     # hour filled worker-2's disk and the kubelet evicted production pods
-    # (2026-10-02). internal/testdb never terminates its shared container, by
-    # design; Ryuk removes it when the test process exits, however it exits.
+    # (2026-10-02).
+    #
+    # Ryuk is the backstop, not the cleanup: each package's TestMain
+    # (testdb.Run) removes its shared container when its tests finish. On
+    # this rootless Docker Ryuk lost its connections mid-run and, after its
+    # default 10s, SIGKILLed every database container of the run while the
+    # tests were still using them (three deploy attempts in a row,
+    # 2026-10-06: run 37481237132, docker events on worker-2). Thirty minutes
+    # outlasts the job, so Ryuk now only acts on what a crashed or timed-out
+    # test binary left behind.
+    env:
+      RYUK_CONNECTION_TIMEOUT: 30m
+      RYUK_RECONNECTION_TIMEOUT: 30m
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -209,9 +220,10 @@ jobs:
       - name: Clean up leaked test containers
         if: always()
         run: |
-          # Ryuk starts removing the run's containers about ten seconds after
-          # the tests exit and takes another twenty or so for sixteen of them
-          # (run 37058074070); counted sooner, they look leaked.
+          # Each package removes its own database container as its tests
+          # finish (testdb.Run); what a crashed binary left, Ryuk removes 30
+          # minutes later (the job's env). The count can include a parallel
+          # run's live containers, so this only waits a minute and reports.
           for _ in $(seq 1 12); do
             n=$(docker ps -q --filter ancestor=postgres:16-alpine | wc -l)
             [ "$n" -eq 0 ] && break

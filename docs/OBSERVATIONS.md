@@ -2459,6 +2459,26 @@ leaves out, until it is fixed.
 
 ## Closed
 
+### Ryuk killed the test databases mid-run on the self-hosted runners
+
+- **Noticed:** 2026-10-06, the production deploy of b469deb (run
+  37481237132) stopped at Go test three times running, on three different
+  runners: about a minute in, `internal/gateway`'s shared Postgres went
+  ("unexpected EOF"), and every later test spent 90 s on "connection
+  refused" until the 20-minute package timeout. The same code had passed
+  CI twice. `docker events` on worker-2 showed Ryuk (`testcontainers/ryuk`)
+  sending SIGKILL to all five database containers of the run within seven
+  seconds and then exiting — its prune after its last connection closed,
+  while the test processes, which never read from that connection, still
+  held it open on their side. No OOM, 93G free, no daemon restart.
+- **Closed by:** 1aa0aa0 (2026-10-06): `testdb.Run`, called from each
+  package's `TestMain`, removes the shared container when the package's
+  tests finish (`New` and `AdminDSN` refuse to start one without it), and
+  the Go test job gives Ryuk 30-minute connection and reconnection
+  timeouts, so it only clears what a crashed binary left. Verified with
+  CI's own `go test -race -p 4 ./...`: everything passes and no database
+  container is left running.
+
 ### A mapping deleted while its re-apply runs keeps its posted total
 
 - **Noticed:** 2026-10-06, public CI run 37463974172 (snapshot 51f9604):

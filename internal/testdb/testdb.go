@@ -22,9 +22,11 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
@@ -36,8 +38,9 @@ import (
 )
 
 type shared struct {
-	adminDSN string // DSN for the container's own bootstrap database
-	err      error
+	adminDSN  string // DSN for the container's own bootstrap database
+	container testcontainers.Container
+	err       error
 }
 
 var (
@@ -52,7 +55,18 @@ var (
 	// container, which is where the cost is.
 	templates = map[string]string{}
 	seq       int
+
+	// running is set by Run: a package whose TestMain does not go through it
+	// would leave its container behind for Ryuk's 30 minutes.
+	running bool
 )
+
+func requireRun(t *testing.T) {
+	t.Helper()
+	if !running {
+		t.Fatal("testdb: this package has no TestMain calling testdb.Run, so its database container would outlive its tests; add\n\tfunc TestMain(m *testing.M) { os.Exit(testdb.Run(m)) }")
+	}
+}
 
 // New returns a pool to a private, fully-migrated database.
 //
@@ -62,6 +76,7 @@ var (
 // rather than silently ignores.
 func New(t *testing.T, fsys embed.FS, dir string) *pgxpool.Pool {
 	t.Helper()
+	requireRun(t)
 	ctx := context.Background()
 
 	once.Do(func() { inst = start(ctx) })
@@ -97,8 +112,8 @@ func New(t *testing.T, fsys embed.FS, dir string) *pgxpool.Pool {
 		t.Fatalf("connect to %s: %v", name, err)
 	}
 	// Only the pool is closed. Dropping the database would need yet another
-	// connection and buys nothing: the container is thrown away when the
-	// binary exits.
+	// connection and buys nothing: Run throws the container away when the
+	// package's tests are done.
 	t.Cleanup(pool.Close)
 	return pool
 }
@@ -109,6 +124,7 @@ func New(t *testing.T, fsys embed.FS, dir string) *pgxpool.Pool {
 // dropping sibling databases on the server the control plane runs on.
 func AdminDSN(t *testing.T) string {
 	t.Helper()
+	requireRun(t)
 	once.Do(func() { inst = start(context.Background()) })
 	if inst.err != nil {
 		t.Fatalf("shared test database: %v", inst.err)
@@ -128,15 +144,40 @@ func start(ctx context.Context) shared {
 	if err != nil {
 		return shared{err: fmt.Errorf("start postgres: %w", err)}
 	}
-	// Deliberately not terminated: there is no process-wide teardown hook here,
-	// and Ryuk (or the daemon's own cleanup) reaps it when the run ends.
 
 	adminDSN, err := pgc.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
-		return shared{err: fmt.Errorf("connection string: %w", err)}
+		return shared{container: pgc, err: fmt.Errorf("connection string: %w", err)}
 	}
 
-	return shared{adminDSN: adminDSN}
+	return shared{adminDSN: adminDSN, container: pgc}
+}
+
+// Run runs a package's tests and then removes the shared container, if they
+// started one. Every package that uses New or AdminDSN calls it from its
+// TestMain:
+//
+//	func TestMain(m *testing.M) { os.Exit(testdb.Run(m)) }
+//
+// Removal used to be left to Ryuk, which a run cannot rely on: on the CI
+// runners' rootless Docker, Ryuk lost its connections mid-run and, ten
+// seconds later, killed every database container of the run while their
+// tests were still using them (2026-10-06; CI now gives it a 30-minute
+// timeout instead). With the timeout that long, the owner removing its own
+// container is what keeps a run's databases from sitting on the runner's
+// disk. Ryuk is left for a binary that never gets here — a panic or a
+// timeout.
+func Run(m *testing.M) int {
+	running = true
+	code := m.Run()
+	if c := inst.container; c != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if err := c.Terminate(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "testdb: remove the shared container: %v\n", err)
+		}
+	}
+	return code
 }
 
 // templateFor builds (once per migration set) a database holding that set's
