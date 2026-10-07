@@ -7,7 +7,7 @@ import type { StepType, TriggerEventCatalogItem } from "../../api/client";
 // engine dispatches on. Per-form keys ("expense_request.submitted") and
 // per-integration keys ("actuals_csv.import.completed") used to fall
 // through to "manual", so a rule created from such a workflow never fired
-// on the event it was designed for. Build › Triggers and the workflow's
+// on the event it was designed for. Developer › Triggers and the workflow's
 // Create Trigger dialog both use this one mapping.
 export function triggerTypeFromWorkflow(triggerEvent: string): string {
   if (triggerEvent === "form.submit" || triggerEvent.endsWith(".submitted")) return "form_submit";

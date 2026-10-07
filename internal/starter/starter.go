@@ -18,6 +18,7 @@ package starter
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/mavericks-engine/mavericks/internal/modeltransfer"
@@ -42,6 +43,24 @@ const (
 	publicDocs      = "https://github.com/Mavericka-SARL/maverick-builds-app/blob/main/docs/"
 )
 
+// dashLink is a text widget's link to a dashboard of another model
+// (web/src/consoles/business/dashboardLinks.ts). It names the model and the
+// dashboard, never their ids — sign-up's import allocates those, and each
+// starter is imported on its own — so it resolves in every tenant that
+// holds both. A link within the same model is written in place as
+// [label](dashboard:Dashboard name).
+func dashLink(label, model, dashboard string) string {
+	esc := strings.NewReplacer("%", "%25", "/", "%2F", ")", "%29")
+	return "[" + label + "](dashboard:" + esc.Replace(model) + "/" + esc.Replace(dashboard) + ")"
+}
+
+// The first page of each starter, where a link to it lands.
+const (
+	devFirstPage = "1 · Your first model"
+	baFirstPage  = "1 · Your part"
+	taFirstPage  = "1 · What you own"
+)
+
 // Starter is one starter package and the key that names it for good.
 // internal/startersync records, per tenant, which model holds each key and
 // the content it was last brought to; the key is what survives a rename of
@@ -60,10 +79,10 @@ const DeveloperGuideKey = "developer_guide"
 // LandingKey names the starter a new tenant lands on: sign-up makes it the
 // application's business default, which every console screen opens until
 // someone picks another model, and its first dashboard is the page they see.
-// The developer guide, whose first page builds a first model (since
-// 2026-10-06; migration 122 moved existing tenants whose default was still
-// the tour). It was the tour before.
-const LandingKey = DeveloperGuideKey
+// The tour, whose first page sends each reader on to the guide for what
+// they came to do (2026-10-07; migration 124 moved existing tenants back).
+// From 2026-10-06 to then it was the developer guide (migration 122).
+const LandingKey = TourKey
 
 // Starters is everything sign-up creates, in order: the tour, then one guide
 // for each role that builds or runs the workspace. Which of them a tenant
@@ -277,6 +296,17 @@ Everything you see here is **yours to change**: these pages, the numbers behind 
 
 Four pages, in order: pick each one from the tabs at the top. Read them, then delete them and build your own.`, 144)
 
+	p.text(`## Where to go from here
+
+Pick what you came to do. Each guide is a model of its own, next to this one; its link opens its first page.
+
+- **See how it all fits** — read on here: four short pages, starting with [2 · Where numbers live](dashboard:2 · Where numbers live).
+- **Build a model** — the `+dashLink("Developer guide", DeveloperGuideName, devFirstPage)+` goes from nothing to a model people type numbers into, in eight steps.
+- **Decide who sees what, and keep requests moving** — the `+dashLink("Business admin guide", BusinessAdminGuideName, baFirstPage)+`.
+- **Invite people and look after the workspace** — the `+dashLink("Tenant admin guide", TenantAdminGuideName, taFirstPage)+`.
+
+Every guide links back here. You can also come back by picking *Learn the platform* in the **Model** list at the top of this page.`, 229)
+
 	p.text(`## A model starts with four things
 
 You describe **what you slice by** and **what you measure**. Then you lay out grids to hold the numbers and dashboards to show them, and the platform keeps every total and calculation in step. Forms, workflows and triggers belong to the model too; page 4 covers them.`, 108)
@@ -285,22 +315,22 @@ You describe **what you slice by** and **what you measure**. Then you lay out gr
 
 	p.text(`## What you are looking at right now
 
-A **dashboard**: a page of widgets you arrange yourself. This one holds text and pictures; the next one holds a real grid you can type into. You are reading it under **Run › Dashboards**, where the people who use a model see its pages.
+A **dashboard**: a page of widgets you arrange yourself. This one holds text and pictures; the next one holds a real grid you can type into. You are reading it under **User › Dashboards**, where the people who use a model see its pages.
 
-To build one, open **Build › Dashboards**, press **New dashboard**, give it a name and press **Create**. Then press **Design** beside it: click a widget type in the palette — Grid, Chart, Text and the rest — choose what it shows and press **Add widget**. Drag and resize it on the canvas, and press **Save**.`, 188)
+To build one, open **Developer › Dashboards**, press **New dashboard**, give it a name and press **Create**. Then press **Design** beside it: click a widget type in the palette — Grid, Chart, Text and the rest — choose what it shows and press **Add widget**. Drag and resize it on the canvas, and press **Save**.`, 188)
 
 	p.text(`## The badge at the top names the revision you are in
 
 A **revision** is a complete copy of the model: its dimensions, metrics, grids, dashboards, forms, workflows and the numbers entered so far. One revision is *live*: it is what everyone else sees.
 
-The revision you are reading is the live one, so a change you make here shows at once. For anything bigger, press **New revision** under this model in **Build › Models**, name it and press **Save**: you get a copy to work in, out of everyone's way. Change it as much as you like, then press **Set active** beside it when it is right.
+The revision you are reading is the live one, so a change you make here shows at once. For anything bigger, press **New revision** under this model in **Developer › Models**, name it and press **Save**: you get a copy to work in, out of everyone's way. Change it as much as you like, then press **Set active** beside it when it is right.
 
 Every change to a model belongs to a revision; people, roles and access rules sit outside revisions and apply to every one. A workflow that is already running keeps the definition it started with.`, 240)
 
 	p.picture(revisions(), "A model has revisions; one of them is live, and New revision makes the next", 720, 180)
 
 	p.text(`---
-Next: **2 · Where numbers live** — pick its tab at the top of this page.`, 72)
+Next: [2 · Where numbers live](dashboard:2 · Where numbers live) — or pick its tab at the top of this page.`, 72)
 
 	return tourDashboard(dashStart, DashboardName, p)
 }
@@ -360,12 +390,12 @@ Click one of the boxed cells in a *Headcount* row — the legend under the grid 
 
 	p.text(`## Every total follows its metric's own rule
 
-A total is what the platform makes of the numbers underneath it, and each metric says how. *Cost* adds up, over teams and over the year. *Cost per head* is averaged. *Headcount* adds up over teams, but the year shows its last quarter: people are counted at a point in time, not added up over it. That works because *quarter* is a **time dimension**: each metric has an **Aggregation rule** for its totals and a **Time summary** for its totals over time, both set under **Build › Metrics**.
+A total is what the platform makes of the numbers underneath it, and each metric says how. *Cost* adds up, over teams and over the year. *Cost per head* is averaged. *Headcount* adds up over teams, but the year shows its last quarter: people are counted at a point in time, not added up over it. That works because *quarter* is a **time dimension**: each metric has an **Aggregation rule** for its totals and a **Time summary** for its totals over time, both set under **Developer › Metrics**.
 
-Grids of your own are built under **Build › Grids**: press **New grid**, name it, press **Create**, then **Configure** it with metrics and dimensions. Where each dimension sits — row, column or context — is set on the grid widget in a dashboard's **Design**, under **Default view**.
+Grids of your own are built under **Developer › Grids**: press **New grid**, name it, press **Create**, then **Configure** it with metrics and dimensions. Where each dimension sits — row, column or context — is set on the grid widget in a dashboard's **Design**, under **Default view**.
 
 ---
-Next: **3 · How people look at it**.`, 256)
+Next: [3 · How people look at it](dashboard:3 · How people look at it).`, 256)
 
 	return tourDashboard(dashNumbers, "2 · Where numbers live", p)
 }
@@ -398,7 +428,7 @@ The same numbers, shown the way each person needs them. The chart below is the e
 - **Chart** — bar, line, pie, scatter or histogram, drawn from a grid
 - **Metric KPI** — one number, large
 - **Form** — structured entry, filled in on the page
-- **Trigger** — a button that starts a workflow, through a manual trigger made under **Build › Triggers**
+- **Trigger** — a button that starts a workflow, through a manual trigger made under **Developer › Triggers**
 - **Integration** — a button that runs one of your integrations
 - **Import** — an upload box that loads a spreadsheet into a grid, with a template to download
 - **Text** and **Image** — the ones this tour is written in`, 272)
@@ -407,10 +437,10 @@ The same numbers, shown the way each person needs them. The chart below is the e
 
 Widgets on a page share their selectors: pick a team or a quarter once, and every widget that follows the page answers for it. Clicking a bar, or a row or column label in a grid, picks that member too. A widget can instead keep its own selectors, show the whole-model total, or be pinned to one member — the two cards on page 2 do the last two. So one page serves everybody, without anyone building four copies of it.
 
-To set this up, open **Build › Dashboards**, press **Design** beside a dashboard and click a widget. The **Widget Properties** panel holds **Context sync** for grids and charts, a card's **Default context** and a grid's **Default view**.`, 208)
+To set this up, open **Developer › Dashboards**, press **Design** beside a dashboard and click a widget. The **Widget Properties** panel holds **Context sync** for grids and charts, a card's **Default context** and a grid's **Default view**.`, 208)
 
 	p.text(`---
-Next: **4 · Beyond the numbers**.`, 72)
+Next: [4 · Beyond the numbers](dashboard:4 · Beyond the numbers).`, 72)
 
 	return tourDashboard(dashViews, "3 · How people look at it", p)
 }
@@ -423,7 +453,7 @@ Numbers rarely start in one place, and they are rarely agreed by one person. Thi
 
 ## Bringing numbers in
 
-Under **Build › Integrations**:
+Under **Developer › Integrations**:
 
 - **Excel / CSV Import** — upload a file, map its columns, validate, commit
 - **Google Sheets** — paste the link of a link-shared sheet. For a private sheet, first store a Google service account under *Private sheets* on the same page, then share the sheet with it
@@ -433,13 +463,13 @@ Press **Save as Integration** while mapping a file or a sheet to keep the mappin
 
 	p.text(`## Asking people for numbers
 
-A **form** collects structured entries — an expense, a request, a headcount change. Forms are designed under **Build › Forms**, and people — business users and business admins alike — make entries through a **Form** widget placed on a dashboard. To turn entries into numbers, add a **Form Records** integration under **Build › Integrations**: it posts each record into an input metric once the record reaches a status you choose, such as approved.
+A **form** collects structured entries — an expense, a request, a headcount change. Forms are designed under **Developer › Forms**, and people — business users and business admins alike — make entries through a **Form** widget placed on a dashboard. To turn entries into numbers, add a **Form Records** integration under **Developer › Integrations**: it posts each record into an input metric once the record reaches a status you choose, such as approved.
 
 ## Getting things agreed
 
 A **workflow** moves something through the people who must see it: submit, review, approve, rework. Steps are assigned to *roles*, not to named people, so the chain keeps working when someone is away or leaves.
 
-Workflows are built under **Build › Workflows**, tried with **Test Run** and opened to people with **Publish**. A business user starts one from their **Workflow Inbox**; a step waiting for you appears under **Run › Workflow Inbox**. A **trigger**, made under **Build › Triggers**, starts one for you: from a button on a dashboard, on a schedule, or each time a form entry is submitted or an integration run ends. A running workflow keeps the definition it started with, so changing the process never rewrites history.`, 340)
+Workflows are built under **Developer › Workflows**, tried with **Test Run** and opened to people with **Publish**. A business user starts one from their **Workflow Inbox**; a step waiting for you appears under **User › Workflow Inbox**. A **trigger**, made under **Developer › Triggers**, starts one for you: from a button on a dashboard, on a schedule, or each time a form entry is submitted or an integration run ends. A running workflow keeps the definition it started with, so changing the process never rewrites history.`, 340)
 
 	p.text(`## Who sees what
 
@@ -453,13 +483,15 @@ Access can be narrower still. Under **Business Admin › Access Rules**, pick a 
 
 ## Building by describing it
 
-**Build › AI Developer** builds the same things you can build by hand. It needs an AI provider key: if none is set up for your workspace, add your own in its **Settings** (one key for the whole workspace, under **Tenant admin › AI keys**, needs the Enterprise edition). Describe what you want, review its action plan step by step and press **Confirm & Execute**. Its changes land in a separate AI draft revision until you press **Promote to Active**, and it has no more power than you do.`, 288)
+**Developer › AI Developer** builds the same things you can build by hand. It needs an AI provider key: if none is set up for your workspace, add your own in its **Settings** (one key for the whole workspace, under **Tenant admin › AI keys**, needs the Enterprise edition). Describe what you want, review its action plan step by step and press **Confirm & Execute**. Its changes land in a separate AI draft revision until you press **Promote to Active**, and it has no more power than you do.`, 288)
 
 	p.text(`## Three more guides
 
-Next to this model sit three more, one for each role your account holds: **Developer guide**, **Business admin guide** and **Tenant admin guide**. To open one, pick it in the **Model** list at the top of **Run › Dashboards** — or press **Open** beside its name under **Business Admin › Models** — and its pages appear. To come back here, pick *Learn the platform* the same way.
+Next to this model sit three more, one for each role your account holds: the `+dashLink("Developer guide", DeveloperGuideName, devFirstPage)+`, the `+dashLink("Business admin guide", BusinessAdminGuideName, baFirstPage)+` and the `+dashLink("Tenant admin guide", TenantAdminGuideName, taFirstPage)+`. A link opens a guide's first page. You can also pick one in the **Model** list at the top of **User › Dashboards**, or press **Open** beside its name under **Business Admin › Models**.
 
-For the whole story, the [developer manual](`+developerManual+`) covers the Build screens and the [formulas manual](`+formulasManual+`) every function.
+A link like these is ordinary text-widget Markdown, `+tick+`[label](dashboard:Model name/Dashboard name)`+tick+`: your own dashboards can point at each other the same way.
+
+For the whole story, the [developer manual](`+developerManual+`) covers the Developer screens and the [formulas manual](`+formulasManual+`) every function.
 
 ---
 

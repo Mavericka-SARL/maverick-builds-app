@@ -1,4 +1,4 @@
-// What Run › Forms and the dashboard form widget offer on a form as a whole,
+// What User › Forms and the dashboard form widget offer on a form as a whole,
 // read from the permissions GET /api/forms serves on each form (the server
 // computes them from the scope that authorises the sync and the create).
 // A form without permissions — an older server — gets nothing offered.

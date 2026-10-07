@@ -14,7 +14,7 @@ export function CreateAutomationModal({ workflow, revisionId, onClose }: { workf
   const [name, setName] = useState(`${workflow.name} — Trigger`);
   const [description, setDescription] = useState("");
 
-  // The same mapping Build › Triggers uses: a per-form or per-integration
+  // The same mapping Developer › Triggers uses: a per-form or per-integration
   // event used to fall through to "manual" here, so the rule never fired —
   // and, typed but unscoped, it would fire for every form or import. The
   // source comes from the working revision's trigger-event catalog.
@@ -54,7 +54,7 @@ export function CreateAutomationModal({ workflow, revisionId, onClose }: { workf
         {trigger.unresolved && !catalogLoading && (
           <div role="alert" style={{ color: "var(--color-danger)", fontSize: 13 }}>
             This workflow starts on “{workflow.trigger_event}”, which names no form or integration of this revision.
-            Choose its trigger event again in the workflow's properties, or create the trigger in Build › Triggers.
+            Choose its trigger event again in the workflow's properties, or create the trigger in Developer › Triggers.
           </div>
         )}
         <Field label="Name">

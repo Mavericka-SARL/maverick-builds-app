@@ -499,10 +499,10 @@ func checkPages(t *testing.T, pkg modeltransfer.Package) {
 		if len(texts) > 0 {
 			last := content(texts[len(texts)-1])
 			if i+1 < len(pkg.Dashboards) {
-				if next := "Next: **" + pkg.Dashboards[i+1].Name + "**"; !strings.Contains(last, next) {
-					t.Errorf("page %q does not end by naming the next page (%s)", d.Name, next)
+				if name := pkg.Dashboards[i+1].Name; !strings.Contains(last, "Next: ["+name+"](dashboard:"+name+")") {
+					t.Errorf("page %q does not end by linking to the next page (Next: [%s](dashboard:%s))", d.Name, name, name)
 				}
-			} else if strings.Contains(last, "Next: **") {
+			} else if strings.Contains(last, "Next: ") {
 				t.Errorf("the last page %q points at a next page", d.Name)
 			}
 		}
@@ -713,7 +713,7 @@ func checkWidgetRefs(t *testing.T, pkg modeltransfer.Package) {
 // headings, **bold**, *italic*, `code`, [label](target), "- " and "1. "
 // lists, "> " quotes, "---" rules. Anything else shows as literal text.
 var (
-	mdLink       = regexp.MustCompile(`\[[^\]]+\]\([^)\s]+\)`)
+	mdLink       = regexp.MustCompile(`\[[^\]]+\]\((?:dashboard:[^)\n]+|[^)\s]+)\)`)
 	mdCode       = regexp.MustCompile("`[^`]+`")
 	mdBadLine    = regexp.MustCompile(`^(#{4,}\s|\* |\+ |` + "```" + `|\||===|<[A-Za-z/!])`)
 	mdHTMLInline = regexp.MustCompile(`<[A-Za-z/][^>]*>`)
@@ -748,7 +748,7 @@ func checkProse(t *testing.T, pkg modeltransfer.Package) {
 						t.Errorf("page %q: unbalanced * in %q", d.Name, para)
 					}
 					if strings.Contains(plain, "](") {
-						t.Errorf("page %q: a link in %q is not [label](target) with no spaces in the target", d.Name, para)
+						t.Errorf("page %q: a link in %q is not [label](target) with no spaces in the target (a dashboard: target may hold them)", d.Name, para)
 					}
 				}
 			case "image":
@@ -868,16 +868,16 @@ func checkFormulas(t *testing.T, pkg modeltransfer.Package) {
 // checkLinks: every link in the prose goes somewhere that answers — one of
 // the two manuals the console serves (and whose file is in docs/), a
 // document of the public repository (in docs/ and not held back from the
-// public snapshot), the product's own site, or an e-mail address.
+// public snapshot), the product's own site, an e-mail address, or a
+// dashboard (TestDashboardLinksResolve, across every starter).
 func checkLinks(t *testing.T, pkg modeltransfer.Package) {
 	excluded := publicExclusions(t)
-	target := regexp.MustCompile(`\[[^\]]+\]\(([^)\s]+)\)`)
 	for _, d := range pkg.Dashboards {
 		for _, w := range d.Widgets {
 			if w.WidgetType != "text" {
 				continue
 			}
-			for _, m := range target.FindAllStringSubmatch(content(w), -1) {
+			for _, m := range linkTargets(content(w)) {
 				link := m[1]
 				bare, _, _ := strings.Cut(link, "#")
 				switch {
@@ -900,6 +900,7 @@ func checkLinks(t *testing.T, pkg modeltransfer.Package) {
 						t.Errorf("page %q links to %q; outside links go to maverickbuilds.app or the public docs only", d.Name, link)
 					}
 				case strings.HasPrefix(link, "mailto:"):
+				case strings.HasPrefix(link, "dashboard:"):
 				default:
 					t.Errorf("page %q has a link %q of a kind the guides do not use", d.Name, link)
 				}
@@ -1028,12 +1029,12 @@ func TestTourShape(t *testing.T) {
 	if scope, _ := kpis[metHeadcnt]["kpi_scope"].(map[string]any); kpis[metHeadcnt]["kpi_context_mode"] != "pin" || scope["dimension_id"] != dimQuarter || scope["member_code"] != "Q4" {
 		t.Errorf("headcount card = %v, want it pinned to Q4", kpis[metHeadcnt])
 	}
-	// The close names the three guides beside it, by their model names.
+	// The close links to the three guides beside it, by their model names.
 	last := textWidgets(pkg.Dashboards[3])
 	closing := content(last[len(last)-1])
 	for _, name := range []string{DeveloperGuideName, BusinessAdminGuideName, TenantAdminGuideName} {
-		if !strings.Contains(closing, "**"+name+"**") {
-			t.Errorf("the tour's close does not name %q", name)
+		if !strings.Contains(closing, "](dashboard:"+name+"/") {
+			t.Errorf("the tour's close does not link to %q", name)
 		}
 	}
 }
@@ -1091,6 +1092,82 @@ func TestOneNumberFollowsTheData(t *testing.T) {
 	for _, q := range quarters {
 		if !slices.Contains(words, q.code) {
 			t.Errorf("the picture has no column for %s", q.code)
+		}
+	}
+}
+
+// linkTarget captures a link's target; code spans are text, not links.
+var linkTarget = regexp.MustCompile(`\[[^\]]+\]\((dashboard:[^)\n]+|[^)\s]+)\)`)
+
+func linkTargets(markdown string) [][]string {
+	return linkTarget.FindAllStringSubmatch(mdCode.ReplaceAllString(markdown, "C"), -1)
+}
+
+// TestDashboardLinksResolve: every dashboard: link in every starter opens a
+// page that sign-up creates — a dashboard of the same starter, or of the
+// starter it names — read the way the console reads it
+// (web/src/consoles/business/dashboardLinks.ts: model and dashboard by name,
+// ignoring case and surrounding space, percent-escapes undone). The tour
+// links to every guide's first page and each guide links back, so nobody
+// has to find the Model list to move between them.
+func TestDashboardLinksResolve(t *testing.T) {
+	norm := func(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+	pages := map[string]map[string]bool{} // model → dashboard names
+	for _, st := range Starters() {
+		names := map[string]bool{}
+		for _, d := range st.Package.Dashboards {
+			names[norm(d.Name)] = true
+		}
+		pages[norm(st.Package.ModelName)] = names
+	}
+	linksTo := map[string]map[string]bool{} // model → models its pages link to
+	for _, st := range Starters() {
+		from := norm(st.Package.ModelName)
+		linksTo[from] = map[string]bool{}
+		for _, d := range st.Package.Dashboards {
+			for _, w := range d.Widgets {
+				if w.WidgetType != "text" {
+					continue
+				}
+				for _, m := range linkTargets(content(w)) {
+					body, ok := strings.CutPrefix(m[1], "dashboard:")
+					if !ok {
+						continue
+					}
+					model, dash := from, body
+					if before, after, cut := strings.Cut(body, "/"); cut {
+						model, dash = before, after
+					}
+					unescape := func(s string) string {
+						u, err := url.PathUnescape(s)
+						if err != nil {
+							t.Errorf("page %q: link %q is not percent-encoded right: %v", d.Name, m[1], err)
+						}
+						return norm(u)
+					}
+					model, dash = unescape(model), unescape(dash)
+					names, ok := pages[model]
+					switch {
+					case !ok:
+						t.Errorf("%s, page %q: link %q names no starter model", st.Key, d.Name, m[1])
+					case dash != "" && !names[dash]:
+						t.Errorf("%s, page %q: link %q names no page of %q", st.Key, d.Name, m[1], model)
+					}
+					linksTo[from][model] = true
+				}
+			}
+		}
+	}
+	tour := norm(ModelName)
+	for model := range pages {
+		if model == tour {
+			continue
+		}
+		if !linksTo[tour][model] {
+			t.Errorf("the tour does not link to %q", model)
+		}
+		if !linksTo[model][tour] {
+			t.Errorf("%q does not link back to the tour", model)
 		}
 	}
 }

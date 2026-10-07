@@ -149,10 +149,10 @@ func taDoc(label, file string) string { return "[" + label + "](" + publicDocs +
 // ── Pages ────────────────────────────────────────────────────────────────────
 
 func taWhatYouOwn() modeltransfer.Dashboard {
-	return taDashboard("ta-dash-1-own", "1 · What you own",
+	return taDashboard("ta-dash-1-own", taFirstPage,
 		taText(`# What you own
 
-As tenant admin you look after the tenant itself, not what is built inside it: who comes in, what each person reaches, where models go, what happened and when, and how the platform reaches people outside the console. Developers build the models; business admins decide who sees what inside one. Five short pages cover your part.`, 136),
+As tenant admin you look after the tenant itself, not what is built inside it: who comes in, what each person reaches, where models go, what happened and when, and how the platform reaches people outside the console. Developers build the models; business admins decide who sees what inside one. Five short pages cover your part; the `+dashLink("tour", ModelName, DashboardName)+` shows the whole platform first.`, 136),
 
 		taText(`## How the pieces fit
 
@@ -189,10 +189,10 @@ More: `+taDoc("editions and licensing", "LICENSING.md")+` · `+taDoc("plans", "P
 
 		taText(`## Reading this guide
 
-These pages are read in **Run › Dashboards**, a screen that comes with a business role — the sign-up account holds business admin for that reason. A person who is only a tenant admin has the **Tenant admin** group and no dashboards; give them a business role in a workspace as well (page 2 shows how) and they can read these pages too. To move between the guides, open **Business Admin › Models** (or **Run › Models**) and press **Open** beside a model.
+These pages are read in **User › Dashboards**, a screen that comes with a business role — the sign-up account holds business admin for that reason. A person who is only a tenant admin has the **Tenant admin** group and no dashboards; give them a business role in a workspace as well (page 2 shows how) and they can read these pages too. To move between the guides, open **Business Admin › Models** (or **User › Models**) and press **Open** beside a model.
 
 ---
-Next: **2 · People and access** — pick its tab at the top of this page.`, 200),
+Next: [2 · People and access](dashboard:2 · People and access) — or pick its tab at the top of this page.`, 200),
 	)
 }
 
@@ -241,7 +241,7 @@ What a person sees *inside* a model — which dashboards, which rows of data —
 You cannot delete your own account, or remove the last role that lets you manage users; another administrator has to. Each of these changes is recorded in the **Audit Log** (page 4).
 
 ---
-Next: **3 · Models as packages**.`, 264),
+Next: [3 · Models as packages](dashboard:3 · Models as packages).`, 264),
 	)
 }
 
@@ -272,14 +272,14 @@ Under an application, press **Import model** and choose a `+tick+`.mavericks-mod
 
 		taText(`## Which model people open first
 
-When an application holds several models, people land on its *business default*. A developer chooses it under **Build › Models** with **Set as business default**. Each person can move to another model for themselves with **Open**, under **Business Admin › Models** or **Run › Models**.`, 132),
+When an application holds several models, people land on its *business default*. A developer chooses it under **Developer › Models** with **Set as business default**. Each person can move to another model for themselves with **Open**, under **Business Admin › Models** or **User › Models**.`, 132),
 
 		taText(`## Deleting
 
 Applications and models are deleted here and nowhere else. The bin beside a model (**Delete model**) removes it with all its revisions; the bin beside an application (**Delete application**) removes it with all its models; the bin beside a revision that is not live (**Delete revision**) removes just that revision. None of it can be undone, so export first if you might want it back.
 
 ---
-Next: **4 · Records, delivery and sign-in**.`, 180),
+Next: [4 · Records, delivery and sign-in](dashboard:4 · Records, delivery and sign-in).`, 180),
 	)
 }
 
@@ -309,7 +309,7 @@ Press **Save settings** to keep them. `+taDoc("Notifications", "NOTIFICATIONS.md
 
 		taText(`## AI keys — Enterprise
 
-One AI provider key for the whole tenant, used by every developer's **AI Developer**. You can also require it, so that no personal key is ever used. Without it, each developer adds a key of their own under **Build › AI Developer**, behind the settings (gear) icon. `+taDoc("AI keys", "AI_KEYS.md")+`
+One AI provider key for the whole tenant, used by every developer's **AI Developer**. You can also require it, so that no personal key is ever used. Without it, each developer adds a key of their own under **Developer › AI Developer**, behind the settings (gear) icon. `+taDoc("AI keys", "AI_KEYS.md")+`
 
 ## Single sign-on and Provisioning (SCIM) — Enterprise
 
@@ -324,7 +324,7 @@ Your product name, tagline, colour, logo and favicon on the console and the sign
 What your tenant holds now: applications and models, revisions, data rows, form records and storage. Plus what happened over the last 7, 30 or 90 days: active users, workflow and integration runs, AI messages and audit events. `+taDoc("Usage analytics", "USAGE_ANALYTICS.md")+`
 
 ---
-Next: **5 · Your setup checklist**.`, 244),
+Next: [5 · Your setup checklist](dashboard:5 · Your setup checklist).`, 244),
 	)
 }
 

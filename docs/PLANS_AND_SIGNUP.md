@@ -185,15 +185,17 @@ a page promising something else. One request creates:
      guide**, one per role that builds or runs the workspace, each a model
      of its own dashboards.
 
-   The **Developer guide** is made the application's **default model**
-   (`core.application.default_model_id`, the same setting as Build › Models ›
-   "Set as business default"; `starter.LandingKey`), so it is what the
-   console opens on, at its first page, *1 · Your first model*, and that
-   page points anyone who does not build models to the tour. The tour and
-   the other guides are reached through the model switcher (Run › Models or
-   Business Admin › Models). Until 2026-10-06 the tour was the default;
-   migration 122 moved every existing tenant whose default was still the
-   tour, and left any default someone had changed. The four are created in
+   The tour, **Learn the platform**, is made the application's **default
+   model** (`core.application.default_model_id`, the same setting as
+   Developer › Models › "Set as business default"; `starter.LandingKey`),
+   so it is what the console opens on, at its first page, *1 · Start here*.
+   That page links each reader on to the guide for what they came to do,
+   and every guide links back (text-widget links to dashboards, whose
+   target is `dashboard:Model name/Dashboard name`); the model switcher
+   (User › Models or Business Admin › Models) reaches them too. From
+   2026-10-06 to 2026-10-07 the Developer guide was the default (migration
+   122); migration 124 moved every existing tenant whose default was still
+   that guide back to the tour, and left any default someone had changed. The four are created in
    one transaction and share a creation time, so the default — not "newest
    model" — is what decides; if the default model is later deleted the
    default clears, and listings and resolution fall back to name order. The

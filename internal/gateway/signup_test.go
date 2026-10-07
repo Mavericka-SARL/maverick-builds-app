@@ -120,7 +120,7 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 		t.Fatalf("apps: %d %v", code, apps)
 	}
 	// Every starter package is a model of that one application. The one a
-	// new tenant lands on (starter.LandingKey, the developer guide) is the
+	// new tenant lands on (starter.LandingKey, the tour) is the
 	// application's default, so the model switcher lists it first and the
 	// application card names it. Expectations come from starter.Starters()
 	// itself, so the guides' contents can change without this test knowing
@@ -128,10 +128,10 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 	pkgs := starter.Packages()
 	var landingPkg, tourPkg modeltransfer.Package
 	for _, st := range starter.Starters() {
-		switch st.Key {
-		case starter.LandingKey:
+		if st.Key == starter.LandingKey {
 			landingPkg = st.Package
-		case starter.TourKey:
+		}
+		if st.Key == starter.TourKey {
 			tourPkg = st.Package
 		}
 	}
@@ -458,7 +458,7 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The default stays an ordinary setting: Build › Models › "Set as
+	// The default stays an ordinary setting: Developer › Models › "Set as
 	// business default" moves it to another starter (the same statement
 	// sign-up ran), and back.
 	if len(guideIDs) > 0 {

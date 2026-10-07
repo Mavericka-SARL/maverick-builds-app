@@ -226,7 +226,7 @@ func TestSyncLeavesWhatTheTenantChose(t *testing.T) {
 
 // TestSyncRemakesTheApplication: a tenant that deleted its "Getting started"
 // application gets it again, with every starter and the landing one (the
-// developer guide) as default.
+// tour) as default.
 func TestSyncRemakesTheApplication(t *testing.T) {
 	ctx := context.Background()
 	f := fixture{t: t, ctx: ctx, pool: testdb.New(t, migrationfs.FS, ".")}

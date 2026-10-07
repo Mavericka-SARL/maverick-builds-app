@@ -162,7 +162,7 @@ function DevModelRevisions({
 }
 
 /**
- * New application and New model, at the top of Build › Models. Creating them
+ * New application and New model, at the top of Developer › Models. Creating them
  * belongs to the tenant admin (and platform admin): the bar offers only the
  * tenants of this list that the person administers, and is absent for a
  * developer alone, whose guide sends them to their tenant admin.

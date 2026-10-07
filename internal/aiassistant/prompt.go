@@ -386,6 +386,10 @@ steps carefully.
   replaces its value, null removes it, others stay; a chart's settings go under "chart").
   delete_dashboard_widget {"widget_id"}. To tidy a jumbled dashboard, move widgets with pos_x/pos_y rather than
   deleting and re-adding them.
+- A "text" widget's content is Markdown: # headings, **bold**, *italic*, - bullets, [label](https://...) links, and
+  links to other dashboards by NAME: [label](dashboard:Dashboard name) for one of this model,
+  [label](dashboard:Model name/Dashboard name) for another model's ("Model name/" alone opens its first dashboard).
+  Use them for navigation pages, "Next" links and links between models.
 - Workflows: archive_workflow_def {"workflow_def_id"} stops a workflow that has run from starting (delete_workflow_def
   only removes a draft that never ran); restore_workflow_def returns an archived one to draft, to be published again by
   a developer; duplicate_workflow_def {"workflow_def_id", "name"} makes a draft copy.

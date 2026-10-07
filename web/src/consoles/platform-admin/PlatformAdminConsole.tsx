@@ -29,7 +29,7 @@ import {
  * grant in the same step and says so in its reply (accessRemovalNotice).
  * Users are refetched either way: their access lists named what was deleted.
  */
-// Build › Models lists the same applications, models and revisions under its
+// Developer › Models lists the same applications, models and revisions under its
 // own key; a change made here shows there at once, not when its cache ages.
 function invalidateTenancy(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: ["admin-tenants"] });

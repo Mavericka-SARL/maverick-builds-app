@@ -22,7 +22,7 @@ const TAB_LABELS: Record<Tab, string> = {
 const SECTION: SectionId = "business-admin";
 
 /**
- * The business_admin section of the console: Run › Dashboards, Workflow
+ * The business_admin section of the console: User › Dashboards, Workflow
  * Inbox and Business Admin › History, Roles, Access Rules, Models. Forms have
  * no screen of their own: their records are worked on through the form
  * widgets a developer places on dashboards, as business users do. A tenant
@@ -39,7 +39,7 @@ export function useBusinessAdminSection({ enabled, setTab }: SectionInput): Cons
     id: SECTION,
     navGroups: [
       {
-        label: "Run",
+        label: "User",
         items: [
           { id: t("dashboards"), label: "Dashboards", icon: <LayoutDashboard size={16} /> },
           { id: t("inbox"), label: "Workflow Inbox", icon: <Inbox size={16} /> },

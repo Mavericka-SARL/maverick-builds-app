@@ -22,7 +22,7 @@ export const SECTION_ORDER: SectionId[] = ["business", "business-admin", "develo
  * Which sections a set of roles switches on. Where two roles would offer the
  * same screens the wider one wins, so nothing appears twice:
  * - business_admin's Run/Business Admin groups already contain everything
- *   the business_user Run group has (history moves under Business Admin).
+ *   the business_user User group has (history moves under Business Admin).
  * - platform_admin's Applications/Users/Audit Log are the tenant_admin
  *   screens at platform scope.
  * - the developer's own Users tab is hidden once an admin section provides it.

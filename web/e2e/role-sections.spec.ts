@@ -56,7 +56,7 @@ test("tenant_admin + business_admin: tenant-admin tabs sit in the business admin
   await expect(page.getByRole("heading", { name: "Applications" })).toBeVisible({ timeout: 15_000 });
 });
 
-test("platform_admin + developer: Build and Platform groups in one sidebar, Users only once", async ({ page }) => {
+test("platform_admin + developer: Developer and Platform groups in one sidebar, Users only once", async ({ page }) => {
   await signInAs(page, ["platform_admin", "developer"]);
   await page.goto("/");
   await expect(mark(page)).toBeVisible({ timeout: 15_000 });
@@ -65,7 +65,7 @@ test("platform_admin + developer: Build and Platform groups in one sidebar, User
   await expect(nav(page, "Users")).toHaveCount(1);
 });
 
-test("business_user + business_admin: the admin Run group supersedes the user one", async ({ page }) => {
+test("business_user + business_admin: the admin User group supersedes the user one", async ({ page }) => {
   await signInAs(page, ["business_user", "business_admin"]);
   await page.goto("/");
   await expect(mark(page)).toBeVisible({ timeout: 15_000 });

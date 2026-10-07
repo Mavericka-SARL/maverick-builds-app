@@ -478,7 +478,7 @@
 }
 
 /* aria-disabled keeps the button focusable (focus does not jump away when a
-   click starts work) while saying it will not act yet — Build › Dimensions
+   click starts work) while saying it will not act yet — Developer › Dimensions
    marks the member-order arrows this way while a move is in flight. Same
    dimmed look as :disabled; the progress cursor says "wait", not "never". */
 .mvx-icon-button[aria-disabled="true"] {

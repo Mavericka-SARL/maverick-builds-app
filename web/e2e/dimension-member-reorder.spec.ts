@@ -1,5 +1,5 @@
 /**
- * A developer reorders a dimension's members in Build › Dimensions
+ * A developer reorders a dimension's members in Developer › Dimensions
  * (2026-09-29: sort_order drives every grid, selector and chart, but nobody
  * could change it in the product). Each member row moves up or down among
  * its siblings — the members sharing its parent — and the page sends that

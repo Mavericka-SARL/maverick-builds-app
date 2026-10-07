@@ -18,16 +18,47 @@ leaves out, until it is fixed.
 
 ## Open
 
+### Renaming a dashboard or model leaves text links to it dangling, unwarned
+
+- **Noticed:** 2026-10-07, adding text-widget links to dashboards (link
+  target `dashboard:Model name/Dashboard name`,
+  `web/src/consoles/business/dashboardLinks.ts`). They name their target
+  rather than hold its id, so revision copies, exports and imports need no
+  remapping; the price is that a rename breaks them. Following a broken
+  link says "No dashboard named … is open to you" instead of opening
+  something else, but nothing tells the developer at rename time.
+- **Why it matters:** a navigation page (the starter tour, a tenant's own
+  home dashboard) can silently stop leading anywhere after an innocent
+  rename. The starters are guarded by `TestDashboardLinksResolve`; a
+  tenant's own pages are not.
+- **How to check:** link a text widget to a dashboard, rename the target
+  under Developer › Dashboards, open User › Dashboards and click the link.
+- **What closes it:** a rename (dashboard or model) that lists the text
+  widgets linking to the old name and offers to rewrite them, or a lint in
+  the dashboard designer that flags links which resolve to nothing.
+
+### Developer manual screenshots still show the old sidebar group names
+
+- **Noticed:** 2026-10-07, renaming the sidebar groups Run → User and
+  Build → Developer. Every text reference in the manuals, guides and UI was
+  changed, but the screenshots under `docs/developer-manual/img/` were
+  captured with the old labels and still show RUN and BUILD.
+- **Why it matters:** a reader comparing a screenshot with the console sees
+  group names that no longer exist.
+- **How to check:** open `docs/developer-manual/manual.html` and look at the
+  sidebar in any full-console screenshot.
+- **What closes it:** recapturing the screenshots against a current console.
+
 ### New revision still sits below each model's revision list
 
 - **Noticed:** 2026-10-06, moving New application and New model to the top of
-  Build › Models and Tenant admin › Applications (and New tenant above the
+  Developer › Models and Tenant admin › Applications (and New tenant above the
   tenants). **New revision** was not part of that request and still follows
   each model's revisions in both screens, so on a model with many revisions
   it is the one create control left at the bottom.
 - **Why it matters:** the two screens now put creation first everywhere
   except here, and a long revision list pushes it out of view.
-- **How to check:** a model with ten revisions in Build › Models; the button
+- **How to check:** a model with ten revisions in Developer › Models; the button
   is under the tenth.
 - **What closes it:** the same move for `DevModelRevisions`
   (web/src/consoles/developer/ApplicationsTab.tsx) and
@@ -888,7 +919,7 @@ leaves out, until it is fixed.
   the AI's `write_executor.go`), and a re-parent keeps the member's number.
   So a child added under the first top-level member afterwards lists after
   the last top-level member's subtree, until the next reorder of any level
-  renumbers the dimension. Order among siblings stays right: Build ›
+  renumbers the dimension. Order among siblings stays right: Developer ›
   Dimensions groups by parent.
 - **Why it matters:** a grid or picker that shows members flat shows the new
   member away from its parent until someone reorders.
@@ -933,7 +964,7 @@ leaves out, until it is fixed.
 - **Noticed:** 2026-09-29, reviewing the member reorder; re-checked after
   the reorder began keeping each group's slots.
 - **What:** for a dimension whose members hang off another dimension's
-  members (`parent_dimension_id`), Build › Dimensions lists them grouped by
+  members (`parent_dimension_id`), Developer › Dimensions lists them grouped by
   that parent, in the parent dimension's order
   (`web/src/consoles/developer/DimensionsTab.tsx:524-535`), and its arrows
   move a member within its group. Every other reader lists the members flat
@@ -970,7 +1001,7 @@ leaves out, until it is fixed.
 - **Why it matters:** a developer who gives two connectors the same name and
   puts a button on one can no longer make a new revision of the model.
 - **How to check:** two connectors with one name, an integration button on
-  one of them, then Build › Models › New revision.
+  one of them, then Developer › Models › New revision.
 - **Decision:** 2026-10-06, the user: names unique per revision: a migration
   renames existing duplicates ("Name (2)"), and create and rename answer 409
   on every path.
@@ -1101,7 +1132,7 @@ leaves out, until it is fixed.
 ### Build edits the live revision without saying so
 
 - **Noticed:** 2026-09-29, writing the Developer guide and the tour.
-- **What:** with nothing picked in Build › Models, Build works in the active
+- **What:** with nothing picked in Developer › Models, Build works in the active
   revision of the model the server resolves
   (`web/src/consoles/developer/DeveloperConsole.tsx:64-69`), and the top
   bar's revision badge has the draft tone whichever revision it names
@@ -1142,7 +1173,7 @@ leaves out, until it is fixed.
 ### A developer who is also a business admin cannot grant a working revision's dashboards
 
 - **Noticed:** 2026-09-29, writing the Developer guide. Standing rule 2.
-- **What:** Build › Roles is hidden from anyone who holds `business_admin`
+- **What:** Developer › Roles is hidden from anyone who holds `business_admin`
   (`web/src/consoles/developer/DeveloperConsole.tsx:130`), and Business
   Admin › Roles saves grants with no revision, so they apply to the selected
   model's live revision
@@ -1159,7 +1190,7 @@ leaves out, until it is fixed.
   working revision too, for someone who also builds the model.
 - **What closes it:** a decision, since it touches the one-console rule:
   Business Admin › Roles offering the working revision to a developer, or
-  Build › Roles shown, scoped to the working revision, when `business_admin`
+  Developer › Roles shown, scoped to the working revision, when `business_admin`
   is held too.
 
 ### A new revision takes its dashboard grants from its source revision
@@ -1167,7 +1198,7 @@ leaves out, until it is fixed.
 - **Noticed:** 2026-09-29, writing the Business admin guide.
 - **What:** a revision copy carries dashboard grants from its source
   revision, matched by dashboard name (step K,
-  `internal/gateway/handler.go:4784-4799`). Build › Models › New revision now
+  `internal/gateway/handler.go:4784-4799`). Developer › Models › New revision now
   copies the working revision when there is one. If a business admin changed
   grants on the live revision after that working copy was made, a revision
   made from the working copy carries the older grants, and setting it
@@ -1181,7 +1212,7 @@ leaves out, until it is fixed.
 - **What closes it:** a decision on which grants a copy takes (for example
   the live revision's, for the dashboards that exist there).
 
-### Two rule types cannot be attached to a workflow from Build › Triggers
+### Two rule types cannot be attached to a workflow from Developer › Triggers
 
 - **Noticed:** 2026-09-29, writing the tour. Standing rule 2.
 - **What:** a rule needs a workflow
@@ -1195,7 +1226,7 @@ leaves out, until it is fixed.
   they are reachable only through the API or the AI.
 - **Why it matters:** the Triggers screen lists two types a developer
   cannot use.
-- **How to check:** Build › Triggers › New rule, pick any workflow, and open
+- **How to check:** Developer › Triggers › New rule, pick any workflow, and open
   Trigger type.
 - **What closes it:** approval and grid-change start events in the
   catalogue, so an event workflow can carry them, or the full choice for a
@@ -1305,7 +1336,7 @@ leaves out, until it is fixed.
   developer or tenant admin whose business role is in another tenant can
   pick that tenant's application, and the developer and admin groups then
   answer 403 there, since their routes count builder and admin reach only.
-  The same holds in Build › Models since the developer routes were narrowed
+  The same holds in Developer › Models since the developer routes were narrowed
   (2026-09-29): `GET /api/developer/applications` (`devOrAdm`,
   `adminTenants`, `internal/gateway/handler.go:341`) still lists the
   applications, models and revisions of a tenant where the account is only
@@ -1317,7 +1348,7 @@ leaves out, until it is fixed.
   owner is not.
 - **Why it matters:** the console offers screens that cannot work.
 - **How to check:** a developer of tenant 1 who is a business user in tenant
-  2; pick tenant 2's application and open Build. For Build › Models,
+  2; pick tenant 2's application and open Build. For Developer › Models,
   `internal/gateway/developer_route_scope_test.go` asserts that app3 is
   listed to the cross accounts (`:210`), while
   `TestDeveloperRoutesIgnoreAdminScopeElsewhere` asserts 403 on `GET
@@ -1325,7 +1356,7 @@ leaves out, until it is fixed.
 - **What closes it:** per-application capabilities in `/api/apps` and
   `/api/developer/applications` (for example `can_build`, `can_admin`,
   computed with the developer-route rule), `web/src/router/sections.ts`
-  hiding the groups the user cannot use there, and Build › Models hiding or
+  hiding the groups the user cannot use there, and Developer › Models hiding or
   disabling admin-only entries and leaving them out of the fallback, with a
   Vitest or Playwright check.
 
@@ -1397,7 +1428,7 @@ leaves out, until it is fixed.
 
 - **Noticed:** 2026-09-29, while scoping the import wizard to the working
   revision.
-- **What:** Build › Integrations' form-to-metric mappings
+- **What:** Developer › Integrations' form-to-metric mappings
   (`FormRecordsSection`,
   `web/src/consoles/developer/IntegrationsTab.tsx:309-312`) load forms, the
   model, dimensions and grids with no revision, so in a multi-model
@@ -1407,7 +1438,7 @@ leaves out, until it is fixed.
   import wizard beside it now follows the working revision.
 - **Why it matters:** a developer working in a guide is offered the tour's
   forms and metrics.
-- **How to check:** pick a guide's revision in Build › Models and open the
+- **How to check:** pick a guide's revision in Developer › Models and open the
   mapping form.
 - **What closes it:** the same working-revision scoping as the import
   wizard.
@@ -2059,7 +2090,7 @@ leaves out, until it is fixed.
 ### Dashboard pages are listed by name
 
 - **Noticed:** 2026-09-29, building the tour.
-- **What:** Run › Dashboards orders a model's dashboards by name
+- **What:** User › Dashboards orders a model's dashboards by name
   (`internal/gateway/handler.go:14177`, `:14182`). The guides number their
   pages ("1 · Start here", …), so a guide of ten or more pages would list
   "10 · …" before "2 · …". `TestPackagesCarryTheirGuides` checks the
@@ -2075,7 +2106,7 @@ leaves out, until it is fixed.
 - **Noticed:** 2026-09-29, measured live by the tour's reviewer.
 - **What:** in Run, a text widget's `size_h` is a minimum
   (`web/src/consoles/business/DashboardWidgets.tsx:73-78`; text is in
-  `INTRINSIC_HEIGHT_WIDGET_TYPES`). The Build › Dashboards Design canvas
+  `INTRINSIC_HEIGHT_WIDGET_TYPES`). The Developer › Dashboards Design canvas
   draws every widget exactly `size_h` tall, including about 57 px of chrome
   (border, drag header, padded body with `overflow: auto`;
   `web/src/consoles/developer/DashboardCanvas.tsx:796-904`). A text block
@@ -2141,7 +2172,7 @@ leaves out, until it is fixed.
   and `docs/USAGE_ANALYTICS.md:7` say "Admin › …". The console's labels are
   Tenant admin › AI keys, Notification delivery, Single sign-on, Provisioning
   (SCIM), Audit Log, Branding and Usage (Platform › … for a platform admin),
-  and the personal AI key is under Build › AI Developer › AI Settings.
+  and the personal AI key is under Developer › AI Developer › AI Settings.
 - **Why it matters:** a reader who follows a guide's link meets different
   names.
 - **How to check:** `grep -n 'Admin ›\|AI Assistant ›' docs/*.md`.

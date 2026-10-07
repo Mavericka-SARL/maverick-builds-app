@@ -1,10 +1,12 @@
 import { useState, useMemo, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { api, type DemoContext, type DashboardDef, type DashboardFolder } from "../../api/client";
-import { LoadingState, EmptyState, Toolbar, ToolbarGroup, SearchInput, FilterChip, Button, Select, Tabs, SectionHeader } from "../../ui";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, type AppInfo, type DemoContext, type DashboardDef, type DashboardFolder } from "../../api/client";
+import { LoadingState, EmptyState, Toolbar, ToolbarGroup, SearchInput, FilterChip, Button, Select, Tabs, SectionHeader, InlineAlert, InConsoleLinkContext } from "../../ui";
 import { flattenFolders, UNFILED_LABEL } from "../developer/folderTree";
 import { DashboardWidgetGrid } from "./DashboardWidgets";
 import { ModelSwitcher } from "./ModelSwitcher";
+import { selectModel } from "./modelSelection";
+import { clearPendingDashboard, findModel, parseDashboardLink, peekPendingDashboard, sameName, setPendingDashboard } from "./dashboardLinks";
 
 // Matches the Developer Console's folder controls: "" filters nothing,
 // this sentinel narrows to dashboards that aren't in any folder.
@@ -15,6 +17,13 @@ export function DashboardsView({ ctx, onOpenInstance }: { ctx: DemoContext; onOp
   const [filterTag, setFilterTag] = useState<string | null>(null);
   const [filterFolder, setFilterFolder] = useState("");
   const [activeDashId, setActiveDashId] = useState<string | null>(null);
+  // A dashboard: link into this model from another one (dashboardLinks):
+  // the console reloaded into this model, and the dashboard it named opens
+  // first. Read once, then forgotten, so a later reload opens as usual.
+  const [linkedName, setLinkedName] = useState<string | null>(() => peekPendingDashboard(ctx.model_id));
+  useEffect(() => { clearPendingDashboard(); }, []);
+  const [linkNotice, setLinkNotice] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   const { data: dashboardsRaw = [], isLoading } = useQuery({
     queryKey: ["user-dashboards"],
@@ -58,7 +67,40 @@ export function DashboardsView({ ctx, onOpenInstance }: { ctx: DemoContext; onOp
     setActiveDashId(prev => visible.some(d => d.id === prev) ? prev : (visible[0]?.id ?? null));
   }, [filterTag, search, filterFolder]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const activeId = activeDashId ?? visible[0]?.id ?? null;
+  const linked = linkedName ? allDashboards.find(d => sameName(d.name, linkedName)) : undefined;
+  const linkedMissing = !!linkedName && !isLoading && !linked;
+  const activeId = activeDashId ?? linked?.id ?? visible[0]?.id ?? null;
+
+  /** Opens a dashboard of this model by name (null: the first), clearing filters that would hide it. */
+  function openHere(name: string | null) {
+    const d = name ? allDashboards.find(x => sameName(x.name, name)) : allDashboards[0];
+    if (!d) {
+      setLinkNotice(`No dashboard named “${name}” is open to you in this model.`);
+      return;
+    }
+    setLinkNotice(null);
+    setSearch("");
+    setFilterTag(null);
+    setFilterFolder("");
+    setActiveDashId(d.id);
+    window.scrollTo({ top: 0 });
+  }
+
+  /** Follows a text widget's dashboard: link. */
+  async function followLink(href: string) {
+    const target = parseDashboardLink(href);
+    if (!target) return;
+    if (!target.model) return openHere(target.dashboard);
+    const apps = await queryClient.ensureQueryData({ queryKey: ["apps"], queryFn: api.getApps });
+    const hit = findModel(apps as AppInfo[], target.model, ctx.app_id);
+    if (!hit) {
+      setLinkNotice(`No model named “${target.model}” is open to you.`);
+      return;
+    }
+    if (hit.model.id === ctx.model_id) return openHere(target.dashboard);
+    setPendingDashboard(hit.model.id, target.dashboard);
+    selectModel(hit.app.id, hit.model.id, hit.model.is_default);
+  }
 
   const { data: detail, isLoading: detailLoading } = useQuery({
     queryKey: ["user-dashboard-detail", activeId],
@@ -76,12 +118,15 @@ export function DashboardsView({ ctx, onOpenInstance }: { ctx: DemoContext; onOp
         <Toolbar className="mvx-toolbar--spaced">
           <ToolbarGroup><ModelSwitcher ctx={ctx} /></ToolbarGroup>
         </Toolbar>
-        <EmptyState label="No dashboards are available to you yet. A developer builds them under Build › Dashboards, and a business admin decides which roles see them." />
+        <EmptyState label="No dashboards are available to you yet. A developer builds them under Developer › Dashboards, and a business admin decides which roles see them." />
       </div>
     );
   }
 
+  const notice = linkNotice ?? (linkedMissing ? `No dashboard named “${linkedName}” is open to you in this model.` : null);
+
   return (
+    <InConsoleLinkContext.Provider value={followLink}>
     <div>
       {/* ── Model + search + tag filter bar ── */}
       <Toolbar className="mvx-toolbar--spaced">
@@ -124,6 +169,13 @@ export function DashboardsView({ ctx, onOpenInstance }: { ctx: DemoContext; onOp
         </ToolbarGroup>
       </Toolbar>
 
+      {notice && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16 }}>
+          <InlineAlert tone="warning">{notice}</InlineAlert>
+          <Button size="sm" variant="ghost" onClick={() => { setLinkNotice(null); setLinkedName(null); }}>Dismiss</Button>
+        </div>
+      )}
+
       {visible.length === 0 && (
         <EmptyState label="No dashboards match your search." />
       )}
@@ -154,5 +206,6 @@ export function DashboardsView({ ctx, onOpenInstance }: { ctx: DemoContext; onOp
         </div>
       )}
     </div>
+    </InConsoleLinkContext.Provider>
   );
 }

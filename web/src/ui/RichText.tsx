@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useContext, type ReactNode } from "react";
+import { InConsoleLinkContext, isInConsoleHref } from "./RichTextLinks";
 
 /**
  * A small Markdown subset, rendered as React elements.
@@ -15,6 +16,9 @@ import type { ReactNode } from "react";
  *     — an http(s) link, or any same-origin path, opens in a new tab: the
  *     console has no path routes, so following one in place would unload the
  *     console and lose its state. A bare #fragment stays in place.
+ *   [label](dashboard:Model name/Dashboard name) — another dashboard, opened
+ *     in place by whoever provides InConsoleLinkContext (RichTextLinks).
+ *     Names may hold spaces, so this one link runs to the closing ")".
  *   - bullets, 1. numbers
  *   > quote
  *   ---        rule
@@ -22,7 +26,7 @@ import type { ReactNode } from "react";
  * Anything else is shown as written.
  */
 
-const INLINE = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\([^)\s]+\))/g;
+const INLINE = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\((?:dashboard:[^)\n]+|[^)\s]+)\))/g;
 
 /** Only schemes a browser may follow from a tenant's own text. */
 function safeHref(raw: string): string | null {
@@ -33,7 +37,25 @@ function safeHref(raw: string): string | null {
   if (href.startsWith("/") || href.startsWith("#")) return href;
   if (/^https?:\/\//i.test(href)) return href;
   if (/^mailto:/i.test(href)) return href;
+  if (isInConsoleHref(href)) return href;
   return null;
+}
+
+const LINK_STYLE: React.CSSProperties = { color: "var(--color-brand-600)", textDecoration: "underline", textUnderlineOffset: 2 };
+
+/** A link that stays in the console: handed to the screen showing the text, never to the browser. */
+function InConsoleLink({ href, label }: { href: string; label: string }) {
+  const follow = useContext(InConsoleLinkContext);
+  return (
+    <a
+      href="#"
+      onClick={e => { e.preventDefault(); follow?.(href); }}
+      title={follow ? undefined : "Opens from User › Dashboards"}
+      style={{ ...LINK_STYLE, cursor: follow ? "pointer" : "default" }}
+    >
+      {label}
+    </a>
+  );
 }
 
 /** Links that leave the console open behind them. */
@@ -53,9 +75,11 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
       const close = part.indexOf("](");
       const label = part.slice(1, close);
       const href = safeHref(part.slice(close + 2, -1));
-      out.push(href
-        ? <a key={key} href={href} target={opensInNewTab(href) ? "_blank" : undefined} rel="noopener noreferrer" style={{ color: "var(--color-brand-600)", textDecoration: "underline", textUnderlineOffset: 2 }}>{label}</a>
-        : <span key={key}>{label}</span>);
+      out.push(!href
+        ? <span key={key}>{label}</span>
+        : isInConsoleHref(href)
+          ? <InConsoleLink key={key} href={href} label={label} />
+          : <a key={key} href={href} target={opensInNewTab(href) ? "_blank" : undefined} rel="noopener noreferrer" style={LINK_STYLE}>{label}</a>);
     } else out.push(part);
   });
   return out;

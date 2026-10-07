@@ -2,7 +2,7 @@ package gateway
 
 // A tenant's application holds several models (sign-up gives "Getting
 // started" four), and the console names the one it works in: X-Model-Id for
-// the model picked under Business Admin/Run › Models, ?revision_id= for the
+// the model picked under Business Admin/User › Models, ?revision_id= for the
 // developer's working revision. These tests pin the endpoints that used to
 // act on an arbitrary or default model instead — and the workflow history
 // and status override, which acted on every tenant's instances.

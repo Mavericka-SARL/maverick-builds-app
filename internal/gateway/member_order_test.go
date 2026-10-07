@@ -40,7 +40,7 @@ func memberCodes(t *testing.T, raw []byte, dimID string) []string {
 	return nil
 }
 
-// A member added by hand in Build › Dimensions, or by the dimension CSV
+// A member added by hand in Developer › Dimensions, or by the dimension CSV
 // import, comes after the members already there — the connector and AI
 // paths append MAX(sort_order)+1, and a hand-added member written with
 // sort_order 0 jumped ahead of all of them.

@@ -204,7 +204,7 @@
 </table>
 <div class="note warn"><b>First thing in every session: pick the revision.</b> Open Models, click the revision row, and confirm the Model and Revision in the context bar. Objects are created in whatever revision is selected, and many models have a revision called "Working".</div>
 <h2>Models</h2>
-<p class="path">Sidebar: Build › Models</p>
+<p class="path">Sidebar: Developer › Models</p>
 <p>The Models screen lists every application and model you can reach, with their revisions. It is where you choose <em>which revision you are editing</em>; every other Build screen works inside that choice.</p>
 <figure><img src="img/01-models.png" alt="Models screen with the working-revision banner and two applications, each with a model and its revisions"><figcaption>The banner names the selected revision and its short id. Applications are cards; each model lists its revisions with badges.</figcaption></figure>
 <h3>Controls</h3>
@@ -226,7 +226,7 @@
 </ul>
 
 <h2>Metrics</h2>
-<p class="path">Sidebar: Build › Metrics</p>
+<p class="path">Sidebar: Developer › Metrics</p>
 <p>A metric is a measure of the model: an <b>Input</b> metric is typed in by users, imported or posted from forms; a <b>Calc</b> metric is computed from a formula over other metrics. The list groups inputs first, then a <b>Calculated</b> section.</p>
 <figure><img src="img/02-metrics.png" alt="Metrics list with input and calculated metrics, type badges, formulas and the Used by column"><figcaption>Each row shows technical name, label, type badges (Input or Calc, aggregation rule, format), the formula, and which calculated metrics use this one.</figcaption></figure>
 <h3>The list</h3>
@@ -267,7 +267,7 @@
 <div class="note"><b>Formula language in short.</b> Optional leading <code>=</code>; names are case-insensitive; operators <code>+ - * / ^</code>, comparisons <code>= &lt;&gt; &lt; &lt;= &gt; &gt;=</code>, text join <code>&amp;</code>, parentheses; arguments separated by commas or semicolons. Functions: see Concepts › Formulas. A formula can read the cell's member (<code>region</code>), a member property (<code>employees.salary</code>), the parent member (<code>PARENT(region)</code>), another member's value (<code>LOOKUP</code>) and conditional totals (<code>SUMIFS</code> and its family). Not available: cell addresses like A1, XLOOKUP/INDEX/MATCH. Offsets between periods use the time-series functions on a Time dimension.</div>
 
 <h2>Dimensions</h2>
-<p class="path">Sidebar: Build › Dimensions</p>
+<p class="path">Sidebar: Developer › Dimensions</p>
 <p>A dimension is an axis of the model (Department, Region, Product, Period). Its members are the values on that axis, optionally arranged in a hierarchy, and each member can carry property values used for grouping and rollups. A dimension is either <b>Standard</b> or <b>Time</b> — chosen explicitly when it is created and fixed afterwards. Only a Time dimension gives formulas a calendar to move along (PREVIOUS, LAG, MOVINGSUM, …); naming a standard dimension "month" does not.</p>
 <figure><img src="img/03-dimensions.png" alt="Dimensions screen with one dimension card showing members, codes and actions"><figcaption>One card per dimension. The header shows member count, root count and the rollup rule; the table lists members with code, children and actions.</figcaption></figure>
 <h3>Controls</h3>
@@ -304,7 +304,7 @@
 </ul>
 
 <h2>Dependency Graph</h2>
-<p class="path">Sidebar: Build › Dependency Graph</p>
+<p class="path">Sidebar: Developer › Dependency Graph</p>
 <p>A read-only map of every metric in the revision and the arrows between them: an arrow from A to B means B's formula uses A. Use it to understand what a change will recalculate and to spot metrics that are on no grid.</p>
 <figure><img src="img/37-dependency-graph.png" alt="Dependency graph with input and calculated metric nodes joined by arrows"><figcaption>Input metrics and calculated metrics are drawn as differently tinted cards; each card names the grids and dimensions of the metric.</figcaption></figure>
 <table class="ctl">
@@ -315,7 +315,7 @@
 <tr><td>Node text</td><td>INPUT or CALC, the metric name, "Grid: …" or the orange warning <b>Not on any grid</b>, and the dimension list.</td></tr>
 </table>
 <h2>Forms</h2>
-<p class="path">Sidebar: Build › Forms</p>
+<p class="path">Sidebar: Developer › Forms</p>
 <p>A form is a structured record type that business users fill in: a purchase request, an expense claim, a headcount change. This screen defines the <em>schema</em> only. Records are entered and reviewed through a <b>Form</b> widget on a dashboard; posting form values into planning cells is configured under Integrations › Form Records.</p>
 <figure><img src="img/04-forms.png" alt="Forms screen listing the Purchase Request form with six fields"><figcaption>The form list. Each card shows the display label, the technical name, the field count and the field labels.</figcaption></figure>
 <h3>Controls</h3>
@@ -337,14 +337,14 @@
   <li><b>Forms are per revision.</b> The list and the create action use the selected revision. Editing never moves a form to another revision.</li>
   <li><b>Same name overwrites.</b> Creating a form whose technical name already exists in the revision silently replaces that form's label and fields. Pick a new name for a new form.</li>
   <li><b>Delete cascades.</b> Deleting a form removes every dashboard widget that shows it and every record ever submitted to it.</li>
-  <li><b>Records live on dashboards.</b> Business users and business admins work on records only in a dashboard <b>Form</b> widget: <b>New record</b>, the pencil to edit one, the status list, delete, <b>Export</b> and <b>Import</b> (CSV and XLSX), and, for an administrator, <b>Sync to grid</b> — each offered only when the server allows it to that person. There is no Forms screen in the Run group. The developer screen has no record controls.</li>
+  <li><b>Records live on dashboards.</b> Business users and business admins work on records only in a dashboard <b>Form</b> widget: <b>New record</b>, the pencil to edit one, the status list, delete, <b>Export</b> and <b>Import</b> (CSV and XLSX), and, for an administrator, <b>Sync to grid</b> — each offered only when the server allows it to that person. There is no Forms screen in the User group. The developer screen has no record controls.</li>
   <li><b>Posting to cells is a separate object.</b> A form mapping (Integrations › Form Records) decides which field feeds which input metric, at which dimension members, for which record statuses. Metric and Dimension field types exist so the mapping has something to read.</li>
   <li><b>Where forms appear.</b> Business users and business admins open a form through a dashboard <b>Form</b> widget. A form that is on no dashboard is not reachable by them: place every form people fill in on a dashboard their business role is granted.</li>
 </ul>
 <figure><img src="img/23-form-editor.png" alt="Inline form editor with field rows, types and Required checkboxes"><figcaption>The inline editor. Field rows carry a name, a label, a type and a Required flag; a Metric field shows its By ID / By name choice below the row.</figcaption></figure>
 
 <h2>Grids</h2>
-<p class="path">Sidebar: Build › Grids</p>
+<p class="path">Sidebar: Developer › Grids</p>
 <p>A grid is a selection of metrics and dimensions that is shown as one table. It holds no data of its own; the data lives in the model. The same metric can only sit in one grid, so grids partition the model's metrics into the tables users will edit.</p>
 <figure><img src="img/24-grid-configure.png" alt="Grid configuration with the metric picker on the left and the dimension picker on the right"><figcaption>Configure opens two pickers. Each tick saves immediately, which is why the closing button is Done rather than Save.</figcaption></figure>
 <h3>Controls</h3>
@@ -373,7 +373,7 @@
   <li><b>Level display.</b> Choosing <b>Leaves only</b> hides parent members from the axis; totals for parents are still computed and appear where the widget shows them.</li>
 </ul>
 <h2>Dashboards</h2>
-<p class="path">Sidebar: Build › Dashboards</p>
+<p class="path">Sidebar: Developer › Dashboards</p>
 <p>A dashboard is the page a business user opens. It is a free-form canvas of widgets: grids to plan in, charts and KPIs to read, forms to submit, buttons that start workflows or integrations, text and pictures, and an import box. Dashboards are organised in folders and tagged, and are granted to business roles on the Users screen.</p>
 <figure><img src="img/06-dashboards.png" alt="Dashboards list grouped by folder with tag chips and a Design button per dashboard"><figcaption>The dashboard list. Folders group dashboards; the Folder control on a row moves it; Design opens the canvas.</figcaption></figure>
 
@@ -396,7 +396,7 @@
 <h3>The canvas: Design and Preview</h3>
 <figure><img src="img/25-dashboard-design.png" alt="Dashboard canvas in Design mode with a grid widget, a trigger button and a text widget"><figcaption>Design mode. The toolbar carries the mode switch and one chip per widget type; widgets sit on a dotted 20-pixel grid.</figcaption></figure>
 <p>The toolbar shows <b>Dashboards</b> (back), the dashboard name, the widget count, the <b>Design</b> / <b>Preview</b> switch and, in Design mode, the widget palette: <b>Grid</b>, <b>Chart</b>, <b>Form</b>, <b>Metric KPI</b>, <b>Trigger</b>, <b>Integration</b>, <b>Text</b>, <b>Image</b>, <b>Import</b>.</p>
-<p><b>Text</b> takes a small Markdown subset — <code>#</code> headings, <code>**bold**</code>, <code>*italic*</code>, <code>`code`</code>, bullet and numbered lists, <code>&gt;</code> quotes, <code>---</code> rules and links — <code>[label](https://example.com)</code> to another site, or <code>[label](/docs/formulas-manual/manual.html)</code> to a page of this deployment such as the manuals it ships with. Both open in a new tab, so the console stays where it was. Plain text that uses none of it is shown as typed. <b>Image</b> takes a PNG, JPEG, SVG, WebP or GIF of up to 512 KB, chosen with a file picker; the picture is stored with the dashboard, so it travels with a revision copy, an export and an import, and it takes alternative text for screen readers and a <b>Fit</b> of "show all of it" or "fill the box". Together they are what an explanatory page is built from — the tour a new workspace starts with is written in exactly these widgets.</p>
+<p><b>Text</b> takes a small Markdown subset — <code>#</code> headings, <code>**bold**</code>, <code>*italic*</code>, <code>`code`</code>, bullet and numbered lists, <code>&gt;</code> quotes, <code>---</code> rules and links — <code>[label](https://example.com)</code> to another site, or <code>[label](/docs/formulas-manual/manual.html)</code> to a page of this deployment such as the manuals it ships with. Both open in a new tab, so the console stays where it was. A link can also open another dashboard in place: <code>[label](dashboard:Dashboard name)</code> for one of the same model, <code>[label](dashboard:Model name/Dashboard name)</code> for one of another model, and <code>[label](dashboard:Model name/)</code> for another model's first dashboard. <b>Link to a dashboard…</b> under the text box writes one for you: pick a model and a dashboard, then <b>Insert link</b>. Such a link names the model and the dashboard rather than pointing at them, so it keeps working through a revision copy, an export and an import; rename the target and the link says it cannot find it. It follows the reader's own access: a model they cannot open or a dashboard their roles hide is reported, never shown. In Design and Preview a dashboard link is inert; it works under <b>User › Dashboards</b>. Plain text that uses none of it is shown as typed. <b>Image</b> takes a PNG, JPEG, SVG, WebP or GIF of up to 512 KB, chosen with a file picker; the picture is stored with the dashboard, so it travels with a revision copy, an export and an import, and it takes alternative text for screen readers and a <b>Fit</b> of "show all of it" or "fill the box". Together they are what an explanatory page is built from — the tour a new workspace starts with is written in exactly these widgets.</p>
 <ul>
   <li><b>Design</b> is for placing and configuring widgets. Nothing is live.</li>
   <li><b>Preview</b> renders the dashboard exactly as a business user gets it, against the revision you are designing, and includes property edits you have not saved yet. Values typed into a grid in Preview are real writes.</li>
@@ -478,7 +478,7 @@
 <h3>Making a dashboard reachable</h3>
 <p>A business user sees a dashboard only when one of their business roles has been granted it. Grants are managed on the Users screen (Users chapter). Until then the dashboard exists only for developers.</p>
 <h2>Workflows</h2>
-<p class="path">Sidebar: Build › Workflows</p>
+<p class="path">Sidebar: Developer › Workflows</p>
 <p>A workflow is a reusable approval or task process: who has to act, in what order, under which conditions, and who is told. Business users start it (from a dashboard button, a form submission, an import, or on demand), see their tasks in the Workflow Inbox, and decide them there. Developers define and publish it here.</p>
 <figure><img src="img/07-workflows.png" alt="Workflows list with name, status, trigger, step count and updated date"><figcaption>The list. Status badges: Draft, Published, Archived, Invalid. The trigger column shows the event the workflow starts on.</figcaption></figure>
 <h3>The list</h3>
@@ -549,7 +549,7 @@
 </ul>
 
 <h2>Triggers</h2>
-<p class="path">Sidebar: Build › Triggers</p>
+<p class="path">Sidebar: Developer › Triggers</p>
 <p>A trigger (automation rule) connects an event to a workflow: when the event happens, an instance of the workflow starts. Rules are what dashboard <b>Trigger</b> buttons run, and what makes a form submission or a finished import start a process.</p>
 <figure><img src="img/08-triggers.png" alt="Triggers screen with one automation rule and an empty execution log"><figcaption>Automation Rules and, below, the Execution Log of recent starts.</figcaption></figure>
 <h3>Controls</h3>
@@ -578,7 +578,7 @@
   <li>Rules are per revision and are copied with it.</li>
 </ul>
 <h2>Integrations</h2>
-<p class="path">Sidebar: Build › Integrations</p>
+<p class="path">Sidebar: Developer › Integrations</p>
 <p>Integrations bring data in and out of the model without typing: file uploads, a Google Sheet (link-shared, or private through the tenant's service account), any JSON REST API, and posting of form records into planning cells. The screen opens with one tile per source; selecting a tile shows that source's list and actions below.</p>
 <figure><img src="img/09-integrations.png" alt="Integrations screen with source tiles and the Excel/CSV import section"><figcaption>Source tiles: Excel / CSV Import, Google Sheets, REST API, Supabase (coming soon), Form Records, Data Export. The section under the tiles belongs to the selected source.</figcaption></figure>
 
@@ -658,8 +658,8 @@
 </table>
 <p>Each card has <b>Download</b>, edit and delete. A download is built when it is asked for, from the downloader's own view of the grid: members and metrics hidden from them are left out, and every value is the one their grid shows. Put an export on a dashboard with an <b>Integration</b> button and business users download it there; each download is kept in the export's run history. The AI Developer creates exports the same way (see the AI chapter), and can import a spreadsheet attached to its chat into a grid or dimension.</p>
 <h2>AI Developer</h2>
-<p class="path">Sidebar: Build › AI Developer</p>
-<p>A chat assistant that can read the model and, when you approve, build, change and remove what you build on the other Build screens, under the same checks. Model changes happen in an isolated <b>AI draft</b> revision that you promote or discard, so the live model is never touched by accident. Three kinds of change are live as soon as you execute the plan, as they are on their own screens: business roles, user access rules, and form records posted through a form integration.</p>
+<p class="path">Sidebar: Developer › AI Developer</p>
+<p>A chat assistant that can read the model and, when you approve, build, change and remove what you build on the other Developer screens, under the same checks. Model changes happen in an isolated <b>AI draft</b> revision that you promote or discard, so the live model is never touched by accident. Three kinds of change are live as soon as you execute the plan, as they are on their own screens: business roles, user access rules, and form records posted through a form integration.</p>
 <figure><img src="img/11-ai-developer.png" alt="AI Developer screen with the session list, chat area and message box"><figcaption>Sessions on the left, the conversation in the middle. Settings hold the provider and key; the Activity panel lists proposals.</figcaption></figure>
 <h3>Controls</h3>
 <table class="ctl">
@@ -707,7 +707,7 @@
 <tr><td>Delete user</td><td>Confirm <b>Delete user?</b>: removes the person and revokes all their access. You cannot delete your own account.</td></tr>
 </table>
 <h2>Roles</h2>
-<p class="path">Sidebar: Build › Roles (hidden when you also hold business_admin: the Business Admin console's Roles tab is the same screen with members)</p>
+<p class="path">Sidebar: Developer › Roles (hidden when you also hold business_admin: the Business Admin console's Roles tab is the same screen with members)</p>
 <p>Named business roles ("Budget Approvers", "Regional Managers"). Workflow tasks and approvals are assigned to these roles by name, or to the platform roles. A developer creates the roles their workflows need and decides which dashboards each may open; who is <b>in</b> a role is decided by a business admin.</p>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>

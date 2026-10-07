@@ -71,3 +71,4 @@ export type { SplitPaneProps } from "./SplitPane";
 export { NotificationCenter } from "./NotificationCenter";
 export type { DesignTone } from "./types";
 export { RichText } from "./RichText";
+export { InConsoleLinkContext } from "./RichTextLinks";

@@ -5,6 +5,7 @@ import { api, type WidgetProps, type SelectorsPosition, type WidgetBackground, t
 import { ChartWidgetEditor } from "../dashboard/ChartWidgetEditor";
 import { chartConfigFromDraft, isChartConfigComplete } from "../dashboard/chartTypes";
 import { DashboardWidgetGrid } from "../business/DashboardWidgets";
+import { DashboardLinkPicker } from "./DashboardLinkPicker";
 import { defaultLeafCode, groupWidgetsIntoRows } from "../dashboardLayout";
 import { Toolbar, ToolbarGroup, Button, SegmentedControl, FilterChip, StatusBadge, IconButton, Field, Select, TextInput, Textarea, NumberInput, Checkbox, PropertyPanel, ConfirmDialog, UnsavedChangesBar, useUnsavedGuard, RichText } from "../../ui";
 
@@ -92,6 +93,15 @@ type Interaction =
   | { kind: "move";   id: string; mx0: number; my0: number; ox: number; oy: number }
   | { kind: "resize"; id: string; mx0: number; my0: number; ow: number; oh: number; edge: "r" | "b" | "rb" };
 
+/** Puts text into a textarea's value at its caret, or at the end when it has none yet. */
+function insertAtCaret(el: HTMLTextAreaElement | null, value: string, text: string): string {
+  const hasCaret = !!el && (el.selectionStart > 0 || el.selectionEnd > 0);
+  const at = hasCaret ? el!.selectionStart : value.length;
+  const end = hasCaret ? el!.selectionEnd : value.length;
+  const before = value.slice(0, at);
+  return before + (before && !/\s$/.test(before) ? " " : "") + text + value.slice(end);
+}
+
 export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dashId: string; dashName: string; revisionId?: string; onBack: () => void }) {
   const qc = useQueryClient();
 
@@ -107,6 +117,8 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
   const [newChartDraft, setNewChartDraft] = useState<Partial<GridChartConfig>>({ chart_type: "bar", context_defaults: {} });
 
   const interRef = useRef<Interaction | null>(null);
+  const newTextRef = useRef<HTMLTextAreaElement>(null);
+  const propTextRef = useRef<HTMLTextAreaElement>(null);
   const liveRef = useRef<Record<string, CanvasRect>>({});
   const draftRef = useRef<Record<string, CanvasRect>>({});
   const widgetsRef = useRef<DashboardWidget[]>([]);
@@ -636,8 +648,15 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
               </Field>
             )}
             {newWidget.widget_type === "text" && (
-              <Field label="Content" description="Markdown: # heading, **bold**, - bullets, [label](https://example.com)">
-                <Textarea value={newWidget.content} onChange={e => setNewWidget(w => ({ ...w, content: e.target.value }))} rows={4} style={{ width: "100%", resize: "vertical" }} placeholder="Text content…" />
+              <Field label="Content" description="Markdown: # heading, **bold**, - bullets, [label](https://example.com), [label](dashboard:Model name/Dashboard name)">
+                <Textarea ref={newTextRef} value={newWidget.content} onChange={e => setNewWidget(w => ({ ...w, content: e.target.value }))} rows={4} style={{ width: "100%", resize: "vertical" }} placeholder="Text content…" />
+                {demoCtx && (
+                  <DashboardLinkPicker
+                    modelId={demoCtx.model_id}
+                    revisionId={revisionId}
+                    onInsert={md => setNewWidget(w => ({ ...w, content: insertAtCaret(newTextRef.current, w.content ?? "", md) }))}
+                  />
+                )}
               </Field>
             )}
             {newWidget.widget_type === "image" && (
@@ -1573,9 +1592,10 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
               <div style={{ marginBottom: 12 }}>
                 <div className="mvx-prop-section">Content</div>
                 <div className="mvx-admin-muted" style={{ fontSize: 12, marginBottom: 4 }}>
-                  Markdown: <code># heading</code>, <code>**bold**</code>, <code>- bullets</code>, <code>[label](https://example.com)</code>
+                  Markdown: <code># heading</code>, <code>**bold**</code>, <code>- bullets</code>, <code>[label](https://example.com)</code>; a link to a dashboard is <code>[label](dashboard:Model name/Dashboard name)</code>
                 </div>
                 <Textarea
+                  ref={propTextRef}
                   key={selectedWidget.id}
                   defaultValue={propsDraft[selectedWidget.id]?.content ?? selectedWidget.content ?? ""}
                   onBlur={e => {
@@ -1585,6 +1605,18 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                   style={{ width: "100%", resize: "vertical" }}
                   aria-label="Text content"
                 />
+                {demoCtx && (
+                  <DashboardLinkPicker
+                    modelId={demoCtx.model_id}
+                    revisionId={revisionId}
+                    onInsert={md => {
+                      const el = propTextRef.current;
+                      const next = insertAtCaret(el, el?.value ?? "", md);
+                      if (el) el.value = next;
+                      setPropsDraft(prev => ({ ...prev, [selectedWidget.id]: { ...prev[selectedWidget.id], content: next } }));
+                    }}
+                  />
+                )}
               </div>
             )}
 

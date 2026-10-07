@@ -327,7 +327,7 @@ export function RolesTab({ variant = "business-admin", revisionId }: { variant?:
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ba-roles"] }),
   });
   const setDashboards = useMutation({
-    // Build › Roles edits the working revision's grants; Business Admin ›
+    // Developer › Roles edits the working revision's grants; Business Admin ›
     // Roles sends no revision (the live one of the selected model).
     mutationFn: ({ id, ids }: { id: string; ids: string[] }) =>
       api.setRoleDashboards(id, ids, developer ? revisionId : undefined),

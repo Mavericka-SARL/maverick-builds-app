@@ -2,7 +2,7 @@
 <h2>14. Time series</h2>
 <h3>What they need</h3>
 <ul>
-  <li>A dimension created with <b>Dimension type: Time</b> (Build › Dimensions › New dimension), with a granularity (day, week, month, quarter, half year, year or custom) and the month the fiscal year starts. The type is fixed at creation: a dimension merely named "month" is not a time dimension.</li>
+  <li>A dimension created with <b>Dimension type: Time</b> (Developer › Dimensions › New dimension), with a granularity (day, week, month, quarter, half year, year or custom) and the month the fiscal year starts. The type is fixed at creation: a dimension merely named "month" is not a time dimension.</li>
   <li><b>Leaf periods</b> carry a start and end date; periods <b>without</b> dates (FY26, H1, Q1) are aggregate periods that group the leaves under them.</li>
   <li>The metric must be on a grid with <b>exactly one</b> time dimension. Otherwise the formula is refused when the metric is placed or the revision activated (<code>TIME_DIMENSION_REQUIRED</code>, <code>MULTIPLE_TIME_DIMENSIONS</code>).</li>
 </ul>

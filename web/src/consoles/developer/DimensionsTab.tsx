@@ -70,7 +70,7 @@ function dimMaxDepth(roots: DimMemberNode[]): number {
 
 // Every query that carries a dimension's members in their order, besides the
 // grids and charts (invalidateModelData's shared list): Build's other member
-// lists, the Run console's dimensions, grid previews and the Business Admin
+// lists, the User group's dimensions, grid previews and the Business Admin
 // access-rule picker.
 const MEMBER_LIST_QUERY_KEYS = new Set(["dev-dimensions-all", "dimensions", "public-dims", "grid-preview",
   "ba-available-dimension-members"]);

@@ -4,10 +4,10 @@
  * PEOPLE 1, SAFETY 4, DELIVERY 7, IDENTITY 10, but the grid showed DELIVERY,
  * IDENTITY, PEOPLE, SAFETY). The server sends members in that order — time
  * period, then sort_order, then code — and the hierarchical row and column
- * axes, the context selectors and Build › Dimensions used to re-sort them by
+ * axes, the context selectors and Developer › Dimensions used to re-sort them by
  * code. (sort_order is set by imports, integrations, the AI assistant's
  * reorder_dimension_members, and the Move up / Move down arrows on each member
- * row in Build › Dimensions.)
+ * row in Developer › Dimensions.)
  *
  * Mocked API (CI runs the e2e job without a gateway).
  */
@@ -170,7 +170,7 @@ test("a hierarchical context selector lists members in the dimension's order and
   expectInOrder(await list.innerText(), ["West", "Zeta City", "Alpha City", "East", "York", "Boston"]);
 });
 
-test("Build › Dimensions lists members in the dimension's order", async ({ page }) => {
+test("Developer › Dimensions lists members in the dimension's order", async ({ page }) => {
   await mockApi(page);
   // The developer API's shape: parent by id.
   await page.route("**/api/developer/dimensions*", (route) => route.fulfill({
@@ -190,7 +190,7 @@ test("Build › Dimensions lists members in the dimension's order", async ({ pag
   expectInOrder(await table.innerText(), ROW_ORDER);
 });
 
-test("Build › Dimensions dims the move arrows while a move is in flight", async ({ page }) => {
+test("Developer › Dimensions dims the move arrows while a move is in flight", async ({ page }) => {
   await mockApi(page);
   await page.route("**/api/developer/dimensions*", (route) => route.fulfill({
     status: 200, contentType: "application/json",

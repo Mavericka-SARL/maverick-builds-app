@@ -42,7 +42,7 @@ const TAB_LABELS: Record<Tab, string> = {
 const SECTION: SectionId = "developer";
 
 /**
- * The developer section of the console: Build › (model authoring) and, unless
+ * The developer section of the console: Developer › (model authoring) and, unless
  * a tenant/platform admin section already supplies it, Govern › Users.
  */
 export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInput): ConsoleSection | null {
@@ -116,7 +116,7 @@ export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInpu
 
   const navGroups = [
     {
-      label: "Build",
+      label: "Developer",
       items: [
         { id: t("ai"), label: TAB_LABELS.ai, icon: <Sparkles size={16} /> },
         { id: t("metrics"), label: TAB_LABELS.metrics, icon: <Sigma size={16} /> },

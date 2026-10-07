@@ -1,5 +1,5 @@
 <h2>Models</h2>
-<p class="path">Sidebar: Build › Models</p>
+<p class="path">Sidebar: Developer › Models</p>
 <p>The Models screen lists every application and model you can reach, with their revisions. It is where you choose <em>which revision you are editing</em>; every other Build screen works inside that choice.</p>
 <figure><img src="img/01-models.png" alt="Models screen with the working-revision banner and two applications, each with a model and its revisions"><figcaption>The banner names the selected revision and its short id. Applications are cards; each model lists its revisions with badges.</figcaption></figure>
 <h3>Controls</h3>
@@ -21,7 +21,7 @@
 </ul>
 
 <h2>Metrics</h2>
-<p class="path">Sidebar: Build › Metrics</p>
+<p class="path">Sidebar: Developer › Metrics</p>
 <p>A metric is a measure of the model: an <b>Input</b> metric is typed in by users, imported or posted from forms; a <b>Calc</b> metric is computed from a formula over other metrics. The list groups inputs first, then a <b>Calculated</b> section.</p>
 <figure><img src="img/02-metrics.png" alt="Metrics list with input and calculated metrics, type badges, formulas and the Used by column"><figcaption>Each row shows technical name, label, type badges (Input or Calc, aggregation rule, format), the formula, and which calculated metrics use this one.</figcaption></figure>
 <h3>The list</h3>
@@ -62,7 +62,7 @@
 <div class="note"><b>Formula language in short.</b> Optional leading <code>=</code>; names are case-insensitive; operators <code>+ - * / ^</code>, comparisons <code>= &lt;&gt; &lt; &lt;= &gt; &gt;=</code>, text join <code>&amp;</code>, parentheses; arguments separated by commas or semicolons. Functions: see Concepts › Formulas. A formula can read the cell's member (<code>region</code>), a member property (<code>employees.salary</code>), the parent member (<code>PARENT(region)</code>), another member's value (<code>LOOKUP</code>) and conditional totals (<code>SUMIFS</code> and its family). Not available: cell addresses like A1, XLOOKUP/INDEX/MATCH. Offsets between periods use the time-series functions on a Time dimension.</div>
 
 <h2>Dimensions</h2>
-<p class="path">Sidebar: Build › Dimensions</p>
+<p class="path">Sidebar: Developer › Dimensions</p>
 <p>A dimension is an axis of the model (Department, Region, Product, Period). Its members are the values on that axis, optionally arranged in a hierarchy, and each member can carry property values used for grouping and rollups. A dimension is either <b>Standard</b> or <b>Time</b> — chosen explicitly when it is created and fixed afterwards. Only a Time dimension gives formulas a calendar to move along (PREVIOUS, LAG, MOVINGSUM, …); naming a standard dimension "month" does not.</p>
 <figure><img src="img/03-dimensions.png" alt="Dimensions screen with one dimension card showing members, codes and actions"><figcaption>One card per dimension. The header shows member count, root count and the rollup rule; the table lists members with code, children and actions.</figcaption></figure>
 <h3>Controls</h3>
@@ -99,7 +99,7 @@
 </ul>
 
 <h2>Dependency Graph</h2>
-<p class="path">Sidebar: Build › Dependency Graph</p>
+<p class="path">Sidebar: Developer › Dependency Graph</p>
 <p>A read-only map of every metric in the revision and the arrows between them: an arrow from A to B means B's formula uses A. Use it to understand what a change will recalculate and to spot metrics that are on no grid.</p>
 <figure><img src="img/37-dependency-graph.png" alt="Dependency graph with input and calculated metric nodes joined by arrows"><figcaption>Input metrics and calculated metrics are drawn as differently tinted cards; each card names the grids and dimensions of the metric.</figcaption></figure>
 <table class="ctl">

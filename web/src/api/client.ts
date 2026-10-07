@@ -2370,6 +2370,11 @@ export const api = {
 
   listDashboards: (revisionId?: string) =>
     apiFetch<DashboardDef[]>(`/api/developer/dashboards${revisionId ? `?revision_id=${revisionId}` : ""}`),
+  // Another model's dashboards (its live revision), for the designer's
+  // dashboard-link picker: the same route, asked for that model, which the
+  // gateway answers only if the caller may open it.
+  listModelDashboards: (appId: string, modelId: string) =>
+    apiFetch<DashboardDef[]>("/api/developer/dashboards", { headers: { "X-App-Id": appId, "X-Model-Id": modelId } }),
   createDashboard: (body: { name: string; tags?: string[]; revision_id?: string; folder_id?: string }) =>
     apiFetch<{ id: string }>("/api/developer/dashboards", { method: "POST", body: JSON.stringify(body) }),
   // Partial: a field left out keeps the dashboard's own; tags replace the
@@ -2458,7 +2463,7 @@ export const api = {
   deleteBARole: (id: string) =>
     apiFetch<{ status: string }>(`/api/business-admin/roles/${id}`, { method: "DELETE" }),
   // revisionId: the revision whose dashboards the list covers (the developer's
-  // working revision in Build › Roles). Omitted, the server uses the live
+  // working revision in Developer › Roles). Omitted, the server uses the live
   // revision of the selected model (Business Admin › Roles).
   setRoleDashboards: (roleId: string, dashboard_ids: string[], revisionId?: string) =>
     apiFetch<{ status: string }>(

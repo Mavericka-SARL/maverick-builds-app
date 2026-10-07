@@ -1,8 +1,8 @@
 /**
- * Build › Roles and the import wizard act on the working revision's model
+ * Developer › Roles and the import wizard act on the working revision's model
  * (2026-09-29, several models in one application):
  *
- *  - Build › Roles listed the working revision's dashboards but saved the
+ *  - Developer › Roles listed the working revision's dashboards but saved the
  *    grants with no revision, so the server replaced the grants among the
  *    selected model's LIVE dashboards: unticking a working-revision
  *    dashboard did nothing. Business Admin › Roles still sends none — it
@@ -79,7 +79,7 @@ async function tickAndSave(page: Page, roleName: string, dashboardName: string) 
   await page.getByRole("button", { name: "Save dashboard access" }).click();
 }
 
-test("Build › Roles saves dashboard grants for the working revision", async ({ page }) => {
+test("Developer › Roles saves dashboard grants for the working revision", async ({ page }) => {
   await mockTwoModels(page);
   const puts = await capturePuts(page);
   await workInOtherDraft(page);

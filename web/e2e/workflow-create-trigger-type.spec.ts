@@ -7,7 +7,7 @@
  * "manual", with no workflow_def_id, so the rule never fired on the event.
  * Typed but sent with no source, the rule would have fired for EVERY form
  * submitted or every import (the dispatcher reads an empty source as "any").
- * Both the dialog and Build › Triggers now take the type and the one form or
+ * Both the dialog and Developer › Triggers now take the type and the one form or
  * integration from the working revision's trigger-event catalog, and the
  * workflow's Usage panel shows the new rule at once.
  *
@@ -122,7 +122,7 @@ test("Create Trigger refuses a per-form workflow whose form the catalog does not
   expect(posted).toHaveLength(0);
 });
 
-test("Build › Triggers fills in the form or integration a per-source workflow starts on", async ({ page }) => {
+test("Developer › Triggers fills in the form or integration a per-source workflow starts on", async ({ page }) => {
   const { posted } = await mockWorkflows(page);
   await loadAs(page, "developer");
   await page.getByRole("button", { name: "Triggers", exact: true }).click();

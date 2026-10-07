@@ -20,8 +20,8 @@ import (
 // Self-service sign-up: a visitor with a company name and a work address
 // gets a tenant on the self-service plan, an application holding the
 // starter models (starter.Packages: the "Learn the platform" tour and one
-// guide per role — the developer guide, starter.LandingKey, is the
-// application's default and what they first see), and an invitation to
+// guide per role — the tour, starter.LandingKey, is the application's
+// default and what they first see), and an invitation to
 // set their password. They arrive as the tenant's administrator, developer
 // and business administrator, which is everything a trial needs to be
 // evaluated by one person.
@@ -252,7 +252,7 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 		// They share one created_at (the transaction's), so "newest
 		// model" cannot pick the one to land on: name it as the
 		// application's default, the same setting a developer changes later
-		// under Build › Models.
+		// under Developer › Models.
 		if _, err := setApplicationDefaultModel(tctx, tx, models[landing].modelID); err != nil {
 			return fmt.Errorf("set default model: %w", err)
 		}

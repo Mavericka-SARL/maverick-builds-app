@@ -189,14 +189,14 @@ func devDashboard(id, name string, rows ...[]modeltransfer.Widget) modeltransfer
 }
 
 func devFirstModelPage() modeltransfer.Dashboard {
-	return devDashboard("dev-dash-1-first-model", "1 · Your first model",
+	return devDashboard("dev-dash-1-first-model", devFirstPage,
 		devText(`# Your first model
 
 This guide is for the person who builds models. This page goes from nothing to a model people can type numbers into, in eight steps; the pages after it explain each step in depth.
 
-The guide is a model too, *Developer guide*, with a small example — two products over four quarters — that page 4 uses. Open it in the Build screens and change it as much as you like, in a revision of your own.
+The guide is a model too, *Developer guide*, with a small example — two products over four quarters — that page 4 uses. Open it in the Developer screens and change it as much as you like, in a revision of your own.
 
-Not building models? Start with the tour instead: pick *Learn the platform* in the **Model** list at the top of this page.`, 196),
+Not building models? Go back to the `+dashLink("tour", ModelName, DashboardName)+` and pick the guide for what you came to do.`, 200),
 
 		devPicture(devFirstModel(), "A tenant admin creates the application and the model; you add a revision, dimensions and metrics, a grid and a dashboard, then press Set active", 860, 190),
 
@@ -204,41 +204,41 @@ Not building models? Start with the tour instead: pick *Learn the platform* in t
 
 An **application** groups related models; a **model** holds what you build. Creating them belongs to the **tenant admin**. If you signed up for this workspace yourself, that is you: your account is tenant admin, developer and business admin at once. If it is not, ask your tenant admin for the two, and start at step 3.
 
-1. Open **Build › Models** and press **New application** at the top of the page. Type a name, such as *Sales*, and press **Create application**.
+1. Open **Developer › Models** and press **New application** at the top of the page. Type a name, such as *Sales*, and press **Create application**.
 2. The model form opens next, with the new application already chosen. Type a name, such as *Sales plan*, and press **Create model**. For another model in an application you already have, press **New model** instead.
 
 **Tenant admin › Applications** does the same: **New application** at the top of your tenant, **Add model** at the top of each application.`, 244),
 
 		devText(`## 3 · A revision to build in
 
-A new model is empty and has no revision yet. Under it in **Build › Models**, press **New revision**, type a name — *Working*, say — and press **Save**. It becomes your working revision: the bar at the top names the model and the revision, and every Build screen now changes them. Page 2 covers revisions.`, 132),
+A new model is empty and has no revision yet. Under it in **Developer › Models**, press **New revision**, type a name — *Working*, say — and press **Save**. It becomes your working revision: the bar at the top names the model and the revision, and every Build screen now changes them. Page 2 covers revisions.`, 132),
 
 		devText(`## 4 · Dimensions
 
-**Build › Dimensions** → **New dimension**. Make a **Standard** one for what you slice by — products, regions, teams — and give it members with **Add root member**. If your numbers run over time, add a **Time** one as well; **Generate periods…** fills it. Page 3.
+**Developer › Dimensions** → **New dimension**. Make a **Standard** one for what you slice by — products, regions, teams — and give it members with **Add root member**. If your numbers run over time, add a **Time** one as well; **Generate periods…** fills it. Page 3.
 
 ## 5 · Metrics
 
-**Build › Metrics** → **Add metric**. First what people type, Type **Input** — `+devCode("units")+` and `+devCode("price")+`, say. Then what is worked out from them, Type **Calc**, with a **Formula** such as `+devCode("=units * price")+`. Pages 3 and 4.
+**Developer › Metrics** → **Add metric**. First what people type, Type **Input** — `+devCode("units")+` and `+devCode("price")+`, say. Then what is worked out from them, Type **Calc**, with a **Formula** such as `+devCode("=units * price")+`. Pages 3 and 4.
 
 ## 6 · A grid
 
-**Build › Grids** → **New grid**, name it, **Create**. Press **Configure** on its card, move your metrics and dimensions to *In this grid*, and press **Done**. A metric takes its dimensions from the grid it sits on. Page 5.
+**Developer › Grids** → **New grid**, name it, **Create**. Press **Configure** on its card, move your metrics and dimensions to *In this grid*, and press **Done**. A metric takes its dimensions from the grid it sits on. Page 5.
 
 ## 7 · A dashboard
 
-**Build › Dashboards** → **New dashboard**, name it, **Create**, then **Design** on its row. Click **Grid** in the palette, choose your grid, press **Add widget**, then **Save**. Switch to **Preview** and type a few numbers: the calculated metrics and the totals follow at once. Page 5.`, 366),
+**Developer › Dashboards** → **New dashboard**, name it, **Create**, then **Design** on its row. Click **Grid** in the palette, choose your grid, press **Add widget**, then **Save**. Switch to **Preview** and type a few numbers: the calculated metrics and the totals follow at once. Page 5.`, 366),
 
 		devText(`## 8 · Make it live
 
-Back in **Build › Models**, press **Set active** on your revision: from now on it is what people see in this model. Press **Set as business default** if people should open this model first, and give business roles its dashboards — page 5 shows where. Before a later change goes live, page 7 has a short checklist.
+Back in **Developer › Models**, press **Set active** on your revision: from now on it is what people see in this model. Press **Set as business default** if people should open this model first, and give business roles its dashboards — page 5 shows where. Before a later change goes live, page 7 has a short checklist.
 
 ## Or describe it to the AI Developer
 
-After step 3 you can hand steps 4 to 7 to **Build › AI Developer**. Describe the model in plain words — *products and quarters; units and price typed in; revenue is units times price; a grid and a dashboard to type into* — and confirm the plan it proposes. Its changes land in a draft revision of their own, which **Promote to Active** makes live. Page 7.
+After step 3 you can hand steps 4 to 7 to **Developer › AI Developer**. Describe the model in plain words — *products and quarters; units and price typed in; revenue is units times price; a grid and a dashboard to type into* — and confirm the plan it proposes. Its changes land in a draft revision of their own, which **Promote to Active** makes live. Page 7.
 
 ---
-Next: **2 · Revisions**.`, 284),
+Next: [2 · Revisions](dashboard:2 · Revisions).`, 284),
 	)
 }
 
@@ -258,7 +258,7 @@ Build starts in the live revision of the model you have open, and nothing stops 
 
 		devText(`## Make a revision
 
-1. Open **Build › Models**. It lists each application you can reach, its models, and each model's revisions.
+1. Open **Developer › Models**. It lists each application you can reach, its models, and each model's revisions.
 2. Under the model you want to change, press **New revision**, type a name where it says *Revision name…* and press **Save**.
 3. The revision is made in that model. It copies your working revision if that is in the same model, and the model's live revision if not. It becomes your working revision at once: its row is marked **Working**, and the bar names it.
 
@@ -272,7 +272,7 @@ The live revision cannot be deleted. Any other can, with the trash icon on its r
 
 		devText(`## Which model people open
 
-An application can hold several models: *Getting started* holds the tour and three guides. Business screens open the model marked **business default** unless someone has opened another one under **Models** in their own sidebar. To change the default, press **Set as business default** beside a model in **Build › Models**.`, 132),
+An application can hold several models: *Getting started* holds the tour and three guides. Business screens open the model marked **business default** unless someone has opened another one under **Models** in their own sidebar. To change the default, press **Set as business default** beside a model in **Developer › Models**.`, 132),
 
 		devText(`## Two more things to know
 
@@ -280,7 +280,7 @@ An application can hold several models: *Getting started* holds the tour and thr
 - People, business roles and access rules belong to the whole workspace, not to a revision. A workflow that is already running keeps the definition it started with, whatever you change afterwards.
 
 ---
-Next: **3 · Dimensions, metrics**.`, 204),
+Next: [3 · Dimensions, metrics](dashboard:3 · Dimensions, metrics).`, 204),
 	)
 }
 
@@ -292,7 +292,7 @@ A model is built from two lists: the ways you slice numbers — **dimensions** �
 
 		devText(`## Dimensions
 
-Open **Build › Dimensions** and press **New dimension**: a **Name**, a **Dimension type**, **Tags** if you like, then **Create**.
+Open **Developer › Dimensions** and press **New dimension**: a **Name**, a **Dimension type**, **Tags** if you like, then **Create**.
 
 - **Standard** — members you define: products, regions, teams. **Add root member** adds one, with a code and a label; **Add child** on a member puts another under it, and every parent becomes a total of its children. The **Move up** and **Move down** arrows on a member put it in order among its siblings; grids list members in that order.
 - **Time** — periods with dates. Choose the **Granularity** (day, week, month, quarter, half year, year or custom) and the month the fiscal year starts; both are fixed once created. **Generate periods…** creates the dated periods, and periods without dates, such as H1 or FY 2026, group them. Only a Time dimension can carry time functions such as PREVIOUS or YEARTODATE — a dimension merely named *month* cannot.
@@ -307,7 +307,7 @@ A member or a property that a formula names cannot be deleted, and renaming a pr
 
 		devText(`## Metrics
 
-Open **Build › Metrics** and press **Add metric**:
+Open **Developer › Metrics** and press **Add metric**:
 
 - **Metric name** — snake_case, such as `+devCode("gross_margin")+`. Names ignore case: `+devCode("Revenue")+` and `+devCode("revenue")+` count as the same name. **Display name**, if you give one, is what grids and charts show instead.
 - **Type** — **Input** is typed or imported. **Calc** has a **Formula** and is worked out by the platform whenever an input changes. The type cannot be changed afterwards.
@@ -335,7 +335,7 @@ A new metric totals by Sum unless you pick another rule, and **Edit** on its row
 A metric that another metric reads cannot be deleted: the **Used by** column shows who reads it, and the delete is refused until those formulas change. The same protects a dimension member or property that a formula names.
 
 ---
-Next: **4 · Formulas**.`, 156),
+Next: [4 · Formulas](dashboard:4 · Formulas).`, 156),
 	)
 }
 
@@ -398,7 +398,7 @@ Then set the product selector to **All products**. There *price* is a plain aver
 
 		devText(`## More you can write
 
-Each of these is valid in this model. Try them in a revision of your own: add the metric under **Build › Metrics**, then move it into *Sales by quarter* under **Build › Grids** → **Configure**, so that it has the grid's product and period.
+Each of these is valid in this model. Try them in a revision of your own: add the metric under **Developer › Metrics**, then move it into *Sales by quarter* under **Developer › Grids** → **Configure**, so that it has the grid's product and period.
 
 - `+devCode("IF(PREVIOUS(revenue) = 0, 0, ROUND((revenue / PREVIOUS(revenue) - 1) * 100, 1))")+` — growth on the previous quarter, in percent. Give it time summary *none*: a year of growth rates does not add up.
 - `+devCode("MOVINGSUM(revenue, -1, 0, AVERAGE)")+` — the average of this quarter and the one before.
@@ -408,9 +408,9 @@ Each of these is valid in this model. Try them in a revision of your own: add th
 
 		devText(`## When something is wrong
 
-The **Formula** field warns while you type when a name is not a metric or dimension of this revision. The server checks the whole formula when you save and refuses it with the reason. A metric whose calculation fails gets a red mark on its row in **Build › Metrics**; hover it for the message.
+The **Formula** field warns while you type when a name is not a metric or dimension of this revision. The server checks the whole formula when you save and refuses it with the reason. A metric whose calculation fails gets a red mark on its row in **Developer › Metrics**; hover it for the message.
 
-**Build › Dependency Graph** draws every metric — inputs and calculated ones in different colours — with arrows showing which metric reads which. **Find metric…** jumps to one.`, 188),
+**Developer › Dependency Graph** draws every metric — inputs and calculated ones in different colours — with arrows showing which metric reads which. **Find metric…** jumps to one.`, 188),
 
 		devText(`## The whole language
 
@@ -419,7 +419,7 @@ The formulas manual describes every function with examples the engine computed, 
 [Open the formulas manual](`+formulasManual+`)
 
 ---
-Next: **5 · Grids, dashboards**.`, 188),
+Next: [5 · Grids, dashboards](dashboard:5 · Grids, dashboards).`, 188),
 	)
 }
 
@@ -434,13 +434,13 @@ A grid decides which numbers belong together; a dashboard decides how people see
 
 ## A grid
 
-Open **Build › Grids**, press **New grid**, name it — **Tags** too, if you like — and press **Create**. Then press **Configure** on its card and move metrics and dimensions from *Available* to *In this grid*. For each dimension, **Show:** picks all levels, the root only, one level, or the leaves only. Every change is saved as you make it; **Done** closes the card.
+Open **Developer › Grids**, press **New grid**, name it — **Tags** too, if you like — and press **Create**. Then press **Configure** on its card and move metrics and dimensions from *Available* to *In this grid*. For each dimension, **Show:** picks all levels, the root only, one level, or the leaves only. Every change is saved as you make it; **Done** closes the card.
 
 A grid has no layout of its own. Where each dimension sits — rows, columns or a selector — is set on each dashboard that shows it.`, 252),
 
 		devText(`## A dashboard
 
-1. Open **Build › Dashboards** and press **New dashboard**. Give it a **Name** — a **Folder** and **Tags** too, if you like — and press **Create**.
+1. Open **Developer › Dashboards** and press **New dashboard**. Give it a **Name** — a **Folder** and **Tags** too, if you like — and press **Create**.
 2. Press **Design** on its row.
 3. Click a widget type in the palette — Grid, Chart, Form, Metric KPI, Trigger, Integration, Text, Image or Import — choose what it shows under *Configure & place*, and press **Add widget**. It lands on the canvas, already saved.
 4. Drag a widget to move it; pull its handles to resize it.
@@ -475,14 +475,14 @@ Click a widget in Design and **Widget Properties** opens beside it:
 
 Beside the dashboard's name, switch from **Design** to **Preview** to use the page as people will: type into grids, use the selectors.
 
-**Run › Dashboards** shows the dashboards of the live revision of the model a person has open, so a dashboard you build in your own revision reaches people when you press **Set active**. Which dashboards a business role can open is set per role under **Build › Roles**, on your working revision; the grants go live with it. If you are also a business admin, Build has no Roles screen: use **Business Admin › Roles**, which changes the live revision of the model selected under **Business Admin › Models**.
+**User › Dashboards** shows the dashboards of the live revision of the model a person has open, so a dashboard you build in your own revision reaches people when you press **Set active**. Which dashboards a business role can open is set per role under **Developer › Roles**, on your working revision; the grants go live with it. If you are also a business admin, Build has no Roles screen: use **Business Admin › Roles**, which changes the live revision of the model selected under **Business Admin › Models**.
 
 ## Keep them findable
 
 **New folder** groups dashboards. Once a folder exists, each row gets a list that files it in a folder, and an *All folders* list above the rows narrows the view; the tag chips and *Search dashboards…* narrow it too. The pencil on a row edits its name and tags. Metrics, dimensions and grids carry tags as well, and the Metrics, Dimensions, Forms, Grids and Workflows lists each have a search box.
 
 ---
-Next: **6 · Data in, workflows**.`, 340),
+Next: [6 · Data in, workflows](dashboard:6 · Data in, workflows).`, 340),
 	)
 }
 
@@ -496,27 +496,27 @@ Numbers do not only arrive by typing into a grid. Forms collect entries, integra
 
 		devText(`## Forms
 
-**Build › Forms** → **New form**: a **Form name**, a **Display label**, then the fields — **Add field** for each: Text, Number, Date, Select, Boolean, Metric, or one of the model's dimensions — and **Create form**. People — business users and business admins alike — work on its records only through a **Form** widget on a dashboard, so place each form on a dashboard their role can open: there they add, edit, export and import records, and an administrator changes their status and syncs them.
+**Developer › Forms** → **New form**: a **Form name**, a **Display label**, then the fields — **Add field** for each: Text, Number, Date, Select, Boolean, Metric, or one of the model's dimensions — and **Create form**. People — business users and business admins alike — work on its records only through a **Form** widget on a dashboard, so place each form on a dashboard their role can open: there they add, edit, export and import records, and an administrator changes their status and syncs them.
 
-A form on its own only stores its records. To post their numbers into the model, map it: **Build › Integrations** → **Form Records** → **New integration**. Choose the **Source form**, the **Target grid** and its **Target input metric**, the **Source value field**, how records combine (**Aggregation**), which statuses post (**Post when status is**), and the **Dimension field mappings**. With **Live update** on, a record posts as soon as it reaches one of those statuses; **Backfill** posts the ones already there.`, 232),
+A form on its own only stores its records. To post their numbers into the model, map it: **Developer › Integrations** → **Form Records** → **New integration**. Choose the **Source form**, the **Target grid** and its **Target input metric**, the **Source value field**, how records combine (**Aggregation**), which statuses post (**Post when status is**), and the **Dimension field mappings**. With **Live update** on, a record posts as soon as it reaches one of those statuses; **Backfill** posts the ones already there.`, 232),
 
 		devText(`## Workflows
 
-**Build › Workflows** → **From Template** (Simple Approval, Two-Level Approval, Amount-Based Approval or Notify Only) or **New Workflow**, which asks for a **Name** and a **Trigger event**: *Manual*, a form submitted, an import completed or failed, or an *API trigger*. A template starts as *Manual*. Open it and add steps with **Add step**: Task, Approval, Condition, Notification or Join. An approval or a task goes to roles, not to named people (**Approver roles**, **Assignee roles**), so it keeps working when someone is away.
+**Developer › Workflows** → **From Template** (Simple Approval, Two-Level Approval, Amount-Based Approval or Notify Only) or **New Workflow**, which asks for a **Name** and a **Trigger event**: *Manual*, a form submitted, an import completed or failed, or an *API trigger*. A template starts as *Manual*. Open it and add steps with **Add step**: Task, Approval, Condition, Notification or Join. An approval or a task goes to roles, not to named people (**Approver roles**, **Assignee roles**), so it keeps working when someone is away.
 
 Then **Save**, **Validate**, try it with **Test Run**, and **Publish**. What you save later applies to new requests; one already running keeps the definition it started with.`, 208),
 
 		devText(`## Triggers
 
-Once published, a *Manual* workflow can be started by people themselves: it is listed under *Start a workflow* in **Run › Workflow Inbox**. Anything else — a dashboard button, a schedule, a form, an import or an outside call — starts a workflow through a rule.
+Once published, a *Manual* workflow can be started by people themselves: it is listed under *Start a workflow* in **User › Workflow Inbox**. Anything else — a dashboard button, a schedule, a form, an import or an outside call — starts a workflow through a rule.
 
-**Build › Triggers** → **New rule**: choose the **Workflow**, and the **Trigger type** follows its trigger event. A *Manual* workflow offers *manual* (a button) or *schedule* (a cron expression); any other is fixed to its event — *form_submit*, *integration_completed*, *integration_failed* or *api*. Then press **Create rule**. **Create Trigger** in a workflow's row menu does the same from the Workflows list.
+**Developer › Triggers** → **New rule**: choose the **Workflow**, and the **Trigger type** follows its trigger event. A *Manual* workflow offers *manual* (a button) or *schedule* (a cron expression); any other is fixed to its event — *form_submit*, *integration_completed*, *integration_failed* or *api*. Then press **Create rule**. **Create Trigger** in a workflow's row menu does the same from the Workflows list.
 
 A **Trigger** widget on a dashboard runs a manual rule that is enabled. Until a workflow has a rule, its editor says *No rule yet*; a *Manual* workflow that people start themselves needs none.`, 240),
 
 		devText(`## Integrations
 
-Everything that brings data in is under **Build › Integrations**:
+Everything that brings data in is under **Developer › Integrations**:
 
 - **Excel / CSV Import** — **New Import** opens a wizard: upload the file and choose what it fills (a grid, a form, or a dimension's members), **Shape** a sheet laid out for people (titles, merged headers, months across) into rows, map its columns, validate, and commit. **Save as Integration** keeps the mapping for the next file.
 - **Google Sheets** — **Import from Sheet**, paste the sheet's link, **Fetch sheet**. A sheet shared as *Anyone with the link* works as it is. A private one needs a Google service account: store its key under *Private sheets*, and share the sheet with that account. A saved sheet refreshes with **Sync Now**.
@@ -527,7 +527,7 @@ Everything that brings data in is under **Build › Integrations**:
 On a dashboard, an **Integration** widget runs a saved integration from a button, and an **Import** widget gives people an upload box for a grid, with a template to download.
 
 ---
-Next: **7 · AI and going live**.`, 388),
+Next: [7 · AI and going live](dashboard:7 · AI and going live).`, 388),
 	)
 }
 
@@ -535,7 +535,7 @@ func devAIPage() modeltransfer.Dashboard {
 	return devDashboard("dev-dash-7-ai", "7 · AI and going live",
 		devText(`# The AI Developer, and going live
 
-**Build › AI Developer** builds with you. Describe a change in plain words and it proposes the steps — dimensions, metrics, grids, dashboards, forms, workflows — for you to confirm. It works under the same checks as the Build screens, and nothing is written until you confirm.
+**Developer › AI Developer** builds with you. Describe a change in plain words and it proposes the steps — dimensions, metrics, grids, dashboards, forms, workflows — for you to confirm. It works under the same checks as the Developer screens, and nothing is written until you confirm.
 
 ## Set it up
 
@@ -549,7 +549,7 @@ Press **New session** and describe what you want. **Attach a document** adds a p
 
 The first plan you confirm in a session creates a revision for it, named *AI Draft* and the date, copied from the live revision. The chat then carries an **AI draft** badge, and every later change in the session goes into that draft — never into your working revision or the live one.
 
-The draft is listed in **Build › Models** like any revision: click its row to look through the result in every Build screen. Back in the chat, the draft's banner has **Promote to Active**, which makes it the live revision, and **Discard**, which throws it away.
+The draft is listed in **Developer › Models** like any revision: click its row to look through the result in every Build screen. Back in the chat, the draft's banner has **Promote to Active**, which makes it the live revision, and **Discard**, which throws it away.
 
 Three kinds of change are not revision-scoped and take effect as soon as you confirm: business roles, user access rules, and form records posted into the model.
 
@@ -561,12 +561,12 @@ Publishing and test-running workflows, making a revision live or deleting one, t
 
 Before you press **Set active**:
 
-- **Build › Metrics** — no red mark beside a formula.
-- **Build › Dependency Graph** — every calculated metric reads what you meant it to.
-- **Build › Dashboards** — each page checked in **Preview**.
-- **Build › Workflows** — the ones people need are published, and each that should start on a button, a schedule or an event has a rule under **Build › Triggers**.
+- **Developer › Metrics** — no red mark beside a formula.
+- **Developer › Dependency Graph** — every calculated metric reads what you meant it to.
+- **Developer › Dashboards** — each page checked in **Preview**.
+- **Developer › Workflows** — the ones people need are published, and each that should start on a button, a schedule or an event has a rule under **Developer › Triggers**.
 
-Then open **Build › Models**, press **Set active** on your revision, and **Set as business default** if people should open this model first.`, 252),
+Then open **Developer › Models**, press **Set active** on your revision, and **Set as business default** if people should open this model first.`, 252),
 
 		devText(`## Read further
 
@@ -704,7 +704,7 @@ func devWiring() string {
 	s += arrow(666, 135, 30)
 	s += box(700, 104, 140, 62, "Workflow Inbox", "the step's roles", false)
 	// Row 3: imports fill the model.
-	s += box(20, 188, 410, 62, "Excel / CSV · Google Sheets · REST API", "Build › Integrations", false)
+	s += box(20, 188, 410, 62, "Excel / CSV · Google Sheets · REST API", "Developer › Integrations", false)
 	s += arrow(436, 219, 38)
 	s += box(480, 188, 180, 62, "Grid, form", "or dimension members", false)
 	return s + `</svg>`

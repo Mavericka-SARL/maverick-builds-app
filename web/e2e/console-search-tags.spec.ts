@@ -228,11 +228,11 @@ test("sidebar: drag to resize, remembered, double-click resets", async ({ page }
   await page.getByRole("button", { name: "Expand sidebar" }).click();
 });
 
-test("business admin sidebar groups read Run and Business Admin", async ({ page }) => {
+test("business admin sidebar groups read User and Business Admin", async ({ page }) => {
   await mockApi(page);
   await loadAs(page, "finance");
   const labels = page.locator(".mvx-sidebar-nav__group-label");
-  await expect(labels).toHaveText(["Run", "Business Admin"], { useInnerText: false });
+  await expect(labels).toHaveText(["User", "Business Admin"], { useInnerText: false });
   // Forms have no screen of their own: records are worked on in a
   // dashboard's form widget.
   await expect(page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Dashboards" })).toBeVisible();

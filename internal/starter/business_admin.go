@@ -141,16 +141,16 @@ func baPicture(svg, alt string, w, h int) []modeltransfer.Widget {
 }
 
 func baYourPart() modeltransfer.Dashboard {
-	return baPage("ba-dash-1-part", "1 · Your part",
+	return baPage("ba-dash-1-part", baFirstPage,
 		baText(`# Your part: who sees what, and what gets decided
 
 A business admin runs one workspace day to day. You decide who opens which dashboards and who can see or change which numbers, and you keep requests moving: approving, rejecting, unsticking. A developer builds the model and a tenant admin adds the people; everything in between is yours.
 
-Five pages, in order. The fourth has a small model of its own to try things on.`, 168),
+Five pages, in order. The fourth has a small model of its own to try things on. New to the platform? The `+dashLink("tour", ModelName, DashboardName)+` shows how it all fits first.`, 168),
 
 		baText(`## Your sidebar
 
-**Run** is where the day's work happens:
+**User** is where the day's work happens:
 
 - **Dashboards** — every dashboard of the model you have open, with grids you can type into, and forms whose records you review
 - **Workflow Inbox** — the requests waiting for your decision
@@ -172,10 +172,10 @@ Each one narrows the one before. **Roles** decide which dashboards a person can 
 
 ## If you signed up for this workspace
 
-Your account is also a developer and a tenant admin, so your sidebar has **Build** and **Tenant admin** too. This guide stays with **Run** and **Business Admin**; the builder's side is in the [developer manual](`+developerManual+`).
+Your account is also a developer and a tenant admin, so your sidebar has **Developer** and **Tenant admin** too. This guide stays with **User** and **Business Admin**; the builder's side is in the [developer manual](`+developerManual+`).
 
 ---
-Next: **2 · The model you work in**.`, 216),
+Next: [2 · The model you work in](dashboard:2 · The model you work in).`, 216),
 	)
 }
 
@@ -187,22 +187,22 @@ func baTheModel() modeltransfer.Dashboard {
 
 		baText(`## Switching models
 
-The quickest way is the **Model** list at the top of **Run › Dashboards**: pick another model and its dashboards appear. **Business Admin › Models** shows the same models with more detail: each card is an application, and inside it each model has a row with the name of its live revision. **Working here** marks the one you have open, and **Open** switches to another; the console reloads on that model's **Run › Dashboards**.
+The quickest way is the **Model** list at the top of **User › Dashboards**: pick another model and its dashboards appear. **Business Admin › Models** shows the same models with more detail: each card is an application, and inside it each model has a row with the name of its live revision. **Working here** marks the one you have open, and **Open** switches to another; the console reloads on that model's **User › Dashboards**.
 
 The row marked **default** is the model everyone lands on until they choose another; a developer decides which one that is. Your own choice is remembered in this browser only.`, 164),
 
 		baText(`## The live revision
 
-A model changes in **revisions**: complete copies a developer works on, then makes live. The **Revision** in the bar at the top of the page names the live one. Everything under **Run** — for you and for every business user — happens in the live revision.
+A model changes in **revisions**: complete copies a developer works on, then makes live. The **Revision** in the bar at the top of the page names the live one. Everything under **User** — for you and for every business user — happens in the live revision.
 
-As a business admin you cannot make a revision or choose which one is live; developers do that under **Build › Models**, and tenant admins under **Tenant admin › Applications**. That is deliberate: what you look at is what everyone else looks at.`, 164),
+As a business admin you cannot make a revision or choose which one is live; developers do that under **Developer › Models**, and tenant admins under **Tenant admin › Applications**. That is deliberate: what you look at is what everyone else looks at.`, 164),
 
 		baText(`## What stays when a new revision goes live
 
 Roles, their members and access rules are not part of any revision. When a developer makes a new revision from the live one, it carries your dashboard grants along, and your access rules follow each member and metric into it. A dashboard that is new in that revision belongs to no role yet: people in roles will not see it until you tick it.
 
 ---
-Next: **3 · Who opens which dashboards**.`, 180),
+Next: [3 · Who opens which dashboards](dashboard:3 · Who opens which dashboards).`, 180),
 	)
 }
 
@@ -230,12 +230,12 @@ You cannot add people yourself. A tenant admin invites them under **Tenant admin
 
 - Someone in **no role** sees every dashboard of the model. Roles are opt-in: nobody is narrowed until you put them in one.
 - Someone in **one or more roles** sees only what those roles are granted, taken together — in every model of this workspace. When you put someone in a role, grant them what they need in each model they use.
-- **Business admins, developers and tenant admins** always see every dashboard. Your own **Run › Dashboards** cannot show you what a role member sees; ask them.
+- **Business admins, developers and tenant admins** always see every dashboard. Your own **User › Dashboards** cannot show you what a role member sees; ask them.
 
 Roles decide pages, not numbers. To narrow the numbers on a page, use access rules.
 
 ---
-Next: **4 · Who sees which numbers**.`, 264),
+Next: [4 · Who sees which numbers](dashboard:4 · Who sees which numbers).`, 264),
 	)
 }
 
@@ -293,17 +293,17 @@ Access rules apply to you too. **Read** is safe to try on yourself: you undo it 
 
 1. Open **Business Admin › Access Rules** and choose yourself under **User:**.
 2. Under **office**, set **Oslo** to **Read** and press **Save rules** in the bar that appears.
-3. Come back to **Run › Dashboards** and open **4 · Who sees which numbers** again. Within half a minute, or at once if you reload the page, Oslo's *budget* and *spent* turn grey — **Read-only / total** in the grid's legend. You can read them; you cannot type into them. Read hides nothing, so no total moves.
+3. Come back to **User › Dashboards** and open **4 · Who sees which numbers** again. Within half a minute, or at once if you reload the page, Oslo's *budget* and *spent* turn grey — **Read-only / total** in the grid's legend. You can read them; you cannot type into them. Read hides nothing, so no total moves.
 4. Back on **Access Rules**, choose yourself under **User:** again, set **Oslo** to **Write** and press **Save rules**. Write is the default, so saving it removes the rule.
 
-Leave **Hidden** alone on yourself: a member or metric hidden from you drops out of your own **Access Rules** list, so you could not set it back yourself. Another business admin could (a tenant admin can invite one) or, for a member, a developer through **Build › AI Developer**.`, 320),
+Leave **Hidden** alone on yourself: a member or metric hidden from you drops out of your own **Access Rules** list, so you could not set it back yourself. Another business admin could (a tenant admin can invite one) or, for a member, a developer through **Developer › AI Developer**.`, 320),
 
 		baText(`## Rules belong to people
 
 A rule is set for one person, not for a role, and it stays when a new revision goes live. The **User:** list holds this workspace's business users and business admins.
 
 ---
-Next: **5 · Requests and history**.`, 156),
+Next: [5 · Requests and history](dashboard:5 · Requests and history).`, 156),
 	)
 }
 
@@ -315,7 +315,7 @@ A developer designs the workflows; business users submit requests through them; 
 
 		baText(`## Workflow Inbox
 
-**Run › Workflow Inbox** lists the steps waiting for you: those assigned to business admins (or to developers or tenant admins, if your account is one too) and those assigned to a role you are in. Each card names the workflow and the step, who asked (**Requested by**), and what the request is about — an office, a region.
+**User › Workflow Inbox** lists the steps waiting for you: those assigned to business admins (or to developers or tenant admins, if your account is one too) and those assigned to a role you are in. Each card names the workflow and the step, who asked (**Requested by**), and what the request is about — an office, a region.
 
 - Type a comment in the box. Some steps require one; their buttons stay disabled until you do.
 - An approval step has **Approve** and **Reject**.
@@ -341,7 +341,7 @@ Open steps are listed under **Pending Actions**, where you can decide the ones a
 
 		baText(`## Forms
 
-Forms have no screen of their own: a developer places each one on a dashboard as a **Form** widget, and you work on its records there, under **Run › Dashboards**, as business users do. The widget lists the records entered so far. **New record** adds one. The pencil edits one, and the status list on its row changes its **Status**: draft, submitted, approved or rejected. Changing the status is a decision in its own right: moving a record to submitted or approved can start a workflow, if a developer set one to listen for it.
+Forms have no screen of their own: a developer places each one on a dashboard as a **Form** widget, and you work on its records there, under **User › Dashboards**, as business users do. The widget lists the records entered so far. **New record** adds one. The pencil edits one, and the status list on its row changes its **Status**: draft, submitted, approved or rejected. Changing the status is a decision in its own right: moving a record to submitted or approved can start a workflow, if a developer set one to listen for it.
 
 **Export** downloads the records as Excel; **Import** reads CSV or Excel. **Sync to grid** posts the records into the model through the form's mappings. A form that is on no dashboard cannot be reached; ask a developer to place it.`, 188),
 
@@ -416,7 +416,7 @@ func baRequest() string {
 	s := svgHead(860, 232)
 	s += box(10, 84, 190, 64, "Submitted", "by a business user", false)
 	s += arrow(208, 116, 40)
-	s += box(256, 84, 220, 64, "Your decision", "Run › Workflow Inbox", true)
+	s += box(256, 84, 220, 64, "Your decision", "User › Workflow Inbox", true)
 	s += `<text x="366" y="68" text-anchor="middle" font-size="12" fill="` + muted + `">numbers locked while it waits</text>`
 	s += `<text x="366" y="170" text-anchor="middle" font-size="12" fill="` + muted + `">stuck? cancel it in History</text>`
 	s += `<line x1="476" y1="116" x2="512" y2="116" stroke="` + muted + `" stroke-width="1.5"/>`

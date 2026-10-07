@@ -111,7 +111,7 @@
 </ul>
 
 <h3>The Metrics screen</h3>
-<p class="path">Sidebar: Build › Metrics</p>
+<p class="path">Sidebar: Developer › Metrics</p>
 <figure><img src="../developer-manual/img/20-metric-add-form.png" alt="Add metric form"><figcaption>The Add metric form. The Formula field takes the expression; the aggregation rule and time summary decide how its results total (chapter 15).</figcaption></figure>
 <table class="ctl">
 <tr><th>Where</th><th>What it does for formulas</th></tr>
@@ -121,7 +121,7 @@
 <tr><td>Warning triangle beside a formula</td><td>The last calculation of this metric failed at some or all cells. Hover it: "Calculation failing: n/m combos failed … (first error: …)". See chapter 5.</td></tr>
 <tr><td><b>Used by</b> column</td><td>The calculated metrics whose formulas read this one.</td></tr>
 </table>
-<p>The <b>Dependency Graph</b> screen (Build › Dependency Graph) draws the same references as a graph. The AI Developer writes formulas through the same checks as the console.</p>
+<p>The <b>Dependency Graph</b> screen (Developer › Dependency Graph) draws the same references as a graph. The AI Developer writes formulas through the same checks as the console.</p>
 
 <h3>When a calculated metric computes</h3>
 <ul>
@@ -342,7 +342,7 @@
 <tr><td>IF(region = "", 1, 0)</td><td>"am I a total?"</td><td>1 at a total</td></tr></table></div>
 
 <div class="fn"><h4><span class="sig">dimension.property</span> — a member property</h4>
-<p>The value of a <b>declared</b> property on the cell's member, typed by its declaration (Build › Dimensions › Dimension Properties):</p>
+<p>The value of a <b>declared</b> property on the cell's member, typed by its declaration (Developer › Dimensions › Dimension Properties):</p>
 <ul>
   <li><b>number</b> → a number (a stored value that is not a number gives <code>#VALUE!</code>);</li>
   <li><b>date</b> → a date serial, from an ISO <code>yyyy-mm-dd</code> value (anything else gives <code>#VALUE!</code>);</li>
@@ -446,7 +446,7 @@
 <h2>14. Time series</h2>
 <h3>What they need</h3>
 <ul>
-  <li>A dimension created with <b>Dimension type: Time</b> (Build › Dimensions › New dimension), with a granularity (day, week, month, quarter, half year, year or custom) and the month the fiscal year starts. The type is fixed at creation: a dimension merely named "month" is not a time dimension.</li>
+  <li>A dimension created with <b>Dimension type: Time</b> (Developer › Dimensions › New dimension), with a granularity (day, week, month, quarter, half year, year or custom) and the month the fiscal year starts. The type is fixed at creation: a dimension merely named "month" is not a time dimension.</li>
   <li><b>Leaf periods</b> carry a start and end date; periods <b>without</b> dates (FY26, H1, Q1) are aggregate periods that group the leaves under them.</li>
   <li>The metric must be on a grid with <b>exactly one</b> time dimension. Otherwise the formula is refused when the metric is placed or the revision activated (<code>TIME_DIMENSION_REQUIRED</code>, <code>MULTIPLE_TIME_DIMENSIONS</code>).</li>
 </ul>
