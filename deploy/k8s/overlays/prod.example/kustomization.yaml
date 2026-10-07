@@ -63,55 +63,55 @@ patches:
 images:
   - name: registry.example.com/mavericks/ai-assistant
     newName: ghcr.io/mavericka-sarl/mavericks/ai-assistant
-    newTag: "2026.09.26"
+    newTag: "2026.10.07"
   - name: registry.example.com/mavericks/audit
     newName: ghcr.io/mavericka-sarl/mavericks/audit
-    newTag: "2026.09.26"
+    newTag: "2026.10.07"
   - name: registry.example.com/mavericks/calculation
     newName: ghcr.io/mavericka-sarl/mavericks/calculation
-    newTag: "2026.09.26"
+    newTag: "2026.10.07"
   - name: registry.example.com/mavericks/gateway
     newName: ghcr.io/mavericka-sarl/mavericks/gateway
-    newTag: "2026.09.26"
+    newTag: "2026.10.07"
   - name: registry.example.com/mavericks/identity
     newName: ghcr.io/mavericka-sarl/mavericks/identity
-    newTag: "2026.09.26"
+    newTag: "2026.10.07"
   - name: registry.example.com/mavericks/import
     newName: ghcr.io/mavericka-sarl/mavericks/import
-    newTag: "2026.09.26"
+    newTag: "2026.10.07"
   - name: registry.example.com/mavericks/integration
     newName: ghcr.io/mavericka-sarl/mavericks/integration
-    newTag: "2026.09.26"
+    newTag: "2026.10.07"
   - name: registry.example.com/mavericks/model
     newName: ghcr.io/mavericka-sarl/mavericks/model
-    newTag: "2026.09.26"
+    newTag: "2026.10.07"
   - name: registry.example.com/mavericks/notification
     newName: ghcr.io/mavericka-sarl/mavericks/notification
-    newTag: "2026.09.26"
+    newTag: "2026.10.07"
   - name: registry.example.com/mavericks/policy
     newName: ghcr.io/mavericka-sarl/mavericks/policy
-    newTag: "2026.09.26"
+    newTag: "2026.10.07"
   - name: registry.example.com/mavericks/postgres-backup
     newName: ghcr.io/mavericka-sarl/mavericks/postgres-backup
-    newTag: "2026.09.26"
+    newTag: "2026.10.07"
   - name: registry.example.com/mavericks/postgres-walg
     newName: ghcr.io/mavericka-sarl/mavericks/postgres-walg
-    newTag: "2026.09.26"
+    newTag: "2026.10.07"
   - name: registry.example.com/mavericks/query
     newName: ghcr.io/mavericka-sarl/mavericks/query
-    newTag: "2026.09.26"
+    newTag: "2026.10.07"
   - name: registry.example.com/mavericks/schema-migration
     newName: ghcr.io/mavericka-sarl/mavericks/schema-migration
-    newTag: "2026.09.26"
+    newTag: "2026.10.07"
   - name: registry.example.com/mavericks/tenant
     newName: ghcr.io/mavericka-sarl/mavericks/tenant
-    newTag: "2026.09.26"
+    newTag: "2026.10.07"
   - name: registry.example.com/mavericks/web
     newName: ghcr.io/mavericka-sarl/mavericks/web
-    newTag: "2026.09.26"
+    newTag: "2026.10.07"
   - name: registry.example.com/mavericks/workflow
     newName: ghcr.io/mavericka-sarl/mavericks/workflow
-    newTag: "2026.09.26"
+    newTag: "2026.10.07"
   - name: quay.io/minio/minio
     newName: ghcr.io/mavericka-sarl/mavericks/minio
-    newTag: "2026.09.26"
+    newTag: "2026.10.07"
