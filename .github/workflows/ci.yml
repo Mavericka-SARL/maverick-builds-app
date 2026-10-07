@@ -6,7 +6,7 @@ on:
     # A date tag (2026.09.26, or 2026.09.26.1 for a second one that day) is a
     # release: every gate runs, every image is published under the tag, and
     # the GitHub release is created. Tags are made on the PUBLIC repository,
-    # so its images land in the organisation's registry (docs/PUBLIC_RELEASE.md).
+    # so its images land in the organisation's registry.
     tags: ['[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]*']
   pull_request:
     branches: [main, develop]
@@ -208,8 +208,7 @@ jobs:
         # internal/gateway alone grew from 339s to 437s here in three days
         # (2.5 minutes locally under -race), then crossed 600s on 2026-10-02
         # and was killed mid-suite. The job's own 30-minute limit still bounds
-        # the run. See docs/OBSERVATIONS.md, "The gateway test package is
-        # outgrowing CI's time limits".
+        # the run.
         run: go test -race -p 4 -timeout 20m ./...
       # A backstop for Ryuk (a reaper that died with the runner leaves its
       # containers): orphaned postgres containers and their volumes once
@@ -644,6 +643,9 @@ jobs:
           build-args: |
             SERVICE=${{ matrix.service }}
           push: true
+          # An SPDX SBOM attestation per image (BuildKit's scanner): the
+          # inventory of what shipped, beside the notices in /licenses/.
+          sbom: true
           tags: |
             ${{ steps.image.outputs.prefix }}/${{ matrix.service }}:latest
             ${{ steps.image.outputs.prefix }}/${{ matrix.service }}:${{ github.sha }}
@@ -708,6 +710,9 @@ jobs:
           context: deploy/docker/pg-backup
           file: deploy/docker/pg-backup/Dockerfile
           push: true
+          # An SPDX SBOM attestation per image (BuildKit's scanner): the
+          # inventory of what shipped, beside the notices in /licenses/.
+          sbom: true
           tags: |
             ${{ steps.image.outputs.prefix }}/postgres-backup:latest
             ${{ steps.image.outputs.prefix }}/postgres-backup:${{ github.sha }}
@@ -771,6 +776,9 @@ jobs:
           context: deploy/docker/postgres-walg
           file: deploy/docker/postgres-walg/Dockerfile
           push: true
+          # An SPDX SBOM attestation per image (BuildKit's scanner): the
+          # inventory of what shipped, beside the notices in /licenses/.
+          sbom: true
           tags: |
             ${{ steps.image.outputs.prefix }}/postgres-walg:latest
             ${{ steps.image.outputs.prefix }}/postgres-walg:${{ github.sha }}
@@ -833,12 +841,19 @@ jobs:
         with:
           # Context is web/, not the repo root — the image needs only the
           # frontend, and a root context would ship the whole Go tree. The
-          # manuals it serves at /docs/ come from docs/ as a named context;
-          # web/Dockerfile fails the build if it is missing.
+          # manuals it serves at /docs/ come from docs/ as a named context,
+          # the two licence files from the root as "legal" (only the files
+          # copied are transferred); web/Dockerfile fails the build if
+          # either is missing.
           context: web
-          build-contexts: docs=docs
+          build-contexts: |
+            docs=docs
+            legal=.
           file: web/Dockerfile
           push: true
+          # An SPDX SBOM attestation per image (BuildKit's scanner): the
+          # inventory of what shipped, beside the notices in /licenses/.
+          sbom: true
           tags: |
             ${{ steps.image.outputs.prefix }}/web:latest
             ${{ steps.image.outputs.prefix }}/web:${{ github.sha }}
@@ -891,6 +906,9 @@ jobs:
           context: deploy/docker/minio
           file: deploy/docker/minio/Dockerfile
           push: true
+          # An SPDX SBOM attestation per image (BuildKit's scanner): the
+          # inventory of what shipped, beside the notices in /licenses/.
+          sbom: true
           tags: |
             ${{ steps.image.outputs.prefix }}/minio:latest
             ${{ steps.image.outputs.prefix }}/minio:${{ github.ref_name }}

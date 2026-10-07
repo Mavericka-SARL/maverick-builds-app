@@ -269,7 +269,8 @@ func (h *handler) ssoDiscover(w http.ResponseWriter, r *http.Request) {
 	// Public, so the sign-in page can ask on every deployment — but single
 	// sign-on is an enterprise feature: without it in the licence there is
 	// nothing to discover, whatever domains an earlier licence left behind.
-	if h.lic.Require(license.FeatureSSO) != nil {
+	// Sign-in keeps working through a key's transition period.
+	if h.lic.RequireUse(license.FeatureSSO) != nil {
 		jsonOK(w, map[string]any{"sso": false})
 		return
 	}
@@ -310,7 +311,7 @@ func (e *errNotProvisionable) Error() string { return e.reason }
 // account is created. Anyone else with a valid-but-unknown token — a
 // realm user created outside the console — is still refused, as before.
 func (h *handler) jitProvision(ctx context.Context, claims *identity.Claims) (*actor, error) {
-	if h.kc == nil || !h.lic.Has(license.FeatureSSO) {
+	if h.kc == nil || !h.lic.Usable(license.FeatureSSO) {
 		return nil, fmt.Errorf("unknown subject")
 	}
 	links, err := h.kc.FederatedIdentities(ctx, claims.Subject)

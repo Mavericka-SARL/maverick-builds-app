@@ -20,7 +20,8 @@ This is a community feature: a deployment with no license key has plans too,
 because a sign-up funnel is not an enterprise capability. The license key
 (`docs/LICENSING.md`) decides the *edition* a deployment runs — community,
 commercial (white-labelling and the right to commercial use) or enterprise,
-keys sent by e-mail on request; a plan decides how much *one tenant* may use.
+each key issued for an accepted order, which it names; a plan decides how
+much *one tenant* may use.
 
 On the hosted service the two never meet: sign-up hands out the Community
 plan, whose only limit is its size, and a sign-up account is never a

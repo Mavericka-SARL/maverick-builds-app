@@ -124,7 +124,10 @@ func (h *handler) scimEndpoint(w http.ResponseWriter, r *http.Request) {
 			"schemas": []string{"urn:ietf:params:scim:api:messages:2.0:Error"}, "status": fmt.Sprint(status), "detail": detail,
 		})
 	}
-	if err := h.lic.Require(license.FeatureSCIM); err != nil {
+	// Provisioning keeps running through a key's transition period: a
+	// directory that stopped reaching the platform would leave leavers
+	// active. Issuing new tokens is refused then (scimGate).
+	if err := h.lic.RequireUse(license.FeatureSCIM); err != nil {
 		scimErr(http.StatusForbidden, err.Error())
 		return
 	}

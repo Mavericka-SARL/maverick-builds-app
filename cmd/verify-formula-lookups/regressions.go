@@ -743,9 +743,8 @@ func (r *regEnv) zonesProblems(moved bool) map[string][]string {
 // checkDeletedLookupMember: deleting a member a formula names is refused
 // (MEMBER_IN_USE, like DIMENSION_IN_USE and PROPERTY_IN_USE) and the cells
 // keep being served; once the formula no longer names it, the delete goes
-// through. A member RENAME is not refused and does not rewrite formulas
-// (docs/OBSERVATIONS.md), so it is what still reaches activation's
-// UNKNOWN_MEMBER (F8).
+// through. A member RENAME is not refused and does not rewrite formulas,
+// so it is what still reaches activation's UNKNOWN_MEMBER (F8).
 func (r *regEnv) checkDeletedLookupMember() {
 	report(waitFor("Zones recalculation", func() map[string][]string { return r.zonesProblems(false) }))
 	path := "/api/developer/dimensions/" + r.zoneDim + "/members/" + r.member["Z2"]

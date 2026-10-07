@@ -13546,22 +13546,35 @@ func (s *LicenseFeatureMinEdition) UnmarshalText(data []byte) error {
 }
 
 // The license in force, as pkg/license.Status renders it. edition is the EFFECTIVE edition —
-// community whenever no key is configured or the key is invalid or expired; the key's own details
-// are still reported so the console can say what ran out.
+// community whenever no key is configured, the key is invalid, or its transition period after expiry
+// has ended; during the transition (state transition) it is the key's, and its features can be read,
+// exported and switched off but not changed. The key's own details are still reported so the console
+// can say what ran out.
 // Ref: #/components/schemas/LicenseInfo
 type LicenseInfo struct {
-	Edition   LicenseInfoEdition   `json:"edition"`
-	State     LicenseInfoState     `json:"state"`
-	Features  []string             `json:"features"`
-	Catalog   []LicenseFeature     `json:"catalog"`
-	Source    LicenseInfoSource    `json:"source"`
-	LicenseID OptString            `json:"license_id"`
-	Customer  OptString            `json:"customer"`
-	Contact   OptString            `json:"contact"`
-	IssuedAt  OptDateTime          `json:"issued_at"`
-	ExpiresAt OptDateTime          `json:"expires_at"`
-	Limits    OptLicenseInfoLimits `json:"limits"`
-	Error     OptString            `json:"error"`
+	Edition   LicenseInfoEdition `json:"edition"`
+	State     LicenseInfoState   `json:"state"`
+	Features  []string           `json:"features"`
+	Catalog   []LicenseFeature   `json:"catalog"`
+	Source    LicenseInfoSource  `json:"source"`
+	LicenseID OptString          `json:"license_id"`
+	Customer  OptString          `json:"customer"`
+	Contact   OptString          `json:"contact"`
+	// Feature schedule the key was sold under (YYYY-MM).
+	Schedule OptString `json:"schedule"`
+	// Order number of the accepted order the key implements.
+	Order OptString `json:"order"`
+	// Reference of the agreement text the customer accepted.
+	Agreement OptString `json:"agreement"`
+	// Deployment identifier(s) the order covers.
+	Deployment OptString   `json:"deployment"`
+	IssuedAt   OptDateTime `json:"issued_at"`
+	ExpiresAt  OptDateTime `json:"expires_at"`
+	// An active key within 30 days of expiry.
+	RenewalDue OptBool `json:"renewal_due"`
+	// End of the read-and-export period after expiry.
+	TransitionEndsAt OptDateTime `json:"transition_ends_at"`
+	Error            OptString   `json:"error"`
 }
 
 // GetEdition returns the value of Edition.
@@ -13604,6 +13617,26 @@ func (s *LicenseInfo) GetContact() OptString {
 	return s.Contact
 }
 
+// GetSchedule returns the value of Schedule.
+func (s *LicenseInfo) GetSchedule() OptString {
+	return s.Schedule
+}
+
+// GetOrder returns the value of Order.
+func (s *LicenseInfo) GetOrder() OptString {
+	return s.Order
+}
+
+// GetAgreement returns the value of Agreement.
+func (s *LicenseInfo) GetAgreement() OptString {
+	return s.Agreement
+}
+
+// GetDeployment returns the value of Deployment.
+func (s *LicenseInfo) GetDeployment() OptString {
+	return s.Deployment
+}
+
 // GetIssuedAt returns the value of IssuedAt.
 func (s *LicenseInfo) GetIssuedAt() OptDateTime {
 	return s.IssuedAt
@@ -13614,9 +13647,14 @@ func (s *LicenseInfo) GetExpiresAt() OptDateTime {
 	return s.ExpiresAt
 }
 
-// GetLimits returns the value of Limits.
-func (s *LicenseInfo) GetLimits() OptLicenseInfoLimits {
-	return s.Limits
+// GetRenewalDue returns the value of RenewalDue.
+func (s *LicenseInfo) GetRenewalDue() OptBool {
+	return s.RenewalDue
+}
+
+// GetTransitionEndsAt returns the value of TransitionEndsAt.
+func (s *LicenseInfo) GetTransitionEndsAt() OptDateTime {
+	return s.TransitionEndsAt
 }
 
 // GetError returns the value of Error.
@@ -13664,6 +13702,26 @@ func (s *LicenseInfo) SetContact(val OptString) {
 	s.Contact = val
 }
 
+// SetSchedule sets the value of Schedule.
+func (s *LicenseInfo) SetSchedule(val OptString) {
+	s.Schedule = val
+}
+
+// SetOrder sets the value of Order.
+func (s *LicenseInfo) SetOrder(val OptString) {
+	s.Order = val
+}
+
+// SetAgreement sets the value of Agreement.
+func (s *LicenseInfo) SetAgreement(val OptString) {
+	s.Agreement = val
+}
+
+// SetDeployment sets the value of Deployment.
+func (s *LicenseInfo) SetDeployment(val OptString) {
+	s.Deployment = val
+}
+
 // SetIssuedAt sets the value of IssuedAt.
 func (s *LicenseInfo) SetIssuedAt(val OptDateTime) {
 	s.IssuedAt = val
@@ -13674,9 +13732,14 @@ func (s *LicenseInfo) SetExpiresAt(val OptDateTime) {
 	s.ExpiresAt = val
 }
 
-// SetLimits sets the value of Limits.
-func (s *LicenseInfo) SetLimits(val OptLicenseInfoLimits) {
-	s.Limits = val
+// SetRenewalDue sets the value of RenewalDue.
+func (s *LicenseInfo) SetRenewalDue(val OptBool) {
+	s.RenewalDue = val
+}
+
+// SetTransitionEndsAt sets the value of TransitionEndsAt.
+func (s *LicenseInfo) SetTransitionEndsAt(val OptDateTime) {
+	s.TransitionEndsAt = val
 }
 
 // SetError sets the value of Error.
@@ -13734,17 +13797,6 @@ func (s *LicenseInfoEdition) UnmarshalText(data []byte) error {
 	}
 }
 
-type LicenseInfoLimits map[string]int64
-
-func (s *LicenseInfoLimits) init() LicenseInfoLimits {
-	m := *s
-	if m == nil {
-		m = map[string]int64{}
-		*s = m
-	}
-	return m
-}
-
 type LicenseInfoSource string
 
 const (
@@ -13796,10 +13848,11 @@ func (s *LicenseInfoSource) UnmarshalText(data []byte) error {
 type LicenseInfoState string
 
 const (
-	LicenseInfoStateCommunity LicenseInfoState = "community"
-	LicenseInfoStateActive    LicenseInfoState = "active"
-	LicenseInfoStateExpired   LicenseInfoState = "expired"
-	LicenseInfoStateInvalid   LicenseInfoState = "invalid"
+	LicenseInfoStateCommunity  LicenseInfoState = "community"
+	LicenseInfoStateActive     LicenseInfoState = "active"
+	LicenseInfoStateTransition LicenseInfoState = "transition"
+	LicenseInfoStateExpired    LicenseInfoState = "expired"
+	LicenseInfoStateInvalid    LicenseInfoState = "invalid"
 )
 
 // AllValues returns all LicenseInfoState values.
@@ -13807,6 +13860,7 @@ func (LicenseInfoState) AllValues() []LicenseInfoState {
 	return []LicenseInfoState{
 		LicenseInfoStateCommunity,
 		LicenseInfoStateActive,
+		LicenseInfoStateTransition,
 		LicenseInfoStateExpired,
 		LicenseInfoStateInvalid,
 	}
@@ -13818,6 +13872,8 @@ func (s LicenseInfoState) MarshalText() ([]byte, error) {
 	case LicenseInfoStateCommunity:
 		return []byte(s), nil
 	case LicenseInfoStateActive:
+		return []byte(s), nil
+	case LicenseInfoStateTransition:
 		return []byte(s), nil
 	case LicenseInfoStateExpired:
 		return []byte(s), nil
@@ -13836,6 +13892,9 @@ func (s *LicenseInfoState) UnmarshalText(data []byte) error {
 		return nil
 	case LicenseInfoStateActive:
 		*s = LicenseInfoStateActive
+		return nil
+	case LicenseInfoStateTransition:
+		*s = LicenseInfoStateTransition
 		return nil
 	case LicenseInfoStateExpired:
 		*s = LicenseInfoStateExpired
@@ -18272,52 +18331,6 @@ func (o OptInt64) Get() (v int64, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptInt64) Or(d int64) int64 {
-	if v, ok := o.Get(); ok {
-		return v
-	}
-	return d
-}
-
-// NewOptLicenseInfoLimits returns new OptLicenseInfoLimits with value set to v.
-func NewOptLicenseInfoLimits(v LicenseInfoLimits) OptLicenseInfoLimits {
-	return OptLicenseInfoLimits{
-		Value: v,
-		Set:   true,
-	}
-}
-
-// OptLicenseInfoLimits is optional LicenseInfoLimits.
-type OptLicenseInfoLimits struct {
-	Value LicenseInfoLimits
-	Set   bool
-}
-
-// IsSet returns true if OptLicenseInfoLimits was set.
-func (o OptLicenseInfoLimits) IsSet() bool { return o.Set }
-
-// Reset unsets value.
-func (o *OptLicenseInfoLimits) Reset() {
-	var v LicenseInfoLimits
-	o.Value = v
-	o.Set = false
-}
-
-// SetTo sets value to v.
-func (o *OptLicenseInfoLimits) SetTo(v LicenseInfoLimits) {
-	o.Set = true
-	o.Value = v
-}
-
-// Get returns value and boolean that denotes whether value was set.
-func (o OptLicenseInfoLimits) Get() (v LicenseInfoLimits, ok bool) {
-	if !o.Set {
-		return v, false
-	}
-	return o.Value, true
-}
-
-// Or returns value if set, or given parameter if does not.
-func (o OptLicenseInfoLimits) Or(d LicenseInfoLimits) LicenseInfoLimits {
 	if v, ok := o.Get(); ok {
 		return v
 	}

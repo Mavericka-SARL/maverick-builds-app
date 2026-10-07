@@ -3840,6 +3840,8 @@ func (s LicenseInfoState) Validate() error {
 		return nil
 	case "active":
 		return nil
+	case "transition":
+		return nil
 	case "expired":
 		return nil
 	case "invalid":

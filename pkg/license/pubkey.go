@@ -1,8 +1,17 @@
 package license
 
-// defaultPublicKeyB64 is the Ed25519 public key every maverickbuilds.app binary
-// verifies license keys against. The matching PRIVATE key is held by the
-// vendor outside any repository (see cmd/license keygen) — a key pair
-// generated on 2026-09-15. Rotating it means shipping a new binary; a
-// deployment can also override it with MAVERICKS_LICENSE_PUBLIC_KEY.
-const defaultPublicKeyB64 = "0UHc1v5toRNhavIi1abWhUTt9G/lYT76Kv4AfjV2d64="
+// trustedPublicKeys are the Ed25519 public keys every maverickbuilds.app
+// binary accepts license keys from. The matching PRIVATE keys are held by
+// the vendor outside any repository (see cmd/license keygen).
+//
+// There is deliberately no setting that adds a key: a deployment that could
+// trust its own signer could issue itself any edition. Tests inject theirs
+// through Options.PublicKey, which the gateway never sets.
+//
+// Rotating the signing key: generate a new pair, append its public key here
+// and release; sign new licences with the new key once the release is out;
+// remove the old public key only after every licence signed with it has
+// expired (its transition period included).
+var trustedPublicKeys = []string{
+	"0UHc1v5toRNhavIi1abWhUTt9G/lYT76Kv4AfjV2d64=", // generated 2026-09-15
+}

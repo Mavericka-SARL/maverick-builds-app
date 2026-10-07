@@ -417,7 +417,7 @@ export const enterpriseLicense = {
   features: ["sso", "audit_export", "white_label", "tenant_ai_keys", "scim", "cell_history", "usage_analytics"],
   license_id: "lic-e2e", customer: "Acme Corp", contact: "ops@acme.test",
   issued_at: "2026-09-01T00:00:00Z", expires_at: "2027-09-01T00:00:00Z",
-  limits: { max_users: 50 },
+  schedule: "2026-10", order: "ORD-E2E-1", agreement: "PFA 2026-10",
 };
 
 /** GET /api/cells/history: two live values and one an import removed. */

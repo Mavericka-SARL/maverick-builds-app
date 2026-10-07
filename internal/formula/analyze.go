@@ -13,7 +13,7 @@ import (
 // functions, and reports for every referenced name the range of source
 // periods it is read at, relative to the result period.
 //
-// See TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md §7.
+// The dependency windows below drive time-series scheduling and recurrence validation.
 
 // ReferenceUse is one referenced identifier with the union of every time
 // offset it is read at. Direct references are [0, 0].

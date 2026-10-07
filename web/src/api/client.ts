@@ -259,7 +259,9 @@ export interface Branding {
 
 /** Product tier a deployment runs in (GET /api/license). */
 export type Edition = "community" | "commercial" | "enterprise";
-export type LicenseState = "community" | "active" | "expired" | "invalid";
+/** transition: the key expired less than 30 days ago; its features can be
+ *  read, exported and switched off, not changed (pkg/license.StateTransition). */
+export type LicenseState = "community" | "active" | "transition" | "expired" | "invalid";
 export interface LicenseFeature {
   key: string;
   name: string;
@@ -380,9 +382,18 @@ export interface LicenseInfo {
   license_id?: string;
   customer?: string;
   contact?: string;
+  /** Feature schedule the key was sold under (YYYY-MM). */
+  schedule?: string;
+  /** Order number and agreement reference of the contract the key implements. */
+  order?: string;
+  agreement?: string;
+  deployment?: string;
   issued_at?: string;
   expires_at?: string;
-  limits?: Record<string, number>;
+  /** An active key within 30 days of expiry. */
+  renewal_due?: boolean;
+  /** End of the read-and-export period after expiry. */
+  transition_ends_at?: string;
   error?: string;
 }
 
@@ -2259,8 +2270,8 @@ export const api = {
 
   // Answers the same whether the address already had an account (which is
   // then only given the role, in a workspace) or not. Only the reply is
-  // alike: the refreshed users list shows an existing account as it is (see
-  // docs/OBSERVATIONS.md), and a role or workspace left out is refused only
+  // alike: the refreshed users list shows an existing account as it is,
+  // and a role or workspace left out is refused only
   // for an existing account.
   createAdminUser: (body: { email: string; first_name: string; last_name: string; role: string; workspace_id?: string }) =>
     apiFetch<{ id: string; status: string; invited?: boolean }>("/api/admin/users", { method: "POST", body: JSON.stringify(body) }),

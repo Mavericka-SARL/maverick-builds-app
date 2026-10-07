@@ -157,7 +157,7 @@ func (h *handler) notificationTestSend(w http.ResponseWriter, r *http.Request) {
 	// The same sender rule as the dispatcher: the tenant's own name when it
 	// is white-labelled, the platform's otherwise.
 	brand := ""
-	if h.lic != nil && h.lic.Has(license.FeatureWhiteLabel) {
+	if h.lic != nil && h.lic.Usable(license.FeatureWhiteLabel) {
 		brand = branding.EmailNameForUser(ctx, h.db.For(ctx), act.UserID)
 	}
 	sender := brand

@@ -56,8 +56,8 @@ type ReorderResult struct {
 //
 // Tree order holds from this renumbering until the next member add or
 // re-parent: those append (MAX(sort_order)+1), so the new member lists after
-// the last subtree until a reorder renumbers the dimension again
-// (docs/OBSERVATIONS.md). Sibling order is kept either way.
+// the last subtree until a reorder renumbers the dimension again.
+// Sibling order is kept either way.
 //
 // The order is a property of the dimension row, and a dimension row belongs
 // to one revision: the edit stays inside that revision, and revision

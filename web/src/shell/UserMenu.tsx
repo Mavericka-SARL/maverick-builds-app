@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { RoleBadge } from "../ui";
 import { useAuth } from "../auth/useAuth";
 import { api } from "../api/client";
-import { EDITION_LABELS, useLicense } from "../license/useLicense";
+import { EDITION_LABELS, licenseDate, useLicense } from "../license/useLicense";
 import { useThemePreference, type ThemePreference } from "../theme/theme";
 import { ChatConnectorDialog } from "./ChatConnectorDialog";
 import { useConnectorInfo } from "./connectorInfo";
@@ -134,7 +134,11 @@ export function UserMenu() {
                   account menu is the one place every role opens. */}
               <div className="mvx-user-menu__edition" data-testid="edition">
                 {EDITION_LABELS[license.edition]} edition
-                {license.state === "expired" ? " · license expired" : license.state === "invalid" ? " · license invalid" : ""}
+                {license.state === "expired" ? " · license expired"
+                  : license.state === "transition" ? ` · license expired, read-only until ${licenseDate(license.transition_ends_at)}`
+                  : license.state === "invalid" ? " · license invalid"
+                  : license.renewal_due ? ` · license expires ${licenseDate(license.expires_at)}`
+                  : ""}
               </div>
             </div>
           )}

@@ -23,6 +23,14 @@ ENV GOEXPERIMENT=jsonv2
 # fail with a misleading "no such file or directory" at runtime (missing
 # glibc dynamic loader, not actually a missing file).
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /wal-g .
+# wal-g is Apache-2.0: the image carries its LICENSE and the licence and
+# notice files of every module it vendors, listed in modules.txt.
+RUN mkdir -p /out/licenses \
+ && cp /src/LICENSE* /out/licenses/ \
+ && cd /src && go mod vendor \
+ && cp vendor/modules.txt /out/licenses/modules.txt \
+ && find vendor -type f \( -iname 'LICEN[CS]E*' -o -iname 'COPYING*' -o -iname 'NOTICE*' \) \
+      -exec sh -c 'mkdir -p "/out/licenses/$(dirname "$1")" && cp "$1" "/out/licenses/$1"' _ {} \;
 
 # mc, built from source rather than copied out of MinIO's published image.
 # quay.io/minio/mc stopped answering anonymous pulls on 2026-09-24 — 401 on
@@ -47,10 +55,31 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -tags kqueue \
       -ldflags="-s -w -X github.com/minio/mc/cmd.ReleaseTag=${MC_VERSION} -X github.com/minio/mc/cmd.CommitID=$(git rev-parse HEAD)" \
       -o /usr/bin/mc .
 
+# mc is AGPLv3 and this image is published, so it carries mc's licence and
+# notices and its Corresponding Source: the tagged source with every module
+# it links (go mod vendor) plus this Dockerfile, the whole build recipe;
+# nothing is modified (same as deploy/docker/minio; docs/LICENSING.md).
+RUN mkdir -p /out/licenses \
+ && cp LICENSE /out/licenses/LICENSE \
+ && for f in CREDITS NOTICE; do if [ -f "$f" ]; then cp "$f" /out/licenses/; fi; done \
+ && go mod vendor \
+ && tar -C / --exclude=src/.git -czf "/out/licenses/mc-${MC_VERSION}-source.tar.gz" src \
+ && printf '%s\n' \
+      "MinIO client mc ${MC_VERSION} (/usr/local/bin/mc), licensed under the GNU Affero General Public License v3 (LICENSE)." \
+      "" \
+      "Corresponding Source: mc-${MC_VERSION}-source.tar.gz in this directory - https://github.com/minio/mc" \
+      "at tag ${MC_VERSION}, commit $(git rev-parse HEAD), unmodified, with its Go module dependencies vendored." \
+      "Build recipe: build.Dockerfile in this directory (the Dockerfile this image was built from)." \
+      "Mavericka does not modify mc." \
+      > /out/licenses/SOURCE.txt
+
 FROM postgres:16-alpine
 
 COPY --from=walg-builder /wal-g /usr/local/bin/wal-g
+COPY --from=walg-builder /out/licenses/ /licenses/wal-g/
 COPY --from=mc /usr/bin/mc /usr/local/bin/mc
+COPY --from=mc /out/licenses/ /licenses/mc/
+COPY Dockerfile /licenses/mc/build.Dockerfile
 COPY basebackup-loop.sh docker-entrypoint-walg.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/basebackup-loop.sh /usr/local/bin/docker-entrypoint-walg.sh
 

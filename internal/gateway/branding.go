@@ -61,7 +61,7 @@ func (h *handler) publicBranding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	if !h.lic.Has(license.FeatureWhiteLabel) {
+	if !h.lic.Usable(license.FeatureWhiteLabel) {
 		jsonOK(w, brandView{Source: "default"})
 		return
 	}

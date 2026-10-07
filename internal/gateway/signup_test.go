@@ -696,8 +696,7 @@ func TestSignupRecalcReachesMetricsWithoutInputs(t *testing.T) {
 			Dimensions: []modeltransfer.GridDimension{{DimensionID: "dim-region"}}}},
 		// Tags and positions set: modeltransfer.Import writes a nil dashboard
 		// Tags or widget position as NULL, which the tables refuse — not what
-		// this test is about; docs/OBSERVATIONS.md, "A package without
-		// dashboard tags or widget positions cannot be imported".
+		// this test is about. Keep this fixture focused on recalculation.
 		Dashboards: []modeltransfer.Dashboard{{ID: "dash-counts", Name: "Counts", Tags: []string{"guide"}, Widgets: []modeltransfer.Widget{
 			{WidgetType: "grid", RefID: &grid, PosX: at(0), PosY: at(0), SizeW: at(600), SizeH: at(300), Props: layout},
 		}}},

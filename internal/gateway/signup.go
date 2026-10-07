@@ -278,7 +278,7 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 	// Every calculated metric of every model, not only those an input
 	// reaches: recalcRevisionFromInputs skips a model with no input metric,
 	// and misses the dependents of a metric that reads only dimensions or
-	// properties (docs/OBSERVATIONS.md). recalcRevisionCalculated recomputes
+	// properties. recalcRevisionCalculated recomputes
 	// the whole set in dependency order and logs its own failures, which,
 	// like any recalculation failure here, leave the sign-up standing.
 	for _, m := range models {

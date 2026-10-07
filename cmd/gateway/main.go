@@ -76,10 +76,10 @@ type cfg struct {
 	ObjectStoreBucket    string `mapstructure:"OBJECT_STORE_BUCKET"`
 	// License key for the commercial/enterprise editions (pkg/license). The
 	// key itself, or a file holding it; empty runs the community edition.
-	// LicensePublicKey overrides the compiled-in verifier key (tests, forks).
-	LicenseKey       string `mapstructure:"MAVERICKS_LICENSE_KEY"`
-	LicenseFile      string `mapstructure:"MAVERICKS_LICENSE_FILE"`
-	LicensePublicKey string `mapstructure:"MAVERICKS_LICENSE_PUBLIC_KEY"`
+	// The keys it is verified against are compiled in; there is no setting
+	// for another (MAVERICKS_LICENSE_PUBLIC_KEY was removed 2026-10-07).
+	LicenseKey  string `mapstructure:"MAVERICKS_LICENSE_KEY"`
+	LicenseFile string `mapstructure:"MAVERICKS_LICENSE_FILE"`
 	// TenantDBMode: "shared" (default) keeps every tenant in the database
 	// DATABASE_URL points at; "dedicated" gives each tenant its own database
 	// on the same server and makes DATABASE_URL the control plane. See
@@ -299,10 +299,21 @@ func main() {
 		log.Info().Msg("no SMTP relay configured (SMTP_HOST): e-mail notifications will not be delivered")
 	}
 
-	lic := license.Load(license.Options{Key: c.LicenseKey, File: c.LicenseFile, PublicKey: c.LicensePublicKey})
+	if os.Getenv("MAVERICKS_LICENSE_PUBLIC_KEY") != "" {
+		log.Warn().Msg("MAVERICKS_LICENSE_PUBLIC_KEY is set but no longer read: license keys verify only against the keys compiled into this build")
+	}
+	lic := license.Load(license.Options{Key: c.LicenseKey, File: c.LicenseFile})
 	switch st := lic.Status(); st.State {
 	case license.StateActive:
-		log.Info().Str("edition", string(st.Edition)).Str("customer", st.Customer).Time("expires_at", *st.ExpiresAt).Msg("license key accepted")
+		ev := log.Info()
+		if st.RenewalDue {
+			ev = log.Warn()
+		}
+		ev.Str("edition", string(st.Edition)).Str("customer", st.Customer).Str("order", st.Order).Str("schedule", st.Schedule).
+			Time("expires_at", *st.ExpiresAt).Bool("renewal_due", st.RenewalDue).Msg("license key accepted")
+	case license.StateTransition:
+		log.Warn().Str("customer", st.Customer).Time("expired_at", *st.ExpiresAt).Time("transition_ends_at", *st.TransitionEndsAt).
+			Msg("license key has EXPIRED — paid features are read and export only until the transition ends, then the community edition runs")
 	case license.StateExpired:
 		log.Warn().Str("customer", st.Customer).Time("expired_at", *st.ExpiresAt).Msg("license key has EXPIRED — running the community edition until a new key is installed")
 	case license.StateInvalid:
@@ -314,8 +325,9 @@ func main() {
 	// The deployment's own settings rows live on the control plane and are
 	// what a tenant without its own inherits — on an edition that includes
 	// them (docs/NOTIFICATIONS.md, migration 091). The resolvers are
-	// process-wide because the control plane is.
-	deploymentSettings := func() bool { return lic.Has(license.FeatureDeploymentSettings) }
+	// process-wide because the control plane is. Inheriting keeps working
+	// through a key's transition period: it is configured behaviour.
+	deploymentSettings := func() bool { return lic.Usable(license.FeatureDeploymentSettings) }
 	notification.DeploymentDefaults = func(ctx context.Context) (notification.Settings, bool) {
 		if !deploymentSettings() {
 			return notification.Settings{}, false
@@ -396,7 +408,7 @@ func main() {
 			// A white-labelled tenant's mail carries its own name; on other
 			// editions the name is empty and the platform's own is used.
 			BrandName: func(ctx context.Context, recipientUserID string) string {
-				if !lic.Has(license.FeatureWhiteLabel) {
+				if !lic.Usable(license.FeatureWhiteLabel) {
 					return ""
 				}
 				return branding.EmailNameForUser(ctx, dbPool, recipientUserID)
@@ -405,7 +417,8 @@ func main() {
 		reminder := &notification.Reminder{Store: store, Log: blog}
 		go reminder.Run(schedCtx, reminderInterval)
 		// Enterprise audit retention: sweeps only while the licence includes
-		// it — keeping events is the safe failure when a key lapses.
+		// it with full rights (Has, not Usable) — deleting is irreversible,
+		// so keeping events is the safe failure from the moment a key lapses.
 		go auditexport.RunRetention(schedCtx, dbPool, blog, auditRetentionInterval, func() bool { return lic.Has(license.FeatureAuditExport) })
 		// Plan limits: a tenant over its plan is marked read-only here,
 		// whichever path put it over (internal/plan).

@@ -22,10 +22,23 @@ not the Sustainable Use License that covers the rest of the repository.
   gateway loads a licence; no gRPC service serves a gated feature. The frontend wraps gated
   UI in `<FeatureGate feature="…">` (`web/src/license/FeatureGate.tsx`) so a
   locked feature is visible but inert.
+- **`Has` or `Usable`.** `Has` is the strict check (an active key): use it for
+  anything that configures, changes or irreversibly acts on a paid feature.
+  `Usable` also holds in the 30-day transition after expiry. Use it only for
+  behaviour that must keep working as configured (sign-in, branding,
+  inherited settings, reads). `requireFeature` applies the rule by method:
+  GET, HEAD and DELETE are `Usable`, everything else is `Has`.
+- **Every paid route is driven by a test.** `TestPaidRoutesFollowTheLicence`
+  covers every route under the paid prefixes as community, transition and
+  enterprise; a feature with a new route prefix adds it there.
 - **Feature names are a contract.** They live in `pkg/license/features.go`
   (community code, because the community gateway must be able to say "this
   needs enterprise"). A key issued today must unlock the same feature on a
   binary built later, so names are never renamed.
+- **A new feature extends no existing key.** Edition defaults come from the
+  frozen feature schedule a key names, not from the catalogue. Adding a
+  feature to the catalogue unlocks it for nobody until a new schedule or a
+  key names it (docs/LICENSING.md, "Feature schedules").
 
 ## Layout
 

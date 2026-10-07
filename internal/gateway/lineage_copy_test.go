@@ -2,7 +2,7 @@ package gateway
 
 // Lineage (migration 099) is the identity a dimension, member or metric
 // shares with its copies in every revision — what access rules resolve by
-// (writeguard.RulesForRevision). CLAUDE.md: a cross-entity column must be
+// (writeguard.RulesForRevision). A cross-entity column must be
 // carried by revision duplication and model export/import. These tests pin
 // both over HTTP.
 

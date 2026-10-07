@@ -4,17 +4,23 @@
 //	license keygen  -out ~/.mavericks/license-signing.key
 //	    Generates an Ed25519 key pair. The PRIVATE key goes to -out (mode 0600,
 //	    keep it out of every repository); the PUBLIC key is printed so it can be
-//	    compiled into pkg/license/pubkey.go (or set as
-//	    MAVERICKS_LICENSE_PUBLIC_KEY on a deployment).
+//	    appended to trustedPublicKeys in pkg/license/pubkey.go (the rotation
+//	    steps are there). A deployment cannot be told to trust another key.
 //
 //	license sign -key ~/.mavericks/license-signing.key -edition enterprise \
-//	    -customer "Acme Corp" -expires 2027-12-31 [-contact ops@acme.com] \
-//	    [-features sso,scim] [-limit max_users=50 -limit max_tenants=3] \
-//	    [-id <uuid>] [-notes "PO 4711"] [-out acme.license]
-//	    Prints (or writes) the signed token.
+//	    -customer "Acme Corp" -expires 2027-12-31 -order ORD-2026-014 \
+//	    -agreement "PFA 2026-10" [-deployment acme-prod] [-schedule 2026-10] \
+//	    [-contact ops@acme.com] [-features sso,scim] [-id <uuid>] \
+//	    [-notes "PO 4711"] [-out acme.license]
+//	    Prints (or writes) the signed token. The key implements an accepted
+//	    order: -order and -agreement name it, and the order, not the key,
+//	    states the rights (docs/LICENSING.md).
+//
+//	license schedules
+//	    Lists the feature schedules this build knows, oldest first.
 //
 //	license inspect -token <token> | -file acme.license [-pubkey <base64>]
-//	    Verifies a token against the compiled-in public key (or -pubkey) and
+//	    Verifies a token against the compiled-in public keys (or -pubkey) and
 //	    prints its claims and whether it is currently valid.
 package main
 
@@ -26,7 +32,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -48,6 +53,8 @@ func main() {
 		err = sign(os.Args[2:])
 	case "inspect":
 		err = inspect(os.Args[2:])
+	case "schedules":
+		err = listSchedules()
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -62,7 +69,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: license keygen|sign|inspect [flags]  (run a subcommand with -h for its flags)")
+	fmt.Fprintln(os.Stderr, "usage: license keygen|sign|schedules|inspect [flags]  (run a subcommand with -h for its flags)")
 }
 
 func keygen(args []string) error {
@@ -93,22 +100,6 @@ func keygen(args []string) error {
 	return nil
 }
 
-type limitFlags map[string]int64
-
-func (l limitFlags) String() string { return fmt.Sprint(map[string]int64(l)) }
-func (l limitFlags) Set(v string) error {
-	k, val, ok := strings.Cut(v, "=")
-	if !ok {
-		return fmt.Errorf("limit must be name=number, got %q", v)
-	}
-	n, err := strconv.ParseInt(strings.TrimSpace(val), 10, 64)
-	if err != nil {
-		return fmt.Errorf("limit %q: %w", k, err)
-	}
-	l[strings.TrimSpace(k)] = n
-	return nil
-}
-
 func sign(args []string) error {
 	fs := flag.NewFlagSet("sign", flag.ExitOnError)
 	keyFile := fs.String("key", "", "path to the private signing key (required)")
@@ -116,17 +107,19 @@ func sign(args []string) error {
 	customer := fs.String("customer", "", "licensee name (required)")
 	contact := fs.String("contact", "", "licensee contact e-mail")
 	expires := fs.String("expires", "", "expiry date, YYYY-MM-DD (end of that day, UTC) or RFC 3339 (required)")
-	features := fs.String("features", "", "comma-separated extra features beyond the edition defaults")
+	schedule := fs.String("schedule", license.LatestSchedule(), "feature schedule the order was sold under; see `license schedules`")
+	order := fs.String("order", "", "order number of the accepted order this key implements (required)")
+	agreement := fs.String("agreement", "", "reference of the agreement text the customer accepted (required)")
+	deployment := fs.String("deployment", "", "deployment identifier(s) the order covers")
+	features := fs.String("features", "", "comma-separated extra features beyond the schedule's edition defaults")
 	id := fs.String("id", "", "license id; a new UUID when empty")
 	notes := fs.String("notes", "", "free text for your records")
 	out := fs.String("out", "", "write the token to this file instead of stdout")
-	limits := limitFlags{}
-	fs.Var(limits, "limit", "numeric entitlement name=value; repeatable")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *keyFile == "" || *edition == "" || *customer == "" || *expires == "" {
-		return fmt.Errorf("-key, -edition, -customer and -expires are required")
+	if *keyFile == "" || *edition == "" || *customer == "" || *expires == "" || *order == "" || *agreement == "" {
+		return fmt.Errorf("-key, -edition, -customer, -expires, -order and -agreement are required: a key implements an accepted order")
 	}
 	raw, err := os.ReadFile(*keyFile)
 	if err != nil {
@@ -141,13 +134,17 @@ func sign(args []string) error {
 		return err
 	}
 	claims := license.Claims{
-		ID:        *id,
-		Edition:   license.Edition(*edition),
-		Customer:  *customer,
-		Contact:   *contact,
-		IssuedAt:  time.Now().UTC().Truncate(time.Second),
-		ExpiresAt: exp,
-		Notes:     *notes,
+		ID:         *id,
+		Edition:    license.Edition(*edition),
+		Customer:   *customer,
+		Contact:    *contact,
+		IssuedAt:   time.Now().UTC().Truncate(time.Second),
+		ExpiresAt:  exp,
+		Schedule:   *schedule,
+		Order:      *order,
+		Agreement:  *agreement,
+		Deployment: *deployment,
+		Notes:      *notes,
 	}
 	if claims.ID == "" {
 		claims.ID = uuid.NewString()
@@ -159,9 +156,6 @@ func sign(args []string) error {
 			}
 			claims.Features = append(claims.Features, license.Feature(f))
 		}
-	}
-	if len(limits) > 0 {
-		claims.Limits = limits
 	}
 	token, err := license.Sign(claims, priv)
 	if err != nil {
@@ -196,11 +190,17 @@ func knownFeatures() string {
 	return strings.Join(names, ", ")
 }
 
+func listSchedules() error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(license.Schedules())
+}
+
 func inspect(args []string) error {
 	fs := flag.NewFlagSet("inspect", flag.ExitOnError)
 	token := fs.String("token", "", "the license token")
 	file := fs.String("file", "", "file holding the token")
-	pubkey := fs.String("pubkey", "", "base64 public key to verify against (default: the compiled-in key)")
+	pubkey := fs.String("pubkey", "", "base64 public key to verify against (default: the compiled-in keys)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

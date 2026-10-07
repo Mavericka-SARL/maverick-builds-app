@@ -290,7 +290,7 @@ literal or dynamic offsets), `CUMULATE`, `DECUMULATE`, `MOVINGSUM`,
 `MONTHTODATE`, `QUARTERTODATE`, `HALFYEARTODATE`, `YEARTODATE`, `MONTHVALUE`,
 `QUARTERVALUE`, `HALFYEARVALUE`, `YEARVALUE`, `TIMESUM`, `START`, `END` and
 time summaries (see
-[TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md](TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md)).
+[the formulas manual](docs/formulas-manual/manual.html)).
 Dimensional functions live in `internal/formula/dimension.go`: the cell's
 member (`dim`), typed member properties (`dim.property`), `PARENT(dim)`,
 `LOOKUP(source, dim, member …)` and conditional aggregation (`SUMIFS`,

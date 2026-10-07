@@ -1,8 +1,7 @@
 # Chat connector (ChatGPT, Claude)
 
-> **Classification:** Current — the read-only connector of
-> [`CHAT_MODEL_REPORTING_INSTRUCTIONS.md`](../CHAT_MODEL_REPORTING_INSTRUCTIONS.md),
-> narrowed by the owner on 2026-10-02 to **grid data only**: charts and reports
+> **Classification:** Current — the read-only connector for **grid data only**:
+> charts and reports
 > are made in ChatGPT or Claude from grids, never from dashboards, and nothing
 > is saved in maverickbuilds.app.
 
@@ -90,6 +89,7 @@ stops later reads only.
 | `MCP_AUTHORIZATION_SERVER` | issuer named in the metadata, default this deployment's Keycloak realm |
 | `MCP_SCOPE` | required scope, default `models:read` |
 | `GATEWAY_TOKEN_CLIENTS` | clients whose tokens the REST API accepts, default `mavericks-web` |
+| `MCP_OPENAI_APPS_CHALLENGE` | the ChatGPT plugin submission's domain-verification token, served at `/.well-known/openai-apps-challenge` when listing the connector in ChatGPT's app directory |
 
 The ingress must route `/mcp`, `/.well-known/oauth-protected-resource` and
 `/.well-known/oauth-protected-resource/mcp` on the console host to the gateway.

@@ -38,6 +38,14 @@ ARG SERVICE
 RUN test -d "./cmd/${SERVICE}" || (echo "no such service: cmd/${SERVICE}" >&2 && exit 1)
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/app "./cmd/${SERVICE}"
 
+# The notices every shipped binary must carry: Go's licence and every module
+# linked into this service, then grpc-health-probe's, read from the module
+# cache the two builds above filled. It fails on a dependency whose licence
+# is missing or unreviewed (cmd/third-party-notices; docs/LICENSING.md).
+RUN go run ./cmd/third-party-notices -out /out/THIRD_PARTY_NOTICES.txt "./cmd/${SERVICE}" \
+ && go run ./cmd/third-party-notices -C "$(go env GOMODCACHE)/github.com/grpc-ecosystem/grpc-health-probe@${GRPC_HEALTH_PROBE_VERSION}" \
+      -append -out /out/THIRD_PARTY_NOTICES.txt -heading "grpc-health-probe ${GRPC_HEALTH_PROBE_VERSION} (/usr/local/bin/grpc-health-probe)" .
+
 # static-debian12 (not base-debian12): every service binary above is fully
 # static (CGO_ENABLED=0), and static-debian12 still carries ca-certificates
 # + tzdata, needed for outbound TLS calls (e.g. ai-assistant's LLM provider,
@@ -48,4 +56,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/app "./
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=builder /out/app /app
 COPY --from=builder /out/grpc-health-probe /usr/local/bin/grpc-health-probe
+# Mavericka's licences (Community, and the Paid Features licence for the ee/
+# code compiled in) and the third-party notices, at /licenses/.
+COPY LICENSE /licenses/LICENSE
+COPY ee/LICENSE /licenses/ee-LICENSE
+COPY --from=builder /out/THIRD_PARTY_NOTICES.txt /licenses/THIRD_PARTY_NOTICES.txt
 ENTRYPOINT ["/app"]

@@ -6,8 +6,9 @@
 #
 # Build context is web/, not the repo root, plus the repo's docs/ as a named
 # context so the two manuals ship with the console (served at /docs/, see
-# nginx.conf). From the repo root:
-#   docker build -f web/Dockerfile --build-context docs=docs -t web web/
+# nginx.conf), and the repo root as "legal" for the two licence files (only
+# the files copied are transferred). From the repo root:
+#   docker build -f web/Dockerfile --build-context docs=docs --build-context legal=. -t web web/
 
 FROM node:24-alpine AS builder
 WORKDIR /app
@@ -23,6 +24,9 @@ COPY . .
 # project is not in this context (.dockerignore) and is checked by CI's own
 # `tsc -b --noEmit`; naming it here failed every image build (TS18003).
 RUN npm run build
+# The bundled packages' licence notices (and the refusal of an unreviewed
+# licence); served beside Mavericka's own at /licenses/.
+RUN node scripts/third-party-notices.mjs --out dist/licenses/THIRD_PARTY_NOTICES.txt
 
 # Guard: a --build-context named "docs" replaces this stage entirely, so it
 # only runs when the flag was forgotten, and the build then fails saying so
@@ -30,6 +34,8 @@ RUN npm run build
 # builder's, already pulled, so the guard adds no image of its own.
 FROM node:24-alpine AS docs
 RUN echo "web/Dockerfile needs the manuals: build with --build-context docs=<repo>/docs (see the header of web/Dockerfile)" >&2; exit 1
+FROM node:24-alpine AS legal
+RUN echo "web/Dockerfile needs the licences: build with --build-context legal=<repo> (see the header of web/Dockerfile)" >&2; exit 1
 
 # nginx-unprivileged, not nginx: the k8s manifests run every pod as a non-root
 # UID with a read-only root filesystem, and stock nginx assumes it can write
@@ -37,6 +43,8 @@ RUN echo "web/Dockerfile needs the manuals: build with --build-context docs=<rep
 FROM nginxinc/nginx-unprivileged:1.27-alpine
 
 COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --from=legal LICENSE    /usr/share/nginx/html/licenses/LICENSE.txt
+COPY --from=legal ee/LICENSE /usr/share/nginx/html/licenses/ee-LICENSE.txt
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 # The manuals, by explicit file: parts/, build.sh and the (gitignored) PDFs
 # stay out. The layout is kept because the formulas manual's pictures are

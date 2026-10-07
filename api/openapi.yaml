@@ -369,13 +369,15 @@ components:
       type: object
       description: >-
         The license in force, as pkg/license.Status renders it. edition is the
-        EFFECTIVE edition — community whenever no key is configured or the key
-        is invalid or expired; the key's own details are still reported so the
-        console can say what ran out.
+        EFFECTIVE edition — community whenever no key is configured, the key
+        is invalid, or its transition period after expiry has ended; during
+        the transition (state transition) it is the key's, and its features
+        can be read, exported and switched off but not changed. The key's own
+        details are still reported so the console can say what ran out.
       required: [edition, state, features, catalog, source]
       properties:
         edition: { type: string, enum: [community, commercial, enterprise] }
-        state: { type: string, enum: [community, active, expired, invalid] }
+        state: { type: string, enum: [community, active, transition, expired, invalid] }
         features:
           type: array
           items: { type: string }
@@ -386,11 +388,14 @@ components:
         license_id: { type: string }
         customer: { type: string }
         contact: { type: string }
+        schedule: { type: string, description: "Feature schedule the key was sold under (YYYY-MM)" }
+        order: { type: string, description: "Order number of the accepted order the key implements" }
+        agreement: { type: string, description: "Reference of the agreement text the customer accepted" }
+        deployment: { type: string, description: "Deployment identifier(s) the order covers" }
         issued_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
-        limits:
-          type: object
-          additionalProperties: { type: integer, format: int64 }
+        renewal_due: { type: boolean, description: "An active key within 30 days of expiry" }
+        transition_ends_at: { type: string, format: date-time, description: "End of the read-and-export period after expiry" }
         error: { type: string }
 
     LicenseFeature:

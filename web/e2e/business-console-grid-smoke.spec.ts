@@ -200,8 +200,8 @@ test("Business Console grid: a withheld total renders as a dash, never the visib
 // value (a leaf with none is left out, never a 0) and count is the number of
 // leaves with a non-zero value (rollup.CombineAgg's rule) — never a mean of
 // the children's means or a count of non-zero children. Region: Global > {World > {EMEA > {UK 2, DE 3, FR —},
-// US 4}, APAC > {JP 10}}, the fixture of docs/OBSERVATIONS.md's "The grid's
-// parent rows differ from chart-data for member-metadata metrics".
+// US 4}, APAC > {JP 10}}, reproducing the difference between grid parent
+// rows and chart-data for member-metadata metrics.
 //                 flat (now)          level by level (before)
 //   average  EMEA 2.50 World 3.00 Global 4.75 | 1.67  2.83  6.42
 //   count    EMEA 2    World 3    Global 4    | 2     2     2

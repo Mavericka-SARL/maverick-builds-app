@@ -276,8 +276,7 @@ export function UsersPanel({
     // Worded from what was asked, never from the reply: an address that
     // already had an account is only given the role, and the confirmation
     // does not tell the two apart. (The refreshed list still shows such an
-    // account as it is — its own name and joined date — see
-    // docs/OBSERVATIONS.md.)
+    // account as it is — its own name and joined date.)
     onSuccess: (_res, body) => {
       inv();
       setShowCreate(false);

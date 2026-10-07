@@ -41,10 +41,26 @@ web/.env.local
 /schema-migration
 /seed
 /seed-*
-/spike-arrow
 /tenant
 /verify-topology
 /workflow
+
+# Local assistant/editor state. The shared .claude/settings.json, its hooks
+# and CLAUDE.md are tracked on purpose; the public export removes them
+# (scripts/public-exclude.txt).
+.claude/settings.local.json
+CLAUDE.local.md
+.vscode/
+.idea/
+
+# Generated test and coverage artifacts.
+coverage.out
+coverage/
+*.test
+*.test.exe
+web/blob-report/
+web/playwright/.cache/
+web/e2e/.cache/
 
 # macOS directory metadata.
 .DS_Store

@@ -57,7 +57,7 @@ build() { # name, context, dockerfile, extra docker build args...
 
 for name in $NAMES; do
   case "$name" in
-    web)             build web web web/Dockerfile --build-context docs=docs ;; # the manuals it serves at /docs/
+    web)             build web web web/Dockerfile --build-context docs=docs --build-context legal=. ;; # the manuals it serves at /docs/, the licences at /licenses/
     postgres-backup) build postgres-backup deploy/docker/pg-backup deploy/docker/pg-backup/Dockerfile ;;
     postgres-walg)   build postgres-walg deploy/docker/postgres-walg deploy/docker/postgres-walg/Dockerfile ;;
     *)

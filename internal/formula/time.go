@@ -13,7 +13,7 @@ import (
 // non-time coordinate held fixed. TimeEvalContext is that contract. The
 // formula package defines it; the calculation package fulfils EvalAt.
 //
-// See TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md §5-6.
+// See docs/formulas-manual/manual.html for the supported time-series functions.
 
 // TimePeriod is one member of a time dimension in chronological order.
 type TimePeriod struct {

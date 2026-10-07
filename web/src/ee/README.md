@@ -12,6 +12,10 @@ Use License that covers the rest of the repository.
   feature is shown with the edition it needs instead of failing on the call.
 - Feature keys come from `pkg/license/features.go` and are reported by
   `GET /api/license`; never invent one on the frontend.
+- During a key's 30-day transition after expiry (`state: "transition"`) the
+  features still report as on: `<FeatureGate>` renders them with a "read and
+  export only" note, and the gateway refuses every change. A screen that uses
+  `useFeature` alone shows no note, so prefer `<FeatureGate>` around screens.
 
 Feature folders (2026-09-16): `aikeys/` — **Admin › AI keys** (`tenant_ai_keys`);
 `sso/` — **Admin › Single sign-on** (`sso`); `scim/` — **Admin › Provisioning

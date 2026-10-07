@@ -1,12 +1,15 @@
 // Package license implements the offline, signed license key that unlocks the
 // commercial and enterprise editions of maverickbuilds.app.
 //
-// A key is a self-contained token: a JSON payload (edition, customer, expiry,
-// optional extra features and limits) signed with the vendor's Ed25519 private
-// key. The gateway verifies it against the public key compiled into the binary
-// (or MAVERICKS_LICENSE_PUBLIC_KEY when set) and never calls home. Without a
-// key, or with an invalid or expired one, the deployment runs the community
-// edition — it never refuses to start.
+// A key is a self-contained token: a JSON payload (edition, feature schedule,
+// customer, order references, expiry, optional extra features) signed with
+// the vendor's Ed25519 private key. The gateway verifies it against the public
+// keys compiled into the binary — a deployment cannot add its own — and never
+// calls home. Without a key, or with an invalid or expired one, the deployment
+// runs the community edition — it never refuses to start.
+//
+// A key is a technical credential implementing a contract; it grants no
+// rights by itself (docs/LICENSING.md).
 //
 // Token format:
 //
@@ -52,16 +55,6 @@ func (e Edition) valid() bool {
 	return false
 }
 
-// rank orders editions so "at least commercial" style comparisons work.
-func (e Edition) rank() int {
-	for i, known := range Editions {
-		if known == e {
-			return i
-		}
-	}
-	return -1
-}
-
 // Claims is the signed payload of a license key.
 type Claims struct {
 	// ID identifies the license (a UUID or any vendor-side reference).
@@ -78,13 +71,23 @@ type Claims struct {
 	// after ExpiresAt; both are compared against the gateway's clock.
 	IssuedAt  time.Time `json:"issued_at"`
 	ExpiresAt time.Time `json:"expires_at"`
+	// Schedule is the feature schedule the key was sold under (see
+	// Schedule): the edition's default features come from it. Empty on keys
+	// issued before schedules existed, which read as FirstSchedule.
+	Schedule string `json:"schedule,omitempty"`
 	// Features lists additional features beyond the edition's defaults, for
 	// tailored contracts. Unknown names are ignored so a newer key still
 	// verifies on an older binary.
 	Features []Feature `json:"features,omitempty"`
-	// Limits carries numeric entitlements (max_users, max_tenants, …). This
-	// package only transports them; enforcement belongs to the callers.
-	Limits map[string]int64 `json:"limits,omitempty"`
+	// Order, Agreement and Deployment tie the key to the contract it
+	// implements: the order number, the reference of the agreement text the
+	// customer accepted, and the deployment(s) the order covers. They are
+	// records for both parties, shown in the console; the rights themselves
+	// are the contract's. (Keys issued before 2026-10-07 could also carry
+	// "limits"; nothing enforced them and they are now ignored.)
+	Order      string `json:"order,omitempty"`
+	Agreement  string `json:"agreement,omitempty"`
+	Deployment string `json:"deployment,omitempty"`
 	// Notes is free text for the vendor's records (never shown to users).
 	Notes string `json:"notes,omitempty"`
 }
@@ -134,7 +137,23 @@ func Parse(token string, pub ed25519.PublicKey) (*Claims, error) {
 	if c.ExpiresAt.IsZero() {
 		return nil, fmt.Errorf("%w: expires_at is required", ErrMalformed)
 	}
+	if _, ok := resolveSchedule(c.Schedule); !ok {
+		return nil, fmt.Errorf("%w: unknown feature schedule %q", ErrMalformed, c.Schedule)
+	}
 	return &c, nil
+}
+
+// ParseAny verifies token against each trusted key in turn — the compiled-in
+// set holds more than one while a signing key is being rotated — and
+// returns the first verification. A malformed token fails at once.
+func ParseAny(token string, keys []ed25519.PublicKey) (*Claims, error) {
+	for _, pub := range keys {
+		c, err := Parse(token, pub)
+		if err == nil || !errors.Is(err, ErrSignature) {
+			return c, err
+		}
+	}
+	return nil, ErrSignature
 }
 
 // Sign produces a token for claims with the vendor's private key. It is the
@@ -148,6 +167,12 @@ func Sign(claims Claims, priv ed25519.PrivateKey) (string, error) {
 	}
 	if claims.ExpiresAt.IsZero() {
 		return "", errors.New("expires_at is required")
+	}
+	if claims.Schedule == "" {
+		claims.Schedule = LatestSchedule()
+	}
+	if !knownSchedule(claims.Schedule) {
+		return "", fmt.Errorf("unknown feature schedule %q; known: %s", claims.Schedule, scheduleIDs())
 	}
 	if claims.IssuedAt.IsZero() {
 		claims.IssuedAt = time.Now().UTC()
@@ -172,11 +197,13 @@ func (c *Claims) NotYetValid(now time.Time) bool {
 	return !c.IssuedAt.IsZero() && now.Add(clockSkew).Before(c.IssuedAt)
 }
 
-// EffectiveFeatures is the edition's default feature set plus any extra
-// features the key names, sorted, with unknown names dropped.
+// EffectiveFeatures is the edition's default feature set under the key's
+// schedule plus any extra features the key names, sorted, with unknown names
+// dropped.
 func (c *Claims) EffectiveFeatures() []Feature {
 	set := map[Feature]bool{}
-	for _, f := range editionFeatures[c.Edition] {
+	sched, _ := resolveSchedule(c.Schedule)
+	for _, f := range sched.Editions[c.Edition] {
 		set[f] = true
 	}
 	for _, f := range c.Features {
@@ -230,4 +257,12 @@ func DecodePrivateKey(s string) (ed25519.PrivateKey, error) {
 		return nil, fmt.Errorf("private key must be %d bytes, got %d", ed25519.PrivateKeySize, len(raw))
 	}
 	return ed25519.PrivateKey(raw), nil
+}
+
+func scheduleIDs() string {
+	ids := make([]string, len(schedules))
+	for i, s := range schedules {
+		ids[i] = s.ID
+	}
+	return strings.Join(ids, ", ")
 }

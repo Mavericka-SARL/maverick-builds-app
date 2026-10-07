@@ -2,11 +2,10 @@
 
 > **Classification:** Current — Index of the documentation set.
 
-> **Last verified:** 2026-09-25
+> **Last verified:** 2026-10-07
 
-This index separates current implementation documentation from historical
-requirements and research. Code, migrations, tests, and build configuration
-remain authoritative.
+This index lists the project documentation and its status. Code, migrations,
+tests, and build configuration remain authoritative.
 
 ## Current implementation references
 
@@ -27,7 +26,6 @@ remain authoritative.
 | [`docs/NOTIFICATIONS.md`](NOTIFICATIONS.md) | current | Notification producers, outbound e-mail and webhooks, task reminders |
 | [`docs/AI_DEVELOPER.md`](AI_DEVELOPER.md) | current | The AI assistant's read and write tools, and what stays human |
 | [`docs/AI_KEYS.md`](AI_KEYS.md) | current | Where the AI assistant's provider key comes from: user, tenant, deployment |
-| [`docs/OBSERVATIONS.md`](OBSERVATIONS.md) | current | Things noticed and not fixed yet — dependency blind spots, drift, risks — with how to check each and what closes it |
 | [`docs/AUDIT_EXPORT.md`](AUDIT_EXPORT.md) | current | Audit export (CSV, JSON Lines for a SIEM) and retention |
 | [`docs/CELL_HISTORY.md`](CELL_HISTORY.md) | current | Per-cell change history |
 | [`docs/SSO_SCIM.md`](SSO_SCIM.md) | current | Enterprise single sign-on and SCIM provisioning |
@@ -38,37 +36,6 @@ remain authoritative.
 | [`docs/formulas-manual/`](formulas-manual/) | current | Formulas manual for the developer role (PDF, built from `parts/*.html` by `build.sh`): the formula language, all 74 functions with their edge behaviour, totals, recipes, validation messages and limits; its function index is held equal to the engine by `TestFormulasManualIndexMatchesEngine`. Every deployment also serves its `manual.html` at `/docs/formulas-manual/manual.html` |
 | [`web/README.md`](../web/README.md) | current | Frontend architecture and commands |
 | [`web/src/ui/DESIGN_SYSTEM.md`](../web/src/ui/DESIGN_SYSTEM.md) | current | Shared UI primitives and regression gates |
-
-## Feature specifications and convergence guides
-
-These documents preserve the design rationale and detailed acceptance criteria.
-Their status block records current implementation and remaining gaps.
-
-| Document | Classification |
-|---|---|
-| [`TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md`](../TIME_SERIES_FUNCTIONS_IMPLEMENTATION.md) | Phase 1 and the time additions implemented (explicit time dimensions, 19 time-series functions incl. dynamic offsets, `*VALUE`, `TIMESUM`, `START`/`END`; causal recurrences); §13 lists what is still deferred (`POST`, `SPREAD`, `PROFILE`, `WEEKVALUE`) |
-| [`CHAT_MODEL_REPORTING_INSTRUCTIONS.md`](../CHAT_MODEL_REPORTING_INSTRUCTIONS.md) | implemented, narrowed to grid data (charts/reports from grids in ChatGPT/Claude, no dashboards, nothing saved); host verification remains — see [`docs/CHAT_CONNECTOR.md`](CHAT_CONNECTOR.md) |
-
-## UX decision history
-
-| Document | Classification |
-|---|---|
-
-## Local ignored binary references
-
-These artifacts exist in the working directory but are excluded by
-`.gitignore`; they are not part of a clean repository checkout.
-
-| Artifact | Classification |
-|---|---|
-| `mavericks_engine_technical_specification.docx` | original target architecture; the local copy's cover now marks it as historical and superseded by `ARCHITECTURE.md` |
-| `mavericks_engine_design.pdf` | original product/design source; immutable research artifact |
-| `mavericks_engine_research.pdf` | original research artifact; not an implementation-status source |
-
-The PDF files are source artifacts without editable project sources in this
-repository. Do not update implementation claims by editing generated PDF bytes;
-record current decisions in Markdown and regenerate from an owned source if a
-new published PDF is required.
 
 ## Contract documentation
 

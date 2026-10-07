@@ -27,9 +27,29 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -tags kqueue \
       -ldflags="-s -w -X github.com/minio/mc/cmd.ReleaseTag=${MC_VERSION} -X github.com/minio/mc/cmd.CommitID=$(git rev-parse HEAD)" \
       -o /usr/bin/mc .
 
+# mc is AGPLv3 and this image is published, so it carries mc's licence and
+# notices and its Corresponding Source: the tagged source with every module
+# it links (go mod vendor) plus this Dockerfile, the whole build recipe;
+# nothing is modified (same as deploy/docker/minio; docs/LICENSING.md).
+RUN mkdir -p /out/licenses \
+ && cp LICENSE /out/licenses/LICENSE \
+ && for f in CREDITS NOTICE; do if [ -f "$f" ]; then cp "$f" /out/licenses/; fi; done \
+ && go mod vendor \
+ && tar -C / --exclude=src/.git -czf "/out/licenses/mc-${MC_VERSION}-source.tar.gz" src \
+ && printf '%s\n' \
+      "MinIO client mc ${MC_VERSION} (/usr/local/bin/mc), licensed under the GNU Affero General Public License v3 (LICENSE)." \
+      "" \
+      "Corresponding Source: mc-${MC_VERSION}-source.tar.gz in this directory - https://github.com/minio/mc" \
+      "at tag ${MC_VERSION}, commit $(git rev-parse HEAD), unmodified, with its Go module dependencies vendored." \
+      "Build recipe: build.Dockerfile in this directory (the Dockerfile this image was built from)." \
+      "Mavericka does not modify mc." \
+      > /out/licenses/SOURCE.txt
+
 FROM postgres:16-alpine
 
 COPY --from=mc /usr/bin/mc /usr/local/bin/mc
+COPY --from=mc /out/licenses/ /licenses/mc/
+COPY Dockerfile /licenses/mc/build.Dockerfile
 COPY pg-backup.sh pg-restore.sh backup-watchdog.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/pg-backup.sh /usr/local/bin/pg-restore.sh \
     /usr/local/bin/backup-watchdog.sh \

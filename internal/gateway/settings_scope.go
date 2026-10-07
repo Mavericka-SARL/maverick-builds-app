@@ -40,7 +40,10 @@ type settingsScope struct {
 // cannot. deploymentRow says whether this setting has a deployment row.
 func (h *handler) settingsScopeFor(w http.ResponseWriter, r *http.Request, act *actor, deploymentRow bool) (settingsScope, bool) {
 	ctx := r.Context()
-	available := h.lic != nil && h.lic.Has(license.FeatureDeploymentSettings)
+	// Reading the deployment row (and switching it off) stays possible
+	// through a key's transition period; changing it does not.
+	gate := h.licenseGate(r.Method)
+	available := h.lic != nil && gate(license.FeatureDeploymentSettings) == nil
 	all, mine, err := h.adminScopeCustomerIDs(ctx, act)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
@@ -69,6 +72,10 @@ func (h *handler) settingsScopeFor(w http.ResponseWriter, r *http.Request, act *
 		return settingsScope{}, false
 	}
 	if !available {
+		if h.lic.Status().State == license.StateTransition && h.lic.Usable(license.FeatureDeploymentSettings) {
+			jsonErr(w, gate(license.FeatureDeploymentSettings), http.StatusForbidden)
+			return settingsScope{}, false
+		}
 		jsonErr(w, fmt.Errorf("deployment-wide settings are an enterprise capability (deployment_settings); name a tenant in the %s header to edit its own", tenantHeader), http.StatusForbidden)
 		return settingsScope{}, false
 	}

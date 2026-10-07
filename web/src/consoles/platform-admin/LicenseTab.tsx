@@ -1,15 +1,9 @@
 import { Check, Lock } from "lucide-react";
 import { Card, InlineAlert, StatusBadge } from "../../ui";
-import { EDITION_LABELS, useLicense } from "../../license/useLicense";
+import { EDITION_LABELS, licenseDate as fmtDate, useLicense } from "../../license/useLicense";
 
-const STATE_TONE = { community: "neutral", active: "success", expired: "warning", invalid: "danger" } as const;
-const STATE_LABEL = { community: "No license key", active: "Active", expired: "Expired", invalid: "Invalid" } as const;
-
-function fmtDate(iso?: string): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
-}
+const STATE_TONE = { community: "neutral", active: "success", transition: "warning", expired: "warning", invalid: "danger" } as const;
+const STATE_LABEL = { community: "No license key", active: "Active", transition: "Expired · transition", expired: "Expired", invalid: "Invalid" } as const;
 
 function daysLeft(iso?: string): string {
   if (!iso) return "";
@@ -36,11 +30,15 @@ export function LicenseTab() {
     ["Customer", lic.customer || "—"],
     ["Contact", lic.contact || "—"],
     ["License id", lic.license_id || "—"],
+    ["Order", lic.order || "—"],
+    ["Agreement", lic.agreement || "—"],
+    ["Deployment", lic.deployment || "—"],
+    ["Feature schedule", lic.schedule || "—"],
     ["Issued", fmtDate(lic.issued_at)],
     ["Expires", lic.expires_at ? `${fmtDate(lic.expires_at)}${daysLeft(lic.expires_at)}` : "—"],
+    ...(lic.transition_ends_at ? [["Transition ends", `${fmtDate(lic.transition_ends_at)}${daysLeft(lic.transition_ends_at)}`] as [string, string]] : []),
     ["Key source", lic.source === "env" ? "MAVERICKS_LICENSE_KEY" : lic.source === "file" ? "MAVERICKS_LICENSE_FILE" : "none configured"],
   ];
-  const limits = Object.entries(lic.limits ?? {});
 
   return (
     <div className="mvx-admin-stack" data-testid="license-tab">
@@ -52,8 +50,14 @@ export function LicenseTab() {
         {lic.state === "invalid" && (
           <InlineAlert tone="danger">The configured license key could not be verified: {lic.error}. The deployment runs the Community edition until a valid key is installed.</InlineAlert>
         )}
+        {lic.state === "active" && lic.renewal_due && (
+          <InlineAlert tone="warning">The license key expires on {fmtDate(lic.expires_at)}. Install the renewed key before then; after expiry the paid features are read and export only for 30 days, then the deployment runs the Community edition.</InlineAlert>
+        )}
+        {lic.state === "transition" && (
+          <InlineAlert tone="warning">The license key expired on {fmtDate(lic.expires_at)}. Until {fmtDate(lic.transition_ends_at)} the paid features keep working as configured and can be read, exported and switched off, but not changed. After that the deployment runs the Community edition. No data is deleted either way.</InlineAlert>
+        )}
         {lic.state === "expired" && (
-          <InlineAlert tone="warning">The license key expired on {fmtDate(lic.expires_at)}. The deployment runs the Community edition until a new key is installed.</InlineAlert>
+          <InlineAlert tone="warning">The license key expired on {fmtDate(lic.expires_at)} and its transition period has ended. The deployment runs the Community edition until a new key is installed; nothing the paid features stored was deleted.</InlineAlert>
         )}
         <table className="mvx-table" style={{ marginTop: 8 }}>
           <tbody>
@@ -63,12 +67,6 @@ export function LicenseTab() {
                 <td>{v}</td>
               </tr>
             ))}
-            {limits.length > 0 && (
-              <tr>
-                <td style={{ fontWeight: 600 }}>Limits</td>
-                <td>{limits.map(([k, v]) => `${k} = ${v}`).join(" · ")}</td>
-              </tr>
-            )}
           </tbody>
         </table>
       </Card>
@@ -110,9 +108,13 @@ export function LicenseTab() {
           <code> MAVERICKS_LICENSE_KEY</code> (the token itself) or <code>MAVERICKS_LICENSE_FILE</code> (a path to a file holding it),
           then restart the gateway. This page and the account menu reflect the new edition immediately after the restart.
         </p>
-        <p className="mvx-admin-muted" style={{ margin: 0 }}>
+        <p className="mvx-admin-muted" style={{ margin: "0 0 8px" }}>
           An expired or invalid key never stops the platform: it runs the Community edition and reports the reason here.
           Enterprise and commercial source lives under <code>ee/</code> in the repository and is unlocked at runtime by the key.
+        </p>
+        <p className="mvx-admin-muted" style={{ margin: 0 }}>
+          The key implements an accepted order and names it above; the rights themselves are the order&apos;s and its agreement&apos;s, not the key&apos;s.
+          Its features come from the feature schedule it was sold under, so features released later are not added to it.
         </p>
       </Card>
     </div>

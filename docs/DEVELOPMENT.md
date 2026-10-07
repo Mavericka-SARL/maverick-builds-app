@@ -59,8 +59,7 @@ make dev-down
 | `go run ./cmd/seed-sandbox` | Sandbox model | the gateway (HTTP) |
 
 Every seed needs a running gateway in dev mode and drives it over HTTP as the
-roles a real application has, per the repository rule (`CLAUDE.md`); start
-new demos from `cmd/seed-regional-planning`. Read a seed's source before
+roles a real application has; start new demos from `cmd/seed-regional-planning`. Read a seed's source before
 assuming it is idempotent.
 
 ## Go checks

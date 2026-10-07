@@ -37,7 +37,15 @@ export function useLicense(): LicenseInfo {
   return isLicenseInfo(data) ? data : COMMUNITY_LICENSE;
 }
 
-/** True when the license in force unlocks `feature` (a pkg/license key). */
+/** True when the license in force unlocks `feature` (a pkg/license key) —
+ *  during a key's transition too, when it is read and export only. */
 export function useFeature(feature: string): boolean {
   return useLicense().features.includes(feature);
+}
+
+/** A date as the console shows licence dates. */
+export function licenseDate(iso?: string): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
 }

@@ -1,6 +1,9 @@
 package license
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // Feature names a gated capability. The strings are part of the license key
 // contract: a key issued today must still unlock the same feature on a
@@ -36,41 +39,107 @@ type Info struct {
 	Key         Feature `json:"key"`
 	Name        string  `json:"name"`
 	Description string  `json:"description"`
-	// MinEdition is the lowest edition whose defaults include the feature.
+	// MinEdition is the lowest edition whose defaults in the LATEST
+	// schedule include the feature — what a new key needs. A feature no
+	// schedule includes reports enterprise: it is sold by naming it.
 	MinEdition Edition `json:"min_edition"`
 }
 
-// catalog is the fixed set of gated features. Order here is the order the
-// console lists them in.
+// catalogOrder is the fixed set of gated features. Order here is the order
+// the console lists them in. Adding a feature here unlocks it for no key:
+// which editions include it is decided by a new Schedule, deliberately.
 var catalogOrder = []Info{
-	{FeatureSSO, "Single sign-on", "Sign in through the customer's SAML or OIDC identity provider.", EditionEnterprise},
-	{FeatureSCIM, "SCIM provisioning", "Create, update and deactivate users from a directory automatically.", EditionEnterprise},
-	{FeatureCellHistory, "Cell history", "Browse who changed which value, per intersection, with the full write history.", EditionEnterprise},
-	{FeatureAuditExport, "Audit export", "Export or stream the audit log, with retention policies.", EditionEnterprise},
-	{FeatureUsageAnalytics, "Usage analytics", "Active users, models, storage and integration runs per tenant.", EditionEnterprise},
-	{FeatureWhiteLabel, "White-labelling", "Custom logo, colours and domain for the console.", EditionCommercial},
-	{FeatureTenantAIKeys, "Tenant AI keys", "One AI provider key per tenant, managed by the tenant admin, used by every developer.", EditionEnterprise},
-	{FeatureDeploymentSettings, "Deployment settings", "Deployment-wide defaults for notification delivery, audit retention and the AI key, inherited by every tenant that has not set its own.", EditionEnterprise},
+	{Key: FeatureSSO, Name: "Single sign-on", Description: "Sign in through the customer's SAML or OIDC identity provider."},
+	{Key: FeatureSCIM, Name: "SCIM provisioning", Description: "Create, update and deactivate users from a directory automatically."},
+	{Key: FeatureCellHistory, Name: "Cell history", Description: "Browse who changed which value, per intersection, with the full write history."},
+	{Key: FeatureAuditExport, Name: "Audit export", Description: "Export or stream the audit log, with retention policies."},
+	{Key: FeatureUsageAnalytics, Name: "Usage analytics", Description: "Active users, models, storage and integration runs per tenant."},
+	{Key: FeatureWhiteLabel, Name: "White-labelling", Description: "Custom logo, colours and domain for the console."},
+	{Key: FeatureTenantAIKeys, Name: "Tenant AI keys", Description: "One AI provider key per tenant, managed by the tenant admin, used by every developer."},
+	{Key: FeatureDeploymentSettings, Name: "Deployment settings", Description: "Deployment-wide defaults for notification delivery, audit retention and the AI key, inherited by every tenant that has not set its own."},
+}
+
+// Schedule is a frozen statement of the features each paid edition
+// includes by default. A key names the schedule it was sold under, and its
+// default features come from that schedule — never from whatever the
+// running binary happens to list — so a feature added later does not
+// silently extend keys sold before it.
+//
+// A schedule is never edited once released (TestSchedulesAreFrozen holds
+// them). Including a new feature in an edition by default means appending
+// a new schedule; keys sold afterwards name it. A feature no schedule
+// includes is sold only by naming it in a key's Features. Schedules only
+// ever add features, so a key naming a schedule newer than the binary
+// safely gets the newest one the binary knows.
+type Schedule struct {
+	// ID is the month the schedule was frozen, YYYY-MM; IDs sort in time.
+	ID       string                `json:"id"`
+	Editions map[Edition][]Feature `json:"editions"`
+}
+
+// schedules, oldest first.
+var schedules = []Schedule{
+	{ID: "2026-10", Editions: map[Edition][]Feature{
+		EditionCommercial: {FeatureWhiteLabel},
+		EditionEnterprise: {FeatureSSO, FeatureSCIM, FeatureCellHistory, FeatureAuditExport, FeatureUsageAnalytics, FeatureWhiteLabel, FeatureTenantAIKeys, FeatureDeploymentSettings},
+	}},
+}
+
+// FirstSchedule is what a key that names no schedule was sold under: every
+// key issued before 2026-10-07, when the defaults were still derived from
+// the catalogue, which then held exactly these features.
+const FirstSchedule = "2026-10"
+
+// LatestSchedule is the schedule new keys are issued under by default.
+func LatestSchedule() string { return schedules[len(schedules)-1].ID }
+
+// Schedules returns every schedule this binary knows, oldest first.
+func Schedules() []Schedule {
+	out := make([]Schedule, len(schedules))
+	copy(out, schedules)
+	return out
+}
+
+// resolveSchedule maps a key's schedule to one this binary knows: the
+// schedule itself, or for a key sold under a newer schedule than the binary
+// knows, the newest one it does. Empty means FirstSchedule. A schedule
+// older than any known is not one the vendor ever issued.
+func resolveSchedule(id string) (Schedule, bool) {
+	if id == "" {
+		id = FirstSchedule
+	}
+	for i := len(schedules) - 1; i >= 0; i-- {
+		if schedules[i].ID <= id {
+			return schedules[i], true
+		}
+	}
+	return Schedule{}, false
+}
+
+// knownSchedule reports whether id is exactly a schedule this binary has —
+// what the vendor tool requires before signing.
+func knownSchedule(id string) bool {
+	for _, s := range schedules {
+		if s.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 var catalog = func() map[Feature]Info {
+	latest := schedules[len(schedules)-1]
 	m := make(map[Feature]Info, len(catalogOrder))
-	for _, info := range catalogOrder {
-		m[info.Key] = info
-	}
-	return m
-}()
-
-// editionFeatures are the defaults each edition unlocks. Enterprise includes
-// everything; commercial only what its MinEdition allows.
-var editionFeatures = func() map[Edition][]Feature {
-	m := map[Edition][]Feature{EditionCommunity: {}}
-	for _, ed := range []Edition{EditionCommercial, EditionEnterprise} {
-		for _, info := range catalogOrder {
-			if info.MinEdition.rank() <= ed.rank() {
-				m[ed] = append(m[ed], info.Key)
+	for i, info := range catalogOrder {
+		info.MinEdition = EditionEnterprise
+		for _, ed := range []Edition{EditionCommercial, EditionEnterprise} {
+			if slices.Contains(latest.Editions[ed], info.Key) {
+				info.MinEdition = ed
+				break
 			}
 		}
+		catalogOrder[i] = info
+		m[info.Key] = info
 	}
 	return m
 }()

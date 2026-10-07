@@ -299,8 +299,9 @@ revision and starts building. The console's screens are described in the
 [formulas manual](formulas-manual/). Your deployment serves both itself, at
 `https://<console host>/docs/developer-manual/manual.html` and
 `/docs/formulas-manual/manual.html`: the web image carries them. A web image
-built by hand needs `--build-context docs=docs` (see `web/Dockerfile`);
-`scripts/build-images.sh` and Compose pass it for you.
+built by hand needs `--build-context docs=docs --build-context legal=.` (see
+`web/Dockerfile`; the second carries the licence files it serves at
+`/licenses/`); `scripts/build-images.sh` and Compose pass both for you.
 
 Create people through the console, not in Keycloak's own admin console: the
 platform keeps its own record of every user and their roles, and only the

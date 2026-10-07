@@ -167,6 +167,7 @@ services:
       # Compose 2.17 or later.
       additional_contexts:
         docs: ../../docs
+        legal: ../..
     restart: unless-stopped
     logging: *logging
     environment:

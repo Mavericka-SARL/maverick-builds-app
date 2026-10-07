@@ -7,9 +7,9 @@ import (
 )
 
 // globalGeo: Global > {World > {EMEA > {UK, DE, FR}, US}, APAC > {JP}} —
-// three levels with uneven branches, the fixture of the OBSERVATIONS entry
-// "The grid's parent rows differ from chart-data for member-metadata
-// metrics". FR has no recorded value.
+// three levels with uneven branches, reproducing the difference between
+// grid parent rows and chart-data for member-metadata metrics. FR has no
+// recorded value.
 func globalGeo(id string) *Dimension {
 	return &Dimension{ID: id, Members: []Member{
 		{Code: "Global"},

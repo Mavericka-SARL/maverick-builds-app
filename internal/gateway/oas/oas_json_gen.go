@@ -34382,6 +34382,30 @@ func (s *LicenseInfo) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.Schedule.Set {
+			e.FieldStart("schedule")
+			s.Schedule.Encode(e)
+		}
+	}
+	{
+		if s.Order.Set {
+			e.FieldStart("order")
+			s.Order.Encode(e)
+		}
+	}
+	{
+		if s.Agreement.Set {
+			e.FieldStart("agreement")
+			s.Agreement.Encode(e)
+		}
+	}
+	{
+		if s.Deployment.Set {
+			e.FieldStart("deployment")
+			s.Deployment.Encode(e)
+		}
+	}
+	{
 		if s.IssuedAt.Set {
 			e.FieldStart("issued_at")
 			s.IssuedAt.Encode(e, json.EncodeDateTime)
@@ -34394,9 +34418,15 @@ func (s *LicenseInfo) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
-		if s.Limits.Set {
-			e.FieldStart("limits")
-			s.Limits.Encode(e)
+		if s.RenewalDue.Set {
+			e.FieldStart("renewal_due")
+			s.RenewalDue.Encode(e)
+		}
+	}
+	{
+		if s.TransitionEndsAt.Set {
+			e.FieldStart("transition_ends_at")
+			s.TransitionEndsAt.Encode(e, json.EncodeDateTime)
 		}
 	}
 	{
@@ -34407,7 +34437,7 @@ func (s *LicenseInfo) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfLicenseInfo = [12]string{
+var jsonFieldsNameOfLicenseInfo = [17]string{
 	0:  "edition",
 	1:  "state",
 	2:  "features",
@@ -34416,10 +34446,15 @@ var jsonFieldsNameOfLicenseInfo = [12]string{
 	5:  "license_id",
 	6:  "customer",
 	7:  "contact",
-	8:  "issued_at",
-	9:  "expires_at",
-	10: "limits",
-	11: "error",
+	8:  "schedule",
+	9:  "order",
+	10: "agreement",
+	11: "deployment",
+	12: "issued_at",
+	13: "expires_at",
+	14: "renewal_due",
+	15: "transition_ends_at",
+	16: "error",
 }
 
 // Decode decodes LicenseInfo from json.
@@ -34427,7 +34462,7 @@ func (s *LicenseInfo) Decode(d *jx.Decoder) error {
 	if s == nil {
 		return errors.New("invalid: unable to decode LicenseInfo to nil")
 	}
-	var requiredBitSet [2]uint8
+	var requiredBitSet [3]uint8
 
 	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
 		switch string(k) {
@@ -34529,6 +34564,46 @@ func (s *LicenseInfo) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"contact\"")
 			}
+		case "schedule":
+			if err := func() error {
+				s.Schedule.Reset()
+				if err := s.Schedule.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"schedule\"")
+			}
+		case "order":
+			if err := func() error {
+				s.Order.Reset()
+				if err := s.Order.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"order\"")
+			}
+		case "agreement":
+			if err := func() error {
+				s.Agreement.Reset()
+				if err := s.Agreement.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"agreement\"")
+			}
+		case "deployment":
+			if err := func() error {
+				s.Deployment.Reset()
+				if err := s.Deployment.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"deployment\"")
+			}
 		case "issued_at":
 			if err := func() error {
 				s.IssuedAt.Reset()
@@ -34549,15 +34624,25 @@ func (s *LicenseInfo) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"expires_at\"")
 			}
-		case "limits":
+		case "renewal_due":
 			if err := func() error {
-				s.Limits.Reset()
-				if err := s.Limits.Decode(d); err != nil {
+				s.RenewalDue.Reset()
+				if err := s.RenewalDue.Decode(d); err != nil {
 					return err
 				}
 				return nil
 			}(); err != nil {
-				return errors.Wrap(err, "decode field \"limits\"")
+				return errors.Wrap(err, "decode field \"renewal_due\"")
+			}
+		case "transition_ends_at":
+			if err := func() error {
+				s.TransitionEndsAt.Reset()
+				if err := s.TransitionEndsAt.Decode(d, json.DecodeDateTime); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"transition_ends_at\"")
 			}
 		case "error":
 			if err := func() error {
@@ -34578,8 +34663,9 @@ func (s *LicenseInfo) Decode(d *jx.Decoder) error {
 	}
 	// Validate required fields.
 	var failures []validate.FieldError
-	for i, mask := range [2]uint8{
+	for i, mask := range [3]uint8{
 		0b00011111,
+		0b00000000,
 		0b00000000,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
@@ -34668,62 +34754,6 @@ func (s *LicenseInfoEdition) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
-// Encode implements json.Marshaler.
-func (s LicenseInfoLimits) Encode(e *jx.Encoder) {
-	e.ObjStart()
-	s.encodeFields(e)
-	e.ObjEnd()
-}
-
-// encodeFields implements json.Marshaler.
-func (s LicenseInfoLimits) encodeFields(e *jx.Encoder) {
-	for k, elem := range s {
-		e.FieldStart(k)
-
-		e.Int64(elem)
-	}
-}
-
-// Decode decodes LicenseInfoLimits from json.
-func (s *LicenseInfoLimits) Decode(d *jx.Decoder) error {
-	if s == nil {
-		return errors.New("invalid: unable to decode LicenseInfoLimits to nil")
-	}
-	m := s.init()
-	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
-		var elem int64
-		if err := func() error {
-			v, err := d.Int64()
-			elem = int64(v)
-			if err != nil {
-				return err
-			}
-			return nil
-		}(); err != nil {
-			return errors.Wrapf(err, "decode field %q", k)
-		}
-		m[string(k)] = elem
-		return nil
-	}); err != nil {
-		return errors.Wrap(err, "decode LicenseInfoLimits")
-	}
-
-	return nil
-}
-
-// MarshalJSON implements stdjson.Marshaler.
-func (s LicenseInfoLimits) MarshalJSON() ([]byte, error) {
-	e := jx.Encoder{}
-	s.Encode(&e)
-	return e.Bytes(), nil
-}
-
-// UnmarshalJSON implements stdjson.Unmarshaler.
-func (s *LicenseInfoLimits) UnmarshalJSON(data []byte) error {
-	d := jx.DecodeBytes(data)
-	return s.Decode(d)
-}
-
 // Encode encodes LicenseInfoSource as json.
 func (s LicenseInfoSource) Encode(e *jx.Encoder) {
 	e.Str(string(s))
@@ -34786,6 +34816,8 @@ func (s *LicenseInfoState) Decode(d *jx.Decoder) error {
 		*s = LicenseInfoStateCommunity
 	case LicenseInfoStateActive:
 		*s = LicenseInfoStateActive
+	case LicenseInfoStateTransition:
+		*s = LicenseInfoStateTransition
 	case LicenseInfoStateExpired:
 		*s = LicenseInfoStateExpired
 	case LicenseInfoStateInvalid:
@@ -42323,40 +42355,6 @@ func (s OptInt64) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *OptInt64) UnmarshalJSON(data []byte) error {
-	d := jx.DecodeBytes(data)
-	return s.Decode(d)
-}
-
-// Encode encodes LicenseInfoLimits as json.
-func (o OptLicenseInfoLimits) Encode(e *jx.Encoder) {
-	if !o.Set {
-		return
-	}
-	o.Value.Encode(e)
-}
-
-// Decode decodes LicenseInfoLimits from json.
-func (o *OptLicenseInfoLimits) Decode(d *jx.Decoder) error {
-	if o == nil {
-		return errors.New("invalid: unable to decode OptLicenseInfoLimits to nil")
-	}
-	o.Set = true
-	o.Value = make(LicenseInfoLimits)
-	if err := o.Value.Decode(d); err != nil {
-		return err
-	}
-	return nil
-}
-
-// MarshalJSON implements stdjson.Marshaler.
-func (s OptLicenseInfoLimits) MarshalJSON() ([]byte, error) {
-	e := jx.Encoder{}
-	s.Encode(&e)
-	return e.Bytes(), nil
-}
-
-// UnmarshalJSON implements stdjson.Unmarshaler.
-func (s *OptLicenseInfoLimits) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }
