@@ -1,4 +1,5 @@
 import { Badge } from "./Badge";
+import { roleLabel } from "./roleLabel";
 import type React from "react";
 import type { DesignTone } from "./types";
 
@@ -27,7 +28,7 @@ export function StatusBadge({ children, tone = "neutral", className }: StatusBad
 export function RoleBadge({ role }: { role: string }) {
   return (
     <StatusBadge tone={ROLE_TONE[role] ?? "neutral"}>
-      {role.replace(/_/g, " ")}
+      {roleLabel(role)}
     </StatusBadge>
   );
 }

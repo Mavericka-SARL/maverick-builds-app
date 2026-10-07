@@ -34,7 +34,7 @@
 </table>
 
 <h3>Users who cannot see every member</h3>
-<p>A business user may have members hidden from them (Business Admin › access rules). Most metrics are then recomputed from what that user can see. A metric that reads <i>other</i> cells — a time function, LOOKUP, the SUMIFS family, TIMESUM or a *VALUE function — is shown from the stored result instead, and a cell whose result was built from a hidden member is <b>withheld</b>: blank ("—") in the grid, a missing point in a chart. A total that includes a withheld cell is withheld too. The engine never recomputes such a cell from the visible part alone, because that would show a number the model never produced.</p>
+<p>A user may have members hidden from them (Business Admin › access rules). Most metrics are then recomputed from what that user can see. A metric that reads <i>other</i> cells — a time function, LOOKUP, the SUMIFS family, TIMESUM or a *VALUE function — is shown from the stored result instead, and a cell whose result was built from a hidden member is <b>withheld</b>: blank ("—") in the grid, a missing point in a chart. A total that includes a withheld cell is withheld too. The engine never recomputes such a cell from the visible part alone, because that would show a number the model never produced.</p>
 
 <h2>16. Recipes</h2>
 <p>The formulas that read the model were computed live, cell by cell, on the example model (chapter 11) by <code>cmd/verify-formula-catalogue</code>; the one-line arithmetic ones are asserted by the function catalogue test.</p>

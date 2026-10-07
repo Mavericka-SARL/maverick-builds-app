@@ -442,7 +442,7 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 			dimTags[dname] = " [" + strings.TrimPrefix(tagSuffix(tagList), ", ") + "]"
 		}
 		if businessMaintained && !strings.Contains(dimTags[dname], "business-maintained") {
-			dimTags[dname] += " [business-maintained: business users add, rename and remove its members]"
+			dimTags[dname] += " [business-maintained: users add, rename and remove its members]"
 		}
 		period := ""
 		if dimType == "time" {

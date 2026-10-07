@@ -60,8 +60,8 @@ function ScimTokens() {
           </Field>
           <Field label="Role a provisioned user gets">
             <Select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Default role">
-              <option value="business_user">business_user</option>
-              <option value="business_admin">business_admin</option>
+              <option value="business_user">user</option>
+              <option value="business_admin">business admin</option>
               <option value="developer">developer</option>
             </Select>
           </Field>

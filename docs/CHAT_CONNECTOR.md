@@ -62,7 +62,7 @@ notifications, integrations, audit.
   but `/api/me`, `/api/apps`, `/api/demo`, `/api/grid`, `/api/grids` and
   `/api/grid/series` before a handler runs.
 - **Active revision only.** Reads use each model's active revision, as every
-  business user does (the REST API enforces the same: other revisions are
+  user does (the REST API enforces the same: other revisions are
   their builders').
 - **The context is confirmed.** The application and model a tool names are
   checked against what the person may open. A filter on a member they cannot

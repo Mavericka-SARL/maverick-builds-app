@@ -347,7 +347,7 @@ function DimHeaderEditor({ dim, onClose }: { dim: DevDimension; onClose: () => v
       {canOpen && (
         <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
           <input type="checkbox" checked={businessMaintained} onChange={(e) => setBusinessMaintained(e.target.checked)} />
-          Business users maintain its members <span className="mvx-admin-muted">(add, rename and remove them from the grid)</span>
+          Users maintain its members <span className="mvx-admin-muted">(add, rename and remove them from the grid)</span>
         </label>
       )}
       {save.isError && <p className="mvx-admin-error">{(save.error as Error).message}</p>}
@@ -569,7 +569,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "",
             <code style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text)" }}>{dim.name}</code>
             <DimTagChips tags={dim.tags} active={activeTag} onClick={onTagClick} />
             {dim.business_maintained && (
-              <span title="Business users add, rename and remove its members from the grid">
+              <span title="Users add, rename and remove its members from the grid">
                 <StatusBadge tone="info">business-maintained</StatusBadge>
               </span>
             )}

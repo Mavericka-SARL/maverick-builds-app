@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Trash2, Plus } from "lucide-react";
 import { api, withTenant, type AdminModel, type AdminTenant } from "../../api/client";
-import { Button, IconButton, TextInput, Select, Field, Toolbar, ToolbarGroup, LoadingState, EmptyState, StatusBadge, RevisionBadge, useConfirm } from "../../ui";
+import { Button, IconButton, TextInput, Select, Field, Toolbar, ToolbarGroup, LoadingState, EmptyState, StatusBadge, RevisionBadge, useConfirm, useCollapsed, CollapseToggle } from "../../ui";
 
 function DevModelRevisions({
   model,
@@ -280,6 +280,7 @@ export function DevApplicationsTab({
     queryFn: api.getDevApplications,
   });
   const qc = useQueryClient();
+  const { isCollapsed, toggle } = useCollapsed();
   const setDefault = useMutation({
     mutationFn: ({ modelId, tenantId }: { modelId: string; tenantId: string }) =>
       withTenant(tenantId, () => api.setDefaultModel(modelId)),
@@ -335,10 +336,13 @@ export function DevApplicationsTab({
         </div>
       )}
 
-      {apps.map((app) => (
+      {apps.map((app) => {
+        const appOpen = !isCollapsed(`app:${app.id}`);
+        return (
         <div key={app.id} className="mvx-admin-object">
           {/* App header */}
           <div className="mvx-admin-object__header">
+            <CollapseToggle expanded={appOpen} onToggle={() => toggle(`app:${app.id}`)} label={`application ${app.name}`} />
             <div className="mvx-admin-avatar mvx-admin-avatar--app">{app.name[0]}</div>
             <div className="mvx-admin-object__title">
               <div className="mvx-admin-object__name">{app.name}</div>
@@ -347,12 +351,17 @@ export function DevApplicationsTab({
           </div>
 
           {/* Models */}
-          <div className="mvx-admin-object__body">
+          {appOpen && <div className="mvx-admin-object__body">
             {app.models.length === 0 && <p className="mvx-admin-muted">No models.</p>}
-            {app.models.map((m) => (
+            {app.models.map((m) => {
+              const modelOpen = !isCollapsed(`model:${m.id}`);
+              const revisions = (m.revisions ?? []).length;
+              return (
               <div key={m.id} className="mvx-admin-model">
                 <div className="mvx-admin-model__header" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <CollapseToggle expanded={modelOpen} onToggle={() => toggle(`model:${m.id}`)} label={`model ${m.name}`} />
                   <span className="mvx-admin-model__name">{m.name}</span>
+                  {!modelOpen && <span className="mvx-admin-muted">{revisions} revision{revisions !== 1 ? "s" : ""}{m.active_revision ? ` · active: ${m.active_revision}` : ""}</span>}
                   {m.is_default ? (
                     <StatusBadge tone="success">business default</StatusBadge>
                   ) : (
@@ -366,12 +375,14 @@ export function DevApplicationsTab({
                     </Button>
                   )}
                 </div>
-                <DevModelRevisions model={m} appId={app.id} tenantId={tenantOfApp.get(app.id) ?? ""} revisionId={revisionId} onSelect={onSelect} />
+                {modelOpen && <DevModelRevisions model={m} appId={app.id} tenantId={tenantOfApp.get(app.id) ?? ""} revisionId={revisionId} onSelect={onSelect} />}
               </div>
-            ))}
-          </div>
+              );
+            })}
+          </div>}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

@@ -9,10 +9,13 @@
 //     (made again if it was deleted) — once: core.starter_model remembers
 //     it, so a model the tenant deletes later is not put back;
 //   - one whose content has changed since it was installed gets the current
-//     content as a new revision of the same model, made live. The old
-//     revision stays, with anything typed into it. A model where someone has
-//     since made another revision live is the tenant's own, and is left
-//     alone;
+//     content as a new revision of the same model, made live. A model where
+//     someone has since made another revision live is the tenant's own, and
+//     is left alone;
+//   - in a model the sync still keeps, the revisions it superseded (its
+//     earlier imports: "First revision", "Updated <date>") are deleted, with
+//     anything typed into them, so the model holds its current content only.
+//     A revision someone made there stays;
 //   - a starter model a tenant got before this record existed is found by
 //     its name in the "Getting started" application and brought up to date
 //     the same way.
@@ -210,6 +213,9 @@ func Sync(ctx context.Context, pool *pgxpool.Pool, customerID string, starters [
 					changes = append(changes, ch)
 				}
 			}
+			if err := t.prune(ctx, s.Key); err != nil {
+				return fmt.Errorf("prune %s: %w", s.Key, err)
+			}
 		}
 		return nil
 	})
@@ -387,6 +393,63 @@ func (t *tenant) update(ctx context.Context, s starter.Starter, hash, modelID st
 		Metadata: map[string]string{"source": "starter", "starter": s.Key, "previous_revision_id": *live, "revision_name": name},
 	})
 	return Change{CustomerID: t.customerID, StarterKey: s.Key, ModelID: modelID, RevisionID: revisionID}, true, nil
+}
+
+// syncRevisionName matches the names of the revisions the sync imports: the
+// first (starter.RevisionName) and each update's (revisionName).
+const syncRevisionName = `^Updated [0-9]{4}-[0-9]{2}-[0-9]{2}( \([0-9]+\))?$`
+
+// prune deletes the revisions the sync superseded in the starter model key,
+// while the sync still keeps that model (its live revision is the one the
+// sync recorded): earlier imports of the starter, named as the sync names
+// them. A revision someone made in the model stays, and a model whose live
+// revision someone else chose is theirs: nothing of it goes.
+func (t *tenant) prune(ctx context.Context, key string) error {
+	var modelID, recorded, live *string
+	err := t.tx.QueryRow(ctx, `
+		SELECT s.model_id::text, s.revision_id::text, m.active_revision_id::text
+		FROM core.starter_model s JOIN core.model m ON m.id = s.model_id
+		WHERE s.customer_id = $1::uuid AND s.starter_key = $2`, t.customerID, key).Scan(&modelID, &recorded, &live)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read model: %w", err)
+	}
+	if modelID == nil || recorded == nil || live == nil || *recorded != *live {
+		return nil
+	}
+	rows, err := t.tx.Query(ctx, `
+		DELETE FROM model.revision
+		WHERE model_id = $1::uuid AND id <> $2::uuid AND description = $3
+		  AND (name = $4 OR name ~ $5)
+		RETURNING id::text, name`,
+		*modelID, *live, modeltransfer.ImportedDescription, starter.RevisionName, syncRevisionName)
+	if err != nil {
+		return fmt.Errorf("delete superseded revisions: %w", err)
+	}
+	type gone struct{ id, name string }
+	deleted, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (gone, error) {
+		var g gone
+		return g, r.Scan(&g.id, &g.name)
+	})
+	if err != nil {
+		return fmt.Errorf("delete superseded revisions: %w", err)
+	}
+	if len(deleted) == 0 {
+		return nil
+	}
+	var appID string
+	_ = t.tx.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id = $1::uuid`, *modelID).Scan(&appID)
+	for _, g := range deleted {
+		auditlog.Log(ctx, t.tx, zerolog.Nop(), auditlog.Fields{
+			Category: auditlog.CategoryModelChange, EventType: auditlog.EventRevisionDeleted,
+			ActorRole: "platform(starter sync)", ApplicationID: appID,
+			ResourceType: "revision", ResourceID: g.id,
+			Metadata: map[string]string{"source": "starter", "starter": key, "revision_name": g.name, "kept_revision_id": *live},
+		})
+	}
+	return nil
 }
 
 // withLineages is a copy of pkg whose dimensions, members and metrics carry

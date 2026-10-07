@@ -13,9 +13,9 @@
 
 <h2>The platform and the developer role</h2>
 <h3>What maverickbuilds.app is</h3>
-<p>maverickbuilds.app is a platform for building governed business applications without code. An application combines three kinds of capability that a developer configures and business users operate:</p>
+<p>maverickbuilds.app is a platform for building governed business applications without code. An application combines three kinds of capability that a developer configures and users operate:</p>
 <table>
-<tr><th style="width:18%">Mode</th><th>What the developer builds</th><th>What business users do</th></tr>
+<tr><th style="width:18%">Mode</th><th>What the developer builds</th><th>What users do</th></tr>
 <tr><td>Planning</td><td>Dimensions, metrics and formulas, grids, dashboards, revisions</td><td>Type and import values, read charts and KPIs, plan in grids</td></tr>
 <tr><td>CRUD</td><td>Forms, form-to-metric posting, imports, integrations</td><td>Submit and manage records that feed the plan</td></tr>
 <tr><td>Execution</td><td>Workflows, triggers, notifications</td><td>Start approvals, act on tasks in their inbox, get notified</td></tr>
@@ -48,7 +48,7 @@
   <li><b>Tenant.</b> The isolation boundary. Users, applications and data belong to exactly one tenant.</li>
   <li><b>Application.</b> What users open. Created by an administrator. Has a mode and a status.</li>
   <li><b>Model.</b> Owns everything below. An application usually has one; when it has several, the <b>business default</b> model is the one business consoles open.</li>
-  <li><b>Revision.</b> Every definition and every value belongs to a revision. Exactly one revision per model is <b>active</b>: that is what business users see and edit. A developer selects a revision on the Models screen and every Developer screen then works inside it.</li>
+  <li><b>Revision.</b> Every definition and every value belongs to a revision. Exactly one revision per model is <b>active</b>: that is what users see and edit. A developer selects a revision on the Models screen and every Developer screen then works inside it.</li>
 </ul>
 <h3>Revisions</h3>
 <ul>
@@ -114,7 +114,7 @@
 <ul>
   <li>A <b>grid</b> is a selection of metrics and dimensions. A metric belongs to one grid at most.</li>
   <li>A <b>dashboard</b> is a canvas of widgets. A grid widget decides which dimension is rows, columns or a selector; charts and KPIs read from grids and metrics; form, trigger, integration, text and import widgets complete the page.</li>
-  <li>Business users reach a dashboard only when a <b>business role</b> they belong to has been granted it. Roles, grants and per-user access rules are managed in the Business Admin console.</li>
+  <li>Users reach a dashboard only when a <b>business role</b> they belong to has been granted it. Roles, grants and per-user access rules are managed in the Business Admin console.</li>
 </ul>
 <h3>Visibility and locks</h3>
 <ul>
@@ -125,11 +125,11 @@
 <h3>Workflows, triggers and notifications</h3>
 <ul>
   <li>A <b>workflow definition</b> is steps and routes; a <b>trigger</b> (automation rule) starts it on an event; an <b>instance</b> is one run, keeping the definition it started with; a <b>task</b> is one step waiting for a person.</li>
-  <li>Tasks appear in the business Workflow Inbox of everyone holding the assigned role. Business users submit, business admins decide.</li>
+  <li>Tasks appear in the business Workflow Inbox of everyone holding the assigned role. Users submit, business admins decide.</li>
   <li>Notifications are in-app (the bell) and are produced by notification steps, rework and failed starts.</li>
 </ul>
 <h3>Audit</h3>
-<p>Every change made through the console, by developers and business users alike, is recorded in the audit log with the acting user, the object and the action. Administrators read it on the <b>Audit Log</b> screen; developers have no screen for it, but should know that their edits are attributable.</p>
+<p>Every change made through the console, by developers and users alike, is recorded in the audit log with the acting user, the object and the action. Administrators read it on the <b>Audit Log</b> screen; developers have no screen for it, but should know that their edits are attributable.</p>
 
 <h2>Getting around the console</h2>
 <figure><img src="img/13-account-menu.png" alt="Developer console with the account menu open showing email, roles and Sign out"><figcaption>The shell: sidebar groups on the left, the context bar at the top with Model and Revision, the notification bell and the account menu.</figcaption></figure>

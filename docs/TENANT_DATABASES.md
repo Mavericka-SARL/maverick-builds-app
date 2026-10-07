@@ -109,7 +109,7 @@ by `X-Tenant-Id`, or as `control-plane`.
   lists), the workflow inbox, notifications, users, workspaces and the audit
   log are read once per home, by the person's own account there, and merged
   (`homesOf`). A home lists only by what the person holds in it: a tenant
-  admin of one tenant who is a business user of another sees none of the
+  admin of one tenant who is a user of another sees none of the
   other's administration. Each row says which home it lives in (`tenant_id`),
   and what the console does with it next is addressed there and resolved
   again.

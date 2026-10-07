@@ -275,7 +275,7 @@ totals; values may be negative. `create_file_integration` saves the target,
 map and mode as a re-runnable `csv_import` integration; `import_file_data`
 with its `integration_id` uses them and records the run in its history. The
 same integration is re-run with a new file of the same columns from the
-Integrations tab, or by a business user from a dashboard **Integration**
+Integrations tab, or by a user from a dashboard **Integration**
 button with a `.csv` or `.xlsx` (`POST /api/integrations/{id}/run` applies the
 saved reshape and map; `internal/gateway/integration_file_run.go`).
 
@@ -294,7 +294,7 @@ that cannot be a thousands separator is never guessed, so `1,5` is not 15).
 The preview shows the sheet's first rows as read and the first rows as the
 import reads them, so the assistant can see a layout and correct its reshape.
 `create_file_integration` and `update_integration` save a reshape with the
-integration, and every run applies it — a business user's monthly upload of
+integration, and every run applies it — a user's monthly upload of
 the same layout from a dashboard button included. In the Integrations tab such
 an integration says what its reshape does and runs with **Run with a file**,
 which sends the file as it is. A developer sets one up without the assistant
@@ -321,7 +321,7 @@ The spec is validated by the same code as the console's editor, and a download
 own `/api/grid` view, so hidden members and metrics never reach the file and
 every value is the one their grid shows. The panel lists the session's exports
 with a **Download** button; developers find them in the Integrations tab, and
-a dashboard's Integration button downloads one for business users.
+a dashboard's Integration button downloads one for users.
 
 ## What stays human
 
@@ -334,7 +334,7 @@ a dashboard's Integration button downloads one for business users.
 - **Role membership.** The assistant creates and changes business roles; a
   business admin decides who is in them.
 - **Promoting or discarding the draft revision**, deleting a revision, and
-  choosing the model business users open by default.
+  choosing the model users open by default.
 - **Users** — invitations, deletion, platform and business role grants.
 - **Data connectors** — configuring REST API and Google Sheets integrations,
   their connections and credentials, and their runs. The assistant can list,

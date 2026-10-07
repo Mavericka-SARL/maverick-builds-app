@@ -782,7 +782,7 @@ func (s *Server) handleAddBusinessMemberRequest(args [1]string, argsEscaped bool
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    AddBusinessMemberOperation,
-			OperationSummary: "A business user adds a member to a business-maintained dimension",
+			OperationSummary: "A user adds a member to a business-maintained dimension",
 			OperationID:      "addBusinessMember",
 			Body:             request,
 			RawBody:          rawBody,
@@ -10142,7 +10142,7 @@ func (s *Server) handleDeleteBusinessMemberRequest(args [2]string, argsEscaped b
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    DeleteBusinessMemberOperation,
-			OperationSummary: "A business user removes a member of a business-maintained dimension",
+			OperationSummary: "A user removes a member of a business-maintained dimension",
 			OperationID:      "deleteBusinessMember",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -27004,7 +27004,7 @@ func (s *Server) handleListBusinessFoldersRequest(args [0]string, argsEscaped bo
 
 // handleListBusinessIntegrationsRequest handles listBusinessIntegrations operation.
 //
-// List integrations visible to business users (e.g. for run-button labels).
+// List integrations visible to users (e.g. for run-button labels).
 //
 // GET /api/integrations
 func (s *Server) handleListBusinessIntegrationsRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -27140,7 +27140,7 @@ func (s *Server) handleListBusinessIntegrationsRequest(args [0]string, argsEscap
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    ListBusinessIntegrationsOperation,
-			OperationSummary: "List integrations visible to business users (e.g. for run-button labels)",
+			OperationSummary: "List integrations visible to users (e.g. for run-button labels)",
 			OperationID:      "listBusinessIntegrations",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -45065,7 +45065,7 @@ func (s *Server) handleUpdateBusinessMemberRequest(args [2]string, argsEscaped b
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    UpdateBusinessMemberOperation,
-			OperationSummary: "A business user renames a member of a business-maintained dimension, or sets its properties",
+			OperationSummary: "A user renames a member of a business-maintained dimension, or sets its properties",
 			OperationID:      "updateBusinessMember",
 			Body:             request,
 			RawBody:          rawBody,

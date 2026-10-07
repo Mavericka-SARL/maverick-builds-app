@@ -17,7 +17,7 @@ async function open(page: Page, persona: string) {
     user_id: "00000000-0000-0000-0000-000000000009",
     email: "signed.in@example.com",
     display_name: "Signed In Person",
-    roles: [persona === "finance" ? "business_admin" : persona === "dept_head" ? "business_user" : persona],
+    roles: persona === "finance" ? ["business_admin", "business_user"] : [persona === "dept_head" ? "business_user" : persona],
   };
   // UserMenu reads /api/me; the platform console's own role gate reads
   // /api/admin/me and drives its context bar from the same object.

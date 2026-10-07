@@ -274,7 +274,7 @@ sign-in page; sign in as the administrator from step 6.
 
 The platform is organised as **tenants** (the organisations using it — often
 just your own), each holding **applications**, each holding **models** that
-developers build and business users work in. People are given
+developers build and users work in. People are given
 **roles**:
 
 | Role | Does |

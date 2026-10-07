@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { roleLabel } from "../../ui/roleLabel";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Mail, Pencil, Plus, Trash2, UserMinus, X } from "lucide-react";
 import {
@@ -146,8 +147,8 @@ function RemovableRoleChip({
           className="mvx-badge__remove"
           onClick={blockedReason ? undefined : onRemove}
           disabled={removing || !!blockedReason}
-          title={blockedReason ?? `Remove ${role}`}
-          aria-label={blockedReason ?? `Remove ${role}`}
+          title={blockedReason ?? `Remove ${roleLabel(role)}`}
+          aria-label={blockedReason ?? `Remove ${roleLabel(role)}`}
         >
           <X size={12} aria-hidden="true" />
         </button>
@@ -381,7 +382,7 @@ export function UsersPanel({
   // tenant a role is held in; the one being edited stays in view.
   const q = search.trim().toLowerCase();
   const shownUsers = users.filter(u => !q || u.id === editId
-    || [u.display_name, u.email, ...(u.assignments ?? []).flatMap(a => [a.role, a.role.replace(/_/g, " "), a.workspace_name, a.customer_name])]
+    || [u.display_name, u.email, ...(u.assignments ?? []).flatMap(a => [a.role, roleLabel(a.role), a.workspace_name, a.customer_name])]
       .some(v => v?.toLowerCase().includes(q)));
 
   return (
@@ -442,7 +443,7 @@ export function UsersPanel({
                         business roles, so filtering to PLATFORM_ROLES left
                         them an empty dropdown and no way to give an invited
                         user any role at all. */}
-                    {assignableRoles.map((role) => <option key={role} value={role}>{role.replace(/_/g, " ")}</option>)}
+                    {assignableRoles.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>)}
                   </Select>
                 </Field>
               )}
@@ -558,7 +559,7 @@ export function UsersPanel({
                         <RemovableRoleChip
                           key={assignmentKey(a)}
                           role={a.role}
-                          label={a.role.replace(/_/g, " ")}
+                          label={roleLabel(a.role)}
                           // A role with no workspace belongs to the account's
                           // own organisation; on another's it is not this
                           // administrator's to take away.
@@ -621,7 +622,7 @@ export function UsersPanel({
                               <RemovableRoleChip
                                 key={assignmentKey(a)}
                                 role={a.role}
-                                label={`${a.workspace_name} · ${a.role.replace(/_/g, " ")}`}
+                                label={`${a.workspace_name} · ${roleLabel(a.role)}`}
                                 onRemove={assignableRoles.includes(a.role) ? () => removeRole.mutate({ userId: u.id, role: a.role, workspaceId: a.workspace_id }) : undefined}
                                 blockedReason={isLastOwnAdminGrant(u, a, currentUserId)
                                   ? "This is what grants you user administration — another administrator has to remove it"

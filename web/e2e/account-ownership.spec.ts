@@ -214,7 +214,7 @@ test("another organisation's account cannot be renamed or re-roled at home", asy
   await expect(page.getByLabel("Remove developer")).toHaveCount(0);
   await expect(page.getByLabel("Add platform role")).toHaveCount(0);
   // The role he holds in our workspace is ours to remove.
-  await expect(page.getByLabel("Remove business_user")).toBeEnabled();
+  await expect(page.getByLabel("Remove user")).toBeEnabled();
   await page.getByRole("button", { name: "Close" }).click();
 
   await page.getByLabel("Edit Olivia Own").click();

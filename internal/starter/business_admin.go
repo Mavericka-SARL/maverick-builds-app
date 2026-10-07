@@ -193,7 +193,7 @@ The row marked **default** is the model everyone lands on until they choose anot
 
 		baText(`## The live revision
 
-A model changes in **revisions**: complete copies a developer works on, then makes live. The **Revision** in the bar at the top of the page names the live one. Everything under **User** — for you and for every business user — happens in the live revision.
+A model changes in **revisions**: complete copies a developer works on, then makes live. The **Revision** in the bar at the top of the page names the live one. Everything under **User** — for you and for every user — happens in the live revision.
 
 As a business admin you cannot make a revision or choose which one is live; developers do that under **Developer › Models**, and tenant admins under **Tenant admin › Applications**. That is deliberate: what you look at is what everyone else looks at.`, 164),
 
@@ -214,7 +214,7 @@ A model soon has more pages than any one person needs. A **role** is a named gro
 
 		baText(`## First, the people
 
-You cannot add people yourself. A tenant admin invites them under **Tenant admin › Users** with **Invite user**, choosing *business user* as the **Initial Role** and this workspace; a developer can invite people too. The people lists on **Roles** and **Access Rules** hold only this workspace's business users and business admins — in a new workspace, just you.`, 132),
+You cannot add people yourself. A tenant admin invites them under **Tenant admin › Users** with **Invite user**, choosing *user* as the **Initial Role** and this workspace; a developer can invite people too. The people lists on **Roles** and **Access Rules** hold only this workspace's users and business admins — in a new workspace, just you.`, 132),
 
 		baText(`## Make a role and fill it
 
@@ -300,7 +300,7 @@ Leave **Hidden** alone on yourself: a member or metric hidden from you drops out
 
 		baText(`## Rules belong to people
 
-A rule is set for one person, not for a role, and it stays when a new revision goes live. The **User:** list holds this workspace's business users and business admins.
+A rule is set for one person, not for a role, and it stays when a new revision goes live. The **User:** list holds this workspace's users and business admins.
 
 ---
 Next: [5 · Requests and history](dashboard:5 · Requests and history).`, 156),
@@ -311,7 +311,7 @@ func baRequests() modeltransfer.Dashboard {
 	return baPage("ba-dash-5-requests", "5 · Requests and history",
 		baText(`# Requests, approvals and history
 
-A developer designs the workflows; business users submit requests through them; you decide the requests and keep them moving. Until a developer publishes a workflow and someone submits a request, your inbox stays empty — this page is for when it fills.`, 112),
+A developer designs the workflows; users submit requests through them; you decide the requests and keep them moving. Until a developer publishes a workflow and someone submits a request, your inbox stays empty — this page is for when it fills.`, 112),
 
 		baText(`## Workflow Inbox
 
@@ -322,9 +322,9 @@ A developer designs the workflows; business users submit requests through them; 
 - A task step has one button, named by the developer: **Complete** unless they chose other words.
 - Now and then, **Continue as true** and **Continue as false**: the engine could not decide a condition and asks you which way to go.
 
-You decide requests; you do not submit them — business users do. An account that is also a developer or tenant admin, like the one that signed up, can submit as well.`, 296),
+You decide requests; you do not submit them — users do. An account that is also a developer or tenant admin, like the one that signed up, can submit as well.`, 296),
 
-		baPicture(baRequest(), "A business user submits, you decide in the Workflow Inbox; approved numbers stay locked if the approval is its last step, rejected or cancelled ones are released", 860, 232),
+		baPicture(baRequest(), "A user submits, you decide in the Workflow Inbox; approved numbers stay locked if the approval is its last step, rejected or cancelled ones are released", 860, 232),
 
 		baText(`## Locks keep agreed numbers still
 
@@ -341,7 +341,7 @@ Open steps are listed under **Pending Actions**, where you can decide the ones a
 
 		baText(`## Forms
 
-Forms have no screen of their own: a developer places each one on a dashboard as a **Form** widget, and you work on its records there, under **User › Dashboards**, as business users do. The widget lists the records entered so far. **New record** adds one. The pencil edits one, and the status list on its row changes its **Status**: draft, submitted, approved or rejected. Changing the status is a decision in its own right: moving a record to submitted or approved can start a workflow, if a developer set one to listen for it.
+Forms have no screen of their own: a developer places each one on a dashboard as a **Form** widget, and you work on its records there, under **User › Dashboards**, as users do. The widget lists the records entered so far. **New record** adds one. The pencil edits one, and the status list on its row changes its **Status**: draft, submitted, approved or rejected. Changing the status is a decision in its own right: moving a record to submitted or approved can start a workflow, if a developer set one to listen for it.
 
 **Export** downloads the records as Excel; **Import** reads CSV or Excel. **Sync to grid** posts the records into the model through the form's mappings. A form that is on no dashboard cannot be reached; ask a developer to place it.`, 188),
 
@@ -414,7 +414,7 @@ func baGrants() string {
 // baRequest: what happens to a request, and to the numbers it is about.
 func baRequest() string {
 	s := svgHead(860, 232)
-	s += box(10, 84, 190, 64, "Submitted", "by a business user", false)
+	s += box(10, 84, 190, 64, "Submitted", "by a user", false)
 	s += arrow(208, 116, 40)
 	s += box(256, 84, 220, 64, "Your decision", "User › Workflow Inbox", true)
 	s += `<text x="366" y="68" text-anchor="middle" font-size="12" fill="` + muted + `">numbers locked while it waits</text>`

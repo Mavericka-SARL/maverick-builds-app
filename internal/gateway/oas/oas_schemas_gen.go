@@ -5434,7 +5434,7 @@ type CreateDimensionRequest struct {
 	SourceProperty OptString `json:"source_property"`
 	// Also add one member (code = label = the value) per distinct non-blank value of the property.
 	DeriveMembers OptBool `json:"derive_members"`
-	// Business users add, rename and remove this dimension's members (POST/PATCH/DELETE
+	// Users add, rename and remove this dimension's members (POST/PATCH/DELETE
 	// /api/dimensions/{dimId}/members); not for a time dimension or a property grouping.
 	BusinessMaintained OptBool `json:"business_maintained"`
 	// Omitted defaults to standard. Only a dimension created as time supports time-series formulas; the
@@ -8058,7 +8058,7 @@ type Dimension struct {
 	SourceDimensionID OptUUID `json:"source_dimension_id"`
 	// The declared property of source_dimension_id whose value names the group (a member's code).
 	SourceProperty OptString `json:"source_property"`
-	// Business users add, rename and remove this dimension's members (POST/PATCH/DELETE
+	// Users add, rename and remove this dimension's members (POST/PATCH/DELETE
 	// /api/dimensions/{dimId}/members); not for a time dimension or a property grouping.
 	BusinessMaintained OptBool `json:"business_maintained"`
 	// Time members in chronological order.
@@ -11655,7 +11655,7 @@ type GridDimension struct {
 	TimeGranularity OptGridDimensionTimeGranularity `json:"time_granularity"`
 	// Time dimensions only.
 	FiscalYearStartMonth OptInt `json:"fiscal_year_start_month"`
-	// Business users add, rename and remove this dimension's members (POST/PATCH/DELETE
+	// Users add, rename and remove this dimension's members (POST/PATCH/DELETE
 	// /api/dimensions/{dimId}/members).
 	BusinessMaintained OptBool      `json:"business_maintained"`
 	Members            []Department `json:"members"`
@@ -25534,7 +25534,7 @@ type UpdateDimensionRequest struct {
 	SourceProperty OptString `json:"source_property"`
 	// Add a member for every value of the property that has none yet (e.g. after a new value appears).
 	DeriveMembers OptBool `json:"derive_members"`
-	// Business users add, rename and remove this dimension's members (POST/PATCH/DELETE
+	// Users add, rename and remove this dimension's members (POST/PATCH/DELETE
 	// /api/dimensions/{dimId}/members); not for a time dimension or a property grouping.
 	BusinessMaintained OptBool `json:"business_maintained"`
 }

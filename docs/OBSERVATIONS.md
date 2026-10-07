@@ -18,6 +18,24 @@ leaves out, until it is fixed.
 
 ## Open
 
+### Keycloak realm roles of earlier sign-up owners lack the user role
+
+- **Noticed:** 2026-10-07, making the user role (key `business_user`) a role
+  of its own. Sign-up now grants it in the database and as a Keycloak realm
+  role; migration 125 gave it in the database to every business admin who
+  lacked it, including every earlier sign-up owner, but their Keycloak
+  accounts were not touched, so the realm role lists no longer match.
+- **Why it matters:** little today — the gateway reads a person's roles from
+  `identity.role_assignment`, and `realm_access.roles` in the token is parsed
+  but not used for any decision. It would matter if anything started to
+  trust the token's roles.
+- **How to check:** in the Keycloak admin console, an owner who signed up
+  before 2026-10-07: realm roles tenant_admin, developer, business_admin
+  only; `/api/admin/users` lists business_user for them too.
+- **What closes it:** a one-off realm-role sync from the database (or a
+  decision that the realm roles are informational and sign-up should stop
+  assigning them).
+
 ### Local Sales models keep activity owners and notes twice
 
 - **Noticed:** 2026-10-07, read-only comparison with

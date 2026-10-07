@@ -27,7 +27,7 @@ tags:
     description: Platform/tenant administration — tenants, applications, models, revisions, users, workspaces, audit.
   - name: Business Admin
     description: >-
-      Workspace-scoped role/user administration for business users — roles, dashboard assignment, access
+      Workspace-scoped role/user administration for users — roles, dashboard assignment, access
       rules. The workspace is the X-App-Id application's (a tenant-level application resolves to a
       workspace of its tenant). Past the route's role guard, the caller must administer that workspace:
       business_admin held in it, tenant admin of its tenant, platform admin or, on the /roles routes,
@@ -40,11 +40,11 @@ tags:
   - name: Workflow
     description: Runtime workflow execution — starting/submitting instances, history, notifications. Separate from the Developer Console's workflow-authoring surface.
   - name: CRUD Forms
-    description: Business-user-facing CRUD forms and their submitted records (any authenticated actor).
+    description: User-facing CRUD forms and their submitted records (any authenticated actor).
   - name: Automation
     description: Event/manual automation rules that start workflow instances, and their execution history.
   - name: Business Dashboards
-    description: Business-user dashboard rendering and chart-data queries, scoped by business-role dashboard assignment.
+    description: User dashboard rendering and chart-data queries, scoped by business-role dashboard assignment.
 
 components:
   securitySchemes:
@@ -656,7 +656,7 @@ components:
         dimension_type:          { type: string, enum: [standard, time] }
         time_granularity:        { type: string, enum: [day, week, month, quarter, half_year, year, custom], description: "Time dimensions only" }
         fiscal_year_start_month: { type: integer, minimum: 1, maximum: 12, description: "Time dimensions only" }
-        business_maintained: { type: boolean, description: "Business users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members)" }
+        business_maintained: { type: boolean, description: "Users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members)" }
         members: { type: array, items: { $ref: "#/components/schemas/Department" } }
 
     GridAccessRules:
@@ -875,7 +875,7 @@ components:
         tags:                 { type: array, items: { type: string }, description: "Free-form labels the developer console filters by; omitted when empty" }
         source_dimension_id:  { type: string, format: uuid, description: "A property grouping: this dimension's members group this dimension's members by their source_property value (developer endpoint; omitted when none)" }
         source_property:      { type: string, description: "The declared property of source_dimension_id whose value names the group (a member's code)" }
-        business_maintained:  { type: boolean, description: "Business users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members); not for a time dimension or a property grouping" }
+        business_maintained:  { type: boolean, description: "Users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members); not for a time dimension or a property grouping" }
         members:              { type: array, items: { $ref: "#/components/schemas/DimensionMember" }, description: "Time members in chronological order" }
 
     HighlightRule:
@@ -1014,7 +1014,7 @@ components:
             refused with INVALID_GROUPING otherwise.
         source_property:      { type: string, description: "A property DECLARED on source_dimension_id (any case; stored as declared)" }
         derive_members:       { type: boolean, default: false, description: "Also add one member (code = label = the value) per distinct non-blank value of the property" }
-        business_maintained:  { type: boolean, description: "Business users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members); not for a time dimension or a property grouping" }
+        business_maintained:  { type: boolean, description: "Users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members); not for a time dimension or a property grouping" }
         dimension_type:
           type: string
           enum: [standard, time]
@@ -1049,7 +1049,7 @@ components:
             the source is refused with 409 DIMENSION_IN_USE while a formula names the dimension.
         source_property:      { type: string, description: "Change the grouping's property; recalculates the metrics reading through it" }
         derive_members:       { type: boolean, description: "Add a member for every value of the property that has none yet (e.g. after a new value appears)" }
-        business_maintained:  { type: boolean, description: "Business users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members); not for a time dimension or a property grouping" }
+        business_maintained:  { type: boolean, description: "Users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members); not for a time dimension or a property grouping" }
 
     MemberRequest:
       type: object
@@ -7885,7 +7885,7 @@ paths:
     get:
       operationId: listBusinessIntegrations
       tags: [Import & Integrations]
-      summary: List integrations visible to business users (e.g. for run-button labels)
+      summary: List integrations visible to users (e.g. for run-button labels)
       parameters:
         - name: revision_id
           in: query
@@ -7979,7 +7979,7 @@ paths:
     post:
       operationId: addBusinessMember
       tags: [CRUD Forms]
-      summary: A business user adds a member to a business-maintained dimension
+      summary: A user adds a member to a business-maintained dimension
       description: >-
         For a dimension the developer marked business_maintained (403 otherwise), on the open revision. The
         write guard applies to the parent: a hidden or read-only parent, a system-managed revision or a
@@ -8010,7 +8010,7 @@ paths:
     patch:
       operationId: updateBusinessMember
       tags: [CRUD Forms]
-      summary: A business user renames a member of a business-maintained dimension, or sets its properties
+      summary: A user renames a member of a business-maintained dimension, or sets its properties
       description: Label and properties only; a code or parent sent is refused with 400 (they are the developer's).
       parameters:
         - { name: dimId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -8028,7 +8028,7 @@ paths:
     delete:
       operationId: deleteBusinessMember
       tags: [CRUD Forms]
-      summary: A business user removes a member of a business-maintained dimension
+      summary: A user removes a member of a business-maintained dimension
       description: >-
         A member with members under it, one a formula names (MEMBER_IN_USE) or a pick-list cell holds is
         refused with 409. Its values go with it, kept in the cell history.

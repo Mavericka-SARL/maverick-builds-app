@@ -1443,7 +1443,7 @@ func (UnimplementedHandler) ListBusinessFolders(ctx context.Context, params List
 
 // ListBusinessIntegrations implements listBusinessIntegrations operation.
 //
-// List integrations visible to business users (e.g. for run-button labels).
+// List integrations visible to users (e.g. for run-button labels).
 //
 // GET /api/integrations
 func (UnimplementedHandler) ListBusinessIntegrations(ctx context.Context, params ListBusinessIntegrationsParams) (r ListBusinessIntegrationsRes, _ error) {

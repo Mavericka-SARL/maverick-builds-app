@@ -997,7 +997,7 @@ type Handler interface {
 	ListBusinessFolders(ctx context.Context, params ListBusinessFoldersParams) (ListBusinessFoldersRes, error)
 	// ListBusinessIntegrations implements listBusinessIntegrations operation.
 	//
-	// List integrations visible to business users (e.g. for run-button labels).
+	// List integrations visible to users (e.g. for run-button labels).
 	//
 	// GET /api/integrations
 	ListBusinessIntegrations(ctx context.Context, params ListBusinessIntegrationsParams) (ListBusinessIntegrationsRes, error)

@@ -330,7 +330,7 @@ Example — developer says "give regions a number factor and create scaled reven
 A metric that reads region.factor, PARENT(region), LOOKUP or *IFS over region computes only once it is
 placed on a grid that has region — always add the add_grid_metric step.
 
-## Text cells, highlights and lists business users keep
+## Text cells, highlights and lists users keep
 - A TEXT input (create_metric "format": "text", "is_input": true) holds a note in each cell — a per-row comment,
   an owner, a free label. It has no total (agg_rule and time_summary "none", the defaults) and formulas do not read
   it (TEXT_METRIC_IN_FORMULA). A workbook's comment column is a text input on the grid where the row lives; write
@@ -348,7 +348,7 @@ placed on a grid that has region — always add the add_grid_metric step.
   metric is on the grid, else its total (a threshold setting); "=" also takes text (a pick-list code). The first
   rule that holds wins; [] removes them. A workbook rule "ABS(S5) > Setup!$B$12" on Var % is
   {"abs": true, "op": ">", "than": "variance_threshold", "tone": "negative"} on the var % metric.
-- A list planners extend (strategic activities they name) is a dimension business users maintain:
+- A list planners extend (strategic activities they name) is a dimension users maintain:
   create_dimension / update_dimension "business_maintained": true lets them add, rename and remove its members
   from the grid — not periods, not a property grouping. Pre-made "Open slot" members are not needed then.
 
@@ -585,7 +585,7 @@ developer says so). Values are numbers, negative ones included. Missing members 
 them first (add_dimension_member) in the same proposal, or import the members into the dimension first.
 Imported data lands in the draft revision with everything else and goes live when the developer promotes it.
 A saved file integration is re-run later with a new file of the same columns: from the Integrations tab, or by
-a business user from a dashboard Integration button (add_dashboard_widget, widget_type "integration_button",
+a user from a dashboard Integration button (add_dashboard_widget, widget_type "integration_button",
 ref_id = the integration's id or name, content = the button's label) with a .csv or .xlsx file — the saved
 column_map and import_mode apply. The same button on an export downloads its file.
 update_integration {"integration_id", "name", "tags", "status", "target_id", "reshape", "column_map", "import_mode"}
@@ -614,7 +614,7 @@ see the layout. Steps (all optional, applied in this order, each naming the colu
 When the developer asks for the file "in the right format", or wants to check it before importing, call
 prepare_converted_file {"file", "sheet", "reshape", "column_map"} after a clean preview: it saves the converted
 file for them to download as CSV or Excel from the chat (nothing is imported). A saved file integration keeps
-its reshape, so a business user's later uploads of the same layout are reshaped too.
+its reshape, so a user's later uploads of the same layout are reshaped too.
 
 ## Writing input values
 A value the developer would type into a grid — a setting (Actual Through Month = 9), a rate, a one-off driver
@@ -628,7 +628,7 @@ unless "values_are_percent_units": true says it really is under 1%.
 
 ## Data export
 A data export (create_export_integration) is a saved, re-downloadable file of one grid's values in a format
-the developer specifies. The developer and business users download it from the Integrations tab or a
+the developer specifies. The developer and users download it from the Integrations tab or a
 dashboard button; each download is built fresh from that user's own view (hidden members and metrics are left
 out). Values are LEAF-level, inputs and calculated metrics alike: one row per leaf combination.
 Always call preview_export {"grid_id", "name", "spec"} first and show the developer the columns and first rows.

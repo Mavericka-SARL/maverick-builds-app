@@ -72,9 +72,9 @@
 
 <h2>The platform and the developer role</h2>
 <h3>What maverickbuilds.app is</h3>
-<p>maverickbuilds.app is a platform for building governed business applications without code. An application combines three kinds of capability that a developer configures and business users operate:</p>
+<p>maverickbuilds.app is a platform for building governed business applications without code. An application combines three kinds of capability that a developer configures and users operate:</p>
 <table>
-<tr><th style="width:18%">Mode</th><th>What the developer builds</th><th>What business users do</th></tr>
+<tr><th style="width:18%">Mode</th><th>What the developer builds</th><th>What users do</th></tr>
 <tr><td>Planning</td><td>Dimensions, metrics and formulas, grids, dashboards, revisions</td><td>Type and import values, read charts and KPIs, plan in grids</td></tr>
 <tr><td>CRUD</td><td>Forms, form-to-metric posting, imports, integrations</td><td>Submit and manage records that feed the plan</td></tr>
 <tr><td>Execution</td><td>Workflows, triggers, notifications</td><td>Start approvals, act on tasks in their inbox, get notified</td></tr>
@@ -107,7 +107,7 @@
   <li><b>Tenant.</b> The isolation boundary. Users, applications and data belong to exactly one tenant.</li>
   <li><b>Application.</b> What users open. Created by an administrator. Has a mode and a status.</li>
   <li><b>Model.</b> Owns everything below. An application usually has one; when it has several, the <b>business default</b> model is the one business consoles open.</li>
-  <li><b>Revision.</b> Every definition and every value belongs to a revision. Exactly one revision per model is <b>active</b>: that is what business users see and edit. A developer selects a revision on the Models screen and every Developer screen then works inside it.</li>
+  <li><b>Revision.</b> Every definition and every value belongs to a revision. Exactly one revision per model is <b>active</b>: that is what users see and edit. A developer selects a revision on the Models screen and every Developer screen then works inside it.</li>
 </ul>
 <h3>Revisions</h3>
 <ul>
@@ -173,7 +173,7 @@
 <ul>
   <li>A <b>grid</b> is a selection of metrics and dimensions. A metric belongs to one grid at most.</li>
   <li>A <b>dashboard</b> is a canvas of widgets. A grid widget decides which dimension is rows, columns or a selector; charts and KPIs read from grids and metrics; form, trigger, integration, text and import widgets complete the page.</li>
-  <li>Business users reach a dashboard only when a <b>business role</b> they belong to has been granted it. Roles, grants and per-user access rules are managed in the Business Admin console.</li>
+  <li>Users reach a dashboard only when a <b>business role</b> they belong to has been granted it. Roles, grants and per-user access rules are managed in the Business Admin console.</li>
 </ul>
 <h3>Visibility and locks</h3>
 <ul>
@@ -184,11 +184,11 @@
 <h3>Workflows, triggers and notifications</h3>
 <ul>
   <li>A <b>workflow definition</b> is steps and routes; a <b>trigger</b> (automation rule) starts it on an event; an <b>instance</b> is one run, keeping the definition it started with; a <b>task</b> is one step waiting for a person.</li>
-  <li>Tasks appear in the business Workflow Inbox of everyone holding the assigned role. Business users submit, business admins decide.</li>
+  <li>Tasks appear in the business Workflow Inbox of everyone holding the assigned role. Users submit, business admins decide.</li>
   <li>Notifications are in-app (the bell) and are produced by notification steps, rework and failed starts.</li>
 </ul>
 <h3>Audit</h3>
-<p>Every change made through the console, by developers and business users alike, is recorded in the audit log with the acting user, the object and the action. Administrators read it on the <b>Audit Log</b> screen; developers have no screen for it, but should know that their edits are attributable.</p>
+<p>Every change made through the console, by developers and users alike, is recorded in the audit log with the acting user, the object and the action. Administrators read it on the <b>Audit Log</b> screen; developers have no screen for it, but should know that their edits are attributable.</p>
 
 <h2>Getting around the console</h2>
 <figure><img src="img/13-account-menu.png" alt="Developer console with the account menu open showing email, roles and Sign out"><figcaption>The shell: sidebar groups on the left, the context bar at the top with Model and Revision, the notification bell and the account menu.</figcaption></figure>
@@ -222,7 +222,7 @@
 <ul>
   <li><b>Selection is per session and not saved.</b> On a fresh sign-in the console pre-selects the most recently created revision, and if you skip this screen it falls back to a default revision that may belong to another application. Check the header (<b>Model</b> and <b>Revision</b>) before creating anything.</li>
   <li><b>Applications and models are created by administrators</b>: on the Applications screen of the tenant or platform admin, or at the top of this screen for a developer who is also one. A developer alone creates revisions, not applications or models.</li>
-  <li><b>Active means live.</b> Business users always see the active revision. Build and test in a non-active revision, then <b>Set active</b>.</li>
+  <li><b>Active means live.</b> Users always see the active revision. Build and test in a non-active revision, then <b>Set active</b>.</li>
 </ul>
 
 <h2>Metrics</h2>
@@ -299,7 +299,7 @@
   <li><b>Properties in formulas.</b> Declare the property here with its type, then write <code>dimension.property</code>: <code>=headcount * employees.salary</code> reads a number, <code>=SUMIFS(salary, employees.region, "EMEA")</code> uses a text property as a criterion, <code>=LOOKUP(fx_rate, currency, entity.currency)</code> uses it as a member code. A number property whose value does not parse gives <code>#VALUE!</code>; an empty value is blank. A formula naming an undeclared property is refused when the metric is saved.</li>
   <li><b>Changes recalculate.</b> Adding, editing or deleting a member, and adding, renaming, retyping or deleting a property, recalculates every metric whose formula uses the dimension. Renaming a property also renames it in every member's values, in any property-derived grouping and in every formula that reads it, in one step. Deleting a property, or the whole dimension, is refused while a formula still reads it; the message names the metrics to change first. Deleting a member is refused the same way while a formula names its code — a literal member in a LOOKUP, a TIMESUM start or end period, a criterion such as <code>SUMIFS(sales, zone, "Z2")</code>, or a comparison such as <code>IF(zone = "Z2", …)</code>; a criterion like <code>"&lt;&gt;Z2"</code> or <code>"Z*"</code> does not count. Renaming a member is not refused and does not change formulas: a formula naming the old code then shows “—” with an error naming the member, and the revision cannot be activated until the formula changes. A new dimension or metric, or a rename, is refused when the revision already has one of that name. Properties declared by a CSV or connector import keep the file's header as their name; a header that is not an identifier cannot be used in a formula.</li>
   <li><b>Calculated members.</b> A top-level member of a standard dimension can be computed from the dimension's other members, for every metric: edit the member and give it a <b>formula</b> such as <code>{RF} - {LY}</code>. The formula names member codes and may use <code>IF</code>, <code>ABS</code>, <code>MIN</code>, <code>MAX</code>, <code>ROUND</code>, <code>AND</code>, <code>OR</code>, <code>NOT</code> and <code>METRICFORMAT()</code>, the format of the metric it is computed for, so a margin's variance can be in points: <code>IF(METRICFORMAT() = "percentage", {RF} - {LY}, IF({LY} = 0, 0, ({RF} - {LY}) / ABS({LY}) * 100))</code>. Its value at every level is computed from its siblings there: the FY variance % from the FY values, never the months' percentages added up. It holds no input, is in no total, and cannot have members under it; a metric formula reads the members it is computed from, not the calculated member. This is the comparison layout: one <code>scenario</code> dimension (RF, LY, Variance, Variance %) on the P&amp;L grid and one metric per line reading the scenario (<code>=IF(scenario = "RF", rev_rf, rev_ly)</code>), instead of a copy of every line per block. Renaming a member updates the formulas that name it; a member a formula names cannot be deleted.</li>
-  <li><b>Members business users keep.</b> Edit a standard dimension's header and tick <b>Business users maintain its members</b> (the card shows "business-maintained"): on any grid whose rows are that dimension, business users then add a member (<b>Add &lt;dimension&gt;</b> under the table: a name, and its parent when the leaves sit under parents), rename one and remove one (icons on the row, on hover) — a planner naming a new strategic activity. Only labels and declared properties are theirs: the code is generated when they give none (the next of the dimension's numbered codes, STRAT-021, else the name in capitals), and codes, parents, periods and the dimension itself stay the developer's. Each change is held to the business user's own access: the open revision, the write guard on the parent or member (hidden or read-only members, a system-managed revision, a workflow lock), and a member with members under it, one a formula names or a pick-list cell holds, cannot be removed. A time dimension or a property grouping cannot be business-maintained. Their routes are <code>POST/PATCH/DELETE /api/dimensions/{dimId}/members</code>.</li>
+  <li><b>Members users keep.</b> Edit a standard dimension's header and tick <b>Users maintain its members</b> (the card shows "business-maintained"): on any grid whose rows are that dimension, users then add a member (<b>Add &lt;dimension&gt;</b> under the table: a name, and its parent when the leaves sit under parents), rename one and remove one (icons on the row, on hover) — a planner naming a new strategic activity. Only labels and declared properties are theirs: the code is generated when they give none (the next of the dimension's numbered codes, STRAT-021, else the name in capitals), and codes, parents, periods and the dimension itself stay the developer's. Each change is held to the user's own access: the open revision, the write guard on the parent or member (hidden or read-only members, a system-managed revision, a workflow lock), and a member with members under it, one a formula names or a pick-list cell holds, cannot be removed. A time dimension or a property grouping cannot be business-maintained. Their routes are <code>POST/PATCH/DELETE /api/dimensions/{dimId}/members</code>.</li>
   <li>Dimensions are per revision, like everything else under Build.</li>
 </ul>
 
@@ -316,7 +316,7 @@
 </table>
 <h2>Forms</h2>
 <p class="path">Sidebar: Developer › Forms</p>
-<p>A form is a structured record type that business users fill in: a purchase request, an expense claim, a headcount change. This screen defines the <em>schema</em> only. Records are entered and reviewed through a <b>Form</b> widget on a dashboard; posting form values into planning cells is configured under Integrations › Form Records.</p>
+<p>A form is a structured record type that users fill in: a purchase request, an expense claim, a headcount change. This screen defines the <em>schema</em> only. Records are entered and reviewed through a <b>Form</b> widget on a dashboard; posting form values into planning cells is configured under Integrations › Form Records.</p>
 <figure><img src="img/04-forms.png" alt="Forms screen listing the Purchase Request form with six fields"><figcaption>The form list. Each card shows the display label, the technical name, the field count and the field labels.</figcaption></figure>
 <h3>Controls</h3>
 <table class="ctl">
@@ -337,9 +337,9 @@
   <li><b>Forms are per revision.</b> The list and the create action use the selected revision. Editing never moves a form to another revision.</li>
   <li><b>Same name overwrites.</b> Creating a form whose technical name already exists in the revision silently replaces that form's label and fields. Pick a new name for a new form.</li>
   <li><b>Delete cascades.</b> Deleting a form removes every dashboard widget that shows it and every record ever submitted to it.</li>
-  <li><b>Records live on dashboards.</b> Business users and business admins work on records only in a dashboard <b>Form</b> widget: <b>New record</b>, the pencil to edit one, the status list, delete, <b>Export</b> and <b>Import</b> (CSV and XLSX), and, for an administrator, <b>Sync to grid</b> — each offered only when the server allows it to that person. There is no Forms screen in the User group. The developer screen has no record controls.</li>
+  <li><b>Records live on dashboards.</b> Users and business admins work on records only in a dashboard <b>Form</b> widget: <b>New record</b>, the pencil to edit one, the status list, delete, <b>Export</b> and <b>Import</b> (CSV and XLSX), and, for an administrator, <b>Sync to grid</b> — each offered only when the server allows it to that person. There is no Forms screen in the User group. The developer screen has no record controls.</li>
   <li><b>Posting to cells is a separate object.</b> A form mapping (Integrations › Form Records) decides which field feeds which input metric, at which dimension members, for which record statuses. Metric and Dimension field types exist so the mapping has something to read.</li>
-  <li><b>Where forms appear.</b> Business users and business admins open a form through a dashboard <b>Form</b> widget. A form that is on no dashboard is not reachable by them: place every form people fill in on a dashboard their business role is granted.</li>
+  <li><b>Where forms appear.</b> Users and business admins open a form through a dashboard <b>Form</b> widget. A form that is on no dashboard is not reachable by them: place every form people fill in on a dashboard their business role is granted.</li>
 </ul>
 <figure><img src="img/23-form-editor.png" alt="Inline form editor with field rows, types and Required checkboxes"><figcaption>The inline editor. Field rows carry a name, a label, a type and a Required flag; a Metric field shows its By ID / By name choice below the row.</figcaption></figure>
 
@@ -374,7 +374,7 @@
 </ul>
 <h2>Dashboards</h2>
 <p class="path">Sidebar: Developer › Dashboards</p>
-<p>A dashboard is the page a business user opens. It is a free-form canvas of widgets: grids to plan in, charts and KPIs to read, forms to submit, buttons that start workflows or integrations, text and pictures, and an import box. Dashboards are organised in folders and tagged, and are granted to business roles on the Users screen.</p>
+<p>A dashboard is the page a user opens. It is a free-form canvas of widgets: grids to plan in, charts and KPIs to read, forms to submit, buttons that start workflows or integrations, text and pictures, and an import box. Dashboards are organised in folders and tagged, and are granted to business roles on the Users screen.</p>
 <figure><img src="img/06-dashboards.png" alt="Dashboards list grouped by folder with tag chips and a Design button per dashboard"><figcaption>The dashboard list. Folders group dashboards; the Folder control on a row moves it; Design opens the canvas.</figcaption></figure>
 
 <h3>The list</h3>
@@ -399,7 +399,7 @@
 <p><b>Text</b> takes a small Markdown subset — <code>#</code> headings, <code>**bold**</code>, <code>*italic*</code>, <code>`code`</code>, bullet and numbered lists, <code>&gt;</code> quotes, <code>---</code> rules and links — <code>[label](https://example.com)</code> to another site, or <code>[label](/docs/formulas-manual/manual.html)</code> to a page of this deployment such as the manuals it ships with. Both open in a new tab, so the console stays where it was. A link can also open another dashboard in place: <code>[label](dashboard:Dashboard name)</code> for one of the same model, <code>[label](dashboard:Model name/Dashboard name)</code> for one of another model, and <code>[label](dashboard:Model name/)</code> for another model's first dashboard. <b>Link to a dashboard…</b> under the text box writes one for you: pick a model and a dashboard, then <b>Insert link</b>. Such a link names the model and the dashboard rather than pointing at them, so it keeps working through a revision copy, an export and an import; rename the target and the link says it cannot find it. It follows the reader's own access: a model they cannot open or a dashboard their roles hide is reported, never shown. In Design and Preview a dashboard link is inert; it works under <b>User › Dashboards</b>. Plain text that uses none of it is shown as typed. <b>Image</b> takes a PNG, JPEG, SVG, WebP or GIF of up to 512 KB, chosen with a file picker; the picture is stored with the dashboard, so it travels with a revision copy, an export and an import, and it takes alternative text for screen readers and a <b>Fit</b> of "show all of it" or "fill the box". Together they are what an explanatory page is built from — the tour a new workspace starts with is written in exactly these widgets.</p>
 <ul>
   <li><b>Design</b> is for placing and configuring widgets. Nothing is live.</li>
-  <li><b>Preview</b> renders the dashboard exactly as a business user gets it, against the revision you are designing, and includes property edits you have not saved yet. Values typed into a grid in Preview are real writes.</li>
+  <li><b>Preview</b> renders the dashboard exactly as a user gets it, against the revision you are designing, and includes property edits you have not saved yet. Values typed into a grid in Preview are real writes.</li>
 </ul>
 
 <h4>Adding a widget</h4>
@@ -413,7 +413,7 @@
 <tr><td><b>Trigger</b></td><td><b>Trigger</b>: an automation rule with trigger type manual that is enabled. If none exists the panel says so. Renders a button that starts the rule's workflow.</td></tr>
 <tr><td><b>Integration</b></td><td><b>Integration</b>: a REST API integration. Renders a button that runs it.</td></tr>
 <tr><td><b>Text</b></td><td><b>Content</b>: static text, styled in the properties panel.</td></tr>
-<tr><td><b>Import</b></td><td><b>Grid</b>: an upload box that lets business users import a file into that grid.</td></tr>
+<tr><td><b>Import</b></td><td><b>Grid</b>: an upload box that lets users import a file into that grid.</td></tr>
 </table>
 
 <h4>Moving, sizing, selecting</h4>
@@ -462,7 +462,7 @@
 </table>
 <p>A configuration is complete when it has a type, a plotted dimension and the required metrics.</p>
 
-<h3>What business users get: the planning grid</h3>
+<h3>What users get: the planning grid</h3>
 <figure><img src="img/28-dashboard-preview.png" alt="Preview of the OPEX Planning dashboard with an editable grid, a Trigger button and a text widget"><figcaption>Preview. Input rows are editable, the calculated row is tinted and marked CALC, and the legend explains the tints.</figcaption></figure>
 <ul>
   <li><b>Editing.</b> Input metrics are inputs; a value is committed on Enter or when leaving the cell. Non-numeric text is discarded. "Saving…" and "Save failed: …" appear while writing.</li>
@@ -476,10 +476,10 @@
 </ul>
 
 <h3>Making a dashboard reachable</h3>
-<p>A business user sees a dashboard only when one of their business roles has been granted it. Grants are managed on the Users screen (Users chapter). Until then the dashboard exists only for developers.</p>
+<p>A user sees a dashboard only when one of their business roles has been granted it. Grants are managed on the Users screen (Users chapter). Until then the dashboard exists only for developers.</p>
 <h2>Workflows</h2>
 <p class="path">Sidebar: Developer › Workflows</p>
-<p>A workflow is a reusable approval or task process: who has to act, in what order, under which conditions, and who is told. Business users start it (from a dashboard button, a form submission, an import, or on demand), see their tasks in the Workflow Inbox, and decide them there. Developers define and publish it here.</p>
+<p>A workflow is a reusable approval or task process: who has to act, in what order, under which conditions, and who is told. Users start it (from a dashboard button, a form submission, an import, or on demand), see their tasks in the Workflow Inbox, and decide them there. Developers define and publish it here.</p>
 <figure><img src="img/07-workflows.png" alt="Workflows list with name, status, trigger, step count and updated date"><figcaption>The list. Status badges: Draft, Published, Archived, Invalid. The trigger column shows the event the workflow starts on.</figcaption></figure>
 <h3>The list</h3>
 <table class="ctl">
@@ -539,10 +539,10 @@
 </ul>
 <figure><img src="img/31-workflow-validate.png" alt="Validation Results dialog"><figcaption>Validation runs against the draft on screen, so you can check before saving.</figcaption></figure>
 
-<h3>What business users experience</h3>
+<h3>What users experience</h3>
 <ul>
   <li><b>Starting.</b> Manual workflows appear under "Start a workflow" in the business Workflow Inbox and behind dashboard <b>Trigger</b> buttons. Context variables become the start form; Dimension member and Metric variables are multi-selects, one instance per combination, at most 20 per submission. An approver of a workflow does not start it — separation of duties — unless the definition ticks <b>Who starts it: its approver may start it</b> in its properties (a planning round its FP&amp;A lead opens and approves); the setting holds for dashboard buttons and automation triggers too, and revision copies and model export carry it.</li>
-  <li><b>Acting.</b> Tasks show the step name, workflow, requester, due date (SLA), instructions, a context summary, a comment box (required when the step says so) and the buttons: <b>Approve</b> / <b>Reject</b>, the task's completion label, or <b>Continue as true</b> / <b>Continue as false</b> for an unevaluable condition. Business admins decide; business users submit and also act on tasks assigned to their role.</li>
+  <li><b>Acting.</b> Tasks show the step name, workflow, requester, due date (SLA), instructions, a context summary, a comment box (required when the step says so) and the buttons: <b>Approve</b> / <b>Reject</b>, the task's completion label, or <b>Continue as true</b> / <b>Continue as false</b> for an unevaluable condition. Business admins decide; users submit and also act on tasks assigned to their role.</li>
   <li><b>Locking.</b> While an approval step of an instance is open, and after the instance was approved, the cells in its scope are locked against edits and imports. While it is at a task, a condition or a notification they stay editable — a correction round's tasks change the data they are about — and a reject that sends it back to a task opens them again; a rejected or cancelled instance releases them.</li>
   <li><b>Rework.</b> A route back to an earlier step re-activates it with a "Sent back for rework (n)" note and notifies the assignee. At most 20 reworks per instance.</li>
   <li><b>Notifications</b> are in-app: the bell in every console. Notification steps, rework, and failed starts produce them.</li>
@@ -564,7 +564,7 @@
 <tr><td><b>Create rule</b> / <b>Save</b></td><td>Needs a name and a workflow.</td></tr>
 <tr><td><b>Schedule</b></td><td>Shown for <b>schedule</b> rules: a five-field <b>Cron expression</b> (minute hour day-of-month month day-of-week; <code>0 6 1 * *</code> is 06:00 on the 1st of every month), the <b>Time zone</b> it is read in (IANA name, default UTC), and what a <b>Missed run</b> does after downtime — skip it, or run it once as soon as possible. The row shows the expression and the next run time.</td></tr>
 <tr><td>Row badges</td><td>Disabled state, trigger type, source, "→ workflow", and the workflow's status (published, draft, archived, or "workflow not found").</td></tr>
-<tr><td><b>Trigger</b> button</td><td>Manual rules only. Confirm <b>Fire this trigger?</b>: starts a real, live instance exactly as a business user's dashboard button would. Not a dry run.</td></tr>
+<tr><td><b>Trigger</b> button</td><td>Manual rules only. Confirm <b>Fire this trigger?</b>: starts a real, live instance exactly as a user's dashboard button would. Not a dry run.</td></tr>
 <tr><td>Enable / Disable icon</td><td>Disabling stops the rule from firing (button or event) until re-enabled; running instances are unaffected. Disabling asks for confirmation.</td></tr>
 <tr><td>Edit, Delete</td><td>Inline edit; delete confirms <b>Delete rule?</b>.</td></tr>
 <tr><td><b>Execution Log</b></td><td>Recent runs: id, status (completed, running, failed, cancelled), instance, started. Refreshes every 8 s.</td></tr>
@@ -573,7 +573,7 @@
 <h3>Rules and behaviour</h3>
 <ul>
   <li><b>A rule is event → workflow, nothing more.</b> Conditions and actions belong to the workflow's steps. A schedule is an event like any other: it starts a manual workflow at the times it names.</li>
-  <li><b>Dashboard buttons</b> can only run rules that are manual and enabled. A business user sees a disabled button with the reason when that stops being true.</li>
+  <li><b>Dashboard buttons</b> can only run rules that are manual and enabled. A user sees a disabled button with the reason when that stops being true.</li>
   <li><b>A failed start</b> (for example a duplicate refused by "one active instance per scope") produces a "Workflow could not start" notification for the person who triggered it.</li>
   <li>Rules are per revision and are copied with it.</li>
 </ul>
@@ -597,7 +597,7 @@
 </table>
 <p><b>File layout by target.</b> Grid: one column per dimension holding leaf member codes, and either one column per metric named after it (wide) or a column of metric names mapped to <b>metric</b> with the amounts in a column mapped to <b>value</b> (long). Values may be negative. Form: one column per form field name. Dimension: <code>code</code>, <code>label</code> and optionally <code>parent_code</code>.</p>
 <p><b>Files laid out for people.</b> A workbook with a title above the header, months across the columns, a label written once per group, total rows or amounts in thousands does not need fixing by hand. The wizard's <b>Shape</b> step, after the upload, sets the <b>Header row</b> (the file as read is shown with its row numbers), <b>Fill down</b> columns, rules to <b>Skip rows</b> ("Total"), <b>Columns into rows</b> (Jan…Dec into a Month column and a value column), <b>Fixed values</b> (Scenario = Budget), <b>Rename values</b> (labels to member codes) and <b>Numbers</b> (decimal comma, a column in thousands). <b>Preview</b> shows the rows as the import will read them, and the next step maps those columns. With nothing set, the file is read as it is. <b>Save as integration</b> keeps the shape, and it applies to every later file of that layout; the integration's line then reads <b>Reshapes each file: …</b>, <b>Run with a file</b> imports a file as it is, and <b>Edit shape and mapping</b> changes them on a sample file without importing. The <b>AI Developer</b> can set the same shape up, and can hand back a converted file as CSV or Excel.</p>
-<p><b>Running a saved integration with a new file.</b> The integration keeps its column mapping, so the next file only has to have the same columns. <b>Run Import</b> opens the wizard with it; on a dashboard, an <b>Integration</b> button lets a business user pick a <code>.csv</code>, <code>.xlsx</code> or <code>.xlsm</code> file and imports it straight away with the saved mapping and mode: valid rows are imported, and the first failing row is named under the button. Every run, from either place, is in the integration's <b>Run history</b>.</p>
+<p><b>Running a saved integration with a new file.</b> The integration keeps its column mapping, so the next file only has to have the same columns. <b>Run Import</b> opens the wizard with it; on a dashboard, an <b>Integration</b> button lets a user pick a <code>.csv</code>, <code>.xlsx</code> or <code>.xlsm</code> file and imports it straight away with the saved mapping and mode: valid rows are imported, and the first failing row is named under the button. Every run, from either place, is in the integration's <b>Run history</b>.</p>
 <p><b>Saved Integrations</b> lists CSV and Google Sheets integrations with a status badge, tags, <b>Sync Now</b> (Sheets), <b>Run history</b> and <b>Delete integration</b> ("removes the integration and its import history"). Double-click a name to rename. <b>Recent Imports</b> shows each import job with its status (Validating, Committed, error) and a delete action.</p>
 <div class="note warn"><b>Imports write to the revision you choose and respect the same rules as typing.</b> Hidden or read-only members, calculated metrics, locked workflow scopes and system-managed revisions are refused row by row. Each committed import triggers recalculation and can start a workflow through an integration trigger.</div>
 
@@ -623,7 +623,7 @@
 <tr><td><b>Schedule</b></td><td><b>Execution</b>: Manual only, Interval (<b>Every (seconds)</b>, minimum 60), Daily, Weekly, Advanced (cron, five fields), with <b>Timezone (IANA)</b>, <b>Overlap policy</b> (skip this tick, or queue behind it) and a <b>Schedule enabled</b> switch. Limits: <b>Max pages</b>, <b>Max records</b>, <b>Max requests</b>, <b>Failure threshold</b> (abort after this many bad records).</td></tr>
 </table>
 <p>The list shows each integration with its status and actions; deleting removes "the definition, its schedule and run history" and any dashboard buttons that reference it. <b>Run history</b> shows per run: status, trigger, started, duration, HTTP status, pages, requests, retries, read, written, skipped.</p>
-<div class="note"><b>Where REST integrations surface.</b> A dashboard <b>Integration</b> button lets a business user run one on demand. An integration's "import completed" and "import failed" events can start a workflow (Workflows › Starts on; Triggers).</div>
+<div class="note"><b>Where REST integrations surface.</b> A dashboard <b>Integration</b> button lets a user run one on demand. An integration's "import completed" and "import failed" events can start a workflow (Workflows › Starts on; Triggers).</div>
 
 <h3>Form Records → Metrics</h3>
 <figure><img src="img/36-integrations-form-records.png" alt="Form Records section for posting form record values to input metrics"><figcaption>A form mapping posts values from submitted or approved records into an input metric.</figcaption></figure>
@@ -656,7 +656,7 @@
 <tr><td><b>Header row</b>, <b>Include combinations without values</b></td><td>Whether CSV and Excel start with a header row; whether every leaf combination gets a row, even with no values.</td></tr>
 <tr><td><b>Column names</b></td><td>Rename any column as it should appear in the file.</td></tr>
 </table>
-<p>Each card has <b>Download</b>, edit and delete. A download is built when it is asked for, from the downloader's own view of the grid: members and metrics hidden from them are left out, and every value is the one their grid shows. Put an export on a dashboard with an <b>Integration</b> button and business users download it there; each download is kept in the export's run history. The AI Developer creates exports the same way (see the AI chapter), and can import a spreadsheet attached to its chat into a grid or dimension.</p>
+<p>Each card has <b>Download</b>, edit and delete. A download is built when it is asked for, from the downloader's own view of the grid: members and metrics hidden from them are left out, and every value is the one their grid shows. Put an export on a dashboard with an <b>Integration</b> button and users download it there; each download is kept in the export's run history. The AI Developer creates exports the same way (see the AI chapter), and can import a spreadsheet attached to its chat into a grid or dimension.</p>
 <h2>AI Developer</h2>
 <p class="path">Sidebar: Developer › AI Developer</p>
 <p>A chat assistant that can read the model and, when you approve, build, change and remove what you build on the other Developer screens, under the same checks. Model changes happen in an isolated <b>AI draft</b> revision that you promote or discard, so the live model is never touched by accident. Three kinds of change are live as soon as you execute the plan, as they are on their own screens: business roles, user access rules, and form records posted through a form integration.</p>
@@ -718,10 +718,10 @@
 </table>
 
 <h3>Where the rest of access is configured</h3>
-<p>Three things decide what a business user sees and may change. Role membership and access rules live in the <b>Business Admin</b> console (sidebar group <b>Business Admin</b>), which a developer sees only when they also hold the business_admin role or ask a business admin:</p>
+<p>Three things decide what a user sees and may change. Role membership and access rules live in the <b>Business Admin</b> console (sidebar group <b>Business Admin</b>), which a developer sees only when they also hold the business_admin role or ask a business admin:</p>
 <ul>
   <li><b>Roles.</b> The roles above, with their members.</li>
-  <li><b>Dashboard access.</b> Per role, the dashboards its members may open (<b>Save dashboard access</b>). A business user who holds any business role sees only the dashboards granted to their roles; one who holds none sees every dashboard.</li>
+  <li><b>Dashboard access.</b> Per role, the dashboards its members may open (<b>Save dashboard access</b>). A user who holds any business role sees only the dashboards granted to their roles; one who holds none sees every dashboard.</li>
   <li><b>Access rules.</b> Per user, an <b>Access level</b> of write, read or hidden for individual dimension members and metrics (<b>Save rules</b>). Hidden members disappear from grids, charts and selectors; read makes cells read-only; rules on a parent member cascade to its descendants.</li>
 </ul>
 <h2>Limits and what is not supported</h2>
@@ -745,8 +745,8 @@
 <table>
 <tr><th style="width:36%">Symptom</th><th>Cause and fix</th></tr>
 <tr><td>Objects you created are missing, or turned up in another application</td><td>They went into the revision that was selected at the time. Models › click the right revision row; check <b>Model</b> and <b>Revision</b> in the context bar. Delete the strays where they landed.</td></tr>
-<tr><td>Business users see an older model, or nothing</td><td>Your revision is not active, or the model is not the business default. Models › <b>Set active</b>, <b>Set as business default</b>.</td></tr>
-<tr><td>A business user cannot see a dashboard</td><td>No business role of theirs has the dashboard. Business Admin › Roles › Configure › tick the dashboard › <b>Save dashboard access</b>.</td></tr>
+<tr><td>Users see an older model, or nothing</td><td>Your revision is not active, or the model is not the business default. Models › <b>Set active</b>, <b>Set as business default</b>.</td></tr>
+<tr><td>A user cannot see a dashboard</td><td>No business role of theirs has the dashboard. Business Admin › Roles › Configure › tick the dashboard › <b>Save dashboard access</b>.</td></tr>
 <tr><td>Add metric stays disabled</td><td>A formula reference is unknown (red "✗ unknown" badge) or a Rate rule lacks an operand. Create the referenced inputs first; names are snake_case.</td></tr>
 <tr><td>A metric will not tick in a grid</td><td>It already belongs to another grid; untick it there first.</td></tr>
 <tr><td>Calculated cells show $0 or blank</td><td>Inputs were not committed (press Enter or leave the cell), or metric and grid are in different revisions. A blank means no input exists at that intersection.</td></tr>
@@ -766,7 +766,7 @@
 
 <h2>Glossary</h2>
 <table class="kv">
-<tr><td>Active revision</td><td>The one revision of a model that business users see and edit.</td></tr>
+<tr><td>Active revision</td><td>The one revision of a model that users see and edit.</td></tr>
 <tr><td>Access rule</td><td>Per-user write, read or hidden setting on a member or metric, cascading to descendants.</td></tr>
 <tr><td>Aggregation rule</td><td>How a metric's member values combine into totals: Sum, Average, Count, Rate, Formula.</td></tr>
 <tr><td>Automation rule (trigger)</td><td>Event → workflow. Manual rules power dashboard Trigger buttons.</td></tr>

@@ -1689,11 +1689,14 @@ func (pkg *Package) StripUnreadWidgetProps() []string {
 	return notes
 }
 
+// ImportedDescription is the description of every revision an import makes.
+const ImportedDescription = "Imported from package"
+
 func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string, pkg *Package, importerID string) (revisionID string, err error) {
 	pkg.StripUnreadWidgetProps()
 	if err = tx.QueryRow(ctx,
-		`INSERT INTO model.revision (model_id, name, description) VALUES ($1::uuid, $2, 'Imported from package') RETURNING id::text`,
-		modelID, revisionName).Scan(&revisionID); err != nil {
+		`INSERT INTO model.revision (model_id, name, description) VALUES ($1::uuid, $2, $3) RETURNING id::text`,
+		modelID, revisionName, ImportedDescription).Scan(&revisionID); err != nil {
 		return "", fmt.Errorf("create revision: %w", err)
 	}
 

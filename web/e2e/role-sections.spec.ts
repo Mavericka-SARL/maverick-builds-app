@@ -44,9 +44,10 @@ test("tenant_admin + business_admin: tenant-admin tabs sit in the business admin
   await signInAs(page, ["business_admin", "tenant_admin"]);
   await page.goto("/");
   await expect(mark(page)).toBeVisible({ timeout: 15_000 });
-  // Business-admin groups…
-  await expect(nav(page, "Dashboards")).toBeVisible();
+  // Business-admin groups (no Dashboards without the user role)…
+  await expect(nav(page, "Workflow Inbox")).toBeVisible();
   await expect(nav(page, "Access Rules")).toBeVisible();
+  await expect(nav(page, "Dashboards")).toHaveCount(0);
   // …and the tenant-admin group, in the same sidebar.
   await expect(nav(page, "Applications")).toBeVisible();
   await expect(nav(page, "Users")).toBeVisible();
@@ -65,13 +66,26 @@ test("platform_admin + developer: Developer and Platform groups in one sidebar, 
   await expect(nav(page, "Users")).toHaveCount(1);
 });
 
-test("business_user + business_admin: the admin User group supersedes the user one", async ({ page }) => {
+test("business_user + business_admin: the user role's User group and the admin screens, nothing twice", async ({ page }) => {
   await signInAs(page, ["business_user", "business_admin"]);
   await page.goto("/");
   await expect(mark(page)).toBeVisible({ timeout: 15_000 });
   await expect(nav(page, "Dashboards")).toHaveCount(1);
-  await expect(nav(page, "My History")).toHaveCount(0);
+  await expect(nav(page, "Workflow Inbox")).toHaveCount(1);
+  await expect(nav(page, "Models")).toHaveCount(1);
+  await expect(nav(page, "My History")).toBeVisible();
   await expect(nav(page, "History")).toBeVisible();
+  await expect(nav(page, "Roles")).toBeVisible();
+});
+
+test("business_admin alone: the admin screens, and no dashboards — those come with the user role", async ({ page }) => {
+  await signInAs(page, ["business_admin"]);
+  await page.goto("/");
+  await expect(mark(page)).toBeVisible({ timeout: 15_000 });
+  await expect(nav(page, "Dashboards")).toHaveCount(0);
+  for (const screen of ["Workflow Inbox", "History", "Roles", "Access Rules", "Models"]) {
+    await expect(nav(page, screen)).toBeVisible();
+  }
 });
 
 test("a single-role user still opens exactly where they always did", async ({ page }) => {

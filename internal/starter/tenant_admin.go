@@ -206,18 +206,18 @@ What a person sees in the console depends on their roles: each role adds its own
 
 1. Press **Invite user**.
 2. Fill in **Email**, **First name** and **Last name** — all three are needed.
-3. Choose an **Initial Role**: developer, business admin or business user. For a business role, also choose the **Workspace**: a business role grants nothing until it has one.
+3. Choose an **Initial Role**: developer, business admin or user. For a business role, also choose the **Workspace**: a business role grants nothing until it has one.
 4. Press **Create user**.
 
 They get an e-mail asking them to set a password, and its link works for three days. The address is their sign-in and cannot be changed later, so check it first. If the invitation cannot be sent, no account is created and the screen says why.`, 244),
 
 		taText(`## Which role to give
 
-- **Business user** — enters numbers, fills in forms, submits requests, reads dashboards.
-- **Business admin** — approves requests, and decides who sees which dashboards and which data inside a model.
+- **User** — enters numbers, fills in forms, submits requests, reads dashboards.
+- **Business admin** — approves requests, and decides who sees which dashboards and which data inside a model. Dashboards themselves come with **User**: give both to someone who also plans.
 - **Developer** — builds models: dimensions, metrics, grids, dashboards, forms, workflows, integrations.
 
-You can give these three here, but not your own role; a platform admin — whoever runs this deployment — can make another tenant admin. A developer can invite people too, with the two business roles only, and cannot decide which applications or models they reach.`, 196),
+You can give these three here, but not your own role; a platform admin — whoever runs this deployment — can make another tenant admin. A developer can invite people too, with the two business roles only, and cannot decide which applications or models they reach.`, 216),
 
 		taPicture(taGrants(), "Who may grant what: a platform admin every role, a tenant admin the developer and business roles plus application and model access, a developer the business roles", 880, 214),
 
@@ -406,7 +406,7 @@ func taGrants() string {
 	const chipX, chipW, chipStep = 262, 116, 124
 	s += `<text x="` + itoa(chipX+(4*chipStep-10)/2) + `" y="16" text-anchor="middle" font-size="12" fill="` + muted + `">can give the role</text>`
 	s += `<text x="` + itoa(chipX+4*chipStep+chipW/2) + `" y="16" text-anchor="middle" font-size="12" fill="` + muted + `">can restrict</text>`
-	chips := []string{"tenant admin", "developer", "business admin", "business user", "apps and models"}
+	chips := []string{"tenant admin", "developer", "business admin", "user", "apps and models"}
 	rows := []struct {
 		who, sub string
 		strong   bool

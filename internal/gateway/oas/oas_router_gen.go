@@ -12589,7 +12589,7 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 									switch method {
 									case "POST":
 										r.name = AddBusinessMemberOperation
-										r.summary = "A business user adds a member to a business-maintained dimension"
+										r.summary = "A user adds a member to a business-maintained dimension"
 										r.operationID = "addBusinessMember"
 										r.operationGroup = ""
 										r.pathPattern = "/api/dimensions/{dimId}/members"
@@ -12623,7 +12623,7 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 										switch method {
 										case "DELETE":
 											r.name = DeleteBusinessMemberOperation
-											r.summary = "A business user removes a member of a business-maintained dimension"
+											r.summary = "A user removes a member of a business-maintained dimension"
 											r.operationID = "deleteBusinessMember"
 											r.operationGroup = ""
 											r.pathPattern = "/api/dimensions/{dimId}/members/{memberId}"
@@ -12632,7 +12632,7 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 											return r, true
 										case "PATCH":
 											r.name = UpdateBusinessMemberOperation
-											r.summary = "A business user renames a member of a business-maintained dimension, or sets its properties"
+											r.summary = "A user renames a member of a business-maintained dimension, or sets its properties"
 											r.operationID = "updateBusinessMember"
 											r.operationGroup = ""
 											r.pathPattern = "/api/dimensions/{dimId}/members/{memberId}"
@@ -13295,7 +13295,7 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 							switch method {
 							case "GET":
 								r.name = ListBusinessIntegrationsOperation
-								r.summary = "List integrations visible to business users (e.g. for run-button labels)"
+								r.summary = "List integrations visible to users (e.g. for run-button labels)"
 								r.operationID = "listBusinessIntegrations"
 								r.operationGroup = ""
 								r.pathPattern = "/api/integrations"

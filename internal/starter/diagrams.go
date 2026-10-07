@@ -196,7 +196,7 @@ func roles() string {
 		yours      bool
 	}
 	rs := []role{
-		{"Business user", "enters numbers, fills in forms, starts requests", false},
+		{"User", "enters numbers, fills in forms, starts requests", false},
 		{"Business admin", "acts on requests; sets who sees which pages and data", true},
 		{"Developer", "builds models: metrics, grids, dashboards, forms, workflows", true},
 		{"Tenant admin", "invites people, grants roles, runs the workspace", true},

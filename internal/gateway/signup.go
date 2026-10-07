@@ -152,7 +152,7 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 				h.log.Error().Err(err).Str("email", req.Email).Msg("sign-up rollback: identity provider account not removed")
 			}
 		})
-		for _, role := range []string{"tenant_admin", "developer", "business_admin"} {
+		for _, role := range []string{"tenant_admin", "developer", "business_admin", "business_user"} {
 			if err := h.kc.AssignRealmRole(ctx, sub, role); err != nil {
 				fail(http.StatusBadGateway, fmt.Errorf("assign %s role in identity provider: %w", role, err))
 				return
@@ -217,7 +217,9 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 			sub, req.Email, req.FirstName+" "+req.LastName, customerID).Scan(&userID); err != nil {
 			return fmt.Errorf("create user: %w", err)
 		}
-		for _, ra := range []struct{ role, ws string }{{"tenant_admin", ""}, {"developer", ""}, {"business_admin", workspaceID}} {
+		// business_user is the user role: the console's User group comes from
+		// it alone, not from business_admin.
+		for _, ra := range []struct{ role, ws string }{{"tenant_admin", ""}, {"developer", ""}, {"business_admin", workspaceID}, {"business_user", workspaceID}} {
 			if _, err := tx.Exec(tctx, `
 				INSERT INTO identity.role_assignment (user_id, role, workspace_id, assigned_by)
 				VALUES ($1::uuid, $2::identity.user_role, NULLIF($3,'')::uuid, $1::uuid) ON CONFLICT DO NOTHING`,

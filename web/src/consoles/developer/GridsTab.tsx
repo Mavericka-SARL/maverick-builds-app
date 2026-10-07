@@ -136,7 +136,7 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
       <Toolbar className="mvx-toolbar--spaced">
         <ToolbarGroup>
           <span className="mvx-admin-muted">
-            Grids combine metrics and dimensions. Business users see grids inside dashboards.
+            Grids combine metrics and dimensions. Users see grids inside dashboards.
           </span>
         </ToolbarGroup>
         <ToolbarGroup align="end">

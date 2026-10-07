@@ -21,8 +21,10 @@ export const SECTION_ORDER: SectionId[] = ["business", "business-admin", "develo
 /**
  * Which sections a set of roles switches on. Where two roles would offer the
  * same screens the wider one wins, so nothing appears twice:
- * - business_admin's Run/Business Admin groups already contain everything
- *   the business_user User group has (history moves under Business Admin).
+ * - the User group (dashboards, inbox, history, models) comes only from the
+ *   user role (key business_user); business_admin adds its admin screens
+ *   beside it, and its own inbox and model list only for someone without
+ *   the user role (business-admin/section.tsx).
  * - platform_admin's Applications/Users/Audit Log are the tenant_admin
  *   screens at platform scope.
  * - the developer's own Users tab is hidden once an admin section provides it.
@@ -30,7 +32,7 @@ export const SECTION_ORDER: SectionId[] = ["business", "business-admin", "develo
 export function enabledSections(roles: string[]): SectionId[] {
   const has = (r: string) => roles.includes(r);
   const out: SectionId[] = [];
-  if (has("business_user") && !has("business_admin")) out.push("business");
+  if (has("business_user")) out.push("business");
   if (has("business_admin")) out.push("business-admin");
   if (has("developer")) out.push("developer");
   if (has("tenant_admin") && !has("platform_admin")) out.push("tenant-admin");
@@ -66,7 +68,7 @@ export function localTab(tab: string): string {
 /** The tab a section opens on when it is the landing one. */
 export const SECTION_LANDING: Record<SectionId, string> = {
   business: tabId("business", "dashboards"),
-  "business-admin": tabId("business-admin", "dashboards"),
+  "business-admin": tabId("business-admin", "inbox"),
   developer: tabId("developer", "applications"),
   "tenant-admin": tabId("tenant-admin", "applications"),
   "platform-admin": tabId("platform-admin", "applications"),

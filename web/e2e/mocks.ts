@@ -18,7 +18,8 @@ const ctx = {
 const personaRoles: Record<string, string[]> = {
   dept_head: ["business_user"],
   developer: ["developer"],
-  finance: ["business_admin"],
+  // Every business admin also holds the user role (migration 125).
+  finance: ["business_admin", "business_user"],
   platform_admin: ["platform_admin"],
   tenant_admin: ["tenant_admin"],
   // A self-service sign-up holds both: it builds, and it owns the tenant.

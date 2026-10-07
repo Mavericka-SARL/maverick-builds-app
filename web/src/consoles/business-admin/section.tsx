@@ -1,18 +1,16 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { LayoutDashboard, Inbox, History, Shield, KeyRound, Boxes } from "lucide-react";
-import { api, type DemoContext } from "../../api/client";
-import { DashboardsView } from "../business/DashboardsView";
+import { Inbox, History, Shield, KeyRound, Boxes } from "lucide-react";
+import { api } from "../../api/client";
 import { AppsTab } from "../business/AppsTab";
 import { useModelLabel } from "../business/modelLabel";
-import { PageLayout, LoadingState } from "../../ui";
+import { PageLayout } from "../../ui";
 import { tabId, localTab, type ConsoleSection, type SectionId, type SectionInput } from "../../router/sections";
 import { WorkflowInbox, WorkflowHistory, RolesTab, AccessRulesTab } from "./BusinessAdminConsole";
 
-type Tab = "dashboards" | "inbox" | "history" | "roles" | "access" | "models";
+type Tab = "inbox" | "history" | "roles" | "access" | "models";
 
 const TAB_LABELS: Record<Tab, string> = {
-  dashboards: "Dashboards",
   inbox: "Workflow Inbox",
   history: "History",
   roles: "Roles",
@@ -23,37 +21,35 @@ const TAB_LABELS: Record<Tab, string> = {
 const SECTION: SectionId = "business-admin";
 
 /**
- * The business_admin section of the console: User › Dashboards, Workflow
- * Inbox and Business Admin › History, Roles, Access Rules, Models. Forms have
- * no screen of their own: their records are worked on through the form
- * widgets a developer places on dashboards, as business users do. A tenant
+ * The business_admin section of the console: Business Admin › Workflow Inbox
+ * (the approvals it decides), History, Roles, Access Rules, Models — the
+ * inbox and Models only for someone without the user role, whose User group
+ * already has them. Dashboards come from the user role alone. A tenant
  * admin's own group (Applications with model export/import, Users, Audit
  * Log) comes from the platform-admin module and appears right after these.
  */
-export function useBusinessAdminSection({ enabled, setTab }: SectionInput): ConsoleSection | null {
+export function useBusinessAdminSection({ enabled, setTab, roles }: SectionInput): ConsoleSection | null {
   const [focusInstanceId, setFocusInstanceId] = useState<string | undefined>();
-  const { data: ctx, isLoading: ctxLoading } = useQuery({ queryKey: ["demo"], queryFn: api.getDemo, enabled });
+  const { data: ctx } = useQuery({ queryKey: ["demo"], queryFn: api.getDemo, enabled });
   const modelLabel = useModelLabel(ctx, enabled);
 
   if (!enabled) return null;
   const t = (id: Tab) => tabId(SECTION, id);
+  // Dashboards come from the user role only. The inbox (the approvals a
+  // business admin decides) and the model list are here for someone without
+  // it; with it, the User group already has both.
+  const isUser = roles.includes("business_user");
   return {
     id: SECTION,
     navGroups: [
       {
-        label: "User",
-        items: [
-          { id: t("dashboards"), label: "Dashboards", icon: <LayoutDashboard size={16} /> },
-          { id: t("inbox"), label: "Workflow Inbox", icon: <Inbox size={16} /> },
-        ],
-      },
-      {
         label: "Business Admin",
         items: [
+          ...(isUser ? [] : [{ id: t("inbox"), label: "Workflow Inbox", icon: <Inbox size={16} /> }]),
           { id: t("history"), label: "History", icon: <History size={16} /> },
           { id: t("roles"), label: "Roles", icon: <Shield size={16} /> },
           { id: t("access"), label: "Access Rules", icon: <KeyRound size={16} /> },
-          { id: t("models"), label: "Models", icon: <Boxes size={16} /> },
+          ...(isUser ? [] : [{ id: t("models"), label: "Models", icon: <Boxes size={16} /> }]),
         ],
       },
     ],
@@ -70,9 +66,7 @@ export function useBusinessAdminSection({ enabled, setTab }: SectionInput): Cons
     render: (active) => {
       const cur = localTab(active) as Tab;
       return (
-        <PageLayout title={cur === "dashboards" ? undefined : TAB_LABELS[cur]}>
-          {ctxLoading && cur === "dashboards" && <LoadingState label="Connecting…" />}
-          {cur === "dashboards" && ctx && <DashboardsView ctx={ctx as DemoContext} />}
+        <PageLayout title={TAB_LABELS[cur]}>
           {cur === "inbox" && <WorkflowInbox />}
           {cur === "history" && <WorkflowHistory focusInstanceId={focusInstanceId} />}
           {cur === "roles" && <RolesTab />}

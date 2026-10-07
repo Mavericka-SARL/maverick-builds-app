@@ -84,5 +84,5 @@ test("a second admin role makes your own platform_admin chip removable again", a
   await page.getByLabel("Edit Admin").click();
 
   await expect(page.getByLabel(/another administrator has to remove it/)).toHaveCount(0);
-  await expect(page.getByLabel("Remove platform_admin")).toBeEnabled();
+  await expect(page.getByLabel("Remove platform admin")).toBeEnabled();
 });

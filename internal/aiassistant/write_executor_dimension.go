@@ -88,7 +88,7 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 		SourceDimensionID   json.RawMessage `json:"source_dimension_id"`
 		SourceDimensionName json.RawMessage `json:"source_dimension_name"`
 		SourceProperty      json.RawMessage `json:"source_property"`
-		// Business users add, rename and remove its members.
+		// Users add, rename and remove its members.
 		BusinessMaintained *bool `json:"business_maintained"`
 	}
 	var sent map[string]json.RawMessage
@@ -224,7 +224,7 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 	var changes []string
 	if p.BusinessMaintained != nil {
 		if *p.BusinessMaintained {
-			changes = append(changes, "business users now maintain its members")
+			changes = append(changes, "users now maintain its members")
 		} else {
 			changes = append(changes, "its members are the developer's again")
 		}

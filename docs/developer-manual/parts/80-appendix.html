@@ -19,8 +19,8 @@
 <table>
 <tr><th style="width:36%">Symptom</th><th>Cause and fix</th></tr>
 <tr><td>Objects you created are missing, or turned up in another application</td><td>They went into the revision that was selected at the time. Models › click the right revision row; check <b>Model</b> and <b>Revision</b> in the context bar. Delete the strays where they landed.</td></tr>
-<tr><td>Business users see an older model, or nothing</td><td>Your revision is not active, or the model is not the business default. Models › <b>Set active</b>, <b>Set as business default</b>.</td></tr>
-<tr><td>A business user cannot see a dashboard</td><td>No business role of theirs has the dashboard. Business Admin › Roles › Configure › tick the dashboard › <b>Save dashboard access</b>.</td></tr>
+<tr><td>Users see an older model, or nothing</td><td>Your revision is not active, or the model is not the business default. Models › <b>Set active</b>, <b>Set as business default</b>.</td></tr>
+<tr><td>A user cannot see a dashboard</td><td>No business role of theirs has the dashboard. Business Admin › Roles › Configure › tick the dashboard › <b>Save dashboard access</b>.</td></tr>
 <tr><td>Add metric stays disabled</td><td>A formula reference is unknown (red "✗ unknown" badge) or a Rate rule lacks an operand. Create the referenced inputs first; names are snake_case.</td></tr>
 <tr><td>A metric will not tick in a grid</td><td>It already belongs to another grid; untick it there first.</td></tr>
 <tr><td>Calculated cells show $0 or blank</td><td>Inputs were not committed (press Enter or leave the cell), or metric and grid are in different revisions. A blank means no input exists at that intersection.</td></tr>
@@ -40,7 +40,7 @@
 
 <h2>Glossary</h2>
 <table class="kv">
-<tr><td>Active revision</td><td>The one revision of a model that business users see and edit.</td></tr>
+<tr><td>Active revision</td><td>The one revision of a model that users see and edit.</td></tr>
 <tr><td>Access rule</td><td>Per-user write, read or hidden setting on a member or metric, cascading to descendants.</td></tr>
 <tr><td>Aggregation rule</td><td>How a metric's member values combine into totals: Sum, Average, Count, Rate, Formula.</td></tr>
 <tr><td>Automation rule (trigger)</td><td>Event → workflow. Manual rules power dashboard Trigger buttons.</td></tr>

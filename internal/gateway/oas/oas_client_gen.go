@@ -1017,7 +1017,7 @@ type Invoker interface {
 	ListBusinessFolders(ctx context.Context, params ListBusinessFoldersParams) (ListBusinessFoldersRes, error)
 	// ListBusinessIntegrations invokes listBusinessIntegrations operation.
 	//
-	// List integrations visible to business users (e.g. for run-button labels).
+	// List integrations visible to users (e.g. for run-button labels).
 	//
 	// GET /api/integrations
 	ListBusinessIntegrations(ctx context.Context, params ListBusinessIntegrationsParams) (ListBusinessIntegrationsRes, error)
@@ -20028,7 +20028,7 @@ func (c *Client) sendListBusinessFolders(ctx context.Context, params ListBusines
 
 // ListBusinessIntegrations invokes listBusinessIntegrations operation.
 //
-// List integrations visible to business users (e.g. for run-button labels).
+// List integrations visible to users (e.g. for run-button labels).
 //
 // GET /api/integrations
 func (c *Client) ListBusinessIntegrations(ctx context.Context, params ListBusinessIntegrationsParams) (ListBusinessIntegrationsRes, error) {

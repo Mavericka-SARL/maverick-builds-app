@@ -1,4 +1,5 @@
 import type { AccessRemovalResult } from "../../api/client";
+import { roleLabel } from "../../ui/roleLabel";
 
 /**
  * What to tell the administrator about a removal that took more with it, or
@@ -13,7 +14,7 @@ export function accessRemovalNotice(res: AccessRemovalResult | undefined): strin
   if (res.message) return res.message;
   const revoked = res.revoked ?? [];
   if (revoked.length === 0) return "";
-  const what = revoked.map((g) => `${g.role.replace(/_/g, " ")} from ${g.email}`).join("; ");
+  const what = revoked.map((g) => `${roleLabel(g.role)} from ${g.email}`).join("; ");
   const one = revoked.length === 1;
   return `Also revoked ${what}. ${one ? "That account belongs" : "Those accounts belong"} to no tenant and ` +
     `${one ? "was" : "were"} limited to what was removed: left in place, the grant would have made ` +

@@ -18,6 +18,8 @@ import {
   Toolbar,
   ToolbarGroup,
   useConfirm,
+  useCollapsed,
+  CollapseToggle,
   InlineAlert,
   type DesignTone,
 } from "../../ui";
@@ -231,10 +233,13 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
     onError: (e) => setImportError((e as Error).message),
   });
   const { confirm, confirmElement } = useConfirm();
+  const { isCollapsed, toggle } = useCollapsed();
+  const appOpen = !isCollapsed(`app:${app.id}`);
 
   return (
     <div className="mvx-admin-object">
       <div className="mvx-admin-object__header">
+        <CollapseToggle expanded={appOpen} onToggle={() => toggle(`app:${app.id}`)} label={`application ${app.name}`} />
         <div className="mvx-admin-avatar mvx-admin-avatar--app">{app.name[0]}</div>
         <div className="mvx-admin-object__title">
           <div className="mvx-admin-object__name">{app.name}</div>
@@ -250,7 +255,7 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
         </IconButton>
       </div>
 
-      <div className="mvx-admin-object__body">
+      {appOpen && <div className="mvx-admin-object__body">
         {addModel ? (
           <div className="mvx-admin-inline-form">
             <TextInput
@@ -306,10 +311,15 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
         )}
         {importError && <p className="mvx-admin-muted" role="alert">Import failed: {importError}</p>}
         {app.models.length === 0 && <p className="mvx-admin-muted">No models yet.</p>}
-        {app.models.map(m => (
+        {app.models.map(m => {
+          const modelOpen = !isCollapsed(`model:${m.id}`);
+          const revisions = (m.revisions ?? []).length;
+          return (
           <div key={m.id} className="mvx-admin-model">
             <div className="mvx-admin-model__header">
+              <CollapseToggle expanded={modelOpen} onToggle={() => toggle(`model:${m.id}`)} label={`model ${m.name}`} />
               <span className="mvx-admin-model__name">{m.name}</span>
+              {!modelOpen && <span className="mvx-admin-muted">{revisions} revision{revisions !== 1 ? "s" : ""}{m.active_revision ? ` · active: ${m.active_revision}` : ""}</span>}
               {canTransferModels && (
                 <IconButton
                   aria-label={`Export model ${m.name}`}
@@ -340,13 +350,14 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
                 <Trash2 size={13} />
               </IconButton>
             </div>
-            <ModelRevisionsSection model={m} tenantId={tenantId} canTransferModels={canTransferModels} />
+            {modelOpen && <ModelRevisionsSection model={m} tenantId={tenantId} canTransferModels={canTransferModels} />}
           </div>
-        ))}
+          );
+        })}
         {deleteModel.isError && <p className="mvx-admin-error" role="alert">{(deleteModel.error as Error).message}</p>}
         {deleteModel.isSuccess && <RemovalNotice result={deleteModel.data} />}
 
-      </div>
+      </div>}
       {confirmElement}
     </div>
   );

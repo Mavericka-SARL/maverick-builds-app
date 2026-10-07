@@ -164,7 +164,7 @@ export function FormsTab({ revisionId }: { revisionId?: string }) {
       <Toolbar className="mvx-toolbar--spaced">
         <ToolbarGroup>
           <span className="mvx-admin-muted">
-            Forms appear in CRUD apps and let business users submit structured records.
+            Forms appear in CRUD apps and let users submit structured records.
           </span>
         </ToolbarGroup>
         <ToolbarGroup align="end">

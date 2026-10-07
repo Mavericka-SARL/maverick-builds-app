@@ -104,8 +104,8 @@ func withText(s starter.Starter, text string) starter.Starter {
 
 // TestSyncBringsAnEarlierTenantUpToDate: a tenant that signed up when sign-up
 // gave only the tour, which has since changed. The guides it never had are
-// installed; the tour gets the current content as a new live revision, with
-// the old one kept and the tenant's access rule and role grant carried over.
+// installed; the tour gets the current content as a new live revision, the
+// tenant's access rule and role grant carried over, and the old import gone.
 func TestSyncBringsAnEarlierTenantUpToDate(t *testing.T) {
 	ctx := context.Background()
 	f := fixture{t: t, ctx: ctx, pool: testdb.New(t, migrationfs.FS, ".")}
@@ -152,8 +152,8 @@ func TestSyncBringsAnEarlierTenantUpToDate(t *testing.T) {
 	if name := f.one(`SELECT name FROM model.revision WHERE id = $1::uuid`, newRev); name != "Updated 2026-10-05" {
 		t.Errorf("new revision named %q", name)
 	}
-	if n := f.one(`SELECT count(*)::text FROM model.revision WHERE model_id = $1::uuid`, tourID); n != "2" {
-		t.Errorf("tour revisions = %s, want the old one kept beside the new", n)
+	if n := f.one(`SELECT count(*)::text FROM model.revision WHERE model_id = $1::uuid`, tourID); n != "1" {
+		t.Errorf("tour revisions = %s, want only the new one: the sync's old import is deleted", n)
 	}
 	if n := f.one(`SELECT count(*)::text FROM model.dashboard_widget w JOIN model.dashboard_def d ON d.id = w.dashboard_id
 	               WHERE d.revision_id = $1::uuid AND w.content = 'OLD TOUR TEXT'`, newRev); n != "0" {
@@ -221,6 +221,51 @@ func TestSyncLeavesWhatTheTenantChose(t *testing.T) {
 	}
 	if live := f.one(`SELECT active_revision_id::text FROM core.model WHERE id = $1::uuid`, baGuide); live != own {
 		t.Error("the business admin guide's own live revision was replaced")
+	}
+}
+
+// TestSyncPrunesWhatItSuperseded: in a starter model the sync still keeps,
+// its earlier imports go — on an update, and on a start with nothing new for
+// a tenant left with old ones — while a revision the tenant made stays, and a
+// model whose live revision the tenant chose keeps every revision.
+func TestSyncPrunesWhatItSuperseded(t *testing.T) {
+	ctx := context.Background()
+	f := fixture{t: t, ctx: ctx, pool: testdb.New(t, migrationfs.FS, ".")}
+	current := starter.Starters()
+	cust, _, _ := f.signedUp("Pruned Co", true)
+	f.sync(cust, current)
+	model := func(key string) string {
+		return f.one(`SELECT model_id::text FROM core.starter_model WHERE customer_id=$1::uuid AND starter_key=$2`, cust, key)
+	}
+	names := func(modelID string) string {
+		return f.one(`SELECT string_agg(name, ', ' ORDER BY name) FROM model.revision WHERE model_id = $1::uuid`, modelID)
+	}
+
+	tour := model(starter.TourKey)
+	f.exec(`INSERT INTO model.revision (model_id, name, description) VALUES ($1::uuid, 'Working', '')`, tour)
+	baGuide := model("business_admin_guide")
+	own := f.one(`INSERT INTO model.revision (model_id, name) VALUES ($1::uuid, 'Our own') RETURNING id::text`, baGuide)
+	f.exec(`UPDATE core.model SET active_revision_id = $2::uuid WHERE id = $1::uuid`, baGuide, own)
+	// An older start left a superseded import in a guide whose content has
+	// not changed since.
+	taGuide := model("tenant_admin_guide")
+	f.exec(`INSERT INTO model.revision (model_id, name, description) VALUES ($1::uuid, 'Updated 2026-10-01', $2)`, taGuide, modeltransfer.ImportedDescription)
+
+	next := append([]starter.Starter(nil), current...)
+	next[0] = withText(current[0], "NEXT TEXT")
+	f.sync(cust, next)
+
+	if got := names(tour); got != "Updated 2026-10-05, Working" {
+		t.Errorf("tour revisions = %s, want the new import and the tenant's own", got)
+	}
+	if got := names(baGuide); got != starter.RevisionName+", Our own" {
+		t.Errorf("business admin guide revisions = %s, want both kept: its live revision is the tenant's", got)
+	}
+	if got := names(taGuide); got != starter.RevisionName {
+		t.Errorf("tenant admin guide revisions = %s, want only its live import", got)
+	}
+	if n := f.one(`SELECT count(*)::text FROM audit.audit_event WHERE event_type = 'revision.deleted' AND actor_role = 'platform(starter sync)'`); n != "2" {
+		t.Errorf("audited deletions = %s, want 2", n)
 	}
 }
 

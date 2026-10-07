@@ -463,13 +463,13 @@ Press **Save as Integration** while mapping a file or a sheet to keep the mappin
 
 	p.text(`## Asking people for numbers
 
-A **form** collects structured entries — an expense, a request, a headcount change. Forms are designed under **Developer › Forms**, and people — business users and business admins alike — make entries through a **Form** widget placed on a dashboard. To turn entries into numbers, add a **Form Records** integration under **Developer › Integrations**: it posts each record into an input metric once the record reaches a status you choose, such as approved.
+A **form** collects structured entries — an expense, a request, a headcount change. Forms are designed under **Developer › Forms**, and people — users and business admins alike — make entries through a **Form** widget placed on a dashboard. To turn entries into numbers, add a **Form Records** integration under **Developer › Integrations**: it posts each record into an input metric once the record reaches a status you choose, such as approved.
 
 ## Getting things agreed
 
 A **workflow** moves something through the people who must see it: submit, review, approve, rework. Steps are assigned to *roles*, not to named people, so the chain keeps working when someone is away or leaves.
 
-Workflows are built under **Developer › Workflows**, tried with **Test Run** and opened to people with **Publish**. A business user starts one from their **Workflow Inbox**; a step waiting for you appears under **User › Workflow Inbox**. A **trigger**, made under **Developer › Triggers**, starts one for you: from a button on a dashboard, on a schedule, or each time a form entry is submitted or an integration run ends. A running workflow keeps the definition it started with, so changing the process never rewrites history.`, 340)
+Workflows are built under **Developer › Workflows**, tried with **Test Run** and opened to people with **Publish**. A user starts one from their **Workflow Inbox**; a step waiting for you appears under **User › Workflow Inbox**. A **trigger**, made under **Developer › Triggers**, starts one for you: from a button on a dashboard, on a schedule, or each time a form entry is submitted or an integration run ends. A running workflow keeps the definition it started with, so changing the process never rewrites history.`, 340)
 
 	p.text(`## Who sees what
 

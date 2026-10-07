@@ -660,7 +660,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 
 	// CRUD forms + automation (authenticated users)
 	register("GET", "/api/dimensions", "any", cors(h.publicDimensions))
-	// A business-maintained dimension's members, kept by business users
+	// A business-maintained dimension's members, kept by users
 	// (business_members.go). Narrow: these three routes only.
 	bizMembers := func(fn http.HandlerFunc) http.HandlerFunc {
 		return cors(h.guard(fn, "business_user", "business_admin"))
@@ -671,7 +671,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	// Form *schema* CRUD (create/edit/delete the form definition itself) is
 	// developer-only, matching the Business Console's own empty-state text
 	// ("Ask a Developer to create a form"). Record-level endpoints below
-	// (records, export/import/sync) stay "any" — that's the business-user
+	// (records, export/import/sync) stay "any" — that's the user
 	// facing surface, already writeguard-gated on the write path.
 	register("GET", "/api/forms", "any", cors(h.forms))
 	register("POST", "/api/forms", "developer", dev(h.forms))
@@ -692,7 +692,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	// console) and the CategoryModelChange audit category these events
 	// already use, same as dimension/metric changes. Triggering an
 	// EXISTING rule stays "any": AutomationButtonWidget places a real
-	// business-user-facing "run this automation" button on dashboards —
+	// user-facing "run this automation" button on dashboards —
 	// automationTrigger enforces ownership internally instead (see its
 	// own comment) rather than a role gate.
 	register("GET", "/api/automation/rules", "any", cors(h.automationRules))
@@ -702,7 +702,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("POST", "/api/automation/trigger/{id}", "any", cors(h.automationTrigger))
 	register("GET", "/api/automation/executions", "any", cors(h.automationExecutions))
 
-	// Business-user dashboard rendering
+	// User dashboard rendering
 	register("GET", "/api/dashboards", "any", cors(h.businessDashboards))
 	register("GET", "/api/dashboards/{id}", "any", cors(h.businessDashboardDetail))
 
@@ -1289,7 +1289,7 @@ func customerlessGrantTenantSQL(userExpr, tenantExpr string) string {
 //
 // builder narrows it to the developer arms: on a builder or administrator
 // route (onBuilderRoute) a business role opens nothing, so a developer who
-// is a business user in another tenant's workspace does not edit that
+// is a user in another tenant's workspace does not edit that
 // tenant's model through the developer routes.
 //
 // It used to match a role held in ANY workspace of the application's
@@ -2144,7 +2144,7 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("revision is outside this model"), http.StatusForbidden)
 		return
 	}
-	// Only the open revision is a business user's to write (revision_access.go).
+	// Only the open revision is a user's to write (revision_access.go).
 	if !h.revisionOpen(ctx, a, req.ModelID, req.RevisionID) {
 		jsonErr(w, fmt.Errorf("revision not found"), http.StatusNotFound)
 		return
@@ -2926,7 +2926,7 @@ type gridDimension struct {
 	ParentDimensionID *string `json:"parent_dimension_id"`
 	SourceDimensionID *string `json:"source_dimension_id,omitempty"` // set = this dimension's members are a grouping of SourceDimensionID's members by their properties[SourceProperty] value
 	SourceProperty    *string `json:"source_property,omitempty"`
-	// BusinessMaintained: business users add, rename and remove this
+	// BusinessMaintained: users add, rename and remove this
 	// dimension's members (business_members.go).
 	BusinessMaintained bool            `json:"business_maintained,omitempty"`
 	Members            []gridDimMember `json:"members"`
@@ -5337,7 +5337,7 @@ func (h *handler) developerRevisionAction(w http.ResponseWriter, r *http.Request
 	}
 	ctx := r.Context()
 
-	// Activating a revision decides which definitions every business user of
+	// Activating a revision decides which definitions every user of
 	// that model sees, so an unscoped {id} here was a cross-tenant WRITE, not
 	// just a read.
 	if !h.requireResourceAccess(w, r, "revision", id) {
@@ -6009,7 +6009,7 @@ func (h *handler) workflowHistory(w http.ResponseWriter, r *http.Request) {
 // workflowMyHistory returns only instances where the caller is a participant.
 // workflowDefinitions serves GET /api/workflow/definitions — the published
 // workflow definitions of the caller's application, WITH their context
-// schemas. This is what lets a business user define what they are
+// schemas. This is what lets a user define what they are
 // submitting: the Planning workspace renders a start dialog from each def's
 // context_schema (a "Dimension member" variable becomes a member picker,
 // already filtered by the caller's hidden rules via /api/dimensions), so
@@ -6424,7 +6424,7 @@ type devDimension struct {
 	// their SourceProperty value (developer endpoint only).
 	SourceDimensionID *string `json:"source_dimension_id,omitempty"`
 	SourceProperty    *string `json:"source_property,omitempty"`
-	// BusinessMaintained: business users add, rename and remove members.
+	// BusinessMaintained: users add, rename and remove members.
 	BusinessMaintained bool        `json:"business_maintained"`
 	Members            []devMember `json:"members"`
 }
@@ -6459,7 +6459,7 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 			SourceDimensionID *string `json:"source_dimension_id"`
 			SourceProperty    string  `json:"source_property"`
 			DeriveMembers     bool    `json:"derive_members"`
-			// Business users maintain its members (business_members.go).
+			// Users maintain its members (business_members.go).
 			BusinessMaintained bool `json:"business_maintained"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -6904,7 +6904,7 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 	seen := map[string]bool{}
 	for _, hm := range homes {
 		// A home lists only by what the person holds there: tenant_admin, or
-		// on the developer route developer too. A business user there lists
+		// on the developer route developer too. A user there lists
 		// nothing — the routed home's roles used to decide every home's.
 		holds := hm.Actor.hasRole("platform_admin") || hm.Actor.hasRole("tenant_admin") ||
 			(!onAdminRoute(ctx) && hm.Actor.hasRole("developer"))
@@ -8936,7 +8936,7 @@ func (h *handler) integrationScope(ctx context.Context, intID string) (revisionI
 	return
 }
 
-// listIntegrations returns integrations visible to business users (for button labels).
+// listIntegrations returns integrations visible to users (for button labels).
 func (h *handler) listIntegrations(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	modelID, err := h.resolveDemoModelID(ctx, r)
@@ -11466,7 +11466,7 @@ func (h *handler) automationTrigger(w http.ResponseWriter, r *http.Request) {
 	store := h.workflowStore(ctx)
 
 	// Ownership guard: this route is deliberately "any" (AutomationButtonWidget
-	// puts a real business-user-facing "run this automation" button on
+	// puts a real user-facing "run this automation" button on
 	// dashboards — a role gate would break that), so it can't rely on
 	// dev()/ba() the way rule management now does. Without this, any
 	// authenticated caller could fire ANY tenant's rule by guessing its
@@ -11487,7 +11487,7 @@ func (h *handler) automationTrigger(w http.ResponseWriter, r *http.Request) {
 	// is ONLY an approver does not start approval workflows, whichever door
 	// they use — this one was left open (found by the 2026-09-13 scenario
 	// run) — unless the rule's workflow lets its approver start it. Holding
-	// business_user (an admin who is also a business user), developer or an
+	// business_user (an admin who is also a user), developer or an
 	// admin role alongside lifts it, as it does there.
 	if onlyApprover(act) && !h.ruleApproverMayStart(ctx, ruleID) {
 		jsonErr(w, errApproverStarts, http.StatusForbidden)
@@ -12232,7 +12232,7 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				AggRule           string    `json:"agg_rule"`
 				ParentDimensionID *string   `json:"parent_dimension_id"`
 				Tags              *[]string `json:"tags"`
-				// Business users maintain its members (business_members.go).
+				// Users maintain its members (business_members.go).
 				BusinessMaintained *bool `json:"business_maintained"`
 			}
 			var sent map[string]json.RawMessage
@@ -15459,7 +15459,7 @@ func (h *handler) developerDashboards(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		revisionID := r.URL.Query().Get("revision_id")
 		// When no revision specified, fall back to the active revision so developers
-		// always see the same dashboards as business users.
+		// always see the same dashboards as users.
 		if revisionID == "" {
 			_ = h.db.QueryRow(ctx,
 				`SELECT COALESCE(active_revision_id::text,'') FROM core.model WHERE id=$1::uuid`, modelID,
@@ -15676,7 +15676,7 @@ func (h *handler) validateDashboardFolder(ctx context.Context, modelID, folderID
 
 // dashboardModelInScope reports whether the dashboard's own model is inside
 // the caller's access scope, reusing the same actorCanAccessModel check the
-// developer endpoints use. The business-user dashboard endpoints that take a
+// developer endpoints use. The user dashboard endpoints that take a
 // dashboard ID directly (detail, chart-data) resolve no model of their own,
 // so without this their business-role check alone decides access — and its
 // "this workspace has no business roles" fallback grants every tenant.
@@ -16076,7 +16076,7 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-// ── /api/dashboards  (business-user read) ────────────────────────────────────
+// ── /api/dashboards  (user read) ────────────────────────────────────
 
 // dashboardAdminBypass reports whether a passes the dashboard-assignment
 // filter (business roles' dashboard grants) for modelID's dashboards,
@@ -16084,7 +16084,7 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 // (administersApp), so they administer those grants. The folder, list,
 // detail and chart-data routes share it. It used to be any of these roles
 // held anywhere — a developer of one workspace skipped another workspace's
-// assignments where they were a business user; held for another
+// assignments where they were a user; held for another
 // application, it now counts for nothing. Fails closed.
 func (h *handler) dashboardAdminBypass(ctx context.Context, a *actor, modelID string) bool {
 	ok, err := h.administersModel(ctx, a, modelID)
@@ -16116,7 +16116,7 @@ func (h *handler) businessDashboards(w http.ResponseWriter, r *http.Request) {
 		jsonAccessErr(w, err, "resolve model")
 		return
 	}
-	// Resolve the active revision so business users only see dashboards for their revision
+	// Resolve the active revision so users only see dashboards for their revision
 	var activeRevisionID string
 	_ = h.db.QueryRow(ctx,
 		`SELECT COALESCE(active_revision_id::text,'') FROM core.model WHERE id=$1::uuid`, modelID,
@@ -16803,7 +16803,7 @@ func (h *handler) baWorkspaceModelFor(ctx context.Context, r *http.Request, allo
 		}
 	}
 	// The fallback can land on a workspace where the caller is only a
-	// business user — with an unscoped (inert) business_admin grant, say.
+	// user — with an unscoped (inert) business_admin grant, say.
 	if ok, err := h.canAdministerWorkspace(ctx, act, wsID, allowDeveloper); err != nil {
 		return "", "", err
 	} else if !ok {
@@ -16826,7 +16826,7 @@ func (h *handler) baWorkspaceModelFor(ctx context.Context, r *http.Request, allo
 // roles, users and access rules of workspace wsID. Business roles are
 // workspace-scoped (see resolveDemoModelID): a business admin administers
 // the workspace it holds business_admin in, and no other — not another
-// workspace of the same tenant, not one where it is only a business user,
+// workspace of the same tenant, not one where it is only a user,
 // and not through an unscoped business_admin grant (isBusinessRole: inert).
 // A tenant admin administers every workspace of its tenants
 // (adminCanAccessWorkspace), a platform admin or platform-level developer
@@ -18604,7 +18604,7 @@ func (h *handler) dashboardWidgetAction(w http.ResponseWriter, r *http.Request) 
 
 // errApproverStarts refuses an approver starting a workflow that does not
 // allow it.
-var errApproverStarts = fmt.Errorf("approvers do not start approval workflows — a business user submits the request, you decide it (a workflow whose approver may start it says so in its definition: approver_may_start)")
+var errApproverStarts = fmt.Errorf("approvers do not start approval workflows — a user submits the request, you decide it (a workflow whose approver may start it says so in its definition: approver_may_start)")
 
 // onlyApprover: the actor's business-facing role is business_admin alone —
 // no submitter or builder role beside it.

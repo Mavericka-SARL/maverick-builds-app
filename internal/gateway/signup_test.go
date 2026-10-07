@@ -107,9 +107,15 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 	if code != 200 || me["email"] != "ann@acme.test" || me["customer_id"] != tenantID || me["contact_url"] != "https://example.test/pricing" {
 		t.Fatalf("me: %d %v", code, me)
 	}
+	// Every role sign-up gives: the user role (business_user) too, which
+	// the console's User group comes from.
 	roles, _ := me["roles"].([]any)
-	if len(roles) != 3 || !strings.Contains(strings.Join([]string{roles[0].(string), roles[1].(string), roles[2].(string)}, ","), "tenant_admin") {
-		t.Fatalf("roles = %v", roles)
+	held := map[string]bool{}
+	for _, r := range roles {
+		held[r.(string)] = true
+	}
+	if len(roles) != 4 || !held["tenant_admin"] || !held["developer"] || !held["business_admin"] || !held["business_user"] {
+		t.Fatalf("roles = %v, want tenant_admin, developer, business_admin and business_user", roles)
 	}
 	st, _ := me["plan"].(map[string]any)
 	if _, has := st["trial"]; has || st["read_only"] != false || st["plan"].(map[string]any)["key"] != "community" {

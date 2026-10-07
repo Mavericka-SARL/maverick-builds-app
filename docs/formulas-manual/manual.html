@@ -569,7 +569,7 @@ closing = opening + flow           time summary: last</pre>
 </table>
 
 <h3>Users who cannot see every member</h3>
-<p>A business user may have members hidden from them (Business Admin › access rules). Most metrics are then recomputed from what that user can see. A metric that reads <i>other</i> cells — a time function, LOOKUP, the SUMIFS family, TIMESUM or a *VALUE function — is shown from the stored result instead, and a cell whose result was built from a hidden member is <b>withheld</b>: blank ("—") in the grid, a missing point in a chart. A total that includes a withheld cell is withheld too. The engine never recomputes such a cell from the visible part alone, because that would show a number the model never produced.</p>
+<p>A user may have members hidden from them (Business Admin › access rules). Most metrics are then recomputed from what that user can see. A metric that reads <i>other</i> cells — a time function, LOOKUP, the SUMIFS family, TIMESUM or a *VALUE function — is shown from the stored result instead, and a cell whose result was built from a hidden member is <b>withheld</b>: blank ("—") in the grid, a missing point in a chart. A total that includes a withheld cell is withheld too. The engine never recomputes such a cell from the visible part alone, because that would show a number the model never produced.</p>
 
 <h2>16. Recipes</h2>
 <p>The formulas that read the model were computed live, cell by cell, on the example model (chapter 11) by <code>cmd/verify-formula-catalogue</code>; the one-line arithmetic ones are asserted by the function catalogue test.</p>
@@ -649,7 +649,7 @@ closing = opening + flow           time summary: last</pre>
 <table>
 <tr><th style="width:30%">Symptom</th><th>Likely cause and what to do</th></tr>
 <tr><td>A warning triangle beside the formula</td><td>Some cells failed. Hover it for the first error; typical: a division by a zero that is not "no data", a member code that does not exist (<code>#N/A</code>), a dynamic offset that is not whole.</td></tr>
-<tr><td>A cell is empty ("—")</td><td>Its formula failed there; or it read only zeros and failed (no data); or the result is blank (a property the member has no value for, a *VALUE of a metric with summary none); or, for a business user, it is withheld (chapter 15).</td></tr>
+<tr><td>A cell is empty ("—")</td><td>Its formula failed there; or it read only zeros and failed (no data); or the result is blank (a property the member has no value for, a *VALUE of a metric with summary none); or, for a user, it is withheld (chapter 15).</td></tr>
 <tr><td>A total looks wrong</td><td>Check the aggregation rule and time summary (chapter 15). Ratios need Formula or Rate; balances need last/first.</td></tr>
 <tr><td>0 where a value was expected</td><td>A metric with nothing recorded reads 0. A plain reference to a metric on another grid reads its total over the dimensions the cell lacks: use LOOKUP to choose a member. A dimension or property at a total is blank.</td></tr>
 <tr><td>A condition never matches</td><td>Numbers compare on 15 significant digits, so a real difference beyond rounding noise is the cause: compare <code>ROUND(x, 2)</code> to ignore cents. Text compares ignoring case, so case is not the problem. A number against text compares as text.</td></tr>

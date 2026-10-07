@@ -430,7 +430,7 @@ func devScreensPage() modeltransfer.Dashboard {
 	return devDashboard("dev-dash-5-screens", "5 · Grids, dashboards",
 		devText(`# Grids and dashboards
 
-A grid decides which numbers belong together; a dashboard decides how people see them. Business users never open a grid on its own — they meet it inside a dashboard.
+A grid decides which numbers belong together; a dashboard decides how people see them. Users never open a grid on its own — they meet it inside a dashboard.
 
 ## A grid
 
@@ -496,7 +496,7 @@ Numbers do not only arrive by typing into a grid. Forms collect entries, integra
 
 		devText(`## Forms
 
-**Developer › Forms** → **New form**: a **Form name**, a **Display label**, then the fields — **Add field** for each: Text, Number, Date, Select, Boolean, Metric, or one of the model's dimensions — and **Create form**. People — business users and business admins alike — work on its records only through a **Form** widget on a dashboard, so place each form on a dashboard their role can open: there they add, edit, export and import records, and an administrator changes their status and syncs them.
+**Developer › Forms** → **New form**: a **Form name**, a **Display label**, then the fields — **Add field** for each: Text, Number, Date, Select, Boolean, Metric, or one of the model's dimensions — and **Create form**. People — users and business admins alike — work on its records only through a **Form** widget on a dashboard, so place each form on a dashboard their role can open: there they add, edit, export and import records, and an administrator changes their status and syncs them.
 
 A form on its own only stores its records. To post their numbers into the model, map it: **Developer › Integrations** → **Form Records** → **New integration**. Choose the **Source form**, the **Target grid** and its **Target input metric**, the **Source value field**, how records combine (**Aggregation**), which statuses post (**Post when status is**), and the **Dimension field mappings**. With **Live update** on, a record posts as soon as it reaches one of those statuses; **Backfill** posts the ones already there.`, 232),
 

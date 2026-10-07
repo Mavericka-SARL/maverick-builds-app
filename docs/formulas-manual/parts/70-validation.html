@@ -45,7 +45,7 @@
 <table>
 <tr><th style="width:30%">Symptom</th><th>Likely cause and what to do</th></tr>
 <tr><td>A warning triangle beside the formula</td><td>Some cells failed. Hover it for the first error; typical: a division by a zero that is not "no data", a member code that does not exist (<code>#N/A</code>), a dynamic offset that is not whole.</td></tr>
-<tr><td>A cell is empty ("—")</td><td>Its formula failed there; or it read only zeros and failed (no data); or the result is blank (a property the member has no value for, a *VALUE of a metric with summary none); or, for a business user, it is withheld (chapter 15).</td></tr>
+<tr><td>A cell is empty ("—")</td><td>Its formula failed there; or it read only zeros and failed (no data); or the result is blank (a property the member has no value for, a *VALUE of a metric with summary none); or, for a user, it is withheld (chapter 15).</td></tr>
 <tr><td>A total looks wrong</td><td>Check the aggregation rule and time summary (chapter 15). Ratios need Formula or Rate; balances need last/first.</td></tr>
 <tr><td>0 where a value was expected</td><td>A metric with nothing recorded reads 0. A plain reference to a metric on another grid reads its total over the dimensions the cell lacks: use LOOKUP to choose a member. A dimension or property at a total is blank.</td></tr>
 <tr><td>A condition never matches</td><td>Numbers compare on 15 significant digits, so a real difference beyond rounding noise is the cause: compare <code>ROUND(x, 2)</code> to ignore cents. Text compares ignoring case, so case is not the problem. A number against text compares as text.</td></tr>

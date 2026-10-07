@@ -17,9 +17,9 @@ import { useModelLabel } from "./modelLabel";
 const SECTION: SectionId = "business";
 
 /**
- * The business_user section of the console: Plan › Dashboards, Workflow
- * Inbox, My History, Models. Superseded by the business-admin section for
- * users who also hold business_admin (see router/sections.ts).
+ * The user role's section of the console (key business_user): User ›
+ * Dashboards, Workflow Inbox, My History, Models — whatever other roles the
+ * person holds (see router/sections.ts).
  */
 export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSection | null {
   const [focusInstanceId, setFocusInstanceId] = useState<string | undefined>();

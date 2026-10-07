@@ -161,10 +161,10 @@ export function AutomationTab({ revisionId }: { revisionId?: string } = {}) {
                       variant="primary"
                       size="sm"
                       disabled={trigger.isPending || !rule.enabled}
-                      title={!rule.enabled ? "Enable the trigger first" : "Starts a real, live workflow instance right now — same as a business user pressing the button on their dashboard"}
+                      title={!rule.enabled ? "Enable the trigger first" : "Starts a real, live workflow instance right now — same as a user pressing the button on their dashboard"}
                       onClick={() => confirm({
                         title: "Fire this trigger?",
-                        body: `This starts a real, live instance of "${rule.workflow_name}" immediately — it will appear in the assigned approver's Workflow Inbox exactly as if a business user had triggered it themselves. This is not a dry run.`,
+                        body: `This starts a real, live instance of "${rule.workflow_name}" immediately — it will appear in the assigned approver's Workflow Inbox exactly as if a user had triggered it themselves. This is not a dry run.`,
                         confirmLabel: "Start it",
                         onConfirm: () => trigger.mutate(rule.id),
                       })}
