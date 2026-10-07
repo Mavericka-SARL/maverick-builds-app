@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, type AppInfo } from "../../api/client";
+import { api, type AppInfo, type AppModelInfo } from "../../api/client";
 import { Button, LoadingState, EmptyState, StatusBadge } from "../../ui";
 import { SELECTED_APP_KEY, SELECTED_MODEL_KEY, selectModel } from "./modelSelection";
 
@@ -21,19 +21,32 @@ export function AppsTab() {
 
   const list = apps as AppInfo[];
   const active = list.find(a => a.id === currentId) ?? list[0];
+  // The model the consoles show for an application: the one opened here (in
+  // the current application only), else its default — what X-Model-Id and
+  // the bar at the top say. The application's own model_name and
+  // active_revision are its default's, which named the wrong model once
+  // another was opened.
+  const workingModel = (app: AppInfo, isCurrent: boolean): AppModelInfo | undefined => {
+    const models = app.models ?? [];
+    return (isCurrent && currentModelId ? models.find(m => m.id === currentModelId) : undefined)
+      ?? models.find(m => m.is_default) ?? models[0];
+  };
+  const activeModel = workingModel(active, true);
 
   return (
     <div className="mvx-admin-stack" style={{ maxWidth: 700 }}>
       {/* Working banner */}
       <div className="mvx-context-banner">
-        Working in: <strong>{active.name}</strong>
+        Working in: <strong>{active.name}{activeModel ? ` · ${activeModel.name}` : ""}</strong>
         <span style={{ marginLeft: 8, color: "var(--color-text-muted)" }}>
-          · revision <strong>{active.active_revision || "—"}</strong>
+          · revision <strong>{(activeModel ? activeModel.active_revision : active.active_revision) || "—"}</strong>
         </span>
       </div>
 
       {list.map((app) => {
         const isCurrent = app.id === (currentId || list[0]?.id);
+        const shown = workingModel(app, isCurrent);
+        const shownRevision = shown ? shown.active_revision : app.active_revision;
         return (
           <div
             key={app.id}
@@ -61,7 +74,7 @@ export function AppsTab() {
               {(app.models ?? []).length > 1 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
                   {(app.models ?? []).map(m => {
-                    const isActiveModel = isCurrent && (currentModelId ? currentModelId === m.id : m.is_default);
+                    const isActiveModel = isCurrent && shown?.id === m.id;
                     return (
                       <div key={m.id} className="mvx-panel" style={{ padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
                         <span style={{ fontWeight: 600, fontSize: 13 }}>{m.name}</span>
@@ -83,14 +96,14 @@ export function AppsTab() {
               )}
               <div className="mvx-admin-model">
                 <div className="mvx-admin-model__header">
-                  <span className="mvx-admin-model__name">{app.model_name || app.name}</span>
+                  <span className="mvx-admin-model__name">{shown?.name || app.model_name || app.name}</span>
                 </div>
                 <div className="mvx-admin-revisions">
                   <div className="mvx-admin-revisions__label">Active Revision</div>
-                  {app.active_revision ? (
+                  {shownRevision ? (
                     <div className="mvx-admin-revision" style={{ alignSelf: "stretch" }}>
                       <div className="mvx-admin-revision__info">
-                        <span className="mvx-admin-revision__name">{app.active_revision}</span>
+                        <span className="mvx-admin-revision__name">{shownRevision}</span>
                       </div>
                       <StatusBadge tone="live">Live</StatusBadge>
                     </div>
