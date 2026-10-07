@@ -355,9 +355,11 @@ test("Business Console grid: the Total row reduces flat, and an aggregate period
   // Balance (sum, time_summary last): level by level the Q1 total was 27.
   await expectTimeTotals(page, "balance", "15", "12", "12", { Germany: "12", "United Kingdom": "5", France: "0" });
   // Price (average, time_summary average): Jan's total is mean(2, 4) = 3, not
-  // the rows' sum 6; Q1 is the average of the periods, mean(3, 6) = 4.5.
+  // the rows' sum 6; Q1 is the average of the periods, mean(3, 6) = 4.5. An
+  // average counts every period, an empty one as 0: the United Kingdom has
+  // only January, so its Q1 is (4 + 0) / 2 = 2; France has nothing at all.
   await page.getByRole("combobox", { name: "Metric context" }).selectOption("m-avg2");
-  await expectTimeTotals(page, "price", "3.0", "6.0", "4.5", { Germany: "4.0", "United Kingdom": "4.0", France: "—" });
+  await expectTimeTotals(page, "price", "3.0", "6.0", "4.5", { Germany: "4.0", "United Kingdom": "2.0", France: "—" });
 });
 
 // A calculated metric's leaf is its own server value, whatever its agg_rule:

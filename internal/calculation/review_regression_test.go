@@ -69,8 +69,8 @@ func TestFormulaSourceReadAtPartialCoordinates(t *testing.T) {
 // TestYearValueAtParentSkipsEmptyPeriods: YEARVALUE and a LOOKUP to an
 // aggregate period at a PARENT member skip the periods no leaf beneath
 // recorded, as they do at a leaf — the closing balance of EMEA is DE's
-// March balance, and the average is the mean of the recorded months, never
-// a reduction over zeros.
+// March balance. An average counts every month of the year, an empty one
+// as 0, at a parent as at a leaf: (10 + 20 + 30) / 12.
 func TestYearValueAtParentSkipsEmptyPeriods(t *testing.T) {
 	store, cleanup := setupDB(t)
 	defer cleanup()
@@ -109,8 +109,8 @@ func TestYearValueAtParentSkipsEmptyPeriods(t *testing.T) {
 	c.want(ids["yvl"], at("DE", "2026-01"), 30)
 	c.want(ids["yvl"], at("EMEA", "2026-01"), 30)
 	c.want(ids["yvl"], at("World", "2026-05"), 30)
-	c.want(ids["yva"], at("DE", "2026-01"), 20)
-	c.want(ids["yva"], at("EMEA", "2026-01"), 20)
+	c.want(ids["yva"], at("DE", "2026-01"), 60.0/12)
+	c.want(ids["yva"], at("EMEA", "2026-01"), 60.0/12)
 	c.want(ids["fyl"], at("DE", "2026-05"), 30)
 	c.want(ids["fyl"], at("EMEA", "2026-05"), 30)
 	for name, id := range ids {

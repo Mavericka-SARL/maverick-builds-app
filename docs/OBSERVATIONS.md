@@ -4,7 +4,7 @@
 > dependencies that are not fixed yet, with the evidence and what would close
 > each one.
 
-> **Last verified:** 2026-10-06
+> **Last verified:** 2026-10-07
 
 A finding that is not acted on in the change that found it is written down
 here, so it does not live only in a chat or a commit message. Each entry says
@@ -17,6 +17,61 @@ is recorded instead in `docs/OBSERVATIONS_PRIVATE.md`, which the public export
 leaves out, until it is fixed.
 
 ## Open
+
+### Local Sales models keep activity owners and notes twice
+
+- **Noticed:** 2026-10-07, read-only comparison with
+  `Standalone_Sales_Target_Setting_Model.xlsx`: all 881 formula results and
+  36 saved chart points per populated implementation match. Both models
+  held the four activity owners and notes only in Activity member
+  properties; their Owner / Source Note text inputs were empty, and AI
+  formatted strategic increments 0.2 and 0.3 million as zero.
+- **Status 2026-10-07:** the Owner and Note text inputs of both models now
+  hold STRAT-001…004's workbook values (F5:F8, V5:V8), written through
+  `POST /api/cells`; AI's twelve zero-decimal amounts and corrections show
+  two and one decimals. The text inputs are the authoritative column — the
+  workbook types owners per row, and Manual's STRAT-005 owner was typed
+  there. Decided by the user: Manual's own edits (STRAT-005, the North
+  America comment, the cleared product-correction zero) stay as they are,
+  and the Sales Base LY source notes are not needed.
+- **Why it still matters:** the member properties `owner` and `note` remain a
+  second, independently editable copy that can diverge from the grid. (The
+  empty duplicate Sales Target Setting (Manual) application `1fcb9f88…` was
+  deleted by the platform admin on 2026-10-07.) Excel and
+  both monthly-phasing definitions share divisions outside their initial
+  zero-sales guard; that boundary was reviewed, not exercised.
+- **How to check:** compare Strategic Activities F5:F8/V5:V8 with the text
+  cells and the activity properties.
+- **What closes it:** dropping the two properties (or deriving them from one
+  source), and a zero-sales phasing test.
+  Evidence/report: `test-results/sales-excel-audit-2026-10-07/` (not tracked).
+
+### Local CPG models: no setup controls, and no business user can open the AI copy
+
+- **Noticed:** 2026-10-07, the CPG audit (see the closed planning-rates
+  entry). Fixed the same day through the running app: AI's 68 metrics show
+  2 decimals for amounts and planning rates and 1 for other percentages;
+  both dashboards carry all twelve workbook KPI tiles (AI's margin changes
+  labelled "(pts)"; values read back: operating profit 1,595.335541,
+  operating margin 66.437572%, margin changes +1.249563 and +1.330291
+  points); AI's four margins and two revenue shares carry Excel's
+  zero-denominator guards; both models put the costs grid and the cutoff on
+  a dashboard; the incomplete older AI copy is deleted. Decided by the
+  user: the 164 row-level notes are not needed.
+- **Still open:** Setup's Model Year / Prior Year / Currency / Units have no
+  equivalent — the time dimension is fixed to 2026, amounts to $, and there
+  is no year-rollover process (recorded at the user's request, not built).
+  No Meridian Industries business user has access to the CPG AI
+  application, and Meridian has no tenant admin to grant it; Acme's
+  business users reach the Manual model's inputs.
+- **Why it matters:** a current-year snapshot does not prove equivalent
+  behaviour after a year changes; the AI copy's dashboards reach nobody who
+  plans with them.
+- **How to check:** compare `Setup!B4:B8` with the models; list Meridian's
+  users and their applications.
+- **What closes it:** a supported year rollover (or a documented decision
+  against it) and, if the AI copy is meant for planners, business access
+  granted by a tenant admin.
 
 ### Renaming a dashboard or model leaves text links to it dangling, unwarned
 
@@ -73,7 +128,9 @@ leaves out, until it is fixed.
   converts or refuses: every cell keeps its note in `text_value` beside a 0,
   so the grid shows "—" (a date of 0) and formulas read 0.
 - **Why it matters:** the natural move after an import that brought dates in
-  as text loses them silently.
+  as text loses them silently. Re-confirmed 2026-10-07 converting both HR
+  models' Hire Date: the PATCH turned 100 dates into 0 with no warning, and
+  they had to be read first and re-entered as dates through `POST /api/cells`.
 - **How to check:** a text input holding `2026-12-01`, PATCH `format: "date"`,
   read the grid.
 - **What closes it:** on a format change away from Text, converting the notes
@@ -2489,6 +2546,100 @@ leaves out, until it is fixed.
 - **What closes it:** a decision, recorded here, or the same-dimension rule.
 
 ## Closed
+
+### Local CPG AI model sums annual planning rates instead of averaging them
+
+- **Noticed:** 2026-10-07, read-only comparison of the populated local CPG
+  AI and Manual models against `CPG_Monthly_FPA_Rolling_Forecast_Model.xlsx`.
+  AI's `revenue_planning_pct` and `cost_planning_pct` use `agg_rule: average`
+  but `time_summary: sum`. All 20 revenue and 21 cost annual planning rates
+  are twelve times Excel's twelve-month means. North America / Snacks is
+  72.48% instead of 6.04%; MFG-NA is 54.3% instead of 4.525%. Confirmed via
+  live `/api/grid/series` reads and execution of PlanningGrid's `combineTime`.
+  Manual uses average over time and matches all 41 values.
+- **Why it matters:** annual assumptions are wrong even though the current
+  forecast amounts are correct. Both implementations match all 492 monthly
+  forecast amounts and their 41 annual totals, all 676 numeric P&L cells,
+  and their saved chart series. This is model configuration, not evidence
+  of an engine failure to honor its configured aggregation.
+- **How to check:** read FY2026 planning rates at each revenue region/product
+  and cost-center leaf; compare with `Revenue_Plan!O5:O24` and
+  `Costs_Plan!P5:P25`. The audit contains 2,954 mapped comparisons per model;
+  AI has these 41 differences and Manual has none. Manual's scenario P&L
+  also matches in 676 separate series comparisons.
+- **Closed by:** 26a35bd (2026-10-07), which makes a time summary of average
+  count every period, an empty one as 0 (`rollup.CombineTimeOver`,
+  EngineVersion 2) and refuses a percentage summed over time in the AI
+  assistant (`LintProposalStep`); then, through the running app as the
+  Meridian developer (access granted by the platform admin), both AI time
+  summaries set to average. Read back through `/api/grid/series`: North
+  America / Snacks 6.04, Beverages 8.54, MFG-NA 4.525; net revenue
+  2,401.255026 and EBITDA margin 67.721420% unchanged.
+
+### Chart series multiply a cost-only rate that the grid reads correctly
+
+- **Noticed:** 2026-10-07, read-only reconciliation of both local HR Planning
+  models against `Standalone_HR_Planning_Model.xlsx`. On Monthly Cost Plan,
+  Effective Global Note (`effective_global_note` in AI, `cost_global_pct` in
+  Manual) at Base Salary / All Departments / FY2027 is **2.5** in
+  `GET /api/grid`, including the exact scoped grid request, but **210** in
+  `GET /api/grid/series` along cost_type with the same context. Insurance is
+  6 versus 504; all ten nonzero rates are multiplied by 84 (7 departments ×
+  12 months). Reproduced with a single-metric series request; neither grid
+  reported recalculation pending. The metrics use `agg_rule: formula` and
+  reference a cost-only input. Persisted grid values are already correct;
+  this is distinct from the older stale-results observation below.
+- **Why it matters:** chart/connector reads disagree with the table and Excel.
+  Current expense calculations and the three existing HR dashboard charts
+  reconcile; this defect concerns the global-rate series, not the budget.
+- **How to check:** request that metric through `/api/grid/series` with
+  `dimension_id=cost_type`, context month=FY2027 and department=All Departments;
+  compare its raw percentage-point value with the matching scoped grid cell.
+- **Closed by:** 26a35bd (2026-10-07,
+  `TestResolveFormulaOverNarrowerInputIgnoresUnrelatedPins`): the chart
+  resolver (`/api/grid/series`, dashboard charts, the chat connector) and
+  `MetricValuesAt` (workflow conditions) read an input through
+  `resolveInput`, which drops pins on dimensions the input neither has nor
+  relates to (`rollup.NormalizeCombo`) before resolving it, as the scheduler
+  and the scoped grid reads already did. The test reads a cost-only rate at
+  All Departments × FY, × a leaf month and × one department: 2.5, not 22.5.
+
+### Local HR imports match the budget but retain display and semantic differences
+
+- **Noticed:** 2026-10-07, the same read-only audit: 7,176 mapped values per
+  model, all 2,604 Monthly_HR_Plan formulas and all 306 Plan_Summary formulas
+  reconcile within 1e-6 source units. All 3,466 Excel formulas were also
+  independently evaluated, matching their caches within 5.5e-12. The final
+  plan differs by only about USD 0.000299 because Excel embeds rounded
+  eligibility ratios while the models compute full-precision ratios.
+- **Display/data drift:** all 126 AI metrics have zero displayed decimals:
+  insurance 0.8 displays as 1, meal 0.2 as 0, and a 2.5% driver as 3%.
+  Manual preserves useful decimals, but Health Insurance's `ca_basis` is
+  `Fixed Monthly^^` versus Excel's `Fixed Monthly` (Cost_Assumptions!B6).
+  Both models store Hire Date as text and omit Increase_Drivers' per-row
+  Source / Note column. Date-format conversion has a separate open entry.
+- **Behavioral differences:** role baselines, opening HC and benefit
+  eligibility are derived from Employee Master in Engine but are entered
+  constants in Excel. Both Action Key formulas concatenate ID and type
+  without Excel's blank-ID/blank-type guard. Current complete rows match;
+  incomplete-row behavior was assessed from formulas without changing data.
+- **Why it matters:** the current numerical plan is faithful, but displayed
+  assumptions and behavior after changing source records are not a literal
+  copy of the workbook.
+- **How to check:** compare the model definitions, Cost Assumptions and
+  Workforce Actions with the workbook; evaluate the AI formats through
+  `fmtMetric` in PlanningGrid.tsx. Detailed audit artifacts are generated in
+  `test-results/hr-excel-audit-2026-10-07/` (not tracked).
+- **Closed by:** model corrections made through the running app on
+  2026-10-07, as the Meridian developer: AI's numeric metrics show 0
+  decimals for counts, months and years, 1 for headcount levels and
+  averages, 2 for amounts and 1 for percentages (64 changed); Manual's
+  `ca_basis` reads `Fixed Monthly`; Hire Date is a Date metric in both
+  models, its 100 dates re-entered through `POST /api/cells` and read back
+  as the workbook's serials; both Action Keys carry Excel's guard
+  `IF(OR(id = "", type = ""), "", id & "|" & type)`, checked live with a
+  temporary incomplete row. Decided by the user: the driver notes are not
+  needed and the dynamic baselines stay.
 
 ### Ryuk killed the test databases mid-run on the self-hosted runners
 

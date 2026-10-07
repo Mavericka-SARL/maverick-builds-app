@@ -227,9 +227,9 @@ func TestNormalizeComboConflictingOverrides(t *testing.T) {
 }
 
 // TestResolveTimeAggregatePeriodIsFlat: an aggregate period in a nested
-// time hierarchy (FY > Q > month) reduces its recorded LEAF periods once,
-// never level by level — an average over unequally recorded quarters is
-// the mean of the recorded months, not a mean of quarter means.
+// time hierarchy (FY > Q > month) reduces its LEAF periods once, never
+// level by level — an average over unequally recorded quarters is the
+// months' sum over every month, not a mean of quarter means.
 func TestResolveTimeAggregatePeriodIsFlat(t *testing.T) {
 	members := []Member{{Code: "FY", TimeIndex: -1}}
 	for q := 1; q <= 2; q++ {
@@ -256,7 +256,7 @@ func TestResolveTimeAggregatePeriodIsFlat(t *testing.T) {
 		rule TimeSummaryRule
 		want float64
 	}{
-		{"average", (1 + 3 + 5 + 11) / 4.0}, // not (3 + 11) / 2
+		{"average", (1 + 3 + 5 + 11) / 6.0}, // Apr and Jun count as 0; not a mean of quarter means
 		{"sum", 20},
 		{"first", 1},
 		{"last", 11},

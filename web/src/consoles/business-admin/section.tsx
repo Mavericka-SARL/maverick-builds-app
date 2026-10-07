@@ -4,6 +4,7 @@ import { LayoutDashboard, Inbox, History, Shield, KeyRound, Boxes } from "lucide
 import { api, type DemoContext } from "../../api/client";
 import { DashboardsView } from "../business/DashboardsView";
 import { AppsTab } from "../business/AppsTab";
+import { useModelLabel } from "../business/modelLabel";
 import { PageLayout, LoadingState } from "../../ui";
 import { tabId, localTab, type ConsoleSection, type SectionId, type SectionInput } from "../../router/sections";
 import { WorkflowInbox, WorkflowHistory, RolesTab, AccessRulesTab } from "./BusinessAdminConsole";
@@ -32,6 +33,7 @@ const SECTION: SectionId = "business-admin";
 export function useBusinessAdminSection({ enabled, setTab }: SectionInput): ConsoleSection | null {
   const [focusInstanceId, setFocusInstanceId] = useState<string | undefined>();
   const { data: ctx, isLoading: ctxLoading } = useQuery({ queryKey: ["demo"], queryFn: api.getDemo, enabled });
+  const modelLabel = useModelLabel(ctx, enabled);
 
   if (!enabled) return null;
   const t = (id: Tab) => tabId(SECTION, id);
@@ -55,7 +57,10 @@ export function useBusinessAdminSection({ enabled, setTab }: SectionInput): Cons
         ],
       },
     ],
-    contextItems: ctx ? [{ id: "revision", label: "Revision", value: ctx.revision, tone: "live" as const }] : [],
+    contextItems: ctx ? [
+      ...(modelLabel ? [{ id: "model", label: "Model", value: modelLabel }] : []),
+      { id: "revision", label: "Revision", value: ctx.revision, tone: "live" as const },
+    ] : [],
     onNotificationNavigate: (resourceType, resourceId) => {
       if (resourceType !== "workflow_instance") return false;
       setTab(t("history"));

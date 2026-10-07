@@ -23,7 +23,7 @@ function useTimeDimensionedMetrics(revisionId?: string): Set<string> {
 
 const TIME_SUMMARY_HELP: Record<TimeSummary, string> = {
   sum: "flows — revenue, cost, units — add up over periods",
-  average: "the mean of the periods",
+  average: "rates — the mean over every period, an empty period counting as 0",
   min: "the smallest period value",
   max: "the largest period value",
   first: "an opening balance: the first period's value",

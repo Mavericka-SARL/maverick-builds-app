@@ -148,6 +148,16 @@ func TimeSummary(method string, vals []float64) (float64, bool) {
 	}
 }
 
+// TimeSummaryOver is TimeSummary over a reduction of `periods` periods, of
+// which vals are those with a value: an average counts a period with no
+// value as 0 (rollup.CombineTimeOver).
+func TimeSummaryOver(method string, vals []float64, periods int) (float64, bool) {
+	if method == "average" && len(vals) > 0 {
+		return rollup.CombineTimeOver(vals, periods, "average"), true
+	}
+	return TimeSummary(method, vals)
+}
+
 // usesTimeSeries reports whether a formula calls a time function. A formula
 // that does not parse is not time series: it fails later with the parser's
 // own error.
@@ -158,7 +168,8 @@ func usesTimeSeries(formulaText string) bool {
 
 // summarizeOverTime reduces leaf results to one value the way every
 // time-dimensioned total does: non-time dimensions first (aggRule, per
-// period), then time (timeSummary). subtrees optionally restricts the leaves
+// period), then time (timeSummary; an average counts every period of the
+// reduction, one with no row as 0). subtrees optionally restricts the leaves
 // to member subtrees per dimension (a slice). ok=false when there is nothing
 // to reduce or the time summary is 'none'.
 func summarizeOverTime(leaves []CalcResultRow, axis *timeAxis, aggRule, timeSummaryRule string, subtrees map[string]map[string]bool) (float64, bool) {
@@ -186,12 +197,17 @@ func summarizeOverTime(leaves []CalcResultRow, axis *timeAxis, aggRule, timeSumm
 		return 0, false
 	}
 	vals := make([]float64, 0, len(axis.periods))
-	for pos := range axis.periods {
+	periods := 0
+	for pos, p := range axis.periods {
+		if sub, ok := subtrees[axis.dim.ID]; ok && !sub[p.Code] {
+			continue
+		}
+		periods++
 		if v, ok := perPeriod[pos]; ok {
 			vals = append(vals, rollup.CombineAgg(v, rollup.AggRule(aggRule)))
 		}
 	}
-	return TimeSummary(timeSummaryRule, vals)
+	return TimeSummaryOver(timeSummaryRule, vals, periods)
 }
 
 // memoKey identifies one evaluation of one AST node at one time position
@@ -401,8 +417,9 @@ func (e *tsEvaluator) evalCtx(combo map[string]string, pos int, parent *formula.
 
 // summarize fulfils TimeEvalContext.Summarize (YEARVALUE and its
 // siblings): the bare source metric at each given leaf position with the
-// non-time coordinates of the cell held, periods with no recorded value
-// skipped, reduced by the source's own time_summary. 'none' is blank.
+// non-time coordinates of the cell held, reduced by the source's own
+// time_summary — periods with no recorded value skipped, except that an
+// average counts them as 0. 'none' is blank.
 func (e *tsEvaluator) summarize(nonTime map[string]string, metric string, positions []int) (float64, bool, *formula.FormulaError) {
 	depID, ferr := e.reads.source(metric)
 	if ferr != nil {
@@ -431,10 +448,12 @@ func (e *tsEvaluator) summarize(nonTime map[string]string, metric string, positi
 		return 0, false, &formula.FormulaError{Code: formula.ErrRef.Code, Message: fmt.Sprintf("reading %s: %v", metric, err)}
 	}
 	vals := make([]float64, 0, len(positions))
+	periods := 0
 	for _, pos := range positions {
 		if pos < 0 || pos >= len(e.axis.periods) {
 			continue
 		}
+		periods++
 		c := make(map[string]string, len(base)+1)
 		for k, v := range base {
 			c[k] = v
@@ -456,7 +475,7 @@ func (e *tsEvaluator) summarize(nonTime map[string]string, metric string, positi
 			return 0, false, &formula.FormulaError{Code: formula.ErrRef.Code, Message: fmt.Sprintf("reading %s: %v", metric, err)}
 		}
 		if !ok {
-			continue // no recorded value: skipped, never a zero to average in
+			continue // no recorded value (an average counts it as 0)
 		}
 		if v != 0 {
 			e.reads.data = true
@@ -466,7 +485,7 @@ func (e *tsEvaluator) summarize(nonTime map[string]string, metric string, positi
 	if len(vals) == 0 {
 		return 0, false, nil
 	}
-	return rollup.CombineTime(vals, rollup.TimeSummaryRule(src.TimeSummary)), true, nil
+	return rollup.CombineTimeOver(vals, periods, rollup.TimeSummaryRule(src.TimeSummary)), true, nil
 }
 
 // span fulfils TimeEvalContext.Span (TIMESUM): a period code — leaf or
@@ -554,7 +573,7 @@ func (e *tsEvaluator) evalCombo(combo map[string]string) (float64, bool, error) 
 	for _, pos := range positions {
 		v, _, err := e.evalAt(e.nonTimeCombo(combo), pos)
 		if errors.Is(err, errBlankResult) {
-			continue // a blank period has no value to reduce
+			continue // a blank period has no value (an average counts it as 0)
 		}
 		if err != nil {
 			return 0, false, err
@@ -564,7 +583,7 @@ func (e *tsEvaluator) evalCombo(combo map[string]string) (float64, bool, error) 
 	if len(vals) == 0 {
 		return 0, true, errBlankResult
 	}
-	v, ok := TimeSummary(e.def.TimeSummary, vals)
+	v, ok := TimeSummaryOver(e.def.TimeSummary, vals, len(positions))
 	if !ok {
 		return 0, false, fmt.Errorf("time_summary is none: no aggregate over periods")
 	}
@@ -676,7 +695,7 @@ func (e *tsEvaluator) finish(res *tsResults) {
 		if len(vals) == 0 {
 			return 0, false
 		}
-		return TimeSummary(e.def.TimeSummary, vals)
+		return TimeSummaryOver(e.def.TimeSummary, vals, len(positions))
 	}
 	allPositions := make([]int, len(e.axis.periods))
 	for i := range allPositions {

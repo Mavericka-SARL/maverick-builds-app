@@ -234,10 +234,11 @@ func TestDimensionalRegressionsTime(t *testing.T) {
 	c := rowChecker{t, store, ctx, modelID, revID, labels}
 	at := func(m string) map[string]string { return pins(monthID, m) }
 
-	// Defect: LOOKUP to FY26 was a mean of quarter means (6.5).
-	c.want(ids["yv"], at("2026-03"), 6)
-	c.want(ids["lk"], at("2026-03"), 6)
-	c.want(ids["lkq"], at("2026-08"), 2) // (1 + 3) / 2
+	// Defect: LOOKUP to FY26 was a mean of quarter means (6.5). An average
+	// counts every month, an empty one as 0: FY26 = 36 / 12.
+	c.want(ids["yv"], at("2026-03"), 3)
+	c.want(ids["lk"], at("2026-03"), 3)
+	c.want(ids["lkq"], at("2026-08"), 4.0/3) // (1 + 0 + 3) / 3
 
 	// Defect: LOOKUP(ratio, month, "Q1") was the sum of the monthly ratios
 	// (0.6); the persisted Q1 ratio is 6/30.

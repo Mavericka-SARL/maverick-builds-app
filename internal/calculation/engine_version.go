@@ -19,7 +19,9 @@ import (
 //	1  2026-10-05: plain references ignore pins of dimensions their source
 //	   neither has nor relates to; formula totals evaluate at a scope's pins;
 //	   a dimensionless rule-none metric keeps its value.
-const EngineVersion = 1
+//	2  2026-10-07: a time summary of average counts every period of the
+//	   reduction, an empty one as 0 (FY = the months' sum / 12).
+const EngineVersion = 2
 
 // engineUpgradeLease is how long a replica's claim on the sweep holds
 // without being renewed; the claim is renewed after every revision.

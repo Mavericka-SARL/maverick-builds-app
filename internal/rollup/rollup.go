@@ -474,14 +474,12 @@ func resolve(
 			if timeSummary == "none" {
 				return 0, false, nil
 			}
-			// The period's recorded LEAF periods reduce once, flat — never
-			// level by level: FY26 averaged is the mean of its recorded
-			// months, not a mean of quarter means (which weighs a quarter
-			// with one recorded month like one with three). For sum, min,
-			// max, first and last the two agree; for average only the flat
-			// reduction is the period's own value, and it is the one the
-			// scheduler persists for the period's row and the *VALUE family
-			// computes.
+			// The period's LEAF periods reduce once, flat — never level by
+			// level: FY26 averaged is its months' sum over its twelve
+			// months, not a mean of quarter means. For sum, min, max, first
+			// and last the two agree; for average only the flat reduction
+			// is the period's own value, and it is the one the scheduler
+			// persists for the period's row and the *VALUE family computes.
 			children = leafPeriods(dim, combo[dimID])
 		}
 		vals := make([]float64, 0, len(children))
@@ -490,9 +488,9 @@ func resolve(
 			childCombo[dimID] = child.Code
 			if timeParent {
 				// A period with no recorded value under the other pins
-				// (EMEA in a month nobody in EMEA recorded) is skipped, as
-				// at a leaf member — never a 0 entering an average or
-				// answering as the last balance.
+				// (EMEA in a month nobody in EMEA recorded) is skipped —
+				// never answering as the last balance; an average still
+				// counts it, as 0 (CombineTimeOver).
 				v, ok, err := noValue(resolveRecorded(ctx, dims, metricID, metricDimIDs, aggRule, timeSummary, childCombo, fetch, depth+1))
 				if err != nil {
 					return 0, false, err
@@ -518,7 +516,7 @@ func resolve(
 			if len(vals) == 0 {
 				return 0, false, nil
 			}
-			return CombineTime(vals, timeSummary), true, nil
+			return CombineTimeOver(vals, len(children), timeSummary), true, nil
 		}
 		return combineAgg(vals, aggRule), true, nil
 	}
@@ -1078,10 +1076,9 @@ func resolveTime(
 	if timeSummary == "none" {
 		return 0, false, nil
 	}
-	// The period's recorded LEAF periods reduce once, flat — never level by
-	// level: FY26 averaged is the mean of its recorded months, not a mean of
-	// quarter means (which weighs a quarter with one recorded month like one
-	// with three).
+	// The period's LEAF periods reduce once, flat — never level by level:
+	// FY26 averaged is its months' sum over its twelve months, not a mean of
+	// quarter means.
 	vals := make([]float64, 0, len(periods))
 	for _, p := range periods {
 		c := cloneCombo(combo)
@@ -1091,13 +1088,29 @@ func resolveTime(
 			return 0, false, err
 		}
 		if ok && recorded {
-			vals = append(vals, v) // a period nothing under combo recorded is skipped, never a 0
+			vals = append(vals, v) // a period nothing under combo recorded has no value (an average counts it as 0)
 		}
 	}
 	if len(vals) == 0 {
 		return 0, false, nil
 	}
-	return CombineTime(vals, timeSummary), true, nil
+	return CombineTimeOver(vals, len(periods), timeSummary), true, nil
+}
+
+// CombineTimeOver is CombineTime over a reduction of `periods` periods, of
+// which vals are those with a value. An average counts every period, one
+// with no value as 0: FY averaged is the sum of its months over twelve, as a
+// workbook's SUM(Jan:Dec)/12, however many months have been entered. The
+// other rules read only the periods with a value.
+func CombineTimeOver(vals []float64, periods int, rule TimeSummaryRule) float64 {
+	if rule == "average" && periods > len(vals) {
+		var s float64
+		for _, v := range vals {
+			s += v
+		}
+		return s / float64(periods)
+	}
+	return CombineTime(vals, rule)
 }
 
 // CombineTime reduces per-period values by a time summary rule. Mirrors

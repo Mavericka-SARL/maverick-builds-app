@@ -14,7 +14,7 @@
 <p>Every level combines the <b>leaves</b> directly, however many levels up it is, so a World row always equals the grand total. A cell with no result (blank, or failed) is left out.</p>
 
 <h3>Time summary: across the time dimension</h3>
-<p>On a grid with a time dimension, each metric also has a <b>Time summary</b> — how an aggregate period (Q1, H1, FY26) reduces its leaf periods: <b>sum</b> (flows such as sales), <b>last</b> (a closing balance), <b>first</b> (an opening balance), <b>average</b>, <b>min</b>, <b>max</b>, or <b>none</b> (no time total: the aggregate period stays empty). Periods with nothing recorded are skipped, never averaged in as 0.</p>
+<p>On a grid with a time dimension, each metric also has a <b>Time summary</b> — how an aggregate period (Q1, H1, FY26) reduces its leaf periods: <b>sum</b> (flows such as sales), <b>last</b> (a closing balance), <b>first</b> (an opening balance), <b>average</b>, <b>min</b>, <b>max</b>, or <b>none</b> (no time total: the aggregate period stays empty). <b>average</b> counts every period of the aggregate, a period with nothing recorded as 0 — FY is the sum of its months divided by twelve, as a workbook's <code>SUM(Jan:Dec)/12</code>, however many months are entered so far. The other summaries skip periods with nothing recorded: <b>last</b> is the last month that has a value.</p>
 <ul>
   <li>For a total over time <i>and</i> other dimensions, the other dimensions are combined first (by the aggregation rule), then the periods (by the time summary).</li>
   <li>A metric whose rule is <b>Formula</b> or <b>Rate</b> keeps that rule across time too: <code>margin_pct</code> for FY26 is the year's margin ÷ the year's sales, not a sum of monthly percentages.</li>

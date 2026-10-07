@@ -183,7 +183,7 @@ func baTheModel() modeltransfer.Dashboard {
 	return baPage("ba-dash-2-model", "2 · The model you work in",
 		baText(`# The model you work in
 
-**Dashboards** (with the forms on them), **Roles** and **Access Rules** work on one model at a time: the one you have open. An application can hold several — *Getting started* holds the tour and a guide for each role — so before you change who sees what, check which model you are in. The inbox and **History** are different: they list requests from every model at once.`, 136),
+**Dashboards** (with the forms on them), **Roles** and **Access Rules** work on one model at a time: the one you have open. An application can hold several — *Getting started* holds the tour and a guide for each role — so before you change who sees what, check which model you are in: the **Model** in the bar at the top of the page names it, beside the **Revision**. The inbox and **History** are different: they list requests from every model at once.`, 156),
 
 		baText(`## Switching models
 

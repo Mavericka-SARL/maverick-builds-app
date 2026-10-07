@@ -72,8 +72,8 @@ func TestResolveTimeFlatCombinesLeavesOnce(t *testing.T) {
 
 // With a time dimension, the non-time leaves combine flat per period and
 // the periods reduce by time_summary (the scheduler's summarizeOverTime);
-// a period with no leaf value is skipped. A leaf reached twice through an
-// unrelated pinned parent counts once.
+// a period with no leaf value is skipped, except that an average counts it
+// as 0. A leaf reached twice through an unrelated pinned parent counts once.
 func TestResolveTimeFlatTimeAndUnrelatedPins(t *testing.T) {
 	dims, _ := regionMonth()
 	dims["geo"] = worldGeo()
@@ -92,7 +92,7 @@ func TestResolveTimeFlatTimeAndUnrelatedPins(t *testing.T) {
 		ts    TimeSummaryRule
 		want  float64
 	}{
-		{map[string]string{"geo": "World"}, "average", 6.5},
+		{map[string]string{"geo": "World"}, "average", (3 + 10) / 4.0}, // m3, m4 empty: 0
 		{map[string]string{"geo": "World", "month": "FY"}, "last", 10},
 		{map[string]string{"geo": "World", "month": "m1"}, "none", 3},
 		{map[string]string{"geo": "World"}, "sum", 13},

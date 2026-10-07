@@ -81,6 +81,7 @@ test("a link to another model's dashboard opens that model at that dashboard", a
     page.getByRole("link", { name: "the guide's second page" }).click(),
   ]);
   await expect(page.getByText("Welcome to the guide's second page.")).toBeVisible();
+  await expect(page.locator(".mvx-context-bar")).toContainText("Getting started · Guide model");
   await expect(page.getByText("The guide's first page.")).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem("selected_model_id"))).toBe("model-2");
 

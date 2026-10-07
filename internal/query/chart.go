@@ -1073,6 +1073,20 @@ func (r *ChartResolver) evalCalcMetricVisited(
 	return r.evalFormulaPoint(ctx, def, dimMembers, allDims, cc, visited)
 }
 
+// resolveInput reads an input metric at point by its aggregation and time
+// summary. A pin on a dimension the input neither has nor relates to is
+// dropped first, as the scheduler and the scoped reads drop it: the input is
+// the same there whatever that member, never rolled up along it — drv_global
+// [cost_type] read at All Departments × FY 2027 added its one rate up once
+// per department and month (84 × 2.5 = 210).
+func resolveInput(ctx context.Context, allDims map[string]*rollup.Dimension, def *fullMetricDef, point map[string]string, fetch rollup.RawValue) (float64, bool, error) {
+	if norm, err := rollup.NormalizeCombo(allDims, def.DimensionIDs, point, nil); err == nil {
+		point = norm
+	}
+	return rollup.ResolveTime(ctx, allDims, def.ID, def.DimensionIDs, rollup.AggRule(def.AggRule),
+		rollup.TimeSummaryRule(def.TimeSummary), point, fetch)
+}
+
 // ownPoint keeps the members of point on the metric's own dimensions
 // (ownDims) and on dimensions related to one of them.
 func ownPoint(dims map[string]*rollup.Dimension, ownDims []string, point map[string]string) map[string]string {
@@ -1142,7 +1156,7 @@ func (r *ChartResolver) evalFormulaPoint(
 		}
 		var val float64
 		if depDef.IsInput {
-			v, ok, err := rollup.ResolveTime(ctx, allDims, depID, depDef.DimensionIDs, rollup.AggRule(depDef.AggRule), rollup.TimeSummaryRule(depDef.TimeSummary), dimMembers, cc.fetchInput)
+			v, ok, err := resolveInput(ctx, allDims, depDef, dimMembers, cc.fetchInput)
 			if err != nil {
 				return 0, false, fmt.Errorf("resolve %s: %w", depDef.Name, err)
 			}

@@ -16357,6 +16357,18 @@ func (h *handler) applyInputAggregation(
 		// one leaf (combineLeaves).
 		flat := m.AggRule == string(rollup.AggAverage) || m.AggRule == string(rollup.AggCount) || m.AggRule == string(rollup.AggNone)
 		axis := timeAxisOf(rdims, ownDims)
+		if sub, pinned := scopeSubtrees[timeAxisID(axis)]; pinned {
+			// An average counts every period of the scope (combineLeaves):
+			// a FY2026 pin averages over 2026's months, not every month.
+			trimmed := *axis
+			trimmed.Members = nil
+			for _, mem := range axis.Members {
+				if sub[mem.Code] {
+					trimmed.Members = append(trimmed.Members, mem)
+				}
+			}
+			axis = &trimmed
+		}
 		timeReduced := axis != nil && m.TimeSummary != "" && m.TimeSummary != "sum"
 		if !flat && !timeReduced {
 			continue // the SUM above is the answer

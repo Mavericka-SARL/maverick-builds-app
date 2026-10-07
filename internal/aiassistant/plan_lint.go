@@ -12,7 +12,8 @@ import (
 // LintProposalStep holds a plan step to what the dry run cannot see: a step
 // that would save cleanly and compute the wrong thing. The AI Developer's
 // plans passed the dry run with six P&L lines written as the formula "0",
-// and margins and variance percentages totalled by average. These are
+// margins and variance percentages totalled by average, and monthly
+// planning rates added up into a year (6.04% a month read 72.48%). These are
 // refusals for the assistant only — a developer in the console can still
 // save any of them on purpose.
 func LintProposalStep(tool string, params json.RawMessage) error {
@@ -23,11 +24,12 @@ func LintProposalStep(tool string, params json.RawMessage) error {
 		return nil
 	}
 	var p struct {
-		Name    string  `json:"name"`
-		Formula string  `json:"formula"`
-		IsInput *bool   `json:"is_input"`
-		AggRule *string `json:"agg_rule"`
-		Format  string  `json:"format"`
+		Name        string  `json:"name"`
+		Formula     string  `json:"formula"`
+		IsInput     *bool   `json:"is_input"`
+		AggRule     *string `json:"agg_rule"`
+		Format      string  `json:"format"`
+		TimeSummary *string `json:"time_summary"`
 	}
 	if json.Unmarshal(params, &p) != nil {
 		return nil
@@ -38,6 +40,10 @@ func LintProposalStep(tool string, params json.RawMessage) error {
 		(p.AggRule == nil || *p.AggRule == "" || *p.AggRule == "sum") {
 		return fmt.Errorf("metric %q is a percentage input totalled by sum: a year or a region would show the percentages added up. "+
 			"Use agg_rule \"average\" (an input has no formula to re-evaluate)", p.Name)
+	}
+	if tool == "create_metric" && p.Format == "percentage" && percentSummedOverTime(p.IsInput != nil && *p.IsInput, p.AggRule, p.TimeSummary) {
+		return fmt.Errorf("metric %q is a percentage totalled over time by sum (the default): a year would show its months' percentages added up "+
+			"(6%% a month reads 72%%). Use time_summary \"average\" — a year is its months' sum / 12 — or \"last\" or \"none\" when that is what the source shows", p.Name)
 	}
 	if !calculated {
 		return nil
@@ -76,6 +82,21 @@ func LintProposalStep(tool string, params json.RawMessage) error {
 			"Multiply the ratio by 100", p.Name, p.Formula)
 	}
 	return nil
+}
+
+// percentSummedOverTime reports a percentage whose year is its periods'
+// percentages added up: time_summary left out or "sum" on an input, or on a
+// calculation with agg_rule "none" (formula and rate re-evaluate the formula
+// at an aggregate period; sum and average are refused on their own).
+func percentSummedOverTime(input bool, aggRule, timeSummary *string) bool {
+	if timeSummary != nil && *timeSummary != "" && *timeSummary != "sum" {
+		return false
+	}
+	agg := ""
+	if aggRule != nil {
+		agg = *aggRule
+	}
+	return input || agg == "none"
 }
 
 // literalOnly reports a formula with no name and no function call in it:

@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/mavericks-engine/mavericks/internal/formula"
-	"github.com/mavericks-engine/mavericks/internal/rollup"
 )
 
 // MetricValuesAt reads metrics, by name (ignoring case, as formulas name
@@ -40,8 +39,7 @@ func (r *ChartResolver) MetricValuesAt(ctx context.Context, modelID, revisionID 
 		var v float64
 		var has bool
 		if d.IsInput {
-			v, has, err = rollup.ResolveTime(ctx, dims, d.ID, d.DimensionIDs, rollup.AggRule(d.AggRule),
-				rollup.TimeSummaryRule(d.TimeSummary), point, cc.fetchInput)
+			v, has, err = resolveInput(ctx, dims, d, point, cc.fetchInput)
 		} else {
 			v, has, err = r.evalCalcMetricVisited(ctx, d.ID, point, dims, cc, map[string]bool{})
 		}

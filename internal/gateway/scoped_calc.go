@@ -134,6 +134,14 @@ func timeAxisOf(dims map[string]*rollup.Dimension, ownDims []string) *rollup.Dim
 	return nil
 }
 
+// timeAxisID is axis's dimension ID, "" without one.
+func timeAxisID(axis *rollup.Dimension) string {
+	if axis == nil {
+		return ""
+	}
+	return axis.ID
+}
+
 // leafPeriods returns axis's dated leaf periods in chronological order.
 func leafPeriods(axis *rollup.Dimension) []string {
 	codes := rollup.LeafCodes(axis)
@@ -153,8 +161,10 @@ type leafValue struct {
 
 // combineLeaves reduces leaf values the way the scheduler totals a
 // combining rule: with a time axis, non-time dimensions by aggRule per
-// period and the periods by timeSummary; without one, by aggRule. ok is
-// false when there is nothing to reduce or the summary is 'none'.
+// period and the periods by timeSummary (an average counts every leaf
+// period of axis, one with no value as 0, so axis must already be trimmed
+// to the scope); without one, by aggRule. ok is false when there is nothing
+// to reduce or the summary is 'none'.
 func combineLeaves(leaves []leafValue, axis *rollup.Dimension, aggRule, timeSummary string) (float64, bool) {
 	if len(leaves) == 0 {
 		return 0, false
@@ -180,7 +190,8 @@ func combineLeaves(leaves []leafValue, axis *rollup.Dimension, aggRule, timeSumm
 		perPeriod[p] = append(perPeriod[p], l.value)
 	}
 	var ordered []float64
-	for _, p := range leafPeriods(axis) {
+	periods := leafPeriods(axis)
+	for _, p := range periods {
 		if vals, ok := perPeriod[p]; ok {
 			ordered = append(ordered, rollup.CombineAgg(vals, rollup.AggRule(aggRule)))
 		}
@@ -188,7 +199,7 @@ func combineLeaves(leaves []leafValue, axis *rollup.Dimension, aggRule, timeSumm
 	if len(ordered) == 0 {
 		return 0, false
 	}
-	return calculation.TimeSummary(timeSummary, ordered)
+	return calculation.TimeSummaryOver(timeSummary, ordered, len(periods))
 }
 
 // isFormulaRule: the total and rollups are the formula evaluated at the
@@ -315,7 +326,7 @@ func (sr *scopedReads) serve(m metricRow, sm *servedMetric, ownDims []string, ro
 				if len(vals) == 0 {
 					continue
 				}
-				if v, ok := calculation.TimeSummary(timeSummary, vals); ok {
+				if v, ok := calculation.TimeSummaryOver(timeSummary, vals, len(periods)); ok {
 					res.cells[aggKey] = v
 				}
 			}

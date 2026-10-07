@@ -448,13 +448,15 @@ function combineFlat(vals: number[], aggRule: string): number | undefined {
   }
 }
 
-// Reduces a set of periods' values (in chronological order) by a metric's
-// time_summary, as calculation.TimeSummary does; undefined for "none" or
-// when no period has a value.
-function combineTime(vals: number[], summary: string): number | undefined {
+// Reduces the values of the periods that have one (in chronological order)
+// by a metric's time_summary, as calculation.TimeSummaryOver does: an
+// average counts every one of `periods` periods, one with no value as 0
+// (FY = the months' sum / 12, as a workbook's SUM(Jan:Dec)/12). undefined
+// for "none" or when no period has a value.
+function combineTime(vals: number[], summary: string, periods: number): number | undefined {
   if (vals.length === 0 || summary === "none") return undefined;
   switch (summary) {
-    case "average": return vals.reduce((a, b) => a + b, 0) / vals.length;
+    case "average": return vals.reduce((a, b) => a + b, 0) / Math.max(periods, vals.length);
     case "min":     return Math.min(...vals);
     case "max":     return Math.max(...vals);
     case "first":   return vals[0];
@@ -950,7 +952,8 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   //   - over an aggregate period (the leaves span more than one period of a
   //     time dimension), each leaf period is combined that way first and the
   //     periods are then reduced by the metric's time_summary — the
-  //     scheduler's summarizeOverTime order;
+  //     scheduler's summarizeOverTime order; an average counts every period
+  //     under the combos, one with no value as 0;
   //   - with no recorded value at all, sum and count are 0 and average has
   //     no value (undefined).
   // Pending (unsaved) edits are in g.cells, so they flow in like any value.
@@ -982,7 +985,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     }
     const summary = fullMetric(metricId)?.time_summary ?? g.metrics.find(m => m.id === metricId)?.time_summary ?? "sum";
     if (summary === "none") return undefined;
-    return vals.length ? combineTime(vals, summary) : combineFlat([], aggRule);
+    return vals.length ? combineTime(vals, summary, periods.size) : combineFlat([], aggRule);
   }
 
   // Is any member in this combo a parent (agg node)?

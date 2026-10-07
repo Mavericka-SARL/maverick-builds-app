@@ -10,6 +10,7 @@ import { WorkflowMyHistory } from "./WorkflowHistoryTab";
 import { DashboardsView } from "./DashboardsView";
 import { AppsTab } from "./AppsTab";
 import { SELECTED_APP_KEY } from "./modelSelection";
+import { useModelLabel } from "./modelLabel";
 
 // ── Section ───────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,7 @@ export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSe
   const [focusInstanceId, setFocusInstanceId] = useState<string | undefined>();
   const qc = useQueryClient();
   const { data: ctx, isLoading, error } = useQuery({ queryKey: ["demo"], queryFn: api.getDemo, enabled });
+  const modelLabel = useModelLabel(ctx, enabled);
 
   // Sync the user's primary app into localStorage so X-App-Id is always sent.
   // Without this, the first load has no selected_app_id and the backend falls back
@@ -52,7 +54,10 @@ export function useBusinessSection({ enabled, setTab }: SectionInput): ConsoleSe
         { id: t("models"), label: "Models", icon: <Boxes size={16} /> },
       ],
     }],
-    contextItems: ctx ? [{ id: "revision", label: "Revision", value: ctx.revision, tone: "live" as const }] : [],
+    contextItems: ctx ? [
+      ...(modelLabel ? [{ id: "model", label: "Model", value: modelLabel }] : []),
+      { id: "revision", label: "Revision", value: ctx.revision, tone: "live" as const },
+    ] : [],
     onNotificationNavigate: (resourceType, resourceId) => {
       if (resourceType !== "workflow_instance") return false;
       openInstance(resourceId);

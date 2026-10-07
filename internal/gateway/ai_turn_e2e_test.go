@@ -180,7 +180,7 @@ func TestSendMessage_WarnsOnceThenShowsWithWarnings(t *testing.T) {
 			"members": []map[string]any{{"code": "ALL_P", "label": "All"}, {"code": "SN", "label": "Snacks", "parent_code": "ALL_P"},
 				{"code": "BV", "label": "Beverages", "parent_code": "ALL_P"}}}},
 		turnMetricStep("weighted_base", map[string]any{"is_input": true}),
-		turnMetricStep("growth_pct", map[string]any{"is_input": true, "format": "percentage", "agg_rule": "average"}),
+		turnMetricStep("growth_pct", map[string]any{"is_input": true, "format": "percentage", "agg_rule": "average", "time_summary": "average"}),
 		{"tool": "create_grid", "description": "Mix grid", "params": map[string]any{"name": "Mix",
 			"dimensions": []string{"mix_region", "mix_product"}, "metrics": []string{"weighted_base", "growth_pct"}}},
 		turnMetricStep("target", map[string]any{"formula": "weighted_base * growth_pct"}),
@@ -232,7 +232,7 @@ func (e aiTurnEnv) storedWarnings(t *testing.T, want string) {
 func TestSendMessage_WarnedPlanShownWhenTheModelOnlyAsks(t *testing.T) {
 	plan := []map[string]any{
 		turnMetricStep("weighted_base", map[string]any{"is_input": true}),
-		turnMetricStep("growth_pct", map[string]any{"is_input": true, "format": "percentage", "agg_rule": "average"}),
+		turnMetricStep("growth_pct", map[string]any{"is_input": true, "format": "percentage", "agg_rule": "average", "time_summary": "average"}),
 		turnMetricStep("target", map[string]any{"formula": "weighted_base * growth_pct"}),
 	}
 	fake := &multiScriptProvider{resps: []providers.ChatResponse{
@@ -387,5 +387,37 @@ func TestSendMessage_WarnsOfRecurringMistakes(t *testing.T) {
 		if !strings.Contains(results[0], w) {
 			t.Errorf("the warnings lack %q:\n%s", w, results[0])
 		}
+	}
+}
+
+// A plan that writes values with decimals into a metric shown with none is
+// warned of: a USD 0.3m strategic increment read 0 in the assistant's sales
+// model. A metric left at the default decimals is not.
+func TestSendMessage_WarnsOfHiddenDecimals(t *testing.T) {
+	plan := []map[string]any{
+		{"tool": "create_dimension", "description": "Activities", "params": map[string]any{"name": "activity",
+			"members": []map[string]any{{"code": "A1", "label": "A1"}, {"code": "A2", "label": "A2"}}}},
+		turnMetricStep("increment", map[string]any{"is_input": true, "format": "currency", "format_decimals": 0}),
+		turnMetricStep("rate", map[string]any{"is_input": true, "format": "percentage", "agg_rule": "average", "time_summary": "average"}),
+		{"tool": "create_grid", "description": "Activities", "params": map[string]any{"name": "Activities", "dimensions": []string{"activity"}, "metrics": []string{"increment", "rate"}}},
+		{"tool": "write_input_values", "description": "Increments", "params": map[string]any{"metric_id": "increment", "values": []map[string]any{
+			{"members": map[string]string{"activity": "A1"}, "value": 0.3}, {"members": map[string]string{"activity": "A2"}, "value": 2}}}},
+		{"tool": "write_input_values", "description": "Rates", "params": map[string]any{"metric_id": "rate", "values": []map[string]any{
+			{"members": map[string]string{"activity": "A1"}, "value": 5.6}}}},
+	}
+	fake := &multiScriptProvider{resps: []providers.ChatResponse{proposeResp("c1", plan...), proposeResp("c2", plan...)}}
+	env := newAITurnEnv(t, fake)
+	if status, sse := env.send("build it"); status != http.StatusOK || !strings.Contains(sse, "event: proposal") {
+		t.Fatalf("send: %d\n%s\ntool results: %q", status, sse, toolResults(t, env))
+	}
+	results := toolResults(t, env)
+	if len(results) < 1 {
+		t.Fatal("no tool result")
+	}
+	if !strings.Contains(results[0], "increment shows no decimal places") || !strings.Contains(results[0], "0.3 would show as 0") {
+		t.Errorf("no warning for increment:\n%s", results[0])
+	}
+	if strings.Contains(results[0], "rate shows no decimal places") {
+		t.Errorf("rate keeps the default two decimals, yet was warned of:\n%s", results[0])
 	}
 }

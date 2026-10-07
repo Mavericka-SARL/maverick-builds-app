@@ -7,7 +7,8 @@ import (
 )
 
 // What the AI Developer proposed live and the dry run let through: P&L lines
-// written as "0", ratios totalled by average, a margin stored as a fraction.
+// written as "0", ratios totalled by average, a margin stored as a fraction,
+// monthly planning rates added up into a year.
 func TestLintProposalStep(t *testing.T) {
 	j := func(m map[string]any) json.RawMessage { b, _ := json.Marshal(m); return b }
 	for _, tc := range []struct {
@@ -25,7 +26,11 @@ func TestLintProposalStep(t *testing.T) {
 		{"a rate percentage", "create_metric", map[string]any{"name": "m", "formula": "a / b * 100", "format": "percentage", "agg_rule": "rate"}, ""},
 		{"a forecast reading a percent", "create_metric", map[string]any{"name": "rf", "formula": "ly * (1 + pct / 100)", "format": "currency"}, ""},
 		{"a period-dependent value", "create_metric", map[string]any{"name": "days", "formula": "DAYSINMONTH(YEAR(START()), MONTH(START()))"}, ""},
-		{"an input percentage", "create_metric", map[string]any{"name": "pct", "is_input": true, "format": "percentage", "agg_rule": "average"}, ""},
+		{"an input percentage", "create_metric", map[string]any{"name": "pct", "is_input": true, "format": "percentage", "agg_rule": "average", "time_summary": "average"}, ""},
+		{"a planning rate summed over the year", "create_metric", map[string]any{"name": "pct", "is_input": true, "format": "percentage", "agg_rule": "average"}, `time_summary "average"`},
+		{"a planning rate summed over the year on purpose", "create_metric", map[string]any{"name": "pct", "is_input": true, "format": "percentage", "agg_rule": "average", "time_summary": "sum"}, `time_summary "average"`},
+		{"a closing rate", "create_metric", map[string]any{"name": "pct", "is_input": true, "format": "percentage", "agg_rule": "none", "time_summary": "last"}, ""},
+		{"a calculated rate with no total summed over time", "create_metric", map[string]any{"name": "eff", "formula": "pct", "format": "percentage", "agg_rule": "none"}, `time_summary "average"`},
 		{"an input percentage summed", "create_metric", map[string]any{"name": "pct", "is_input": true, "format": "percentage", "agg_rule": "sum"}, `agg_rule "average"`},
 		{"another tool", "create_grid", map[string]any{"name": "g"}, ""},
 		{"a value on a metric", "create_metric", map[string]any{"name": "cutoff", "is_input": true, "value": 9}, "create_metric has no value"},

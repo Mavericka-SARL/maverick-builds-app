@@ -211,7 +211,7 @@ An **application** groups related models; a **model** holds what you build. Crea
 
 		devText(`## 3 · A revision to build in
 
-A new model is empty and has no revision yet. Under it in **Developer › Models**, press **New revision**, type a name — *Working*, say — and press **Save**. It becomes your working revision: the bar at the top names the model and the revision, and every Build screen now changes them. Page 2 covers revisions.`, 132),
+A new model is empty and has no revision yet. Under it in **Developer › Models**, press **New revision**, type a name — *Working*, say — and press **Save**. It becomes your working revision: the bar at the top names the model and the revision, and every Developer screen now changes them. Page 2 covers revisions.`, 132),
 
 		devText(`## 4 · Dimensions
 
@@ -250,7 +250,7 @@ Everything you build — dimensions, metrics, grids, dashboards, forms, workflow
 
 		devText(`## Check where you are
 
-Every Build screen shows two things in the bar at the top: **Model** (the application and the model) and **Revision**. Everything you add, change or delete goes into that revision.
+Every Developer screen shows two things in the bar at the top: **Model** (the application and the model) and **Revision**. Everything you add, change or delete goes into that revision.
 
 Build starts in the live revision of the model you have open, and nothing stops an edit there: it reaches people at once. Look at the bar before you change anything.`, 164),
 
@@ -549,7 +549,7 @@ Press **New session** and describe what you want. **Attach a document** adds a p
 
 The first plan you confirm in a session creates a revision for it, named *AI Draft* and the date, copied from the live revision. The chat then carries an **AI draft** badge, and every later change in the session goes into that draft — never into your working revision or the live one.
 
-The draft is listed in **Developer › Models** like any revision: click its row to look through the result in every Build screen. Back in the chat, the draft's banner has **Promote to Active**, which makes it the live revision, and **Discard**, which throws it away.
+The draft is listed in **Developer › Models** like any revision: click its row to look through the result in every Developer screen. Back in the chat, the draft's banner has **Promote to Active**, which makes it the live revision, and **Discard**, which throws it away.
 
 Three kinds of change are not revision-scoped and take effect as soon as you confirm: business roles, user access rules, and form records posted into the model.
 
@@ -570,7 +570,7 @@ Then open **Developer › Models**, press **Set active** on your revision, and *
 
 		devText(`## Read further
 
-- [Developer manual](`+developerManual+`) — every Build screen, in detail
+- [Developer manual](`+developerManual+`) — every Developer screen, in detail
 - [Formulas manual](`+formulasManual+`) — the formula language, function by function
 - [The AI Developer](`+publicDocs+`AI_DEVELOPER.md) — what it reads, writes and leaves to you
 - [HTTP API](`+publicDocs+`API.md) — for the *api* trigger type and scripts of your own

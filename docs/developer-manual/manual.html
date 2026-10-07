@@ -107,7 +107,7 @@
   <li><b>Tenant.</b> The isolation boundary. Users, applications and data belong to exactly one tenant.</li>
   <li><b>Application.</b> What users open. Created by an administrator. Has a mode and a status.</li>
   <li><b>Model.</b> Owns everything below. An application usually has one; when it has several, the <b>business default</b> model is the one business consoles open.</li>
-  <li><b>Revision.</b> Every definition and every value belongs to a revision. Exactly one revision per model is <b>active</b>: that is what business users see and edit. A developer selects a revision on the Models screen and every Build screen then works inside it.</li>
+  <li><b>Revision.</b> Every definition and every value belongs to a revision. Exactly one revision per model is <b>active</b>: that is what business users see and edit. A developer selects a revision on the Models screen and every Developer screen then works inside it.</li>
 </ul>
 <h3>Revisions</h3>
 <ul>
@@ -210,7 +210,7 @@
 <h3>Controls</h3>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
-<tr><td>Banner <b>Working in revision: …</b></td><td>The revision every Build screen edits, with its short id. With nothing selected the banner is orange: "No revision selected — select a revision below to start working".</td></tr>
+<tr><td>Banner <b>Working in revision: …</b></td><td>The revision every Developer screen edits, with its short id. With nothing selected the banner is orange: "No revision selected — select a revision below to start working".</td></tr>
 <tr><td>Revision row</td><td>Click to select it. The row gets a <b>Working</b> badge; a <b>live</b> badge marks the model's active revision.</td></tr>
 <tr><td><b>Set active</b></td><td>On a non-active revision. Confirm <b>Set as active revision?</b>: the revision "becomes the live revision everyone sees. This can be changed again later."</td></tr>
 <tr><td>Delete revision icon</td><td>On a non-active revision. Confirm <b>Delete revision?</b>: "This permanently removes the revision. This cannot be undone." The active revision cannot be deleted.</td></tr>

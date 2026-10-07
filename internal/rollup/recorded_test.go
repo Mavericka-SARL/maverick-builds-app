@@ -35,7 +35,8 @@ func regionMonth() (map[string]*Dimension, RawValue) {
 // A time reduction at a PARENT member skips the periods nothing beneath it
 // recorded, as it does at a leaf: EMEA's closing balance over the year is
 // DE's March balance, not the 0 an empty April aggregates to — whichever
-// dimension the reduction expands first.
+// dimension the reduction expands first. An average counts the empty April
+// as 0 at a parent as at a leaf: (10 + 20 + 30) / 4.
 func TestResolveTimeSkipsUnrecordedPeriodsAtParent(t *testing.T) {
 	dims, fetch := regionMonth()
 	ctx := context.Background()
@@ -48,8 +49,9 @@ func TestResolveTimeSkipsUnrecordedPeriodsAtParent(t *testing.T) {
 	}{
 		{"time unpinned, last", map[string]string{"region": "EMEA"}, "last", 30},
 		{"aggregate period, last", map[string]string{"region": "EMEA", "month": "FY"}, "last", 30},
-		{"time unpinned, average", map[string]string{"region": "EMEA"}, "average", 20},
-		{"aggregate period, average", map[string]string{"region": "EMEA", "month": "FY"}, "average", 20},
+		{"time unpinned, average", map[string]string{"region": "EMEA"}, "average", 15},
+		{"aggregate period, average", map[string]string{"region": "EMEA", "month": "FY"}, "average", 15},
+		{"leaf member, average", map[string]string{"region": "DE"}, "average", 15},
 		{"leaf member, last", map[string]string{"region": "DE"}, "last", 30},
 	} {
 		v, ok, err := ResolveTime(ctx, dims, "bal", ids, AggSum, tc.rule, tc.combo, fetch)

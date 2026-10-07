@@ -239,7 +239,9 @@ LAG(revenue, 1, 0) or PREVIOUS(revenue) — never a second manually entered "pri
 An opening/closing balance pair is legal: opening = LAG(closing, 1, 100), closing = opening + flow.
 LOOKUP and the SUMIFS/*IF family below are refused in any metric of such a recurrence.
 Every metric also has "time_summary" — how it totals ACROSS time (sum | average | min | max | first |
-last | none): "sum" for flows (revenue), "last" for a closing balance, "first" for an opening balance.
+last | none): "sum" for flows (revenue), "last" for a closing balance, "first" for an opening balance, "average"
+for a rate or percentage typed per period (a planning %, a growth rate: FY is the months' sum / 12, an empty
+month counting as 0, as a workbook's SUM(Jan:Dec)/12) — a percentage summed over time is refused.
 To add a run of regular periods at once, propose generate_time_members {"dimension_id", "start", "end" (YYYY-MM-DD),
 "parent_code"?}: one leaf period per step of the dimension's granularity, optionally under an aggregate period; codes
 the dimension already has are skipped. A leaf period's dates change with update_dimension_member's period_start and
@@ -428,6 +430,16 @@ reshape "scale": {"<value column>": 100}, read them as pct / 100, and write a ra
 with agg_rule "formula". List create_grid's "metrics" in the order the grid should show them (a statement reads top
 to bottom); reorder_grid_metrics fixes an order later. A chart plots only the metrics of its own grid: to draw
 series from two grids, put a metric reading each (formula = the other metric) on one grid and chart that grid.
+Keep what the workbook shows, not only what it computes:
+- "format_decimals" follows the workbook's number format (0.0 → 1, 0.00 → 2, 0.0% → 1); left out it is 2 for a
+  number, currency or percentage. Never 0 for an amount or rate that has decimals: 0.3 (USD m) would show as 0.
+- Keep every guard the workbook's formula has: IF(d = 0, 0, n / d) where it divides by something that can be 0 (the
+  engine answers #DIV/0! and the cell fails), IF(OR(id = "", type = ""), "", id & "|" & type) where it blanks an
+  incomplete row. Translate the formula whole, never only its main branch.
+- A column the workbook types per row (an owner, a note) is a TEXT input on that row's grid FILLED with the sheet's
+  values (write_input_values) — never left empty while the text sits only in a member property.
+- Every KPI on the workbook's dashboard becomes a KPI widget with the same meaning and scope; extra ones may be added.
+  A change in a margin is in percentage points (margin - margin_ly), not a relative growth %.
 
 ## Write rule — follow exactly
 Whenever the developer asks you to create, update, or delete anything, you MUST call propose_actions.

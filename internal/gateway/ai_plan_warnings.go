@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -31,6 +33,7 @@ func planWarnings(ctx context.Context, tx pgx.Tx, modelID, revID string, steps [
 	}
 	var out []string
 	out = append(out, recurringMistakeWarnings(ctx, tx, modelID, revID, steps)...)
+	out = append(out, hiddenDecimalWarnings(ctx, tx, modelID, revID, steps)...)
 	for i, step := range steps {
 		if step.Tool != "create_metric" && step.Tool != "update_metric" {
 			continue
@@ -64,6 +67,67 @@ func planWarnings(ctx context.Context, tx pgx.Tx, modelID, revID string, steps [
 				out = append(out, at+": "+w)
 			}
 		}
+	}
+	return out
+}
+
+// hiddenDecimalWarnings names each metric a write_input_values step writes
+// values with decimals into while it shows no decimal places (as the plan
+// leaves it): 0.3 (USD millions) would read 0 and a 5.6% rate 6%.
+func hiddenDecimalWarnings(ctx context.Context, tx pgx.Tx, modelID, revID string, steps []aiassistant.ProposalStep) []string {
+	var out []string
+	warned := map[string]bool{}
+	for i, step := range steps {
+		if step.Tool != "write_input_values" {
+			continue
+		}
+		var p struct {
+			MetricID string `json:"metric_id"`
+			Values   []struct {
+				Value any `json:"value"`
+			} `json:"values"`
+		}
+		if json.Unmarshal(step.Params, &p) != nil {
+			continue
+		}
+		frac, found := 0.0, false
+		for _, v := range p.Values {
+			var f float64
+			switch x := v.Value.(type) {
+			case float64:
+				f = x
+			case string:
+				n, err := strconv.ParseFloat(strings.TrimSpace(x), 64)
+				if err != nil {
+					continue
+				}
+				f = n
+			default:
+				continue
+			}
+			if f != math.Trunc(f) {
+				frac, found = f, true
+				break
+			}
+		}
+		if !found {
+			continue
+		}
+		var name, format string
+		var decimals int
+		if tx.QueryRow(ctx, `
+			SELECT name, COALESCE(format,'number'), COALESCE(format_decimals,0) FROM model.metric_def
+			WHERE model_id=$1::uuid AND revision_id=$2::uuid AND (id::text=$3 OR lower(name)=lower($3))
+			ORDER BY (id::text=$3) DESC LIMIT 1`, modelID, revID, p.MetricID).Scan(&name, &format, &decimals) != nil {
+			continue
+		}
+		if decimals != 0 || warned[name] || (format != "number" && format != "currency" && format != "percentage") {
+			continue
+		}
+		warned[name] = true
+		out = append(out, fmt.Sprintf("step %d (write_input_values %s): %s shows no decimal places, but the values have decimals (%s would show as %s): "+
+			"set its format_decimals to the source's precision",
+			i+1, name, name, strconv.FormatFloat(frac, 'f', -1, 64), strconv.FormatFloat(math.Round(frac), 'f', -1, 64)))
 	}
 	return out
 }

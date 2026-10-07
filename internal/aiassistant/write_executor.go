@@ -516,12 +516,15 @@ func (e *WriteExecutor) Execute(ctx context.Context, tool string, params json.Ra
 // ── create_metric ─────────────────────────────────────────────────────────────
 
 type createMetricParams struct {
-	Name           string `json:"name"`
-	Label          string `json:"label"` // display label; empty derives it from the name
-	Formula        string `json:"formula"`
-	IsInput        bool   `json:"is_input"`
-	Format         string `json:"format"`
-	FormatDecimals int    `json:"format_decimals"`
+	Name    string `json:"name"`
+	Label   string `json:"label"` // display label; empty derives it from the name
+	Formula string `json:"formula"`
+	IsInput bool   `json:"is_input"`
+	Format  string `json:"format"`
+	// FormatDecimals: the decimal places shown. Left out, two for a number,
+	// currency or percentage — a default of none showed a 0.3 increment as
+	// 0 and a 5.6% rate as 6% in every model the assistant built.
+	FormatDecimals *int   `json:"format_decimals"`
 	FormatCurrency string `json:"format_currency"`
 	AggRule        string `json:"agg_rule"`
 	RevisionID     string `json:"revision_id"`
@@ -566,6 +569,10 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 	}
 	if p.FormatCurrency == "" {
 		p.FormatCurrency = "$"
+	}
+	decimals := defaultDecimals(p.Format)
+	if p.FormatDecimals != nil {
+		decimals = *p.FormatDecimals
 	}
 	revID := e.effectiveRevision(p.RevisionID)
 	if err := metricformula.CheckNameFreeOfOtherKind(ctx, e.pool, e.modelID, revID, p.Name, "metric"); err != nil {
@@ -635,7 +642,7 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 			                              agg_numerator_metric_id, agg_denominator_metric_id, time_summary, tags)
 			VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6, $7, $8, $9, NULLIF($10,'')::uuid, NULLIF($11,'')::uuid, $12, $13)
 			RETURNING id::text
-		`, e.modelID, p.Name, formulaPtr, p.IsInput, revID, p.Format, p.FormatDecimals, p.FormatCurrency, p.AggRule,
+		`, e.modelID, p.Name, formulaPtr, p.IsInput, revID, p.Format, decimals, p.FormatCurrency, p.AggRule,
 			p.AggNumeratorMetricID, p.AggDenominatorMetricID, p.TimeSummary, tags.Clean(p.Tags)).Scan(&newID)
 	} else {
 		err = e.pool.QueryRow(ctx, `
@@ -643,7 +650,7 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 			                              agg_numerator_metric_id, agg_denominator_metric_id, time_summary, tags)
 			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, NULLIF($9,'')::uuid, NULLIF($10,'')::uuid, $11, $12)
 			RETURNING id::text
-		`, e.modelID, p.Name, formulaPtr, p.IsInput, p.Format, p.FormatDecimals, p.FormatCurrency, p.AggRule,
+		`, e.modelID, p.Name, formulaPtr, p.IsInput, p.Format, decimals, p.FormatCurrency, p.AggRule,
 			p.AggNumeratorMetricID, p.AggDenominatorMetricID, p.TimeSummary, tags.Clean(p.Tags)).Scan(&newID)
 	}
 	if err != nil {
@@ -677,6 +684,17 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 	}
 
 	return fmt.Sprintf("Metric '%s' created (id: %s)", p.Name, newID), newID, nil
+}
+
+// defaultDecimals is create_metric's decimal places when the step leaves
+// them out: two for a number, currency or percentage, none for the other
+// formats (a date, text, pick-list or boolean shows no decimals).
+func defaultDecimals(format string) int {
+	switch format {
+	case "number", "currency", "percentage":
+		return 2
+	}
+	return 0
 }
 
 // ── update_metric ─────────────────────────────────────────────────────────────
