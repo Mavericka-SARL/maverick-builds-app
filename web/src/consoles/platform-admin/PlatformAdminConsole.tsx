@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { createContext, useContext, useRef, useState } from "react";
+import { tenancyMatches } from "./tenancySearch";
 import { AuditExportPanel } from "../../ee/auditexport/AuditExportPanel";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Plus, Pencil, Trash2, Download, Upload, Package, Braces } from "lucide-react";
@@ -33,6 +34,9 @@ import {
  */
 // Developer › Models lists the same applications, models and revisions under its
 // own key; a change made here shows there at once, not when its cache ages.
+// What the search on Applications shows (see tenancyMatches); null shows everything.
+const SearchMatches = createContext<Set<string> | null>(null);
+
 function invalidateTenancy(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: ["admin-tenants"] });
   qc.invalidateQueries({ queryKey: ["dev-applications"] });
@@ -54,6 +58,7 @@ function ModelRevisionsSection({ model, tenantId, canTransferModels }: { model: 
   const qc = useQueryClient();
   const [addRevision, setAddRevision] = useState(false);
   const [revisionName, setRevisionName] = useState("");
+  const matches = useContext(SearchMatches);
 
   const inv = () => invalidateTenancy(qc);
   // Export of ONE specific revision (the model-level button exports the
@@ -93,7 +98,7 @@ function ModelRevisionsSection({ model, tenantId, canTransferModels }: { model: 
         <p className="mvx-admin-muted">No revisions yet.</p>
       )}
       <div className="mvx-admin-revisions__list">
-        {(model.revisions ?? []).map((s: AdminRevision) => {
+        {(model.revisions ?? []).filter((s) => !matches || matches.has(`revision:${s.id}`)).map((s: AdminRevision) => {
           const isActive = s.name === model.active_revision;
           return (
             <div key={s.id} className={["mvx-admin-revision", isActive ? "mvx-admin-revision--active" : ""].filter(Boolean).join(" ")}>
@@ -234,7 +239,8 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
   });
   const { confirm, confirmElement } = useConfirm();
   const { isCollapsed, toggle } = useCollapsed();
-  const appOpen = !isCollapsed(`app:${app.id}`);
+  const matches = useContext(SearchMatches);
+  const appOpen = !!matches?.has(`open:app:${app.id}`) || !isCollapsed(`app:${app.id}`);
 
   return (
     <div className="mvx-admin-object">
@@ -311,8 +317,8 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
         )}
         {importError && <p className="mvx-admin-muted" role="alert">Import failed: {importError}</p>}
         {app.models.length === 0 && <p className="mvx-admin-muted">No models yet.</p>}
-        {app.models.map(m => {
-          const modelOpen = !isCollapsed(`model:${m.id}`);
+        {app.models.filter(m => !matches || matches.has(`model:${m.id}`)).map(m => {
+          const modelOpen = !!matches?.has(`open:model:${m.id}`) || !isCollapsed(`model:${m.id}`);
           const revisions = (m.revisions ?? []).length;
           return (
           <div key={m.id} className="mvx-admin-model">
@@ -457,6 +463,7 @@ function TenantSection({ tenant, onDelete, isPlatformAdmin, canTransferModels }:
   const [appName, setAppName] = useState("");
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(tenant.name);
+  const matches = useContext(SearchMatches);
 
   const inv = () => invalidateTenancy(qc);
 
@@ -565,7 +572,7 @@ function TenantSection({ tenant, onDelete, isPlatformAdmin, canTransferModels }:
         {(tenant.applications ?? []).length === 0 && (
           <p className="mvx-admin-muted">No applications yet.</p>
         )}
-        {(tenant.applications ?? []).map(app => (
+        {(tenant.applications ?? []).filter(app => !matches || matches.has(`app:${app.id}`)).map(app => (
           <AppSection key={app.id} app={app} tenantId={tenant.id} onDelete={() => deleteApp.mutate(app.id)} canTransferModels={canTransferModels} />
         ))}
         {deleteApp.isError && <p className="mvx-admin-error">{(deleteApp.error as Error).message}</p>}
@@ -584,6 +591,9 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
   const [addTenant, setAddTenant] = useState(false);
   const [tenantName, setTenantName] = useState("");
   const [tenantPlan, setTenantPlan] = useState("commercial");
+  const [query, setQuery] = useState("");
+  const matches = tenancyMatches(tenants, query);
+  const shownTenants = matches ? tenants.filter(t => matches.has(`tenant:${t.id}`)) : tenants;
   // The plans a new tenant can start on come from the catalog (Platform › Plans).
   const { data: plans } = useQuery({ queryKey: ["admin-plans"], queryFn: api.getPlans, enabled: isPlatformAdmin });
 
@@ -600,6 +610,16 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
 
   return (
     <div className="mvx-admin-stack">
+      {tenants.length > 0 && (
+        <SearchInput
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Search tenants, applications, models and revisions…"
+          aria-label="Search tenants, applications, models and revisions"
+          width={420}
+          style={{ maxWidth: "100%" }}
+        />
+      )}
       {tenants.length === 0 && !addTenant && (
         <EmptyState
           label="No tenants yet. Create the first one."
@@ -639,9 +659,14 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
         </Button>
       ) : null}
 
-      {tenants.map(tenant => (
-        <TenantSection key={tenant.id} tenant={tenant} onDelete={() => deleteTenant.mutate(tenant.id)} isPlatformAdmin={isPlatformAdmin} canTransferModels={canTransferModels} />
-      ))}
+      {matches && shownTenants.length === 0 && (
+        <EmptyState label={`No tenant, application, model or revision matches "${query.trim()}".`} />
+      )}
+      <SearchMatches.Provider value={matches}>
+        {shownTenants.map(tenant => (
+          <TenantSection key={tenant.id} tenant={tenant} onDelete={() => deleteTenant.mutate(tenant.id)} isPlatformAdmin={isPlatformAdmin} canTransferModels={canTransferModels} />
+        ))}
+      </SearchMatches.Provider>
 
     </div>
   );

@@ -1,13 +1,13 @@
 import React, { useState } from "react";
 import { ApiIntegrationSection } from "./api-integrations/ApiIntegrationSection";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Trash2, Plus, FileSpreadsheet, Table2, Database, ClipboardList, Globe, FileDown } from "lucide-react";
+import { Pencil, Trash2, Plus, FileSpreadsheet, Table2, Database, ClipboardList, Globe, FileDown, Columns3, Server } from "lucide-react";
 import { api, type FormDef, type DevMetric, type DevDimension, type GridDef, type FormMetricMapping, type FormRecordPosting } from "../../api/client";
 import { Field, TextInput, Select, FilterChip, Switch, Button, StatusBadge, SectionHeader, EmptyState, useConfirm } from "../../ui";
 import { ExcelImportSection, GoogleSheetsImportSection } from "./ImportWizard";
 import { ExportSection } from "./ExportSection";
 
-type IntegrationSource = "csv" | "google_sheets" | "rest_api" | "supabase" | "form_records" | "export";
+type IntegrationSource = "csv" | "google_sheets" | "rest_api" | "supabase" | "clickhouse" | "mysql" | "form_records" | "export";
 
 // ── Form Records Integration Section ─────────────────────────────────────────
 
@@ -415,6 +415,20 @@ export function IntegrationsTab({ revisionId }: { revisionId?: string } = {}) {
       icon: <Database size={24} />,
       title: "Supabase",
       description: "Import data directly from a Supabase table or view.",
+      available: false,
+    },
+    {
+      id: "clickhouse",
+      icon: <Columns3 size={24} />,
+      title: "ClickHouse",
+      description: "Import data directly from a ClickHouse table or query.",
+      available: false,
+    },
+    {
+      id: "mysql",
+      icon: <Server size={24} />,
+      title: "MySQL",
+      description: "Import data directly from a MySQL table or view.",
       available: false,
     },
     {
