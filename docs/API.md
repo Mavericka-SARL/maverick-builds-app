@@ -175,7 +175,7 @@ call — there is no create-then-raw-config sequence. `POST {id}/test`
 requires `acknowledge_side_effects=1`. Activation is refused until the
 CURRENT configuration hash has a successful test; editing any
 request-critical field (request, auth, response, pagination, direction,
-target) invalidates it.
+target, protocol, sftp) invalidates it.
 
 Credential connections (`/api/developer/integration-connections`) hold
 secrets write-only — `secret` absent = keep, `null` = remove, object =
@@ -184,7 +184,8 @@ integration cannot be deleted. Secrets are sealed with mandatory AES-256-GCM
 under `INTEGRATION_CRED_KEY` (32+ bytes; required by the gateway and the
 integration worker, no plaintext fallback). Run rows carry a machine
 `error_code` — `dns | blocked_host | tls | timeout | auth | rate_limit |
-http_error | invalid_data | too_large | cancelled | internal` — with
+http_error | invalid_data | too_large | cancelled | internal`, and for SFTP
+`host_key | not_found` — with
 sanitized messages and query-stripped attempt URLs. The gateway never
 executes connector requests; `cmd/integration` claims queued runs and is the
 only egress path (dev-only `INTEGRATION_ALLOW_INSECURE=1`/`DEV_MODE=true`
@@ -204,6 +205,25 @@ tokens belong to the connection: scheduled runs use them as they use a
 bearer, refreshing (and storing a rotated refresh token) when expired.
 `…/oauth/disconnect` forgets the tokens and keeps the client. Register
 `<CONSOLE_URL>/api/integrations/oauth/callback` with the provider.
+
+A pull can read a spreadsheet file from an SFTP server instead of calling an
+API (added 2026-10-08): `"protocol": "sftp"` with
+`"sftp": {"host", "host_key", "select": "fixed" | "newest", "path" | "folder"
++ "pattern", "sheet", "reshape"}`. Request, response and pagination are
+ignored. The host takes port 22 only; it passes the same destination checks
+as an HTTPS URL. Auth is `basic` (password) or `ssh_key` (a connection secret
+of `username`, `private_key`, optional `passphrase`). A run reads nothing
+from a server whose key is not pinned in `host_key` (authorized_keys form):
+it fails with `host_key` and reports the presented key in `meta.host_key`
+and `meta.host_key_fingerprint`, and a pinned key that changed adds
+`meta.host_key_changed`. `select: newest` reads the most recently modified
+.csv/.xlsx/.xlsm file in `folder` whose name matches the glob `pattern`.
+Files are left in place, capped at 16 MB, and read with the file-import
+reader (`sheet`, `reshape` as for file imports). Each run records
+`meta.file`, `file_size`, `file_modified`, `file_sha256` and, for workbooks,
+`sheets`. A scheduled run whose file has the same SHA-256 as the last
+committed import writes nothing (`meta.unchanged`); a manual run always
+imports.
 
 Google Sheets imports (`POST /api/import/sheets/fetch`, integrations of type
 `google_sheets`) read a link-shared sheet through Google's CSV export, or a

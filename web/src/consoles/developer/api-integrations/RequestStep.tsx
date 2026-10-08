@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react";
 import type { ApiIntegrationConfig, ApiKV } from "../../../api/client";
 import { Button, Checkbox, Field, IconButton, NumberInput, Select, TextInput, Textarea } from "../../../ui";
-import { TEMPLATE_VARIABLES } from "./apiIntegrationTypes";
+import { TEMPLATE_VARIABLES, defaultSFTPSource } from "./apiIntegrationTypes";
+import { SFTPSourceFields } from "./SFTPSourceFields";
 
 // KVEditor: the visual key/value rows with enable/disable, remove, and
 // keyboard-reachable reorder (explicit up/down buttons — fully operable
@@ -51,7 +52,39 @@ function VariablePicker({ onPick, rowFields }: { onPick: (v: string) => void; ro
   );
 }
 
+// RequestStep: where a run reads from — an HTTPS API call, or (pull only) a
+// spreadsheet file on an SFTP server.
 export function RequestStep({ config, onConfig }: {
+  config: ApiIntegrationConfig;
+  onConfig: (patch: Partial<ApiIntegrationConfig>) => void;
+}) {
+  const sftp = config.protocol === "sftp";
+  const setProtocol = (p: string) => {
+    if (p === "sftp") {
+      onConfig({
+        protocol: "sftp", sftp: config.sftp ?? defaultSFTPSource(),
+        auth: config.auth.type === "basic" || config.auth.type === "ssh_key" ? config.auth : { type: "basic" },
+      });
+    } else {
+      onConfig({ protocol: undefined, sftp: undefined, auth: config.auth.type === "ssh_key" ? { type: "none" } : config.auth });
+    }
+  };
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      <Field label="Source" description={config.direction === "push" ? "SFTP reads files, so it is for imports (pull) only." : undefined}>
+        <Select value={sftp ? "sftp" : ""} aria-label="Source" onChange={e => setProtocol(e.target.value)} style={{ maxWidth: 320 }}>
+          <option value="">HTTPS API</option>
+          <option value="sftp" disabled={config.direction === "push" && !sftp}>SFTP server (a spreadsheet file)</option>
+        </Select>
+      </Field>
+      {sftp
+        ? <SFTPSourceFields source={config.sftp ?? defaultSFTPSource()} onSource={s => onConfig({ sftp: s })} />
+        : <HTTPRequestFields config={config} onConfig={onConfig} />}
+    </div>
+  );
+}
+
+function HTTPRequestFields({ config, onConfig }: {
   config: ApiIntegrationConfig;
   onConfig: (patch: Partial<ApiIntegrationConfig>) => void;
 }) {

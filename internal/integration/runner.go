@@ -186,13 +186,16 @@ func (rn *Runner) execute(ctx context.Context, run *Run) (res RunResult) {
 		res.ErrorCode, res.Message = ErrCodeInvalidData, "configuration invalid: "+oerr.Error()
 		return res
 	}
-	res.Meta["host"] = SanitizedHost(cfg.Request.URL)
+	res.Meta["host"] = cfg.DisplayHost()
 
 	// Credential.
 	authType, authMeta, secret, cerr := rn.openAuth(ctx, appID, def)
 	if cerr != nil {
 		res.ErrorCode, res.Message = ErrCodeAuth, cerr.Error()
 		return res
+	}
+	if cfg.Protocol == ProtocolSFTP {
+		return rn.executeSFTPPull(ctx, run, def, authType, secret, res)
 	}
 
 	limits := &Limits{}
@@ -609,6 +612,13 @@ func (rn *Runner) executePull(ctx context.Context, run *Run, def *Definition, ap
 		}
 	}
 
+	return rn.finishPull(ctx, run, def, header, allRows, recordErrs, res)
+}
+
+// finishPull is the tail every pull shares once its records are mapped:
+// long → wide, the test-run stop, and the commit.
+func (rn *Runner) finishPull(ctx context.Context, run *Run, def *Definition, header []string, allRows [][]string, recordErrs []RecordError, res RunResult) RunResult {
+	cfg := def.Config
 	if cfg.Mapping.Shape == ShapeLong && header != nil {
 		header, allRows = LongToWide(header, allRows)
 	}

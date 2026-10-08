@@ -267,39 +267,8 @@ func NewSafeClient(limits *Limits, allowInsecure bool) *http.Client {
 	l := limits.withDefaults()
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	transport := &http.Transport{
-		Proxy: nil, // NEVER honor environment proxies — they bypass IP validation
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			host, port, err := net.SplitHostPort(addr)
-			if err != nil {
-				return nil, err
-			}
-			// Literal IPs were validated in ValidateURL; names resolve here,
-			// get validated, and the dial goes to the validated IP — the
-			// single-resolution property that defeats rebinding.
-			if ip, perr := netip.ParseAddr(host); perr == nil {
-				if !allowInsecure {
-					if reason := ipForbidden(ip); reason != "" {
-						return nil, &BlockedDestinationError{Reason: reason}
-					}
-				}
-				return dialer.DialContext(ctx, network, addr)
-			}
-			ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-			if err != nil || len(ips) == 0 {
-				return nil, &net.DNSError{Err: "no addresses", Name: host, IsNotFound: true}
-			}
-			// One unsafe answer poisons the whole set: a mixed response is
-			// exactly what a rebinding/split-horizon attack looks like, so
-			// every address is validated before the first one is dialed.
-			if !allowInsecure {
-				for _, ip := range ips {
-					if reason := ipForbidden(ip); reason != "" {
-						return nil, &BlockedDestinationError{Reason: reason + " (resolved from " + host + ")"}
-					}
-				}
-			}
-			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
-		},
+		Proxy:                 nil, // NEVER honor environment proxies — they bypass IP validation
+		DialContext:           safeDialContext(dialer, allowInsecure),
 		ForceAttemptHTTP2:     true,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: l.RequestTimeout,
@@ -345,4 +314,42 @@ func CheckHeaderSafe(name, value string) error {
 		}
 	}
 	return nil
+}
+
+// safeDialContext is the validated dial every connector connection takes,
+// HTTPS and SFTP alike: literal IPs are checked, names resolve ONCE, every
+// answer is checked, and the dial goes to the checked address.
+func safeDialContext(dialer *net.Dialer, allowInsecure bool) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		// Literal IPs were validated in ValidateURL; names resolve here,
+		// get validated, and the dial goes to the validated IP — the
+		// single-resolution property that defeats rebinding.
+		if ip, perr := netip.ParseAddr(host); perr == nil {
+			if !allowInsecure {
+				if reason := ipForbidden(ip); reason != "" {
+					return nil, &BlockedDestinationError{Reason: reason}
+				}
+			}
+			return dialer.DialContext(ctx, network, addr)
+		}
+		ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		if err != nil || len(ips) == 0 {
+			return nil, &net.DNSError{Err: "no addresses", Name: host, IsNotFound: true}
+		}
+		// One unsafe answer poisons the whole set: a mixed response is
+		// exactly what a rebinding/split-horizon attack looks like, so
+		// every address is validated before the first one is dialed.
+		if !allowInsecure {
+			for _, ip := range ips {
+				if reason := ipForbidden(ip); reason != "" {
+					return nil, &BlockedDestinationError{Reason: reason + " (resolved from " + host + ")"}
+				}
+			}
+		}
+		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+	}
 }

@@ -189,7 +189,7 @@ func (h *handler) restAPICreate(w http.ResponseWriter, r *http.Request, modelID,
 			Category: auditlog.CategoryModelChange, EventType: auditlog.EventIntegrationCreated,
 			ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
 			ApplicationID: appID, ResourceType: "integration", ResourceID: def.ID, RevisionID: revisionID,
-			Metadata: map[string]string{"name": def.Name, "type": "rest_api", "host": integration.SanitizedHost(def.Config.Request.URL)},
+			Metadata: map[string]string{"name": def.Name, "type": "rest_api", "host": def.Config.DisplayHost()},
 		})
 	}
 	h.restAPIRespond(w, r, modelID, def.ID)
@@ -383,7 +383,7 @@ func (h *handler) restAPIEnqueue(w http.ResponseWriter, r *http.Request, modelID
 		return
 	}
 	// Mutation-method tests require the explicit acknowledgement (spec §4).
-	if trigger == "test" && def.Config.Request.Method != "GET" {
+	if trigger == "test" && def.Config.Protocol != integration.ProtocolSFTP && def.Config.Request.Method != "GET" {
 		if r.URL.Query().Get("acknowledge_side_effects") != "1" {
 			jsonErr(w, fmt.Errorf("testing a %s request may change external data — retry with acknowledge_side_effects=1", def.Config.Request.Method), http.StatusBadRequest)
 			return
@@ -558,6 +558,7 @@ func (h *handler) integrationConnectionAction(w http.ResponseWriter, r *http.Req
 			// The client secret is set by the developer; the tokens arrive
 			// through the consent round trip (Connect).
 			integration.AuthTypeOAuthCode: {"client_secret", "access_token"},
+			integration.AuthTypeSSHKey:    {"username", "private_key"},
 		}
 		for _, k := range need[authType] {
 			if k == "token_url" {
@@ -569,6 +570,14 @@ func (h *handler) integrationConnectionAction(w http.ResponseWriter, r *http.Req
 					return
 				}
 				jsonOK(w, map[string]any{"ok": false, "error": fmt.Sprintf("credential is missing %q", k)})
+				return
+			}
+		}
+		if authType == integration.AuthTypeSSHKey {
+			pass, _ := doc["passphrase"].(string)
+			key, _ := doc["private_key"].(string)
+			if _, kerr := integration.ParseSSHPrivateKey(key, pass); kerr != nil {
+				jsonOK(w, map[string]any{"ok": false, "error": kerr.Error()})
 				return
 			}
 		}

@@ -45,9 +45,10 @@ export function ScheduleStep({
     ? (grids as { id: string; name: string }[]).find(g => g.id === config.target_id)?.name ?? config.target_id
     : config.target_id;
 
+  const sftp = config.protocol === "sftp";
   return (
     <div style={{ display: "grid", gap: 12, maxWidth: 640 }}>
-      <Field label="Execution">
+      <Field label="Execution" description={sftp ? "A scheduled run skips a file that has not changed since the last import; Run now always imports." : undefined}>
         <Select value={mode} aria-label="Execution mode" onChange={e => setMode(e.target.value)}>
           <option value="manual">Manual only</option>
           <option value="interval">Interval</option>
@@ -94,18 +95,22 @@ export function ScheduleStep({
 
       <h4 style={{ margin: "8px 0 0" }}>Limits</h4>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
-        <Field label="Max pages">
-          <NumberInput value={pag.max_pages ?? 0} min={0} max={1000} aria-label="Max pages"
-            onChange={e => onConfig({ pagination: { ...pag, max_pages: Number(e.target.value) || 0 } })} />
-        </Field>
+        {!sftp && (
+          <Field label="Max pages">
+            <NumberInput value={pag.max_pages ?? 0} min={0} max={1000} aria-label="Max pages"
+              onChange={e => onConfig({ pagination: { ...pag, max_pages: Number(e.target.value) || 0 } })} />
+          </Field>
+        )}
         <Field label="Max records">
           <NumberInput value={limits.max_records ?? 0} min={0} max={1000000} aria-label="Max records"
             onChange={e => patchLimits({ max_records: Number(e.target.value) || 0 })} />
         </Field>
-        <Field label="Max requests">
-          <NumberInput value={limits.max_requests ?? 0} min={0} max={10000} aria-label="Max requests"
-            onChange={e => patchLimits({ max_requests: Number(e.target.value) || 0 })} />
-        </Field>
+        {!sftp && (
+          <Field label="Max requests">
+            <NumberInput value={limits.max_requests ?? 0} min={0} max={10000} aria-label="Max requests"
+              onChange={e => patchLimits({ max_requests: Number(e.target.value) || 0 })} />
+          </Field>
+        )}
         <Field label="Failure threshold" description="abort after this many bad records">
           <NumberInput value={limits.failure_threshold ?? 0} min={0} max={100000} aria-label="Failure threshold"
             onChange={e => patchLimits({ failure_threshold: Number(e.target.value) || 0 })} />
@@ -115,8 +120,12 @@ export function ScheduleStep({
       <h4 style={{ margin: "8px 0 0" }}>Review</h4>
       <div className="mvx-admin-object" style={{ padding: 12, fontSize: 13, display: "grid", gap: 4 }}>
         <div><strong>{name || "(unnamed)"}</strong> · {config.direction === "pull" ? "Pull into" : "Push from"} {config.target_type} “{targetName}”</div>
-        <div>{config.request.method} {sanitize(config.request.url)}</div>
-        <div>Auth: {config.auth.type}{connectionName ? ` via “${connectionName}”` : ""} · Pagination: {pag.mode ?? "none"}</div>
+        {sftp
+          ? <div>SFTP {config.sftp?.host} · {config.sftp?.select === "newest"
+            ? `newest ${config.sftp?.pattern ?? ""} in ${config.sftp?.folder || "the login folder"}`
+            : config.sftp?.path}</div>
+          : <div>{config.request.method} {sanitize(config.request.url)}</div>}
+        <div>Auth: {config.auth.type}{connectionName ? ` via “${connectionName}”` : ""}{sftp ? "" : ` · Pagination: ${pag.mode ?? "none"}`}</div>
         <div>Schedule: {schedule.kind === "manual" ? "manual only" : schedule.kind === "interval" ? `every ${schedule.interval_seconds}s` : schedule.cron_expr} ({schedule.timezone ?? "UTC"}){schedule.enabled ? "" : " — disabled"}</div>
         <div>
           {tested

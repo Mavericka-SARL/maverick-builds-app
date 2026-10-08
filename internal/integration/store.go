@@ -37,10 +37,22 @@ func ConfigHash(c *Config) string {
 		Auth       AuthPlacement    `json:"a"`
 		Response   ResponseConfig   `json:"re"`
 		Pagination PaginationConfig `json:"p"`
-	}{c.Direction, c.TargetType, c.TargetID, c.Request, c.Auth, c.Response, c.Pagination}
+		// omitempty keeps every HTTPS config's hash what it was.
+		Protocol Protocol    `json:"pr,omitempty"`
+		SFTP     *SFTPSource `json:"s,omitempty"`
+	}{c.Direction, c.TargetType, c.TargetID, c.Request, c.Auth, c.Response, c.Pagination, c.Protocol, c.SFTP}
 	raw, _ := json.Marshal(doc)
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:8])
+}
+
+// DisplayHost is the host run history, cards and audit entries show: the
+// SFTP server, or the API URL's host.
+func (c *Config) DisplayHost() string {
+	if c.Protocol == ProtocolSFTP && c.SFTP != nil {
+		return sftpHostName(c.SFTP.Host)
+	}
+	return SanitizedHost(c.Request.URL)
 }
 
 // SanitizedHost is what run history and cards may show of a URL.
@@ -78,7 +90,7 @@ type Connection struct {
 
 func validAuthType(t string) bool {
 	switch t {
-	case "none", "api_key", "bearer", "basic", "oauth2_client_credentials", "oauth2_authorization_code":
+	case "none", "api_key", "bearer", "basic", "oauth2_client_credentials", "oauth2_authorization_code", AuthTypeSSHKey:
 		return true
 	}
 	return false
@@ -506,6 +518,22 @@ type RunResult struct {
 	ErrorCode                                   string
 	Message                                     string // MUST already be sanitized by the caller
 	Meta                                        map[string]string
+}
+
+// LastImportedFileHash is the file_sha256 of the integration's latest run
+// that committed a file (success or partial; not a dry or test run), which a
+// scheduled SFTP run compares before importing the same file again. Empty
+// when there is none.
+func (s *Store) LastImportedFileHash(ctx context.Context, integrationID, excludeRunID string) string {
+	var h string
+	_ = s.pool.QueryRow(ctx, `
+		SELECT COALESCE(meta->>'file_sha256', '') FROM model.integration_run
+		WHERE integration_id=$1::uuid AND id<>$2::uuid
+		  AND status IN ('success','partial') AND NOT dry_run AND trigger_type<>'test'
+		  AND finished_at IS NOT NULL
+		ORDER BY finished_at DESC LIMIT 1
+	`, integrationID, excludeRunID).Scan(&h)
+	return h
 }
 
 func (s *Store) Finish(ctx context.Context, runID string, r RunResult) error {

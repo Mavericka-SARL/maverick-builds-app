@@ -1,6 +1,6 @@
 // Shared shapes and defaults for the REST API visual constructor. The typed
 // DTOs live in api/client.ts; this module holds wizard-local structure only.
-import type { ApiIntegrationConfig, ApiSchedule } from "../../../api/client";
+import type { ApiIntegrationConfig, ApiSchedule, ApiSFTPSource } from "../../../api/client";
 
 export const WIZARD_STEPS = [
   { id: "basics", label: "Basics" },
@@ -27,6 +27,10 @@ export function defaultConfig(): ApiIntegrationConfig {
     mapping: { fields: [] },
     limits: {},
   };
+}
+
+export function defaultSFTPSource(): ApiSFTPSource {
+  return { host: "", select: "fixed", path: "" };
 }
 
 export function defaultSchedule(): ApiSchedule {
@@ -63,5 +67,20 @@ export function requestCriticalKey(c: ApiIntegrationConfig): string {
   return JSON.stringify({
     d: c.direction, tt: c.target_type, t: c.target_id,
     r: c.request, a: c.auth, re: c.response, p: c.pagination,
+    pr: c.protocol, s: c.sftp,
   });
+}
+
+// sshFingerprint renders an authorized_keys line's SHA256 fingerprint the way
+// ssh-keygen -l prints it ("SHA256:…"), so a trusted key can be compared with
+// the server's. Empty when the key does not decode.
+export async function sshFingerprint(authorizedKey: string): Promise<string> {
+  const blob = authorizedKey.trim().split(/\s+/)[1] ?? "";
+  try {
+    const raw = Uint8Array.from(atob(blob), c => c.charCodeAt(0));
+    const sum = new Uint8Array(await crypto.subtle.digest("SHA-256", raw));
+    return "SHA256:" + btoa(String.fromCharCode(...sum)).replace(/=+$/, "");
+  } catch {
+    return "";
+  }
 }

@@ -6,6 +6,8 @@ package integration
 // NEVER part of this document; auth is a reference to an
 // integration_connection row plus non-secret placement metadata.
 
+import "github.com/mavericks-engine/mavericks/internal/importpkg"
+
 type Direction string
 
 const (
@@ -172,16 +174,57 @@ type RunLimits struct {
 // credential goes. The secret itself lives in integration_connection.
 type AuthPlacement struct {
 	// Type mirrors the connection's type for validation: none | api_key |
-	// bearer | basic | oauth2_client_credentials | oauth2_authorization_code.
+	// bearer | basic | oauth2_client_credentials | oauth2_authorization_code
+	// over HTTPS; basic (password) | ssh_key over SFTP.
 	Type string `json:"type"`
 	// api_key placement:
 	HeaderName string `json:"header_name,omitempty"`
 	QueryParam string `json:"query_param,omitempty"`
 }
 
+// Protocol is how a run reaches the source. Empty means HTTPS (Request,
+// Response and Pagination describe the call); "sftp" reads one spreadsheet
+// file from an SFTP server instead (SFTP describes it; pull only).
+type Protocol string
+
+const (
+	ProtocolHTTPS Protocol = ""
+	ProtocolSFTP  Protocol = "sftp"
+)
+
+// FileSelect is how an SFTP run picks its file.
+type FileSelect string
+
+const (
+	FileFixed  FileSelect = "fixed"  // the file at Path
+	FileNewest FileSelect = "newest" // the most recently modified file in Folder matching Pattern
+)
+
+// SFTPSource is the file an SFTP pull reads: a .csv, .xlsx or .xlsm, chosen
+// by Select. The file is left in place after a run. Port 22 only (any port
+// solely when allowInsecure, for local fixtures, written as host:port).
+type SFTPSource struct {
+	Host string `json:"host"`
+	// HostKey is the server's public key in authorized_keys form
+	// ("ssh-ed25519 AAAA…"), pinned when the developer trusts the key a
+	// test run reported. No file is read from a server whose key is not
+	// pinned, or does not match.
+	HostKey string     `json:"host_key,omitempty"`
+	Select  FileSelect `json:"select"`
+	Path    string     `json:"path,omitempty"`    // fixed
+	Folder  string     `json:"folder,omitempty"`  // newest; empty = the login folder
+	Pattern string     `json:"pattern,omitempty"` // newest; file-name glob, e.g. sales_*.xlsx
+	// Sheet picks the workbook's worksheet (empty = the first); Reshape is
+	// the same layout clean-up a file import takes (header row, delimiter…).
+	Sheet   string             `json:"sheet,omitempty"`
+	Reshape *importpkg.Reshape `json:"reshape,omitempty"`
+}
+
 // Config is the full typed document.
 type Config struct {
 	Kind       string           `json:"kind"` // always "rest_api/v1"
+	Protocol   Protocol         `json:"protocol,omitempty"`
+	SFTP       *SFTPSource      `json:"sftp,omitempty"` // Protocol=="sftp" only
 	Direction  Direction        `json:"direction"`
 	TargetType TargetType       `json:"target_type"`
 	TargetID   string           `json:"target_id"`

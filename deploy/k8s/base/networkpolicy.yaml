@@ -648,10 +648,10 @@ spec:
     # other service.
     - to: [{podSelector: {matchLabels: {app: pgbouncer}}}]
       ports: [{protocol: TCP, port: 5433}]
-    # Connector destinations: HTTPS to the world OUTSIDE the cluster and
-    # private ranges. NetworkPolicy ipBlock+except carries the same denylist
-    # the in-process rules enforce, so a compromise of the worker process
-    # still cannot reach internal networks.
+    # Connector destinations: HTTPS (443) and SFTP (22) to the world OUTSIDE
+    # the cluster and private ranges. NetworkPolicy ipBlock+except carries
+    # the same denylist the in-process rules enforce, so a compromise of the
+    # worker process still cannot reach internal networks.
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
@@ -662,7 +662,7 @@ spec:
               - 169.254.0.0/16
               - 172.16.0.0/12
               - 192.168.0.0/16
-      ports: [{protocol: TCP, port: 443}]
+      ports: [{protocol: TCP, port: 443}, {protocol: TCP, port: 22}]
     # DNS — ports-only like every sibling policy: kustomize injects
     # commonLabels into any podSelector here, which CoreDNS's pods don't
     # carry, silently blocking resolution (bit this worker on first deploy).

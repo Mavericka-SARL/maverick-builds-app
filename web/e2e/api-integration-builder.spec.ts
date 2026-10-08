@@ -9,6 +9,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { mockApi, loadAs } from "./mocks";
 
 const EXTERNAL_HOST = "api.example.com";
+const SFTP_HOST_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIP9zJ3GyBnDhVgYZR8LhcUaBxi/tKre+jdrhsdGx/SNw";
 
 interface StubState {
   integration: Record<string, unknown> | null;
@@ -24,7 +25,7 @@ interface StubState {
 function criticalOf(cfg: unknown): string {
   const c = cfg as Record<string, unknown> | undefined;
   if (!c) return "";
-  return JSON.stringify({ d: c.direction, tt: c.target_type, t: c.target_id, r: c.request, a: c.auth, re: c.response, p: c.pagination });
+  return JSON.stringify({ d: c.direction, tt: c.target_type, t: c.target_id, r: c.request, a: c.auth, re: c.response, p: c.pagination, pr: c.protocol, s: c.sftp });
 }
 
 function freshState(): StubState {
@@ -101,6 +102,32 @@ async function stubConnector(page: Page, state: StubState) {
       };
       state.runs.unshift(run);
       // Resolve async: queued → terminal on next poll.
+      const cfg = (state.integration as { config?: { protocol?: string; sftp?: { host_key?: string } } } | null)?.config;
+      if (cfg?.protocol === "sftp") {
+        // The worker reads the SAVED config: no pinned key → it reports the
+        // server's; a pinned key → it reads the file.
+        setTimeout(() => {
+          run.duration_ms = 42;
+          if (!cfg.sftp?.host_key) {
+            Object.assign(run, {
+              status: "failed", error_code: "host_key",
+              message: "the server's ED25519 host key SHA256:stubfp is not trusted yet: compare it with the server's, trust it, then test again",
+              meta: { host_key: SFTP_HOST_KEY, host_key_fingerprint: "ED25519 host key SHA256:stubfp" },
+            });
+            return;
+          }
+          Object.assign(run, {
+            status: "success", records_read: 2,
+            meta: {
+              file: "/exports/sales_0902.xlsx", file_size: "6449", file_modified: new Date().toISOString(),
+              sheets: JSON.stringify(["Notes", "Data"]), preview_content_type: "application/json", preview_truncated: "false",
+              preview_body: JSON.stringify([{ Region: "A", Amount: "10" }, { Region: "B", Amount: "20" }]),
+            },
+          });
+          if (state.integration) (state.integration as { tested: boolean }).tested = true;
+        }, 400);
+        return ok({ run_id: runID, status: "queued" }, 202);
+      }
       setTimeout(() => {
         run.status = state.testRunStatus;
         run.duration_ms = 42;
@@ -276,6 +303,55 @@ test("request changes invalidate a prior successful test and disable activation"
   await page.getByRole("button", { name: "Test & response", exact: true }).click();
   await expect(page.getByText("Not tested for current config")).toBeVisible();
   await expect(page.getByRole("button", { name: "Activate" })).toBeDisabled();
+  expect(state.externalContacted).toHaveLength(0);
+});
+
+test("SFTP source: the first test reports the host key; once trusted, the next test reads the file", async ({ page }) => {
+  const state = freshState();
+  await openRestAPI(page, state);
+  await fillBasics(page);
+
+  await page.getByRole("button", { name: "Request", exact: true }).click();
+  await page.getByLabel("Source").selectOption("sftp");
+  await page.getByLabel("SFTP server").fill("sftp.example.com");
+  await page.getByLabel("Which file").selectOption("newest");
+  await page.getByLabel("Folder").fill("/exports");
+  await page.getByLabel("File name pattern").fill("sales_*.xlsx");
+  await expect(page.getByText("Not trusted yet.", { exact: false })).toBeVisible();
+
+  // SFTP signs in with a password or an SSH key only.
+  await page.getByRole("button", { name: "Authentication", exact: true }).click();
+  await expect(page.getByLabel("Authentication type")).toHaveValue("basic");
+  await expect(page.getByLabel("Authentication type").locator("option")).toHaveText(["User name and password", "SSH private key"]);
+  await page.getByLabel("Authentication type").selectOption("ssh_key");
+  await page.getByRole("button", { name: "New connection" }).click();
+  await page.getByLabel("Connection name").fill("sftp key");
+  await page.getByLabel("Username").fill("loader");
+  await page.getByLabel("Private key").fill("stub key file");
+  await page.getByRole("button", { name: "Create connection" }).click();
+  await expect(page.getByText("Credential configured")).toBeVisible();
+
+  await page.getByRole("button", { name: "Test & response", exact: true }).click();
+  await expect(page.getByLabel("Records path")).toHaveCount(0);
+  await page.getByRole("button", { name: "Test: read the file" }).click();
+  await expect(page.getByTestId("sftp-host-key")).toContainText("ED25519 host key SHA256:stubfp", { timeout: 10_000 });
+  await page.getByRole("button", { name: "Trust this key" }).click();
+  // The next test saves first, so the worker sees the trusted key.
+  await page.getByRole("button", { name: "Test: read the file" }).click();
+  await expect(page.getByText("Tested ✓")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("Records preview (2 of the file)")).toBeVisible();
+  await expect(page.getByLabel("Sheet to read")).toBeVisible();
+
+  const cfg = (state.integration as { config: { protocol: string; sftp: Record<string, string>; auth: { type: string } } }).config;
+  expect(cfg.protocol).toBe("sftp");
+  expect(cfg.sftp).toMatchObject({ host: "sftp.example.com", host_key: SFTP_HOST_KEY, select: "newest", folder: "/exports", pattern: "sales_*.xlsx" });
+  expect(cfg.auth.type).toBe("ssh_key");
+
+  await page.getByRole("button", { name: "Request", exact: true }).click();
+  await expect(page.getByText("Trusted", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Run & schedule", exact: true }).click();
+  await expect(page.getByText("SFTP sftp.example.com · newest sales_*.xlsx in /exports")).toBeVisible();
+  await expect(page.getByLabel("Max pages")).toHaveCount(0);
   expect(state.externalContacted).toHaveLength(0);
 });
 

@@ -37,7 +37,13 @@ export function BasicsStep({
       </Field>
       <Field label="Direction">
         <Select value={config.direction} aria-label="Direction"
-          onChange={e => onConfig({ direction: e.target.value as ApiIntegrationConfig["direction"] })}>
+          onChange={e => {
+            const direction = e.target.value as ApiIntegrationConfig["direction"];
+            // SFTP reads files: a push goes back to an HTTPS call.
+            onConfig(direction === "push" && config.protocol === "sftp"
+              ? { direction, protocol: undefined, sftp: undefined, auth: { type: "none" } }
+              : { direction });
+          }}>
           <option value="pull">Pull — external API → {brand.name}</option>
           <option value="push">Push — {brand.name} → external API</option>
         </Select>

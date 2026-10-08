@@ -91,7 +91,8 @@ function ApiCard({
   });
   const last: ApiRun | undefined = runs?.[0];
   const cfg = det?.config;
-  const host = cfg ? hostOf(cfg.request.url) : "";
+  const sftp = cfg?.protocol === "sftp";
+  const host = !cfg ? "" : sftp ? (cfg.sftp?.host ?? "").replace(/:\d+$/, "") : hostOf(cfg.request.url);
   const sched = det?.schedule;
 
   return (
@@ -100,7 +101,7 @@ function ApiCard({
         <StatusBadge tone={item.status === "active" ? "success" : "warning"}>{item.status}</StatusBadge>
         {det && !det.enabled && <StatusBadge tone="warning">disabled</StatusBadge>}
         <strong>{item.name}</strong>
-        {cfg && <span className="mvx-admin-muted">{cfg.request.method} {host}</span>}
+        {cfg && <span className="mvx-admin-muted">{sftp ? "SFTP" : cfg.request.method} {host}</span>}
         {det && <StatusBadge tone="neutral">{det.direction}</StatusBadge>}
         <span className="mvx-admin-muted" style={{ fontSize: 12 }}>
           {cfg?.target_type ?? item.target_type}{revisionId ? ` · rev ${revisionId.slice(0, 8)}` : ""}

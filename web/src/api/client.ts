@@ -750,15 +750,31 @@ export type ApiDirection = "pull" | "push";
 export type ApiTargetType = "grid" | "form" | "dimension";
 export type ApiBodyMode = "none" | "json" | "form" | "raw";
 export type ApiPaginationMode = "none" | "page_number" | "offset_limit" | "cursor" | "link_header";
-export type ApiAuthType = "none" | "api_key" | "bearer" | "basic" | "oauth2_client_credentials" | "oauth2_authorization_code";
+export type ApiAuthType = "none" | "api_key" | "bearer" | "basic" | "oauth2_client_credentials" | "oauth2_authorization_code" | "ssh_key";
 export type ApiImportMode = "incremental" | "replace" | "full_reload";
 
 export interface ApiKV { key: string; value: string; enabled: boolean }
 export interface ApiTransform { kind: string; value?: string; lookup?: Record<string, string> }
 export interface ApiFieldMap { source: string; target: string; target_kind?: string; transforms?: ApiTransform[] }
 
+/** A spreadsheet file read from an SFTP server (port 22), left in place. */
+export interface ApiSFTPSource {
+  host: string;
+  /** The trusted server key in authorized_keys form; empty until trusted. */
+  host_key?: string;
+  select: "fixed" | "newest";
+  path?: string;
+  folder?: string;
+  pattern?: string;
+  sheet?: string;
+  reshape?: FileReshape;
+}
+
 export interface ApiIntegrationConfig {
   kind: "rest_api/v1";
+  /** Empty = HTTPS API; "sftp" reads a file instead (pull only). */
+  protocol?: "" | "sftp";
+  sftp?: ApiSFTPSource;
   direction: ApiDirection;
   target_type: ApiTargetType;
   target_id: string;

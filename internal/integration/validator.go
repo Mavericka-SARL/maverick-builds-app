@@ -31,6 +31,99 @@ func (c *Config) Validate(allowInsecure bool) error {
 		default:
 			return fmt.Errorf("import_mode must be incremental, replace or full_reload for pull")
 		}
+	}
+
+	switch c.Protocol {
+	case ProtocolHTTPS:
+		if err := c.validateHTTPS(allowInsecure); err != nil {
+			return err
+		}
+	case ProtocolSFTP:
+		if err := c.validateSFTP(allowInsecure); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("protocol %q is not supported", c.Protocol)
+	}
+
+	// ── Mapping ──
+	if len(c.Mapping.Fields) == 0 && c.Direction == DirectionPush {
+		return fmt.Errorf("push requires at least one mapped field")
+	}
+	if len(c.Mapping.Fields) > 256 {
+		return fmt.Errorf("too many mapped fields")
+	}
+	seen := map[string]bool{}
+	for i, f := range c.Mapping.Fields {
+		if strings.TrimSpace(f.Source) == "" || strings.TrimSpace(f.Target) == "" {
+			return fmt.Errorf("mapping row %d: source and target are required", i+1)
+		}
+		if c.Direction == DirectionPull {
+			if _, err := ParsePath(f.Source); err != nil {
+				return fmt.Errorf("mapping row %d: %w", i+1, err)
+			}
+		}
+		key := f.Source + "→" + f.Target
+		if seen[key] {
+			return fmt.Errorf("duplicate mapping %s", key)
+		}
+		seen[key] = true
+		for _, t := range f.Transforms {
+			switch t.Kind {
+			case TransformNone, TransformToString, TransformToNumber, TransformToBoolean,
+				TransformToDate, TransformTrim, TransformDefault, TransformDateFormat:
+			case TransformLookup:
+				if len(t.Lookup) == 0 {
+					return fmt.Errorf("mapping row %d: lookup transform needs a table", i+1)
+				}
+				if len(t.Lookup) > 500 {
+					return fmt.Errorf("mapping row %d: lookup table exceeds 500 entries", i+1)
+				}
+			default:
+				return fmt.Errorf("mapping row %d: transform %q is not allowed", i+1, t.Kind)
+			}
+		}
+	}
+	if c.Mapping.Shape == ShapeLong {
+		if c.Mapping.MetricNameSource == "" || c.Mapping.ValueSource == "" {
+			return fmt.Errorf("long shape requires metric_name_source and value_source")
+		}
+	}
+	if c.Mapping.BatchSize < 0 || c.Mapping.BatchSize > 1000 {
+		return fmt.Errorf("batch_size must be 0–1000")
+	}
+
+	// ── Limits ──
+	if c.Limits.MaxRecords < 0 || c.Limits.MaxRecords > 1_000_000 {
+		return fmt.Errorf("max_records must be 0–1000000")
+	}
+	if c.Limits.MaxRequests < 0 || c.Limits.MaxRequests > 10_000 {
+		return fmt.Errorf("max_requests must be 0–10000")
+	}
+	return nil
+}
+
+// ParseConfig decodes and validates a stored config document.
+func ParseConfig(raw []byte, allowInsecure bool) (*Config, error) {
+	var c Config
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&c); err != nil {
+		return nil, fmt.Errorf("config does not parse: %w", err)
+	}
+	if err := c.Validate(allowInsecure); err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// validateHTTPS checks the call an HTTPS run makes: response, request, auth
+// placement and pagination.
+func (c *Config) validateHTTPS(allowInsecure bool) error {
+	if c.SFTP != nil {
+		return fmt.Errorf("sftp settings apply to the sftp protocol only")
+	}
+	if c.Direction == DirectionPull {
 		switch c.Response.Format {
 		case FormatJSON, FormatCSV:
 		default:
@@ -180,74 +273,5 @@ func (c *Config) Validate(allowInsecure bool) error {
 	default:
 		return fmt.Errorf("pagination mode %q is not allowed", c.Pagination.Mode)
 	}
-
-	// ── Mapping ──
-	if len(c.Mapping.Fields) == 0 && c.Direction == DirectionPush {
-		return fmt.Errorf("push requires at least one mapped field")
-	}
-	if len(c.Mapping.Fields) > 256 {
-		return fmt.Errorf("too many mapped fields")
-	}
-	seen := map[string]bool{}
-	for i, f := range c.Mapping.Fields {
-		if strings.TrimSpace(f.Source) == "" || strings.TrimSpace(f.Target) == "" {
-			return fmt.Errorf("mapping row %d: source and target are required", i+1)
-		}
-		if c.Direction == DirectionPull {
-			if _, err := ParsePath(f.Source); err != nil {
-				return fmt.Errorf("mapping row %d: %w", i+1, err)
-			}
-		}
-		key := f.Source + "→" + f.Target
-		if seen[key] {
-			return fmt.Errorf("duplicate mapping %s", key)
-		}
-		seen[key] = true
-		for _, t := range f.Transforms {
-			switch t.Kind {
-			case TransformNone, TransformToString, TransformToNumber, TransformToBoolean,
-				TransformToDate, TransformTrim, TransformDefault, TransformDateFormat:
-			case TransformLookup:
-				if len(t.Lookup) == 0 {
-					return fmt.Errorf("mapping row %d: lookup transform needs a table", i+1)
-				}
-				if len(t.Lookup) > 500 {
-					return fmt.Errorf("mapping row %d: lookup table exceeds 500 entries", i+1)
-				}
-			default:
-				return fmt.Errorf("mapping row %d: transform %q is not allowed", i+1, t.Kind)
-			}
-		}
-	}
-	if c.Mapping.Shape == ShapeLong {
-		if c.Mapping.MetricNameSource == "" || c.Mapping.ValueSource == "" {
-			return fmt.Errorf("long shape requires metric_name_source and value_source")
-		}
-	}
-	if c.Mapping.BatchSize < 0 || c.Mapping.BatchSize > 1000 {
-		return fmt.Errorf("batch_size must be 0–1000")
-	}
-
-	// ── Limits ──
-	if c.Limits.MaxRecords < 0 || c.Limits.MaxRecords > 1_000_000 {
-		return fmt.Errorf("max_records must be 0–1000000")
-	}
-	if c.Limits.MaxRequests < 0 || c.Limits.MaxRequests > 10_000 {
-		return fmt.Errorf("max_requests must be 0–10000")
-	}
 	return nil
-}
-
-// ParseConfig decodes and validates a stored config document.
-func ParseConfig(raw []byte, allowInsecure bool) (*Config, error) {
-	var c Config
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&c); err != nil {
-		return nil, fmt.Errorf("config does not parse: %w", err)
-	}
-	if err := c.Validate(allowInsecure); err != nil {
-		return nil, err
-	}
-	return &c, nil
 }

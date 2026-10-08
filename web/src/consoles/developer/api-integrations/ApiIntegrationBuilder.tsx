@@ -32,6 +32,7 @@ export function ApiIntegrationBuilder({
   const [config, setConfig] = useState<ApiIntegrationConfig>(existing?.config ?? defaultConfig());
   const [schedule, setSchedule] = useState<ApiSchedule>(existing?.schedule ?? defaultSchedule());
   const [serverTested, setServerTested] = useState(existing?.tested ?? false);
+  const [savedStatus, setSavedStatus] = useState(existing?.status ?? "draft");
   const [inferred, setInferred] = useState<InferredField[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -67,6 +68,12 @@ export function ApiIntegrationBuilder({
     schedule,
   }), [name, description, tags, connectionId, config, schedule]);
 
+  // The list and its cards cache under these keys (ApiIntegrationList).
+  const invalidateLists = () => {
+    qc.invalidateQueries({ queryKey: ["dev-integrations"] });
+    qc.invalidateQueries({ queryKey: ["api-integration"] });
+  };
+
   // saveDraft persists from any step; returns the id (creating on first use).
   const saveDraft = async (): Promise<string | null> => {
     setSaving(true);
@@ -74,7 +81,11 @@ export function ApiIntegrationBuilder({
     try {
       let saved: ApiIntegrationDetail;
       if (id) {
-        saved = await api.updateApiIntegration(id, body);
+        // An active integration runs only a tested configuration: an
+        // untested change saves it as a draft until it is tested and
+        // activated again (the server refuses it as active).
+        const backToDraft = savedStatus === "active" && criticalNow !== savedCritical;
+        saved = await api.updateApiIntegration(id, backToDraft ? { ...body, status: "draft" } : body);
       } else {
         if (!name.trim() || !config.target_id) {
           setError("Name and a target are required before saving.");
@@ -85,8 +96,9 @@ export function ApiIntegrationBuilder({
       }
       setSavedCritical(saved.config ? requestCriticalKey(saved.config) : criticalNow);
       setServerTested(saved.tested);
+      setSavedStatus(saved.status);
       setDirty(false);
-      qc.invalidateQueries({ queryKey: ["api-integrations"] });
+      invalidateLists();
       return saved.id;
     } catch (e) {
       setError((e as Error).message);
@@ -107,7 +119,7 @@ export function ApiIntegrationBuilder({
         return;
       }
       await api.updateApiIntegration(savedID, { status: "active" });
-      qc.invalidateQueries({ queryKey: ["api-integrations"] });
+      invalidateLists();
       onClose();
     } catch (e) {
       setError((e as Error).message);
@@ -148,7 +160,7 @@ export function ApiIntegrationBuilder({
             connectionId={connectionId} setConnectionId={v => { setConnectionId(v); setDirty(true); }} />
         )}
         {step === "response" && (
-          <ResponseStep config={config} onConfig={onConfig} integrationId={id} tested={tested}
+          <ResponseStep config={config} onConfig={onConfig} tested={tested}
             onTestOutcome={ok => { if (ok) { setServerTested(true); setSavedCritical(criticalNow); } }}
             onFieldsInferred={f => setInferred(f)} saveDraft={saveDraft} />
         )}

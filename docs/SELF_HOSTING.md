@@ -113,7 +113,7 @@ The stack lives in [`deploy/compose/`](../deploy/compose/):
 | `proxy` | Caddy: the only published ports, HTTPS with automatic certificates, routing by host name |
 | `web` | The console (static files) |
 | `gateway` | The API and every background job: calculations, workflows, notifications, schedules |
-| `integration` | Runs scheduled REST API connector syncs |
+| `integration` | Runs REST API connector syncs and SFTP file imports |
 | `keycloak` | Sign-in, passwords, invitations |
 | `postgres` | PostgreSQL 16: the platform's database, Keycloak's database, and one database per tenant if you choose that |
 | `minio` | Object storage for model package exports and, by default, the backups |

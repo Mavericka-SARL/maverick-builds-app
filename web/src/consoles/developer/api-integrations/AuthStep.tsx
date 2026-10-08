@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type ApiAuthType, type ApiIntegrationConfig, type IntegrationConnection } from "../../../api/client";
-import { Button, Field, InlineAlert, Select, StatusBadge, TextInput } from "../../../ui";
+import { Button, Field, InlineAlert, Select, StatusBadge, TextInput, Textarea } from "../../../ui";
 
 // Credentials are reusable named connections stored server-side; secret
 // fields here are WRITE-ONLY. An existing credential renders as
@@ -43,12 +43,21 @@ export function AuthStep({
             patchAuth({ type: t, header_name: t === "api_key" ? "X-Api-Key" : undefined, query_param: undefined });
             if (t === "none") setConnectionId("");
           }}>
-          <option value="none">None</option>
-          <option value="api_key">API key (header or query)</option>
-          <option value="bearer">Bearer token</option>
-          <option value="basic">Basic auth</option>
-          <option value="oauth2_client_credentials">OAuth 2.0 client credentials</option>
-          <option value="oauth2_authorization_code">OAuth 2.0 authorization code (Connect)</option>
+          {config.protocol === "sftp" ? (
+            <>
+              <option value="basic">User name and password</option>
+              <option value="ssh_key">SSH private key</option>
+            </>
+          ) : (
+            <>
+              <option value="none">None</option>
+              <option value="api_key">API key (header or query)</option>
+              <option value="bearer">Bearer token</option>
+              <option value="basic">Basic auth</option>
+              <option value="oauth2_client_credentials">OAuth 2.0 client credentials</option>
+              <option value="oauth2_authorization_code">OAuth 2.0 authorization code (Connect)</option>
+            </>
+          )}
         </Select>
       </Field>
 
@@ -161,6 +170,16 @@ function SecretFields({ authType, fields, setFields }: {
     // The client id is public (it goes into the browser's consent URL) and
     // lives in meta; the secret is the only sealed field a developer types.
     case "oauth2_authorization_code": return input("client_secret", "Client secret");
+    case "ssh_key": return (
+      <>
+        {input("username", "Username", "text")}
+        <Field label="Private key" key="private_key" description="OpenSSH or PEM; add its public key to the server's authorized_keys">
+          <Textarea rows={6} value={fields.private_key ?? ""} onChange={e => set("private_key", e.target.value)}
+            aria-label="Private key" spellCheck={false} autoComplete="off" placeholder="Paste the whole key file" />
+        </Field>
+        {input("passphrase", "Passphrase (if the key has one)")}
+      </>
+    );
     default: return null;
   }
 }
