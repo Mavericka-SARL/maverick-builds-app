@@ -521,13 +521,14 @@ Everything that brings data in is under **Developer › Integrations**:
 - **Excel / CSV Import** — **New Import** opens a wizard: upload the file and choose what it fills (a grid, a form, or a dimension's members), **Shape** a sheet laid out for people (titles, merged headers, months across) into rows, map its columns, validate, and commit. **Save as Integration** keeps the mapping for the next file.
 - **Google Sheets** — **Import from Sheet**, paste the sheet's link, **Fetch sheet**. A sheet shared as *Anyone with the link* works as it is. A private one needs a Google service account: store its key under *Private sheets*, and share the sheet with that account. A saved sheet refreshes with **Sync Now**.
 - **REST API** — **New integration** walks through six steps, from *Basics* to *Run & schedule*, and **Activate** turns it on. It runs by hand or on a schedule.
+- **SFTP file** — a REST API integration whose **Source** is an **SFTP server** reads one .csv, .xlsx or .xlsm file (a fixed path, or the newest file in a folder whose name matches a pattern such as `+devCode("sales_*.xlsx")+`) and leaves it on the server. The first **Test: read the file** shows the server's key fingerprint; compare it with the server's own and press **Trust this key**. The wizard sets the sheet, header row and CSV delimiter; a file laid out for people (fill-down, months across) is shaped only through the HTTP API for now.
 - **Form Records** — the form mapping above.
 - **Data Export** — **New export** saves a fixed download of a grid's values as CSV, Excel or JSON: which metrics, which dimensions as columns, and which members.
 
 On a dashboard, an **Integration** widget runs a saved integration from a button, and an **Import** widget gives people an upload box for a grid, with a template to download.
 
 ---
-Next: [7 · AI and going live](dashboard:7 · AI and going live).`, 388),
+Next: [7 · AI and going live](dashboard:7 · AI and going live).`, 470),
 	)
 }
 

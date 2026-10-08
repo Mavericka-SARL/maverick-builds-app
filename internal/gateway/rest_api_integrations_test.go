@@ -289,5 +289,68 @@ func TestRestAPIIntegrationEndpoints(t *testing.T) {
 			t.Fatalf("integration document leaks %q", needle)
 		}
 	}
+
+	// ── SFTP source shaped through the HTTP API: the wizard has no Shape
+	// step for it, and the developer manual sends developers here ──
+	status, raw = do(devSub, "POST", "/api/developer/integration-connections", map[string]any{
+		"name": "sftp-login", "auth_type": "basic",
+		"secret": map[string]any{"username": "planner", "password": "SFTPSECRET"},
+	})
+	if status != 200 {
+		t.Fatalf("create sftp connection: %d %s", status, raw)
+	}
+	var sftpConn struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(raw, &sftpConn)
+	status, raw = do(devSub, "POST", "/api/developer/integrations", map[string]any{
+		"type": "rest_api", "name": "Sales file", "connection_id": sftpConn.ID,
+		"config": map[string]any{
+			"kind": "rest_api/v1", "protocol": "sftp", "direction": "pull", "target_type": "grid",
+			"target_id": gridID, "import_mode": "incremental",
+			"sftp":    map[string]any{"host": "sftp.example.com", "select": "fixed", "path": "out/sales.xlsx", "sheet": "Data"},
+			"auth":    map[string]any{"type": "basic"},
+			"mapping": map[string]any{"fields": []map[string]any{{"source": "$.Region", "target": "product", "target_kind": "dimension"}}},
+		},
+	})
+	if status != 200 {
+		t.Fatalf("create sftp integration: %d %s", status, raw)
+	}
+	var sftpInt struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(raw, &sftpInt)
+	// Read it back, add the reshape to its config, send the whole config.
+	_, raw = do(devSub, "GET", "/api/developer/integrations/"+sftpInt.ID, nil)
+	var sftpDoc struct {
+		Config map[string]any `json:"config"`
+	}
+	if err := json.Unmarshal(raw, &sftpDoc); err != nil || sftpDoc.Config["sftp"] == nil {
+		t.Fatalf("sftp integration document: %s", raw)
+	}
+	sftpDoc.Config["sftp"].(map[string]any)["reshape"] = map[string]any{
+		"header_row": 3, "fill_down": []string{"Region"},
+		"unpivot": map[string]any{"from": "Jan", "to": "Dec", "name_column": "Month", "value_column": "Amount"},
+	}
+	status, raw = do(devSub, "PATCH", "/api/developer/integrations/"+sftpInt.ID, map[string]any{"config": sftpDoc.Config})
+	if status != 200 {
+		t.Fatalf("patch sftp reshape: %d %s", status, raw)
+	}
+	_, raw = do(devSub, "GET", "/api/developer/integrations/"+sftpInt.ID, nil)
+	for _, want := range []string{`"header_row":3`, `"fill_down":["Region"]`, `"name_column":"Month"`, `"value_column":"Amount"`, `"path":"out/sales.xlsx"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("sftp reshape not kept (%s): %s", want, raw)
+		}
+	}
+	// A draft may hold an unfinished config; Validate (as test, run and
+	// activation do) reports a reshape the file reader cannot apply.
+	sftpDoc.Config["sftp"].(map[string]any)["reshape"] = map[string]any{"delimiter": "xx"}
+	if status, raw = do(devSub, "PATCH", "/api/developer/integrations/"+sftpInt.ID, map[string]any{"config": sftpDoc.Config}); status != 200 {
+		t.Fatalf("draft sftp save: %d %s", status, raw)
+	}
+	_, raw = do(devSub, "POST", "/api/developer/integrations/"+sftpInt.ID+"/validate", nil)
+	if !strings.Contains(string(raw), `"valid":false`) || !strings.Contains(string(raw), "reshape") {
+		t.Fatalf("bad sftp reshape passes validate: %s", raw)
+	}
 	_ = fmt.Sprint() // keep fmt import when assertions above change
 }
