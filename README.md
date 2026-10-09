@@ -2,11 +2,29 @@
 
 > **Classification:** Current — Product overview of what the platform does today.
 
-maverickbuilds.app is a Go and React platform for building governed
-decision-making applications for business. The current product combines
-calculated metrics, multidimensional grids, forms, imports, dashboards,
-workflows, automations, role-scoped access, revision management, audit history,
-and an AI-assisted developer workspace.
+maverickbuilds.app turns spreadsheets into decision-making apps for planning
+and analytics: budgets, forecasts, targets and headcount plans the whole
+business works in.
+
+- **Multidimensional models**: regions, products, cost centres and time with
+  totals on every level and spreadsheet-style formulas.
+- **Integrations**: Excel and CSV files, Google Sheets, REST APIs and SFTP
+  folders on a schedule; grid exports as CSV, XLSX or JSON.
+- **Roles and workflows**: roles defined by the business with access down to
+  each member and metric, and approval steps with due dates and reminders.
+- **Dashboards and chat with data**: charts, KPIs and live tables, plus a
+  read-only MCP server so Claude and ChatGPT can answer questions from the
+  grids.
+- **AI developer**: builds models, forms, dashboards and workflows together
+  with you as a plan to review, on OpenAI, Anthropic, Google, Mistral or
+  DeepSeek at no mark-up.
+- **Revisions**: each change built and tested in its own revision and
+  published in one step; models move between workspaces by export and import.
+
+No edition is licensed per user. The Community edition is free to self-host
+for internal company, non-commercial and personal use, and maverickbuilds.app
+runs a free hosted Playground for smaller apps. It is built with Go, React and
+PostgreSQL.
 
 This repository is the source of truth for the running implementation. The
 current architecture is described in [ARCHITECTURE.md](ARCHITECTURE.md), and
