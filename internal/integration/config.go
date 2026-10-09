@@ -184,13 +184,36 @@ type AuthPlacement struct {
 
 // Protocol is how a run reaches the source. Empty means HTTPS (Request,
 // Response and Pagination describe the call); "sftp" reads one spreadsheet
-// file from an SFTP server instead (SFTP describes it; pull only).
+// file from an SFTP server instead (SFTP describes it; pull only); "model"
+// reads a grid of another model of the same tenant (Model describes it;
+// pull only, run by the gateway).
 type Protocol string
 
 const (
 	ProtocolHTTPS Protocol = ""
 	ProtocolSFTP  Protocol = "sftp"
+	ProtocolModel Protocol = "model"
 )
+
+// ModelSource is the grid a model link reads: a grid of another model of
+// the same tenant, in that model's active revision, with the values the
+// developer the run acts for sees in it. Each run reads it afresh, so the
+// link follows the source model's promotions. The grid, metrics and
+// filters are named rather than referenced by id because a grid's id
+// changes with every revision and its name does not; a grid renamed away
+// fails the run until the link is pointed at it again.
+type ModelSource struct {
+	ModelID string `json:"model_id"`
+	Grid    string `json:"grid"`
+	// Metrics are metric names; empty = every metric of the grid.
+	Metrics []string `json:"metrics,omitempty"`
+	// Filters keeps only these members: dimension name -> member codes, a
+	// parent standing for every leaf under it (as a data export's filters).
+	Filters map[string][]string `json:"filters,omitempty"`
+	// MemberDisplay is what a record's dimension fields carry: "code"
+	// (default) or "label".
+	MemberDisplay string `json:"member_display,omitempty"`
+}
 
 // FileSelect is how an SFTP run picks its file.
 type FileSelect string
@@ -224,7 +247,8 @@ type SFTPSource struct {
 type Config struct {
 	Kind       string           `json:"kind"` // always "rest_api/v1"
 	Protocol   Protocol         `json:"protocol,omitempty"`
-	SFTP       *SFTPSource      `json:"sftp,omitempty"` // Protocol=="sftp" only
+	SFTP       *SFTPSource      `json:"sftp,omitempty"`  // Protocol=="sftp" only
+	Model      *ModelSource     `json:"model,omitempty"` // Protocol=="model" only
 	Direction  Direction        `json:"direction"`
 	TargetType TargetType       `json:"target_type"`
 	TargetID   string           `json:"target_id"`

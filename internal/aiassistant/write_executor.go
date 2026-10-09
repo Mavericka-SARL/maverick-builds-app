@@ -103,6 +103,22 @@ type Hooks struct {
 	// the assistant found a clean preview live and then proposed the import
 	// without the params it had just proven.
 	RecallPreview func(ctx context.Context, file, sheet string) (FileImportRequest, bool)
+	// SaveConnector creates or updates a REST API connector — an HTTPS API,
+	// an SFTP file or a model link — through the developer's own save path
+	// (validation, ownership, a model link's both-models rule, schedule,
+	// audit), on the database this executor runs on. Returns its id.
+	SaveConnector func(ctx context.Context, req ConnectorSave) (string, error)
+	// SaveConnection creates or updates a sign-in connection. The secret
+	// parts of its credential come from the confirmation card, which the
+	// gateway reads; a proposal check saves it without them.
+	SaveConnection func(ctx context.Context, req ConnectionSave) (string, error)
+	// RunIntegration runs, tests (mode "test") or dry-runs an integration
+	// through the developer's own Run now and Test routes, as the developer,
+	// and waits for the result. A proposal check answers ErrNotDryRunnable.
+	RunIntegration func(ctx context.Context, integrationID, mode string) (string, error)
+	// TriggerRule fires an automation rule through its manual trigger route,
+	// as the developer. A proposal check answers ErrNotDryRunnable.
+	TriggerRule func(ctx context.Context, ruleID string, payload map[string]any) (string, error)
 }
 
 // WithHooks sets the executor's gateway hooks and returns it.
@@ -506,6 +522,18 @@ func (e *WriteExecutor) Execute(ctx context.Context, tool string, params json.Ra
 		return e.updateIntegration(ctx, params)
 	case "delete_integration":
 		return e.deleteIntegration(ctx, params)
+	case "create_api_integration":
+		return e.createAPIIntegration(ctx, params)
+	case "update_api_integration":
+		return e.updateAPIIntegration(ctx, params)
+	case "create_connection":
+		return e.createConnection(ctx, params)
+	case "update_connection":
+		return e.updateConnection(ctx, params)
+	case "run_integration":
+		return e.runIntegration(ctx, params)
+	case "trigger_automation_rule":
+		return e.triggerAutomationRule(ctx, params)
 	}
 	if fn, ok := e.editTools()[tool]; ok {
 		return fn(ctx, params)
@@ -2900,9 +2928,12 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 				            JOIN model.metric_def n ON n.model_id = o.model_id AND n.name = o.name AND n.revision_id = $2::uuid
 				           WHERE o.model_id = $1::uuid AND o.revision_id <> $2::uuid
 			)
+			-- A model link keeps link_id and its source columns: its source is
+			-- another model, which a revision copy does not remap (migration 126).
 			INSERT INTO model.integration_def (model_id, revision_id, name, description, type, target_type, target_id, config,
 			                                   status, tags, direction, enabled, connection_id, config_version,
-			                                   last_tested_hash, last_tested_at)
+			                                   last_tested_hash, last_tested_at,
+			                                   link_id, source_model_id, source_enabled, source_switched_by, source_switched_at)
 			SELECT i.model_id, $2::uuid, i.name, i.description, i.type, i.target_type,
 				COALESCE((SELECT m.new_id FROM idmap m WHERE m.old_id = i.target_id
 				          ORDER BY m.kind = COALESCE(NULLIF(i.target_type,''), 'grid') DESC LIMIT 1), i.target_id),
@@ -2918,7 +2949,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 					FROM jsonb_each(i.config) e), i.config)
 				ELSE i.config END,
 				i.status, i.tags, i.direction, i.enabled, i.connection_id, i.config_version,
-				i.last_tested_hash, i.last_tested_at
+				i.last_tested_hash, i.last_tested_at,
+				i.link_id, i.source_model_id, i.source_enabled, i.source_switched_by, i.source_switched_at
 			FROM model.integration_def i
 			WHERE i.model_id=$1::uuid AND i.revision_id=$3::uuid
 		`, e.modelID, newID, srcID); err != nil {

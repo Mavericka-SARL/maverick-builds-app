@@ -81,6 +81,25 @@ func (UnimplementedHandler) AdminInfraNodes(ctx context.Context) (r []AdminInfra
 	return r, ht.ErrNotImplemented
 }
 
+// AdminListModelLinks implements adminListModelLinks operation.
+//
+// Every model link of the tenants the caller administers.
+//
+// GET /api/admin/model-links
+func (UnimplementedHandler) AdminListModelLinks(ctx context.Context) (r []ModelLink, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// AdminSwitchModelLink implements adminSwitchModelLink operation.
+//
+// A tenant administrator holds both switches: enabled (the link's own model's, this revision copy)
+// and source_enabled (the source model's, every copy of the link).
+//
+// PATCH /api/admin/model-links/{id}
+func (UnimplementedHandler) AdminSwitchModelLink(ctx context.Context, req *AdminSwitchModelLinkReq, params AdminSwitchModelLinkParams) (r AdminSwitchModelLinkRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // ApplyMigration implements applyMigration operation.
 //
 // Generate and immediately apply a schema migration for a model.
@@ -1580,6 +1599,29 @@ func (UnimplementedHandler) ListMetrics(ctx context.Context, params ListMetricsP
 	return r, ht.ErrNotImplemented
 }
 
+// ListModelLinkSources implements listModelLinkSources operation.
+//
+// The other models of the request's tenant the caller is a developer of, each with its active
+// revision's grids (metric and dimension names). With model_id and grid, only that grid, with its
+// dimensions' members for a link's filters.
+//
+// GET /api/developer/model-link-sources
+func (UnimplementedHandler) ListModelLinkSources(ctx context.Context, params ListModelLinkSourcesParams) (r []ListModelLinkSourcesOKItem, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// ListModelLinksReadingModel implements listModelLinksReadingModel operation.
+//
+// A model link is a REST API connector (protocol "model") of another model of the same tenant whose
+// source is a grid of this model. This is the source side's view: one entry per revision copy of
+// each link, with the switch the source side holds (source_enabled, shared by every copy of a link)
+// and the link's own side's switch (enabled).
+//
+// GET /api/developer/model-links
+func (UnimplementedHandler) ListModelLinksReadingModel(ctx context.Context) (r []ModelLink, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // ListNotifications implements listNotifications operation.
 //
 // List the 50 most recent notifications for the current user.
@@ -2223,6 +2265,17 @@ func (UnimplementedHandler) StartWorkflowInstance(ctx context.Context, req *Star
 //
 // POST /api/workflow/submit
 func (UnimplementedHandler) SubmitBudget(ctx context.Context, req *SubmitBudgetRequest) (r SubmitBudgetRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// SwitchModelLinkSource implements switchModelLinkSource operation.
+//
+// The source side's switch, held by the developers of the model the link reads. It applies to every
+// revision copy of the link; a link runs only while both sides are on. 404 to anyone who is not a
+// developer of the source model.
+//
+// PATCH /api/developer/model-links/{id}
+func (UnimplementedHandler) SwitchModelLinkSource(ctx context.Context, req *SwitchModelLinkSourceReq, params SwitchModelLinkSourceParams) (r SwitchModelLinkSourceRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 

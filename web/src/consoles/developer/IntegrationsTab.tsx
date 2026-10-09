@@ -407,7 +407,7 @@ export function IntegrationsTab({ revisionId }: { revisionId?: string } = {}) {
       id: "rest_api",
       icon: <Globe size={24} />,
       title: "REST API",
-      description: "Connect any JSON API, configure authentication, map data, and run or schedule syncs.",
+      description: "Connect a JSON API, an SFTP file or another model's grid, map data, and run or schedule syncs.",
       available: true,
     },
     {

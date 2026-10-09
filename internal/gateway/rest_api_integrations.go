@@ -13,11 +13,13 @@ import (
 
 	"github.com/mavericks-engine/mavericks/internal/integration"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
+	"github.com/mavericks-engine/mavericks/pkg/dbx"
 )
 
 // REST API connector endpoints (spec §6). The gateway VALIDATES and
 // PERSISTS; it never executes external requests — /test and /run enqueue a
-// job (202 + run id) that cmd/integration's worker claims and executes.
+// job (202 + run id) that cmd/integration's worker claims and executes (a
+// model link's, the gateway's own runner: model_links.go).
 // Legacy csv_import / google_sheets handlers are untouched; requests for
 // type "rest_api" are delegated here from the shared routes.
 
@@ -97,7 +99,7 @@ func refsOf(cfg *integration.Config, connectionID string) integrationRefs {
 // dimension is deleted, and that must not block a rename, a tag, a
 // connection change or a copy. Every use re-checks and fails on it anyway.
 // Activation is strict for both: an active integration must be runnable.
-func (h *handler) checkIntegrationSave(ctx context.Context, modelID string, stored, next integrationRefs, activating bool) error {
+func (h *handler) checkIntegrationSave(ctx context.Context, q integration.RowQuerier, modelID string, stored, next integrationRefs, activating bool) error {
 	kept := func(changed bool, err error) error {
 		if err == nil || changed || activating || integration.IsForeign(err) {
 			return err
@@ -105,10 +107,10 @@ func (h *handler) checkIntegrationSave(ctx context.Context, modelID string, stor
 		return nil
 	}
 	targetChanged := stored.TargetType != next.TargetType || stored.TargetID != next.TargetID
-	if err := kept(targetChanged, integration.CheckOwnership(ctx, h.db, modelID, next.TargetType, next.TargetID, "")); err != nil {
+	if err := kept(targetChanged, integration.CheckOwnership(ctx, q, modelID, next.TargetType, next.TargetID, "")); err != nil {
 		return err
 	}
-	return kept(stored.ConnectionID != next.ConnectionID, integration.CheckOwnership(ctx, h.db, modelID, "", "", next.ConnectionID))
+	return kept(stored.ConnectionID != next.ConnectionID, integration.CheckOwnership(ctx, q, modelID, "", "", next.ConnectionID))
 }
 
 // restAPIDetail is the typed GET/PATCH response: definition + schedule.
@@ -140,6 +142,143 @@ type restAPICreateBody struct {
 	Schedule     *integration.Schedule `json:"schedule,omitempty"`
 }
 
+// errIntegrationNotFound answers 404 from restAPISave.
+var errIntegrationNotFound = errors.New("integration not found")
+
+// restAPISave is the one save path of a REST API connector — an HTTPS API,
+// an SFTP file or a model link: the wizard's create and PATCH, the legacy
+// config PATCH, and the AI Developer's create_api_integration and
+// update_api_integration — run as a, on db (a request's tenant pool, or a
+// proposal check's transaction, which leaves nothing behind). id "" creates
+// in revisionID; a create is a draft unless body asks for active. It
+// returns the connector's id; errIntegrationNotFound for an unknown id,
+// any other error a refusal (400).
+//
+// An update checks the state it leaves behind whenever it sends a config or
+// connection, or activates (checkIntegrationSave): a changed target or
+// connection must be the model's own, a kept one must not be another
+// model's, and activation re-checks a stored config that may predate this
+// check. A model link is checked again whenever the save changes what it
+// reads, activates it or switches its schedule on (the schedule then runs as
+// a): each of these is for a developer of both models only. A rename, a tag
+// or its own side's switch is any developer's of its model.
+func (h *handler) restAPISave(ctx context.Context, db dbx.DB, a *actor, modelID, revisionID, id string, body *restAPICreateBody) (string, error) {
+	st := integration.NewStoreOn(db)
+	var appID string
+	_ = db.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, modelID).Scan(&appID)
+	schedulingOn := body.Schedule != nil && body.Schedule.Enabled
+
+	if id == "" {
+		if body.Name == "" || body.Config == nil {
+			return "", fmt.Errorf("name and config are required")
+		}
+		connID := ""
+		if body.ConnectionID != nil {
+			connID = *body.ConnectionID
+		}
+		status := body.Status
+		if status == "" {
+			status = "draft"
+		}
+		// A draft is refused a foreign target too: a draft can be tested and
+		// dry-run, and it can be activated later.
+		if err := integration.CheckOwnership(ctx, db, modelID, string(body.Config.TargetType), body.Config.TargetID, connID); err != nil {
+			return "", err
+		}
+		if err := h.checkModelLink(ctx, a, modelID, body.Config, connID, status == "active"); err != nil {
+			return "", err
+		}
+		desc := ""
+		if body.Description != nil {
+			desc = *body.Description
+		}
+		def, err := st.CreateDefinition(ctx, modelID, revisionID, body.Name, desc, body.Tags, status, connID, body.Config, h.integrationAllowInsecure())
+		if err != nil {
+			return "", err
+		}
+		if body.Schedule != nil {
+			body.Schedule.IntegrationID = def.ID
+			if schedulingOn {
+				body.Schedule.EnabledBy = a.UserID
+			}
+			if err := st.UpsertSchedule(ctx, body.Schedule); err != nil {
+				return "", fmt.Errorf("schedule: %w", err)
+			}
+		}
+		auditlog.Log(ctx, db, h.log, auditlog.Fields{
+			Category: auditlog.CategoryModelChange, EventType: auditlog.EventIntegrationCreated,
+			ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
+			ApplicationID: appID, ResourceType: "integration", ResourceID: def.ID, RevisionID: revisionID,
+			Metadata: map[string]string{"name": def.Name, "type": "rest_api", "host": def.Config.DisplayHost()},
+		})
+		return def.ID, nil
+	}
+
+	if body.Config != nil || body.ConnectionID != nil || body.Status == "active" || schedulingOn {
+		cur, err := st.GetDefinition(ctx, modelID, id)
+		if err != nil {
+			return "", errIntegrationNotFound
+		}
+		cfg, connID := cur.Config, cur.ConnectionID
+		if body.Config != nil {
+			cfg = body.Config
+		}
+		if body.ConnectionID != nil {
+			connID = *body.ConnectionID
+		}
+		if body.Config != nil || body.ConnectionID != nil || body.Status == "active" {
+			if err := h.checkIntegrationSave(ctx, db, modelID, refsOf(cur.Config, cur.ConnectionID), refsOf(cfg, connID), body.Status == "active"); err != nil {
+				return "", err
+			}
+		}
+		if err := h.checkModelLink(ctx, a, modelID, cfg, connID, body.Status == "active"); err != nil {
+			return "", err
+		}
+	}
+	var namePtr, statusPtr *string
+	if body.Name != "" {
+		namePtr = &body.Name
+	}
+	if body.Status != "" {
+		statusPtr = &body.Status
+	}
+	if body.Enabled != nil {
+		if _, err := db.Exec(ctx, `UPDATE model.integration_def SET enabled=$2 WHERE id=$1::uuid AND model_id=$3::uuid`, id, *body.Enabled, modelID); err != nil {
+			return "", err
+		}
+	}
+	if _, err := st.UpdateDefinition(ctx, modelID, id, namePtr, body.Description, body.Tags, statusPtr, body.ConnectionID, body.Config, h.integrationAllowInsecure()); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", errIntegrationNotFound
+		}
+		return "", err
+	}
+	if body.Schedule != nil {
+		body.Schedule.IntegrationID = id
+		if schedulingOn {
+			body.Schedule.EnabledBy = a.UserID
+		}
+		if err := st.UpsertSchedule(ctx, body.Schedule); err != nil {
+			return "", fmt.Errorf("schedule: %w", err)
+		}
+	}
+	auditlog.Log(ctx, db, h.log, auditlog.Fields{
+		Category: auditlog.CategoryModelChange, EventType: auditlog.EventIntegrationUpdated,
+		ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
+		ApplicationID: appID, ResourceType: "integration", ResourceID: id, Metadata: map[string]string{"type": "rest_api"},
+	})
+	return id, nil
+}
+
+// writeSaveErr answers a restAPISave error.
+func writeSaveErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, errIntegrationNotFound) {
+		jsonErr(w, err, http.StatusNotFound)
+		return
+	}
+	jsonErr(w, err, http.StatusBadRequest)
+}
+
 // restAPICreate handles POST /api/developer/integrations with type=rest_api —
 // metadata + typed config + schedule in one atomic call.
 func (h *handler) restAPICreate(w http.ResponseWriter, r *http.Request, modelID, revisionID string, raw []byte) {
@@ -149,50 +288,17 @@ func (h *handler) restAPICreate(w http.ResponseWriter, r *http.Request, modelID,
 		jsonErr(w, fmt.Errorf("name and config are required"), http.StatusBadRequest)
 		return
 	}
-	var appID string
-	_ = h.db.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, modelID).Scan(&appID)
-	connID := ""
-	if body.ConnectionID != nil {
-		connID = *body.ConnectionID
-	}
-	status := body.Status
-	if status == "" {
-		status = "draft"
-	}
-	// A draft is refused a foreign target too: a draft can be tested and
-	// dry-run, and it can be activated later.
-	if err := h.checkRestAPITargets(r, modelID, body.Config, connID); err != nil {
-		jsonErr(w, err, http.StatusBadRequest)
-		return
-	}
-	desc := ""
-	if body.Description != nil {
-		desc = *body.Description
-	}
-	def, err := h.intStore(ctx).CreateDefinition(ctx, modelID, revisionID, body.Name, desc, body.Tags, status, connID, body.Config, h.integrationAllowInsecure())
+	a, err := h.resolveActor(ctx, r)
 	if err != nil {
-		jsonErr(w, err, http.StatusBadRequest)
+		jsonErr(w, err, http.StatusUnauthorized)
 		return
 	}
-	if body.Schedule != nil {
-		body.Schedule.IntegrationID = def.ID
-		if act, aerr := h.resolveActor(ctx, r); aerr == nil && body.Schedule.Enabled {
-			body.Schedule.EnabledBy = act.UserID
-		}
-		if err := h.intStore(ctx).UpsertSchedule(ctx, body.Schedule); err != nil {
-			jsonErr(w, fmt.Errorf("schedule: %w", err), http.StatusBadRequest)
-			return
-		}
+	id, err := h.restAPISave(ctx, h.db.For(ctx), a, modelID, revisionID, "", &body)
+	if err != nil {
+		writeSaveErr(w, err)
+		return
 	}
-	if a, e := h.resolveActor(ctx, r); e == nil {
-		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
-			Category: auditlog.CategoryModelChange, EventType: auditlog.EventIntegrationCreated,
-			ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
-			ApplicationID: appID, ResourceType: "integration", ResourceID: def.ID, RevisionID: revisionID,
-			Metadata: map[string]string{"name": def.Name, "type": "rest_api", "host": def.Config.DisplayHost()},
-		})
-	}
-	h.restAPIRespond(w, r, modelID, def.ID)
+	h.restAPIRespond(w, r, modelID, id)
 }
 
 // restAPIUpdate handles PATCH for a rest_api integration: atomic metadata +
@@ -226,67 +332,19 @@ func (h *handler) restAPIConfigPatch(w http.ResponseWriter, r *http.Request, mod
 	}
 }
 
-// restAPIApplyUpdate applies a typed PATCH. It writes the error response
-// and returns false on failure.
+// restAPIApplyUpdate applies a typed PATCH (restAPISave). It writes the
+// error response and returns false on failure.
 func (h *handler) restAPIApplyUpdate(w http.ResponseWriter, r *http.Request, modelID, id string, body *restAPICreateBody) bool {
 	ctx := r.Context()
-	var appID string
-	_ = h.db.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, modelID).Scan(&appID)
-	// Check the state the PATCH leaves behind whenever it sends a config
-	// or connection, or activates (checkIntegrationSave): a changed target
-	// or connection must be the model's own, a kept one must not be
-	// another model's, and activation re-checks a stored config that may
-	// predate this check.
-	if body.Config != nil || body.ConnectionID != nil || body.Status == "active" {
-		cur, err := h.intStore(ctx).GetDefinition(ctx, modelID, id)
-		if err != nil {
-			jsonErr(w, fmt.Errorf("integration not found"), http.StatusNotFound)
-			return false
-		}
-		cfg, connID := cur.Config, cur.ConnectionID
-		if body.Config != nil {
-			cfg = body.Config
-		}
-		if body.ConnectionID != nil {
-			connID = *body.ConnectionID
-		}
-		if err := h.checkIntegrationSave(ctx, modelID, refsOf(cur.Config, cur.ConnectionID), refsOf(cfg, connID), body.Status == "active"); err != nil {
-			jsonErr(w, err, http.StatusBadRequest)
-			return false
-		}
-	}
-	var namePtr, statusPtr *string
-	if body.Name != "" {
-		namePtr = &body.Name
-	}
-	if body.Status != "" {
-		statusPtr = &body.Status
-	}
-	if body.Enabled != nil {
-		if _, err := h.db.Exec(ctx, `UPDATE model.integration_def SET enabled=$2 WHERE id=$1::uuid AND model_id=$3::uuid`, id, *body.Enabled, modelID); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return false
-		}
-	}
-	if _, err := h.intStore(ctx).UpdateDefinition(ctx, modelID, id, namePtr, body.Description, body.Tags, statusPtr, body.ConnectionID, body.Config, h.integrationAllowInsecure()); err != nil {
-		code := http.StatusBadRequest
-		if errors.Is(err, pgx.ErrNoRows) {
-			code = http.StatusNotFound
-		}
-		jsonErr(w, err, code)
+	a, err := h.resolveActor(ctx, r)
+	if err != nil {
+		jsonErr(w, err, http.StatusUnauthorized)
 		return false
 	}
-	if body.Schedule != nil {
-		body.Schedule.IntegrationID = id
-		if act, aerr := h.resolveActor(ctx, r); aerr == nil && body.Schedule.Enabled {
-			body.Schedule.EnabledBy = act.UserID
-		}
-		if err := h.intStore(ctx).UpsertSchedule(ctx, body.Schedule); err != nil {
-			jsonErr(w, fmt.Errorf("schedule: %w", err), http.StatusBadRequest)
-			return false
-		}
+	if _, err := h.restAPISave(ctx, h.db.For(ctx), a, modelID, "", id, body); err != nil {
+		writeSaveErr(w, err)
+		return false
 	}
-	h.auditIntegrationEvent(r, appID, id, auditlog.EventIntegrationUpdated, map[string]string{"type": "rest_api"})
 	return true
 }
 
@@ -315,8 +373,13 @@ func (h *handler) restAPIDuplicate(w http.ResponseWriter, r *http.Request, model
 	// model's is refused (a stored row may predate the check), a deleted
 	// one is kept for the copy to be retargeted.
 	refs := refsOf(src.Config, src.ConnectionID)
-	if terr := h.checkIntegrationSave(ctx, modelID, refs, refs, false); terr != nil {
+	if terr := h.checkIntegrationSave(ctx, h.db, modelID, refs, refs, false); terr != nil {
 		jsonErr(w, terr, http.StatusBadRequest)
+		return
+	}
+	// A copy of a model link is a new link: for a developer of both models.
+	if lerr := h.checkModelLinkRequest(r, modelID, src.Config, src.ConnectionID, false); lerr != nil {
+		jsonErr(w, lerr, http.StatusBadRequest)
 		return
 	}
 	dup, err := st.CreateDefinition(ctx, modelID, src.RevisionID, src.Name+" (copy)", src.Description, src.Tags, "draft", src.ConnectionID, src.Config, h.integrationAllowInsecure())
@@ -352,6 +415,9 @@ func (h *handler) restAPIValidate(w http.ResponseWriter, r *http.Request, modelI
 	if terr := h.checkRestAPITargets(r, modelID, def.Config, def.ConnectionID); terr != nil {
 		errs = append(errs, terr.Error())
 	}
+	if lerr := h.checkModelLinkRequest(r, modelID, def.Config, def.ConnectionID, true); lerr != nil {
+		errs = append(errs, lerr.Error())
+	}
 	if len(errs) == 0 {
 		jsonOK(w, map[string]any{"valid": true, "config_hash": integration.ConfigHash(def.Config), "errors": []string{}})
 		return
@@ -382,8 +448,17 @@ func (h *handler) restAPIEnqueue(w http.ResponseWriter, r *http.Request, modelID
 		jsonErr(w, terr, http.StatusBadRequest)
 		return
 	}
+	// A model link runs as the caller: a developer of both models only.
+	if lerr := h.checkModelLinkRequest(r, modelID, def.Config, def.ConnectionID, true); lerr != nil {
+		jsonErr(w, lerr, http.StatusBadRequest)
+		return
+	}
+	if def.Config.Protocol == integration.ProtocolModel && !def.SourceEnabled {
+		jsonErr(w, fmt.Errorf("the link is switched off on the source model's side"), http.StatusBadRequest)
+		return
+	}
 	// Mutation-method tests require the explicit acknowledgement (spec §4).
-	if trigger == "test" && def.Config.Protocol != integration.ProtocolSFTP && def.Config.Request.Method != "GET" {
+	if trigger == "test" && def.Config.Protocol == integration.ProtocolHTTPS && def.Config.Request.Method != "GET" {
 		if r.URL.Query().Get("acknowledge_side_effects") != "1" {
 			jsonErr(w, fmt.Errorf("testing a %s request may change external data — retry with acknowledge_side_effects=1", def.Config.Request.Method), http.StatusBadRequest)
 			return

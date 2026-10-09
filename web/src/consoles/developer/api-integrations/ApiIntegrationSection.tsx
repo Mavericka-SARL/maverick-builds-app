@@ -4,6 +4,7 @@ import type { ApiIntegrationDetail } from "../../../api/client";
 import { Button, SectionHeader } from "../../../ui";
 import { ApiIntegrationBuilder } from "./ApiIntegrationBuilder";
 import { ApiIntegrationList } from "./ApiIntegrationList";
+import { ModelLinksReadingPanel } from "./ModelLinksReadingPanel";
 
 // Developer Console → Integrations → REST API: the saved-connector list and
 // the six-step visual constructor.
@@ -16,7 +17,7 @@ export function ApiIntegrationSection({ revisionId }: { revisionId?: string }) {
       <div>
         <SectionHeader
           title={editing ? `Edit “${editing.name}”` : "New REST API integration"}
-          subtitle="Connect any JSON API, configure authentication, map data, and run or schedule syncs."
+          subtitle="Connect a JSON API, an SFTP file or another model's grid, map data, and run or schedule syncs."
         />
         <ApiIntegrationBuilder
           existing={editing}
@@ -31,7 +32,7 @@ export function ApiIntegrationSection({ revisionId }: { revisionId?: string }) {
     <div>
       <SectionHeader
         title="REST API"
-        subtitle="Connect any JSON API, configure authentication, map data, and run or schedule syncs."
+        subtitle="Connect any JSON API, an SFTP file or a grid of another model of this tenant, map data, and run or schedule syncs."
         actions={
           <Button icon={<Plus size={15} />} onClick={() => setBuilding(true)}>
             New integration
@@ -39,6 +40,7 @@ export function ApiIntegrationSection({ revisionId }: { revisionId?: string }) {
         }
       />
       <ApiIntegrationList revisionId={revisionId} onEdit={d => setEditing(d)} />
+      <ModelLinksReadingPanel />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -842,6 +843,19 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// What the developer typed into the confirmation card, by 1-based step:
+	// a sign-in connection's secret parts. Never stored with the proposal,
+	// never shown to the assistant — handed to the connection's save alone.
+	var card struct {
+		Secrets map[string]map[string]string `json:"secrets"`
+	}
+	if raw, rerr := readAll(r); rerr == nil && len(bytes.TrimSpace(raw)) > 0 {
+		if err := json.Unmarshal(raw, &card); err != nil {
+			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
+			return
+		}
+	}
+
 	// /api/ai/sessions/{sid}/proposals/{pid}/confirm
 	path := strings.TrimPrefix(r.URL.Path, "/api/ai/sessions/")
 	parts := strings.SplitN(path, "/", 4) // [sid, "proposals", pid, "confirm"]
@@ -929,6 +943,19 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 	hooks.RecallPreview = func(ctx context.Context, file, sheet string) (aiassistant.FileImportRequest, bool) {
 		return h.recallCleanPreview(ctx, sessionID, file, sheet)
 	}
+	var stepCard map[string]string // the card's entries for the step running
+	hooks.SaveConnector = func(ctx context.Context, req aiassistant.ConnectorSave) (string, error) {
+		return h.aiSaveConnector(ctx, h.db.For(ctx), a, modelID, revID, req)
+	}
+	hooks.SaveConnection = func(ctx context.Context, req aiassistant.ConnectionSave) (string, error) {
+		return h.aiSaveConnection(ctx, h.db.For(ctx), a, modelID, req, stepCard, false)
+	}
+	hooks.RunIntegration = func(ctx context.Context, integrationID, mode string) (string, error) {
+		return h.aiRunIntegration(ctx, r, integrationID, mode)
+	}
+	hooks.TriggerRule = func(ctx context.Context, ruleID string, payload map[string]any) (string, error) {
+		return h.aiTriggerRule(ctx, r, ruleID, payload)
+	}
 	executor := aiassistant.NewWriteExecutorWithActor(h.db.For(ctx), modelID, revID, a.UserID).WithHooks(hooks)
 	_ = pStore.SetStatus(ctx, proposalID, "confirmed")
 
@@ -948,7 +975,9 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		resolved := resolveParamRefs(step.Params, created[:i])
+		stepCard = card.Secrets[strconv.Itoa(i+1)]
 		result, createdID, execErr := executor.Execute(ctx, step.Tool, resolved)
+		stepCard = nil
 		if execErr != nil {
 			steps[i].Status = "failed"
 			steps[i].Result = execErr.Error()

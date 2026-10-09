@@ -720,6 +720,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 			rows.Close()
 			return nil, err
 		}
+		i.Config, _ = detachModelLink(i.Config)
 		pkg.Integrations = append(pkg.Integrations, i)
 	}
 	rows.Close()
@@ -2152,12 +2153,19 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 		// one its runs read and write (integration.Config.TargetID). The
 		// rest of the config is the external system's, left as written.
 		config, _ := rewriteRefs(ig.Config, jsonRefs{topOnly: true}, targetRefs(refs.ref, configType))
+		// A model link's source is outside the package: it arrives as a
+		// draft, its source cleared, to be pointed at a model here.
+		config, link := detachModelLink(config)
+		status := "active"
+		if link {
+			status = "draft"
+		}
 		var newIntegrationID string
 		if err = tx.QueryRow(ctx, `
-			INSERT INTO model.integration_def (model_id, revision_id, name, type, target_type, target_id, config)
-			VALUES ($1::uuid, $2::uuid, $3, COALESCE(NULLIF($4::text,''),'csv_import'), $5, $6::uuid, COALESCE($7::jsonb,'{}'::jsonb))
+			INSERT INTO model.integration_def (model_id, revision_id, name, type, target_type, target_id, config, status)
+			VALUES ($1::uuid, $2::uuid, $3, COALESCE(NULLIF($4::text,''),'csv_import'), $5, $6::uuid, COALESCE($7::jsonb,'{}'::jsonb), $8)
 			RETURNING id::text`,
-			modelID, revisionID, ig.Name, ig.Type, targetType, target, jsonArg(config)).Scan(&newIntegrationID); err != nil {
+			modelID, revisionID, ig.Name, ig.Type, targetType, target, jsonArg(config), status).Scan(&newIntegrationID); err != nil {
 			return "", fmt.Errorf("integration %q: %w", ig.Name, err)
 		}
 		if ig.ID != "" {
@@ -2218,4 +2226,31 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 	}
 
 	return revisionID, nil
+}
+
+// detachModelLink clears a model link's source model from a connector's
+// config (integration.ModelSource.ModelID) and reports whether it was a
+// link. The model a link reads is another model of the exporting tenant,
+// never part of the package: a package does not carry its id, and an
+// imported link keeps the grid, metrics and filters it read, waiting to be
+// pointed at a model of its new home. Any other config is returned as is.
+func detachModelLink(cfg json.RawMessage) (json.RawMessage, bool) {
+	var doc map[string]json.RawMessage
+	if len(cfg) == 0 || json.Unmarshal(cfg, &doc) != nil {
+		return cfg, false
+	}
+	var protocol string
+	if json.Unmarshal(doc["protocol"], &protocol) != nil || protocol != "model" {
+		return cfg, false
+	}
+	var src map[string]json.RawMessage
+	if json.Unmarshal(doc["model"], &src) == nil && src != nil {
+		src["model_id"] = json.RawMessage(`""`)
+		doc["model"], _ = json.Marshal(src)
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		return cfg, true
+	}
+	return out, true
 }

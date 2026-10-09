@@ -25,6 +25,10 @@ type AddGridMetricRes interface {
 	addGridMetricRes()
 }
 
+type AdminSwitchModelLinkRes interface {
+	adminSwitchModelLinkRes()
+}
+
 type ApplyMigrationRes interface {
 	applyMigrationRes()
 }
@@ -683,6 +687,10 @@ type StartWorkflowInstanceRes interface {
 
 type SubmitBudgetRes interface {
 	submitBudgetRes()
+}
+
+type SwitchModelLinkSourceRes interface {
+	switchModelLinkSourceRes()
 }
 
 type SyncFormMappingsRes interface {

@@ -186,10 +186,33 @@ integration worker, no plaintext fallback). Run rows carry a machine
 `error_code` — `dns | blocked_host | tls | timeout | auth | rate_limit |
 http_error | invalid_data | too_large | cancelled | internal`, and for SFTP
 `host_key | not_found` — with
-sanitized messages and query-stripped attempt URLs. The gateway never
-executes connector requests; `cmd/integration` claims queued runs and is the
-only egress path (dev-only `INTEGRATION_ALLOW_INSECURE=1`/`DEV_MODE=true`
-permit loopback fixtures).
+sanitized messages and query-stripped attempt URLs, and `switched_off` for a
+run of a connector switched off (or, scheduled, still a draft) by the time it
+was claimed. The gateway never executes connector requests; `cmd/integration`
+claims queued runs and is the only egress path (dev-only
+`INTEGRATION_ALLOW_INSECURE=1`/`DEV_MODE=true` permit loopback fixtures). A
+due schedule of a draft or switched-off connector advances without a run.
+
+**Model links** (config `protocol: "model"`, added 2026-10-09) read a grid
+of another model of the same tenant: `model: {model_id, grid, metrics?,
+filters?, member_display?}`, `auth.type` none, no connection, `import_mode`
+`replace` or `full_reload`. The grid is named and read in the source model's
+active revision through the gateway's own `/api/grid`, as the run's acting
+developer (`run_by`), so the gateway — not the worker — claims these runs.
+Saving one that changes its source, activating it, enabling its schedule,
+testing it and running it need a developer of both models (400 otherwise),
+re-checked for `run_by` on every run (`auth` when it fails). Each side holds a
+switch: the connector's `enabled`, and `source_enabled`, shared by every
+revision copy of the link (`link_id`):
+`GET /api/developer/model-links` lists the links reading the request's model
+and `PATCH /api/developer/model-links/{id}` `{"source_enabled": bool}` sets
+its switch (404 unless the caller builds the source model);
+`GET /api/developer/model-link-sources[?model_id=&grid=]` lists the models a
+link may read; `GET /api/admin/model-links` and `PATCH
+/api/admin/model-links/{id}` `{"enabled"?, "source_enabled"?}` give tenant
+administrators both switches. Each switch is audited as
+`integration.switched`. A model package carries a link without its source
+model (imported as a draft).
 
 Connections of auth type `oauth2_authorization_code` (added 2026-09-21; the
 flow the connector had reserved) are connected once by a developer: `POST

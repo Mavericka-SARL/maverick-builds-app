@@ -173,11 +173,12 @@ They are the **Tenant admin** group in the sidebar:
 - **Users** — invite people, give them roles, decide what they reach
 - **Audit Log** — who did what, and when
 - **Usage** — activity and size over a period *(Enterprise)*
+- **Model links** — links that import one model's grid into another model of your tenant, with both sides' switches
 - **Notification delivery** — e-mail, webhook and task reminders
 - **AI keys** — one AI provider key for the whole tenant *(Enterprise)*
 - **Single sign-on** — sign in with your company's identity provider *(Enterprise)*
 - **Provisioning (SCIM)** — let your directory create and deactivate accounts *(Enterprise)*
-- **Branding** — your name, colour and logo on the console *(Commercial and Enterprise)*`, 332),
+- **Branding** — your name, colour and logo on the console *(Commercial and Enterprise)*`, 356),
 
 		taText(`## Edition and plan
 
@@ -323,8 +324,12 @@ Your product name, tagline, colour, logo and favicon on the console and the sign
 
 What your tenant holds now: applications and models, revisions, data rows, form records and storage. Plus what happened over the last 7, 30 or 90 days: active users, workflow and integration runs, AI messages and audit events. `+taDoc("Usage analytics", "USAGE_ANALYTICS.md")+`
 
+## Model links
+
+A developer of two models can link them: an integration of one model that imports a grid of the other, read as that developer sees it. **Tenant admin › Model links** lists every link in your tenant — what it reads, where it writes, its schedule and last run — with both of its switches. A link runs only while both are on: the **Link's side** belongs to the model it writes into, the **Source side** to the model it reads, whose developers can switch it off too. Switching a side off stops every run that has not started yet.
+
 ---
-Next: [5 · Your setup checklist](dashboard:5 · Your setup checklist).`, 244),
+Next: [5 · Your setup checklist](dashboard:5 · Your setup checklist).`, 330),
 	)
 }
 

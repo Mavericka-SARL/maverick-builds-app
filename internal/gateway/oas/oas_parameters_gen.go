@@ -511,6 +511,71 @@ func decodeAddGridMetricParams(args [2]string, argsEscaped bool, r *http.Request
 	return params, nil
 }
 
+// AdminSwitchModelLinkParams is parameters of adminSwitchModelLink operation.
+type AdminSwitchModelLinkParams struct {
+	ID uuid.UUID
+}
+
+func unpackAdminSwitchModelLinkParams(packed middleware.Parameters) (params AdminSwitchModelLinkParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeAdminSwitchModelLinkParams(args [1]string, argsEscaped bool, r *http.Request) (params AdminSwitchModelLinkParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // ArchiveWorkflowParams is parameters of archiveWorkflow operation.
 type ArchiveWorkflowParams struct {
 	ID uuid.UUID
@@ -9345,6 +9410,121 @@ func decodeListMetricsParams(args [0]string, argsEscaped bool, r *http.Request) 
 	return params, nil
 }
 
+// ListModelLinkSourcesParams is parameters of listModelLinkSources operation.
+type ListModelLinkSourcesParams struct {
+	ModelID OptUUID   `json:",omitempty,omitzero"`
+	Grid    OptString `json:",omitempty,omitzero"`
+}
+
+func unpackListModelLinkSourcesParams(packed middleware.Parameters) (params ListModelLinkSourcesParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "model_id",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.ModelID = v.(OptUUID)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "grid",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.Grid = v.(OptString)
+		}
+	}
+	return params
+}
+
+func decodeListModelLinkSourcesParams(args [0]string, argsEscaped bool, r *http.Request) (params ListModelLinkSourcesParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: model_id.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "model_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotModelIDVal uuid.UUID
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToUUID(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotModelIDVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.ModelID.SetTo(paramsDotModelIDVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "model_id",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: grid.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "grid",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotGridVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotGridVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.Grid.SetTo(paramsDotGridVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "grid",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // ListPublicDimensionsParams is parameters of listPublicDimensions operation.
 type ListPublicDimensionsParams struct {
 	RevisionID OptUUID `json:",omitempty,omitzero"`
@@ -12852,6 +13032,71 @@ func unpackStartIntegrationOAuthParams(packed middleware.Parameters) (params Sta
 }
 
 func decodeStartIntegrationOAuthParams(args [1]string, argsEscaped bool, r *http.Request) (params StartIntegrationOAuthParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// SwitchModelLinkSourceParams is parameters of switchModelLinkSource operation.
+type SwitchModelLinkSourceParams struct {
+	ID uuid.UUID
+}
+
+func unpackSwitchModelLinkSourceParams(packed middleware.Parameters) (params SwitchModelLinkSourceParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeSwitchModelLinkSourceParams(args [1]string, argsEscaped bool, r *http.Request) (params SwitchModelLinkSourceParams, _ error) {
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]

@@ -65,18 +65,25 @@ func (h *handler) gridSnapshot(r *http.Request, gridID, revisionID string) (data
 	req.ContentLength = 0
 	rec := httptest.NewRecorder()
 	h.grid(rec, req)
-	if rec.Code != http.StatusOK {
+	return gridResponseSnapshot(rec.Code, rec.Body.Bytes())
+}
+
+// gridResponseSnapshot turns an /api/grid answer into a dataexport.Snapshot
+// (an export's and a model link's read): a refusal becomes a *statusError
+// carrying its status and message.
+func gridResponseSnapshot(code int, body []byte) (dataexport.Snapshot, error) {
+	if code != http.StatusOK {
 		var e struct {
 			Error string `json:"error"`
 		}
-		_ = json.Unmarshal(rec.Body.Bytes(), &e)
+		_ = json.Unmarshal(body, &e)
 		if e.Error == "" {
-			e.Error = http.StatusText(rec.Code)
+			e.Error = http.StatusText(code)
 		}
-		return dataexport.Snapshot{}, &statusError{status: rec.Code, msg: "read grid: " + e.Error}
+		return dataexport.Snapshot{}, &statusError{status: code, msg: "read grid: " + e.Error}
 	}
 	var resp gridResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+	if err := json.Unmarshal(body, &resp); err != nil {
 		return dataexport.Snapshot{}, fmt.Errorf("read grid: %w", err)
 	}
 	if resp.RollupSourceGridID != nil {

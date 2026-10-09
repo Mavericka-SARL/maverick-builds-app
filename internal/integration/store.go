@@ -12,14 +12,24 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/mavericks-engine/mavericks/pkg/dbx"
 )
 
 // Store is the connector's persistence layer: credential connections,
 // rest_api integration definitions (typed config), schedules, and the
 // durable run queue the worker claims from.
-type Store struct{ pool *pgxpool.Pool }
+// Store runs its statements on db: a pool, or a transaction (NewStoreOn).
+type Store struct {
+	db   dbx.DB
+	pool *pgxpool.Pool
+}
 
-func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+func NewStore(pool *pgxpool.Pool) *Store { return &Store{db: pool, pool: pool} }
+
+// NewStoreOn is a Store on db — a transaction for the AI Developer's
+// proposal check, which rolls it back. Pool is nil on it.
+func NewStoreOn(db dbx.DB) *Store { return &Store{db: db} }
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
@@ -38,9 +48,10 @@ func ConfigHash(c *Config) string {
 		Response   ResponseConfig   `json:"re"`
 		Pagination PaginationConfig `json:"p"`
 		// omitempty keeps every HTTPS config's hash what it was.
-		Protocol Protocol    `json:"pr,omitempty"`
-		SFTP     *SFTPSource `json:"s,omitempty"`
-	}{c.Direction, c.TargetType, c.TargetID, c.Request, c.Auth, c.Response, c.Pagination, c.Protocol, c.SFTP}
+		Protocol Protocol     `json:"pr,omitempty"`
+		SFTP     *SFTPSource  `json:"s,omitempty"`
+		Model    *ModelSource `json:"m,omitempty"`
+	}{c.Direction, c.TargetType, c.TargetID, c.Request, c.Auth, c.Response, c.Pagination, c.Protocol, c.SFTP, c.Model}
 	raw, _ := json.Marshal(doc)
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:8])
@@ -110,7 +121,7 @@ func (s *Store) CreateConnection(ctx context.Context, appID, name, authType stri
 		meta = json.RawMessage(`{}`)
 	}
 	var id string
-	if err := s.pool.QueryRow(ctx, `
+	if err := s.db.QueryRow(ctx, `
 		INSERT INTO model.integration_connection (application_id, name, auth_type, meta, created_by)
 		VALUES ($1::uuid, $2, $3, $4::jsonb, NULLIF($5,'')::uuid) RETURNING id::text
 	`, appID, name, authType, string(meta), createdBy).Scan(&id); err != nil {
@@ -120,10 +131,10 @@ func (s *Store) CreateConnection(ctx context.Context, appID, name, authType stri
 		sealed, err := EncryptCredential(secret, appID, id)
 		if err != nil {
 			// Encryption unavailable ⇒ the row must not survive half-made.
-			_, _ = s.pool.Exec(ctx, `DELETE FROM model.integration_connection WHERE id=$1::uuid`, id)
+			_, _ = s.db.Exec(ctx, `DELETE FROM model.integration_connection WHERE id=$1::uuid`, id)
 			return nil, err
 		}
-		if _, err := s.pool.Exec(ctx, `
+		if _, err := s.db.Exec(ctx, `
 			UPDATE model.integration_connection SET secret_enc=$2, updated_at=now() WHERE id=$1::uuid
 		`, id, sealed); err != nil {
 			return nil, fmt.Errorf("store credential: %w", err)
@@ -140,7 +151,7 @@ func (s *Store) UpdateConnection(ctx context.Context, appID, id, name, authType 
 	if authType != "" && !validAuthType(authType) {
 		return nil, fmt.Errorf("auth_type %q is not supported", authType)
 	}
-	tag, err := s.pool.Exec(ctx, `
+	tag, err := s.db.Exec(ctx, `
 		UPDATE model.integration_connection
 		SET name = COALESCE(NULLIF($3,''), name),
 		    auth_type = COALESCE(NULLIF($4,''), auth_type),
@@ -163,7 +174,7 @@ func (s *Store) UpdateConnection(ctx context.Context, appID, id, name, authType 
 				return nil, eerr
 			}
 		}
-		if _, err := s.pool.Exec(ctx, `
+		if _, err := s.db.Exec(ctx, `
 			UPDATE model.integration_connection SET secret_enc=$2, updated_at=now() WHERE id=$1::uuid
 		`, id, sealed); err != nil {
 			return nil, fmt.Errorf("store credential: %w", err)
@@ -184,13 +195,13 @@ func (s *Store) DeleteConnection(ctx context.Context, appID, id string) error {
 	// Refuse while referenced: silently orphaning integrations to SET NULL
 	// would flip them broken; the developer unbinds or deletes them first.
 	var refs int
-	_ = s.pool.QueryRow(ctx, `
+	_ = s.db.QueryRow(ctx, `
 		SELECT COUNT(*) FROM model.integration_def WHERE connection_id=$1::uuid
 	`, id).Scan(&refs)
 	if refs > 0 {
 		return fmt.Errorf("connection is used by %d integration(s); unbind them first", refs)
 	}
-	tag, err := s.pool.Exec(ctx, `
+	tag, err := s.db.Exec(ctx, `
 		DELETE FROM model.integration_connection WHERE id=$1::uuid AND application_id=$2::uuid
 	`, id, appID)
 	if err != nil {
@@ -205,7 +216,7 @@ func (s *Store) DeleteConnection(ctx context.Context, appID, id string) error {
 func (s *Store) GetConnection(ctx context.Context, appID, id string) (*Connection, error) {
 	var c Connection
 	var meta string
-	if err := s.pool.QueryRow(ctx, `
+	if err := s.db.QueryRow(ctx, `
 		SELECT id::text, application_id::text, name, auth_type, meta::text,
 		       secret_enc <> '', created_at, updated_at
 		FROM model.integration_connection
@@ -218,7 +229,7 @@ func (s *Store) GetConnection(ctx context.Context, appID, id string) (*Connectio
 }
 
 func (s *Store) ListConnections(ctx context.Context, appID string) ([]Connection, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT id::text, application_id::text, name, auth_type, meta::text,
 		       secret_enc <> '', created_at, updated_at
 		FROM model.integration_connection WHERE application_id=$1::uuid ORDER BY name
@@ -244,7 +255,7 @@ func (s *Store) ListConnections(ctx context.Context, appID string) ([]Connection
 // no HTTP handler may ever call this on a response path.
 func (s *Store) OpenCredential(ctx context.Context, appID, id string) (authType string, meta json.RawMessage, secret []byte, err error) {
 	var sealed, metaStr string
-	if err = s.pool.QueryRow(ctx, `
+	if err = s.db.QueryRow(ctx, `
 		SELECT auth_type, meta::text, secret_enc FROM model.integration_connection
 		WHERE id=$1::uuid AND application_id=$2::uuid
 	`, id, appID).Scan(&authType, &metaStr, &sealed); err != nil {
@@ -276,6 +287,23 @@ type Definition struct {
 	LastTestedHash string     `json:"last_tested_hash,omitempty"`
 	LastTestedAt   *time.Time `json:"last_tested_at,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
+	// LinkID is the connector's identity across its model's revisions
+	// (migration 126). The Source* fields apply to a model link only: the
+	// model it reads, and the switch that model's side holds.
+	LinkID           string     `json:"link_id"`
+	SourceModelID    string     `json:"source_model_id,omitempty"`
+	SourceEnabled    bool       `json:"source_enabled"`
+	SourceSwitchedBy string     `json:"source_switched_by,omitempty"`
+	SourceSwitchedAt *time.Time `json:"source_switched_at,omitempty"`
+}
+
+// SourceModelID is the model a model link reads ("" for any other
+// connector), the value its source_model_id column keeps.
+func (c *Config) SourceModelID() string {
+	if c != nil && c.Protocol == ProtocolModel && c.Model != nil {
+		return c.Model.ModelID
+	}
+	return ""
 }
 
 // Tested reports whether the CURRENT config passed its test.
@@ -301,15 +329,15 @@ func (s *Store) CreateDefinition(ctx context.Context, modelID, revisionID, name,
 		tags = []string{}
 	}
 	var id string
-	if err := s.pool.QueryRow(ctx, `
+	if err := s.db.QueryRow(ctx, `
 		INSERT INTO model.integration_def
 		    (model_id, revision_id, name, description, type, target_type, target_id, config,
-		     status, tags, direction, connection_id, enabled)
+		     status, tags, direction, connection_id, enabled, source_model_id)
 		VALUES ($1::uuid, NULLIF($2,'')::uuid, $3, $4, 'rest_api', $5, NULLIF($6,'')::uuid, $7::jsonb,
-		        $8, $9, $10, NULLIF($11,'')::uuid, true)
+		        $8, $9, $10, NULLIF($11,'')::uuid, true, NULLIF($12,'')::uuid)
 		RETURNING id::text
 	`, modelID, revisionID, name, description, string(cfg.TargetType), cfg.TargetID, string(raw),
-		status, tags, string(cfg.Direction), connectionID).Scan(&id); err != nil {
+		status, tags, string(cfg.Direction), connectionID, cfg.SourceModelID()).Scan(&id); err != nil {
 		return nil, fmt.Errorf("create integration: %w", err)
 	}
 	return s.GetDefinition(ctx, modelID, id)
@@ -363,16 +391,23 @@ func (s *Store) UpdateDefinition(ctx context.Context, modelID, id string, name, 
 		}
 	}
 	raw, _ := json.Marshal(next.Config)
-	tag, err := s.pool.Exec(ctx, `
+	// A link pointed at another source model starts with that side's
+	// switch on: the switch belongs to the model it was set for.
+	tag, err := s.db.Exec(ctx, `
 		UPDATE model.integration_def
 		SET name=$3, description=$4, tags=$5, status=$6,
 		    connection_id=NULLIF($7,'')::uuid, config=$8::jsonb,
 		    config_version=$9, target_type=$10, target_id=NULLIF($11,'')::uuid,
-		    direction=$12
+		    direction=$12,
+		    source_enabled     = CASE WHEN source_model_id IS NOT DISTINCT FROM NULLIF($13,'')::uuid THEN source_enabled ELSE true END,
+		    source_switched_by = CASE WHEN source_model_id IS NOT DISTINCT FROM NULLIF($13,'')::uuid THEN source_switched_by END,
+		    source_switched_at = CASE WHEN source_model_id IS NOT DISTINCT FROM NULLIF($13,'')::uuid THEN source_switched_at END,
+		    source_model_id    = NULLIF($13,'')::uuid
 		WHERE id=$2::uuid AND model_id=$1::uuid AND type='rest_api'
 	`, modelID, id, next.Name, next.Description, next.Tags, next.Status,
 		next.ConnectionID, string(raw), next.ConfigVersion,
-		string(next.Config.TargetType), next.Config.TargetID, string(next.Config.Direction))
+		string(next.Config.TargetType), next.Config.TargetID, string(next.Config.Direction),
+		next.Config.SourceModelID())
 	if err != nil {
 		return nil, fmt.Errorf("update integration: %w", err)
 	}
@@ -384,7 +419,7 @@ func (s *Store) UpdateDefinition(ctx context.Context, modelID, id string, name, 
 
 // MarkTested records a successful test of the config identified by hash.
 func (s *Store) MarkTested(ctx context.Context, id, hash string) error {
-	_, err := s.pool.Exec(ctx, `
+	_, err := s.db.Exec(ctx, `
 		UPDATE model.integration_def SET last_tested_hash=$2, last_tested_at=now() WHERE id=$1::uuid
 	`, id, hash)
 	return err
@@ -394,15 +429,18 @@ func (s *Store) GetDefinition(ctx context.Context, modelID, id string) (*Definit
 	var d Definition
 	var rawCfg string
 	var revID, connID *string
-	if err := s.pool.QueryRow(ctx, `
+	if err := s.db.QueryRow(ctx, `
 		SELECT id::text, model_id::text, COALESCE(revision_id::text,''), name, description,
 		       status, tags, direction, enabled, connection_id::text,
-		       config::text, config_version, last_tested_hash, last_tested_at, created_at
+		       config::text, config_version, last_tested_hash, last_tested_at, created_at,
+		       link_id::text, COALESCE(source_model_id::text,''), source_enabled,
+		       COALESCE(source_switched_by::text,''), source_switched_at
 		FROM model.integration_def
 		WHERE id=$1::uuid AND model_id=$2::uuid AND type='rest_api'
 	`, id, modelID).Scan(&d.ID, &d.ModelID, &revID, &d.Name, &d.Description,
 		&d.Status, &d.Tags, &d.Direction, &d.Enabled, &connID,
-		&rawCfg, &d.ConfigVersion, &d.LastTestedHash, &d.LastTestedAt, &d.CreatedAt); err != nil {
+		&rawCfg, &d.ConfigVersion, &d.LastTestedHash, &d.LastTestedAt, &d.CreatedAt,
+		&d.LinkID, &d.SourceModelID, &d.SourceEnabled, &d.SourceSwitchedBy, &d.SourceSwitchedAt); err != nil {
 		return nil, err
 	}
 	if revID != nil {
@@ -448,7 +486,7 @@ type Run struct {
 // the insert idempotent per (integration, tick).
 func (s *Store) Enqueue(ctx context.Context, integrationID, trigger, runBy string, dryRun bool, scheduledFor *time.Time) (string, error) {
 	var id string
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		INSERT INTO model.integration_run
 		    (integration_id, status, trigger_type, dry_run, run_by, scheduled_for)
 		VALUES ($1::uuid, 'queued', $2, $3, NULLIF($4,'')::uuid, $5)
@@ -461,25 +499,38 @@ func (s *Store) Enqueue(ctx context.Context, integrationID, trigger, runBy strin
 	return id, err
 }
 
-// Claim leases the oldest queued run for workerID. Returns nil when the
-// queue is empty. FOR UPDATE SKIP LOCKED keeps concurrent workers from
-// fighting over the same row; the lease lets a crashed worker's run be
-// reclaimed after leaseFor.
+// Claim leases the oldest queued run for workerID, of any connector but a
+// model link. Returns nil when the queue is empty. FOR UPDATE SKIP LOCKED
+// keeps concurrent workers from fighting over the same row; the lease lets
+// a crashed worker's run be reclaimed after leaseFor.
 func (s *Store) Claim(ctx context.Context, workerID string, leaseFor time.Duration) (*Run, error) {
-	tx, err := s.pool.Begin(ctx)
+	return s.claim(ctx, workerID, leaseFor, false)
+}
+
+// ClaimModelLink is Claim for model links only. The gateway claims them:
+// a link reads its source through the gateway's own grid route, which the
+// worker does not have.
+func (s *Store) ClaimModelLink(ctx context.Context, workerID string, leaseFor time.Duration) (*Run, error) {
+	return s.claim(ctx, workerID, leaseFor, true)
+}
+
+func (s *Store) claim(ctx context.Context, workerID string, leaseFor time.Duration, modelLinks bool) (*Run, error) {
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	var id string
 	err = tx.QueryRow(ctx, `
-		SELECT id::text FROM model.integration_run
-		WHERE (status='queued' AND (lease_until IS NULL OR lease_until < now()))
-		   OR (status='running' AND lease_until < now())
-		ORDER BY created_at
-		FOR UPDATE SKIP LOCKED
+		SELECT r.id::text FROM model.integration_run r
+		JOIN model.integration_def i ON i.id = r.integration_id
+		WHERE ((r.status='queued' AND (r.lease_until IS NULL OR r.lease_until < now()))
+		    OR (r.status='running' AND r.lease_until < now()))
+		  AND (COALESCE(i.config->>'protocol','') = $1) = $2
+		ORDER BY r.created_at
+		FOR UPDATE OF r SKIP LOCKED
 		LIMIT 1
-	`).Scan(&id)
+	`, string(ProtocolModel), modelLinks).Scan(&id)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
@@ -501,7 +552,7 @@ func (s *Store) Claim(ctx context.Context, workerID string, leaseFor time.Durati
 }
 
 func (s *Store) Heartbeat(ctx context.Context, runID, workerID string, leaseFor time.Duration) error {
-	_, err := s.pool.Exec(ctx, `
+	_, err := s.db.Exec(ctx, `
 		UPDATE model.integration_run SET lease_until=now()+$3::interval
 		WHERE id=$1::uuid AND claimed_by=$2 AND status='running'
 	`, runID, workerID, fmt.Sprintf("%d seconds", int(leaseFor.Seconds())))
@@ -526,7 +577,7 @@ type RunResult struct {
 // when there is none.
 func (s *Store) LastImportedFileHash(ctx context.Context, integrationID, excludeRunID string) string {
 	var h string
-	_ = s.pool.QueryRow(ctx, `
+	_ = s.db.QueryRow(ctx, `
 		SELECT COALESCE(meta->>'file_sha256', '') FROM model.integration_run
 		WHERE integration_id=$1::uuid AND id<>$2::uuid
 		  AND status IN ('success','partial') AND NOT dry_run AND trigger_type<>'test'
@@ -541,7 +592,7 @@ func (s *Store) Finish(ctx context.Context, runID string, r RunResult) error {
 	if r.Meta == nil {
 		meta = []byte(`{}`)
 	}
-	_, err := s.pool.Exec(ctx, `
+	_, err := s.db.Exec(ctx, `
 		UPDATE model.integration_run
 		SET status=$2, http_status=$3, duration_ms=$4, pages=$5, requests=$6, retries=$7,
 		    records_read=$8, records_written=$9, records_skipped=$10,
@@ -557,7 +608,7 @@ func (s *Store) Finish(ctx context.Context, runID string, r RunResult) error {
 // one (the worker checks IsCancelRequested between pages).
 func (s *Store) Cancel(ctx context.Context, runID string) (string, error) {
 	var status string
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		UPDATE model.integration_run
 		SET status = CASE WHEN status='queued' THEN 'cancelled' ELSE status END,
 		    meta = meta || '{"cancel_requested":"true"}'::jsonb,
@@ -570,7 +621,7 @@ func (s *Store) Cancel(ctx context.Context, runID string) (string, error) {
 
 func (s *Store) IsCancelRequested(ctx context.Context, runID string) bool {
 	var v bool
-	_ = s.pool.QueryRow(ctx, `
+	_ = s.db.QueryRow(ctx, `
 		SELECT meta->>'cancel_requested' = 'true' FROM model.integration_run WHERE id=$1::uuid
 	`, runID).Scan(&v)
 	return v
@@ -580,7 +631,7 @@ func (s *Store) GetRun(ctx context.Context, id string) (*Run, error) {
 	var r Run
 	var runBy *string
 	var meta string
-	if err := s.pool.QueryRow(ctx, `
+	if err := s.db.QueryRow(ctx, `
 		SELECT id::text, integration_id::text, status, trigger_type, dry_run,
 		       run_by::text, scheduled_for, created_at, started_at, finished_at,
 		       http_status, duration_ms, pages, requests, retries,
@@ -603,7 +654,7 @@ func (s *Store) ListRuns(ctx context.Context, integrationID string, limit int) (
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := s.pool.Query(ctx, `
+	rows, err := s.db.Query(ctx, `
 		SELECT id::text FROM model.integration_run
 		WHERE integration_id=$1::uuid ORDER BY created_at DESC LIMIT $2
 	`, integrationID, limit)
@@ -630,7 +681,7 @@ func (s *Store) ListRuns(ctx context.Context, integrationID string, limit int) (
 
 // RecordAttempt logs one outbound request (sanitized).
 func (s *Store) RecordAttempt(ctx context.Context, runID string, seq, page int, method, rawURL string, httpStatus, durationMS int, errorCode, message string) {
-	_, _ = s.pool.Exec(ctx, `
+	_, _ = s.db.Exec(ctx, `
 		INSERT INTO model.integration_attempt (run_id, seq, page, method, url_sanitized, http_status, duration_ms, error_code, message)
 		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (run_id, seq) DO NOTHING
@@ -651,6 +702,10 @@ type Schedule struct {
 	EnabledBy       string     `json:"enabled_by,omitempty"`
 	NextFireAt      *time.Time `json:"next_fire_at,omitempty"`
 	LastFireAt      *time.Time `json:"last_fire_at,omitempty"`
+	// Runnable is set by DueSchedules only: the connector is active and
+	// switched on (on both sides, for a model link). A due schedule of one
+	// that is not advances without a run.
+	Runnable bool `json:"-"`
 }
 
 func (s *Store) UpsertSchedule(ctx context.Context, sc *Schedule) error {
@@ -683,7 +738,7 @@ func (s *Store) UpsertSchedule(ctx context.Context, sc *Schedule) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.pool.Exec(ctx, `
+	_, err = s.db.Exec(ctx, `
 		INSERT INTO model.integration_schedule
 		    (integration_id, kind, interval_seconds, cron_expr, timezone, enabled,
 		     overlap_policy, misfire_policy, enabled_by, next_fire_at, updated_at)
@@ -725,7 +780,7 @@ func (s *Store) GetSchedule(ctx context.Context, integrationID string) (*Schedul
 	var sc Schedule
 	var interval *int
 	var enabledBy *string
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		SELECT integration_id::text, kind, interval_seconds, cron_expr, timezone, enabled,
 		       overlap_policy, misfire_policy, enabled_by::text, next_fire_at, last_fire_at
 		FROM model.integration_schedule WHERE integration_id=$1::uuid
@@ -750,13 +805,15 @@ func (s *Store) GetSchedule(ctx context.Context, integrationID string) (*Schedul
 // advances next_fire_at atomically so sibling schedulers don't double-fire
 // (the unique (integration, scheduled_for) run index is the second guard).
 func (s *Store) DueSchedules(ctx context.Context, now time.Time, limit int) ([]Schedule, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT integration_id::text, kind, COALESCE(interval_seconds,0), cron_expr, timezone,
-		       enabled, overlap_policy, misfire_policy, COALESCE(enabled_by::text,''), next_fire_at
-		FROM model.integration_schedule
-		WHERE enabled AND next_fire_at IS NOT NULL AND next_fire_at <= $1
-		ORDER BY next_fire_at LIMIT $2
-		FOR UPDATE SKIP LOCKED
+	rows, err := s.db.Query(ctx, `
+		SELECT sc.integration_id::text, sc.kind, COALESCE(sc.interval_seconds,0), sc.cron_expr, sc.timezone,
+		       sc.enabled, sc.overlap_policy, sc.misfire_policy, COALESCE(sc.enabled_by::text,''), sc.next_fire_at,
+		       (i.status='active' AND i.enabled AND i.source_enabled)
+		FROM model.integration_schedule sc
+		JOIN model.integration_def i ON i.id = sc.integration_id
+		WHERE sc.enabled AND sc.next_fire_at IS NOT NULL AND sc.next_fire_at <= $1
+		ORDER BY sc.next_fire_at LIMIT $2
+		FOR UPDATE OF sc SKIP LOCKED
 	`, now, limit)
 	if err != nil {
 		return nil, err
@@ -766,7 +823,7 @@ func (s *Store) DueSchedules(ctx context.Context, now time.Time, limit int) ([]S
 	for rows.Next() {
 		var sc Schedule
 		if err := rows.Scan(&sc.IntegrationID, &sc.Kind, &sc.IntervalSeconds, &sc.CronExpr, &sc.Timezone,
-			&sc.Enabled, &sc.OverlapPolicy, &sc.MisfirePolicy, &sc.EnabledBy, &sc.NextFireAt); err != nil {
+			&sc.Enabled, &sc.OverlapPolicy, &sc.MisfirePolicy, &sc.EnabledBy, &sc.NextFireAt, &sc.Runnable); err != nil {
 			return nil, err
 		}
 		out = append(out, sc)
@@ -780,7 +837,7 @@ func (s *Store) AdvanceSchedule(ctx context.Context, sc *Schedule, firedAt time.
 	if err != nil {
 		return err
 	}
-	_, err = s.pool.Exec(ctx, `
+	_, err = s.db.Exec(ctx, `
 		UPDATE model.integration_schedule
 		SET last_fire_at=$2, next_fire_at=$3, updated_at=now()
 		WHERE integration_id=$1::uuid
@@ -791,7 +848,7 @@ func (s *Store) AdvanceSchedule(ctx context.Context, sc *Schedule, firedAt time.
 // HasActiveRun reports a queued/running run for overlap_policy=skip.
 func (s *Store) HasActiveRun(ctx context.Context, integrationID string) bool {
 	var n int
-	_ = s.pool.QueryRow(ctx, `
+	_ = s.db.QueryRow(ctx, `
 		SELECT COUNT(*) FROM model.integration_run
 		WHERE integration_id=$1::uuid AND status IN ('queued','running')
 	`, integrationID).Scan(&n)

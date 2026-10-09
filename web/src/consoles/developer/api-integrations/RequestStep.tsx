@@ -2,8 +2,9 @@ import { useState } from "react";
 import { Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react";
 import type { ApiIntegrationConfig, ApiKV } from "../../../api/client";
 import { Button, Checkbox, Field, IconButton, NumberInput, Select, TextInput, Textarea } from "../../../ui";
-import { TEMPLATE_VARIABLES, defaultSFTPSource } from "./apiIntegrationTypes";
+import { TEMPLATE_VARIABLES, defaultModelSource, defaultSFTPSource } from "./apiIntegrationTypes";
 import { SFTPSourceFields } from "./SFTPSourceFields";
+import { ModelSourceFields } from "./ModelSourceFields";
 
 // KVEditor: the visual key/value rows with enable/disable, remove, and
 // keyboard-reachable reorder (explicit up/down buttons — fully operable
@@ -53,33 +54,45 @@ function VariablePicker({ onPick, rowFields }: { onPick: (v: string) => void; ro
 }
 
 // RequestStep: where a run reads from — an HTTPS API call, or (pull only) a
-// spreadsheet file on an SFTP server.
+// spreadsheet file on an SFTP server or a grid of another model of this
+// tenant.
 export function RequestStep({ config, onConfig }: {
   config: ApiIntegrationConfig;
   onConfig: (patch: Partial<ApiIntegrationConfig>) => void;
 }) {
   const sftp = config.protocol === "sftp";
+  const link = config.protocol === "model";
   const setProtocol = (p: string) => {
     if (p === "sftp") {
       onConfig({
-        protocol: "sftp", sftp: config.sftp ?? defaultSFTPSource(),
+        protocol: "sftp", sftp: config.sftp ?? defaultSFTPSource(), model: undefined,
         auth: config.auth.type === "basic" || config.auth.type === "ssh_key" ? config.auth : { type: "basic" },
       });
+    } else if (p === "model") {
+      // A link reads as the developer who runs it, and replaces the values
+      // it imports: each run reads the source's whole values again.
+      onConfig({
+        protocol: "model", model: config.model ?? defaultModelSource(), sftp: undefined,
+        auth: { type: "none" }, import_mode: config.import_mode === "full_reload" ? "full_reload" : "replace",
+      });
     } else {
-      onConfig({ protocol: undefined, sftp: undefined, auth: config.auth.type === "ssh_key" ? { type: "none" } : config.auth });
+      onConfig({ protocol: undefined, sftp: undefined, model: undefined, auth: config.auth.type === "ssh_key" ? { type: "none" } : config.auth });
     }
   };
   return (
     <div style={{ display: "grid", gap: 12 }}>
-      <Field label="Source" description={config.direction === "push" ? "SFTP reads files, so it is for imports (pull) only." : undefined}>
-        <Select value={sftp ? "sftp" : ""} aria-label="Source" onChange={e => setProtocol(e.target.value)} style={{ maxWidth: 320 }}>
+      <Field label="Source" description={config.direction === "push" ? "An SFTP file and another model are read, so they are for imports (pull) only." : undefined}>
+        <Select value={config.protocol ?? ""} aria-label="Source" onChange={e => setProtocol(e.target.value)} style={{ maxWidth: 320 }}>
           <option value="">HTTPS API</option>
           <option value="sftp" disabled={config.direction === "push" && !sftp}>SFTP server (a spreadsheet file)</option>
+          <option value="model" disabled={config.direction === "push" && !link}>Another model of this tenant (a grid)</option>
         </Select>
       </Field>
       {sftp
         ? <SFTPSourceFields source={config.sftp ?? defaultSFTPSource()} onSource={s => onConfig({ sftp: s })} />
-        : <HTTPRequestFields config={config} onConfig={onConfig} />}
+        : link
+          ? <ModelSourceFields source={config.model ?? defaultModelSource()} onSource={m => onConfig({ model: m })} />
+          : <HTTPRequestFields config={config} onConfig={onConfig} />}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Boxes, Users, ScrollText, Server, KeyRound, Bell, Sparkles, Fingerprint, UserPlus, BarChart3, Palette, Layers } from "lucide-react";
+import { Boxes, Users, ScrollText, Server, KeyRound, Bell, Sparkles, Fingerprint, UserPlus, BarChart3, Palette, Layers, Link2 } from "lucide-react";
 import { api } from "../../api/client";
 import { UsersPanel } from "../admin/UsersPanel";
 import { InfraNodesTab } from "./InfraNodesTab";
@@ -10,6 +10,7 @@ import { SettingsScopePicker, DEPLOYMENT_SCOPE } from "./SettingsScopePicker";
 import { UsersScopePicker } from "./UsersScopePicker";
 import { ALL_PEOPLE, peopleIn } from "./people";
 import { NotificationSettingsTab } from "../admin/NotificationSettingsTab";
+import { ModelLinksTab } from "../admin/ModelLinksTab";
 import { TenantAIKeysTab } from "../../ee/aikeys/TenantAIKeysTab";
 import { SsoTab } from "../../ee/sso/SsoTab";
 import { ScimTab } from "../../ee/scim/ScimTab";
@@ -30,8 +31,8 @@ function tenantChosen(scope: "platform" | "tenant", settingsScope: string): bool
   return scope === "tenant" || settingsScope !== DEPLOYMENT_SCOPE;
 }
 
-type Tab = "applications" | "users" | "audit" | "usage" | "notifications" | "ai-keys" | "sso" | "scim" | "branding" | "plans" | "infra" | "license";
-const TAB_LABELS: Record<Tab, string> = { applications: "Applications", users: "Users", audit: "Audit Log", usage: "Usage", notifications: "Notification delivery", "ai-keys": "AI keys", sso: "Single sign-on", scim: "Provisioning (SCIM)", branding: "Branding", plans: "Plans", infra: "Infrastructure", license: "License" };
+type Tab = "applications" | "users" | "audit" | "usage" | "model-links" | "notifications" | "ai-keys" | "sso" | "scim" | "branding" | "plans" | "infra" | "license";
+const TAB_LABELS: Record<Tab, string> = { applications: "Applications", users: "Users", audit: "Audit Log", usage: "Usage", "model-links": "Model links", notifications: "Notification delivery", "ai-keys": "AI keys", sso: "Single sign-on", scim: "Provisioning (SCIM)", branding: "Branding", plans: "Plans", infra: "Infrastructure", license: "License" };
 
 /**
  * The administration section of the console — Applications (models,
@@ -74,6 +75,8 @@ export function useAdminSection({ enabled, tab, scope }: SectionInput & { scope:
     { id: t("audit"), label: TAB_LABELS.audit, icon: <ScrollText size={16} /> },
     // Usage is per tenant: every tenant at the platform scope, one's own otherwise.
     { id: t("usage"), label: TAB_LABELS.usage, icon: <BarChart3 size={16} /> },
+    // Links between a tenant's models: the administrator holds both switches.
+    { id: t("model-links"), label: TAB_LABELS["model-links"], icon: <Link2 size={16} /> },
     // Outbound delivery is per tenant, so both scopes get it.
     { id: t("notifications"), label: TAB_LABELS.notifications, icon: <Bell size={16} /> },
     // So is the AI key. The tab always shows: on a non-enterprise edition it
@@ -132,6 +135,7 @@ export function useAdminSection({ enabled, tab, scope }: SectionInput & { scope:
           {cur === "notifications" && <NotificationSettingsTab />}
           {cur === "ai-keys" && <TenantAIKeysTab />}
           {cur === "usage" && <UsageTab scope={scope} />}
+          {cur === "model-links" && <ModelLinksTab />}
           {cur === "sso" && tenantChosen(scope, settingsScope) && <SsoTab />}
           {cur === "scim" && tenantChosen(scope, settingsScope) && <ScimTab />}
           {cur === "branding" && tenantChosen(scope, settingsScope) && <BrandingTab />}

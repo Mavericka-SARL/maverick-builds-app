@@ -14,10 +14,8 @@ package main
 
 import (
 	"context"
-	"github.com/mavericks-engine/mavericks/internal/workflow"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -136,7 +134,9 @@ func fireDue(ctx context.Context, log zerolog.Logger, store *integration.Store, 
 	for i := range due {
 		sc := &due[i]
 		fireAt := now.Truncate(time.Minute)
-		if sc.OverlapPolicy == "skip" && store.HasActiveRun(ctx, sc.IntegrationID) {
+		// A draft or switched-off connector's schedule keeps its times but
+		// runs nothing: switching it back on does not fire a missed run.
+		if !sc.Runnable || (sc.OverlapPolicy == "skip" && store.HasActiveRun(ctx, sc.IntegrationID)) {
 			_ = store.AdvanceSchedule(ctx, sc, now)
 			continue
 		}
@@ -164,42 +164,8 @@ func runWorker(ctx context.Context, log zerolog.Logger, pool *pgxpool.Pool, work
 		AllowInsecure: allowInsecure,
 		Committer:     &integration.DBCommitter{Pool: pool, Log: log},
 		// A finished run fires the application's integration_completed /
-		// integration_failed automation rules (scoped to this integration or
-		// to any). The trigger catalog had advertised these events without
-		// anything dispatching them.
-		OnFinished: func(ctx context.Context, run *integration.Run, res integration.RunResult) {
-			var triggerType string
-			switch res.Status {
-			case "success", "partial":
-				triggerType = "integration_completed"
-			case "failed":
-				triggerType = "integration_failed"
-			default:
-				return // cancelled: nothing to react to
-			}
-			var appID, revisionID string
-			if err := pool.QueryRow(ctx, `
-				SELECT m.application_id::text, COALESCE(d.revision_id::text, '')
-				FROM model.integration_def d JOIN core.model m ON m.id = d.model_id
-				WHERE d.id = $1::uuid
-			`, run.IntegrationID).Scan(&appID, &revisionID); err != nil {
-				log.Warn().Err(err).Str("integration", run.IntegrationID).Msg("resolve application for integration event")
-				return
-			}
-			payload := map[string]string{
-				"integration_id": run.IntegrationID,
-				"run_id":         run.ID,
-				"record_count":   strconv.Itoa(res.RecordsWritten),
-				"status":         res.Status,
-			}
-			if res.Status == "failed" {
-				payload["error_message"] = res.Message
-				if payload["error_message"] == "" {
-					payload["error_message"] = res.ErrorCode
-				}
-			}
-			workflow.NewStore(pool).DispatchEventRules(context.WithoutCancel(ctx), appID, revisionID, triggerType, run.IntegrationID, run.RunBy, payload)
-		},
+		// integration_failed automation rules.
+		OnFinished: integration.DispatchRunEvents(pool, log),
 	}
 
 	// Health endpoint for the standard grpc-health-probe manifests.

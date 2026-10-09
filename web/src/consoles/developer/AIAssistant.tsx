@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { ExportDownloadButton } from "../ExportDownloadButton";
 import { downloadBlob } from "../business/blobUtils";
+import { credentialSteps, credentialsComplete } from "./proposalCredentials";
 import { api, type AIConversion, type AISession, type AIMessage, type AISettings, type AIProposal, type AIProposalStep, type AIProposalWithSummary, type AIDocument } from "../../api/client";
 import {
   Button, IconButton, TextInput, Select, Textarea, Field, StatusBadge, RevisionBadge,
@@ -246,6 +247,9 @@ const TOOL_LABELS: Record<string, string> = {
   create_file_integration: "Create Excel/CSV integration", import_file_data: "Import attached file", write_input_values: "Write input values",
   create_export_integration: "Create data export", update_integration: "Update integration",
   delete_integration: "Delete integration",
+  create_api_integration: "Create REST API connector", update_api_integration: "Update REST API connector",
+  create_connection: "Create sign-in connection", update_connection: "Update sign-in connection",
+  run_integration: "Run integration", trigger_automation_rule: "Trigger automation rule",
 };
 function friendlyTool(tool: string): string {
   return TOOL_LABELS[tool] ?? tool.replace(/_/g, " ");
@@ -365,6 +369,11 @@ function ProposalPanel({
 }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr]   = useState<string | null>(null);
+  // Sign-in details typed here go with the confirmation and nowhere else.
+  const credSteps = credentialSteps(proposal.steps ?? []);
+  const [secrets, setSecrets] = useState<Record<number, Record<string, string>>>(() =>
+    Object.fromEntries(credSteps.map(c => [c.number, { ...c.prefill }])));
+  const credsReady = credentialsComplete(credSteps, secrets);
 
   const isPending  = proposal.status === "pending";
   const isExecuted = proposal.status === "executed" || proposal.status === "partial";
@@ -374,7 +383,8 @@ function ProposalPanel({
     setErr(null);
     try {
       if (action === "confirm") {
-        const resp = await api.aiConfirmProposal(sessionId, proposal.id, revisionId);
+        const resp = await api.aiConfirmProposal(sessionId, proposal.id, revisionId, credSteps.length > 0 ? secrets : undefined);
+        setSecrets({});
         onSettled(resp.messages, resp.proposal, resp.session);
       } else {
         const resp = await api.aiRejectProposal(sessionId, proposal.id);
@@ -438,10 +448,38 @@ function ProposalPanel({
         ))}
       </div>
 
+      {/* Sign-in details: the assistant never sees these */}
+      {isPending && credSteps.length > 0 && (
+        <div style={{ padding: "10px 14px", borderTop: "1px solid var(--color-border)", display: "grid", gap: 10 }}>
+          <div className="mvx-admin-muted" style={{ fontSize: 12 }}>
+            Sign-in details go to the server with your confirmation. The assistant does not see them and they are not
+            kept in this chat.
+          </div>
+          {credSteps.map(c => (
+            <fieldset key={c.number} style={{ border: "1px solid var(--color-border)", borderRadius: 6, padding: "8px 10px", margin: 0, display: "grid", gap: 6 }}>
+              <legend style={{ fontSize: 12, padding: "0 4px" }}>Step {c.number}: {c.name} ({c.authType})</legend>
+              {c.fields.map(f => {
+                const value = secrets[c.number]?.[f.key] ?? "";
+                const set = (v: string) => setSecrets(prev => ({ ...prev, [c.number]: { ...(prev[c.number] ?? {}), [f.key]: v } }));
+                const label = `${f.label}${f.optional ? " (optional)" : ""}`;
+                return (
+                  <Field key={f.key} label={label}>
+                    {f.multiline
+                      ? <Textarea rows={4} value={value} onChange={e => set(e.target.value)} aria-label={`${label} for step ${c.number}`} spellCheck={false} autoComplete="off" />
+                      : <TextInput type={f.secret ? "password" : "text"} value={value} onChange={e => set(e.target.value)} aria-label={`${label} for step ${c.number}`} autoComplete="off" />}
+                  </Field>
+                );
+              })}
+            </fieldset>
+          ))}
+        </div>
+      )}
+
       {/* Actions */}
       {isPending && (
         <div className="mvx-admin-inline-form" style={{ padding: "10px 14px", borderTop: "1px solid var(--color-border)" }}>
-          <Button variant="primary" size="sm" loading={busy} loadingLabel="Executing…" onClick={() => act("confirm")}>
+          <Button variant="primary" size="sm" loading={busy} loadingLabel="Executing…" onClick={() => act("confirm")}
+            disabled={!credsReady} title={credsReady ? undefined : "Fill in the sign-in details above first"}>
             Confirm &amp; Execute
           </Button>
           <Button size="sm" disabled={busy} onClick={() => act("reject")}>

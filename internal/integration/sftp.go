@@ -211,6 +211,9 @@ func (c *Config) validateSFTP(allowInsecure bool) error {
 	if s == nil {
 		return fmt.Errorf("sftp settings are required for the sftp protocol")
 	}
+	if c.Model != nil {
+		return fmt.Errorf("model settings apply to the model protocol only")
+	}
 	if c.Direction != DirectionPull {
 		return fmt.Errorf("sftp reads files only (direction pull)")
 	}

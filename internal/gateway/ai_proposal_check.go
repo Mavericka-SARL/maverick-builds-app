@@ -61,7 +61,28 @@ func (h *handler) aiCheckProposal(ctx context.Context, sessionID, modelID, revID
 func (h *handler) runStepsOn(ctx context.Context, tx pgx.Tx, sessionID, modelID, revID, userID string, steps []aiassistant.ProposalStep) (proposalCheck, []string, error) {
 	var out proposalCheck
 	live := h.aiWriteHooks(modelID, userID)
+	// Connectors and connections are saved on tx as confirming saves them
+	// (a connection without its credential, which only the card holds); a
+	// run or a trigger reaches outside the database and is left to the
+	// confirmation.
+	a, aerr := h.actorByUserID(ctx, userID)
 	ex := aiassistant.NewDryRunWriteExecutor(tx, modelID, revID, userID).WithHooks(aiassistant.Hooks{
+		SaveConnector: func(ctx context.Context, req aiassistant.ConnectorSave) (string, error) {
+			if aerr != nil {
+				return "", aerr
+			}
+			return h.aiSaveConnector(ctx, tx, a, modelID, revID, req)
+		},
+		SaveConnection: func(ctx context.Context, req aiassistant.ConnectionSave) (string, error) {
+			if aerr != nil {
+				return "", aerr
+			}
+			return h.aiSaveConnection(ctx, tx, a, modelID, req, nil, true)
+		},
+		RunIntegration: func(context.Context, string, string) (string, error) { return "", aiassistant.ErrNotDryRunnable },
+		TriggerRule: func(context.Context, string, map[string]any) (string, error) {
+			return "", aiassistant.ErrNotDryRunnable
+		},
 		CheckMetrics: live.CheckMetrics, CheckMembers: live.CheckMembers,
 		ImportFile: func(ctx context.Context, req aiassistant.FileImportRequest) (string, error) {
 			return h.aiCheckImportFile(ctx, tx, sessionID, req)

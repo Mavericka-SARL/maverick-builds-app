@@ -770,11 +770,26 @@ export interface ApiSFTPSource {
   reshape?: FileReshape;
 }
 
+/** A grid of another model of the same tenant, read in that model's active
+ *  revision as the developer who runs the link. Named, not referenced by id:
+ *  a grid's id changes with every revision. */
+export interface ApiModelSource {
+  model_id: string;
+  grid: string;
+  /** Metric names; empty = every metric of the grid. */
+  metrics?: string[];
+  /** Dimension name -> member codes; a parent stands for its leaves. */
+  filters?: Record<string, string[]>;
+  member_display?: "code" | "label";
+}
+
 export interface ApiIntegrationConfig {
   kind: "rest_api/v1";
-  /** Empty = HTTPS API; "sftp" reads a file instead (pull only). */
-  protocol?: "" | "sftp";
+  /** Empty = HTTPS API; "sftp" reads a file instead (pull only); "model"
+   *  reads a grid of another model of this tenant (pull only). */
+  protocol?: "" | "sftp" | "model";
   sftp?: ApiSFTPSource;
+  model?: ApiModelSource;
   direction: ApiDirection;
   target_type: ApiTargetType;
   target_id: string;
@@ -812,6 +827,37 @@ export interface ApiIntegrationDetail {
   connection_id?: string; config?: ApiIntegrationConfig;
   config_version: number; last_tested_at?: string | null;
   created_at: string; tested: boolean; schedule?: ApiSchedule;
+  /** A model link's source side: the model it reads and that side's switch. */
+  link_id?: string; source_model_id?: string; source_enabled?: boolean;
+  source_switched_by?: string; source_switched_at?: string | null;
+}
+
+/** One end of a model link. */
+export interface ModelLinkEnd {
+  application_id: string; application_name: string;
+  model_id: string; model_name: string;
+  revision?: string; active_revision?: boolean; grid?: string;
+}
+
+/** One revision copy of a model link, with both sides' switches. */
+export interface ModelLink {
+  id: string; link_id: string; name: string; status: "draft" | "active";
+  enabled: boolean; source_enabled: boolean;
+  source_switched_by?: string; source_switched_at?: string | null;
+  schedule: string; schedule_by?: string;
+  target: ModelLinkEnd; source: ModelLinkEnd;
+  last_run?: { status: string; finished_at?: string | null; error_code?: string; message?: string; records_written: number };
+}
+
+/** A model a link may read, with its active revision's grids. */
+export interface ModelLinkSource {
+  application_id: string; application_name: string;
+  model_id: string; model_name: string; revision: string;
+  grids: {
+    name: string;
+    metrics: { name: string; label?: string }[];
+    dimensions: { name: string; members?: { code: string; label: string; parent_code?: string }[] }[];
+  }[];
 }
 
 export interface IntegrationConnection {
@@ -2481,6 +2527,24 @@ export const api = {
   cancelApiIntegrationRun: (runId: string) =>
     apiFetch<{ status: string }>(`/api/developer/integration-runs/${runId}/cancel`, { method: "POST" }),
 
+  // ── Model links ──────────────────────────────────────────────────────────────
+  /** The models a link in the current model may read; with modelId and grid,
+   *  that grid alone with its dimensions' members. */
+  listModelLinkSources: (opts?: { modelId?: string; grid?: string }) => {
+    const p = new URLSearchParams();
+    if (opts?.modelId) p.set("model_id", opts.modelId);
+    if (opts?.grid) p.set("grid", opts.grid);
+    const qs = p.toString();
+    return apiFetch<ModelLinkSource[]>(`/api/developer/model-link-sources${qs ? "?" + qs : ""}`);
+  },
+  /** The links that read the current model (its source side). */
+  listModelLinksReadingModel: () => apiFetch<ModelLink[]>("/api/developer/model-links"),
+  switchModelLinkSource: (id: string, sourceEnabled: boolean) =>
+    apiFetch<{ id: string; source_enabled: boolean }>(`/api/developer/model-links/${id}`, { method: "PATCH", body: JSON.stringify({ source_enabled: sourceEnabled }) }),
+  adminListModelLinks: () => apiFetch<ModelLink[]>("/api/admin/model-links"),
+  adminSwitchModelLink: (id: string, body: { enabled?: boolean; source_enabled?: boolean }) =>
+    apiFetch<{ status: string }>(`/api/admin/model-links/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+
   // ── Business-Admin: roles ────────────────────────────────────────────────────
   listBARoles: () => apiFetch<BARole[]>("/api/business-admin/roles"),
   createBARole: (name: string) =>
@@ -2619,10 +2683,12 @@ export const api = {
   // signal stops the turn: the server sees the request close and saves "Stopped".
   aiSendMessage: (sessionId: string, content: string, onEvent: (event: AISendMessageEvent) => void, revisionId?: string, signal?: AbortSignal) =>
     streamSSE(`/api/ai/sessions/${sessionId}/messages${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, { content }, onEvent, signal),
-  aiConfirmProposal: (sessionId: string, proposalId: string, revisionId?: string) =>
+  /** secrets: what the developer typed into the card for sign-in connection
+   *  steps, by 1-based step — sent with the confirmation only, never stored. */
+  aiConfirmProposal: (sessionId: string, proposalId: string, revisionId?: string, secrets?: Record<number, Record<string, string>>) =>
     apiFetch<{ proposal: AIProposal; messages: AIMessage[]; session?: AISession }>(
       `/api/ai/sessions/${sessionId}/proposals/${proposalId}/confirm${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`,
-      { method: "POST" },
+      { method: "POST", ...(secrets && Object.keys(secrets).length > 0 ? { body: JSON.stringify({ secrets }) } : {}) },
     ),
   aiRejectProposal: (sessionId: string, proposalId: string) =>
     apiFetch<{ proposal: AIProposal; messages: AIMessage[] }>(

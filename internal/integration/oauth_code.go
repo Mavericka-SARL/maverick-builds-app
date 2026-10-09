@@ -109,7 +109,7 @@ func (s *Store) StartOAuth(ctx context.Context, appID, connectionID, userID, red
 	if err != nil {
 		return "", err
 	}
-	if _, err := s.pool.Exec(ctx, `
+	if _, err := s.db.Exec(ctx, `
 		INSERT INTO model.integration_oauth_state (state, connection_id, application_id, user_id, code_verifier, return_to, expires_at)
 		VALUES ($1, $2::uuid, $3::uuid, NULLIF($4,'')::uuid, $5, $6, now() + $7::interval)`,
 		state, connectionID, appID, userID, verifier, returnTo, oauthStateTTL.String()); err != nil {
@@ -149,7 +149,7 @@ func (s *Store) CompleteOAuth(ctx context.Context, client *http.Client, state, c
 	var res OAuthCallbackResult
 	var verifier string
 	var userID *string
-	err := s.pool.QueryRow(ctx, `
+	err := s.db.QueryRow(ctx, `
 		DELETE FROM model.integration_oauth_state
 		WHERE state = $1 AND expires_at > now()
 		RETURNING connection_id::text, application_id::text, user_id::text, code_verifier, return_to`, state,
@@ -223,7 +223,7 @@ func (s *Store) storeOAuth(ctx context.Context, appID, connectionID string, meta
 	if err != nil {
 		return err
 	}
-	if _, err := s.pool.Exec(ctx, `
+	if _, err := s.db.Exec(ctx, `
 		UPDATE model.integration_connection SET meta = $3::jsonb, secret_enc = $4, updated_at = now()
 		WHERE id = $1::uuid AND application_id = $2::uuid`, connectionID, appID, string(metaJSON), sealed); err != nil {
 		return fmt.Errorf("store oauth tokens: %w", err)

@@ -34,6 +34,9 @@ type Runner struct {
 	Committer Committer
 	// Now is injectable for tests.
 	Now func() time.Time
+	// Source reads a model link's source grid. Only the gateway sets it;
+	// the worker never claims a model link (Store.Claim).
+	Source SourceReader
 	// OnFinished, when set, runs after a real (non-dry) run's result is
 	// persisted — the worker uses it to fire integration_completed /
 	// integration_failed automation rules. Nil in tests and dry runs.
@@ -64,6 +67,7 @@ const (
 	ErrCodeInvalidData = "invalid_data"
 	ErrCodeTooLarge    = "too_large"
 	ErrCodeCancelled   = "cancelled"
+	ErrCodeSwitchedOff = "switched_off"
 	ErrCodeInternal    = "internal"
 )
 
@@ -161,7 +165,7 @@ func (rn *Runner) execute(ctx context.Context, run *Run) (res RunResult) {
 	// Load + re-validate: an edited row, foreign target, or stale revision
 	// copy fails at claim time, not mid-request (validated at save AND here).
 	var modelID, appID string
-	if err := rn.Store.pool.QueryRow(ctx, `
+	if err := rn.Store.db.QueryRow(ctx, `
 		SELECT i.model_id::text, m.application_id::text
 		FROM model.integration_def i JOIN core.model m ON m.id=i.model_id WHERE i.id=$1::uuid
 	`, run.IntegrationID).Scan(&modelID, &appID); err != nil {
@@ -182,9 +186,16 @@ func (rn *Runner) execute(ctx context.Context, run *Run) (res RunResult) {
 	// stored row can predate the save-time check (or have been written by a
 	// path that skipped it), so a foreign target fails the run here, before
 	// any request is made or any row is read or written.
-	if oerr := checkDefinitionOwnership(ctx, rn.Store.pool, def); oerr != nil {
+	if oerr := checkDefinitionOwnership(ctx, rn.Store.db, def); oerr != nil {
 		res.ErrorCode, res.Message = ErrCodeInvalidData, "configuration invalid: "+oerr.Error()
 		return res
+	}
+	if aerr := runAllowed(run, def); aerr != nil {
+		res.ErrorCode, res.Message = ErrCodeSwitchedOff, aerr.Error()
+		return res
+	}
+	if cfg.Protocol == ProtocolModel {
+		return rn.executeModelPull(ctx, run, def, res)
 	}
 	res.Meta["host"] = cfg.DisplayHost()
 

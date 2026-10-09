@@ -56,6 +56,20 @@ func encodeAddBusinessMemberRequest(
 	return nil
 }
 
+func encodeAdminSwitchModelLinkRequest(
+	req *AdminSwitchModelLinkReq,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
 func encodeApplyMigrationRequest(
 	req *MigrationApplyRequest,
 	r *http.Request,
@@ -916,6 +930,20 @@ func encodeStartWorkflowInstanceRequest(
 
 func encodeSubmitBudgetRequest(
 	req *SubmitBudgetRequest,
+	r *http.Request,
+) error {
+	const contentType = "application/json"
+	e := new(jx.Encoder)
+	{
+		req.Encode(e)
+	}
+	encoded := e.Bytes()
+	ht.SetBody(r, bytes.NewReader(encoded), contentType)
+	return nil
+}
+
+func encodeSwitchModelLinkSourceRequest(
+	req *SwitchModelLinkSourceReq,
 	r *http.Request,
 ) error {
 	const contentType = "application/json"

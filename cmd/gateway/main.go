@@ -353,6 +353,9 @@ func main() {
 	// Plans are read from the control plane. One enforcer serves both the
 	// requests and the sweep below, so a sweep's verdict applies at once.
 	planEnforcer := plan.NewEnforcer(pool)
+	// Model links read their source through the handler's own grid route,
+	// so they run here rather than in the integration worker.
+	modelLinks := gateway.NewModelLinks()
 	handler := otelhttp.NewHandler(
 		gateway.NewHandlerWithDeps(log, pool, jwks, gateway.Deps{
 			Plans:       planEnforcer,
@@ -371,6 +374,7 @@ func main() {
 			KeycloakPublicURL: firstNonEmptyString(c.KeycloakIssuer, c.KeycloakURL), KeycloakRealm: c.KeycloakRealm, PublicURL: c.ConsoleURL,
 			TokenClients: splitList(c.TokenClients),
 			MCP:          mcpConfig(c, log),
+			ModelLinks:   modelLinks,
 		}),
 		"gateway",
 		otelhttp.WithMessageEvents(otelhttp.ReadEvents, otelhttp.WriteEvents),
@@ -398,9 +402,10 @@ func main() {
 	// fire against. In shared mode that is the single pool; in dedicated mode
 	// every tenant gets its own, including tenants created while running.
 	// startBackground runs the loops that belong to one database: workflow
-	// timers, outbound notification delivery, task reminders and the plan
-	// sweep.
-	startBackground := func(dbPool *pgxpool.Pool, blog zerolog.Logger, id string) {
+	// timers, outbound notification delivery, task reminders, the plan
+	// sweep and model links. customerID is the dedicated tenant whose
+	// database dbPool is ("" in shared mode).
+	startBackground := func(dbPool *pgxpool.Pool, customerID string, blog zerolog.Logger, id string) {
 		go workflow.RunScheduler(schedCtx, workflow.NewStore(dbPool), blog,
 			schedulerPollInterval, schedulerMisfireThreshold, id)
 		store := notification.NewStore(dbPool)
@@ -429,13 +434,14 @@ func main() {
 		// Tenants that signed up earlier get the starter models they lack,
 		// and the current content of those they have (internal/startersync).
 		go startersync.Run(schedCtx, dbPool, blog)
+		go modelLinks.Run(schedCtx, dbPool, customerID, blog, id)
 	}
 	if router != nil {
 		router.Watch(schedCtx, tenantWatchInterval, func(t tenantdb.Tenant, tpool *pgxpool.Pool) {
-			startBackground(tpool, log.With().Str("tenant", t.CustomerID).Logger(), workerID+"-"+t.CustomerID[:8])
+			startBackground(tpool, t.CustomerID, log.With().Str("tenant", t.CustomerID).Logger(), workerID+"-"+t.CustomerID[:8])
 		})
 	} else {
-		startBackground(pool, log, workerID)
+		startBackground(pool, "", log, workerID)
 	}
 
 	stop := make(chan os.Signal, 1)

@@ -92,7 +92,15 @@ function ApiCard({
   const last: ApiRun | undefined = runs?.[0];
   const cfg = det?.config;
   const sftp = cfg?.protocol === "sftp";
-  const host = !cfg ? "" : sftp ? (cfg.sftp?.host ?? "").replace(/:\d+$/, "") : hostOf(cfg.request.url);
+  const link = cfg?.protocol === "model";
+  const { data: sources = [] } = useQuery({
+    queryKey: ["model-link-sources"],
+    queryFn: () => api.listModelLinkSources(),
+    enabled: link,
+  });
+  const source = link ? sources.find(m => m.model_id === cfg?.model?.model_id) : undefined;
+  const host = !cfg ? "" : link ? `${source ? `${source.application_name} › ${source.model_name}` : "another model"} · ${cfg.model?.grid ?? ""}`
+    : sftp ? (cfg.sftp?.host ?? "").replace(/:\d+$/, "") : hostOf(cfg.request.url);
   const sched = det?.schedule;
 
   return (
@@ -100,8 +108,11 @@ function ApiCard({
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <StatusBadge tone={item.status === "active" ? "success" : "warning"}>{item.status}</StatusBadge>
         {det && !det.enabled && <StatusBadge tone="warning">disabled</StatusBadge>}
+        {det && link && det.source_enabled === false && (
+          <StatusBadge tone="warning">off on the source side</StatusBadge>
+        )}
         <strong>{item.name}</strong>
-        {cfg && <span className="mvx-admin-muted">{sftp ? "SFTP" : cfg.request.method} {host}</span>}
+        {cfg && <span className="mvx-admin-muted">{link ? "Model link" : sftp ? "SFTP" : cfg.request.method} {host}</span>}
         {det && <StatusBadge tone="neutral">{det.direction}</StatusBadge>}
         <span className="mvx-admin-muted" style={{ fontSize: 12 }}>
           {cfg?.target_type ?? item.target_type}{revisionId ? ` · rev ${revisionId.slice(0, 8)}` : ""}

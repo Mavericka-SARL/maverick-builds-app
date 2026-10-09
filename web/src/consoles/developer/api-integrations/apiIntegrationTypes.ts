@@ -1,6 +1,6 @@
 // Shared shapes and defaults for the REST API visual constructor. The typed
 // DTOs live in api/client.ts; this module holds wizard-local structure only.
-import type { ApiIntegrationConfig, ApiSchedule, ApiSFTPSource } from "../../../api/client";
+import type { ApiIntegrationConfig, ApiModelSource, ApiSchedule, ApiSFTPSource } from "../../../api/client";
 
 export const WIZARD_STEPS = [
   { id: "basics", label: "Basics" },
@@ -31,6 +31,10 @@ export function defaultConfig(): ApiIntegrationConfig {
 
 export function defaultSFTPSource(): ApiSFTPSource {
   return { host: "", select: "fixed", path: "" };
+}
+
+export function defaultModelSource(): ApiModelSource {
+  return { model_id: "", grid: "" };
 }
 
 export function defaultSchedule(): ApiSchedule {
@@ -67,7 +71,7 @@ export function requestCriticalKey(c: ApiIntegrationConfig): string {
   return JSON.stringify({
     d: c.direction, tt: c.target_type, t: c.target_id,
     r: c.request, a: c.auth, re: c.response, p: c.pagination,
-    pr: c.protocol, s: c.sftp,
+    pr: c.protocol, s: c.sftp, m: c.model,
   });
 }
 

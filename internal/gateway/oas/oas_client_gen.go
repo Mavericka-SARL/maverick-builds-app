@@ -75,6 +75,19 @@ type Invoker interface {
 	//
 	// GET /api/admin/infra/nodes
 	AdminInfraNodes(ctx context.Context) ([]AdminInfraNodesOKItem, error)
+	// AdminListModelLinks invokes adminListModelLinks operation.
+	//
+	// Every model link of the tenants the caller administers.
+	//
+	// GET /api/admin/model-links
+	AdminListModelLinks(ctx context.Context) ([]ModelLink, error)
+	// AdminSwitchModelLink invokes adminSwitchModelLink operation.
+	//
+	// A tenant administrator holds both switches: enabled (the link's own model's, this revision copy)
+	// and source_enabled (the source model's, every copy of the link).
+	//
+	// PATCH /api/admin/model-links/{id}
+	AdminSwitchModelLink(ctx context.Context, request *AdminSwitchModelLinkReq, params AdminSwitchModelLinkParams) (AdminSwitchModelLinkRes, error)
 	// ApplyMigration invokes applyMigration operation.
 	//
 	// Generate and immediately apply a schema migration for a model.
@@ -1109,6 +1122,23 @@ type Invoker interface {
 	//
 	// GET /api/metrics
 	ListMetrics(ctx context.Context, params ListMetricsParams) (ListMetricsRes, error)
+	// ListModelLinkSources invokes listModelLinkSources operation.
+	//
+	// The other models of the request's tenant the caller is a developer of, each with its active
+	// revision's grids (metric and dimension names). With model_id and grid, only that grid, with its
+	// dimensions' members for a link's filters.
+	//
+	// GET /api/developer/model-link-sources
+	ListModelLinkSources(ctx context.Context, params ListModelLinkSourcesParams) ([]ListModelLinkSourcesOKItem, error)
+	// ListModelLinksReadingModel invokes listModelLinksReadingModel operation.
+	//
+	// A model link is a REST API connector (protocol "model") of another model of the same tenant whose
+	// source is a grid of this model. This is the source side's view: one entry per revision copy of
+	// each link, with the switch the source side holds (source_enabled, shared by every copy of a link)
+	// and the link's own side's switch (enabled).
+	//
+	// GET /api/developer/model-links
+	ListModelLinksReadingModel(ctx context.Context) ([]ModelLink, error)
 	// ListNotifications invokes listNotifications operation.
 	//
 	// List the 50 most recent notifications for the current user.
@@ -1561,6 +1591,14 @@ type Invoker interface {
 	//
 	// POST /api/workflow/submit
 	SubmitBudget(ctx context.Context, request *SubmitBudgetRequest) (SubmitBudgetRes, error)
+	// SwitchModelLinkSource invokes switchModelLinkSource operation.
+	//
+	// The source side's switch, held by the developers of the model the link reads. It applies to every
+	// revision copy of the link; a link runs only while both sides are on. 404 to anyone who is not a
+	// developer of the source model.
+	//
+	// PATCH /api/developer/model-links/{id}
+	SwitchModelLinkSource(ctx context.Context, request *SwitchModelLinkSourceReq, params SwitchModelLinkSourceParams) (SwitchModelLinkSourceRes, error)
 	// SyncFormMappings invokes syncFormMappings operation.
 	//
 	// For an administrator of the form's application (a business_admin of its workspace, a developer or
@@ -2804,6 +2842,242 @@ func (c *Client) sendAdminInfraNodes(ctx context.Context) (res []AdminInfraNodes
 
 	stage = "DecodeResponse"
 	result, err := decodeAdminInfraNodesResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// AdminListModelLinks invokes adminListModelLinks operation.
+//
+// Every model link of the tenants the caller administers.
+//
+// GET /api/admin/model-links
+func (c *Client) AdminListModelLinks(ctx context.Context) ([]ModelLink, error) {
+	res, err := c.sendAdminListModelLinks(ctx)
+	return res, err
+}
+
+func (c *Client) sendAdminListModelLinks(ctx context.Context) (res []ModelLink, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("adminListModelLinks"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/admin/model-links"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, AdminListModelLinksOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/admin/model-links"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, AdminListModelLinksOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeAdminListModelLinksResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// AdminSwitchModelLink invokes adminSwitchModelLink operation.
+//
+// A tenant administrator holds both switches: enabled (the link's own model's, this revision copy)
+// and source_enabled (the source model's, every copy of the link).
+//
+// PATCH /api/admin/model-links/{id}
+func (c *Client) AdminSwitchModelLink(ctx context.Context, request *AdminSwitchModelLinkReq, params AdminSwitchModelLinkParams) (AdminSwitchModelLinkRes, error) {
+	res, err := c.sendAdminSwitchModelLink(ctx, request, params)
+	return res, err
+}
+
+func (c *Client) sendAdminSwitchModelLink(ctx context.Context, request *AdminSwitchModelLinkReq, params AdminSwitchModelLinkParams) (res AdminSwitchModelLinkRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("adminSwitchModelLink"),
+		semconv.HTTPRequestMethodKey.String("PATCH"),
+		semconv.URLTemplateKey.String("/api/admin/model-links/{id}"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, AdminSwitchModelLinkOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [2]string
+	pathParts[0] = "/api/admin/model-links/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "PATCH", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeAdminSwitchModelLinkRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, AdminSwitchModelLinkOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeAdminSwitchModelLinkResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -21919,6 +22193,263 @@ func (c *Client) sendListMetrics(ctx context.Context, params ListMetricsParams) 
 	return result, nil
 }
 
+// ListModelLinkSources invokes listModelLinkSources operation.
+//
+// The other models of the request's tenant the caller is a developer of, each with its active
+// revision's grids (metric and dimension names). With model_id and grid, only that grid, with its
+// dimensions' members for a link's filters.
+//
+// GET /api/developer/model-link-sources
+func (c *Client) ListModelLinkSources(ctx context.Context, params ListModelLinkSourcesParams) ([]ListModelLinkSourcesOKItem, error) {
+	res, err := c.sendListModelLinkSources(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendListModelLinkSources(ctx context.Context, params ListModelLinkSourcesParams) (res []ListModelLinkSourcesOKItem, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("listModelLinkSources"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/developer/model-link-sources"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ListModelLinkSourcesOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/developer/model-link-sources"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeQueryParams"
+	q := uri.NewQueryEncoder()
+	{
+		// Encode "model_id" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "model_id",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.ModelID.Get(); ok {
+				return e.EncodeValue(conv.UUIDToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "grid" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "grid",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.Grid.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	u.RawQuery = q.Values().Encode()
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ListModelLinkSourcesOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeListModelLinkSourcesResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// ListModelLinksReadingModel invokes listModelLinksReadingModel operation.
+//
+// A model link is a REST API connector (protocol "model") of another model of the same tenant whose
+// source is a grid of this model. This is the source side's view: one entry per revision copy of
+// each link, with the switch the source side holds (source_enabled, shared by every copy of a link)
+// and the link's own side's switch (enabled).
+//
+// GET /api/developer/model-links
+func (c *Client) ListModelLinksReadingModel(ctx context.Context) ([]ModelLink, error) {
+	res, err := c.sendListModelLinksReadingModel(ctx)
+	return res, err
+}
+
+func (c *Client) sendListModelLinksReadingModel(ctx context.Context) (res []ModelLink, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("listModelLinksReadingModel"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/developer/model-links"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ListModelLinksReadingModelOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/developer/model-links"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ListModelLinksReadingModelOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeListModelLinksReadingModelResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // ListNotifications invokes listNotifications operation.
 //
 // List the 50 most recent notifications for the current user.
@@ -29925,6 +30456,136 @@ func (c *Client) sendSubmitBudget(ctx context.Context, request *SubmitBudgetRequ
 
 	stage = "DecodeResponse"
 	result, err := decodeSubmitBudgetResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// SwitchModelLinkSource invokes switchModelLinkSource operation.
+//
+// The source side's switch, held by the developers of the model the link reads. It applies to every
+// revision copy of the link; a link runs only while both sides are on. 404 to anyone who is not a
+// developer of the source model.
+//
+// PATCH /api/developer/model-links/{id}
+func (c *Client) SwitchModelLinkSource(ctx context.Context, request *SwitchModelLinkSourceReq, params SwitchModelLinkSourceParams) (SwitchModelLinkSourceRes, error) {
+	res, err := c.sendSwitchModelLinkSource(ctx, request, params)
+	return res, err
+}
+
+func (c *Client) sendSwitchModelLinkSource(ctx context.Context, request *SwitchModelLinkSourceReq, params SwitchModelLinkSourceParams) (res SwitchModelLinkSourceRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("switchModelLinkSource"),
+		semconv.HTTPRequestMethodKey.String("PATCH"),
+		semconv.URLTemplateKey.String("/api/developer/model-links/{id}"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, SwitchModelLinkSourceOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [2]string
+	pathParts[0] = "/api/developer/model-links/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "PATCH", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeSwitchModelLinkSourceRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, SwitchModelLinkSourceOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeSwitchModelLinkSourceResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

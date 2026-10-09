@@ -59,6 +59,9 @@ import (
 
 type handler struct {
 	log zerolog.Logger
+	// mux is the route table registerRoutes built, for in-process calls
+	// made as the caller (callAsCaller).
+	mux *http.ServeMux
 	// db routes every query: a request whose tenant was resolved (see
 	// tenant.go) runs against that tenant's own database, everything else
 	// against the control plane. Handlers use it exactly like a pool;
@@ -177,6 +180,9 @@ type Deps struct {
 	// MCP mounts the read-only chat-reporting connector (mcp.go); the zero
 	// value leaves it off.
 	MCP MCPConfig
+	// ModelLinks, when set, is filled in with this handler so the caller
+	// can run model links (model_links.go) on its databases.
+	ModelLinks *ModelLinks
 }
 
 // DefaultTokenClients is the console's own client, the only one whose tokens
@@ -258,6 +264,9 @@ func NewHandlerWithDeps(log zerolog.Logger, pool *pgxpool.Pool, jwks *identity.J
 	// in the context; the plan guard needs the routed tenant. The connector's
 	// reads run through this same chain (mcpReader), behind delegatedReadGate.
 	api := appIDMiddleware(h.tenantRouting(h.delegatedReadGate(h.planGuard(mux))))
+	if deps.ModelLinks != nil {
+		deps.ModelLinks.h, deps.ModelLinks.api = h, api
+	}
 	return limitRequestBodies(h.mountMCP(api))
 }
 
@@ -298,6 +307,9 @@ func BuildRoutes() []RouteInfo {
 }
 
 func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
+	if routes == nil {
+		h.mux = mux
+	}
 	// register performs the real mux registration and, when routes is
 	// non-nil (BuildRoutes' introspection path), records it for tooling. An
 	// empty method registers a bare pattern matching any method, identically
@@ -455,6 +467,9 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("POST", "/api/developer/integrations/{id}/duplicate", "developer", dev(h.restAPIIntegrationSubAction))
 	register("POST", "/api/developer/integrations/{id}/validate", "developer", dev(h.restAPIIntegrationSubAction))
 	register("POST", "/api/developer/integrations/{id}/test", "developer", dev(h.restAPIIntegrationSubAction))
+	register("GET", "/api/developer/model-links", "developer", dev(h.developerModelLinks))
+	register("PATCH", "/api/developer/model-links/{id}", "developer", dev(h.developerModelLinkSwitch))
+	register("GET", "/api/developer/model-link-sources", "developer", dev(h.developerModelLinkSources))
 	register("GET", "/api/developer/integration-runs/{runId}", "developer", dev(h.integrationRunDetail))
 	register("POST", "/api/developer/integration-runs/{runId}/cancel", "developer", dev(h.integrationRunDetail))
 	register("GET", "/api/developer/integration-connections", "developer", dev(h.integrationConnections))
@@ -522,6 +537,8 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	// Admin endpoints. User-management routes are shared with developers; the
 	// remaining admin routes stay restricted to platform/tenant admins.
 	register("GET", "/api/admin/me", "admin", adm(h.adminMe))
+	register("GET", "/api/admin/model-links", "admin", adm(h.adminModelLinks))
+	register("PATCH", "/api/admin/model-links/{id}", "admin", adm(h.adminModelLinkSwitch))
 	register("GET", "/api/admin/infra/nodes", "admin", adm(h.adminInfraNodes))
 	register("GET", "/api/admin/tenants", "admin", adm(h.adminTenants))
 	register("POST", "/api/admin/tenants", "admin", adm(h.adminTenants))
@@ -4991,9 +5008,12 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 			            JOIN model.metric_def n ON n.model_id = o.model_id AND n.name = o.name AND n.revision_id = $2::uuid
 			           WHERE o.model_id = $1::uuid AND o.revision_id <> $2::uuid
 		)
+		-- A model link keeps link_id and its source columns: its source is
+		-- another model, which a revision copy does not remap (migration 126).
 		INSERT INTO model.integration_def (model_id, revision_id, name, description, type, target_type, target_id, config,
 		                                   status, tags, direction, enabled, connection_id, config_version,
-		                                   last_tested_hash, last_tested_at)
+		                                   last_tested_hash, last_tested_at,
+		                                   link_id, source_model_id, source_enabled, source_switched_by, source_switched_at)
 		SELECT i.model_id, $2::uuid, i.name, i.description, i.type, i.target_type,
 			COALESCE((SELECT m.new_id FROM idmap m WHERE m.old_id = i.target_id
 			          ORDER BY m.kind = COALESCE(NULLIF(i.target_type,''), 'grid') DESC LIMIT 1), i.target_id),
@@ -5009,7 +5029,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 				FROM jsonb_each(i.config) e), i.config)
 			ELSE i.config END,
 			i.status, i.tags, i.direction, i.enabled, i.connection_id, i.config_version,
-			i.last_tested_hash, i.last_tested_at
+			i.last_tested_hash, i.last_tested_at,
+			i.link_id, i.source_model_id, i.source_enabled, i.source_switched_by, i.source_switched_at
 		FROM model.integration_def i
 		WHERE i.model_id=$1::uuid AND i.revision_id=$3::uuid
 	`, srcArgs...); err != nil {
@@ -8883,7 +8904,7 @@ func (h *handler) developerIntegrationAction(w http.ResponseWriter, r *http.Requ
 		var stored integrationRefs
 		_ = h.db.QueryRow(ctx, `SELECT model_id::text, target_type, COALESCE(target_id::text,'') FROM model.integration_def WHERE id=$1::uuid`, intID).Scan(&intModelID, &stored.TargetType, &stored.TargetID)
 		next := integrationRefs{TargetType: body.TargetType, TargetID: body.TargetID}
-		if err := h.checkIntegrationSave(ctx, intModelID, stored, next, body.Status != nil && *body.Status == "active"); err != nil {
+		if err := h.checkIntegrationSave(ctx, h.db, intModelID, stored, next, body.Status != nil && *body.Status == "active"); err != nil {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}

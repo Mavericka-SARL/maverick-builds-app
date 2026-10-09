@@ -97,6 +97,40 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
 
   schemas:
+    ModelLinkEnd:
+      type: object
+      properties:
+        application_id:   { type: string, format: uuid }
+        application_name: { type: string }
+        model_id:         { type: string, format: uuid }
+        model_name:       { type: string }
+        revision:         { type: string }
+        active_revision:  { type: boolean }
+        grid:             { type: string }
+    ModelLink:
+      type: object
+      description: One revision copy of a model link, with both sides' switches.
+      properties:
+        id:                 { type: string, format: uuid }
+        link_id:            { type: string, format: uuid }
+        name:               { type: string }
+        status:             { type: string, enum: [draft, active] }
+        enabled:            { type: boolean }
+        source_enabled:     { type: boolean }
+        source_switched_by: { type: string }
+        source_switched_at: { type: string, format: date-time }
+        schedule:           { type: string }
+        schedule_by:        { type: string }
+        target:             { $ref: "#/components/schemas/ModelLinkEnd" }
+        source:             { $ref: "#/components/schemas/ModelLinkEnd" }
+        last_run:
+          type: object
+          properties:
+            status:          { type: string }
+            finished_at:     { type: string, format: date-time }
+            error_code:      { type: string }
+            message:         { type: string }
+            records_written: { type: integer }
     Error:
       type: object
       description: >-
@@ -4616,6 +4650,123 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/developer/model-links:
+    get:
+      operationId: listModelLinksReadingModel
+      tags: [Integrations]
+      summary: The model links that read the model the request works in
+      description: >-
+        A model link is a REST API connector (protocol "model") of another
+        model of the same tenant whose source is a grid of this model. This
+        is the source side's view: one entry per revision copy of each link,
+        with the switch the source side holds (source_enabled, shared by
+        every copy of a link) and the link's own side's switch (enabled).
+      responses:
+        "200":
+          description: Links reading this model
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ModelLink" }
+
+  /api/developer/model-links/{id}:
+    patch:
+      operationId: switchModelLinkSource
+      tags: [Integrations]
+      summary: Switch a model link on or off on the source model's side
+      description: >-
+        The source side's switch, held by the developers of the model the
+        link reads. It applies to every revision copy of the link; a link runs
+        only while both sides are on. 404 to anyone who is not a developer of
+        the source model.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_enabled]
+              properties:
+                source_enabled: { type: boolean }
+      responses:
+        "200":
+          description: Switched
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:             { type: string, format: uuid }
+                  source_enabled: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/developer/model-link-sources:
+    get:
+      operationId: listModelLinkSources
+      tags: [Integrations]
+      summary: The models a model link in this model may read
+      description: >-
+        The other models of the request's tenant the caller is a developer of,
+        each with its active revision's grids (metric and dimension names).
+        With model_id and grid, only that grid, with its dimensions' members
+        for a link's filters.
+      parameters:
+        - name: model_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: grid
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Candidate source models
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    application_id:   { type: string, format: uuid }
+                    application_name: { type: string }
+                    model_id:         { type: string, format: uuid }
+                    model_name:       { type: string }
+                    revision:         { type: string }
+                    grids:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          name: { type: string }
+                          metrics:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                name:  { type: string }
+                                label: { type: string }
+                          dimensions:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                name: { type: string }
+                                members:
+                                  type: array
+                                  items:
+                                    type: object
+                                    properties:
+                                      code:        { type: string }
+                                      label:       { type: string }
+                                      parent_code: { type: string }
+
   /api/developer/integration-runs/{runId}:
     get:
       operationId: getIntegrationRun
@@ -5910,6 +6061,55 @@ paths:
                   email:        { type: string, format: email }
                   display_name: { type: string }
                   roles:        { type: array, items: { type: string } }
+
+  /api/admin/model-links:
+    get:
+      operationId: adminListModelLinks
+      tags: [Admin]
+      summary: Every model link of the tenants the caller administers
+      responses:
+        "200":
+          description: Model links, one entry per revision copy
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ModelLink" }
+
+  /api/admin/model-links/{id}:
+    patch:
+      operationId: adminSwitchModelLink
+      tags: [Admin]
+      summary: Switch either side of a model link
+      description: >-
+        A tenant administrator holds both switches: enabled (the link's own
+        model's, this revision copy) and source_enabled (the source model's,
+        every copy of the link).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:        { type: boolean }
+                source_enabled: { type: boolean }
+      responses:
+        "200":
+          description: Switched
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/admin/infra/nodes:
     get:

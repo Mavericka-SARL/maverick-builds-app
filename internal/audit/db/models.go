@@ -1566,24 +1566,29 @@ type ModelIntegrationConnection struct {
 }
 
 type ModelIntegrationDef struct {
-	ID             uuid.UUID          `json:"id"`
-	ModelID        uuid.UUID          `json:"model_id"`
-	Name           string             `json:"name"`
-	Type           string             `json:"type"`
-	TargetType     string             `json:"target_type"`
-	TargetID       pgtype.UUID        `json:"target_id"`
-	Config         json.RawMessage    `json:"config"`
-	CreatedAt      time.Time          `json:"created_at"`
-	RevisionID     pgtype.UUID        `json:"revision_id"`
-	Status         string             `json:"status"`
-	Tags           []string           `json:"tags"`
-	Direction      string             `json:"direction"`
-	Enabled        bool               `json:"enabled"`
-	ConnectionID   pgtype.UUID        `json:"connection_id"`
-	ConfigVersion  int32              `json:"config_version"`
-	LastTestedHash string             `json:"last_tested_hash"`
-	LastTestedAt   pgtype.Timestamptz `json:"last_tested_at"`
-	Description    string             `json:"description"`
+	ID               uuid.UUID          `json:"id"`
+	ModelID          uuid.UUID          `json:"model_id"`
+	Name             string             `json:"name"`
+	Type             string             `json:"type"`
+	TargetType       string             `json:"target_type"`
+	TargetID         pgtype.UUID        `json:"target_id"`
+	Config           json.RawMessage    `json:"config"`
+	CreatedAt        time.Time          `json:"created_at"`
+	RevisionID       pgtype.UUID        `json:"revision_id"`
+	Status           string             `json:"status"`
+	Tags             []string           `json:"tags"`
+	Direction        string             `json:"direction"`
+	Enabled          bool               `json:"enabled"`
+	ConnectionID     pgtype.UUID        `json:"connection_id"`
+	ConfigVersion    int32              `json:"config_version"`
+	LastTestedHash   string             `json:"last_tested_hash"`
+	LastTestedAt     pgtype.Timestamptz `json:"last_tested_at"`
+	Description      string             `json:"description"`
+	LinkID           uuid.UUID          `json:"link_id"`
+	SourceModelID    pgtype.UUID        `json:"source_model_id"`
+	SourceEnabled    bool               `json:"source_enabled"`
+	SourceSwitchedBy pgtype.UUID        `json:"source_switched_by"`
+	SourceSwitchedAt pgtype.Timestamptz `json:"source_switched_at"`
 }
 
 type ModelIntegrationOauthState struct {

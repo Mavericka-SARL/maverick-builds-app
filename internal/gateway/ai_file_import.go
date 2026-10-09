@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -508,6 +509,29 @@ func (h *handler) aiReadHooks(r *http.Request, sessionID, modelID, userID string
 		},
 		ReadAttachedSheet: func(ctx context.Context, file, sheet string, fromRow, toRow int) (string, error) {
 			return h.aiReadAttachedSheet(ctx, sessionID, file, sheet, fromRow, toRow)
+		},
+		TestIntegration: func(ctx context.Context, integrationID string) (string, error) {
+			return h.aiTestIntegration(ctx, r, modelID, integrationID)
+		},
+		AttachGoogleSheet: func(ctx context.Context, sheetURL string) (string, error) {
+			return h.aiAttachGoogleSheet(ctx, r, sessionID, userID, sheetURL)
+		},
+		ModelLinkSources: func(ctx context.Context, sourceModelID, grid string) (string, error) {
+			q := url.Values{}
+			if sourceModelID != "" {
+				q.Set("model_id", sourceModelID)
+			}
+			if grid != "" {
+				q.Set("grid", grid)
+			}
+			status, body := h.callAsCaller(ctx, r, http.MethodGet, "/api/developer/model-link-sources", q, nil)
+			if status != http.StatusOK {
+				return "", routeError(status, body)
+			}
+			if strings.TrimSpace(string(body)) == "[]" {
+				return "No other model of this tenant can be linked: the developer must be a developer of the model a link reads.", nil
+			}
+			return clippedJSON(body), nil
 		},
 	}
 }

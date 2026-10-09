@@ -746,6 +746,55 @@ func (s *AdminRevisionItem) SetCreatedAt(val string) {
 	s.CreatedAt = val
 }
 
+type AdminSwitchModelLinkBadRequest Error
+
+func (*AdminSwitchModelLinkBadRequest) adminSwitchModelLinkRes() {}
+
+type AdminSwitchModelLinkNotFound Error
+
+func (*AdminSwitchModelLinkNotFound) adminSwitchModelLinkRes() {}
+
+type AdminSwitchModelLinkOK struct {
+	Status OptString `json:"status"`
+}
+
+// GetStatus returns the value of Status.
+func (s *AdminSwitchModelLinkOK) GetStatus() OptString {
+	return s.Status
+}
+
+// SetStatus sets the value of Status.
+func (s *AdminSwitchModelLinkOK) SetStatus(val OptString) {
+	s.Status = val
+}
+
+func (*AdminSwitchModelLinkOK) adminSwitchModelLinkRes() {}
+
+type AdminSwitchModelLinkReq struct {
+	Enabled       OptBool `json:"enabled"`
+	SourceEnabled OptBool `json:"source_enabled"`
+}
+
+// GetEnabled returns the value of Enabled.
+func (s *AdminSwitchModelLinkReq) GetEnabled() OptBool {
+	return s.Enabled
+}
+
+// GetSourceEnabled returns the value of SourceEnabled.
+func (s *AdminSwitchModelLinkReq) GetSourceEnabled() OptBool {
+	return s.SourceEnabled
+}
+
+// SetEnabled sets the value of Enabled.
+func (s *AdminSwitchModelLinkReq) SetEnabled(val OptBool) {
+	s.Enabled = val
+}
+
+// SetSourceEnabled sets the value of SourceEnabled.
+func (s *AdminSwitchModelLinkReq) SetSourceEnabled(val OptBool) {
+	s.SourceEnabled = val
+}
+
 // Ref: #/components/schemas/AdminTenant
 type AdminTenant struct {
 	// Why a dedicated tenant's database could not be read (provisioning, failed, disabled); absent when
@@ -14233,6 +14282,197 @@ type ListMetricsOKApplicationJSON []Metric
 
 func (*ListMetricsOKApplicationJSON) listMetricsRes() {}
 
+type ListModelLinkSourcesOKItem struct {
+	ApplicationID   OptUUID                               `json:"application_id"`
+	ApplicationName OptString                             `json:"application_name"`
+	ModelID         OptUUID                               `json:"model_id"`
+	ModelName       OptString                             `json:"model_name"`
+	Revision        OptString                             `json:"revision"`
+	Grids           []ListModelLinkSourcesOKItemGridsItem `json:"grids"`
+}
+
+// GetApplicationID returns the value of ApplicationID.
+func (s *ListModelLinkSourcesOKItem) GetApplicationID() OptUUID {
+	return s.ApplicationID
+}
+
+// GetApplicationName returns the value of ApplicationName.
+func (s *ListModelLinkSourcesOKItem) GetApplicationName() OptString {
+	return s.ApplicationName
+}
+
+// GetModelID returns the value of ModelID.
+func (s *ListModelLinkSourcesOKItem) GetModelID() OptUUID {
+	return s.ModelID
+}
+
+// GetModelName returns the value of ModelName.
+func (s *ListModelLinkSourcesOKItem) GetModelName() OptString {
+	return s.ModelName
+}
+
+// GetRevision returns the value of Revision.
+func (s *ListModelLinkSourcesOKItem) GetRevision() OptString {
+	return s.Revision
+}
+
+// GetGrids returns the value of Grids.
+func (s *ListModelLinkSourcesOKItem) GetGrids() []ListModelLinkSourcesOKItemGridsItem {
+	return s.Grids
+}
+
+// SetApplicationID sets the value of ApplicationID.
+func (s *ListModelLinkSourcesOKItem) SetApplicationID(val OptUUID) {
+	s.ApplicationID = val
+}
+
+// SetApplicationName sets the value of ApplicationName.
+func (s *ListModelLinkSourcesOKItem) SetApplicationName(val OptString) {
+	s.ApplicationName = val
+}
+
+// SetModelID sets the value of ModelID.
+func (s *ListModelLinkSourcesOKItem) SetModelID(val OptUUID) {
+	s.ModelID = val
+}
+
+// SetModelName sets the value of ModelName.
+func (s *ListModelLinkSourcesOKItem) SetModelName(val OptString) {
+	s.ModelName = val
+}
+
+// SetRevision sets the value of Revision.
+func (s *ListModelLinkSourcesOKItem) SetRevision(val OptString) {
+	s.Revision = val
+}
+
+// SetGrids sets the value of Grids.
+func (s *ListModelLinkSourcesOKItem) SetGrids(val []ListModelLinkSourcesOKItemGridsItem) {
+	s.Grids = val
+}
+
+type ListModelLinkSourcesOKItemGridsItem struct {
+	Name       OptString                                           `json:"name"`
+	Metrics    []ListModelLinkSourcesOKItemGridsItemMetricsItem    `json:"metrics"`
+	Dimensions []ListModelLinkSourcesOKItemGridsItemDimensionsItem `json:"dimensions"`
+}
+
+// GetName returns the value of Name.
+func (s *ListModelLinkSourcesOKItemGridsItem) GetName() OptString {
+	return s.Name
+}
+
+// GetMetrics returns the value of Metrics.
+func (s *ListModelLinkSourcesOKItemGridsItem) GetMetrics() []ListModelLinkSourcesOKItemGridsItemMetricsItem {
+	return s.Metrics
+}
+
+// GetDimensions returns the value of Dimensions.
+func (s *ListModelLinkSourcesOKItemGridsItem) GetDimensions() []ListModelLinkSourcesOKItemGridsItemDimensionsItem {
+	return s.Dimensions
+}
+
+// SetName sets the value of Name.
+func (s *ListModelLinkSourcesOKItemGridsItem) SetName(val OptString) {
+	s.Name = val
+}
+
+// SetMetrics sets the value of Metrics.
+func (s *ListModelLinkSourcesOKItemGridsItem) SetMetrics(val []ListModelLinkSourcesOKItemGridsItemMetricsItem) {
+	s.Metrics = val
+}
+
+// SetDimensions sets the value of Dimensions.
+func (s *ListModelLinkSourcesOKItemGridsItem) SetDimensions(val []ListModelLinkSourcesOKItemGridsItemDimensionsItem) {
+	s.Dimensions = val
+}
+
+type ListModelLinkSourcesOKItemGridsItemDimensionsItem struct {
+	Name    OptString                                                      `json:"name"`
+	Members []ListModelLinkSourcesOKItemGridsItemDimensionsItemMembersItem `json:"members"`
+}
+
+// GetName returns the value of Name.
+func (s *ListModelLinkSourcesOKItemGridsItemDimensionsItem) GetName() OptString {
+	return s.Name
+}
+
+// GetMembers returns the value of Members.
+func (s *ListModelLinkSourcesOKItemGridsItemDimensionsItem) GetMembers() []ListModelLinkSourcesOKItemGridsItemDimensionsItemMembersItem {
+	return s.Members
+}
+
+// SetName sets the value of Name.
+func (s *ListModelLinkSourcesOKItemGridsItemDimensionsItem) SetName(val OptString) {
+	s.Name = val
+}
+
+// SetMembers sets the value of Members.
+func (s *ListModelLinkSourcesOKItemGridsItemDimensionsItem) SetMembers(val []ListModelLinkSourcesOKItemGridsItemDimensionsItemMembersItem) {
+	s.Members = val
+}
+
+type ListModelLinkSourcesOKItemGridsItemDimensionsItemMembersItem struct {
+	Code       OptString `json:"code"`
+	Label      OptString `json:"label"`
+	ParentCode OptString `json:"parent_code"`
+}
+
+// GetCode returns the value of Code.
+func (s *ListModelLinkSourcesOKItemGridsItemDimensionsItemMembersItem) GetCode() OptString {
+	return s.Code
+}
+
+// GetLabel returns the value of Label.
+func (s *ListModelLinkSourcesOKItemGridsItemDimensionsItemMembersItem) GetLabel() OptString {
+	return s.Label
+}
+
+// GetParentCode returns the value of ParentCode.
+func (s *ListModelLinkSourcesOKItemGridsItemDimensionsItemMembersItem) GetParentCode() OptString {
+	return s.ParentCode
+}
+
+// SetCode sets the value of Code.
+func (s *ListModelLinkSourcesOKItemGridsItemDimensionsItemMembersItem) SetCode(val OptString) {
+	s.Code = val
+}
+
+// SetLabel sets the value of Label.
+func (s *ListModelLinkSourcesOKItemGridsItemDimensionsItemMembersItem) SetLabel(val OptString) {
+	s.Label = val
+}
+
+// SetParentCode sets the value of ParentCode.
+func (s *ListModelLinkSourcesOKItemGridsItemDimensionsItemMembersItem) SetParentCode(val OptString) {
+	s.ParentCode = val
+}
+
+type ListModelLinkSourcesOKItemGridsItemMetricsItem struct {
+	Name  OptString `json:"name"`
+	Label OptString `json:"label"`
+}
+
+// GetName returns the value of Name.
+func (s *ListModelLinkSourcesOKItemGridsItemMetricsItem) GetName() OptString {
+	return s.Name
+}
+
+// GetLabel returns the value of Label.
+func (s *ListModelLinkSourcesOKItemGridsItemMetricsItem) GetLabel() OptString {
+	return s.Label
+}
+
+// SetName sets the value of Name.
+func (s *ListModelLinkSourcesOKItemGridsItemMetricsItem) SetName(val OptString) {
+	s.Name = val
+}
+
+// SetLabel sets the value of Label.
+func (s *ListModelLinkSourcesOKItemGridsItemMetricsItem) SetLabel(val OptString) {
+	s.Label = val
+}
+
 type ListPlansOKApplicationJSON []Plan
 
 func (*ListPlansOKApplicationJSON) listPlansRes() {}
@@ -15386,6 +15626,334 @@ func (s *ModelImportRequest) SetApplicationID(val uuid.UUID) {
 // SetPackage sets the value of Package.
 func (s *ModelImportRequest) SetPackage(val ModelExportPackage) {
 	s.Package = val
+}
+
+// One revision copy of a model link, with both sides' switches.
+// Ref: #/components/schemas/ModelLink
+type ModelLink struct {
+	ID               OptUUID             `json:"id"`
+	LinkID           OptUUID             `json:"link_id"`
+	Name             OptString           `json:"name"`
+	Status           OptModelLinkStatus  `json:"status"`
+	Enabled          OptBool             `json:"enabled"`
+	SourceEnabled    OptBool             `json:"source_enabled"`
+	SourceSwitchedBy OptString           `json:"source_switched_by"`
+	SourceSwitchedAt OptDateTime         `json:"source_switched_at"`
+	Schedule         OptString           `json:"schedule"`
+	ScheduleBy       OptString           `json:"schedule_by"`
+	Target           OptModelLinkEnd     `json:"target"`
+	Source           OptModelLinkEnd     `json:"source"`
+	LastRun          OptModelLinkLastRun `json:"last_run"`
+}
+
+// GetID returns the value of ID.
+func (s *ModelLink) GetID() OptUUID {
+	return s.ID
+}
+
+// GetLinkID returns the value of LinkID.
+func (s *ModelLink) GetLinkID() OptUUID {
+	return s.LinkID
+}
+
+// GetName returns the value of Name.
+func (s *ModelLink) GetName() OptString {
+	return s.Name
+}
+
+// GetStatus returns the value of Status.
+func (s *ModelLink) GetStatus() OptModelLinkStatus {
+	return s.Status
+}
+
+// GetEnabled returns the value of Enabled.
+func (s *ModelLink) GetEnabled() OptBool {
+	return s.Enabled
+}
+
+// GetSourceEnabled returns the value of SourceEnabled.
+func (s *ModelLink) GetSourceEnabled() OptBool {
+	return s.SourceEnabled
+}
+
+// GetSourceSwitchedBy returns the value of SourceSwitchedBy.
+func (s *ModelLink) GetSourceSwitchedBy() OptString {
+	return s.SourceSwitchedBy
+}
+
+// GetSourceSwitchedAt returns the value of SourceSwitchedAt.
+func (s *ModelLink) GetSourceSwitchedAt() OptDateTime {
+	return s.SourceSwitchedAt
+}
+
+// GetSchedule returns the value of Schedule.
+func (s *ModelLink) GetSchedule() OptString {
+	return s.Schedule
+}
+
+// GetScheduleBy returns the value of ScheduleBy.
+func (s *ModelLink) GetScheduleBy() OptString {
+	return s.ScheduleBy
+}
+
+// GetTarget returns the value of Target.
+func (s *ModelLink) GetTarget() OptModelLinkEnd {
+	return s.Target
+}
+
+// GetSource returns the value of Source.
+func (s *ModelLink) GetSource() OptModelLinkEnd {
+	return s.Source
+}
+
+// GetLastRun returns the value of LastRun.
+func (s *ModelLink) GetLastRun() OptModelLinkLastRun {
+	return s.LastRun
+}
+
+// SetID sets the value of ID.
+func (s *ModelLink) SetID(val OptUUID) {
+	s.ID = val
+}
+
+// SetLinkID sets the value of LinkID.
+func (s *ModelLink) SetLinkID(val OptUUID) {
+	s.LinkID = val
+}
+
+// SetName sets the value of Name.
+func (s *ModelLink) SetName(val OptString) {
+	s.Name = val
+}
+
+// SetStatus sets the value of Status.
+func (s *ModelLink) SetStatus(val OptModelLinkStatus) {
+	s.Status = val
+}
+
+// SetEnabled sets the value of Enabled.
+func (s *ModelLink) SetEnabled(val OptBool) {
+	s.Enabled = val
+}
+
+// SetSourceEnabled sets the value of SourceEnabled.
+func (s *ModelLink) SetSourceEnabled(val OptBool) {
+	s.SourceEnabled = val
+}
+
+// SetSourceSwitchedBy sets the value of SourceSwitchedBy.
+func (s *ModelLink) SetSourceSwitchedBy(val OptString) {
+	s.SourceSwitchedBy = val
+}
+
+// SetSourceSwitchedAt sets the value of SourceSwitchedAt.
+func (s *ModelLink) SetSourceSwitchedAt(val OptDateTime) {
+	s.SourceSwitchedAt = val
+}
+
+// SetSchedule sets the value of Schedule.
+func (s *ModelLink) SetSchedule(val OptString) {
+	s.Schedule = val
+}
+
+// SetScheduleBy sets the value of ScheduleBy.
+func (s *ModelLink) SetScheduleBy(val OptString) {
+	s.ScheduleBy = val
+}
+
+// SetTarget sets the value of Target.
+func (s *ModelLink) SetTarget(val OptModelLinkEnd) {
+	s.Target = val
+}
+
+// SetSource sets the value of Source.
+func (s *ModelLink) SetSource(val OptModelLinkEnd) {
+	s.Source = val
+}
+
+// SetLastRun sets the value of LastRun.
+func (s *ModelLink) SetLastRun(val OptModelLinkLastRun) {
+	s.LastRun = val
+}
+
+// Ref: #/components/schemas/ModelLinkEnd
+type ModelLinkEnd struct {
+	ApplicationID   OptUUID   `json:"application_id"`
+	ApplicationName OptString `json:"application_name"`
+	ModelID         OptUUID   `json:"model_id"`
+	ModelName       OptString `json:"model_name"`
+	Revision        OptString `json:"revision"`
+	ActiveRevision  OptBool   `json:"active_revision"`
+	Grid            OptString `json:"grid"`
+}
+
+// GetApplicationID returns the value of ApplicationID.
+func (s *ModelLinkEnd) GetApplicationID() OptUUID {
+	return s.ApplicationID
+}
+
+// GetApplicationName returns the value of ApplicationName.
+func (s *ModelLinkEnd) GetApplicationName() OptString {
+	return s.ApplicationName
+}
+
+// GetModelID returns the value of ModelID.
+func (s *ModelLinkEnd) GetModelID() OptUUID {
+	return s.ModelID
+}
+
+// GetModelName returns the value of ModelName.
+func (s *ModelLinkEnd) GetModelName() OptString {
+	return s.ModelName
+}
+
+// GetRevision returns the value of Revision.
+func (s *ModelLinkEnd) GetRevision() OptString {
+	return s.Revision
+}
+
+// GetActiveRevision returns the value of ActiveRevision.
+func (s *ModelLinkEnd) GetActiveRevision() OptBool {
+	return s.ActiveRevision
+}
+
+// GetGrid returns the value of Grid.
+func (s *ModelLinkEnd) GetGrid() OptString {
+	return s.Grid
+}
+
+// SetApplicationID sets the value of ApplicationID.
+func (s *ModelLinkEnd) SetApplicationID(val OptUUID) {
+	s.ApplicationID = val
+}
+
+// SetApplicationName sets the value of ApplicationName.
+func (s *ModelLinkEnd) SetApplicationName(val OptString) {
+	s.ApplicationName = val
+}
+
+// SetModelID sets the value of ModelID.
+func (s *ModelLinkEnd) SetModelID(val OptUUID) {
+	s.ModelID = val
+}
+
+// SetModelName sets the value of ModelName.
+func (s *ModelLinkEnd) SetModelName(val OptString) {
+	s.ModelName = val
+}
+
+// SetRevision sets the value of Revision.
+func (s *ModelLinkEnd) SetRevision(val OptString) {
+	s.Revision = val
+}
+
+// SetActiveRevision sets the value of ActiveRevision.
+func (s *ModelLinkEnd) SetActiveRevision(val OptBool) {
+	s.ActiveRevision = val
+}
+
+// SetGrid sets the value of Grid.
+func (s *ModelLinkEnd) SetGrid(val OptString) {
+	s.Grid = val
+}
+
+type ModelLinkLastRun struct {
+	Status         OptString   `json:"status"`
+	FinishedAt     OptDateTime `json:"finished_at"`
+	ErrorCode      OptString   `json:"error_code"`
+	Message        OptString   `json:"message"`
+	RecordsWritten OptInt      `json:"records_written"`
+}
+
+// GetStatus returns the value of Status.
+func (s *ModelLinkLastRun) GetStatus() OptString {
+	return s.Status
+}
+
+// GetFinishedAt returns the value of FinishedAt.
+func (s *ModelLinkLastRun) GetFinishedAt() OptDateTime {
+	return s.FinishedAt
+}
+
+// GetErrorCode returns the value of ErrorCode.
+func (s *ModelLinkLastRun) GetErrorCode() OptString {
+	return s.ErrorCode
+}
+
+// GetMessage returns the value of Message.
+func (s *ModelLinkLastRun) GetMessage() OptString {
+	return s.Message
+}
+
+// GetRecordsWritten returns the value of RecordsWritten.
+func (s *ModelLinkLastRun) GetRecordsWritten() OptInt {
+	return s.RecordsWritten
+}
+
+// SetStatus sets the value of Status.
+func (s *ModelLinkLastRun) SetStatus(val OptString) {
+	s.Status = val
+}
+
+// SetFinishedAt sets the value of FinishedAt.
+func (s *ModelLinkLastRun) SetFinishedAt(val OptDateTime) {
+	s.FinishedAt = val
+}
+
+// SetErrorCode sets the value of ErrorCode.
+func (s *ModelLinkLastRun) SetErrorCode(val OptString) {
+	s.ErrorCode = val
+}
+
+// SetMessage sets the value of Message.
+func (s *ModelLinkLastRun) SetMessage(val OptString) {
+	s.Message = val
+}
+
+// SetRecordsWritten sets the value of RecordsWritten.
+func (s *ModelLinkLastRun) SetRecordsWritten(val OptInt) {
+	s.RecordsWritten = val
+}
+
+type ModelLinkStatus string
+
+const (
+	ModelLinkStatusDraft  ModelLinkStatus = "draft"
+	ModelLinkStatusActive ModelLinkStatus = "active"
+)
+
+// AllValues returns all ModelLinkStatus values.
+func (ModelLinkStatus) AllValues() []ModelLinkStatus {
+	return []ModelLinkStatus{
+		ModelLinkStatusDraft,
+		ModelLinkStatusActive,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s ModelLinkStatus) MarshalText() ([]byte, error) {
+	switch s {
+	case ModelLinkStatusDraft:
+		return []byte(s), nil
+	case ModelLinkStatusActive:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *ModelLinkStatus) UnmarshalText(data []byte) error {
+	switch ModelLinkStatus(data) {
+	case ModelLinkStatusDraft:
+		*s = ModelLinkStatusDraft
+		return nil
+	case ModelLinkStatusActive:
+		*s = ModelLinkStatusActive
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // NewNilFloat64 returns new NilFloat64 with value set to v.
@@ -18377,6 +18945,144 @@ func (o OptMetricDefTimeSummary) Get() (v MetricDefTimeSummary, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptMetricDefTimeSummary) Or(d MetricDefTimeSummary) MetricDefTimeSummary {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptModelLinkEnd returns new OptModelLinkEnd with value set to v.
+func NewOptModelLinkEnd(v ModelLinkEnd) OptModelLinkEnd {
+	return OptModelLinkEnd{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptModelLinkEnd is optional ModelLinkEnd.
+type OptModelLinkEnd struct {
+	Value ModelLinkEnd
+	Set   bool
+}
+
+// IsSet returns true if OptModelLinkEnd was set.
+func (o OptModelLinkEnd) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptModelLinkEnd) Reset() {
+	var v ModelLinkEnd
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptModelLinkEnd) SetTo(v ModelLinkEnd) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptModelLinkEnd) Get() (v ModelLinkEnd, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptModelLinkEnd) Or(d ModelLinkEnd) ModelLinkEnd {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptModelLinkLastRun returns new OptModelLinkLastRun with value set to v.
+func NewOptModelLinkLastRun(v ModelLinkLastRun) OptModelLinkLastRun {
+	return OptModelLinkLastRun{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptModelLinkLastRun is optional ModelLinkLastRun.
+type OptModelLinkLastRun struct {
+	Value ModelLinkLastRun
+	Set   bool
+}
+
+// IsSet returns true if OptModelLinkLastRun was set.
+func (o OptModelLinkLastRun) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptModelLinkLastRun) Reset() {
+	var v ModelLinkLastRun
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptModelLinkLastRun) SetTo(v ModelLinkLastRun) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptModelLinkLastRun) Get() (v ModelLinkLastRun, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptModelLinkLastRun) Or(d ModelLinkLastRun) ModelLinkLastRun {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptModelLinkStatus returns new OptModelLinkStatus with value set to v.
+func NewOptModelLinkStatus(v ModelLinkStatus) OptModelLinkStatus {
+	return OptModelLinkStatus{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptModelLinkStatus is optional ModelLinkStatus.
+type OptModelLinkStatus struct {
+	Value ModelLinkStatus
+	Set   bool
+}
+
+// IsSet returns true if OptModelLinkStatus was set.
+func (o OptModelLinkStatus) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptModelLinkStatus) Reset() {
+	var v ModelLinkStatus
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptModelLinkStatus) SetTo(v ModelLinkStatus) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptModelLinkStatus) Get() (v ModelLinkStatus, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptModelLinkStatus) Or(d ModelLinkStatus) ModelLinkStatus {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -23994,6 +24700,55 @@ func (s *SubmitBudgetRequest) SetModelID(val OptUUID) {
 // SetRevisionID sets the value of RevisionID.
 func (s *SubmitBudgetRequest) SetRevisionID(val OptUUID) {
 	s.RevisionID = val
+}
+
+type SwitchModelLinkSourceBadRequest Error
+
+func (*SwitchModelLinkSourceBadRequest) switchModelLinkSourceRes() {}
+
+type SwitchModelLinkSourceNotFound Error
+
+func (*SwitchModelLinkSourceNotFound) switchModelLinkSourceRes() {}
+
+type SwitchModelLinkSourceOK struct {
+	ID            OptUUID `json:"id"`
+	SourceEnabled OptBool `json:"source_enabled"`
+}
+
+// GetID returns the value of ID.
+func (s *SwitchModelLinkSourceOK) GetID() OptUUID {
+	return s.ID
+}
+
+// GetSourceEnabled returns the value of SourceEnabled.
+func (s *SwitchModelLinkSourceOK) GetSourceEnabled() OptBool {
+	return s.SourceEnabled
+}
+
+// SetID sets the value of ID.
+func (s *SwitchModelLinkSourceOK) SetID(val OptUUID) {
+	s.ID = val
+}
+
+// SetSourceEnabled sets the value of SourceEnabled.
+func (s *SwitchModelLinkSourceOK) SetSourceEnabled(val OptBool) {
+	s.SourceEnabled = val
+}
+
+func (*SwitchModelLinkSourceOK) switchModelLinkSourceRes() {}
+
+type SwitchModelLinkSourceReq struct {
+	SourceEnabled bool `json:"source_enabled"`
+}
+
+// GetSourceEnabled returns the value of SourceEnabled.
+func (s *SwitchModelLinkSourceReq) GetSourceEnabled() bool {
+	return s.SourceEnabled
+}
+
+// SetSourceEnabled sets the value of SourceEnabled.
+func (s *SwitchModelLinkSourceReq) SetSourceEnabled(val bool) {
+	s.SourceEnabled = val
 }
 
 type SyncFormMappingsForbidden Error

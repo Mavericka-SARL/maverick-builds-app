@@ -63,6 +63,11 @@ posting runs the gateway's own posting code the same way.
 | `read_attached_sheet` | one sheet of an attached workbook: any rows as stored, the whole formulas of those rows (compressed into ranges sharing a formula), its layout, drop-down lists, highlights and comments. Writes nothing |
 | `prepare_converted_file` | saves an attached spreadsheet reshaped and column-mapped into the import layout, for the developer to download as CSV or Excel from the chat. Imports nothing |
 | `preview_export` | an export spec rendered against the grid's current values — columns, first rows, row count — or every problem with the spec. Saves nothing |
+| `get_integration`, `list_integration_runs` | a REST API connector in full (typed config, connection, schedule, switches, tested state) and run history with error codes |
+| `test_integration` | the developer's own Test route, in-process as the developer: a GET request, an SFTP file or a model link, run now, writing nothing; answers the outcome and the first records. A test of a mutating request is refused here (it is a plan step) |
+| `list_model_link_sources`, `list_connections` | the models a link may read (the developer's own route); the application's sign-in connections, never their secrets |
+| `attach_google_sheet` | the Sheets import's own fetch route, as the developer; attaches the sheet to the chat as CSV for `preview_file_import` |
+| `read_manual` | sections of the Developer and Formulas manuals (`internal/manuals`, embedded from `docs/`) matching a query, or their contents |
 
 ## Write tools (through `propose_actions`)
 
@@ -336,9 +341,19 @@ a dashboard's Integration button downloads one for users.
 - **Promoting or discarding the draft revision**, deleting a revision, and
   choosing the model users open by default.
 - **Users** — invitations, deletion, platform and business role grants.
-- **Data connectors** — configuring REST API and Google Sheets integrations,
-  their connections and credentials, and their runs. The assistant can list,
-  rename, retag or delete them.
+- **Secrets.** The assistant configures REST API connectors (HTTPS, SFTP,
+  model links), Google Sheets integrations and sign-in connections, tests and
+  runs them, and fires manual triggers (since 2026-10-09: `create_api_integration`,
+  `update_api_integration`, `create_connection`, `update_connection`,
+  `run_integration`, `trigger_automation_rule`; saves go through the
+  wizard's own `restAPISave`, tests, runs and triggers through the
+  developer's own routes in-process, `callAsCaller`). A credential's secret
+  parts never pass through it: a proposal carrying one is refused, and the
+  plan card asks the developer for them; they travel with the confirmation
+  (`secrets` by step) to `SaveConnection` alone, and are in no proposal,
+  message or audit row. An OAuth authorization-code connection's **Connect**
+  click and trusting an SFTP host key after comparing its fingerprint stay
+  the developer's.
 - **Business data** — typing cells and entering form records. The assistant
   imports a spreadsheet the developer attaches to its chat (into the draft)
   and posts saved form records through a form integration, and nothing else.

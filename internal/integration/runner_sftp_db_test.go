@@ -257,7 +257,11 @@ func TestRunner_SFTPPull(t *testing.T) {
 	}
 
 	// 4. A scheduled run over the same file writes nothing; a manual run
-	// would (it always imports), a changed file does.
+	// would (it always imports), a changed file does. Only an active
+	// connector's schedule runs.
+	if _, err := st.Pool().Exec(ctx, `UPDATE model.integration_def SET status='active' WHERE id=$1::uuid`, def.ID); err != nil {
+		t.Fatal(err)
+	}
 	run = claimAndRun(t, rn, st, def.ID, "schedule", false)
 	if m = runMeta(t, run); run.Status != "success" || m["unchanged"] != "true" || run.RecordsWritten != 0 || factCount() != facts {
 		t.Fatalf("unchanged schedule run: %s %q written=%d meta=%v", run.Status, run.Message, run.RecordsWritten, m)
@@ -266,6 +270,10 @@ func TestRunner_SFTPPull(t *testing.T) {
 	run = claimAndRun(t, rn, st, def.ID, "schedule", false)
 	if m = runMeta(t, run); run.Status != "success" || m["unchanged"] != "" || run.RecordsWritten != 2 {
 		t.Fatalf("changed-file schedule run: %s %s %q written=%d meta=%v", run.Status, run.ErrorCode, run.Message, run.RecordsWritten, m)
+	}
+	// Back to a draft, so the edits below need no new test.
+	if _, err := st.Pool().Exec(ctx, `UPDATE model.integration_def SET status='draft' WHERE id=$1::uuid`, def.ID); err != nil {
+		t.Fatal(err)
 	}
 
 	// 5. A different pinned key: refused as changed, nothing read.

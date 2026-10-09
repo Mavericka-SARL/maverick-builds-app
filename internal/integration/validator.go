@@ -42,6 +42,10 @@ func (c *Config) Validate(allowInsecure bool) error {
 		if err := c.validateSFTP(allowInsecure); err != nil {
 			return err
 		}
+	case ProtocolModel:
+		if err := c.validateModel(); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("protocol %q is not supported", c.Protocol)
 	}
@@ -122,6 +126,9 @@ func ParseConfig(raw []byte, allowInsecure bool) (*Config, error) {
 func (c *Config) validateHTTPS(allowInsecure bool) error {
 	if c.SFTP != nil {
 		return fmt.Errorf("sftp settings apply to the sftp protocol only")
+	}
+	if c.Model != nil {
+		return fmt.Errorf("model settings apply to the model protocol only")
 	}
 	if c.Direction == DirectionPull {
 		switch c.Response.Format {

@@ -104,7 +104,7 @@ func ReadTools() []providers.ToolDef {
 			Parameters:  noParams,
 		},
 	}
-	for _, d := range integrationToolDefs() {
+	for _, d := range append(integrationToolDefs(), connectorToolDefs()...) {
 		tools = append(tools, providers.ToolDef{Name: d.Name, Description: d.Description, Parameters: json.RawMessage(d.Parameters)})
 	}
 	return tools
@@ -136,6 +136,7 @@ var WriteToolNames = []string{
 	"create_form_integration", "update_form_integration", "delete_form_integration", "backfill_form_integration",
 	"set_user_access_rules",
 	"create_file_integration", "import_file_data", "write_input_values", "create_export_integration", "update_integration", "delete_integration",
+	"create_api_integration", "update_api_integration", "create_connection", "update_connection", "run_integration", "trigger_automation_rule",
 }
 
 // proposeActionsTool is the single write-side tool the LLM can call.
@@ -258,6 +259,27 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, args json.RawMe
 		return e.readAttachedSheet(ctx, args)
 	case "preview_export":
 		return e.previewExport(ctx, args)
+	case "get_integration":
+		return e.getIntegration(ctx, args)
+	case "list_integration_runs":
+		return e.listIntegrationRuns(ctx, args)
+	case "test_integration":
+		return e.testIntegration(ctx, args)
+	case "list_model_link_sources":
+		return e.listModelLinkSources(ctx, args)
+	case "list_connections":
+		return e.listConnections(ctx)
+	case "read_manual":
+		return e.readManual(ctx, args)
+	case "attach_google_sheet":
+		var p struct {
+			SheetURL string `json:"sheet_url"`
+		}
+		_ = json.Unmarshal(args, &p)
+		if e.hooks.AttachGoogleSheet == nil {
+			return "", fmt.Errorf("a Google Sheet is fetched through the gateway, which is not available here")
+		}
+		return e.hooks.AttachGoogleSheet(ctx, p.SheetURL)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}

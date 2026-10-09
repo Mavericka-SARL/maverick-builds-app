@@ -39,9 +39,10 @@ export function BasicsStep({
         <Select value={config.direction} aria-label="Direction"
           onChange={e => {
             const direction = e.target.value as ApiIntegrationConfig["direction"];
-            // SFTP reads files: a push goes back to an HTTPS call.
-            onConfig(direction === "push" && config.protocol === "sftp"
-              ? { direction, protocol: undefined, sftp: undefined, auth: { type: "none" } }
+            // SFTP files and other models are read: a push goes back to an
+            // HTTPS call.
+            onConfig(direction === "push" && (config.protocol === "sftp" || config.protocol === "model")
+              ? { direction, protocol: undefined, sftp: undefined, model: undefined, auth: { type: "none" } }
               : { direction });
           }}>
           <option value="pull">Pull — external API → {brand.name}</option>
@@ -65,10 +66,12 @@ export function BasicsStep({
         </Field>
       </div>
       {config.direction === "pull" && (
-        <Field label="Import mode" description="incremental adds to existing values; replace overwrites matched cells; full reload wipes the target first">
+        <Field label="Import mode" description={config.protocol === "model"
+          ? "A model link reads the source's whole values at each run: replace overwrites matched cells; full reload wipes the target first"
+          : "incremental adds to existing values; replace overwrites matched cells; full reload wipes the target first"}>
           <Select value={config.import_mode ?? "incremental"} aria-label="Import mode"
             onChange={e => onConfig({ import_mode: e.target.value as ApiIntegrationConfig["import_mode"] })}>
-            <option value="incremental">Incremental</option>
+            <option value="incremental" disabled={config.protocol === "model"}>Incremental</option>
             <option value="replace">Replace</option>
             <option value="full_reload">Full reload</option>
           </Select>

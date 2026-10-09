@@ -101,9 +101,9 @@ func (c MCPConfig) scope() string {
 
 type delegatedKey struct{}
 
-// withDelegatedSubject marks ctx as a connector's read for sub. Only
-// mcpReader sets it, on requests it builds itself: nothing from the network
-// can.
+// withDelegatedSubject marks ctx as a delegated read for sub: a chat
+// connector's, or a model link's. Only mcpReader sets it, on requests it
+// builds itself: nothing from the network can.
 func withDelegatedSubject(ctx context.Context, sub string) context.Context {
 	return context.WithValue(ctx, delegatedKey{}, sub)
 }
@@ -171,15 +171,22 @@ func (h *handler) delegatedReadGate(next http.Handler) http.Handler {
 	})
 }
 
-// mcpReader runs a connector's reads through the gateway's own chain.
+// mcpReader runs a delegated read through the gateway's own chain: a chat
+// connector's, and a model link's source read (model_links.go).
 type mcpReader struct {
 	api http.Handler
+	// timeout bounds one read; zero is mcpReadTimeout.
+	timeout time.Duration
 }
 
 func (m mcpReader) Read(ctx context.Context, subject string, req reporting.Request) (reporting.Response, error) {
+	timeout := m.timeout
+	if timeout == 0 {
+		timeout = mcpReadTimeout
+	}
 	// A fresh context: the host's request contributes its cancellation and
 	// nothing else — no value of it reaches the read but the subject.
-	rctx, cancel := context.WithTimeout(context.Background(), mcpReadTimeout)
+	rctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	stop := context.AfterFunc(ctx, cancel)
 	defer stop()

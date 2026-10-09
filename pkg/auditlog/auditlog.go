@@ -136,15 +136,18 @@ const (
 	// distinct from EventWorkflowDefUpdated — publish/archive are the
 	// security-sensitive "revision promotion" case the backlog item calls
 	// out by name, not routine edits.
-	EventWorkflowDefCreated        EventType = "workflow_def.created"
-	EventWorkflowDefUpdated        EventType = "workflow_def.updated"
-	EventWorkflowDefDeleted        EventType = "workflow_def.deleted"
-	EventWorkflowPublished         EventType = "workflow_def.published"
-	EventWorkflowArchived          EventType = "workflow_def.archived"
-	EventIntegrationCreated        EventType = "integration.created"
-	EventIntegrationUpdated        EventType = "integration.updated"
-	EventIntegrationDeleted        EventType = "integration.deleted"
-	EventIntegrationRun            EventType = "integration.run"
+	EventWorkflowDefCreated EventType = "workflow_def.created"
+	EventWorkflowDefUpdated EventType = "workflow_def.updated"
+	EventWorkflowDefDeleted EventType = "workflow_def.deleted"
+	EventWorkflowPublished  EventType = "workflow_def.published"
+	EventWorkflowArchived   EventType = "workflow_def.archived"
+	EventIntegrationCreated EventType = "integration.created"
+	EventIntegrationUpdated EventType = "integration.updated"
+	EventIntegrationDeleted EventType = "integration.deleted"
+	EventIntegrationRun     EventType = "integration.run"
+	// EventIntegrationSwitched: one side's switch of a model link (metadata
+	// side = source | target, enabled).
+	EventIntegrationSwitched       EventType = "integration.switched"
 	EventFormIntegrationCreated    EventType = "form_integration.created"
 	EventFormIntegrationUpdated    EventType = "form_integration.updated"
 	EventFormIntegrationDeleted    EventType = "form_integration.deleted"

@@ -24,8 +24,12 @@ export function ResponseStep({
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
   const sftp = config.protocol === "sftp";
-  const sideEffects = !sftp && config.request.method !== "GET";
-  const recordsPath = sftp ? "" : config.response?.records_path ?? "";
+  const link = config.protocol === "model";
+  // An SFTP file and a model link are read, never called: no request, no
+  // side effects, records as they come.
+  const noRequest = sftp || link;
+  const sideEffects = !noRequest && config.request.method !== "GET";
+  const recordsPath = noRequest ? "" : config.response?.records_path ?? "";
 
   useEffect(() => () => { if (pollRef.current) window.clearInterval(pollRef.current); }, []);
 
@@ -86,7 +90,7 @@ export function ResponseStep({
     <div style={{ display: "grid", gap: 12 }}>
       {confirmElement}
       <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
-        {!sftp && <>
+        {!noRequest && <>
         <Field label="Response format">
           <Select value={config.response?.format ?? "json"} aria-label="Response format"
             onChange={e => onConfig({ response: { ...config.response, format: e.target.value as "json" | "csv" } })}>
@@ -101,14 +105,18 @@ export function ResponseStep({
         </Field>
         </>}
         <Button onClick={startTest} loading={testing} loadingLabel="Testing…" aria-busy={testing}>
-          {sftp ? "Test: read the file" : "Send test request"}
+          {sftp ? "Test: read the file" : link ? "Test: read the grid" : "Send test request"}
         </Button>
         {tested
           ? <StatusBadge tone="success">Tested ✓</StatusBadge>
           : <StatusBadge tone="warning">Not tested for current config</StatusBadge>}
       </div>
       <p className="mvx-admin-muted" style={{ margin: 0, fontSize: 12 }}>
-        {sftp
+        {link
+          ? <>The grid is read by the {brand.name} backend as you, in the source model&apos;s active revision, and a
+            test writes nothing. Changing the source model, grid, metrics or filters invalidates a previous successful
+            test.</>
+          : sftp
           ? <>The file is read by the {brand.name} backend — never from your browser — and a test writes nothing.
             Changing the server, file, sheet, header row or sign-in invalidates a previous successful test.</>
           : <>The request is executed by the {brand.name} backend — never from your browser. Changing the
@@ -123,6 +131,7 @@ export function ResponseStep({
               {run.status}
             </StatusBadge>
             {meta.preview_status && <span>HTTP {meta.preview_status}</span>}
+            {meta.source_model && <span>{meta.source_model} · revision {meta.source_revision} · grid {meta.source_grid}</span>}
             <span>{run.duration_ms} ms</span>
             {meta.preview_content_type && <span className="mvx-admin-muted">{meta.preview_content_type}</span>}
             {meta.preview_truncated === "true" && <StatusBadge tone="warning">truncated</StatusBadge>}

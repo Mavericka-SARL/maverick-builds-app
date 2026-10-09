@@ -20,6 +20,7 @@ import (
 
 	"github.com/mavericks-engine/mavericks/internal/dataexport"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
+	"github.com/mavericks-engine/mavericks/internal/integration"
 	"github.com/mavericks-engine/mavericks/internal/modeledit"
 )
 
@@ -64,6 +65,16 @@ type ReadHooks struct {
 	// ReadAttachedSheet renders rows from..to of one sheet of an attached
 	// workbook, with those rows' whole formulas.
 	ReadAttachedSheet func(ctx context.Context, file, sheet string, fromRow, toRow int) (string, error)
+	// TestIntegration tests a saved REST API connector through the
+	// developer's own Test route, as the developer, and reports the result
+	// with its first records. Tests with side effects are refused there.
+	TestIntegration func(ctx context.Context, integrationID string) (string, error)
+	// AttachGoogleSheet fetches a Google Sheet through the Sheets import's
+	// own route, as the developer, and attaches it to the chat as a CSV file.
+	AttachGoogleSheet func(ctx context.Context, sheetURL string) (string, error)
+	// ModelLinkSources lists the models a link may read (the developer's own
+	// model-link-sources route).
+	ModelLinkSources func(ctx context.Context, modelID, grid string) (string, error)
 }
 
 // WithReadHooks sets the read executor's gateway hooks and returns it.
@@ -111,6 +122,11 @@ func integrationToolDefs() []toolDef {
 				"reshape":` + reshapeSchema + `,
 				"column_map":{"type":"object","description":"File column -> model field, applied after reshape"}
 			},"required":["file"]}`,
+		},
+		{
+			Name:        "attach_google_sheet",
+			Description: "Fetches a Google Sheet (a link-shared sheet, or a private one shared with the tenant's Google service account) exactly as the Sheets import does, and attaches it to this chat as a CSV file, so preview_file_import, read_attached_sheet and import_file_data work on it. Then create_file_integration with \"sheet_url\" saves a Google Sheets integration that re-reads the sheet on every run.",
+			Parameters:  `{"type":"object","properties":{"sheet_url":{"type":"string","description":"The sheet's address as copied from the browser (its gid picks the tab)"}},"required":["sheet_url"]}`,
 		},
 		{
 			Name:        "preview_export",
@@ -215,6 +231,11 @@ func (e *ToolExecutor) listIntegrations(ctx context.Context) (string, error) {
 				fmt.Fprintf(&sb, "\n    reshape: %s", r)
 			}
 			sb.WriteString("\n")
+		case "rest_api":
+			var c integration.Config
+			if json.Unmarshal([]byte(cfg), &c) == nil {
+				fmt.Fprintf(&sb, "    connector: %s, %s (get_integration shows it in full)\n", describeSource(&c), c.Direction)
+			}
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -458,6 +479,9 @@ func (e *WriteExecutor) loadIntegrationDef(ctx context.Context, ref string) (int
 }
 
 type fileIntegrationConfig struct {
+	// SheetURL makes it a Google Sheets integration, which re-reads the
+	// sheet on every run instead of taking a file.
+	SheetURL   string             `json:"sheet_url,omitempty"`
 	Reshape    *importpkg.Reshape `json:"reshape,omitempty"`
 	ColumnMap  map[string]string  `json:"column_map,omitempty"`
 	ImportMode string             `json:"import_mode,omitempty"`
@@ -474,12 +498,20 @@ func (e *WriteExecutor) createFileIntegration(ctx context.Context, raw json.RawM
 		ColumnMap  map[string]string  `json:"column_map"`
 		ImportMode string             `json:"import_mode"`
 		Tags       []string           `json:"tags"`
+		SheetURL   string             `json:"sheet_url"`
 	}
 	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
 	if err := reshapeKeysChecked(raw); err != nil {
 		return "", "", err
+	}
+	kindOf := "csv_import"
+	if p.SheetURL = strings.TrimSpace(p.SheetURL); p.SheetURL != "" {
+		if _, _, err := importpkg.ParseSheetURL(p.SheetURL); err != nil {
+			return "", "", fmt.Errorf("sheet_url: %w", err)
+		}
+		kindOf = "google_sheets"
 	}
 	p.Name = strings.TrimSpace(p.Name)
 	if p.Name == "" {
@@ -502,6 +534,7 @@ func (e *WriteExecutor) createFileIntegration(ctx context.Context, raw json.RawM
 	if !p.Reshape.IsZero() {
 		cfg.Reshape = p.Reshape
 	}
+	cfg.SheetURL = p.SheetURL
 	if err := e.integrationNameFree(ctx, p.Name, ""); err != nil {
 		return "", "", err
 	}
@@ -513,9 +546,13 @@ func (e *WriteExecutor) createFileIntegration(ctx context.Context, raw json.RawM
 	var id string
 	if err := e.pool.QueryRow(ctx, `
 		INSERT INTO model.integration_def (model_id, name, type, target_type, target_id, revision_id, status, tags, config)
-		VALUES ($1::uuid, $2, 'csv_import', $3, $4::uuid, NULLIF($5,'')::uuid, 'active', $6, $7::jsonb)
-		RETURNING id::text`, e.modelID, p.Name, p.TargetType, targetID, e.revID, tags, string(cfgJSON)).Scan(&id); err != nil {
+		VALUES ($1::uuid, $2, $8, $3, $4::uuid, NULLIF($5,'')::uuid, 'active', $6, $7::jsonb)
+		RETURNING id::text`, e.modelID, p.Name, p.TargetType, targetID, e.revID, tags, string(cfgJSON), kindOf).Scan(&id); err != nil {
 		return "", "", fmt.Errorf("create integration: %w", err)
+	}
+	if kindOf == "google_sheets" {
+		return fmt.Sprintf("Google Sheets integration '%s' created (id: %s) into %s, %d mapped column(s), mode %s: each run re-reads the sheet (run_integration runs it)",
+			p.Name, id, p.TargetType, len(cfg.ColumnMap), orDefault(cfg.ImportMode, "default")), id, nil
 	}
 	reshaped := ""
 	if cfg.Reshape != nil {
@@ -599,6 +636,7 @@ func (e *WriteExecutor) updateIntegration(ctx context.Context, raw json.RawMessa
 		ImportMode    *string           `json:"import_mode"`
 		Spec          json.RawMessage   `json:"spec"`
 		Status        *string           `json:"status"`
+		SheetURL      *string           `json:"sheet_url"`
 	}
 	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
@@ -669,6 +707,16 @@ func (e *WriteExecutor) updateIntegration(ctx context.Context, raw json.RawMessa
 		_ = json.Unmarshal(row.Config, &c)
 		if c == nil {
 			c = map[string]any{}
+		}
+		if p.SheetURL != nil {
+			if row.Type != "google_sheets" {
+				return "", "", fmt.Errorf("only a Google Sheets integration has a sheet_url")
+			}
+			if _, _, err := importpkg.ParseSheetURL(*p.SheetURL); err != nil {
+				return "", "", fmt.Errorf("sheet_url: %w", err)
+			}
+			c["sheet_url"] = strings.TrimSpace(*p.SheetURL)
+			changed = append(changed, "sheet_url")
 		}
 		if p.ColumnMap != nil {
 			c["column_map"] = p.ColumnMap
