@@ -3,9 +3,9 @@ import { api, type ApiModelSource } from "../../../api/client";
 import { Checkbox, Field, InlineAlert, Select } from "../../../ui";
 
 // The model-link side of the Request step: a grid of another model of this
-// tenant, read in that model's active revision as the developer who runs the
-// link. Only models you are a developer of are offered — setting up, testing
-// and running a link needs a developer of both models.
+// tenant, read in that model's active revision as the link's owner — the
+// developer of both models who set it up. Only models you are a developer of
+// are offered: setting up and testing a link needs a developer of both.
 export function ModelSourceFields({ source, onSource }: {
   source: ApiModelSource;
   onSource: (s: ApiModelSource) => void;
@@ -102,9 +102,10 @@ export function ModelSourceFields({ source, onSource }: {
       )}
       <p className="mvx-admin-muted" style={{ margin: 0, fontSize: 12 }}>
         Each record is one combination of members with a value: a field for every dimension of the grid and for
-        every metric chosen. The link reads what the developer who runs it sees — you for Run now and tests, the
-        developer who switches the schedule on for scheduled runs. Only a developer of both models can change,
-        test or run it, and the source model&apos;s developers can switch it off.
+        every metric chosen. Saving or activating the link makes you its owner: every run reads what you see in the
+        source — whoever starts it, including a user pressing a dashboard button who has no access to the source
+        model. If you stop being a developer of both models, the link stops until a developer of both activates it
+        again. The source model&apos;s developers can switch it off.
       </p>
     </div>
   );

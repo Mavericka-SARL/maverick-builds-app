@@ -695,8 +695,10 @@ each field goes into, how often it runs. Never guess an address, a path or a fie
      "label"}; "auth" {"type": "none"}; "import_mode" "replace" (or "full_reload"), never "incremental": each run
      reads the source's whole values. Its records are one per leaf combination with a value: a field per dimension
      and per metric, named as in the source ("$.region", "$.revenue"), calculated metrics included. It reads the
-     source model's ACTIVE revision as the developer running it; only a developer of BOTH models may set it up,
-     test or run it, and the source model's developers and tenant admins can switch it off from their side.
+     source model's ACTIVE revision as its owner — the developer of BOTH models who created it or last changed its
+     config or activated it (only such a developer may) — whoever runs it, a business user's dashboard button
+     included; it stops if the owner loses either model, until a developer of both activates it again. The source
+     model's developers and tenant admins can switch it off from their side.
    - "mapping" {"fields": [{"source": "$.field", "target": "<dimension or metric name>", "transforms": [{"kind":
      "to_number"}]}], "shape": "wide" | "long" (+ "metric_name_source", "value_source")}. Transforms: trim,
      to_string, to_number, to_boolean, to_date, date_format ("value": layout), default ("value"), lookup ("lookup":

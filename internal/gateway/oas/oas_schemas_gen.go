@@ -15631,19 +15631,20 @@ func (s *ModelImportRequest) SetPackage(val ModelExportPackage) {
 // One revision copy of a model link, with both sides' switches.
 // Ref: #/components/schemas/ModelLink
 type ModelLink struct {
-	ID               OptUUID             `json:"id"`
-	LinkID           OptUUID             `json:"link_id"`
-	Name             OptString           `json:"name"`
-	Status           OptModelLinkStatus  `json:"status"`
-	Enabled          OptBool             `json:"enabled"`
-	SourceEnabled    OptBool             `json:"source_enabled"`
-	SourceSwitchedBy OptString           `json:"source_switched_by"`
-	SourceSwitchedAt OptDateTime         `json:"source_switched_at"`
-	Schedule         OptString           `json:"schedule"`
-	ScheduleBy       OptString           `json:"schedule_by"`
-	Target           OptModelLinkEnd     `json:"target"`
-	Source           OptModelLinkEnd     `json:"source"`
-	LastRun          OptModelLinkLastRun `json:"last_run"`
+	ID               OptUUID            `json:"id"`
+	LinkID           OptUUID            `json:"link_id"`
+	Name             OptString          `json:"name"`
+	Status           OptModelLinkStatus `json:"status"`
+	Enabled          OptBool            `json:"enabled"`
+	SourceEnabled    OptBool            `json:"source_enabled"`
+	SourceSwitchedBy OptString          `json:"source_switched_by"`
+	SourceSwitchedAt OptDateTime        `json:"source_switched_at"`
+	Schedule         OptString          `json:"schedule"`
+	// The developer of both models every run reads the source as.
+	Owner   OptString           `json:"owner"`
+	Target  OptModelLinkEnd     `json:"target"`
+	Source  OptModelLinkEnd     `json:"source"`
+	LastRun OptModelLinkLastRun `json:"last_run"`
 }
 
 // GetID returns the value of ID.
@@ -15691,9 +15692,9 @@ func (s *ModelLink) GetSchedule() OptString {
 	return s.Schedule
 }
 
-// GetScheduleBy returns the value of ScheduleBy.
-func (s *ModelLink) GetScheduleBy() OptString {
-	return s.ScheduleBy
+// GetOwner returns the value of Owner.
+func (s *ModelLink) GetOwner() OptString {
+	return s.Owner
 }
 
 // GetTarget returns the value of Target.
@@ -15756,9 +15757,9 @@ func (s *ModelLink) SetSchedule(val OptString) {
 	s.Schedule = val
 }
 
-// SetScheduleBy sets the value of ScheduleBy.
-func (s *ModelLink) SetScheduleBy(val OptString) {
-	s.ScheduleBy = val
+// SetOwner sets the value of Owner.
+func (s *ModelLink) SetOwner(val OptString) {
+	s.Owner = val
 }
 
 // SetTarget sets the value of Target.

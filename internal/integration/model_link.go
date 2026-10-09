@@ -16,17 +16,29 @@ import (
 // commit into the link's own model, the same run history.
 //
 // Reading the source is not this package's: SourceReader is the gateway's
-// own grid route, made as the developer the run acts for, so a link reads
-// exactly what that developer sees and nothing the routes would refuse
-// them. That is why the gateway, not the worker, claims these runs
-// (Store.ClaimModelLink).
+// own grid route, made as the link's owner (Definition.LinkOwner) — the
+// developer of both models who set it up — whoever starts the run, so a
+// business user's dashboard button refreshes a link without any access to
+// the source model, and a link reads exactly what its owner sees and
+// nothing the routes would refuse them. That is why the gateway, not the
+// worker, claims these runs (Store.ClaimModelLink).
 
-// SourceReader reads a model link's source grid as the developer runBy.
+// SourceReader reads a model link's source grid as the developer readAs.
 // It refuses, with a *SourceError, a source that is not a model of the
 // link's tenant, a developer who no longer builds both models, and a grid
 // missing from the source model's active revision.
 type SourceReader interface {
-	ReadModelSource(ctx context.Context, def *Definition, runBy string) (*SourceTable, error)
+	ReadModelSource(ctx context.Context, def *Definition, readAs string) (*SourceTable, error)
+}
+
+// LinkReadsAs is the developer a run of def reads its source as: the
+// link's owner, or — for a link saved before owners were kept — the person
+// who runs it.
+func LinkReadsAs(def *Definition, runBy string) string {
+	if def.LinkOwner != "" {
+		return def.LinkOwner
+	}
+	return runBy
 }
 
 // SourceTable is a source grid read as text records.
@@ -124,15 +136,17 @@ func (rn *Runner) executeModelPull(ctx context.Context, run *Run, def *Definitio
 		res.ErrorCode, res.Message = ErrCodeInternal, "a model link is run by the gateway, not by this worker"
 		return res
 	}
-	if run.RunBy == "" {
-		// Nobody to read as: a schedule enabled before anyone was recorded.
-		res.ErrorCode, res.Message = ErrCodeAuth, "the run acts for no developer — switch the schedule on again"
+	readAs := LinkReadsAs(def, run.RunBy)
+	if readAs == "" {
+		// Nobody to read as: an ownerless link run by a schedule enabled
+		// before anyone was recorded.
+		res.ErrorCode, res.Message = ErrCodeAuth, "the link has no owner — a developer of both models must activate it again"
 		return res
 	}
 	res.Meta["source_grid"] = cfg.Model.Grid
 
 	start := rn.now()
-	tbl, err := rn.Source.ReadModelSource(ctx, def, run.RunBy)
+	tbl, err := rn.Source.ReadModelSource(ctx, def, readAs)
 	res.Requests = 1
 	durMS := int(rn.now().Sub(start).Milliseconds())
 	target := "model:" + cfg.Model.Grid

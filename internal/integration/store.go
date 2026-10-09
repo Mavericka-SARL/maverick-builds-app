@@ -295,6 +295,10 @@ type Definition struct {
 	SourceEnabled    bool       `json:"source_enabled"`
 	SourceSwitchedBy string     `json:"source_switched_by,omitempty"`
 	SourceSwitchedAt *time.Time `json:"source_switched_at,omitempty"`
+	// LinkOwner is the developer a model link reads its source as, on every
+	// run (migration 127); "" for a link saved before it, which reads as the
+	// person who runs it.
+	LinkOwner string `json:"link_owner,omitempty"`
 }
 
 // SourceModelID is the model a model link reads ("" for any other
@@ -417,6 +421,12 @@ func (s *Store) UpdateDefinition(ctx context.Context, modelID, id string, name, 
 	return s.GetDefinition(ctx, modelID, id)
 }
 
+// SetLinkOwner makes userID the developer a model link reads as.
+func (s *Store) SetLinkOwner(ctx context.Context, id, userID string) error {
+	_, err := s.db.Exec(ctx, `UPDATE model.integration_def SET link_owner = NULLIF($2,'')::uuid WHERE id = $1::uuid`, id, userID)
+	return err
+}
+
 // MarkTested records a successful test of the config identified by hash.
 func (s *Store) MarkTested(ctx context.Context, id, hash string) error {
 	_, err := s.db.Exec(ctx, `
@@ -434,13 +444,13 @@ func (s *Store) GetDefinition(ctx context.Context, modelID, id string) (*Definit
 		       status, tags, direction, enabled, connection_id::text,
 		       config::text, config_version, last_tested_hash, last_tested_at, created_at,
 		       link_id::text, COALESCE(source_model_id::text,''), source_enabled,
-		       COALESCE(source_switched_by::text,''), source_switched_at
+		       COALESCE(source_switched_by::text,''), source_switched_at, COALESCE(link_owner::text,'')
 		FROM model.integration_def
 		WHERE id=$1::uuid AND model_id=$2::uuid AND type='rest_api'
 	`, id, modelID).Scan(&d.ID, &d.ModelID, &revID, &d.Name, &d.Description,
 		&d.Status, &d.Tags, &d.Direction, &d.Enabled, &connID,
 		&rawCfg, &d.ConfigVersion, &d.LastTestedHash, &d.LastTestedAt, &d.CreatedAt,
-		&d.LinkID, &d.SourceModelID, &d.SourceEnabled, &d.SourceSwitchedBy, &d.SourceSwitchedAt); err != nil {
+		&d.LinkID, &d.SourceModelID, &d.SourceEnabled, &d.SourceSwitchedBy, &d.SourceSwitchedAt, &d.LinkOwner); err != nil {
 		return nil, err
 	}
 	if revID != nil {

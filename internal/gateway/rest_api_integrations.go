@@ -158,10 +158,11 @@ var errIntegrationNotFound = errors.New("integration not found")
 // connection, or activates (checkIntegrationSave): a changed target or
 // connection must be the model's own, a kept one must not be another
 // model's, and activation re-checks a stored config that may predate this
-// check. A model link is checked again whenever the save changes what it
-// reads, activates it or switches its schedule on (the schedule then runs as
-// a): each of these is for a developer of both models only. A rename, a tag
-// or its own side's switch is any developer's of its model.
+// check. A model link is checked again whenever the save creates it, changes
+// its config or activates it: each of these is for a developer of both models
+// only, and makes a its owner — whom every run reads the source as. A rename,
+// a tag, its schedule or its own side's switch is any developer's of its
+// model.
 func (h *handler) restAPISave(ctx context.Context, db dbx.DB, a *actor, modelID, revisionID, id string, body *restAPICreateBody) (string, error) {
 	st := integration.NewStoreOn(db)
 	var appID string
@@ -196,6 +197,11 @@ func (h *handler) restAPISave(ctx context.Context, db dbx.DB, a *actor, modelID,
 		if err != nil {
 			return "", err
 		}
+		if body.Config.Protocol == integration.ProtocolModel {
+			if err := st.SetLinkOwner(ctx, def.ID, a.UserID); err != nil {
+				return "", err
+			}
+		}
 		if body.Schedule != nil {
 			body.Schedule.IntegrationID = def.ID
 			if schedulingOn {
@@ -214,7 +220,8 @@ func (h *handler) restAPISave(ctx context.Context, db dbx.DB, a *actor, modelID,
 		return def.ID, nil
 	}
 
-	if body.Config != nil || body.ConnectionID != nil || body.Status == "active" || schedulingOn {
+	ownLink := false // the save makes a the link's owner
+	if body.Config != nil || body.ConnectionID != nil || body.Status == "active" {
 		cur, err := st.GetDefinition(ctx, modelID, id)
 		if err != nil {
 			return "", errIntegrationNotFound
@@ -226,14 +233,13 @@ func (h *handler) restAPISave(ctx context.Context, db dbx.DB, a *actor, modelID,
 		if body.ConnectionID != nil {
 			connID = *body.ConnectionID
 		}
-		if body.Config != nil || body.ConnectionID != nil || body.Status == "active" {
-			if err := h.checkIntegrationSave(ctx, db, modelID, refsOf(cur.Config, cur.ConnectionID), refsOf(cfg, connID), body.Status == "active"); err != nil {
-				return "", err
-			}
+		if err := h.checkIntegrationSave(ctx, db, modelID, refsOf(cur.Config, cur.ConnectionID), refsOf(cfg, connID), body.Status == "active"); err != nil {
+			return "", err
 		}
 		if err := h.checkModelLink(ctx, a, modelID, cfg, connID, body.Status == "active"); err != nil {
 			return "", err
 		}
+		ownLink = cfg != nil && cfg.Protocol == integration.ProtocolModel && (body.Config != nil || body.Status == "active")
 	}
 	var namePtr, statusPtr *string
 	if body.Name != "" {
@@ -252,6 +258,11 @@ func (h *handler) restAPISave(ctx context.Context, db dbx.DB, a *actor, modelID,
 			return "", errIntegrationNotFound
 		}
 		return "", err
+	}
+	if ownLink {
+		if err := st.SetLinkOwner(ctx, id, a.UserID); err != nil {
+			return "", err
+		}
 	}
 	if body.Schedule != nil {
 		body.Schedule.IntegrationID = id
@@ -387,6 +398,13 @@ func (h *handler) restAPIDuplicate(w http.ResponseWriter, r *http.Request, model
 		jsonErr(w, err, http.StatusBadRequest)
 		return
 	}
+	if src.Config != nil && src.Config.Protocol == integration.ProtocolModel {
+		// The copy is a new link, owned by whoever made it (a developer of
+		// both models, checked above).
+		if a, aerr := h.resolveActor(ctx, r); aerr == nil {
+			_ = st.SetLinkOwner(ctx, dup.ID, a.UserID)
+		}
+	}
 	if sched, serr := st.GetSchedule(ctx, id); serr == nil && sched.Kind != "manual" {
 		sched.IntegrationID = dup.ID
 		sched.Enabled = false
@@ -448,14 +466,30 @@ func (h *handler) restAPIEnqueue(w http.ResponseWriter, r *http.Request, modelID
 		jsonErr(w, terr, http.StatusBadRequest)
 		return
 	}
-	// A model link runs as the caller: a developer of both models only.
-	if lerr := h.checkModelLinkRequest(r, modelID, def.Config, def.ConnectionID, true); lerr != nil {
-		jsonErr(w, lerr, http.StatusBadRequest)
-		return
+	act, _ := h.resolveActor(ctx, r)
+	runBy := ""
+	if act != nil {
+		runBy = act.UserID
 	}
-	if def.Config.Protocol == integration.ProtocolModel && !def.SourceEnabled {
-		jsonErr(w, fmt.Errorf("the link is switched off on the source model's side"), http.StatusBadRequest)
-		return
+	if def.Config.Protocol == integration.ProtocolModel {
+		if trigger != "manual" || dryRun {
+			// A test or a dry run is setting the link up: a developer of
+			// both models only.
+			if lerr := h.checkModelLinkRequest(r, modelID, def.Config, def.ConnectionID, true); lerr != nil {
+				jsonErr(w, lerr, http.StatusBadRequest)
+				return
+			}
+		} else if _, lerr := h.linkReader(ctx, def, integration.LinkReadsAs(def, runBy)); lerr != nil {
+			// Run now, or a dashboard button: whoever may run the
+			// integration runs it, read as its owner — refused at once,
+			// for everyone, when the owner has lost either model.
+			jsonErr(w, lerr, http.StatusBadRequest)
+			return
+		}
+		if !def.SourceEnabled {
+			jsonErr(w, fmt.Errorf("the link is switched off on the source model's side"), http.StatusBadRequest)
+			return
+		}
 	}
 	// Mutation-method tests require the explicit acknowledgement (spec §4).
 	if trigger == "test" && def.Config.Protocol == integration.ProtocolHTTPS && def.Config.Request.Method != "GET" {
@@ -473,11 +507,6 @@ func (h *handler) restAPIEnqueue(w http.ResponseWriter, r *http.Request, modelID
 			jsonErr(w, fmt.Errorf("integration is disabled"), http.StatusBadRequest)
 			return
 		}
-	}
-	act, _ := h.resolveActor(ctx, r)
-	runBy := ""
-	if act != nil {
-		runBy = act.UserID
 	}
 	runID, err := h.intStore(ctx).Enqueue(ctx, id, trigger, runBy, dryRun, nil)
 	if err != nil {

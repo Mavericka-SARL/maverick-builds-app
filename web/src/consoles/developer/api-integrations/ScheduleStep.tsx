@@ -50,7 +50,7 @@ export function ScheduleStep({
   return (
     <div style={{ display: "grid", gap: 12, maxWidth: 640 }}>
       <Field label="Execution" description={sftp ? "A scheduled run skips a file that has not changed since the last import; Run now always imports."
-        : link ? "Scheduled runs read the source as the developer who switches the schedule on — a developer of both models. They stop if that developer loses either model, or if either side switches the link off."
+        : link ? "Every run reads the source as the link's owner, the developer of both models who last saved or activated it. Runs stop if the owner loses either model, or if either side switches the link off."
         : undefined}>
         <Select value={mode} aria-label="Execution mode" onChange={e => setMode(e.target.value)}>
           <option value="manual">Manual only</option>

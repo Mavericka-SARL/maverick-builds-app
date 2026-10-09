@@ -2928,12 +2928,12 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 				            JOIN model.metric_def n ON n.model_id = o.model_id AND n.name = o.name AND n.revision_id = $2::uuid
 				           WHERE o.model_id = $1::uuid AND o.revision_id <> $2::uuid
 			)
-			-- A model link keeps link_id and its source columns: its source is
+			-- A model link keeps link_id, its source columns and its owner: its source is
 			-- another model, which a revision copy does not remap (migration 126).
 			INSERT INTO model.integration_def (model_id, revision_id, name, description, type, target_type, target_id, config,
 			                                   status, tags, direction, enabled, connection_id, config_version,
 			                                   last_tested_hash, last_tested_at,
-			                                   link_id, source_model_id, source_enabled, source_switched_by, source_switched_at)
+			                                   link_id, source_model_id, source_enabled, source_switched_by, source_switched_at, link_owner)
 			SELECT i.model_id, $2::uuid, i.name, i.description, i.type, i.target_type,
 				COALESCE((SELECT m.new_id FROM idmap m WHERE m.old_id = i.target_id
 				          ORDER BY m.kind = COALESCE(NULLIF(i.target_type,''), 'grid') DESC LIMIT 1), i.target_id),
@@ -2950,7 +2950,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 				ELSE i.config END,
 				i.status, i.tags, i.direction, i.enabled, i.connection_id, i.config_version,
 				i.last_tested_hash, i.last_tested_at,
-				i.link_id, i.source_model_id, i.source_enabled, i.source_switched_by, i.source_switched_at
+				i.link_id, i.source_model_id, i.source_enabled, i.source_switched_by, i.source_switched_at, i.link_owner
 			FROM model.integration_def i
 			WHERE i.model_id=$1::uuid AND i.revision_id=$3::uuid
 		`, e.modelID, newID, srcID); err != nil {

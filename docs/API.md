@@ -197,11 +197,14 @@ due schedule of a draft or switched-off connector advances without a run.
 of another model of the same tenant: `model: {model_id, grid, metrics?,
 filters?, member_display?}`, `auth.type` none, no connection, `import_mode`
 `replace` or `full_reload`. The grid is named and read in the source model's
-active revision through the gateway's own `/api/grid`, as the run's acting
-developer (`run_by`), so the gateway — not the worker — claims these runs.
-Saving one that changes its source, activating it, enabling its schedule,
-testing it and running it need a developer of both models (400 otherwise),
-re-checked for `run_by` on every run (`auth` when it fails). Each side holds a
+active revision through the gateway's own `/api/grid`, as the link's owner
+(`link_owner`, migration 127), so the gateway — not the worker — claims these
+runs. Creating one, changing its config, activating it and testing it need a
+developer of both models (400 otherwise), who becomes its owner. Any caller
+that may run the integration (`POST /api/integrations/{id}/run`: a developer,
+or a business user's dashboard button) runs it as the owner; the owner must
+still build both models, checked when the run is queued (400) and when it
+runs (`auth`). Each side holds a
 switch: the connector's `enabled`, and `source_enabled`, shared by every
 revision copy of the link (`link_id`):
 `GET /api/developer/model-links` lists the links reading the request's model

@@ -36,8 +36,8 @@ export function AuthStep({
     return (
       <div style={{ maxWidth: 560 }}>
         <InlineAlert tone="info">
-          A model link needs no sign-in: it reads the other model as the developer who runs it — you for Run now and
-          tests, the developer who switches its schedule on for scheduled runs — and only what that developer sees.
+          A model link needs no sign-in: it reads the other model as its owner — the developer of both models who
+          last saved or activated it — whoever starts a run, and only what the owner sees there.
         </InlineAlert>
       </div>
     );

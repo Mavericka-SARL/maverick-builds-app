@@ -1384,6 +1384,7 @@ type ModelIntegrationDef struct {
 	SourceEnabled    bool               `json:"source_enabled"`
 	SourceSwitchedBy pgtype.UUID        `json:"source_switched_by"`
 	SourceSwitchedAt pgtype.Timestamptz `json:"source_switched_at"`
+	LinkOwner        pgtype.UUID        `json:"link_owner"`
 }
 
 type ModelIntegrationOauthState struct {

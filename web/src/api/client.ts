@@ -844,7 +844,9 @@ export interface ModelLink {
   id: string; link_id: string; name: string; status: "draft" | "active";
   enabled: boolean; source_enabled: boolean;
   source_switched_by?: string; source_switched_at?: string | null;
-  schedule: string; schedule_by?: string;
+  schedule: string;
+  /** The developer of both models every run reads the source as. */
+  owner?: string;
   target: ModelLinkEnd; source: ModelLinkEnd;
   last_run?: { status: string; finished_at?: string | null; error_code?: string; message?: string; records_written: number };
 }

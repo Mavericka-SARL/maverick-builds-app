@@ -4,15 +4,18 @@ package gateway
 // Config protocol "model") whose source is a grid of another model of the
 // same tenant. The rules, in one place:
 //
-//   - Only a developer of both models creates or changes a link's source,
-//     activates it, switches its schedule on, tests it or runs it
-//     (checkModelLink). Every run checks again that the developer it acts
-//     for — the manual runner, or whoever switched the schedule on — still
-//     builds both (ReadModelSource), so a developer who loses either model
-//     stops the link rather than keeps reading through it.
-//   - The source is read through /api/grid as that developer, in the source
-//     model's active revision: the values that developer sees, calculated
-//     ones included, and nothing a route would refuse them.
+//   - Only a developer of both models creates a link, changes what it reads,
+//     activates it or tests it (checkModelLink); doing so makes them the
+//     link's owner (link_owner).
+//   - Every run reads the source as the owner, whoever starts it: a
+//     developer's Run now, the schedule, or a business user's dashboard
+//     button — who needs no access to the source model. Every run checks
+//     again that the owner still builds both models (linkReader), so an
+//     owner who loses either model stops the link, for everyone, until a
+//     developer of both activates it again and becomes its owner.
+//   - The source is read through /api/grid as the owner, in the source
+//     model's active revision: the values the owner sees, calculated ones
+//     included, and nothing a route would refuse them.
 //   - Each side holds a switch. The link's own model holds its connector's
 //     enabled flag (per revision copy, as for any connector); the source
 //     model holds source_enabled, one switch for every copy of the link
@@ -261,11 +264,47 @@ func (h *handler) checkModelLinkRequest(r *http.Request, modelID string, cfg *in
 	return h.checkModelLink(r.Context(), a, modelID, cfg, connectionID, strict)
 }
 
+// linkRevive is how a stopped link runs again.
+const linkRevive = "a developer of both models must activate it again, and becomes its owner"
+
+// linkReader resolves readAs, the developer a link reads as (its owner),
+// and confirms they still build both of its models; a *SourceError (code
+// auth) says why not. It answers their subject, for the delegated read.
+func (h *handler) linkReader(ctx context.Context, def *integration.Definition, readAs string) (string, error) {
+	refuse := func(format string, args ...any) (string, error) {
+		return "", &integration.SourceError{Code: integration.ErrCodeAuth, Msg: fmt.Sprintf(format, args...)}
+	}
+	if readAs == "" {
+		return refuse("the link has no owner — %s", linkRevive)
+	}
+	var sub, name string
+	if err := h.db.QueryRow(ctx, `
+		SELECT COALESCE(keycloak_sub, ''), COALESCE(NULLIF(display_name, ''), email)
+		FROM identity.user WHERE id = $1::uuid
+	`, readAs).Scan(&sub, &name); err != nil || sub == "" {
+		return refuse("the developer this link reads as has no account here any more, so the link has stopped — %s", linkRevive)
+	}
+	a, err := h.actorByKeycloakSub(ctx, sub)
+	if err != nil {
+		return refuse("%s, whom this link reads as, can no longer sign in, so the link has stopped — %s", name, linkRevive)
+	}
+	for _, m := range []string{def.ModelID, def.Config.Model.ModelID} {
+		ok, berr := h.buildsModel(ctx, a, m)
+		if berr != nil {
+			return "", berr
+		}
+		if !ok {
+			return refuse("%s, whom this link reads as, is no longer a developer of both models, so the link has stopped — %s", name, linkRevive)
+		}
+	}
+	return sub, nil
+}
+
 // ReadModelSource implements integration.SourceReader: the source grid,
-// read through /api/grid as runBy, after the checks a save makes are made
-// again for runBy — the link's models may have changed, and runBy's access
-// with them, since anyone looked.
-func (ml *ModelLinks) ReadModelSource(ctx context.Context, def *integration.Definition, runBy string) (*integration.SourceTable, error) {
+// read through /api/grid as readAs (integration.LinkReadsAs: the owner),
+// after the checks a save makes are made again — the link's models may have
+// changed, and the owner's access with them, since anyone looked.
+func (ml *ModelLinks) ReadModelSource(ctx context.Context, def *integration.Definition, readAs string) (*integration.SourceTable, error) {
 	h := ml.h
 	src := def.Config.Model
 	refuse := func(code, format string, args ...any) (*integration.SourceTable, error) {
@@ -282,25 +321,9 @@ func (ml *ModelLinks) ReadModelSource(ctx context.Context, def *integration.Defi
 		return refuse(integration.ErrCodeInvalidData, "a model link reads another model")
 	}
 
-	var sub, name string
-	if err := h.db.QueryRow(ctx, `
-		SELECT COALESCE(keycloak_sub, ''), COALESCE(NULLIF(display_name, ''), email)
-		FROM identity.user WHERE id = $1::uuid
-	`, runBy).Scan(&sub, &name); err != nil || sub == "" {
-		return refuse(integration.ErrCodeAuth, "the developer this run acts for has no account here any more — a developer of both models must run it or switch its schedule on again")
-	}
-	a, err := h.actorByKeycloakSub(ctx, sub)
+	sub, err := h.linkReader(ctx, def, readAs)
 	if err != nil {
-		return refuse(integration.ErrCodeAuth, "%s can no longer sign in — a developer of both models must run the link or switch its schedule on again", name)
-	}
-	for _, m := range []string{def.ModelID, src.ModelID} {
-		ok, berr := h.buildsModel(ctx, a, m)
-		if berr != nil {
-			return nil, berr
-		}
-		if !ok {
-			return refuse(integration.ErrCodeAuth, "%s is no longer a developer of both models — a developer of both must run the link or switch its schedule on again", name)
-		}
+		return nil, err
 	}
 
 	if lm.ActiveRevisionID == "" {
@@ -385,7 +408,7 @@ type modelLinkItem struct {
 	SourceSwitchedBy string        `json:"source_switched_by,omitempty"`
 	SourceSwitchedAt *time.Time    `json:"source_switched_at,omitempty"`
 	Schedule         string        `json:"schedule"`
-	ScheduleBy       string        `json:"schedule_by,omitempty"`
+	Owner            string        `json:"owner,omitempty"` // whom it reads as
 	Target           modelLinkEnd  `json:"target"`
 	Source           modelLinkEnd  `json:"source"`
 	LastRun          *modelLinkRun `json:"last_run,omitempty"`
@@ -401,7 +424,7 @@ func (h *handler) listModelLinks(ctx context.Context, where string, args ...any)
 		            WHEN sc.kind = 'interval' THEN 'every ' || sc.interval_seconds || 's'
 		            ELSE sc.cron_expr || ' (' || sc.timezone || ')' END
 		         || CASE WHEN sc.kind IS NOT NULL AND sc.kind <> 'manual' AND NOT sc.enabled THEN ' — off' ELSE '' END,
-		       COALESCE(NULLIF(eu.display_name, ''), eu.email, ''),
+		       COALESCE(NULLIF(ou.display_name, ''), ou.email, ''),
 		       tapp.id::text, tapp.name, tm.id::text, tm.name, COALESCE(rev.name, ''),
 		       COALESCE(tm.active_revision_id = i.revision_id, false),
 		       sapp.id::text, sapp.name, sm.id::text, sm.name, COALESCE(i.config->'model'->>'grid', ''),
@@ -414,7 +437,7 @@ func (h *handler) listModelLinks(ctx context.Context, where string, args ...any)
 		LEFT JOIN model.revision rev ON rev.id = i.revision_id
 		LEFT JOIN identity.user su ON su.id = i.source_switched_by
 		LEFT JOIN model.integration_schedule sc ON sc.integration_id = i.id
-		LEFT JOIN identity.user eu ON eu.id = sc.enabled_by
+		LEFT JOIN identity.user ou ON ou.id = i.link_owner
 		LEFT JOIN LATERAL (
 		    SELECT status, finished_at, error_code, message, records_written
 		    FROM model.integration_run
@@ -435,7 +458,7 @@ func (h *handler) listModelLinks(ctx context.Context, where string, args ...any)
 		var runAt *time.Time
 		var runWritten *int
 		if err := rows.Scan(&it.ID, &it.LinkID, &it.Name, &it.Status, &it.Enabled, &it.SourceEnabled,
-			&it.SourceSwitchedBy, &it.SourceSwitchedAt, &it.Schedule, &it.ScheduleBy,
+			&it.SourceSwitchedBy, &it.SourceSwitchedAt, &it.Schedule, &it.Owner,
 			&it.Target.ApplicationID, &it.Target.ApplicationName, &it.Target.ModelID, &it.Target.ModelName,
 			&it.Target.Revision, &it.Target.ActiveRevision,
 			&it.Source.ApplicationID, &it.Source.ApplicationName, &it.Source.ModelID, &it.Source.ModelName, &it.Source.Grid,

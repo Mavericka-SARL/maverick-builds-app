@@ -40921,9 +40921,9 @@ func (s *ModelLink) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
-		if s.ScheduleBy.Set {
-			e.FieldStart("schedule_by")
-			s.ScheduleBy.Encode(e)
+		if s.Owner.Set {
+			e.FieldStart("owner")
+			s.Owner.Encode(e)
 		}
 	}
 	{
@@ -40956,7 +40956,7 @@ var jsonFieldsNameOfModelLink = [13]string{
 	6:  "source_switched_by",
 	7:  "source_switched_at",
 	8:  "schedule",
-	9:  "schedule_by",
+	9:  "owner",
 	10: "target",
 	11: "source",
 	12: "last_run",
@@ -41060,15 +41060,15 @@ func (s *ModelLink) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"schedule\"")
 			}
-		case "schedule_by":
+		case "owner":
 			if err := func() error {
-				s.ScheduleBy.Reset()
-				if err := s.ScheduleBy.Decode(d); err != nil {
+				s.Owner.Reset()
+				if err := s.Owner.Decode(d); err != nil {
 					return err
 				}
 				return nil
 			}(); err != nil {
-				return errors.Wrap(err, "decode field \"schedule_by\"")
+				return errors.Wrap(err, "decode field \"owner\"")
 			}
 		case "target":
 			if err := func() error {

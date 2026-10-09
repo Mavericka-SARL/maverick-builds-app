@@ -57,7 +57,7 @@ export function ModelLinksTable({ links, loading, sides, onSwitch, emptyTitle }:
     {
       id: "schedule", header: "Schedule",
       cell: (l: ModelLink) => (
-        <span>{l.schedule}{l.schedule_by ? <span className="mvx-admin-muted"> · runs as {l.schedule_by}</span> : null}</span>
+        <span>{l.schedule}{l.owner ? <span className="mvx-admin-muted"> · reads as {l.owner}</span> : null}</span>
       ),
     },
     {

@@ -50,6 +50,8 @@ const (
 	linkTgtDev = "ml-tgtdev" // developer of the target application only
 	linkSrcDev = "ml-srcdev" // developer of the source application only
 	linkAdmin  = "ml-admin"  // the tenant's administrator
+	linkUser   = "ml-user"   // a business user of the target application only
+	linkDev2   = "ml-dev2"   // a second developer of both applications
 )
 
 // req calls the gateway as persona in app (and its revision).
@@ -150,6 +152,8 @@ func setupLinkFixture(t *testing.T, provider ...providers.Provider) *linkFixture
 	person(linkTgtDev, "developer", f.tgtApp)
 	person(linkSrcDev, "developer", f.srcApp)
 	person(linkAdmin, "tenant_admin")
+	person(linkUser, "business_user", f.tgtApp)
+	person(linkDev2, "developer")
 
 	t.Setenv("DEV_MODE", "true")
 	// The handler as NewHandlerWithDeps assembles it, with a scripted AI
@@ -318,17 +322,32 @@ func TestModelLinkEndToEnd(t *testing.T) {
 
 	// ── Activate, run: the source's values, calculated ones included ──
 	f.ok("PATCH", "/api/developer/integrations/"+id, linkDev, f.tgtApp, f.tgtRev, map[string]any{"status": "active"})
-	status, raw = f.req("POST", "/api/integrations/"+id+"/run", linkTgtDev, f.tgtApp, f.tgtRev, nil)
-	f.refused("run as a developer of the target only", status, raw, http.StatusBadRequest, "developer of both models")
-	f.ok("POST", "/api/integrations/"+id+"/run", linkDev, f.tgtApp, f.tgtRev, nil)
+	owner := func() string {
+		var o string
+		_ = f.pool.QueryRow(ctx, `SELECT COALESCE(link_owner::text,'') FROM model.integration_def WHERE id=$1::uuid`, id).Scan(&o)
+		return o
+	}
+	if owner() != f.devID {
+		t.Fatalf("owner %q, want the developer who set the link up", owner())
+	}
+	// A business user with no access to the source model runs it — a
+	// dashboard button's run — and it reads as the owner.
+	f.ok("POST", "/api/integrations/"+id+"/run", linkUser, f.tgtApp, f.tgtRev, nil)
 	// Two records, a value of each of two metrics: four cells.
 	if run := f.runQueued(); run.Status != "success" || run.RecordsRead != 2 || run.RecordsWritten != 4 {
-		t.Fatalf("run: %+v", run)
+		t.Fatalf("a business user's run: %+v", run)
 	}
-	// A second run reads the same values and leaves the target as it was.
-	f.ok("POST", "/api/integrations/"+id+"/run", linkDev, f.tgtApp, f.tgtRev, nil)
+	// So does a developer of the target only; it reads the same values and
+	// leaves the target as it was.
+	f.ok("POST", "/api/integrations/"+id+"/run", linkTgtDev, f.tgtApp, f.tgtRev, nil)
 	if run := f.runQueued(); run.Status != "success" {
-		t.Fatalf("second run: %+v", run)
+		t.Fatalf("a target developer's run: %+v", run)
+	}
+	// Changing its schedule is the target side's: it keeps the owner.
+	f.ok("PATCH", "/api/developer/integrations/"+id, linkTgtDev, f.tgtApp, f.tgtRev, map[string]any{"schedule": map[string]any{
+		"kind": "interval", "interval_seconds": 3600, "timezone": "UTC", "enabled": true, "overlap_policy": "skip", "misfire_policy": "skip"}})
+	if owner() != f.devID {
+		t.Fatal("a schedule change moved the owner")
 	}
 	for _, c := range []struct {
 		metric, region string
@@ -395,14 +414,27 @@ func TestModelLinkEndToEnd(t *testing.T) {
 		t.Errorf("integration.switched audit events = %d, want 3", audits)
 	}
 
-	// ── A developer who loses the source model stops the link ──
-	if _, err := st.Enqueue(ctx, id, "schedule", f.devID, false, nil); err != nil {
+	// ── An owner who loses the source model stops the link, for everyone ──
+	if _, err := st.Enqueue(ctx, id, "schedule", "", false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.pool.Exec(ctx, `INSERT INTO identity.user_app_access (user_id, application_id) VALUES ($1::uuid, $2::uuid)`, f.devID, f.tgtApp); err != nil {
 		t.Fatal(err)
 	}
 	if run := f.runQueued(); run.Status != "failed" || run.ErrorCode != integration.ErrCodeAuth || !strings.Contains(run.Message, "no longer a developer of both models") {
-		t.Fatalf("run for a developer who lost the source: %+v", run)
+		t.Fatalf("scheduled run of a link whose owner lost the source: %+v", run)
+	}
+	status, raw = f.req("POST", "/api/integrations/"+id+"/run", linkUser, f.tgtApp, f.tgtRev, nil)
+	f.refused("a business user's run of a stopped link", status, raw, http.StatusBadRequest, "the link has stopped")
+	// A developer of both activates it again and becomes its owner.
+	f.ok("PATCH", "/api/developer/integrations/"+id, linkDev2, f.tgtApp, f.tgtRev, map[string]any{"status": "active"})
+	var dev2 string
+	_ = f.pool.QueryRow(ctx, `SELECT id::text FROM identity.user WHERE keycloak_sub=$1`, linkDev2).Scan(&dev2)
+	if owner() != dev2 {
+		t.Fatalf("owner after re-activation %q, want the second developer", owner())
+	}
+	f.ok("POST", "/api/integrations/"+id+"/run", linkUser, f.tgtApp, f.tgtRev, nil)
+	if run := f.runQueued(); run.Status != "success" {
+		t.Fatalf("a business user's run after re-activation: %+v", run)
 	}
 }

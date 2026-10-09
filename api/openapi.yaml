@@ -120,7 +120,7 @@ components:
         source_switched_by: { type: string }
         source_switched_at: { type: string, format: date-time }
         schedule:           { type: string }
-        schedule_by:        { type: string }
+        owner:              { type: string, description: "The developer of both models every run reads the source as" }
         target:             { $ref: "#/components/schemas/ModelLinkEnd" }
         source:             { $ref: "#/components/schemas/ModelLinkEnd" }
         last_run:
