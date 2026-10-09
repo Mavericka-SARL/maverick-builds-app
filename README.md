@@ -2,14 +2,13 @@
 
 > **Classification:** Current — Product overview of what the platform does today.
 
-maverickbuilds.app turns spreadsheets into decision-making apps for planning
-and analytics: budgets, forecasts, targets and headcount plans the whole
-business works in.
+maverickbuilds.app is the decision-making apps platform for planning, forecasting, data management
+and analytics.
 
 - **Multidimensional models**: regions, products, cost centres and time with
   totals on every level and spreadsheet-style formulas.
 - **Integrations**: Excel and CSV files, Google Sheets, REST APIs and SFTP
-  folders on a schedule; grid exports as CSV, XLSX or JSON.
+  folders on a schedule; grid exports as CSV, XLSX or JSON. ClickHouse and MySQL are coming soon.
 - **Roles and workflows**: roles defined by the business with access down to
   each member and metric, and approval steps with due dates and reminders.
 - **Dashboards and chat with data**: charts, KPIs and live tables, plus a
