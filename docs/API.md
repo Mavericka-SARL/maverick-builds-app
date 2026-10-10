@@ -28,12 +28,14 @@ application. Resource handlers check explicit model, revision, grid, form,
 dashboard, widget and job IDs — from the path and from the request body —
 against the actor's accessible scope.
 
-The read-only chat connector is served at `/mcp` when `MCP_ENABLED=true`
-(Model Context Protocol, not REST; see [CHAT_CONNECTOR.md](CHAT_CONNECTOR.md)),
-with its OAuth protected-resource metadata at
+The chat connector is served at `/mcp` when `MCP_ENABLED=true` (Model
+Context Protocol, not REST; see [CHAT_CONNECTOR.md](CHAT_CONNECTOR.md)), with
+its OAuth protected-resource metadata at
 `/.well-known/oauth-protected-resource[/mcp]`. It accepts only tokens of the
-registered host clients (`MCP_CLIENTS`), and reads grid data through the grid
-routes below as the token's subject.
+registered host clients (`MCP_CLIENTS`), reads grid data through the grid
+routes below as the token's subject, and — for a token that also carries
+`grids:write`, in a tenant that has not turned chat writes off — writes cells
+through `POST /api/cells/batch`.
 
 Revisions: a model's active revision is open to everyone who opens the model;
 any other is its builders' (developers, tenant and platform admins with builder
@@ -70,6 +72,7 @@ user with a role; the handler then applies the scope checks above.
 | `GET /api/grid/series` | one grid's metrics resolved along one of its dimensions (the dashboard chart resolver without a dashboard); a hidden or unknown context member is refused alike | authenticated + model/member/metric access |
 | `/api/metrics`, `/api/dimensions`, `/api/formula/refs` | runtime metric and dimension summaries, formula reference catalog | authenticated + model access |
 | `/api/cells` | input fact writeback and recalculation | authenticated + shared write guard |
+| `POST /api/cells/batch` | up to 500 cells of one model, all or nothing: every cell checked as `/api/cells` checks one, then written in one transaction with one recalculation; `dry_run` checks only; 422 lists each refused cell by index | authenticated + shared write guard |
 | `GET /api/cells/history` | one input cell's change history, including archived rows (enterprise) | authenticated + metric and member access, hidden ancestors included |
 | `/api/dashboards`, `/api/folders` | role-visible dashboard runtime; list, detail, folders and chart-data apply the same rule: business-role assignments, which an administrator of the dashboard's application (builder reach over the model, or `business_admin` of its workspace) passes | authenticated + business-role assignment |
 | `POST /api/dashboard-widgets/{id}/chart-data` | server-resolved chart series used by every chart widget | dashboard + member + metric access |
@@ -78,6 +81,7 @@ user with a role; the handler then applies the scope checks above.
 | `/api/workflow/history` | latest instances of the applications the caller administers (its business_admin workspaces; `X-App-Id` narrows to one application), without test runs | `business_admin` |
 | `/api/notifications`, `…/mark-read` | list and mark read (own notifications only) | authenticated |
 | `/api/notifications/settings*` | per-tenant e-mail delivery settings and a test send | `platform_admin` or `tenant_admin` |
+| `/api/admin/connector-settings` | whether the tenant's people may change grid values from a chat connection (on by default) | `platform_admin` or `tenant_admin` |
 | `/api/forms*`, `/api/records*` | form runtime and record actions; CSV/XLSX form export/import; `GET /api/forms/{id}/records` pages the records the caller may see (`limit` ≤ 1000, `cursor` from the `X-Next-Cursor` header), withheld records neither filling a page nor ending the list | reach of the form's application, plus per-record permissions: the creator edits and deletes their own draft or submitted records and moves them only between draft and submitted; business admins of the workspace, developers and tenant admins within their scope, and platform admins do everything; `POST /api/forms/{id}/sync` is admin-only |
 | form definition create/update/delete under `/api/forms` | building forms | `developer` |
 | `/api/automation/rules*` | automation rules (list: authenticated; create/update/delete, including cron schedules) | `developer` |

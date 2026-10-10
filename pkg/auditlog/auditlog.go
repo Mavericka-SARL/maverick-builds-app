@@ -33,12 +33,15 @@ const (
 	// Pre-existing, carried over unchanged from the old per-handler
 	// logAudit call sites (same string values, so replacing those call
 	// sites with auditlog.Log is behavior-preserving).
-	EventModelExported          EventType = "model.exported"
-	EventModelImported          EventType = "model.imported"
-	EventRevisionCreated        EventType = "revision.created"
-	EventRevisionActivated      EventType = "revision.activated"
-	EventRevisionDeleted        EventType = "revision.deleted"
-	EventCellWritten            EventType = "cell.written"
+	EventModelExported     EventType = "model.exported"
+	EventModelImported     EventType = "model.imported"
+	EventRevisionCreated   EventType = "revision.created"
+	EventRevisionActivated EventType = "revision.activated"
+	EventRevisionDeleted   EventType = "revision.deleted"
+	EventCellWritten       EventType = "cell.written"
+	// A batch of cells written at once (POST /api/cells/batch): one event
+	// for the batch, not one per cell.
+	EventCellsWritten           EventType = "cells.written"
 	EventTaskCompleted          EventType = "task.completed"
 	EventWorkflowSubmitted      EventType = "workflow.submitted"
 	EventMetricCreated          EventType = "metric.created"
@@ -66,11 +69,14 @@ const (
 	// an administrator proving the relay works by mailing themselves.
 	EventNotificationSettingsUpdated EventType = "notification.settings_updated"
 	EventNotificationTestSent        EventType = "notification.test_sent"
-	EventTenantDeleted               EventType = "tenant.deleted"
-	EventApplicationCreated          EventType = "application.created"
-	EventApplicationUpdated          EventType = "application.updated"
-	EventApplicationDeleted          EventType = "application.deleted"
-	EventModelCreated                EventType = "model.created"
+	// Whether people may change grid data from a chat connection
+	// (ChatGPT, Claude) in a tenant.
+	EventConnectorSettingsUpdated EventType = "connector.settings_updated"
+	EventTenantDeleted            EventType = "tenant.deleted"
+	EventApplicationCreated       EventType = "application.created"
+	EventApplicationUpdated       EventType = "application.updated"
+	EventApplicationDeleted       EventType = "application.deleted"
+	EventModelCreated             EventType = "model.created"
 	// EventModelActiveRevisionSet is deliberately distinct from
 	// EventRevisionActivated (the developer-console path): both flip a
 	// model's active revision, but through different UIs/roles, and should

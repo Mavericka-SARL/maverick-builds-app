@@ -6,7 +6,7 @@
  * has published nothing says so instead of showing an unsigned policy.
  */
 import { test, expect } from "@playwright/test";
-import { mockApi, legalUnpublished, signupOptionsSmall } from "./mocks";
+import { mockApi, legalInfo, legalUnpublished, signupOptionsSmall } from "./mocks";
 
 test("the terms name the operator and quote the server's plan", async ({ page }) => {
   await mockApi(page);
@@ -50,6 +50,18 @@ test("the privacy notice states what is held and who else sees it", async ({ pag
   await expect(doc).toContainText("kept for fourteen days");
   await expect(doc).toContainText("complain to a data-protection supervisory authority");
   await expect(doc.getByRole("link", { name: "Terms of service" })).toHaveAttribute("href", "/terms");
+});
+
+test("the privacy notice describes the chat connector only where it runs", async ({ page }) => {
+  await mockApi(page);
+  await page.goto("/privacy");
+  await expect(page.getByTestId("legal-privacy")).not.toContainText("ChatGPT");
+
+  await mockApi(page, { legal: { ...legalInfo, chat_connector: true } });
+  await page.goto("/privacy");
+  const doc = page.getByTestId("legal-privacy");
+  await expect(doc).toContainText("You can also connect ChatGPT or Claude to your account.");
+  await expect(doc).toContainText("your workspace's administrator can turn this off");
 });
 
 test("a deployment that publishes nothing says so, and /signup promises nothing", async ({ page }) => {

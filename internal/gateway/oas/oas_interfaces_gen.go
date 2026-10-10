@@ -293,6 +293,10 @@ type GetChartDataRes interface {
 	getChartDataRes()
 }
 
+type GetConnectorSettingsRes interface {
+	getConnectorSettingsRes()
+}
+
 type GetDemoRes interface {
 	getDemoRes()
 }
@@ -745,6 +749,10 @@ type UpdateBusinessMemberRes interface {
 	updateBusinessMemberRes()
 }
 
+type UpdateConnectorSettingsRes interface {
+	updateConnectorSettingsRes()
+}
+
 type UpdateDashboardRes interface {
 	updateDashboardRes()
 }
@@ -843,6 +851,10 @@ type ValidateIntegrationRes interface {
 
 type ValidateWorkflowRes interface {
 	validateWorkflowRes()
+}
+
+type WritebackBatchRes interface {
+	writebackBatchRes()
 }
 
 type WritebackRes interface {

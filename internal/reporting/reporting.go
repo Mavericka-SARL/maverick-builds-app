@@ -1,9 +1,10 @@
 // Package reporting reads a model's grid data for the chat connector
 // (internal/mcpserver), as one signed-in person, through the engine's own
 // read routes (Reader), and lays it out as tables, charts, comparisons and
-// reports (presentation.go). The connector analyses grid data only: charts
+// reports (presentation.go). The connector works on grid data only: charts
 // and reports are made in the chat from grids, never from dashboards, and
-// nothing is saved in maverickbuilds.app.
+// are not saved in maverickbuilds.app. The one change it makes is writing
+// grid cells, through the engine's own write route (writes.go).
 //
 // It decides nothing about access. Every read is a route's — /api/grid,
 // /api/grids, /api/grid/series — made as the person the connector was
@@ -92,13 +93,21 @@ var errUnavailable = &Error{Code: CodeUnavailable, Message: "the read could not 
 // Service reads for any subject; As binds it to one.
 type Service struct {
 	reader  Reader
+	writer  Writer
 	cursors *cursorCodec
 	now     func() time.Time
 }
 
-// New returns a Service reading through r.
+// New returns a Service reading through r. It writes nothing until given a
+// Writer (WithWriter).
 func New(r Reader) *Service {
 	return &Service{reader: r, cursors: newCursorCodec(), now: time.Now}
+}
+
+// WithWriter lets the service write cells through w.
+func (s *Service) WithWriter(w Writer) *Service {
+	s.writer = w
+	return s
 }
 
 // Session is a Service bound to one verified subject. It holds nothing
@@ -107,6 +116,9 @@ func New(r Reader) *Service {
 type Session struct {
 	s       *Service
 	subject string
+	// client is the chat host's client a write is recorded as made
+	// through (Via).
+	client string
 }
 
 // As binds the service to subject.
@@ -296,7 +308,10 @@ type AccessFamily struct {
 }
 
 // Access summarizes the person's reach through this connection.
-func (s *Session) Access(ctx context.Context) (Access, error) {
+//
+// writes says whether this connection was granted writing; whether a write
+// lands is still decided per cell, and by the tenant (write_cells).
+func (s *Session) Access(ctx context.Context, writes bool) (Access, error) {
 	var a Access
 	var me struct {
 		Roles []string `json:"roles"`
@@ -308,13 +323,20 @@ func (s *Session) Access(ctx context.Context) (Access, error) {
 	if a.Roles == nil {
 		a.Roles = []string{}
 	}
-	a.ReadOnly = true
-	a.Note = "Every read is made as you, under the access your administrators and developers configured in maverickbuilds.app, and is decided again on every call. This connection reads grid data of each model's active revision; it never changes data, and charts and reports made from it are not saved in maverickbuilds.app."
+	a.ReadOnly = !writes || s.s.writer == nil
+	a.Note = "Every read and write is made as you, under the access your administrators and developers configured in maverickbuilds.app, and is decided again on every call. This connection reads grid data of each model's active revision; charts and reports made from it are not saved in maverickbuilds.app."
+	if a.ReadOnly {
+		a.Note += " It cannot change data: to write cells from this chat, disconnect maverickbuilds.app and connect it again, allowing it to change grid values."
+	} else {
+		a.Note += " It can write the input cells you may write in the console, and nothing else; each write is all or nothing."
+	}
 	a.Families = []AccessFamily{
 		{Family: "models", Tools: []string{"list_models"}, Available: true,
 			DecidedBy: "your application and model grants"},
 		{Family: "grids", Tools: []string{"list_sources", "describe_source", "list_members", "query_grid", "compare_grid", "render_chart", "render_report"}, Available: true,
 			DecidedBy: "model access; hidden members and metrics are left out, and values that depend on them are withheld"},
+		{Family: "cells", Tools: []string{"write_cells"}, Available: !a.ReadOnly,
+			DecidedBy: "the write permission you granted this connection, your tenant's chat-writes setting, and per cell: input metrics only, your access rules, workflow locks and the workspace's plan"},
 	}
 	return a, nil
 }

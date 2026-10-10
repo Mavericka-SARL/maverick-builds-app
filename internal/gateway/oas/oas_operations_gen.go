@@ -103,6 +103,7 @@ const (
 	GetCellHistoryOperation               OperationName = "GetCellHistory"
 	GetChartDataOperation                 OperationName = "GetChartData"
 	GetConnectorInfoOperation             OperationName = "GetConnectorInfo"
+	GetConnectorSettingsOperation         OperationName = "GetConnectorSettings"
 	GetDemoOperation                      OperationName = "GetDemo"
 	GetDeveloperModelOperation            OperationName = "GetDeveloperModel"
 	GetFormRecordOperation                OperationName = "GetFormRecord"
@@ -252,6 +253,7 @@ const (
 	UpdateBARoleOperation                 OperationName = "UpdateBARole"
 	UpdateBrandingOperation               OperationName = "UpdateBranding"
 	UpdateBusinessMemberOperation         OperationName = "UpdateBusinessMember"
+	UpdateConnectorSettingsOperation      OperationName = "UpdateConnectorSettings"
 	UpdateDashboardOperation              OperationName = "UpdateDashboard"
 	UpdateDashboardWidgetOperation        OperationName = "UpdateDashboardWidget"
 	UpdateDimensionOperation              OperationName = "UpdateDimension"
@@ -279,4 +281,5 @@ const (
 	ValidateIntegrationOperation          OperationName = "ValidateIntegration"
 	ValidateWorkflowOperation             OperationName = "ValidateWorkflow"
 	WritebackOperation                    OperationName = "Writeback"
+	WritebackBatchOperation               OperationName = "WritebackBatch"
 )

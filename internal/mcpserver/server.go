@@ -1,20 +1,23 @@
 // Package mcpserver is the chat connector's Model Context Protocol server:
 // the tools ChatGPT, Claude and other MCP hosts call to analyse a person's
-// grid data and chart it, compare it and report on it in the conversation.
-// The protocol lives here; the reads are internal/reporting's, made as the
-// person the host's token was issued for (the token's subject, verified by
-// the gateway before any call reaches a tool).
+// grid data and chart it, compare it and report on it in the conversation,
+// and to write the grid cells the person may write. The protocol lives
+// here; the reads and writes are internal/reporting's, made as the person
+// the host's token was issued for (the token's subject, verified by the
+// gateway before any call reaches a tool).
 //
 // Only grid data is read. Charts and reports are made in the chat from
-// grids — never from dashboards — and nothing is saved in maverickbuilds.app.
-// No tool writes, publishes, runs or schedules anything, and the gateway
-// refuses any route outside its grid-read allowlist to a connector's reads
-// besides.
+// grids — never from dashboards — and are not saved in maverickbuilds.app.
+// One tool changes data, write_cells, and only for a token that also
+// carries the write scope; no tool publishes, runs or schedules anything,
+// and the gateway refuses any route outside its grid allowlists to a
+// connector's requests besides.
 package mcpserver
 
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -27,27 +30,67 @@ import (
 type Observer func(ctx context.Context, subject, tool string, took time.Duration, err error)
 
 // Instructions is what the server tells a host about itself.
-const Instructions = `Read-only analysis of maverickbuilds.app grid data, as the signed-in person.
+const Instructions = `Analysis of maverickbuilds.app grid data, and entry of grid values, as the signed-in person.
 
 Start with list_models, then pass its application_id and model_id to every other tool. Discover before querying: list_sources lists the grids, describe_source their metrics and dimensions, list_members the members you can filter or group by. Never guess an id.
 
 query_grid reads the engine's own values: one total per metric for a filtered slice, or values per member of a group_by dimension. compare_grid compares two readings (actual against budget, one period against another). render_chart and render_report draw charts and reports from grid queries in this conversation; they are not saved in maverickbuilds.app and do not use dashboards.
 
-Every read is made under the access the person's administrators configured; hidden members and metrics are absent, and values that depend on them are withheld. A value whose state is not "ok" is not zero. Ratios, averages and balances are not additive: ask query_grid for the total you need instead of adding rows. This connection cannot change data.`
+Every read is made under the access the person's administrators configured; hidden members and metrics are absent, and values that depend on them are withheld. A value whose state is not "ok" is not zero. Ratios, averages and balances are not additive: ask query_grid for the total you need instead of adding rows.
+
+write_cells is the only tool that changes data: it writes input cells of the active revision as the person, all or nothing. Before calling it, show the person the cells and values you will write and get their confirmation; use dry_run to check them first. Name each cell by an input metric (describe_source) and one leaf member of every dimension of that metric (list_members). Read the cells back with query_grid afterwards. A connection granted read access only refuses writes: the person must disconnect and connect again, allowing changes.`
+
+// ClientKey is the TokenInfo.Extra key under which the gateway gives the
+// host's client id (the token's azp), recorded with each write.
+const ClientKey = "client"
+
+// Options configures the server.
+type Options struct {
+	// Version is reported to hosts as the server's version.
+	Version string
+	// WriteScope is the scope a token must carry for write_cells to write.
+	WriteScope string
+	// Observe is told about every tool call; nil observes nothing.
+	Observe Observer
+}
 
 // New returns the connector's MCP server over svc.
-func New(svc *reporting.Service, version string, observe Observer) *sdk.Server {
-	s := sdk.NewServer(&sdk.Implementation{Name: "maverickbuilds-reporting", Title: "maverickbuilds.app reporting", Version: version},
+func New(svc *reporting.Service, opts Options) *sdk.Server {
+	s := sdk.NewServer(&sdk.Implementation{Name: "maverickbuilds-reporting", Title: "maverickbuilds.app", Version: opts.Version},
 		&sdk.ServerOptions{Instructions: Instructions})
-	t := &tools{svc: svc, observe: observe}
+	t := &tools{svc: svc, observe: opts.Observe, writeScope: opts.WriteScope}
 	t.register(s)
 	t.registerPresentation(s)
+	t.registerWrites(s)
 	return s
 }
 
 type tools struct {
-	svc     *reporting.Service
-	observe Observer
+	svc        *reporting.Service
+	observe    Observer
+	writeScope string
+}
+
+// call is what a tool body is given about its call: the verified subject,
+// and whether its token may write.
+type call struct {
+	subject string
+	client  string
+	writes  bool
+}
+
+func (t *tools) callOf(req *sdk.CallToolRequest) call {
+	var c call
+	if req == nil || req.Extra == nil || req.Extra.TokenInfo == nil {
+		return c
+	}
+	ti := req.Extra.TokenInfo
+	c.subject = ti.UserID
+	if client, ok := ti.Extra[ClientKey].(string); ok {
+		c.client = client
+	}
+	c.writes = t.writeScope != "" && slices.Contains(ti.Scopes, t.writeScope)
+	return c
 }
 
 // errNotSignedIn is a call without a verified subject — never reached
@@ -64,21 +107,25 @@ func readOnly(title string) *sdk.ToolAnnotations {
 // read wraps a tool body: it binds the reporting session to the verified
 // subject of this call, and reports the call to the observer.
 func read[In any](t *tools, name string, body func(ctx context.Context, s *reporting.Session, in In) (any, error)) sdk.ToolHandlerFor[In, any] {
+	return called(t, name, func(ctx context.Context, s *reporting.Session, _ call, in In) (any, error) {
+		return body(ctx, s, in)
+	})
+}
+
+// called is read with the call's details given to the body.
+func called[In any](t *tools, name string, body func(ctx context.Context, s *reporting.Session, c call, in In) (any, error)) sdk.ToolHandlerFor[In, any] {
 	return func(ctx context.Context, req *sdk.CallToolRequest, in In) (*sdk.CallToolResult, any, error) {
 		start := time.Now()
-		subject := ""
-		if req != nil && req.Extra != nil && req.Extra.TokenInfo != nil {
-			subject = req.Extra.TokenInfo.UserID
-		}
+		c := t.callOf(req)
 		var out any
 		var err error
-		if subject == "" {
+		if c.subject == "" {
 			err = errNotSignedIn
 		} else {
-			out, err = body(ctx, t.svc.As(subject), in)
+			out, err = body(ctx, t.svc.As(c.subject).Via(c.client), c, in)
 		}
 		if t.observe != nil {
-			t.observe(ctx, subject, name, time.Since(start), err)
+			t.observe(ctx, c.subject, name, time.Since(start), err)
 		}
 		if err != nil {
 			var re *reporting.Error
@@ -88,7 +135,7 @@ func read[In any](t *tools, name string, body func(ctx context.Context, s *repor
 			if errors.Is(err, errNotSignedIn) {
 				return nil, nil, err
 			}
-			return nil, nil, errors.New("unavailable: the read could not be completed; try again")
+			return nil, nil, errors.New("unavailable: the call could not be completed; try again")
 		}
 		return nil, out, nil
 	}
@@ -141,10 +188,10 @@ type gridQueryIn struct {
 }
 
 func (t *tools) register(s *sdk.Server) {
-	sdk.AddTool(s, &sdk.Tool{Name: "get_connection_access", Annotations: readOnly("What this connection can read"),
-		Description: "Your roles and what this read-only connection reads for you, with what decides each. Names no one and lists nothing about anyone else."},
-		read(t, "get_connection_access", func(ctx context.Context, s *reporting.Session, _ accessIn) (any, error) {
-			return s.Access(ctx)
+	sdk.AddTool(s, &sdk.Tool{Name: "get_connection_access", Annotations: readOnly("What this connection can do"),
+		Description: "Your roles, what this connection reads for you and whether it may write cells, with what decides each. Names no one and lists nothing about anyone else."},
+		called(t, "get_connection_access", func(ctx context.Context, s *reporting.Session, c call, _ accessIn) (any, error) {
+			return s.Access(ctx, c.writes)
 		}))
 
 	sdk.AddTool(s, &sdk.Tool{Name: "list_models", Annotations: readOnly("List models"),

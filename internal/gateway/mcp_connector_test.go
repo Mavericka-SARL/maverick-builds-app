@@ -160,7 +160,7 @@ func TestMCPConnectorReadsAsThePerson(t *testing.T) {
 	reed := f.as(f.ro)
 	dev := f.as(f.dev)
 
-	t.Run("every tool is a read", func(t *testing.T) {
+	t.Run("every tool but write_cells is a read", func(t *testing.T) {
 		list, err := reed.cs.ListTools(context.Background(), nil)
 		if err != nil {
 			t.Fatal(err)
@@ -171,12 +171,19 @@ func TestMCPConnectorReadsAsThePerson(t *testing.T) {
 		}
 		slices.Sort(names)
 		want := []string{"compare_grid", "describe_source", "get_connection_access", "list_members", "list_models",
-			"list_sources", "query_grid", "render_chart", "render_report"}
+			"list_sources", "query_grid", "render_chart", "render_report", "write_cells"}
 		if !slices.Equal(names, want) {
 			t.Errorf("tools = %v, want the grid tools only %v", names, want)
 		}
 		for _, tool := range list.Tools {
 			a := tool.Annotations
+			if tool.Name == "write_cells" {
+				// A host asks the person before a call that changes data.
+				if a == nil || a.ReadOnlyHint || a.DestructiveHint == nil || !*a.DestructiveHint {
+					t.Errorf("write_cells is not annotated as a write that overwrites")
+				}
+				continue
+			}
 			if a == nil || !a.ReadOnlyHint || a.DestructiveHint == nil || *a.DestructiveHint {
 				t.Errorf("%s is not annotated as a non-destructive read", tool.Name)
 			}
@@ -338,14 +345,37 @@ func TestDelegatedReadGate(t *testing.T) {
 
 	f := setupConnector(t)
 	h := NewHandlerWithDeps(logger.New("test"), f.pool, nil, Deps{})
-	for _, c := range [][2]string{{"POST", "/api/cells"}, {"GET", "/api/business-admin/users"}} {
-		req := httptest.NewRequestWithContext(withDelegatedSubject(context.Background(), f.admin), c[0], c[1], strings.NewReader(`{}`))
+	serve := func(ctx context.Context, method, path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequestWithContext(ctx, method, path, strings.NewReader(`{}`))
 		req.Header.Set("X-App-Id", f.appID)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
-		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "not a read this connection may make") {
+		return rec
+	}
+	gated := func(rec *httptest.ResponseRecorder) bool {
+		return rec.Code == http.StatusForbidden && strings.Contains(rec.Body.String(), "not a read this connection may make")
+	}
+	// A read — a chat connector's, or a model link's source read — writes
+	// nothing, the batch route included.
+	read := withDelegatedSubject(context.Background(), f.admin)
+	for _, c := range [][2]string{{"POST", "/api/cells"}, {"POST", "/api/cells/batch"}, {"GET", "/api/business-admin/users"}} {
+		if rec := serve(read, c[0], c[1]); !gated(rec) {
 			t.Errorf("%s %s as a connector's read: %d %s", c[0], c[1], rec.Code, rec.Body.String())
 		}
+	}
+	// A chat connection's write reaches the batch route and nothing else.
+	write := withDelegatedWrite(read, "claude-connector")
+	for _, c := range [][2]string{{"POST", "/api/cells"}, {"POST", "/api/forms/abc/records"}, {"PUT", "/api/admin/connector-settings"}} {
+		if rec := serve(write, c[0], c[1]); !gated(rec) {
+			t.Errorf("%s %s as a connector's write: %d %s", c[0], c[1], rec.Code, rec.Body.String())
+		}
+	}
+	if rec := serve(write, "POST", "/api/cells/batch"); gated(rec) {
+		t.Errorf("the batch route refused a connector's write at the gate: %d %s", rec.Code, rec.Body.String())
+	}
+	// The write mark means nothing without a delegated subject.
+	if _, ok := delegatedWrite(withDelegatedWrite(context.Background(), "x")); ok {
+		t.Error("a write mark with no delegated subject counts as a delegated write")
 	}
 }
 

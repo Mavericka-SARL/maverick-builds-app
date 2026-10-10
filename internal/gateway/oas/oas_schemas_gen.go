@@ -4827,6 +4827,83 @@ func (s *ConnectorInfoHostsItem) SetClientSecret(val OptString) {
 	s.ClientSecret = val
 }
 
+// Ref: #/components/schemas/ConnectorSettings
+type ConnectorSettings struct {
+	// People may write grid cells from ChatGPT or Claude (default true).
+	ChatWrites OptBool                   `json:"chat_writes"`
+	Scope      OptConnectorSettingsScope `json:"scope"`
+}
+
+// GetChatWrites returns the value of ChatWrites.
+func (s *ConnectorSettings) GetChatWrites() OptBool {
+	return s.ChatWrites
+}
+
+// GetScope returns the value of Scope.
+func (s *ConnectorSettings) GetScope() OptConnectorSettingsScope {
+	return s.Scope
+}
+
+// SetChatWrites sets the value of ChatWrites.
+func (s *ConnectorSettings) SetChatWrites(val OptBool) {
+	s.ChatWrites = val
+}
+
+// SetScope sets the value of Scope.
+func (s *ConnectorSettings) SetScope(val OptConnectorSettingsScope) {
+	s.Scope = val
+}
+
+func (*ConnectorSettings) getConnectorSettingsRes()    {}
+func (*ConnectorSettings) updateConnectorSettingsRes() {}
+
+type ConnectorSettingsScope struct {
+	CustomerID                  OptUUID `json:"customer_id"`
+	Deployment                  OptBool `json:"deployment"`
+	Inherited                   OptBool `json:"inherited"`
+	DeploymentSettingsAvailable OptBool `json:"deployment_settings_available"`
+}
+
+// GetCustomerID returns the value of CustomerID.
+func (s *ConnectorSettingsScope) GetCustomerID() OptUUID {
+	return s.CustomerID
+}
+
+// GetDeployment returns the value of Deployment.
+func (s *ConnectorSettingsScope) GetDeployment() OptBool {
+	return s.Deployment
+}
+
+// GetInherited returns the value of Inherited.
+func (s *ConnectorSettingsScope) GetInherited() OptBool {
+	return s.Inherited
+}
+
+// GetDeploymentSettingsAvailable returns the value of DeploymentSettingsAvailable.
+func (s *ConnectorSettingsScope) GetDeploymentSettingsAvailable() OptBool {
+	return s.DeploymentSettingsAvailable
+}
+
+// SetCustomerID sets the value of CustomerID.
+func (s *ConnectorSettingsScope) SetCustomerID(val OptUUID) {
+	s.CustomerID = val
+}
+
+// SetDeployment sets the value of Deployment.
+func (s *ConnectorSettingsScope) SetDeployment(val OptBool) {
+	s.Deployment = val
+}
+
+// SetInherited sets the value of Inherited.
+func (s *ConnectorSettingsScope) SetInherited(val OptBool) {
+	s.Inherited = val
+}
+
+// SetDeploymentSettingsAvailable sets the value of DeploymentSettingsAvailable.
+func (s *ConnectorSettingsScope) SetDeploymentSettingsAvailable(val OptBool) {
+	s.DeploymentSettingsAvailable = val
+}
+
 type CreateAdminApplicationOK struct {
 	ID        OptUUID   `json:"id"`
 	CreatedAt OptString `json:"created_at"`
@@ -8837,6 +8914,7 @@ func (*Error) setDefaultModelRes()             {}
 func (*Error) startIntegrationOAuthRes()       {}
 func (*Error) testIntegrationConnectionRes()   {}
 func (*Error) updateAutomationRuleRes()        {}
+func (*Error) updateConnectorSettingsRes()     {}
 func (*Error) updateDashboardRes()             {}
 func (*Error) updateDashboardWidgetRes()       {}
 func (*Error) updateFolderRes()                {}
@@ -10680,6 +10758,16 @@ func NewHistogramChartDataGetChartDataOK(v HistogramChartData) GetChartDataOK {
 }
 
 func (*GetChartDataOK) getChartDataRes() {}
+
+// GetConnectorSettingsConflict is response for GetConnectorSettings operation.
+type GetConnectorSettingsConflict struct{}
+
+func (*GetConnectorSettingsConflict) getConnectorSettingsRes() {}
+
+// GetConnectorSettingsForbidden is response for GetConnectorSettings operation.
+type GetConnectorSettingsForbidden struct{}
+
+func (*GetConnectorSettingsForbidden) getConnectorSettingsRes() {}
 
 type GetDeveloperModelOK struct {
 	AppName   string      `json:"app_name"`
@@ -17066,6 +17154,52 @@ func (o OptChartRuntimeRequestContext) Or(d ChartRuntimeRequestContext) ChartRun
 	return d
 }
 
+// NewOptConnectorSettingsScope returns new OptConnectorSettingsScope with value set to v.
+func NewOptConnectorSettingsScope(v ConnectorSettingsScope) OptConnectorSettingsScope {
+	return OptConnectorSettingsScope{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptConnectorSettingsScope is optional ConnectorSettingsScope.
+type OptConnectorSettingsScope struct {
+	Value ConnectorSettingsScope
+	Set   bool
+}
+
+// IsSet returns true if OptConnectorSettingsScope was set.
+func (o OptConnectorSettingsScope) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptConnectorSettingsScope) Reset() {
+	var v ConnectorSettingsScope
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptConnectorSettingsScope) SetTo(v ConnectorSettingsScope) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptConnectorSettingsScope) Get() (v ConnectorSettingsScope, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptConnectorSettingsScope) Or(d ConnectorSettingsScope) ConnectorSettingsScope {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptCreateApplicationRequestMode returns new OptCreateApplicationRequestMode with value set to v.
 func NewOptCreateApplicationRequestMode(v CreateApplicationRequestMode) OptCreateApplicationRequestMode {
 	return OptCreateApplicationRequestMode{
@@ -21123,6 +21257,144 @@ func (o OptWorkflowInstanceContext) Get() (v WorkflowInstanceContext, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptWorkflowInstanceContext) Or(d WorkflowInstanceContext) WorkflowInstanceContext {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptWritebackBatchOKStatus returns new OptWritebackBatchOKStatus with value set to v.
+func NewOptWritebackBatchOKStatus(v WritebackBatchOKStatus) OptWritebackBatchOKStatus {
+	return OptWritebackBatchOKStatus{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptWritebackBatchOKStatus is optional WritebackBatchOKStatus.
+type OptWritebackBatchOKStatus struct {
+	Value WritebackBatchOKStatus
+	Set   bool
+}
+
+// IsSet returns true if OptWritebackBatchOKStatus was set.
+func (o OptWritebackBatchOKStatus) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptWritebackBatchOKStatus) Reset() {
+	var v WritebackBatchOKStatus
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptWritebackBatchOKStatus) SetTo(v WritebackBatchOKStatus) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptWritebackBatchOKStatus) Get() (v WritebackBatchOKStatus, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptWritebackBatchOKStatus) Or(d WritebackBatchOKStatus) WritebackBatchOKStatus {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptWritebackBatchReqCellsItemDimCodes returns new OptWritebackBatchReqCellsItemDimCodes with value set to v.
+func NewOptWritebackBatchReqCellsItemDimCodes(v WritebackBatchReqCellsItemDimCodes) OptWritebackBatchReqCellsItemDimCodes {
+	return OptWritebackBatchReqCellsItemDimCodes{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptWritebackBatchReqCellsItemDimCodes is optional WritebackBatchReqCellsItemDimCodes.
+type OptWritebackBatchReqCellsItemDimCodes struct {
+	Value WritebackBatchReqCellsItemDimCodes
+	Set   bool
+}
+
+// IsSet returns true if OptWritebackBatchReqCellsItemDimCodes was set.
+func (o OptWritebackBatchReqCellsItemDimCodes) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptWritebackBatchReqCellsItemDimCodes) Reset() {
+	var v WritebackBatchReqCellsItemDimCodes
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptWritebackBatchReqCellsItemDimCodes) SetTo(v WritebackBatchReqCellsItemDimCodes) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptWritebackBatchReqCellsItemDimCodes) Get() (v WritebackBatchReqCellsItemDimCodes, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptWritebackBatchReqCellsItemDimCodes) Or(d WritebackBatchReqCellsItemDimCodes) WritebackBatchReqCellsItemDimCodes {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptWritebackBatchReqRecalc returns new OptWritebackBatchReqRecalc with value set to v.
+func NewOptWritebackBatchReqRecalc(v WritebackBatchReqRecalc) OptWritebackBatchReqRecalc {
+	return OptWritebackBatchReqRecalc{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptWritebackBatchReqRecalc is optional WritebackBatchReqRecalc.
+type OptWritebackBatchReqRecalc struct {
+	Value WritebackBatchReqRecalc
+	Set   bool
+}
+
+// IsSet returns true if OptWritebackBatchReqRecalc was set.
+func (o OptWritebackBatchReqRecalc) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptWritebackBatchReqRecalc) Reset() {
+	var v WritebackBatchReqRecalc
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptWritebackBatchReqRecalc) SetTo(v WritebackBatchReqRecalc) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptWritebackBatchReqRecalc) Get() (v WritebackBatchReqRecalc, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptWritebackBatchReqRecalc) Or(d WritebackBatchReqRecalc) WritebackBatchReqRecalc {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -26127,6 +26399,30 @@ type UpdateBusinessMemberOK struct{}
 
 func (*UpdateBusinessMemberOK) updateBusinessMemberRes() {}
 
+// UpdateConnectorSettingsConflict is response for UpdateConnectorSettings operation.
+type UpdateConnectorSettingsConflict struct{}
+
+func (*UpdateConnectorSettingsConflict) updateConnectorSettingsRes() {}
+
+// UpdateConnectorSettingsForbidden is response for UpdateConnectorSettings operation.
+type UpdateConnectorSettingsForbidden struct{}
+
+func (*UpdateConnectorSettingsForbidden) updateConnectorSettingsRes() {}
+
+type UpdateConnectorSettingsReq struct {
+	ChatWrites bool `json:"chat_writes"`
+}
+
+// GetChatWrites returns the value of ChatWrites.
+func (s *UpdateConnectorSettingsReq) GetChatWrites() bool {
+	return s.ChatWrites
+}
+
+// SetChatWrites sets the value of ChatWrites.
+func (s *UpdateConnectorSettingsReq) SetChatWrites(val bool) {
+	s.ChatWrites = val
+}
+
 type UpdateDashboardOK struct {
 	Status OptString `json:"status"`
 }
@@ -28910,6 +29206,393 @@ func (s *WorkflowStepStepType) UnmarshalText(data []byte) error {
 type WritebackBadRequest Error
 
 func (*WritebackBadRequest) writebackRes() {}
+
+type WritebackBatchBadRequest Error
+
+func (*WritebackBatchBadRequest) writebackBatchRes() {}
+
+// WritebackBatchForbidden is response for WritebackBatch operation.
+type WritebackBatchForbidden struct{}
+
+func (*WritebackBatchForbidden) writebackBatchRes() {}
+
+type WritebackBatchInternalServerError Error
+
+func (*WritebackBatchInternalServerError) writebackBatchRes() {}
+
+type WritebackBatchNotFound Error
+
+func (*WritebackBatchNotFound) writebackBatchRes() {}
+
+type WritebackBatchOK struct {
+	Status        OptWritebackBatchOKStatus `json:"status"`
+	RevisionID    OptUUID                   `json:"revision_id"`
+	Cells         OptInt                    `json:"cells"`
+	Cleared       OptInt                    `json:"cleared"`
+	Recalculating OptBool                   `json:"recalculating"`
+}
+
+// GetStatus returns the value of Status.
+func (s *WritebackBatchOK) GetStatus() OptWritebackBatchOKStatus {
+	return s.Status
+}
+
+// GetRevisionID returns the value of RevisionID.
+func (s *WritebackBatchOK) GetRevisionID() OptUUID {
+	return s.RevisionID
+}
+
+// GetCells returns the value of Cells.
+func (s *WritebackBatchOK) GetCells() OptInt {
+	return s.Cells
+}
+
+// GetCleared returns the value of Cleared.
+func (s *WritebackBatchOK) GetCleared() OptInt {
+	return s.Cleared
+}
+
+// GetRecalculating returns the value of Recalculating.
+func (s *WritebackBatchOK) GetRecalculating() OptBool {
+	return s.Recalculating
+}
+
+// SetStatus sets the value of Status.
+func (s *WritebackBatchOK) SetStatus(val OptWritebackBatchOKStatus) {
+	s.Status = val
+}
+
+// SetRevisionID sets the value of RevisionID.
+func (s *WritebackBatchOK) SetRevisionID(val OptUUID) {
+	s.RevisionID = val
+}
+
+// SetCells sets the value of Cells.
+func (s *WritebackBatchOK) SetCells(val OptInt) {
+	s.Cells = val
+}
+
+// SetCleared sets the value of Cleared.
+func (s *WritebackBatchOK) SetCleared(val OptInt) {
+	s.Cleared = val
+}
+
+// SetRecalculating sets the value of Recalculating.
+func (s *WritebackBatchOK) SetRecalculating(val OptBool) {
+	s.Recalculating = val
+}
+
+func (*WritebackBatchOK) writebackBatchRes() {}
+
+type WritebackBatchOKStatus string
+
+const (
+	WritebackBatchOKStatusOk    WritebackBatchOKStatus = "ok"
+	WritebackBatchOKStatusValid WritebackBatchOKStatus = "valid"
+)
+
+// AllValues returns all WritebackBatchOKStatus values.
+func (WritebackBatchOKStatus) AllValues() []WritebackBatchOKStatus {
+	return []WritebackBatchOKStatus{
+		WritebackBatchOKStatusOk,
+		WritebackBatchOKStatusValid,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s WritebackBatchOKStatus) MarshalText() ([]byte, error) {
+	switch s {
+	case WritebackBatchOKStatusOk:
+		return []byte(s), nil
+	case WritebackBatchOKStatusValid:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *WritebackBatchOKStatus) UnmarshalText(data []byte) error {
+	switch WritebackBatchOKStatus(data) {
+	case WritebackBatchOKStatusOk:
+		*s = WritebackBatchOKStatusOk
+		return nil
+	case WritebackBatchOKStatusValid:
+		*s = WritebackBatchOKStatusValid
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// WritebackBatchPaymentRequired is response for WritebackBatch operation.
+type WritebackBatchPaymentRequired struct{}
+
+func (*WritebackBatchPaymentRequired) writebackBatchRes() {}
+
+type WritebackBatchReq struct {
+	ModelID uuid.UUID `json:"model_id"`
+	// Omitted, the model's active revision.
+	RevisionID OptUUID `json:"revision_id"`
+	DryRun     OptBool `json:"dry_run"`
+	// Answer once stored; dependents are recalculated after.
+	Recalc OptWritebackBatchReqRecalc   `json:"recalc"`
+	Cells  []WritebackBatchReqCellsItem `json:"cells"`
+}
+
+// GetModelID returns the value of ModelID.
+func (s *WritebackBatchReq) GetModelID() uuid.UUID {
+	return s.ModelID
+}
+
+// GetRevisionID returns the value of RevisionID.
+func (s *WritebackBatchReq) GetRevisionID() OptUUID {
+	return s.RevisionID
+}
+
+// GetDryRun returns the value of DryRun.
+func (s *WritebackBatchReq) GetDryRun() OptBool {
+	return s.DryRun
+}
+
+// GetRecalc returns the value of Recalc.
+func (s *WritebackBatchReq) GetRecalc() OptWritebackBatchReqRecalc {
+	return s.Recalc
+}
+
+// GetCells returns the value of Cells.
+func (s *WritebackBatchReq) GetCells() []WritebackBatchReqCellsItem {
+	return s.Cells
+}
+
+// SetModelID sets the value of ModelID.
+func (s *WritebackBatchReq) SetModelID(val uuid.UUID) {
+	s.ModelID = val
+}
+
+// SetRevisionID sets the value of RevisionID.
+func (s *WritebackBatchReq) SetRevisionID(val OptUUID) {
+	s.RevisionID = val
+}
+
+// SetDryRun sets the value of DryRun.
+func (s *WritebackBatchReq) SetDryRun(val OptBool) {
+	s.DryRun = val
+}
+
+// SetRecalc sets the value of Recalc.
+func (s *WritebackBatchReq) SetRecalc(val OptWritebackBatchReqRecalc) {
+	s.Recalc = val
+}
+
+// SetCells sets the value of Cells.
+func (s *WritebackBatchReq) SetCells(val []WritebackBatchReqCellsItem) {
+	s.Cells = val
+}
+
+type WritebackBatchReqCellsItem struct {
+	MetricID uuid.UUID `json:"metric_id"`
+	// Dimension id → leaf member code.
+	DimCodes OptWritebackBatchReqCellsItemDimCodes `json:"dim_codes"`
+	Value    OptFloat64                            `json:"value"`
+	// A pick-list cell's member, by code or label.
+	Member OptString `json:"member"`
+	// A text cell's text, or a date cell's yyyy-mm-dd.
+	Text  OptString `json:"text"`
+	Clear OptBool   `json:"clear"`
+}
+
+// GetMetricID returns the value of MetricID.
+func (s *WritebackBatchReqCellsItem) GetMetricID() uuid.UUID {
+	return s.MetricID
+}
+
+// GetDimCodes returns the value of DimCodes.
+func (s *WritebackBatchReqCellsItem) GetDimCodes() OptWritebackBatchReqCellsItemDimCodes {
+	return s.DimCodes
+}
+
+// GetValue returns the value of Value.
+func (s *WritebackBatchReqCellsItem) GetValue() OptFloat64 {
+	return s.Value
+}
+
+// GetMember returns the value of Member.
+func (s *WritebackBatchReqCellsItem) GetMember() OptString {
+	return s.Member
+}
+
+// GetText returns the value of Text.
+func (s *WritebackBatchReqCellsItem) GetText() OptString {
+	return s.Text
+}
+
+// GetClear returns the value of Clear.
+func (s *WritebackBatchReqCellsItem) GetClear() OptBool {
+	return s.Clear
+}
+
+// SetMetricID sets the value of MetricID.
+func (s *WritebackBatchReqCellsItem) SetMetricID(val uuid.UUID) {
+	s.MetricID = val
+}
+
+// SetDimCodes sets the value of DimCodes.
+func (s *WritebackBatchReqCellsItem) SetDimCodes(val OptWritebackBatchReqCellsItemDimCodes) {
+	s.DimCodes = val
+}
+
+// SetValue sets the value of Value.
+func (s *WritebackBatchReqCellsItem) SetValue(val OptFloat64) {
+	s.Value = val
+}
+
+// SetMember sets the value of Member.
+func (s *WritebackBatchReqCellsItem) SetMember(val OptString) {
+	s.Member = val
+}
+
+// SetText sets the value of Text.
+func (s *WritebackBatchReqCellsItem) SetText(val OptString) {
+	s.Text = val
+}
+
+// SetClear sets the value of Clear.
+func (s *WritebackBatchReqCellsItem) SetClear(val OptBool) {
+	s.Clear = val
+}
+
+// Dimension id → leaf member code.
+type WritebackBatchReqCellsItemDimCodes map[string]string
+
+func (s *WritebackBatchReqCellsItemDimCodes) init() WritebackBatchReqCellsItemDimCodes {
+	m := *s
+	if m == nil {
+		m = map[string]string{}
+		*s = m
+	}
+	return m
+}
+
+// Answer once stored; dependents are recalculated after.
+type WritebackBatchReqRecalc string
+
+const (
+	WritebackBatchReqRecalcBackground WritebackBatchReqRecalc = "background"
+)
+
+// AllValues returns all WritebackBatchReqRecalc values.
+func (WritebackBatchReqRecalc) AllValues() []WritebackBatchReqRecalc {
+	return []WritebackBatchReqRecalc{
+		WritebackBatchReqRecalcBackground,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s WritebackBatchReqRecalc) MarshalText() ([]byte, error) {
+	switch s {
+	case WritebackBatchReqRecalcBackground:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *WritebackBatchReqRecalc) UnmarshalText(data []byte) error {
+	switch WritebackBatchReqRecalc(data) {
+	case WritebackBatchReqRecalcBackground:
+		*s = WritebackBatchReqRecalcBackground
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type WritebackBatchUnprocessableEntity struct {
+	Error   OptString                                      `json:"error"`
+	Refused []WritebackBatchUnprocessableEntityRefusedItem `json:"refused"`
+}
+
+// GetError returns the value of Error.
+func (s *WritebackBatchUnprocessableEntity) GetError() OptString {
+	return s.Error
+}
+
+// GetRefused returns the value of Refused.
+func (s *WritebackBatchUnprocessableEntity) GetRefused() []WritebackBatchUnprocessableEntityRefusedItem {
+	return s.Refused
+}
+
+// SetError sets the value of Error.
+func (s *WritebackBatchUnprocessableEntity) SetError(val OptString) {
+	s.Error = val
+}
+
+// SetRefused sets the value of Refused.
+func (s *WritebackBatchUnprocessableEntity) SetRefused(val []WritebackBatchUnprocessableEntityRefusedItem) {
+	s.Refused = val
+}
+
+func (*WritebackBatchUnprocessableEntity) writebackBatchRes() {}
+
+type WritebackBatchUnprocessableEntityRefusedItem struct {
+	Index    OptInt    `json:"index"`
+	MetricID OptString `json:"metric_id"`
+	Status   OptInt    `json:"status"`
+	Code     OptString `json:"code"`
+	Error    OptString `json:"error"`
+}
+
+// GetIndex returns the value of Index.
+func (s *WritebackBatchUnprocessableEntityRefusedItem) GetIndex() OptInt {
+	return s.Index
+}
+
+// GetMetricID returns the value of MetricID.
+func (s *WritebackBatchUnprocessableEntityRefusedItem) GetMetricID() OptString {
+	return s.MetricID
+}
+
+// GetStatus returns the value of Status.
+func (s *WritebackBatchUnprocessableEntityRefusedItem) GetStatus() OptInt {
+	return s.Status
+}
+
+// GetCode returns the value of Code.
+func (s *WritebackBatchUnprocessableEntityRefusedItem) GetCode() OptString {
+	return s.Code
+}
+
+// GetError returns the value of Error.
+func (s *WritebackBatchUnprocessableEntityRefusedItem) GetError() OptString {
+	return s.Error
+}
+
+// SetIndex sets the value of Index.
+func (s *WritebackBatchUnprocessableEntityRefusedItem) SetIndex(val OptInt) {
+	s.Index = val
+}
+
+// SetMetricID sets the value of MetricID.
+func (s *WritebackBatchUnprocessableEntityRefusedItem) SetMetricID(val OptString) {
+	s.MetricID = val
+}
+
+// SetStatus sets the value of Status.
+func (s *WritebackBatchUnprocessableEntityRefusedItem) SetStatus(val OptInt) {
+	s.Status = val
+}
+
+// SetCode sets the value of Code.
+func (s *WritebackBatchUnprocessableEntityRefusedItem) SetCode(val OptString) {
+	s.Code = val
+}
+
+// SetError sets the value of Error.
+func (s *WritebackBatchUnprocessableEntityRefusedItem) SetError(val OptString) {
+	s.Error = val
+}
 
 type WritebackInternalServerError Error
 

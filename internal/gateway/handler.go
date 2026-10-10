@@ -377,6 +377,9 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("POST", "/api/formula/refs", "any", cors(h.formulaRefs))
 	register("GET", "/api/metrics", "any", cors(h.metrics))
 	register("POST", "/api/cells", "any", cors(h.cells))
+	// Many cells at once, all or nothing: a pasted block, a chat
+	// connection's write (mcp.go).
+	register("POST", "/api/cells/batch", "any", cors(h.cellsBatch))
 	// Enterprise: every value a cell has held (ee/cellhistory).
 	register("GET", "/api/cells/history", "any", cors(h.requireFeature(license.FeatureCellHistory, h.cellHistory)))
 	register("GET", "/api/tasks", "any", cors(h.tasks))
@@ -632,6 +635,9 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("PATCH", "/api/workflow/instances/{id}", "business_admin", ba(h.workflowInstanceAction))
 	register("GET", "/api/notifications", "any", cors(h.notifications))
 	register("POST", "/api/notifications/mark-read", "any", cors(h.markNotifRead))
+	// Whether a tenant's people may change grid data from a chat connection.
+	register("GET", "/api/admin/connector-settings", "admin", adm(h.connectorSettings))
+	register("PUT", "/api/admin/connector-settings", "admin", adm(h.connectorSettings))
 	register("GET", "/api/notifications/settings", "admin", adm(h.notificationSettings))
 	register("PUT", "/api/notifications/settings", "admin", adm(h.notificationSettings))
 	register("DELETE", "/api/notifications/settings", "admin", adm(h.notificationSettings))
@@ -2125,68 +2131,15 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Guard: the caller must have access to this model at all — a metric or
-	// revision ID from a model the caller has no grant on must never reach
-	// the checks below, regardless of whether those IDs happen to exist.
-	if canAccess, caErr := h.actorCanAccessModel(ctx, a, req.ModelID); caErr != nil {
-		jsonErr(w, caErr, http.StatusInternalServerError)
-		return
-	} else if !canAccess {
-		jsonErr(w, fmt.Errorf("forbidden: model is outside your access scope"), http.StatusForbidden)
+	revisionID, ref := h.cellRevision(ctx, a, req.ModelID, req.RevisionID)
+	if ref != nil {
+		ref.respond(w)
 		return
 	}
-
-	// Resolve revision: fall back to model's active revision if not provided.
-	if req.RevisionID == "" {
-		_ = h.db.QueryRow(ctx,
-			`SELECT COALESCE(active_revision_id::text, (SELECT id::text FROM model.revision WHERE model_id=$1::uuid ORDER BY created_at DESC LIMIT 1)) FROM core.model WHERE id=$1::uuid`,
-			req.ModelID,
-		).Scan(&req.RevisionID)
-	}
-
-	// Guard: the revision must actually belong to this model — a
-	// client-supplied revision_id from a different model must be rejected,
-	// not silently accepted. Checked even for the auto-resolved case above
-	// (redundant there, since that path is already model-scoped by
-	// construction, but harmless).
-	var revisionBelongs bool
-	if err := h.db.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM model.revision WHERE id=$1::uuid AND model_id=$2::uuid)`,
-		req.RevisionID, req.ModelID,
-	).Scan(&revisionBelongs); err != nil {
-		jsonErr(w, fmt.Errorf("check revision ownership: %w", err), http.StatusInternalServerError)
-		return
-	}
-	if !revisionBelongs {
-		jsonErr(w, fmt.Errorf("revision is outside this model"), http.StatusForbidden)
-		return
-	}
-	// Only the open revision is a user's to write (revision_access.go).
-	if !h.revisionOpen(ctx, a, req.ModelID, req.RevisionID) {
-		jsonErr(w, fmt.Errorf("revision not found"), http.StatusNotFound)
-		return
-	}
-
-	// Guard: metric must be flagged is_input=true AND belong to this model —
-	// without the model_id predicate, an is_input metric from a completely
-	// different tenant's model would otherwise pass.
-	var isInput bool
-	var metricFormat string
-	if err := h.db.QueryRow(ctx,
-		`SELECT is_input, COALESCE(format,'') FROM model.metric_def WHERE id=$1::uuid AND model_id=$2::uuid`, req.MetricID, req.ModelID,
-	).Scan(&isInput, &metricFormat); err != nil || !isInput {
-		jsonErr(w, fmt.Errorf("metric is not writable"), http.StatusForbidden)
-		return
-	}
-
-	// Guard: user must not be restricted to read-only or hidden access for this metric.
-	metricAccess, maErr := writeguard.MetricAccess(ctx, h.db.For(ctx), a.UserID, req.MetricID)
-	if maErr != nil {
-		jsonErr(w, fmt.Errorf("check metric access: %w", maErr), http.StatusInternalServerError)
-		return
-	}
-	if metricAccess == "hidden" || metricAccess == "read" {
-		jsonErr(w, fmt.Errorf("access denied"), http.StatusForbidden)
+	req.RevisionID = revisionID
+	metricFormat, ref := h.cellMetric(ctx, a, req.ModelID, req.MetricID)
+	if ref != nil {
+		ref.respond(w)
 		return
 	}
 
@@ -2194,84 +2147,31 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 	// The legacy form names no dimension, so it goes to the one dimension of
 	// this revision that has a member with that code (among the metric's own grid
 	// dimensions when it has any) — never to one chosen by its name.
-	resolvedDims := req.DimCodes
-	if len(resolvedDims) == 0 && req.DimCode != "" {
+	if len(req.DimCodes) == 0 && req.DimCode != "" {
 		dimID, status, rErr := h.resolveLegacyDimCode(ctx, req.ModelID, req.RevisionID, req.MetricID, req.DimCode)
 		if rErr != nil {
 			jsonErr(w, rErr, status)
 			return
 		}
-		resolvedDims = map[string]string{dimID: req.DimCode}
+		req.DimCodes = map[string]string{dimID: req.DimCode}
 	}
 
-	// Resolve each written dim_code into its dimension_member id. A code no
-	// member of this revision's dimension has, a parent member and a
-	// calculated one are refused: a value stored there is never read by a
-	// grid (found live: "Snacks" for the member SNACKS).
 	// A read-only revision is refused as such first, whatever the write names.
-	if systemManaged, smErr := writeguard.SystemManaged(ctx, h.db.For(ctx), req.RevisionID); smErr != nil {
-		jsonErr(w, fmt.Errorf("check system-managed: %w", smErr), http.StatusInternalServerError)
-		return
-	} else if systemManaged {
-		jsonErr(w, fmt.Errorf("this revision is system-managed and read-only"), http.StatusForbidden)
+	if ref := h.cellRevisionWritable(ctx, req.RevisionID); ref != nil {
+		ref.respond(w)
 		return
 	}
-	writtenMemberIDs, err := writeguard.ResolveWriteMembers(ctx, h.db.For(ctx), req.ModelID, req.RevisionID, resolvedDims)
-	if me := (*writeguard.MemberError)(nil); errors.As(err, &me) {
-		jsonCodeErr(w, http.StatusBadRequest, me.Code, me.Message)
-		return
-	} else if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
+	cell, ref := h.prepareCell(ctx, a, req.RevisionID, req, metricFormat)
+	if ref != nil {
+		ref.respond(w)
 		return
 	}
-
-	// Generic write guard: system-managed revision, hidden/read-only access
-	// (cascading through the dimension hierarchy — e.g. a cost center hidden
-	// from this user also blocks a write to one of its employees, even
-	// without a direct rule on that employee — see writeguard.ExpandHidden's
-	// read-side equivalent in grid()), and workflow-lock. The single
-	// implementation shared with every import path (HTTP and gRPC) — see
-	// writeguard.CheckWrite's package doc.
-	if reason, gErr := writeguard.CheckWriteMetrics(ctx, h.db.For(ctx), req.ModelID, req.RevisionID, a.UserID, writtenMemberIDs, []string{req.MetricID}); gErr != nil {
-		jsonErr(w, fmt.Errorf("write guard: %w", gErr), http.StatusInternalServerError)
-		return
-	} else if reason != "" {
-		jsonErr(w, fmt.Errorf("%s", reason), http.StatusForbidden)
+	write := cell.write
+	if err := h.checkCellLimits(ctx, req.ModelID, []preparedCell{cell}); err != nil {
+		h.jsonLimitErr(w, err)
 		return
 	}
-
-	// A pick-list cell holds a member of its dimension (the value must be
-	// one's key, or Member names one), a text metric's cell its text, and
-	// a clear empties the cell.
-	write, err := h.resolveCellWrite(ctx, req, metricFormat)
-	if err != nil {
-		jsonErr(w, err, http.StatusBadRequest)
-		return
-	}
-
-	if cid := h.customerOfModel(ctx, req.ModelID); cid != "" && h.plans != nil && !write.clear {
-		if err := cmp.Or(h.plans.CheckFactRows(ctx, h.db.For(ctx), cid, req.ModelID, 1), h.plans.CheckStorage(ctx, h.db.For(ctx), cid)); err != nil {
-			h.jsonLimitErr(w, err)
-			return
-		}
-	}
-
-	dimMembers := "{}"
-	if len(resolvedDims) > 0 {
-		b, _ := json.Marshal(resolvedDims)
-		dimMembers = string(b)
-	}
-
-	if write.clear {
-		err = h.clearCell(ctx, req.ModelID, req.RevisionID, req.MetricID, dimMembers)
-	} else {
-		_, err = h.db.Exec(ctx, `
-			INSERT INTO runtime.fact_input
-			    (model_id, revision_id, metric_id, dim_members, value, entered_by, text_value)
-			VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::uuid, $7)
-		`, req.ModelID, req.RevisionID, req.MetricID, dimMembers, write.value, a.UserID, write.text)
-	}
-	if err != nil {
+	if err := h.storeCells(ctx, req.ModelID, req.RevisionID, a.UserID, []preparedCell{cell}); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
@@ -2285,7 +2185,10 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 	}
 	background := req.Recalc == "background"
 	if !background {
-		recalc(ctx)
+		// The value is stored: its recalculation runs to its end even if the
+		// caller stops waiting, or the calculated cells would stay stale with
+		// nothing saying so.
+		recalc(context.WithoutCancel(ctx))
 	}
 
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{

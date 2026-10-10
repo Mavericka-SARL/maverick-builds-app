@@ -12,9 +12,9 @@ business works in.
   folders on a schedule; grid exports as CSV, XLSX or JSON.
 - **Roles and workflows**: roles defined by the business with access down to
   each member and metric, and approval steps with due dates and reminders.
-- **Dashboards and chat with data**: charts, KPIs and live tables, plus a
-  read-only MCP server so Claude and ChatGPT can answer questions from the
-  grids.
+- **Dashboards and chat with data**: charts, KPIs and live tables, plus an
+  MCP server so Claude and ChatGPT can answer questions from the grids and
+  enter values into them, with each person's own access.
 - **AI developer**: builds models, forms, dashboards and workflows together
   with you as a plan to review, on OpenAI, Anthropic, Google, Mistral or
   DeepSeek at no mark-up.

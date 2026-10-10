@@ -121,13 +121,15 @@ type cfg struct {
 	// of any other client of the realm — a chat connector's above all —
 	// opens no REST route.
 	TokenClients string `mapstructure:"GATEWAY_TOKEN_CLIENTS"`
-	// The read-only chat-reporting connector at /mcp (docs/CHAT_CONNECTOR.md).
-	// MCPResourceURL defaults to CONSOLE_URL + "/mcp"; its tokens must carry
-	// it as their audience, and the MCP_SCOPE scope (default models:read).
+	// The chat connector at /mcp (docs/CHAT_CONNECTOR.md). MCPResourceURL
+	// defaults to CONSOLE_URL + "/mcp"; its tokens must carry it as their
+	// audience, and the MCP_SCOPE scope (default models:read); write_cells
+	// also needs MCP_WRITE_SCOPE (default grids:write).
 	MCPEnabled             bool   `mapstructure:"MCP_ENABLED"`
 	MCPResourceURL         string `mapstructure:"MCP_RESOURCE_URL"`
 	MCPAuthorizationServer string `mapstructure:"MCP_AUTHORIZATION_SERVER"`
 	MCPScope               string `mapstructure:"MCP_SCOPE"`
+	MCPWriteScope          string `mapstructure:"MCP_WRITE_SCOPE"`
 	// MCPClients: the chat hosts' registered clients (cmd/connector-clients),
 	// comma-separated; default chatgpt-connector,claude-connector.
 	MCPClients string `mapstructure:"MCP_CLIENTS"`
@@ -513,7 +515,7 @@ func mcpConfig(c cfg, log zerolog.Logger) gateway.MCPConfig {
 	}
 	log.Info().Str("resource", resource).Msg("chat connector enabled at /mcp (read-only)")
 	return gateway.MCPConfig{Enabled: true, ResourceURL: resource, AuthorizationServer: c.MCPAuthorizationServer,
-		Scope: c.MCPScope, Clients: splitList(c.MCPClients), ClientSecrets: splitPairs(c.MCPClientSecrets), Version: c.ServiceVersion,
+		Scope: c.MCPScope, WriteScope: c.MCPWriteScope, Clients: splitList(c.MCPClients), ClientSecrets: splitPairs(c.MCPClientSecrets), Version: c.ServiceVersion,
 		OpenAIAppsChallenge: c.MCPOpenAIAppsChallenge}
 }
 

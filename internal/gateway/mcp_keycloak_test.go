@@ -244,7 +244,10 @@ func TestConnectorClientsAgainstKeycloak(t *testing.T) {
 				t.Fatalf("code exchange: %d %s: %s", status, ts.Error, ts.Description)
 			}
 			c := claimsOf(t, ts.AccessToken)
-			if c["azp"] != host.ClientID || !strings.Contains(c["scope"].(string), "models:read") || c["sub"] == nil {
+			// grids:write is a default scope: granted on consent though the
+			// host asked for models:read only.
+			if c["azp"] != host.ClientID || !strings.Contains(c["scope"].(string), "models:read") ||
+				!strings.Contains(c["scope"].(string), "grids:write") || c["sub"] == nil {
 				t.Errorf("token claims: azp=%v scope=%v sub=%v", c["azp"], c["scope"], c["sub"])
 			}
 			auds, _ := json.Marshal(c["aud"])
@@ -274,10 +277,13 @@ func TestConnectorClientsAgainstKeycloak(t *testing.T) {
 			if err != nil || res.IsError {
 				t.Fatalf("get_connection_access: %v %+v", err, res)
 			}
+			if raw, _ := json.Marshal(res.StructuredContent); !strings.Contains(string(raw), `"read_only":false`) {
+				t.Errorf("a connection granted grids:write reads as read-only: %s", raw)
+			}
 
 			refreshed, status := exchange(t, base, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {ts.RefreshToken},
 				"client_id": {host.ClientID}, "client_secret": {secrets[host.ClientID]}})
-			if status != http.StatusOK || !strings.Contains(refreshed.Scope, "models:read") {
+			if status != http.StatusOK || !strings.Contains(refreshed.Scope, "models:read") || !strings.Contains(refreshed.Scope, "grids:write") {
 				t.Errorf("refresh: %d scope %q", status, refreshed.Scope)
 			}
 		})

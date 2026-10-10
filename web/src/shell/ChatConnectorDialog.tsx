@@ -4,12 +4,12 @@ import { Button, Dialog, Field, InlineAlert, TextInput } from "../ui";
 import { useConnectorInfo } from "./connectorInfo";
 
 /**
- * How to use your models in ChatGPT and Claude: the read-only chat
- * connector's URL and each host's client ID and secret (GET /api/connector),
+ * How to use your models in ChatGPT and Claude: the chat connector's URL
+ * and each host's client ID and secret (GET /api/connector),
  * opened from the account menu so every person finds it, whatever their role.
  * The client ID and secret are the host's, shared by everyone on the
- * deployment; each person still signs in with their own account and reads
- * only grid data their own access allows.
+ * deployment; each person still signs in with their own account, and reads
+ * and changes only grid data their own access allows.
  */
 function CopyField({ label, value, secret }: { label: string; value: string; secret?: boolean }) {
   const [shown, setShown] = useState(!secret);
@@ -54,9 +54,11 @@ export function ChatConnectorDialog({ open, onClose }: { open: boolean; onClose:
       {data?.enabled && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <p style={{ fontSize: 12, margin: 0, color: "var(--color-text-muted)" }}>
-            Ask ChatGPT or Claude about your grids and get tables, charts and reports in the conversation. You sign in
-            with your own maverickbuilds.app account and read only what your access allows; the connection reads grid
-            data of each model&apos;s active revision and never changes anything.
+            Ask ChatGPT or Claude about your grids and get tables, charts and reports in the conversation, or ask it to
+            enter values for you. You sign in with your own maverickbuilds.app account and the connection works on grid
+            data of each model&apos;s active revision, reading and changing only what your access allows. The chat asks
+            you before it changes a value, unless you told it not to. If you connected before changes were possible,
+            connect again to allow them.
           </p>
           <CopyField label="Connector URL" value={data.url ?? ""} />
           {data.hosts.map(host => (

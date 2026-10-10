@@ -210,6 +210,12 @@ export function privacyDocument(l: LegalInfo, product: string): LegalDocument {
         heading: "6. Artificial intelligence features",
         body: [
           "The service includes an assistant that can propose changes to a model. It works only once a provider key is configured — by your organisation, by the developer using it, or by the operator of the deployment — and when it is used, the text of the request and the structure of the model it concerns are sent to that key's provider to answer it. Nothing it proposes takes effect until a person applies it, and no decision about any individual is made automatically.",
+          // The chat connector (docs/CHAT_CONNECTOR.md): reads as the person,
+          // writes input cells only with the write scope, the tenant's
+          // switch (connector_settings.go) and the cell history and audit log.
+          ...(l.chat_connector
+            ? ["You can also connect ChatGPT or Claude to your account. When you ask either of them about your models, the service returns to that assistant, at your request, the names of the models, grids, metrics and dimension members you may see and the values you may read — never anything your access does not allow, and never your password. The assistant's provider then processes that data under its own terms and privacy policy, and it stays in your conversation history there; disconnecting stops further reads but cannot remove what was already returned. When you allow it, the assistant can also enter values into the grid cells you may edit, at your request: each value is saved as entered by you, kept in the cell history and the audit log, and your workspace's administrator can turn this off."]
+            : []),
         ],
       },
       {

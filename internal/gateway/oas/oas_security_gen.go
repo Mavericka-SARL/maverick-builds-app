@@ -133,6 +133,7 @@ var operationRolesBearerAuth = map[string][]string{
 	GetCellHistoryOperation:               []string{},
 	GetChartDataOperation:                 []string{},
 	GetConnectorInfoOperation:             []string{},
+	GetConnectorSettingsOperation:         []string{},
 	GetDemoOperation:                      []string{},
 	GetDeveloperModelOperation:            []string{},
 	GetFormRecordOperation:                []string{},
@@ -261,6 +262,7 @@ var operationRolesBearerAuth = map[string][]string{
 	UpdateBARoleOperation:                 []string{},
 	UpdateBrandingOperation:               []string{},
 	UpdateBusinessMemberOperation:         []string{},
+	UpdateConnectorSettingsOperation:      []string{},
 	UpdateDashboardOperation:              []string{},
 	UpdateDashboardWidgetOperation:        []string{},
 	UpdateDimensionOperation:              []string{},
@@ -288,6 +290,7 @@ var operationRolesBearerAuth = map[string][]string{
 	ValidateIntegrationOperation:          []string{},
 	ValidateWorkflowOperation:             []string{},
 	WritebackOperation:                    []string{},
+	WritebackBatchOperation:               []string{},
 }
 
 // GetRolesForBearerAuth returns the required roles for the given operation.

@@ -682,6 +682,13 @@ type Invoker interface {
 	//
 	// GET /api/connector
 	GetConnectorInfo(ctx context.Context) (*ConnectorInfo, error)
+	// GetConnectorSettings invokes getConnectorSettings operation.
+	//
+	// Whether the tenant's people may change grid data from a chat connection (tenant or platform
+	// administrators).
+	//
+	// GET /api/admin/connector-settings
+	GetConnectorSettings(ctx context.Context) (GetConnectorSettingsRes, error)
 	// GetDemo invokes getDemo operation.
 	//
 	// Get demo context (model, revision, actor for current persona).
@@ -1720,6 +1727,12 @@ type Invoker interface {
 	//
 	// PATCH /api/dimensions/{dimId}/members/{memberId}
 	UpdateBusinessMember(ctx context.Context, request *BusinessMemberRequest, params UpdateBusinessMemberParams) (UpdateBusinessMemberRes, error)
+	// UpdateConnectorSettings invokes updateConnectorSettings operation.
+	//
+	// Turn chat writes on or off for the tenant (tenant or platform administrators).
+	//
+	// PUT /api/admin/connector-settings
+	UpdateConnectorSettings(ctx context.Context, request *UpdateConnectorSettingsReq) (UpdateConnectorSettingsRes, error)
 	// UpdateDashboard invokes updateDashboard operation.
 	//
 	// Rename, retag, or move a dashboard between folders.
@@ -1893,6 +1906,16 @@ type Invoker interface {
 	//
 	// POST /api/cells
 	Writeback(ctx context.Context, request *WritebackRequest) (WritebackRes, error)
+	// WritebackBatch invokes writebackBatch operation.
+	//
+	// Every cell is checked as POST /api/cells checks one — input metrics only, the caller's access
+	// rules, workflow locks, the plan's limits — before any is written; a refused cell refuses the
+	// batch (422, each refused cell by its index) and nothing is written. Two writes to one cell are
+	// refused. With dry_run every cell is checked and none written. A chat connection's write (the
+	// connector's write_cells) is also refused when the tenant turned chat writes off.
+	//
+	// POST /api/cells/batch
+	WritebackBatch(ctx context.Context, request *WritebackBatchReq) (WritebackBatchRes, error)
 }
 
 // Client implements OAS client.
@@ -14275,6 +14298,114 @@ func (c *Client) sendGetConnectorInfo(ctx context.Context) (res *ConnectorInfo, 
 
 	stage = "DecodeResponse"
 	result, err := decodeGetConnectorInfoResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// GetConnectorSettings invokes getConnectorSettings operation.
+//
+// Whether the tenant's people may change grid data from a chat connection (tenant or platform
+// administrators).
+//
+// GET /api/admin/connector-settings
+func (c *Client) GetConnectorSettings(ctx context.Context) (GetConnectorSettingsRes, error) {
+	res, err := c.sendGetConnectorSettings(ctx)
+	return res, err
+}
+
+func (c *Client) sendGetConnectorSettings(ctx context.Context) (res GetConnectorSettingsRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("getConnectorSettings"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/admin/connector-settings"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, GetConnectorSettingsOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/admin/connector-settings"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, GetConnectorSettingsOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeGetConnectorSettingsResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -32729,6 +32860,116 @@ func (c *Client) sendUpdateBusinessMember(ctx context.Context, request *Business
 	return result, nil
 }
 
+// UpdateConnectorSettings invokes updateConnectorSettings operation.
+//
+// Turn chat writes on or off for the tenant (tenant or platform administrators).
+//
+// PUT /api/admin/connector-settings
+func (c *Client) UpdateConnectorSettings(ctx context.Context, request *UpdateConnectorSettingsReq) (UpdateConnectorSettingsRes, error) {
+	res, err := c.sendUpdateConnectorSettings(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendUpdateConnectorSettings(ctx context.Context, request *UpdateConnectorSettingsReq) (res UpdateConnectorSettingsRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("updateConnectorSettings"),
+		semconv.HTTPRequestMethodKey.String("PUT"),
+		semconv.URLTemplateKey.String("/api/admin/connector-settings"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, UpdateConnectorSettingsOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/admin/connector-settings"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "PUT", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeUpdateConnectorSettingsRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, UpdateConnectorSettingsOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeUpdateConnectorSettingsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // UpdateDashboard invokes updateDashboard operation.
 //
 // Rename, retag, or move a dashboard between folders.
@@ -36176,6 +36417,120 @@ func (c *Client) sendWriteback(ctx context.Context, request *WritebackRequest) (
 
 	stage = "DecodeResponse"
 	result, err := decodeWritebackResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// WritebackBatch invokes writebackBatch operation.
+//
+// Every cell is checked as POST /api/cells checks one — input metrics only, the caller's access
+// rules, workflow locks, the plan's limits — before any is written; a refused cell refuses the
+// batch (422, each refused cell by its index) and nothing is written. Two writes to one cell are
+// refused. With dry_run every cell is checked and none written. A chat connection's write (the
+// connector's write_cells) is also refused when the tenant turned chat writes off.
+//
+// POST /api/cells/batch
+func (c *Client) WritebackBatch(ctx context.Context, request *WritebackBatchReq) (WritebackBatchRes, error) {
+	res, err := c.sendWritebackBatch(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendWritebackBatch(ctx context.Context, request *WritebackBatchReq) (res WritebackBatchRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("writebackBatch"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/cells/batch"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, WritebackBatchOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/cells/batch"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeWritebackBatchRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, WritebackBatchOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeWritebackBatchResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

@@ -95,5 +95,7 @@ func (h *handler) legalInfo(w http.ResponseWriter, r *http.Request) {
 		"jurisdiction": l.Jurisdiction,
 		"hosting":      l.Hosting,
 		"updated":      l.Updated,
+		// The privacy notice describes the chat connector only where it runs.
+		"chat_connector": h.mcp.Enabled,
 	})
 }

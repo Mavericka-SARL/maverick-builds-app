@@ -36,6 +36,7 @@ func TestMCPConnectorInDedicatedTenants(t *testing.T) {
 	}
 	f.seed(t, tctxA, "acme-dev", "dev@acme.test", "Dana", "developer", wsA)
 	f.seed(t, tctxA, "acme-bu", "bu@acme.test", "Bo", "business_user", wsA)
+	f.seed(t, tctxA, "acme-ta", "ta@acme.test", "Tia", "tenant_admin", wsA)
 	caller := func(method, path string, body any) (map[string]any, error) {
 		code, raw := do(t, f.srv, call{persona: "acme-dev", app: appA}, method, path, body)
 		if code < 200 || code >= 300 {
@@ -111,7 +112,50 @@ func TestMCPConnectorInDedicatedTenants(t *testing.T) {
 		}
 	})
 
-	_ = context.Background()
+	units := func(v float64) map[string]any {
+		return args(map[string]any{"cells": []any{map[string]any{"metric_id": m.Metric["units"],
+			"members": map[string]string{m.GeoDim: "UK", m.ProdDim: "LAPTOP", m.PeriodDim: "Q1"}, "value": v}}})
+	}
+	ukUnits := func() float64 {
+		t.Helper()
+		var v float64
+		_ = f.reader.db.QueryRow(tctxA, `SELECT value FROM runtime.fact_input WHERE metric_id=$1::uuid AND dim_members->>$2 = 'UK'
+			AND dim_members->>$3 = 'LAPTOP' AND dim_members->>$4 = 'Q1' ORDER BY entered_at DESC LIMIT 1`,
+			m.Metric["units"], m.GeoDim, m.ProdDim, m.PeriodDim).Scan(&v)
+		return v
+	}
+
+	t.Run("a person writes their own tenant's cells, in its database", func(t *testing.T) {
+		if res := acme.must("write_cells", units(950)); res["status"] != "written" {
+			t.Fatalf("write_cells: %v", res)
+		}
+		if v := ukUnits(); !nearly(v, 950) {
+			t.Errorf("units in Acme's database = %v, want 950", v)
+		}
+		if _, errText := beta.call("write_cells", units(1)); !strings.HasPrefix(errText, "not_found") {
+			t.Errorf("Beta writing Acme's cells: %q", errText)
+		}
+		if v := ukUnits(); !nearly(v, 950) {
+			t.Errorf("units after Beta's attempt = %v, want 950", v)
+		}
+	})
+
+	t.Run("the tenant's administrator turns chat writes off for that tenant", func(t *testing.T) {
+		code, raw := do(t, f.srv, call{persona: "acme-ta", app: appA}, http.MethodPut, "/api/admin/connector-settings", map[string]any{"chat_writes": false})
+		if code != http.StatusOK {
+			t.Fatalf("switch off: %d %s", code, raw)
+		}
+		if _, errText := acme.call("write_cells", units(1)); !strings.Contains(errText, "turned off changing data from chat") {
+			t.Errorf("a chat write in a tenant that turned them off: %q", errText)
+		}
+		if v := ukUnits(); !nearly(v, 950) {
+			t.Errorf("units = %v, want 950", v)
+		}
+		code, raw = do(t, f.srv, call{persona: "acme-ta", app: appA}, http.MethodGet, "/api/admin/connector-settings", nil)
+		if code != http.StatusOK || !strings.Contains(string(raw), `"chat_writes":false`) {
+			t.Errorf("Acme's settings: %d %s", code, raw)
+		}
+	})
 }
 
 func TestConnectorInfoForEveryone(t *testing.T) {

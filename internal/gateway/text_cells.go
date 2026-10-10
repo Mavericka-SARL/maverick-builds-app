@@ -72,24 +72,14 @@ func (h *handler) resolveCellWrite(ctx context.Context, req writebackReq, format
 // maxCellText caps one text cell: a comment, not a document.
 const maxCellText = 4000
 
-// clearCell empties one cell: its directly entered rows are deleted, and the
-// archive trigger keeps them in fact_input_history with the reason
-// "cleared". Rows a form or an import posted (source_ref) stay — they are
-// that source's, and its next posting would bring them back anyway.
+// clearCell empties one cell in a transaction of its own (clearCellTx).
 func (h *handler) clearCell(ctx context.Context, modelID, revisionID, metricID, dimMembers string) error {
 	tx, err := h.db.For(ctx).Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, `SET LOCAL mvx.delete_reason = 'cleared'`); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM runtime.fact_input
-		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid
-		  AND dim_members = $4::jsonb AND source_ref IS NULL`,
-		modelID, revisionID, metricID, dimMembers); err != nil {
+	if err := clearCellTx(ctx, tx, modelID, revisionID, metricID, dimMembers); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

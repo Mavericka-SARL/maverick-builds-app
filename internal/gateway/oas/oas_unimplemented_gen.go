@@ -959,6 +959,16 @@ func (UnimplementedHandler) GetConnectorInfo(ctx context.Context) (r *ConnectorI
 	return r, ht.ErrNotImplemented
 }
 
+// GetConnectorSettings implements getConnectorSettings operation.
+//
+// Whether the tenant's people may change grid data from a chat connection (tenant or platform
+// administrators).
+//
+// GET /api/admin/connector-settings
+func (UnimplementedHandler) GetConnectorSettings(ctx context.Context) (r GetConnectorSettingsRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // GetDemo implements getDemo operation.
 //
 // Get demo context (model, revision, actor for current persona).
@@ -2451,6 +2461,15 @@ func (UnimplementedHandler) UpdateBusinessMember(ctx context.Context, req *Busin
 	return r, ht.ErrNotImplemented
 }
 
+// UpdateConnectorSettings implements updateConnectorSettings operation.
+//
+// Turn chat writes on or off for the tenant (tenant or platform administrators).
+//
+// PUT /api/admin/connector-settings
+func (UnimplementedHandler) UpdateConnectorSettings(ctx context.Context, req *UpdateConnectorSettingsReq) (r UpdateConnectorSettingsRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // UpdateDashboard implements updateDashboard operation.
 //
 // Rename, retag, or move a dashboard between folders.
@@ -2702,5 +2721,18 @@ func (UnimplementedHandler) ValidateWorkflow(ctx context.Context, req OptValidat
 //
 // POST /api/cells
 func (UnimplementedHandler) Writeback(ctx context.Context, req *WritebackRequest) (r WritebackRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// WritebackBatch implements writebackBatch operation.
+//
+// Every cell is checked as POST /api/cells checks one — input metrics only, the caller's access
+// rules, workflow locks, the plan's limits — before any is written; a refused cell refuses the
+// batch (422, each refused cell by its index) and nothing is written. Two writes to one cell are
+// refused. With dry_run every cell is checked and none written. A chat connection's write (the
+// connector's write_cells) is also refused when the tenant turned chat writes off.
+//
+// POST /api/cells/batch
+func (UnimplementedHandler) WritebackBatch(ctx context.Context, req *WritebackBatchReq) (r WritebackBatchRes, _ error) {
 	return r, ht.ErrNotImplemented
 }

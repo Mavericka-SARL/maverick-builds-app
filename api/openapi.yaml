@@ -160,6 +160,17 @@ components:
         inherited: { type: boolean, description: The tenant has no row of its own and these are the deployment's values }
         deployment_settings_available: { type: boolean, description: Whether this edition has a deployment row at all }
 
+    ConnectorSettings:
+      type: object
+      properties:
+        chat_writes: { type: boolean, description: "People may write grid cells from ChatGPT or Claude (default true)" }
+        scope:
+          type: object
+          properties:
+            customer_id: { type: string, format: uuid }
+            deployment: { type: boolean }
+            inherited: { type: boolean }
+            deployment_settings_available: { type: boolean }
     NotificationSettings:
       type: object
       description: >-
@@ -2510,6 +2521,40 @@ paths:
         "401": { description: Unauthorized }
         "404": { description: Account not found }
 
+  /api/admin/connector-settings:
+    get:
+      operationId: getConnectorSettings
+      summary: Whether the tenant's people may change grid data from a chat connection (tenant or platform administrators)
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConnectorSettings" }
+        "403": { description: Forbidden }
+        "409": { description: Name a tenant in the X-Tenant-Id header }
+    put:
+      operationId: updateConnectorSettings
+      summary: Turn chat writes on or off for the tenant (tenant or platform administrators)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [chat_writes]
+              properties:
+                chat_writes: { type: boolean }
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConnectorSettings" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { description: Forbidden }
+        "409": { description: Name a tenant in the X-Tenant-Id header }
+
   /api/notifications/settings:
     get:
       operationId: getNotificationSettings
@@ -3563,6 +3608,79 @@ paths:
                 properties:
                   ok: { type: boolean }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/cells/batch:
+    post:
+      operationId: writebackBatch
+      summary: Write up to 500 cells of one model at once, all or nothing (one recalculation)
+      description: >-
+        Every cell is checked as POST /api/cells checks one — input metrics only, the caller's access
+        rules, workflow locks, the plan's limits — before any is written; a refused cell refuses the
+        batch (422, each refused cell by its index) and nothing is written. Two writes to one cell are
+        refused. With dry_run every cell is checked and none written. A chat connection's write
+        (the connector's write_cells) is also refused when the tenant turned chat writes off.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model_id, cells]
+              properties:
+                model_id: { type: string, format: uuid }
+                revision_id: { type: string, format: uuid, description: "Omitted, the model's active revision." }
+                dry_run: { type: boolean }
+                recalc: { type: string, enum: [background], description: "Answer once stored; dependents are recalculated after." }
+                cells:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [metric_id]
+                    properties:
+                      metric_id: { type: string, format: uuid }
+                      dim_codes: { type: object, additionalProperties: { type: string }, description: "dimension id → leaf member code" }
+                      value: { type: number }
+                      member: { type: string, description: "A pick-list cell's member, by code or label" }
+                      text: { type: string, description: "A text cell's text, or a date cell's yyyy-mm-dd" }
+                      clear: { type: boolean }
+      responses:
+        "200":
+          description: Cells written (status "ok"), or checked by a dry run (status "valid")
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok, valid] }
+                  revision_id: { type: string, format: uuid }
+                  cells: { type: integer }
+                  cleared: { type: integer }
+                  recalculating: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "402": { description: The workspace's plan has no room for the cells }
+        "403": { description: The model, revision or chat writes are not the caller's to write }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: One or more cells were refused; nothing was written
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  refused:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        index: { type: integer }
+                        metric_id: { type: string }
+                        status: { type: integer }
+                        code: { type: string }
+                        error: { type: string }
         "500": { $ref: "#/components/responses/InternalError" }
 
   /api/metrics:

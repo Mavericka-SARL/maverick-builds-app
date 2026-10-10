@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Boxes, Users, ScrollText, Server, KeyRound, Bell, Sparkles, Fingerprint, UserPlus, BarChart3, Palette, Layers, Link2 } from "lucide-react";
+import { Boxes, Users, ScrollText, Server, KeyRound, Bell, Sparkles, Fingerprint, UserPlus, BarChart3, Palette, Layers, Link2, MessageSquare } from "lucide-react";
 import { api } from "../../api/client";
 import { UsersPanel } from "../admin/UsersPanel";
 import { InfraNodesTab } from "./InfraNodesTab";
@@ -11,6 +11,7 @@ import { UsersScopePicker } from "./UsersScopePicker";
 import { ALL_PEOPLE, peopleIn } from "./people";
 import { NotificationSettingsTab } from "../admin/NotificationSettingsTab";
 import { ModelLinksTab } from "../admin/ModelLinksTab";
+import { ChatConnectorSettingsTab } from "../admin/ChatConnectorSettingsTab";
 import { TenantAIKeysTab } from "../../ee/aikeys/TenantAIKeysTab";
 import { SsoTab } from "../../ee/sso/SsoTab";
 import { ScimTab } from "../../ee/scim/ScimTab";
@@ -22,7 +23,7 @@ import { tabId, localTab, sectionOf, type ConsoleSection, type SectionId, type S
 import { ApplicationsView, AuditView } from "./PlatformAdminConsole";
 
 /** Tabs whose content is one tenant's (or the deployment's) settings. */
-const SCOPED_TABS = new Set<string>(["notifications", "ai-keys", "sso", "scim", "branding", "audit"]);
+const SCOPED_TABS = new Set<string>(["notifications", "chat-connector", "ai-keys", "sso", "scim", "branding", "audit"]);
 /** Of those, the ones with a deployment-wide row to inherit from. */
 const DEPLOYMENT_ROW_TABS = new Set<string>(["notifications", "ai-keys", "audit"]);
 
@@ -31,8 +32,8 @@ function tenantChosen(scope: "platform" | "tenant", settingsScope: string): bool
   return scope === "tenant" || settingsScope !== DEPLOYMENT_SCOPE;
 }
 
-type Tab = "applications" | "users" | "audit" | "usage" | "model-links" | "notifications" | "ai-keys" | "sso" | "scim" | "branding" | "plans" | "infra" | "license";
-const TAB_LABELS: Record<Tab, string> = { applications: "Applications", users: "Users", audit: "Audit Log", usage: "Usage", "model-links": "Model links", notifications: "Notification delivery", "ai-keys": "AI keys", sso: "Single sign-on", scim: "Provisioning (SCIM)", branding: "Branding", plans: "Plans", infra: "Infrastructure", license: "License" };
+type Tab = "applications" | "users" | "audit" | "usage" | "model-links" | "notifications" | "chat-connector" | "ai-keys" | "sso" | "scim" | "branding" | "plans" | "infra" | "license";
+const TAB_LABELS: Record<Tab, string> = { applications: "Applications", users: "Users", audit: "Audit Log", usage: "Usage", "model-links": "Model links", notifications: "Notification delivery", "chat-connector": "Chat connector", "ai-keys": "AI keys", sso: "Single sign-on", scim: "Provisioning (SCIM)", branding: "Branding", plans: "Plans", infra: "Infrastructure", license: "License" };
 
 /**
  * The administration section of the console — Applications (models,
@@ -79,6 +80,9 @@ export function useAdminSection({ enabled, tab, scope }: SectionInput & { scope:
     { id: t("model-links"), label: TAB_LABELS["model-links"], icon: <Link2 size={16} /> },
     // Outbound delivery is per tenant, so both scopes get it.
     { id: t("notifications"), label: TAB_LABELS.notifications, icon: <Bell size={16} /> },
+    // Whether people may change grid data from ChatGPT or Claude: one
+    // tenant's call, with no deployment row.
+    { id: t("chat-connector"), label: TAB_LABELS["chat-connector"], icon: <MessageSquare size={16} /> },
     // So is the AI key. The tab always shows: on a non-enterprise edition it
     // renders the feature gate, which is how an admin learns the option
     // exists at all.
@@ -133,6 +137,7 @@ export function useAdminSection({ enabled, tab, scope }: SectionInput & { scope:
             <SettingsScopePicker tenants={tenants ?? []} value={settingsScope} onChange={setSettingsScope} deploymentRow={DEPLOYMENT_ROW_TABS.has(cur)} />
           )}
           {cur === "notifications" && <NotificationSettingsTab />}
+          {cur === "chat-connector" && tenantChosen(scope, settingsScope) && <ChatConnectorSettingsTab />}
           {cur === "ai-keys" && <TenantAIKeysTab />}
           {cur === "usage" && <UsageTab scope={scope} />}
           {cur === "model-links" && <ModelLinksTab />}

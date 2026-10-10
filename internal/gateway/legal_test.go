@@ -90,4 +90,17 @@ func TestLegalInfo(t *testing.T) {
 			}
 		})
 	}
+
+	// The privacy notice describes the chat connector only where it runs.
+	for _, on := range []bool{false, true} {
+		h := &handler{mcp: MCPConfig{Enabled: on}}
+		rec := httptest.NewRecorder()
+		h.legalInfo(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/legal", nil))
+		var out struct {
+			ChatConnector bool `json:"chat_connector"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.ChatConnector != on {
+			t.Errorf("chat_connector = %v with the connector enabled=%v (%v)", out.ChatConnector, on, err)
+		}
+	}
 }

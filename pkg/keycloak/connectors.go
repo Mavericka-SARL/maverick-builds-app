@@ -2,9 +2,10 @@ package keycloak
 
 // The chat connector's OAuth clients (docs/CHAT_CONNECTOR.md): one
 // registered, confidential client per chat host — never dynamic client
-// registration — and one client scope, models:read, whose tokens name the
-// connector as their audience. The gateway's /mcp accepts exactly these
-// tokens; its REST API refuses them.
+// registration — and two client scopes: models:read, whose tokens name the
+// connector as their audience, and grids:write, which lets the connector
+// write the grid cells the person may write. The gateway's /mcp accepts
+// exactly these tokens; its REST API refuses them.
 
 import (
 	"context"
@@ -17,8 +18,14 @@ import (
 	"time"
 )
 
-// ConnectorScope is the connector's scope: read-only reporting.
+// ConnectorScope is the connector's read scope: models and their grids.
 const ConnectorScope = "models:read"
+
+// ConnectorWriteScope is the connector's write scope: the grid cells the
+// person may write in the console. A default scope of every connector
+// client, so each new connection asks for it on the consent screen; one
+// granted before it existed keeps the read scope only.
+const ConnectorWriteScope = "grids:write"
 
 // ConnectorHost is a chat host and the client registered for it.
 type ConnectorHost struct {
@@ -125,6 +132,19 @@ func (c *Client) EnsureConnectorClients(ctx context.Context, setup ConnectorSetu
 	if err != nil {
 		return nil, err
 	}
+	writeScopeID, err := c.ensureClientScope(ctx, clientScopeRep{
+		Name:        ConnectorWriteScope,
+		Description: "Write grid cells through the chat connector, with the person's own access",
+		Protocol:    "openid-connect",
+		Attributes: map[string]string{
+			"include.in.token.scope":    "true",
+			"display.on.consent.screen": "true",
+			"consent.screen.text":       "Change the grid values you can change in maverickbuilds.app, with your access.",
+		},
+	}, nil)
+	if err != nil {
+		return nil, err
+	}
 	offlineID, err := c.clientScopeID(ctx, "offline_access")
 	if err != nil {
 		return nil, err
@@ -133,8 +153,8 @@ func (c *Client) EnsureConnectorClients(ctx context.Context, setup ConnectorSetu
 	var out []ConnectorClient
 	for _, host := range hosts {
 		rep := clientRep{
-			ClientID: host.ClientID, Name: "maverickbuilds.app reporting in " + host.Name,
-			Description: "Read-only chat connector (/mcp) for " + host.Name + ". Managed by cmd/connector-clients.",
+			ClientID: host.ClientID, Name: "maverickbuilds.app in " + host.Name,
+			Description: "Chat connector (/mcp) for " + host.Name + ": reads grids, and writes cells with grids:write. Managed by cmd/connector-clients.",
 			Enabled:     true, Protocol: "openid-connect",
 			PublicClient: false, ClientAuthenticatorType: "client-secret",
 			StandardFlowEnabled: true,
@@ -171,11 +191,13 @@ func (c *Client) EnsureConnectorClients(ctx context.Context, setup ConnectorSetu
 				return nil, fmt.Errorf("update client %s: %w", host.ClientID, err)
 			}
 		}
-		// models:read always; offline_access on request (Claude asks for
-		// it to refresh). The realm's own default scopes stay: newer
-		// Keycloak carries the subject itself in one of them.
-		if _, err := c.do(ctx, http.MethodPut, "/clients/"+id+"/default-client-scopes/"+scopeID, nil, nil); err != nil {
-			return nil, err
+		// models:read and grids:write always; offline_access on request
+		// (Claude asks for it to refresh). The realm's own default scopes
+		// stay: newer Keycloak carries the subject itself in one of them.
+		for _, sid := range []string{scopeID, writeScopeID} {
+			if _, err := c.do(ctx, http.MethodPut, "/clients/"+id+"/default-client-scopes/"+sid, nil, nil); err != nil {
+				return nil, err
+			}
 		}
 		if _, err := c.do(ctx, http.MethodPut, "/clients/"+id+"/optional-client-scopes/"+offlineID, nil, nil); err != nil {
 			return nil, err
@@ -220,12 +242,12 @@ func (c *Client) clientScopeID(ctx context.Context, name string) (string, error)
 func (c *Client) ensureConnectorScope(ctx context.Context, resource string) (string, error) {
 	scope := clientScopeRep{
 		Name:        ConnectorScope,
-		Description: "Read models, dashboards and workflow activity through the chat connector (read-only)",
+		Description: "Read models and their grid data through the chat connector",
 		Protocol:    "openid-connect",
 		Attributes: map[string]string{
 			"include.in.token.scope":    "true",
 			"display.on.consent.screen": "true",
-			"consent.screen.text":       "Read your models, dashboards and workflow activity in maverickbuilds.app, with your access. Nothing can be changed.",
+			"consent.screen.text":       "Read the models and grid data you can open in maverickbuilds.app, with your access.",
 		},
 	}
 	mapper := mapperRep{
@@ -237,21 +259,32 @@ func (c *Client) ensureConnectorScope(ctx context.Context, resource string) (str
 			"introspection.token.claim": "true",
 		},
 	}
-	id, err := c.clientScopeID(ctx, ConnectorScope)
+	return c.ensureClientScope(ctx, scope, &mapper)
+}
+
+// ensureClientScope creates or updates scope, with mapper when it has one,
+// and returns its id.
+func (c *Client) ensureClientScope(ctx context.Context, scope clientScopeRep, mapper *mapperRep) (string, error) {
+	id, err := c.clientScopeID(ctx, scope.Name)
 	if err != nil {
 		return "", err
 	}
 	if id == "" {
-		scope.ProtocolMappers = []mapperRep{mapper}
+		if mapper != nil {
+			scope.ProtocolMappers = []mapperRep{*mapper}
+		}
 		res, err := c.do(ctx, http.MethodPost, "/client-scopes", scope, nil)
 		if err != nil {
-			return "", fmt.Errorf("create client scope %s: %w", ConnectorScope, err)
+			return "", fmt.Errorf("create client scope %s: %w", scope.Name, err)
 		}
 		return path.Base(res.Location), nil
 	}
 	scope.ID = id
 	if _, err := c.do(ctx, http.MethodPut, "/client-scopes/"+id, scope, nil); err != nil {
-		return "", fmt.Errorf("update client scope %s: %w", ConnectorScope, err)
+		return "", fmt.Errorf("update client scope %s: %w", scope.Name, err)
+	}
+	if mapper == nil {
+		return id, nil
 	}
 	var mappers []mapperRep
 	if _, err := c.do(ctx, http.MethodGet, "/client-scopes/"+id+"/protocol-mappers/models", nil, &mappers); err != nil {

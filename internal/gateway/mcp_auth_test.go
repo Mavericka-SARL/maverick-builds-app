@@ -139,7 +139,7 @@ func TestConnectorTokens(t *testing.T) {
 			Scopes               []string `json:"scopes_supported"`
 		}
 		_ = json.Unmarshal([]byte(body), &meta)
-		if resp.StatusCode != http.StatusOK || meta.Resource != connectorResource || len(meta.Scopes) != 1 || meta.Scopes[0] != "models:read" {
+		if resp.StatusCode != http.StatusOK || meta.Resource != connectorResource || len(meta.Scopes) != 2 || meta.Scopes[0] != "models:read" || meta.Scopes[1] != "grids:write" {
 			t.Errorf("metadata: %d %s", resp.StatusCode, body)
 		}
 	})

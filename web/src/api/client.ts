@@ -114,6 +114,14 @@ export interface Actor {
   roles: string[];
 }
 
+/** Whether a tenant's people may change grid data from a chat connection
+ *  — ChatGPT or Claude (GET/PUT /api/admin/connector-settings). On unless an
+ *  administrator turned it off; reads through a connection are not affected. */
+export interface ConnectorSettings {
+  chat_writes: boolean;
+  scope?: SettingsScope;
+}
+
 /** Outbound notification delivery for this tenant (GET/PUT /api/notifications/settings).
  *  webhook_secret is write-only: it never comes back, and sending an empty one
  *  keeps the stored value. mailer_configured says whether the deployment has an
@@ -345,6 +353,8 @@ export interface LegalInfo {
   hosting: string;
   /** YYYY-MM-DD, shown on both documents. */
   updated: string;
+  /** The chat connector (ChatGPT, Claude) runs here, so the privacy notice describes it. */
+  chat_connector?: boolean;
 }
 
 export interface SignupOptions {
@@ -2096,6 +2106,9 @@ export const api = {
   updatePlan: (key: string, body: Omit<PlanDef, "key" | "updated_at">) =>
     apiFetch<PlanDef>(`/api/admin/plans/${encodeURIComponent(key)}`, { method: "PUT", body: JSON.stringify(body) }),
   getLicense: () => apiFetch<LicenseInfo>("/api/license"),
+  getConnectorSettings: () => apiFetch<ConnectorSettings>("/api/admin/connector-settings"),
+  updateConnectorSettings: (body: { chat_writes: boolean }) =>
+    apiFetch<ConnectorSettings>("/api/admin/connector-settings", { method: "PUT", body: JSON.stringify(body) }),
   getNotificationSettings: () => apiFetch<NotificationSettings>("/api/notifications/settings"),
   updateNotificationSettings: (body: NotificationSettings) =>
     apiFetch<NotificationSettings>("/api/notifications/settings", { method: "PUT", body: JSON.stringify(body) }),

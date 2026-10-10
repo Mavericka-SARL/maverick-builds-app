@@ -173,15 +173,59 @@ func TestChatPluginReviewCases(t *testing.T) {
 		want("office totals", got, map[string]float64{bm["budget"]: 380000, bm["spent"]: 293500, bm["remaining"]: 86500})
 	})
 
-	t.Run("negative cases — nothing can be changed", func(t *testing.T) {
+	// Cases 6 and 7 change the account, so they run last, and 7 puts back
+	// what 6 changed: the next reviewer reads the numbers above.
+	headcount := func(team, quarter string) map[string]any {
+		return map[string]any{"metric_id": tm["headcount"], "members": map[string]string{td["team"]: team, td["quarter"]: quarter}}
+	}
+	yearEnd := func() float64 {
+		total := c.must("query_grid", ctxOf("Learn the platform", map[string]any{"grid_id": tourGrid, "metric_ids": []string{tm["headcount"]}}))
+		v, _ := valueOf(t, total["rows"].([]any)[0].(map[string]any)["value"])
+		return v
+	}
+
+	t.Run("case 6 — set Engineering's headcount in Q4 to 10", func(t *testing.T) {
+		cell := headcount("ENG", "Q4")
+		cell["value"] = 10
+		if res := c.must("write_cells", ctxOf("Learn the platform", map[string]any{"cells": []any{cell}})); res["status"] != "written" {
+			t.Fatalf("write_cells: %v", res)
+		}
+		if v := yearEnd(); !nearly(v, 15) {
+			t.Errorf("year-end headcount = %v, want 15 (5 + 10)", v)
+		}
+		res := c.must("query_grid", ctxOf("Learn the platform", map[string]any{
+			"grid_id": tourGrid, "metric_ids": []string{tm["cost"]}, "group_by": td["team"], "leaves_only": true}))
+		want("cost by team", byMember(res["rows"].([]any), tm["cost"]), map[string]float64{"SALES": 216000, "ENG": 435000})
+	})
+
+	t.Run("case 7 — set it back to 8", func(t *testing.T) {
+		cell := headcount("ENG", "Q4")
+		cell["value"] = 8
+		c.must("write_cells", ctxOf("Learn the platform", map[string]any{"cells": []any{cell}}))
+		if v := yearEnd(); !nearly(v, 13) {
+			t.Errorf("year-end headcount = %v, want 13 again", v)
+		}
+	})
+
+	t.Run("negative cases — only input cells can be changed", func(t *testing.T) {
 		list, err := c.cs.ListTools(context.Background(), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, tool := range list.Tools {
-			if !tool.Annotations.ReadOnlyHint || strings.HasPrefix(tool.Name, "update") || strings.HasPrefix(tool.Name, "delete") {
+			if (tool.Name != "write_cells" && !tool.Annotations.ReadOnlyHint) || strings.HasPrefix(tool.Name, "update") || strings.HasPrefix(tool.Name, "delete") {
 				t.Errorf("%s is not a pure read", tool.Name)
 			}
 		}
+		// Negative case 1: cost is calculated, so a write to it is refused
+		// and nothing is written.
+		cell := map[string]any{"metric_id": tm["cost"], "members": map[string]string{td["team"]: "ENG", td["quarter"]: "Q4"}, "value": 100000}
+		if _, errText := c.call("write_cells", ctxOf("Learn the platform", map[string]any{"cells": []any{cell}})); !strings.Contains(errText, "metric is not writable") ||
+			!strings.HasPrefix(errText, "refused: nothing was written") {
+			t.Errorf("a write to the calculated cost: %q", errText)
+		}
+		res := c.must("query_grid", ctxOf("Learn the platform", map[string]any{
+			"grid_id": tourGrid, "metric_ids": []string{tm["cost"]}, "group_by": td["team"], "leaves_only": true}))
+		want("cost by team", byMember(res["rows"].([]any), tm["cost"]), map[string]float64{"SALES": 216000, "ENG": 405000})
 	})
 }

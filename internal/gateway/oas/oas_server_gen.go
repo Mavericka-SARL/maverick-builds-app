@@ -662,6 +662,13 @@ type Handler interface {
 	//
 	// GET /api/connector
 	GetConnectorInfo(ctx context.Context) (*ConnectorInfo, error)
+	// GetConnectorSettings implements getConnectorSettings operation.
+	//
+	// Whether the tenant's people may change grid data from a chat connection (tenant or platform
+	// administrators).
+	//
+	// GET /api/admin/connector-settings
+	GetConnectorSettings(ctx context.Context) (GetConnectorSettingsRes, error)
 	// GetDemo implements getDemo operation.
 	//
 	// Get demo context (model, revision, actor for current persona).
@@ -1700,6 +1707,12 @@ type Handler interface {
 	//
 	// PATCH /api/dimensions/{dimId}/members/{memberId}
 	UpdateBusinessMember(ctx context.Context, req *BusinessMemberRequest, params UpdateBusinessMemberParams) (UpdateBusinessMemberRes, error)
+	// UpdateConnectorSettings implements updateConnectorSettings operation.
+	//
+	// Turn chat writes on or off for the tenant (tenant or platform administrators).
+	//
+	// PUT /api/admin/connector-settings
+	UpdateConnectorSettings(ctx context.Context, req *UpdateConnectorSettingsReq) (UpdateConnectorSettingsRes, error)
 	// UpdateDashboard implements updateDashboard operation.
 	//
 	// Rename, retag, or move a dashboard between folders.
@@ -1873,6 +1886,16 @@ type Handler interface {
 	//
 	// POST /api/cells
 	Writeback(ctx context.Context, req *WritebackRequest) (WritebackRes, error)
+	// WritebackBatch implements writebackBatch operation.
+	//
+	// Every cell is checked as POST /api/cells checks one — input metrics only, the caller's access
+	// rules, workflow locks, the plan's limits — before any is written; a refused cell refuses the
+	// batch (422, each refused cell by its index) and nothing is written. Two writes to one cell are
+	// refused. With dry_run every cell is checked and none written. A chat connection's write (the
+	// connector's write_cells) is also refused when the tenant turned chat writes off.
+	//
+	// POST /api/cells/batch
+	WritebackBatch(ctx context.Context, req *WritebackBatchReq) (WritebackBatchRes, error)
 }
 
 // Server implements http server based on OpenAPI v3 specification and

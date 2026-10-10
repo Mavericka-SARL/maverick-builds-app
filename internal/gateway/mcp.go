@@ -1,16 +1,18 @@
 package gateway
 
-// The chat-reporting connector: an MCP server at /mcp that ChatGPT, Claude
-// and other MCP hosts call with an OAuth access token issued for it
-// (internal/mcpserver, internal/reporting). It analyses grid data only:
+// The chat connector: an MCP server at /mcp that ChatGPT, Claude and other
+// MCP hosts call with an OAuth access token issued for it
+// (internal/mcpserver, internal/reporting). It works on grid data only:
 // charts and reports are made in the chat from grids, never from
-// dashboards, and nothing is saved here.
+// dashboards, and are not saved here; the one change it makes is writing
+// grid cells the person may write in the console.
 //
 // A connector token is not a console token. It must name this connector
 // (audience = the connector's resource URL) and carry its read scope, and it
 // must not be the console's own: /mcp refuses console tokens, and the REST
 // routes refuse connector tokens (restClaims). A host's token therefore
-// opens only what the connector serves — reads.
+// opens only what the connector serves — reads, and cell writes when the
+// token also carries the write scope and the tenant allows them.
 //
 // Every tool call reads as the token's subject through this gateway's own
 // routes, run in-process through the same chain as a console request
@@ -18,10 +20,12 @@ package gateway
 // routing, role guards and access rules are the console's, decided afresh
 // for every read. The person is resolved like any account — a disabled or
 // removed one reads nothing — and nothing about them is cached between
-// calls. Two things are narrower than the console: delegatedReadGate lets a
-// connector's request reach only the read routes in delegatedReadRoutes, and
-// the request carries nothing of the host's but the verified subject and the
-// application and model it names.
+// calls. Three things are narrower than the console: delegatedReadGate lets
+// a connector's request reach only the read routes in delegatedReadRoutes,
+// and the write routes in delegatedWriteRoutes only when mcpReader.Write
+// made it; the request carries nothing of the host's but the verified
+// subject and the application and model it names; and a write is refused
+// when the model's tenant has turned chat writes off (chatWritesAllowed).
 
 import (
 	"context"
@@ -55,6 +59,9 @@ type MCPConfig struct {
 	// Scope is the scope a connector token must carry; empty means
 	// DefaultMCPScope.
 	Scope string
+	// WriteScope is the scope a token must also carry for the connector to
+	// write cells; empty means DefaultMCPWriteScope.
+	WriteScope string
 	// Clients are the OAuth clients registered for the chat hosts (a
 	// token's azp; cmd/connector-clients); empty means DefaultMCPClients.
 	Clients []string
@@ -71,10 +78,16 @@ type MCPConfig struct {
 	OpenAIAppsChallenge string
 }
 
-// DefaultMCPScope is the connector's one scope: reading models and their
-// activity. It permits the connector's use; what it reads is the person's
+// DefaultMCPScope is the connector's read scope: reading models and their
+// grids. It permits the connector's use; what it reads is the person's
 // access, nothing more.
-const DefaultMCPScope = "models:read"
+const DefaultMCPScope = keycloak.ConnectorScope
+
+// DefaultMCPWriteScope is the connector's write scope: writing the grid
+// cells the person may write in the console. A connection granted before it
+// existed holds the read scope only, and writes nothing until the person
+// connects again.
+const DefaultMCPWriteScope = keycloak.ConnectorWriteScope
 
 // DefaultMCPClients are the clients cmd/connector-clients registers: one per
 // chat host, never one a host registered for itself.
@@ -97,6 +110,13 @@ func (c MCPConfig) scope() string {
 	return c.Scope
 }
 
+func (c MCPConfig) writeScope() string {
+	if c.WriteScope == "" {
+		return DefaultMCPWriteScope
+	}
+	return c.WriteScope
+}
+
 // ── delegated reads ─────────────────────────────────────────────────────────
 
 type delegatedKey struct{}
@@ -114,6 +134,25 @@ func delegatedSubject(ctx context.Context) (string, bool) {
 	return sub, ok && sub != ""
 }
 
+type delegatedWriteKey struct{}
+
+// withDelegatedWrite marks a delegated request as a chat connection's write,
+// made through via (the host's client). Only mcpReader.Write sets it: a
+// model link's reads never carry it.
+func withDelegatedWrite(ctx context.Context, via string) context.Context {
+	return context.WithValue(ctx, delegatedWriteKey{}, via)
+}
+
+// delegatedWrite is the client a delegated write was made through, if ctx
+// is one.
+func delegatedWrite(ctx context.Context) (string, bool) {
+	if _, ok := delegatedSubject(ctx); !ok {
+		return "", false
+	}
+	via, ok := ctx.Value(delegatedWriteKey{}).(string)
+	return via, ok
+}
+
 // delegatedReadRoutes are the routes a connector's read may reach: who the
 // person is, which models they open, and grid data — the connector analyses
 // grids only. Each decides its own access as for the console. Anything else
@@ -128,9 +167,19 @@ var delegatedReadRoutes = []struct{ method, pattern string }{
 	{http.MethodGet, "/api/grid/series"},
 }
 
+// delegatedWriteRoutes are the routes a chat connection's write may reach:
+// a batch of grid cells, all or nothing, under the console's own checks.
+var delegatedWriteRoutes = []struct{ method, pattern string }{
+	{http.MethodPost, "/api/cells/batch"},
+}
+
 func delegatedReadAllowed(method, path string) bool {
+	return routeListed(delegatedReadRoutes, method, path)
+}
+
+func routeListed(routes []struct{ method, pattern string }, method, path string) bool {
 	segs := strings.Split(strings.Trim(path, "/"), "/")
-	for _, r := range delegatedReadRoutes {
+	for _, r := range routes {
 		if r.method != method {
 			continue
 		}
@@ -160,10 +209,13 @@ func delegatedReadAllowed(method, path string) bool {
 }
 
 // delegatedReadGate refuses a connector's read of any route outside
-// delegatedReadRoutes. Console requests pass untouched.
+// delegatedReadRoutes, and its write of any outside delegatedWriteRoutes.
+// Console requests pass untouched.
 func (h *handler) delegatedReadGate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := delegatedSubject(r.Context()); ok && !delegatedReadAllowed(r.Method, r.URL.Path) {
+		_, writes := delegatedWrite(r.Context())
+		if _, ok := delegatedSubject(r.Context()); ok && !delegatedReadAllowed(r.Method, r.URL.Path) &&
+			(!writes || !routeListed(delegatedWriteRoutes, r.Method, r.URL.Path)) {
 			jsonErr(w, fmt.Errorf("forbidden: not a read this connection may make"), http.StatusForbidden)
 			return
 		}
@@ -180,6 +232,17 @@ type mcpReader struct {
 }
 
 func (m mcpReader) Read(ctx context.Context, subject string, req reporting.Request) (reporting.Response, error) {
+	return m.serve(ctx, subject, "", false, req)
+}
+
+// Write makes a chat connection's write as subject, through via (the host's
+// client): the one kind of delegated request that may reach
+// delegatedWriteRoutes. A model link never writes through it.
+func (m mcpReader) Write(ctx context.Context, subject, via string, req reporting.Request) (reporting.Response, error) {
+	return m.serve(ctx, subject, via, true, req)
+}
+
+func (m mcpReader) serve(ctx context.Context, subject, via string, write bool, req reporting.Request) (reporting.Response, error) {
 	timeout := m.timeout
 	if timeout == 0 {
 		timeout = mcpReadTimeout
@@ -191,6 +254,9 @@ func (m mcpReader) Read(ctx context.Context, subject string, req reporting.Reque
 	stop := context.AfterFunc(ctx, cancel)
 	defer stop()
 	rctx = withDelegatedSubject(rctx, subject)
+	if write {
+		rctx = withDelegatedWrite(rctx, via)
+	}
 
 	u := url.URL{Path: req.Path}
 	if req.Query != nil {
@@ -221,7 +287,9 @@ func (m mcpReader) Read(ctx context.Context, subject string, req reporting.Reque
 	}
 	rec := httptest.NewRecorder()
 	m.api.ServeHTTP(rec, hr)
-	if err := rctx.Err(); err != nil {
+	// A write's answer is the route's, even past the deadline: once its
+	// cells are stored the route finishes regardless, and says so.
+	if err := rctx.Err(); err != nil && (!write || rec.Code != http.StatusOK) {
 		return reporting.Response{}, err
 	}
 	return reporting.Response{Status: rec.Code, Header: rec.Header(), Body: rec.Body.Bytes()}, nil
@@ -247,7 +315,10 @@ func (h *handler) mountMCP(api http.Handler) http.Handler {
 	}
 	metadataURL := resourceMetadataURL(resource)
 
-	server := mcpserver.New(reporting.New(mcpReader{api: api}), h.mcp.Version, h.observeMCP)
+	conn := mcpReader{api: api}
+	server := mcpserver.New(reporting.New(conn).WithWriter(conn), mcpserver.Options{
+		Version: h.mcp.Version, WriteScope: h.mcp.writeScope(), Observe: h.observeMCP,
+	})
 	streamable := sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server },
 		&sdk.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
 	limiter := &discoverLimiter{rate: mcpRate, burst: mcpBurst}
@@ -267,9 +338,9 @@ func (h *handler) mountMCP(api http.Handler) http.Handler {
 	metadata := auth.ProtectedResourceMetadataHandler(&oauthex.ProtectedResourceMetadata{
 		Resource:               resource,
 		AuthorizationServers:   nonEmpty(issuer),
-		ScopesSupported:        []string{h.mcp.scope()},
+		ScopesSupported:        []string{h.mcp.scope(), h.mcp.writeScope()},
 		BearerMethodsSupported: []string{"header"},
-		ResourceName:           "maverickbuilds.app reporting (read-only)",
+		ResourceName:           "maverickbuilds.app grids",
 	})
 
 	mux := http.NewServeMux()
@@ -312,14 +383,23 @@ func (h *handler) verifyMCPToken(_ context.Context, token string, _ *http.Reques
 		Scopes:     strings.Fields(claims.Scope),
 		Expiration: claims.ExpiresAt.Time,
 		UserID:     claims.Subject,
+		Extra:      map[string]any{mcpserver.ClientKey: claims.AuthorizedParty},
 	}, nil
 }
 
 // devMCPToken is the dev stack's stand-in for a connector token, which has
-// no identity provider: "dev:<persona>" reads as that persona (an
-// X-Dev-User value). Only reachable with DEV_MODE on and no JWKS.
+// no identity provider: "dev:<persona>" reads and writes as that persona
+// (an X-Dev-User value), "dev-read:<persona>" only reads — a connection
+// granted before the write scope existed. Only reachable with DEV_MODE on
+// and no JWKS.
 func devMCPToken(token string) (*auth.TokenInfo, error) {
+	scopes := []string{DefaultMCPScope, DefaultMCPWriteScope}
 	persona, ok := strings.CutPrefix(token, "dev:")
+	if !ok {
+		if persona, ok = strings.CutPrefix(token, "dev-read:"); ok {
+			scopes = scopes[:1]
+		}
+	}
 	if !ok || persona == "" {
 		return nil, auth.ErrInvalidToken
 	}
@@ -327,7 +407,8 @@ func devMCPToken(token string) (*auth.TokenInfo, error) {
 	if s, ok := devPersonas[persona]; ok {
 		sub = s
 	}
-	return &auth.TokenInfo{Scopes: []string{DefaultMCPScope}, Expiration: time.Now().Add(time.Hour), UserID: sub}, nil
+	return &auth.TokenInfo{Scopes: scopes, Expiration: time.Now().Add(time.Hour), UserID: sub,
+		Extra: map[string]any{mcpserver.ClientKey: "dev"}}, nil
 }
 
 // observeMCP logs each tool call: who, which tool, how long, how it ended —
@@ -337,7 +418,7 @@ func (h *handler) observeMCP(_ context.Context, subject, tool string, took time.
 	if err != nil {
 		ev = h.log.Warn().Str("outcome", strings.SplitN(err.Error(), ":", 2)[0])
 	}
-	ev.Str("component", "mcp").Str("subject", subject).Str("tool", tool).Dur("took", took).Msg("connector read")
+	ev.Str("component", "mcp").Str("subject", subject).Str("tool", tool).Dur("took", took).Msg("connector call")
 }
 
 // resourceMetadataURL is where RFC 9728 places resource's metadata: the
@@ -403,7 +484,7 @@ func (h *handler) connectorInfo(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]any{
 		"enabled": true,
 		"url":     strings.TrimSuffix(h.mcp.ResourceURL, "/"),
-		"scope":   h.mcp.scope(),
+		"scope":   h.mcp.scope() + " " + h.mcp.writeScope(),
 		"hosts":   hosts,
 	})
 }
