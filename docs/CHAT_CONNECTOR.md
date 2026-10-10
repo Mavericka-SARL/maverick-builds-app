@@ -1,9 +1,11 @@
 # Chat connector (ChatGPT, Claude)
 
-> **Classification:** Current — the connector for **grid data only**: charts
-> and reports are made in ChatGPT or Claude from grids, never from dashboards,
-> and are not saved in maverickbuilds.app; the one change it makes is entering
-> values into the input cells the person may edit.
+> **Classification:** Current — numbers come from **grids only**: charts and
+> reports are made in ChatGPT or Claude from grid reads, never from dashboard
+> widgets, and are not saved in maverickbuilds.app. Dashboards and workflows
+> are read for the process around the grids (their text, links and steps).
+> The one change it makes is entering values into the input cells the person
+> may edit.
 
 > **Last verified:** 2026-10-10 — `go test ./internal/gateway -run 'TestMCPConnector|TestConnectorTokens|TestDelegatedReadGate|TestChatWritesCells|TestCellsBatchRoute|TestChatPluginReviewCases'`
 > (cell writes, 2026-10-10); 2026-10-02 for the rest (shared and dedicated
@@ -35,6 +37,10 @@ Claude** shows the connector URL and each host's client ID and secret.
 | `compare_grid` | two readings member by member (actual vs budget, one period vs another): difference and percent change |
 | `render_chart` | a bar, line, pie, scatter or histogram chart of a grid query |
 | `render_report` | up to 10 sections — KPIs, tables, charts, comparisons — each a grid query |
+| `list_dashboards` | a model's dashboards you can open, with folders and tags |
+| `describe_dashboard` | a dashboard as a page: its text widgets' Markdown, its links to other dashboards resolved so they can be followed, and what each widget shows (grid, metrics, axis, fixed filters) or does — no numbers |
+| `list_workflows` | a model's published workflows with their descriptions |
+| `describe_workflow` | one workflow's start fields and steps: name, type, instructions, the roles that act on each, deadlines, which step follows |
 | `write_cells` | enters up to 500 input cells of the active revision as you — numbers, texts, dates, pick-list choices, or clears — all or nothing; `dry_run` checks without writing |
 
 Charts and reports take **grid queries, never numbers**: each call reads the
@@ -44,9 +50,35 @@ MCP Apps (Claude, ChatGPT) shows an interactive view (switch chart type,
 refresh); every host also receives a text summary with the data table and a
 PNG of each chart.
 
-Not read through the connector: forms, dashboards, workflows, triggers,
-notifications, integrations, audit. Nothing but input cells can be changed:
-not the model, its members, forms, workflows or anyone's access.
+Not read through the connector: forms and their records, a widget's data,
+running workflow instances and tasks, triggers, notifications, integrations,
+audit. Nothing but input cells can be changed: not the model, its members,
+forms, workflows or anyone's access.
+
+### Reading the process
+
+Dashboards and workflows explain how a model is meant to be used, so the
+assistant can read them — through the console's own routes
+(`GET /api/dashboards`, `/api/dashboards/{id}`, `/api/folders`,
+`/api/workflow/definitions`, `/api/workflow/definitions/{id}`), with the
+console's access: a dashboard is listed only when the person's business roles
+give it to them, in the model's active revision.
+
+- **No data from widgets.** `describe_dashboard` says which grid, metrics and
+  fixed filters a widget shows; the numbers come from `query_grid`, the one
+  path for numbers, with one set of checks.
+- **What a widget names is the person's view.** A metric or member hidden
+  from them is left out of a widget's description, as the grid reads leave it
+  out; a widget on a grid they cannot read says only that. An image widget
+  gives its alternative text, never the picture.
+- **Links are followed by name**, as in the console (a `dashboard:Model/Name` link target):
+  resolved against the models and dashboards the person opens, or marked as
+  leading nowhere for them.
+- **Workflow steps without machinery.** Name, type, written instructions,
+  role names, deadline hours, completion label and routing — never a
+  condition, a notification's recipients or anything naming a person
+  (owner decision, 2026-10-10). The connector never starts, approves or
+  submits a workflow.
 
 ### Entering values
 
@@ -89,9 +121,10 @@ server's instructions also tell the assistant to confirm the values first.
   subject: application and model grants, hidden and read-only members and
   metrics apply as in the console, decided again on every call. A disabled
   account or a removed grant or rule applies to the next call.
-- **Grid routes only.** The gateway refuses a connector's request to anything
-  but `/api/me`, `/api/apps`, `/api/demo`, `/api/grid`, `/api/grids` and
-  `/api/grid/series` before a handler runs — and `POST /api/cells/batch` for
+- **Listed routes only.** The gateway refuses a connector's request to
+  anything but `/api/me`, `/api/apps`, `/api/demo`, `/api/grid`, `/api/grids`,
+  `/api/grid/series` and the five dashboard and workflow reads above before a
+  handler runs — and `POST /api/cells/batch` for
   `write_cells` alone: a model link's reads, which run through the same
   delegated path, cannot reach it.
 - **Active revision only.** Reads and writes use each model's active

@@ -122,6 +122,7 @@ const (
 	GetTenantAISettingsOperation          OperationName = "GetTenantAISettings"
 	GetUsageOperation                     OperationName = "GetUsage"
 	GetWorkflowOperation                  OperationName = "GetWorkflow"
+	GetWorkflowDefinitionOperation        OperationName = "GetWorkflowDefinition"
 	GetWorkflowHistoryOperation           OperationName = "GetWorkflowHistory"
 	GetWorkflowInstancesOperation         OperationName = "GetWorkflowInstances"
 	GetWorkflowUsageOperation             OperationName = "GetWorkflowUsage"

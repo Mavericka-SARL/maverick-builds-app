@@ -20,6 +20,12 @@ import (
 	"github.com/mavericks-engine/mavericks/pkg/logger"
 )
 
+// asList is v as a JSON list; absent is empty.
+func asList(v any) []any {
+	l, _ := v.([]any)
+	return l
+}
+
 func TestChatPluginReviewCases(t *testing.T) {
 	pool := testdb.New(t, migrationfs.FS, ".")
 	t.Setenv("DEV_MODE", "true")
@@ -171,6 +177,38 @@ func TestChatPluginReviewCases(t *testing.T) {
 			got[r.(map[string]any)["metric_id"].(string)] = v
 		}
 		want("office totals", got, map[string]float64{bm["budget"]: 380000, bm["spent"]: 293500, bm["remaining"]: 86500})
+	})
+
+	t.Run("case 8 — walk me through the Business admin guide", func(t *testing.T) {
+		var first string
+		for _, d := range c.must("list_dashboards", ctxOf("Business admin guide", nil))["dashboards"].([]any) {
+			if d.(map[string]any)["name"] == "1 · Your part" {
+				first = d.(map[string]any)["id"].(string)
+			}
+		}
+		if first == "" {
+			t.Fatal("the guide's first page is not listed")
+		}
+		page := c.must("describe_dashboard", ctxOf("Business admin guide", map[string]any{"dashboard_id": first}))
+		var next map[string]any
+		for _, w := range page["widgets"].([]any) {
+			wm := w.(map[string]any)
+			if wm["type"] != "text" {
+				continue
+			}
+			for _, l := range asList(wm["links"]) {
+				if l.(map[string]any)["dashboard_name"] == "2 · The model you work in" {
+					next = l.(map[string]any)
+				}
+			}
+		}
+		if next == nil || next["dashboard_id"] == nil {
+			t.Fatalf("page 1 does not lead to page 2: %v", page["widgets"])
+		}
+		page2 := c.must("describe_dashboard", map[string]any{"application_id": next["application_id"], "model_id": next["model_id"], "dashboard_id": next["dashboard_id"]})
+		if page2["dashboard"].(map[string]any)["name"] != "2 · The model you work in" {
+			t.Errorf("following the link opened %v", page2["dashboard"])
+		}
 	})
 
 	// Cases 6 and 7 change the account, so they run last, and 7 puts back

@@ -14,6 +14,8 @@ import {
   DataTable,
   type DataTableColumn,
   StatusBadge,
+  KindTag,
+  kindHint,
   EmptyState,
   SearchInput,
   Toolbar,
@@ -93,7 +95,7 @@ function ModelRevisionsSection({ model, tenantId, canTransferModels }: { model: 
 
   return (
     <div className="mvx-admin-revisions">
-      <div className="mvx-admin-revisions__label">Revisions</div>
+      <div className="mvx-admin-revisions__label" title={kindHint("revision")}>Revisions</div>
       {(model.revisions ?? []).length === 0 && (
         <p className="mvx-admin-muted">No revisions yet.</p>
       )}
@@ -248,7 +250,7 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
         <CollapseToggle expanded={appOpen} onToggle={() => toggle(`app:${app.id}`)} label={`application ${app.name}`} />
         <div className="mvx-admin-avatar mvx-admin-avatar--app">{app.name[0]}</div>
         <div className="mvx-admin-object__title">
-          <div className="mvx-admin-object__name">{app.name}</div>
+          <div className="mvx-admin-object__name"><KindTag kind="application" />{app.name}</div>
           <div className="mvx-admin-object__meta">{app.models.length} model{app.models.length !== 1 ? "s" : ""}</div>
         </div>
         <IconButton
@@ -324,7 +326,7 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
           <div key={m.id} className="mvx-admin-model">
             <div className="mvx-admin-model__header">
               <CollapseToggle expanded={modelOpen} onToggle={() => toggle(`model:${m.id}`)} label={`model ${m.name}`} />
-              <span className="mvx-admin-model__name">{m.name}</span>
+              <span className="mvx-admin-model__name"><KindTag kind="model" />{m.name}</span>
               {!modelOpen && <span className="mvx-admin-muted">{revisions} revision{revisions !== 1 ? "s" : ""}{m.active_revision ? ` · active: ${m.active_revision}` : ""}</span>}
               {canTransferModels && (
                 <IconButton
@@ -510,7 +512,7 @@ function TenantSection({ tenant, onDelete, isPlatformAdmin, canTransferModels }:
           </div>
         ) : (
           <div className="mvx-admin-object__title">
-            <div className="mvx-admin-object__name">{tenant.name}</div>
+            <div className="mvx-admin-object__name"><KindTag kind="tenant" />{tenant.name}</div>
             <div className="mvx-admin-object__meta" data-testid={`tenant-meta-${tenant.id}`}>
               {planLabel(tenant)} · {(tenant.applications ?? []).length} app{(tenant.applications ?? []).length !== 1 ? "s" : ""}
             </div>

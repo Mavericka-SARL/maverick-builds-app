@@ -8878,6 +8878,7 @@ func (*Error) getDemoRes()                     {}
 func (*Error) getFormRecordRes()               {}
 func (*Error) getIntegrationRes()              {}
 func (*Error) getIntegrationRunRes()           {}
+func (*Error) getWorkflowDefinitionRes()       {}
 func (*Error) getWorkflowRes()                 {}
 func (*Error) grantAdminUserAppAccessRes()     {}
 func (*Error) grantAdminUserModelAccessRes()   {}
@@ -11189,6 +11190,281 @@ func (s *GetUsageOK) SetTenants(val []TenantUsage) {
 }
 
 func (*GetUsageOK) getUsageRes() {}
+
+type GetWorkflowDefinitionOK struct {
+	ID            OptUUID                                    `json:"id"`
+	Name          OptString                                  `json:"name"`
+	Description   OptString                                  `json:"description"`
+	TriggerEvent  OptString                                  `json:"trigger_event"`
+	ContextSchema []GetWorkflowDefinitionOKContextSchemaItem `json:"context_schema"`
+	Steps         []GetWorkflowDefinitionOKStepsItem         `json:"steps"`
+}
+
+// GetID returns the value of ID.
+func (s *GetWorkflowDefinitionOK) GetID() OptUUID {
+	return s.ID
+}
+
+// GetName returns the value of Name.
+func (s *GetWorkflowDefinitionOK) GetName() OptString {
+	return s.Name
+}
+
+// GetDescription returns the value of Description.
+func (s *GetWorkflowDefinitionOK) GetDescription() OptString {
+	return s.Description
+}
+
+// GetTriggerEvent returns the value of TriggerEvent.
+func (s *GetWorkflowDefinitionOK) GetTriggerEvent() OptString {
+	return s.TriggerEvent
+}
+
+// GetContextSchema returns the value of ContextSchema.
+func (s *GetWorkflowDefinitionOK) GetContextSchema() []GetWorkflowDefinitionOKContextSchemaItem {
+	return s.ContextSchema
+}
+
+// GetSteps returns the value of Steps.
+func (s *GetWorkflowDefinitionOK) GetSteps() []GetWorkflowDefinitionOKStepsItem {
+	return s.Steps
+}
+
+// SetID sets the value of ID.
+func (s *GetWorkflowDefinitionOK) SetID(val OptUUID) {
+	s.ID = val
+}
+
+// SetName sets the value of Name.
+func (s *GetWorkflowDefinitionOK) SetName(val OptString) {
+	s.Name = val
+}
+
+// SetDescription sets the value of Description.
+func (s *GetWorkflowDefinitionOK) SetDescription(val OptString) {
+	s.Description = val
+}
+
+// SetTriggerEvent sets the value of TriggerEvent.
+func (s *GetWorkflowDefinitionOK) SetTriggerEvent(val OptString) {
+	s.TriggerEvent = val
+}
+
+// SetContextSchema sets the value of ContextSchema.
+func (s *GetWorkflowDefinitionOK) SetContextSchema(val []GetWorkflowDefinitionOKContextSchemaItem) {
+	s.ContextSchema = val
+}
+
+// SetSteps sets the value of Steps.
+func (s *GetWorkflowDefinitionOK) SetSteps(val []GetWorkflowDefinitionOKStepsItem) {
+	s.Steps = val
+}
+
+func (*GetWorkflowDefinitionOK) getWorkflowDefinitionRes() {}
+
+type GetWorkflowDefinitionOKContextSchemaItem map[string]jx.Raw
+
+func (s *GetWorkflowDefinitionOKContextSchemaItem) init() GetWorkflowDefinitionOKContextSchemaItem {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
+
+type GetWorkflowDefinitionOKStepsItem struct {
+	ID              OptString                                 `json:"id"`
+	Name            OptString                                 `json:"name"`
+	Type            OptGetWorkflowDefinitionOKStepsItemType   `json:"type"`
+	Instructions    OptString                                 `json:"instructions"`
+	AssigneeRoles   []string                                  `json:"assignee_roles"`
+	SLAHours        OptInt                                    `json:"sla_hours"`
+	CompletionLabel OptString                                 `json:"completion_label"`
+	RequiredComment OptBool                                   `json:"required_comment"`
+	Routes          OptGetWorkflowDefinitionOKStepsItemRoutes `json:"routes"`
+	NextStepIds     []string                                  `json:"next_step_ids"`
+}
+
+// GetID returns the value of ID.
+func (s *GetWorkflowDefinitionOKStepsItem) GetID() OptString {
+	return s.ID
+}
+
+// GetName returns the value of Name.
+func (s *GetWorkflowDefinitionOKStepsItem) GetName() OptString {
+	return s.Name
+}
+
+// GetType returns the value of Type.
+func (s *GetWorkflowDefinitionOKStepsItem) GetType() OptGetWorkflowDefinitionOKStepsItemType {
+	return s.Type
+}
+
+// GetInstructions returns the value of Instructions.
+func (s *GetWorkflowDefinitionOKStepsItem) GetInstructions() OptString {
+	return s.Instructions
+}
+
+// GetAssigneeRoles returns the value of AssigneeRoles.
+func (s *GetWorkflowDefinitionOKStepsItem) GetAssigneeRoles() []string {
+	return s.AssigneeRoles
+}
+
+// GetSLAHours returns the value of SLAHours.
+func (s *GetWorkflowDefinitionOKStepsItem) GetSLAHours() OptInt {
+	return s.SLAHours
+}
+
+// GetCompletionLabel returns the value of CompletionLabel.
+func (s *GetWorkflowDefinitionOKStepsItem) GetCompletionLabel() OptString {
+	return s.CompletionLabel
+}
+
+// GetRequiredComment returns the value of RequiredComment.
+func (s *GetWorkflowDefinitionOKStepsItem) GetRequiredComment() OptBool {
+	return s.RequiredComment
+}
+
+// GetRoutes returns the value of Routes.
+func (s *GetWorkflowDefinitionOKStepsItem) GetRoutes() OptGetWorkflowDefinitionOKStepsItemRoutes {
+	return s.Routes
+}
+
+// GetNextStepIds returns the value of NextStepIds.
+func (s *GetWorkflowDefinitionOKStepsItem) GetNextStepIds() []string {
+	return s.NextStepIds
+}
+
+// SetID sets the value of ID.
+func (s *GetWorkflowDefinitionOKStepsItem) SetID(val OptString) {
+	s.ID = val
+}
+
+// SetName sets the value of Name.
+func (s *GetWorkflowDefinitionOKStepsItem) SetName(val OptString) {
+	s.Name = val
+}
+
+// SetType sets the value of Type.
+func (s *GetWorkflowDefinitionOKStepsItem) SetType(val OptGetWorkflowDefinitionOKStepsItemType) {
+	s.Type = val
+}
+
+// SetInstructions sets the value of Instructions.
+func (s *GetWorkflowDefinitionOKStepsItem) SetInstructions(val OptString) {
+	s.Instructions = val
+}
+
+// SetAssigneeRoles sets the value of AssigneeRoles.
+func (s *GetWorkflowDefinitionOKStepsItem) SetAssigneeRoles(val []string) {
+	s.AssigneeRoles = val
+}
+
+// SetSLAHours sets the value of SLAHours.
+func (s *GetWorkflowDefinitionOKStepsItem) SetSLAHours(val OptInt) {
+	s.SLAHours = val
+}
+
+// SetCompletionLabel sets the value of CompletionLabel.
+func (s *GetWorkflowDefinitionOKStepsItem) SetCompletionLabel(val OptString) {
+	s.CompletionLabel = val
+}
+
+// SetRequiredComment sets the value of RequiredComment.
+func (s *GetWorkflowDefinitionOKStepsItem) SetRequiredComment(val OptBool) {
+	s.RequiredComment = val
+}
+
+// SetRoutes sets the value of Routes.
+func (s *GetWorkflowDefinitionOKStepsItem) SetRoutes(val OptGetWorkflowDefinitionOKStepsItemRoutes) {
+	s.Routes = val
+}
+
+// SetNextStepIds sets the value of NextStepIds.
+func (s *GetWorkflowDefinitionOKStepsItem) SetNextStepIds(val []string) {
+	s.NextStepIds = val
+}
+
+type GetWorkflowDefinitionOKStepsItemRoutes map[string]string
+
+func (s *GetWorkflowDefinitionOKStepsItemRoutes) init() GetWorkflowDefinitionOKStepsItemRoutes {
+	m := *s
+	if m == nil {
+		m = map[string]string{}
+		*s = m
+	}
+	return m
+}
+
+type GetWorkflowDefinitionOKStepsItemType string
+
+const (
+	GetWorkflowDefinitionOKStepsItemTypeTask         GetWorkflowDefinitionOKStepsItemType = "task"
+	GetWorkflowDefinitionOKStepsItemTypeApproval     GetWorkflowDefinitionOKStepsItemType = "approval"
+	GetWorkflowDefinitionOKStepsItemTypeNotification GetWorkflowDefinitionOKStepsItemType = "notification"
+	GetWorkflowDefinitionOKStepsItemTypeCondition    GetWorkflowDefinitionOKStepsItemType = "condition"
+	GetWorkflowDefinitionOKStepsItemTypeJoin         GetWorkflowDefinitionOKStepsItemType = "join"
+	GetWorkflowDefinitionOKStepsItemTypeUnspecified  GetWorkflowDefinitionOKStepsItemType = "unspecified"
+)
+
+// AllValues returns all GetWorkflowDefinitionOKStepsItemType values.
+func (GetWorkflowDefinitionOKStepsItemType) AllValues() []GetWorkflowDefinitionOKStepsItemType {
+	return []GetWorkflowDefinitionOKStepsItemType{
+		GetWorkflowDefinitionOKStepsItemTypeTask,
+		GetWorkflowDefinitionOKStepsItemTypeApproval,
+		GetWorkflowDefinitionOKStepsItemTypeNotification,
+		GetWorkflowDefinitionOKStepsItemTypeCondition,
+		GetWorkflowDefinitionOKStepsItemTypeJoin,
+		GetWorkflowDefinitionOKStepsItemTypeUnspecified,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s GetWorkflowDefinitionOKStepsItemType) MarshalText() ([]byte, error) {
+	switch s {
+	case GetWorkflowDefinitionOKStepsItemTypeTask:
+		return []byte(s), nil
+	case GetWorkflowDefinitionOKStepsItemTypeApproval:
+		return []byte(s), nil
+	case GetWorkflowDefinitionOKStepsItemTypeNotification:
+		return []byte(s), nil
+	case GetWorkflowDefinitionOKStepsItemTypeCondition:
+		return []byte(s), nil
+	case GetWorkflowDefinitionOKStepsItemTypeJoin:
+		return []byte(s), nil
+	case GetWorkflowDefinitionOKStepsItemTypeUnspecified:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *GetWorkflowDefinitionOKStepsItemType) UnmarshalText(data []byte) error {
+	switch GetWorkflowDefinitionOKStepsItemType(data) {
+	case GetWorkflowDefinitionOKStepsItemTypeTask:
+		*s = GetWorkflowDefinitionOKStepsItemTypeTask
+		return nil
+	case GetWorkflowDefinitionOKStepsItemTypeApproval:
+		*s = GetWorkflowDefinitionOKStepsItemTypeApproval
+		return nil
+	case GetWorkflowDefinitionOKStepsItemTypeNotification:
+		*s = GetWorkflowDefinitionOKStepsItemTypeNotification
+		return nil
+	case GetWorkflowDefinitionOKStepsItemTypeCondition:
+		*s = GetWorkflowDefinitionOKStepsItemTypeCondition
+		return nil
+	case GetWorkflowDefinitionOKStepsItemTypeJoin:
+		*s = GetWorkflowDefinitionOKStepsItemTypeJoin
+		return nil
+	case GetWorkflowDefinitionOKStepsItemTypeUnspecified:
+		*s = GetWorkflowDefinitionOKStepsItemTypeUnspecified
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
 
 // A tenant's Google service account, public half only.
 // Ref: #/components/schemas/GoogleConnection
@@ -18620,6 +18896,98 @@ func (o OptGetGridTotalsOnly) Get() (v GetGridTotalsOnly, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptGetGridTotalsOnly) Or(d GetGridTotalsOnly) GetGridTotalsOnly {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptGetWorkflowDefinitionOKStepsItemRoutes returns new OptGetWorkflowDefinitionOKStepsItemRoutes with value set to v.
+func NewOptGetWorkflowDefinitionOKStepsItemRoutes(v GetWorkflowDefinitionOKStepsItemRoutes) OptGetWorkflowDefinitionOKStepsItemRoutes {
+	return OptGetWorkflowDefinitionOKStepsItemRoutes{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGetWorkflowDefinitionOKStepsItemRoutes is optional GetWorkflowDefinitionOKStepsItemRoutes.
+type OptGetWorkflowDefinitionOKStepsItemRoutes struct {
+	Value GetWorkflowDefinitionOKStepsItemRoutes
+	Set   bool
+}
+
+// IsSet returns true if OptGetWorkflowDefinitionOKStepsItemRoutes was set.
+func (o OptGetWorkflowDefinitionOKStepsItemRoutes) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGetWorkflowDefinitionOKStepsItemRoutes) Reset() {
+	var v GetWorkflowDefinitionOKStepsItemRoutes
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGetWorkflowDefinitionOKStepsItemRoutes) SetTo(v GetWorkflowDefinitionOKStepsItemRoutes) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGetWorkflowDefinitionOKStepsItemRoutes) Get() (v GetWorkflowDefinitionOKStepsItemRoutes, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGetWorkflowDefinitionOKStepsItemRoutes) Or(d GetWorkflowDefinitionOKStepsItemRoutes) GetWorkflowDefinitionOKStepsItemRoutes {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptGetWorkflowDefinitionOKStepsItemType returns new OptGetWorkflowDefinitionOKStepsItemType with value set to v.
+func NewOptGetWorkflowDefinitionOKStepsItemType(v GetWorkflowDefinitionOKStepsItemType) OptGetWorkflowDefinitionOKStepsItemType {
+	return OptGetWorkflowDefinitionOKStepsItemType{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGetWorkflowDefinitionOKStepsItemType is optional GetWorkflowDefinitionOKStepsItemType.
+type OptGetWorkflowDefinitionOKStepsItemType struct {
+	Value GetWorkflowDefinitionOKStepsItemType
+	Set   bool
+}
+
+// IsSet returns true if OptGetWorkflowDefinitionOKStepsItemType was set.
+func (o OptGetWorkflowDefinitionOKStepsItemType) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGetWorkflowDefinitionOKStepsItemType) Reset() {
+	var v GetWorkflowDefinitionOKStepsItemType
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGetWorkflowDefinitionOKStepsItemType) SetTo(v GetWorkflowDefinitionOKStepsItemType) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGetWorkflowDefinitionOKStepsItemType) Get() (v GetWorkflowDefinitionOKStepsItemType, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGetWorkflowDefinitionOKStepsItemType) Or(d GetWorkflowDefinitionOKStepsItemType) GetWorkflowDefinitionOKStepsItemType {
 	if v, ok := o.Get(); ok {
 		return v
 	}

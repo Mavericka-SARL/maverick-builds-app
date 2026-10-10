@@ -170,8 +170,9 @@ func TestMCPConnectorReadsAsThePerson(t *testing.T) {
 			names = append(names, tool.Name)
 		}
 		slices.Sort(names)
-		want := []string{"compare_grid", "describe_source", "get_connection_access", "list_members", "list_models",
-			"list_sources", "query_grid", "render_chart", "render_report", "write_cells"}
+		want := []string{"compare_grid", "describe_dashboard", "describe_source", "describe_workflow", "get_connection_access",
+			"list_dashboards", "list_members", "list_models", "list_sources", "list_workflows", "query_grid", "render_chart",
+			"render_report", "write_cells"}
 		if !slices.Equal(names, want) {
 			t.Errorf("tools = %v, want the grid tools only %v", names, want)
 		}
@@ -327,11 +328,14 @@ func TestMCPConnectorStopsWhenAccessEnds(t *testing.T) {
 }
 
 func TestDelegatedReadGate(t *testing.T) {
-	if !delegatedReadAllowed("GET", "/api/grid") || !delegatedReadAllowed("GET", "/api/grid/series") {
-		t.Error("an allowlisted read is refused")
+	for _, path := range []string{"/api/grid", "/api/grid/series", "/api/dashboards", "/api/dashboards/abc", "/api/folders",
+		"/api/workflow/definitions", "/api/workflow/definitions/abc"} {
+		if !delegatedReadAllowed("GET", path) {
+			t.Errorf("the allowlisted read %s is refused", path)
+		}
 	}
 	for _, c := range [][2]string{
-		{"GET", "/api/forms/abc/records"}, {"POST", "/api/dashboard-widgets/x/chart-data"}, {"GET", "/api/dashboards"},
+		{"GET", "/api/forms/abc/records"}, {"POST", "/api/dashboard-widgets/x/chart-data"}, {"GET", "/api/workflow/my-history"},
 		{"GET", "/api/tasks"}, {"GET", "/api/notifications"}, {"GET", "/api/automation/rules"},
 		{"POST", "/api/cells"}, {"POST", "/api/forms/abc/records"}, {"PUT", "/api/records/abc"},
 		{"POST", "/api/automation/trigger/abc"}, {"POST", "/api/notifications/mark-read"},

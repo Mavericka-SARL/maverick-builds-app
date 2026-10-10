@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Trash2, Plus } from "lucide-react";
 import { api, withTenant, type AdminModel, type AdminTenant } from "../../api/client";
-import { Button, IconButton, TextInput, Select, Field, Toolbar, ToolbarGroup, LoadingState, EmptyState, StatusBadge, RevisionBadge, useConfirm, useCollapsed, CollapseToggle } from "../../ui";
+import { Button, IconButton, TextInput, Select, Field, Toolbar, ToolbarGroup, LoadingState, EmptyState, StatusBadge, RevisionBadge, KindTag, kindHint, useConfirm, useCollapsed, CollapseToggle } from "../../ui";
 
 function DevModelRevisions({
   model,
@@ -69,7 +69,7 @@ function DevModelRevisions({
 
   return (
     <div className="mvx-admin-revisions">
-      <div className="mvx-admin-revisions__label">Revisions</div>
+      <div className="mvx-admin-revisions__label" title={kindHint("revision")}>Revisions</div>
 
       {(model.revisions ?? []).length === 0 && (
         <p className="mvx-admin-muted">No revisions yet.</p>
@@ -345,7 +345,7 @@ export function DevApplicationsTab({
             <CollapseToggle expanded={appOpen} onToggle={() => toggle(`app:${app.id}`)} label={`application ${app.name}`} />
             <div className="mvx-admin-avatar mvx-admin-avatar--app">{app.name[0]}</div>
             <div className="mvx-admin-object__title">
-              <div className="mvx-admin-object__name">{app.name}</div>
+              <div className="mvx-admin-object__name"><KindTag kind="application" />{app.name}</div>
               <div className="mvx-admin-object__meta">{app.models.length} model{app.models.length !== 1 ? "s" : ""}</div>
             </div>
           </div>
@@ -360,7 +360,7 @@ export function DevApplicationsTab({
               <div key={m.id} className="mvx-admin-model">
                 <div className="mvx-admin-model__header" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <CollapseToggle expanded={modelOpen} onToggle={() => toggle(`model:${m.id}`)} label={`model ${m.name}`} />
-                  <span className="mvx-admin-model__name">{m.name}</span>
+                  <span className="mvx-admin-model__name"><KindTag kind="model" />{m.name}</span>
                   {!modelOpen && <span className="mvx-admin-muted">{revisions} revision{revisions !== 1 ? "s" : ""}{m.active_revision ? ` · active: ${m.active_revision}` : ""}</span>}
                   {m.is_default ? (
                     <StatusBadge tone="success">business default</StatusBadge>

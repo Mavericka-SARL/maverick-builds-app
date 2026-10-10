@@ -28481,6 +28481,580 @@ func (s *GetUsageOK) UnmarshalJSON(data []byte) error {
 }
 
 // Encode implements json.Marshaler.
+func (s *GetWorkflowDefinitionOK) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *GetWorkflowDefinitionOK) encodeFields(e *jx.Encoder) {
+	{
+		if s.ID.Set {
+			e.FieldStart("id")
+			s.ID.Encode(e)
+		}
+	}
+	{
+		if s.Name.Set {
+			e.FieldStart("name")
+			s.Name.Encode(e)
+		}
+	}
+	{
+		if s.Description.Set {
+			e.FieldStart("description")
+			s.Description.Encode(e)
+		}
+	}
+	{
+		if s.TriggerEvent.Set {
+			e.FieldStart("trigger_event")
+			s.TriggerEvent.Encode(e)
+		}
+	}
+	{
+		if s.ContextSchema != nil {
+			e.FieldStart("context_schema")
+			e.ArrStart()
+			for _, elem := range s.ContextSchema {
+				elem.Encode(e)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.Steps != nil {
+			e.FieldStart("steps")
+			e.ArrStart()
+			for _, elem := range s.Steps {
+				elem.Encode(e)
+			}
+			e.ArrEnd()
+		}
+	}
+}
+
+var jsonFieldsNameOfGetWorkflowDefinitionOK = [6]string{
+	0: "id",
+	1: "name",
+	2: "description",
+	3: "trigger_event",
+	4: "context_schema",
+	5: "steps",
+}
+
+// Decode decodes GetWorkflowDefinitionOK from json.
+func (s *GetWorkflowDefinitionOK) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode GetWorkflowDefinitionOK to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "id":
+			if err := func() error {
+				s.ID.Reset()
+				if err := s.ID.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"id\"")
+			}
+		case "name":
+			if err := func() error {
+				s.Name.Reset()
+				if err := s.Name.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"name\"")
+			}
+		case "description":
+			if err := func() error {
+				s.Description.Reset()
+				if err := s.Description.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"description\"")
+			}
+		case "trigger_event":
+			if err := func() error {
+				s.TriggerEvent.Reset()
+				if err := s.TriggerEvent.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"trigger_event\"")
+			}
+		case "context_schema":
+			if err := func() error {
+				s.ContextSchema = make([]GetWorkflowDefinitionOKContextSchemaItem, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem GetWorkflowDefinitionOKContextSchemaItem
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.ContextSchema = append(s.ContextSchema, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"context_schema\"")
+			}
+		case "steps":
+			if err := func() error {
+				s.Steps = make([]GetWorkflowDefinitionOKStepsItem, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem GetWorkflowDefinitionOKStepsItem
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.Steps = append(s.Steps, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"steps\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode GetWorkflowDefinitionOK")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *GetWorkflowDefinitionOK) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *GetWorkflowDefinitionOK) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s GetWorkflowDefinitionOKContextSchemaItem) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields implements json.Marshaler.
+func (s GetWorkflowDefinitionOKContextSchemaItem) encodeFields(e *jx.Encoder) {
+	for k, elem := range s {
+		e.FieldStart(k)
+
+		if len(elem) != 0 {
+			e.Raw(elem)
+		}
+	}
+}
+
+// Decode decodes GetWorkflowDefinitionOKContextSchemaItem from json.
+func (s *GetWorkflowDefinitionOKContextSchemaItem) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode GetWorkflowDefinitionOKContextSchemaItem to nil")
+	}
+	m := s.init()
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		var elem jx.Raw
+		if err := func() error {
+			v, err := d.RawAppend(nil)
+			elem = jx.Raw(v)
+			if err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			return errors.Wrapf(err, "decode field %q", k)
+		}
+		m[string(k)] = elem
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode GetWorkflowDefinitionOKContextSchemaItem")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s GetWorkflowDefinitionOKContextSchemaItem) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *GetWorkflowDefinitionOKContextSchemaItem) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *GetWorkflowDefinitionOKStepsItem) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *GetWorkflowDefinitionOKStepsItem) encodeFields(e *jx.Encoder) {
+	{
+		if s.ID.Set {
+			e.FieldStart("id")
+			s.ID.Encode(e)
+		}
+	}
+	{
+		if s.Name.Set {
+			e.FieldStart("name")
+			s.Name.Encode(e)
+		}
+	}
+	{
+		if s.Type.Set {
+			e.FieldStart("type")
+			s.Type.Encode(e)
+		}
+	}
+	{
+		if s.Instructions.Set {
+			e.FieldStart("instructions")
+			s.Instructions.Encode(e)
+		}
+	}
+	{
+		if s.AssigneeRoles != nil {
+			e.FieldStart("assignee_roles")
+			e.ArrStart()
+			for _, elem := range s.AssigneeRoles {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.SLAHours.Set {
+			e.FieldStart("sla_hours")
+			s.SLAHours.Encode(e)
+		}
+	}
+	{
+		if s.CompletionLabel.Set {
+			e.FieldStart("completion_label")
+			s.CompletionLabel.Encode(e)
+		}
+	}
+	{
+		if s.RequiredComment.Set {
+			e.FieldStart("required_comment")
+			s.RequiredComment.Encode(e)
+		}
+	}
+	{
+		if s.Routes.Set {
+			e.FieldStart("routes")
+			s.Routes.Encode(e)
+		}
+	}
+	{
+		if s.NextStepIds != nil {
+			e.FieldStart("next_step_ids")
+			e.ArrStart()
+			for _, elem := range s.NextStepIds {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+}
+
+var jsonFieldsNameOfGetWorkflowDefinitionOKStepsItem = [10]string{
+	0: "id",
+	1: "name",
+	2: "type",
+	3: "instructions",
+	4: "assignee_roles",
+	5: "sla_hours",
+	6: "completion_label",
+	7: "required_comment",
+	8: "routes",
+	9: "next_step_ids",
+}
+
+// Decode decodes GetWorkflowDefinitionOKStepsItem from json.
+func (s *GetWorkflowDefinitionOKStepsItem) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode GetWorkflowDefinitionOKStepsItem to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "id":
+			if err := func() error {
+				s.ID.Reset()
+				if err := s.ID.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"id\"")
+			}
+		case "name":
+			if err := func() error {
+				s.Name.Reset()
+				if err := s.Name.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"name\"")
+			}
+		case "type":
+			if err := func() error {
+				s.Type.Reset()
+				if err := s.Type.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"type\"")
+			}
+		case "instructions":
+			if err := func() error {
+				s.Instructions.Reset()
+				if err := s.Instructions.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"instructions\"")
+			}
+		case "assignee_roles":
+			if err := func() error {
+				s.AssigneeRoles = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.AssigneeRoles = append(s.AssigneeRoles, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"assignee_roles\"")
+			}
+		case "sla_hours":
+			if err := func() error {
+				s.SLAHours.Reset()
+				if err := s.SLAHours.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"sla_hours\"")
+			}
+		case "completion_label":
+			if err := func() error {
+				s.CompletionLabel.Reset()
+				if err := s.CompletionLabel.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"completion_label\"")
+			}
+		case "required_comment":
+			if err := func() error {
+				s.RequiredComment.Reset()
+				if err := s.RequiredComment.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"required_comment\"")
+			}
+		case "routes":
+			if err := func() error {
+				s.Routes.Reset()
+				if err := s.Routes.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"routes\"")
+			}
+		case "next_step_ids":
+			if err := func() error {
+				s.NextStepIds = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.NextStepIds = append(s.NextStepIds, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"next_step_ids\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode GetWorkflowDefinitionOKStepsItem")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *GetWorkflowDefinitionOKStepsItem) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *GetWorkflowDefinitionOKStepsItem) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s GetWorkflowDefinitionOKStepsItemRoutes) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields implements json.Marshaler.
+func (s GetWorkflowDefinitionOKStepsItemRoutes) encodeFields(e *jx.Encoder) {
+	for k, elem := range s {
+		e.FieldStart(k)
+
+		e.Str(elem)
+	}
+}
+
+// Decode decodes GetWorkflowDefinitionOKStepsItemRoutes from json.
+func (s *GetWorkflowDefinitionOKStepsItemRoutes) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode GetWorkflowDefinitionOKStepsItemRoutes to nil")
+	}
+	m := s.init()
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		var elem string
+		if err := func() error {
+			v, err := d.Str()
+			elem = string(v)
+			if err != nil {
+				return err
+			}
+			return nil
+		}(); err != nil {
+			return errors.Wrapf(err, "decode field %q", k)
+		}
+		m[string(k)] = elem
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode GetWorkflowDefinitionOKStepsItemRoutes")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s GetWorkflowDefinitionOKStepsItemRoutes) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *GetWorkflowDefinitionOKStepsItemRoutes) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes GetWorkflowDefinitionOKStepsItemType as json.
+func (s GetWorkflowDefinitionOKStepsItemType) Encode(e *jx.Encoder) {
+	e.Str(string(s))
+}
+
+// Decode decodes GetWorkflowDefinitionOKStepsItemType from json.
+func (s *GetWorkflowDefinitionOKStepsItemType) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode GetWorkflowDefinitionOKStepsItemType to nil")
+	}
+	v, err := d.StrBytes()
+	if err != nil {
+		return err
+	}
+	// Try to use constant string.
+	switch GetWorkflowDefinitionOKStepsItemType(v) {
+	case GetWorkflowDefinitionOKStepsItemTypeTask:
+		*s = GetWorkflowDefinitionOKStepsItemTypeTask
+	case GetWorkflowDefinitionOKStepsItemTypeApproval:
+		*s = GetWorkflowDefinitionOKStepsItemTypeApproval
+	case GetWorkflowDefinitionOKStepsItemTypeNotification:
+		*s = GetWorkflowDefinitionOKStepsItemTypeNotification
+	case GetWorkflowDefinitionOKStepsItemTypeCondition:
+		*s = GetWorkflowDefinitionOKStepsItemTypeCondition
+	case GetWorkflowDefinitionOKStepsItemTypeJoin:
+		*s = GetWorkflowDefinitionOKStepsItemTypeJoin
+	case GetWorkflowDefinitionOKStepsItemTypeUnspecified:
+		*s = GetWorkflowDefinitionOKStepsItemTypeUnspecified
+	default:
+		*s = GetWorkflowDefinitionOKStepsItemType(v)
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s GetWorkflowDefinitionOKStepsItemType) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *GetWorkflowDefinitionOKStepsItemType) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
 func (s *GoogleConnection) Encode(e *jx.Encoder) {
 	e.ObjStart()
 	s.encodeFields(e)
@@ -43646,6 +44220,73 @@ func (s OptGenerateMigrationOKFiles) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *OptGenerateMigrationOKFiles) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes GetWorkflowDefinitionOKStepsItemRoutes as json.
+func (o OptGetWorkflowDefinitionOKStepsItemRoutes) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	o.Value.Encode(e)
+}
+
+// Decode decodes GetWorkflowDefinitionOKStepsItemRoutes from json.
+func (o *OptGetWorkflowDefinitionOKStepsItemRoutes) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptGetWorkflowDefinitionOKStepsItemRoutes to nil")
+	}
+	o.Set = true
+	o.Value = make(GetWorkflowDefinitionOKStepsItemRoutes)
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptGetWorkflowDefinitionOKStepsItemRoutes) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptGetWorkflowDefinitionOKStepsItemRoutes) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode encodes GetWorkflowDefinitionOKStepsItemType as json.
+func (o OptGetWorkflowDefinitionOKStepsItemType) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	e.Str(string(o.Value))
+}
+
+// Decode decodes GetWorkflowDefinitionOKStepsItemType from json.
+func (o *OptGetWorkflowDefinitionOKStepsItemType) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptGetWorkflowDefinitionOKStepsItemType to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptGetWorkflowDefinitionOKStepsItemType) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptGetWorkflowDefinitionOKStepsItemType) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }

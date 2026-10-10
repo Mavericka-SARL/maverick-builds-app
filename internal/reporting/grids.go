@@ -84,20 +84,8 @@ func (s *Session) ListGrids(ctx context.Context, p Pinned, search string) ([]Gri
 // gridMetaResponse is the part of /api/grid?meta_only=1 read here. It is
 // the person's own view: hidden members and metrics are already gone.
 type gridMetaResponse struct {
-	RevisionID string `json:"revision_id"`
-	Metrics    []struct {
-		ID             string   `json:"id"`
-		Name           string   `json:"name"`
-		Label          string   `json:"label"`
-		IsInput        bool     `json:"is_input"`
-		AggRule        string   `json:"agg_rule"`
-		Format         string   `json:"format"`
-		FormatDecimals int      `json:"format_decimals"`
-		FormatCurrency string   `json:"format_currency"`
-		TimeSummary    string   `json:"time_summary"`
-		Readonly       bool     `json:"readonly"`
-		DimensionIDs   []string `json:"dimension_ids"`
-	} `json:"metrics"`
+	RevisionID string       `json:"revision_id"`
+	Metrics    []gridMetric `json:"metrics"`
 	Dimensions []struct {
 		ID              string   `json:"id"`
 		Name            string   `json:"name"`
@@ -105,6 +93,20 @@ type gridMetaResponse struct {
 		TimeGranularity *string  `json:"time_granularity"`
 		Members         []member `json:"members"`
 	} `json:"dimensions"`
+}
+
+type gridMetric struct {
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Label          string   `json:"label"`
+	IsInput        bool     `json:"is_input"`
+	AggRule        string   `json:"agg_rule"`
+	Format         string   `json:"format"`
+	FormatDecimals int      `json:"format_decimals"`
+	FormatCurrency string   `json:"format_currency"`
+	TimeSummary    string   `json:"time_summary"`
+	Readonly       bool     `json:"readonly"`
+	DimensionIDs   []string `json:"dimension_ids"`
 }
 
 type member struct {

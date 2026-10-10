@@ -3803,6 +3803,52 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/WorkflowInstance" }
 
+  /api/workflow/definitions/{id}:
+    get:
+      operationId: getWorkflowDefinition
+      tags: [Workflows]
+      summary: One published workflow of the caller's model with its steps, as anyone who opens the model may read them
+      description: >-
+        Each step gives its name, type, written instructions, the roles that act on it (role names), its deadline in
+        hours, its completion label and which step follows (routes, next_step_ids). Conditions, notification
+        recipients and anything naming a person are never returned. The chat connector's describe_workflow reads it.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The workflow and its steps
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:            { type: string, format: uuid }
+                  name:          { type: string }
+                  description:   { type: string }
+                  trigger_event: { type: string }
+                  context_schema:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+                  steps:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:               { type: string }
+                        name:             { type: string }
+                        type:             { type: string, enum: [task, approval, notification, condition, join, unspecified] }
+                        instructions:     { type: string }
+                        assignee_roles:   { type: array, items: { type: string } }
+                        sla_hours:        { type: integer }
+                        completion_label: { type: string }
+                        required_comment: { type: boolean }
+                        routes:           { type: object, additionalProperties: { type: string } }
+                        next_step_ids:    { type: array, items: { type: string } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/workflow/definitions:
     get:
       operationId: listWorkflowDefinitions

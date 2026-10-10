@@ -150,6 +150,7 @@ var operationRolesBearerAuth = map[string][]string{
 	GetTenantAISettingsOperation:          []string{},
 	GetUsageOperation:                     []string{},
 	GetWorkflowOperation:                  []string{},
+	GetWorkflowDefinitionOperation:        []string{},
 	GetWorkflowHistoryOperation:           []string{},
 	GetWorkflowInstancesOperation:         []string{},
 	GetWorkflowUsageOperation:             []string{},

@@ -631,6 +631,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/workflow/history", "business_admin", ba(h.workflowHistory))
 	register("GET", "/api/workflow/my-history", "any", cors(h.workflowMyHistory))
 	register("GET", "/api/workflow/definitions", "any", cors(h.workflowDefinitions))
+	register("GET", "/api/workflow/definitions/{id}", "any", cors(h.workflowDefinition))
 	register("POST", "/api/workflow/instances", "any", cors(h.workflowStartInstance))
 	register("PATCH", "/api/workflow/instances/{id}", "business_admin", ba(h.workflowInstanceAction))
 	register("GET", "/api/notifications", "any", cors(h.notifications))

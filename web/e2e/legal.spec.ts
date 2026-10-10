@@ -61,6 +61,7 @@ test("the privacy notice describes the chat connector only where it runs", async
   await page.goto("/privacy");
   const doc = page.getByTestId("legal-privacy");
   await expect(doc).toContainText("You can also connect ChatGPT or Claude to your account.");
+  await expect(doc).toContainText("the text of the dashboards and workflows you may open");
   await expect(doc).toContainText("your workspace's administrator can turn this off");
 });
 

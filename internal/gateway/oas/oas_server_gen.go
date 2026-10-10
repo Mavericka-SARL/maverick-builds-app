@@ -790,6 +790,15 @@ type Handler interface {
 	//
 	// GET /api/developer/workflows/{id}
 	GetWorkflow(ctx context.Context, params GetWorkflowParams) (GetWorkflowRes, error)
+	// GetWorkflowDefinition implements getWorkflowDefinition operation.
+	//
+	// Each step gives its name, type, written instructions, the roles that act on it (role names), its
+	// deadline in hours, its completion label and which step follows (routes, next_step_ids). Conditions,
+	//  notification recipients and anything naming a person are never returned. The chat connector's
+	// describe_workflow reads it.
+	//
+	// GET /api/workflow/definitions/{id}
+	GetWorkflowDefinition(ctx context.Context, params GetWorkflowDefinitionParams) (GetWorkflowDefinitionRes, error)
 	// GetWorkflowHistory implements getWorkflowHistory operation.
 	//
 	// Newest first. Only instances of workflows of applications the caller administers: an application

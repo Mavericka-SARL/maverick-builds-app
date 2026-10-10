@@ -154,10 +154,11 @@ func delegatedWrite(ctx context.Context) (string, bool) {
 }
 
 // delegatedReadRoutes are the routes a connector's read may reach: who the
-// person is, which models they open, and grid data — the connector analyses
-// grids only. Each decides its own access as for the console. Anything else
-// answers 403 before any handler runs, so a tool that asked for another
-// route, by mistake or otherwise, could not reach it.
+// person is, which models they open, grid data, and the dashboards and
+// workflows that explain the process around it. Each decides its own
+// access as for the console. Anything else answers 403 before any handler
+// runs, so a tool that asked for another route, by mistake or otherwise,
+// could not reach it.
 var delegatedReadRoutes = []struct{ method, pattern string }{
 	{http.MethodGet, "/api/me"},
 	{http.MethodGet, "/api/apps"},
@@ -165,6 +166,14 @@ var delegatedReadRoutes = []struct{ method, pattern string }{
 	{http.MethodGet, "/api/grid"},
 	{http.MethodGet, "/api/grids"},
 	{http.MethodGet, "/api/grid/series"},
+	// The process around the grids: dashboards (their text, links and
+	// what each widget shows — never its data, which the grid reads give)
+	// and published workflows with their steps.
+	{http.MethodGet, "/api/dashboards"},
+	{http.MethodGet, "/api/dashboards/{}"},
+	{http.MethodGet, "/api/folders"},
+	{http.MethodGet, "/api/workflow/definitions"},
+	{http.MethodGet, "/api/workflow/definitions/{}"},
 }
 
 // delegatedWriteRoutes are the routes a chat connection's write may reach:

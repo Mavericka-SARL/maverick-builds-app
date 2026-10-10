@@ -349,6 +349,10 @@ type GetUsageRes interface {
 	getUsageRes()
 }
 
+type GetWorkflowDefinitionRes interface {
+	getWorkflowDefinitionRes()
+}
+
 type GetWorkflowRes interface {
 	getWorkflowRes()
 }

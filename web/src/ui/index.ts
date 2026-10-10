@@ -4,6 +4,9 @@ export type { ButtonVariant, ButtonSize } from "./Button";
 export { IconButton } from "./IconButton";
 
 export { Badge } from "./Badge";
+export { KindTag } from "./KindTag";
+export { kindHint } from "./kinds";
+export type { Kind } from "./kinds";
 export type { BadgeColor } from "./Badge";
 
 export { Dialog } from "./Dialog";

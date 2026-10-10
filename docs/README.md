@@ -14,7 +14,7 @@ tests, and build configuration remain authoritative.
 | [`README.md`](../README.md) | current | Repository entry point and quick start |
 | [`ARCHITECTURE.md`](../ARCHITECTURE.md) | current | Implemented system architecture and known boundaries |
 | [`docs/SELF_HOSTING.md`](SELF_HOSTING.md) | current | Deploying on your own infrastructure: requirements, Docker Compose and Kubernetes installs, backups, upgrades |
-| [`docs/CHAT_CONNECTOR.md`](CHAT_CONNECTOR.md) | current | The chat connector at `/mcp` (ChatGPT, Claude): grid tools, charts and reports, entering cell values (`write_cells`, all or nothing), security model, configuration, per-host Keycloak clients |
+| [`docs/CHAT_CONNECTOR.md`](CHAT_CONNECTOR.md) | current | The chat connector at `/mcp` (ChatGPT, Claude): grid tools, charts and reports, reading dashboards and workflows for the process around the grids, entering cell values (`write_cells`, all or nothing), security model, configuration, per-host Keycloak clients |
 | [`docs/DEVELOPMENT.md`](DEVELOPMENT.md) | current | Local development, generation, and validation |
 | [`docs/API.md`](API.md) | current | Actual HTTP route groups and API conventions |
 | [`docs/LICENSING.md`](LICENSING.md) | current | Editions, the signed license key, and the `ee/` enterprise tree |

@@ -65,7 +65,7 @@ checkable in this repository:
 | You can take your data out | The model, grid, form and audit export endpoints in `internal/gateway/handler.go` |
 | An audit record of who changed what | `pkg/auditlog`; retention per tenant, else the deployment default (`ee/auditexport`, enterprise) |
 | The assistant runs only on a configured key — the tenant's, the developer's own, or the deployment's env key | `buildProviderForRequest` in `internal/gateway/ai_handler.go` |
-| ChatGPT or Claude read only what the person may see, and write only the cells they may edit, saved as theirs, in the cell history and audit log; an administrator can turn writes off (shown only where `MCP_ENABLED`) | `internal/gateway/mcp.go`, `cell_batch.go`, `connector_settings.go`; [CHAT_CONNECTOR.md](CHAT_CONNECTOR.md) |
+| ChatGPT or Claude read only what the person may see (grid names and values, dashboard and workflow text), and write only the cells they may edit, saved as theirs, in the cell history and audit log; an administrator can turn writes off (shown only where `MCP_ENABLED`) | `internal/gateway/mcp.go`, `cell_batch.go`, `connector_settings.go`; [CHAT_CONNECTOR.md](CHAT_CONNECTOR.md) |
 
 A sentence nobody can check is a liability, not a policy. When behaviour
 changes, the text changes with it and `LEGAL_UPDATED` moves.

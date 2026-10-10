@@ -6,8 +6,10 @@
 // the host's token was issued for (the token's subject, verified by the
 // gateway before any call reaches a tool).
 //
-// Only grid data is read. Charts and reports are made in the chat from
-// grids — never from dashboards — and are not saved in maverickbuilds.app.
+// Numbers come from grids only: charts and reports are made in the chat
+// from grid reads, never from dashboard widgets, and are not saved in
+// maverickbuilds.app. Dashboards and workflows are read for the process
+// around the grids — their text, links and steps — never for data.
 // One tool changes data, write_cells, and only for a token that also
 // carries the write scope; no tool publishes, runs or schedules anything,
 // and the gateway refuses any route outside its grid allowlists to a
@@ -30,9 +32,11 @@ import (
 type Observer func(ctx context.Context, subject, tool string, took time.Duration, err error)
 
 // Instructions is what the server tells a host about itself.
-const Instructions = `Analysis of maverickbuilds.app grid data, and entry of grid values, as the signed-in person.
+const Instructions = `Analysis of maverickbuilds.app grid data, the process around it, and entry of grid values, as the signed-in person.
 
 Start with list_models, then pass its application_id and model_id to every other tool. Discover before querying: list_sources lists the grids, describe_source their metrics and dimensions, list_members the members you can filter or group by. Never guess an id.
+
+To understand how a model is meant to be used, read its dashboards and workflows: list_dashboards, then describe_dashboard gives a page's text (instructions and explanations), its links to other dashboards (follow them with describe_dashboard) and which grid, metrics and filters each widget shows — fetch those numbers with query_grid. list_workflows and describe_workflow give the approval and submission processes with their steps and the roles that act on each.
 
 query_grid reads the engine's own values: one total per metric for a filtered slice, or values per member of a group_by dimension. compare_grid compares two readings (actual against budget, one period against another). render_chart and render_report draw charts and reports from grid queries in this conversation; they are not saved in maverickbuilds.app and do not use dashboards.
 
@@ -61,6 +65,7 @@ func New(svc *reporting.Service, opts Options) *sdk.Server {
 	t := &tools{svc: svc, observe: opts.Observe, writeScope: opts.WriteScope}
 	t.register(s)
 	t.registerPresentation(s)
+	t.registerProcess(s)
 	t.registerWrites(s)
 	return s
 }
