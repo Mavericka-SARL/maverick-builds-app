@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect, useReducer, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, X, Copy, Trash2 } from "lucide-react";
-import { api, type WidgetProps, type SelectorsPosition, type WidgetBackground, type GridChartConfig, type DashboardWidget, type DashboardDef, type DemoContext, type GridDef, type FormDef, type AutomationRule, type IntegrationDef, type Metric, type DevDimension, type GridDefaultView } from "../../api/client";
+import { api, type WidgetProps, type SelectorsPosition, type WidgetBackground, type GridChartConfig, type DashboardWidget, type DashboardDef, type DemoContext, type GridDef, type FormDef, type AutomationRule, type IntegrationDef, type Metric, type DevDimension, type GridDefaultView, type ButtonCorners } from "../../api/client";
 import { ChartWidgetEditor } from "../dashboard/ChartWidgetEditor";
 import { chartConfigFromDraft, isChartConfigComplete } from "../dashboard/chartTypes";
 import { DashboardWidgetGrid } from "../business/DashboardWidgets";
 import { DashboardLinkPicker } from "./DashboardLinkPicker";
-import { defaultLeafCode, groupWidgetsIntoRows } from "../dashboardLayout";
+import { defaultLeafCode, groupWidgetsIntoRows, buttonRadius } from "../dashboardLayout";
 import { Toolbar, ToolbarGroup, Button, SegmentedControl, FilterChip, StatusBadge, IconButton, Field, Select, TextInput, Textarea, NumberInput, Checkbox, PropertyPanel, ConfirmDialog, UnsavedChangesBar, useUnsavedGuard, RichText } from "../../ui";
 
 // ── Dashboard widget palette / sizing ───────────────────────────────────────
@@ -384,7 +384,10 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
     const pd = propsDraft[w.id];
     const refId = pd?.ref_id !== undefined ? pd.ref_id : w.ref_id;
     const wp: WidgetProps = { ...(w.widget_props ?? {}), ...(pd?.widget_props ?? {}) };
-    const dimName = (id: string) => (kpiScopeDims as DevDimension[]).find(d => d.id === id)?.name ?? id.slice(0, 8);
+    // "__metrics__" is a grid's metric selector, not a dimension: its id cut
+    // to eight characters showed as "__metric".
+    const dimName = (id: string) => id === "__metrics__" ? "Metric"
+      : (kpiScopeDims as DevDimension[]).find(d => d.id === id)?.name ?? id.slice(0, 8);
     const synced = wp.sync_context !== false;
     if (w.widget_type === "grid") {
       const g = (grids as GridDef[]).find(x => x.id === refId);
@@ -896,8 +899,8 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                           background: buttonColor, color: "var(--color-text-inverse)",
                           fontSize: 14, fontWeight: 600,
                           cursor: "inherit", pointerEvents: "none",
-                          // As the dashboard draws it (.mvx-command-button).
-                          borderRadius: "var(--radius-card)",
+                          // As the dashboard draws it (buttonRadius).
+                          borderRadius: buttonRadius(pd?.widget_props?.button_corners ?? w.widget_props?.button_corners),
                         }}>
                           {label}
                         </button>
@@ -1250,6 +1253,27 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                       <TextInput value={currentColor} onChange={e => setButtonColor(e.target.value)}
                         style={{ flex: 1 }} aria-label="Button color hex" />
                     </div>
+                  </div>
+                  <div style={{ marginBottom: 12 }}>
+                    <div className="mvx-prop-section">Corners</div>
+                    <Select
+                      aria-label="Button corners"
+                      value={propsDraft[selectedWidget.id]?.widget_props?.button_corners ?? selectedWidget.widget_props?.button_corners ?? "rounded"}
+                      onChange={e => {
+                        const v = e.target.value as ButtonCorners;
+                        setPropsDraft(prev => ({
+                          ...prev,
+                          [selectedWidget.id]: {
+                            ...prev[selectedWidget.id],
+                            widget_props: { ...(selectedWidget.widget_props ?? {}), ...(prev[selectedWidget.id]?.widget_props ?? {}), button_corners: v === "rounded" ? undefined : v },
+                          },
+                        }));
+                      }}
+                    >
+                      <option value="rounded">Rounded</option>
+                      <option value="sharp">Sharp</option>
+                      <option value="pill">Pill</option>
+                    </Select>
                   </div>
                   {selectedWidget.widget_type === "automation_button" && (
                     <div style={{ marginBottom: 12 }}>

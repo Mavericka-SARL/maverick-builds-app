@@ -2,11 +2,11 @@ import React, { useState } from "react";
 import { serialToISO } from "../dateSerial";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Check as CheckIcon } from "lucide-react";
-import { api, type AutomationRule, type DashboardWidget, type DemoContext, type WidgetProps, type GridData, type IntegrationDef, type FormDef, type ChartContextDim } from "../../api/client";
+import { api, type AutomationRule, type DashboardWidget, type DemoContext, type WidgetProps, type GridData, type IntegrationDef, type FormDef, type ChartContextDim, type ButtonCorners } from "../../api/client";
 import { ContextSelectors } from "../dashboard/ChartWidget";
 import { useSelectorOwnership, useWidgetContextSync } from "../dashboardContextSync";
 import { WidgetErrorBoundary, CommandButton, LoadingState, EmptyState, Button, useConfirm, RichText } from "../../ui";
-import { groupWidgetsIntoRows, INTRINSIC_HEIGHT_WIDGET_TYPES, BUTTON_WIDGET_TYPES } from "../dashboardLayout";
+import { groupWidgetsIntoRows, INTRINSIC_HEIGHT_WIDGET_TYPES, BUTTON_WIDGET_TYPES, buttonRadius } from "../dashboardLayout";
 import { DashboardContextSyncProvider } from "../DashboardContextSyncProvider";
 import { ChartWidget } from "../dashboard/ChartWidget";
 import { FormPanel } from "./FormPanel";
@@ -132,7 +132,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
       />
     );
   } else if (widget.widget_type === "automation_button" && widget.ref_id) {
-    inner = <AutomationButtonWidget ruleId={widget.ref_id} label={widget.content ?? "Trigger"} buttonColor={widget.widget_props?.button_color} ctx={ctx} staticContext={widget.widget_props?.context} confirmText={widget.widget_props?.confirm_text} onOpenInstance={onOpenInstance} />;
+    inner = <AutomationButtonWidget ruleId={widget.ref_id} label={widget.content ?? "Trigger"} buttonColor={widget.widget_props?.button_color} corners={widget.widget_props?.button_corners} ctx={ctx} staticContext={widget.widget_props?.context} confirmText={widget.widget_props?.confirm_text} onOpenInstance={onOpenInstance} />;
   } else if (widget.widget_type === "form" && widget.ref_id) {
     inner = (
       <div className="mvx-panel" style={{ padding: 0, overflow: "hidden" }}>
@@ -140,7 +140,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
       </div>
     );
   } else if (widget.widget_type === "integration_button" && widget.ref_id) {
-    inner = <IntegrationButtonWidget integrationId={widget.ref_id} label={widget.content ?? "Import"} buttonColor={widget.widget_props?.button_color} />;
+    inner = <IntegrationButtonWidget integrationId={widget.ref_id} label={widget.content ?? "Import"} buttonColor={widget.widget_props?.button_color} corners={widget.widget_props?.button_corners} />;
   } else if (widget.widget_type === "chart" && widget.ref_id && widget.widget_props?.chart) {
     inner = <ChartWidget widget={widget} ctx={ctx} />;
   } else if (widget.widget_type === "metric_kpi" && widget.ref_id) {
@@ -313,7 +313,8 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps }: { metricId: stri
   );
 }
 
-export function IntegrationButtonWidget({ integrationId, label, buttonColor }: { integrationId: string; label: string; buttonColor?: string }) {
+export function IntegrationButtonWidget({ integrationId, label, buttonColor, corners }: { integrationId: string; label: string; buttonColor?: string; corners?: ButtonCorners }) {
+  const radius = { borderRadius: buttonRadius(corners) };
   const fileRef = React.useRef<HTMLInputElement>(null);
   const [result, setResult] = useState<{ rows_imported?: number; error_rows?: number; errors?: { row: number; message: string }[]; message?: string } | null>(null);
 
@@ -342,7 +343,7 @@ export function IntegrationButtonWidget({ integrationId, label, buttonColor }: {
   if (isExport) {
     return (
       <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%" }}>
-        <CommandButton color={buttonColor} onClick={() => { setResult(null); download.mutate(); }} disabled={download.isPending}>
+        <CommandButton color={buttonColor} style={radius} onClick={() => { setResult(null); download.mutate(); }} disabled={download.isPending}>
           {download.isPending ? "Preparing…" : label}
         </CommandButton>
         {result?.message && !download.isPending && (
@@ -366,6 +367,7 @@ export function IntegrationButtonWidget({ integrationId, label, buttonColor }: {
     <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%" }}>
       <input ref={fileRef} type="file" accept=".csv,.xlsx,.xlsm,text/csv" style={{ display: "none" }} onChange={handleFile} />
       <CommandButton
+        style={radius}
         color={run.isSuccess ? "var(--color-info-solid)" : buttonColor}
         onClick={() => {
           setResult(null);
@@ -400,7 +402,8 @@ export function IntegrationButtonWidget({ integrationId, label, buttonColor }: {
 // merges this payload with server-resolved RACI context before starting the
 // instance, so a manual trigger button gets the same scoping a direct
 // POST /api/workflow/start call would.
-export function AutomationButtonWidget({ ruleId, label, buttonColor, ctx, staticContext, confirmText, onOpenInstance }: { ruleId: string; label: string; buttonColor?: string; ctx: DemoContext; staticContext?: Record<string, string>; confirmText?: string; onOpenInstance?: (instanceId: string) => void }) {
+export function AutomationButtonWidget({ ruleId, label, buttonColor, corners, ctx, staticContext, confirmText, onOpenInstance }: { ruleId: string; label: string; buttonColor?: string; corners?: ButtonCorners; ctx: DemoContext; staticContext?: Record<string, string>; confirmText?: string; onOpenInstance?: (instanceId: string) => void }) {
+  const radius = { borderRadius: buttonRadius(corners) };
   const { confirm, confirmElement } = useConfirm();
 
   // The rule list is the only way this widget can tell a runnable rule from
@@ -431,7 +434,7 @@ export function AutomationButtonWidget({ ruleId, label, buttonColor, ctx, static
   if (blocked) {
     return (
       <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", gap: 4 }}>
-        <CommandButton color="var(--color-disabled)" disabled onClick={() => {}}>
+        <CommandButton color="var(--color-disabled)" style={radius} disabled onClick={() => {}}>
           {label}
         </CommandButton>
         <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{blocked}</span>
@@ -452,6 +455,7 @@ export function AutomationButtonWidget({ ruleId, label, buttonColor, ctx, static
   return (
     <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", gap: 4 }}>
       <CommandButton
+        style={radius}
         color={trigger.isSuccess ? "var(--color-success-solid)" : (buttonColor ?? "var(--color-success-solid)")}
         onClick={run}
         disabled={trigger.isPending || rulesLoading}

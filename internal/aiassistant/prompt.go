@@ -596,7 +596,9 @@ Imported data lands in the draft revision with everything else, and goes live on
 A saved file integration is re-run later with a new file of the same columns: from the Integrations tab, or by
 a user from a dashboard Integration button (add_dashboard_widget, widget_type "integration_button",
 ref_id = the integration's id or name, content = the button's label) with a .csv or .xlsx file — the saved
-column_map and import_mode apply. The same button on an export downloads its file.
+column_map and import_mode apply. The same button on an export downloads its file. A button widget (this one or
+"automation_button") takes widget_props "button_color" (a hex colour) and "button_corners" ("rounded", the default;
+"sharp"; or "pill").
 update_integration {"integration_id", "name", "tags", "status", "target_id", "reshape", "column_map", "import_mode"}
 changes a saved one (reshape replaces the saved one whole; {} removes it); delete_integration {"integration_id"}
 removes any integration (list_integrations for ids).

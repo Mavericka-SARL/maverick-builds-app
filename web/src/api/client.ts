@@ -612,6 +612,8 @@ export interface GridDefaultView {
 export type GridChartType = "bar" | "line" | "pie" | "scatter" | "histogram";
 
 export type WidgetBackground = "white" | "none";
+/** A button widget's corners: the card rounding (default), square, or fully round. */
+export type ButtonCorners = "rounded" | "sharp" | "pill";
 export type SelectorsPosition = "top" | "bottom" | "left" | "right";
 
 export interface GridChartConfig {
@@ -728,6 +730,8 @@ export interface WidgetProps {
   alt?: string;
   image_fit?: "contain" | "cover";
   button_color?: string;
+  /** Button widgets: "rounded" (default), "sharp" or "pill" (buttonRadius). */
+  button_corners?: ButtonCorners;
   default_view?: GridDefaultView;
   /** Grid widgets: the metrics shown, in this order. Absent or empty = all of the grid's. */
   metric_ids?: string[];

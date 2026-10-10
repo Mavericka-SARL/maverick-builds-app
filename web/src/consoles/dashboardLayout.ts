@@ -1,4 +1,4 @@
-import type { DashboardWidget } from "../api/client";
+import type { DashboardWidget, ButtonCorners } from "../api/client";
 
 const SNAP = 20;
 
@@ -23,6 +23,12 @@ export const INTRINSIC_HEIGHT_WIDGET_TYPES = new Set([
 // Button widgets: intrinsic beside a taller sibling, but drawn at their
 // designed size_h exactly, as the design canvas draws them.
 export const BUTTON_WIDGET_TYPES = new Set(["automation_button", "integration_button"]);
+
+// buttonRadius is a button widget's corner radius (widget_props.button_corners),
+// the same in Design, Preview and on the live dashboard.
+export function buttonRadius(corners?: ButtonCorners): string {
+  return corners === "sharp" ? "0" : corners === "pill" ? "999px" : "var(--radius-card)";
+}
 
 // ── Hierarchy-aware default member selection ────────────────────────────────
 //
