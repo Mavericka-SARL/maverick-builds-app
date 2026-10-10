@@ -171,6 +171,8 @@ const move = (page: Page, label: string, dir: "up" | "down") =>
 
 async function openDimensions(page: Page) {
   await page.getByRole("button", { name: "Dimensions", exact: true }).click();
+  // Dimension cards start collapsed to their headers.
+  await page.getByRole("button", { name: "Expand all", exact: true }).first().click();
   const table = page.locator("table", { hasText: "Send invitations" }).first();
   await expect(table).toBeVisible({ timeout: 15_000 });
   return table;
@@ -387,6 +389,8 @@ test("the access-rule member picker shows the new order when a developer who is 
   const openRules = async () => {
     await accessRules.click();
     await page.getByLabel("Select user").selectOption("u-2");
+    // Each dimension's rules start collapsed.
+    await page.getByRole("button", { name: "Expand all", exact: true }).click();
     const rules = page.locator("table", { hasText: "Send invitations" }).first();
     await expect(rules).toBeVisible({ timeout: 15_000 });
     return rules;

@@ -9594,7 +9594,7 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 												switch method {
 												case "POST":
 													r.name = PromoteAiDraftOperation
-													r.summary = "Make the session's isolated draft revision the model's active revision, then clear the session's draft"
+													r.summary = "Hand the session's isolated draft revision to the developer as their working revision (not the active one — that is PUT /api/developer/revisions/{id}/activate), finish the session and clear its draft; the response names the revision"
 													r.operationID = "promoteAiDraft"
 													r.operationGroup = ""
 													r.pathPattern = "/api/ai/sessions/{id}/promote-draft"

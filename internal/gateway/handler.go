@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/csv"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -5243,6 +5241,10 @@ func (h *handler) activateRevision(ctx context.Context, revisionID string) (mode
 	// revision once, so what becomes live is what its definitions say
 	// (contract C8).
 	go h.recalcRevisionCalculated(context.WithoutCancel(ctx), modelID, revisionID) //nolint:contextcheck
+	// The schema migration follows the revision that went live. It ran
+	// only on the AI promote, back when that activated: the assistant's
+	// metric and dimension writes have no other migration path.
+	go h.autoMigrate(context.Background(), modelID) //nolint:contextcheck
 	return modelID, nil
 }
 
@@ -5556,6 +5558,9 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 		jsonAccessErr(w, err, "resolve model")
 		return
 	}
+	// The body's revision names the model when the application has
+	// several (pinModelForRevision reads only the query string).
+	modelID = h.pinModelForBodyRevision(ctx, r, modelID, req.RevisionID)
 	if !h.requireRevisionInModel(w, r, req.RevisionID, modelID) {
 		return
 	}
@@ -6399,6 +6404,9 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("name required"), http.StatusBadRequest)
 			return
 		}
+		// The body's revision names the model when the application has
+		// several (pinModelForRevision reads only the query string).
+		modelID = h.pinModelForBodyRevision(ctx, r, modelID, body.RevisionID)
 		if !h.requireRevisionInModel(w, r, body.RevisionID, modelID) {
 			return
 		}
@@ -8423,63 +8431,14 @@ func deref(s *string) string {
 	return *s
 }
 
-// autoMemberCodeOn derives a stable member code from a label: an uppercased
-// alphanumeric slug. If the slug is already taken by a member with the SAME
-// label the existing code is reused (idempotent re-import); a different
-// label gets numeric suffixes until a free (or same-labeled) code is found.
+// autoMemberCodeOn is the code for an imported row with a label and no code
+// (modeledit.MemberCode: at most 10 characters, a same-labelled member's
+// own code on a re-import).
 //
 // It reads through db: the pool, or the AI Developer's proposal check's
 // transaction.
 func (h *handler) autoMemberCodeOn(ctx context.Context, db dbx.DB, dimensionID, label string) (string, error) {
-	slug := strings.ToUpper(strings.TrimSpace(label))
-	var b strings.Builder
-	lastUnderscore := false
-	for _, r := range slug {
-		switch {
-		case (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'):
-			b.WriteRune(r)
-			lastUnderscore = false
-		case (r >= 'a' && r <= 'z'):
-			b.WriteRune(r - 32)
-			lastUnderscore = false
-		default:
-			// Any other rune (spaces, punctuation, non-latin letters kept
-			// out of codes) collapses to a single underscore.
-			if !lastUnderscore && b.Len() > 0 {
-				b.WriteByte('_')
-				lastUnderscore = true
-			}
-		}
-	}
-	base := strings.Trim(b.String(), "_")
-	if base == "" {
-		// A label with no ASCII-representable characters (e.g. fully
-		// non-latin) hashes to a stable short code instead.
-		sum := sha256.Sum256([]byte(label))
-		base = "M_" + strings.ToUpper(hex.EncodeToString(sum[:4]))
-	}
-	if len(base) > 40 {
-		base = base[:40]
-	}
-	candidate := base
-	for i := 2; i < 100; i++ {
-		var existingLabel string
-		err := db.QueryRow(ctx,
-			`SELECT label FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2`,
-			dimensionID, candidate,
-		).Scan(&existingLabel)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return candidate, nil // free
-		}
-		if err != nil {
-			return "", err
-		}
-		if existingLabel == label {
-			return candidate, nil // same member, upsert will update in place
-		}
-		candidate = fmt.Sprintf("%s_%d", base, i)
-	}
-	return "", fmt.Errorf("could not derive a unique code for label %q", label)
+	return modeledit.MemberCode(ctx, db, dimensionID, label)
 }
 
 // setApplicationDefaultModel makes modelID its application's business default
@@ -13254,10 +13213,20 @@ func (h *handler) adminModels(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// The model comes with its first revision, in the same statement: every
+	// developer screen works in a revision, and a model without one could
+	// not be built until someone made it by hand. It is not made active —
+	// that stays the developer's decision (Set active).
 	var id, createdAt string
-	if err := h.db.QueryRow(tctx,
-		`INSERT INTO core.model (application_id, name, storage_type) VALUES ($1::uuid, $2, $3::core.storage_type) RETURNING id::text, created_at::text`, //nolint:lll
-		body.ApplicationID, body.Name, body.StorageType).Scan(&id, &createdAt); err != nil {
+	if err := h.db.QueryRow(tctx, `
+		WITH m AS (
+			INSERT INTO core.model (application_id, name, storage_type) VALUES ($1::uuid, $2, $3::core.storage_type)
+			RETURNING id, created_at
+		), rev AS (
+			INSERT INTO model.revision (model_id, name, description) SELECT id, $4, '' FROM m
+		)
+		SELECT id::text, created_at::text FROM m`,
+		body.ApplicationID, body.Name, body.StorageType, modeledit.FirstRevisionName).Scan(&id, &createdAt); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
@@ -15453,14 +15422,18 @@ func (h *handler) developerDashboards(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		body.Tags = tags.Clean(body.Tags)
+		// The body's revision names the model when the application has
+		// several (pinModelForRevision reads only the query string).
+		modelID = h.pinModelForBodyRevision(ctx, r, modelID, body.RevisionID)
 		if !h.requireRevisionInModel(w, r, body.RevisionID, modelID) {
 			return
 		}
-		// Fall back to model's active revision when not specified
+		// Not named: the revision the model opens in — the active one, else
+		// the newest. With no active revision this used to file the
+		// dashboard under no revision at all, where no revision's list
+		// showed it.
 		if body.RevisionID == "" {
-			_ = h.db.QueryRow(ctx,
-				`SELECT COALESCE(active_revision_id::text,'') FROM core.model WHERE id=$1::uuid`, modelID,
-			).Scan(&body.RevisionID)
+			body.RevisionID, _, _ = h.resolveRevisionCtx(ctx, "", modelID)
 		}
 		if err := h.validateDashboardFolder(ctx, modelID, body.FolderID); err != nil {
 			jsonErr(w, err, http.StatusBadRequest)

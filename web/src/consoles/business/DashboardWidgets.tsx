@@ -6,7 +6,7 @@ import { api, type AutomationRule, type DashboardWidget, type DemoContext, type 
 import { ContextSelectors } from "../dashboard/ChartWidget";
 import { useSelectorOwnership, useWidgetContextSync } from "../dashboardContextSync";
 import { WidgetErrorBoundary, CommandButton, LoadingState, EmptyState, Button, useConfirm, RichText } from "../../ui";
-import { groupWidgetsIntoRows, INTRINSIC_HEIGHT_WIDGET_TYPES } from "../dashboardLayout";
+import { groupWidgetsIntoRows, INTRINSIC_HEIGHT_WIDGET_TYPES, BUTTON_WIDGET_TYPES } from "../dashboardLayout";
 import { DashboardContextSyncProvider } from "../DashboardContextSyncProvider";
 import { ChartWidget } from "../dashboard/ChartWidget";
 import { FormPanel } from "./FormPanel";
@@ -70,8 +70,13 @@ export function DashboardWidgetGrid({ widgets, ctx, dashboardId, onOpenInstance 
                   // stretches to its row: a row of tiles stays aligned (as in
                   // Design) and one carrying a selector row grows instead of
                   // clipping its value.
+                  // A button IS its designed box, as Design draws it: the
+                  // minimum height an intrinsic type gets left it shrunk to
+                  // its label (reported live, 2026-10-10).
                   ...(widget.widget_type === "metric_kpi"
                     ? { minHeight: widget.size_h || undefined, alignSelf: "stretch" as const }
+                    : widget.size_h && BUTTON_WIDGET_TYPES.has(widget.widget_type)
+                    ? { height: widget.size_h, alignSelf: "start" as const }
                     : widget.size_h && !INTRINSIC_HEIGHT_WIDGET_TYPES.has(widget.widget_type)
                     ? { height: widget.size_h, overflow: "auto" as const, alignSelf: "start" as const }
                     : {
@@ -102,7 +107,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
     // goes INTO the grid's own toolbar row (beside the ··· actions) instead
     // of a separate header bar — see the show_title branch below, which
     // deliberately skips grid widgets.
-    inner = <PlanningGrid ctx={ctx} gridDefId={widget.ref_id} defaultView={widget.widget_props?.default_view} metricIds={widget.widget_props?.metric_ids} showMembers={widget.widget_props?.show_members} syncContext={widget.widget_props?.sync_context !== false} selectorsPosition={widget.widget_props?.selectors_position} title={widget.show_title && widget.title ? widget.title : undefined} />;
+    inner = <PlanningGrid ctx={ctx} gridDefId={widget.ref_id} defaultView={widget.widget_props?.default_view} metricIds={widget.widget_props?.metric_ids} showMembers={widget.widget_props?.show_members} syncContext={widget.widget_props?.sync_context !== false} selectorsPosition={widget.widget_props?.selectors_position} rowsCollapsed={widget.widget_props?.rows_collapsed} title={widget.show_title && widget.title ? widget.title : undefined} />;
   } else if (widget.widget_type === "text" && widget.content) {
     const wp = widget.widget_props ?? {};
     // Explanatory copy needs headings, emphasis, lists and links, so the

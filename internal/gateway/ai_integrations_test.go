@@ -272,7 +272,13 @@ func TestAIDeveloperTriggersReadsManualsAndAttachesASheet(t *testing.T) {
 	if p := confirmLatest(); p.Status != "executed" {
 		t.Fatalf("workflow proposal: %+v", p.Steps)
 	}
-	f.ok("POST", "/api/ai/sessions/"+sess.ID+"/promote-draft", linkDev, f.tgtApp, "", nil)
+	status, promoted := f.req("POST", "/api/ai/sessions/"+sess.ID+"/promote-draft", linkDev, f.tgtApp, "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("promote: %d %s", status, promoted)
+	}
+	// Promoting makes the draft the working revision; going live is the
+	// developer's own step.
+	f.ok("PUT", "/api/developer/revisions/"+promotedRevisionID(t, promoted)+"/activate", linkDev, f.tgtApp, "", nil)
 	var wfID, ruleID string
 	_ = f.pool.QueryRow(ctx, `SELECT d.id::text FROM workflow.workflow_def d JOIN core.model m ON m.id=$1::uuid
 		WHERE d.name='Ping' AND d.revision_id = m.active_revision_id`, f.tgtModel).Scan(&wfID)

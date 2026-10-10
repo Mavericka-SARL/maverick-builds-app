@@ -90,9 +90,13 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
   }, [filtered, folders]);
 
   const createDashboard = useMutation({
+    // Into the revision this list shows: without it the server filed the
+    // dashboard under the model's active revision, and a developer working
+    // in another revision saw nothing happen.
     mutationFn: () => api.createDashboard({
       name: newDashName,
       tags: newDashTags,
+      revision_id: revisionId,
       folder_id: newDashFolder === ROOT_OPTION ? "" : newDashFolder,
     }),
     onSuccess: () => {
@@ -121,7 +125,7 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
     mutationFn: () => api.createFolder({
       name: newFolderName,
       parent_id: newFolderParent === ROOT_OPTION ? "" : newFolderParent,
-    }),
+    }, revisionId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["dev-folders"] });
       setNewFolderName(""); setNewFolderParent(ROOT_OPTION); setShowFolderCreate(false);
@@ -241,6 +245,7 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
               Create
             </Button>
           </div>
+          {createDashboard.isError && <p className="mvx-admin-error">{(createDashboard.error as Error).message}</p>}
         </div>
       )}
 

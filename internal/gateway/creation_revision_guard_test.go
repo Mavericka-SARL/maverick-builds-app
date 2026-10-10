@@ -15,7 +15,7 @@ import (
 // stored it unchecked, while the model came from X-Model-Id or the app's
 // newest model. A client that named its revision but not its model, in an app
 // with two models, got rows in the newest model tagged with the other model's
-// revision. Workflow and automation-rule creation took ?revision_id= verbatim.
+// revision. (Since 2026-10-10 such a revision names the model instead.) Workflow and automation-rule creation took ?revision_id= verbatim.
 func TestCreationRefusesARevisionOfAnotherModel(t *testing.T) {
 	f := setupRollupFixture(t)
 	ctx := context.Background()
@@ -96,12 +96,24 @@ func TestCreationRefusesARevisionOfAnotherModel(t *testing.T) {
 
 	// Last, because it changes which model a header-less request resolves
 	// to: a second model in the SAME app. The request names the first
-	// model's revision in its body but not the model, so the app's newest
-	// model (the second) is resolved — and the revision is not one of its.
+	// model's revision in its body but not the model. That revision names
+	// the model (pinModelForBodyRevision, as grid creation and file import
+	// already did): the row lands in the revision's own model — never in the
+	// app's newest model tagged with another model's revision. Refusing it
+	// left a developer working in an older model unable to create anything
+	// from the console (reported live, 2026-10-10: dashboard Create did
+	// nothing).
 	q(`INSERT INTO core.model (application_id, name) VALUES ($1::uuid, 'Second') RETURNING id::text`, f.appID)
-	expect("metric, revision of a sibling model", http.StatusNotFound, "POST", "/api/developer/metrics",
-		map[string]any{"name": "m_sibling", "is_input": true, "revision_id": f.workingRevID})
-	if n := count("model.metric_def", "m_sibling"); n != 0 {
-		t.Errorf("metric written into a model its revision does not belong to")
+	for _, c := range []struct{ what, path, table, name string }{
+		{"metric", "/api/developer/metrics", "model.metric_def", "m_sibling"},
+		{"dimension", "/api/developer/dimensions", "model.dimension_def", "d_sibling"},
+		{"dashboard", "/api/developer/dashboards", "model.dashboard_def", "db_sibling"},
+	} {
+		expect(c.what+", revision of a sibling model", http.StatusOK, "POST", c.path,
+			map[string]any{"name": c.name, "is_input": true, "revision_id": f.workingRevID})
+		var sameModel bool
+		if err := f.pool.QueryRow(ctx, `SELECT d.model_id = r.model_id FROM `+c.table+` d JOIN model.revision r ON r.id = d.revision_id WHERE d.name=$1`, c.name).Scan(&sameModel); err != nil || !sameModel {
+			t.Errorf("%s written into a model its revision does not belong to (%v)", c.what, err)
+		}
 	}
 }

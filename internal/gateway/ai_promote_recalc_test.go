@@ -11,8 +11,9 @@ import (
 )
 
 // The assistant edits members only in its draft, where nothing
-// recalculates; promoting the draft must recompute the metrics that read
-// what it changed (contract C8), here a property read as region.factor.
+// recalculates; promoting the draft (to the developer's working revision)
+// must recompute the metrics that read what it changed (contract C8), here a
+// property read as region.factor.
 func TestPromoteDraftRecalculatesMetricsReadingAIMemberEdits(t *testing.T) {
 	assertActivationRecalculatesAIDraft(t, func(f *promoteFixture, sessionID, _ string) (int, []byte) {
 		return f.do(t, "POST", "/api/ai/sessions/"+sessionID+"/promote-draft", f.devSub, nil)
@@ -69,10 +70,8 @@ func assertActivationRecalculatesAIDraft(t *testing.T, activate func(f *promoteF
 		t.Fatalf("activate: status %d, body %s", status, body)
 	}
 
-	active := activeRevisionID(t, f.pool, f.modelID)
-	if active == f.workingRevID {
-		t.Fatal("promotion did not switch the active revision")
-	}
+	// Promoted or activated, the draft is the revision recomputed.
+	active := confirmed.DraftRevisionID
 	var last float64
 	seen := false
 	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {

@@ -20435,6 +20435,52 @@ func (o OptPreviewImportReshapeReqReshape) Or(d PreviewImportReshapeReqReshape) 
 	return d
 }
 
+// NewOptPromoteAiDraftOKRevision returns new OptPromoteAiDraftOKRevision with value set to v.
+func NewOptPromoteAiDraftOKRevision(v PromoteAiDraftOKRevision) OptPromoteAiDraftOKRevision {
+	return OptPromoteAiDraftOKRevision{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptPromoteAiDraftOKRevision is optional PromoteAiDraftOKRevision.
+type OptPromoteAiDraftOKRevision struct {
+	Value PromoteAiDraftOKRevision
+	Set   bool
+}
+
+// IsSet returns true if OptPromoteAiDraftOKRevision was set.
+func (o OptPromoteAiDraftOKRevision) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptPromoteAiDraftOKRevision) Reset() {
+	var v PromoteAiDraftOKRevision
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptPromoteAiDraftOKRevision) SetTo(v PromoteAiDraftOKRevision) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptPromoteAiDraftOKRevision) Get() (v PromoteAiDraftOKRevision, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptPromoteAiDraftOKRevision) Or(d PromoteAiDraftOKRevision) PromoteAiDraftOKRevision {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptProtoTimestamp returns new OptProtoTimestamp with value set to v.
 func NewOptProtoTimestamp(v ProtoTimestamp) OptProtoTimestamp {
 	return OptProtoTimestamp{
@@ -22799,6 +22845,8 @@ func (*PromoteAiDraftNotFound) promoteAiDraftRes() {}
 type PromoteAiDraftOK struct {
 	Session  OptAiSession    `json:"session"`
 	Messages []AiChatMessage `json:"messages"`
+	// The promoted draft, now the developer's working revision.
+	Revision OptPromoteAiDraftOKRevision `json:"revision"`
 }
 
 // GetSession returns the value of Session.
@@ -22811,6 +22859,11 @@ func (s *PromoteAiDraftOK) GetMessages() []AiChatMessage {
 	return s.Messages
 }
 
+// GetRevision returns the value of Revision.
+func (s *PromoteAiDraftOK) GetRevision() OptPromoteAiDraftOKRevision {
+	return s.Revision
+}
+
 // SetSession sets the value of Session.
 func (s *PromoteAiDraftOK) SetSession(val OptAiSession) {
 	s.Session = val
@@ -22821,7 +22874,38 @@ func (s *PromoteAiDraftOK) SetMessages(val []AiChatMessage) {
 	s.Messages = val
 }
 
+// SetRevision sets the value of Revision.
+func (s *PromoteAiDraftOK) SetRevision(val OptPromoteAiDraftOKRevision) {
+	s.Revision = val
+}
+
 func (*PromoteAiDraftOK) promoteAiDraftRes() {}
+
+// The promoted draft, now the developer's working revision.
+type PromoteAiDraftOKRevision struct {
+	ID   OptUUID   `json:"id"`
+	Name OptString `json:"name"`
+}
+
+// GetID returns the value of ID.
+func (s *PromoteAiDraftOKRevision) GetID() OptUUID {
+	return s.ID
+}
+
+// GetName returns the value of Name.
+func (s *PromoteAiDraftOKRevision) GetName() OptString {
+	return s.Name
+}
+
+// SetID sets the value of ID.
+func (s *PromoteAiDraftOKRevision) SetID(val OptUUID) {
+	s.ID = val
+}
+
+// SetName sets the value of Name.
+func (s *PromoteAiDraftOKRevision) SetName(val OptString) {
+	s.Name = val
+}
 
 // Ref: #/components/schemas/PropertyRequest
 type PropertyRequest struct {

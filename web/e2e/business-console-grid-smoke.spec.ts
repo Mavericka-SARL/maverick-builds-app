@@ -273,7 +273,8 @@ test("Business Console grid: a parent two levels up averages and counts its leav
   const table = page.locator("table").first();
   // Hierarchy rows are labelled "└Europe"; a parent's cells are read-only
   // text, a leaf's are inputs (an empty input is a leaf with no value).
-  const row = (label: string) => table.getByRole("row", { name: new RegExp(`^└?${label} `) });
+  // A parent row's name starts with its collapse toggle ("Collapse Europe").
+  const row = (label: string) => table.getByRole("row", { name: new RegExp(`^(?:(?:Collapse|Expand) ${label} )?└?${label} `) });
   const expectRow = async (label: string, avg: string, cnt: string, amt: string) => {
     const cells = row(label).getByRole("cell");
     await expect(cells.nth(1), `${label} average`).toHaveText(avg);
@@ -403,7 +404,8 @@ test("Business Console grid: a calculated leaf is its own value; count skips zer
   await loadAs(page, "dept_head");
   await expect(page.getByText("Calc Count Dashboard")).toBeVisible({ timeout: 15_000 });
   const table = page.locator("table").first();
-  const row = (label: string) => table.getByRole("row", { name: new RegExp(`^└?${label} `) });
+  // A parent row's name starts with its collapse toggle ("Collapse Europe").
+  const row = (label: string) => table.getByRole("row", { name: new RegExp(`^(?:(?:Collapse|Expand) ${label} )?└?${label} `) });
   // Columns: [Region, CCnt, IZc, PR]; calc cells are read-only text.
   const expectCalc = async (label: string, ccnt: string, pr: string) => {
     const cells = row(label).getByRole("cell");

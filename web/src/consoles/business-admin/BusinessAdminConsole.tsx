@@ -18,6 +18,8 @@ import {
   ToolbarGroup,
   SearchInput,
   UnsavedChangesBar,
+  CollapseToggle,
+  useExpanded,
   useUnsavedGuard,
   useConfirm,
   type DesignTone,
@@ -614,6 +616,22 @@ export function AccessRulesTab() {
     return groups;
   }, [dimMembers]);
 
+  // A dimension can have hundreds of members: its group starts collapsed,
+  // a search opens every group with a match.
+  const [search, setSearch] = useState("");
+  const groupsOpen = useExpanded("mvx-access-rules-open");
+  const query = search.trim().toLowerCase();
+  const groups = useMemo(() => {
+    const all = [
+      ...Object.entries(dimGroups).map(([name, items]) => ({ key: `dim:${name}`, name, type: "dimension_member", typeLabel: "dimension member", items })),
+      ...(metrics.length > 0 ? [{ key: "metrics", name: "Metrics", type: "metric", typeLabel: "metric", items: metrics }] : []),
+    ];
+    if (!query) return all;
+    return all
+      .map(g => (g.name.toLowerCase().includes(query) ? g : { ...g, items: g.items.filter(m => m.name.toLowerCase().includes(query)) }))
+      .filter(g => g.items.length > 0);
+  }, [dimGroups, metrics, query]);
+
   const [selectedUser, setSelectedUser] = useState<string>("");
   const [draft, setDraft] = useState<Record<string, AccessLevel>>({});
   const [dirty, setDirty] = useState(false);
@@ -738,6 +756,14 @@ export function AccessRulesTab() {
             </span>
           )}
         </ToolbarGroup>
+        {selectedUser && (
+          <ToolbarGroup>
+            <SearchInput value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Search dimensions, members, metrics…" width={280} aria-label="Search access rules" />
+            <Button size="sm" variant="ghost" onClick={() => groupsOpen.setAll(groups.map(g => g.key), true)}>Expand all</Button>
+            <Button size="sm" variant="ghost" onClick={() => groupsOpen.setAll(groups.map(g => g.key), false)}>Collapse all</Button>
+          </ToolbarGroup>
+        )}
       </Toolbar>
 
       {!selectedUser && (
@@ -755,32 +781,35 @@ export function AccessRulesTab() {
               </tr>
             </thead>
             <tbody>
-              {Object.entries(dimGroups).map(([groupName, members]) => (
-                <React.Fragment key={groupName}>
-                  <tr>
-                    <td colSpan={3} className="mvx-table__group-row">{groupName}</td>
-                  </tr>
-                  {members.map(m => (
-                    <tr key={m.id}>
-                      <td style={{ paddingLeft: 24 }}>{m.name}</td>
-                      <td className="mvx-admin-muted">dimension member</td>
-                      <td>{accessSelect("dimension_member", m.id)}</td>
-                    </tr>
-                  ))}
-                </React.Fragment>
-              ))}
-              {metrics.length > 0 && (
-                <tr>
-                  <td colSpan={3} className="mvx-table__group-row">Metrics</td>
-                </tr>
+              {groups.length === 0 && (
+                <tr><td colSpan={3} className="mvx-admin-muted">Nothing matches "{search.trim()}".</td></tr>
               )}
-              {metrics.map(m => (
-                <tr key={m.id}>
-                  <td>{m.name}</td>
-                  <td className="mvx-admin-muted">metric</td>
-                  <td>{accessSelect("metric", m.id)}</td>
-                </tr>
-              ))}
+              {groups.map(g => {
+                const open = !!query || groupsOpen.isExpanded(g.key);
+                const restricted = g.items.filter(m => getAccess(g.type, m.id) !== "write").length;
+                return (
+                  <React.Fragment key={g.key}>
+                    <tr>
+                      <td colSpan={3} className="mvx-table__group-row">
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <CollapseToggle expanded={open} onToggle={() => groupsOpen.toggle(g.key)} label={g.name} />
+                          {g.name}
+                          <span className="mvx-admin-muted" style={{ textTransform: "none", letterSpacing: "normal", fontWeight: 400 }}>
+                            {g.items.length}{restricted > 0 ? ` · ${restricted} restricted` : ""}
+                          </span>
+                        </span>
+                      </td>
+                    </tr>
+                    {open && g.items.map(m => (
+                      <tr key={m.id}>
+                        <td style={{ paddingLeft: 24 }}>{m.name}</td>
+                        <td className="mvx-admin-muted">{g.typeLabel}</td>
+                        <td>{accessSelect(g.type, m.id)}</td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>

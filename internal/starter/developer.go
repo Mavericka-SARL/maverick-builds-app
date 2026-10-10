@@ -548,9 +548,9 @@ Press **New session** and describe what you want. **Attach a document** adds a p
 
 		devText(`## Where its changes land
 
-The first plan you confirm in a session creates a revision for it, named *AI Draft* and the date, copied from the live revision. The chat then carries an **AI draft** badge, and every later change in the session goes into that draft — never into your working revision or the live one.
+The first plan you confirm in a session creates a revision for it, named *AI Draft* and the date, copied from your working revision. The chat then carries an **AI draft** badge, and every later change in the session goes into that draft — never into your working revision or the live one.
 
-The draft is listed in **Developer › Models** like any revision: click its row to look through the result in every Developer screen. Back in the chat, the draft's banner has **Promote to Active**, which makes it the live revision, and **Discard**, which throws it away.
+The draft is listed in **Developer › Models** like any revision: click its row to look through the result in every Developer screen. Back in the chat, the draft's banner has **Use as working revision**, which switches you to it (live only once you **Set active**), and **Discard**.
 
 Three kinds of change are not revision-scoped and take effect as soon as you confirm: business roles, user access rules, and form records posted into the model.
 

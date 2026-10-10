@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	tenantv1 "github.com/mavericks-engine/mavericks/gen/go/tenant/v1"
+	"github.com/mavericks-engine/mavericks/internal/modeledit"
 )
 
 type Store struct {
@@ -281,11 +282,18 @@ func (s *Store) CreateModel(ctx context.Context, applicationID, name, storageTyp
 	}
 	var id string
 	var createdAt time.Time
+	// With its first revision, as the gateway's model create makes it
+	// (not active: activating is the developer's decision).
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO core.model (application_id, name, storage_type)
-		 VALUES ($1, $2, $3::core.storage_type)
-		 RETURNING id, created_at`,
-		applicationID, name, storageType,
+		`WITH m AS (
+			INSERT INTO core.model (application_id, name, storage_type)
+			VALUES ($1, $2, $3::core.storage_type)
+			RETURNING id, created_at
+		 ), rev AS (
+			INSERT INTO model.revision (model_id, name, description) SELECT id, $4, '' FROM m
+		 )
+		 SELECT id, created_at FROM m`,
+		applicationID, name, storageType, modeledit.FirstRevisionName,
 	).Scan(&id, &createdAt)
 	if err != nil {
 		return nil, fmt.Errorf("create model: %w", err)

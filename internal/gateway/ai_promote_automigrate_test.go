@@ -1,11 +1,12 @@
-// Tests that promoting an AI draft triggers a schema migration, closing a
+// Tests that an AI draft made active triggers a schema migration, closing a
 // real gap: the manual create_metric/update_metric handlers each call
 // autoMigrate synchronously after every write, but write_executor's AI
 // equivalents have no access to *handler across the aiassistant/gateway
 // package boundary and never called it at all — an AI-authored metric/
 // dimension change had no schema-migration path whatsoever until
-// aiPromoteDraft was given a single autoMigrate pass right after the
-// draft's structural writes become the live model.
+// aiPromoteDraft was given a single autoMigrate pass. Since promoting no
+// longer activates (2026-10-10), that pass runs on every activation
+// (activateRevision): here, the developer's Set active after promoting.
 package gateway
 
 import (
@@ -56,6 +57,10 @@ func TestPromoteDraftTriggersAutoMigrate(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("promote: status %d, body %s", status, body)
 	}
+	draftRevID := promotedRevisionID(t, body)
+	if status, body := f.do(t, "PUT", "/api/developer/revisions/"+draftRevID+"/activate", f.devSub, nil); status != http.StatusOK {
+		t.Fatalf("activate: status %d, body %s", status, body)
+	}
 
 	// autoMigrate runs in a background goroutine (go h.autoMigrate(...)) that
 	// does store.Create (row lands as 'pending') then store.Apply (a
@@ -81,7 +86,7 @@ func TestPromoteDraftTriggersAutoMigrate(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	if afterCount == 0 {
-		t.Fatal("expected promote-draft to trigger autoMigrate and create a deployment.schema_migration row, found none")
+		t.Fatal("expected activating the promoted draft to trigger autoMigrate and create a deployment.schema_migration row, found none")
 	}
 	if migStatus != "applied" {
 		t.Errorf("schema_migration status = %q, want 'applied'", migStatus)

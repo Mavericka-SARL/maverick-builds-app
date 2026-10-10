@@ -169,7 +169,7 @@ export function useDeveloperSection({ enabled, tab, setTab, roles }: SectionInpu
       if (cur === "workflows" || cur === "ai") {
         return (
           <div style={{ flex: 1, overflow: "hidden" }}>
-            {cur === "workflows" ? <WorkflowsTab revisionId={effectiveRevisionId || undefined} /> : <AIAssistant revisionId={effectiveRevisionId || undefined} revisionName={effectiveRevisionName || undefined} />}
+            {cur === "workflows" ? <WorkflowsTab revisionId={effectiveRevisionId || undefined} /> : <AIAssistant revisionId={effectiveRevisionId || undefined} revisionName={effectiveRevisionName || undefined} onSelectRevision={handleSelectRevision} />}
           </div>
         );
       }

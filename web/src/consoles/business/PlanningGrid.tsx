@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { serialToISO, isoToSerial } from "../dateSerial";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { GripVertical, Download, MoreVertical, Rows3, X as XIcon } from "lucide-react";
+import { ChevronDown, ChevronRight, GripVertical, Download, MoreVertical, Rows3, X as XIcon } from "lucide-react";
 import { api, type DemoContext, type GridData, type Metric, type DimMember, type DimInfo, type GridDefaultView , type SelectorsPosition, type HighlightRule, type HighlightTone } from "../../api/client";
 import { CellHistoryDrawer, type CellRef } from "../../ee/cellhistory/CellHistoryDrawer";
 import { AddMemberRow, MemberLabel } from "./BusinessMemberControls";
@@ -159,12 +159,13 @@ function memberTreeDepth(nodes: MemberTreeNode[]): number {
   return d;
 }
 
-// Depth-first flat list for hierarchical row rendering.
-function flattenTree(nodes: MemberTreeNode[]): { member: DimMember; level: number; isLeaf: boolean }[] {
+// Depth-first flat list for hierarchical row rendering; a collapsed parent's
+// descendants are left out.
+function flattenTree(nodes: MemberTreeNode[], collapsed: (code: string) => boolean = () => false): { member: DimMember; level: number; isLeaf: boolean }[] {
   const out: { member: DimMember; level: number; isLeaf: boolean }[] = [];
   function walk(n: MemberTreeNode) {
     out.push({ member: n.member, level: n.level, isLeaf: n.children.length === 0 });
-    n.children.forEach(walk);
+    if (!collapsed(n.member.code)) n.children.forEach(walk);
   }
   nodes.forEach(walk);
   return out;
@@ -476,8 +477,18 @@ function pickMetrics<T extends { id: string }>(all: T[], ids?: string[]): T[] {
   return picked.length > 0 ? picked : all;
 }
 
-export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembers, syncContext, title, selectorsPosition }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; metricIds?: string[]; showMembers?: Record<string, string[]>; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition }) {
+export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembers, syncContext, title, selectorsPosition, rowsCollapsed }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; metricIds?: string[]; showMembers?: Record<string, string[]>; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition;
+  /** Parent rows start collapsed (widget_props.rows_collapsed, the developer's choice); the viewer opens and closes them by click. */
+  rowsCollapsed?: boolean }) {
   const qc = useQueryClient();
+  // Parent rows the viewer flipped from the developer's default.
+  const [rowsFlipped, setRowsFlipped] = useState<Set<string>>(() => new Set());
+  const rowCollapsed = (code: string) => !!rowsCollapsed !== rowsFlipped.has(code);
+  const flipRow = (code: string) => setRowsFlipped(prev => {
+    const next = new Set(prev);
+    if (next.has(code)) next.delete(code); else next.add(code);
+    return next;
+  });
 
   // Two-query split for server-side context scoping. The META query is cheap
   // (dimensions/metrics/access, no cells) and tells us the context selectors;
@@ -748,7 +759,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     : null;
 
   // flatRowEntries: depth-first ordered row entries for hierarchical row dims.
-  const flatRowEntries = hasRowHierarchy && rowTree ? flattenTree(rowTree) : null;
+  const flatRowEntries = hasRowHierarchy && rowTree ? flattenTree(rowTree, rowCollapsed) : null;
 
   const rowCombos = crossProduct(rowDims);   // [[]] when empty → one "All" row
   const colCombos = crossProduct(colDims);   // full crossProduct for formula evaluation
@@ -1602,7 +1613,17 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                             paddingLeft: 12 + level * 20,
                             fontWeight: isLeaf ? 400 : 700,
                             color: "var(--color-text-strong)" }}>
-                            {level > 0 && <span style={{ color: "var(--color-border-muted)", marginRight: 4, fontSize: 11 }}>└</span>}
+                            {isLeaf
+                              ? level > 0 && <span style={{ color: "var(--color-border-muted)", marginRight: 4, fontSize: 11 }}>└</span>
+                              : (
+                                <button type="button" onClick={() => flipRow(member.code)}
+                                  aria-expanded={!rowCollapsed(member.code)}
+                                  aria-label={`${rowCollapsed(member.code) ? "Expand" : "Collapse"} ${member.label}`}
+                                  title={rowCollapsed(member.code) ? "Expand" : "Collapse"}
+                                  style={{ background: "none", border: "none", padding: 0, marginRight: 4, cursor: "pointer", color: "var(--color-text-muted)", verticalAlign: "middle", display: "inline-flex" }}>
+                                  {rowCollapsed(member.code) ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                                </button>
+                              )}
                             {maintainedRowDim && isLeaf && !member.formula ? <MemberLabel dim={maintainedRowDim} member={member} /> : member.label}
                           </td>
                           {effectiveColCombos.flatMap((cc, ci) => {

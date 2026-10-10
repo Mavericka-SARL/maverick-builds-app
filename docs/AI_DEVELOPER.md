@@ -13,8 +13,11 @@ writes only by **proposing** an ordered plan that the developer confirms.
 Nothing is written until then.
 
 **Where its writes land.** Model changes land in an isolated draft revision,
-created on the session's first confirmed proposal and promoted or discarded by
-the developer — and so does data the assistant imports from a spreadsheet
+created on the session's first confirmed proposal as a copy of the developer's
+working revision (else the active one), and promoted or discarded by the
+developer. Promoting makes the draft the developer's **working** revision, not
+the live one: making a revision active is a separate step (**Set active** in
+Developer › Models; owner decision, 2026-10-10). So does data the assistant imports from a spreadsheet
 attached to the chat. Three kinds of write are not revision-scoped, exactly as in the
 console, so they take effect on confirmation and discarding the draft does not
 undo them:
@@ -28,7 +31,7 @@ undo them:
 
 `set_role_dashboards` writes live grant rows too, but on the working
 revision's dashboards: grants on the draft's dashboards matter once it is
-promoted.
+made active.
 
 **The exception.** `set_user_access_rules` is a business-admin capability
 given to the assistant at the owner's direction (2026-08-26). Access rules are
@@ -245,7 +248,8 @@ input limit (gpt-5-mini: 272,000 tokens) at its sixth stage.
 arguments as they arrive) and offers Stop, which closes the request; both end
 with a saved message. Promoting a session's draft finishes the session: its
 next message is refused with 409 `SESSION_PROMOTED`, and a new session works on
-the promoted revision.
+the developer's working revision — the promoted draft, which the console has
+switched to.
 
 Confirming runs the steps in order and **stops at the first failure**: the
 steps after it are marked *not run*, because they are usually built on it.
@@ -361,7 +365,7 @@ a dashboard's Integration button downloads one for users.
   one model.
 - **Database migrations.** There is no migration tool: the gateway migrates a
   model's tables after the developer creates, changes or deletes a metric or
-  creates a dimension, and when an AI draft is promoted
+  creates a dimension, and whenever a revision is made active
   (until 2026-09-28 the assistant offered `generate_migration` and
   `apply_migration`; neither did anything).
 

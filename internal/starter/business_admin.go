@@ -292,7 +292,7 @@ This page has a model of its own: four offices in two regions, each with a *budg
 Access rules apply to you too. **Read** is safe to try on yourself: you undo it on the same screen.
 
 1. Open **Business Admin › Access Rules** and choose yourself under **User:**.
-2. Under **office**, set **Oslo** to **Read** and press **Save rules** in the bar that appears.
+2. Open **office** by the arrow before it (or search *Oslo*), set **Oslo** to **Read** and press **Save rules** in the bar that appears.
 3. Come back to **User › Dashboards** and open **4 · Who sees which numbers** again. Within half a minute, or at once if you reload the page, Oslo's *budget* and *spent* turn grey — **Read-only / total** in the grid's legend. You can read them; you cannot type into them. Read hides nothing, so no total moves.
 4. Back on **Access Rules**, choose yourself under **User:** again, set **Oslo** to **Write** and press **Save rules**. Write is the default, so saving it removes the rule.
 

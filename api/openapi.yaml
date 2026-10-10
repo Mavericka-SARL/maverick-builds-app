@@ -7686,7 +7686,7 @@ paths:
     post:
       operationId: promoteAiDraft
       tags: [AI Assistant]
-      summary: Make the session's isolated draft revision the model's active revision, then clear the session's draft
+      summary: Hand the session's isolated draft revision to the developer as their working revision (not the active one — that is PUT /api/developer/revisions/{id}/activate), finish the session and clear its draft; the response names the revision
       parameters:
         - name: id
           in: path
@@ -7702,6 +7702,12 @@ paths:
                 properties:
                   session:  { $ref: "#/components/schemas/AiSession" }
                   messages: { type: array, items: { $ref: "#/components/schemas/AiChatMessage" } }
+                  revision:
+                    type: object
+                    description: The promoted draft, now the developer's working revision
+                    properties:
+                      id:   { type: string, format: uuid }
+                      name: { type: string }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 

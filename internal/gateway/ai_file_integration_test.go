@@ -393,6 +393,8 @@ func TestAIDeveloperImportsAttachedFileAndDefinesAnExport(t *testing.T) {
 	// ── 4. Promoted, a business user's download leaves out what they cannot see
 	if status, body := do(devSub, "POST", "/api/ai/sessions/"+sess.ID+"/promote-draft", nil); status != http.StatusOK {
 		t.Fatalf("promote: %d %s", status, body)
+	} else if status, body := do(devSub, "PUT", "/api/developer/revisions/"+promotedRevisionID(t, body)+"/activate", nil); status != http.StatusOK {
+		t.Fatalf("activate: %d %s", status, body)
 	}
 	wantBiz := "Country;metric;Quarter 1;Quarter 2\n" +
 		"Canada;revenue;1234,5;\nCanada;margin;1034,5;0,0\n" +

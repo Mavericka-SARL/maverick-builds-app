@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useQueries, useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Plus, X, Pencil, Trash2, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, ArrowUp, ArrowDown } from "lucide-react";
 import { api, type DevDimensionMember, type DevDimension, type DimProperty, type DimensionType, type TimeGranularity, TIME_GRANULARITIES } from "../../api/client";
-import { Button, Field, TextInput, Select, EmptyState, IconButton, StatusBadge, SearchInput, FilterChip, TagInput, TagFilter, Toolbar, ToolbarGroup, useConfirm } from "../../ui";
+import { Button, Field, TextInput, Select, EmptyState, IconButton, StatusBadge, SearchInput, FilterChip, TagInput, TagFilter, Toolbar, ToolbarGroup, useConfirm, CollapseToggle, useExpanded } from "../../ui";
 import { invalidateModelData } from "../modelDataQueries";
 
 // Tree node type — flat DevDimensionMember enriched with hierarchy metadata.
@@ -108,6 +108,9 @@ export function DimensionsView({ dims, revisionId }: { dims: DevDimension[]; rev
   });
   const [search, setSearch] = useState("");
   const [filterTag, setFilterTag] = useState<string | null>(null);
+  // A dimension can have hundreds of members: each card starts collapsed to
+  // its header, a search opens the cards it matches.
+  const dimsOpen = useExpanded("mvx-dimensions-open");
 
   // Declared property names, which a search matches even before any member
   // has a value. Same query keys as each card's own, so nothing is fetched twice.
@@ -145,7 +148,9 @@ export function DimensionsView({ dims, revisionId }: { dims: DevDimension[]; rev
       ...(newType === "standard" && newSourceDim
         ? { source_dimension_id: newSourceDim, source_property: newSourceProp, derive_members: newDerive } : {}),
     }),
-    onSuccess: () => {
+    onSuccess: (data) => {
+      // Open, since adding its members comes next.
+      if (data?.id) dimsOpen.setAll([data.id], true);
       qc.invalidateQueries({ queryKey: ["dev-dimensions"] });
       setNewName(""); setNewParentDim(""); setNewType(""); setNewGranularity(""); setNewFiscalStart(1); setNewTags([]);
       setNewSourceDim(""); setNewSourceProp(""); setNewDerive(true); setShowAdd(false);
@@ -251,11 +256,11 @@ export function DimensionsView({ dims, revisionId }: { dims: DevDimension[]; rev
               placeholder="Search dimensions, members, properties…" width={340} />
             <TagFilter tags={allTags} active={filterTag} onChange={setFilterTag} />
           </ToolbarGroup>
-          {(q || filterTag) && (
-            <ToolbarGroup align="end">
-              <span className="mvx-admin-muted">{shown.length} of {dims.length} dimensions</span>
-            </ToolbarGroup>
-          )}
+          <ToolbarGroup align="end">
+            {(q || filterTag) && <span className="mvx-admin-muted">{shown.length} of {dims.length} dimensions</span>}
+            <Button size="sm" variant="ghost" onClick={() => dimsOpen.setAll(shown.map(x => x.d.id), true)}>Expand all</Button>
+            <Button size="sm" variant="ghost" onClick={() => dimsOpen.setAll(shown.map(x => x.d.id), false)}>Collapse all</Button>
+          </ToolbarGroup>
         </Toolbar>
       )}
       {dims.length === 0 ? (
@@ -265,8 +270,10 @@ export function DimensionsView({ dims, revisionId }: { dims: DevDimension[]; rev
       ) : (
         <div className="mvx-admin-stack">
           {shown.map(({ d, match }) => d.dimension_type === "time"
-            ? <TimeDimensionCard key={d.id} dim={d} activeTag={filterTag} onTagClick={toggleTag} />
+            ? <TimeDimensionCard key={d.id} dim={d} activeTag={filterTag} onTagClick={toggleTag}
+                open={!!q || dimsOpen.isExpanded(d.id)} onToggleOpen={() => dimsOpen.toggle(d.id)} />
             : <DimensionCard key={d.id} dim={d} allDims={dims} activeTag={filterTag} onTagClick={toggleTag}
+                open={!!q || dimsOpen.isExpanded(d.id)} onToggleOpen={() => dimsOpen.toggle(d.id)}
                 memberSearch={match === "members" ? q : ""} revisionId={revisionId} />)}
         </div>
       )}
@@ -370,9 +377,12 @@ function DimTagChips({ tags, active, onClick }: { tags?: string[]; active?: stri
 interface DimCardTagProps {
   activeTag?: string | null;
   onTagClick?: (tag: string) => void;
+  /** Whether the card shows its members; the header always shows. */
+  open: boolean;
+  onToggleOpen: () => void;
 }
 
-function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "", revisionId }: DimCardTagProps & {
+function DimensionCard({ dim, allDims, activeTag, onTagClick, open, onToggleOpen, memberSearch = "", revisionId }: DimCardTagProps & {
   dim: DevDimension;
   allDims: DevDimension[];
   /** The page-level search, when this dimension matched it through its members. */
@@ -566,6 +576,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "",
           <DimHeaderEditor dim={dim} onClose={() => setEditDimName(false)} />
         ) : (
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <CollapseToggle expanded={open} onToggle={onToggleOpen} label={dim.name} />
             <code style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text)" }}>{dim.name}</code>
             <DimTagChips tags={dim.tags} active={activeTag} onClick={onTagClick} />
             {dim.business_maintained && (
@@ -589,6 +600,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "",
               </Button>
             )}
             <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
+              {open && (<>
               <Button size="sm" variant="ghost" onClick={() => setShowProps(v => !v)}>
                 {showProps ? "Hide props" : "Props"}
               </Button>
@@ -598,6 +610,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "",
               <IconButton aria-label="Collapse all" title="Collapse all" size={26} onClick={collapseAll}>
                 <ChevronsUp size={14} />
               </IconButton>
+              </>)}
               <IconButton aria-label={`Edit dimension ${dim.name}`} title="Edit name and tags" size={26}
                 onClick={() => setEditDimName(true)}>
                 <Pencil size={13} />
@@ -609,14 +622,14 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "",
             </div>
           </div>
         )}
-        {!editDimName && parentDim && dim.members.length > 1 && (
+        {open && !editDimName && parentDim && dim.members.length > 1 && (
           <p className="mvx-admin-muted" style={{ margin: "6px 0 0" }}>
             Members are listed by their {parentDim.name}; the arrows move a member within its {parentDim.name}.
           </p>
         )}
 
         {/* Search */}
-        {!editDimName && dim.members.length > 3 && (
+        {open && !editDimName && dim.members.length > 3 && (
           <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
             <SearchInput value={search} onChange={(e) => setSearch(e.target.value)}
               placeholder="Search members…" width={220} />
@@ -631,6 +644,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "",
         )}
       </div>
 
+      {open && (<>
       {/* Declared properties — shown ABOVE the members so the schema is
           visible before the data (reported live). Toggled with the members'
           property columns by the same "Props/Hide props" control. */}
@@ -868,6 +882,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "",
           {parentDim ? "Add member" : "Add root member"}
         </Button>
       </div>
+      </>)}
 
       {confirmElement}
     </div>
@@ -881,7 +896,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, memberSearch = "",
 // metric's time summary. The server validates the whole set (no overlap, no
 // gap on a regular calendar, boundaries on the granularity, a leaf never
 // under a leaf) and owns the ordinal.
-function TimeDimensionCard({ dim, activeTag, onTagClick }: DimCardTagProps & { dim: DevDimension }) {
+function TimeDimensionCard({ dim, activeTag, onTagClick, open, onToggleOpen }: DimCardTagProps & { dim: DevDimension }) {
   const qc = useQueryClient();
   const invalidate = () => qc.invalidateQueries({ queryKey: ["dev-dimensions"] });
   const { confirm, confirmElement } = useConfirm();
@@ -980,6 +995,7 @@ function TimeDimensionCard({ dim, activeTag, onTagClick }: DimCardTagProps & { d
           <DimHeaderEditor dim={dim} onClose={() => setEditDimName(false)} />
         ) : (
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <CollapseToggle expanded={open} onToggle={onToggleOpen} label={dim.name} />
             <code style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text)" }}>{dim.name}</code>
             <DimTagChips tags={dim.tags} active={activeTag} onClick={onTagClick} />
             <StatusBadge tone="brand">time · {(dim.time_granularity ?? "").replace("_", " ")}</StatusBadge>
@@ -1004,13 +1020,14 @@ function TimeDimensionCard({ dim, activeTag, onTagClick }: DimCardTagProps & { d
         )}
         {/* No move controls here: the server refuses to reorder a time
             dimension, whose order is the calendar. */}
-        {!editDimName && (
+        {open && !editDimName && (
           <p className="mvx-admin-muted" style={{ margin: "6px 0 0" }}>
             Periods keep calendar order: leaf periods by their dates, aggregates by their first period. To move a period, change its dates.
           </p>
         )}
       </div>
 
+      {open && (<>
       {error && (
         <div role="alert" style={{ padding: "8px 16px", color: "var(--color-danger-600)", borderBottom: "1px solid var(--color-border)", fontSize: 12 }}>
           {error}
@@ -1114,6 +1131,7 @@ function TimeDimensionCard({ dim, activeTag, onTagClick }: DimCardTagProps & { d
           )
         )}
       </div>
+      </>)}
       {confirmElement}
     </div>
   );

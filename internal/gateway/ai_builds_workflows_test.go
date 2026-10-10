@@ -238,6 +238,8 @@ func TestAIDeveloperBuildsAWorkflowThatRuns(t *testing.T) {
 	//    and says why, rather than starting a draft.
 	if status, body := do(devSub, "POST", "/api/ai/sessions/"+sess.ID+"/promote-draft", nil); status != http.StatusOK {
 		t.Fatalf("promote: %d\n%s", status, body)
+	} else if status, body := do(devSub, "PUT", "/api/developer/revisions/"+promotedRevisionID(t, body)+"/activate", nil); status != http.StatusOK {
+		t.Fatalf("activate (the developer's own step after promoting): %d\n%s", status, body)
 	}
 	if status, body := do(requesterSub, "POST", "/api/automation/trigger/"+manualRuleID, map[string]any{"payload": map[string]string{"amount": "2500"}}); status != http.StatusBadRequest || !strings.Contains(string(body), "not published") {
 		t.Fatalf("firing before publish: %d %s — want 400 'not published'", status, body)

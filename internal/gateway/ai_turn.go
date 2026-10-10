@@ -23,12 +23,13 @@ import (
 // went on checking plans against its empty base revision).
 
 // promotedMessage is the session's last message once its draft is promoted.
-const promotedMessage = "Promoted the draft to the active revision — it's now the live model. " +
-	"This session is finished: start a new session to keep building; it works on the promoted revision."
+const promotedMessage = "The draft is now your working revision. It is not live: make it the active revision with " +
+	"Set active in Developer › Models when it is ready. This session is finished: start a new session to keep building; " +
+	"it works on your working revision."
 
 // sessionPromotedError refuses a message in a promoted session.
-const sessionPromotedError = "this session's draft was promoted to the active revision, so the session is finished — " +
-	"start a new session to keep building; it works on the promoted revision"
+const sessionPromotedError = "this session's draft became your working revision, so the session is finished — " +
+	"start a new session to keep building; it works on your working revision"
 
 func jsonCodeErr(w http.ResponseWriter, status int, code, msg string) {
 	w.Header().Set("Content-Type", "application/json")

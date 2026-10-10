@@ -184,6 +184,8 @@ test("Developer › Dimensions lists members in the dimension's order", async ({
   }));
   await loadAs(page, "developer");
   await page.getByRole("button", { name: "Dimensions", exact: true }).click();
+  // Dimension cards start collapsed to their headers.
+  await page.getByRole("button", { name: "Expand all", exact: true }).first().click();
 
   const table = page.locator("table", { hasText: "Connect SSO" }).first();
   await expect(table).toBeVisible({ timeout: 15_000 });
@@ -206,6 +208,8 @@ test("Developer › Dimensions dims the move arrows while a move is in flight", 
   await page.route("**/api/developer/dimensions/checklist/members/order", () => { sent++; });
   await loadAs(page, "developer");
   await page.getByRole("button", { name: "Dimensions", exact: true }).click();
+  // Dimension cards start collapsed to their headers.
+  await page.getByRole("button", { name: "Expand all", exact: true }).first().click();
 
   const up = page.getByRole("button", { name: "Move member Safety up" });
   const peopleDown = page.getByRole("button", { name: "Move member People down" });

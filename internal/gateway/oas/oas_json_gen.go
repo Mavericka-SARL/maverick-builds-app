@@ -45381,6 +45381,39 @@ func (s *OptPreviewImportReshapeReqReshape) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode encodes PromoteAiDraftOKRevision as json.
+func (o OptPromoteAiDraftOKRevision) Encode(e *jx.Encoder) {
+	if !o.Set {
+		return
+	}
+	o.Value.Encode(e)
+}
+
+// Decode decodes PromoteAiDraftOKRevision from json.
+func (o *OptPromoteAiDraftOKRevision) Decode(d *jx.Decoder) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptPromoteAiDraftOKRevision to nil")
+	}
+	o.Set = true
+	if err := o.Value.Decode(d); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptPromoteAiDraftOKRevision) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptPromoteAiDraftOKRevision) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes ProtoTimestamp as json.
 func (o OptProtoTimestamp) Encode(e *jx.Encoder) {
 	if !o.Set {
@@ -48699,11 +48732,18 @@ func (s *PromoteAiDraftOK) encodeFields(e *jx.Encoder) {
 			e.ArrEnd()
 		}
 	}
+	{
+		if s.Revision.Set {
+			e.FieldStart("revision")
+			s.Revision.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfPromoteAiDraftOK = [2]string{
+var jsonFieldsNameOfPromoteAiDraftOK = [3]string{
 	0: "session",
 	1: "messages",
+	2: "revision",
 }
 
 // Decode decodes PromoteAiDraftOK from json.
@@ -48741,6 +48781,16 @@ func (s *PromoteAiDraftOK) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"messages\"")
 			}
+		case "revision":
+			if err := func() error {
+				s.Revision.Reset()
+				if err := s.Revision.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"revision\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -48761,6 +48811,86 @@ func (s *PromoteAiDraftOK) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements stdjson.Unmarshaler.
 func (s *PromoteAiDraftOK) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *PromoteAiDraftOKRevision) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *PromoteAiDraftOKRevision) encodeFields(e *jx.Encoder) {
+	{
+		if s.ID.Set {
+			e.FieldStart("id")
+			s.ID.Encode(e)
+		}
+	}
+	{
+		if s.Name.Set {
+			e.FieldStart("name")
+			s.Name.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfPromoteAiDraftOKRevision = [2]string{
+	0: "id",
+	1: "name",
+}
+
+// Decode decodes PromoteAiDraftOKRevision from json.
+func (s *PromoteAiDraftOKRevision) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode PromoteAiDraftOKRevision to nil")
+	}
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "id":
+			if err := func() error {
+				s.ID.Reset()
+				if err := s.ID.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"id\"")
+			}
+		case "name":
+			if err := func() error {
+				s.Name.Reset()
+				if err := s.Name.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"name\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode PromoteAiDraftOKRevision")
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *PromoteAiDraftOKRevision) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *PromoteAiDraftOKRevision) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
 }

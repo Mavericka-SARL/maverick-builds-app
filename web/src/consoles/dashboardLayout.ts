@@ -20,6 +20,10 @@ export const INTRINSIC_HEIGHT_WIDGET_TYPES = new Set([
   "text",
 ]);
 
+// Button widgets: intrinsic beside a taller sibling, but drawn at their
+// designed size_h exactly, as the design canvas draws them.
+export const BUTTON_WIDGET_TYPES = new Set(["automation_button", "integration_button"]);
+
 // ── Hierarchy-aware default member selection ────────────────────────────────
 //
 // Shared by PlanningGrid (business/BusinessConsole.tsx) and ChartWidget's

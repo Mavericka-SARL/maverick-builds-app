@@ -711,6 +711,8 @@ export interface WidgetProps {
   // Where a grid/chart/KPI widget shows its context selectors: along the
   // top edge (default), the bottom edge, or as a column on the left/right.
   selectors_position?: SelectorsPosition;
+  /** Grid widgets: parent rows start collapsed; a viewer opens one by click. */
+  rows_collapsed?: boolean;
   /** Widget surface: "white" draws the widget on a card (surface + border),
       "none" draws it straight on the page. Absent = the type's default
       (KPI tiles are cards, everything else is bare). */
@@ -2474,8 +2476,9 @@ export const api = {
   // ── Dashboard folders ────────────────────────────────────────────────────
   listFolders: (revisionId?: string) =>
     apiFetch<DashboardFolder[]>(`/api/developer/folders${revisionId ? `?revision_id=${revisionId}` : ""}`),
-  createFolder: (body: { name: string; parent_id?: string }) =>
-    apiFetch<{ id: string }>("/api/developer/folders", { method: "POST", body: JSON.stringify(body) }),
+  // Into revisionId, as listFolders reads it; omitted, the model's open revision.
+  createFolder: (body: { name: string; parent_id?: string }, revisionId?: string) =>
+    apiFetch<{ id: string }>(`/api/developer/folders${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, { method: "POST", body: JSON.stringify(body) }),
   updateFolder: (id: string, body: { name: string; parent_id?: string }) =>
     apiFetch<{ status: string }>(`/api/developer/folders/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteFolder: (id: string) =>
@@ -2710,8 +2713,9 @@ export const api = {
       `/api/ai/sessions/${sessionId}/proposals/${proposalId}/reject`,
       { method: "POST" },
     ),
+  // The draft becomes the developer's working revision (not the active one).
   aiPromoteDraft: (sessionId: string) =>
-    apiFetch<{ session: AISession; messages: AIMessage[] }>(
+    apiFetch<{ session: AISession; messages: AIMessage[]; revision?: { id: string; name: string } }>(
       `/api/ai/sessions/${sessionId}/promote-draft`,
       { method: "POST" },
     ),

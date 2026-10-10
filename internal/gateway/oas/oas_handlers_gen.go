@@ -33990,8 +33990,9 @@ func (s *Server) handlePreviewImportReshapeRequest(args [0]string, argsEscaped b
 
 // handlePromoteAiDraftRequest handles promoteAiDraft operation.
 //
-// Make the session's isolated draft revision the model's active revision, then clear the session's
-// draft.
+// Hand the session's isolated draft revision to the developer as their working revision (not the
+// active one — that is PUT /api/developer/revisions/{id}/activate), finish the session and clear
+// its draft; the response names the revision.
 //
 // POST /api/ai/sessions/{id}/promote-draft
 func (s *Server) handlePromoteAiDraftRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -34127,7 +34128,7 @@ func (s *Server) handlePromoteAiDraftRequest(args [1]string, argsEscaped bool, w
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    PromoteAiDraftOperation,
-			OperationSummary: "Make the session's isolated draft revision the model's active revision, then clear the session's draft",
+			OperationSummary: "Hand the session's isolated draft revision to the developer as their working revision (not the active one — that is PUT /api/developer/revisions/{id}/activate), finish the session and clear its draft; the response names the revision",
 			OperationID:      "promoteAiDraft",
 			Body:             nil,
 			RawBody:          rawBody,

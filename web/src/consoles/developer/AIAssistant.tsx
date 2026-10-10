@@ -633,7 +633,11 @@ function formatElapsed(ms: number): string {
 
 // ── Main AIAssistant component ────────────────────────────────────────────────
 
-export function AIAssistant({ revisionId, revisionName }: { revisionId?: string; revisionName?: string } = {}) {
+export function AIAssistant({ revisionId, revisionName, onSelectRevision }: {
+  revisionId?: string; revisionName?: string;
+  /** Makes a revision the console's working revision (the draft, once promoted). */
+  onSelectRevision?: (id: string, name: string) => void;
+} = {}) {
   const qc = useQueryClient();
   const [sessionId, setSessionId]   = useState<string | null>(null);
   const [currentSession, setCurrentSession] = useState<AISession | null>(null);
@@ -763,13 +767,11 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
     },
   });
 
-  // Promote the session's isolated draft revision to active. Goes through
-  // the AI-specific endpoint (not the generic revision-activate one) so the
-  // session's draft_revision_id is cleared server-side too — that's what
-  // makes the "AI draft" banner disappear below, the only visible sign the
-  // click did anything, and what makes the session's next confirmed
-  // proposal start a fresh draft instead of continuing to write straight
-  // into what just became the live model.
+  // Take the session's isolated draft as the working revision — not the
+  // live one: Set active in Developer › Models is a separate decision. The
+  // AI-specific endpoint clears the session's draft_revision_id server-side
+  // too, which makes the "AI draft" banner disappear below and finishes the
+  // session; the console then switches to the draft.
   const promoteDraft = async () => {
     if (!sessionId || !currentSession?.draft_revision_id) return;
     setDraftBusy(true);
@@ -778,7 +780,9 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
       const resp = await api.aiPromoteDraft(sessionId!);
       setCurrentSession(resp.session);
       setMessages(resp.messages ?? []);
+      if (resp.revision) onSelectRevision?.(resp.revision.id, resp.revision.name);
       qc.invalidateQueries({ queryKey: ["dev-model"] });
+      qc.invalidateQueries({ queryKey: ["dev-applications"] });
       qc.invalidateQueries({ queryKey: ["ai-proposals", sessionId] });
     } catch (e) {
       setError((e as Error).message);
@@ -1137,15 +1141,16 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
 
         {/* Draft revision banner — shown once the session's first confirmed
             proposal has created an isolated draft. AI writes always land here,
-            never in the live model, until explicitly promoted. */}
+            never in an existing revision; promoting makes it the working revision,
+            never the live one. */}
         {currentSession?.draft_revision_id && (
           <div className="mvx-context-banner" style={{ display: "flex", alignItems: "center", gap: 10, borderRadius: 0, borderLeft: "none", borderRight: "none", borderTop: "none" }}>
             <RevisionBadge status="draft" label="AI draft" />
             <span style={{ flex: 1, fontSize: 12 }}>
-              Working in an isolated draft revision — changes here won't affect the live model until promoted.
+              Working in an isolated draft revision — use it as your working revision to look it through; it goes live only when you Set active in Models.
             </span>
             <Button size="sm" variant="primary" loading={draftBusy} loadingLabel="Working…" onClick={promoteDraft}>
-              Promote to Active
+              Use as working revision
             </Button>
             <Button size="sm" disabled={draftBusy} onClick={discardDraft}>
               Discard
@@ -1237,7 +1242,7 @@ export function AIAssistant({ revisionId, revisionName }: { revisionId?: string;
           {promoted && (
             <div role="status" style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, padding: "8px 12px", borderRadius: 8,
               border: "1px solid var(--color-info-border)", background: "var(--color-info-bg)" }}>
-              <span style={{ flex: 1 }}>This session's draft was promoted, so the session is finished. Start a new session to keep building — it works on the promoted revision.</span>
+              <span style={{ flex: 1 }}>This session's draft is now your working revision, so the session is finished. Start a new session to keep building — it works on your working revision.</span>
               <Button size="sm" variant="primary" disabled={newSession.isPending} onClick={() => newSession.mutate()}>New session</Button>
             </div>
           )}

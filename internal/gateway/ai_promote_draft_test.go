@@ -1,13 +1,11 @@
-// Tests the AI Assistant's isolated-draft promotion flow end to end,
-// closing a gap where clicking "Promote to Active" appeared to do nothing:
-// the click did correctly flip core.model.active_revision_id (verified
-// against a live instance), but nothing ever cleared the session's
-// draft_revision_id — the only thing the "AI draft" banner's visibility is
-// gated on — so the banner and its buttons stayed exactly as they were
-// after a successful promote, giving no visible sign anything happened.
-// That same missing clear meant the session's *next* confirmed proposal
-// would keep reusing the (now-active) revision as if it were still an
-// isolated draft, silently writing AI changes straight into the live model.
+// Tests the AI Assistant's isolated-draft promotion flow end to end.
+// Promoting hands the draft to the developer as their working revision; it
+// never makes it the active one (owner decision, 2026-10-10: which revision
+// goes live is a separate step). It also closes an older gap: nothing ever
+// cleared the session's draft_revision_id — the only thing the "AI draft"
+// banner's visibility is gated on — so the banner stayed up after a
+// successful promote, and the session's *next* confirmed proposal kept
+// reusing the promoted revision as if it were still an isolated draft.
 package gateway
 
 import (
@@ -133,6 +131,21 @@ func (f *promoteFixture) createSessionWithProposal(t *testing.T, ownerID, dimNam
 	return sess.ID, proposal.ID
 }
 
+// promotedRevisionID is the revision a promote-draft response names: the
+// draft, now the developer's working revision.
+func promotedRevisionID(t *testing.T, body []byte) string {
+	t.Helper()
+	var resp struct {
+		Revision struct {
+			ID string `json:"id"`
+		} `json:"revision"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil || resp.Revision.ID == "" {
+		t.Fatalf("promote response names no revision: %s (%v)", body, err)
+	}
+	return resp.Revision.ID
+}
+
 func dimensionExists(t *testing.T, pool *pgxpool.Pool, modelID, revisionID, name string) bool {
 	t.Helper()
 	var n int
@@ -154,7 +167,7 @@ func activeRevisionID(t *testing.T, pool *pgxpool.Pool, modelID string) string {
 	return id
 }
 
-func TestPromoteDraftMakesAIWritesVisibleInActiveRevision(t *testing.T) {
+func TestPromoteDraftHandsItOverAsTheWorkingRevisionNotTheActiveOne(t *testing.T) {
 	f := setupPromoteFixture(t)
 	sessionID, proposalID := f.createSessionWithProposal(t, f.devID, "Secret")
 
@@ -187,9 +200,10 @@ func TestPromoteDraftMakesAIWritesVisibleInActiveRevision(t *testing.T) {
 		t.Fatalf("active revision changed just by confirming a proposal: %s, want unchanged %s", got, f.workingRevID)
 	}
 
-	// Promote: the model's active revision must become the draft, and the
-	// session's draft_revision_id must clear (that's what the "AI draft"
-	// banner's visibility is gated on in AIAssistant.tsx).
+	// Promote: the response names the draft (the console switches to it),
+	// the active revision stays, and the session's draft_revision_id must
+	// clear (that's what the "AI draft" banner's visibility is gated on in
+	// AIAssistant.tsx).
 	status, body = f.do(t, "POST", "/api/ai/sessions/"+sessionID+"/promote-draft", f.devSub, nil)
 	if status != http.StatusOK {
 		t.Fatalf("promote: status %d, body %s", status, body)
@@ -202,6 +216,10 @@ func TestPromoteDraftMakesAIWritesVisibleInActiveRevision(t *testing.T) {
 			Role    string `json:"role"`
 			Content string `json:"content"`
 		} `json:"messages"`
+		Revision struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"revision"`
 	}
 	if err := json.Unmarshal(body, &promoteResp); err != nil {
 		t.Fatalf("parse promote response: %v", err)
@@ -209,14 +227,14 @@ func TestPromoteDraftMakesAIWritesVisibleInActiveRevision(t *testing.T) {
 	if promoteResp.Session.DraftRevisionID != "" {
 		t.Errorf("session.draft_revision_id = %q after promote, want empty — the banner will never disappear otherwise", promoteResp.Session.DraftRevisionID)
 	}
-	if got := activeRevisionID(t, f.pool, f.modelID); got != draftRevID {
-		t.Errorf("active_revision_id = %s after promote, want the draft %s", got, draftRevID)
+	if promoteResp.Revision.ID != draftRevID || promoteResp.Revision.Name == "" {
+		t.Errorf("promote names revision %+v, want the draft %s with its name — the console switches to it", promoteResp.Revision, draftRevID)
 	}
-
-	// The exact user-facing symptom this closes: the dimension is now
-	// visible under whatever the model's active revision is.
-	if !dimensionExists(t, f.pool, f.modelID, activeRevisionID(t, f.pool, f.modelID), "Secret") {
-		t.Error("dimension still not visible in the active revision after promotion")
+	if got := activeRevisionID(t, f.pool, f.modelID); got != f.workingRevID {
+		t.Errorf("active_revision_id = %s after promote, want unchanged %s — going live is the developer's own step", got, f.workingRevID)
+	}
+	if dimensionExists(t, f.pool, f.modelID, f.workingRevID, "Secret") {
+		t.Error("dimension reached the active revision by promoting")
 	}
 
 	// A confirmation message was posted so the chat transcript itself
@@ -242,7 +260,11 @@ func TestPromoteDraftGivesNextProposalAFreshDraft(t *testing.T) {
 	if status, body := f.do(t, "POST", "/api/ai/sessions/"+sessionID+"/promote-draft", f.devSub, nil); status != http.StatusOK {
 		t.Fatalf("promote: status %d, body %s", status, body)
 	}
-	firstDraftRevID := activeRevisionID(t, f.pool, f.modelID)
+	var firstDraftRevID string
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT id::text FROM model.revision WHERE model_id=$1::uuid AND name LIKE 'AI Draft%'`, f.modelID).Scan(&firstDraftRevID); err != nil {
+		t.Fatalf("load first draft: %v", err)
+	}
 
 	// A second proposal in the SAME session, confirmed after the first was
 	// promoted, must isolate into a NEW draft — not silently keep writing
@@ -273,13 +295,48 @@ func TestPromoteDraftGivesNextProposalAFreshDraft(t *testing.T) {
 		t.Fatal("second confirm did not create a draft at all")
 	}
 	if secondDraftRevID == firstDraftRevID {
-		t.Fatal("second proposal reused the promoted (now-active) revision as its draft — AI writes are no longer isolated")
+		t.Fatal("second proposal reused the promoted revision as its draft — AI writes are no longer isolated")
 	}
 	if dimensionExists(t, f.pool, f.modelID, firstDraftRevID, "Second") {
-		t.Error("'Second' dimension leaked into the already-promoted (live) revision")
+		t.Error("'Second' dimension leaked into the already-promoted revision")
 	}
 	if !dimensionExists(t, f.pool, f.modelID, secondDraftRevID, "Second") {
 		t.Error("'Second' dimension not found in the fresh draft")
+	}
+}
+
+// The draft is a copy of the revision the developer works in — the one the
+// session's plans were read from (?revision_id) — not of the live one: a
+// developer working in a revision other than the active one got a draft
+// without their own work in it.
+func TestConfirmCopiesTheWorkingRevisionIntoTheDraft(t *testing.T) {
+	f := setupPromoteFixture(t)
+	ctx := context.Background()
+	var otherRevID string
+	if err := f.pool.QueryRow(ctx, `INSERT INTO model.revision (model_id, name) VALUES ($1::uuid, 'Mine') RETURNING id::text`, f.modelID).Scan(&otherRevID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO model.dimension_def (model_id, revision_id, name) VALUES ($1::uuid, $2::uuid, 'OnlyInMine')`, f.modelID, otherRevID); err != nil {
+		t.Fatal(err)
+	}
+	sessionID, proposalID := f.createSessionWithProposal(t, f.devID, "Secret")
+	status, body := f.do(t, "POST", "/api/ai/sessions/"+sessionID+"/proposals/"+proposalID+"/confirm?revision_id="+otherRevID, f.devSub, nil)
+	if status != http.StatusOK {
+		t.Fatalf("confirm: status %d, body %s", status, body)
+	}
+	var resp struct {
+		Session struct {
+			DraftRevisionID string `json:"draft_revision_id"`
+		} `json:"session"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil || resp.Session.DraftRevisionID == "" {
+		t.Fatalf("no draft in %s (%v)", body, err)
+	}
+	if !dimensionExists(t, f.pool, f.modelID, resp.Session.DraftRevisionID, "OnlyInMine") {
+		t.Error("the draft is not a copy of the working revision the confirm named")
+	}
+	if !dimensionExists(t, f.pool, f.modelID, resp.Session.DraftRevisionID, "Secret") {
+		t.Error("the proposal's dimension is not in the draft")
 	}
 }
 

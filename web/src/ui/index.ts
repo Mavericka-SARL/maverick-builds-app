@@ -77,4 +77,5 @@ export type { DesignTone } from "./types";
 export { RichText } from "./RichText";
 export { InConsoleLinkContext } from "./RichTextLinks";
 export { useCollapsed } from "./useCollapsed";
+export { useExpanded } from "./useExpanded";
 export { CollapseToggle } from "./CollapseToggle";

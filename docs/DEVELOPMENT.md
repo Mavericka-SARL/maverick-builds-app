@@ -178,7 +178,7 @@ uses `ANTHROPIC_API_KEY`.
 1000, per user, UTC day) cap the AI Developer's LLM calls; every call counts,
 read-tool round trips included. A whole 13-sheet FP&A workbook took 74 to 78
 calls with the gpt-5 models; at the session cap, the developer is told to
-promote the session's draft and continue in a new session.
+make the session's draft their working revision and continue in a new session.
 
 The model is each developer's own choice (AI Developer → Settings, free text),
 or the tenant's when a tenant administrator sets the tenant key. When neither

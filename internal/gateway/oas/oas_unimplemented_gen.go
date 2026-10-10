@@ -1810,8 +1810,9 @@ func (UnimplementedHandler) PreviewImportReshape(ctx context.Context, req *Previ
 
 // PromoteAiDraft implements promoteAiDraft operation.
 //
-// Make the session's isolated draft revision the model's active revision, then clear the session's
-// draft.
+// Hand the session's isolated draft revision to the developer as their working revision (not the
+// active one — that is PUT /api/developer/revisions/{id}/activate), finish the session and clear
+// its draft; the response names the revision.
 //
 // POST /api/ai/sessions/{id}/promote-draft
 func (UnimplementedHandler) PromoteAiDraft(ctx context.Context, params PromoteAiDraftParams) (r PromoteAiDraftRes, _ error) {

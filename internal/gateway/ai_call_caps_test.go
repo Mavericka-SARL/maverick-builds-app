@@ -26,10 +26,10 @@ func TestLLMCallCapsAreSettings(t *testing.T) {
 }
 
 // At the cap, a session with confirmed work says how to carry on from it:
-// a new session starts from the active revision, so the draft is promoted
-// first.
+// a new session starts from the developer's working revision, so the draft
+// is taken as the working revision first.
 func TestSessionCapMessageSaysToPromoteTheDraft(t *testing.T) {
-	if m := sessionCapMessage(200, "draft-1"); !strings.Contains(m, "Promote to Active") || !strings.Contains(m, "new session") {
+	if m := sessionCapMessage(200, "draft-1"); !strings.Contains(m, "Use as working revision") || !strings.Contains(m, "new session") {
 		t.Errorf("with a draft: %q", m)
 	}
 	if m := sessionCapMessage(200, ""); strings.Contains(m, "promote") || !strings.Contains(m, "new session") {

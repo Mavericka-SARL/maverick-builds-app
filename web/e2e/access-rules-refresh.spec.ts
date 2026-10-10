@@ -26,6 +26,8 @@ test("saving access rules makes a dashboard read its grid's structure again", as
 
   await nav.getByRole("button", { name: "Access Rules", exact: true }).click();
   await page.getByLabel("Select user").selectOption("u-1");
+  // Each dimension's rules start collapsed.
+  await page.getByRole("button", { name: "Expand all", exact: true }).click();
   await page.getByLabel("Access level").first().selectOption("read");
   const saved = page.waitForRequest((r) => r.method() === "PUT" && r.url().includes("/access-rules"));
   await page.getByRole("button", { name: "Save rules" }).click();

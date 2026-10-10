@@ -666,12 +666,23 @@ func (b *aiBuild) q(sql string, args ...any) string {
 	return id
 }
 
-// promote makes the AI's draft the active revision through the session's
-// promote endpoint and returns it.
+// promote takes the AI's draft as the developer's working revision through
+// the session's promote endpoint, makes it active as the developer does
+// next (Set active), and returns it.
 func (b *aiBuild) promote() string {
 	b.t.Helper()
-	if status, body := b.do("POST", "/api/ai/sessions/"+b.sessID+"/promote-draft", nil); status != http.StatusOK {
+	status, body := b.do("POST", "/api/ai/sessions/"+b.sessID+"/promote-draft", nil)
+	if status != http.StatusOK {
 		b.t.Fatalf("promote: status %d\n%s", status, body)
+	}
+	if got := promotedRevisionID(b.t, body); got != b.draft {
+		b.t.Fatalf("promote named revision %s, want the draft %s", got, b.draft)
+	}
+	if active := activeRevisionID(b.t, b.pool, b.modelID); active == b.draft {
+		b.t.Fatal("promoting made the draft active — that is the developer's own step")
+	}
+	if status, body := b.do("PUT", "/api/developer/revisions/"+b.draft+"/activate", nil); status != http.StatusOK {
+		b.t.Fatalf("activate: status %d\n%s", status, body)
 	}
 	active := activeRevisionID(b.t, b.pool, b.modelID)
 	if active != b.draft {

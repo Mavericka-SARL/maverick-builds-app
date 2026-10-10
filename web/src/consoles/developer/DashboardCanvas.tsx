@@ -896,7 +896,8 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                           background: buttonColor, color: "var(--color-text-inverse)",
                           fontSize: 14, fontWeight: 600,
                           cursor: "inherit", pointerEvents: "none",
-                          borderRadius: 0,
+                          // As the dashboard draws it (.mvx-command-button).
+                          borderRadius: "var(--radius-card)",
                         }}>
                           {label}
                         </button>
@@ -1139,6 +1140,31 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                       <option value="right">Right column</option>
                     </Select>
                   </Field>
+                </div>
+              );
+            })()}
+
+            {/* Row hierarchy — grid only */}
+            {selectedWidget.widget_type === "grid" && (() => {
+              const wp = { ...(selectedWidget.widget_props ?? {}), ...(propsDraft[selectedWidget.id]?.widget_props ?? {}) };
+              return (
+                <div style={{ marginBottom: 12 }}>
+                  <div className="mvx-prop-section">Rows</div>
+                  <Checkbox
+                    checked={!!wp.rows_collapsed}
+                    onChange={e => {
+                      const wid = selectedWidget!.id;
+                      setPropsDraft(prev => ({
+                        ...prev,
+                        [wid]: { ...prev[wid], widget_props: { ...wp, rows_collapsed: e.target.checked || undefined } },
+                      }));
+                    }}
+                    label="Parent rows start collapsed"
+                  />
+                  <p style={{ fontSize: 11, color: "var(--color-text-quiet)", marginTop: 4 }}>
+                    For a row dimension with a hierarchy: users open and close
+                    each parent row by clicking its arrow.
+                  </p>
                 </div>
               );
             })()}

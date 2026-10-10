@@ -168,14 +168,16 @@ const (
 	// security-relevant signal; session lifecycle, document access, and
 	// proposal confirm/reject (actual model mutations) are the
 	// security-sensitive decisions here. EventAIProposalConfirmed is kept
-	// distinct from EventRevisionActivated (aiPromoteDraft) — "confirmed a
-	// proposal" and "activated a revision" are two separate actions even
-	// when they happen in the same user flow.
+	// distinct from EventAIDraftPromoted — "confirmed a proposal" and "took
+	// the session's draft as the working revision" are two separate actions
+	// even when they happen in the same user flow. Neither activates a
+	// revision: that is EventRevisionActivated, the developer's own step.
 	EventAISessionDeleted    EventType = "ai_session.deleted"
 	EventAIDocumentUploaded  EventType = "ai_document.uploaded"
 	EventAIDocumentDeleted   EventType = "ai_document.deleted"
 	EventAIProposalConfirmed EventType = "ai_proposal.confirmed"
 	EventAIProposalRejected  EventType = "ai_proposal.rejected"
+	EventAIDraftPromoted     EventType = "ai_draft.promoted"
 	EventAISettingsUpdated   EventType = "ai_settings.updated"
 	EventAISettingsTested    EventType = "ai_settings.tested"
 	// Tenant-level AI key (enterprise). Separate from the per-user events

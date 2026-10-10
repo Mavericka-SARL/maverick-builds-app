@@ -17,7 +17,6 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/aiassistant"
 	"github.com/mavericks-engine/mavericks/internal/aiassistant/providers"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
-	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 )
 
@@ -94,7 +93,7 @@ const (
 func sessionCapMessage(limit int, draftRevisionID string) string {
 	if draftRevisionID != "" {
 		return fmt.Sprintf("this session has reached its limit of %d LLM calls. Your confirmed changes are in its AI draft: "+
-			"promote the draft (Promote to Active), then start a new session to continue from it", limit)
+			"make the draft your working revision (Use as working revision), then start a new session to continue from it", limit)
 	}
 	return fmt.Sprintf("this session has reached its limit of %d LLM calls — start a new session to continue", limit)
 }
@@ -883,12 +882,14 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve model/revision for the write executor. AI writes never target the
-	// active revision directly: the session's first confirmed proposal lazily
-	// creates an isolated draft (a full copy of whatever's active) and every
-	// later proposal in the same session reuses it. The developer promotes it
-	// to active (PUT /api/developer/revisions/{id}/activate) or discards it
-	// (the existing DELETE) once they're happy — or not — with the result.
+	// Resolve model/revision for the write executor. AI writes never target an
+	// existing revision directly: the session's first confirmed proposal lazily
+	// creates an isolated draft — a full copy of the developer's working
+	// revision (?revision_id, the revision the session's plans were read
+	// from), else of the active one — and every later proposal in the same
+	// session reuses it. The developer takes it as their working revision
+	// (promote-draft) or discards it once they're happy — or not — with the
+	// result; making it active is a separate step.
 	// Discarding this error left modelID empty and handed it to the write
 	// executor, where it surfaced as a uuid cast failure — a 500 for what is
 	// really a 403, on the one endpoint that performs every AI write.
@@ -904,6 +905,11 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusConflict)
 		return
 	}
+	baseRevID := r.URL.Query().Get("revision_id")
+	if baseRevID != "" && !h.revisionBelongsToModel(ctx, baseRevID, modelID) {
+		jsonErr(w, fmt.Errorf("revision does not belong to this model"), http.StatusForbidden)
+		return
+	}
 	revID := sess.DraftRevisionID
 	if revID == "" {
 		// Millisecond precision: minute-granularity previously collided with
@@ -913,7 +919,8 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 		// raw constraint-violation 500 instead of quietly creating the next
 		// draft.
 		draftParams, _ := json.Marshal(map[string]string{
-			"name": fmt.Sprintf("AI Draft %s", time.Now().Format("2006-01-02 15:04:05.000")),
+			"name":               fmt.Sprintf("AI Draft %s", time.Now().Format("2006-01-02 15:04:05.000")),
+			"source_revision_id": baseRevID,
 		})
 		draftExecutor := aiassistant.NewWriteExecutorWithActor(h.db.For(ctx), modelID, "", a.UserID)
 		_, newRevID, dErr := draftExecutor.Execute(ctx, "create_revision", draftParams)
@@ -1137,17 +1144,15 @@ func plural(n int) string {
 
 // ── POST /api/ai/sessions/{sid}/promote-draft ─────────────────────────────────
 
-// aiPromoteDraft makes the session's isolated draft revision (created
-// lazily on its first confirmed proposal — see aiConfirmProposal above) the
-// model's active revision, then clears the session's draft_revision_id.
-// That clearing matters for two reasons: it's what makes the "AI draft"
-// banner disappear (the frontend's only feedback that promotion actually
-// happened — previously nothing cleared it, so the banner and its buttons
-// stayed up unchanged after a successful promote and the action looked
-// like a no-op), and it means the session's *next* confirmed proposal
-// lazily creates a fresh draft instead of continuing to write straight
-// into what is now the live model, silently defeating the isolation this
-// mechanism exists for.
+// aiPromoteDraft hands the session's isolated draft revision (created
+// lazily on its first confirmed proposal — see aiConfirmProposal above) to
+// the developer as their working revision: the console switches to it.
+// It does not make it the model's active revision — which revision goes
+// live is a separate decision, Set active in Developer › Models (owner
+// decision, 2026-10-10). It then clears the session's draft_revision_id,
+// which makes the "AI draft" banner disappear, and finishes the session:
+// its next confirmed proposal would otherwise write on into a revision the
+// developer now builds by hand.
 func (h *handler) aiPromoteDraft(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
@@ -1174,35 +1179,24 @@ func (h *handler) aiPromoteDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	draftRevID := sess.DraftRevisionID
 
-	modelID, err := h.activateRevision(ctx, draftRevID)
-	if err != nil {
-		if metricformula.IsValidationError(err) {
-			jsonErr(w, err, http.StatusBadRequest)
-			return
-		}
-		jsonErr(w, err, http.StatusNotFound)
+	var modelID, draftName string
+	if err := h.db.QueryRow(ctx, `SELECT model_id::text, name FROM model.revision WHERE id=$1::uuid`, draftRevID).Scan(&modelID, &draftName); err != nil {
+		jsonErr(w, fmt.Errorf("draft revision not found"), http.StatusNotFound)
 		return
 	}
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
-		Category: auditlog.CategoryModelChange, EventType: auditlog.EventRevisionActivated,
+		Category: auditlog.CategoryAIAssistant, EventType: auditlog.EventAIDraftPromoted,
 		ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
 		ResourceType: "revision", ResourceID: draftRevID, RevisionID: draftRevID,
-		Metadata: map[string]string{"source": "ai_assistant_draft", "session_id": sessionID},
+		Metadata: map[string]string{"session_id": sessionID, "name": draftName},
 	})
-	// The manual create_metric/update_metric handlers each trigger this
-	// per-write; write_executor's AI equivalents never do (no access to
-	// *handler across the aiassistant/gateway package boundary), so an
-	// AI-authored metric/dimension change had no schema-migration path at
-	// all until now. One pass here — right after the draft's structural
-	// writes become the live model — reconciles it, rather than per
-	// tool-call inside aiConfirmProposal against draft data nothing can
-	// query yet.
-	go h.autoMigrate(context.Background(), modelID) //nolint:contextcheck
 	// The assistant's member, property and formula writes landed on the
 	// draft, where nothing recalculated them (write_executor has no
-	// scheduler); activateRevision above recomputes every calculated metric
-	// of the promoted revision, so what the draft changed is what the live
-	// model shows (contract C8).
+	// scheduler): recompute every calculated metric of the draft once, so
+	// what the developer looks through in the console is what its
+	// definitions say (contract C8). Activation recomputes again, and runs
+	// the schema migration (activateRevision).
+	go h.recalcRevisionCalculated(context.WithoutCancel(ctx), modelID, draftRevID) //nolint:contextcheck
 
 	if err := h.aiChatStore(ctx).SetDraftRevisionID(ctx, sessionID, ""); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
@@ -1225,7 +1219,8 @@ func (h *handler) aiPromoteDraft(w http.ResponseWriter, r *http.Request) {
 		allMsgs = []aiassistant.ChatMessage{}
 	}
 
-	jsonOK(w, map[string]any{"session": sess, "messages": allMsgs})
+	jsonOK(w, map[string]any{"session": sess, "messages": allMsgs,
+		"revision": map[string]string{"id": draftRevID, "name": draftName}})
 }
 
 // ── POST /api/ai/sessions/{sid}/discard-draft ─────────────────────────────────

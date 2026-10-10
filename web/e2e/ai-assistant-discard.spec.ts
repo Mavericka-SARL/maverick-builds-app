@@ -112,3 +112,35 @@ test("Activity panel lists past proposals with status and summary", async ({ pag
   await expect(page.getByText("Executed 1 step successfully.")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText("executed", { exact: true })).toBeVisible();
 });
+
+// Promoting hands the draft over as the developer's working revision — the
+// console switches to it — and never makes it live: that is Set active in
+// Developer › Models (owner decision, 2026-10-10).
+test("Use as working revision switches the console to the draft without activating it", async ({ page }) => {
+  await mockApi(page);
+  await mockCommonAiRoutes(page);
+  const activateCalls: string[] = [];
+  await page.route("**/api/developer/revisions/*/activate", async (route) => {
+    activateCalls.push(route.request().url());
+    await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+  });
+  await page.route(`**/api/ai/sessions/${SESSION_ID}/promote-draft`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        session: { ...session(false), promoted_at: "2026-08-01T09:10:00Z" },
+        messages: [{ id: "m-1", session_id: SESSION_ID, role: "assistant", content: "The draft is now your working revision. It is not live.", created_at: "2026-08-01T09:10:00Z" }],
+        revision: { id: DRAFT_REV_ID, name: "AI Draft 2026-08-01 09:05:00.000" },
+      }),
+    });
+  });
+
+  await openAiAssistantSession(page);
+  await expect(page.getByText("AI draft")).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "Use as working revision" }).click();
+
+  await expect(page.getByText("AI Draft 2026-08-01 09:05:00.000").first()).toBeVisible();
+  await expect(page.getByText("The draft is now your working revision")).toBeVisible();
+  expect(activateCalls).toEqual([]);
+});

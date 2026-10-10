@@ -69,8 +69,9 @@ func TestImportDimensionMembersPropertiesAndAutoCodes(t *testing.T) {
 		dimID).Scan(&code, &props); err != nil {
 		t.Fatalf("load member: %v", err)
 	}
-	if code != "MONITOR_STAND" {
-		t.Errorf("auto code = %q, want MONITOR_STAND", code)
+	// At most 10 characters (modeledit.MaxGeneratedCodeLen).
+	if code != "MONITOR_ST" {
+		t.Errorf("auto code = %q, want MONITOR_ST", code)
 	}
 	if !strings.Contains(props, `"center": "Dragon"`) && !strings.Contains(props, `"center":"Dragon"`) {
 		t.Errorf("properties = %s, want center=Dragon", props)
@@ -111,13 +112,14 @@ func TestImportDimensionMembersPropertiesAndAutoCodes(t *testing.T) {
 		t.Errorf("member count after re-import = %d, want 2 (no duplicates)", n)
 	}
 	_ = pool.QueryRow(ctx,
-		`SELECT properties->>'center' FROM model.dimension_member WHERE dimension_id=$1::uuid AND code='MONITOR_STAND'`,
+		`SELECT properties->>'center' FROM model.dimension_member WHERE dimension_id=$1::uuid AND code='MONITOR_ST'`,
 		dimID).Scan(&props)
 	if props != "Ruchnaya" {
 		t.Errorf("re-imported property = %q, want Ruchnaya", props)
 	}
 
-	// A DIFFERENT label colliding to the same slug gets a suffix.
+	// A DIFFERENT label colliding to the same slug gets a suffix, the base
+	// shortened to keep the code within 10 characters.
 	imported, errs = run("label\nMonitor-Stand\n")
 	if imported != 1 || errs != 0 {
 		t.Fatalf("collision import: %d/%d, want 1/0", imported, errs)
@@ -128,12 +130,12 @@ func TestImportDimensionMembersPropertiesAndAutoCodes(t *testing.T) {
 		dimID).Scan(&suffixed); err != nil {
 		t.Fatalf("load collided member: %v", err)
 	}
-	if suffixed != "MONITOR_STAND_2" {
-		t.Errorf("collision code = %q, want MONITOR_STAND_2", suffixed)
+	if suffixed != "MONITOR_2" {
+		t.Errorf("collision code = %q, want MONITOR_2", suffixed)
 	}
 
 	// Explicit code + parent_code still work as before.
-	imported, errs = run("code,label,parent_code\nCHILD1,Child One,MONITOR_STAND\n")
+	imported, errs = run("code,label,parent_code\nCHILD1,Child One,MONITOR_ST\n")
 	if imported != 1 || errs != 0 {
 		t.Fatalf("explicit import: %d/%d, want 1/0", imported, errs)
 	}
@@ -142,7 +144,7 @@ func TestImportDimensionMembersPropertiesAndAutoCodes(t *testing.T) {
 		SELECT EXISTS(
 			SELECT 1 FROM model.dimension_member c
 			JOIN model.dimension_member p ON p.id = c.parent_member_id
-			WHERE c.dimension_id=$1::uuid AND c.code='CHILD1' AND p.code='MONITOR_STAND')
+			WHERE c.dimension_id=$1::uuid AND c.code='CHILD1' AND p.code='MONITOR_ST')
 	`, dimID).Scan(&parentOK)
 	if !parentOK {
 		t.Error("explicit parent_code was not linked")

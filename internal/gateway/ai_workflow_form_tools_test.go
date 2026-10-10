@@ -83,7 +83,8 @@ func TestConfirmProposal_CreateAndUpdateWorkflowDefLandsAfterPromote(t *testing.
 		t.Fatalf("confirm 2: status %d, body %s", status, body)
 	}
 
-	// Promote: the draft (including the AI-authored workflow) becomes active.
+	// Promote: the draft (including the AI-authored workflow) becomes the
+	// developer's working revision.
 	status, body = f.do(t, "POST", "/api/ai/sessions/"+sess.ID+"/promote-draft", f.devSub, nil)
 	if status != http.StatusOK {
 		t.Fatalf("promote: status %d, body %s", status, body)
@@ -279,6 +280,9 @@ func TestConfirmProposal_CreateFormDefLandsAfterPromote(t *testing.T) {
 	status, body = f.do(t, "POST", "/api/ai/sessions/"+sess.ID+"/promote-draft", f.devSub, nil)
 	if status != http.StatusOK {
 		t.Fatalf("promote: status %d, body %s", status, body)
+	}
+	if status, body := f.do(t, "PUT", "/api/developer/revisions/"+promotedRevisionID(t, body)+"/activate", f.devSub, nil); status != http.StatusOK {
+		t.Fatalf("activate: status %d, body %s", status, body)
 	}
 
 	activeRev := activeRevisionID(t, f.pool, f.modelID)

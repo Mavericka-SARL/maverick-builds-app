@@ -1065,6 +1065,45 @@ func (p *createDimensionParams) memberPropertyKeys() map[string]string {
 	return keys
 }
 
+// fillMemberCodes gives every member listed without a code one made from its
+// label (modeledit.FreeMemberCode, unique among the members listed), as a
+// file import does for a row with no code. With sameDimParents, a
+// parent_code naming no listed code but an earlier member's label is pointed
+// at that member's code: a member with no code has no other name to give.
+func (p *createDimensionParams) fillMemberCodes(sameDimParents bool) error {
+	taken := map[string]bool{}
+	for _, m := range p.Members {
+		if c := strings.TrimSpace(m.Code); c != "" {
+			taken[c] = true
+		}
+	}
+	codeOfLabel := map[string]string{}
+	for i := range p.Members {
+		m := &p.Members[i]
+		m.Code = strings.TrimSpace(m.Code)
+		if m.Code == "" {
+			if strings.TrimSpace(m.Label) == "" {
+				return fmt.Errorf("member %d has neither a code nor a label", i+1)
+			}
+			code, err := modeledit.FreeMemberCode(m.Label, func(c string) (bool, error) { return taken[c], nil })
+			if err != nil {
+				return err
+			}
+			m.Code = code
+			taken[code] = true
+		}
+		if sameDimParents && m.ParentCode != "" && !taken[m.ParentCode] {
+			if c, ok := codeOfLabel[m.ParentCode]; ok {
+				m.ParentCode = c
+			}
+		}
+		if _, ok := codeOfLabel[m.Label]; !ok {
+			codeOfLabel[m.Label] = m.Code
+		}
+	}
+	return nil
+}
+
 func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p createDimensionParams
 	if err := decodeParams(raw, &p); err != nil {
@@ -1105,6 +1144,9 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 
 	sourceDimID, sourceProp, err := e.resolveGrouping(ctx, &p, revID, timeCfg.Type, parentDimID != nil)
 	if err != nil {
+		return "", "", err
+	}
+	if err := p.fillMemberCodes(parentDimID == nil); err != nil {
 		return "", "", err
 	}
 	if err := e.checkMembers(ctx, "", len(p.Members)); err != nil {
@@ -1237,7 +1279,12 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 				SELECT COALESCE(MAX(sort_order),0)+1 FROM model.dimension_member WHERE dimension_id=$1::uuid
 			), $5::jsonb) RETURNING id::text
 		`, newID, m.Code, m.Label, parentID, memberPropertiesJSON(m.Properties)).Scan(&memID)
-		if er == nil && parentDimID == nil {
+		if er != nil {
+			// Ignored, a second member with the same code — two listed with
+			// no code at all, before fillMemberCodes — vanished silently.
+			return "", "", fmt.Errorf("member %q: %w", m.Code, metricformula.MemberCodeTaken(er, m.Code))
+		}
+		if parentDimID == nil {
 			// Same-dimension hierarchy: later members in this same call may reference
 			// an earlier one as their parent.
 			codeToID[m.Code] = memID
@@ -1340,14 +1387,22 @@ func (e *WriteExecutor) addDimensionMember(ctx context.Context, raw json.RawMess
 	if err := decodeParams(raw, &p); err != nil {
 		return "", "", fmt.Errorf("invalid params: %w", err)
 	}
-	if p.DimensionID == "" || p.Code == "" {
-		return "", "", fmt.Errorf("dimension_id and code are required")
+	p.Code = strings.TrimSpace(p.Code)
+	if p.DimensionID == "" || (p.Code == "" && strings.TrimSpace(p.Label) == "") {
+		return "", "", fmt.Errorf("dimension_id and a code or label are required")
 	}
 	mappedDimID, err := e.requireInModel(ctx, "dimension", p.DimensionID)
 	if err != nil {
 		return "", "", err
 	}
 	p.DimensionID = mappedDimID
+	if p.Code == "" {
+		// No code in the source: one is made from the label, as a file
+		// import makes it.
+		if p.Code, err = modeledit.NewMemberCode(ctx, e.pool, p.DimensionID, p.Label); err != nil {
+			return "", "", err
+		}
+	}
 	props, err := metricformula.CheckMemberProperties(ctx, e.pool, p.DimensionID, p.Properties, nil)
 	if err != nil {
 		return "", "", err
@@ -1435,9 +1490,12 @@ func (e *WriteExecutor) addDimensionMember(ctx context.Context, raw json.RawMess
 		if parentDimensionID != nil {
 			lookupDim = *parentDimensionID
 		}
+		// By code, else by label: a parent added with no code of its own
+		// has no other name the plan could give.
 		var pid string
 		er := e.pool.QueryRow(ctx, `
-			SELECT id::text FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2
+			SELECT id::text FROM model.dimension_member WHERE dimension_id=$1::uuid AND (code=$2 OR label=$2)
+			ORDER BY (code=$2) DESC, code LIMIT 1
 		`, lookupDim, p.ParentCode).Scan(&pid)
 		switch {
 		case er == nil:

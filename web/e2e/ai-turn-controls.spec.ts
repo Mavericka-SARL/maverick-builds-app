@@ -42,7 +42,7 @@ test("a promoted session is finished: input closed, a new session offered", asyn
   await mockApi(page);
   await mockAi(page, { promoted: true });
   await openSession(page);
-  await expect(page.getByText("This session's draft was promoted")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("This session's draft is now your working revision")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByLabel("Message")).toBeDisabled();
   await expect(page.getByRole("button", { name: "New session" }).last()).toBeVisible();
 });
