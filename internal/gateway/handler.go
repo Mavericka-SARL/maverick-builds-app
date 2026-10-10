@@ -632,6 +632,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/workflow/definitions/{id}", "any", cors(h.workflowDefinition))
 	register("POST", "/api/workflow/instances", "any", cors(h.workflowStartInstance))
 	register("PATCH", "/api/workflow/instances/{id}", "business_admin", ba(h.workflowInstanceAction))
+	register("POST", "/api/workflow/instances/{id}/cancel", "developer_or_business_admin", baOrDev(h.workflowInstanceCancel))
 	register("GET", "/api/notifications", "any", cors(h.notifications))
 	register("POST", "/api/notifications/mark-read", "any", cors(h.markNotifRead))
 	// Whether a tenant's people may change grid data from a chat connection.
@@ -6245,12 +6246,41 @@ func (h *handler) workflowInstanceAction(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Cancelling a running instance is CancelInstance, as from the cancel
+	// route: its execution follows and the people it involved are told.
+	// One that already ended (an approval to revoke) takes the override.
+	if body.Status == "cancelled" {
+		res, err := h.workflowStore(ctx).CancelInstance(ctx, instanceID, act.UserID, "")
+		if err == nil {
+			h.auditInstanceCancelled(ctx, act, res, instanceID, "")
+			jsonOK(w, map[string]string{"status": "ok"})
+			return
+		}
+		if !errors.Is(err, workflow.ErrInstanceNotRunning) {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+	}
+
 	tx, err := h.db.Begin(ctx)
 	if err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// The automation execution that started the instance follows it: the
+	// Triggers execution log showed "running" for an instance an admin had
+	// ended.
+	if _, err := tx.Exec(ctx, `
+		UPDATE workflow.execution
+		SET status = $2::text::workflow.execution_status,
+		    completed_at = CASE WHEN $3::bool THEN NULL ELSE now() END
+		WHERE instance_id = $1::uuid
+	`, instanceID, body.Status, body.Status == "running"); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
 
 	if body.Status == "running" {
 		// Clear completed_at and set instance back to running

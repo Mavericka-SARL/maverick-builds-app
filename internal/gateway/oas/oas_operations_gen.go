@@ -19,6 +19,7 @@ const (
 	ArchiveWorkflowOperation              OperationName = "ArchiveWorkflow"
 	BackfillFormMappingOperation          OperationName = "BackfillFormMapping"
 	CancelIntegrationRunOperation         OperationName = "CancelIntegrationRun"
+	CancelWorkflowInstanceOperation       OperationName = "CancelWorkflowInstance"
 	ClearAuditSettingsOperation           OperationName = "ClearAuditSettings"
 	ClearNotificationSettingsOperation    OperationName = "ClearNotificationSettings"
 	ClearTenantAIKeyOperation             OperationName = "ClearTenantAIKey"

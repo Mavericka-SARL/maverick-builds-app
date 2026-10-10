@@ -122,6 +122,18 @@ test("Instances section lists real runs with test runs marked; one-active-per-sc
   await expect(list.getByText("test run", { exact: true })).toHaveCount(1);
   await expect(list.getByText("dept: SALES")).toBeVisible();
 
+  // A running run — here a test run, which no trigger started — is stopped
+  // from here; an ended one offers nothing.
+  let cancelURL = "";
+  await page.route("**/api/workflow/instances/*/cancel", (route) => {
+    cancelURL = route.request().url();
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "cancelled", notified: 0 }) });
+  });
+  await expect(list.getByRole("button", { name: /^Cancel run/ })).toHaveCount(1);
+  await list.getByRole("button", { name: "Cancel run i-2" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Cancel run" }).click();
+  await expect.poll(() => cancelURL).toContain("/api/workflow/instances/i-2/cancel");
+
   // Dedup is a per-definition choice: on by default, saved through PATCH.
   await page.getByRole("button", { name: "properties", exact: true }).click();
   const flag = page.getByLabel("One active instance per scope");

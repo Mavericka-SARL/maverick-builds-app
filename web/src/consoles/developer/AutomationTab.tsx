@@ -4,6 +4,7 @@ import { Plus, Pause, Play, Pencil, Trash2 } from "lucide-react";
 import { api, type AutomationRule, type Execution, type FormDef, type GridDef, type WorkflowDefSummary , type IntegrationDef, type TriggerEventCatalogItem } from "../../api/client";
 import { SectionHeader, Button, EmptyState, StatusBadge, IconButton, Field, TextInput, Select, useConfirm, type DesignTone } from "../../ui";
 import { triggerTypeFromWorkflow, ruleTriggerFromWorkflow, useTriggerEvents } from "./workflowConstants";
+import { useCancelRun } from "./useCancelRun";
 
 const EXEC_STATUS_TONE: Record<string, DesignTone> = {
   completed: "success", running: "warning", failed: "danger", cancelled: "neutral",
@@ -71,6 +72,7 @@ export function AutomationTab({ revisionId }: { revisionId?: string } = {}) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["executions"] }),
   });
   const { confirm, confirmElement } = useConfirm();
+  const cancelRun = useCancelRun();
 
   const startEdit = (r: AutomationRule) => {
     setEditId(r.id);
@@ -220,7 +222,7 @@ export function AutomationTab({ revisionId }: { revisionId?: string } = {}) {
             <table className="mvx-table mvx-table--compact">
               <thead>
                 <tr>
-                  <th>ID</th><th>Status</th><th>Instance</th><th>Started</th>
+                  <th>ID</th><th>Status</th><th>Instance</th><th>Started</th><th aria-label="Actions" />
                 </tr>
               </thead>
               <tbody>
@@ -234,14 +236,24 @@ export function AutomationTab({ revisionId }: { revisionId?: string } = {}) {
                       {e.instance_id ? e.instance_id.slice(0, 8) : "—"}
                     </td>
                     <td className="mvx-admin-muted">{new Date(e.started_at).toLocaleString()}</td>
+                    <td style={{ textAlign: "right" }}>
+                      {e.status === "running" && e.instance_id && (
+                        <Button size="sm" variant="ghost" disabled={cancelRun.pending}
+                          aria-label={`Cancel run ${e.id.slice(0, 8)}`} onClick={() => cancelRun.askCancel(e.instance_id!, e.id.slice(0, 8))}>
+                          Cancel
+                        </Button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
+        {cancelRun.error && <p className="mvx-admin-error">{cancelRun.error}</p>}
       </div>
       {confirmElement}
+      {cancelRun.confirmElement}
     </div>
   );
 }

@@ -4109,6 +4109,99 @@ func (s *CancelIntegrationRunOK) SetStatus(val OptString) {
 
 func (*CancelIntegrationRunOK) cancelIntegrationRunRes() {}
 
+type CancelWorkflowInstanceBadRequest Error
+
+func (*CancelWorkflowInstanceBadRequest) cancelWorkflowInstanceRes() {}
+
+type CancelWorkflowInstanceConflict Error
+
+func (*CancelWorkflowInstanceConflict) cancelWorkflowInstanceRes() {}
+
+type CancelWorkflowInstanceForbidden Error
+
+func (*CancelWorkflowInstanceForbidden) cancelWorkflowInstanceRes() {}
+
+type CancelWorkflowInstanceNotFound Error
+
+func (*CancelWorkflowInstanceNotFound) cancelWorkflowInstanceRes() {}
+
+type CancelWorkflowInstanceOK struct {
+	Status OptCancelWorkflowInstanceOKStatus `json:"status"`
+	// How many people were notified.
+	Notified OptInt `json:"notified"`
+}
+
+// GetStatus returns the value of Status.
+func (s *CancelWorkflowInstanceOK) GetStatus() OptCancelWorkflowInstanceOKStatus {
+	return s.Status
+}
+
+// GetNotified returns the value of Notified.
+func (s *CancelWorkflowInstanceOK) GetNotified() OptInt {
+	return s.Notified
+}
+
+// SetStatus sets the value of Status.
+func (s *CancelWorkflowInstanceOK) SetStatus(val OptCancelWorkflowInstanceOKStatus) {
+	s.Status = val
+}
+
+// SetNotified sets the value of Notified.
+func (s *CancelWorkflowInstanceOK) SetNotified(val OptInt) {
+	s.Notified = val
+}
+
+func (*CancelWorkflowInstanceOK) cancelWorkflowInstanceRes() {}
+
+type CancelWorkflowInstanceOKStatus string
+
+const (
+	CancelWorkflowInstanceOKStatusCancelled CancelWorkflowInstanceOKStatus = "cancelled"
+)
+
+// AllValues returns all CancelWorkflowInstanceOKStatus values.
+func (CancelWorkflowInstanceOKStatus) AllValues() []CancelWorkflowInstanceOKStatus {
+	return []CancelWorkflowInstanceOKStatus{
+		CancelWorkflowInstanceOKStatusCancelled,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CancelWorkflowInstanceOKStatus) MarshalText() ([]byte, error) {
+	switch s {
+	case CancelWorkflowInstanceOKStatusCancelled:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CancelWorkflowInstanceOKStatus) UnmarshalText(data []byte) error {
+	switch CancelWorkflowInstanceOKStatus(data) {
+	case CancelWorkflowInstanceOKStatusCancelled:
+		*s = CancelWorkflowInstanceOKStatusCancelled
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type CancelWorkflowInstanceReq struct {
+	// Optional; quoted in the notification.
+	Reason OptString `json:"reason"`
+}
+
+// GetReason returns the value of Reason.
+func (s *CancelWorkflowInstanceReq) GetReason() OptString {
+	return s.Reason
+}
+
+// SetReason sets the value of Reason.
+func (s *CancelWorkflowInstanceReq) SetReason(val OptString) {
+	s.Reason = val
+}
+
 // Returned when the widget's chart_type is bar, line, or pie.
 // Ref: #/components/schemas/CategoryChartData
 type CategoryChartData struct {
@@ -17240,6 +17333,98 @@ func (o OptBusinessMemberRequestProperties) Get() (v BusinessMemberRequestProper
 
 // Or returns value if set, or given parameter if does not.
 func (o OptBusinessMemberRequestProperties) Or(d BusinessMemberRequestProperties) BusinessMemberRequestProperties {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptCancelWorkflowInstanceOKStatus returns new OptCancelWorkflowInstanceOKStatus with value set to v.
+func NewOptCancelWorkflowInstanceOKStatus(v CancelWorkflowInstanceOKStatus) OptCancelWorkflowInstanceOKStatus {
+	return OptCancelWorkflowInstanceOKStatus{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCancelWorkflowInstanceOKStatus is optional CancelWorkflowInstanceOKStatus.
+type OptCancelWorkflowInstanceOKStatus struct {
+	Value CancelWorkflowInstanceOKStatus
+	Set   bool
+}
+
+// IsSet returns true if OptCancelWorkflowInstanceOKStatus was set.
+func (o OptCancelWorkflowInstanceOKStatus) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCancelWorkflowInstanceOKStatus) Reset() {
+	var v CancelWorkflowInstanceOKStatus
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCancelWorkflowInstanceOKStatus) SetTo(v CancelWorkflowInstanceOKStatus) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCancelWorkflowInstanceOKStatus) Get() (v CancelWorkflowInstanceOKStatus, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCancelWorkflowInstanceOKStatus) Or(d CancelWorkflowInstanceOKStatus) CancelWorkflowInstanceOKStatus {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptCancelWorkflowInstanceReq returns new OptCancelWorkflowInstanceReq with value set to v.
+func NewOptCancelWorkflowInstanceReq(v CancelWorkflowInstanceReq) OptCancelWorkflowInstanceReq {
+	return OptCancelWorkflowInstanceReq{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCancelWorkflowInstanceReq is optional CancelWorkflowInstanceReq.
+type OptCancelWorkflowInstanceReq struct {
+	Value CancelWorkflowInstanceReq
+	Set   bool
+}
+
+// IsSet returns true if OptCancelWorkflowInstanceReq was set.
+func (o OptCancelWorkflowInstanceReq) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCancelWorkflowInstanceReq) Reset() {
+	var v CancelWorkflowInstanceReq
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCancelWorkflowInstanceReq) SetTo(v CancelWorkflowInstanceReq) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCancelWorkflowInstanceReq) Get() (v CancelWorkflowInstanceReq, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCancelWorkflowInstanceReq) Or(d CancelWorkflowInstanceReq) CancelWorkflowInstanceReq {
 	if v, ok := o.Get(); ok {
 		return v
 	}

@@ -5,7 +5,7 @@ import { ChevronDown, ChevronRight, GripVertical, Download, MoreVertical, Rows3,
 import { api, type DemoContext, type GridData, type Metric, type DimMember, type DimInfo, type GridDefaultView , type SelectorsPosition, type HighlightRule, type HighlightTone } from "../../api/client";
 import { CellHistoryDrawer, type CellRef } from "../../ee/cellhistory/CellHistoryDrawer";
 import { AddMemberRow, MemberLabel } from "./BusinessMemberControls";
-import { LoadingState, ErrorState, Toolbar, ToolbarGroup, Select, PropertyPanel, IconButton } from "../../ui";
+import { LoadingState, ErrorState, Toolbar, ToolbarGroup, Select, PropertyPanel, IconButton, SearchInput } from "../../ui";
 import { defaultLeafCode } from "../dashboardLayout";
 import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
 import { evalMemberFormula } from "./memberFormula";
@@ -169,6 +169,62 @@ function flattenTree(nodes: MemberTreeNode[], collapsed: (code: string) => boole
   }
   nodes.forEach(walk);
   return out;
+}
+
+// The code of the ad-hoc parent a context selection of several members
+// becomes (withSelection); no real member has it.
+const SELECTION_CODE = "\u0000selection";
+
+// withSelection makes the chosen members of a context dimension the children
+// of one ad-hoc parent, so the grid aggregates them as it aggregates any
+// parent — each metric by its own rule (flatValue). A member under another
+// chosen member is dropped: it is already counted.
+function withSelection(dim: DimInfo, codes: string[]): DimInfo {
+  const byCode = new Map(dim.members.map(m => [m.code, m]));
+  const under = (code: string, ancestor: string) => {
+    let p = byCode.get(code)?.parent_code;
+    for (let i = 0; p && i < 20; i++) {
+      if (p === ancestor) return true;
+      p = byCode.get(p)?.parent_code;
+    }
+    return false;
+  };
+  const picked = codes.filter(c => byCode.has(c) && !codes.some(o => o !== c && under(c, o)));
+  const label = picked.map(c => byCode.get(c)!.label).join(" + ");
+  return {
+    ...dim,
+    members: [
+      { id: "", code: SELECTION_CODE, label },
+      ...dim.members.map(m => picked.includes(m.code) ? { ...m, parent_code: SELECTION_CODE } : m),
+    ],
+  };
+}
+
+// searchAxis narrows an axis dimension to the members matching query (label
+// or code) with their ancestors, for the hierarchy, and their descendants, so
+// a matching parent shows what it adds up. null when nothing matches: that
+// axis stays whole.
+function searchAxis(dim: DimInfo, query: string): DimInfo | null {
+  if (!query) return null;
+  const hits = dim.members.filter(m => m.label.toLowerCase().includes(query) || m.code.toLowerCase().includes(query));
+  if (hits.length === 0) return null;
+  const byCode = new Map(dim.members.map(m => [m.code, m]));
+  const keep = new Set<string>();
+  for (const h of hits) {
+    keep.add(h.code);
+    let p = h.parent_code;
+    for (let i = 0; p && byCode.has(p) && i < 20; i++) { keep.add(p); p = byCode.get(p)!.parent_code; }
+  }
+  const hitCodes = new Set(hits.map(h => h.code));
+  const underHit = (m: DimMember) => {
+    let p = m.parent_code;
+    for (let i = 0; p && i < 20; i++) {
+      if (hitCodes.has(p)) return true;
+      p = byCode.get(p)?.parent_code;
+    }
+    return false;
+  };
+  return { ...dim, members: dim.members.filter(m => keep.has(m.code) || underHit(m)) };
 }
 
 // Depth-first list of only the leaf members (for column data combos).
@@ -477,9 +533,11 @@ function pickMetrics<T extends { id: string }>(all: T[], ids?: string[]): T[] {
   return picked.length > 0 ? picked : all;
 }
 
-export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembers, syncContext, title, selectorsPosition, rowsCollapsed }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; metricIds?: string[]; showMembers?: Record<string, string[]>; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition;
+export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembers, syncContext, title, selectorsPosition, rowsCollapsed, multiSelect }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; metricIds?: string[]; showMembers?: Record<string, string[]>; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition;
   /** Parent rows start collapsed (widget_props.rows_collapsed, the developer's choice); the viewer opens and closes them by click. */
-  rowsCollapsed?: boolean }) {
+  rowsCollapsed?: boolean;
+  /** Context selectors take several members (widget_props.multi_select): the grid shows their aggregate. */
+  multiSelect?: boolean }) {
   const qc = useQueryClient();
   // Parent rows the viewer flipped from the developer's default.
   const [rowsFlipped, setRowsFlipped] = useState<Set<string>>(() => new Set());
@@ -543,6 +601,24 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   const [pivotCols, setPivotCols]       = useState<string[]>([]);
   const [pivotContext, setPivotContext] = useState<string[]>([]);
   const [filterSel, setFilterSel]       = useState<Record<string, string>>({});
+  // Several members chosen in one context selector (multiSelect), kept with
+  // the single selection they were chosen over: a synced widget's later
+  // choice moves filterSel, and that replaces them.
+  const [multiSel, setMultiSel] = useState<Record<string, { codes: string[]; base: string }>>({});
+  const multiOf = (dimId: string): string[] | null => {
+    const m = multiSel[dimId];
+    return multiSelect && m && m.codes.length > 1 && m.base === (filterSel[dimId] ?? "") ? m.codes : null;
+  };
+  const chooseMany = (dimId: string, codes: string[]) => {
+    if (codes.length === 1) {
+      setMultiSel(p => { const n = { ...p }; delete n[dimId]; return n; });
+      setFilterValue(dimId, codes[0]);
+      return;
+    }
+    setMultiSel(p => ({ ...p, [dimId]: { codes, base: filterSel[dimId] ?? "" } }));
+  };
+  // Find a row or column: narrows each axis to what matches (see searchAxis).
+  const [find, setFind] = useState("");
   // Which metric is selected when METRICS_ID is in the context zone
   const [contextMetric, setContextMetric] = useState<string>("");
 
@@ -560,12 +636,16 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     const s: Record<string, string> = {};
     for (const dimId of pivotContext) {
       if (dimId === METRICS_ID) continue;
+      // Several members: the whole dimension is read and the grid adds
+      // up the chosen ones, as for a calculated member.
+      if (multiOf(dimId)) continue;
       const code = filterSel[dimId];
       const calculated = gridMeta?.dimensions.find(d => d.id === dimId)?.members.some(m => m.code === code && m.formula);
       if (code && !calculated) s[dimId] = code;
     }
     return s;
-  }, [pivotContext, filterSel, gridMeta]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- multiOf reads multiSel, filterSel and multiSelect
+  }, [pivotContext, filterSel, gridMeta, multiSel, multiSelect]);
   const scopeKey = JSON.stringify(scope);
 
   const { data: cellsData, error: cellsError } = useQuery({
@@ -688,7 +768,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
 
   // Backend has already filtered hidden members/metrics and marked readonly ones.
   // Just unpack — no client-side ID lookup needed.
-  const dims = (g.dimensions ?? []).map(dim => {
+  const dimsBase = (g.dimensions ?? []).map(dim => {
     const level = dim.display_level;
     if (level == null) return dim; // null = all levels, no filtering
     const lvl: number = level;    // narrow away null for closures below
@@ -711,6 +791,13 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     // (the selected level is treated as flat — no further hierarchy).
     return { ...dim, display_level: null, members: filtered.map(m => ({ ...m, parent_code: undefined })) };
   }).map(dim => ({ ...dim, members: withAncestorMembers(g, dim) }));
+  // A context selection of several members is one ad-hoc parent of them in
+  // the grid's own copy of the dimension; its selector lists them as they are.
+  const dims = dimsBase.map(dim => {
+    const codes = pivotContext.includes(dim.id) ? multiOf(dim.id) : null;
+    return codes ? withSelection(dim, codes) : dim;
+  });
+  const selectorMembers = (dimId: string) => dimsBase.find(d => d.id === dimId)?.members ?? [];
   const visibleMetrics = pickMetrics(g.metrics ?? [], metricIds);
   const metricsInRows    = pivotRows.includes(METRICS_ID);
   const metricsInContext = pivotContext.includes(METRICS_ID);
@@ -726,12 +813,18 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     const picked = codes.flatMap(c => d.members.filter(m => m.code === c).map(m => ({ ...m, parent_code: undefined })));
     return picked.length > 0 ? { ...d, members: picked } : d;
   };
-  const rowDims  = inZone(pivotRows).map(onAxis);
-  const colDims  = inZone(pivotCols).map(onAxis);
+  const findQuery = find.trim().toLowerCase();
+  const rowDims  = inZone(pivotRows).map(onAxis).map(d => searchAxis(d, findQuery) ?? d);
+  const colDims  = inZone(pivotCols).map(onAxis).map(d => searchAxis(d, findQuery) ?? d);
   const ctxDims  = inZone(pivotContext);
   // When metrics are in the context zone, only show the one selected metric in the grid
   const ctxMetricId = visibleMetrics.some(v => v.id === contextMetric) ? contextMetric : (visibleMetrics[0]?.id ?? "");
-  const gridMetrics = metricsInContext ? visibleMetrics.filter(m => m.id === ctxMetricId) : visibleMetrics;
+  // On an axis, the metrics narrow to those matching the search, when any do.
+  const foundMetrics = findQuery ? visibleMetrics.filter(m => m.label.toLowerCase().includes(findQuery) || m.name.toLowerCase().includes(findQuery)) : [];
+  const gridMetrics = metricsInContext ? visibleMetrics.filter(m => m.id === ctxMetricId)
+    : foundMetrics.length > 0 ? foundMetrics : visibleMetrics;
+  const findMisses = !!findQuery && foundMetrics.length === 0 &&
+    ![...inZone(pivotRows), ...inZone(pivotCols)].some(d => searchAxis(d, findQuery));
 
   // ── Hierarchy-aware dimension trees ────────────────────────────────────────
   // Trees are built only for single-dimension row/col zones; multi-dim zones
@@ -759,7 +852,8 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     : null;
 
   // flatRowEntries: depth-first ordered row entries for hierarchical row dims.
-  const flatRowEntries = hasRowHierarchy && rowTree ? flattenTree(rowTree, rowCollapsed) : null;
+  // While searching every match shows, whatever is collapsed.
+  const flatRowEntries = hasRowHierarchy && rowTree ? flattenTree(rowTree, findQuery ? () => false : rowCollapsed) : null;
 
   const rowCombos = crossProduct(rowDims);   // [[]] when empty → one "All" row
   const colCombos = crossProduct(colDims);   // full crossProduct for formula evaluation
@@ -775,7 +869,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     // leaf "2026-01", which would make every combo look like it touches an
     // agg node (isAggNode below) and always resolve via aggregation instead
     // of a direct leaf lookup.
-    ctxDims.forEach(d => { byId[d.id] = filterSel[d.id] ?? defaultLeafCode(d) ?? ""; });
+    ctxDims.forEach(d => { byId[d.id] = multiOf(d.id) ? SELECTION_CODE : (filterSel[d.id] ?? defaultLeafCode(d) ?? ""); });
     return dims.map(d => {
       const code = byId[d.id] ?? "";
       return d.members.find(m => m.code === code) ?? { id: "", code, label: code };
@@ -841,7 +935,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     // The grand total (every dimension at its root) is what the server's
     // `totals` answers; if the server withheld it, no client rollup of the
     // visible children may stand in for it.
-    if (withheld.has(metricId) && dims.every((dim, i) => isAggNode(dim, fc[i]) && !fc[i].parent_code)) return null;
+    if (withheld.has(metricId) && dims.every((dim, i) => isAggNode(dim, fc[i]) && !fc[i].parent_code && fc[i].code !== SELECTION_CODE)) return null;
     const metric = g.metrics.find(m => m.id === metricId);
     const aggRule = metric?.agg_rule ?? "sum";
     // agg_rule none (an index, a pick-list): nothing above the leaves of
@@ -890,7 +984,9 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
       // user saw margin_pct 60 at a no-data intersection), and after that
       // was fixed, the World rollup column showed the all-periods total
       // under a Q1 context — "these mistakes must never happen".
-      const allRoots = dims.every((dim, i) => isAggNode(dim, fc[i]) && !fc[i].parent_code);
+      // A selection of several members is no root: the server's totals
+      // know nothing of it, and these rules cannot be added up.
+      const allRoots = dims.every((dim, i) => isAggNode(dim, fc[i]) && !fc[i].parent_code && fc[i].code !== SELECTION_CODE);
       if (!allRoots) return undefined;
       if (withheld.has(metricId)) return null;
       return g.totals[metricId] ?? (evaluatedAvg ? undefined : 0);
@@ -1120,10 +1216,13 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                   <span onClick={e => e.stopPropagation()}>
                     <HierarchicalMemberSelect
                       ariaLabel={`${name} context`}
-                      members={dim.members}
+                      members={selectorMembers(id)}
                       value={filterSel[id] ?? defaultLeafCode(dim) ?? ""}
                       onChange={code => setFilterValue(id, code)}
                       onMouseDown={e => e.stopPropagation()}
+                      multiple={multiSelect}
+                      values={multiOf(id) ?? [filterSel[id] ?? defaultLeafCode(dim) ?? ""]}
+                      onChangeMany={codes => chooseMany(id, codes)}
                     />
                   </span>
                 )}
@@ -1419,9 +1518,12 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                 <span className="mvx-admin-muted" style={{ fontWeight: 500 }}>{dim.name}:</span>
                 <HierarchicalMemberSelect
                   ariaLabel={`${dim.name} context`}
-                  members={dim.members}
+                  members={selectorMembers(dim.id)}
                   value={filterSel[dim.id] ?? defaultLeafCode(dim) ?? ""}
                   onChange={code => setFilterValue(dim.id, code)}
+                  multiple={multiSelect}
+                  values={multiOf(dim.id) ?? [filterSel[dim.id] ?? defaultLeafCode(dim) ?? ""]}
+                  onChangeMany={codes => chooseMany(dim.id, codes)}
                 />
               </div>
             ))}
@@ -1439,6 +1541,9 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
             )}
           </ToolbarGroup>
           <ToolbarGroup align="end">
+            <SearchInput value={find} onChange={e => setFind(e.target.value)} placeholder="Find a row or column…"
+              width={190} aria-label="Find in this grid" />
+            {findMisses && <span className="mvx-admin-muted" style={{ fontSize: 12 }}>No match</span>}
             <GridActionsMenu
               canExport={!!gridDefId}
               exporting={exportGrid.isPending}

@@ -76,6 +76,9 @@ export function HierarchicalMemberSelect<T extends HierarchicalMember>({
   placeholder,
   leafOnly,
   isSelectable,
+  multiple,
+  values,
+  onChangeMany,
 }: {
   id?: string;
   ariaLabel: string;
@@ -98,6 +101,12 @@ export function HierarchicalMemberSelect<T extends HierarchicalMember>({
    *  (those are governed by `leafOnly` + whether they retain any
    *  surviving descendant). */
   isSelectable?: (member: T) => boolean;
+  /** Several members at once (a grid widget's widget_props.multi_select):
+   *  `values` are the chosen codes, an option toggles without closing, and
+   *  the last one cannot be unchosen. `value`/`onChange` are unused. */
+  multiple?: boolean;
+  values?: string[];
+  onChangeMany?: (codes: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -108,7 +117,12 @@ export function HierarchicalMemberSelect<T extends HierarchicalMember>({
   const listboxId = useId();
   const optionId = useCallback((code: string) => `${listboxId}-opt-${code}`, [listboxId]);
 
+  const chosen = multiple ? (values ?? []) : [value];
   const selected = members.find(m => m.code === value);
+  const chosenLabels = chosen.map(c => members.find(m => m.code === c)?.label ?? c);
+  const triggerLabel = multiple
+    ? (chosenLabels.length <= 2 ? chosenLabels.join(" + ") : `${chosenLabels[0]} + ${chosenLabels.length - 1} more`)
+    : (selected?.label ?? (value ? value : placeholder ?? ""));
   let tree = buildMemberTree(members);
   if (leafOnly || isSelectable) {
     tree = pruneTree(tree, (member, isRawLeaf) => {
@@ -131,12 +145,19 @@ export function HierarchicalMemberSelect<T extends HierarchicalMember>({
     activeCodeRef.current = activeCode;
   });
 
+  const chosenKey = chosen.join("\u0000");
   const pick = useCallback((code: string) => {
+    if (multiple) {
+      const current = chosenKey ? chosenKey.split("\u0000") : [];
+      const next = current.includes(code) ? current.filter(c => c !== code) : [...current, code];
+      if (next.length > 0) onChangeMany?.(next);
+      return;
+    }
     onChange(code);
     setOpen(false);
     setSearch("");
     triggerRef.current?.focus();
-  }, [onChange]);
+  }, [onChange, onChangeMany, multiple, chosenKey]);
 
   // Keep the keyboard-active option valid as the visible set changes (open,
   // or search narrows/widens it): prefer the current value if still
@@ -145,7 +166,7 @@ export function HierarchicalMemberSelect<T extends HierarchicalMember>({
     if (!open) return;
     setActiveCode(prev => { // eslint-disable-line react-hooks/set-state-in-effect -- syncing keyboard-active selection to an external trigger (open/search changing the visible option set), not derivable from props alone
       if (prev && flatOptions.some(n => n.member.code === prev)) return prev;
-      if (flatOptions.some(n => n.member.code === value)) return value;
+      if (flatOptions.some(n => n.member.code === chosen[0])) return chosen[0];
       return flatOptions[0]?.member.code ?? null;
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -241,18 +262,23 @@ export function HierarchicalMemberSelect<T extends HierarchicalMember>({
           <div
             id={isGroup ? undefined : optionId(n.member.code)}
             role={isGroup ? undefined : "option"}
-            aria-selected={isGroup ? undefined : n.member.code === value}
+            aria-selected={isGroup ? undefined : chosen.includes(n.member.code)}
             aria-disabled={isGroup ? true : undefined}
             className={[
               "mvx-hier-select__option",
               isGroup ? "mvx-hier-select__option--group" : "",
-              !isGroup && n.member.code === value ? "mvx-hier-select__option--selected" : "",
+              !isGroup && chosen.includes(n.member.code) ? "mvx-hier-select__option--selected" : "",
               !isGroup && n.member.code === activeCode ? "mvx-hier-select__option--active" : "",
             ].filter(Boolean).join(" ")}
             style={{ paddingLeft: 10 + n.level * 16 }}
             onClick={isGroup ? undefined : () => pick(n.member.code)}
             onMouseEnter={isGroup ? undefined : () => setActiveCode(n.member.code)}
           >
+            {multiple && !isGroup && (
+              <span aria-hidden="true" style={{ display: "inline-block", width: 16, marginRight: 4 }}>
+                {chosen.includes(n.member.code) ? "✓" : ""}
+              </span>
+            )}
             {n.member.label}
           </div>
           {n.children.length > 0 && renderNodes(n.children)}
@@ -276,10 +302,10 @@ export function HierarchicalMemberSelect<T extends HierarchicalMember>({
         onMouseDown={onMouseDown}
         onClick={() => setOpen(o => !o)}
       >
-        <span className="mvx-hier-select__trigger-label">{selected?.label ?? (value ? value : placeholder ?? "")}</span>
+        <span className="mvx-hier-select__trigger-label">{triggerLabel}</span>
       </button>
       {open && createPortal(
-        <div ref={popoverRef} role="listbox" id={listboxId} className="mvx-hier-select__popover" style={popoverStyle}>
+        <div ref={popoverRef} role="listbox" aria-multiselectable={multiple || undefined} id={listboxId} className="mvx-hier-select__popover" style={popoverStyle}>
           <div className="mvx-hier-select__search">
             <SearchInput
               value={search}

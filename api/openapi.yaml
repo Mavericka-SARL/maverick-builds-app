@@ -3949,6 +3949,53 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /api/workflow/instances/{id}/cancel:
+    post:
+      operationId: cancelWorkflowInstance
+      tags: [Workflow]
+      summary: Stop a running workflow instance (developer or business_admin)
+      description: >-
+        Withdraws the instance's open steps (they leave every inbox) and marks the instance and the
+        automation execution that started it cancelled; steps already decided keep their effect. The
+        open steps' assignees and the person who started the run are notified, the caller excepted,
+        unless it is a test run. A developer cancels instances of applications they build, test runs
+        included; a business admin those GET /api/workflow/history lists.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 500, description: Optional; quoted in the notification }
+      responses:
+        "200":
+          description: Instance cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:   { type: string, enum: [cancelled] }
+                  notified: { type: integer, description: How many people were notified }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: No such instance within the caller's scope (the same answer as an unknown id)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: The run has already ended
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /api/notifications:
     get:
       operationId: listNotifications

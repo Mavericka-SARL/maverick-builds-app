@@ -17,8 +17,8 @@ created on the session's first confirmed proposal as a copy of the developer's
 working revision (else the active one), and promoted or discarded by the
 developer. Promoting makes the draft the developer's **working** revision, not
 the live one: making a revision active is a separate step (**Set active** in
-Developer › Models; owner decision, 2026-10-10). So does data the assistant imports from a spreadsheet
-attached to the chat. Three kinds of write are not revision-scoped, exactly as in the
+Developer › Models; owner decision, 2026-10-10). Data the assistant imports from a spreadsheet
+attached to the chat lands in the draft too. Three kinds of write are not revision-scoped, exactly as in the
 console, so they take effect on confirmation and discarding the draft does not
 undo them:
 
@@ -342,8 +342,11 @@ a dashboard's Integration button downloads one for users.
   name at fire time, so the rule goes live the moment the developer publishes.
 - **Role membership.** The assistant creates and changes business roles; a
   business admin decides who is in them.
-- **Promoting or discarding the draft revision**, deleting a revision, and
-  choosing the model users open by default.
+- **Promoting or discarding the draft revision**, making a revision active,
+  deleting one, and choosing the model users open by default.
+- **Cancelling a running workflow run** — a developer's (Developer › Triggers,
+  the execution log's **Cancel**) or a business admin's (Business Admin ›
+  History). The assistant starts manual runs but does not stop them.
 - **Users** — invitations, deletion, platform and business role grants.
 - **Secrets.** The assistant configures REST API connectors (HTTPS, SFTP,
   model links), Google Sheets integrations and sign-in connections, tests and

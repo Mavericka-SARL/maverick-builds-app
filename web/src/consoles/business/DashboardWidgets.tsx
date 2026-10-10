@@ -107,7 +107,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
     // goes INTO the grid's own toolbar row (beside the ··· actions) instead
     // of a separate header bar — see the show_title branch below, which
     // deliberately skips grid widgets.
-    inner = <PlanningGrid ctx={ctx} gridDefId={widget.ref_id} defaultView={widget.widget_props?.default_view} metricIds={widget.widget_props?.metric_ids} showMembers={widget.widget_props?.show_members} syncContext={widget.widget_props?.sync_context !== false} selectorsPosition={widget.widget_props?.selectors_position} rowsCollapsed={widget.widget_props?.rows_collapsed} title={widget.show_title && widget.title ? widget.title : undefined} />;
+    inner = <PlanningGrid ctx={ctx} gridDefId={widget.ref_id} defaultView={widget.widget_props?.default_view} metricIds={widget.widget_props?.metric_ids} showMembers={widget.widget_props?.show_members} syncContext={widget.widget_props?.sync_context !== false} selectorsPosition={widget.widget_props?.selectors_position} rowsCollapsed={widget.widget_props?.rows_collapsed} multiSelect={widget.widget_props?.multi_select} title={widget.show_title && widget.title ? widget.title : undefined} />;
   } else if (widget.widget_type === "text" && widget.content) {
     const wp = widget.widget_props ?? {};
     // Explanatory copy needs headings, emphasis, lists and links, so the

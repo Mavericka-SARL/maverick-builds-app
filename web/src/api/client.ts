@@ -713,6 +713,9 @@ export interface WidgetProps {
   selectors_position?: SelectorsPosition;
   /** Grid widgets: parent rows start collapsed; a viewer opens one by click. */
   rows_collapsed?: boolean;
+  /** Grid widgets: a context selector takes several members (Region 1 +
+      Region 3), and the grid shows their aggregate, read-only. */
+  multi_select?: boolean;
   /** Widget surface: "white" draws the widget on a card (surface + border),
       "none" draws it straight on the page. Absent = the type's default
       (KPI tiles are cards, everything else is bare). */
@@ -2422,6 +2425,12 @@ export const api = {
   triggerRule: (ruleId: string, payload?: Record<string, string>) =>
     apiFetch<Execution>(`/api/automation/trigger/${ruleId}`, { method: "POST", body: JSON.stringify({ payload: payload ?? {} }) }),
   listExecutions: () => apiFetch<Execution[]>("/api/automation/executions"),
+  // Stops a running instance: its open steps are withdrawn, it and its
+  // execution read "cancelled", and its assignees and starter are told.
+  cancelWorkflowInstance: (instanceId: string, reason?: string) =>
+    apiFetch<{ status: string; notified: number }>(`/api/workflow/instances/${instanceId}/cancel`, {
+      method: "POST", body: JSON.stringify({ reason: reason ?? "" }),
+    }),
 
   generateMigration: () =>
     apiFetch<{ model_id: string; version_number: number; files: MigrationFile[] }>(

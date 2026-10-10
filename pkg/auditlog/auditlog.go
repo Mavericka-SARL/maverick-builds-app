@@ -210,6 +210,9 @@ const (
 	// (pre-existing) already covers form-submission-triggered starts.
 	EventWorkflowInstanceStarted          EventType = "workflow_instance.started"
 	EventWorkflowInstanceStatusOverridden EventType = "workflow_instance.status_overridden"
+	// A running instance stopped by a developer or business admin
+	// (workflow.Store.CancelInstance), with its reason.
+	EventWorkflowInstanceCancelled EventType = "workflow_instance.cancelled"
 
 	// Batch 7 — Forms / CRUD app (/api/forms/..., /api/records/...).
 	EventFormCreated       EventType = "form.created"

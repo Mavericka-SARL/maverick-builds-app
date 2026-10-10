@@ -50,6 +50,7 @@ var operationRolesBearerAuth = map[string][]string{
 	ArchiveWorkflowOperation:              []string{},
 	BackfillFormMappingOperation:          []string{},
 	CancelIntegrationRunOperation:         []string{},
+	CancelWorkflowInstanceOperation:       []string{},
 	ClearAuditSettingsOperation:           []string{},
 	ClearNotificationSettingsOperation:    []string{},
 	ClearTenantAIKeyOperation:             []string{},

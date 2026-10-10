@@ -3,9 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import type { WorkflowDef, WorkflowDefUsage, ContextVariable, WorkflowSubjectType, GridDef, FormDef, DevModel } from "../../api/client";
 import { StatusBadge, Field, TriggerEventSelect } from "./WorkflowShared";
-import { StatusBadge as Badge } from "../../ui";
+import { StatusBadge as Badge, Button } from "../../ui";
 import { inputStyle, btnPrimary, btnSecondary, TRIGGER_FALLBACK, useTriggerEvents } from "./workflowConstants";
 import { CreateAutomationModal } from "./CreateAutomationModal";
+import { useCancelRun } from "./useCancelRun";
 
 const CONTEXT_DATA_TYPES = [
   "Text", "Number", "Boolean", "Date", "User", "Role",
@@ -30,6 +31,9 @@ function InstancesSection({ workflow }: { workflow: WorkflowDef }) {
     queryFn: () => api.getWorkflowInstances(workflow.id),
     refetchInterval: 10_000,
   });
+  // A run started without a trigger has no row in Triggers' execution log:
+  // here is where a developer stops it.
+  const cancelRun = useCancelRun();
   if (isLoading) return <p className="mvx-admin-muted" style={{ fontSize: 13 }}>Loading instances…</p>;
   if (instances.length === 0) return <p className="mvx-admin-muted" style={{ fontSize: 13 }}>No instances yet. Publish the workflow and start it, or run a test.</p>;
   return (
@@ -40,6 +44,12 @@ function InstancesSection({ workflow }: { workflow: WorkflowDef }) {
             <Badge tone={inst.status === "completed" ? "success" : inst.status === "running" ? "warning" : "neutral"}>{inst.status}</Badge>
             {inst.test_run && <Badge tone="draft">test run</Badge>}
             <span className="mvx-admin-muted" style={{ marginLeft: "auto" }}>{new Date(inst.started_at).toLocaleString()}</span>
+            {inst.status === "running" && (
+              <Button size="sm" variant="ghost" disabled={cancelRun.pending}
+                aria-label={`Cancel run ${inst.id.slice(0, 8)}`} onClick={() => cancelRun.askCancel(inst.id, inst.id.slice(0, 8))}>
+                Cancel
+              </Button>
+            )}
           </div>
           {inst.context && Object.keys(inst.context).length > 0 && (
             <div className="mvx-admin-muted" style={{ fontSize: 12, marginTop: 4, wordBreak: "break-word" }}>
@@ -48,6 +58,8 @@ function InstancesSection({ workflow }: { workflow: WorkflowDef }) {
           )}
         </div>
       ))}
+      {cancelRun.error && <p className="mvx-admin-error">{cancelRun.error}</p>}
+      {cancelRun.confirmElement}
     </div>
   );
 }

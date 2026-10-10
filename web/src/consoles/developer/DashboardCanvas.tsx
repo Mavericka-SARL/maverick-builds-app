@@ -1140,6 +1140,22 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                       <option value="right">Right column</option>
                     </Select>
                   </Field>
+                  {selectedWidget.widget_type === "grid" && (
+                    <>
+                      <Checkbox
+                        checked={!!wp.multi_select}
+                        onChange={e => {
+                          const wid = selectedWidget!.id;
+                          setPropsDraft(prev => ({ ...prev, [wid]: { ...prev[wid], widget_props: { ...wp, multi_select: e.target.checked || undefined } } }));
+                        }}
+                        label="Users may choose several members in a selector"
+                      />
+                      <p style={{ fontSize: 11, color: "var(--color-text-quiet)", marginTop: 4 }}>
+                        Region 1 + Region 3, for example: the grid shows them added up by each metric's rule,
+                        read-only. A formula or ratio metric shows "—" for such a choice.
+                      </p>
+                    </>
+                  )}
                 </div>
               );
             })()}

@@ -136,6 +136,19 @@ func (UnimplementedHandler) CancelIntegrationRun(ctx context.Context, params Can
 	return r, ht.ErrNotImplemented
 }
 
+// CancelWorkflowInstance implements cancelWorkflowInstance operation.
+//
+// Withdraws the instance's open steps (they leave every inbox) and marks the instance and the
+// automation execution that started it cancelled; steps already decided keep their effect. The open
+// steps' assignees and the person who started the run are notified, the caller excepted, unless it
+// is a test run. A developer cancels instances of applications they build, test runs included; a
+// business admin those GET /api/workflow/history lists.
+//
+// POST /api/workflow/instances/{id}/cancel
+func (UnimplementedHandler) CancelWorkflowInstance(ctx context.Context, req OptCancelWorkflowInstanceReq, params CancelWorkflowInstanceParams) (r CancelWorkflowInstanceRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // ClearAuditSettings implements clearAuditSettings operation.
 //
 // Drop the tenant's own retention so it inherits the deployment's again (administrators; enterprise).

@@ -37,6 +37,10 @@ type CancelIntegrationRunRes interface {
 	cancelIntegrationRunRes()
 }
 
+type CancelWorkflowInstanceRes interface {
+	cancelWorkflowInstanceRes()
+}
+
 type ClearAuditSettingsRes interface {
 	clearAuditSettingsRes()
 }
