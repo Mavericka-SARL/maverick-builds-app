@@ -1,5 +1,8 @@
 # Security policy
 
+maverickbuilds.app is developed and published by Mavericka SARL-S,
+2 Rue Pierre-Joseph Redouté, L-2435 Luxembourg (RCS Luxembourg B289552).
+
 ## Reporting a vulnerability
 
 Please report it privately, never in a public issue, pull request or

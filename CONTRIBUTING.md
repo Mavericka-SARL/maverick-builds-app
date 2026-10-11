@@ -80,3 +80,6 @@ issue, a discussion or an e-mail, you agree that:
 
 For anything that fits neither an issue nor a security report:
 team@maverickans.com.
+
+maverickbuilds.app is developed and published by Mavericka SARL-S,
+2 Rue Pierre-Joseph Redouté, L-2435 Luxembourg (RCS Luxembourg B289552).
