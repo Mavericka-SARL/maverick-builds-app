@@ -211,3 +211,82 @@ func TestMigrateAllAndWatch(t *testing.T) {
 		t.Fatalf("watch starts = %v", started)
 	}
 }
+
+// A background loop keeps the pool Watch gave it for its whole life. The idle
+// janitor used to close that pool after IdleTimeout, because the loop never
+// came back through Pool, and every later query failed with "closed pool".
+// Pools nobody holds still close.
+func TestWatchedPoolOutlivesIdleTimeout(t *testing.T) {
+	ctx := context.Background()
+	control := testdb.New(t, migrationfs.FS, ".")
+	r := tenantdb.New(control, tenantdb.Config{
+		Migrations:    migrationfs.FS,
+		MigrationsDir: ".",
+		AdminURL:      testdb.AdminDSN(t),
+		IdleTimeout:   200 * time.Millisecond,
+	})
+	t.Cleanup(r.Close)
+	if _, err := r.Provision(ctx, "A", ""); err != nil {
+		t.Fatal(err)
+	}
+	held := make(chan *pgxpool.Pool, 1)
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	r.Watch(wctx, time.Hour, func(_ tenantdb.Tenant, p *pgxpool.Pool) { held <- p })
+	bg := <-held
+
+	// B appears after Watch's only pass, so nothing holds its pool.
+	b, err := r.Provision(ctx, "B", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	idle, err := r.Pool(ctx, b.Tenant.CustomerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 8; i++ {
+		if _, err := bg.Exec(ctx, "SELECT 1"); err != nil {
+			t.Fatalf("held pool, query %d: %v", i, err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if _, err := idle.Exec(ctx, "SELECT 1"); err == nil {
+		t.Fatal("an unheld pool idle past IdleTimeout must be closed")
+	}
+}
+
+// A deploy migrates every tenant database. Holding each one's pool open
+// afterwards kept one connection per tenant, and past max_connections the
+// rest failed to connect and were marked failed.
+func TestMigrateAllLeavesNoConnections(t *testing.T) {
+	ctx := context.Background()
+	r, control := newRouter(t)
+	var dbs []string
+	for _, name := range []string{"A", "B", "C"} {
+		p, err := r.Provision(ctx, name, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Forget(p.Tenant.CustomerID)
+		dbs = append(dbs, p.Tenant.Database)
+	}
+	if err := r.MigrateAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var open int
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := control.QueryRow(ctx,
+			`SELECT count(*) FROM pg_stat_activity WHERE datname = ANY($1)`, dbs).Scan(&open); err != nil {
+			t.Fatal(err)
+		}
+		if open == 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if open != 0 {
+		t.Fatalf("%d connections to tenant databases left open after MigrateAll", open)
+	}
+}

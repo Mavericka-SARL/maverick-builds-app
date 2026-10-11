@@ -169,9 +169,11 @@ applications the same way, and builds in each through a stand-in.
   Deleting a person never deletes the tenant's data: what they entered,
   posted, started or imported stays, authored by "a former user"
   (migration 094).
-- **Pools**: opened on first use, capped at `TENANT_DB_MAX_CONNS` (5 by
-  default) and closed after ten idle minutes. Hundreds of test-workspace tenants
-  therefore cost nothing while idle.
+- **Pools**: opened on first use and capped at `TENANT_DB_MAX_CONNS` (5 by
+  default). A pool that only serves requests closes after ten idle minutes.
+  The background work below holds its tenant's pool for as long as the process
+  runs, so an idle tenant is not free: see Limits. Start-up migration opens
+  each tenant database in turn and closes it straight after.
 
 ## Background work
 
@@ -227,3 +229,9 @@ in dedicated mode, import the package, then delete the old rows.
   identity to both. Lists that span a person's homes show one row per home.
 - The cross-tenant admin listing opens one pool per tenant. That is fine for
   hundreds of tenants and would need paging for thousands.
+- Background work checks every tenant database every few seconds, idle or
+  not, so each one keeps at least one PostgreSQL connection open (one per
+  gateway replica and integration worker without PgBouncer). PostgreSQL's
+  `max_connections` (100 by default) therefore caps the number of tenant
+  databases: keep it, with the server's memory, comfortably above the tenant
+  count plus the control plane's own connections.

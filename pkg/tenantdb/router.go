@@ -38,6 +38,10 @@ type Config struct {
 type entry struct {
 	pool     *pgxpool.Pool
 	lastUsed time.Time
+	// held: a background loop started by Watch keeps this pool for its whole
+	// life and never comes back through Pool, so lastUsed says nothing about
+	// it. The janitor leaves held pools open; only Forget and Close end them.
+	held bool
 }
 
 // Router owns the tenant pools. It opens them lazily from the catalog, closes
@@ -110,6 +114,24 @@ func (r *Router) Pool(ctx context.Context, customerID string) (*pgxpool.Pool, er
 	return pool, nil
 }
 
+// hold is Pool for a caller that keeps the pool for good (Watch's background
+// loops): the pool is marked held so the janitor never closes it under them.
+func (r *Router) hold(ctx context.Context, customerID string) (*pgxpool.Pool, error) {
+	pool, err := r.Pool(ctx, customerID)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e, ok := r.pools[customerID]
+	if !ok || e.pool != pool {
+		// Forgotten between the two locks: the pool is already closed.
+		return nil, fmt.Errorf("tenant %s pool was closed while opening", customerID)
+	}
+	e.held = true
+	return pool, nil
+}
+
 // open connects to database on the control plane's server with the control
 // plane's credentials, capped for a single tenant.
 func (r *Router) open(ctx context.Context, database string) (*pgxpool.Pool, error) {
@@ -161,7 +183,7 @@ func (r *Router) janitor() {
 		case now := <-t.C:
 			r.mu.Lock()
 			for id, e := range r.pools {
-				if now.Sub(e.lastUsed) > r.cfg.IdleTimeout {
+				if !e.held && now.Sub(e.lastUsed) > r.cfg.IdleTimeout {
 					e.pool.Close()
 					delete(r.pools, id)
 				}
@@ -207,9 +229,14 @@ func (r *Router) MigrateAll(ctx context.Context) error {
 		if t.Status != StatusReady {
 			continue
 		}
-		pool, err := r.Pool(ctx, t.CustomerID)
+		// A pool of its own, closed straight after: keeping every tenant's
+		// pool open would hold one connection per tenant database at once,
+		// and past the server's max_connections the rest fail to connect
+		// and are marked failed below.
+		pool, err := r.open(ctx, t.Database)
 		if err == nil {
 			err = migrate.Run(ctx, pool, r.cfg.Migrations, r.cfg.MigrationsDir)
+			pool.Close()
 		}
 		if err != nil {
 			r.cfg.Log.Error().Err(err).Str("tenant", t.CustomerID).Str("database", t.Database).Msg("tenant database migration failed — tenant disabled until fixed")
@@ -242,7 +269,7 @@ func (r *Router) Watch(ctx context.Context, interval time.Duration, start func(t
 			if t.Status != StatusReady || seen[t.CustomerID] {
 				continue
 			}
-			pool, err := r.Pool(ctx, t.CustomerID)
+			pool, err := r.hold(ctx, t.CustomerID)
 			if err != nil {
 				r.cfg.Log.Warn().Err(err).Str("tenant", t.CustomerID).Msg("tenant watch: open pool")
 				continue
