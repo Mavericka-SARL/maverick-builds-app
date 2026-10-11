@@ -1,7 +1,5 @@
 # Security policy
 
-> **Classification:** Current — How to report a vulnerability in maverickbuilds.app.
-
 ## Reporting a vulnerability
 
 Please report it privately, never in a public issue, pull request or

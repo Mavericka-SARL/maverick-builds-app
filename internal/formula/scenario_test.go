@@ -584,7 +584,7 @@ func TestScenario_DependencyGraph(t *testing.T) {
 // ── Scenario 8: Approval status derived label in form record ─────────────────
 
 func TestScenario_ApprovalStatusInFormRecord(t *testing.T) {
-	// Replicate the end-to-end approval_status calculation from FORMULA_CALCULATION_INSTRUCTIONS.md
+	// Replicate an end-to-end approval_status calculation
 	//
 	// Fields:
 	//   quantity, unit_price, discount_pct  (input)

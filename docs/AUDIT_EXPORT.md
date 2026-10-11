@@ -1,8 +1,6 @@
 # Audit log export and retention
 
-> **Classification:** Current — Getting the audit log out, feeding a SIEM, and how long it is kept.
-
-> **Last verified:** 2026-09-16
+> **Last verified:** 2026-10-11 (every path, variable, route and identifier it names checked against the code)
 
 An enterprise feature (`audit_export`). Every write to the audit log goes
 through `pkg/auditlog.Log`; this is how the result leaves the platform.

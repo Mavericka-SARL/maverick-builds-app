@@ -1,8 +1,6 @@
 # Editions and licensing
 
-> **Classification:** Current — How editions, license keys and the `ee/` tree work.
-
-> **Last verified:** 2026-10-07
+> **Last verified:** 2026-10-11
 
 maverickbuilds.app ships as one code base in three editions. The edition a
 deployment runs is decided by a signed license key the gateway reads at
@@ -17,13 +15,20 @@ not from possessing a key, and a key does not widen them.
 
 | Edition | License | What it adds |
 |---|---|---|
-| Community | [Sustainable Use License](../LICENSE): use and modify for your own internal business, non-commercial or personal purposes; no hosting or reselling for third parties | The whole product except the gated features below |
-| Commercial | Commercial License (a contract with the licensor) | The right to build solutions and services for clients; white-labelling |
-| Enterprise | Commercial terms plus the [Enterprise License](../ee/LICENSE) for the `ee/` source | Single sign-on brokering and SCIM, per-cell change history, audit export, usage analytics, tenant-level AI keys, deployment-wide settings, white-labelling, and support |
+| Community | [Sustainable Use License](../LICENSE): internal use only. Your company (or you, for personal use) runs and modifies it for its own operations, and may share the reports and exports it produces with anyone; nobody outside the company may sign in to it, and building on it for clients, hosting it for others or reselling it needs a Commercial License | The whole product except the gated features below |
+| Commercial | Commercial License (a contract with the licensor), which switches on its gated features under the [Enterprise Features License](../ee/LICENSE) | The right to build solutions and services for clients; white-labelling |
+| Enterprise | Commercial terms, which switch on its gated features under the [Enterprise Features License](../ee/LICENSE) | Single sign-on brokering and SCIM, per-cell change history, audit export, usage analytics, tenant-level AI keys, deployment-wide settings, white-labelling, and support |
 
-`LICENSE` and `ee/LICENSE` are version 1.0 (September 2026) and are the
-licences in force. A paid order states what its customer may do; this page
-only describes what the software does.
+`LICENSE` and `ee/LICENSE` are version 1.1 (October 2026) and are the
+licences in force. Version 1.1 replaced version 1.0 (September 2026) on
+11 October 2026 without withdrawing rights granted under it. The gated
+features' code under `ee/` is in every build and image; without a key it runs
+with those features switched off, which the Enterprise Features License permits.
+The licensor owns the code and the maverickbuilds.app and Mavericka marks
+(`LICENSE` section 7), and takes outside contributions only under the
+contributor terms in [CONTRIBUTING.md](../CONTRIBUTING.md#contributor-terms).
+A paid order states what its customer may do; this page only describes what
+the software does.
 
 ## Gated features
 
@@ -131,7 +136,7 @@ platform administrators.
 |---|---|---|
 | More than 30 days before expiry | `active` | Everything the key includes works |
 | Within 30 days of expiry | `active`, `renewal_due` | The same, and the account menu and Platform › License say when the key expires |
-| Up to 30 days after expiry | `transition` | The paid features keep working as configured: sign-in through single sign-on, SCIM provisioning, branding, inherited deployment settings and tenant AI keys. Their data can be read and exported, and their configuration can be switched off (DELETE, e.g. revoking a SCIM token), but nothing paid can be configured or changed. Audit retention stops deleting events. Every screen of a paid feature says so |
+| Up to 30 days after expiry | `transition` | The enterprise features keep working as configured: sign-in through single sign-on, SCIM provisioning, branding, inherited deployment settings and tenant AI keys. Their data can be read and exported, and their configuration can be switched off (DELETE, e.g. revoking a SCIM token), but nothing paid can be configured or changed. Audit retention stops deleting events. Every screen of an enterprise feature says so |
 | After that | `expired` | The deployment runs the Community edition until a new key is installed |
 
 No state deletes data. Installing a renewed key (and restarting the gateway)
@@ -152,18 +157,17 @@ continue a commercial service.
   on every deployment checks inline and says "no" instead (`/api/sso/discover`
   answers `{"sso": false}`).
 - **Two checks:** `Manager.Has(f)` is the strict one (an active key) for
-  anything that configures, changes or irreversibly acts on a paid feature;
+  anything that configures, changes or irreversibly acts on an enterprise feature;
   `Manager.Usable(f)` also holds during the transition, for behaviour that
   keeps working as configured. Use `Has` unless the transition must keep the
   behaviour working.
 - **Background work:** the jobs the gateway runs check the licence on every
   pass: audit retention with `Has`, white-label mail names and deployment
-  settings inheritance with `Usable`. Only the gateway loads a licence; the
-  gRPC services serve no gated feature.
+  settings inheritance with `Usable`. Only the gateway loads a licence.
 - **Enforcement is the server's:** `TestPaidRoutesFollowTheLicence`
   (`internal/gateway/license_routes_test.go`) drives every route under the
-  paid features' prefixes through the real router as community, transition
-  and enterprise. A paid feature with a new route prefix adds it there.
+  enterprise features' prefixes through the real router as community, transition
+  and enterprise. An enterprise feature with a new route prefix adds it there.
 - **Frontend:** `useFeature("x")` or `<FeatureGate feature="x">…</FeatureGate>`
   from `web/src/license/`, which renders a short lock note naming the needed
   edition when the feature is off, and a "read and export only until …" note
@@ -223,7 +227,7 @@ Every image carries the licences that apply to what is in it, at `/licenses/`:
 
 | Image | Contents of `/licenses/` |
 |---|---|
-| Go services (`deploy/docker/Dockerfile`) | `LICENSE`, `ee-LICENSE`, and `THIRD_PARTY_NOTICES.txt`: Go's licence and the licence and NOTICE texts of every module linked into that service, then grpc-health-probe's |
+| Go services (`deploy/docker/Dockerfile`) | `LICENSE`, `ee-LICENSE`, and `THIRD_PARTY_NOTICES.txt`: Go's licence and the licence and NOTICE texts of every module linked into that service |
 | Console (`web/Dockerfile`) | Served at `/licenses/`: `LICENSE.txt`, `ee-LICENSE.txt`, and `THIRD_PARTY_NOTICES.txt` for every production npm package, plus Tailwind, whose stylesheet is bundled |
 | `minio` | `minio/`: MinIO's AGPLv3 `LICENSE`, `CREDITS`, `NOTICE`, `SOURCE.txt`, the build recipe and the complete corresponding source (tagged source plus vendored modules) |
 | `pg-backup` | `mc/`: the same for the MinIO client |

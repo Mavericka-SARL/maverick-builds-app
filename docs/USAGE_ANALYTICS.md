@@ -1,8 +1,6 @@
 # Usage analytics per tenant
 
-> **Classification:** Current — What a tenant uses, counted from what the platform already keeps.
-
-> **Last verified:** 2026-09-16
+> **Last verified:** 2026-10-11 (every path, variable, route and identifier it names checked against the code)
 
 An enterprise feature (`usage_analytics`). **Admin › Usage** shows every
 tenant to a platform admin and their own tenant to a tenant admin, for a

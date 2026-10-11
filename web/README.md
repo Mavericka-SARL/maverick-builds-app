@@ -1,8 +1,6 @@
 # Mavericks Web Application
 
-> **Classification:** Current — The console as built.
-
-> **Last verified:** 2026-09-25
+> **Last verified:** 2026-10-11 (every path, variable, route and identifier it names checked against the code)
 
 The `web` package is the role-based maverickbuilds.app frontend. It is not the
 original Vite starter: it implements business, business-admin, developer,

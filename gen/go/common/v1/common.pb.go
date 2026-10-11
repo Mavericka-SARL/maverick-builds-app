@@ -123,110 +123,6 @@ func (x *UUID) GetValue() string {
 	return ""
 }
 
-type PageRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	PageSize      int32                  `protobuf:"varint,1,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
-	PageToken     string                 `protobuf:"bytes,2,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PageRequest) Reset() {
-	*x = PageRequest{}
-	mi := &file_common_v1_common_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PageRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PageRequest) ProtoMessage() {}
-
-func (x *PageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_common_v1_common_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PageRequest.ProtoReflect.Descriptor instead.
-func (*PageRequest) Descriptor() ([]byte, []int) {
-	return file_common_v1_common_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *PageRequest) GetPageSize() int32 {
-	if x != nil {
-		return x.PageSize
-	}
-	return 0
-}
-
-func (x *PageRequest) GetPageToken() string {
-	if x != nil {
-		return x.PageToken
-	}
-	return ""
-}
-
-type PageResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	NextPageToken string                 `protobuf:"bytes,1,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
-	TotalCount    int32                  `protobuf:"varint,2,opt,name=total_count,json=totalCount,proto3" json:"total_count,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PageResponse) Reset() {
-	*x = PageResponse{}
-	mi := &file_common_v1_common_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PageResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PageResponse) ProtoMessage() {}
-
-func (x *PageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_common_v1_common_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PageResponse.ProtoReflect.Descriptor instead.
-func (*PageResponse) Descriptor() ([]byte, []int) {
-	return file_common_v1_common_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *PageResponse) GetNextPageToken() string {
-	if x != nil {
-		return x.NextPageToken
-	}
-	return ""
-}
-
-func (x *PageResponse) GetTotalCount() int32 {
-	if x != nil {
-		return x.TotalCount
-	}
-	return 0
-}
-
 type Actor struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
@@ -238,7 +134,7 @@ type Actor struct {
 
 func (x *Actor) Reset() {
 	*x = Actor{}
-	mi := &file_common_v1_common_proto_msgTypes[3]
+	mi := &file_common_v1_common_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -250,7 +146,7 @@ func (x *Actor) String() string {
 func (*Actor) ProtoMessage() {}
 
 func (x *Actor) ProtoReflect() protoreflect.Message {
-	mi := &file_common_v1_common_proto_msgTypes[3]
+	mi := &file_common_v1_common_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -263,7 +159,7 @@ func (x *Actor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Actor.ProtoReflect.Descriptor instead.
 func (*Actor) Descriptor() ([]byte, []int) {
-	return file_common_v1_common_proto_rawDescGZIP(), []int{3}
+	return file_common_v1_common_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Actor) GetUserId() string {
@@ -298,7 +194,7 @@ type Error struct {
 
 func (x *Error) Reset() {
 	*x = Error{}
-	mi := &file_common_v1_common_proto_msgTypes[4]
+	mi := &file_common_v1_common_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -310,7 +206,7 @@ func (x *Error) String() string {
 func (*Error) ProtoMessage() {}
 
 func (x *Error) ProtoReflect() protoreflect.Message {
-	mi := &file_common_v1_common_proto_msgTypes[4]
+	mi := &file_common_v1_common_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -323,7 +219,7 @@ func (x *Error) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Error.ProtoReflect.Descriptor instead.
 func (*Error) Descriptor() ([]byte, []int) {
-	return file_common_v1_common_proto_rawDescGZIP(), []int{4}
+	return file_common_v1_common_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Error) GetCode() string {
@@ -353,15 +249,7 @@ const file_common_v1_common_proto_rawDesc = "" +
 	"\n" +
 	"\x16common/v1/common.proto\x12\tcommon.v1\"\x1c\n" +
 	"\x04UUID\x12\x14\n" +
-	"\x05value\x18\x01 \x01(\tR\x05value\"I\n" +
-	"\vPageRequest\x12\x1b\n" +
-	"\tpage_size\x18\x01 \x01(\x05R\bpageSize\x12\x1d\n" +
-	"\n" +
-	"page_token\x18\x02 \x01(\tR\tpageToken\"W\n" +
-	"\fPageResponse\x12&\n" +
-	"\x0fnext_page_token\x18\x01 \x01(\tR\rnextPageToken\x12\x1f\n" +
-	"\vtotal_count\x18\x02 \x01(\x05R\n" +
-	"totalCount\"h\n" +
+	"\x05value\x18\x01 \x01(\tR\x05value\"h\n" +
 	"\x05Actor\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12#\n" +
 	"\x04role\x18\x02 \x01(\x0e2\x0f.common.v1.RoleR\x04role\x12!\n" +
@@ -394,19 +282,17 @@ func file_common_v1_common_proto_rawDescGZIP() []byte {
 }
 
 var file_common_v1_common_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_common_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_common_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_common_v1_common_proto_goTypes = []any{
-	(Role)(0),            // 0: common.v1.Role
-	(*UUID)(nil),         // 1: common.v1.UUID
-	(*PageRequest)(nil),  // 2: common.v1.PageRequest
-	(*PageResponse)(nil), // 3: common.v1.PageResponse
-	(*Actor)(nil),        // 4: common.v1.Actor
-	(*Error)(nil),        // 5: common.v1.Error
-	nil,                  // 6: common.v1.Error.DetailsEntry
+	(Role)(0),     // 0: common.v1.Role
+	(*UUID)(nil),  // 1: common.v1.UUID
+	(*Actor)(nil), // 2: common.v1.Actor
+	(*Error)(nil), // 3: common.v1.Error
+	nil,           // 4: common.v1.Error.DetailsEntry
 }
 var file_common_v1_common_proto_depIdxs = []int32{
 	0, // 0: common.v1.Actor.role:type_name -> common.v1.Role
-	6, // 1: common.v1.Error.details:type_name -> common.v1.Error.DetailsEntry
+	4, // 1: common.v1.Error.details:type_name -> common.v1.Error.DetailsEntry
 	2, // [2:2] is the sub-list for method output_type
 	2, // [2:2] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
@@ -425,7 +311,7 @@ func file_common_v1_common_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_common_v1_common_proto_rawDesc), len(file_common_v1_common_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   6,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

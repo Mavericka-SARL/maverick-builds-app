@@ -44,7 +44,7 @@ func (h *handler) requireFeature(f license.Feature, fn http.HandlerFunc) http.Ha
 	}
 }
 
-// transitionAllowed is what a paid feature still answers to while its key
+// transitionAllowed is what an enterprise feature still answers to while its key
 // is in the transition period: reads and exports (GET, HEAD), and DELETE,
 // which switches paid configuration off — an administrator moving off a
 // feature, or revoking a SCIM token, must not have to renew first.

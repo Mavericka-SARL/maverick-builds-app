@@ -14,8 +14,6 @@ namespace: mavericks-staging
 
 resources:
   - ../../base
-  # Add your own, as in the production overlay:
-  #   - mtls.yaml             # cert-manager CA + service cert for gRPC mTLS
   # Secrets are NOT sealed here: staging holds nothing worth the ceremony, so
   # its Secrets are created on the cluster by hand (README.md).
 

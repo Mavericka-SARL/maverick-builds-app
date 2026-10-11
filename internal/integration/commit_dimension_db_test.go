@@ -57,7 +57,7 @@ func TestCommitDimensionRecalculatesMetricsReadingIt(t *testing.T) {
 		}
 		return v
 	}
-	sched := calculation.NewScheduler(log, calculation.NewStore(pool), nil)
+	sched := calculation.NewScheduler(log, calculation.NewStore(pool))
 	if err := sched.RecalcSpecific(ctx, modelID, revID, []string{metricID}); err != nil {
 		t.Fatalf("initial recalc: %v", err)
 	}

@@ -1,10 +1,10 @@
 package gateway
 
 // The ChatGPT/Claude plugin submission's test cases, run end to end on what
-// a reviewer's account holds: a fresh self-service sign-up (the Basic
-// workspace), whose starter models are the same for everyone. The expected
-// results written in docs/CHAT_PLUGIN_SUBMISSION.md are the numbers asserted
-// here — change one, change both.
+// a reviewer's account holds: a fresh self-service sign-up (the Community
+// plan), whose starter models are the same for everyone. The expected
+// results submitted with the listing are the numbers asserted here — change
+// one, change both.
 
 import (
 	"context"

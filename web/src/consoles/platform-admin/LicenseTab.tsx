@@ -51,13 +51,13 @@ export function LicenseTab() {
           <InlineAlert tone="danger">The configured license key could not be verified: {lic.error}. The deployment runs the Community edition until a valid key is installed.</InlineAlert>
         )}
         {lic.state === "active" && lic.renewal_due && (
-          <InlineAlert tone="warning">The license key expires on {fmtDate(lic.expires_at)}. Install the renewed key before then; after expiry the paid features are read and export only for 30 days, then the deployment runs the Community edition.</InlineAlert>
+          <InlineAlert tone="warning">The license key expires on {fmtDate(lic.expires_at)}. Install the renewed key before then; after expiry the enterprise features are read and export only for 30 days, then the deployment runs the Community edition.</InlineAlert>
         )}
         {lic.state === "transition" && (
-          <InlineAlert tone="warning">The license key expired on {fmtDate(lic.expires_at)}. Until {fmtDate(lic.transition_ends_at)} the paid features keep working as configured and can be read, exported and switched off, but not changed. After that the deployment runs the Community edition. No data is deleted either way.</InlineAlert>
+          <InlineAlert tone="warning">The license key expired on {fmtDate(lic.expires_at)}. Until {fmtDate(lic.transition_ends_at)} the enterprise features keep working as configured and can be read, exported and switched off, but not changed. After that the deployment runs the Community edition. No data is deleted either way.</InlineAlert>
         )}
         {lic.state === "expired" && (
-          <InlineAlert tone="warning">The license key expired on {fmtDate(lic.expires_at)} and its transition period has ended. The deployment runs the Community edition until a new key is installed; nothing the paid features stored was deleted.</InlineAlert>
+          <InlineAlert tone="warning">The license key expired on {fmtDate(lic.expires_at)} and its transition period has ended. The deployment runs the Community edition until a new key is installed; nothing the enterprise features stored was deleted.</InlineAlert>
         )}
         <table className="mvx-table" style={{ marginTop: 8 }}>
           <tbody>

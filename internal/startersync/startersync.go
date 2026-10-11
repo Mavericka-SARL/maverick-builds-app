@@ -108,7 +108,7 @@ func Run(ctx context.Context, pool *pgxpool.Pool, log zerolog.Logger) {
 // Recalculate computes every calculated metric of each changed revision, as
 // sign-up does for the starters it imports.
 func Recalculate(ctx context.Context, pool *pgxpool.Pool, log zerolog.Logger, changes []Change) {
-	sched := calculation.NewScheduler(log, calculation.NewStore(pool), nil)
+	sched := calculation.NewScheduler(log, calculation.NewStore(pool))
 	for _, ch := range changes {
 		rows, err := pool.Query(ctx,
 			`SELECT id::text FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid AND NOT is_input`,

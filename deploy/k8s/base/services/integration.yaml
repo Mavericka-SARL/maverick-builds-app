@@ -6,9 +6,8 @@
 # is reachable even before internal/integration's in-process destination
 # rules refuse them (defense in depth).
 #
-# No Service object: nothing dials the worker; its :9090 health endpoint is
-# probed locally by grpc-health-probe (mTLS flags arrive via the prod
-# overlay's component=service patch, like every other service).
+# No Service object: nothing dials the worker; the kubelet probes its :9090
+# health endpoint (GET /healthz) directly.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -44,7 +43,7 @@ spec:
           image: registry.example.com/mavericks/integration:latest
           imagePullPolicy: IfNotPresent
           ports:
-            - name: grpc
+            - name: health
               containerPort: 9090
               protocol: TCP
           envFrom:
@@ -70,18 +69,16 @@ spec:
               cpu: "500m"
               memory: "512Mi"
           readinessProbe:
-            exec:
-              command:
-                - grpc-health-probe
-                - -addr=:9090
+            httpGet:
+              path: /healthz
+              port: 9090
             initialDelaySeconds: 5
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:
-            exec:
-              command:
-                - grpc-health-probe
-                - -addr=:9090
+            httpGet:
+              path: /healthz
+              port: 9090
             initialDelaySeconds: 15
             periodSeconds: 20
             failureThreshold: 3

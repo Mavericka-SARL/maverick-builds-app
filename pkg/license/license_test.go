@@ -197,7 +197,7 @@ func TestManagerStates(t *testing.T) {
 			t.Error("transition: Has must be false and Usable true")
 		}
 		if m.RequireUse(FeatureAuditExport) != nil {
-			t.Error("transition: reading a paid feature must be allowed")
+			t.Error("transition: reading an enterprise feature must be allowed")
 		}
 		err := m.Require(FeatureAuditExport)
 		if err == nil || !strings.Contains(err.Error(), "read and export only") || !strings.Contains(err.Error(), "Audit export") {

@@ -6,14 +6,6 @@ option go_package = "github.com/mavericks-engine/mavericks/gen/go/calculation/v1
 
 import "google/protobuf/timestamp.proto";
 
-service CalculationService {
-  rpc GetPartitionState(GetPartitionStateRequest) returns (GetPartitionStateResponse);
-  rpc TriggerRecalc(TriggerRecalcRequest) returns (TriggerRecalcResponse);
-  rpc TriggerFullRecalc(TriggerFullRecalcRequest) returns (TriggerFullRecalcResponse);
-  rpc GetDependencyGraph(GetDependencyGraphRequest) returns (GetDependencyGraphResponse);
-  rpc GetCalculationResult(GetCalculationResultRequest) returns (GetCalculationResultResponse);
-}
-
 enum PartitionStatus {
   PARTITION_STATUS_UNSPECIFIED = 0;
   PARTITION_STATUS_CLEAN = 1;
@@ -62,29 +54,3 @@ message CalculationResult {
   google.protobuf.Timestamp calc_at = 3;
 }
 
-message GetPartitionStateRequest { PartitionKey key = 1; }
-message GetPartitionStateResponse { PartitionState state = 1; }
-
-message TriggerRecalcRequest {
-  PartitionKey key = 1;
-  RecalcReason reason = 2;
-}
-message TriggerRecalcResponse {
-  string job_id = 1;
-  bool queued = 2;
-}
-
-message TriggerFullRecalcRequest {
-  string model_id = 1;
-  RecalcReason reason = 2;
-}
-message TriggerFullRecalcResponse {
-  string job_id = 1;
-  int32 partitions_queued = 2;
-}
-
-message GetDependencyGraphRequest { string model_id = 1; string revision_id = 2; }
-message GetDependencyGraphResponse { repeated DependencyEdge edges = 1; }
-
-message GetCalculationResultRequest { PartitionKey key = 1; }
-message GetCalculationResultResponse { CalculationResult result = 1; }

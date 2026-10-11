@@ -147,30 +147,6 @@ func (s *Store) MarkError(ctx context.Context, key, errMsg string) error {
 	return err
 }
 
-// ListDirtyPartitions returns partition keys in order of updated_at (oldest first).
-func (s *Store) ListDirtyPartitions(ctx context.Context, modelID string, limit int) ([]string, error) {
-	rows, err := s.db.Query(ctx, `
-		SELECT partition_key FROM runtime.metric_partition_state
-		WHERE model_id = $1 AND status = 'dirty'
-		ORDER BY updated_at ASC
-		LIMIT $2
-	`, modelID, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var keys []string
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			return nil, err
-		}
-		keys = append(keys, key)
-	}
-	return keys, rows.Err()
-}
-
 // ── Metric values for calculation ─────────────────────────────────────────────
 
 // MetricDef holds what the calculation engine needs about a metric.
@@ -280,29 +256,6 @@ func (s *Store) GetCalcValue(ctx context.Context, modelID, revisionID, metricID 
 }
 
 // ── Dependency graph (mirrors model.graph but reads from DB) ──────────────────
-
-func (s *Store) LoadDependencyGraph(ctx context.Context, modelID, revisionID string) (map[string][]string, error) {
-	rows, err := s.db.Query(ctx, `
-		SELECT d.metric_id::text, d.depends_on_metric_id::text
-		FROM model.calc_dependency d
-		JOIN model.metric_def m ON m.id = d.metric_id
-		WHERE m.model_id = $1::uuid AND m.revision_id = $2::uuid
-	`, modelID, revisionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	graph := make(map[string][]string)
-	for rows.Next() {
-		var from, to string
-		if err := rows.Scan(&from, &to); err != nil {
-			return nil, err
-		}
-		graph[from] = append(graph[from], to)
-	}
-	return graph, rows.Err()
-}
 
 // LoadDimIDToName returns a map of dimension_def.id → dimension_def.name for
 // the given model/revision, used to translate stored {dim_id: member_code}

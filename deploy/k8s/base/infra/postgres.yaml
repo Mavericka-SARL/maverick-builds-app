@@ -1,4 +1,4 @@
-# PostgreSQL 16 — primary database for the Mavericks platform.
+# PostgreSQL 16 — primary database for maverickbuilds.app.
 # Configured for streaming replication readiness (wal_level=replica, archive_mode=on).
 #
 # Continuous WAL archiving + point-in-time recovery via WAL-G, pushing
@@ -75,7 +75,7 @@ spec:
           # added here only so the WAL-G env vars below can reference
           # $(MINIO_URL)/$(MINIO_ROOT_USER) rather than duplicating those
           # literal values (this container also picks up other,
-          # irrelevant-to-it keys like POLICY_ADDR — harmless, same as
+          # irrelevant-to-it keys like KEYCLOAK_URL — harmless, same as
           # every other service in this repo that envFroms the full
           # ConfigMap and uses only what it needs).
           envFrom:
@@ -222,7 +222,7 @@ spec:
       # this pod, which runs as UID 70, cannot write to it: postgres would fail to initialise PGDATA the same way
       # Local-path/hostPath volumes hide this because the kubelet creates
       # those directories permissively — it only appears on real CSI
-      # storage, which is why it surfaced on the first Hetzner deploy.
+      # storage, which is why it surfaced only on the first cloud deploy.
       securityContext:
         fsGroup: 70
 

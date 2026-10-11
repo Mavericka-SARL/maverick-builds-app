@@ -1,8 +1,7 @@
 package importpkg
 
 // Generic, name-based row resolution shared by every import entry point
-// (currently the gateway HTTP handler; see its doc comment for why the gRPC
-// ImportService's own ValidateImport isn't routed through this yet). A
+// (the gateway's file, Google Sheets and connector imports). A
 // caller parses a file (CSV or native .xlsx — see xlsx.go) into a plain
 // header + row-of-cells shape and hands it to ResolveRows, which is the one
 // place that knows how to turn column headers into metric/dimension IDs, so

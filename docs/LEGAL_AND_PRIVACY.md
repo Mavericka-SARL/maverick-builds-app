@@ -1,8 +1,6 @@
 # Terms of service and privacy notice
 
-> **Classification:** Current — What the engine publishes at `/terms` and `/privacy`, what the operator must configure, and the rule the text follows.
-
-> **Last verified:** 2026-09-18
+> **Last verified:** 2026-10-11 (every path, variable, route and identifier it names checked against the code)
 
 A deployment that lets strangers sign up collects personal data from them, and
 owes them two documents before it does: what the agreement is, and what happens
@@ -58,7 +56,7 @@ checkable in this repository:
 
 | The text says | Where it comes from |
 |---|---|
-| The free plan's limits, and that the workspace goes read-only | `GET /api/signup/options` at render time — the seeded plan, not a number typed into the page |
+| The sign-up plan's name and limits, and that the workspace goes read-only | `GET /api/signup/options` at render time — the seeded plan, not a number typed into the page |
 | Backups are kept for fourteen days | `BACKUP_RETENTION_DAYS` in `deploy/docker/pg-backup/pg-backup.sh` |
 | No analytics, tracking, or third-party script | `web/index.html` loads none, and the CSP-relevant surface is the app's own bundle |
 | Sign-in stores a cookie and an in-memory token | `web/src/auth/AuthProvider.tsx` — `check-sso` with PKCE, the token in React state |
@@ -86,7 +84,7 @@ changes, the text changes with it and `LEGAL_UPDATED` moves.
 
 ## Related
 
-- [Plans, trials and self-service sign-up](PLANS_AND_SIGNUP.md) — the plan the
+- [Plans and self-service sign-up](PLANS_AND_SIGNUP.md) — the plan the
   terms quote, and the read-only state they describe.
 - [The look of the pre-account pages](BRAND.md) — the frame both documents
   render in.

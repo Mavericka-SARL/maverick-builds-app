@@ -1,5 +1,5 @@
 /**
- * Phase 6 UX regression gates (UX_UPGRADE_INSTRUCTIONS.md).
+ * UX regression gates for the shared design system (web/src/ui/DESIGN_SYSTEM.md).
  *
  * Runs every role console against mocked APIs at the three target viewports
  * and asserts structural invariants of the design system:

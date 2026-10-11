@@ -73,7 +73,7 @@ func TestRecalcAffectedIsolatesRevisions(t *testing.T) {
 	insertDep(t, store, ctx, doubleB, baseB)
 	insertFact(t, store, ctx, model, revB, baseB, "{}", 1000)
 
-	sched := calculation.NewScheduler(logger.New("calc-test"), store, nil)
+	sched := calculation.NewScheduler(logger.New("calc-test"), store)
 	if err := sched.RecalcAffected(ctx, model, revA, []string{baseA}); err != nil {
 		t.Fatalf("RecalcAffected(revA): %v", err)
 	}
@@ -117,7 +117,7 @@ func TestPartitionMarkedErrorOnPerComboFailure(t *testing.T) {
 	insertFact(t, store, ctx, model, rev, baseID, `{"`+dimID+`": "OK"}`, 50)
 	insertFact(t, store, ctx, model, rev, baseID, `{"`+dimID+`": "BAD"}`, 99)
 
-	sched := calculation.NewScheduler(logger.New("calc-test"), store, nil)
+	sched := calculation.NewScheduler(logger.New("calc-test"), store)
 	if err := sched.RecalcAffected(ctx, model, rev, []string{baseID}); err != nil {
 		t.Fatalf("RecalcAffected: %v", err)
 	}

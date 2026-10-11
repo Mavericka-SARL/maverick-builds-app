@@ -1,7 +1,5 @@
 # Staging and load testing
 
-> **Classification:** Current — The staging environment, the load harness, and the measured baseline before the first hundreds of concurrent users.
-
 > **Last verified:** 2026-09-17
 
 ## Why
@@ -18,8 +16,8 @@ use does — rather than a guess from reading the scheduler.
 ## Staging
 
 `deploy/k8s/overlays/staging.example/` is the overlay: production's shape in
-namespace `mavericks-staging` on the same cluster — same images, mTLS between
-services, Keycloak on Postgres, network policies — with one replica of
+namespace `mavericks-staging` on the same cluster — same images, Keycloak on
+Postgres, network policies — with one replica of
 everything, its own hostnames, a smaller database volume, WAL-G and dumps
 under their own prefixes (never production's point-in-time chain), and
 `SIGNUP_ENABLED: "true"` so the sign-up funnel can be tried end to end. Its
@@ -29,23 +27,16 @@ first administrator (`scripts/bootstrap-platform-admin.sh`, new — the
 deployment guide had no step for how the first person comes to exist) and
 SMTP.
 
-The hosted service's own staging overlay lives in the private deployment
-repository next to `prod/`, generated from it; the namespace, secrets and
-accounts were brought up on 2026-09-17. Two notes from doing that:
+Two notes for bringing a staging namespace up:
 
 - The namespace's network policies admit traffic to Keycloak only from the
   ingress and the gateway, so the setup scripts run **through the public
   ingress** — before DNS exists, with the hostnames pinned to the load
   balancer and the placeholder certificate accepted (`CURL_OPTS="--resolve
   auth-staging.example.com:443:<lb ip> -k"`, which both scripts honour).
-- Staging runs the images the private CI last published. A change reaches
-  staging only after `workflow_dispatch` with `publish_images` — the same
-  build that moves `:latest`, which production also names. Pin production to
-  the `:<git sha>` tag CI publishes alongside, as `prod.example` says, so a
-  staging publish can never surprise a production pod restart.
-  Note that the `deploy` input of that dispatch defaults to `true`, and the
-  deploy job rolls **production**: to publish for staging only, untick
-  `deploy`.
+- If staging and production both name `:latest`, a publish for staging also
+  moves production's next restart. Pin production to the `:<git sha>` tag CI
+  publishes alongside, as `prod.example` says.
 
 ## The harness
 

@@ -146,7 +146,7 @@ func (h *handler) prepareCell(ctx context.Context, a *actor, revisionID string, 
 	// from this user also blocks a write to one of its employees, even
 	// without a direct rule on that employee — see writeguard.ExpandHidden's
 	// read-side equivalent in grid()), and workflow-lock. The single
-	// implementation shared with every import path (HTTP and gRPC) — see
+	// implementation shared with every import path — see
 	// writeguard.CheckWrite's package doc.
 	if reason, err := writeguard.CheckWriteMetrics(ctx, h.db.For(ctx), req.ModelID, revisionID, a.UserID, memberIDs, []string{req.MetricID}); err != nil {
 		return preparedCell{}, refuseCell(http.StatusInternalServerError, "write guard: %v", err)
@@ -389,7 +389,7 @@ func (h *handler) cellsBatch(w http.ResponseWriter, r *http.Request) {
 
 	recalc := func(ctx context.Context) {
 		calcLog := h.log.With().Str("op", "cells_batch").Logger()
-		scheduler := calculation.NewScheduler(calcLog, calculation.NewStore(h.db.For(ctx)), nil)
+		scheduler := calculation.NewScheduler(calcLog, calculation.NewStore(h.db.For(ctx)))
 		if err := scheduler.RecalcAffected(ctx, req.ModelID, revisionID, metricIDs); err != nil {
 			h.log.Warn().Err(err).Msg("recalc failed after a batch write")
 		}

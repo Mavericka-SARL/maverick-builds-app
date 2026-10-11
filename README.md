@@ -1,7 +1,5 @@
 # maverickbuilds.app
 
-> **Classification:** Current — Product overview of what the platform does today.
-
 maverickbuilds.app turns spreadsheets into decision-making apps for planning
 and analytics: budgets, forecasts, targets and headcount plans the whole
 business works in.
@@ -22,14 +20,12 @@ business works in.
   published in one step; models move between workspaces by export and import.
 
 No edition is licensed per user. The Community edition is free to self-host
-for internal company, non-commercial and personal use, and maverickbuilds.app
-runs a free hosted Playground for smaller apps. It is built with Go, React and
-PostgreSQL.
+for your company's internal use only, and maverickbuilds.app runs it for you
+as the Playground: the hosted Community edition, free up to
+100 MB. It is built with Go, React and PostgreSQL.
 
-This repository is the source of truth for the running implementation. The
-current architecture is described in [ARCHITECTURE.md](ARCHITECTURE.md), and
-the status of every project document is indexed in
-[docs/README.md](docs/README.md).
+The architecture is described in [ARCHITECTURE.md](ARCHITECTURE.md), and
+every document is indexed in [docs/README.md](docs/README.md).
 
 ## Current runtime
 
@@ -46,11 +42,9 @@ Go HTTP gateway :8080
 PostgreSQL :5432
 ```
 
-The gateway owns the currently exercised browser API and calls domain packages
-in-process. The repository also contains independently buildable gRPC services
-and Kubernetes manifests for a distributed topology. See
-[Runtime topology](ARCHITECTURE.md#runtime-topology) before assuming that local
-development starts all service binaries.
+The gateway serves the whole browser API and runs the domain packages
+in-process. The integration worker, which runs connector syncs, is the only
+other program; see [Runtime topology](ARCHITECTURE.md#runtime-topology).
 
 ## Deploying it for real
 
@@ -69,7 +63,7 @@ trust.
 - Node.js 24, matching CI
 - Docker with Compose v2
 - npm
-- optional code-generation tools: Buf, sqlc, and ogen
+- optional code-generation tools: Buf and ogen
 
 ## Quick start
 
@@ -106,9 +100,8 @@ Open <http://localhost:5173>. The frontend proxies `/api` to
 `http://localhost:8080`. Use the persona switcher in the shell footer to change
 roles in development mode.
 
-`make dev-up` starts infrastructure only: PostgreSQL, PgBouncer, NATS,
-Redis, Keycloak, and MinIO. It does not start the Go gateway, web application,
-or the separate gRPC services.
+`make dev-up` starts infrastructure only: PostgreSQL, PgBouncer, Keycloak,
+and MinIO. It does not start the Go gateway or the web application.
 
 ## Verification
 
@@ -119,31 +112,30 @@ go test -race -coverprofile=coverage.out ./...
 go build ./...
 golangci-lint run ./...
 buf lint
-sqlc generate
 ogen --target internal/gateway/oas --package oas --clean api/openapi.yaml
 
 cd web
 npm ci
 npx eslint src/
-npx tsc --noEmit
+npx tsc -b --noEmit
 npm run e2e
 npm run build
 ```
 
-The sqlc and ogen steps are drift checks: generated files must remain unchanged
+The ogen step is a drift check: generated files must remain unchanged
 after generation.
 
 ## Repository map
 
 | Path | Purpose |
 |---|---|
-| `cmd/` | HTTP gateway, gRPC services, diagnostics, and demo seed binaries |
+| `cmd/` | HTTP gateway, integration worker, command-line tools, verification harnesses, and demo seeds |
 | `internal/gateway/` | Browser-facing HTTP API and current composition root |
 | `internal/` | Domain packages for model, formula, calculation, query, workflow, import, identity, policy, AI, deployment, and supporting services |
-| `pkg/` | Shared configuration, database, auth, gRPC, logging, migration, and telemetry helpers |
+| `pkg/` | Shared configuration, database, tenant routing, licence, logging, migration, object storage, and telemetry helpers |
 | `migrations/` | Ordered PostgreSQL schema history embedded into Go binaries |
-| `proto/` and `gen/go/` | Protobuf contracts and generated gRPC code |
-| `api/openapi.yaml` | Partial OpenAPI contract for the stabilized core HTTP surface |
+| `proto/` and `gen/go/` | Protobuf definitions of stored workflow, import, notification and calculation types, and their generated Go code |
+| `api/openapi.yaml` | OpenAPI contract for every gateway route, held to the router by a CI test; generates `internal/gateway/oas` |
 | `web/` | React 19, TypeScript, Vite, React Query, Recharts, and Playwright application |
 | `deploy/compose/` | The self-hosted single-server stack (docs/SELF_HOSTING.md) |
 | `deploy/docker/` | Dockerfiles, local development infrastructure and optional observability stack |
@@ -154,13 +146,17 @@ after generation.
 ## Editions and licensing
 
 maverickbuilds.app is one code base in three editions. The Community edition is
-licensed under the [Sustainable Use License](LICENSE) (use and modify it for
-your own internal business; do not host or resell it for others). The
-Commercial edition adds the right to build for clients, and the Enterprise
-edition adds gated features such as single sign-on, audit export and per-cell
-history, whose source lives under [`ee/`](ee/README.md) under the
-[Enterprise License](ee/LICENSE). A signed, offline license key unlocks the
-paid editions; see [docs/LICENSING.md](docs/LICENSING.md).
+licensed under the [Sustainable Use License](LICENSE) for internal use only:
+your company runs and modifies it for its own operations and may share the
+reports and exports it produces with anyone, but nobody outside the company
+may sign in to it, and building on it for clients, hosting it for others or
+reselling it needs a Commercial licence. The Commercial edition adds those
+rights and white-labelling; the Enterprise edition adds features
+such as single sign-on, audit export and per-cell history. The code of those
+enterprise features lives under [`ee/`](ee/README.md) under the
+[Enterprise Features License](ee/LICENSE): every build and image contains
+it, switched off until a signed, offline license key switches it on; see
+[docs/LICENSING.md](docs/LICENSING.md).
 
 ## Community
 

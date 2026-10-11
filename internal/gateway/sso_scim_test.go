@@ -20,7 +20,6 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/identity"
 	"github.com/mavericks-engine/mavericks/internal/testdb"
 	migrationfs "github.com/mavericks-engine/mavericks/migrations"
-	"github.com/mavericks-engine/mavericks/pkg/auth"
 	"github.com/mavericks-engine/mavericks/pkg/keycloak"
 	"github.com/mavericks-engine/mavericks/pkg/logger"
 	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
@@ -474,15 +473,12 @@ func TestSsoRegisterDiscoverAndFirstLogin(t *testing.T) {
 		t.Errorf("jit off: %v", err)
 	}
 
-	// A deactivated account is refused by every resolver, token or not.
+	// A deactivated account is refused by the resolver, token or not.
 	if _, err := f.pool.Exec(ctx, `UPDATE identity.user SET disabled_at = now() WHERE keycloak_sub = 'kc-new'`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.h.actorByKeycloakSub(ctx, "kc-new"); err == nil {
 		t.Error("gateway resolver accepted a disabled user")
-	}
-	if _, err := auth.ResolveActorByKeycloakSub(ctx, f.pool, "kc-new"); err == nil {
-		t.Error("gRPC resolver accepted a disabled user")
 	}
 
 	// Removing the provider removes it from the registry and from discovery.

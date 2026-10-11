@@ -1,7 +1,5 @@
 # HTTP API Guide
 
-> **Classification:** Current — HTTP surface as served by internal/gateway.
-
 > **Last verified:** 2026-10-02
 > **Router authority:** `internal/gateway.NewHandler` (`registerRoutes`)
 
@@ -130,8 +128,7 @@ rejects:
 - descendants of hidden ancestors; and
 - scopes locked by running or approved workflows.
 
-The query gRPC writeback applies the same guard. A rule lookup that fails
-answers an error: the guard fails closed.
+A rule lookup that fails answers an error: the guard fails closed.
 
 `POST /api/cells` names the cell with `dim_codes`, one member code per
 dimension (`{dimension_id: code}`). The older single `dim_code` field is still
@@ -146,9 +143,7 @@ dimensions are. Members order by time index, then sort order, then code.
 
 Known gaps: import does not refuse a calculated (non-input) metric, and
 `POST /api/cells` skips `dim_codes` member codes it cannot resolve rather than
-rejecting them. The HTTP and gRPC import services are different implementations: HTTP
-supports the current CSV/XLSX/name-resolution flow, while gRPC retains a legacy
-CSV/UUID layout and different staging/commit semantics.
+rejecting them.
 
 HTTP errors are returned as JSON (`{"error": "..."}`) by the gateway helpers.
 
@@ -160,12 +155,11 @@ disagree. It generates `internal/gateway/oas`, but `cmd/gateway` serves the
 hand-written router, not the generated ogen server. When adding a route,
 register it and add it to the spec in the same change.
 
-## gRPC contracts
+## Protobuf types
 
-Internal service contracts live under `proto/*/v1`. They are independently
-buildable and deployed by the distributed Kubernetes topology, but they are not
-a one-to-one mirror of the browser HTTP API. Consult the service's proto and
-`cmd/<service>/main.go` together.
+`proto/*/v1` defines a few data types the domain packages store and pass
+around (workflow definitions and runs, import jobs, notifications, calculation
+partitions). There are no gRPC services: the HTTP API above is the only API.
 
 ## REST API connector
 

@@ -34,20 +34,18 @@ concurrency:
 # commit: clear RUNNER_LABEL in Settings > Variables and the `|| 'ubuntu-latest'`
 # takes over on the next run.
 #
-# It currently points at "mavericks-ci" — three self-hosted runners on the
-# Hetzner worker-2 node, which bills nothing. They share a systemd ci.slice
-# capped at 5 cores / 9G with low CPU and IO weights, because that node also
-# runs 15 production pods and they must win any contention. Docker there is
-# ROOTLESS on purpose: the rootful daemon sets the iptables FORWARD policy to
-# DROP on start, which would sit in front of the pod network on a live node.
+# Self-hosted runners are expected to run several jobs side by side under a
+# CPU and memory cap, with rootless Docker; the comments below about ports,
+# Ryuk and buildx builders exist because of that setup. GitHub's hosted
+# runners need none of it.
 
 jobs:
 
   # ── What changed ─────────────────────────────────────────────────────────────
   # Billing sums every parallel job, so a run costs the TOTAL of its jobs, not
   # its wall-clock time: a full run is ~67 minutes across 27 jobs. A
-  # frontend-only change was still running the Go test suite, the sqlc/ogen
-  # drift checks and proto lint — around 55 of those minutes doing nothing.
+  # frontend-only change was still running the Go test suite, the ogen
+  # drift check and proto lint — around 55 of those minutes doing nothing.
   #
   # Computed with git rather than a third-party action to keep the dependency
   # surface of the workflow small. When the diff base is unknown (first push,
@@ -83,9 +81,9 @@ jobs:
           files=$(git diff --name-only "$base" "${{ github.sha }}")
           echo "changed files:" >&2; echo "$files" >&2
 
-          # The Go gates cover more than *.go: sqlc reads migrations, ogen reads
-          # the OpenAPI spec, and both fail the drift check if their source
-          # moves without the generated output following. Go tests also read the
+          # The Go gates cover more than *.go: ogen reads the OpenAPI spec and
+          # fails the drift check if it moves without the generated output
+          # following, and tests read the migrations. Go tests also read the
           # docs (docs_test.go: TestManualsMatchTheirParts, TestDocsLinksResolve;
           # TestFormulasManualIndexMatchesEngine), so a docs-only edit runs them.
           if echo "$files" | grep -qE '^(cmd/|internal/|pkg/|migrations/|api/|proto/|deploy/docker/|docs/)|(^|/)(go\.mod|go\.sum)$|\.(go|md)$'; then
@@ -136,19 +134,15 @@ jobs:
     timeout-minutes: 30
     needs: changes
     if: needs.changes.outputs.go == 'true'
-    # Ryuk is on. It was turned off (2026-05) while CI ran on GitHub's
-    # runners, and on the self-hosted ones that meant every test process left
+    # Ryuk is on. With it off, on self-hosted runners every test process left
     # its Postgres container running: about 20 per run, the gateway's alone
-    # near 6G, kept until an hour-old reaper removed them. Two runs within an
-    # hour filled worker-2's disk and the kubelet evicted production pods
-    # (2026-10-02).
+    # near 6G, and two runs within an hour filled a runner's disk.
     #
     # Ryuk is the backstop, not the cleanup: each package's TestMain
     # (testdb.Run) removes its shared container when its tests finish. On
     # this rootless Docker Ryuk lost its connections mid-run and, after its
     # default 10s, SIGKILLed every database container of the run while the
-    # tests were still using them (three deploy attempts in a row,
-    # 2026-10-06: run 37481237132, docker events on worker-2). Thirty minutes
+    # tests were still using them (three runs in a row). Thirty minutes
     # outlasts the job, so Ryuk now only acts on what a crashed or timed-out
     # test binary left behind.
     env:
@@ -183,9 +177,9 @@ jobs:
       # and uploading an artifact nobody read. Run it locally when you want it
       # (the command is in docs/DEVELOPMENT.md).
       - name: Run tests
-        # -p 4 rather than the default GOMAXPROCS because the self-hosted
-        # runners share a systemd slice capped at 5 cores, and -race on top of
-        # 8 concurrent packages just thrashes.
+        # -p 4 rather than the default GOMAXPROCS because self-hosted runners
+        # share a capped CPU budget, and -race on top of 8 concurrent packages
+        # just thrashes.
         #
         # It is NOT what fixes the "bind: address already in use" failures this
         # suite hit on rootless Docker — capping parallelism only made them
@@ -193,9 +187,9 @@ jobs:
         # network namespace, where host bindings are invisible, then having
         # RootlessKit bind it on the host; both namespaces defaulted to
         # 32768-60999, so a port Docker saw as free could already be held by an
-        # outbound socket from a test process. The node now sets
+        # outbound socket from a test process. A runner host therefore sets
         # net.ipv4.ip_local_port_range=15000-29999 for host clients
-        # (/etc/sysctl.d/99-ci-rootless-ports.conf), leaving Docker the kernel
+        # (a sysctl.d file), leaving Docker the kernel
         # default its namespace still gets. Disjoint ranges, no race. Verified
         # to survive a dockerd restart, since a fresh netns takes the kernel
         # default rather than inheriting the host value.
@@ -258,33 +252,7 @@ jobs:
           cache: ${{ !vars.RUNNER_LABEL }}
       - run: go build ./...
 
-  # ── sqlc ──────────────────────────────────────────────────────────────────────
-
-  sqlc-generate:
-    name: sqlc generate (verify no drift)
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    timeout-minutes: 15
-    needs: changes
-    if: needs.changes.outputs.go == 'true'
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          # Only on GitHub's runners. A self-hosted runner keeps its module
-          # cache on disk between jobs, so there is nothing to restore — and
-          # the attempt actively fails, because tar cannot overwrite the
-          # read-only files already in $GOMODCACHE ("tar failed with exit
-          # code 2"). Skipping it removes the noise and a pointless download.
-          cache: ${{ !vars.RUNNER_LABEL }}
-      - name: Install sqlc
-        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
-      - name: Generate
-        run: sqlc generate
-      - name: Check for drift
-        run: git diff --exit-code -- internal/*/db/
-
-  # ── Proto ─────────────────────────────────────────────────────────────────────
+  # ── OpenAPI ─────────────────────────────────────────────────────────────────────
 
   ogen-generate:
     name: ogen generate (verify no drift)
@@ -309,7 +277,7 @@ jobs:
         # drifts the moment upstream ships a new release, since generated
         # boilerplate (import list, response-draining pattern, comment
         # wrapping) changes between ogen versions independent of
-        # api/openapi.yaml. Matches the sqlc-generate job's pinning below.
+        # api/openapi.yaml.
         run: go install github.com/ogen-go/ogen/cmd/ogen@v1.20.3
       - name: Generate
         run: ogen --target internal/gateway/oas --package oas --clean api/openapi.yaml
@@ -429,13 +397,13 @@ jobs:
     # 2026-09-21, and its assumptions had quietly drifted (the console's
     # first /api call is a public one since branding shipped).
     #
-    # Ports: the smoke suite (web-e2e) runs its console on 5173 on the same
-    # self-hosted node at the same time, so this one takes 3000 — the other
+    # Ports: the smoke suite (web-e2e) may run its console on 5173 on the
+    # same self-hosted runner host at the same time, so this one takes 3000 — the other
     # redirect the realm's mavericks-web client allows — and its gateway
     # 8090. The database and Keycloak take host ports picked per attempt
-    # (below): rootless Docker on the runner node does not always release a
-    # published port when a stack is torn down, and a fixed port left bound
-    # that way failed every later run (2026-09-29, 15432 and 18180). The web
+    # (below): rootless Docker does not always release a published port when
+    # a stack is torn down, and a fixed port left bound that way failed every
+    # later run. The web
     # and gateway ports are plain processes, released when they exit; two of
     # THOSE would still collide, so the job is one at a time across every run.
     concurrency:
@@ -563,45 +531,29 @@ jobs:
       packages: write
     strategy:
       fail-fast: false
-      # Concurrent image builds on the self-hosted runners kept dying with
-      # buildkit's "graceful_stop". Memory pressure was the first suspect and
-      # is real — the ci.slice hits its soft limit constantly — but it was not
-      # the cause: oom_kill stayed 0, and the failures continued at two-way
-      # parallelism. The logs settled it. A failed job's log named a builder
-      # UUID belonging to a DIFFERENT job, because all three runners share
-      # HOME and therefore shared ~/.docker/buildx: one job's cleanup removed
-      # a buildkit container another was still building against. Each runner
-      # now has its own DOCKER_CONFIG/BUILDX_CONFIG (set in its .env on the
-      # node), which is the actual fix.
+      # Concurrent image builds on self-hosted runners kept dying with
+      # buildkit's "graceful_stop". Memory pressure was the first suspect but
+      # not the cause: oom_kill stayed 0. A failed job's log named a builder
+      # UUID belonging to a DIFFERENT job, because runners sharing HOME share
+      # ~/.docker/buildx: one job's cleanup removed a buildkit container
+      # another was still building against. Each runner needs its own
+      # DOCKER_CONFIG/BUILDX_CONFIG (in its .env), which is the actual fix.
       #
-      # Two is kept anyway: peak memory with three concurrent Go builds sits
-      # right on the slice's limit, and that headroom is what keeps CI from
-      # starving the production pods sharing this node.
+      # Two is kept anyway: three concurrent Go builds peak near a capped
+      # runner host's memory limit.
       max-parallel: 2
       matrix:
         service:
           - gateway
-          - identity
-          - tenant
-          - model
-          - schema-migration
-          - policy
-          - calculation
-          - workflow
-          - import
-          - query
-          - audit
-          - notification
-          - ai-assistant
           - integration
     steps:
       - uses: actions/checkout@v6
       # One persistent named builder per runner daemon instead of the
       # action's default builder-per-job: each default builder is a running
       # buildkit container with its own cache volume that nothing ever
-      # removes — they accumulated 97GB and filled worker-2's disk, killing
-      # every runner on the box ("No space left on device", 2026-08-28).
-      # The builder is per-RUNNER, not shared: the three runners share one
+      # removes — they accumulated 97GB and filled a runner host's disk,
+      # killing every runner on it ("No space left on device").
+      # The builder is per-RUNNER, not shared: runners on one host share one
       # rootless dockerd, and a shared builder gets re-bootstrapped by
       # whichever job starts next — restarting buildkit mid-build under its
       # neighbours (seen live: "graceful_stop" killed 2 of 14 publishes).
@@ -674,9 +626,9 @@ jobs:
       # One persistent named builder per runner daemon instead of the
       # action's default builder-per-job: each default builder is a running
       # buildkit container with its own cache volume that nothing ever
-      # removes — they accumulated 97GB and filled worker-2's disk, killing
-      # every runner on the box ("No space left on device", 2026-08-28).
-      # The builder is per-RUNNER, not shared: the three runners share one
+      # removes — they accumulated 97GB and filled a runner host's disk,
+      # killing every runner on it ("No space left on device").
+      # The builder is per-RUNNER, not shared: runners on one host share one
       # rootless dockerd, and a shared builder gets re-bootstrapped by
       # whichever job starts next — restarting buildkit mid-build under its
       # neighbours (seen live: "graceful_stop" killed 2 of 14 publishes).
@@ -740,9 +692,9 @@ jobs:
       # One persistent named builder per runner daemon instead of the
       # action's default builder-per-job: each default builder is a running
       # buildkit container with its own cache volume that nothing ever
-      # removes — they accumulated 97GB and filled worker-2's disk, killing
-      # every runner on the box ("No space left on device", 2026-08-28).
-      # The builder is per-RUNNER, not shared: the three runners share one
+      # removes — they accumulated 97GB and filled a runner host's disk,
+      # killing every runner on it ("No space left on device").
+      # The builder is per-RUNNER, not shared: runners on one host share one
       # rootless dockerd, and a shared builder gets re-bootstrapped by
       # whichever job starts next — restarting buildkit mid-build under its
       # neighbours (seen live: "graceful_stop" killed 2 of 14 publishes).
@@ -806,9 +758,9 @@ jobs:
       # One persistent named builder per runner daemon instead of the
       # action's default builder-per-job: each default builder is a running
       # buildkit container with its own cache volume that nothing ever
-      # removes — they accumulated 97GB and filled worker-2's disk, killing
-      # every runner on the box ("No space left on device", 2026-08-28).
-      # The builder is per-RUNNER, not shared: the three runners share one
+      # removes — they accumulated 97GB and filled a runner host's disk,
+      # killing every runner on it ("No space left on device").
+      # The builder is per-RUNNER, not shared: runners on one host share one
       # rootless dockerd, and a shared builder gets re-bootstrapped by
       # whichever job starts next — restarting buildkit mid-build under its
       # neighbours (seen live: "graceful_stop" killed 2 of 14 publishes).
@@ -867,7 +819,7 @@ jobs:
     name: Publish image (minio)
     # Releases only. MinIO withdrew its pullable images (deploy/docker/minio/
     # Dockerfile says when), so a self-hoster following a release needs this
-    # one from us; the hosted cluster keeps the image it already runs, and a
+    # one from us; a running cluster keeps the image it already has, and a
     # from-source MinIO build is too heavy to repeat on every manual publish.
     needs: [go-lint, go-test, go-build]
     if: startsWith(github.ref, 'refs/tags/')
@@ -950,16 +902,25 @@ jobs:
               --search "reason:completed${prev:+ closed:>$prev}" \
               --json number,title,labels --jq "$1"
           }
+          # What changed: every snapshot's message lists its changes as
+          # "- " lines (scripts/export-public.sh); gather them since the
+          # previous release, each once.
+          prevtag=$(gh release list --repo "$REPO" --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // empty')
+          changes=""
+          if [ -n "$prevtag" ]; then
+            changes=$(gh api "repos/$REPO/compare/$prevtag...$TAG" --jq '.commits[].commit.message' | grep '^- ' | awk '!seen[$0]++' || true)
+          fi
           fixed=$(closed '.[] | select(any(.labels[]; .name == "bug")) | "- \(.title) (#\(.number))"')
           added=$(closed '.[] | select(all(.labels[]; .name != "bug")) | "- \(.title) (#\(.number))"')
           {
+            if [ -n "$changes" ]; then printf '## Changes\n\n%s\n\n' "$changes"; fi
             if [ -n "$added" ]; then printf '## New\n\n%s\n\n' "$added"; fi
             if [ -n "$fixed" ]; then printf '## Fixed\n\n%s\n\n' "$fixed"; fi
             echo "## Images"
             echo
             echo "Container images of this release (linux/amd64), each tagged \`$TAG\`:"
             echo
-            for n in gateway identity tenant model schema-migration policy calculation workflow import query audit notification ai-assistant integration web postgres-backup postgres-walg minio; do
+            for n in gateway integration web postgres-backup postgres-walg minio; do
               echo "- \`$prefix/$n:$TAG\`"
             done
             echo

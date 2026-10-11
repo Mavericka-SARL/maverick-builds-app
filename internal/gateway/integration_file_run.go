@@ -123,7 +123,7 @@ func (h *handler) commitGridRows(ctx context.Context, act *actor, modelID, revis
 	}
 	if len(metricIDs) > 0 {
 		calcStore := calculation.NewStore(h.db.For(ctx))
-		sched := calculation.NewScheduler(h.log, calcStore, nil)
+		sched := calculation.NewScheduler(h.log, calcStore)
 		go func() { //nolint:contextcheck // outlives the request
 			bg, done := h.backgroundRecalc(context.Background(), "recalculation after "+source+" import")
 			defer done()

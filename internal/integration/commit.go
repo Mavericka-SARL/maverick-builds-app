@@ -53,7 +53,7 @@ func (c *DBCommitter) CommitPull(ctx context.Context, def *Definition, header []
 			// calc_dependency edges, so recompute the metrics that make
 			// them explicitly (contract C8), as the gateway's CSV import
 			// does.
-			sched := calculation.NewScheduler(c.Log, calculation.NewStore(c.Pool), nil)
+			sched := calculation.NewScheduler(c.Log, calculation.NewStore(c.Pool))
 			if rerr := sched.RecalcDimensionDependents(ctx, def.Config.TargetID); rerr != nil {
 				c.Log.Warn().Err(rerr).Msg("recalc after connector dimension import")
 			}
@@ -115,7 +115,7 @@ func (c *DBCommitter) commitGrid(ctx context.Context, def *Definition, header []
 		return 0, 0, err
 	}
 	if len(metricIDs) > 0 {
-		sched := calculation.NewScheduler(c.Log, calculation.NewStore(c.Pool), nil)
+		sched := calculation.NewScheduler(c.Log, calculation.NewStore(c.Pool))
 		if rerr := sched.RecalcAffected(ctx, def.ModelID, def.RevisionID, metricIDs); rerr != nil {
 			c.Log.Warn().Err(rerr).Msg("recalc after connector import")
 		}

@@ -314,7 +314,7 @@ func TestTimeFunctionWithoutTimeDimensionFails(t *testing.T) {
 	insertFact(t, store, ctx, modelID, revID, salesID, fmt.Sprintf(`{"%s":"2026-01"}`, monthID), 100)
 	insertFact(t, store, ctx, modelID, revID, salesID, fmt.Sprintf(`{"%s":"2026-02"}`, monthID), 120)
 
-	sched := calculation.NewScheduler(logger.New("calc-test"), store, nil)
+	sched := calculation.NewScheduler(logger.New("calc-test"), store)
 	_ = sched.RecalcAffected(ctx, modelID, revID, []string{salesID})
 	if _, ok := calcRow(t, store, ctx, modelID, revID, prevID, map[string]string{monthID: "2026-02"}); ok {
 		t.Error("a standard dimension named month must not act as time: no value may be persisted")

@@ -82,7 +82,7 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 	if code != 200 || opts["enabled"] != true || opts["contact_url"] != "https://example.test/pricing" {
 		t.Fatalf("options: %d %v", code, opts)
 	}
-	// What sign-up offers is the basic workspace: no trial, 100 MB of storage.
+	// What sign-up offers is the Community plan: no end date, 100 MB of storage.
 	if p, _ := opts["plan"].(map[string]any); p["key"] != "community" || p["limits"].(map[string]any)["max_storage_mb"] != float64(100) {
 		t.Fatalf("options plan: %v", opts["plan"])
 	}
@@ -97,7 +97,7 @@ func TestSignupCreatesAUsableTenant(t *testing.T) {
 		t.Fatalf("signup: %d %v", code, out)
 	}
 	if _, has := out["trial_ends_at"]; has {
-		t.Fatalf("a basic workspace has no trial end: %v", out)
+		t.Fatalf("the Community plan has no end date: %v", out)
 	}
 	// model_id is the model the tenant lands on: the starter.LandingKey one.
 	tenantID, landingID := out["tenant_id"].(string), out["model_id"].(string)

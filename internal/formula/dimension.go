@@ -15,7 +15,7 @@ import (
 // criteria matching, found-skipping, memoisation); the calculation package
 // supplies member metadata and metric reads through DimEvalContext.
 //
-// See FORMULA_CALCULATION_INSTRUCTIONS.md, "Implementation contract".
+// The language side is documented in docs/formulas-manual, chapters 11-14.
 
 // DimMember is one leaf member of a dimension offered for criteria
 // iteration: its code and its declared properties, already typed by

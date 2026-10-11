@@ -46,7 +46,7 @@ test("the privacy notice states what is held and who else sees it", async ({ pag
   await expect(doc.getByRole("heading", { name: "Privacy notice", level: 1 })).toBeVisible();
   await expect(doc).toContainText("is the controller of the personal data");
   await expect(doc).toContainText("no analytics, tracking or advertising technology");
-  await expect(doc).toContainText("Hetzner Online GmbH (Germany)");
+  await expect(doc).toContainText("Example Hosting GmbH (Germany)");
   await expect(doc).toContainText("kept for fourteen days");
   await expect(doc).toContainText("complain to a data-protection supervisory authority");
   await expect(doc.getByRole("link", { name: "Terms of service" })).toHaveAttribute("href", "/terms");

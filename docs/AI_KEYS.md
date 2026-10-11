@@ -1,8 +1,6 @@
 # AI provider keys: per user, per tenant
 
-> **Classification:** Current — Where the AI assistant's API key comes from.
-
-> **Last verified:** 2026-09-16
+> **Last verified:** 2026-10-11 (every path, variable, route and identifier it names checked against the code)
 
 The AI assistant calls a third-party model provider, and somebody's account
 pays for it. This describes whose.
@@ -53,7 +51,8 @@ Both tables hold the key AES-256-GCM encrypted under
 `SECRETS_ENCRYPTION_KEY` (`internal/secretbox`; the older name
 `AI_KEY_ENCRYPTION_SECRET` is still accepted). In Kubernetes it is one of the
 two keys in the `mavericks-integration` Secret, sealed with
-`scripts/seal-integration-secret.sh` (docs/HETZNER_DEPLOYMENT.md, step 6).
+`scripts/seal-integration-secret.sh` (see
+[SELF_HOSTING.md, Step 4 — Create the secrets](SELF_HOSTING.md#step-4--create-the-secrets)).
 Without it set, values are written in plaintext and a previously encrypted
 value cannot be read back — set it before storing any key.
 

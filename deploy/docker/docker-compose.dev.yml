@@ -1,7 +1,6 @@
-version: "3.9"
 
 # Usage:
-#   make dev-up          — core services (Postgres, PgBouncer, NATS, Redis, Keycloak, MinIO)
+#   make dev-up          — core services (Postgres, PgBouncer, Keycloak, MinIO)
 #   make obs-up          — observability stack (Prometheus, Loki, Tempo, Grafana, OTel Collector)
 #   make dev-down        — stop everything
 
@@ -96,27 +95,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-
-  # ── Messaging ─────────────────────────────────────────────────────────────────
-
-  nats:
-    image: nats:2.10-alpine
-    command: ["-js", "-m", "8222"]
-    ports:
-      - "4222:4222"
-      - "8222:8222"   # monitoring UI
-
-  # ── Cache ─────────────────────────────────────────────────────────────────────
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
 
   # ── Identity ──────────────────────────────────────────────────────────────────
 

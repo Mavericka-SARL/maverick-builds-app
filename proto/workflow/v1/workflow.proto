@@ -7,16 +7,6 @@ option go_package = "github.com/mavericks-engine/mavericks/gen/go/workflow/v1;wo
 import "google/protobuf/timestamp.proto";
 import "common/v1/common.proto";
 
-service WorkflowService {
-  rpc CreateWorkflowDef(CreateWorkflowDefRequest) returns (CreateWorkflowDefResponse);
-  rpc GetWorkflowDef(GetWorkflowDefRequest) returns (GetWorkflowDefResponse);
-  rpc StartWorkflow(StartWorkflowRequest) returns (StartWorkflowResponse);
-  rpc GetWorkflowInstance(GetWorkflowInstanceRequest) returns (GetWorkflowInstanceResponse);
-  rpc ListWorkflowInstances(ListWorkflowInstancesRequest) returns (ListWorkflowInstancesResponse);
-  rpc CompleteStep(CompleteStepRequest) returns (CompleteStepResponse);
-  rpc GetPendingTasks(GetPendingTasksRequest) returns (GetPendingTasksResponse);
-}
-
 enum WorkflowStatus {
   WORKFLOW_STATUS_UNSPECIFIED = 0;
   WORKFLOW_STATUS_RUNNING = 1;
@@ -84,23 +74,3 @@ message WorkflowStep {
   google.protobuf.Timestamp completed_at = 9;
 }
 
-message CreateWorkflowDefRequest { string application_id = 1; string name = 2; string trigger_event = 3; repeated WorkflowStepDef steps = 4; }
-message CreateWorkflowDefResponse { WorkflowDef workflow_def = 1; }
-
-message GetWorkflowDefRequest { string workflow_def_id = 1; }
-message GetWorkflowDefResponse { WorkflowDef workflow_def = 1; }
-
-message StartWorkflowRequest { string workflow_def_id = 1; common.v1.Actor actor = 2; map<string, string> context = 3; }
-message StartWorkflowResponse { WorkflowInstance instance = 1; }
-
-message GetWorkflowInstanceRequest { string instance_id = 1; }
-message GetWorkflowInstanceResponse { WorkflowInstance instance = 1; repeated WorkflowStep steps = 2; }
-
-message ListWorkflowInstancesRequest { string application_id = 1; WorkflowStatus status = 2; common.v1.PageRequest page = 3; }
-message ListWorkflowInstancesResponse { repeated WorkflowInstance instances = 1; common.v1.PageResponse page = 2; }
-
-message CompleteStepRequest { string step_id = 1; common.v1.Actor actor = 2; string decision = 3; string comment = 4; }
-message CompleteStepResponse { WorkflowStep step = 1; }
-
-message GetPendingTasksRequest { string user_id = 1; string application_id = 2; }
-message GetPendingTasksResponse { repeated WorkflowStep tasks = 1; }

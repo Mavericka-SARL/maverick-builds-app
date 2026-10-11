@@ -30,30 +30,6 @@ patches:
 replicas:
   - name: dev-gateway
     count: 1
-  - name: dev-ai-assistant
-    count: 1
-  - name: dev-audit
-    count: 1
-  - name: dev-calculation
-    count: 1
-  - name: dev-identity
-    count: 1
-  - name: dev-import
-    count: 1
-  - name: dev-model
-    count: 1
-  - name: dev-notification
-    count: 1
-  - name: dev-policy
-    count: 1
-  - name: dev-query
-    count: 1
-  - name: dev-schema-migration
-    count: 1
-  - name: dev-tenant
-    count: 1
-  - name: dev-workflow
-    count: 1
   - name: dev-web
     count: 1
 
@@ -61,30 +37,6 @@ replicas:
 # clarity).  Replace with a specific digest in CI after each build.
 images:
   - name: registry.example.com/mavericks/gateway
-    newTag: latest
-  - name: registry.example.com/mavericks/ai-assistant
-    newTag: latest
-  - name: registry.example.com/mavericks/audit
-    newTag: latest
-  - name: registry.example.com/mavericks/calculation
-    newTag: latest
-  - name: registry.example.com/mavericks/identity
-    newTag: latest
-  - name: registry.example.com/mavericks/import
-    newTag: latest
-  - name: registry.example.com/mavericks/model
-    newTag: latest
-  - name: registry.example.com/mavericks/notification
-    newTag: latest
-  - name: registry.example.com/mavericks/policy
-    newTag: latest
-  - name: registry.example.com/mavericks/query
-    newTag: latest
-  - name: registry.example.com/mavericks/schema-migration
-    newTag: latest
-  - name: registry.example.com/mavericks/tenant
-    newTag: latest
-  - name: registry.example.com/mavericks/workflow
     newTag: latest
   - name: registry.example.com/mavericks/web
     newTag: latest

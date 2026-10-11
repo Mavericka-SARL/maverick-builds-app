@@ -1,7 +1,5 @@
 # Staging overlay (example)
 
-> **Classification:** Current — How a staging environment is set up next to production, and how it is used.
-
 Staging runs what production runs — the same images and manifests, a real
 identity provider, TLS at the ingress — in its own namespace on the same
 cluster, on data nobody minds losing. A release candidate goes here first,
@@ -24,10 +22,9 @@ like production, a staging overlay names a real cluster.
 | Database volume | 20Gi | 10Gi |
 | Object storage | `mavericks` bucket | `mavericks-staging`, backups in `mavericks-backups-staging`, WAL under `staging/` |
 
-Everything else — mTLS between services, Keycloak on Postgres, the ingress
-annotations, the network policies — is the production shape; copy the
-production overlay's `mtls.yaml` and network-policy patches with the
-namespace changed.
+Everything else — Keycloak on Postgres, the ingress annotations, the network
+policies — is the production shape; copy the production overlay's
+network-policy patches with the namespace changed.
 
 ## Bringing it up
 

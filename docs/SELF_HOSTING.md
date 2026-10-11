@@ -1,7 +1,5 @@
 # Self-hosting maverickbuilds.app
 
-> **Classification:** Current — How to run the platform on your own infrastructure: what it needs, a one-server install with Docker Compose, a Kubernetes install, and how to operate either.
-
 This guide takes you from an empty server to a running deployment that your
 own people sign in to, with backups you have restored at least once. It is
 written for whoever runs servers at your organisation: it assumes you know
@@ -14,13 +12,17 @@ is the whole product except the features listed in
 [LICENSING.md](LICENSING.md#gated-features) (single sign-on, SCIM, per-cell
 history, audit export, usage analytics, tenant-level AI keys, white-labelling).
 Read the [Sustainable Use License](../LICENSE) before you start: it permits
-use for your own internal business, and not hosting the platform for others.
+internal use only. Your own employees and contractors may use the platform;
+nobody outside your company may sign in to it, and hosting it for others,
+building on it for clients or reselling it needs a Commercial License.
+The gated features' code is in every image and stays switched off without a
+key, as its [Enterprise Features License](../ee/LICENSE) permits.
 
 ## Choose a path
 
 | | [Docker Compose, one server](#install-on-one-server-with-docker-compose) | [Kubernetes](#install-on-kubernetes) |
 |---|---|---|
-| What runs | 8 containers: the gateway, the web console, the integration worker, PostgreSQL, Keycloak, MinIO, a nightly backup job, and Caddy for HTTPS | The full distributed topology: 15 application deployments plus PostgreSQL with continuous WAL archiving, PgBouncer, NATS, Redis, Keycloak and MinIO |
+| What runs | 8 containers: the gateway, the web console, the integration worker, PostgreSQL, Keycloak, MinIO, a nightly backup job, and Caddy for HTTPS | The gateway (two replicas), the web console and the integration worker, plus PostgreSQL with continuous WAL archiving, PgBouncer, Keycloak and MinIO |
 | Good for | One organisation, a team to a few hundred users; the simplest thing to keep running | Several nodes, rolling upgrades, point-in-time recovery |
 | You need | One Linux server and Docker | A cluster with Traefik and cert-manager, and a container registry |
 | Time to first sign-in | About an hour, most of it building | Half a day |
@@ -90,8 +92,8 @@ Let's Encrypt, reachable from the internet. Nothing else is published.
   path alone. (Until 2026-09 these manifests used ingress-nginx, whose
   upstream project was retired in March 2026.)
 - **cert-manager**, for certificates (or your own TLS secrets).
-- A **StorageClass** with `ReadWriteOnce` volumes: 20 GiB for PostgreSQL,
-  5 GiB for NATS and, if MinIO runs in the cluster, 20 GiB for it.
+- A **StorageClass** with `ReadWriteOnce` volumes: 20 GiB for PostgreSQL
+  and, if MinIO runs in the cluster, 20 GiB for it.
 - A network plugin that **enforces NetworkPolicy** (Calico, Cilium, k3s's
   built-in controller, kind's kindnet). Without enforcement the policies are
   ignored rather than harmful, and you lose their isolation.
@@ -138,7 +140,7 @@ Certificates cannot be issued until they do.
 ```bash
 git clone https://github.com/Mavericka-SARL/maverick-builds-app.git maverickbuilds
 cd maverickbuilds
-git checkout 2026.10.07        # a release: the newest is on the Releases page
+git checkout 2026.10.11        # a release: the newest is on the Releases page
 cd deploy/compose
 ```
 
@@ -190,7 +192,7 @@ lines to `.env`:
 
 ```bash
 COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml
-MAVERICKS_RELEASE=2026.10.07   # the release you checked out
+MAVERICKS_RELEASE=2026.10.11   # the release you checked out
 ```
 
 ```bash
@@ -485,7 +487,7 @@ The values file sets what the platform needs from its entry point: a
 challenge path, a 300-second limit for reading a request (large imports over a
 slow link), and two replicas with a disruption budget. Your cloud's
 load-balancer settings go in a second values file; the comment in
-`service.annotations` shows Hetzner's. Keep its PROXY-protocol part if your
+`service.annotations` shows its shape. Keep its PROXY-protocol part if your
 load balancer forwards plain TCP, as most do: the gateway throttles sign-ups
 and SSO discovery per client address, and without the PROXY protocol every
 visitor arrives from the same internal one.
@@ -551,7 +553,7 @@ of your own. Then edit it:
    appear several times and must agree everywhere), the storage class, the
    SMTP relay and sender, and the address the backup watchdog alerts.
 2. **`kustomization.yaml`** — its `images:` block pins every image to the
-   release `2026.10.07`; set the release you deploy, or, if you built your
+   release `2026.10.11`; set the release you deploy, or, if you built your
    own images, replace the block with the one `build-images.sh` printed.
 3. **Object storage.** By default MinIO runs in the cluster and holds the
    backups and WAL archive. To keep them outside the cluster, as you should in
@@ -564,7 +566,7 @@ of your own. Then edit it:
 
 **Check:** `kubectl kustomize deploy/k8s/overlays/prod > /dev/null` builds
 without errors, and `kubectl kustomize deploy/k8s/overlays/prod | grep image:`
-names only your registry, `quay.io/keycloak/keycloak`, `nats`, `redis` and
+names only your registry, `quay.io/keycloak/keycloak` and
 `edoburu/pgbouncer`.
 
 ### Step 4 — Create the secrets
@@ -715,7 +717,7 @@ start again. `pg-restore.sh` drops the database and loads the dump into an
 empty one; `latest` is the newest dump of the database the URL names:
 
 ```bash
-IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.10.07   # the one your overlay runs
+IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.10.11   # the one your overlay runs
 kubectl -n mavericks scale deployment --replicas=0 \
   -l 'app.kubernetes.io/component in (api-gateway,service,identity)'
 for db in mavericks keycloak; do          # and each tenant_… database, if dedicated
@@ -745,6 +747,20 @@ a restore.
 
 Never deploy `latest`: a pod that restarts for any reason pulls whatever was
 pushed last.
+
+**Upgrading from 2026.10.07 or earlier.** Those releases also deployed twelve
+gRPC services, NATS and Redis, which nothing used; the manifests no longer
+have them, and `kubectl apply` does not delete what a manifest stopped
+listing. Apply the new release first (it also moves the integration worker to
+an HTTP health probe, which its new image needs), then delete them:
+
+```bash
+apps='ai-assistant,audit,calculation,identity,import,model,notification,policy,query,schema-migration,tenant,workflow,redis'
+kubectl -n mavericks delete deployment,service,networkpolicy -l "app in ($apps)"
+kubectl -n mavericks delete statefulset,service,networkpolicy -l app=nats
+kubectl -n mavericks delete pvc nats-data-nats-0   # NATS held only transient events
+kubectl -n mavericks get deploy,statefulset        # gateway, integration, web, keycloak, pgbouncer, postgres (and minio)
+```
 
 ---
 

@@ -1,7 +1,7 @@
 // Package assignee draws the boundary of workflow assignment: who a step is
-// assigned to, as one SQL predicate that deciding a step (the gRPC
-// WorkflowService.CompleteStep, through workflow.Store.IsAssigneeEligible),
-// a notification step's role recipients and the SLA reminder all share. It
+// assigned to, as one SQL predicate that deciding a step (the gateway's task
+// inbox), a notification step's role recipients and the SLA reminder all
+// share. It
 // imports nothing, so internal/notification (which internal/workflow
 // imports) can use it as well as internal/workflow and the gateway.
 //
@@ -46,7 +46,7 @@ import "strings"
 //     a business role tenant_admin would otherwise make its members
 //     assignees of every tenant_admin step of the workspace.
 //   - A disabled account (identity.user.disabled_at set) is an assignee of
-//     nothing, as the gateway and the gRPC services refuse to resolve it:
+//     nothing, as the gateway refuses to resolve it:
 //     it is neither notified nor reminded of a step.
 //
 // The tiers are the gateway's (adminTiers in internal/gateway/admin_tiers.go):

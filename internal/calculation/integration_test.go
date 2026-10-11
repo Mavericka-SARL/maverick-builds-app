@@ -119,7 +119,7 @@ func TestRecalcAffected(t *testing.T) {
 		t.Fatalf("insert facts: %v", err)
 	}
 
-	scheduler := calculation.NewScheduler(log, store, nil)
+	scheduler := calculation.NewScheduler(log, store)
 	if err := scheduler.RecalcAffected(ctx, modelID, revisionID, []string{revenueID, cogsID}); err != nil {
 		t.Fatalf("RecalcAffected: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestRecalcPartitionState(t *testing.T) {
 		VALUES ($1::uuid, $2::uuid, $3::uuid, '{}', 50)
 	`, modelID, revisionID, inputID)
 
-	scheduler := calculation.NewScheduler(log, store, nil)
+	scheduler := calculation.NewScheduler(log, store)
 	if err := scheduler.RecalcAffected(ctx, modelID, revisionID, []string{inputID}); err != nil {
 		t.Fatalf("RecalcAffected: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestRecalcAffected_FormulaErrorWritesNoRow(t *testing.T) {
 		t.Fatalf("insert fact: %v", err)
 	}
 
-	scheduler := calculation.NewScheduler(log, store, nil)
+	scheduler := calculation.NewScheduler(log, store)
 	// The per-metric evaluation failure is caught and logged inside
 	// RecalcAffected's own loop, not propagated as its return value — this
 	// call succeeding is expected, not a gap in the test.
@@ -306,7 +306,7 @@ func TestRecalcSpecificForcesRecomputeIgnoringGraphReachability(t *testing.T) {
 		t.Fatalf("insert fact: %v", err)
 	}
 
-	scheduler := calculation.NewScheduler(log, store, nil)
+	scheduler := calculation.NewScheduler(log, store)
 	if err := scheduler.RecalcAffected(ctx, modelID, revisionID, []string{travelCostID}); err != nil {
 		t.Fatalf("initial RecalcAffected: %v", err)
 	}

@@ -1,5 +1,5 @@
 // Restricted viewers and scoped reads of calculated metrics over HTTP
-// (FORMULA_CALCULATION_INSTRUCTIONS.md, contracts C6 and C7): a developer
+// (package readset decides what such a viewer is shown): a developer
 // builds a model with LOOKUP, SUMIFS, a member-local FX LOOKUP, time
 // windows (PREVIOUS, a dynamic LAG, YEARVALUE, TIMESUM), a coarse-grained
 // metric, a dim.property metric and an ordinary metric reading a served

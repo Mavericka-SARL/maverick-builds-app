@@ -1,7 +1,5 @@
 # Self-hosted stack (Docker Compose)
 
-> **Classification:** Current — The one-server deployment; docs/SELF_HOSTING.md is its manual.
-
 maverickbuilds.app on a single server: the gateway, the console, the
 integration worker, PostgreSQL, Keycloak, MinIO, a nightly backup and Caddy
 for automatic HTTPS — from a release's published images, or built from this

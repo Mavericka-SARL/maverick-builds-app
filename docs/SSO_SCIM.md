@@ -1,8 +1,6 @@
 # Single sign-on and SCIM provisioning
 
-> **Classification:** Current — How an enterprise tenant signs in through its own identity provider and provisions its users.
-
-> **Last verified:** 2026-09-16
+> **Last verified:** 2026-10-11 (every path, variable, route and identifier it names checked against the code)
 
 Both are enterprise features (`sso`, `scim` in `pkg/license/features.go`)
 and both are per tenant — one row per tenant since migration 091, in a

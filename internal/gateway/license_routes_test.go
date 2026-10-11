@@ -16,10 +16,10 @@ import (
 	"github.com/mavericks-engine/mavericks/pkg/logger"
 )
 
-// paidRoutePrefixes are the HTTP surfaces of the paid features. Every route
-// registered under one is driven below; a paid feature with a new surface
+// enterpriseRoutePrefixes are the HTTP surfaces of the enterprise features. Every route
+// registered under one is driven below; an enterprise feature with a new surface
 // adds its prefix here.
-var paidRoutePrefixes = []string{
+var enterpriseRoutePrefixes = []string{
 	"/api/cells/history",
 	"/api/admin/audit/export",
 	"/api/admin/audit/settings",
@@ -52,7 +52,7 @@ func TestPaidRoutesFollowTheLicence(t *testing.T) {
 	var routes []RouteInfo
 	seen := map[string]bool{}
 	for _, r := range BuildRoutes() {
-		for _, p := range paidRoutePrefixes {
+		for _, p := range enterpriseRoutePrefixes {
 			if r.Pattern == p || strings.HasPrefix(r.Pattern, p+"/") {
 				routes = append(routes, r)
 				seen[p] = true
@@ -62,7 +62,7 @@ func TestPaidRoutesFollowTheLicence(t *testing.T) {
 	if len(routes) < 30 {
 		t.Fatalf("only %d paid routes found; the prefixes no longer match the router", len(routes))
 	}
-	for _, p := range paidRoutePrefixes {
+	for _, p := range enterpriseRoutePrefixes {
 		if !seen[p] {
 			t.Errorf("no route registered under paid prefix %s", p)
 		}

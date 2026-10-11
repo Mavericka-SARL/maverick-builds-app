@@ -19,7 +19,7 @@ const LIMIT_FIELDS: { key: keyof PlanLimits; label: string }[] = [
  * Platform › Plans: the catalog every tenant's plan points at — Community,
  * Commercial and Enterprise, no more (migration 123; there is no way to add
  * a plan) — tuned by the platform administrators for every tenant. A plan bounds how much a tenant
- * may use — never for how long: there is no trial. Limits are numbers here
+ * may use — never for how long. Limits are numbers here
  * rather than constants in code, so tuning the Community plan is an edit,
  * not a release. 0 means unlimited. A change applies to every tenant on the
  * plan within a minute; the read-only verdict for a tenant already over a

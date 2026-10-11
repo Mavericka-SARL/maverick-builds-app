@@ -94,7 +94,7 @@ func insertFact(t *testing.T, store *calculation.Store, ctx context.Context, mod
 
 func runRecalc(t *testing.T, store *calculation.Store, ctx context.Context, modelID, revID string, inputIDs []string) {
 	t.Helper()
-	sched := calculation.NewScheduler(logger.New("calc-test"), store, nil)
+	sched := calculation.NewScheduler(logger.New("calc-test"), store)
 	if err := sched.RecalcAffected(ctx, modelID, revID, inputIDs); err != nil {
 		t.Fatalf("RecalcAffected: %v", err)
 	}

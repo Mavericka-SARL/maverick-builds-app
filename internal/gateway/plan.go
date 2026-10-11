@@ -14,17 +14,17 @@ import (
 	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
 )
 
-// Plans and trials (internal/plan) as the gateway applies them.
+// Plans (internal/plan) as the gateway applies them.
 //
 // Two mechanisms, both keyed on the tenant a request acts on:
 //
 //   - planGuard, a middleware ahead of every route, refuses mutating
-//     requests from a tenant that is read-only — its trial ended, or the
-//     usage sweep found it over a limit — with 402 and the reason. Platform
+//     requests from a tenant that is read-only — the usage sweep found it
+//     over a limit — with 402 and the reason. Platform
 //     administrators are never refused: they are who fixes it.
 //   - the CheckX calls in the creation handlers refuse the one creation that
-//     would cross a limit, so a person is told "the Trial plan allows 3
-//     models" at the moment they try, not by a sweep minutes later.
+//     would cross a limit, so a person is told "the Community plan allows
+//     100 MB" at the moment they try, not by a sweep minutes later.
 //
 // The tenant of a request is the routed tenant in dedicated mode, else the
 // application named by X-App-Id, else the actor's own tenant. Nothing found
@@ -37,7 +37,7 @@ type SignupConfig struct {
 	// deployment must not grow a public registration page by accident.
 	Enabled bool
 	// ContactURL is where "change the plan" leads — a pricing page or a
-	// mailto:. Shown with every plan limit and trial notice.
+	// mailto:. Shown with every plan-limit notice.
 	ContactURL string
 }
 

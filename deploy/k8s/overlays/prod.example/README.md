@@ -1,7 +1,5 @@
 # Production overlay (example)
 
-> **Classification:** Current — The template a Kubernetes deployment starts from; docs/SELF_HOSTING.md walks through it.
-
 A production overlay describes one cluster: its host names, storage class,
 registry, mail relay and secrets. This directory is a complete one with
 placeholder values, verified by deploying it. Copy it and fill it in:

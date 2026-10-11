@@ -8,17 +8,13 @@ import (
 )
 
 type BaseConfig struct {
-	GRPCPort    int    `mapstructure:"GRPC_PORT"`
 	MetricsPort int    `mapstructure:"METRICS_PORT"`
 	LogLevel    string `mapstructure:"LOG_LEVEL"`
 	DatabaseURL string `mapstructure:"DATABASE_URL"`
-	NATSUrl     string `mapstructure:"NATS_URL"`
-	RedisURL    string `mapstructure:"REDIS_URL"`
-	// KeycloakURL/KeycloakRealm: every gRPC service's AuthInterceptor
-	// needs these to build a production-mode JWKS validator (see
-	// pkg/grpcutil.WithAuth), not just cmd/gateway — like DatabaseURL,
-	// each service sets its own literal default in main() before
-	// config.Load runs rather than registering one centrally here.
+	// KeycloakURL/KeycloakRealm build the gateway's production-mode JWKS
+	// validator. Like DatabaseURL, a program sets its own literal default
+	// in main() before config.Load runs rather than registering one
+	// centrally here.
 	KeycloakURL   string `mapstructure:"KEYCLOAK_URL"`
 	KeycloakRealm string `mapstructure:"KEYCLOAK_REALM"`
 	// KeycloakIssuer is Keycloak's PUBLIC origin — the one browsers use and
@@ -43,11 +39,8 @@ type BaseConfig struct {
 
 func Load(cfg any) error {
 	viper.AutomaticEnv()
-	viper.SetDefault("GRPC_PORT", 9090)
 	viper.SetDefault("METRICS_PORT", 9091)
 	viper.SetDefault("LOG_LEVEL", "info")
-	viper.SetDefault("NATS_URL", "nats://localhost:4222")
-	viper.SetDefault("REDIS_URL", "redis://localhost:6379")
 
 	// viper.AutomaticEnv() only makes an env var visible to Unmarshal for
 	// keys viper already knows about (registered via SetDefault/BindEnv/

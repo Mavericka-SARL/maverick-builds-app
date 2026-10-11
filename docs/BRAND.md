@@ -1,8 +1,6 @@
 # The product's look
 
-> **Classification:** Current — The identity of the pages a visitor sees before they have an account, and how a deployment overrides it.
-
-> **Last verified:** 2026-09-18
+> **Last verified:** 2026-10-11 (every path, variable, route and identifier it names checked against the code)
 
 The console is a working surface: light, dense, neutral. The pages in front of
 it — `/signup`, the sign-in chooser, the account-refused notice, and Keycloak's

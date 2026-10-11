@@ -253,9 +253,8 @@ const (
 // dimension_member UUIDs (best-effort — a key that isn't a resolvable UUID,
 // e.g. a legacy name-keyed row from an older caller, is skipped rather than
 // failing the whole commit) and runs writeguard.CheckWrite against modelID/
-// revisionID/userID/those members. This is the ONE place both the gRPC
-// ImportService and the HTTP import handler ultimately flow through, so
-// neither can commit a write cells() itself would reject — see
+// revisionID/userID/those members. Every import commit flows through this
+// one place, so none can commit a write cells() itself would reject — see
 // internal/writeguard's package doc for why this used to be bypassable.
 func (s *Store) CommitImport(ctx context.Context, jobID, modelID, revisionID, userID string, mode ImportMode) ([]string, error) {
 	if mode == "" {
@@ -504,21 +503,6 @@ func (s *Store) resolveStagedMetricIDs(ctx context.Context, jobID string) ([]str
 		metricIDs = append(metricIDs, id)
 	}
 	return metricIDs, rows.Err()
-}
-
-func (s *Store) AbortImport(ctx context.Context, jobID string) error {
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE import.import_job
-		SET status = 'aborted', completed_at = now()
-		WHERE id = $1::uuid AND status NOT IN ('committed', 'aborted')
-	`, jobID)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("job %s cannot be aborted", jobID)
-	}
-	return nil
 }
 
 func (s *Store) GetImportErrors(ctx context.Context, jobID string, limit int32) ([]*importpkgv1.ImportError, error) {

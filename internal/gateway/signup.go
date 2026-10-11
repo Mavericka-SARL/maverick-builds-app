@@ -23,8 +23,8 @@ import (
 // guide per role — the tour, starter.LandingKey, is the application's
 // default and what they first see), and an invitation to
 // set their password. They arrive as the tenant's administrator, developer
-// and business administrator, which is everything a trial needs to be
-// evaluated by one person.
+// and business administrator, which is everything one person needs to
+// build and run an application on their own.
 //
 // Public by nature (nobody is signed in yet), so it is rate-limited per
 // address, refuses an address that already has an account, and creates

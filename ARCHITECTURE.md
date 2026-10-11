@@ -1,7 +1,5 @@
 # maverickbuilds.app Architecture
 
-> **Classification:** Current — Implementation reference for the system as built.
-
 > **Status:** Current implementation reference
 > **Last verified:** 2026-09-25 (formula paragraph 2026-09-28)
 > **Authority:** Running code, migrations, build configuration, and tests take
@@ -61,54 +59,26 @@ PostgreSQL
 `cmd/gateway/main.go` connects to PostgreSQL, applies embedded migrations, and
 serves `internal/gateway.NewHandler` on port 8080. The gateway directly composes
 the calculation, CRUD, formula, import, query, schema-migration, workflow, and
-write-guard packages. This path does not make gRPC calls to the sibling service
-binaries.
+write-guard packages.
 
 Cell writes, imports, form postings, approval copies, and relevant definition
-changes invoke recalculation in-process. This keeps the primary local runtime
-functional when NATS is unavailable.
+changes invoke recalculation in-process.
 
-### Distributed service topology
+### Integration worker
 
-The repository also builds separate gRPC binaries:
+`cmd/integration` is the only other program. It claims connector runs from a
+durable PostgreSQL queue (`FOR UPDATE SKIP LOCKED`), executes them through
+`internal/integration`'s hardened HTTP client, and fires due schedules; in
+dedicated-database mode it runs one worker per tenant database. It serves no
+API: port 9090 answers health probes only (`GET /healthz`).
 
-| Binary | Domain package | External dependency beyond PostgreSQL |
-|---|---|---|
-| `identity` | `internal/identity` | Keycloak JWKS and Redis session cache |
-| `tenant` | `internal/tenant` | none |
-| `model` | `internal/model` | none |
-| `schema-migration` | `internal/schemamigration` | none |
-| `policy` | `internal/policy` | Redis decision cache |
-| `query` | `internal/query` | NATS JetStream and policy gRPC client |
-| `calculation` | `internal/calculation` | NATS JetStream consumer |
-| `workflow` | `internal/workflow` | policy gRPC client |
-| `import` | `internal/importpkg` | optional NATS publisher |
-| `audit` | `internal/audit` | none |
-| `notification` | `internal/notification` | none |
-| `ai-assistant` | `internal/aiassistant` | Anthropic for the legacy gRPC path |
-| `integration` | `internal/integration` | outbound HTTPS to connector targets (worker, not a gRPC service) |
-
-These binaries register protobuf services from `proto/*/v1` using the shared
-gRPC server helper (`pkg/grpcutil.NewServer`), and every one installs
-`grpcutil.AuthInterceptor`, which resolves a real actor per call (bearer token
-validated against the JWKS, or the dev persona in `DEV_MODE`), plus the audit
-interceptor. When the `MTLS_*` variables are set the transport additionally
-requires a CA-signed client certificate (`pkg/grpcutil/tls.go`). The Kubernetes base manifests deploy this topology together
-with PostgreSQL, PgBouncer, NATS, Redis, Keycloak, and MinIO.
-
-Query treats NATS startup as mandatory. Query and workflow always construct a
-policy client, although gRPC dialing is lazy; an unreachable policy service can
-therefore surface later as request-time fail-open or fail-closed behavior.
-Import alone treats its NATS publisher as optional.
-
-The distributed topology is deployed (see Infrastructure and operations) and
-exercised by `cmd/verify-topology`, but it is not the default local
-composition: `make dev-up` starts only infrastructure, and `dev.sh` starts
-only the HTTP gateway. The gateway's browser API remains the most complete
-product path. Several gRPC stores still use legacy, model-wide or scenario-era
-semantics and do not match current revision isolation, hierarchy fields, formula
-references, or gateway validation. Production readiness of this composition
-must therefore be demonstrated, not inferred from successful compilation.
+Docker Compose (`deploy/compose/`) and the Kubernetes manifests
+(`deploy/k8s/`) run the same set: the gateway, the web console and the
+integration worker, with PostgreSQL, PgBouncer, Keycloak and MinIO. Until
+2026-10-11 the repository also built twelve gRPC service binaries with NATS
+and Redis behind them; nothing on the product path called them, and they were
+removed (see [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md#upgrading-and-rolling-back)
+for removing them from a cluster that runs them).
 
 ## Backend composition
 
@@ -142,21 +112,18 @@ is the readable overview.
 
 | Package | Responsibility |
 |---|---|
-| `internal/model` | Semantic definitions, dependency graph, cycle detection, revision publishing |
 | `internal/formula` | Lexer, parser, AST, references, typed values, functions, and Excel-style evaluation |
-| `internal/calculation` | Dependency-aware affected-metric traversal, partition state, evaluation, result persistence, optional JetStream consumer |
-| `internal/query` | Fact write/query service, chart data resolution, access-filtered aggregation, and JetStream publishing |
+| `internal/calculation` | Dependency-aware affected-metric traversal, partition state, evaluation, result persistence |
+| `internal/query` | Chart data resolution and access-filtered aggregation |
 | `internal/crudapp` | Form definitions and record persistence |
 | `internal/workflow` | Definitions, instances, steps, routing, joins, automations, and execution logs |
 | `internal/importpkg` | CSV/XLSX parsing, name/ID resolution, staging, validation, and commit |
 | `internal/writeguard` | Shared system-managed, member-access, ancestor-cascade, and workflow-lock checks |
-| `internal/identity` | User persistence, JWKS validation, and Redis-backed session caching |
-| `internal/policy` | Role, RACI, metric/dimension/cell/ABAC evaluation and Redis caching for the gRPC path |
+| `internal/identity` | JWKS validation of Keycloak tokens |
 | `internal/aiassistant` | Provider adapters, chat/session stores, documents, proposals, read tools, and isolated-revision writes |
 | `internal/schemamigration` | Model-driven schema migration generation and tracking |
-| `internal/deployment` | Standalone deployment package builder (tar.gz: entity graph via `internal/modeltransfer`, full migrations tree, provenance manifest, infra-only compose), fully in-memory — no longer a standalone binary or gRPC service, and no longer writes to local disk; retention goes through `pkg/objectstore` |
+| `internal/deployment` | Standalone deployment package builder (tar.gz: entity graph via `internal/modeltransfer`, full migrations tree, provenance manifest, infra-only compose), fully in-memory, retention through `pkg/objectstore` |
 | `internal/modeltransfer` | Model entity-graph export/import — the shared core behind both the admin JSON export/import HTTP endpoints and `internal/deployment`'s tarball builder |
-| `internal/audit` | Partitioned audit events |
 | `internal/notification` | Notification persistence, e-mail dispatch (SMTP, STARTTLS or implicit TLS) and task reminders |
 | `internal/integration` | REST API connector definitions, sealed connections, the durable run queue and the worker |
 | `internal/rollup` | Shared hierarchy rollups used by the grid, charts and the calculation scheduler |
@@ -300,8 +267,8 @@ member (`dim`), typed member properties (`dim.property`), `PARENT(dim)`,
 Metrics that read other cells (time series, lookups, conditional aggregation)
 are served from persisted rows on scoped reads, and cells whose read set
 touches a hidden member are withheld from that viewer (`internal/readset`).
-The rules are in
-FORMULA_CALCULATION_INSTRUCTIONS.md.
+The formula language is documented in the
+[formulas manual](docs/formulas-manual/).
 Dependencies are explicit in `model.calc_dependency` and are cycle-checked.
 
 `internal/calculation.Scheduler.RecalcAffected` traverses transitive dependents,
@@ -364,17 +331,11 @@ Authorization is layered rather than represented by one role check:
 
 The HTTP gateway applies role guards plus explicit app/model access checks,
 and checks resource ownership for IDs taken from the path and the request
-body. Direct HTTP cells, forms, imports and the gRPC writeback use the shared
-write guard. `writeguard.HiddenAccess` fails closed on a database error, and
+body. Direct HTTP cells, forms and imports use the shared write guard. `writeguard.HiddenAccess` fails closed on a database error, and
 `HiddenInChain` / `ExpandHidden` cascade a hidden rule from any ancestor to its
 descendants. Two known gaps remain: import does not refuse a non-input
 (`is_input=false`) metric, and `/api/cells` skips unknown dimension codes
 rather than rejecting them.
-
-The gRPC policy path has additional ambiguity: query reads proceed unrestricted
-when policy evaluation fails, an empty allowed-metric list is interpreted as no
-restriction, and the query request places a model ID in the proto's
-`application_id` field.
 
 Model export/import is a tenant-admin and platform-admin operation; developers
 do not receive it.
@@ -423,8 +384,6 @@ import service, not demo-specific endpoints.
 
 Name- and UUID-based import resolution is scoped to the selected
 model/revision. Import does not yet refuse a calculated (non-input) metric.
-HTTP and gRPC import expose different file formats, staging, and commit
-semantics.
 
 Form-to-metric mappings post approved or selected record states into planning
 facts with sum/replace-style aggregation. Integration definitions and saved
@@ -440,9 +399,7 @@ an infra-only docker-compose. `internal/deployment`'s builder delegates to
 implementation queried a removed `dimension_def.code` column and suppressed
 query/scan errors, so a schema mismatch could emit an empty local archive
 instead of failing; it also had no revision scoping and covered only
-dimensions/metrics. The former gRPC transport (`cmd/deployment`, an
-async job/status model with zero callers anywhere in the codebase) has been
-retired in favor of one synchronous HTTP route. The built package is
+dimensions/metrics. The built package is
 retained via `pkg/objectstore` (a thin `minio-go/v7` client plus a
 `storage.object` PostgreSQL metadata table, one row per revision — a
 re-export overwrites the previous package rather than accumulating
@@ -477,12 +434,7 @@ dashboard, form, workflow, automation, business-role, revision and migration
 changes. One tool deliberately writes outside the draft:
 `set_user_access_rules` writes live `identity.user_access_rule` rows against
 the active revision. The assistant is available to the developer role only
-(`/api/ai/*`). Per-action rollback is not implemented (`RollbackAction` is a
-stub); see `AI_ASSISTANT_SOW.md`.
-
-The separate `cmd/ai-assistant` gRPC binary is an older Anthropic-oriented
-file-diff service and is not the implementation used by the current Developer
-Console chat UI.
+(`/api/ai/*`).
 
 ## Frontend architecture
 
@@ -543,8 +495,6 @@ The Docker development stack provides:
 
 - PostgreSQL 16 with local WAL archiving;
 - PgBouncer in transaction mode;
-- NATS 2.10 with JetStream;
-- Redis 7;
 - Keycloak 24 with realm import;
 - MinIO; and
 - optional OpenTelemetry Collector, Prometheus, Loki, Tempo, and Grafana.
@@ -552,12 +502,12 @@ The Docker development stack provides:
 The gateway initializes OpenTelemetry and continues if the collector is
 unreachable. The optional observability profile is started with `make obs-up`.
 
-Production runs on Kubernetes (k3s on Hetzner; see
-docs/HETZNER_DEPLOYMENT.md, and
-[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) for other operators). The
+A production deployment runs on one server with Docker Compose or on
+Kubernetes; [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) describes both. The
 repository carries:
 
-- a shared distroless `deploy/docker/Dockerfile` for every service, plus
+- a shared distroless `deploy/docker/Dockerfile` for the gateway and the
+  integration worker, plus
   `pg-backup` and `postgres-walg` images; CI publishes all of them to GHCR,
   tagged `:latest` and with the commit SHA, and a `workflow_dispatch` deploy
   job rolls the cluster onto them;
@@ -566,19 +516,17 @@ repository carries:
   `staging.example` overlays show the shape (a real production overlay lives in
   its operator's private repository);
 - PostgreSQL WAL archived by WAL-G to object storage with point-in-time
-  recovery, nightly `pg_dump` backups, and a backup watchdog; and
-- optional service-to-service mTLS.
+  recovery, nightly `pg_dump` backups, and a backup watchdog.
 
 ## Build, generation, and tests
 
-Three contract generators are present:
+Two contract generators are present:
 
-- Buf generates Go protobuf and gRPC code into `gen/go`;
-- sqlc generates typed audit and tenant query code; and
+- Buf generates Go protobuf code into `gen/go`; and
 - ogen generates the OpenAPI package in `internal/gateway/oas` (pinned
   versions: `make gen`).
 
-CI runs Go lint, race-enabled tests with coverage, Go build, sqlc and ogen drift
+CI runs Go lint, race-enabled tests with coverage, Go build, ogen drift
 checks, Buf lint, frontend ESLint, TypeScript checking, Playwright smoke tests,
 and the production web build.
 
@@ -588,9 +536,6 @@ transfer, chart, workflow, import, and rollup behavior.
 
 ## Current architectural limitations
 
-- The browser runtime and distributed gRPC topology overlap rather than sharing
-  one complete, behaviorally equivalent composition path. Several gRPC policy
-  error/empty-result paths fail open.
 - RLS policies (migration 013) and least-privilege database roles exist in
   schema history, but no service sets `app.user_id`, so they are not active
   boundaries.
@@ -608,5 +553,4 @@ transfer, chart, workflow, import, and rollup behavior.
   shared design system.
 
 These are current boundaries, not promises that the associated target designs
-are already delivered. The prioritized follow-up work is maintained in
-IMPLEMENTATION_PLAN.md.
+are already delivered.

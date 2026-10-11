@@ -8,8 +8,8 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/calculation"
 )
 
-// Regressions found by verifying stage 2a of the dimensional-references
-// contract (FORMULA_CALCULATION_INSTRUCTIONS.md, C1-C5) against a live
+// Regressions found by verifying the dimensional references (dim.property,
+// PARENT, LOOKUP, conditional aggregation, time series) against a live
 // database.
 
 func memberID(t *testing.T, store *calculation.Store, ctx context.Context, dimID, code string) string {

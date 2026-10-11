@@ -12,7 +12,7 @@ import (
 
 // The HTTP inbox and step completion (taskAssigneeSQL with the admin scope
 // of adminScopeCustomerIDs) and every other surface of workflow assignment
-// (workflow.Store.IsAssigneeEligible, i.e. assignee.SQL) agree for every
+// (workflow.Store.IsAssigneeEligible, the reference form of assignee.SQL) agree for every
 // user of every role shape of assigneetest, on every step shape.
 func TestTaskAssigneeSQLMatchesTheWorkflowBoundary(t *testing.T) {
 	f := assigneetest.New(t)

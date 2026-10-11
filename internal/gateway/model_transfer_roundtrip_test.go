@@ -198,7 +198,7 @@ func TestDuplicateRevisionRemapsFactSourceRefSubjectConfigAndRecalcs(t *testing.
 	if calcRows == 0 {
 		t.Errorf("duplicated revision has no calc_result rows — calc metrics render blank until a cell is edited")
 	}
-	sched := calculation.NewScheduler(logger.New("test"), calculation.NewStore(f.pool), nil)
+	sched := calculation.NewScheduler(logger.New("test"), calculation.NewStore(f.pool))
 	if err := sched.RecalcAffected(context.Background(), f.modelID, f.workingRevID, []string{f.amountMetricID}); err != nil {
 		t.Fatalf("recalc source: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestModelImportKeepsFormPostedFactsRemapsSubjectConfigAndRecalcs(t *testing
 	if calcRows == 0 {
 		t.Errorf("imported revision has no calc_result rows — calc metrics render blank until a cell is edited")
 	}
-	sched := calculation.NewScheduler(logger.New("test"), calculation.NewStore(f.pool), nil)
+	sched := calculation.NewScheduler(logger.New("test"), calculation.NewStore(f.pool))
 	if err := sched.RecalcAffected(context.Background(), f.modelID, f.workingRevID, []string{f.amountMetricID}); err != nil {
 		t.Fatalf("recalc source: %v", err)
 	}

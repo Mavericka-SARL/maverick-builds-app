@@ -13,8 +13,8 @@ import type { LegalInfo } from "../../api/client";
  * Two rules when editing:
  *
  *   - Only state what the code does. Every factual claim here is verifiable
- *     in the repository: the free plan's allowance and read-only ending
- *     come from the plan the server offers, the backup window from
+ *     in the repository: the sign-up plan's name, allowance and read-only
+ *     ending come from the plan the server offers, the backup window from
  *     deploy/docker/pg-backup/pg-backup.sh, "no analytics" from web/index.html
  *     having no third-party script, the export rights from the four export
  *     endpoints. A sentence nobody can check is a liability, not a policy.
@@ -58,6 +58,8 @@ function compact(sections: LegalSection[]): LegalSection[] {
 }
 
 export function termsDocument(l: LegalInfo, product: string, plan?: PlanFacts): LegalDocument {
+  // The plan sign-up hands out, by its own name ("the Community plan").
+  const freePlan = plan ? `the ${plan.name} plan` : "the free plan";
   const planClause: Block[] = plan
     ? [
         `The ${plan.name} plan costs nothing and has no end date. It is limited${plan.allowance ? ` to ${plan.allowance}` : ""}, and the service tells you when a limit stops an action.`,
@@ -110,14 +112,14 @@ export function termsDocument(l: LegalInfo, product: string, plan?: PlanFacts): 
       {
         heading: "6. Availability, backups and support",
         body: [
-          "We run the service with care but do not promise a particular level of availability, and the free plan carries no service level at all. We may take the service down for maintenance, and will give notice where we can.",
+          `We run the service with care but do not promise a particular level of availability, and ${freePlan} carries no service level at all. We may take the service down for maintenance, and will give notice where we can.`,
           "We take daily backups and keep them for fourteen days. They exist so that we can recover the service, and they are not a substitute for your own exports of anything you cannot afford to lose.",
         ],
       },
       {
         heading: "7. Price",
         body: [
-          "The free plan needs no payment details. If you move to a paid plan, the price, the billing period and the payment terms are agreed with you in writing before that plan starts. Nothing here creates an obligation to pay for something you did not agree to.",
+          `${freePlan.charAt(0).toUpperCase()}${freePlan.slice(1)} needs no payment details. If you move to a paid plan, the price, the billing period and the payment terms are agreed with you in writing before that plan starts. Nothing here creates an obligation to pay for something you did not agree to.`,
         ],
       },
       {
@@ -137,7 +139,7 @@ export function termsDocument(l: LegalInfo, product: string, plan?: PlanFacts): 
       {
         heading: "10. Liability",
         body: [
-          "The service is provided as it is. On the free plan we accept no liability beyond what the law requires of us, which in particular means we are not liable for lost profit, lost data or indirect loss.",
+          `The service is provided as it is. On ${freePlan} we accept no liability beyond what the law requires of us, which in particular means we are not liable for lost profit, lost data or indirect loss.`,
           "Under a paid plan our total liability in any twelve-month period is limited to the fees you paid us in that period. Nothing in this agreement limits liability for death or personal injury caused by negligence, for fraud, or for anything else that cannot lawfully be limited.",
         ],
       },
@@ -177,7 +179,7 @@ export function privacyDocument(l: LegalInfo, product: string): LegalDocument {
             "Your content — the models, numbers, comments, files and configuration your organisation puts into the service. This is yours; we hold it to run the service for you. It may contain personal data about other people, and where it does your organisation decides what goes in and we act on its instructions.",
             "Technical records — a log of requests to the service including your IP address, the time and what was called; an audit record of which account created, changed or deleted what and when; and delivery records for e-mail we send you.",
           ],
-          "We do not ask for payment card details; the free plan needs none.",
+          "We do not ask for payment card details.",
         ],
       },
       {

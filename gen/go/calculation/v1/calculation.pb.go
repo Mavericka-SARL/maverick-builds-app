@@ -421,486 +421,6 @@ func (x *CalculationResult) GetCalcAt() *timestamppb.Timestamp {
 	return nil
 }
 
-type GetPartitionStateRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Key           *PartitionKey          `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetPartitionStateRequest) Reset() {
-	*x = GetPartitionStateRequest{}
-	mi := &file_calculation_v1_calculation_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetPartitionStateRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetPartitionStateRequest) ProtoMessage() {}
-
-func (x *GetPartitionStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_calculation_v1_calculation_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetPartitionStateRequest.ProtoReflect.Descriptor instead.
-func (*GetPartitionStateRequest) Descriptor() ([]byte, []int) {
-	return file_calculation_v1_calculation_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *GetPartitionStateRequest) GetKey() *PartitionKey {
-	if x != nil {
-		return x.Key
-	}
-	return nil
-}
-
-type GetPartitionStateResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	State         *PartitionState        `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetPartitionStateResponse) Reset() {
-	*x = GetPartitionStateResponse{}
-	mi := &file_calculation_v1_calculation_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetPartitionStateResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetPartitionStateResponse) ProtoMessage() {}
-
-func (x *GetPartitionStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_calculation_v1_calculation_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetPartitionStateResponse.ProtoReflect.Descriptor instead.
-func (*GetPartitionStateResponse) Descriptor() ([]byte, []int) {
-	return file_calculation_v1_calculation_proto_rawDescGZIP(), []int{5}
-}
-
-func (x *GetPartitionStateResponse) GetState() *PartitionState {
-	if x != nil {
-		return x.State
-	}
-	return nil
-}
-
-type TriggerRecalcRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Key           *PartitionKey          `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	Reason        RecalcReason           `protobuf:"varint,2,opt,name=reason,proto3,enum=calculation.v1.RecalcReason" json:"reason,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *TriggerRecalcRequest) Reset() {
-	*x = TriggerRecalcRequest{}
-	mi := &file_calculation_v1_calculation_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *TriggerRecalcRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TriggerRecalcRequest) ProtoMessage() {}
-
-func (x *TriggerRecalcRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_calculation_v1_calculation_proto_msgTypes[6]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TriggerRecalcRequest.ProtoReflect.Descriptor instead.
-func (*TriggerRecalcRequest) Descriptor() ([]byte, []int) {
-	return file_calculation_v1_calculation_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *TriggerRecalcRequest) GetKey() *PartitionKey {
-	if x != nil {
-		return x.Key
-	}
-	return nil
-}
-
-func (x *TriggerRecalcRequest) GetReason() RecalcReason {
-	if x != nil {
-		return x.Reason
-	}
-	return RecalcReason_RECALC_REASON_UNSPECIFIED
-}
-
-type TriggerRecalcResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
-	Queued        bool                   `protobuf:"varint,2,opt,name=queued,proto3" json:"queued,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *TriggerRecalcResponse) Reset() {
-	*x = TriggerRecalcResponse{}
-	mi := &file_calculation_v1_calculation_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *TriggerRecalcResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TriggerRecalcResponse) ProtoMessage() {}
-
-func (x *TriggerRecalcResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_calculation_v1_calculation_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TriggerRecalcResponse.ProtoReflect.Descriptor instead.
-func (*TriggerRecalcResponse) Descriptor() ([]byte, []int) {
-	return file_calculation_v1_calculation_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *TriggerRecalcResponse) GetJobId() string {
-	if x != nil {
-		return x.JobId
-	}
-	return ""
-}
-
-func (x *TriggerRecalcResponse) GetQueued() bool {
-	if x != nil {
-		return x.Queued
-	}
-	return false
-}
-
-type TriggerFullRecalcRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ModelId       string                 `protobuf:"bytes,1,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
-	Reason        RecalcReason           `protobuf:"varint,2,opt,name=reason,proto3,enum=calculation.v1.RecalcReason" json:"reason,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *TriggerFullRecalcRequest) Reset() {
-	*x = TriggerFullRecalcRequest{}
-	mi := &file_calculation_v1_calculation_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *TriggerFullRecalcRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TriggerFullRecalcRequest) ProtoMessage() {}
-
-func (x *TriggerFullRecalcRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_calculation_v1_calculation_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TriggerFullRecalcRequest.ProtoReflect.Descriptor instead.
-func (*TriggerFullRecalcRequest) Descriptor() ([]byte, []int) {
-	return file_calculation_v1_calculation_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *TriggerFullRecalcRequest) GetModelId() string {
-	if x != nil {
-		return x.ModelId
-	}
-	return ""
-}
-
-func (x *TriggerFullRecalcRequest) GetReason() RecalcReason {
-	if x != nil {
-		return x.Reason
-	}
-	return RecalcReason_RECALC_REASON_UNSPECIFIED
-}
-
-type TriggerFullRecalcResponse struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	JobId            string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
-	PartitionsQueued int32                  `protobuf:"varint,2,opt,name=partitions_queued,json=partitionsQueued,proto3" json:"partitions_queued,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
-}
-
-func (x *TriggerFullRecalcResponse) Reset() {
-	*x = TriggerFullRecalcResponse{}
-	mi := &file_calculation_v1_calculation_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *TriggerFullRecalcResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TriggerFullRecalcResponse) ProtoMessage() {}
-
-func (x *TriggerFullRecalcResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_calculation_v1_calculation_proto_msgTypes[9]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TriggerFullRecalcResponse.ProtoReflect.Descriptor instead.
-func (*TriggerFullRecalcResponse) Descriptor() ([]byte, []int) {
-	return file_calculation_v1_calculation_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *TriggerFullRecalcResponse) GetJobId() string {
-	if x != nil {
-		return x.JobId
-	}
-	return ""
-}
-
-func (x *TriggerFullRecalcResponse) GetPartitionsQueued() int32 {
-	if x != nil {
-		return x.PartitionsQueued
-	}
-	return 0
-}
-
-type GetDependencyGraphRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ModelId       string                 `protobuf:"bytes,1,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
-	RevisionId    string                 `protobuf:"bytes,2,opt,name=revision_id,json=revisionId,proto3" json:"revision_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetDependencyGraphRequest) Reset() {
-	*x = GetDependencyGraphRequest{}
-	mi := &file_calculation_v1_calculation_proto_msgTypes[10]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetDependencyGraphRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetDependencyGraphRequest) ProtoMessage() {}
-
-func (x *GetDependencyGraphRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_calculation_v1_calculation_proto_msgTypes[10]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetDependencyGraphRequest.ProtoReflect.Descriptor instead.
-func (*GetDependencyGraphRequest) Descriptor() ([]byte, []int) {
-	return file_calculation_v1_calculation_proto_rawDescGZIP(), []int{10}
-}
-
-func (x *GetDependencyGraphRequest) GetModelId() string {
-	if x != nil {
-		return x.ModelId
-	}
-	return ""
-}
-
-func (x *GetDependencyGraphRequest) GetRevisionId() string {
-	if x != nil {
-		return x.RevisionId
-	}
-	return ""
-}
-
-type GetDependencyGraphResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Edges         []*DependencyEdge      `protobuf:"bytes,1,rep,name=edges,proto3" json:"edges,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetDependencyGraphResponse) Reset() {
-	*x = GetDependencyGraphResponse{}
-	mi := &file_calculation_v1_calculation_proto_msgTypes[11]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetDependencyGraphResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetDependencyGraphResponse) ProtoMessage() {}
-
-func (x *GetDependencyGraphResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_calculation_v1_calculation_proto_msgTypes[11]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetDependencyGraphResponse.ProtoReflect.Descriptor instead.
-func (*GetDependencyGraphResponse) Descriptor() ([]byte, []int) {
-	return file_calculation_v1_calculation_proto_rawDescGZIP(), []int{11}
-}
-
-func (x *GetDependencyGraphResponse) GetEdges() []*DependencyEdge {
-	if x != nil {
-		return x.Edges
-	}
-	return nil
-}
-
-type GetCalculationResultRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Key           *PartitionKey          `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetCalculationResultRequest) Reset() {
-	*x = GetCalculationResultRequest{}
-	mi := &file_calculation_v1_calculation_proto_msgTypes[12]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetCalculationResultRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetCalculationResultRequest) ProtoMessage() {}
-
-func (x *GetCalculationResultRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_calculation_v1_calculation_proto_msgTypes[12]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetCalculationResultRequest.ProtoReflect.Descriptor instead.
-func (*GetCalculationResultRequest) Descriptor() ([]byte, []int) {
-	return file_calculation_v1_calculation_proto_rawDescGZIP(), []int{12}
-}
-
-func (x *GetCalculationResultRequest) GetKey() *PartitionKey {
-	if x != nil {
-		return x.Key
-	}
-	return nil
-}
-
-type GetCalculationResultResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Result        *CalculationResult     `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetCalculationResultResponse) Reset() {
-	*x = GetCalculationResultResponse{}
-	mi := &file_calculation_v1_calculation_proto_msgTypes[13]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetCalculationResultResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetCalculationResultResponse) ProtoMessage() {}
-
-func (x *GetCalculationResultResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_calculation_v1_calculation_proto_msgTypes[13]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetCalculationResultResponse.ProtoReflect.Descriptor instead.
-func (*GetCalculationResultResponse) Descriptor() ([]byte, []int) {
-	return file_calculation_v1_calculation_proto_rawDescGZIP(), []int{13}
-}
-
-func (x *GetCalculationResultResponse) GetResult() *CalculationResult {
-	if x != nil {
-		return x.Result
-	}
-	return nil
-}
-
 var File_calculation_v1_calculation_proto protoreflect.FileDescriptor
 
 const file_calculation_v1_calculation_proto_rawDesc = "" +
@@ -931,33 +451,7 @@ const file_calculation_v1_calculation_proto_rawDesc = "" +
 	"\x11CalculationResult\x12.\n" +
 	"\x03key\x18\x01 \x01(\v2\x1c.calculation.v1.PartitionKeyR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x01R\x05value\x123\n" +
-	"\acalc_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x06calcAt\"J\n" +
-	"\x18GetPartitionStateRequest\x12.\n" +
-	"\x03key\x18\x01 \x01(\v2\x1c.calculation.v1.PartitionKeyR\x03key\"Q\n" +
-	"\x19GetPartitionStateResponse\x124\n" +
-	"\x05state\x18\x01 \x01(\v2\x1e.calculation.v1.PartitionStateR\x05state\"|\n" +
-	"\x14TriggerRecalcRequest\x12.\n" +
-	"\x03key\x18\x01 \x01(\v2\x1c.calculation.v1.PartitionKeyR\x03key\x124\n" +
-	"\x06reason\x18\x02 \x01(\x0e2\x1c.calculation.v1.RecalcReasonR\x06reason\"F\n" +
-	"\x15TriggerRecalcResponse\x12\x15\n" +
-	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x16\n" +
-	"\x06queued\x18\x02 \x01(\bR\x06queued\"k\n" +
-	"\x18TriggerFullRecalcRequest\x12\x19\n" +
-	"\bmodel_id\x18\x01 \x01(\tR\amodelId\x124\n" +
-	"\x06reason\x18\x02 \x01(\x0e2\x1c.calculation.v1.RecalcReasonR\x06reason\"_\n" +
-	"\x19TriggerFullRecalcResponse\x12\x15\n" +
-	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12+\n" +
-	"\x11partitions_queued\x18\x02 \x01(\x05R\x10partitionsQueued\"W\n" +
-	"\x19GetDependencyGraphRequest\x12\x19\n" +
-	"\bmodel_id\x18\x01 \x01(\tR\amodelId\x12\x1f\n" +
-	"\vrevision_id\x18\x02 \x01(\tR\n" +
-	"revisionId\"R\n" +
-	"\x1aGetDependencyGraphResponse\x124\n" +
-	"\x05edges\x18\x01 \x03(\v2\x1e.calculation.v1.DependencyEdgeR\x05edges\"M\n" +
-	"\x1bGetCalculationResultRequest\x12.\n" +
-	"\x03key\x18\x01 \x01(\v2\x1c.calculation.v1.PartitionKeyR\x03key\"Y\n" +
-	"\x1cGetCalculationResultResponse\x129\n" +
-	"\x06result\x18\x01 \x01(\v2!.calculation.v1.CalculationResultR\x06result*\xa9\x01\n" +
+	"\acalc_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x06calcAt*\xa9\x01\n" +
 	"\x0fPartitionStatus\x12 \n" +
 	"\x1cPARTITION_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16PARTITION_STATUS_CLEAN\x10\x01\x12\x1a\n" +
@@ -972,13 +466,7 @@ const file_calculation_v1_calculation_proto_rawDesc = "" +
 	"\x1cRECALC_REASON_MAPPING_CHANGE\x10\x04\x12\x1f\n" +
 	"\x1bRECALC_REASON_POLICY_CHANGE\x10\x05\x12\x1d\n" +
 	"\x19RECALC_REASON_BULK_IMPORT\x10\x06\x12\x18\n" +
-	"\x14RECALC_REASON_MANUAL\x10\a2\xa6\x04\n" +
-	"\x12CalculationService\x12h\n" +
-	"\x11GetPartitionState\x12(.calculation.v1.GetPartitionStateRequest\x1a).calculation.v1.GetPartitionStateResponse\x12\\\n" +
-	"\rTriggerRecalc\x12$.calculation.v1.TriggerRecalcRequest\x1a%.calculation.v1.TriggerRecalcResponse\x12h\n" +
-	"\x11TriggerFullRecalc\x12(.calculation.v1.TriggerFullRecalcRequest\x1a).calculation.v1.TriggerFullRecalcResponse\x12k\n" +
-	"\x12GetDependencyGraph\x12).calculation.v1.GetDependencyGraphRequest\x1a*.calculation.v1.GetDependencyGraphResponse\x12q\n" +
-	"\x14GetCalculationResult\x12+.calculation.v1.GetCalculationResultRequest\x1a,.calculation.v1.GetCalculationResultResponseBKZIgithub.com/mavericks-engine/mavericks/gen/go/calculation/v1;calculationv1b\x06proto3"
+	"\x14RECALC_REASON_MANUAL\x10\aBKZIgithub.com/mavericks-engine/mavericks/gen/go/calculation/v1;calculationv1b\x06proto3"
 
 var (
 	file_calculation_v1_calculation_proto_rawDescOnce sync.Once
@@ -993,57 +481,29 @@ func file_calculation_v1_calculation_proto_rawDescGZIP() []byte {
 }
 
 var file_calculation_v1_calculation_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_calculation_v1_calculation_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_calculation_v1_calculation_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_calculation_v1_calculation_proto_goTypes = []any{
-	(PartitionStatus)(0),                 // 0: calculation.v1.PartitionStatus
-	(RecalcReason)(0),                    // 1: calculation.v1.RecalcReason
-	(*PartitionKey)(nil),                 // 2: calculation.v1.PartitionKey
-	(*PartitionState)(nil),               // 3: calculation.v1.PartitionState
-	(*DependencyEdge)(nil),               // 4: calculation.v1.DependencyEdge
-	(*CalculationResult)(nil),            // 5: calculation.v1.CalculationResult
-	(*GetPartitionStateRequest)(nil),     // 6: calculation.v1.GetPartitionStateRequest
-	(*GetPartitionStateResponse)(nil),    // 7: calculation.v1.GetPartitionStateResponse
-	(*TriggerRecalcRequest)(nil),         // 8: calculation.v1.TriggerRecalcRequest
-	(*TriggerRecalcResponse)(nil),        // 9: calculation.v1.TriggerRecalcResponse
-	(*TriggerFullRecalcRequest)(nil),     // 10: calculation.v1.TriggerFullRecalcRequest
-	(*TriggerFullRecalcResponse)(nil),    // 11: calculation.v1.TriggerFullRecalcResponse
-	(*GetDependencyGraphRequest)(nil),    // 12: calculation.v1.GetDependencyGraphRequest
-	(*GetDependencyGraphResponse)(nil),   // 13: calculation.v1.GetDependencyGraphResponse
-	(*GetCalculationResultRequest)(nil),  // 14: calculation.v1.GetCalculationResultRequest
-	(*GetCalculationResultResponse)(nil), // 15: calculation.v1.GetCalculationResultResponse
-	nil,                                  // 16: calculation.v1.PartitionKey.DimensionScopeEntry
-	(*timestamppb.Timestamp)(nil),        // 17: google.protobuf.Timestamp
+	(PartitionStatus)(0),          // 0: calculation.v1.PartitionStatus
+	(RecalcReason)(0),             // 1: calculation.v1.RecalcReason
+	(*PartitionKey)(nil),          // 2: calculation.v1.PartitionKey
+	(*PartitionState)(nil),        // 3: calculation.v1.PartitionState
+	(*DependencyEdge)(nil),        // 4: calculation.v1.DependencyEdge
+	(*CalculationResult)(nil),     // 5: calculation.v1.CalculationResult
+	nil,                           // 6: calculation.v1.PartitionKey.DimensionScopeEntry
+	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
 }
 var file_calculation_v1_calculation_proto_depIdxs = []int32{
-	16, // 0: calculation.v1.PartitionKey.dimension_scope:type_name -> calculation.v1.PartitionKey.DimensionScopeEntry
-	2,  // 1: calculation.v1.PartitionState.key:type_name -> calculation.v1.PartitionKey
-	0,  // 2: calculation.v1.PartitionState.status:type_name -> calculation.v1.PartitionStatus
-	17, // 3: calculation.v1.PartitionState.last_calc_at:type_name -> google.protobuf.Timestamp
-	2,  // 4: calculation.v1.CalculationResult.key:type_name -> calculation.v1.PartitionKey
-	17, // 5: calculation.v1.CalculationResult.calc_at:type_name -> google.protobuf.Timestamp
-	2,  // 6: calculation.v1.GetPartitionStateRequest.key:type_name -> calculation.v1.PartitionKey
-	3,  // 7: calculation.v1.GetPartitionStateResponse.state:type_name -> calculation.v1.PartitionState
-	2,  // 8: calculation.v1.TriggerRecalcRequest.key:type_name -> calculation.v1.PartitionKey
-	1,  // 9: calculation.v1.TriggerRecalcRequest.reason:type_name -> calculation.v1.RecalcReason
-	1,  // 10: calculation.v1.TriggerFullRecalcRequest.reason:type_name -> calculation.v1.RecalcReason
-	4,  // 11: calculation.v1.GetDependencyGraphResponse.edges:type_name -> calculation.v1.DependencyEdge
-	2,  // 12: calculation.v1.GetCalculationResultRequest.key:type_name -> calculation.v1.PartitionKey
-	5,  // 13: calculation.v1.GetCalculationResultResponse.result:type_name -> calculation.v1.CalculationResult
-	6,  // 14: calculation.v1.CalculationService.GetPartitionState:input_type -> calculation.v1.GetPartitionStateRequest
-	8,  // 15: calculation.v1.CalculationService.TriggerRecalc:input_type -> calculation.v1.TriggerRecalcRequest
-	10, // 16: calculation.v1.CalculationService.TriggerFullRecalc:input_type -> calculation.v1.TriggerFullRecalcRequest
-	12, // 17: calculation.v1.CalculationService.GetDependencyGraph:input_type -> calculation.v1.GetDependencyGraphRequest
-	14, // 18: calculation.v1.CalculationService.GetCalculationResult:input_type -> calculation.v1.GetCalculationResultRequest
-	7,  // 19: calculation.v1.CalculationService.GetPartitionState:output_type -> calculation.v1.GetPartitionStateResponse
-	9,  // 20: calculation.v1.CalculationService.TriggerRecalc:output_type -> calculation.v1.TriggerRecalcResponse
-	11, // 21: calculation.v1.CalculationService.TriggerFullRecalc:output_type -> calculation.v1.TriggerFullRecalcResponse
-	13, // 22: calculation.v1.CalculationService.GetDependencyGraph:output_type -> calculation.v1.GetDependencyGraphResponse
-	15, // 23: calculation.v1.CalculationService.GetCalculationResult:output_type -> calculation.v1.GetCalculationResultResponse
-	19, // [19:24] is the sub-list for method output_type
-	14, // [14:19] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	6, // 0: calculation.v1.PartitionKey.dimension_scope:type_name -> calculation.v1.PartitionKey.DimensionScopeEntry
+	2, // 1: calculation.v1.PartitionState.key:type_name -> calculation.v1.PartitionKey
+	0, // 2: calculation.v1.PartitionState.status:type_name -> calculation.v1.PartitionStatus
+	7, // 3: calculation.v1.PartitionState.last_calc_at:type_name -> google.protobuf.Timestamp
+	2, // 4: calculation.v1.CalculationResult.key:type_name -> calculation.v1.PartitionKey
+	7, // 5: calculation.v1.CalculationResult.calc_at:type_name -> google.protobuf.Timestamp
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_calculation_v1_calculation_proto_init() }
@@ -1057,9 +517,9 @@ func file_calculation_v1_calculation_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_calculation_v1_calculation_proto_rawDesc), len(file_calculation_v1_calculation_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   15,
+			NumMessages:   5,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   0,
 		},
 		GoTypes:           file_calculation_v1_calculation_proto_goTypes,
 		DependencyIndexes: file_calculation_v1_calculation_proto_depIdxs,

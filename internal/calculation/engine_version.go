@@ -51,7 +51,7 @@ func RunEngineUpgrade(ctx context.Context, pool *pgxpool.Pool, log zerolog.Logge
 	}
 	log.Info().Int("revisions", len(revisions)).Int("engine_version", EngineVersion).
 		Msg("calculation engine upgraded: recalculating every revision")
-	sched := NewScheduler(log, NewStore(pool), nil)
+	sched := NewScheduler(log, NewStore(pool))
 	failed := 0
 	for _, r := range revisions {
 		if ctx.Err() != nil {

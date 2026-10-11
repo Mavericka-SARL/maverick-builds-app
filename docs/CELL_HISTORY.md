@@ -1,8 +1,6 @@
 # Per-cell change history
 
-> **Classification:** Current — Who changed which value, browsable per intersection.
-
-> **Last verified:** 2026-09-16
+> **Last verified:** 2026-10-11 (every path, variable, route and identifier it names checked against the code)
 
 An enterprise feature (`cell_history`). Right-click an input cell in a
 planning grid and choose **History** to see every value that intersection

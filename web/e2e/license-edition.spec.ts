@@ -57,7 +57,7 @@ test("renewal due: the account menu says when the key expires", async ({ page })
   await expect(page.getByTestId("license-tab")).toContainText("Install the renewed key before then");
 });
 
-test("transition: paid features are read and export only, and say so where they are used", async ({ page }) => {
+test("transition: enterprise features are read and export only, and say so where they are used", async ({ page }) => {
   await mockApi(page, { license: { ...enterpriseLicense, state: "transition", expires_at: "2026-10-01T00:00:00Z", transition_ends_at: "2026-10-31T00:00:00Z" } });
   await loadAs(page, "platform_admin");
   await account(page).click();

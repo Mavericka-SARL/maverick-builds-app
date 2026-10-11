@@ -1,61 +1,84 @@
-maverickbuilds.app Enterprise License
-Version 1.0, September 2026
+maverickbuilds.app Enterprise Features License
+Version 1.1, October 2026
 
 Copyright (c) 2026 Mavericka SARL-S.
 
 This license applies to all files under the "ee/" directory and the
 "web/src/ee/" directory of the maverickbuilds.app repository (the "Enterprise
-Software"). The rest of the repository is licensed under the maverickbuilds.app
-Sustainable Use License in the top-level "LICENSE" file.
+Code"). The Enterprise Code implements the features that a license key for the
+Commercial or Enterprise edition switches on (the "Enterprise Features");
+docs/LICENSING.md lists them. The rest of the repository is licensed under the
+maverickbuilds.app Sustainable Use License in the top-level "LICENSE" file.
+
+Version 1.1 replaces version 1.0 (September 2026, then named the
+"maverickbuilds.app Enterprise License") for copies made available from
+11 October 2026. It does not withdraw any right granted under version 1.0 for
+copies received under it.
 
 1. Source-available, not open source
 
-The Enterprise Software is made available in source form so that it can be
-reviewed, built and deployed together with the rest of maverickbuilds.app. It is
-not licensed for use under the Sustainable Use License.
+The Enterprise Code is published in source form so that it can be reviewed,
+built and deployed together with the rest of maverickbuilds.app.
 
-2. Grant
+2. Without a subscription: Enterprise Features switched off
 
-Subject to a valid, unexpired license key issued by the licensor that names
-the relevant edition (a "Subscription"), the licensor grants you a
-non-exclusive, non-transferable, non-sublicensable license to use the
-Enterprise Software, and the functionality it unlocks, for your own internal
-business purposes, for the term and within the limits stated in the
-Subscription.
+You may read and copy the Enterprise Code, build it together with the rest of
+maverickbuilds.app, and install and run the result, including the images the
+licensor publishes, which contain it, for any use the Sustainable Use License
+permits, as long as the Enterprise Features stay switched off. Running the
+Enterprise Code that this involves is permitted.
 
-3. Limitations
+You may share unmodified copies of the Enterprise Code as part of a complete
+copy of the repository shared under the Sustainable Use License, with this
+license and every notice intact.
 
-Without a Subscription you may not use, copy, modify, distribute, make
-available or create derivative works of the Enterprise Software, except to
-build the software from source for the purpose of evaluating it.
+3. With a subscription: Enterprise Features switched on
 
-You may not remove, disable, or circumvent the license-key checks that gate
-the Enterprise Software, nor use the Enterprise Software beyond the edition,
-term or limits of your Subscription.
+Subject to a valid, unexpired license key issued by the licensor for an
+agreement you have accepted with it (a "Subscription"), the licensor grants
+you a non-exclusive, non-transferable, non-sublicensable license to use the
+Enterprise Features for the term, edition and scope that agreement states. A
+license key implements the agreement; it grants no right the agreement does
+not.
 
-You may not distribute, sublicense, resell, host for third parties or
-otherwise make the Enterprise Software available to anyone outside your
-company, unless a separate written agreement with the licensor permits it.
+4. Limitations
 
-You may not alter, remove, or obscure any licensing, copyright, or other
-notices of the licensor.
+Except as a Subscription or another written agreement with the licensor
+allows, you may not:
 
-4. Term and termination
+- switch on or use Enterprise Features, or change the software so that it
+  treats them as licensed;
+- create, alter or use license keys the licensor did not issue, or remove,
+  disable or circumvent the license-key checks;
+- distribute modified Enterprise Code, or distribute, sublicense, resell, host
+  for third parties or otherwise make the Enterprise Code available beyond
+  section 2;
+- alter, remove, or obscure any licensing, copyright, or other notices of the
+  licensor.
 
-Your license ends automatically when your Subscription expires or terminates,
-or if you breach these terms. On termination you must stop using the
-Enterprise Software; the rest of maverickbuilds.app remains available to you
-under the Sustainable Use License.
+5. Term and termination
 
-5. No warranty, no liability
+Your rights under section 3 end when your Subscription expires or terminates,
+as its agreement provides. You may then go on using the rest of
+maverickbuilds.app under the Sustainable Use License, with the Enterprise
+Features switched off as section 2 describes.
 
-As far as the law allows, the Enterprise Software comes as is, without any
+If you breach these terms, your license ends automatically.
+
+6. Ownership and trademarks
+
+Section 7 of the Sustainable Use License, "Ownership and trademarks", applies
+to the Enterprise Code too.
+
+7. No warranty, no liability
+
+As far as the law allows, the Enterprise Code comes as is, without any
 warranty or condition, and the licensor will not be liable to you for any
 damages arising out of these terms or the use or nature of the Enterprise
-Software, under any kind of legal claim, except as agreed in writing in your
+Code, under any kind of legal claim, except as agreed in writing in your
 Subscription.
 
-6. Definitions
+8. Definitions
 
-"Licensor", "you", "your company", "use" and "internal business purposes" have
-the meanings given in the maverickbuilds.app Sustainable Use License.
+"Licensor", "you", "your company", "use" and "internal use" have the meanings
+given in the maverickbuilds.app Sustainable Use License.

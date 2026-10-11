@@ -117,7 +117,7 @@ func (h *handler) aiClearCells(ctx context.Context, act *actor, modelID string, 
 			return fmt.Errorf("clear: %w", err)
 		}
 	}
-	scheduler := calculation.NewScheduler(h.log, calculation.NewStore(h.db.For(ctx)), nil)
+	scheduler := calculation.NewScheduler(h.log, calculation.NewStore(h.db.For(ctx)))
 	if err := scheduler.RecalcAffected(ctx, modelID, req.RevisionID, []string{req.MetricID}); err != nil {
 		h.log.Warn().Err(err).Msg("recalc failed after an AI clear")
 	}

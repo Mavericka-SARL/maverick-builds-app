@@ -315,7 +315,7 @@ func main() {
 			Time("expires_at", *st.ExpiresAt).Bool("renewal_due", st.RenewalDue).Msg("license key accepted")
 	case license.StateTransition:
 		log.Warn().Str("customer", st.Customer).Time("expired_at", *st.ExpiresAt).Time("transition_ends_at", *st.TransitionEndsAt).
-			Msg("license key has EXPIRED — paid features are read and export only until the transition ends, then the community edition runs")
+			Msg("license key has EXPIRED — enterprise features are read and export only until the transition ends, then the community edition runs")
 	case license.StateExpired:
 		log.Warn().Str("customer", st.Customer).Time("expired_at", *st.ExpiresAt).Msg("license key has EXPIRED — running the community edition until a new key is installed")
 	case license.StateInvalid:

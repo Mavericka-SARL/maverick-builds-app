@@ -16,7 +16,7 @@ import (
 )
 
 // Scoped grid reads of calculated metrics (a caller with hidden members, or
-// a scope pin): FORMULA_CALCULATION_INSTRUCTIONS.md contracts C6 and C7.
+// a scope pin); package readset decides which persisted values they may show.
 //
 //   - A SERVED metric (time functions, LOOKUP, the *IFS/*IF family, TIMESUM,
 //     the *VALUE family — readset.Served) reads members and periods outside

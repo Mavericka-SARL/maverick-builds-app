@@ -15,10 +15,9 @@ import (
 // the 2.5% rate once per department and month: 7 × 12 × 2.5 = 210, where the
 // grid showed 2.5. Here three departments and three months: 22.5 before.
 func TestResolveFormulaOverNarrowerInputIgnoresUnrelatedPins(t *testing.T) {
-	store, cleanup := setupDB(t)
+	pool, cleanup := setupDB(t)
 	defer cleanup()
 	ctx := context.Background()
-	pool := store.Pool()
 	modelID := "00000000-0000-0000-0000-000000000031"
 	revisionID := "00000000-0000-0000-0031-000000000031"
 	userID := "00000000-0000-0000-0000-000000000331"

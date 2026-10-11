@@ -3,7 +3,7 @@ package gateway
 // The cell write refuses coordinates no reader reads — a parent member
 // (stored values there were ignored by the grid but counted by a pinned
 // KPI), a calculated member, a dimension of another revision — through the
-// resolver it now shares with the gRPC write and form postings. A member
+// resolver it now shares with form postings. A member
 // another dimension points at (a department its staff belong to) is not a
 // parent: the grid lets a planner type there, and the file import now
 // accepts the same value.

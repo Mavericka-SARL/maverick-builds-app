@@ -54,13 +54,12 @@ podDisruptionBudget:
   maxUnavailable: 1
 
 service:
-  # Your cloud's LoadBalancer settings, in a second values file. Hetzner's:
+  # Your cloud's LoadBalancer settings, in a second values file, for example:
   #
   #   service:
   #     annotations:
-  #       load-balancer.hetzner.cloud/location: fsn1
-  #       load-balancer.hetzner.cloud/use-private-ip: "true"
-  #       load-balancer.hetzner.cloud/uses-proxyprotocol: "true"
+  #       <your cloud's load-balancer annotations: location, private network,
+  #        and turning the PROXY protocol on>
   #   ports:
   #     web:
   #       proxyProtocol: {trustedIPs: ["<load balancer subnet>", "<pod network>"]}

@@ -326,7 +326,7 @@ const adminAudit = [
 
 const noLimits = { max_users: 0, max_applications: 0, max_models: 0, max_metrics_per_model: 0, max_members_per_dimension: 0, max_fact_rows_per_model: 0, max_ai_messages_per_day: 0, max_integration_runs_per_day: 0, max_storage_mb: 0 };
 const testLimits = { ...noLimits, max_storage_mb: 100, max_ai_messages_per_day: 100, max_integration_runs_per_day: 50 };
-const testNote = "A basic workspace holds up to 100 MB. To go further, run the platform on your own infrastructure — free of charge and without limits for non-commercial use, under a commercial licence otherwise — or get the enterprise edition.";
+const testNote = "A Community workspace holds up to 100 MB. To go further, run the platform on your own infrastructure — free for your company's internal use — or get the Commercial or Enterprise edition.";
 const smallLimits = { ...noLimits, max_users: 5, max_applications: 2, max_models: 3, max_metrics_per_model: 50, max_members_per_dimension: 500, max_fact_rows_per_model: 100000, max_ai_messages_per_day: 100, max_integration_runs_per_day: 50 };
 
 /** GET /api/admin/plans as the seeded catalog answers it. */
@@ -352,7 +352,7 @@ export const legalInfo = {
   address: "1 Rue de Test, L-1000 Luxembourg",
   email: "legal@acme.test",
   jurisdiction: "Luxembourg",
-  hosting: "Hetzner Online GmbH (Germany)",
+  hosting: "Example Hosting GmbH (Germany)",
   updated: "2026-09-18",
 };
 
@@ -362,7 +362,7 @@ export const legalUnpublished = {
   entity: "", address: "", email: "", jurisdiction: "", hosting: "", updated: "",
 };
 
-/** GET /api/signup/options with sign-up open: the basic workspace, as seeded. */
+/** GET /api/signup/options with sign-up open: the Community plan, as seeded. */
 export const signupOptions = {
   enabled: true, contact_url: "https://example.test/pricing",
   plan: { key: "community", name: "Community", description: "Use the platform for as long as you like, with up to 100 MB of data.", limits: testLimits, limit_note: testNote },

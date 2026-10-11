@@ -1,7 +1,5 @@
 # Development and Validation
 
-> **Classification:** Current — How to build, run and validate the repository.
-
 > **Last verified:** 2026-07-15
 
 ## Toolchain
@@ -13,7 +11,6 @@
 | npm dependencies | `web/package-lock.json` |
 | PostgreSQL | 16 in the Docker development stack |
 | Buf | 1.69.0 in CI |
-| sqlc | v1.31.1, pinned in the `Makefile` (`SQLC_VERSION`) and CI |
 | ogen | v1.20.3, pinned in the `Makefile` (`OGEN_VERSION`) and CI; other versions produce drift |
 
 ## Local workflow
@@ -91,7 +88,7 @@ go test -timeout 20m ./internal/testobjectstore/
 cd web
 npm ci
 npx eslint src/
-npx tsc --noEmit
+npx tsc -b --noEmit
 npm run e2e
 npm run build
 ```
@@ -113,11 +110,10 @@ Or separately:
 ```bash
 make proto   # buf generate
 make oas     # ogen at the pinned OGEN_VERSION
-make sqlc    # sqlc at the pinned SQLC_VERSION
-make gen     # all three
+make gen     # both
 ```
 
-Run the pinned versions through `make`: a different ogen or sqlc produces
+Run the pinned versions through `make`: a different ogen produces
 different output, which CI rejects as drift.
 
 Generated locations:
@@ -125,21 +121,17 @@ Generated locations:
 | Source | Output |
 |---|---|
 | `proto/` + `buf.gen.yaml` | `gen/go/` |
-| migrations + `internal/{audit,tenant}/queries` | `internal/{audit,tenant}/db` |
 | `api/openapi.yaml` | `internal/gateway/oas` |
 
-After generation, review `git diff`. CI rejects drift in sqlc and ogen output.
+After generation, review `git diff`. CI rejects drift in ogen output.
 
 ## Configuration
 
 Common environment variables come from `pkg/config.BaseConfig`:
 
 - `DATABASE_URL`
-- `GRPC_PORT`
 - `METRICS_PORT`
 - `LOG_LEVEL`
-- `NATS_URL`
-- `REDIS_URL`
 
 Gateway-specific variables include `HTTP_PORT`,
 `OTEL_EXPORTER_OTLP_ENDPOINT`, `SERVICE_VERSION`, and `DEV_MODE`. With
@@ -171,8 +163,7 @@ Per-user and per-tenant keys are AES-256-GCM encrypted only when
 store retains a legacy plaintext path. Treat that variable as mandatory
 outside disposable local development, together with `INTEGRATION_CRED_KEY`,
 which seals connector credentials and has no plaintext fallback at all
-(docs/HETZNER_DEPLOYMENT.md, step 6). The separate legacy gRPC assistant
-uses `ANTHROPIC_API_KEY`.
+(see [SELF_HOSTING.md](SELF_HOSTING.md#step-4--create-the-secrets)).
 
 `AI_MAX_CALLS_PER_SESSION` (default 200) and `AI_MAX_CALLS_PER_DAY` (default
 1000, per user, UTC day) cap the AI Developer's LLM calls; every call counts,
@@ -213,7 +204,7 @@ development placeholders and must be replaced for any deployed environment.
 ## Change-specific validation
 
 - API schema change: run ogen and its drift check.
-- SQL query/schema change: run migrations, sqlc, and affected package tests.
+- SQL query/schema change: run migrations and the affected package tests.
 - Protobuf change: run `buf lint`, `buf generate`, and Go tests.
 - Access or workflow change: run gateway integration tests with real
   PostgreSQL, including negative authorization cases.

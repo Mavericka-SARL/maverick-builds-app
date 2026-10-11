@@ -14,8 +14,8 @@ import (
 	"github.com/mavericks-engine/mavericks/pkg/logger"
 )
 
-// Dimensional references through the real scheduler (contract C1-C5 of
-// FORMULA_CALCULATION_INSTRUCTIONS.md): dim.property, PARENT, LOOKUP, the
+// Dimensional references through the real scheduler (docs/formulas-manual,
+// chapters 11-14): dim.property, PARENT, LOOKUP, the
 // conditional aggregations and the time additions, with exact numbers at
 // leaves, rollup combos, one-dimension slices and totals.
 
@@ -505,7 +505,7 @@ func TestRecurrenceRefusesDimensionalFunctions(t *testing.T) {
 		closingID, `opening + flow + LOOKUP(flow, month, "2026-01") * 0`); err != nil {
 		t.Fatal(err)
 	}
-	sched := calculation.NewScheduler(logger.New("calc-test"), store, nil)
+	sched := calculation.NewScheduler(logger.New("calc-test"), store)
 	recalcErr := sched.RecalcAffected(ctx, modelID, revID, []string{flowID})
 	refused := recalcErr != nil && strings.Contains(recalcErr.Error(), "TEMPORAL_CYCLE_NOT_CAUSAL")
 	if !refused {

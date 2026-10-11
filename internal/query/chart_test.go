@@ -18,10 +18,9 @@ import (
 // (generic_rollup_workflow_test.go), the only other place this logic is
 // exercised end-to-end.
 func TestResolveCascadesHiddenMemberFromAncestorDimension(t *testing.T) {
-	store, cleanup := setupDB(t)
+	pool, cleanup := setupDB(t)
 	defer cleanup()
 	ctx := context.Background()
-	pool := store.Pool()
 
 	modelID := "00000000-0000-0000-0000-000000000010"
 	revisionID := "00000000-0000-0000-0010-000000000010"
@@ -145,10 +144,9 @@ func TestResolveCascadesHiddenMemberFromAncestorDimension(t *testing.T) {
 // resolveMetricPerMember/evalCalcMetricVisited's new rollup.Resolve wiring
 // end to end, not just a plain per-leaf formula evaluation.
 func TestResolveCalcMetricRollsUpThroughRollupPackage(t *testing.T) {
-	store, cleanup := setupDB(t)
+	pool, cleanup := setupDB(t)
 	defer cleanup()
 	ctx := context.Background()
-	pool := store.Pool()
 
 	modelID := "00000000-0000-0000-0000-000000000020"
 	revisionID := "00000000-0000-0000-0020-000000000020"
@@ -270,10 +268,9 @@ func TestResolveCalcMetricRollsUpThroughRollupPackage(t *testing.T) {
 // that does not exist at all is still an error — that is a broken config,
 // not an access rule.
 func TestResolveSubstitutesHiddenContextMember(t *testing.T) {
-	store, cleanup := setupDB(t)
+	pool, cleanup := setupDB(t)
 	defer cleanup()
 	ctx := context.Background()
-	pool := store.Pool()
 
 	modelID := "00000000-0000-0000-0000-000000000011"
 	revisionID := "00000000-0000-0000-0011-000000000011"

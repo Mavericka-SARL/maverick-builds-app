@@ -1,10 +1,11 @@
-# Enterprise source (`ee/`)
-
-> **Classification:** Current — How enterprise and commercial code is organised and gated.
+# Enterprise-feature source (`ee/`)
 
 Everything under this directory (and under [`web/src/ee/`](../web/src/ee/README.md)
-on the frontend) is licensed under the [maverickbuilds.app Enterprise License](LICENSE),
-not the Sustainable Use License that covers the rest of the repository.
+on the frontend) is licensed under the [maverickbuilds.app Enterprise Features License](LICENSE),
+not the Sustainable Use License that covers the rest of the repository. It holds
+the features of both paid editions, Commercial and Enterprise. Without a license
+key it still runs in every build, with those features switched off, which that
+license permits.
 
 ## How it works
 
@@ -19,11 +20,11 @@ not the Sustainable Use License that covers the rest of the repository.
   and the edition it needs; a public route that must answer everywhere checks
   inline and answers "no" (`/api/sso/discover`). Background jobs, which the
   gateway runs, check `license.Manager.Has` before doing gated work. Only the
-  gateway loads a licence; no gRPC service serves a gated feature. The frontend wraps gated
+  gateway loads a licence. The frontend wraps gated
   UI in `<FeatureGate feature="…">` (`web/src/license/FeatureGate.tsx`) so a
   locked feature is visible but inert.
 - **`Has` or `Usable`.** `Has` is the strict check (an active key): use it for
-  anything that configures, changes or irreversibly acts on a paid feature.
+  anything that configures, changes or irreversibly acts on an enterprise feature.
   `Usable` also holds in the 30-day transition after expiry. Use it only for
   behaviour that must keep working as configured (sign-in, branding,
   inherited settings, reads). `requireFeature` applies the rule by method:
@@ -44,7 +45,7 @@ not the Sustainable Use License that covers the rest of the repository.
 
 ```text
 ee/
-  LICENSE            the Enterprise License
+  LICENSE            the Enterprise Features License
   README.md          this file
   <feature>/         one Go package per enterprise feature (added with the feature)
 web/src/ee/

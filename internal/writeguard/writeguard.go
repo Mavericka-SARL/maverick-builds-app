@@ -5,13 +5,9 @@
 // member (or an ancestor of it) currently locked by an in-progress or
 // approved workflow instance.
 //
-// This logic used to live only inline in internal/gateway's HTTP handlers
-// (cells() and importUpload()), which meant the gRPC ImportService
-// (internal/importpkg) could commit facts that bypassed every one of these
-// checks — an actor blocked from writing a cell interactively could still
-// write it via the gRPC import path. Both entry points now call the same
-// functions here, so there is exactly one implementation of "is this write
-// allowed" for the whole engine, not one per transport.
+// Every write entry point (interactive cells, imports, form postings) calls
+// the functions here, so there is exactly one implementation of "is this
+// write allowed" for the whole engine.
 //
 // Every function takes a *pgxpool.Pool directly rather than a request/handler
 // type, so it has no dependency on gateway (or any other caller), avoiding an
@@ -429,7 +425,7 @@ func WorkflowLockReasonForMetrics(ctx context.Context, pool *pgxpool.Pool, model
 // per-member hidden/read-only access, then workflow-lock. Returns a single
 // human-readable reason on the first violation found, or ("", nil) if the
 // write is allowed. This is the one function both the interactive cell
-// writeback path and every import path (HTTP and gRPC) should call — see
+// writeback path and every import path should call — see
 // package doc.
 func CheckWrite(ctx context.Context, pool *pgxpool.Pool, modelID, revisionID, userID string, memberIDs []string) (reason string, err error) {
 	return CheckWriteMetrics(ctx, pool, modelID, revisionID, userID, memberIDs, nil)

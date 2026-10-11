@@ -1,7 +1,5 @@
 # Contributing
 
-> **Classification:** Current — How to take part in maverickbuilds.app from outside the team.
-
 Thank you for looking. Everyone taking part follows the
 [code of conduct](CODE_OF_CONDUCT.md). This repository is published as **snapshots**: the
 product is developed in a separate repository, and every commit here
@@ -48,18 +46,35 @@ so you can see whether yours is coming. Every
 [release](https://github.com/Mavericka-SARL/maverick-builds-app/releases)
 lists the issues it closed.
 
-## Pull requests: not yet
+## Code contributions
 
-We cannot merge outside code at the moment. The same code base is offered
-under the [Sustainable Use License](LICENSE) and under commercial and
-enterprise licences (see [docs/LICENSING.md](docs/LICENSING.md)), so we can
-only take a contribution under a contributor licence agreement, and that
-agreement does not exist yet. A pull request would also be overwritten by the
-next snapshot.
+A fix or an improvement is welcome. Because this repository is published as
+snapshots, a pull request cannot be merged as it stands: we apply the change in
+the development repository, and it reaches this one with the next snapshot,
+where the issue or pull request names it. Open a pull request, or an issue that
+links a branch in your fork, and say in it that you accept the contributor terms
+below. We take a contribution only under those terms.
 
-If you have a fix, open an issue describing it, or link a branch in your fork
-from the issue. We may implement it ourselves, and we will say so in the
-issue. This section changes once the agreement is in place.
+### Contributor terms
+
+The same code base is offered under the [Sustainable Use License](LICENSE), the
+[Enterprise Features License](ee/LICENSE) and commercial agreements (see
+[docs/LICENSING.md](docs/LICENSING.md)), so a contribution has to be usable
+under all of them. By sending one, as a pull request, a patch, or code in an
+issue, a discussion or an e-mail, you agree that:
+
+1. you wrote it, or otherwise have the right to send it under these terms, and
+   if your employer has rights in your work, it has agreed;
+2. you keep the copyright in it, and you grant Mavericka SARL-S, the owner of
+   maverickbuilds.app, a perpetual, worldwide, non-exclusive, royalty-free and
+   irrevocable license to use, copy, modify, distribute and sublicense it, and
+   to license it under any terms, including the licenses above;
+3. you grant Mavericka SARL-S the same license under any patent claims you can
+   license that your contribution, alone or combined with maverickbuilds.app,
+   necessarily infringes;
+4. you tell us in the contribution about any part of it that is someone
+   else's work, and under which license; and
+5. Mavericka SARL-S may decide not to use it, and owes nothing for it.
 
 ## Contact
 

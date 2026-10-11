@@ -99,7 +99,7 @@ func TestFormulaReferencesDimsCaseInsensitive(t *testing.T) {
 // Where a metric shares a dimension's name, the evaluators bind a pinned
 // dimension's member code after the metric values, so the bare name is the
 // member code at a pinned cell and the metric only where the dimension is
-// unpinned. This pins what FORMULA_CALCULATION_INSTRUCTIONS.md documents.
+// unpinned. This pins what the formulas manual documents.
 func TestDimensionNameSharedWithMetric(t *testing.T) {
 	dims := map[string]*rollup.Dimension{
 		"d-region": {ID: "d-region", Members: []rollup.Member{

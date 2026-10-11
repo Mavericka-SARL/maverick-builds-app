@@ -1,4 +1,4 @@
-# Non-sensitive runtime configuration shared across all Mavericks services.
+# Non-sensitive runtime configuration shared by the gateway and the integration worker.
 # Secrets (passwords, tokens) live in mavericks-secrets and are NOT here.
 apiVersion: v1
 kind: ConfigMap
@@ -17,19 +17,7 @@ data:
   # contributed by envFrom). Each service manifest therefore composes its
   # own DATABASE_URL via an explicit `env:` entry referencing
   # $(POSTGRES_PASSWORD), which mavericks-secrets already provides via
-  # envFrom's secretRef. See any services/*.yaml for the pattern.
-
-  # Policy Service (RACI / permission checks)
-  POLICY_ADDR: "policy:9090"
-
-  # Audit Service (records mutating-RPC audit events for every gRPC service)
-  AUDIT_ADDR: "audit:9090"
-
-  # NATS JetStream broker
-  NATS_URL: "nats://nats:4222"
-
-  # Redis cache / session store
-  REDIS_URL: "redis://redis:6379"
+  # envFrom's secretRef. See services/gateway.yaml for the pattern.
 
   # Keycloak identity provider (internal cluster address)
   KEYCLOAK_URL: "http://keycloak:8080"
@@ -44,8 +32,7 @@ data:
   MINIO_ROOT_USER: "mavericks"
   OBJECT_STORE_BUCKET: "mavericks"
 
-  # Default listener ports for service binaries
-  GRPC_PORT: "9090"
+  # The gateway's listener port
   HTTP_PORT: "8080"
 
   # OpenTelemetry collector endpoint (no schema — gRPC plain-text)

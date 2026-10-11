@@ -16,7 +16,7 @@
 #   MINIO_ROOT_PASSWORD    (required)
 #   BACKUP_BUCKET          default: mavericks-backups
 #   BACKUP_REGION          region used only when the bucket has to be created
-#                          (e.g. fsn1 for Hetzner Object Storage); unset is fine
+#                          (the provider's region name); unset is fine
 #                          when the bucket already exists
 #   BACKUP_RETENTION_DAYS  default: 14
 #   BACKUP_DATABASES       default: the one in DATABASE_URL. "all" also dumps
@@ -50,11 +50,9 @@ mc alias set backupminio "$MINIO_URL" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" 
 
 # Create the bucket only when it is genuinely missing. `mc mb
 # --ignore-existing` still asks the server to create it, and a provider whose
-# region is not mc's default (Hetzner Object Storage serves fsn1, mc assumes
-# us-east-1) answers "The location constraint differs from the location you
+# region is not mc's default (mc assumes us-east-1) answers "The location constraint differs from the location you
 # are trying to access" rather than a plain "already exists". With set -e that
-# aborted every run: production backups failed silently for three nights from
-# 2026-09-15, when the image picked up a newer mc that reports this.
+# aborted every run, and backups failed silently once a newer mc reported it.
 log "ensuring bucket ${BACKUP_BUCKET} exists"
 if mc ls "backupminio/${BACKUP_BUCKET}" >/dev/null 2>&1; then
   log "bucket ${BACKUP_BUCKET} is present"

@@ -1,7 +1,5 @@
 # Example models
 
-> **Classification:** Current — Model packages you can import to try the platform, and how to share your own.
-
 A model package is a JSON file holding a model's definitions: dimensions and
 their members, metrics and formulas, grids, dashboards, forms, workflows and
 automation rules. Import one and you have a working model in seconds, without

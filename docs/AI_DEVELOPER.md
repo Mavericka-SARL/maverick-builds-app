@@ -1,7 +1,5 @@
 # The AI Developer: what it can build, and what stays human
 
-> **Classification:** Current — The assistant's tool surface and its limits.
-
 > **Last verified:** 2026-10-05
 
 The AI Developer is the assistant inside the developer console. Its rule is
@@ -144,8 +142,7 @@ dimension are still the copied ones, and keeps that match for the rest of the
 proposal; otherwise it is refused with a request for the current name. Promoting the draft
 recomputes every calculated metric of the revision. The assistant's formulas use the same validation as the
 console, including `dim.property`, `PARENT`, `LOOKUP`, the `SUMIFS` family and
-the time additions (see
-`FORMULA_CALCULATION_INSTRUCTIONS.md`). Its system prompt's "Formula language"
+the time additions (see the [formulas manual](formulas-manual/)). Its system prompt's "Formula language"
 section lists the functions from the engine's own registry (`formula.BuiltinNames`,
 held there by `TestPromptListsEveryFormulaFunction`), so the assistant is never
 told of a function the engine lacks, and names what does not exist (VLOOKUP,

@@ -1,4 +1,4 @@
-# Gateway — the sole HTTP entry-point for the Mavericks platform.
+# Gateway — the sole HTTP entry-point for maverickbuilds.app.
 # Exposes port 8080 internally and is fronted by a LoadBalancer Service (gateway-lb)
 # for external traffic on port 80.
 ---
@@ -250,6 +250,6 @@ spec:
 #
 # TLS now terminates in-cluster at the ingress controller (Traefik, see
 # base/ingress.yaml), which brings its own LoadBalancer. Keeping a second one
-# here would provision a second Hetzner load balancer AND publish the API on
+# here would provision a second cloud load balancer AND publish the API on
 # plain port 80, bypassing the TLS the Ingress exists to enforce. Dev keeps it for direct access to a
 # cluster that has no Ingress controller or DNS.

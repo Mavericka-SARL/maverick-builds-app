@@ -1,12 +1,5 @@
 # Chat connector (ChatGPT, Claude)
 
-> **Classification:** Current — numbers come from **grids only**: charts and
-> reports are made in ChatGPT or Claude from grid reads, never from dashboard
-> widgets, and are not saved in maverickbuilds.app. Dashboards and workflows
-> are read for the process around the grids (their text, links and steps).
-> The one change it makes is entering values into the input cells the person
-> may edit.
-
 > **Last verified:** 2026-10-10 — `go test ./internal/gateway -run 'TestMCPConnector|TestConnectorTokens|TestDelegatedReadGate|TestChatWritesCells|TestCellsBatchRoute|TestChatPluginReviewCases'`
 > (cell writes, 2026-10-10); 2026-10-02 for the rest (shared and dedicated
 > tenant databases);
@@ -20,7 +13,8 @@ A person connects ChatGPT or Claude to maverickbuilds.app once. The assistant
 can then read the grids of the models they open, as them, and make tables,
 charts, comparisons and reports in the conversation — and enter values into
 the input cells they may edit, when they ask it to. On the hosted service it
-is available to every workspace, the free Community plan included, and to
+is available to every workspace, the Playground (the hosted Community
+edition) included, and to
 every person in it: the account menu (top right) → **Connect ChatGPT or
 Claude** shows the connector URL and each host's client ID and secret.
 

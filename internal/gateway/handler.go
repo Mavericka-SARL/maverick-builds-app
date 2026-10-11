@@ -125,7 +125,7 @@ type handler struct {
 	// the console warns before e-mail notifications are switched on, and an
 	// administrator can send themselves a test message through it.
 	mailer notification.Mailer
-	// plans answers plan and trial questions per tenant (internal/plan,
+	// plans answers plan and limit questions per tenant (internal/plan,
 	// see plan.go); signup is the public sign-up configuration and
 	// signupLimit throttles it per address.
 	plans       *plan.Enforcer
@@ -284,8 +284,7 @@ func limitRequestBodies(next http.Handler) http.Handler {
 
 // RouteInfo describes one endpoint registerRoutes wires up: its HTTP method
 // (empty if the underlying handler still dispatches multiple methods/
-// sub-paths internally instead of exposing them as distinct patterns —
-// see IMPLEMENTATION_PLAN.md's HTTP contract documentation item), its mux
+// sub-paths internally instead of exposing them as distinct patterns), its mux
 // pattern, and the auth level required to reach it.
 type RouteInfo struct {
 	Method  string
@@ -2178,7 +2177,7 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 
 	recalc := func(ctx context.Context) {
 		calcLog := h.log.With().Str("op", "cells").Logger()
-		scheduler := calculation.NewScheduler(calcLog, calculation.NewStore(h.db.For(ctx)), nil)
+		scheduler := calculation.NewScheduler(calcLog, calculation.NewStore(h.db.For(ctx)))
 		if err := scheduler.RecalcAffected(ctx, req.ModelID, req.RevisionID, []string{req.MetricID}); err != nil {
 			h.log.Warn().Err(err).Msg("recalc failed after writeback")
 		}
@@ -2427,9 +2426,8 @@ type taskRow struct {
 // taskAssigneeSQL is true when user $1 is an assignee of the workflow step
 // whose definition is step_def.elem, in application app. It is the one
 // definition of that boundary (internal/workflow/assignee, which documents
-// the rule), shared with workflow.Store.IsAssigneeEligible — and so with the
-// gRPC CompleteStep — and with notification and reminder recipients, so no
-// surface can drift from another.
+// the rule), shared with notification and reminder recipients, so no surface
+// can drift from another.
 //
 // The gateway used to keep a copy of its own. Before that copy was scoped it
 // matched a role held in any workspace of the task's tenant, and an unscoped
@@ -2597,9 +2595,8 @@ func (h *handler) taskAction(w http.ResponseWriter, r *http.Request) {
 
 	// The inbox's boundary (taskAssigneeSQL) holds for deciding a step as
 	// well: a role held in another workspace or tenant must not decide it,
-	// whether or not the step ever showed in this user's inbox. It is the
-	// same predicate workflow.Store.IsAssigneeEligible — the gRPC
-	// CompleteStep — applies.
+	// whether or not the step ever showed in this user's inbox
+	// (taskAssigneeSQL, from package assignee).
 	var isAssignee bool
 	if err := h.db.QueryRow(ctx, `
 		SELECT EXISTS (
@@ -2664,8 +2661,8 @@ func (h *handler) taskAction(w http.ResponseWriter, r *http.Request) {
 	// Complete the step and advance the instance through the workflow
 	// store's route-aware engine (approve/reject branch routing,
 	// notification auto-dispatch, skipping untaken branches, instance
-	// close with completed/cancelled) — the same code path the gRPC
-	// workflow service uses, so a reject can never fall through to the
+	// close with completed/cancelled) — workflow.Store.CompleteStep, so a
+	// reject can never fall through to the
 	// approve branch's steps. For an approval, this also atomically runs
 	// the step's declared on_approve action (fact copy + dirty-marking), if
 	// any — a no-op for any step with no such config.
@@ -6698,8 +6695,8 @@ type adminTenantItem struct {
 	Plan         string         `json:"plan"`
 	CreatedAt    string         `json:"created_at"`
 	Applications []adminAppItem `json:"applications"`
-	// PlanState is the plan as it applies right now: trial, days left,
-	// read-only and why (plan.go).
+	// PlanState is the plan as it applies right now: its limits, and whether
+	// the tenant is read-only and why (plan.go).
 	PlanState *plan.State `json:"plan_state,omitempty"`
 	// Dedicated is whether the tenant has a database of its own: the
 	// platform console addresses it by id (X-Tenant-Id) to act on its people.
@@ -6725,8 +6722,8 @@ func (h *handler) adminMe(w http.ResponseWriter, r *http.Request) {
 
 // adminInfraNodes serves GET /api/admin/infra/nodes — the latest health
 // sample per cluster node (disk/memory/load), fed by the node-stats
-// DaemonSet (deploy/k8s/base/infra/node-stats.yaml). Built after two CI
-// disk-full outages showed nothing was watching node disks at all. A node
+// DaemonSet (deploy/k8s/base/infra/node-stats.yaml), so a filling node disk
+// is seen before the kubelet starts evicting pods. A node
 // whose newest sample is older than 15 minutes is flagged stale — a stale
 // collector is itself a signal (node down, DaemonSet broken).
 func (h *handler) adminInfraNodes(w http.ResponseWriter, r *http.Request) {
@@ -7797,7 +7794,7 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 	// Best-effort recalc (no NATS in gateway — call calculation scheduler directly)
 	if len(metricIDs) > 0 {
 		calcStore := calculation.NewStore(h.db.For(ctx))
-		sched := calculation.NewScheduler(h.log, calcStore, nil)
+		sched := calculation.NewScheduler(h.log, calcStore)
 		go func() { //nolint:contextcheck
 			_ = sched.RecalcAffected(context.Background(), modelID, revisionID, metricIDs)
 		}()
@@ -11819,7 +11816,7 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		revRows.Close()
 
 		calcStore := calculation.NewStore(h.db.For(ctx))
-		sched := calculation.NewScheduler(h.log, calcStore, nil)
+		sched := calculation.NewScheduler(h.log, calcStore)
 		type recalcResult struct {
 			RevisionID string   `json:"revision_id"`
 			Metric     string   `json:"metric"`
@@ -11923,7 +11920,7 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			}
 			revRows.Close()
 			calcStore := calculation.NewStore(h.db.For(ctx))
-			sched := calculation.NewScheduler(h.log, calcStore, nil)
+			sched := calculation.NewScheduler(h.log, calcStore)
 			for _, rid := range revIDs {
 				if err := sched.RecalcSpecific(ctx, modelID, rid, dependentIDs); err != nil {
 					h.log.Warn().Err(err).Str("model", modelID).Str("revision", rid).
@@ -16541,7 +16538,7 @@ func (h *handler) recalcAfterDimChange(ctx context.Context, modelID string, affe
 		byRev[a.RevisionID] = append(byRev[a.RevisionID], a.MetricID)
 	}
 	calcStore := calculation.NewStore(h.db.For(ctx))
-	sched := calculation.NewScheduler(h.log, calcStore, nil)
+	sched := calculation.NewScheduler(h.log, calcStore)
 	for revID, metricIDs := range byRev {
 		if err := sched.RecalcAffected(ctx, modelID, revID, metricIDs); err != nil {
 			h.log.Warn().Err(err).Str("model", modelID).Str("revision", revID).
@@ -16558,7 +16555,7 @@ func (h *handler) recalcAfterDimChange(ctx context.Context, modelID string, affe
 func (h *handler) recalcDimensionDependents(ctx context.Context, dimID string) {
 	ctx, done := h.backgroundRecalc(ctx, "recalculation of a dimension's dependents")
 	defer done()
-	sched := calculation.NewScheduler(h.log, calculation.NewStore(h.db.For(ctx)), nil)
+	sched := calculation.NewScheduler(h.log, calculation.NewStore(h.db.For(ctx)))
 	if err := sched.RecalcDimensionDependents(ctx, dimID); err != nil {
 		h.log.Warn().Err(err).Str("dimension", dimID).Msg("recalc after dimension change failed")
 	}
@@ -16607,7 +16604,7 @@ func (h *handler) recalcAllInputsAcrossRevisions(ctx context.Context, modelID st
 	revRows.Close()
 
 	calcStore := calculation.NewStore(h.db.For(ctx))
-	sched := calculation.NewScheduler(h.log, calcStore, nil)
+	sched := calculation.NewScheduler(h.log, calcStore)
 	for _, rid := range revIDs {
 		if err := sched.RecalcAffected(ctx, modelID, rid, inputIDs); err != nil {
 			h.log.Warn().Err(err).Str("model", modelID).Str("revision", rid).
@@ -18612,7 +18609,7 @@ func (h *handler) recalcGridMetrics(ctx context.Context, gridID string) {
 		if len(ids) == 0 {
 			return
 		}
-		sched := calculation.NewScheduler(h.log, calculation.NewStore(h.db.For(bg)), nil)
+		sched := calculation.NewScheduler(h.log, calculation.NewStore(h.db.For(bg)))
 		if err := sched.RecalcSpecific(bg, modelID, revisionID, ids); err != nil {
 			h.log.Warn().Err(err).Str("grid", gridID).Msg("recalculation after a grid change failed")
 		}

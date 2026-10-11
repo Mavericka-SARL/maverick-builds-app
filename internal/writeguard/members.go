@@ -35,7 +35,7 @@ func IsMemberError(err error) bool {
 
 // ResolveWriteMembers resolves a write's {dimension id: member code} map to
 // member ids, for the write guard, and refuses a coordinate no grid, chart
-// or total reads. The interactive cell write, the gRPC write and the form
+// or total reads. The interactive cell write and the form
 // posting all used to store a value at a code the dimension does not have
 // (and an interactive write at a parent member, which the grid ignores but a
 // pinned KPI counted); the file import already refused both.

@@ -2,7 +2,6 @@ package calculation
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"runtime/debug"
@@ -11,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog"
 
 	"github.com/mavericks-engine/mavericks/internal/formula"
@@ -19,112 +17,20 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/rollup"
 )
 
-const (
-	subjectFactsCommitted = "facts.committed"
-	streamName            = "MAVERICKS"
-	consumerName          = "calc-engine"
-)
-
-// FactsCommittedEvent mirrors the event published by the Query Service.
-type FactsCommittedEvent struct {
-	ModelID    string   `json:"model_id"`
-	RevisionID string   `json:"revision_id"`
-	MetricIDs  []string `json:"metric_ids"` // input metrics that changed
-	UserID     string   `json:"user_id"`
-}
-
-// Scheduler subscribes to NATS and drives the incremental calculation loop.
+// Scheduler drives the incremental calculation of a revision: the gateway
+// runs it in-process after every change that can move a calculated value.
 type Scheduler struct {
 	log   zerolog.Logger
 	store *Store
-	nc    *nats.Conn
 }
 
-func NewScheduler(log zerolog.Logger, store *Store, nc *nats.Conn) *Scheduler {
-	return &Scheduler{log: log, store: store, nc: nc}
-}
-
-// Run starts the NATS JetStream consumer and blocks until ctx is cancelled.
-func (s *Scheduler) Run(ctx context.Context) error {
-	js, err := s.nc.JetStream()
-	if err != nil {
-		return fmt.Errorf("jetstream: %w", err)
-	}
-
-	// Ensure stream exists (idempotent)
-	_, err = js.AddStream(&nats.StreamConfig{
-		Name:     streamName,
-		Subjects: []string{"facts.*", "model.changed.*"},
-		MaxAge:   7 * 24 * time.Hour,
-	})
-	if err != nil && !isAlreadyExists(err) {
-		return fmt.Errorf("ensure stream: %w", err)
-	}
-
-	sub, err := js.PullSubscribe(subjectFactsCommitted, consumerName,
-		nats.BindStream(streamName),
-		nats.ManualAck(),
-	)
-	if err != nil {
-		// Durable consumer may not exist yet — create without bind
-		sub, err = js.PullSubscribe(subjectFactsCommitted, consumerName,
-			nats.Durable(consumerName),
-			nats.ManualAck(),
-		)
-		if err != nil {
-			return fmt.Errorf("subscribe: %w", err)
-		}
-	}
-	defer sub.Unsubscribe() //nolint:errcheck
-
-	s.log.Info().Msg("calculation scheduler started")
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
-
-		msgs, err := sub.Fetch(10, nats.MaxWait(2*time.Second))
-		if err != nil {
-			if err == nats.ErrTimeout {
-				continue
-			}
-			s.log.Error().Err(err).Msg("fetch messages")
-			continue
-		}
-
-		for _, msg := range msgs {
-			if err := s.handleMessage(ctx, msg); err != nil {
-				s.log.Error().Err(err).Msg("handle message")
-				msg.Nak() //nolint:errcheck
-			} else {
-				msg.Ack() //nolint:errcheck
-			}
-		}
-	}
-}
-
-func (s *Scheduler) handleMessage(ctx context.Context, msg *nats.Msg) error {
-	var evt FactsCommittedEvent
-	if err := json.Unmarshal(msg.Data, &evt); err != nil {
-		return fmt.Errorf("unmarshal event: %w", err)
-	}
-
-	s.log.Info().
-		Str("model_id", evt.ModelID).
-		Str("revision_id", evt.RevisionID).
-		Int("input_metrics", len(evt.MetricIDs)).
-		Msg("facts.committed received")
-
-	return s.RecalcAffected(ctx, evt.ModelID, evt.RevisionID, evt.MetricIDs)
+func NewScheduler(log zerolog.Logger, store *Store) *Scheduler {
+	return &Scheduler{log: log, store: store}
 }
 
 // RecalcTimeout bounds a recalculation that runs after its request has
-// returned (the gateway's background recalculations, the calculation
-// service's RPCs), so a stuck one gives up its revision lock instead of
-// holding it forever.
+// returned (the gateway's background recalculations), so a stuck one
+// gives up its revision lock instead of holding it forever.
 const RecalcTimeout = 30 * time.Minute
 
 // recoverAsError turns a panic in a recalculation entry point into its
@@ -1026,8 +932,4 @@ func BuildPartitionKey(modelID, revisionID, metricID, timePartition string) stri
 
 func PartitionMonth(t time.Time) string {
 	return fmt.Sprintf("%d-%02d", t.Year(), t.Month())
-}
-
-func isAlreadyExists(err error) bool {
-	return err != nil && (strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "stream name already in use"))
 }

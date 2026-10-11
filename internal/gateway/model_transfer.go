@@ -245,7 +245,7 @@ func (h *handler) recalcRevisionFromInputs(ctx context.Context, modelID, revisio
 	if len(inputIDs) == 0 {
 		return nil
 	}
-	sched := calculation.NewScheduler(h.log, calculation.NewStore(h.db.For(ctx)), nil)
+	sched := calculation.NewScheduler(h.log, calculation.NewStore(h.db.For(ctx)))
 	return sched.RecalcAffected(ctx, modelID, revisionID, inputIDs)
 }
 
@@ -276,7 +276,7 @@ func (h *handler) recalcRevisionCalculated(ctx context.Context, modelID, revisio
 	if len(ids) == 0 {
 		return
 	}
-	sched := calculation.NewScheduler(h.log, calculation.NewStore(h.db.For(ctx)), nil)
+	sched := calculation.NewScheduler(h.log, calculation.NewStore(h.db.For(ctx)))
 	if err := sched.RecalcSpecific(ctx, modelID, revisionID, ids); err != nil {
 		h.log.Warn().Err(err).Str("revision", revisionID).Msg("recalc revision failed")
 	}

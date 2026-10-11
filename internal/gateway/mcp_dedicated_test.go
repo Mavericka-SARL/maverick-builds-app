@@ -1,6 +1,6 @@
 package gateway
 
-// The chat connector where the hosted service runs it: every tenant in a
+// The chat connector in dedicated mode: every tenant in a
 // database of its own (TENANT_DB_MODE=dedicated). A connector's read is
 // routed like a console request — by the application it names and the
 // person's own homes — so a person reads their tenant's grids and nothing of

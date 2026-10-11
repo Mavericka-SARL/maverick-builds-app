@@ -54,6 +54,11 @@ func markdownFiles(t *testing.T) []string {
 // (Target), or as it once was (Historical). Without it, a specification and a
 // reference read identically, and a reader has no way to know which is which.
 func TestDocsDeclareClassification(t *testing.T) {
+	// A public snapshot carries only documents that describe the system as it
+	// is, so the export drops the banner; it has no public-exclude.txt either.
+	if _, err := os.Stat(filepath.Join("scripts", "public-exclude.txt")); os.IsNotExist(err) {
+		t.Skip("public snapshot: every document is current and carries no banner")
+	}
 	for _, path := range markdownFiles(t) {
 		// The design-system doc lives with the components it documents and is
 		// maintained alongside them; it isn't part of the top-level set.

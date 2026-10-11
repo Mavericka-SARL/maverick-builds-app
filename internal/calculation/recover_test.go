@@ -14,7 +14,7 @@ import (
 // panic in the caller: recalculations run in background goroutines, where
 // one would stop the whole process.
 func TestRecalcEntryPointsRecover(t *testing.T) {
-	s := NewScheduler(zerolog.Nop(), nil, nil)
+	s := NewScheduler(zerolog.Nop(), nil)
 	ctx := context.Background()
 	for name, run := range map[string]func() error{
 		"RecalcAffected":            func() error { return s.RecalcAffected(ctx, "m", "r", []string{"x"}) },
@@ -31,7 +31,7 @@ func TestRecalcEntryPointsRecover(t *testing.T) {
 // TestGuardedTurnsPanicIntoError: one metric's calculation that panics is
 // that metric's error (marked failed), and an ordinary error passes through.
 func TestGuardedTurnsPanicIntoError(t *testing.T) {
-	s := NewScheduler(zerolog.Nop(), nil, nil)
+	s := NewScheduler(zerolog.Nop(), nil)
 	err := s.guarded("margin", func() error { panic("boom") })
 	if err == nil || !strings.Contains(err.Error(), "internal error during margin: boom") {
 		t.Errorf("want the panic as margin's error, got %v", err)

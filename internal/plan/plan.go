@@ -1,7 +1,6 @@
 // Package plan is what a tenant's plan means: the limits it carries, and
 // whether the tenant is read-only because a limit was exceeded. A plan
-// bounds how much a tenant may use, never for how long — there is no trial
-// (migration 090).
+// bounds how much a tenant may use, never for how long (migration 090).
 //
 // Plans are rows in platform.plan, edited by the platform administrator; a
 // tenant names one in core.customer.plan (migration 085). Nothing here is a

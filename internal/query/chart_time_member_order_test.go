@@ -14,10 +14,9 @@ import (
 // came out alphabetically: on the axis, in the context selector, and in the
 // member a restricted viewer's hidden context default is replaced with.
 func TestChartTimeMembersFollowPeriodOrder(t *testing.T) {
-	store, cleanup := setupDB(t)
+	pool, cleanup := setupDB(t)
 	defer cleanup()
 	ctx := context.Background()
-	pool := store.Pool()
 	modelID := "00000000-0000-0000-0000-000000000011"
 	revisionID := "00000000-0000-0000-0011-000000000011"
 	userID := "00000000-0000-0000-0000-000000000399"

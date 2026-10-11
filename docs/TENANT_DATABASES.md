@@ -1,8 +1,6 @@
 # A database per tenant
 
-> **Classification:** Current — How dedicated tenant databases work and how to operate them.
-
-> **Last verified:** 2026-10-01
+> **Last verified:** 2026-10-11 (every path, variable, route and identifier it names checked against the code)
 
 Every tenant can have its own PostgreSQL database on the shared server. The
 boundary is then enforced by the database itself rather than by a `WHERE`

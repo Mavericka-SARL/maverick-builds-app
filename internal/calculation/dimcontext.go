@@ -13,7 +13,7 @@ import (
 )
 
 // Member metadata for the dimensional references of the formula language
-// (FORMULA_CALCULATION_INSTRUCTIONS.md, contract C1-C3).
+// (docs/formulas-manual, chapters 11-13).
 //
 // DimMetadata is the cell-local half: dim.property, PARENT, member checks
 // and criteria leaves, all answered from member metadata alone. Every

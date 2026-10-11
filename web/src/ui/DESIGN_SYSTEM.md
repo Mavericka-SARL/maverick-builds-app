@@ -1,18 +1,14 @@
-# Mavericks UI Design System
-
-> **Classification:** Current — Frontend UI authority.
+# maverickbuilds.app UI design system
 
 > **Status:** Current frontend UI authority
-> **Last verified:** 2026-09-25
+> **Last verified:** 2026-10-11 (every path, variable, route and identifier it names checked against the code)
 >
 > All role consoles use the shared shell, but this is still a migration target,
 > not a claim that every screen exposes every context item or contains no local
 > styling. `AppPicker` is exported but currently unused; application selection
-> remains console-specific. Configuration-save exceptions are tracked in the
-> root `IMPLEMENTATION_PLAN.md`.
+> remains console-specific.
 
-This package is the implementation target from `UX_UPGRADE_INSTRUCTIONS.md`.
-It gives the app one shared planning-product language for shell layout, context,
+This package gives the app one shared planning-product language for shell layout, context,
 controls, data states, tables, builder panels, and status badges.
 
 ## Principles

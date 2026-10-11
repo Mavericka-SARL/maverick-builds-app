@@ -3,24 +3,14 @@
 # default-deny for both directions the moment any policy selects it).
 #
 # Every ingress/egress rule below is derived from a real, grep-confirmed
-# call site (clients.NewAuditClient/NewPolicyClient callers,
-# nats.Connect callers, identity.NewJWKSValidator callers, redis.*
-# callers, pkg/objectstore importers, ANTHROPIC_API_KEY usage) — not
-# inferred from the shared mavericks-config/mavericks-secrets ConfigMap/
-# Secret, which every pod gets identically via envFrom regardless of what
-# it actually calls. See IMPLEMENTATION_PLAN.md's P2 "Distributed
-# topology validation" entry for the full call-graph table this was
-# built from.
-#
-# Notably: nothing in the current in-cluster call graph calls any
-# backend service's gRPC port except audit/policy (which DO have real
-# callers, listed explicitly below) — gateway executes equivalent logic
-# in-process rather than calling out over gRPC today. Every backend
-# service's ingress is therefore restricted to `app: gateway` — matching
-# the intended architecture (gateway is the one legitimate caller) without
-# leaving it open cluster-wide, and without blocking that path's natural
-# next step. kubectl port-forward bypasses NetworkPolicy entirely, so this
-# doesn't block ad-hoc debugging.
+# call site (identity.NewJWKSValidator callers, pkg/objectstore importers,
+# outbound HTTPS and SMTP) — not inferred from the shared
+# mavericks-config/mavericks-secrets ConfigMap/Secret, which every pod gets
+# identically via envFrom regardless of what it actually calls. The
+# application tier is two pods: the gateway, which serves every request and
+# runs the domain logic in-process, and the integration worker.
+# kubectl port-forward bypasses NetworkPolicy entirely, so this doesn't
+# block ad-hoc debugging.
 #
 # kube-dns's exact namespace/pod labels vary by cluster/CNI, so every
 # egress list ends with a port-only (UDP+TCP/53), unrestricted-destination
@@ -55,308 +45,12 @@ spec:
     - to: [{ipBlock: {cidr: 0.0.0.0/0}}]
       ports: [{protocol: TCP, port: 587}, {protocol: TCP, port: 465}]
     # Public HTTPS. The gateway itself calls the AI providers
-    # (internal/gateway/ai_handler.go — in-process, not through the
-    # ai-assistant service), fetches Google Sheets for imports and exchanges
+    # (internal/gateway/ai_handler.go), fetches Google Sheets for imports and exchanges
     # OAuth tokens for REST connections. Without this rule every one of those
     # times out wherever policies are enforced; the production overlay only
     # worked because its object-storage patch restates this list with 443.
     - to: [{ipBlock: {cidr: 0.0.0.0/0}}]
       ports: [{protocol: TCP, port: 443}]
-    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
-
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: tenant
-  namespace: mavericks
-  labels: {app: tenant}
-spec:
-  podSelector: {matchLabels: {app: tenant}}
-  policyTypes: [Ingress, Egress]
-  ingress:
-    - from: [{podSelector: {matchLabels: {app: gateway}}}]
-      ports: [{protocol: TCP, port: 9090}]
-  egress:
-    - to: [{podSelector: {matchLabels: {app: audit}}}]
-      ports: [{protocol: TCP, port: 9090}]
-    - to: [{podSelector: {matchLabels: {app: keycloak}}}]
-      ports: [{protocol: TCP, port: 8080}]
-    - to: [{podSelector: {matchLabels: {app: pgbouncer}}}]
-      ports: [{protocol: TCP, port: 5433}]
-    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
-
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: identity
-  namespace: mavericks
-  labels: {app: identity}
-spec:
-  podSelector: {matchLabels: {app: identity}}
-  policyTypes: [Ingress, Egress]
-  ingress:
-    - from: [{podSelector: {matchLabels: {app: gateway}}}]
-      ports: [{protocol: TCP, port: 9090}]
-  egress:
-    - to: [{podSelector: {matchLabels: {app: audit}}}]
-      ports: [{protocol: TCP, port: 9090}]
-    - to: [{podSelector: {matchLabels: {app: keycloak}}}]
-      ports: [{protocol: TCP, port: 8080}]
-    - to: [{podSelector: {matchLabels: {app: redis}}}]
-      ports: [{protocol: TCP, port: 6379}]
-    - to: [{podSelector: {matchLabels: {app: pgbouncer}}}]
-      ports: [{protocol: TCP, port: 5433}]
-    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
-
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: audit
-  namespace: mavericks
-  labels: {app: audit}
-spec:
-  podSelector: {matchLabels: {app: audit}}
-  policyTypes: [Ingress, Egress]
-  ingress:
-    - from:   # every real caller, confirmed via clients.NewAuditClient
-        - podSelector: {matchLabels: {app: tenant}}
-        - podSelector: {matchLabels: {app: identity}}
-        - podSelector: {matchLabels: {app: notification}}
-        - podSelector: {matchLabels: {app: calculation}}
-        - podSelector: {matchLabels: {app: schema-migration}}
-        - podSelector: {matchLabels: {app: model}}
-        - podSelector: {matchLabels: {app: workflow}}
-        - podSelector: {matchLabels: {app: ai-assistant}}
-        - podSelector: {matchLabels: {app: query}}
-        - podSelector: {matchLabels: {app: import}}
-        - podSelector: {matchLabels: {app: policy}}
-      ports: [{protocol: TCP, port: 9090}]
-  egress:
-    - to: [{podSelector: {matchLabels: {app: pgbouncer}}}]
-      ports: [{protocol: TCP, port: 5433}]
-    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
-
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: ai-assistant
-  namespace: mavericks
-  labels: {app: ai-assistant}
-spec:
-  podSelector: {matchLabels: {app: ai-assistant}}
-  policyTypes: [Ingress, Egress]
-  ingress:
-    - from: [{podSelector: {matchLabels: {app: gateway}}}]
-      ports: [{protocol: TCP, port: 9090}]
-  egress:
-    - to: [{podSelector: {matchLabels: {app: audit}}}]
-      ports: [{protocol: TCP, port: 9090}]
-    - to: [{podSelector: {matchLabels: {app: keycloak}}}]
-      ports: [{protocol: TCP, port: 8080}]
-    - to: [{podSelector: {matchLabels: {app: pgbouncer}}}]
-      ports: [{protocol: TCP, port: 5433}]
-    # Anthropic API access (ANTHROPIC_API_KEY, internal/aiassistant). A
-    # NetworkPolicy can only match by IP/pod/namespace selector, never by
-    # hostname, so this is scoped by port only — a deliberate looseness,
-    # tightenable later with a CIDR allowlist or an egress proxy if
-    # Anthropic's IP ranges need pinning.
-    - to: [{ipBlock: {cidr: 0.0.0.0/0}}]
-      ports: [{protocol: TCP, port: 443}]
-    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
-
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: calculation
-  namespace: mavericks
-  labels: {app: calculation}
-spec:
-  podSelector: {matchLabels: {app: calculation}}
-  policyTypes: [Ingress, Egress]
-  ingress:
-    - from: [{podSelector: {matchLabels: {app: gateway}}}]
-      ports: [{protocol: TCP, port: 9090}]
-  egress:
-    - to: [{podSelector: {matchLabels: {app: audit}}}]
-      ports: [{protocol: TCP, port: 9090}]
-    - to: [{podSelector: {matchLabels: {app: keycloak}}}]
-      ports: [{protocol: TCP, port: 8080}]
-    - to: [{podSelector: {matchLabels: {app: nats}}}]
-      ports: [{protocol: TCP, port: 4222}]
-    - to: [{podSelector: {matchLabels: {app: pgbouncer}}}]
-      ports: [{protocol: TCP, port: 5433}]
-    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
-
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: import
-  namespace: mavericks
-  labels: {app: import}
-spec:
-  podSelector: {matchLabels: {app: import}}
-  policyTypes: [Ingress, Egress]
-  ingress:
-    - from: [{podSelector: {matchLabels: {app: gateway}}}]
-      ports: [{protocol: TCP, port: 9090}]
-  egress:
-    - to: [{podSelector: {matchLabels: {app: audit}}}]
-      ports: [{protocol: TCP, port: 9090}]
-    - to: [{podSelector: {matchLabels: {app: keycloak}}}]
-      ports: [{protocol: TCP, port: 8080}]
-    - to: [{podSelector: {matchLabels: {app: nats}}}]
-      ports: [{protocol: TCP, port: 4222}]
-    - to: [{podSelector: {matchLabels: {app: pgbouncer}}}]
-      ports: [{protocol: TCP, port: 5433}]
-    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
-
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: model
-  namespace: mavericks
-  labels: {app: model}
-spec:
-  podSelector: {matchLabels: {app: model}}
-  policyTypes: [Ingress, Egress]
-  ingress:
-    - from: [{podSelector: {matchLabels: {app: gateway}}}]
-      ports: [{protocol: TCP, port: 9090}]
-  egress:
-    - to: [{podSelector: {matchLabels: {app: audit}}}]
-      ports: [{protocol: TCP, port: 9090}]
-    - to: [{podSelector: {matchLabels: {app: keycloak}}}]
-      ports: [{protocol: TCP, port: 8080}]
-    - to: [{podSelector: {matchLabels: {app: pgbouncer}}}]
-      ports: [{protocol: TCP, port: 5433}]
-    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
-
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: notification
-  namespace: mavericks
-  labels: {app: notification}
-spec:
-  podSelector: {matchLabels: {app: notification}}
-  policyTypes: [Ingress, Egress]
-  ingress:
-    - from: [{podSelector: {matchLabels: {app: gateway}}}]
-      ports: [{protocol: TCP, port: 9090}]
-  egress:
-    - to: [{podSelector: {matchLabels: {app: audit}}}]
-      ports: [{protocol: TCP, port: 9090}]
-    - to: [{podSelector: {matchLabels: {app: keycloak}}}]
-      ports: [{protocol: TCP, port: 8080}]
-    - to: [{podSelector: {matchLabels: {app: pgbouncer}}}]
-      ports: [{protocol: TCP, port: 5433}]
-    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
-
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: policy
-  namespace: mavericks
-  labels: {app: policy}
-spec:
-  podSelector: {matchLabels: {app: policy}}
-  policyTypes: [Ingress, Egress]
-  ingress:
-    - from:   # real callers, confirmed via clients.NewPolicyClient, plus gateway
-        - podSelector: {matchLabels: {app: gateway}}
-        - podSelector: {matchLabels: {app: workflow}}
-        - podSelector: {matchLabels: {app: query}}
-      ports: [{protocol: TCP, port: 9090}]
-  egress:
-    - to: [{podSelector: {matchLabels: {app: audit}}}]
-      ports: [{protocol: TCP, port: 9090}]
-    - to: [{podSelector: {matchLabels: {app: keycloak}}}]
-      ports: [{protocol: TCP, port: 8080}]
-    - to: [{podSelector: {matchLabels: {app: redis}}}]
-      ports: [{protocol: TCP, port: 6379}]
-    - to: [{podSelector: {matchLabels: {app: pgbouncer}}}]
-      ports: [{protocol: TCP, port: 5433}]
-    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
-
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: query
-  namespace: mavericks
-  labels: {app: query}
-spec:
-  podSelector: {matchLabels: {app: query}}
-  policyTypes: [Ingress, Egress]
-  ingress:
-    - from: [{podSelector: {matchLabels: {app: gateway}}}]
-      ports: [{protocol: TCP, port: 9090}]
-  egress:
-    - to: [{podSelector: {matchLabels: {app: audit}}}]
-      ports: [{protocol: TCP, port: 9090}]
-    - to: [{podSelector: {matchLabels: {app: policy}}}]
-      ports: [{protocol: TCP, port: 9090}]
-    - to: [{podSelector: {matchLabels: {app: keycloak}}}]
-      ports: [{protocol: TCP, port: 8080}]
-    - to: [{podSelector: {matchLabels: {app: nats}}}]
-      ports: [{protocol: TCP, port: 4222}]
-    - to: [{podSelector: {matchLabels: {app: pgbouncer}}}]
-      ports: [{protocol: TCP, port: 5433}]
-    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
-
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: schema-migration
-  namespace: mavericks
-  labels: {app: schema-migration}
-spec:
-  podSelector: {matchLabels: {app: schema-migration}}
-  policyTypes: [Ingress, Egress]
-  ingress:
-    - from: [{podSelector: {matchLabels: {app: gateway}}}]
-      ports: [{protocol: TCP, port: 9090}]
-  egress:
-    - to: [{podSelector: {matchLabels: {app: audit}}}]
-      ports: [{protocol: TCP, port: 9090}]
-    - to: [{podSelector: {matchLabels: {app: keycloak}}}]
-      ports: [{protocol: TCP, port: 8080}]
-    - to: [{podSelector: {matchLabels: {app: pgbouncer}}}]
-      ports: [{protocol: TCP, port: 5433}]
-    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
-
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: workflow
-  namespace: mavericks
-  labels: {app: workflow}
-spec:
-  podSelector: {matchLabels: {app: workflow}}
-  policyTypes: [Ingress, Egress]
-  ingress:
-    - from: [{podSelector: {matchLabels: {app: gateway}}}]
-      ports: [{protocol: TCP, port: 9090}]
-  egress:
-    - to: [{podSelector: {matchLabels: {app: audit}}}]
-      ports: [{protocol: TCP, port: 9090}]
-    - to: [{podSelector: {matchLabels: {app: policy}}}]
-      ports: [{protocol: TCP, port: 9090}]
-    - to: [{podSelector: {matchLabels: {app: keycloak}}}]
-      ports: [{protocol: TCP, port: 8080}]
-    - to: [{podSelector: {matchLabels: {app: pgbouncer}}}]
-      ports: [{protocol: TCP, port: 5433}]
     - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
 
 ---
@@ -431,12 +125,11 @@ spec:
     # NetworkPolicy is per-pod, not per-container) pushes/fetches
     # directly to MinIO.
     #
-    # Production backups target Hetzner Object Storage over HTTPS — this
-    # allowance existed only LIVE; re-applying the repo policy wiped it and
-    # the wal-g sidecar crash-looped on 'connection refused' to
-    # *.your-objectstorage.com, taking postgres-0 out of the Service and
-    # with it every DB-backed surface (second live-only-rule outage in two
-    # days — the file must BE the cluster).
+    # Backups may target external S3-compatible object storage over HTTPS
+    # instead. An allowance kept only in a live cluster is wiped when the
+    # repository's policy is re-applied: the wal-g sidecar then crash-loops
+    # on 'connection refused', taking postgres-0 out of the Service and with
+    # it every DB-backed surface. The file must BE the cluster.
     - ports: [{protocol: TCP, port: 443}]
     - to: [{podSelector: {matchLabels: {app: minio}}}]
       ports: [{protocol: TCP, port: 9000}]
@@ -453,20 +146,8 @@ spec:
   podSelector: {matchLabels: {app: pgbouncer}}
   policyTypes: [Ingress, Egress]
   ingress:
-    - from:   # all 13 app-tier pods — confirmed identical DATABASE_URL in every service manifest
+    - from:   # the two app-tier pods — the same DATABASE_URL in both manifests
         - podSelector: {matchLabels: {app: gateway}}
-        - podSelector: {matchLabels: {app: tenant}}
-        - podSelector: {matchLabels: {app: identity}}
-        - podSelector: {matchLabels: {app: audit}}
-        - podSelector: {matchLabels: {app: ai-assistant}}
-        - podSelector: {matchLabels: {app: calculation}}
-        - podSelector: {matchLabels: {app: import}}
-        - podSelector: {matchLabels: {app: model}}
-        - podSelector: {matchLabels: {app: notification}}
-        - podSelector: {matchLabels: {app: policy}}
-        - podSelector: {matchLabels: {app: query}}
-        - podSelector: {matchLabels: {app: schema-migration}}
-        - podSelector: {matchLabels: {app: workflow}}
         # The integration worker's durable run queue lives in Postgres — the
         # counterpart of its own egress rule (a netpol needs BOTH directions).
         - podSelector: {matchLabels: {app: integration}}
@@ -480,43 +161,6 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: nats
-  namespace: mavericks
-  labels: {app: nats}
-spec:
-  podSelector: {matchLabels: {app: nats}}
-  policyTypes: [Ingress, Egress]
-  ingress:
-    - from:   # confirmed via nats.Connect callers
-        - podSelector: {matchLabels: {app: calculation}}
-        - podSelector: {matchLabels: {app: import}}
-        - podSelector: {matchLabels: {app: query}}
-      ports: [{protocol: TCP, port: 4222}]
-  egress:
-    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
-
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: redis
-  namespace: mavericks
-  labels: {app: redis}
-spec:
-  podSelector: {matchLabels: {app: redis}}
-  policyTypes: [Ingress, Egress]
-  ingress:
-    - from:   # confirmed via redis.ParseURL/NewClient callers
-        - podSelector: {matchLabels: {app: identity}}
-        - podSelector: {matchLabels: {app: policy}}
-      ports: [{protocol: TCP, port: 6379}]
-  egress:
-    - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
-
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
   name: keycloak
   namespace: mavericks
   labels: {app: keycloak}
@@ -524,26 +168,15 @@ spec:
   podSelector: {matchLabels: {app: keycloak}}
   policyTypes: [Ingress, Egress]
   ingress:
-    - from:   # confirmed via identity.NewJWKSValidator callers — every service except audit
+    - from:   # confirmed via identity.NewJWKSValidator callers: the gateway only
         - podSelector: {matchLabels: {app: gateway}}
-        - podSelector: {matchLabels: {app: tenant}}
-        - podSelector: {matchLabels: {app: identity}}
-        - podSelector: {matchLabels: {app: ai-assistant}}
-        - podSelector: {matchLabels: {app: calculation}}
-        - podSelector: {matchLabels: {app: import}}
-        - podSelector: {matchLabels: {app: model}}
-        - podSelector: {matchLabels: {app: notification}}
-        - podSelector: {matchLabels: {app: policy}}
-        - podSelector: {matchLabels: {app: query}}
-        - podSelector: {matchLabels: {app: schema-migration}}
-        - podSelector: {matchLabels: {app: workflow}}
       ports: [{protocol: TCP, port: 8080}]
     # Browsers, via the auth.* rule in ingress.yaml. The ingress controller
     # runs in its own namespace, so a podSelector cannot reach it — but unlike
     # the web and gateway rules, this stays scoped with a namespaceSelector
     # instead of dropping `from` entirely. An unrestricted rule on port 8080
-    # would also supersede the twelve-caller list above, silently making the
-    # whole namespace able to reach the identity provider.
+    # would also supersede the caller list above, silently making the whole
+    # namespace able to reach the identity provider.
     #
     # Traefik, installed in "traefik" (bootstrap/traefik-values.yaml). The
     # "ingress-nginx" entry is for a cluster moving off that controller: both

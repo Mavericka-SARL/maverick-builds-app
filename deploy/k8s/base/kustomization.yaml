@@ -26,26 +26,12 @@ resources:
   # ── Application services ──────────────────────────────────────────────────
   - services/gateway.yaml
   - services/web.yaml
-  - services/ai-assistant.yaml
-  - services/audit.yaml
-  - services/calculation.yaml
-  - services/identity.yaml
-  - services/import.yaml
   - services/integration.yaml
-  - services/model.yaml
-  - services/notification.yaml
-  - services/policy.yaml
-  - services/query.yaml
-  - services/schema-migration.yaml
-  - services/tenant.yaml
-  - services/workflow.yaml
 
   # ── Infrastructure ────────────────────────────────────────────────────────
   - infra/postgres.yaml
   - infra/postgres-backup.yaml
   - infra/pgbouncer.yaml
-  - infra/nats.yaml
-  - infra/redis.yaml
   - infra/keycloak.yaml
   - infra/minio.yaml
 

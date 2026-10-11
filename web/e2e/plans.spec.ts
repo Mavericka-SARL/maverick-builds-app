@@ -7,7 +7,7 @@
 import { test, expect } from "@playwright/test";
 import { mockApi, loadAs, smallPlanState, overStoragePlanState, adminPlans } from "./mocks";
 
-test("a basic workspace that has filled its space is read-only and told where to go, not to change plan", async ({ page }) => {
+test("a Community workspace that has filled its space is read-only and told where to go, not to change plan", async ({ page }) => {
   await mockApi(page, { plan: overStoragePlanState() });
   await loadAs(page, "developer");
   const banner = page.getByTestId("plan-banner");

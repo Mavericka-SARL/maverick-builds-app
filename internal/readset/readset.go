@@ -1,6 +1,5 @@
 // Package readset decides which persisted calculated values a restricted
-// viewer may be shown (FORMULA_CALCULATION_INSTRUCTIONS.md, contracts C6
-// and C7).
+// viewer may be shown.
 //
 // The calculation scheduler computes every metric over ALL members, with no
 // notion of who will look. A metric that reads other members — LOOKUP, the

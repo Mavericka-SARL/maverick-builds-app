@@ -3,7 +3,7 @@
 # Both sites get certificates automatically: from Let's Encrypt when
 # CADDY_CERTS is empty (the names must resolve to this server and ports 80 and
 # 443 must be reachable from the internet), or from Caddy's own local CA when
-# it is "local_certs" (private networks and trials; browsers warn).
+# it is "local_certs" (private networks and try-outs; browsers warn).
 {
 	{$CADDY_CERTS}
 }

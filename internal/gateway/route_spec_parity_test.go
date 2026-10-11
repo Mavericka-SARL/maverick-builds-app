@@ -1,8 +1,7 @@
 // Checks the manual router (BuildRoutes, see handler.go's registerRoutes)
-// against api/openapi.yaml, per IMPLEMENTATION_PLAN.md's "Complete HTTP
-// contract documentation" P1 item. Every registered route must have exactly
-// one precise method+pattern entry in the spec, and vice versa — this is the
-// item's exit criterion, enforced unconditionally now that the spec has full
+// against api/openapi.yaml. Every registered route must have exactly
+// one precise method+pattern entry in the spec, and vice versa,
+// enforced unconditionally now that the spec has full
 // coverage. If this test ever needs an allowlist again (a new resource area
 // added faster than it's documented), reintroduce one deliberately rather
 // than resurrecting this comment.

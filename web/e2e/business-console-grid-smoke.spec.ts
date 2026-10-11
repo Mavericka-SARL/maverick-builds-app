@@ -1,8 +1,7 @@
 /**
  * Smoke test: the Business Console's planning grid renders calc-metric cells
- * straight from the server's `cells` map (grid()'s calc-value convergence —
- * see IMPLEMENTATION_PLAN.md's P1 "server-side per-intersection
- * calculations" item), not by evaluating a formula client-side. There is no
+ * straight from the server's `cells` map (grid()'s calc-value convergence:
+ * server-side per-intersection calculations), not by evaluating a formula client-side. There is no
  * client-side formula evaluator left in this app at all — BusinessConsole.tsx
  * only reads `grid.cells`/`grid.totals`, exactly like it always has for
  * input metrics. This is wiring confidence (does the grid actually render

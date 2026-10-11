@@ -41,8 +41,8 @@ func TestLoad_EmbeddedBaseConfigMustBeSquashed(t *testing.T) {
 	if err := Load(&c); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if c.GRPCPort != 9090 {
-		t.Errorf("GRPCPort = %d, want 9090 (the registered default) — without the `mapstructure:\",squash\"` tag on the embedded BaseConfig, mapstructure never flattens its fields and Unmarshal silently leaves them at the zero value", c.GRPCPort)
+	if c.MetricsPort != 9091 {
+		t.Errorf("MetricsPort = %d, want 9091 (the registered default) — without the `mapstructure:\",squash\"` tag on the embedded BaseConfig, mapstructure never flattens its fields and Unmarshal silently leaves them at the zero value", c.MetricsPort)
 	}
 }
 

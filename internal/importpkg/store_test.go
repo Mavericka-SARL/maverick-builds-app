@@ -4,10 +4,8 @@ import (
 	"context"
 	"embed"
 	"errors"
-	"strings"
 	"testing"
 
-	"github.com/rs/zerolog"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -262,41 +260,6 @@ func TestNoValidRowsResultsInFailed(t *testing.T) {
 	failed, _ := store.GetImportJob(ctx, job.Id)
 	if failed.Status != importpkgv1.ImportStatus_IMPORT_STATUS_FAILED {
 		t.Errorf("status = %v, want FAILED", failed.Status)
-	}
-}
-
-func TestValidateImportServerCSVParsing(t *testing.T) {
-	store, cleanup := setupDB(t)
-	defer cleanup()
-	ctx := context.Background()
-
-	userID, modelID, metricID := insertFixtures(t, store)
-	job, _ := store.CreateImportJob(ctx, modelID, "", "inline", userID, nil)
-
-	csvContent := strings.Join([]string{
-		"metric_id,value,region",
-		metricID + ",1500.00,EMEA",
-		metricID + ",bad-num,APAC",
-		metricID + ",3000.00,AMER",
-	}, "\n")
-
-	srv := importpkg.NewServer(zerolog.Nop(), store, nil)
-	resp, err := srv.ValidateImport(ctx, &importpkgv1.ValidateImportRequest{
-		JobId:      job.Id,
-		CsvContent: []byte(csvContent),
-	})
-	if err != nil {
-		t.Fatalf("ValidateImport: %v", err)
-	}
-
-	if resp.ValidRows != 2 {
-		t.Errorf("valid_rows = %d, want 2", resp.ValidRows)
-	}
-	if resp.ErrorRows != 1 {
-		t.Errorf("error_rows = %d, want 1", resp.ErrorRows)
-	}
-	if resp.Status != importpkgv1.ImportStatus_IMPORT_STATUS_STAGED {
-		t.Errorf("status = %v, want STAGED", resp.Status)
 	}
 }
 

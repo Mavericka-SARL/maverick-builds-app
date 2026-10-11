@@ -7,8 +7,8 @@
 //
 //	third-party-notices [-C dir] [-out FILE] [-append] [-heading TEXT] [-report] packages...
 //
-// deploy/docker/Dockerfile runs it per service (and once more, with -C, for
-// grpc-health-probe) and copies the result to /licenses/ in the image. The
+// deploy/docker/Dockerfile runs it per service and copies the result to
+// /licenses/ in the image (-C reads another module's tree). The
 // test in this package runs it over ./cmd/... so CI fails on the same
 // conditions before an image is built. See docs/LICENSING.md, "What ships
 // with a release".

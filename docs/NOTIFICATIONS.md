@@ -1,8 +1,6 @@
 # Notifications: in-app, e-mail, webhooks and reminders
 
-> **Classification:** Current — How notifications are produced and delivered.
-
-> **Last verified:** 2026-09-15
+> **Last verified:** 2026-10-11 (every path, variable, route and identifier it names checked against the code)
 
 Every notification the platform produces is written to the recipient's
 notification centre, the bell in each console. A tenant can additionally have

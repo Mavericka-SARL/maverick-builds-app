@@ -953,7 +953,7 @@ func TestImportRespectsWorkflowLockAndSystemManaged(t *testing.T) {
 }
 
 // TestGridScopesCellsTotalsAndAllDimensionsByHiddenMembers is the core
-// regression for the security gap BUILD_INSTRUCTIONS.md flagged: a caller
+// regression for a security gap: a caller
 // with hidden dimension_member access rules (identity.user_access_rule)
 // used to still receive every other caller's facts in grid()'s cells,
 // totals, and all_dimensions — only the primary `dimensions` member list was
@@ -1248,7 +1248,7 @@ func TestWorkflowTwoScopesIndependentInstancesAndApproveRequiresComment(t *testi
 }
 
 // TestCellsRejectsDirectWriteToHiddenMember covers the write-side half of
-// the hidden-member scoping BUILD_INSTRUCTIONS.md requires ("reject a
+// the hidden-member scoping requires ("reject a
 // request that includes an employee outside the caller's cost center even
 // if the caller constructs the request manually") — independent of any
 // workflow lock (no instance is submitted here at all): a manager whose

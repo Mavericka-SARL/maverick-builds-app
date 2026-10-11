@@ -160,7 +160,7 @@ func TestGroupingDimensionRecalcOnMemberChange(t *testing.T) {
 	if _, err := store.Pool().Exec(ctx, `UPDATE model.dimension_member SET properties='{"area":"EMEA"}'::jsonb WHERE id=$1::uuid`, e2); err != nil {
 		t.Fatal(err)
 	}
-	sched := calculation.NewScheduler(logger.New("calc-test"), store, nil)
+	sched := calculation.NewScheduler(logger.New("calc-test"), store)
 	if err := sched.RecalcDimensionDependents(ctx, empID); err != nil {
 		t.Fatalf("RecalcDimensionDependents: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestLookupOfDeletedMemberClearsRows(t *testing.T) {
 	if _, err := store.Pool().Exec(ctx, `DELETE FROM model.dimension_member WHERE id=$1::uuid`, usID); err != nil {
 		t.Fatal(err)
 	}
-	sched := calculation.NewScheduler(logger.New("calc-test"), store, nil)
+	sched := calculation.NewScheduler(logger.New("calc-test"), store)
 	_ = sched.RecalcAffected(ctx, modelID, revID, []string{salesID})
 	_ = sched.RecalcDimensionDependents(ctx, regionID)
 

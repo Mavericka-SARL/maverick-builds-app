@@ -7,25 +7,16 @@ import (
 	"slices"
 	"testing"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
-	commonv1 "github.com/mavericks-engine/mavericks/gen/go/common/v1"
-	workflowv1 "github.com/mavericks-engine/mavericks/gen/go/workflow/v1"
 	"github.com/mavericks-engine/mavericks/internal/workflow"
 	"github.com/mavericks-engine/mavericks/internal/workflow/assignee/assigneetest"
-	"github.com/mavericks-engine/mavericks/pkg/auth"
-	"github.com/mavericks-engine/mavericks/pkg/logger"
 )
 
-// The workspace boundary of workflow assignment (package assignee) holds
-// for deciding a step outside the gateway, and for a notification step's
-// role recipients. Store.IsAssigneeEligible — all the gRPC
-// WorkflowService.CompleteStep checks — matched a named platform role held
-// in any workspace of any tenant (or none), and a named business role of
-// any workspace of the application's tenant; a notification step naming a
-// role notified its holders in every workspace of the tenant and every
-// unscoped holder anywhere, with the workflow's name and message.
+// The workspace boundary of workflow assignment (package assignee) holds for
+// deciding a step (Store.IsAssigneeEligible, the reference the gateway's
+// inbox is held equal to) and for a notification step's role recipients. A
+// named platform role used to match in any workspace of any tenant, and a
+// notification step naming a role notified its holders in every workspace of
+// the tenant and every unscoped holder anywhere.
 
 func TestIsAssigneeEligibleKeepsTheWorkspaceBoundary(t *testing.T) {
 	f := assigneetest.New(t)
@@ -48,35 +39,6 @@ func TestIsAssigneeEligibleKeepsTheWorkspaceBoundary(t *testing.T) {
 				t.Errorf("eligible = %v, want %v", got, c.Want)
 			}
 		})
-	}
-}
-
-func TestGRPCCompleteStepKeepsTheWorkspaceBoundary(t *testing.T) {
-	f := assigneetest.New(t)
-	store := workflow.NewStore(f.Pool)
-	srv := workflow.NewServer(logger.New("test"), store)
-	step := f.Step(t, f.App1, "business_admin")
-
-	complete := func(user string) error {
-		ctx := auth.WithActor(context.Background(), &commonv1.Actor{UserId: f.Users[user]})
-		_, err := srv.CompleteStep(ctx, &workflowv1.CompleteStepRequest{StepId: step, Decision: "approve"})
-		return err
-	}
-	// A business admin of another tenant, of another workspace of the same
-	// tenant, one whose role is held in no workspace, a disabled one of
-	// this workspace, and a member of this workspace's business role named
-	// business_admin (not the platform role).
-	for _, user := range []string{"ba_2", "ba_1b", "ba_unscoped", "ba_1a_off", "imp_1a"} {
-		if code := status.Code(complete(user)); code != codes.PermissionDenied {
-			t.Errorf("%s deciding ws1a's step: code %v, want PermissionDenied", user, code)
-		}
-	}
-	var st string
-	if err := f.Pool.QueryRow(context.Background(), `SELECT status::text FROM workflow.workflow_step WHERE id=$1::uuid`, step).Scan(&st); err != nil || st != "in_progress" {
-		t.Fatalf("step status after refused decisions = %q (%v), want in_progress", st, err)
-	}
-	if err := complete("ba_1a"); err != nil {
-		t.Fatalf("the business admin of ws1a could not decide its step: %v", err)
 	}
 }
 

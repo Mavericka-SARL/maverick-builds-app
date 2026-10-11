@@ -14,6 +14,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -28,7 +30,6 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/integration"
 	"github.com/mavericks-engine/mavericks/pkg/config"
 	"github.com/mavericks-engine/mavericks/pkg/db"
-	"github.com/mavericks-engine/mavericks/pkg/grpcutil"
 	"github.com/mavericks-engine/mavericks/pkg/logger"
 	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
 )
@@ -82,9 +83,27 @@ func main() {
 		log.Warn().Msg("INTEGRATION_ALLOW_INSECURE: plain-http/loopback destinations permitted (dev only)")
 	}
 
-	srv := grpcutil.NewServer()
+	// The worker serves no API; :9090 answers the orchestrator's health
+	// probes (GET /healthz) and nothing else.
+	health := &http.Server{
+		Addr: ":9090",
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/healthz" {
+				http.NotFound(w, r)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
 	go func() {
-		if err := grpcutil.Serve(ctx, 9090, srv, log); err != nil {
+		<-ctx.Done()
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = health.Shutdown(sctx)
+	}()
+	go func() {
+		if err := health.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error().Err(err).Msg("health server exited")
 		}
 	}()
@@ -167,8 +186,6 @@ func runWorker(ctx context.Context, log zerolog.Logger, pool *pgxpool.Pool, work
 		// integration_failed automation rules.
 		OnFinished: integration.DispatchRunEvents(pool, log),
 	}
-
-	// Health endpoint for the standard grpc-health-probe manifests.
 
 	// Schedule ticker.
 	go func() {

@@ -604,7 +604,7 @@ func TestSalesDemoTiedTimestampRowsStayConsistent(t *testing.T) {
 	}
 
 	// Recompute every calc metric from the new facts, like a real import does.
-	sched := calculation.NewScheduler(logger.New("test"), calculation.NewStore(d.pool), nil)
+	sched := calculation.NewScheduler(logger.New("test"), calculation.NewStore(d.pool))
 	if err := sched.RecalcAffected(ctx, d.modelID, d.revID, []string{d.metric["revenue"], d.metric["cost"]}); err != nil {
 		t.Fatalf("recalc: %v", err)
 	}

@@ -17,7 +17,7 @@ func TestLegalInfo(t *testing.T) {
 	configured := LegalConfig{
 		Entity: "Acme Software SARL", Address: "1 Rue de Test, Luxembourg",
 		Email: "legal@acme.test", Jurisdiction: "Luxembourg",
-		Hosting: "Hetzner Online GmbH (Germany)", Updated: "2026-09-18",
+		Hosting: "Example Hosting GmbH (Germany)", Updated: "2026-09-18",
 	}
 
 	for _, tc := range []struct {

@@ -32,8 +32,8 @@ if [ "${1:-}" = "postgres" ] || [ "${1:-}" = "" ] || [ "${1:0:1}" = "-" ]; then
     # CreateBucket, and a provider whose region differs from mc's default
     # rejects it on the location constraint BEFORE reaching the
     # already-exists path — so --ignore-existing does not help there. Against
-    # Hetzner Object Storage (fsn1) this failed even though the bucket
-    # existed, and `set -e` then stopped postgres from starting at all.
+    # such a provider this failed even though the bucket existed, and
+    # `set -e` then stopped postgres from starting at all.
     # `mc ls` needs no region and succeeds for an existing (even empty) bucket.
     if ! mc ls "walgminio/${bucket}" >/dev/null 2>&1; then
       mc mb "walgminio/${bucket}" >/dev/null

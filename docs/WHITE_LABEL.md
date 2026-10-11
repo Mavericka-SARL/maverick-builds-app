@@ -1,8 +1,6 @@
 # White-labelling
 
-> **Classification:** Current — A tenant's own name, logo, colours and domain on the console, and its name on outbound mail.
-
-> **Last verified:** 2026-09-16
+> **Last verified:** 2026-10-11 (every path, variable, route and identifier it names checked against the code)
 
 A commercial and enterprise feature (`white_label`). **Admin › Branding** lets
 a tenant admin set:

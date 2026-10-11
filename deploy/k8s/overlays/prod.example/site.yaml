@@ -139,23 +139,6 @@ spec:
             storage: 20Gi
 
 ---
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: nats
-  namespace: mavericks
-spec:
-  volumeClaimTemplates:
-    - metadata:
-        name: nats-data
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        storageClassName: standard                              # CHANGE
-        resources:
-          requests:
-            storage: 5Gi
-
----
 # In-cluster MinIO's volume. Remove this patch when you list
 # minio-remove.yaml (external object storage) in kustomization.yaml.
 apiVersion: v1

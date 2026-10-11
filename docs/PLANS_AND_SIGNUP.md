@@ -1,13 +1,10 @@
 # Plans and self-service sign-up
 
-> **Classification:** Current — How a tenant's plan is defined and enforced, and how a visitor becomes a tenant.
-
-> **Last verified:** 2026-10-06 (tests; migration 123: three plans, Community, Commercial and Enterprise)
+> **Last verified:** 2026-10-11 (tests; migration 129: the Community note matches the licence)
 
 A tenant is on one **plan**. The plan says how much the tenant may use
 (limits) and whether a visitor may pick it at public **sign-up**. A plan
-bounds how much, never for how long: **there is no trial** (migration 090
-removed the concept). Plans are rows the platform administrators — the
+bounds how much, never for how long. Plans are rows the platform administrators — the
 operator's own people, with reach over every tenant — edit in the console,
 not constants in code: tuning the Community plan is an edit, not a release.
 
@@ -24,7 +21,8 @@ each key issued for an accepted order, which it names; a plan decides how
 much *one tenant* may use.
 
 On the hosted service the two never meet: sign-up hands out the Community
-plan, whose only limit is its size, and a sign-up account is never a
+plan, whose only limit is its size — that hosted Community edition is the
+**Playground** — and a sign-up account is never a
 platform administrator — that role is the operator's, and whoever they
 delegate it to. Everything beyond the Community plan is a licence key and
 running the platform yourself.
@@ -49,16 +47,16 @@ running the platform yourself.
 
 0 means unlimited. Migration 085 seeds `starter`, `standard` and
 `enterprise` without limits, so that every tenant that already existed keeps
-working exactly as before. Migration 089 adds `test` ("Test workspace", renamed "Basic workspace" by 096) —
-no end date, `max_storage_mb: 100` plus the two daily caps — and makes it
-the self-service plan. Migration 090 drops the fourteen-day `trial` plan 085
-had seeded, together with `trial_days` and `core.customer.trial_ends_at`;
-a tenant that had been put on it by hand moves to the basic workspace.
+working exactly as before. Migration 089 adds `test` — no end date,
+`max_storage_mb: 100` plus the two daily caps — and makes it the
+self-service plan. Migration 090 removes the time-limited plan 085 had
+seeded, with its columns; a tenant that had been put on it by hand moves to
+`test`.
 Migration 123 leaves three plans: `test` becomes `community` ("Community",
 `max_storage_mb: 100` only — the two daily caps go), `standard` becomes
 `commercial` ("Commercial"), `enterprise` stays; tenants on `starter` move
-to `commercial` and the plan goes, a leftover `trial` tenant moves to
-`community`, and both places a tenant names its plan (`core.customer.plan`,
+to `commercial` and the plan goes, a tenant left on the removed
+time-limited plan moves to `community`, and both places a tenant names its plan (`core.customer.plan`,
 `platform.tenant_database.plan`) now default to `commercial`. Keys were
 renamed in place, so each plan kept whatever the platform administrator had
 set on it. Sign-up offers the first `self_service` plan by `sort_order`.
@@ -68,8 +66,10 @@ it — the 402 body, the read-only reason in the banner, the terms of service
 — in place of the engine's default "Change the plan to add more." A
 deployment whose answer to a full workspace is another plan leaves it empty;
 the Community plan's note says to run the platform on your own
-infrastructure (free and unlimited for non-commercial use, under a
-commercial licence otherwise) or to get the enterprise edition. The console
+infrastructure (free for your company's internal use, as the Sustainable
+Use License says) or to get the Commercial
+or Enterprise edition (migration 129 corrected the seeded wording, which
+understated the licence). The console
 shows the plan's `contact_url` link as "Learn more" when a note is set and
 "Change plan" when it is not.
 

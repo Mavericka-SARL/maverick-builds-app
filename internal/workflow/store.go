@@ -275,89 +275,6 @@ func (s *Store) GetWorkflowInstance(ctx context.Context, instanceID string) (*wo
 	return inst, steps, nil
 }
 
-func (s *Store) ListWorkflowInstances(ctx context.Context, applicationID string, filterStatus workflowv1.WorkflowStatus, limit, offset int32) ([]*workflowv1.WorkflowInstance, error) {
-	query := `
-		SELECT wi.id::text, wi.workflow_def_id::text, wi.status::text,
-		       COALESCE(wi.started_by::text, ''), wi.context, wi.started_at, wi.completed_at
-		FROM workflow.workflow_instance wi
-		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
-		WHERE wd.application_id = $1::uuid
-	`
-	args := []any{applicationID}
-
-	if filterStatus != workflowv1.WorkflowStatus_WORKFLOW_STATUS_UNSPECIFIED {
-		args = append(args, workflowStatusToString(filterStatus))
-		query += fmt.Sprintf(" AND wi.status = $%d::workflow.workflow_status", len(args))
-	}
-	args = append(args, limit, offset)
-	query += fmt.Sprintf(" ORDER BY wi.started_at DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args))
-
-	rows, err := s.db.Query(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var instances []*workflowv1.WorkflowInstance
-	for rows.Next() {
-		var id, defID, statusStr, startedBy string
-		var ctxJSON []byte
-		var startedAt time.Time
-		var completedAt *time.Time
-
-		if err := rows.Scan(&id, &defID, &statusStr, &startedBy, &ctxJSON, &startedAt, &completedAt); err != nil {
-			return nil, err
-		}
-		var contextVars map[string]string
-		_ = json.Unmarshal(ctxJSON, &contextVars)
-
-		inst := &workflowv1.WorkflowInstance{
-			Id:            id,
-			WorkflowDefId: defID,
-			Status:        workflowStatusFromString(statusStr),
-			Context:       contextVars,
-			StartedAt:     timestamppb.New(startedAt),
-		}
-		if completedAt != nil {
-			inst.CompletedAt = timestamppb.New(*completedAt)
-		}
-		instances = append(instances, inst)
-	}
-	return instances, rows.Err()
-}
-
-// IsAssigneeEligible reports whether userID is an assignee of stepID, an
-// in-progress step, within the workspace boundary of workflow assignment
-// (assignee.SQL): a role the step names counts only when it is held for the
-// step's application, and a step naming no role is open to those who reach
-// the application. It is the whole check behind the gRPC
-// WorkflowService.CompleteStep (Server.CompleteStep); the HTTP task inbox and
-// completion (internal/gateway/handler.go's taskAssigneeSQL) apply the same
-// predicate in their own queries. A disabled account is never eligible.
-//
-// It used to match a named platform role held in any workspace of any
-// tenant (or in none), and a named business role of any workspace of the
-// application's tenant, so over gRPC a business admin of another tenant
-// could decide the step.
-func (s *Store) IsAssigneeEligible(ctx context.Context, stepID, userID string) (bool, error) {
-	var eligible bool
-	err := s.db.QueryRow(ctx, `
-		SELECT EXISTS (
-		    SELECT 1
-		    FROM workflow.workflow_def wd
-		    JOIN workflow.workflow_instance wi ON wi.workflow_def_id = wd.id
-		    JOIN workflow.workflow_step ws ON ws.id = $1::uuid AND ws.instance_id = wi.id
-		    CROSS JOIN LATERAL (
-		        SELECT elem FROM jsonb_array_elements(COALESCE(wi.steps_snapshot, wd.steps)) AS elem
-		        WHERE elem->>'id' = ws.step_def_id LIMIT 1
-		    ) step_def
-		    WHERE ws.status = 'in_progress'
-		      AND `+assignee.SQL("wd.application_id", "step_def.elem->'assignee_roles'", "$2::uuid")+`
-		)
-	`, stepID, userID).Scan(&eligible)
-	return eligible, err
-}
-
 // CompleteStep marks a step done and advances to the next pending step.
 func (s *Store) CompleteStep(ctx context.Context, stepID, userID, decision, comment string) (*workflowv1.WorkflowStep, error) {
 	var instanceID, stepDefID string
@@ -417,9 +334,8 @@ func (s *Store) CompleteStep(ctx context.Context, stepID, userID, decision, comm
 	// If this step declares an on_approve action and the decision approves,
 	// run its fact copy + dirty-marking inside the same tx as the decision
 	// above. This is deliberately transport-uniform: CompleteStep is the one
-	// method the HTTP task-inbox path, the gRPC WorkflowService, and every
-	// seed script all call, so this now applies to all three, closing what
-	// was previously an HTTP-only behavior.
+	// method the HTTP task-inbox path and every seed script call, so this
+	// applies to both.
 	var copyResult *onApproveCopyResult
 	// A test run never writes facts: the on_approve copy is the engine's one
 	// path from a workflow decision into real planning data.
@@ -501,7 +417,7 @@ func (s *Store) CompleteStep(ctx context.Context, stepID, userID, decision, comm
 	// WHERE status='dirty' guard is what makes it safe to trigger here even
 	// though the partition may already have been marked dirty by the tx.
 	if copyResult != nil && len(copyResult.AffectedMetrics) > 0 {
-		scheduler := calculation.NewScheduler(s.log, calculation.NewStoreOn(s.db), nil)
+		scheduler := calculation.NewScheduler(s.log, calculation.NewStoreOn(s.db))
 		if err := scheduler.RecalcAffected(ctx, copyResult.ModelID, copyResult.TargetRevisionID, copyResult.AffectedMetrics); err != nil {
 			s.log.Warn().Err(err).Str("instance_id", instanceID).Msg("on_approve recalc failed")
 		}
@@ -1738,21 +1654,6 @@ func workflowStatusFromString(s string) workflowv1.WorkflowStatus {
 		return workflowv1.WorkflowStatus_WORKFLOW_STATUS_FAILED
 	default:
 		return workflowv1.WorkflowStatus_WORKFLOW_STATUS_UNSPECIFIED
-	}
-}
-
-func workflowStatusToString(s workflowv1.WorkflowStatus) string {
-	switch s {
-	case workflowv1.WorkflowStatus_WORKFLOW_STATUS_RUNNING:
-		return "running"
-	case workflowv1.WorkflowStatus_WORKFLOW_STATUS_COMPLETED:
-		return "completed"
-	case workflowv1.WorkflowStatus_WORKFLOW_STATUS_CANCELLED:
-		return "cancelled"
-	case workflowv1.WorkflowStatus_WORKFLOW_STATUS_FAILED:
-		return "failed"
-	default:
-		return ""
 	}
 }
 
@@ -3172,4 +3073,32 @@ func (s *Store) ListExecutions(ctx context.Context, appID string, limit int) ([]
 		execs = append(execs, &e)
 	}
 	return execs, rows.Err()
+}
+
+// IsAssigneeEligible reports whether userID is an assignee of stepID, an
+// in-progress step, within the workspace boundary of workflow assignment
+// (assignee.SQL): a role the step names counts only when it is held for the
+// step's application, and a step naming no role is open to those who reach
+// the application. It is the reference form of that boundary: the HTTP task
+// inbox and completion (internal/gateway/handler.go's taskAssigneeSQL) apply
+// the same predicate in their own queries, and the gateway's
+// task_assignee_equivalence_test holds the two equal. A disabled account is
+// never eligible.
+func (s *Store) IsAssigneeEligible(ctx context.Context, stepID, userID string) (bool, error) {
+	var eligible bool
+	err := s.db.QueryRow(ctx, `
+		SELECT EXISTS (
+		    SELECT 1
+		    FROM workflow.workflow_def wd
+		    JOIN workflow.workflow_instance wi ON wi.workflow_def_id = wd.id
+		    JOIN workflow.workflow_step ws ON ws.id = $1::uuid AND ws.instance_id = wi.id
+		    CROSS JOIN LATERAL (
+		        SELECT elem FROM jsonb_array_elements(COALESCE(wi.steps_snapshot, wd.steps)) AS elem
+		        WHERE elem->>'id' = ws.step_def_id LIMIT 1
+		    ) step_def
+		    WHERE ws.status = 'in_progress'
+		      AND `+assignee.SQL("wd.application_id", "step_def.elem->'assignee_roles'", "$2::uuid")+`
+		)
+	`, stepID, userID).Scan(&eligible)
+	return eligible, err
 }

@@ -12,12 +12,10 @@ func bootstrap(root *api) *api {
 	// Idempotent delete-before-create: this tool never cleaned up its own
 	// "Engine QA Co" tenant on any prior run, so every invocation left a
 	// fresh one behind — 4 accumulated in the shared dev DB, discovered
-	// live 2026-08-10 (same root cause, and same fix, as
-	// cmd/verify-topology's own "verify-topology" customer earlier the
-	// same day). Delete-before-create here guarantees at most one exists
-	// at a time regardless of how any PREVIOUS run exited, including a
-	// log.Fatalf mid-run (which — like cmd/verify-topology's fatalf —
-	// terminates immediately with no deferred cleanup).
+	// live 2026-08-10. Delete-before-create here guarantees at most one
+	// exists at a time regardless of how any PREVIOUS run exited, including
+	// a log.Fatalf mid-run (which terminates immediately with no deferred
+	// cleanup).
 	for _, t := range root.as("platform_admin").callList("GET", "/api/admin/tenants", nil) {
 		if name, _ := t["name"].(string); name == "Engine QA Co" {
 			step("deleting stale tenant \"Engine QA Co\" from a prior run (%s)", id(t))

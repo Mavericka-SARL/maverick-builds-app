@@ -18,7 +18,7 @@ const (
 	// StateActive: a valid key is in force.
 	StateActive State = "active"
 	// StateTransition: a valid key has expired less than TransitionPeriod
-	// ago. Its paid features keep working as configured and can be read and
+	// ago. Its enterprise features keep working as configured and can be read and
 	// exported, so a customer can renew or move off them, but nothing paid
 	// can be newly configured or changed.
 	StateTransition State = "transition"
@@ -213,7 +213,7 @@ func (m *Manager) Edition() Edition { return m.Status().Edition }
 
 // Has reports whether f is unlocked with full rights right now: a key in
 // force, not in its transition. It is the strict check — anything that
-// configures, changes or irreversibly acts on a paid feature uses it, so a
+// configures, changes or irreversibly acts on an enterprise feature uses it, so a
 // caller that forgets to choose fails closed.
 func (m *Manager) Has(f Feature) bool {
 	st := m.Status()
@@ -222,7 +222,7 @@ func (m *Manager) Has(f Feature) bool {
 
 // Usable reports whether f may keep working as configured: Has, or the
 // key's transition period. Sign-in, branding, inherited settings and reads
-// and exports of a paid feature use it, so an expired key does not lock
+// and exports of an enterprise feature use it, so an expired key does not lock
 // people out or strand their data while they renew or migrate.
 func (m *Manager) Usable(f Feature) bool {
 	st := m.Status()
@@ -255,7 +255,7 @@ func (m *Manager) refusal(f Feature) error {
 	return UnavailableError(f, st.Edition)
 }
 
-// TransitionError explains why a change to a paid feature is refused while
+// TransitionError explains why a change to an enterprise feature is refused while
 // its key is in the transition period.
 func TransitionError(f Feature, expired, ends time.Time) error {
 	return fmt.Errorf("%s is read and export only: the license key expired on %s, and until %s nothing paid can be changed; install a renewed key to change it",
