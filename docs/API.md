@@ -1,6 +1,6 @@
 # HTTP API Guide
 
-> **Last verified:** 2026-10-02
+> **Last verified:** 2026-10-11 (every path, variable, route and identifier it names checked against the code)
 > **Router authority:** `internal/gateway.NewHandler` (`registerRoutes`)
 
 ## Transport and context

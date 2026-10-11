@@ -92,7 +92,7 @@ application holding it) does: since migration 089 the archive skips facts
 whose model is being deleted and drops the model's earlier history — history
 no screen could show once the model is gone. That is what "read-only,
 except for deleting" means for a storage-bounded plan, and it was proven
-live: a basic workspace at 128 MB, application deleted by its own tenant
+live: a Community workspace at 128 MB (over its 100 MB), application deleted by its own tenant
 administrator while read-only, back to 33 MB and writable at the next sweep.
 The residual is PostgreSQL free space the tenant's next writes reuse. A tenant that names a plan with no row is treated
 as unlimited and shown as "(no such plan)": a catalog gap must never lock a

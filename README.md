@@ -178,6 +178,8 @@ it, switched off until a signed, offline license key switches it on; see
 - [Documentation index and status](docs/README.md)
 - [Development and validation](docs/DEVELOPMENT.md)
 - [HTTP API guide](docs/API.md)
+- [Chat with your data: the ChatGPT and Claude connector](docs/CHAT_CONNECTOR.md)
+- [The AI developer](docs/AI_DEVELOPER.md)
 - [Editions and licensing](docs/LICENSING.md)
 - [Contributing](CONTRIBUTING.md), the [code of conduct](CODE_OF_CONDUCT.md) and
   [reporting a security issue](SECURITY.md)

@@ -1,6 +1,6 @@
 # Documentation Index
 
-> **Last verified:** 2026-10-07
+> **Last verified:** 2026-10-11 (every path, variable, route and identifier it names checked against the code)
 
 This index lists the project documentation and its status. Code, migrations,
 tests, and build configuration remain authoritative.

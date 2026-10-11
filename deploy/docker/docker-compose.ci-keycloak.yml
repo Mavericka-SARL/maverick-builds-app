@@ -4,7 +4,7 @@
 # than the dev stack's 5432 and 8180. CI_PG_PORT and CI_KC_PORT override them;
 # the CI job picks fresh ones per attempt, because rootless Docker on the
 # runner node can keep a torn-down stack's port bound. No WAL-G, no
-# MinIO, no NATS: the gateway under test only needs its database and the
+# MinIO: the gateway under test only needs its database and the
 # identity provider. The realm import is the same file the dev stack uses,
 # so the seeded "alex"/"mavericks" user and the mavericks-web client (redirect
 # http://localhost:5173/*) are what the spec signs in with.

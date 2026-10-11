@@ -7791,7 +7791,7 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Best-effort recalc (no NATS in gateway — call calculation scheduler directly)
+	// Best-effort recalc, in-process
 	if len(metricIDs) > 0 {
 		calcStore := calculation.NewStore(h.db.For(ctx))
 		sched := calculation.NewScheduler(h.log, calcStore)

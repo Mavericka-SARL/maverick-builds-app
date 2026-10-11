@@ -357,8 +357,8 @@ func (s *Store) LoadDimensionSchema(ctx context.Context, modelID, revisionID str
 // LoadAllDimensions loads every dimension in the revision (regardless of
 // grid), in the shape rollup.Resolve/rollup.LeafCombos need. Unlike
 // chart.go's version, there is no hidden-member filtering here: the
-// scheduler has no per-user/access-rule concept (it runs from a
-// NATS-triggered or directly-called background path with no acting user),
+// scheduler has no per-user/access-rule concept (it runs on a background
+// path with no acting user),
 // and a computed value must exist regardless of who can currently see it —
 // exactly like fact_input itself is never access-filtered at write time.
 func (s *Store) LoadAllDimensions(ctx context.Context, modelID, revisionID string) (map[string]*rollup.Dimension, error) {

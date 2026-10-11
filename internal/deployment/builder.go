@@ -74,9 +74,8 @@ type manifest struct {
 }
 
 // runtimeDep declares (rather than builds) what's needed to run this
-// package's data against a live gateway — no Dockerfile exists anywhere in
-// this repository, and building/publishing the real ~14-service image set
-// is owned by a separate backlog item ("Distributed topology validation").
+// package's data against a live gateway: the repository and commit whose
+// images (gateway, integration worker, web console) serve it.
 type runtimeDep struct {
 	Repo         string `json:"repo"`
 	CommitSHA    string `json:"commit_sha"`

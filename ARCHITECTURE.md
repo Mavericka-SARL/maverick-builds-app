@@ -1,7 +1,7 @@
 # maverickbuilds.app Architecture
 
 > **Status:** Current implementation reference
-> **Last verified:** 2026-09-25 (formula paragraph 2026-09-28)
+> **Last verified:** 2026-10-11 (every path, variable, route and identifier it names checked against the code)
 > **Authority:** Running code, migrations, build configuration, and tests take
 > precedence if this document drifts.
 

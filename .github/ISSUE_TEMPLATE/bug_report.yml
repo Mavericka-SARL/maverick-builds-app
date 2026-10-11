@@ -11,8 +11,8 @@ body:
     id: release
     attributes:
       label: Release
-      description: The release you run (e.g. 2026.09.26), or the commit if you built from main.
-      placeholder: "2026.09.26"
+      description: The release you run (e.g. 2026.10.11), or the commit if you built from main.
+      placeholder: "2026.10.11"
     validations:
       required: true
   - type: dropdown

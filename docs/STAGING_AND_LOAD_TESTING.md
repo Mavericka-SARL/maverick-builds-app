@@ -1,6 +1,6 @@
 # Staging and load testing
 
-> **Last verified:** 2026-09-17
+> **Last verified:** 2026-10-11 (every path, variable, route and identifier it names checked against the code)
 
 ## Why
 
