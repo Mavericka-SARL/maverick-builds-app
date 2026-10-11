@@ -290,3 +290,46 @@ func TestMigrateAllLeavesNoConnections(t *testing.T) {
 		t.Fatalf("%d connections to tenant databases left open after MigrateAll", open)
 	}
 }
+
+// Each walks every tenant without leaving a connection open per tenant:
+// at gateway start it visited every database and the connections stayed
+// idle until their timeout, adding up to PgBouncer's client limit.
+func TestEachLeavesNoConnections(t *testing.T) {
+	ctx := context.Background()
+	r, control := newRouter(t)
+	var dbs []string
+	for _, name := range []string{"A", "B", "C"} {
+		p, err := r.Provision(ctx, name, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Forget(p.Tenant.CustomerID)
+		dbs = append(dbs, p.Tenant.Database)
+	}
+	visited := 0
+	if err := r.Each(ctx, func(_ tenantdb.Tenant, pool *pgxpool.Pool) error {
+		visited++
+		_, err := pool.Exec(ctx, "SELECT 1")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if visited != 3 {
+		t.Fatalf("visited %d tenants, want 3", visited)
+	}
+	var open int
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := control.QueryRow(ctx,
+			`SELECT count(*) FROM pg_stat_activity WHERE datname = ANY($1)`, dbs).Scan(&open); err != nil {
+			t.Fatal(err)
+		}
+		if open == 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if open != 0 {
+		t.Fatalf("%d connections to tenant databases left open after Each", open)
+	}
+}

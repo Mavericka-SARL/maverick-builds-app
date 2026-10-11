@@ -811,6 +811,19 @@ func (s *Store) GetSchedule(ctx context.Context, integrationID string) (*Schedul
 	return &sc, nil
 }
 
+// NextScheduleAt is when the next enabled schedule comes due, for the
+// tenant's Waker; the zero time when none is enabled.
+func (s *Store) NextScheduleAt(ctx context.Context) (time.Time, error) {
+	var next *time.Time
+	err := s.db.QueryRow(ctx, `
+		SELECT min(next_fire_at) FROM model.integration_schedule
+		WHERE enabled AND next_fire_at IS NOT NULL`).Scan(&next)
+	if err != nil || next == nil {
+		return time.Time{}, err
+	}
+	return *next, nil
+}
+
 // DueSchedules returns enabled schedules whose next_fire_at has passed, and
 // advances next_fire_at atomically so sibling schedulers don't double-fire
 // (the unique (integration, scheduled_for) run index is the second guard).

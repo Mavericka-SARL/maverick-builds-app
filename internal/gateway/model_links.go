@@ -47,6 +47,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/reporting"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
+	"github.com/mavericks-engine/mavericks/pkg/wake"
 )
 
 // ModelLinks runs the model links of the databases it is started on. The
@@ -71,27 +72,26 @@ const (
 
 // Run claims and runs pool's model links one at a time until ctx ends.
 // customerID routes a dedicated tenant's database ("" in shared mode).
-func (ml *ModelLinks) Run(ctx context.Context, pool *pgxpool.Pool, customerID string, log zerolog.Logger, workerID string) {
+func (ml *ModelLinks) Run(ctx context.Context, pool *pgxpool.Pool, customerID string, log zerolog.Logger, workerID string, gate wake.Gate) {
 	if ml == nil || ml.h == nil {
 		return
 	}
 	if customerID != "" {
 		ctx = tenantdb.WithScope(ctx, tenantdb.Scope{CustomerID: customerID, Pool: pool})
 	}
+	gate = wake.OrTimer(gate)
 	runner := ml.runner(pool, log)
-	for {
+	for wait := time.Duration(0); gate.Wait(ctx, wait); {
 		ran, err := ml.runNext(ctx, runner, workerID)
 		if err != nil && ctx.Err() == nil {
 			log.Error().Err(err).Msg("claim model link run")
 		}
 		if ran {
+			gate.Touch()
+			wait = 0
 			continue
 		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(modelLinkClaimInterval):
-		}
+		wait = modelLinkClaimInterval
 	}
 }
 

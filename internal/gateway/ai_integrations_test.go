@@ -38,7 +38,7 @@ func TestAIDeveloperBuildsTestsAndRunsAModelLink(t *testing.T) {
 	// The gateway's model-link runner, as cmd/gateway runs it.
 	runCtx, stop := context.WithCancel(ctx)
 	t.Cleanup(stop)
-	go f.ml.Run(runCtx, f.pool, "", logger.New("test"), "test-gateway")
+	go f.ml.Run(runCtx, f.pool, "", logger.New("test"), "test-gateway", nil) // shared database: a plain timer
 
 	chat := aiassistant.NewChatStore(f.pool)
 	sess, err := chat.CreateSession(ctx, f.tgtApp, f.tgtModel, f.devID, "openai", "gpt-4o-mini")

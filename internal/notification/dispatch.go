@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+
+	"github.com/mavericks-engine/mavericks/pkg/wake"
 )
 
 // Outbound delivery.
@@ -268,6 +270,8 @@ type Dispatcher struct {
 	// so a message that is another tenant's news is sent without it
 	// (Message.OtherTenant).
 	BrandName func(ctx context.Context, recipientUserID string) string
+	// Gate paces Run: nil is a plain timer (see pkg/wake).
+	Gate wake.Gate
 }
 
 // BrandedMailer is a Mailer that can send under a display name.
@@ -285,18 +289,26 @@ func (d *Dispatcher) httpClient() *http.Client {
 // Run delivers every due notification, then repeats on interval until ctx
 // ends. One of these runs per database.
 func (d *Dispatcher) Run(ctx context.Context, interval time.Duration) {
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	for {
-		if _, err := d.RunOnce(ctx); err != nil && ctx.Err() == nil {
+	wake.Loop(ctx, wake.OrTimer(d.Gate), interval, func(ctx context.Context) bool {
+		n, err := d.RunOnce(ctx)
+		if err != nil && ctx.Err() == nil {
 			d.Log.Warn().Err(err).Msg("notification dispatch pass failed")
 		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
+		return n > 0
+	})
+}
+
+// NextRetryAt is when the next pending delivery is due, for the tenant's
+// Waker; the zero time when none is pending.
+func (s *Store) NextRetryAt(ctx context.Context) (time.Time, error) {
+	var next *time.Time
+	err := s.db.QueryRow(ctx, `
+		SELECT min(next_attempt_at) FROM notification.notification
+		WHERE status = 'pending' AND channel <> 'in_app'`).Scan(&next)
+	if err != nil || next == nil {
+		return time.Time{}, err
 	}
+	return *next, nil
 }
 
 // RunOnce delivers one batch and reports how many were delivered.

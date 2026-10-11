@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+
+	"github.com/mavericks-engine/mavericks/pkg/wake"
 )
 
 // Enforcer answers "may this tenant do that?" cheaply: the plan and tenant
@@ -488,12 +490,12 @@ func isNoRows(err error) bool {
 // In dedicated mode a tenant database holds one customer; the control plane
 // holds the tenants created in shared mode. Errors are logged, never fatal:
 // a sweep that cannot run leaves the last verdict standing.
-func RunSweep(ctx context.Context, db DB, e *Enforcer, interval time.Duration, log zerolog.Logger) {
-	sweepAll := func() {
+func RunSweep(ctx context.Context, db DB, e *Enforcer, interval time.Duration, log zerolog.Logger, gate wake.Gate) {
+	sweepAll := func(ctx context.Context) bool {
 		rows, err := db.Query(ctx, `SELECT id::text FROM core.customer`)
 		if err != nil {
 			log.Warn().Err(err).Msg("plan sweep: could not list tenants")
-			return
+			return false
 		}
 		var ids []string
 		for rows.Next() {
@@ -513,16 +515,8 @@ func RunSweep(ctx context.Context, db DB, e *Enforcer, interval time.Duration, l
 				log.Info().Str("tenant", id).Str("reason", t.LimitReason).Msg("tenant is over its plan limits and read-only")
 			}
 		}
+		return false
 	}
-	sweepAll()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			sweepAll()
-		}
-	}
+	// A sweep changes no work for other loops: it touches nothing.
+	wake.Loop(ctx, wake.OrTimer(gate), interval, sweepAll)
 }

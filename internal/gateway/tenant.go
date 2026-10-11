@@ -140,6 +140,9 @@ func (h *handler) tenantRouting(next http.Handler) http.Handler {
 		}
 		if target != "" {
 			if pool, err := router.Pool(ctx, target); err == nil {
+				// A request is activity: the tenant's background loops wake
+				// (pkg/tenantdb Waker).
+				router.Touch(ctx, target)
 				ctx = tenantdb.WithScope(ctx, tenantdb.Scope{CustomerID: target, Pool: pool})
 				// Someone platform-level, addressing a tenant: their account
 				// is in the control plane (platformActorOnControl).
@@ -180,6 +183,9 @@ func (h *handler) tenantCtx(ctx context.Context, customerID string) context.Cont
 	if err != nil {
 		return ctx
 	}
+	// An administrator acting on a tenant (a plan change, say) is activity
+	// its background loops must see, like the tenant's own requests.
+	router.Touch(ctx, customerID)
 	return tenantdb.WithScope(ctx, tenantdb.Scope{CustomerID: customerID, Pool: pool})
 }
 

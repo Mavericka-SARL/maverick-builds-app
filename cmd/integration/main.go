@@ -32,6 +32,7 @@ import (
 	"github.com/mavericks-engine/mavericks/pkg/db"
 	"github.com/mavericks-engine/mavericks/pkg/logger"
 	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
+	"github.com/mavericks-engine/mavericks/pkg/wake"
 )
 
 type cfg struct {
@@ -110,9 +111,18 @@ func main() {
 
 	base := "integration-" + uuid.NewString()[:8]
 	if router == nil {
-		runWorker(ctx, log, pool, base, allowInsecure)
+		runWorker(ctx, log, pool, base, allowInsecure, wake.Timer{})
 		return
 	}
+	// A quiet tenant's worker sleeps instead of polling its database; it is
+	// visited when one of its schedules comes due, and woken by activity
+	// the gateway records (a "run now", say).
+	waker := tenantdb.NewWaker(pool, tenantdb.WakeConfig{Log: log},
+		func(ctx context.Context, p *pgxpool.Pool) (time.Time, error) {
+			return integration.NewStore(p).NextScheduleAt(ctx)
+		})
+	waker.Start(ctx)
+	router.SetWaker(waker)
 	// One worker per tenant database, including tenants created while this
 	// process runs.
 	var wg sync.WaitGroup
@@ -120,7 +130,7 @@ func main() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runWorker(ctx, log.With().Str("tenant", t.CustomerID).Logger(), tpool, base+"-"+t.CustomerID[:8], allowInsecure)
+			runWorker(ctx, log.With().Str("tenant", t.CustomerID).Logger(), tpool, base+"-"+t.CustomerID[:8], allowInsecure, router.Gate(t.CustomerID, tpool))
 		}()
 	})
 	<-ctx.Done()
@@ -145,10 +155,10 @@ func heartbeat(ctx context.Context, store *integration.Store, runID, workerID st
 // fireDue enqueues runs for due schedules. Overlap policy "skip" refuses to
 // enqueue while a run is queued/running; the unique tick index deduplicates
 // racing replicas.
-func fireDue(ctx context.Context, log zerolog.Logger, store *integration.Store, now time.Time) {
+func fireDue(ctx context.Context, log zerolog.Logger, store *integration.Store, now time.Time) int {
 	due, err := store.DueSchedules(ctx, now, 50)
 	if err != nil {
-		return
+		return 0
 	}
 	for i := range due {
 		sc := &due[i]
@@ -168,6 +178,7 @@ func fireDue(ctx context.Context, log zerolog.Logger, store *integration.Store, 
 			log.Warn().Err(err).Str("integration", sc.IntegrationID).Msg("schedule enqueue")
 		}
 	}
+	return len(due)
 }
 
 // runWorker drives one database: the schedule ticker plus a pool of claimers.
@@ -175,7 +186,7 @@ func fireDue(ctx context.Context, log zerolog.Logger, store *integration.Store, 
 // dedicated tenant databases one of these runs per tenant, each with its own
 // worker id, so a run is only ever claimed by a worker connected to the
 // database that holds it.
-func runWorker(ctx context.Context, log zerolog.Logger, pool *pgxpool.Pool, workerID string, allowInsecure bool) {
+func runWorker(ctx context.Context, log zerolog.Logger, pool *pgxpool.Pool, workerID string, allowInsecure bool, gate wake.Gate) {
 	store := integration.NewStore(pool)
 	runner := &integration.Runner{
 		Store:         store,
@@ -188,18 +199,9 @@ func runWorker(ctx context.Context, log zerolog.Logger, pool *pgxpool.Pool, work
 	}
 
 	// Schedule ticker.
-	go func() {
-		t := time.NewTicker(schedInterval)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case now := <-t.C:
-				fireDue(ctx, log, store, now)
-			}
-		}
-	}()
+	go wake.Loop(ctx, gate, schedInterval, func(ctx context.Context) bool {
+		return fireDue(ctx, log, store, time.Now()) > 0
+	})
 
 	// Claim workers.
 	var wg sync.WaitGroup
@@ -207,24 +209,17 @@ func runWorker(ctx context.Context, log zerolog.Logger, pool *pgxpool.Pool, work
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
+			for wait := time.Duration(0); gate.Wait(ctx, wait); {
 				run, err := store.Claim(ctx, workerID, leaseFor)
-				if err != nil {
+				if err != nil && ctx.Err() == nil {
 					log.Error().Err(err).Msg("claim")
 				}
 				if run == nil {
-					select {
-					case <-ctx.Done():
-						return
-					case <-time.After(claimInterval):
-					}
+					wait = claimInterval
 					continue
 				}
+				gate.Touch()
+				wait = 0
 				log.Info().Str("run", run.ID).Str("integration", run.IntegrationID).
 					Str("trigger", run.TriggerType).Bool("dry_run", run.DryRun).Msg("run claimed")
 				runCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)

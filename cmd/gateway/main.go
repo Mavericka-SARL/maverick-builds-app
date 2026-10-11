@@ -36,6 +36,7 @@ import (
 	"github.com/mavericks-engine/mavericks/pkg/objectstore"
 	"github.com/mavericks-engine/mavericks/pkg/telemetry"
 	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
+	"github.com/mavericks-engine/mavericks/pkg/wake"
 )
 
 // schedulerPollInterval is how often this process checks for due scheduled
@@ -406,10 +407,12 @@ func main() {
 	// startBackground runs the loops that belong to one database: workflow
 	// timers, outbound notification delivery, task reminders, the plan
 	// sweep and model links. customerID is the dedicated tenant whose
-	// database dbPool is ("" in shared mode).
-	startBackground := func(dbPool *pgxpool.Pool, customerID string, blog zerolog.Logger, id string) {
+	// database dbPool is ("" in shared mode). gate paces the loops: a plain
+	// timer for the shared database; with a database per tenant, a Waker's,
+	// so a quiet tenant's loops sleep instead of polling it.
+	startBackground := func(dbPool *pgxpool.Pool, customerID string, blog zerolog.Logger, id string, gate wake.Gate) {
 		go workflow.RunScheduler(schedCtx, workflow.NewStore(dbPool), blog,
-			schedulerPollInterval, schedulerMisfireThreshold, id)
+			schedulerPollInterval, schedulerMisfireThreshold, id, gate)
 		store := notification.NewStore(dbPool)
 		dispatcher := &notification.Dispatcher{Store: store, Mailer: mailer, Log: blog,
 			// A white-labelled tenant's mail carries its own name; on other
@@ -419,9 +422,10 @@ func main() {
 					return ""
 				}
 				return branding.EmailNameForUser(ctx, dbPool, recipientUserID)
-			}}
+			},
+			Gate: gate}
 		go dispatcher.Run(schedCtx, notificationDispatchInterval)
-		reminder := &notification.Reminder{Store: store, Log: blog}
+		reminder := &notification.Reminder{Store: store, Log: blog, Gate: gate}
 		go reminder.Run(schedCtx, reminderInterval)
 		// Enterprise audit retention: sweeps only while the licence includes
 		// it with full rights (Has, not Usable) — deleting is irreversible,
@@ -429,21 +433,44 @@ func main() {
 		go auditexport.RunRetention(schedCtx, dbPool, blog, auditRetentionInterval, func() bool { return lic.Has(license.FeatureAuditExport) })
 		// Plan limits: a tenant over its plan is marked read-only here,
 		// whichever path put it over (internal/plan).
-		go plan.RunSweep(schedCtx, dbPool, planEnforcer, planSweepInterval, blog)
+		go plan.RunSweep(schedCtx, dbPool, planEnforcer, planSweepInterval, blog, gate)
+		// The one-off passes below wait for the tenant's first visit, so a
+		// start spreads them out instead of opening every database at once.
+		once := func(pass func()) {
+			go func() {
+				if gate.Wait(schedCtx, 0) {
+					pass()
+				}
+			}()
+		}
 		// Results stored by an older calculation engine are recalculated
 		// once (internal/calculation.EngineVersion).
-		go calculation.RunEngineUpgrade(schedCtx, dbPool, blog)
+		once(func() { calculation.RunEngineUpgrade(schedCtx, dbPool, blog) })
 		// Tenants that signed up earlier get the starter models they lack,
 		// and the current content of those they have (internal/startersync).
-		go startersync.Run(schedCtx, dbPool, blog)
-		go modelLinks.Run(schedCtx, dbPool, customerID, blog, id)
+		once(func() { startersync.Run(schedCtx, dbPool, blog) })
+		go modelLinks.Run(schedCtx, dbPool, customerID, blog, id, gate)
 	}
 	if router != nil {
+		// Each tenant's next scheduled item, for the loops above: a quiet
+		// tenant is visited when one comes due.
+		waker := tenantdb.NewWaker(pool, tenantdb.WakeConfig{Log: log},
+			func(ctx context.Context, p *pgxpool.Pool) (time.Time, error) {
+				return workflow.NewStore(p).NextScheduleAt(ctx)
+			},
+			func(ctx context.Context, p *pgxpool.Pool) (time.Time, error) {
+				return notification.NewStore(p).NextRetryAt(ctx)
+			},
+			func(ctx context.Context, p *pgxpool.Pool) (time.Time, error) {
+				return (&notification.Reminder{Store: notification.NewStore(p)}).NextAt(ctx)
+			})
+		waker.Start(schedCtx)
+		router.SetWaker(waker)
 		router.Watch(schedCtx, tenantWatchInterval, func(t tenantdb.Tenant, tpool *pgxpool.Pool) {
-			startBackground(tpool, t.CustomerID, log.With().Str("tenant", t.CustomerID).Logger(), workerID+"-"+t.CustomerID[:8])
+			startBackground(tpool, t.CustomerID, log.With().Str("tenant", t.CustomerID).Logger(), workerID+"-"+t.CustomerID[:8], router.Gate(t.CustomerID, tpool))
 		})
 	} else {
-		startBackground(pool, "", log, workerID)
+		startBackground(pool, "", log, workerID, wake.Timer{})
 	}
 
 	stop := make(chan os.Signal, 1)

@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
+	"github.com/mavericks-engine/mavericks/pkg/wake"
 )
 
 // ensureSystemUser returns the ID of a real identity.user row to attribute
@@ -44,19 +45,27 @@ type dueRule struct {
 // found only slightly late (within one normal poll interval) always fires
 // regardless of policy — misfire_policy only governs genuine backlog, e.g.
 // after the process was down.
-func RunScheduler(ctx context.Context, store *Store, log zerolog.Logger, pollInterval, misfireThreshold time.Duration, workerID string) {
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := store.PollDueSchedules(ctx, log, workerID, misfireThreshold); err != nil {
-				log.Warn().Err(err).Msg("scheduled automation poll failed")
-			}
+func RunScheduler(ctx context.Context, store *Store, log zerolog.Logger, pollInterval, misfireThreshold time.Duration, workerID string, gate wake.Gate) {
+	wake.Loop(ctx, wake.OrTimer(gate), pollInterval, func(ctx context.Context) bool {
+		claimed, err := store.pollDueSchedules(ctx, log, workerID, misfireThreshold)
+		if err != nil && ctx.Err() == nil {
+			log.Warn().Err(err).Msg("scheduled automation poll failed")
 		}
+		return claimed > 0
+	})
+}
+
+// NextScheduleAt is when the next schedule-type rule comes due; the zero
+// time when none is enabled. The tenant's Waker visits it then.
+func (s *Store) NextScheduleAt(ctx context.Context) (time.Time, error) {
+	var next *time.Time
+	err := s.db.QueryRow(ctx, `
+		SELECT min(next_fire_at) FROM workflow.automation_rule
+		WHERE enabled AND trigger_type = 'schedule'`).Scan(&next)
+	if err != nil || next == nil {
+		return time.Time{}, err
 	}
+	return *next, nil
 }
 
 // PollDueSchedules is one poll pass: claim every enabled schedule-type rule
@@ -67,9 +76,15 @@ func RunScheduler(ctx context.Context, store *Store, log zerolog.Logger, pollInt
 // partial unique index in TriggerScheduledRule, make firing idempotent
 // even if two instances both wake up for the same due tick.
 func (s *Store) PollDueSchedules(ctx context.Context, log zerolog.Logger, workerID string, misfireThreshold time.Duration) error {
+	_, err := s.pollDueSchedules(ctx, log, workerID, misfireThreshold)
+	return err
+}
+
+// pollDueSchedules is PollDueSchedules reporting how many rules it claimed.
+func (s *Store) pollDueSchedules(ctx context.Context, log zerolog.Logger, workerID string, misfireThreshold time.Duration) (int, error) {
 	due, err := s.claimDueSchedules(ctx, log, misfireThreshold)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	for _, d := range due {
 		if !d.fire {
@@ -87,7 +102,7 @@ func (s *Store) PollDueSchedules(ctx context.Context, log zerolog.Logger, worker
 		}
 		s.auditScheduleEvent(ctx, d.rule, auditlog.EventAutomationRuleScheduledFire, workerID, exec.ID)
 	}
-	return nil
+	return len(due), nil
 }
 
 // claimDueSchedules selects due schedule-type rules with FOR UPDATE SKIP

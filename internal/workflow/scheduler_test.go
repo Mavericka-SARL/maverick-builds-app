@@ -300,3 +300,31 @@ func TestTriggerScheduledRuleRetriesThenFails(t *testing.T) {
 		t.Error("expected a non-empty error message on the failed execution")
 	}
 }
+
+// NextScheduleAt is what a quiet tenant's Waker visits it for: the earliest
+// enabled schedule rule's next fire time, and nothing once none is enabled.
+func TestNextScheduleAt(t *testing.T) {
+	store, cleanup := setupDB(t)
+	defer cleanup()
+	userID, appID := insertFixtures(t, store)
+	ctx := context.Background()
+
+	if next, err := store.NextScheduleAt(ctx); err != nil || !next.IsZero() {
+		t.Fatalf("no rules: next = %v, err = %v; want the zero time", next, err)
+	}
+	rule := createDueScheduleRule(t, store, appID, userID, -90*time.Minute,
+		workflow.ScheduleConfig{CronExpr: "* * * * *"})
+	next, err := store.NextScheduleAt(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := next.Sub(*rule.NextFireAt); d < -time.Millisecond || d > time.Millisecond {
+		t.Fatalf("next = %v, want the rule's next_fire_at %v", next, *rule.NextFireAt)
+	}
+	if _, err := store.Pool().Exec(ctx, `UPDATE workflow.automation_rule SET enabled = false WHERE id = $1::uuid`, rule.ID); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := store.NextScheduleAt(ctx); err != nil || !next.IsZero() {
+		t.Fatalf("rule disabled: next = %v, err = %v; want the zero time", next, err)
+	}
+}

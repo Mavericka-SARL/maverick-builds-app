@@ -75,10 +75,23 @@ spec:
               value: "scram-sha-256"
             - name: POOL_MODE
               value: "transaction"
+            # With a database per tenant, every gateway replica and the
+            # integration worker keep a pool for each tenant, so client
+            # connections grow with the tenant count. They are cheap here
+            # (no Postgres backend each); server connections are not.
             - name: MAX_CLIENT_CONN
-              value: "200"
+              value: "2000"
             - name: DEFAULT_POOL_SIZE
               value: "25"
+            # The cap on server connections across every database, since all
+            # of them log in as the one application user. At the cap PgBouncer
+            # closes an idle server connection of another database to make
+            # room, and a client waits rather than fails, so Postgres never
+            # refuses a tenant for too many connections. 70 leaves 30 of
+            # Postgres's default max_connections (100) for Keycloak and the
+            # backups, which connect directly. Raise both together.
+            - name: MAX_USER_CONNECTIONS
+              value: "70"
             # Minimum TLS version for upstream Postgres connections.
             - name: SERVER_TLS_SSLMODE
               value: "disable"   # set to "require" once Postgres has TLS configured

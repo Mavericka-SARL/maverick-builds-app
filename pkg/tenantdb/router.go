@@ -3,14 +3,19 @@ package tenantdb
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
 	"github.com/mavericks-engine/mavericks/pkg/migrate"
+	"github.com/mavericks-engine/mavericks/pkg/wake"
 )
 
 // Config tunes the Router. Zero values take the defaults documented on each
@@ -22,6 +27,9 @@ type Config struct {
 	// IdleTimeout closes a tenant pool that has not been used for this long;
 	// the next request reopens it. Default 10 minutes; <0 disables.
 	IdleTimeout time.Duration
+	// RetryUnreached is how often a tenant whose start-up migration could
+	// not reach its database is tried again. Default 30 seconds.
+	RetryUnreached time.Duration
 	// Migrations and MigrationsDir are applied to every new tenant database
 	// (and by MigrateAll at start-up).
 	Migrations    embed.FS
@@ -55,6 +63,33 @@ type Router struct {
 	pools map[string]*entry // customer id → pool
 	stop  chan struct{}
 	once  sync.Once
+
+	waker atomic.Pointer[Waker]
+
+	// unreached holds tenants whose start-up migration could not reach
+	// their database: refused by Pool, and migrated again in the background.
+	unreached map[string]Tenant
+	retrying  bool
+}
+
+// SetWaker lets this process's background loops sleep while their tenant is
+// quiet (see Waker). Without one, Gate is a plain timer.
+func (r *Router) SetWaker(w *Waker) { r.waker.Store(w) }
+
+// Touch records activity in a tenant: a request, or a platform
+// administrator acting on it.
+func (r *Router) Touch(ctx context.Context, customerID string) {
+	if w := r.waker.Load(); w != nil {
+		w.Touch(ctx, customerID)
+	}
+}
+
+// Gate is the wake.Gate for a tenant's background loops holding pool.
+func (r *Router) Gate(customerID string, pool *pgxpool.Pool) wake.Gate {
+	if w := r.waker.Load(); w != nil {
+		return w.Gate(customerID, pool)
+	}
+	return wake.Timer{}
 }
 
 // New builds a Router over the control-plane pool. It does not open any
@@ -65,6 +100,9 @@ func New(control *pgxpool.Pool, cfg Config) *Router {
 	}
 	if cfg.IdleTimeout == 0 {
 		cfg.IdleTimeout = 10 * time.Minute
+	}
+	if cfg.RetryUnreached <= 0 {
+		cfg.RetryUnreached = 30 * time.Second
 	}
 	if cfg.MigrationsDir == "" {
 		cfg.MigrationsDir = "."
@@ -85,6 +123,10 @@ func (r *Router) Control() *pgxpool.Pool { return r.control }
 // Pool returns the pool for a ready tenant, opening it on first use.
 func (r *Router) Pool(ctx context.Context, customerID string) (*pgxpool.Pool, error) {
 	r.mu.Lock()
+	if _, ok := r.unreached[customerID]; ok {
+		r.mu.Unlock()
+		return nil, fmt.Errorf("tenant %s database is not migrated yet: it was unreachable at start-up", customerID)
+	}
 	if e, ok := r.pools[customerID]; ok {
 		e.lastUsed = time.Now()
 		r.mu.Unlock()
@@ -129,6 +171,11 @@ func (r *Router) hold(ctx context.Context, customerID string) (*pgxpool.Pool, er
 		return nil, fmt.Errorf("tenant %s pool was closed while opening", customerID)
 	}
 	e.held = true
+	// Opening the pool left its check connection idle. Watch takes every
+	// tenant's pool at once when a process starts, and those connections
+	// would add up to PgBouncer's client limit across hundreds of tenants
+	// before their idle time ran out; the loops connect when they run.
+	pool.Reset()
 	return pool, nil
 }
 
@@ -139,6 +186,12 @@ func (r *Router) open(ctx context.Context, database string) (*pgxpool.Pool, erro
 	cfg.ConnConfig.Database = database
 	cfg.MaxConns = r.cfg.MaxConnsPerTenant
 	cfg.MinConns = 0
+	// A quiet tenant's background loops wait without querying (Waker), and a
+	// visit's connections must not linger: across hundreds of tenants they
+	// add up to PgBouncer's client limit. Closed after 30s idle, not pgx's
+	// 30 minutes.
+	cfg.MaxConnIdleTime = 30 * time.Second
+	cfg.HealthCheckPeriod = 15 * time.Second
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("open tenant database %s: %w", database, err)
@@ -193,7 +246,11 @@ func (r *Router) janitor() {
 	}
 }
 
-// Each runs fn against every ready tenant. The first error stops the walk.
+// Each runs fn against every ready tenant, one database at a time. A tenant
+// whose pool is open already uses it; any other gets a pool for the call
+// only, closed straight after, so a walk over hundreds of tenants holds one
+// connection rather than one per tenant until their idle time runs out. fn
+// must not keep the pool. The first error stops the walk.
 func (r *Router) Each(ctx context.Context, fn func(t Tenant, pool *pgxpool.Pool) error) error {
 	tenants, err := r.catalog.List(ctx)
 	if err != nil {
@@ -203,12 +260,30 @@ func (r *Router) Each(ctx context.Context, fn func(t Tenant, pool *pgxpool.Pool)
 		if t.Status != StatusReady {
 			continue
 		}
-		pool, err := r.Pool(ctx, t.CustomerID)
-		if err != nil {
-			return err
+		r.mu.Lock()
+		_, unreached := r.unreached[t.CustomerID]
+		e, open := r.pools[t.CustomerID]
+		if open {
+			e.lastUsed = time.Now()
 		}
-		if err := fn(t, pool); err != nil {
-			return err
+		r.mu.Unlock()
+		switch {
+		case unreached:
+			continue // not migrated yet: as good as not ready
+		case open:
+			if err := fn(t, e.pool); err != nil {
+				return err
+			}
+		default:
+			pool, err := r.open(ctx, t.Database)
+			if err != nil {
+				return err
+			}
+			err = fn(t, pool)
+			pool.Close()
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -229,16 +304,19 @@ func (r *Router) MigrateAll(ctx context.Context) error {
 		if t.Status != StatusReady {
 			continue
 		}
-		// A pool of its own, closed straight after: keeping every tenant's
-		// pool open would hold one connection per tenant database at once,
-		// and past the server's max_connections the rest fail to connect
-		// and are marked failed below.
-		pool, err := r.open(ctx, t.Database)
-		if err == nil {
-			err = migrate.Run(ctx, pool, r.cfg.Migrations, r.cfg.MigrationsDir)
-			pool.Close()
-		}
-		if err != nil {
+		err := r.migrateOne(ctx, t)
+		switch {
+		case err == nil:
+		case unreachable(err):
+			// Nothing ran: a failure to reach the database is not a failed
+			// migration, and must not disable the tenant for good.
+			r.cfg.Log.Error().Err(err).Str("tenant", t.CustomerID).Str("database", t.Database).Msg("tenant database unreachable for its migration — held back and retried")
+			r.holdBack(ctx, t)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		default:
 			r.cfg.Log.Error().Err(err).Str("tenant", t.CustomerID).Str("database", t.Database).Msg("tenant database migration failed — tenant disabled until fixed")
 			_ = r.catalog.SetStatus(ctx, t.CustomerID, StatusFailed, "migration: "+err.Error())
 			r.Forget(t.CustomerID)
@@ -250,6 +328,94 @@ func (r *Router) MigrateAll(ctx context.Context) error {
 		r.cfg.Log.Info().Str("tenant", t.CustomerID).Str("database", t.Database).Msg("tenant database migrated")
 	}
 	return firstErr
+}
+
+// migrateOne migrates one tenant database through a pool of its own, closed
+// straight after: keeping every tenant's pool open would hold one connection
+// per tenant database at once.
+func (r *Router) migrateOne(ctx context.Context, t Tenant) error {
+	pool, err := r.open(ctx, t.Database)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	return migrate.Run(ctx, pool, r.cfg.Migrations, r.cfg.MigrationsDir)
+}
+
+// unreachable is a failure to reach a database at all — no connection, a
+// pooler's wait timeout, a server at its connection limit — as opposed to a
+// statement that ran and failed.
+func unreachable(err error) bool {
+	var ce *pgconn.ConnectError
+	if errors.As(err, &ce) {
+		return true
+	}
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) {
+		// 08: connection exception (PgBouncer's query_wait_timeout is
+		// 08P01); 53300: too many connections; 57P03: cannot connect now.
+		return strings.HasPrefix(pe.Code, "08") || pe.Code == "53300" || pe.Code == "57P03"
+	}
+	return errors.Is(err, context.DeadlineExceeded)
+}
+
+// holdBack keeps a tenant whose migration could not reach its database out
+// of service in this process, and migrates it again every RetryUnreached
+// until it succeeds or fails for a reason other than reaching it.
+func (r *Router) holdBack(ctx context.Context, t Tenant) {
+	r.Forget(t.CustomerID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.unreached == nil {
+		r.unreached = map[string]Tenant{}
+	}
+	r.unreached[t.CustomerID] = t
+	if !r.retrying {
+		r.retrying = true
+		// The retries outlive start-up: they end with the router, not ctx.
+		go r.retryUnreached(context.WithoutCancel(ctx))
+	}
+}
+
+func (r *Router) retryUnreached(base context.Context) {
+	tk := time.NewTicker(r.cfg.RetryUnreached)
+	defer tk.Stop()
+	for {
+		select {
+		case <-r.stop:
+			return
+		case <-tk.C:
+		}
+		r.mu.Lock()
+		held := make([]Tenant, 0, len(r.unreached))
+		for _, t := range r.unreached {
+			held = append(held, t)
+		}
+		if len(held) == 0 {
+			r.retrying = false
+			r.mu.Unlock()
+			return
+		}
+		r.mu.Unlock()
+		for _, t := range held {
+			ctx, cancel := context.WithTimeout(base, 2*time.Minute)
+			err := r.migrateOne(ctx, t)
+			switch {
+			case err == nil:
+				r.cfg.Log.Info().Str("tenant", t.CustomerID).Str("database", t.Database).Msg("tenant database migrated after being unreachable")
+			case unreachable(err):
+				cancel()
+				continue // still out of reach: next round
+			default:
+				r.cfg.Log.Error().Err(err).Str("tenant", t.CustomerID).Str("database", t.Database).Msg("tenant database migration failed — tenant disabled until fixed")
+				_ = r.catalog.SetStatus(ctx, t.CustomerID, StatusFailed, "migration: "+err.Error())
+			}
+			cancel()
+			r.mu.Lock()
+			delete(r.unreached, t.CustomerID)
+			r.mu.Unlock()
+		}
+	}
 }
 
 // Watch calls start once for every ready tenant, now and whenever a new one

@@ -140,3 +140,34 @@ func TestRunner_ModelLinkWithoutSourceReader(t *testing.T) {
 		t.Fatalf("model link run without a source reader: %s %q", got.Status, got.Message)
 	}
 }
+
+// NextScheduleAt is what a quiet tenant's Waker visits it for: the earliest
+// enabled schedule's next fire time, and nothing once none is enabled.
+func TestNextScheduleAt(t *testing.T) {
+	s, _, modelID, revID := setupStore(t)
+	ctx := context.Background()
+	if next, err := s.NextScheduleAt(ctx); err != nil || !next.IsZero() {
+		t.Fatalf("no schedules: next = %v, err = %v; want the zero time", next, err)
+	}
+	d, err := s.CreateDefinition(ctx, modelID, revID, "hourly", "", nil, "draft", "", baseConfig("11111111-1111-1111-1111-111111111111"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertSchedule(ctx, &integration.Schedule{IntegrationID: d.ID, Kind: "interval", IntervalSeconds: 3600,
+		Timezone: "UTC", Enabled: true, OverlapPolicy: "skip", MisfirePolicy: "skip"}); err != nil {
+		t.Fatal(err)
+	}
+	var want time.Time
+	if err := s.Pool().QueryRow(ctx, `SELECT next_fire_at FROM model.integration_schedule WHERE integration_id = $1::uuid`, d.ID).Scan(&want); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := s.NextScheduleAt(ctx); err != nil || !next.Equal(want) {
+		t.Fatalf("next = %v, err = %v; want %v", next, err, want)
+	}
+	if _, err := s.Pool().Exec(ctx, `UPDATE model.integration_schedule SET enabled = false WHERE integration_id = $1::uuid`, d.ID); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := s.NextScheduleAt(ctx); err != nil || !next.IsZero() {
+		t.Fatalf("schedule off: next = %v, err = %v; want the zero time", next, err)
+	}
+}

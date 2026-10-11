@@ -170,10 +170,13 @@ applications the same way, and builds in each through a stand-in.
   posted, started or imported stays, authored by "a former user"
   (migration 094).
 - **Pools**: opened on first use and capped at `TENANT_DB_MAX_CONNS` (5 by
-  default). A pool that only serves requests closes after ten idle minutes.
-  The background work below holds its tenant's pool for as long as the process
-  runs, so an idle tenant is not free: see Limits. Start-up migration opens
-  each tenant database in turn and closes it straight after.
+  default). A pool that only serves requests closes after ten idle minutes;
+  the background work below holds its tenant's pool for as long as the
+  process runs. Either way a connection idle for 30 seconds is closed, so a
+  quiet tenant holds none. Start-up migration opens each tenant database in
+  turn and closes it straight after; one it cannot reach (no connection, a
+  pooler's wait timeout) is held back and migrated again every 30 seconds,
+  not marked failed.
 
 ## Background work
 
@@ -181,6 +184,33 @@ Workflow schedulers and integration workers run per database, one goroutine
 set each, discovered through `Router.Watch` — including tenants created while
 the process is running. A run is only ever claimed by a worker connected to
 the database that holds it.
+
+Those loops sleep while their tenant is quiet, so an idle tenant costs no
+queries (`pkg/tenantdb` `Waker`, `pkg/wake`):
+
+- A tenant is **active** for ten minutes after anything happens in it: a
+  request routed to it, a platform administrator acting on it, or a
+  background pass that found work (a schedule fired, a run claimed, a
+  notification delivered). While active, every loop keeps its usual
+  interval. Activity is written to `platform.tenant_database.last_active_at`
+  (at most every 30 seconds per tenant and process), and every process reads
+  it every 2 seconds, so a "run now" in the console wakes the integration
+  worker within about 2 seconds.
+- While a tenant is **quiet** its loops wait. Each process reads when the
+  next item its own loops act on comes due — in the gateway an automation
+  schedule, a task reminder or a notification retry; in the integration
+  worker an integration or model-link schedule — and visits the tenant then:
+  each loop runs one pass. A pass that finds work makes the tenant active,
+  which wakes the other processes too (a fired model-link schedule wakes the
+  gateway that runs it). Every quiet tenant is also visited at least once an
+  hour.
+- After a **start**, each tenant's next due time is read at once, one
+  database at a time, and its first visit, which also runs the one-off passes
+  (starter models, calculation-engine upgrade), is spread over ten minutes.
+  A tenant active at the time wakes at once.
+
+With the shared database there is nothing to sleep for: the loops run on
+their plain intervals.
 
 ## Configuration
 
@@ -202,6 +232,16 @@ any database name is proxied and dedicated tenants open `tenant_<id>`
 through the same address. A PgBouncer pinned to one database name
 (`DB_NAME` set on that image) refuses them with "no such database" — which
 is why the base leaves it unset.
+
+Every tenant database is reached as the same application user, so
+`MAX_USER_CONNECTIONS` (70 in the base) caps PgBouncer's server connections
+across all of them. At the cap PgBouncer closes an idle connection of another
+database to make room, and a client waits for one rather than failing, so
+PostgreSQL never refuses a tenant for too many connections. Keep the cap
+below `max_connections` with room for what connects directly (Keycloak,
+backups), and raise both together. `MAX_CLIENT_CONN` (2,000) is high on
+purpose: each process keeps a pool per tenant, and a client connection costs
+PgBouncer little.
 
 ## Backups
 
@@ -229,9 +269,9 @@ in dedicated mode, import the package, then delete the old rows.
   identity to both. Lists that span a person's homes show one row per home.
 - The cross-tenant admin listing opens one pool per tenant. That is fine for
   hundreds of tenants and would need paging for thousands.
-- Background work checks every tenant database every few seconds, idle or
-  not, so each one keeps at least one PostgreSQL connection open (one per
-  gateway replica and integration worker without PgBouncer). PostgreSQL's
-  `max_connections` (100 by default) therefore caps the number of tenant
-  databases: keep it, with the server's memory, comfortably above the tenant
-  count plus the control plane's own connections.
+- Only active tenants are polled (see Background work), so the cost grows
+  with the tenants in use, not with the tenants that exist. Active tenants
+  each keep at least one connection per gateway replica and integration
+  worker: behind the shipped PgBouncer they share its capped server
+  connections; without PgBouncer, `max_connections` (100 by default) must
+  stay comfortably above that count, with the server's memory to match.

@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/mavericks-engine/mavericks/internal/workflow/assignee"
+	"github.com/mavericks-engine/mavericks/pkg/wake"
 )
 
 // Task reminders.
@@ -30,22 +31,44 @@ type Reminder struct {
 	Log   zerolog.Logger
 	// Batch caps one pass (default 100 steps).
 	Batch int
+	// Gate paces Run: nil is a plain timer (see pkg/wake).
+	Gate wake.Gate
 }
 
 // Run reminds on every tick until ctx ends.
 func (r *Reminder) Run(ctx context.Context, interval time.Duration) {
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	for {
-		if _, err := r.RunOnce(ctx); err != nil && ctx.Err() == nil {
+	wake.Loop(ctx, wake.OrTimer(r.Gate), interval, func(ctx context.Context) bool {
+		n, err := r.RunOnce(ctx)
+		if err != nil && ctx.Err() == nil {
 			r.Log.Warn().Err(err).Msg("task reminder pass failed")
 		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
+		return n > 0
+	})
+}
+
+// NextAt is when the next step comes due for a reminder (its due time less
+// the longest lead), for the tenant's Waker; the zero time when none will.
+// Steps already past it are the pass's business — reminded, or left while
+// reminders are off — so they do not keep waking a quiet tenant.
+func (r *Reminder) NextAt(ctx context.Context) (time.Time, error) {
+	lead, err := r.Store.maxReminderLead(ctx)
+	if err != nil {
+		return time.Time{}, err
 	}
+	var next *time.Time
+	err = r.Store.pool.QueryRow(ctx, `
+		SELECT min(ws.due_at - make_interval(hours => $1::int))
+		FROM workflow.workflow_step ws
+		JOIN workflow.workflow_instance wi ON wi.id = ws.instance_id
+		WHERE ws.status = 'in_progress'
+		  AND ws.reminded_at IS NULL
+		  AND ws.due_at IS NOT NULL
+		  AND ws.due_at - make_interval(hours => $1::int) > now()
+		  AND COALESCE(wi.test_run, FALSE) = FALSE`, lead).Scan(&next)
+	if err != nil || next == nil {
+		return time.Time{}, err
+	}
+	return *next, nil
 }
 
 type dueStep struct {
