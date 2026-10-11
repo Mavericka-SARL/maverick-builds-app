@@ -121,13 +121,19 @@ spec:
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
+          # Memory, measured 2026-10-11: a connection that has touched every
+          # table of the schema holds ~5 MB of its own. At the 100-connection
+          # limit that is ~510 MB, plus 128 MB of shared buffers, up to three
+          # autovacuum workers at 64 MB, and sorts and hashes at work_mem
+          # each: 1.1-1.8 GiB at a busy peak. Past the limit the kernel kills
+          # Postgres, and every tenant goes down with it.
           resources:
             requests:
               cpu: "200m"
-              memory: "256Mi"
+              memory: "1Gi"
             limits:
               cpu: "1"
-              memory: "1Gi"
+              memory: "3Gi"
           readinessProbe:
             exec:
               command:
@@ -214,6 +220,52 @@ spec:
             limits:
               cpu: "200m"
               memory: "256Mi"
+          securityContext:
+            runAsUser: 70
+            runAsGroup: 70
+        # Mails before the volume fills or WAL archiving falls behind
+        # (deploy/docker/pg-backup/disk-watchdog.sh): a full volume stops
+        # Postgres and every tenant with it, and nothing else watches it. It
+        # reads the volume's own figures, which nothing outside this pod can
+        # reach without rights it should not hold.
+        - name: disk-watchdog
+          image: registry.example.com/mavericks/postgres-backup:latest
+          imagePullPolicy: IfNotPresent
+          # A pod is ready only when every container is: a watchdog that
+          # crash-looped would take Postgres out of its Service. If the
+          # script ever exits, the container says so and idles instead.
+          command:
+            - /bin/sh
+            - -c
+            - '/usr/local/bin/disk-watchdog.sh; echo "disk-watchdog stopped (exit $?), not watching until the pod restarts"; exec sleep 2147483647'
+          envFrom:
+            - configMapRef:
+                name: mavericks-config
+            # The relay the gateway sends with (scripts/seal-smtp-secret.sh);
+            # without it the alert is log-only.
+            - secretRef:
+                name: mavericks-smtp
+                optional: true
+          env:
+            - name: PGDATA
+              value: "/var/lib/postgresql/data/pgdata"
+            - name: ALERT_WHERE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          volumeMounts:
+            # Read-only, and as Postgres's own uid: the data directory is
+            # owner-only (see wal-g-basebackup above).
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+              readOnly: true
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+            limits:
+              cpu: "100m"
+              memory: "64Mi"
           securityContext:
             runAsUser: 70
             runAsGroup: 70

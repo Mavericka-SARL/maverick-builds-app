@@ -348,6 +348,9 @@ Set `ALERT_EMAIL` in `.env` (and `docker compose up -d backup`) to be told
 when a run fails or leaves a dump smaller than `BACKUP_MIN_SIZE` (100 KB):
 after every run the container checks what actually arrived in the bucket and
 mails that address through your relay, which for this has to offer TLS.
+The `disk-watchdog` service mails the same address when the database
+volume passes 80% (90% critical), so it is grown before Postgres stops:
+`docker compose up -d disk-watchdog`.
 
 Keep these outside the dumps as well:
 
@@ -711,6 +714,19 @@ control database newer than 26 hours exists and that `pg_restore` reads it
 through to the end, and e-mails `ALERT_EMAIL` when either is not so. Prove it once:
 `kubectl -n mavericks create job --from=cronjob/postgres-backup-watchdog watchdog-now`,
 then `kubectl -n mavericks logs job/watchdog-now` ends with `ok:`.
+
+The `disk-watchdog` container in the `postgres-0` pod mails the same address
+before the database volume fills: at 80% (warning) and 90% (critical), and
+when more than 20 WAL segments, or any older than an hour, are waiting to be
+archived. It repeats daily while a problem lasts and mails once when it is
+over. `DISK_WARN_PERCENT`, `DISK_CRITICAL_PERCENT`, `WAL_MAX_READY` and
+`WAL_MAX_READY_MINUTES` in `mavericks-config` move the lines. Prove it with a
+line it is always past, which sends a real mail:
+`kubectl -n mavericks exec postgres-0 -c disk-watchdog -- env ONCE=1 DISK_WARN_PERCENT=0 /usr/local/bin/disk-watchdog.sh`.
+To grow the volume, patch the claim, not the StatefulSet, whose
+`volumeClaimTemplates` cannot change in place:
+`kubectl -n mavericks patch pvc postgres-data-postgres-0 -p '{"spec":{"resources":{"requests":{"storage":"50Gi"}}}}'`
+(the storage class must allow expansion; volumes cannot shrink).
 
 To restore dumps: stop everything that writes, restore each database, and
 start again. `pg-restore.sh` drops the database and loads the dump into an

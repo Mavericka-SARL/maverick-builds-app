@@ -59,6 +59,8 @@ services:
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: mavericks
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      # Its pool counts against Postgres's max_connections beside the app's.
+      KC_DB_POOL_MAX_SIZE: "20"
       # A bare host name on Keycloak 24, never a URL. It must equal AUTH_HOST
       # exactly, or sign-in redirects fail in a way that looks like a realm
       # misconfiguration.
@@ -197,6 +199,29 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
+
+  # Mails before the database volume fills (disk-watchdog.sh in the backup
+  # image): a full volume stops Postgres, and every tenant with it. Reads the
+  # volume read-only, as Postgres's own uid; to the same address as backups.
+  disk-watchdog:
+    build: ../docker/pg-backup
+    restart: unless-stopped
+    logging: *logging
+    entrypoint: ["/usr/local/bin/disk-watchdog.sh"]
+    user: "70:70"
+    environment:
+      PGDATA: /var/lib/postgresql/data
+      ALERT_EMAIL: ${ALERT_EMAIL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+    volumes:
+      - postgres:/var/lib/postgresql/data:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # Daily pg_dump of the platform, every tenant database and Keycloak's.
   backup:

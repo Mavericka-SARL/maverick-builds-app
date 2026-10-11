@@ -133,6 +133,12 @@ spec:
     - ports: [{protocol: TCP, port: 443}]
     - to: [{podSelector: {matchLabels: {app: minio}}}]
       ports: [{protocol: TCP, port: 9000}]
+    # The disk watchdog sidecar (infra/postgres.yaml) mails its alert, and
+    # NetworkPolicy is per-pod, so the relay is admitted for the pod. By port
+    # alone, as for the backup watchdog: 587 STARTTLS, 465 implicit TLS. An
+    # alert a policy silently dropped is the failure the sidecar exists to end.
+    - to: [{ipBlock: {cidr: 0.0.0.0/0}}]
+      ports: [{protocol: TCP, port: 587}, {protocol: TCP, port: 465}]
     - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
 
 ---

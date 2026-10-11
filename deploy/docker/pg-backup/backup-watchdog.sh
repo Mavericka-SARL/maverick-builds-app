@@ -53,42 +53,17 @@ ALERT_EMAIL="${ALERT_EMAIL:-}"
 
 log() { echo "[backup-watchdog] $(date -u +%Y-%m-%dT%H:%M:%SZ) $*"; }
 
-# alert sends one plain-text mail and never fails the script: a relay that is
-# down must not hide the verdict the exit status carries.
+# shellcheck source=alert-mail.sh
+. "$(dirname "$0")/alert-mail.sh"
+
+# alert logs the verdict and mails it; it never fails the script: a relay
+# that is down must not hide the verdict the exit status carries.
 alert() {
   local subject="$1"
   local body="$2"
   log "ALERT: ${subject}"
   echo "${body}" | sed 's/^/  /'
-  if [ -z "$ALERT_EMAIL" ] || [ -z "${SMTP_HOST:-}" ] || [ -z "${SMTP_FROM:-}" ]; then
-    log "no ALERT_EMAIL/SMTP_HOST/SMTP_FROM configured — nobody was told by mail"
-    return 0
-  fi
-  local port="${SMTP_PORT:-587}"
-  local scheme="smtp"
-  # 465 is implicit TLS; 587 and 25 negotiate it with STARTTLS, which
-  # --ssl-reqd makes mandatory rather than optional.
-  if [ "$port" = "465" ]; then scheme="smtps"; fi
-  local message="/tmp/backup-alert.txt"
-  {
-    echo "From: ${SMTP_FROM}"
-    echo "To: ${ALERT_EMAIL}"
-    echo "Subject: ${subject}"
-    echo "Date: $(date -uR)"
-    echo "Content-Type: text/plain; charset=utf-8"
-    echo
-    echo "${body}"
-  } > "$message"
-  if curl --silent --show-error --ssl-reqd --max-time 30 \
-      --url "${scheme}://${SMTP_HOST}:${port}" \
-      ${SMTP_USERNAME:+--user "${SMTP_USERNAME}:${SMTP_PASSWORD:-}"} \
-      --mail-from "${SMTP_FROM}" --mail-rcpt "${ALERT_EMAIL}" \
-      --upload-file "$message"; then
-    log "alert sent to ${ALERT_EMAIL}"
-  else
-    log "could not send the alert mail; the job still fails"
-  fi
-  rm -f "$message"
+  send_alert_mail "$subject" "$body"
 }
 
 log "checking ${BACKUP_BUCKET}/pg for a ${BACKUP_DB} backup newer than ${BACKUP_MAX_AGE_HOURS}h and larger than ${BACKUP_MIN_SIZE}"

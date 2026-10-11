@@ -96,6 +96,11 @@ spec:
                 secretKeyRef:
                   name: mavericks-secrets
                   key: POSTGRES_PASSWORD
+            # Keycloak connects to Postgres directly, not through PgBouncer,
+            # so its pool counts against max_connections (100) beside
+            # PgBouncer's 70. Quarkus's default would allow 100 on its own.
+            - name: KC_DB_POOL_MAX_SIZE
+              value: "20"
             - name: KC_HOSTNAME
               value: "auth-staging.example.com"
             - name: KC_HOSTNAME_STRICT

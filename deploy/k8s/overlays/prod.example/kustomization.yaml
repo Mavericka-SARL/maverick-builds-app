@@ -53,6 +53,15 @@ patches:
     target:
       kind: StatefulSet
       name: postgres
+  # ...and a third, the disk watchdog, from the postgres-backup image: with
+  # a "latest" tag, a node holding an older copy would run one without it.
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/2/imagePullPolicy
+        value: Always
+    target:
+      kind: StatefulSet
+      name: postgres
 
 # Where the images come from: the published release images of
 # ghcr.io/mavericka-sarl/mavericks (one tag per release, listed on the
