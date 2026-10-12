@@ -22,7 +22,8 @@ reaches the console even when every outbound channel is off, or misconfigured.
 
 ## Turning delivery on
 
-**Admin › Notifications** in the console (platform or tenant admin):
+**Tenant admin › Notification delivery** in the console (**Platform ›
+Notification delivery** for a platform administrator):
 
 - **E-mail** — send each notification to the recipient's address as well.
 - **Webhook** — post each notification to a URL, with a signing secret.

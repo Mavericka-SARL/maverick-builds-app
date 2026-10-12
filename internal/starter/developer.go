@@ -540,7 +540,7 @@ func devAIPage() modeltransfer.Dashboard {
 
 ## Set it up
 
-It needs an AI provider key. Press **AI Settings** (the gear), choose the **LLM Provider** — OpenAI, Anthropic (Claude), Google (Gemini), Mistral or DeepSeek — and, if you like, a **Model**. Paste your **API Key**, then press **Save settings** and **Test connection**. That key is yours alone. One key for the whole workspace, set by a tenant admin under **Tenant admin › AI keys**, needs the Enterprise edition.
+It needs an AI provider key. Press **AI Settings** (the gear), choose the **LLM Provider** — OpenAI, Anthropic (Claude), Google (Gemini), Mistral or DeepSeek — and, if you like, a **Model**. Paste your **API Key**, then press **Save settings** and **Test connection**. That key is yours alone. One key for the whole workspace, set by a tenant admin under **Tenant admin › AI keys**, needs the Enterprise Edition.
 
 ## Work with it
 

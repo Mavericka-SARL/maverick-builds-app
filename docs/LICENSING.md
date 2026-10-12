@@ -5,7 +5,7 @@
 maverickbuilds.app ships as one code base in three editions. The edition a
 deployment runs is decided by a signed license key the gateway reads at
 start-up; nothing calls home, and a missing, invalid or expired key never
-stops the platform — it runs the Community edition and says why.
+stops the platform — it runs the Community Edition and says why.
 
 A key is a technical credential that implements a contract. The rights to use
 the paid editions come from the accepted order and agreement the key names,
@@ -49,7 +49,7 @@ once, in `pkg/license/features.go`, and reported by `GET /api/license`.
 A key can name extra features beyond its edition's defaults, for tailored
 contracts. Keys carry no numeric limits: what a *tenant* may use is a question of
 its edition, enforced per tenant — see
-[`docs/PLANS_AND_SIGNUP.md`](PLANS_AND_SIGNUP.md). (Keys issued before
+[`docs/EDITIONS_AND_SIGNUP.md`](EDITIONS_AND_SIGNUP.md). (Keys issued before
 2026-10-07 could carry `limits`; nothing ever enforced them, and they are now
 ignored.)
 
@@ -127,7 +127,7 @@ and restart the gateway. On the local stack export the variable before
 The gateway logs the outcome at start-up ("license key accepted", with the
 order and schedule; "has EXPIRED"; "could not be verified"; or "no license
 key configured"). The console shows it in the account menu of every role
-("Enterprise edition") and in detail under **Platform › License** for
+("Enterprise Edition") and in detail under **Platform › License** for
 platform administrators.
 
 ## Renewal, expiry and transition
@@ -137,7 +137,7 @@ platform administrators.
 | More than 30 days before expiry | `active` | Everything the key includes works |
 | Within 30 days of expiry | `active`, `renewal_due` | The same, and the account menu and Platform › License say when the key expires |
 | Up to 30 days after expiry | `transition` | The enterprise features keep working as configured: sign-in through single sign-on, SCIM provisioning, branding, inherited deployment settings and tenant AI keys. Their data can be read and exported, and their configuration can be switched off (DELETE, e.g. revoking a SCIM token), but nothing paid can be configured or changed. Audit retention stops deleting events. Every screen of an enterprise feature says so |
-| After that | `expired` | The deployment runs the Community edition until a new key is installed |
+| After that | `expired` | The deployment runs the Community Edition until a new key is installed |
 
 No state deletes data. Installing a renewed key (and restarting the gateway)
 returns to `active` at once. The transition period is a technical grace for

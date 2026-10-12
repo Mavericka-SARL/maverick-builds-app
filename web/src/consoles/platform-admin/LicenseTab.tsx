@@ -44,20 +44,20 @@ export function LicenseTab() {
     <div className="mvx-admin-stack" data-testid="license-tab">
       <Card>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-          <span style={{ fontSize: 17, fontWeight: 700 }}>{EDITION_LABELS[lic.edition]} edition</span>
+          <span style={{ fontSize: 17, fontWeight: 700 }}>{EDITION_LABELS[lic.edition]} Edition</span>
           <StatusBadge tone={STATE_TONE[lic.state]}>{STATE_LABEL[lic.state]}</StatusBadge>
         </div>
         {lic.state === "invalid" && (
-          <InlineAlert tone="danger">The configured license key could not be verified: {lic.error}. The deployment runs the Community edition until a valid key is installed.</InlineAlert>
+          <InlineAlert tone="danger">The configured license key could not be verified: {lic.error}. The deployment runs the Community Edition until a valid key is installed.</InlineAlert>
         )}
         {lic.state === "active" && lic.renewal_due && (
-          <InlineAlert tone="warning">The license key expires on {fmtDate(lic.expires_at)}. Install the renewed key before then; after expiry the enterprise features are read and export only for 30 days, then the deployment runs the Community edition.</InlineAlert>
+          <InlineAlert tone="warning">The license key expires on {fmtDate(lic.expires_at)}. Install the renewed key before then; after expiry the enterprise features are read and export only for 30 days, then the deployment runs the Community Edition.</InlineAlert>
         )}
         {lic.state === "transition" && (
-          <InlineAlert tone="warning">The license key expired on {fmtDate(lic.expires_at)}. Until {fmtDate(lic.transition_ends_at)} the enterprise features keep working as configured and can be read, exported and switched off, but not changed. After that the deployment runs the Community edition. No data is deleted either way.</InlineAlert>
+          <InlineAlert tone="warning">The license key expired on {fmtDate(lic.expires_at)}. Until {fmtDate(lic.transition_ends_at)} the enterprise features keep working as configured and can be read, exported and switched off, but not changed. After that the deployment runs the Community Edition. No data is deleted either way.</InlineAlert>
         )}
         {lic.state === "expired" && (
-          <InlineAlert tone="warning">The license key expired on {fmtDate(lic.expires_at)} and its transition period has ended. The deployment runs the Community edition until a new key is installed; nothing the enterprise features stored was deleted.</InlineAlert>
+          <InlineAlert tone="warning">The license key expired on {fmtDate(lic.expires_at)} and its transition period has ended. The deployment runs the Community Edition until a new key is installed; nothing the enterprise features stored was deleted.</InlineAlert>
         )}
         <table className="mvx-table" style={{ marginTop: 8 }}>
           <tbody>
@@ -109,7 +109,7 @@ export function LicenseTab() {
           then restart the gateway. This page and the account menu reflect the new edition immediately after the restart.
         </p>
         <p className="mvx-admin-muted" style={{ margin: "0 0 8px" }}>
-          An expired or invalid key never stops the platform: it runs the Community edition and reports the reason here.
+          An expired or invalid key never stops the platform: it runs the Community Edition and reports the reason here.
           Enterprise and commercial source lives under <code>ee/</code> in the repository and is unlocked at runtime by the key.
         </p>
         <p className="mvx-admin-muted" style={{ margin: 0 }}>

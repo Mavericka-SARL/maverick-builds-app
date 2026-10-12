@@ -16,7 +16,7 @@ test("community: both tabs render the feature gate", async ({ page }) => {
   await tab(page, "Single sign-on");
   await chooseTenant(page);
   await expect(page.locator(".mvx-feature-gate")).toContainText("Single sign-on");
-  await expect(page.locator(".mvx-feature-gate")).toContainText("requires the Enterprise edition");
+  await expect(page.locator(".mvx-feature-gate")).toContainText("requires the Enterprise Edition");
   await expect(page.getByTestId("sso-settings")).toHaveCount(0);
   await tab(page, "Provisioning (SCIM)");
   await chooseTenant(page);

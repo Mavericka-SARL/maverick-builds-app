@@ -48,7 +48,7 @@ should read as the product's name.
 Nothing here is a company's logo, and no image ships with the code: an
 open-source deployment must not wear someone else's mark. A deployment that
 licenses white-labelling sets its name, tagline, logo and colour under
-**Admin › Branding** (`docs/WHITE_LABEL.md`), and the public pages use it —
+**Tenant admin › Branding** (`docs/WHITE_LABEL.md`), and the public pages use it —
 the logo replaces the wordmark, the product name replaces "maverickbuilds.app".
 Keycloak's page is separate: point its realm at a theme of your own, or
 override `--mvx-accent` in a copy of `brand.css`.

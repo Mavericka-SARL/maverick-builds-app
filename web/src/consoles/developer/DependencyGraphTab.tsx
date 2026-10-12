@@ -156,7 +156,7 @@ export function DepGraph({ model, grids, dims }: { model: DevModel; grids: GridD
 
   return (
     <div style={{ position: "relative" }}>
-      <div style={{ position: "absolute", top: 8, right: 8, zIndex: 5, display: "flex", gap: 4, alignItems: "center", background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "var(--radius-button)", padding: 3 }}>
+      <div style={{ position: "relative", width: "fit-content", marginLeft: "auto", marginBottom: 8, zIndex: 5, display: "flex", gap: 4, alignItems: "center", background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "var(--radius-button)", padding: 3 }}>
         <div style={{ position: "relative" }}>
           <SearchInput
             value={search}

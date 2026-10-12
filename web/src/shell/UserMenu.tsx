@@ -133,7 +133,7 @@ export function UserMenu() {
               {/* The edition is deployment-wide, not per person, but the
                   account menu is the one place every role opens. */}
               <div className="mvx-user-menu__edition" data-testid="edition">
-                {EDITION_LABELS[license.edition]} edition
+                {EDITION_LABELS[license.edition]} Edition
                 {license.state === "expired" ? " · license expired"
                   : license.state === "transition" ? ` · license expired, read-only until ${licenseDate(license.transition_ends_at)}`
                   : license.state === "invalid" ? " · license invalid"

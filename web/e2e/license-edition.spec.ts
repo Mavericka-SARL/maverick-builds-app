@@ -13,12 +13,12 @@ test("community: the account menu names the edition and License shows locked fea
   await mockApi(page);
   await loadAs(page, "platform_admin");
   await account(page).click();
-  await expect(page.getByTestId("edition")).toHaveText(/Community edition/);
+  await expect(page.getByTestId("edition")).toHaveText(/Community Edition/);
   await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "License", exact: true }).click();
   const tab = page.getByTestId("license-tab");
-  await expect(tab).toContainText("Community edition");
+  await expect(tab).toContainText("Community Edition");
   await expect(tab).toContainText("No license key");
   await expect(tab.getByTestId("feature-sso")).toContainText("Locked");
   await expect(tab.getByTestId("feature-white_label")).toContainText("Commercial");
@@ -30,28 +30,28 @@ test("enterprise: the key's details and unlocked features are reported", async (
   await loadAs(page, "platform_admin");
   await page.getByRole("button", { name: "License", exact: true }).click();
   const tab = page.getByTestId("license-tab");
-  await expect(tab).toContainText("Enterprise edition");
+  await expect(tab).toContainText("Enterprise Edition");
   await expect(tab).toContainText("Acme Corp");
   await expect(tab).toContainText("ORD-E2E-1");
   await expect(tab).toContainText("PFA 2026-10");
   await expect(tab).toContainText("2026-10");
   await expect(tab.getByTestId("feature-sso")).toContainText("Included");
   await account(page).click();
-  await expect(page.getByTestId("edition")).toHaveText(/Enterprise edition/);
+  await expect(page.getByTestId("edition")).toHaveText(/Enterprise Edition/);
 });
 
 test("expired key: runs as community and says so", async ({ page }) => {
   await mockApi(page, { license: { ...enterpriseLicense, edition: "community", state: "expired", features: [], expires_at: "2026-01-01T00:00:00Z" } });
   await loadAs(page, "developer");
   await account(page).click();
-  await expect(page.getByTestId("edition")).toHaveText(/Community edition · license expired/);
+  await expect(page.getByTestId("edition")).toHaveText(/Community Edition · license expired/);
 });
 
 test("renewal due: the account menu says when the key expires", async ({ page }) => {
   await mockApi(page, { license: { ...enterpriseLicense, renewal_due: true, expires_at: "2027-09-01T00:00:00Z" } });
   await loadAs(page, "platform_admin");
   await account(page).click();
-  await expect(page.getByTestId("edition")).toHaveText(/Enterprise edition · license expires/);
+  await expect(page.getByTestId("edition")).toHaveText(/Enterprise Edition · license expires/);
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "License", exact: true }).click();
   await expect(page.getByTestId("license-tab")).toContainText("Install the renewed key before then");
@@ -61,7 +61,7 @@ test("transition: enterprise features are read and export only, and say so where
   await mockApi(page, { license: { ...enterpriseLicense, state: "transition", expires_at: "2026-10-01T00:00:00Z", transition_ends_at: "2026-10-31T00:00:00Z" } });
   await loadAs(page, "platform_admin");
   await account(page).click();
-  await expect(page.getByTestId("edition")).toHaveText(/Enterprise edition · license expired, read-only until/);
+  await expect(page.getByTestId("edition")).toHaveText(/Enterprise Edition · license expired, read-only until/);
   await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "License", exact: true }).click();

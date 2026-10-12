@@ -101,7 +101,7 @@ type cfg struct {
 	SMTPUsername string `mapstructure:"SMTP_USERNAME"`
 	SMTPPassword string `mapstructure:"SMTP_PASSWORD"`
 	SMTPFrom     string `mapstructure:"SMTP_FROM"`
-	// Self-service sign-up (docs/PLANS_AND_SIGNUP.md): off unless a
+	// Self-service sign-up (docs/EDITIONS_AND_SIGNUP.md): off unless a
 	// deployment opts in. PlanContactURL is where "change the plan" leads
 	// in every plan-limit refusal.
 	SignupEnabled  bool   `mapstructure:"SIGNUP_ENABLED"`

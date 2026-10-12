@@ -30,7 +30,7 @@ Include what you can of:
 
 ## Scope
 
-Everything in this repository: the Community edition and the Enterprise
+Everything in this repository: the Community Edition and the Enterprise
 Features code under `ee/`, the deployment manifests and the self-hosting setup. Only the
 latest snapshot on `main` receives fixes; there are no maintained older
 releases yet.

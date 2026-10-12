@@ -15,10 +15,10 @@ Use License that covers the rest of the repository.
   export only" note, and the gateway refuses every change. A screen that uses
   `useFeature` alone shows no note, so prefer `<FeatureGate>` around screens.
 
-Feature folders (2026-09-16): `aikeys/` — **Admin › AI keys** (`tenant_ai_keys`);
-`sso/` — **Admin › Single sign-on** (`sso`); `scim/` — **Admin › Provisioning
+Feature folders (2026-09-16): `aikeys/` — **Tenant admin › AI keys** (`tenant_ai_keys`);
+`sso/` — **Tenant admin › Single sign-on** (`sso`); `scim/` — **Tenant admin › Provisioning
 (SCIM)** (`scim`); `cellhistory/` — the grid's cell **History** drawer
-(`cell_history`); `auditexport/` — **Admin › Audit Log** export and retention
-(`audit_export`); `usage/` — **Admin › Usage** (`usage_analytics`); `branding/` — **Admin ›
+(`cell_history`); `auditexport/` — **Tenant admin › Audit Log** export and retention
+(`audit_export`); `usage/` — **Tenant admin › Usage** (`usage_analytics`); `branding/` — **Tenant admin ›
 Branding** (`white_label`). Applying a brand lives outside this tree, in
 `web/src/branding/`, because every edition must apply what the server reports.

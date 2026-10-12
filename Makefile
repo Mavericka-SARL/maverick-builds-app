@@ -4,7 +4,7 @@ PATH  := $(shell brew --prefix 2>/dev/null || echo /usr/local)/bin:$(PATH)
 COMPOSE := docker compose -f deploy/docker/docker-compose.dev.yml
 SERVICES := gateway integration
 
-.PHONY: proto oas gen build test lint clean dev-up dev-down dev-logs obs-up obs-down demo $(SERVICES:%=build-%)
+.PHONY: proto oas gen build test lint clean dev-up dev-down dev-admin dev-logs obs-up obs-down demo $(SERVICES:%=build-%)
 
 # ── Protobuf ───────────────────────────────────────────────────────────────────
 
@@ -61,6 +61,14 @@ dev-up:
 	@echo "    Keycloak    → http://localhost:8180  (admin/admin, realm: mavericks)"
 	@echo "    MinIO       → http://localhost:9001  (mavericks / mavericks123)"
 	@echo ""
+
+# The platform_admin dev persona (X-Dev-User: platform_admin), which a fresh
+# database lacks; the seeds start as it. Run once, after the gateway's first
+# start has migrated the database.
+dev-admin:
+	SUBJECT=demo-platform-admin-001 ADMIN_EMAIL=platform.admin@example.com ADMIN_NAME="Platform Admin" \
+	PSQL="$(COMPOSE) exec -T postgres psql -q -U mavericks -d $${DEV_DB:-mavericks}" \
+	bash scripts/bootstrap-platform-admin.sh
 
 dev-down:
 	$(COMPOSE) --profile observability down

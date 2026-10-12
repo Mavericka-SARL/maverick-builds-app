@@ -7,7 +7,7 @@ your way around a Linux shell and DNS, and for the Kubernetes path, around
 `kubectl`.
 
 Everything runs on your infrastructure. Nothing calls home, and no license
-key is needed: without one the platform runs the **Community edition**, which
+key is needed: without one the platform runs the **Community Edition**, which
 is the whole product except the features listed in
 [LICENSING.md](LICENSING.md#gated-features) (single sign-on, SCIM, per-cell
 history, audit export, usage analytics, tenant-level AI keys, white-labelling).
@@ -140,7 +140,7 @@ Certificates cannot be issued until they do.
 ```bash
 git clone https://github.com/Mavericka-SARL/maverick-builds-app.git maverickbuilds
 cd maverickbuilds
-git checkout 2026.10.11        # a release: the newest is on the Releases page
+git checkout 2026.10.12        # a release: the newest is on the Releases page
 cd deploy/compose
 ```
 
@@ -192,7 +192,7 @@ lines to `.env`:
 
 ```bash
 COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml
-MAVERICKS_RELEASE=2026.10.11   # the release you checked out
+MAVERICKS_RELEASE=2026.10.12   # the release you checked out
 ```
 
 ```bash
@@ -402,7 +402,7 @@ reclaim the space.
 Edit `.env`, then `docker compose up -d`: Compose recreates exactly the
 containers whose settings changed.
 
-- **A license key** for the Commercial or Enterprise edition goes in
+- **A license key** for the Commercial or Enterprise Edition goes in
   `MAVERICKS_LICENSE_KEY`. **Platform › License** in the console shows the
   edition it unlocked.
 - **The AI assistant** uses each user's own provider key, stored in the
@@ -410,7 +410,7 @@ containers whose settings changed.
   is used by everyone who has not stored one ([AI_KEYS.md](AI_KEYS.md)).
 - **Public sign-up** is off; administrators create tenants and users. To let
   visitors create their own workspace, see
-  [PLANS_AND_SIGNUP.md](PLANS_AND_SIGNUP.md), and publish your terms and
+  [EDITIONS_AND_SIGNUP.md](EDITIONS_AND_SIGNUP.md), and publish your terms and
   privacy notice first ([LEGAL_AND_PRIVACY.md](LEGAL_AND_PRIVACY.md)).
 
 **Changing a host name** takes one more step. Keycloak reads its realm file
@@ -556,7 +556,7 @@ of your own. Then edit it:
    appear several times and must agree everywhere), the storage class, the
    SMTP relay and sender, and the address the backup watchdog alerts.
 2. **`kustomization.yaml`** — its `images:` block pins every image to the
-   release `2026.10.11`; set the release you deploy, or, if you built your
+   release `2026.10.12`; set the release you deploy, or, if you built your
    own images, replace the block with the one `build-images.sh` printed.
 3. **Object storage.** By default MinIO runs in the cluster and holds the
    backups and WAL archive. To keep them outside the cluster, as you should in
@@ -733,7 +733,7 @@ start again. `pg-restore.sh` drops the database and loads the dump into an
 empty one; `latest` is the newest dump of the database the URL names:
 
 ```bash
-IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.10.11   # the one your overlay runs
+IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.10.12   # the one your overlay runs
 kubectl -n mavericks scale deployment --replicas=0 \
   -l 'app.kubernetes.io/component in (api-gateway,service,identity)'
 for db in mavericks keycloak; do          # and each tenant_… database, if dedicated

@@ -7,7 +7,7 @@ through `pkg/auditlog.Log`; this is how the result leaves the platform.
 
 ## Export
 
-**Admin › Audit Log › Export**: choose a format and a date range and
+**Tenant admin › Audit Log › Export**: choose a format and a date range and
 download. The scope is exactly the listing's: a tenant admin gets the
 events of their own tenant, a platform admin everything. The download is
 streamed and complete: without `limit` or `after` the gateway pages through
@@ -45,7 +45,7 @@ account holding the `tenant_admin` (or `platform_admin`) role.
 
 ## Retention
 
-**Admin › Audit Log › Retention**: how many days of events to keep. `0`
+**Tenant admin › Audit Log › Retention**: how many days of events to keep. `0`
 (the default) keeps them forever. Any other value is at least **30 days** —
 an audit log that a setting can empty is not an audit log — and the
 platform refuses less. A daily sweep removes events older than the

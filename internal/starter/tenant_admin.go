@@ -186,7 +186,7 @@ The **edition** decides what may be used. This deployment's licence key gives it
 
 Your tenant runs an edition of its own, which sets how much it may use — storage, for example, or AI messages a day. Whoever runs the platform sets it; you cannot change it yourself. Its name is on your tenant's card under **Tenant admin › Applications**, and below it the storage your data uses — with a storage limit, also how much is left, measured every few minutes. If the tenant goes over a limit, it turns read-only and a banner at the top of the console says why. Deleting still works, so removing what you no longer need is how you make room.
 
-More: `+taDoc("editions and licensing", "LICENSING.md")+` · `+taDoc("editions and sign-up", "PLANS_AND_SIGNUP.md")+``, 240),
+More: `+taDoc("editions and licensing", "LICENSING.md")+` · `+taDoc("editions and sign-up", "EDITIONS_AND_SIGNUP.md")+``, 240),
 
 		taText(`## Reading this guide
 

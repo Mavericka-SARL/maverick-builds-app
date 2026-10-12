@@ -84,7 +84,7 @@ changes, the text changes with it and `LEGAL_UPDATED` moves.
 
 ## Related
 
-- [Editions and self-service sign-up](PLANS_AND_SIGNUP.md) — the edition the
+- [Editions and self-service sign-up](EDITIONS_AND_SIGNUP.md) — the edition the
   terms quote, and the read-only state they describe.
 - [The look of the pre-account pages](BRAND.md) — the frame both documents
   render in.

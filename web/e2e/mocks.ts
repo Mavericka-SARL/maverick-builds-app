@@ -326,7 +326,7 @@ const adminAudit = [
 
 const noLimits = { max_users: 0, max_applications: 0, max_models: 0, max_metrics_per_model: 0, max_members_per_dimension: 0, max_fact_rows_per_model: 0, max_ai_messages_per_day: 0, max_integration_runs_per_day: 0, max_storage_mb: 0 };
 const testLimits = { ...noLimits, max_storage_mb: 100, max_ai_messages_per_day: 100, max_integration_runs_per_day: 50 };
-const testNote = "A Community workspace holds up to 100 MB. To go further, run the platform on your own infrastructure — free for your company's internal use — or get the Commercial or Enterprise edition.";
+const testNote = "A Community workspace holds up to 100 MB. To go further, run the platform on your own infrastructure — free for your company's internal use — or get the Commercial or Enterprise Edition.";
 const smallLimits = { ...noLimits, max_users: 5, max_applications: 2, max_models: 3, max_metrics_per_model: 50, max_members_per_dimension: 500, max_fact_rows_per_model: 100000, max_ai_messages_per_day: 100, max_integration_runs_per_day: 50 };
 
 /** GET /api/admin/plans as the seeded catalog answers it. */

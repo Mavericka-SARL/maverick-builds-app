@@ -2,7 +2,7 @@
 
 > **Last verified:** 2026-10-11 (every path, variable, route and identifier it names checked against the code)
 
-A commercial and enterprise feature (`white_label`). **Admin › Branding** lets
+A commercial and enterprise feature (`white_label`). **Tenant admin › Branding** lets
 a tenant admin set:
 
 | Setting | Where it shows |

@@ -215,7 +215,7 @@ their plain intervals.
 `platform.tenant_database` also records when the tenant was last **used**
 by its own people or API clients (`last_used_at`) and when its
 administrators were told it will be deleted (`dormancy_warned_at`): in the hosted
-Playground, editions retire workspaces nobody uses ([PLANS_AND_SIGNUP.md](PLANS_AND_SIGNUP.md),
+Playground, editions retire workspaces nobody uses ([EDITIONS_AND_SIGNUP.md](EDITIONS_AND_SIGNUP.md),
 "Unused workspaces").
 
 ## Configuration

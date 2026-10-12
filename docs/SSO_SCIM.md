@@ -16,7 +16,7 @@ Keycloak *identity provider* under the alias `mvx-<customer id>`, hidden
 from the shared login page, and reached through `kc_idp_hint`. The
 provider's secret is sent to Keycloak and stored nowhere else.
 
-**Setting it up — the tenant admin, under Admin › Single sign-on:**
+**Setting it up — the tenant admin, under Tenant admin › Single sign-on:**
 
 1. Create an application for this platform at your provider. Register the
    **redirect URI** (OIDC) or **assertion consumer service URL** (SAML) the
@@ -62,7 +62,7 @@ tab uses to show the broker endpoint.
 any RFC 7644 client can create, update, deactivate and delete this tenant's
 users, and keep its groups in step with business roles.
 
-**Tokens.** The tenant admin issues tokens under Admin › Provisioning
+**Tokens.** The tenant admin issues tokens under Tenant admin › Provisioning
 (SCIM). A token is `mvx_scim_<tenant>_<secret>`: the tenant part routes the
 request to the right database before the hash is checked; the secret is the
 only part that authenticates. The plaintext is shown once; the database

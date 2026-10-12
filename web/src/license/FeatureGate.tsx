@@ -33,7 +33,7 @@ export function FeatureGate({ feature, children, fallback }: { feature: string; 
   const needed = info?.min_edition ?? "enterprise";
   return (
     <InlineAlert tone="info" icon={<Lock size={14} />} className="mvx-feature-gate">
-      <b>{info?.name ?? feature}</b> requires the {EDITION_LABELS[needed]} edition; this deployment runs the {EDITION_LABELS[license.edition]} edition.
+      <b>{info?.name ?? feature}</b> requires the {EDITION_LABELS[needed]} Edition; this deployment runs the {EDITION_LABELS[license.edition]} Edition.
     </InlineAlert>
   );
 }

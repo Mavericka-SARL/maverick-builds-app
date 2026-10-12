@@ -18,8 +18,14 @@
 ```bash
 make dev-up
 bash dev.sh
-make demo      # in a second terminal, once the gateway answers
+make dev-admin # in a second terminal, once the gateway answers; once per database
+make demo
 ```
+
+`make dev-admin` creates the `platform_admin` dev persona that a fresh
+database lacks and every seed starts as (`scripts/bootstrap-platform-admin.sh`
+with `SUBJECT`, no identity provider). `DEV_DB=<name>` aims it at another
+database on the same server.
 
 Then:
 
@@ -58,6 +64,35 @@ make dev-down
 Every seed needs a running gateway in dev mode and drives it over HTTP as the
 roles a real application has; start new demos from `cmd/seed-regional-planning`. Read a seed's source before
 assuming it is idempotent.
+
+## Live verification harnesses
+
+| Command | What it checks |
+|---|---|
+| `go run ./cmd/qa-engine-test` | Formula functions and operators, form-to-metric aggregation modes, a 10,000-cell import and single-cell write timings |
+| `go run ./cmd/verify-formula-catalogue` | Every formula function and the combinations a developer writes, in a throwaway tenant |
+| `go run ./cmd/verify-formula-lookups` | Dimensional references, `LOOKUP`, conditional aggregation and the time functions, in a throwaway tenant |
+| `go run ./cmd/loadtest` | Concurrent grid reads and cell writes; see [Staging and load testing](STAGING_AND_LOAD_TESTING.md) |
+
+All four work only through the gateway's HTTP API. The first three need a
+gateway in dev mode, as the seeds do; the load test also runs against a real
+deployment with a token.
+
+## Developer manual screenshots
+
+The pictures in `docs/developer-manual/img` are captured from a live console,
+as the reference demo's developer, by `web/e2e-manual`. On a fresh database,
+with the gateway in dev mode:
+
+```bash
+make dev-admin && make demo
+cd web && npm run manual:screenshots
+cd ../docs/developer-manual && sh build.sh
+```
+
+Recapture after a change to a screen the manual shows, and look at every
+picture before committing: a step that lands on the wrong screen still writes
+a file.
 
 ## Go checks
 

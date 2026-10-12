@@ -38,7 +38,7 @@ import (
 	"time"
 )
 
-const revisionName = "Working"
+const revisionName = "Revision 1" // the revision a new model is created with
 
 // ── tiny HTTP client, driven exactly like a browser session ────────────────
 

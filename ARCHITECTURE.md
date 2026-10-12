@@ -161,7 +161,7 @@ Fourteen named schemas organize the data:
 | `deployment` | per-model auto-generated reporting-view schema migrations (`deployment.schema_migration`) |
 | `ai_assistant` | sessions, messages, settings, proposals, documents, and legacy actions |
 | `ops` | node statistics for the infrastructure view |
-| `platform` | cross-tenant directories and settings: plans, SSO and branding domains, tenant databases, user/application directories |
+| `platform` | cross-tenant directories and settings: editions (`platform.plan`), SSO and branding domains, tenant databases, user/application directories |
 | `storage` | object-store metadata (`storage.object`) for `pkg/objectstore` |
 
 Some early tables were renamed or retired. In particular, the current model

@@ -10,10 +10,10 @@ pays for it. This describes whose.
 | Key | Stored in | Managed by | Editions |
 |---|---|---|---|
 | **Personal** | `ai_assistant.llm_settings`, one row per user | the developer, in **AI Assistant › Settings** | all |
-| **Tenant** | `ai_assistant.tenant_llm_settings`, one row per tenant (migration 091); on `deployment_settings` also a deployment row that a tenant without a key of its own falls back to | the tenant admin, in **Admin › AI keys**; a platform admin for any tenant, or the deployment | enterprise (`tenant_ai_keys`) |
+| **Tenant** | `ai_assistant.tenant_llm_settings`, one row per tenant (migration 091); on `deployment_settings` also a deployment row that a tenant without a key of its own falls back to | the tenant admin, in **Tenant admin › AI keys**; a platform admin for any tenant, or the deployment | enterprise (`tenant_ai_keys`) |
 
 A community or commercial deployment has personal keys only: every developer
-pastes their own. The routes behind **Admin › AI keys** answer 403 there, and
+pastes their own. The routes behind **Tenant admin › AI keys** answer 403 there, and
 the tab renders the feature gate naming the edition that would unlock it.
 
 ## Which key a call uses
@@ -35,7 +35,7 @@ provider's account, so using the tenant key means using the tenant's provider.
 
 ## Enforcing
 
-**Admin › AI keys › Use the tenant key for every AI call** is the governance
+**Tenant admin › AI keys › Use the tenant key for every AI call** is the governance
 switch. Until it is on, the tenant key only fills gaps. With it on, no model
 data can reach an employee's private provider account.
 
@@ -66,5 +66,5 @@ receives the key can still be saved.
 - `internal/gateway/tenant_ai_settings.go` — the four admin routes, behind
   `requireFeature(license.FeatureTenantAIKeys, …)`.
 - `internal/gateway/ai_handler.go` — `buildProviderForRequest`, the order above.
-- `web/src/ee/aikeys/TenantAIKeysTab.tsx` — **Admin › AI keys**.
+- `web/src/ee/aikeys/TenantAIKeysTab.tsx` — **Tenant admin › AI keys**.
 - `migrations/079_tenant_ai_keys.sql` — the tenant table.

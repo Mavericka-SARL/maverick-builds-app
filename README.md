@@ -19,9 +19,9 @@ business works in.
 - **Revisions**: each change built and tested in its own revision and
   published in one step; models move between workspaces by export and import.
 
-No edition is licensed per user. The Community edition is free to self-host
+No edition is licensed per user. The Community Edition is free to self-host
 for your company's internal use only, and maverickbuilds.app runs it for you
-as the Playground: the hosted Community edition, free up to
+as the Playground: the hosted Community Edition, free up to
 100 MB. It is built with Go, React and PostgreSQL.
 
 The architecture is described in [ARCHITECTURE.md](ARCHITECTURE.md), and
@@ -79,10 +79,12 @@ Start the API in development-persona mode:
 bash dev.sh
 ```
 
-With the gateway running, seed the reference demo through its HTTP API, the
-way a real developer would build it:
+With the gateway running, create the platform administrator persona the seeds
+start as (once per database), then seed the reference demo through its HTTP
+API, the way a real developer would build it:
 
 ```bash
+make dev-admin
 go run ./cmd/seed-regional-planning
 ```
 
@@ -131,7 +133,7 @@ after generation.
 |---|---|
 | `cmd/` | HTTP gateway, integration worker, command-line tools, verification harnesses, and demo seeds |
 | `internal/gateway/` | Browser-facing HTTP API and current composition root |
-| `internal/` | Domain packages for model, formula, calculation, query, workflow, import, identity, policy, AI, deployment, and supporting services |
+| `internal/` | Domain packages for model editing, formula, calculation, query, workflow, import, integrations, identity, access checks, AI, editions, deployment, and supporting services |
 | `pkg/` | Shared configuration, database, tenant routing, licence, logging, migration, object storage, and telemetry helpers |
 | `migrations/` | Ordered PostgreSQL schema history embedded into Go binaries |
 | `proto/` and `gen/go/` | Protobuf definitions of stored workflow, import, notification and calculation types, and their generated Go code |
@@ -139,19 +141,19 @@ after generation.
 | `web/` | React 19, TypeScript, Vite, React Query, Recharts, and Playwright application |
 | `deploy/compose/` | The self-hosted single-server stack (docs/SELF_HOSTING.md) |
 | `deploy/docker/` | Dockerfiles, local development infrastructure and optional observability stack |
-| `deploy/k8s/` | Base and overlay manifests for the distributed service topology |
+| `deploy/k8s/` | Base manifests and example overlays for running on Kubernetes (docs/SELF_HOSTING.md) |
 | `examples/` | Model packages to import and try, and how to share your own |
 | `docs/` | Current documentation index and engineering guides |
 
 ## Editions and licensing
 
-maverickbuilds.app is one code base in three editions. The Community edition is
+maverickbuilds.app is one code base in three editions. The Community Edition is
 licensed under the [Sustainable Use License](LICENSE) for internal use only:
 your company runs and modifies it for its own operations and may share the
 reports and exports it produces with anyone, but nobody outside the company
 may sign in to it, and building on it for clients, hosting it for others or
-reselling it needs a Commercial licence. The Commercial edition adds those
-rights and white-labelling; the Enterprise edition adds features
+reselling it needs a Commercial licence. The Commercial Edition adds those
+rights and white-labelling; the Enterprise Edition adds features
 such as single sign-on, audit export and per-cell history. The code of those
 enterprise features lives under [`ee/`](ee/README.md) under the
 [Enterprise Features License](ee/LICENSE): every build and image contains
@@ -183,7 +185,7 @@ it, switched off until a signed, offline license key switches it on; see
 - [Editions and licensing](docs/LICENSING.md)
 - [Contributing](CONTRIBUTING.md), the [code of conduct](CODE_OF_CONDUCT.md) and
   [reporting a security issue](SECURITY.md)
-- [Plans and self-service sign-up](docs/PLANS_AND_SIGNUP.md)
+- [Editions and self-service sign-up](docs/EDITIONS_AND_SIGNUP.md)
 - [Terms of service and privacy notice](docs/LEGAL_AND_PRIVACY.md)
 - [The product's look](docs/BRAND.md)
 - [Staging and load testing](docs/STAGING_AND_LOAD_TESTING.md)

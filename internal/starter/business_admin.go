@@ -349,7 +349,7 @@ Forms have no screen of their own: a developer places each one on a dashboard as
 
 The bell at the top of the page collects what workflows send you: notification steps, and reminders when a task you can act on falls due — if a tenant admin has turned on **Task reminders** under **Tenant admin › Notification delivery**. A notification about a request opens it in **History**.
 
-To see who changed a number, right-click an input cell in a grid: its history lists every value it has held, when, by whom and how. Cell history is part of the Enterprise edition; on other editions the panel says so. See [cell history](`+publicDocs+`CELL_HISTORY.md) and [editions](`+publicDocs+`LICENSING.md).
+To see who changed a number, right-click an input cell in a grid: its history lists every value it has held, when, by whom and how. Cell history is part of the Enterprise Edition; on other editions the panel says so. See [cell history](`+publicDocs+`CELL_HISTORY.md) and [editions](`+publicDocs+`LICENSING.md).
 
 ---
 That is the business admin guide. For how models, dashboards and workflows are built, see the [developer manual](`+developerManual+`).`, 232),

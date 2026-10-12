@@ -49,11 +49,21 @@ func bootstrap(a *api) bootstrapResult {
 
 // createAndActivateRevision must run as the developer persona (revisions
 // are a developer-guarded resource) — called from provisionDeveloper, once
-// the developer persona and X-App-Id scoping are both in place.
-func createAndActivateRevision(dev *api) string {
-	step("creating revision %q", revisionName)
-	rev := dev.call("POST", "/api/developer/revisions", map[string]any{"name": revisionName})
-	revID := id(rev)
+// the developer persona and X-App-Id scoping are both in place. A new model
+// comes with its first revision, so the developer builds in that one, as
+// they would in the console; a second revision is made only if it is missing.
+func createAndActivateRevision(dev *api, modelID string) string {
+	var revID string
+	for _, rev := range dev.callList("GET", "/api/developer/revisions?model_id="+modelID, nil) {
+		if rev["name"] == revisionName {
+			revID = id(rev)
+			break
+		}
+	}
+	if revID == "" {
+		step("creating revision %q", revisionName)
+		revID = id(dev.call("POST", "/api/developer/revisions", map[string]any{"name": revisionName}))
+	}
 	step("activating revision %q", revisionName)
 	dev.call("PUT", fmt.Sprintf("/api/developer/revisions/%s/activate", revID), nil)
 	return revID
@@ -87,6 +97,6 @@ func provisionDeveloper(admin *api, boot bootstrapResult) (*api, bootstrapResult
 	// directly, so this user is immediately usable, no separate step needed.
 	dev := admin.as("admin-created-" + email).withApp(boot.appID).withModel(boot.modelID)
 
-	boot.revisionID = createAndActivateRevision(dev)
+	boot.revisionID = createAndActivateRevision(dev, boot.modelID)
 	return dev.withRevision(boot.revisionID), boot
 }

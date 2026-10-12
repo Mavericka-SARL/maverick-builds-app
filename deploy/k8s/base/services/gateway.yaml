@@ -118,7 +118,7 @@ spec:
                   name: mavericks-config
                   key: TENANT_DB_MODE
                   optional: true
-            # Public self-service sign-up (docs/PLANS_AND_SIGNUP.md). Off
+            # Public self-service sign-up (docs/EDITIONS_AND_SIGNUP.md). Off
             # unless the deployment sets SIGNUP_ENABLED: "true"; the
             # contact URL is where "change the plan" leads.
             - name: SIGNUP_ENABLED

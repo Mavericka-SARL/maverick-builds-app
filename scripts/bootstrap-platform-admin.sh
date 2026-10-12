@@ -24,14 +24,21 @@
 # platform_admin) and CUSTOMER_ID (the tenant the account belongs to, for
 # tenant_admin/developer accounts) — e.g. ROLES=tenant_admin,developer
 # CUSTOMER_ID=<tenant uuid> for an account that can seed and drive a model.
+#
+# SUBJECT skips the identity provider: the user row gets that subject and no
+# password, for a gateway in DEV_MODE, where X-Dev-User names the account
+# (`make dev-admin` makes the platform_admin persona this way).
 set -euo pipefail
 
-KEYCLOAK_URL="${KEYCLOAK_URL:?set KEYCLOAK_URL}"
-REALM="${KEYCLOAK_REALM:-mavericks}"
-ADMIN_USER="${KEYCLOAK_ADMIN:-admin}"
-ADMIN_PASS="${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD}"
+SUBJECT="${SUBJECT:-}"
+if [ -z "$SUBJECT" ]; then
+  KEYCLOAK_URL="${KEYCLOAK_URL:?set KEYCLOAK_URL}"
+  REALM="${KEYCLOAK_REALM:-mavericks}"
+  ADMIN_USER="${KEYCLOAK_ADMIN:-admin}"
+  ADMIN_PASS="${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD}"
+  PASSWORD="${ADMIN_PASSWORD:?set ADMIN_PASSWORD}"
+fi
 EMAIL="$(echo "${ADMIN_EMAIL:?set ADMIN_EMAIL}" | tr '[:upper:]' '[:lower:]')"
-PASSWORD="${ADMIN_PASSWORD:?set ADMIN_PASSWORD}"
 NAME="${ADMIN_NAME:-Platform Administrator}"
 PSQL="${PSQL:?set PSQL to a command that runs SQL from stdin against the control-plane database}"
 ROLES="${ROLES:-platform_admin}"
@@ -43,6 +50,18 @@ log() { echo "  $*" >&2; }
 # not exist yet, e.g. CURL_OPTS="--resolve auth.example.com:443:203.0.113.10 -k".
 curl() { command curl ${CURL_OPTS:-} "$@"; }
 
+role_sql() {
+  echo "INSERT INTO identity.role_assignment (user_id, role) SELECT id, '$1' FROM identity.\"user\" WHERE keycloak_sub = '${SUB}' ON CONFLICT DO NOTHING;"
+}
+
+ROLE_SQL=""
+if [ -n "$SUBJECT" ]; then
+  SUB="$SUBJECT"
+  for role in $(echo "$ROLES" | tr ',' ' '); do
+    ROLE_SQL="${ROLE_SQL}$(role_sql "$role")
+"
+  done
+else
 T="$(curl -sf --max-time 30 -X POST "${KEYCLOAK_URL}/realms/master/protocol/openid-connect/token" \
   -d client_id=admin-cli -d grant_type=password \
   --data-urlencode "username=${ADMIN_USER}" --data-urlencode "password=${ADMIN_PASS}" \
@@ -67,15 +86,15 @@ log "setting the password"
 curl -sf -o /dev/null -X PUT "${API}/users/${SUB}/reset-password" -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
   -d "$(python3 -c 'import sys,json; print(json.dumps({"type": "password", "value": sys.argv[1], "temporary": False}))' "$PASSWORD")"
 
-ROLE_SQL=""
 for role in $(echo "$ROLES" | tr ',' ' '); do
   ROLE_JSON="$(curl -sf -H "Authorization: Bearer $T" "${API}/roles/${role}")"
   log "granting the ${role} realm role"
   curl -sf -o /dev/null -X POST "${API}/users/${SUB}/role-mappings/realm" -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
     -d "[$(echo "$ROLE_JSON" | python3 -c 'import sys,json; r=json.load(sys.stdin); print(json.dumps({"id": r["id"], "name": r["name"]}))')]"
-  ROLE_SQL="${ROLE_SQL}INSERT INTO identity.role_assignment (user_id, role) SELECT id, '${role}' FROM identity.\"user\" WHERE keycloak_sub = '${SUB}' ON CONFLICT DO NOTHING;
+  ROLE_SQL="${ROLE_SQL}$(role_sql "$role")
 "
 done
+fi
 
 CUSTOMER_SQL="NULL"
 [ -n "$CUSTOMER_ID" ] && CUSTOMER_SQL="'${CUSTOMER_ID}'::uuid"

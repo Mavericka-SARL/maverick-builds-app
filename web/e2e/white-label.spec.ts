@@ -20,7 +20,7 @@ test("community: default look, and the Branding tab shows the gate", async ({ pa
   await page.getByRole("button", { name: "Branding", exact: true }).click();
   await chooseTenant(page);
   await expect(page.locator(".mvx-feature-gate")).toContainText("White-labelling");
-  await expect(page.locator(".mvx-feature-gate")).toContainText("requires the Commercial edition");
+  await expect(page.locator(".mvx-feature-gate")).toContainText("requires the Commercial Edition");
 });
 
 test("a configured brand is applied everywhere the product shows its name", async ({ page }) => {

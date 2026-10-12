@@ -279,7 +279,7 @@ export interface LicenseFeature {
 /** Mirrors pkg/license.Status: edition is the EFFECTIVE one (community when
  *  no key, or the key is invalid or expired); the key's own details stay
  *  filled so the console can say what ran out. */
-// ── Plans and sign-up (internal/plan, docs/PLANS_AND_SIGNUP.md) ──────────────
+// ── Editions and sign-up (internal/plan, docs/EDITIONS_AND_SIGNUP.md) ───────────
 
 /** What a plan allows; 0 means unlimited. Keys are the server's. */
 export interface PlanLimits {

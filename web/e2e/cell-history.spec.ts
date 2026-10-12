@@ -61,7 +61,7 @@ test("community: right-click shows which edition unlocks history, not the data",
   await openHistory(page);
   const gate = page.locator(".mvx-feature-gate");
   await expect(gate).toContainText("Cell history");
-  await expect(gate).toContainText("requires the Enterprise edition");
+  await expect(gate).toContainText("requires the Enterprise Edition");
   await expect(page.getByTestId("cell-history")).toHaveCount(0);
 });
 

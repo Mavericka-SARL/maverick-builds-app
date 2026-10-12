@@ -23,7 +23,7 @@
 <div class="note warn"><b>Imports write to the revision you choose and respect the same rules as typing.</b> Hidden or read-only members, calculated metrics, locked workflow scopes and system-managed revisions are refused row by row. Each committed import triggers recalculation and can start a workflow through an integration trigger.</div>
 
 <h3>Google Sheets</h3>
-<figure><img src="img/35-integrations-google-sheets.png" alt="Google Sheets section with the URL field and how-it-works notes"><figcaption>Paste a link-shared sheet URL; the rest is the same wizard.</figcaption></figure>
+<figure><img src="img/35-integrations-google-sheets.png" alt="Google Sheets import wizard with the sheet URL field"><figcaption>Paste a link-shared sheet URL; the rest is the same wizard.</figcaption></figure>
 <ul>
   <li><b>Google Sheet URL</b> and <b>Fetch</b>. Either the sheet is shared as "Anyone with the link → Viewer", or a Google service account is stored in the <b>Private sheets</b> panel at the bottom of this section (paste the JSON key file Google Cloud downloaded; only its address and private key are kept, encrypted) — then a sheet shared with that account's address, shown in the panel, is read privately, with nothing else changed. No personal Google account is ever connected. The worksheet tab in the URL (gid) is the one fetched.</li>
   <li>Layout matches the CSV formats. Mapping, validation and commit are the same wizard steps.</li>
@@ -32,7 +32,7 @@
 </ul>
 
 <h3>REST API</h3>
-<figure><img src="img/34-integrations-rest-api.png" alt="REST API section with the New integration button"><figcaption>REST API integrations are built in a six-step wizard and can run on a schedule.</figcaption></figure>
+<figure><img src="img/34-integrations-rest-api.png" alt="New REST API integration wizard at its first step, Basics"><figcaption>REST API integrations are built in a six-step wizard and can run on a schedule.</figcaption></figure>
 <p><b>New integration</b> opens the builder with steps <b>Basics</b>, <b>Request</b>, <b>Authentication</b>, <b>Test &amp; response</b>, <b>Mapping</b>, <b>Run &amp; schedule</b>. <b>Save draft</b> keeps work in progress; <b>Activate</b> requires a successful test of the current configuration.</p>
 <table class="ctl">
 <tr><th>Step</th><th>Fields</th></tr>

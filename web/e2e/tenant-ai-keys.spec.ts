@@ -17,8 +17,8 @@ test("community: the tab explains which edition unlocks it, and shows no form", 
   await openTab(page);
   const gate = page.locator(".mvx-feature-gate");
   await expect(gate).toContainText("Tenant AI keys");
-  await expect(gate).toContainText("requires the Enterprise edition");
-  await expect(gate).toContainText("this deployment runs the Community edition");
+  await expect(gate).toContainText("requires the Enterprise Edition");
+  await expect(gate).toContainText("this deployment runs the Community Edition");
   await expect(page.getByTestId("tenant-ai-settings")).toHaveCount(0);
 });
 
