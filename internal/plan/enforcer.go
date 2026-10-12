@@ -24,9 +24,6 @@ type Enforcer struct {
 
 	mu     sync.Mutex
 	states map[string]cachedState
-	// compacted is, per tenant, each table's deleted-row count when reclaim
-	// last rewrote it.
-	compacted map[string]map[uint32]int64
 }
 
 type cachedState struct {
@@ -36,7 +33,7 @@ type cachedState struct {
 
 // NewEnforcer builds an enforcer reading plans from the control plane.
 func NewEnforcer(control DB) *Enforcer {
-	return &Enforcer{control: control, ttl: time.Minute, now: time.Now, states: map[string]cachedState{}, compacted: map[string]map[uint32]int64{}}
+	return &Enforcer{control: control, ttl: time.Minute, now: time.Now, states: map[string]cachedState{}}
 }
 
 // State returns the tenant's current state. tenantDB is the database holding
@@ -254,21 +251,27 @@ func megabytes(b int64) int {
 	return int((b + mb - 1) / mb)
 }
 
-// StorageBytes measures the tenant's data. In a dedicated tenant database
-// (pkg/tenantdb) it is the size of every table there, indexes and TOAST
-// included — exact, and a catalog read. In a shared database the tables
-// belong to every tenant at once, so the tenant's share is estimated: its
-// row count in each of the data-bearing tables (facts, calculated results,
-// cell history) times that table's average bytes per row from the planner
-// statistics. Definitions, users and audit rows are small next to those
-// and are left out of the estimate.
+// StorageBytes measures the tenant's data: the rows it holds, not the files
+// they sit in. PostgreSQL keeps a deleted row's space in a table's files
+// for later writes, so the files do not shrink when data is deleted —
+// measured by them, a workspace that deleted a model stayed the size it
+// was. Each table counts its live rows (pg_stat_user_tables, which a
+// delete changes at once) times the row width the planner statistics give
+// (pg_stats), and its indexes and TOAST in the same proportion of the
+// table's files (liveTablesCTE); the data-bearing tables (facts,
+// calculated results, cell history) count the tenant's rows exactly, times
+// the table's live bytes per row (ModelStorage). In a dedicated tenant
+// database (pkg/tenantdb) every other table counts too; in a shared one the
+// tables belong to every tenant at once, so only the data-bearing ones do. Definitions, users and
+// audit rows are small next to those and are left out of the shared
+// estimate.
 func StorageBytes(ctx context.Context, db DB, customerID string) (int64, error) {
 	dedicated, err := dedicatedTo(ctx, db, customerID)
 	if err != nil {
 		return 0, err
 	}
 	if dedicated {
-		return dedicatedStorageBytes(ctx, db)
+		return dedicatedStorageBytes(ctx, db, customerID)
 	}
 	return sharedStorageBytes(ctx, db, customerID)
 }
@@ -282,14 +285,61 @@ func dedicatedTo(ctx context.Context, db DB, customerID string) (bool, error) {
 	return current == "tenant_"+strings.ReplaceAll(customerID, "-", ""), nil
 }
 
-// dedicatedStorageBytes is every table of the database, indexes and TOAST
-// included, catalogs excluded.
-func dedicatedStorageBytes(ctx context.Context, db DB) (int64, error) {
+// liveTablesCTE is every ordinary table of the database (catalogs
+// excluded) with its root (the partitioned table a partition belongs to,
+// else itself), its live rows and the bytes they take:
+//
+//   - live rows from the statistics collector, or the planner's count when
+//     the collector has nothing (just after a restart);
+//   - a row's width as the planner statistics give it: the columns' average
+//     stored widths, a 24-byte header, alignment, and a 4-byte line pointer;
+//   - the table's indexes and TOAST in the proportion its live rows take of
+//     its main file, as they hold the same rows;
+//   - a table the planner has not analysed yet at its files' size.
+const liveTablesCTE = `WITH stat AS (
+	    SELECT schemaname, tablename, sum(avg_width * (1 - null_frac)) AS width
+	    FROM pg_stats WHERE NOT inherited GROUP BY schemaname, tablename),
+	tbl AS (
+	    SELECT c.oid, COALESCE(pg_partition_root(c.oid), c.oid) AS root,
+	           CASE WHEN s.n_live_tup + s.n_dead_tup + s.n_tup_ins + s.n_tup_del > 0 THEN s.n_live_tup
+	                ELSE GREATEST(c.reltuples, 0)::bigint END AS live,
+	           pg_relation_size(c.oid) AS heap,
+	           pg_total_relation_size(c.oid) - pg_relation_size(c.oid) AS rest,
+	           ceil((24 + st.width) / 8.0) * 8 + 4 AS row_bytes
+	    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+	    LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid
+	    LEFT JOIN stat st ON st.schemaname = n.nspname AND st.tablename = c.relname
+	    WHERE c.relkind IN ('r', 'm') AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')),
+	live_tables AS (
+	    SELECT oid, root, live,
+	           CASE WHEN live = 0 THEN 0
+	                WHEN row_bytes IS NULL OR heap = 0 THEN heap + rest
+	                ELSE live * row_bytes + rest * LEAST(1, live * row_bytes / heap::numeric)
+	           END AS bytes
+	    FROM tbl)`
+
+// dedicatedStorageBytes is the live data of every table in the database:
+// the models' data as ModelStorage counts it — rows counted exactly, so a
+// statistics count an ANALYZE has just reset cannot leave a deleted model
+// in the figure — and every other table as its statistics give it.
+func dedicatedStorageBytes(ctx context.Context, db DB, customerID string) (int64, error) {
+	models, err := ModelStorage(ctx, db, customerID)
+	if err != nil {
+		return 0, err
+	}
+	other, err := otherTablesBytes(ctx, db)
+	return total(models) + other, err
+}
+
+// dataTables are the tables a model's data lives in (ModelStorage counts
+// their rows), as partition roots.
+const dataTables = `('runtime.fact_input'::regclass::oid, 'runtime.calc_result'::regclass::oid, 'runtime.fact_input_history'::regclass::oid)`
+
+// otherTablesBytes is the live data of every table but the dataTables.
+func otherTablesBytes(ctx context.Context, db DB) (int64, error) {
 	var b int64
-	err := db.QueryRow(ctx, `
-		SELECT COALESCE(sum(pg_total_relation_size(c.oid)), 0)::bigint
-		FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-		WHERE c.relkind IN ('r', 'm') AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')`).Scan(&b)
+	err := db.QueryRow(ctx, liveTablesCTE+`
+		SELECT COALESCE(sum(bytes), 0)::bigint FROM live_tables WHERE root NOT IN `+dataTables).Scan(&b)
 	return b, err
 }
 
@@ -308,20 +358,18 @@ func total(models map[string]int64) int64 {
 }
 
 // ModelStorage is each of the tenant's models with its rows in each data
-// table times that table's bytes per row (200 while the planner has no
-// statistics yet) — the model's share of the space those tables take,
-// indexes included. Definitions are small next to the data and left out.
+// table times that table's live bytes per row (liveTablesCTE; 200 while the
+// table has no rows the statistics know of) — the model's share of the
+// data those tables hold, indexes included. Definitions are small next to
+// the data and left out.
 func ModelStorage(ctx context.Context, db DB, customerID string) (map[string]int64, error) {
-	rows, err := db.Query(ctx, appsCTE+`,
+	rows, err := db.Query(ctx, liveTablesCTE+`,
+		`+strings.TrimPrefix(appsCTE, "WITH ")+`,
 		models AS (SELECT id FROM core.model WHERE application_id IN (SELECT id FROM apps)),
 		width AS (
-		    SELECT t.name,
-		           COALESCE(sum(pg_total_relation_size(pt.relid))::numeric / NULLIF(sum(GREATEST(c.reltuples, 0)), 0), 200) AS bytes
+		    SELECT t.name, COALESCE(sum(l.bytes) / NULLIF(sum(l.live), 0), 200) AS bytes
 		    FROM (VALUES ('runtime.fact_input'), ('runtime.calc_result'), ('runtime.fact_input_history')) t(name)
-		    -- pg_partition_tree is empty for a plain table, so the table
-		    -- itself is added; for a partitioned one it is the 0-byte parent.
-		    CROSS JOIN LATERAL (SELECT t.name::regclass::oid AS relid UNION SELECT relid FROM pg_partition_tree(t.name::regclass)) pt
-		    JOIN pg_class c ON c.oid = pt.relid
+		    LEFT JOIN live_tables l ON l.root = t.name::regclass::oid
 		    GROUP BY t.name),
 		rows_of AS (
 		    SELECT 'runtime.fact_input' AS name, model_id, count(*) AS n FROM runtime.fact_input WHERE model_id IN (SELECT id FROM models) GROUP BY model_id
@@ -405,42 +453,31 @@ func (e *Enforcer) Sweep(ctx context.Context, db DB, customerID string) (Tenant,
 	} else if err != nil {
 		return Tenant{}, err
 	}
-	// Storage is recorded so a tenant admin sees the space used, and the
-	// space left under a limit. Measured where it is cheap or needed anyway:
-	// a dedicated database's size is a catalog read, while the shared-mode
-	// estimate and each model's size count the tenant's rows, so they run
-	// only for a plan that limits storage.
+	// Storage is recorded so a tenant admin sees the space used, the space
+	// left under a limit, and each model's share. Measured where it is cheap
+	// or needed anyway: a dedicated database's live data is a catalog read,
+	// while the shared-mode estimate counts the tenant's rows, so there it
+	// runs only for a plan that limits storage.
 	var storage *int64
 	dedicated, err := dedicatedTo(ctx, db, customerID)
 	if err != nil {
 		return Tenant{}, fmt.Errorf("sweep tenant %s: %w", customerID, err)
 	}
-	limited := p.Limits.MaxStorageMB > 0
-	if dedicated {
-		b, err := dedicatedStorageBytes(ctx, db)
-		if err == nil && limited {
-			var compacted bool
-			if compacted, err = e.reclaim(ctx, db, customerID, megabytes(b) > p.Limits.MaxStorageMB); err == nil && compacted {
-				b, err = dedicatedStorageBytes(ctx, db)
-			}
+	if dedicated || p.Limits.MaxStorageMB > 0 {
+		models, err := ModelStorage(ctx, db, customerID)
+		if err == nil {
+			err = recordModelStorage(ctx, db, models)
+		}
+		b := total(models)
+		if err == nil && dedicated {
+			var other int64
+			other, err = otherTablesBytes(ctx, db)
+			b += other
 		}
 		if err != nil {
 			return Tenant{}, fmt.Errorf("sweep tenant %s: storage: %w", customerID, err)
 		}
 		storage = &b
-	}
-	if limited {
-		models, err := ModelStorage(ctx, db, customerID)
-		if err == nil {
-			err = recordModelStorage(ctx, db, models)
-		}
-		if err != nil {
-			return Tenant{}, fmt.Errorf("sweep tenant %s: storage: %w", customerID, err)
-		}
-		if !dedicated {
-			b := total(models)
-			storage = &b
-		}
 	}
 	reason := ""
 	if p.Limits.Any() {

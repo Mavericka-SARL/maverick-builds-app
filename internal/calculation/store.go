@@ -708,29 +708,57 @@ func scanDimValueMap(rows pgx.Rows, err error) (map[string]float64, error) {
 
 // ── Batched per-intersection write ──────────────────────────────────────────
 
-// CalcResultRow is one leaf-combo's calculated value, for WriteCalcResults.
+// CalcResultRow is one intersection's calculated value, for ReplaceResultsTx.
 type CalcResultRow struct {
 	DimMembers map[string]string
 	Value      float64
 	Text       *string // a text calculation's result, beside a 0 Value
 }
 
-// ClearPerComboResultsTx deletes a metric's per-intersection calc_result rows
-// (never the '{}' aggregate row), making each recompute's per-combo set
-// authoritative. Without this, an intersection whose underlying facts were
-// deleted (full_reload, member removal) kept serving its LAST computed
-// value forever: the recompute skips the now-empty combo, the skip writes
-// nothing, and nothing else ever garbage-collects the stale row — found
-// live when a business user's junk test-writes (revenue 4, cost 3) kept
-// showing margin_pct=25 at an intersection whose facts had been wiped. It
-// runs in the same transaction as the write of the new set (Store.InTx), so
-// no reader sees the metric with no rows in between.
-func (s *Store) ClearPerComboResultsTx(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID string) error {
+// ReplaceResultsTx makes a metric's calc_result rows — its '{}' total and
+// every intersection — the given set, inside tx, writing only what
+// changed: a cell whose value is unchanged keeps its row, a changed one
+// gets a new row, and every other row of the metric goes, earlier rows of
+// a cell included. The set is authoritative: an intersection whose facts
+// were deleted (full_reload, member removal) and that a pass therefore
+// skips must stop serving its last value — found live when junk
+// test-writes (revenue 4, cost 3) kept showing margin_pct=25 at an
+// intersection whose facts had been wiped. A pass with no total leaves no
+// total either (time_summary 'none', a blank total).
+//
+// Each pass used to delete every cell and insert it again, and to add a
+// '{}' total without removing the last one, so a busy workspace's
+// calc_result was mostly rows nobody would read again: one tenant held
+// 260 MB for 200,000 live rows after 7.3 million deletes.
+func (s *Store) ReplaceResultsTx(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID, partitionKey string, rows []CalcResultRow) error {
+	dims := make([]string, len(rows))
+	values := make([]float64, len(rows))
+	texts := make([]*string, len(rows))
+	for i, r := range rows {
+		dimJSON, _ := json.Marshal(r.DimMembers)
+		dims[i], values[i], texts[i] = string(dimJSON), r.Value, r.Text
+	}
+	// Values go as numeric, every digit of the float64 kept (a float8 cast
+	// keeps 15): a pick-list option's code is a 16-digit number.
 	_, err := tx.Exec(ctx, `
-		DELETE FROM runtime.calc_result
-		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid
-		  AND dim_members::text <> '{}'
-	`, modelID, revisionID, metricID)
+		WITH new AS (
+		    SELECT d::jsonb AS dims, v AS value, t AS text
+		    FROM unnest($4::text[], $5::numeric[], $6::text[]) AS n(d, v, t)),
+		keep AS (
+		    SELECT DISTINCT ON (c.dim_members) c.id, c.calc_at, c.dim_members
+		    FROM runtime.calc_result c JOIN new n ON n.dims = c.dim_members
+		    WHERE c.model_id = $1::uuid AND c.revision_id = $2::uuid AND c.metric_id = $3::uuid
+		      AND c.value = n.value AND c.text_value IS NOT DISTINCT FROM n.text
+		      AND c.partition_key IS NOT DISTINCT FROM $7
+		    ORDER BY c.dim_members, c.calc_at DESC),
+		gone AS (
+		    DELETE FROM runtime.calc_result c
+		    WHERE c.model_id = $1::uuid AND c.revision_id = $2::uuid AND c.metric_id = $3::uuid
+		      AND NOT EXISTS (SELECT 1 FROM keep k WHERE k.id = c.id AND k.calc_at = c.calc_at))
+		INSERT INTO runtime.calc_result (model_id, revision_id, dim_members, metric_id, value, partition_key, text_value)
+		SELECT $1::uuid, $2::uuid, n.dims, $3::uuid, n.value, $7, n.text
+		FROM new n WHERE NOT EXISTS (SELECT 1 FROM keep k WHERE k.dim_members = n.dims)
+	`, modelID, revisionID, metricID, dims, values, texts, partitionKey)
 	return err
 }
 
@@ -738,37 +766,26 @@ func (s *Store) ClearPerComboResultsTx(ctx context.Context, tx pgx.Tx, modelID, 
 // total included: the state of a metric whose every intersection has no
 // data (all of it deleted) — absent, never its last total.
 func (s *Store) ClearAllResults(ctx context.Context, modelID, revisionID, metricID string) error {
-	return clearResults(ctx, s.pool, modelID, revisionID, metricID, "")
+	return clearResults(ctx, s.pool, modelID, revisionID, metricID)
 }
 
 // ClearAllResultsTx is ClearAllResults inside tx.
 func (s *Store) ClearAllResultsTx(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID string) error {
-	return clearResults(ctx, tx, modelID, revisionID, metricID, "")
+	return clearResults(ctx, tx, modelID, revisionID, metricID)
 }
 
-// ClearAggregateResultTx deletes a metric's '{}' total rows: a pass that
-// computes no total (time_summary 'none', a blank total) must not leave an
-// earlier pass's total answering for it.
-func (s *Store) ClearAggregateResultTx(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID string) error {
-	return clearResults(ctx, tx, modelID, revisionID, metricID, `AND dim_members::text = '{}'`)
-}
-
-// clearResults deletes a metric's calc_result rows, narrowed by extra (a
-// fixed SQL fragment, never user input).
-func clearResults(ctx context.Context, w resultWriter, modelID, revisionID, metricID, extra string) error {
+func clearResults(ctx context.Context, w resultWriter, modelID, revisionID, metricID string) error {
 	_, err := w.Exec(ctx, `
 		DELETE FROM runtime.calc_result
-		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid `+extra,
+		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid`,
 		modelID, revisionID, metricID)
 	return err
 }
 
 // InTx runs fn in one transaction, committed when fn returns nil and
-// rolled back otherwise. A metric's result set (its '{}' total, the clear
-// of its previous per-combo rows and the new ones) is replaced through it,
-// so a concurrent reader sees either the previous set or the new one —
-// never the empty moment between the clear and the write — and a failed
-// write keeps the last good rows.
+// rolled back otherwise. A metric's result set is replaced through it
+// (ReplaceResultsTx), so a concurrent reader sees either the previous set
+// or the new one, and a failed write keeps the last good rows.
 func (s *Store) InTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -781,55 +798,9 @@ func (s *Store) InTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
 	return tx.Commit(ctx)
 }
 
-// resultWriter is the subset of pgx shared by a pool and a transaction, so
-// the recurrence executor can persist a whole component atomically through
-// the same functions the per-metric path uses on the pool.
+// resultWriter is the subset of pgx shared by a pool and a transaction.
 type resultWriter interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
-	SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults
-}
-
-// WriteCalcResultTx / WriteCalcResultsTx write a metric's calc_result rows
-// (the '{}' total; one row per entry, batched in one round trip) inside tx:
-// a metric's result set is replaced as one unit (Store.InTx), and a
-// recurrence (an opening/closing balance pair) as one unit across its
-// metrics — a failure at a later period must never leave a half-updated
-// chain behind.
-func (s *Store) WriteCalcResultTx(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID, partitionKey string, dimMembers map[string]string, value float64) error {
-	dimJSON, _ := json.Marshal(dimMembers)
-	_, err := tx.Exec(ctx, `
-		INSERT INTO runtime.calc_result
-		    (model_id, revision_id, dim_members, metric_id, value, partition_key)
-		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6)
-	`, modelID, revisionID, dimJSON, metricID, value, partitionKey)
-	return err
-}
-
-func (s *Store) WriteCalcResultsTx(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID, partitionKey string, rows []CalcResultRow) error {
-	return writeCalcResults(ctx, tx, modelID, revisionID, metricID, partitionKey, rows)
-}
-
-func writeCalcResults(ctx context.Context, w resultWriter, modelID, revisionID, metricID, partitionKey string, rows []CalcResultRow) error {
-	if len(rows) == 0 {
-		return nil
-	}
-	batch := &pgx.Batch{}
-	for _, r := range rows {
-		dimJSON, _ := json.Marshal(r.DimMembers)
-		batch.Queue(`
-			INSERT INTO runtime.calc_result
-			    (model_id, revision_id, dim_members, metric_id, value, partition_key, text_value)
-			VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7)
-		`, modelID, revisionID, string(dimJSON), metricID, r.Value, partitionKey, r.Text)
-	}
-	br := w.SendBatch(ctx, batch)
-	defer br.Close() //nolint:errcheck // any real failure already surfaces via br.Exec() below
-	for range rows {
-		if _, err := br.Exec(); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func partitionStatusFromString(s string) calculationv1.PartitionStatus {

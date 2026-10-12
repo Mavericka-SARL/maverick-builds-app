@@ -290,9 +290,10 @@ func TestCatalogChecksAndSweep(t *testing.T) {
 	if tt, err := e.Sweep(ctx, pool, cust); err != nil || tt.LimitState != "ok" {
 		t.Fatalf("storage sweep back = %+v err=%v", tt, err)
 	}
-	// The dedicated measurer sees a whole database: the migrated schema
-	// alone is real bytes.
-	if b, err := dedicatedStorageBytes(ctx, pool); err != nil || b < 1<<20 {
+	// The dedicated measurer counts data, not files: a migrated schema whose
+	// data was deleted is a few rows (the catalog of editions, the migration
+	// log), not the megabytes its empty tables and indexes take on disk.
+	if b, err := dedicatedStorageBytes(ctx, pool, cust); err != nil || b <= 0 || b >= 1<<20 {
 		t.Fatalf("dedicated storage of the test database = %d err=%v", b, err)
 	}
 	if megabytes(0) != 0 || megabytes(1) != 1 || megabytes(1<<20) != 1 || megabytes(1<<20+1) != 2 {

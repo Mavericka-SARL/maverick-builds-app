@@ -1,20 +1,23 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
-	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mavericks-engine/mavericks/internal/plan"
 )
 
-// A workspace over its edition's storage limit gets back under it by
-// deleting a model: the tenant listing shows each model's size, deleting the
-// big one over HTTP gives its space back at the next sweep, and the
-// workspace is writable again. Before, a dedicated database kept the deleted
-// rows' space (and the model's facts were copied into cell history on the
-// way out), so the measured size did not move.
+// Deleting a model gives its space back at once, in every edition: the
+// DELETE re-measures the workspace before it answers, so the tenant listing
+// right after shows the smaller figure — and a workspace that was read-only
+// for its storage is writable again — with nothing of the model left in
+// any table. Before, a dedicated database was measured by its files, which
+// PostgreSQL does not shrink when rows are deleted, so the figure did not
+// move.
 func TestDeletingAModelBringsAWorkspaceBackUnderItsStorageLimit(t *testing.T) {
 	f := newDedicatedFixture(t, Deps{})
 	id, workspace, tctx := f.tenant(t, "Playground Co")
@@ -22,39 +25,16 @@ func TestDeletingAModelBringsAWorkspaceBackUnderItsStorageLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	q := func(sql string, args ...any) string {
-		t.Helper()
-		var s string
-		if err := pool.QueryRow(tctx, sql, args...).Scan(&s); err != nil {
-			t.Fatalf("%s: %v", sql, err)
-		}
-		return s
-	}
-	app := q(`INSERT INTO core.application (customer_id, workspace_id, name, mode) VALUES ($1::uuid, $2::uuid, 'Planning', 'planning') RETURNING id::text`, id, workspace)
-	seed := func(name string, facts int) string {
-		model := q(`INSERT INTO core.model (application_id, name) VALUES ($1::uuid, $2) RETURNING id::text`, app, name)
-		rev := q(`INSERT INTO model.revision (model_id, name) VALUES ($1::uuid, 'Working') RETURNING id::text`, model)
-		metric := q(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input, agg_rule) VALUES ($1::uuid, $2::uuid, 'Amount', true, 'sum') RETURNING id::text`, model, rev)
-		if _, err := pool.Exec(tctx, `INSERT INTO runtime.fact_input (model_id, revision_id, dim_members, metric_id, value)
-			SELECT $1::uuid, $2::uuid, jsonb_build_object('i', i), $3::uuid, i FROM generate_series(1, $4::int) i`, model, rev, metric, facts); err != nil {
-			t.Fatal(err)
-		}
-		return model
-	}
-	small := seed("Small", 3000)
-	if _, err := pool.Exec(tctx, `ANALYZE`); err != nil {
+	app := seedApp(t, tctx, pool, id, workspace)
+	small := seedModel(t, tctx, pool, app, "Small", 3000)
+	analyze(t, tctx, pool)
+	base, err := plan.StorageBytes(tctx, pool, id)
+	if err != nil {
 		t.Fatal(err)
 	}
-	var base int64
-	if err := pool.QueryRow(tctx, `SELECT sum(pg_total_relation_size(c.oid))::bigint FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-		WHERE c.relkind IN ('r', 'm') AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')`).Scan(&base); err != nil {
-		t.Fatal(err)
-	}
-	limitMB := int(base>>20) + 3
-	big := seed("Big", 80000)
-	if _, err := pool.Exec(tctx, `ANALYZE`); err != nil {
-		t.Fatal(err)
-	}
+	limitMB := int(base>>20) + 2
+	big := seedModel(t, tctx, pool, app, "Big", 80000)
+	analyze(t, tctx, pool)
 
 	// The platform admin sets the Community Edition's limit just above the
 	// workspace without its big model, and moves the workspace onto it.
@@ -75,57 +55,73 @@ func TestDeletingAModelBringsAWorkspaceBackUnderItsStorageLimit(t *testing.T) {
 		t.Fatalf("move to community: %d %s", code, body)
 	}
 	f.plans.InvalidateAll()
-
 	tenant, err := f.plans.Sweep(tctx, pool, id)
 	if err != nil || tenant.LimitState != "over" {
 		t.Fatalf("sweep with the big model = %+v err=%v, want over a %d MB limit", tenant, err, limitMB)
 	}
-	sizes := f.modelSizes(t, id)
-	if sizes[big] < 20*sizes[small] || sizes[small] <= 0 {
-		t.Fatalf("listed model sizes = %v, want Big ~27x Small", sizes)
+	listed := f.listedTenant(t, id)
+	if listed.Models[big] < 20*listed.Models[small] || listed.Models[small] <= 0 || !listed.ReadOnly {
+		t.Fatalf("listed before the delete = %+v, want Big ~27x Small and read-only", listed)
 	}
-	before := *tenant.StorageBytes
 
 	if code, body := do(t, f.srv, call{persona: "held-pa", tenant: id}, http.MethodDelete, "/api/admin/models/"+big, nil); code != http.StatusOK {
 		t.Fatalf("delete Big: %d %s", code, body)
 	}
-	if n := q(`SELECT count(*)::text FROM runtime.fact_input_history`); n != "0" {
-		t.Fatalf("cell history after deleting the model = %s rows, want 0", n)
+	after := f.listedTenant(t, id)
+	t.Logf("storage %d MB with the big model, %d MB right after deleting it (limit %d MB)", listed.Storage>>20, after.Storage>>20, limitMB)
+	if after.ReadOnly || after.Storage > listed.Storage/3 {
+		t.Fatalf("right after deleting Big: %+v, was %+v", after, listed)
 	}
-	// Statistics see the deleted rows shortly after the transaction ends.
-	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
-		var deleted int64
-		if err := pool.QueryRow(tctx, `SELECT COALESCE(sum(n_tup_del), 0)::bigint FROM pg_stat_user_tables WHERE relname LIKE 'fact_input%'`).Scan(&deleted); err != nil {
-			t.Fatal(err)
-		}
-		if deleted >= 80000 {
-			break
-		}
+	if len(after.Models) != 1 || after.Models[small] <= 0 {
+		t.Fatalf("listed model sizes after the delete = %v", after.Models)
 	}
+	noRowsOf(t, tctx, pool, big)
+}
 
-	tenant, err = f.plans.Sweep(tctx, pool, id)
+// An edition without a storage limit shows the space given back too.
+func TestDeletingAModelLowersStorageInAnUnlimitedEdition(t *testing.T) {
+	f := newDedicatedFixture(t, Deps{})
+	id, workspace, tctx := f.tenant(t, "Enterprise Co") // enterprise: no storage limit
+	pool, err := f.router.Pool(f.ctx, id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("storage %d MB with the big model, %d MB after deleting it (limit %d MB)", before>>20, *tenant.StorageBytes>>20, limitMB)
-	if tenant.LimitState != "ok" || *tenant.StorageBytes >= before*2/3 {
-		t.Fatalf("after deleting Big: state %s, storage %d (was %d)", tenant.LimitState, *tenant.StorageBytes, before)
+	app := seedApp(t, tctx, pool, id, workspace)
+	seedModel(t, tctx, pool, app, "Kept", 3000)
+	gone := seedModel(t, tctx, pool, app, "Deleted", 60000)
+	analyze(t, tctx, pool)
+	if _, err := f.plans.Sweep(tctx, pool, id); err != nil {
+		t.Fatal(err)
 	}
-	if st, err := f.plans.State(tctx, pool, id); err != nil || st.ReadOnly {
-		t.Fatalf("still read-only after deleting Big: %+v err=%v", st, err)
+	before := f.listedTenant(t, id)
+	if code, body := do(t, f.srv, call{persona: "held-pa", tenant: id}, http.MethodDelete, "/api/admin/models/"+gone, nil); code != http.StatusOK {
+		t.Fatalf("delete: %d %s", code, body)
 	}
-	if sizes := f.modelSizes(t, id); len(sizes) != 1 || sizes[small] <= 0 {
-		t.Fatalf("listed model sizes after the delete = %v", sizes)
+	after := f.listedTenant(t, id)
+	t.Logf("enterprise storage %d MB -> %d MB right after the delete", before.Storage>>20, after.Storage>>20)
+	if after.Storage > before.Storage/3 || before.Models[gone] <= 0 || len(after.Models) != 1 {
+		t.Fatalf("enterprise: before %+v, after %+v", before, after)
 	}
+	noRowsOf(t, tctx, pool, gone)
 }
 
-// modelSizes is each model's storage_bytes as GET /api/admin/tenants lists
-// it for the platform admin.
-func (f *dedicatedFixture) modelSizes(t *testing.T, tenantID string) map[string]int64 {
+type listedTenant struct {
+	Storage  int64
+	ReadOnly bool
+	Models   map[string]int64
+}
+
+// listedTenant is the tenant as GET /api/admin/tenants shows it to the
+// platform admin: its storage, whether it is read-only, each model's size.
+func (f *dedicatedFixture) listedTenant(t *testing.T, tenantID string) listedTenant {
 	t.Helper()
 	code, body := do(t, f.srv, f.pa, http.MethodGet, "/api/admin/tenants", nil)
 	var tenants []struct {
-		ID           string `json:"id"`
+		ID        string `json:"id"`
+		PlanState *struct {
+			ReadOnly     bool   `json:"read_only"`
+			StorageBytes *int64 `json:"storage_bytes"`
+		} `json:"plan_state"`
 		Applications []struct {
 			Models []struct {
 				ID           string `json:"id"`
@@ -136,18 +132,104 @@ func (f *dedicatedFixture) modelSizes(t *testing.T, tenantID string) map[string]
 	if code != http.StatusOK || json.Unmarshal(body, &tenants) != nil {
 		t.Fatalf("tenants: %d %s", code, body)
 	}
-	out := map[string]int64{}
+	out := listedTenant{Models: map[string]int64{}}
 	for _, tn := range tenants {
 		if tn.ID != tenantID {
 			continue
 		}
+		if tn.PlanState != nil {
+			out.ReadOnly = tn.PlanState.ReadOnly
+			if tn.PlanState.StorageBytes != nil {
+				out.Storage = *tn.PlanState.StorageBytes
+			}
+		}
 		for _, a := range tn.Applications {
 			for _, m := range a.Models {
 				if m.StorageBytes != nil {
-					out[m.ID] = *m.StorageBytes
+					out.Models[m.ID] = *m.StorageBytes
 				}
 			}
 		}
 	}
 	return out
+}
+
+func seedApp(t *testing.T, tctx context.Context, pool *pgxpool.Pool, customerID, workspace string) string {
+	t.Helper()
+	var app string
+	if err := pool.QueryRow(tctx, `INSERT INTO core.application (customer_id, workspace_id, name, mode) VALUES ($1::uuid, $2::uuid, 'Planning', 'planning') RETURNING id::text`, customerID, workspace).Scan(&app); err != nil {
+		t.Fatal(err)
+	}
+	return app
+}
+
+// seedModel adds a model with facts and calculated results of its own.
+func seedModel(t *testing.T, tctx context.Context, pool *pgxpool.Pool, app, name string, cells int) string {
+	t.Helper()
+	var model, rev, metric string
+	if err := pool.QueryRow(tctx, `INSERT INTO core.model (application_id, name) VALUES ($1::uuid, $2) RETURNING id::text`, app, name).Scan(&model); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(tctx, `INSERT INTO model.revision (model_id, name) VALUES ($1::uuid, 'Working') RETURNING id::text`, model).Scan(&rev); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(tctx, `INSERT INTO model.metric_def (model_id, revision_id, name, is_input, agg_rule) VALUES ($1::uuid, $2::uuid, 'Amount', true, 'sum') RETURNING id::text`, model, rev).Scan(&metric); err != nil {
+		t.Fatal(err)
+	}
+	for _, sql := range []string{
+		`INSERT INTO runtime.fact_input (model_id, revision_id, dim_members, metric_id, value)
+		 SELECT $1::uuid, $2::uuid, jsonb_build_object('i', i), $3::uuid, i FROM generate_series(1, $4::int) i`,
+		`INSERT INTO runtime.calc_result (model_id, revision_id, dim_members, metric_id, value, partition_key)
+		 SELECT $1::uuid, $2::uuid, jsonb_build_object('i', i), $3::uuid, i * 2, 'p' FROM generate_series(1, $4::int) i`,
+	} {
+		if _, err := pool.Exec(tctx, sql, model, rev, metric, cells); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return model
+}
+
+func analyze(t *testing.T, tctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	if _, err := pool.Exec(tctx, `ANALYZE`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(tctx, `SELECT pg_stat_force_next_flush()`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// noRowsOf fails if any table with a model_id column still holds a row of
+// the deleted model.
+func noRowsOf(t *testing.T, tctx context.Context, pool *pgxpool.Pool, modelID string) {
+	t.Helper()
+	rows, err := pool.Query(tctx, `
+		SELECT quote_ident(n.nspname) || '.' || quote_ident(c.relname)
+		FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE a.attname = 'model_id' AND NOT a.attisdropped AND c.relkind IN ('r', 'p') AND NOT c.relispartition
+		  AND n.nspname NOT IN ('pg_catalog', 'information_schema')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		tables = append(tables, name)
+	}
+	rows.Close()
+	if len(tables) < 10 {
+		t.Fatalf("only %d tables with a model_id column: %v", len(tables), tables)
+	}
+	for _, table := range tables {
+		var n int
+		if err := pool.QueryRow(tctx, `SELECT count(*) FROM `+table+` WHERE model_id::text = $1`, modelID).Scan(&n); err != nil {
+			t.Fatalf("%s: %v", table, err)
+		}
+		if n != 0 {
+			t.Errorf("%s still holds %d rows of the deleted model", table, n)
+		}
+	}
 }

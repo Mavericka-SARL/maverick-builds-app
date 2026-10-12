@@ -335,3 +335,43 @@ func (h *handler) applyTenantPlan(ctx, tctx context.Context, customerID string, 
 	h.plans.Invalidate(customerID)
 	return changed, nil
 }
+
+// flushStatsSQL makes the deleting session hand its row counts to the
+// statistics at its commit rather than up to a second later, so the
+// re-measure that follows (remeasureStorage) already sees the rows gone.
+const flushStatsSQL = `SELECT pg_stat_force_next_flush()`
+
+// remeasureStorage re-measures a tenant's storage straight after a delete,
+// so the console shows the space given back — and a workspace read-only
+// for its storage is writable again — at once rather than at the next
+// sweep. The delete's transaction ran flushStatsSQL. A failure only logs:
+// the next sweep measures it.
+func (h *handler) remeasureStorage(ctx context.Context, customerID string) {
+	if h.plans == nil || customerID == "" {
+		return
+	}
+	if _, err := h.plans.Sweep(ctx, h.db.For(ctx), customerID); err != nil {
+		h.log.Warn().Err(err).Str("tenant", customerID).Msg("storage re-measure after a delete failed; the next sweep measures it")
+	}
+}
+
+// deleteAndRemeasure runs one delete of a model's structure (a revision, a
+// metric) with flushStatsSQL in its transaction, then remeasureStorage.
+func (h *handler) deleteAndRemeasure(ctx context.Context, customerID, sql string, args ...any) error {
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // a no-op after Commit
+	if _, err := tx.Exec(ctx, sql, args...); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, flushStatsSQL); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	h.remeasureStorage(ctx, customerID)
+	return nil
+}

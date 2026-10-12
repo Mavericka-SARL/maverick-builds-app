@@ -4810,7 +4810,7 @@ paths:
                     has_aggregate:  { type: boolean, description: "Summary mode only: a '{}' grand-total row exists" }
                     one_dim_slices: { type: integer, description: "Summary mode only: rows pinning exactly one dimension" }
                     value:          { type: number, description: "dim_members mode only" }
-                    calc_at:        { type: string, description: "dim_members mode only" }
+                    calc_at:        { type: string, description: "dim_members mode only: when the value was last written — a recalculation that arrives at the same value keeps the row and its time" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "403":
           description: >-

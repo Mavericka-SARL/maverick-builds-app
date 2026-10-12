@@ -846,23 +846,15 @@ func (s *Scheduler) executeTimeSeries(
 }
 
 // persistTimeSeries replaces one metric's results inside tx: its '{}'
-// total (or the clear of a stale one), the clear of its previous per-combo
-// rows and the new ones.
+// total — none when this pass has none (time_summary 'none', no period
+// with a value) — and every intersection.
 func (s *Scheduler) persistTimeSeries(ctx context.Context, tx pgx.Tx, def *MetricDef, modelID, revisionID, partitionKey string, res *tsResults) error {
+	rows := res.rows
 	if res.aggregate != nil {
-		if err := s.store.WriteCalcResultTx(ctx, tx, modelID, revisionID, def.ID, partitionKey, map[string]string{}, *res.aggregate); err != nil {
-			return fmt.Errorf("write aggregate: %w", err)
-		}
-	} else if err := s.store.ClearAggregateResultTx(ctx, tx, modelID, revisionID, def.ID); err != nil {
-		// No total this pass (time_summary 'none', no period with a value):
-		// an earlier pass's total must not keep answering for it.
-		return fmt.Errorf("clear stale aggregate: %w", err)
+		rows = append(rows, CalcResultRow{DimMembers: map[string]string{}, Value: *res.aggregate})
 	}
-	if err := s.store.ClearPerComboResultsTx(ctx, tx, modelID, revisionID, def.ID); err != nil {
-		return fmt.Errorf("clear stale per-combo results: %w", err)
-	}
-	if err := s.store.WriteCalcResultsTx(ctx, tx, modelID, revisionID, def.ID, partitionKey, res.rows); err != nil {
-		return fmt.Errorf("write per-intersection results: %w", err)
+	if err := s.store.ReplaceResultsTx(ctx, tx, modelID, revisionID, def.ID, partitionKey, rows); err != nil {
+		return fmt.Errorf("write results: %w", err)
 	}
 	return nil
 }

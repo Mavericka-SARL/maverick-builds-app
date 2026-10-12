@@ -72,49 +72,53 @@ understated the licence). The console
 shows the edition's `contact_url` link as "Learn more" when a note is set and
 "Change edition" when it is not.
 
-**How storage is measured** (`plan.StorageBytes`). In a dedicated tenant
-database (`TENANT_DB_MODE=dedicated`, docs/TENANT_DATABASES.md) it is the
-size of every table in that database, indexes and TOAST included, catalogs
-excluded — exact, and a catalog read. In a shared database the tables hold
-every tenant at once, so the tenant's share is an **estimate**: its row
-count in each data-bearing table (`runtime.fact_input`, `runtime.calc_result`,
-`runtime.fact_input_history`) times that table's average bytes per row from
-the planner statistics (200 bytes until the table has been analysed).
-Definitions, users and audit rows are not counted in the estimate. A
-deployment that means the number to be exact runs its self-service tenants
-dedicated.
+**How storage is measured** (`plan.StorageBytes`). The figure is the data a
+tenant holds, not the size of the files it sits in. PostgreSQL keeps a deleted
+row's space in a table's files for later writes to reuse, so the files do not
+shrink when data is deleted; measured by them, a workspace that deleted a model
+stayed the size it was. Each model's data — its rows in the data-bearing
+tables (`runtime.fact_input`, `runtime.calc_result`,
+`runtime.fact_input_history`), counted exactly — is multiplied by that table's
+live bytes per row: a row's width from the planner statistics (`pg_stats`) plus
+its share of the table's indexes and TOAST (200 bytes until the table has been
+analysed). In a dedicated tenant database (`TENANT_DB_MODE=dedicated`,
+docs/TENANT_DATABASES.md) every other table is added the same way from its
+live-row count (`pg_stat_user_tables`); in a shared database those tables hold
+every tenant at once, so definitions, users and audit rows are left out of the
+estimate. It is an estimate either way: on freshly written tables it comes
+within about a tenth of their files' size.
 
-**Making room.** `runtime.fact_input` is append-only and deleted facts are
-archived to `runtime.fact_input_history` (migration 081), so deleting rows
-or clearing an import does not shrink a tenant. Deleting a **model**, a
-**revision** or a **metric** (or the application holding them) does: the
-archive skips facts whose model or metric is being deleted, and drops their
-earlier history — history no screen could show once they are gone. (Migration
-089 did this for models; 111 lost the check, so for a while deleting a model
-wrote its facts into the archive and out again, and deleting a revision kept
-them there for good; 133 restored it and covers metrics, which a revision's
-deletion goes through.)
+**Making room.** Deleting a **model**, a **revision**, a **metric** or the
+application holding them gives the space back at once, in every edition.
+Everything the model held goes with it (ON DELETE CASCADE: facts, calculated
+results, imports and their staged rows, form records, grants), and its cell
+history by trigger — the archive skips facts whose model or metric is being
+deleted and drops their earlier history, which no screen could show once they
+are gone (migration 089 for models; 111 lost the check, 133 restored it and
+covers metrics, which a revision's deletion goes through). The delete then
+re-measures the workspace before it answers (`remeasureStorage`), with its
+transaction having flushed its row counts to the statistics
+(`pg_stat_force_next_flush`), so the console shows the smaller figure straight
+away and a workspace read-only for its storage is writable again. Other paths
+that delete — an import in full-reload mode, the AI developer — show it at the
+next sweep. Deleting single cells does not shrink a tenant: `runtime.fact_input`
+is append-only and deleted facts are archived to `runtime.fact_input_history`
+(migration 081).
 
-Deleting the rows is not yet the space. PostgreSQL keeps a deleted row's
-space in the table's files for later writes to reuse, so a **dedicated**
-database's size does not fall when data is deleted. On an edition with a
-storage limit the sweep therefore compacts (`plan.reclaim`,
-`VACUUM (FULL, SKIP_LOCKED)`) the tables rows were deleted from since it last
-did — when the workspace is over its limit, or when those rows are a tenth of
-its data — and records the size after. The rewrite locks one table at a time,
-briefly in a database a storage limit keeps small; a table in use at that
-moment is left to the next sweep. Tenants on editions without a storage limit
-are never compacted: autovacuum makes the space reusable and nothing is judged
-on it. In a **shared** database the estimate counts the tenant's rows, so it
-falls at once.
+Recalculating writes only the cells whose value changed
+(`calculation.Store.ReplaceResultsTx`). It used to delete and re-insert every
+cell of a metric, and add a `'{}'` total per pass without removing the last
+one, so a busy workspace held mostly rows nobody would read again — one tenant
+260 MB for 200,000 live rows; migration 134 removed the piled-up rows.
 
 That is what "read-only, except for deleting" means for a storage-bounded
-edition. Proven live in a shared database: a Community workspace at 128 MB
-(over its 100 MB), application deleted by its own tenant administrator while
-read-only, back to 33 MB and writable at the next sweep. In a dedicated one by
-`TestDeletingAModelBringsAWorkspaceBackUnderItsStorageLimit`: 22 MB, model
-deleted over HTTP, 3 MB and writable at the next sweep — 23 MB and still
-read-only without the compaction. A tenant that names an edition with no row is treated
+edition. The disk is not given back: the deleted rows' space stays in the files
+for the tenant's next writes. Proven by
+`TestDeletingAModelBringsAWorkspaceBackUnderItsStorageLimit` (a real gateway
+and a dedicated tenant database: a model deleted over HTTP, 49 MB to 2 MB and
+writable again in the listing that follows) and
+`TestDeletingAModelLowersStorageInAnUnlimitedEdition` (an Enterprise tenant,
+37 MB to 2 MB). A tenant that names an edition with no row is treated
 as unlimited and shown as "(no such edition)": a catalog gap must never lock a
 paying customer out.
 
@@ -341,11 +345,11 @@ Enterprise keep their workspaces:
   "Storage: N MB used"; hovering shows when it was measured. This is how a
   tenant administrator sees the space left before the workspace turns
   read-only. Under it, each model shows its own share (`runtime.model_storage`,
-  written by the same sweep on an edition with a storage limit): its rows in
-  the three data tables times each table's bytes per row, so the tenant
-  administrator can see which model to delete. The shares do not add up to
-  the meter — definitions, people, audit and the database's own overhead are
-  the rest. **Change edition** (platform administrators)
+  written by the same sweep — for every tenant with its own database, and in a
+  shared one on an edition with a storage limit): its rows in the three data
+  tables times each table's live bytes per row, so the tenant administrator can
+  see which model to delete. The shares do not add up to the meter —
+  definitions, people and audit are the rest. **Change edition** (platform administrators)
   moves the tenant. `PATCH /api/admin/tenants/{id}` takes `plan`; the next
   usage sweep judges the tenant by the new limits. A tenant administrator
   has the same console for their own tenant, minus this: lifting one's own

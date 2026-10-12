@@ -66,8 +66,11 @@ func TestTenantAdminSeesStorageSpace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
-	if tn.StorageBytes == nil || *tn.StorageBytes < 1<<20 {
-		t.Fatalf("sweep recorded %v bytes for a migrated database", tn.StorageBytes)
+	// It counts the data the database holds, not its files: a tenant just
+	// provisioned is a few rows, well under the megabyte its empty tables
+	// take on disk.
+	if tn.StorageBytes == nil || *tn.StorageBytes <= 0 || *tn.StorageBytes >= 1<<20 {
+		t.Fatalf("sweep recorded %v bytes for a new tenant's database", tn.StorageBytes)
 	}
 
 	st := listed()

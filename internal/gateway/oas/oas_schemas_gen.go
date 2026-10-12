@@ -7407,7 +7407,8 @@ type DebugCalcOKItem struct {
 	OneDimSlices OptInt `json:"one_dim_slices"`
 	// Dim_members mode only.
 	Value OptFloat64 `json:"value"`
-	// Dim_members mode only.
+	// Dim_members mode only: when the value was last written — a recalculation that arrives at the
+	// same value keeps the row and its time.
 	CalcAt OptString `json:"calc_at"`
 }
 

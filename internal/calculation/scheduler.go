@@ -503,29 +503,19 @@ func (s *Scheduler) executePartition(
 		perComboRows = append(perComboRows, aggregatePeriodRows(def.AggRule, metricDimIDs[def.ID], results, axis, def.TimeSummary)...)
 	}
 
-	// Replace the metric's result set in ONE transaction: the '{}' total
-	// (or the clear of a stale one — time_summary 'none', a blank total),
-	// the clear of the previous per-combo set and the new one. The new set
-	// is authoritative — intersections that lost their data since the last
-	// run (skipped above, absent from perComboRows) must stop serving their
-	// old values — but a reader between a clear and a write used to see the
-	// metric with no cells at all; inside one transaction it sees the old
+	// Replace the metric's result set in one transaction: the '{}' total
+	// (none when this pass has none — time_summary 'none', a blank total)
+	// and every intersection. The new set is authoritative: intersections
+	// that lost their data since the last run (skipped above, absent from
+	// perComboRows) stop serving their old values. A reader sees the old
 	// set or the new one, and a failed write keeps the last good rows.
+	rows := perComboRows
+	if writeAggregate {
+		rows = append(rows, CalcResultRow{DimMembers: map[string]string{}, Value: aggregate})
+	}
 	if err := s.store.InTx(ctx, func(tx pgx.Tx) error {
-		if writeAggregate {
-			if err := s.store.WriteCalcResultTx(ctx, tx, modelID, revisionID, def.ID, partitionKey, map[string]string{}, aggregate); err != nil {
-				return fmt.Errorf("write aggregate: %w", err)
-			}
-		} else if err := s.store.ClearAggregateResultTx(ctx, tx, modelID, revisionID, def.ID); err != nil {
-			// No total this pass: an earlier pass's total must not keep
-			// answering for it.
-			return fmt.Errorf("clear stale aggregate: %w", err)
-		}
-		if err := s.store.ClearPerComboResultsTx(ctx, tx, modelID, revisionID, def.ID); err != nil {
-			return fmt.Errorf("clear stale per-combo results: %w", err)
-		}
-		if err := s.store.WriteCalcResultsTx(ctx, tx, modelID, revisionID, def.ID, partitionKey, perComboRows); err != nil {
-			return fmt.Errorf("write per-intersection results: %w", err)
+		if err := s.store.ReplaceResultsTx(ctx, tx, modelID, revisionID, def.ID, partitionKey, rows); err != nil {
+			return fmt.Errorf("write results: %w", err)
 		}
 		return nil
 	}); err != nil {
@@ -582,13 +572,7 @@ func (s *Scheduler) executeText(ctx context.Context, def *MetricDef, modelID, re
 		return fmt.Errorf("%d/%d combos failed to evaluate for metric %s (first error: %w)", failures, len(combos), def.Name, firstErr)
 	}
 	if err := s.store.InTx(ctx, func(tx pgx.Tx) error {
-		if err := s.store.ClearAggregateResultTx(ctx, tx, modelID, revisionID, def.ID); err != nil {
-			return fmt.Errorf("clear stale aggregate: %w", err)
-		}
-		if err := s.store.ClearPerComboResultsTx(ctx, tx, modelID, revisionID, def.ID); err != nil {
-			return fmt.Errorf("clear stale per-combo results: %w", err)
-		}
-		return s.store.WriteCalcResultsTx(ctx, tx, modelID, revisionID, def.ID, partitionKey, rows)
+		return s.store.ReplaceResultsTx(ctx, tx, modelID, revisionID, def.ID, partitionKey, rows)
 	}); err != nil {
 		return err
 	}

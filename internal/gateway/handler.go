@@ -5313,7 +5313,9 @@ func (h *handler) developerRevisionAction(w http.ResponseWriter, r *http.Request
 		jsonErr(w, fmt.Errorf("cannot delete the active revision"), http.StatusConflict)
 		return
 	}
-	if _, err := h.db.Exec(ctx, `DELETE FROM model.revision WHERE id=$1::uuid`, id); err != nil {
+	var revModelID string
+	_ = h.db.QueryRow(ctx, `SELECT model_id::text FROM model.revision WHERE id=$1::uuid`, id).Scan(&revModelID)
+	if err := h.deleteAndRemeasure(ctx, h.customerOfModel(ctx, revModelID), `DELETE FROM model.revision WHERE id=$1::uuid`, id); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
@@ -11930,7 +11932,7 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		}
 
 		h.dropWidgetsReferencing(ctx, metricID)
-		if _, err := h.db.Exec(ctx, `DELETE FROM model.metric_def WHERE id=$1::uuid`, metricID); err != nil {
+		if err := h.deleteAndRemeasure(ctx, h.customerOfModel(ctx, modelID), `DELETE FROM model.metric_def WHERE id=$1::uuid`, metricID); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -13219,16 +13221,21 @@ func (h *handler) adminApplicationAction(w http.ResponseWriter, r *http.Request)
 			jsonErr(w, err, http.StatusUnauthorized)
 			return
 		}
+		appCustomer := h.customerOfApplication(tctx, id)
 		revoked, ok := h.removeGrants(tctx, w, delAct, grantRemoval{appID: id, modelsOfApp: id},
 			map[string]string{"cause": "application_deleted", "application_id": id},
 			func(tx pgx.Tx) error {
 				h.forgetApplication(ctx, id)
-				_, err := tx.Exec(tctx, `DELETE FROM core.application WHERE id=$1::uuid`, id)
+				if _, err := tx.Exec(tctx, `DELETE FROM core.application WHERE id=$1::uuid`, id); err != nil {
+					return err
+				}
+				_, err := tx.Exec(tctx, flushStatsSQL)
 				return err
 			})
 		if !ok {
 			return
 		}
+		h.remeasureStorage(tctx, appCustomer)
 		if a, e := h.resolveActor(ctx, r); e == nil {
 			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 				Category: auditlog.CategoryAdmin, EventType: auditlog.EventApplicationDeleted,
@@ -13390,12 +13397,18 @@ func (h *handler) adminModelAction(w http.ResponseWriter, r *http.Request) {
 		map[string]string{"cause": "model_deleted", "model_id": id},
 		func(tx pgx.Tx) error {
 			_ = tx.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, id).Scan(&deletedAppID)
-			_, err := tx.Exec(ctx, `DELETE FROM core.model WHERE id=$1::uuid`, id)
+			if _, err := tx.Exec(ctx, `DELETE FROM core.model WHERE id=$1::uuid`, id); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, flushStatsSQL)
 			return err
 		})
 	if !ok {
 		return
 	}
+	// Everything the model held went with it (ON DELETE CASCADE, and its
+	// cell history by trigger); the workspace's storage shows it now.
+	h.remeasureStorage(ctx, h.customerOfApplication(ctx, deletedAppID))
 	if a, e := h.resolveActor(ctx, r); e == nil {
 		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 			Category: auditlog.CategoryAdmin, EventType: auditlog.EventModelDeleted,
@@ -13489,7 +13502,7 @@ func (h *handler) adminRevisionAction(w http.ResponseWriter, r *http.Request) {
 		_ = h.db.QueryRow(ctx, `
 			SELECT m.application_id::text FROM model.revision r
 			JOIN core.model m ON m.id = r.model_id WHERE r.id=$1::uuid`, id).Scan(&appID)
-		if _, err := h.db.Exec(ctx, `DELETE FROM model.revision WHERE id=$1::uuid`, id); err != nil {
+		if err := h.deleteAndRemeasure(ctx, h.customerOfApplication(ctx, appID), `DELETE FROM model.revision WHERE id=$1::uuid`, id); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
