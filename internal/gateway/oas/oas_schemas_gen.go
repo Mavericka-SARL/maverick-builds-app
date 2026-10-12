@@ -657,6 +657,10 @@ type AdminModel struct {
 	StorageType    string              `json:"storage_type"`
 	ActiveRevision NilString           `json:"active_revision"`
 	Revisions      []AdminRevisionItem `json:"revisions"`
+	// The model's share of the tenant's storage — its rows in the data tables times each table's bytes
+	// per row — as the usage sweep last measured it; absent on an edition without a storage limit, or
+	// before the first measurement.
+	StorageBytes OptInt64 `json:"storage_bytes"`
 }
 
 // GetID returns the value of ID.
@@ -684,6 +688,11 @@ func (s *AdminModel) GetRevisions() []AdminRevisionItem {
 	return s.Revisions
 }
 
+// GetStorageBytes returns the value of StorageBytes.
+func (s *AdminModel) GetStorageBytes() OptInt64 {
+	return s.StorageBytes
+}
+
 // SetID sets the value of ID.
 func (s *AdminModel) SetID(val uuid.UUID) {
 	s.ID = val
@@ -707,6 +716,11 @@ func (s *AdminModel) SetActiveRevision(val NilString) {
 // SetRevisions sets the value of Revisions.
 func (s *AdminModel) SetRevisions(val []AdminRevisionItem) {
 	s.Revisions = val
+}
+
+// SetStorageBytes sets the value of StorageBytes.
+func (s *AdminModel) SetStorageBytes(val OptInt64) {
+	s.StorageBytes = val
 }
 
 // Ref: #/components/schemas/AdminRevisionItem

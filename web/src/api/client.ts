@@ -976,6 +976,8 @@ export interface AdminModel {
   // The app's business-default model — what business consoles resolve.
   is_default?: boolean;
   revisions: AdminRevision[];
+  /** Its share of the tenant's storage as last measured; absent on an edition without a storage limit. */
+  storage_bytes?: number;
 }
 
 // A switchable dev-mode persona: every user in the database. `key` is the

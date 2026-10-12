@@ -24,6 +24,9 @@ type Enforcer struct {
 
 	mu     sync.Mutex
 	states map[string]cachedState
+	// compacted is, per tenant, each table's deleted-row count when reclaim
+	// last rewrote it.
+	compacted map[string]map[uint32]int64
 }
 
 type cachedState struct {
@@ -33,7 +36,7 @@ type cachedState struct {
 
 // NewEnforcer builds an enforcer reading plans from the control plane.
 func NewEnforcer(control DB) *Enforcer {
-	return &Enforcer{control: control, ttl: time.Minute, now: time.Now, states: map[string]cachedState{}}
+	return &Enforcer{control: control, ttl: time.Minute, now: time.Now, states: map[string]cachedState{}, compacted: map[string]map[uint32]int64{}}
 }
 
 // State returns the tenant's current state. tenantDB is the database holding
@@ -290,11 +293,26 @@ func dedicatedStorageBytes(ctx context.Context, db DB) (int64, error) {
 	return b, err
 }
 
-// sharedStorageBytes is the tenant's rows in each data table times that
-// table's bytes per row (200 while the planner has no statistics yet).
+// sharedStorageBytes is the sum of the tenant's models (ModelStorage).
 func sharedStorageBytes(ctx context.Context, db DB, customerID string) (int64, error) {
+	models, err := ModelStorage(ctx, db, customerID)
+	return total(models), err
+}
+
+func total(models map[string]int64) int64 {
 	var b int64
-	err := db.QueryRow(ctx, appsCTE+`,
+	for _, n := range models {
+		b += n
+	}
+	return b
+}
+
+// ModelStorage is each of the tenant's models with its rows in each data
+// table times that table's bytes per row (200 while the planner has no
+// statistics yet) — the model's share of the space those tables take,
+// indexes included. Definitions are small next to the data and left out.
+func ModelStorage(ctx context.Context, db DB, customerID string) (map[string]int64, error) {
+	rows, err := db.Query(ctx, appsCTE+`,
 		models AS (SELECT id FROM core.model WHERE application_id IN (SELECT id FROM apps)),
 		width AS (
 		    SELECT t.name,
@@ -306,11 +324,43 @@ func sharedStorageBytes(ctx context.Context, db DB, customerID string) (int64, e
 		    JOIN pg_class c ON c.oid = pt.relid
 		    GROUP BY t.name),
 		rows_of AS (
-		    SELECT 'runtime.fact_input' AS name, count(*) AS n FROM runtime.fact_input WHERE model_id IN (SELECT id FROM models)
-		    UNION ALL SELECT 'runtime.calc_result', count(*) FROM runtime.calc_result WHERE model_id IN (SELECT id FROM models)
-		    UNION ALL SELECT 'runtime.fact_input_history', count(*) FROM runtime.fact_input_history WHERE model_id IN (SELECT id FROM models))
-		SELECT COALESCE(sum(r.n * w.bytes), 0)::bigint FROM rows_of r JOIN width w ON w.name = r.name`, customerID).Scan(&b)
-	return b, err
+		    SELECT 'runtime.fact_input' AS name, model_id, count(*) AS n FROM runtime.fact_input WHERE model_id IN (SELECT id FROM models) GROUP BY model_id
+		    UNION ALL SELECT 'runtime.calc_result', model_id, count(*) FROM runtime.calc_result WHERE model_id IN (SELECT id FROM models) GROUP BY model_id
+		    UNION ALL SELECT 'runtime.fact_input_history', model_id, count(*) FROM runtime.fact_input_history WHERE model_id IN (SELECT id FROM models) GROUP BY model_id)
+		SELECT m.id::text, COALESCE(sum(r.n * w.bytes), 0)::bigint
+		FROM models m LEFT JOIN rows_of r ON r.model_id = m.id LEFT JOIN width w ON w.name = r.name
+		GROUP BY m.id`, customerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int64{}
+	for rows.Next() {
+		var id string
+		var b int64
+		if err := rows.Scan(&id, &b); err != nil {
+			return nil, err
+		}
+		out[id] = b
+	}
+	return out, rows.Err()
+}
+
+// recordModelStorage keeps the measurement in runtime.model_storage for the
+// console; a row changes only when its size did.
+func recordModelStorage(ctx context.Context, db DB, models map[string]int64) error {
+	ids := make([]string, 0, len(models))
+	sizes := make([]int64, 0, len(models))
+	for id, b := range models {
+		ids = append(ids, id)
+		sizes = append(sizes, b)
+	}
+	_, err := db.Exec(ctx, `
+		INSERT INTO runtime.model_storage (model_id, bytes)
+		SELECT * FROM unnest($1::uuid[], $2::bigint[])
+		ON CONFLICT (model_id) DO UPDATE SET bytes = EXCLUDED.bytes
+		WHERE runtime.model_storage.bytes <> EXCLUDED.bytes`, ids, sizes)
+	return err
 }
 
 // CheckAIMessages refuses once the tenant has sent max_ai_messages_per_day
@@ -358,19 +408,39 @@ func (e *Enforcer) Sweep(ctx context.Context, db DB, customerID string) (Tenant,
 	// Storage is recorded so a tenant admin sees the space used, and the
 	// space left under a limit. Measured where it is cheap or needed anyway:
 	// a dedicated database's size is a catalog read, while the shared-mode
-	// estimate counts the tenant's rows, so there it runs only for a plan
-	// that limits storage.
+	// estimate and each model's size count the tenant's rows, so they run
+	// only for a plan that limits storage.
 	var storage *int64
 	dedicated, err := dedicatedTo(ctx, db, customerID)
 	if err != nil {
 		return Tenant{}, fmt.Errorf("sweep tenant %s: %w", customerID, err)
 	}
-	if dedicated || p.Limits.MaxStorageMB > 0 {
-		b, err := StorageBytes(ctx, db, customerID)
+	limited := p.Limits.MaxStorageMB > 0
+	if dedicated {
+		b, err := dedicatedStorageBytes(ctx, db)
+		if err == nil && limited {
+			var compacted bool
+			if compacted, err = e.reclaim(ctx, db, customerID, megabytes(b) > p.Limits.MaxStorageMB); err == nil && compacted {
+				b, err = dedicatedStorageBytes(ctx, db)
+			}
+		}
 		if err != nil {
 			return Tenant{}, fmt.Errorf("sweep tenant %s: storage: %w", customerID, err)
 		}
 		storage = &b
+	}
+	if limited {
+		models, err := ModelStorage(ctx, db, customerID)
+		if err == nil {
+			err = recordModelStorage(ctx, db, models)
+		}
+		if err != nil {
+			return Tenant{}, fmt.Errorf("sweep tenant %s: storage: %w", customerID, err)
+		}
+		if !dedicated {
+			b := total(models)
+			storage = &b
+		}
 	}
 	reason := ""
 	if p.Limits.Any() {

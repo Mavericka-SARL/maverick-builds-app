@@ -2098,14 +2098,21 @@ func (s *AdminModel) encodeFields(e *jx.Encoder) {
 		}
 		e.ArrEnd()
 	}
+	{
+		if s.StorageBytes.Set {
+			e.FieldStart("storage_bytes")
+			s.StorageBytes.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfAdminModel = [5]string{
+var jsonFieldsNameOfAdminModel = [6]string{
 	0: "id",
 	1: "name",
 	2: "storage_type",
 	3: "active_revision",
 	4: "revisions",
+	5: "storage_bytes",
 }
 
 // Decode decodes AdminModel from json.
@@ -2180,6 +2187,16 @@ func (s *AdminModel) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"revisions\"")
+			}
+		case "storage_bytes":
+			if err := func() error {
+				s.StorageBytes.Reset()
+				if err := s.StorageBytes.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"storage_bytes\"")
 			}
 		default:
 			return d.Skip()

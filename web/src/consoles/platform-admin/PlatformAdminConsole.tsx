@@ -327,6 +327,11 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
             <div className="mvx-admin-model__header">
               <CollapseToggle expanded={modelOpen} onToggle={() => toggle(`model:${m.id}`)} label={`model ${m.name}`} />
               <span className="mvx-admin-model__name"><KindTag kind="model" />{m.name}</span>
+              {m.storage_bytes != null && (
+                <span className="mvx-admin-muted" data-testid={`model-storage-${m.id}`} title="This model's share of the tenant's storage, as last measured">
+                  {formatMB(m.storage_bytes / MB)}
+                </span>
+              )}
               {!modelOpen && <span className="mvx-admin-muted">{revisions} revision{revisions !== 1 ? "s" : ""}{m.active_revision ? ` · active: ${m.active_revision}` : ""}</span>}
               {canTransferModels && (
                 <IconButton

@@ -86,14 +86,35 @@ dedicated.
 
 **Making room.** `runtime.fact_input` is append-only and deleted facts are
 archived to `runtime.fact_input_history` (migration 081), so deleting rows
-or clearing an import does not shrink a tenant. Deleting a **model** (or the
-application holding it) does: since migration 089 the archive skips facts
-whose model is being deleted and drops the model's earlier history — history
-no screen could show once the model is gone. That is what "read-only,
-except for deleting" means for a storage-bounded edition, and it was proven
-live: a Community workspace at 128 MB (over its 100 MB), application deleted by its own tenant
-administrator while read-only, back to 33 MB and writable at the next sweep.
-The residual is PostgreSQL free space the tenant's next writes reuse. A tenant that names an edition with no row is treated
+or clearing an import does not shrink a tenant. Deleting a **model**, a
+**revision** or a **metric** (or the application holding them) does: the
+archive skips facts whose model or metric is being deleted, and drops their
+earlier history — history no screen could show once they are gone. (Migration
+089 did this for models; 111 lost the check, so for a while deleting a model
+wrote its facts into the archive and out again, and deleting a revision kept
+them there for good; 133 restored it and covers metrics, which a revision's
+deletion goes through.)
+
+Deleting the rows is not yet the space. PostgreSQL keeps a deleted row's
+space in the table's files for later writes to reuse, so a **dedicated**
+database's size does not fall when data is deleted. On an edition with a
+storage limit the sweep therefore compacts (`plan.reclaim`,
+`VACUUM (FULL, SKIP_LOCKED)`) the tables rows were deleted from since it last
+did — when the workspace is over its limit, or when those rows are a tenth of
+its data — and records the size after. The rewrite locks one table at a time,
+briefly in a database a storage limit keeps small; a table in use at that
+moment is left to the next sweep. Tenants on editions without a storage limit
+are never compacted: autovacuum makes the space reusable and nothing is judged
+on it. In a **shared** database the estimate counts the tenant's rows, so it
+falls at once.
+
+That is what "read-only, except for deleting" means for a storage-bounded
+edition. Proven live in a shared database: a Community workspace at 128 MB
+(over its 100 MB), application deleted by its own tenant administrator while
+read-only, back to 33 MB and writable at the next sweep. In a dedicated one by
+`TestDeletingAModelBringsAWorkspaceBackUnderItsStorageLimit`: 22 MB, model
+deleted over HTTP, 3 MB and writable at the next sweep — 23 MB and still
+read-only without the compaction. A tenant that names an edition with no row is treated
 as unlimited and shown as "(no such edition)": a catalog gap must never lock a
 paying customer out.
 
@@ -319,14 +340,20 @@ Enterprise keep their workspaces:
   free" (amber from 80%, red and "N MB over the limit" past it), otherwise
   "Storage: N MB used"; hovering shows when it was measured. This is how a
   tenant administrator sees the space left before the workspace turns
-  read-only. **Change edition** (platform administrators)
+  read-only. Under it, each model shows its own share (`runtime.model_storage`,
+  written by the same sweep on an edition with a storage limit): its rows in
+  the three data tables times each table's bytes per row, so the tenant
+  administrator can see which model to delete. The shares do not add up to
+  the meter — definitions, people, audit and the database's own overhead are
+  the rest. **Change edition** (platform administrators)
   moves the tenant. `PATCH /api/admin/tenants/{id}` takes `plan`; the next
   usage sweep judges the tenant by the new limits. A tenant administrator
   has the same console for their own tenant, minus this: lifting one's own
   limits is the platform's side of the relationship.
 - `GET /api/admin/tenants` carries `plan_state` per tenant; `GET /api/me`
   carries `plan` for a member of a tenant. Both include `storage_bytes` once
-  a sweep has measured it.
+  a sweep has measured it, and the tenant listing has each model's
+  `storage_bytes` as well.
 
 ## Limits of this design
 

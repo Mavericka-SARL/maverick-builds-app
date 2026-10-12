@@ -6686,6 +6686,10 @@ type adminModelItem struct {
 	// resolves when no revision pins another model.
 	IsDefault bool                `json:"is_default"`
 	Revisions []adminRevisionItem `json:"revisions"`
+	// The model's share of the tenant's storage as the edition-limits sweep
+	// last measured it (internal/plan); absent where the edition sets no
+	// storage limit, or before the first measurement.
+	StorageBytes *int64 `json:"storage_bytes,omitempty"`
 }
 
 type adminAppItem struct {
@@ -7124,10 +7128,27 @@ func (h *handler) tenantsIn(ctx context.Context, act *actor) ([]adminTenantItem,
 					          (id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) IS TRUE DESC,
 					          name, id`, ap.ID)
 			}
+			// Read apart from the models, so a tenant whose sizes cannot be
+			// read still lists its models.
+			sizes := map[string]int64{}
+			if sRows, err := h.db.Query(ctx, `SELECT s.model_id::text, s.bytes FROM runtime.model_storage s
+				JOIN core.model m ON m.id = s.model_id WHERE m.application_id = $1::uuid`, ap.ID); err == nil {
+				for sRows.Next() {
+					var id string
+					var b int64
+					if sRows.Scan(&id, &b) == nil {
+						sizes[id] = b
+					}
+				}
+				sRows.Close()
+			}
 			if mRows != nil {
 				for mRows.Next() {
 					var m adminModelItem
 					_ = mRows.Scan(&m.ID, &m.Name, &m.StorageType, &m.ActiveRevision, &m.IsDefault)
+					if b, ok := sizes[m.ID]; ok {
+						m.StorageBytes = &b
+					}
 					rRows, _ := h.db.Query(ctx,
 						`SELECT id::text, name, created_at::text FROM model.revision WHERE model_id=$1::uuid ORDER BY created_at`, m.ID)
 					if rRows != nil {

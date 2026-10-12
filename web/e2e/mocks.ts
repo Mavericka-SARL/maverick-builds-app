@@ -271,6 +271,7 @@ const adminTenants = [
             name: "Finance Model",
             storage_type: "oltp",
             active_revision: "FY2026 Budget",
+            storage_bytes: 48 * (1 << 20),
             revisions: [
               { id: "rev-1", name: "FY2026 Budget", created_at: "2026-01-01T00:00:00Z" },
               { id: "rev-2", name: "FY2026 Forecast", created_at: "2026-01-02T00:00:00Z" },

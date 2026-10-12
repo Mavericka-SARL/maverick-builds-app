@@ -1626,6 +1626,7 @@ components:
         storage_type:    { type: string }
         active_revision: { type: string, nullable: true }
         revisions:       { type: array, items: { $ref: "#/components/schemas/AdminRevisionItem" } }
+        storage_bytes:   { type: integer, format: int64, description: "The model's share of the tenant's storage — its rows in the data tables times each table's bytes per row — as the usage sweep last measured it; absent on an edition without a storage limit, or before the first measurement" }
 
     AdminApp:
       type: object

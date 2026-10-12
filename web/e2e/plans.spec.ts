@@ -91,6 +91,12 @@ test("tenant admin: the tenant card shows the space used and the space left", as
   await expect(storage.getByRole("meter", { name: "Storage used" })).toHaveAttribute("aria-valuenow", "40");
 });
 
+test("tenant admin: each model shows its share of the storage, to know what to delete", async ({ page }) => {
+  await mockApi(page, { plan: { ...overStoragePlanState(), storage_bytes: 104 * (1 << 20) } });
+  await loadAs(page, "tenant_admin");
+  await expect(page.getByTestId("model-storage-model-1")).toHaveText("48 MB");
+});
+
 test("tenant admin: a tenant over its storage limit sees by how much", async ({ page }) => {
   const MB = 1 << 20;
   await mockApi(page, { plan: { ...overStoragePlanState(), storage_bytes: 104 * MB } });
