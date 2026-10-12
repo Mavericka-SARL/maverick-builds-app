@@ -24,7 +24,7 @@ key, as its [Enterprise Features License](../ee/LICENSE) permits.
 |---|---|---|
 | What runs | 8 containers: the gateway, the web console, the integration worker, PostgreSQL, Keycloak, MinIO, a nightly backup job, and Caddy for HTTPS | The gateway (two replicas), the web console and the integration worker, plus PostgreSQL with continuous WAL archiving, PgBouncer, Keycloak and MinIO |
 | Good for | One organisation, a team to a few hundred users; the simplest thing to keep running | Several nodes, rolling upgrades, point-in-time recovery |
-| You need | One Linux server and Docker | A cluster with Traefik and cert-manager, and a container registry |
+| You need | One Linux server and Docker, or a Windows computer with [WSL 2](#on-windows) | A cluster with Traefik and cert-manager, and a container registry |
 | Time to first sign-in | About an hour, most of it building | Half a day |
 
 Both paths build the containers **from this repository's source**; there is
@@ -68,7 +68,7 @@ later is a backup and a restore.
 | CPU | 2 cores | 4 cores |
 | Memory | 4 GB | 8 GB |
 | Disk | 30 GB | 60 GB or more, depending on your data |
-| OS | 64-bit Linux, x86-64 or arm64 | a current Ubuntu or Debian LTS release |
+| OS | 64-bit Linux, x86-64 or arm64; or Windows 10 (22H2) or 11 through WSL 2, see [On Windows](#on-windows) | a current Ubuntu or Debian LTS release |
 | Software | Docker Engine with the Compose v2 plugin, 2.24 or later (`docker compose version`) | |
 
 The running platform idles at about 1 GB of memory, three quarters of it
@@ -121,6 +121,61 @@ The stack lives in [`deploy/compose/`](../deploy/compose/):
 | `minio` | Object storage for the backups, by default |
 | `backup` | Dumps every database once a day |
 
+### On Windows
+
+The stack runs on Windows 10 (22H2) or 11 inside **WSL 2**, the Linux that
+ships with Windows. Do this first, then follow steps 2 to 8 **in the Ubuntu
+terminal**, never in PowerShell or Git Bash: `setup.sh` is a bash script that
+needs `python3`, and the containers are Linux containers either way.
+
+1. In PowerShell, as administrator, install WSL 2 with Ubuntu, and restart
+   when it asks:
+
+   ```powershell
+   wsl --install -d Ubuntu
+   ```
+
+   Open **Ubuntu** from the Start menu once and choose a Linux user name and
+   password.
+2. Install [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)
+   with its default WSL 2 back end. In **Settings › Resources › WSL
+   integration**, turn on **Ubuntu**; in **Settings › General**, turn on
+   **Start Docker Desktop when you sign in**, because the platform, and its
+   nightly backup, run only while Docker Desktop does. Docker Desktop needs a
+   paid Docker subscription in larger companies; Docker Engine installed
+   inside Ubuntu, [as on Linux](https://docs.docker.com/engine/install/ubuntu/),
+   works as well.
+3. In the Ubuntu terminal, check that `docker compose version` and
+   `python3 --version` both answer.
+4. Run `cd ~` before Step 2, so that the clone lives in Ubuntu's own file
+   system. A clone under `/mnt/c` builds many times slower and ignores the
+   file permissions `setup.sh` puts on `.env`.
+
+On a typical Windows PC (x86-64), Step 4's published images save the build.
+Docker Desktop gives Linux half of the computer's memory; on an 8 GB computer
+that is too little to build from source.
+
+To serve other people, the computer needs the DNS records and open ports of
+Step 1. For a trial on the computer itself, set `CADDY_CERTS=local_certs`
+(Step 3) and point both names at it in
+`C:\Windows\System32\drivers\etc\hosts`, edited as administrator — for example:
+
+```text
+127.0.0.1  mavericks.test auth.mavericks.test
+```
+
+Browsers warn about the certificates until Caddy's root certificate is
+trusted. After Step 4, from `deploy/compose` in the Ubuntu terminal:
+
+```bash
+docker compose cp proxy:/data/caddy/pki/authorities/local/root.crt .
+explorer.exe .
+```
+
+In the folder that opens, double-click `root.crt`, choose **Install
+Certificate › Local Machine**, and place it in **Trusted Root Certification
+Authorities**. Edge and Chrome use it at once.
+
 ### Step 1 — Prepare the server
 
 1. Install Docker Engine and the Compose plugin from
@@ -140,7 +195,7 @@ Certificates cannot be issued until they do.
 ```bash
 git clone https://github.com/Mavericka-SARL/maverick-builds-app.git maverickbuilds
 cd maverickbuilds
-git checkout 2026.10.12        # a release: the newest is on the Releases page
+git checkout 2026.10.12.1        # a release: the newest is on the Releases page
 cd deploy/compose
 ```
 
@@ -192,7 +247,7 @@ lines to `.env`:
 
 ```bash
 COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml
-MAVERICKS_RELEASE=2026.10.12   # the release you checked out
+MAVERICKS_RELEASE=2026.10.12.1   # the release you checked out
 ```
 
 ```bash
@@ -463,6 +518,7 @@ Each container keeps five log files of 20 MB.
 | **Invite user** answers 503 | The provisioning account is not configured: run `./setup.sh keycloak`. |
 | **Invite user** answers 502 and names the e-mail step | Keycloak could not send the invitation. Rerun `SMTP_TEST_TO=you@example.com ./setup.sh keycloak` and read what the relay says. |
 | Keycloak stops with `database "keycloak" does not exist` | The database volume was created before the stack's init script ran. Create it: `docker compose exec postgres psql -U mavericks -c 'CREATE DATABASE keycloak OWNER mavericks'`, then `docker compose up -d`. |
+| The `web` container restarts over and over; its log says `99-runtime-config.sh: not found` | The clone has Windows (CRLF) line endings: Git for Windows made it, from a release before 2026.10.12.1. Repair it in place from `deploy/compose`, in the Ubuntu terminal: `git config core.autocrlf false`, then `(cd ../.. && git rm -rq --cached . && git reset -q --hard)` and `sed -i 's/\r$//' .env`, then `docker compose up -d --build`. |
 | `./setup.sh check` shows no backups the day after installing | `docker compose logs backup` names the failing step; for an external bucket it is usually the credentials or `BACKUP_REGION`. |
 
 ---
@@ -556,7 +612,7 @@ of your own. Then edit it:
    appear several times and must agree everywhere), the storage class, the
    SMTP relay and sender, and the address the backup watchdog alerts.
 2. **`kustomization.yaml`** — its `images:` block pins every image to the
-   release `2026.10.12`; set the release you deploy, or, if you built your
+   release `2026.10.12.1`; set the release you deploy, or, if you built your
    own images, replace the block with the one `build-images.sh` printed.
 3. **Object storage.** By default MinIO runs in the cluster and holds the
    backups and WAL archive. To keep them outside the cluster, as you should in
@@ -732,7 +788,7 @@ start again. `pg-restore.sh` drops the database and loads the dump into an
 empty one; `latest` is the newest dump of the database the URL names:
 
 ```bash
-IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.10.12   # the one your overlay runs
+IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.10.12.1   # the one your overlay runs
 kubectl -n mavericks scale deployment --replicas=0 \
   -l 'app.kubernetes.io/component in (api-gateway,service,identity)'
 for db in mavericks keycloak; do          # and each tenant_… database, if dedicated

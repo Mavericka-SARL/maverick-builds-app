@@ -1,0 +1,6 @@
+# Every text file is checked out with LF line endings, Windows included.
+# Git for Windows converts to CRLF by default (core.autocrlf), and the
+# scripts here run under bash or inside Linux containers, where a CRLF
+# shebang fails as "not found" and every other line ends in a stray \r:
+# the web container restarted over and over on a Windows clone.
+* text=auto eol=lf
