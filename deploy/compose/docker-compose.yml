@@ -135,6 +135,8 @@ services:
       LEGAL_ENTITY: ${LEGAL_ENTITY:-}
       LEGAL_ADDRESS: ${LEGAL_ADDRESS:-}
       LEGAL_EMAIL: ${LEGAL_EMAIL:-}
+      # How long backups keep a deleted workspace, as the backup service.
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
       LEGAL_JURISDICTION: ${LEGAL_JURISDICTION:-}
       LEGAL_HOSTING: ${LEGAL_HOSTING:-}
       LEGAL_UPDATED: ${LEGAL_UPDATED:-}

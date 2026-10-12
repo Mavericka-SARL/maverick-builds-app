@@ -37130,6 +37130,220 @@ func (s *ListDeveloperIntegrationsOKApplicationJSON) UnmarshalJSON(data []byte) 
 	return s.Decode(d)
 }
 
+// Encode encodes ListDormancyOKApplicationJSON as json.
+func (s ListDormancyOKApplicationJSON) Encode(e *jx.Encoder) {
+	unwrapped := []ListDormancyOKItem(s)
+
+	e.ArrStart()
+	for _, elem := range unwrapped {
+		elem.Encode(e)
+	}
+	e.ArrEnd()
+}
+
+// Decode decodes ListDormancyOKApplicationJSON from json.
+func (s *ListDormancyOKApplicationJSON) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ListDormancyOKApplicationJSON to nil")
+	}
+	var unwrapped []ListDormancyOKItem
+	if err := func() error {
+		unwrapped = make([]ListDormancyOKItem, 0)
+		if err := d.Arr(func(d *jx.Decoder) error {
+			var elem ListDormancyOKItem
+			if err := elem.Decode(d); err != nil {
+				return err
+			}
+			unwrapped = append(unwrapped, elem)
+			return nil
+		}); err != nil {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return errors.Wrap(err, "alias")
+	}
+	*s = ListDormancyOKApplicationJSON(unwrapped)
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s ListDormancyOKApplicationJSON) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ListDormancyOKApplicationJSON) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
+// Encode implements json.Marshaler.
+func (s *ListDormancyOKItem) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *ListDormancyOKItem) encodeFields(e *jx.Encoder) {
+	{
+		e.FieldStart("customer_id")
+		e.Str(s.CustomerID)
+	}
+	{
+		e.FieldStart("last_used_at")
+		json.EncodeDateTime(e, s.LastUsedAt)
+	}
+	{
+		if s.WarnedAt.Set {
+			e.FieldStart("warned_at")
+			s.WarnedAt.Encode(e, json.EncodeDateTime)
+		}
+	}
+	{
+		if s.WarnOn.Set {
+			e.FieldStart("warn_on")
+			s.WarnOn.Encode(e, json.EncodeDateTime)
+		}
+	}
+	{
+		if s.DeleteOn.Set {
+			e.FieldStart("delete_on")
+			s.DeleteOn.Encode(e, json.EncodeDateTime)
+		}
+	}
+}
+
+var jsonFieldsNameOfListDormancyOKItem = [5]string{
+	0: "customer_id",
+	1: "last_used_at",
+	2: "warned_at",
+	3: "warn_on",
+	4: "delete_on",
+}
+
+// Decode decodes ListDormancyOKItem from json.
+func (s *ListDormancyOKItem) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode ListDormancyOKItem to nil")
+	}
+	var requiredBitSet [1]uint8
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "customer_id":
+			requiredBitSet[0] |= 1 << 0
+			if err := func() error {
+				v, err := d.Str()
+				s.CustomerID = string(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"customer_id\"")
+			}
+		case "last_used_at":
+			requiredBitSet[0] |= 1 << 1
+			if err := func() error {
+				v, err := json.DecodeDateTime(d)
+				s.LastUsedAt = v
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"last_used_at\"")
+			}
+		case "warned_at":
+			if err := func() error {
+				s.WarnedAt.Reset()
+				if err := s.WarnedAt.Decode(d, json.DecodeDateTime); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"warned_at\"")
+			}
+		case "warn_on":
+			if err := func() error {
+				s.WarnOn.Reset()
+				if err := s.WarnOn.Decode(d, json.DecodeDateTime); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"warn_on\"")
+			}
+		case "delete_on":
+			if err := func() error {
+				s.DeleteOn.Reset()
+				if err := s.DeleteOn.Decode(d, json.DecodeDateTime); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"delete_on\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode ListDormancyOKItem")
+	}
+	// Validate required fields.
+	var failures []validate.FieldError
+	for i, mask := range [1]uint8{
+		0b00000011,
+	} {
+		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
+			// Mask only required fields and check equality to mask using XOR.
+			//
+			// If XOR result is not zero, result is not equal to expected, so some fields are missed.
+			// Bits of fields which would be set are actually bits of missed fields.
+			missed := bits.OnesCount8(result)
+			for bitN := 0; bitN < missed; bitN++ {
+				bitIdx := bits.TrailingZeros8(result)
+				fieldIdx := i*8 + bitIdx
+				var name string
+				if fieldIdx < len(jsonFieldsNameOfListDormancyOKItem) {
+					name = jsonFieldsNameOfListDormancyOKItem[fieldIdx]
+				} else {
+					name = strconv.Itoa(fieldIdx)
+				}
+				failures = append(failures, validate.FieldError{
+					Name:  name,
+					Error: validate.ErrFieldRequired,
+				})
+				// Reset bit.
+				result &^= 1 << bitIdx
+			}
+		}
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *ListDormancyOKItem) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *ListDormancyOKItem) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes ListFormMappingsOKApplicationJSON as json.
 func (s ListFormMappingsOKApplicationJSON) Encode(e *jx.Encoder) {
 	unwrapped := []FormMetricMapping(s)
@@ -46823,6 +47037,18 @@ func (s *Plan) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.DormantWarnDays.Set {
+			e.FieldStart("dormant_warn_days")
+			s.DormantWarnDays.Encode(e)
+		}
+	}
+	{
+		if s.DormantDeleteDays.Set {
+			e.FieldStart("dormant_delete_days")
+			s.DormantDeleteDays.Encode(e)
+		}
+	}
+	{
 		e.FieldStart("sort_order")
 		e.Int(s.SortOrder)
 	}
@@ -46832,15 +47058,17 @@ func (s *Plan) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfPlan = [8]string{
+var jsonFieldsNameOfPlan = [10]string{
 	0: "key",
 	1: "name",
 	2: "description",
 	3: "self_service",
 	4: "limits",
 	5: "limit_note",
-	6: "sort_order",
-	7: "updated_at",
+	6: "dormant_warn_days",
+	7: "dormant_delete_days",
+	8: "sort_order",
+	9: "updated_at",
 }
 
 // Decode decodes Plan from json.
@@ -46848,7 +47076,7 @@ func (s *Plan) Decode(d *jx.Decoder) error {
 	if s == nil {
 		return errors.New("invalid: unable to decode Plan to nil")
 	}
-	var requiredBitSet [1]uint8
+	var requiredBitSet [2]uint8
 
 	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
 		switch string(k) {
@@ -46920,8 +47148,28 @@ func (s *Plan) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"limit_note\"")
 			}
+		case "dormant_warn_days":
+			if err := func() error {
+				s.DormantWarnDays.Reset()
+				if err := s.DormantWarnDays.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"dormant_warn_days\"")
+			}
+		case "dormant_delete_days":
+			if err := func() error {
+				s.DormantDeleteDays.Reset()
+				if err := s.DormantDeleteDays.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"dormant_delete_days\"")
+			}
 		case "sort_order":
-			requiredBitSet[0] |= 1 << 6
+			requiredBitSet[1] |= 1 << 0
 			if err := func() error {
 				v, err := d.Int()
 				s.SortOrder = int(v)
@@ -46933,7 +47181,7 @@ func (s *Plan) Decode(d *jx.Decoder) error {
 				return errors.Wrap(err, "decode field \"sort_order\"")
 			}
 		case "updated_at":
-			requiredBitSet[0] |= 1 << 7
+			requiredBitSet[1] |= 1 << 1
 			if err := func() error {
 				v, err := json.DecodeDateTime(d)
 				s.UpdatedAt = v
@@ -46953,8 +47201,9 @@ func (s *Plan) Decode(d *jx.Decoder) error {
 	}
 	// Validate required fields.
 	var failures []validate.FieldError
-	for i, mask := range [1]uint8{
-		0b11011111,
+	for i, mask := range [2]uint8{
+		0b00011111,
+		0b00000011,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -47038,6 +47287,18 @@ func (s *PlanInput) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.DormantWarnDays.Set {
+			e.FieldStart("dormant_warn_days")
+			s.DormantWarnDays.Encode(e)
+		}
+	}
+	{
+		if s.DormantDeleteDays.Set {
+			e.FieldStart("dormant_delete_days")
+			s.DormantDeleteDays.Encode(e)
+		}
+	}
+	{
 		if s.SortOrder.Set {
 			e.FieldStart("sort_order")
 			s.SortOrder.Encode(e)
@@ -47045,13 +47306,15 @@ func (s *PlanInput) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfPlanInput = [6]string{
+var jsonFieldsNameOfPlanInput = [8]string{
 	0: "name",
 	1: "description",
 	2: "self_service",
 	3: "limits",
 	4: "limit_note",
-	5: "sort_order",
+	5: "dormant_warn_days",
+	6: "dormant_delete_days",
+	7: "sort_order",
 }
 
 // Decode decodes PlanInput from json.
@@ -47114,6 +47377,26 @@ func (s *PlanInput) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"limit_note\"")
+			}
+		case "dormant_warn_days":
+			if err := func() error {
+				s.DormantWarnDays.Reset()
+				if err := s.DormantWarnDays.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"dormant_warn_days\"")
+			}
+		case "dormant_delete_days":
+			if err := func() error {
+				s.DormantDeleteDays.Reset()
+				if err := s.DormantDeleteDays.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"dormant_delete_days\"")
 			}
 		case "sort_order":
 			if err := func() error {
@@ -54680,14 +54963,35 @@ func (s *SignupOptionsPlan) encodeFields(e *jx.Encoder) {
 			s.LimitNote.Encode(e)
 		}
 	}
+	{
+		if s.DormantWarnDays.Set {
+			e.FieldStart("dormant_warn_days")
+			s.DormantWarnDays.Encode(e)
+		}
+	}
+	{
+		if s.DormantDeleteDays.Set {
+			e.FieldStart("dormant_delete_days")
+			s.DormantDeleteDays.Encode(e)
+		}
+	}
+	{
+		if s.BackupRetentionDays.Set {
+			e.FieldStart("backup_retention_days")
+			s.BackupRetentionDays.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfSignupOptionsPlan = [5]string{
+var jsonFieldsNameOfSignupOptionsPlan = [8]string{
 	0: "key",
 	1: "name",
 	2: "description",
 	3: "limits",
 	4: "limit_note",
+	5: "dormant_warn_days",
+	6: "dormant_delete_days",
+	7: "backup_retention_days",
 }
 
 // Decode decodes SignupOptionsPlan from json.
@@ -54747,6 +55051,36 @@ func (s *SignupOptionsPlan) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"limit_note\"")
+			}
+		case "dormant_warn_days":
+			if err := func() error {
+				s.DormantWarnDays.Reset()
+				if err := s.DormantWarnDays.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"dormant_warn_days\"")
+			}
+		case "dormant_delete_days":
+			if err := func() error {
+				s.DormantDeleteDays.Reset()
+				if err := s.DormantDeleteDays.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"dormant_delete_days\"")
+			}
+		case "backup_retention_days":
+			if err := func() error {
+				s.BackupRetentionDays.Reset()
+				if err := s.BackupRetentionDays.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"backup_retention_days\"")
 			}
 		default:
 			return d.Skip()

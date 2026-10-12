@@ -380,7 +380,7 @@ function planLabel(tenant: AdminTenant): string {
   if (tenant.status) return `${tenant.plan} · database ${tenant.status}${tenant.error ? `: ${tenant.error}` : ""}`;
   const st = tenant.plan_state;
   if (!st) return tenant.plan;
-  const parts = [st.plan_known ? st.plan.name : `${tenant.plan} (no such plan)`];
+  const parts = [st.plan_known ? st.plan.name : `${tenant.plan} (no such edition)`];
   if (st.read_only) parts.push("read-only");
   return parts.join(" · ");
 }
@@ -441,20 +441,39 @@ function TenantPlanControls({ tenant }: { tenant: AdminTenant }) {
   });
   if (!open) {
     return (
-      <Button size="sm" variant="ghost" onClick={() => setOpen(true)} style={{ alignSelf: "flex-start" }} aria-label={`Change plan of ${tenant.name}`}>
-        Change plan
+      <Button size="sm" variant="ghost" onClick={() => setOpen(true)} style={{ alignSelf: "flex-start" }} aria-label={`Change edition of ${tenant.name}`}>
+        Change edition
       </Button>
     );
   }
   return (
     <div className="mvx-admin-inline-form mvx-admin-inline-form--boxed" data-testid={`tenant-plan-${tenant.id}`}>
-      <Select value={plan} onChange={(e) => setPlan(e.target.value)} style={{ width: 160 }} aria-label="Plan">
+      <Select value={plan} onChange={(e) => setPlan(e.target.value)} style={{ width: 160 }} aria-label="Edition">
         {(plans ?? []).map((p) => <option key={p.key} value={p.key}>{p.name}</option>)}
         {plans && !plans.some((p) => p.key === tenant.plan) && <option value={tenant.plan}>{tenant.plan}</option>}
       </Select>
       <Button variant="primary" size="sm" loading={save.isPending} loadingLabel="Saving…" onClick={() => save.mutate()}>Save</Button>
       <Button size="sm" onClick={() => setOpen(false)}>Cancel</Button>
       {save.isError && <span className="mvx-admin-error">{(save.error as Error).message}</span>}
+    </div>
+  );
+}
+
+/**
+ * When a dedicated tenant was last used, and when its plan will retire it if
+ * nobody uses it (internal/dormancy). Moving it to a plan that keeps unused
+ * workspaces stops that. Nothing for a tenant in the shared database.
+ */
+function TenantUse({ tenantId }: { tenantId: string }) {
+  const { data } = useQuery({ queryKey: ["admin-dormancy"], queryFn: api.adminDormancy });
+  const row = data?.find((d) => d.customer_id === tenantId);
+  if (!row) return null;
+  const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  return (
+    <div className="mvx-admin-muted" data-testid={`tenant-use-${tenantId}`} style={{ fontSize: 13 }}>
+      Last used {day(row.last_used_at)}
+      {row.delete_on && <> · <strong>deleted on {day(row.delete_on)}</strong> unless used (administrators told {day(row.warned_at!)})</>}
+      {!row.delete_on && row.warn_on && <> · administrators told on {day(row.warn_on)} if unused until then</>}
     </div>
   );
 }
@@ -544,6 +563,7 @@ function TenantSection({ tenant, onDelete, isPlatformAdmin, canTransferModels }:
 
       <div className="mvx-admin-object__body">
         {isPlatformAdmin && <TenantPlanControls key={tenant.plan} tenant={tenant} />}
+        {isPlatformAdmin && <TenantUse tenantId={tenant.id} />}
         {addApp ? (
           <div className="mvx-admin-inline-form mvx-admin-inline-form--boxed">
             <TextInput

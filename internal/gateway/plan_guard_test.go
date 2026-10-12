@@ -99,7 +99,7 @@ func TestPlanGuardAndLimits(t *testing.T) {
 		if code, body := callJSON(t, srv, "guard-a", http.MethodPost, "/api/admin/applications", map[string]any{"customer_id": custA, "name": "Now fine", "mode": "planning"}); code != 200 {
 			t.Fatalf("write after plan change: %d %v", code, body)
 		}
-		if code, body := callJSON(t, srv, "guard-padmin", http.MethodPatch, "/api/admin/tenants/"+custA, map[string]any{"plan": "no-such-plan"}, tenantHeader, custA); code != 400 || !strings.Contains(body["error"].(string), "unknown plan") {
+		if code, body := callJSON(t, srv, "guard-padmin", http.MethodPatch, "/api/admin/tenants/"+custA, map[string]any{"plan": "no-such-plan"}, tenantHeader, custA); code != 400 || !strings.Contains(body["error"].(string), "unknown edition") {
 			t.Fatalf("unknown plan: %d %v", code, body)
 		}
 	})
@@ -112,18 +112,24 @@ func TestPlanGuardAndLimits(t *testing.T) {
 		if code, _ := callJSON(t, srv, "guard-b", http.MethodPut, "/api/admin/plans/enterprise", map[string]any{"name": "Enterprise"}); code != 403 {
 			t.Fatalf("tenant admin editing a plan: %d", code)
 		}
-		if code, body := callJSON(t, srv, "guard-padmin", http.MethodPut, "/api/admin/plans/Bad%20Key", map[string]any{"name": "x"}); code != 400 || !strings.Contains(body["error"].(string), "plan key") {
+		if code, body := callJSON(t, srv, "guard-padmin", http.MethodPut, "/api/admin/plans/Bad%20Key", map[string]any{"name": "x"}); code != 400 || !strings.Contains(body["error"].(string), "edition key") {
 			t.Fatalf("bad key: %d %v", code, body)
 		}
 		// The catalog is the three plans: a key that is not one of them is
 		// not created.
-		if code, body := callJSON(t, srv, "guard-padmin", http.MethodPut, "/api/admin/plans/starter", map[string]any{"name": "Starter"}); code != 404 || !strings.Contains(body["error"].(string), "unknown plan") {
-			t.Fatalf("a new plan key: %d %v, want 404 unknown plan", code, body)
+		if code, body := callJSON(t, srv, "guard-padmin", http.MethodPut, "/api/admin/plans/starter", map[string]any{"name": "Starter"}); code != 404 || !strings.Contains(body["error"].(string), "unknown edition") {
+			t.Fatalf("a new edition key: %d %v, want 404 unknown edition", code, body)
 		}
 		code, saved := callJSON(t, srv, "guard-padmin", http.MethodPut, "/api/admin/plans/enterprise",
 			map[string]any{"name": "Enterprise", "description": "One model", "limits": map[string]int{"max_models": 1}, "sort_order": 40})
 		if code != 200 || saved["key"] != "enterprise" || saved["limits"].(map[string]any)["max_models"] != float64(1) {
 			t.Fatalf("save: %d %v", code, saved)
+		}
+		// Retiring unused workspaces exists only in the hosted Playground;
+		// this deployment is not it, so the settings are refused.
+		if code, body := callJSON(t, srv, "guard-padmin", http.MethodPut, "/api/admin/plans/community",
+			map[string]any{"name": "Community", "dormant_warn_days": 30, "dormant_delete_days": 45}); code != 400 || !strings.Contains(body["error"].(string), "Playground") {
+			t.Fatalf("unused-workspace settings outside the Playground: %d %v, want 400", code, body)
 		}
 	})
 
@@ -133,7 +139,7 @@ func TestPlanGuardAndLimits(t *testing.T) {
 		}
 		code, body := callJSON(t, srv, "guard-b", http.MethodPost, "/api/admin/models", map[string]any{"application_id": appB, "name": "Second"})
 		if code != http.StatusPaymentRequired || body["code"] != "plan_limit" || body["limit"] != "max_models" || body["max"] != float64(1) || body["current"] != float64(1) ||
-			!strings.Contains(body["error"].(string), "The Enterprise plan allows 1 model; this tenant has 1") {
+			!strings.Contains(body["error"].(string), "The Enterprise Edition allows 1 model; this tenant has 1") {
 			t.Fatalf("second model: %d %v", code, body)
 		}
 	})

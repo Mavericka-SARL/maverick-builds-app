@@ -37,7 +37,7 @@ func groupingDeleteErr(w http.ResponseWriter, err error) {
 
 // errPlanLimit marks a derive refused by the tenant's member limit; the
 // caller has already answered the request.
-var errPlanLimit = errors.New("plan limit")
+var errPlanLimit = errors.New("edition limit")
 
 // deriveGroupingMembers adds to grouping dimension dimID a member for every
 // value of the source's property it has no member for yet, within the

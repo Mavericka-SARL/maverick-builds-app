@@ -8987,6 +8987,7 @@ func (*Error) listBusinessIntegrationsRes()    {}
 func (*Error) listDevPersonasRes()             {}
 func (*Error) listDeveloperFoldersRes()        {}
 func (*Error) listDeveloperIntegrationsRes()   {}
+func (*Error) listDormancyRes()                {}
 func (*Error) listFormMappingsRes()            {}
 func (*Error) listFormsRes()                   {}
 func (*Error) listGridsRes()                   {}
@@ -14551,6 +14552,76 @@ func (*ListDeveloperFoldersOKApplicationJSON) listDeveloperFoldersRes() {}
 type ListDeveloperIntegrationsOKApplicationJSON []IntegrationDef
 
 func (*ListDeveloperIntegrationsOKApplicationJSON) listDeveloperIntegrationsRes() {}
+
+type ListDormancyOKApplicationJSON []ListDormancyOKItem
+
+func (*ListDormancyOKApplicationJSON) listDormancyRes() {}
+
+type ListDormancyOKItem struct {
+	CustomerID string    `json:"customer_id"`
+	LastUsedAt time.Time `json:"last_used_at"`
+	// When its administrators were told it will be deleted.
+	WarnedAt OptDateTime `json:"warned_at"`
+	// When they will be told.
+	WarnOn OptDateTime `json:"warn_on"`
+	// When it will be deleted.
+	DeleteOn OptDateTime `json:"delete_on"`
+}
+
+// GetCustomerID returns the value of CustomerID.
+func (s *ListDormancyOKItem) GetCustomerID() string {
+	return s.CustomerID
+}
+
+// GetLastUsedAt returns the value of LastUsedAt.
+func (s *ListDormancyOKItem) GetLastUsedAt() time.Time {
+	return s.LastUsedAt
+}
+
+// GetWarnedAt returns the value of WarnedAt.
+func (s *ListDormancyOKItem) GetWarnedAt() OptDateTime {
+	return s.WarnedAt
+}
+
+// GetWarnOn returns the value of WarnOn.
+func (s *ListDormancyOKItem) GetWarnOn() OptDateTime {
+	return s.WarnOn
+}
+
+// GetDeleteOn returns the value of DeleteOn.
+func (s *ListDormancyOKItem) GetDeleteOn() OptDateTime {
+	return s.DeleteOn
+}
+
+// SetCustomerID sets the value of CustomerID.
+func (s *ListDormancyOKItem) SetCustomerID(val string) {
+	s.CustomerID = val
+}
+
+// SetLastUsedAt sets the value of LastUsedAt.
+func (s *ListDormancyOKItem) SetLastUsedAt(val time.Time) {
+	s.LastUsedAt = val
+}
+
+// SetWarnedAt sets the value of WarnedAt.
+func (s *ListDormancyOKItem) SetWarnedAt(val OptDateTime) {
+	s.WarnedAt = val
+}
+
+// SetWarnOn sets the value of WarnOn.
+func (s *ListDormancyOKItem) SetWarnOn(val OptDateTime) {
+	s.WarnOn = val
+}
+
+// SetDeleteOn sets the value of DeleteOn.
+func (s *ListDormancyOKItem) SetDeleteOn(val OptDateTime) {
+	s.DeleteOn = val
+}
+
+// ListDormancyUnauthorized is response for ListDormancy operation.
+type ListDormancyUnauthorized struct{}
+
+func (*ListDormancyUnauthorized) listDormancyRes() {}
 
 type ListFormMappingsOKApplicationJSON []FormMetricMapping
 
@@ -22094,14 +22165,16 @@ func (o OptWritebackRequestRecalc) Or(d WritebackRequestRecalc) WritebackRequest
 
 // Ref: #/components/schemas/Plan
 type Plan struct {
-	Key         string     `json:"key"`
-	Name        string     `json:"name"`
-	Description string     `json:"description"`
-	SelfService bool       `json:"self_service"`
-	Limits      PlanLimits `json:"limits"`
-	LimitNote   OptString  `json:"limit_note"`
-	SortOrder   int        `json:"sort_order"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	Key               string     `json:"key"`
+	Name              string     `json:"name"`
+	Description       string     `json:"description"`
+	SelfService       bool       `json:"self_service"`
+	Limits            PlanLimits `json:"limits"`
+	LimitNote         OptString  `json:"limit_note"`
+	DormantWarnDays   OptInt     `json:"dormant_warn_days"`
+	DormantDeleteDays OptInt     `json:"dormant_delete_days"`
+	SortOrder         int        `json:"sort_order"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 // GetKey returns the value of Key.
@@ -22132,6 +22205,16 @@ func (s *Plan) GetLimits() PlanLimits {
 // GetLimitNote returns the value of LimitNote.
 func (s *Plan) GetLimitNote() OptString {
 	return s.LimitNote
+}
+
+// GetDormantWarnDays returns the value of DormantWarnDays.
+func (s *Plan) GetDormantWarnDays() OptInt {
+	return s.DormantWarnDays
+}
+
+// GetDormantDeleteDays returns the value of DormantDeleteDays.
+func (s *Plan) GetDormantDeleteDays() OptInt {
+	return s.DormantDeleteDays
 }
 
 // GetSortOrder returns the value of SortOrder.
@@ -22174,6 +22257,16 @@ func (s *Plan) SetLimitNote(val OptString) {
 	s.LimitNote = val
 }
 
+// SetDormantWarnDays sets the value of DormantWarnDays.
+func (s *Plan) SetDormantWarnDays(val OptInt) {
+	s.DormantWarnDays = val
+}
+
+// SetDormantDeleteDays sets the value of DormantDeleteDays.
+func (s *Plan) SetDormantDeleteDays(val OptInt) {
+	s.DormantDeleteDays = val
+}
+
 // SetSortOrder sets the value of SortOrder.
 func (s *Plan) SetSortOrder(val int) {
 	s.SortOrder = val
@@ -22193,9 +22286,14 @@ type PlanInput struct {
 	// May be chosen at public sign-up.
 	SelfService OptBool       `json:"self_service"`
 	Limits      OptPlanLimits `json:"limits"`
-	// What a tenant is told when a limit stops it; empty: change the plan.
+	// What a tenant is told when a limit stops it; empty: change the edition.
 	LimitNote OptString `json:"limit_note"`
-	SortOrder OptInt    `json:"sort_order"`
+	// Days without use before the tenant's administrators are told it will be deleted; 0 with
+	// dormant_delete_days 0: never.
+	DormantWarnDays OptInt `json:"dormant_warn_days"`
+	// Days without use at which the tenant is deleted; later than dormant_warn_days.
+	DormantDeleteDays OptInt `json:"dormant_delete_days"`
+	SortOrder         OptInt `json:"sort_order"`
 }
 
 // GetName returns the value of Name.
@@ -22221,6 +22319,16 @@ func (s *PlanInput) GetLimits() OptPlanLimits {
 // GetLimitNote returns the value of LimitNote.
 func (s *PlanInput) GetLimitNote() OptString {
 	return s.LimitNote
+}
+
+// GetDormantWarnDays returns the value of DormantWarnDays.
+func (s *PlanInput) GetDormantWarnDays() OptInt {
+	return s.DormantWarnDays
+}
+
+// GetDormantDeleteDays returns the value of DormantDeleteDays.
+func (s *PlanInput) GetDormantDeleteDays() OptInt {
+	return s.DormantDeleteDays
 }
 
 // GetSortOrder returns the value of SortOrder.
@@ -22253,12 +22361,22 @@ func (s *PlanInput) SetLimitNote(val OptString) {
 	s.LimitNote = val
 }
 
+// SetDormantWarnDays sets the value of DormantWarnDays.
+func (s *PlanInput) SetDormantWarnDays(val OptInt) {
+	s.DormantWarnDays = val
+}
+
+// SetDormantDeleteDays sets the value of DormantDeleteDays.
+func (s *PlanInput) SetDormantDeleteDays(val OptInt) {
+	s.DormantDeleteDays = val
+}
+
 // SetSortOrder sets the value of SortOrder.
 func (s *PlanInput) SetSortOrder(val OptInt) {
 	s.SortOrder = val
 }
 
-// What a plan allows; 0 or absent means unlimited (internal/plan).
+// What an edition allows; 0 or absent means unlimited (internal/plan).
 // Ref: #/components/schemas/PlanLimits
 type PlanLimits struct {
 	MaxUsers                 OptInt `json:"max_users"`
@@ -22362,11 +22480,11 @@ func (s *PlanLimits) SetMaxStorageMB(val OptInt) {
 	s.MaxStorageMB = val
 }
 
-// A tenant's plan as it applies right now.
+// A tenant's edition as it applies right now.
 // Ref: #/components/schemas/PlanState
 type PlanState struct {
 	Plan Plan `json:"plan"`
-	// False when the tenant names a plan with no row (treated as unlimited).
+	// False when the tenant names an edition with no row (treated as unlimited).
 	PlanKnown bool `json:"plan_known"`
 	// Mutating requests are refused with 402.
 	ReadOnly       bool                `json:"read_only"`
@@ -22376,8 +22494,8 @@ type PlanState struct {
 	LimitReason    OptString           `json:"limit_reason"`
 	UsageCheckedAt OptDateTime         `json:"usage_checked_at"`
 	// The tenant's data as the usage sweep last measured it (at usage_checked_at): exact in a dedicated
-	// database, an estimate in a shared one, and absent where it is not measured (a shared database on a
-	// plan without a storage limit).
+	// database, an estimate in a shared one, and absent where it is not measured (a shared database on
+	// an edition without a storage limit).
 	StorageBytes OptInt64 `json:"storage_bytes"`
 }
 
@@ -24882,6 +25000,12 @@ type SignupOptionsPlan struct {
 	Limits      OptPlanLimits `json:"limits"`
 	// What a tenant is told when a limit stops it.
 	LimitNote OptString `json:"limit_note"`
+	// Days without use before deletion is announced; 0 never.
+	DormantWarnDays OptInt `json:"dormant_warn_days"`
+	// Days without use at which the workspace is deleted; 0 never.
+	DormantDeleteDays OptInt `json:"dormant_delete_days"`
+	// How long backups keep a deleted workspace.
+	BackupRetentionDays OptInt `json:"backup_retention_days"`
 }
 
 // GetKey returns the value of Key.
@@ -24909,6 +25033,21 @@ func (s *SignupOptionsPlan) GetLimitNote() OptString {
 	return s.LimitNote
 }
 
+// GetDormantWarnDays returns the value of DormantWarnDays.
+func (s *SignupOptionsPlan) GetDormantWarnDays() OptInt {
+	return s.DormantWarnDays
+}
+
+// GetDormantDeleteDays returns the value of DormantDeleteDays.
+func (s *SignupOptionsPlan) GetDormantDeleteDays() OptInt {
+	return s.DormantDeleteDays
+}
+
+// GetBackupRetentionDays returns the value of BackupRetentionDays.
+func (s *SignupOptionsPlan) GetBackupRetentionDays() OptInt {
+	return s.BackupRetentionDays
+}
+
 // SetKey sets the value of Key.
 func (s *SignupOptionsPlan) SetKey(val OptString) {
 	s.Key = val
@@ -24932,6 +25071,21 @@ func (s *SignupOptionsPlan) SetLimits(val OptPlanLimits) {
 // SetLimitNote sets the value of LimitNote.
 func (s *SignupOptionsPlan) SetLimitNote(val OptString) {
 	s.LimitNote = val
+}
+
+// SetDormantWarnDays sets the value of DormantWarnDays.
+func (s *SignupOptionsPlan) SetDormantWarnDays(val OptInt) {
+	s.DormantWarnDays = val
+}
+
+// SetDormantDeleteDays sets the value of DormantDeleteDays.
+func (s *SignupOptionsPlan) SetDormantDeleteDays(val OptInt) {
+	s.DormantDeleteDays = val
+}
+
+// SetBackupRetentionDays sets the value of BackupRetentionDays.
+func (s *SignupOptionsPlan) SetBackupRetentionDays(val OptInt) {
+	s.BackupRetentionDays = val
 }
 
 // Ref: #/components/schemas/SignupRequest

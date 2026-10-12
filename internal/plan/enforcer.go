@@ -102,25 +102,25 @@ func (e *LimitError) Error() string {
 	}
 	switch e.Limit {
 	case "max_users":
-		return fmt.Sprintf("The %s plan allows %s; this tenant has %d.%s", e.Plan, n(e.Max, "user"), e.Current, more)
+		return fmt.Sprintf("The %s Edition allows %s; this tenant has %d.%s", e.Plan, n(e.Max, "user"), e.Current, more)
 	case "max_applications":
-		return fmt.Sprintf("The %s plan allows %s; this tenant has %d.%s", e.Plan, n(e.Max, "application"), e.Current, more)
+		return fmt.Sprintf("The %s Edition allows %s; this tenant has %d.%s", e.Plan, n(e.Max, "application"), e.Current, more)
 	case "max_models":
-		return fmt.Sprintf("The %s plan allows %s; this tenant has %d.%s", e.Plan, n(e.Max, "model"), e.Current, more)
+		return fmt.Sprintf("The %s Edition allows %s; this tenant has %d.%s", e.Plan, n(e.Max, "model"), e.Current, more)
 	case "max_metrics_per_model":
-		return fmt.Sprintf("The %s plan allows %s per model; this model has %d.%s", e.Plan, n(e.Max, "metric"), e.Current, more)
+		return fmt.Sprintf("The %s Edition allows %s per model; this model has %d.%s", e.Plan, n(e.Max, "metric"), e.Current, more)
 	case "max_members_per_dimension":
-		return fmt.Sprintf("The %s plan allows %s per dimension; this dimension has %d.%s", e.Plan, n(e.Max, "member"), e.Current, more)
+		return fmt.Sprintf("The %s Edition allows %s per dimension; this dimension has %d.%s", e.Plan, n(e.Max, "member"), e.Current, more)
 	case "max_fact_rows_per_model":
-		return fmt.Sprintf("The %s plan allows %s per model; this model has %d.%s", e.Plan, n(e.Max, "data row"), e.Current, more)
+		return fmt.Sprintf("The %s Edition allows %s per model; this model has %d.%s", e.Plan, n(e.Max, "data row"), e.Current, more)
 	case "max_ai_messages_per_day":
-		return fmt.Sprintf("The %s plan allows %s per day and this tenant has sent %d today. Try again tomorrow.%s", e.Plan, n(e.Max, "AI message"), e.Current, more)
+		return fmt.Sprintf("The %s Edition allows %s per day and this tenant has sent %d today. Try again tomorrow.%s", e.Plan, n(e.Max, "AI message"), e.Current, more)
 	case "max_integration_runs_per_day":
-		return fmt.Sprintf("The %s plan allows %s per day and this tenant has run %d today. Try again tomorrow.%s", e.Plan, n(e.Max, "integration run"), e.Current, more)
+		return fmt.Sprintf("The %s Edition allows %s per day and this tenant has run %d today. Try again tomorrow.%s", e.Plan, n(e.Max, "integration run"), e.Current, more)
 	case "max_storage_mb":
-		return fmt.Sprintf("The %s plan allows %d MB of storage; this tenant uses %d MB.%s", e.Plan, e.Max, e.Current, more)
+		return fmt.Sprintf("The %s Edition allows %d MB of storage; this tenant uses %d MB.%s", e.Plan, e.Max, e.Current, more)
 	}
-	return fmt.Sprintf("The %s plan allows %d (%s); this tenant has %d.%s", e.Plan, e.Max, e.Limit, e.Current, more)
+	return fmt.Sprintf("The %s Edition allows %d (%s); this tenant has %d.%s", e.Plan, e.Max, e.Limit, e.Current, more)
 }
 
 func plural(n int, noun string) string {
@@ -494,7 +494,7 @@ func RunSweep(ctx context.Context, db DB, e *Enforcer, interval time.Duration, l
 	sweepAll := func(ctx context.Context) bool {
 		rows, err := db.Query(ctx, `SELECT id::text FROM core.customer`)
 		if err != nil {
-			log.Warn().Err(err).Msg("plan sweep: could not list tenants")
+			log.Warn().Err(err).Msg("edition limits sweep: could not list tenants")
 			return false
 		}
 		var ids []string
@@ -508,11 +508,11 @@ func RunSweep(ctx context.Context, db DB, e *Enforcer, interval time.Duration, l
 		for _, id := range ids {
 			t, err := e.Sweep(ctx, db, id)
 			if err != nil {
-				log.Warn().Err(err).Str("tenant", id).Msg("plan sweep failed")
+				log.Warn().Err(err).Str("tenant", id).Msg("edition limits sweep failed")
 				continue
 			}
 			if t.LimitState == "over" {
-				log.Info().Str("tenant", id).Str("reason", t.LimitReason).Msg("tenant is over its plan limits and read-only")
+				log.Info().Str("tenant", id).Str("reason", t.LimitReason).Msg("tenant is over its edition limits and read-only")
 			}
 		}
 		return false

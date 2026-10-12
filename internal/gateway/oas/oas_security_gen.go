@@ -189,6 +189,7 @@ var operationRolesBearerAuth = map[string][]string{
 	ListDeveloperIntegrationsOperation:    []string{},
 	ListDimensionPropertiesOperation:      []string{},
 	ListDimensionsOperation:               []string{},
+	ListDormancyOperation:                 []string{},
 	ListFormMappingsOperation:             []string{},
 	ListFormRecordsOperation:              []string{},
 	ListFormsOperation:                    []string{},

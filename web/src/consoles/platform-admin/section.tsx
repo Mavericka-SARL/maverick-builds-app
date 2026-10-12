@@ -33,7 +33,7 @@ function tenantChosen(scope: "platform" | "tenant", settingsScope: string): bool
 }
 
 type Tab = "applications" | "users" | "audit" | "usage" | "model-links" | "notifications" | "chat-connector" | "ai-keys" | "sso" | "scim" | "branding" | "plans" | "infra" | "license";
-const TAB_LABELS: Record<Tab, string> = { applications: "Applications", users: "Users", audit: "Audit Log", usage: "Usage", "model-links": "Model links", notifications: "Notification delivery", "chat-connector": "Chat connector", "ai-keys": "AI keys", sso: "Single sign-on", scim: "Provisioning (SCIM)", branding: "Branding", plans: "Plans", infra: "Infrastructure", license: "License" };
+const TAB_LABELS: Record<Tab, string> = { applications: "Applications", users: "Users", audit: "Audit Log", usage: "Usage", "model-links": "Model links", notifications: "Notification delivery", "chat-connector": "Chat connector", "ai-keys": "AI keys", sso: "Single sign-on", scim: "Provisioning (SCIM)", branding: "Branding", plans: "Editions", infra: "Infrastructure", license: "License" };
 
 /**
  * The administration section of the console — Applications (models,

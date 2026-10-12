@@ -494,7 +494,7 @@ components:
 
     PlanLimits:
       type: object
-      description: What a plan allows; 0 or absent means unlimited (internal/plan).
+      description: What an edition allows; 0 or absent means unlimited (internal/plan).
       properties:
         max_users:                    { type: integer }
         max_applications:             { type: integer }
@@ -514,7 +514,9 @@ components:
         description:  { type: string }
         self_service: { type: boolean, description: May be chosen at public sign-up }
         limits:       { $ref: "#/components/schemas/PlanLimits" }
-        limit_note:   { type: string, description: "What a tenant is told when a limit stops it; empty: change the plan" }
+        limit_note:   { type: string, description: "What a tenant is told when a limit stops it; empty: change the edition" }
+        dormant_warn_days:   { type: integer, description: "Days without use before the tenant's administrators are told it will be deleted; 0 with dormant_delete_days 0: never" }
+        dormant_delete_days: { type: integer, description: "Days without use at which the tenant is deleted; later than dormant_warn_days" }
         sort_order:   { type: integer }
 
     Plan:
@@ -527,23 +529,25 @@ components:
         self_service: { type: boolean }
         limits:       { $ref: "#/components/schemas/PlanLimits" }
         limit_note:   { type: string }
+        dormant_warn_days:   { type: integer }
+        dormant_delete_days: { type: integer }
         sort_order:   { type: integer }
         updated_at:   { type: string, format: date-time }
 
     PlanState:
       type: object
-      description: A tenant's plan as it applies right now.
+      description: A tenant's edition as it applies right now.
       required: [plan, plan_known, read_only, limit_state]
       properties:
         plan:             { $ref: "#/components/schemas/Plan" }
-        plan_known:       { type: boolean, description: False when the tenant names a plan with no row (treated as unlimited) }
+        plan_known:       { type: boolean, description: False when the tenant names an edition with no row (treated as unlimited) }
         read_only:        { type: boolean, description: Mutating requests are refused with 402 }
         code:             { type: string, enum: [over_limit] }
         reason:           { type: string }
         limit_state:      { type: string, enum: [ok, over] }
         limit_reason:     { type: string }
         usage_checked_at: { type: string, format: date-time }
-        storage_bytes:    { type: integer, format: int64, description: "The tenant's data as the usage sweep last measured it (at usage_checked_at): exact in a dedicated database, an estimate in a shared one, and absent where it is not measured (a shared database on a plan without a storage limit)" }
+        storage_bytes:    { type: integer, format: int64, description: "The tenant's data as the usage sweep last measured it (at usage_checked_at): exact in a dedicated database, an estimate in a shared one, and absent where it is not measured (a shared database on an edition without a storage limit)" }
 
     LegalInfo:
       type: object
@@ -575,6 +579,9 @@ components:
             description: { type: string }
             limits:      { $ref: "#/components/schemas/PlanLimits" }
             limit_note:  { type: string, description: What a tenant is told when a limit stops it }
+            dormant_warn_days:   { type: integer, description: Days without use before deletion is announced; 0 never }
+            dormant_delete_days: { type: integer, description: Days without use at which the workspace is deleted; 0 never }
+            backup_retention_days: { type: integer, description: How long backups keep a deleted workspace }
 
     SignupRequest:
       type: object
@@ -3336,7 +3343,7 @@ paths:
     post:
       operationId: signup
       security: []
-      summary: Register a tenant from the public sign-up page — the tenant on the self-service plan, its first administrator/developer, an application with the starter models, and an invitation to set a password (public, rate-limited per address)
+      summary: Register a tenant from the public sign-up page — the tenant on the self-service edition, its first administrator/developer, an application with the starter models, and an invitation to set a password (public, rate-limited per address)
       description: >-
         The application gets four starter models in one transaction, all of them or none: the "Learn the
         platform" tour, which is made the application's default model (the one business consoles open),
@@ -3358,14 +3365,38 @@ paths:
         "502": { description: "The identity provider refused, or the invitation could not be sent; nothing was created" }
         "503": { description: Sign-up is not enabled here }
 
+  /api/admin/dormancy:
+    get:
+      operationId: listDormancy
+      tags: [Admin]
+      summary: Each dedicated tenant's last use, and when an unused one will be told or deleted (platform_admin; internal/dormancy)
+      responses:
+        "200":
+          description: One row per dedicated tenant, least recently used first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [customer_id, last_used_at]
+                  properties:
+                    customer_id:  { type: string }
+                    last_used_at: { type: string, format: date-time }
+                    warned_at:    { type: string, format: date-time, description: When its administrators were told it will be deleted }
+                    warn_on:      { type: string, format: date-time, description: When they will be told, while not yet told }
+                    delete_on:    { type: string, format: date-time, description: When it will be deleted, once they have been told }
+        "401": { description: Unauthorized }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
   /api/admin/plans:
     get:
       operationId: listPlans
       tags: [Admin]
-      summary: The plan catalog in display order (platform_admin and tenant_admin; internal/plan)
+      summary: The edition catalog in display order (platform_admin and tenant_admin; internal/plan)
       responses:
         "200":
-          description: Plans
+          description: Editions
           content:
             application/json:
               schema: { type: array, items: { $ref: "#/components/schemas/Plan" } }
@@ -3376,7 +3407,7 @@ paths:
     put:
       operationId: upsertPlan
       tags: [Admin]
-      summary: Change a plan — name, self-service flag and limits (platform_admin; applies to every tenant on the plan within a minute). Adds none — the catalog is Community, Commercial and Enterprise; an unknown key is 404
+      summary: Change an edition — name, self-service flag and limits (platform_admin; applies to every tenant on the edition within a minute). Adds none — the catalog is Community, Commercial and Enterprise; an unknown key is 404
       parameters:
         - name: key
           in: path
@@ -3389,13 +3420,13 @@ paths:
             schema: { $ref: "#/components/schemas/PlanInput" }
       responses:
         "200":
-          description: The plan as stored
+          description: The edition as stored
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Plan" }
-        "400": { description: Invalid plan }
+        "400": { description: Invalid edition }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { description: No plan with that key }
+        "404": { description: No edition with that key }
 
   /api/apps:
     get:
@@ -3660,7 +3691,7 @@ paths:
                   cleared: { type: integer }
                   recalculating: { type: boolean }
         "400": { $ref: "#/components/responses/BadRequest" }
-        "402": { description: The workspace's plan has no room for the cells }
+        "402": { description: The workspace's edition has no room for the cells }
         "403": { description: The model, revision or chat writes are not the caller's to write }
         "404": { $ref: "#/components/responses/NotFound" }
         "422":
@@ -8326,7 +8357,7 @@ paths:
     post:
       operationId: runIntegration
       tags: [Import & Integrations]
-      summary: Run a saved integration — a csv_import with the CSV or workbook in the body, a google_sheets by re-fetching its sheet — into its form, dimension or grid. A grid run resolves names, checks members are leaves, commits valid rows through the write guard and the plan's limits (invalid rows are listed), and recalculates; every run is recorded in the integration's history. A file_export is downloaded instead (GET /api/integrations/{id}/export).
+      summary: Run a saved integration — a csv_import with the CSV or workbook in the body, a google_sheets by re-fetching its sheet — into its form, dimension or grid. A grid run resolves names, checks members are leaves, commits valid rows through the write guard and the edition's limits (invalid rows are listed), and recalculates; every run is recorded in the integration's history. A file_export is downloaded instead (GET /api/integrations/{id}/export).
       parameters:
         - name: id
           in: path
@@ -8353,7 +8384,7 @@ paths:
                     description: Grid runs — each value that failed, by row and column
                     items: {type: object, properties: {row: {type: integer}, column: {type: string}, code: {type: string}, message: {type: string}, raw_value: {type: string}}}
         "400": { $ref: "#/components/responses/BadRequest" }
-        "402": {description: The tenant's plan limit would be exceeded}
+        "402": {description: The tenant's edition limit would be exceeded}
         "403": {description: The file writes a member, metric or scope the caller may not write}
         "404": { $ref: "#/components/responses/NotFound" }
 

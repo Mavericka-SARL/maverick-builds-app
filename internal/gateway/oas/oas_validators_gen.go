@@ -4281,6 +4281,14 @@ func (s ListDeveloperIntegrationsOKApplicationJSON) Validate() error {
 	return nil
 }
 
+func (s ListDormancyOKApplicationJSON) Validate() error {
+	alias := ([]ListDormancyOKItem)(s)
+	if alias == nil {
+		return errors.New("nil is invalid value")
+	}
+	return nil
+}
+
 func (s ListFormMappingsOKApplicationJSON) Validate() error {
 	alias := ([]FormMetricMapping)(s)
 	if alias == nil {

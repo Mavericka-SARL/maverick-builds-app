@@ -14,7 +14,7 @@ export function PlanBanner() {
   if (!st) return null;
   // The reason already says where to go from here when the plan has a
   // note; the link then just leads there, without promising another plan.
-  const change = me?.contact_url ? <> <a href={me.contact_url} target="_blank" rel="noreferrer">{st.plan.limit_note ? "Learn more" : "Change plan"}</a></> : null;
+  const change = me?.contact_url ? <> <a href={me.contact_url} target="_blank" rel="noreferrer">{st.plan.limit_note ? "Learn more" : "Change edition"}</a></> : null;
   if (st.read_only) {
     return (
       <div data-testid="plan-banner" data-state={st.code} style={{ marginBottom: 12 }}>

@@ -57,7 +57,7 @@ user with a role; the handler then applies the scope checks above.
 | Route family | Purpose | Role guard |
 |---|---|---|
 | `/healthz` | process health | public |
-| `/api/signup`, `/api/signup/options` | self-service sign-up and the plan it offers; creates the tour (the application's default model) and three role guides | public |
+| `/api/signup`, `/api/signup/options` | self-service sign-up and the edition it offers; creates the tour (the application's default model) and three role guides | public |
 | `/api/legal`, `/api/branding`, `/api/sso/discover` | legal document values, sign-in branding, SSO discovery by e-mail domain | public |
 | `/api/scim/v2/*` | SCIM 2.0 user and group provisioning (enterprise) | SCIM token |
 | `/api/dev/personas` | development persona catalog | development mode |
@@ -94,11 +94,11 @@ user with a role; the handler then applies the scope checks above.
 | `/api/business-admin/roles*` | business roles and their members | `business_admin` of the application's workspace, or a `developer` of its tenant |
 | `/api/business-admin/*` (everything else) | users, dashboards, access rules | `business_admin` of the application's workspace |
 | `/api/admin/users*`, `/api/admin/workspaces*` | user and workspace administration | `platform_admin`, `tenant_admin` or `developer` |
-| `/api/admin/*` (everything else) | tenants, applications, models, revisions, grants, audit (listing, export, retention settings), usage, plans, branding, SSO, SCIM tokens, AI settings, infrastructure nodes | `platform_admin` or `tenant_admin` |
+| `/api/admin/*` (everything else) | tenants, applications, models, revisions, grants, audit (listing, export, retention settings), usage, editions, branding, SSO, SCIM tokens, AI settings, infrastructure nodes | `platform_admin` or `tenant_admin` |
 | `GET /api/admin/models/{id}/export`, `…/export/package`, `POST /api/admin/models/import` | revision-aware model export (`?include_data=`), standalone package, import | `platform_admin` or `tenant_admin` |
 
 Enterprise and commercial features answer **403** with the feature name when
-the deployment's licence does not include them. A tenant whose plan has ended
+the deployment's licence does not include them. A tenant whose edition has ended
 or run out of storage is read-only: mutations answer **402** (except a
 person's own display preferences, `PATCH /api/me/preferences`).
 

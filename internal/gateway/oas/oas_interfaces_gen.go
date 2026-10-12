@@ -453,6 +453,10 @@ type ListDeveloperIntegrationsRes interface {
 	listDeveloperIntegrationsRes()
 }
 
+type ListDormancyRes interface {
+	listDormancyRes()
+}
+
 type ListFormMappingsRes interface {
 	listFormMappingsRes()
 }

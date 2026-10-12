@@ -156,6 +156,22 @@ spec:
                   name: mavericks-config
                   key: LEGAL_EMAIL
                   optional: true
+            # "true" only on the hosted Playground: the one deployment that
+            # retires unused workspaces (internal/dormancy). Unset elsewhere.
+            - name: PLAYGROUND
+              valueFrom:
+                configMapKeyRef:
+                  name: mavericks-config
+                  key: PLAYGROUND
+                  optional: true
+            # The backup job's retention, quoted by the terms and the mails
+            # that retire unused workspaces (internal/dormancy). Default 14.
+            - name: BACKUP_RETENTION_DAYS
+              valueFrom:
+                configMapKeyRef:
+                  name: mavericks-config
+                  key: BACKUP_RETENTION_DAYS
+                  optional: true
             - name: LEGAL_JURISDICTION
               valueFrom:
                 configMapKeyRef:

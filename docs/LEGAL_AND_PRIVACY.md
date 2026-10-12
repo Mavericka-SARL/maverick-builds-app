@@ -56,7 +56,7 @@ checkable in this repository:
 
 | The text says | Where it comes from |
 |---|---|
-| The sign-up plan's name and limits, and that the workspace goes read-only | `GET /api/signup/options` at render time — the seeded plan, not a number typed into the page |
+| The sign-up edition's name and limits, and that the workspace goes read-only | `GET /api/signup/options` at render time — the seeded edition, not a number typed into the page |
 | Backups are kept for fourteen days | `BACKUP_RETENTION_DAYS` in `deploy/docker/pg-backup/pg-backup.sh` |
 | No analytics, tracking, or third-party script | `web/index.html` loads none, and the CSP-relevant surface is the app's own bundle |
 | Sign-in stores a cookie and an in-memory token | `web/src/auth/AuthProvider.tsx` — `check-sso` with PKCE, the token in React state |
@@ -84,7 +84,7 @@ changes, the text changes with it and `LEGAL_UPDATED` moves.
 
 ## Related
 
-- [Plans and self-service sign-up](PLANS_AND_SIGNUP.md) — the plan the
+- [Editions and self-service sign-up](PLANS_AND_SIGNUP.md) — the edition the
   terms quote, and the read-only state they describe.
 - [The look of the pre-account pages](BRAND.md) — the frame both documents
   render in.

@@ -46,7 +46,7 @@ const COLUMNS: DataTableColumn<TenantUsage>[] = [
       </span>
     ),
   },
-  { id: "plan", header: "Plan", cell: (t) => t.plan },
+  { id: "plan", header: "Edition", cell: (t) => t.plan },
   { id: "active_users", header: "Active / users", align: "right", cell: (t) => `${num(t.active_users)} / ${num(t.users)}` },
   { id: "models", header: "Apps / models / revisions", align: "right", cell: (t) => `${num(t.applications)} / ${num(t.models)} / ${num(t.revisions)}` },
   { id: "fact_rows", header: "Facts / calc rows", align: "right", cell: (t) => `${num(t.fact_rows)} / ${num(t.calc_rows)}` },

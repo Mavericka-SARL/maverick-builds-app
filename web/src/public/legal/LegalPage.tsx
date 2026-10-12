@@ -71,7 +71,14 @@ export function LegalPage({ doc }: { doc: "terms" | "privacy" }) {
   }
 
   const plan: PlanFacts | undefined =
-    opts?.plan ? { name: opts.plan.name, allowance: planAllowanceProse(opts.plan.limits), next: opts.plan.limit_note || undefined } : undefined;
+    opts?.plan
+      ? {
+          name: opts.plan.name, allowance: planAllowanceProse(opts.plan.limits), next: opts.plan.limit_note || undefined,
+          dormancy: opts.plan.dormant_warn_days && opts.plan.dormant_delete_days
+            ? { warnDays: opts.plan.dormant_warn_days, deleteDays: opts.plan.dormant_delete_days, backupDays: opts.plan.backup_retention_days ?? 14 }
+            : undefined,
+        }
+      : undefined;
   const document = doc === "terms" ? termsDocument(legal, brand.name, plan) : privacyDocument(legal, brand.name);
   const other = doc === "terms" ? { href: legal.privacy_url, label: "Privacy notice" } : { href: legal.terms_url, label: "Terms of service" };
 

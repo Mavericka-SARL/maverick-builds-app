@@ -40,7 +40,7 @@ It replaces only the user's member rules that resolve in the active revision;
 metric and button rules, and rules on members no longer in the active revision
 (which still restrict older revisions), are kept.
 
-**Held to the same limits.** The tenant's plan limits on metrics per model and
+**Held to the same limits.** The tenant's edition limits on metrics per model and
 members per dimension refuse the assistant where they refuse the developer:
 the gateway hands the executor its own checks (`aiassistant.Hooks`), and form
 posting runs the gateway's own posting code the same way.
@@ -273,7 +273,7 @@ optional `reshape`. A date-formatted cell reads as its ISO date
 is the developer's own pipeline, run by the gateway through the executor's
 `ImportFile` hook (`internal/gateway/ai_file_import.go`): stored cell values,
 not displayed ones (`1234.5`, not `"1,234.50"`), `importpkg.ResolveRows`, the
-revision's write guard, the plan's fact, storage and member limits,
+revision's write guard, the edition's fact, storage and member limits,
 recalculation and an `import.uploaded` audit row. It is all-or-nothing: one bad
 row and nothing is written, with the rows named. A grid import defaults to
 `replace` — re-importing the same file converges instead of adding to the
@@ -388,7 +388,7 @@ requester is notified. `ai_builds_model_test.go` does the same for the
 model itself. `internal/aiassistant/edit_tools_test.go` changes and removes
 what was built — every change-and-remove tool, against the refusals and data
 effects of its endpoint — and `internal/gateway/ai_edit_parity_test.go` runs
-the gateway's hooks: the plan limits refuse the assistant where they refuse
+the gateway's hooks: the edition limits refuse the assistant where they refuse
 the developer, and a backfill posts through the gateway's own posting code.
 When a divergence between the assistant and the developer role appears, it is
 found by building something, not by reading the tool list.
@@ -397,5 +397,5 @@ The 2026-09-28 audit compared every route the developer role can reach with
 the tool list. Besides the missing change-and-remove tools, it found the
 assistant doing things the developer cannot: `create_grid` attached another
 model's metric, `add_dashboard_widget` took another model's form or grid for
-the widget types it did not check, and plan limits did not apply; each now
+the widget types it did not check, and edition limits did not apply; each now
 goes through the developer's check.

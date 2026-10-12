@@ -1076,6 +1076,13 @@ type Handler interface {
 	//
 	// GET /api/developer/dimensions
 	ListDimensions(ctx context.Context, params ListDimensionsParams) ([]Dimension, error)
+	// ListDormancy implements listDormancy operation.
+	//
+	// Each dedicated tenant's last use, and when an unused one will be told or deleted (platform_admin;
+	// internal/dormancy).
+	//
+	// GET /api/admin/dormancy
+	ListDormancy(ctx context.Context) (ListDormancyRes, error)
 	// ListFormMappings implements listFormMappings operation.
 	//
 	// List form-to-metric mappings for a model.
@@ -1153,7 +1160,7 @@ type Handler interface {
 	ListNotifications(ctx context.Context) ([]Notification, error)
 	// ListPlans implements listPlans operation.
 	//
-	// The plan catalog in display order (platform_admin and tenant_admin; internal/plan).
+	// The edition catalog in display order (platform_admin and tenant_admin; internal/plan).
 	//
 	// GET /api/admin/plans
 	ListPlans(ctx context.Context) (ListPlansRes, error)
@@ -1404,9 +1411,9 @@ type Handler interface {
 	//
 	// Run a saved integration — a csv_import with the CSV or workbook in the body, a google_sheets by
 	// re-fetching its sheet — into its form, dimension or grid. A grid run resolves names, checks
-	// members are leaves, commits valid rows through the write guard and the plan's limits (invalid rows
-	// are listed), and recalculates; every run is recorded in the integration's history. A file_export
-	// is downloaded instead (GET /api/integrations/{id}/export).
+	// members are leaves, commits valid rows through the write guard and the edition's limits (invalid
+	// rows are listed), and recalculates; every run is recorded in the integration's history. A
+	// file_export is downloaded instead (GET /api/integrations/{id}/export).
 	//
 	// POST /api/integrations/{id}/run
 	RunIntegration(ctx context.Context, req *IntegrationRunRequest, params RunIntegrationParams) (RunIntegrationRes, error)
@@ -1882,9 +1889,9 @@ type Handler interface {
 	UploadAiDocument(ctx context.Context, req *UploadAiDocumentReq, params UploadAiDocumentParams) (UploadAiDocumentRes, error)
 	// UpsertPlan implements upsertPlan operation.
 	//
-	// Change a plan — name, self-service flag and limits (platform_admin; applies to every tenant on
-	// the plan within a minute). Adds none — the catalog is Community, Commercial and Enterprise; an
-	// unknown key is 404.
+	// Change an edition — name, self-service flag and limits (platform_admin; applies to every tenant
+	// on the edition within a minute). Adds none — the catalog is Community, Commercial and Enterprise;
+	//  an unknown key is 404.
 	//
 	// PUT /api/admin/plans/{key}
 	UpsertPlan(ctx context.Context, req *PlanInput, params UpsertPlanParams) (UpsertPlanRes, error)

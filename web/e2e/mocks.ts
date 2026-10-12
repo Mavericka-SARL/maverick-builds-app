@@ -372,7 +372,7 @@ export const signupOptions = {
 export function overStoragePlanState() {
   return {
     plan: adminPlans[0], plan_known: true, read_only: true, code: "over_limit", limit_state: "over",
-    reason: `This tenant is over its plan's limits (The Community plan allows 100 MB of storage; this tenant uses 104 MB. ${testNote}). The workspace is read-only, except for deleting, until it is back within them.`,
+    reason: `This tenant is over its edition's limits (The Community Edition allows 100 MB of storage; this tenant uses 104 MB. ${testNote}). The workspace is read-only, except for deleting, until it is back within them.`,
   };
 }
 

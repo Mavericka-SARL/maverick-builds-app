@@ -150,7 +150,7 @@ func (s *Session) get(ctx context.Context, what string, req Request, out any) (h
 	case http.StatusUnauthorized:
 		return nil, &Error{Code: CodeUnauthorized, Message: "your account is not active in maverickbuilds.app or no longer signs in; reconnect"}
 	case http.StatusPaymentRequired:
-		return nil, &Error{Code: CodeUnavailable, Message: "the workspace's plan does not allow this right now"}
+		return nil, &Error{Code: CodeUnavailable, Message: "the workspace's edition does not allow this right now"}
 	case http.StatusForbidden, http.StatusNotFound:
 		return nil, notFound(what)
 	case http.StatusBadRequest, http.StatusConflict, http.StatusUnprocessableEntity:

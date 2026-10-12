@@ -29242,6 +29242,179 @@ func (s *Server) handleListDimensionsRequest(args [0]string, argsEscaped bool, w
 	}
 }
 
+// handleListDormancyRequest handles listDormancy operation.
+//
+// Each dedicated tenant's last use, and when an unused one will be told or deleted (platform_admin;
+// internal/dormancy).
+//
+// GET /api/admin/dormancy
+func (s *Server) handleListDormancyRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
+	statusWriter := &codeRecorder{ResponseWriter: w}
+	w = statusWriter
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("listDormancy"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.HTTPRouteKey.String("/api/admin/dormancy"),
+	}
+	// Add attributes from config.
+	otelAttrs = append(otelAttrs, s.cfg.Attributes...)
+
+	// Start a span for this request.
+	ctx, span := s.cfg.Tracer.Start(r.Context(), ListDormancyOperation,
+		trace.WithAttributes(otelAttrs...),
+		serverSpanKind,
+	)
+	defer span.End()
+
+	// Add Labeler to context.
+	labeler := &Labeler{attrs: otelAttrs}
+	ctx = contextWithLabeler(ctx, labeler)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		elapsedDuration := time.Since(startTime)
+
+		attrSet := labeler.AttributeSet()
+		attrs := attrSet.ToSlice()
+		code := statusWriter.status
+		if code != 0 {
+			codeAttr := semconv.HTTPResponseStatusCode(code)
+			attrs = append(attrs, codeAttr)
+			span.SetAttributes(codeAttr)
+		}
+		attrOpt := metric.WithAttributes(attrs...)
+
+		// Increment request counter.
+		s.requests.Add(ctx, 1, attrOpt)
+
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		s.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), attrOpt)
+	}()
+
+	var (
+		recordError = func(stage string, err error) {
+			span.RecordError(err)
+
+			// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#status
+			// Span Status MUST be left unset if HTTP status code was in the 1xx, 2xx or 3xx ranges,
+			// unless there was another error (e.g., network error receiving the response body; or 3xx codes with
+			// max redirects exceeded), in which case status MUST be set to Error.
+			code := statusWriter.status
+			if code < 100 || code >= 500 {
+				span.SetStatus(codes.Error, stage)
+			}
+
+			attrSet := labeler.AttributeSet()
+			attrs := attrSet.ToSlice()
+			if code != 0 {
+				attrs = append(attrs, semconv.HTTPResponseStatusCode(code))
+			}
+
+			s.errors.Add(ctx, 1, metric.WithAttributes(attrs...))
+		}
+		err          error
+		opErrContext = ogenerrors.OperationContext{
+			Name: ListDormancyOperation,
+			ID:   "listDormancy",
+		}
+	)
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			sctx, ok, err := s.securityBearerAuth(ctx, ListDormancyOperation, r)
+			if err != nil {
+				err = &ogenerrors.SecurityError{
+					OperationContext: opErrContext,
+					Security:         "BearerAuth",
+					Err:              err,
+				}
+				defer recordError("Security:BearerAuth", err)
+				s.cfg.ErrorHandler(ctx, w, r, err)
+				return
+			}
+			if ok {
+				satisfied[0] |= 1 << 0
+				ctx = sctx
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			err = &ogenerrors.SecurityError{
+				OperationContext: opErrContext,
+				Err:              ogenerrors.ErrSecurityRequirementIsNotSatisfied,
+			}
+			defer recordError("Security", err)
+			s.cfg.ErrorHandler(ctx, w, r, err)
+			return
+		}
+	}
+
+	var rawBody []byte
+
+	var response ListDormancyRes
+	if m := s.cfg.Middleware; m != nil {
+		mreq := middleware.Request{
+			Context:          ctx,
+			OperationName:    ListDormancyOperation,
+			OperationSummary: "Each dedicated tenant's last use, and when an unused one will be told or deleted (platform_admin; internal/dormancy)",
+			OperationID:      "listDormancy",
+			Body:             nil,
+			RawBody:          rawBody,
+			Params:           middleware.Parameters{},
+			Raw:              r,
+		}
+
+		type (
+			Request  = struct{}
+			Params   = struct{}
+			Response = ListDormancyRes
+		)
+		response, err = middleware.HookMiddleware[
+			Request,
+			Params,
+			Response,
+		](
+			m,
+			mreq,
+			nil,
+			func(ctx context.Context, request Request, params Params) (response Response, err error) {
+				response, err = s.h.ListDormancy(ctx)
+				return response, err
+			},
+		)
+	} else {
+		response, err = s.h.ListDormancy(ctx)
+	}
+	if err != nil {
+		defer recordError("Internal", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	if err := encodeListDormancyResponse(response, w, span); err != nil {
+		defer recordError("EncodeResponse", err)
+		if !errors.Is(err, ht.ErrInternalServerErrorResponse) {
+			s.cfg.ErrorHandler(ctx, w, r, err)
+		}
+		return
+	}
+}
+
 // handleListFormMappingsRequest handles listFormMappings operation.
 //
 // List form-to-metric mappings for a model.
@@ -31262,7 +31435,7 @@ func (s *Server) handleListNotificationsRequest(args [0]string, argsEscaped bool
 
 // handleListPlansRequest handles listPlans operation.
 //
-// The plan catalog in display order (platform_admin and tenant_admin; internal/plan).
+// The edition catalog in display order (platform_admin and tenant_admin; internal/plan).
 //
 // GET /api/admin/plans
 func (s *Server) handleListPlansRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -31388,7 +31561,7 @@ func (s *Server) handleListPlansRequest(args [0]string, argsEscaped bool, w http
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    ListPlansOperation,
-			OperationSummary: "The plan catalog in display order (platform_admin and tenant_admin; internal/plan)",
+			OperationSummary: "The edition catalog in display order (platform_admin and tenant_admin; internal/plan)",
 			OperationID:      "listPlans",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -37828,9 +38001,9 @@ func (s *Server) handleRevokeScimTokenRequest(args [1]string, argsEscaped bool, 
 //
 // Run a saved integration — a csv_import with the CSV or workbook in the body, a google_sheets by
 // re-fetching its sheet — into its form, dimension or grid. A grid run resolves names, checks
-// members are leaves, commits valid rows through the write guard and the plan's limits (invalid rows
-// are listed), and recalculates; every run is recorded in the integration's history. A file_export
-// is downloaded instead (GET /api/integrations/{id}/export).
+// members are leaves, commits valid rows through the write guard and the edition's limits (invalid
+// rows are listed), and recalculates; every run is recorded in the integration's history. A
+// file_export is downloaded instead (GET /api/integrations/{id}/export).
 //
 // POST /api/integrations/{id}/run
 func (s *Server) handleRunIntegrationRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -37981,7 +38154,7 @@ func (s *Server) handleRunIntegrationRequest(args [1]string, argsEscaped bool, w
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    RunIntegrationOperation,
-			OperationSummary: "Run a saved integration — a csv_import with the CSV or workbook in the body, a google_sheets by re-fetching its sheet — into its form, dimension or grid. A grid run resolves names, checks members are leaves, commits valid rows through the write guard and the plan's limits (invalid rows are listed), and recalculates; every run is recorded in the integration's history. A file_export is downloaded instead (GET /api/integrations/{id}/export).",
+			OperationSummary: "Run a saved integration — a csv_import with the CSV or workbook in the body, a google_sheets by re-fetching its sheet — into its form, dimension or grid. A grid run resolves names, checks members are leaves, commits valid rows through the write guard and the edition's limits (invalid rows are listed), and recalculates; every run is recorded in the integration's history. A file_export is downloaded instead (GET /api/integrations/{id}/export).",
 			OperationID:      "runIntegration",
 			Body:             request,
 			RawBody:          rawBody,
@@ -42352,7 +42525,7 @@ func (s *Server) handleSignupRequest(args [0]string, argsEscaped bool, w http.Re
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    SignupOperation,
-			OperationSummary: "Register a tenant from the public sign-up page — the tenant on the self-service plan, its first administrator/developer, an application with the starter models, and an invitation to set a password (public, rate-limited per address)",
+			OperationSummary: "Register a tenant from the public sign-up page — the tenant on the self-service edition, its first administrator/developer, an application with the starter models, and an invitation to set a password (public, rate-limited per address)",
 			OperationID:      "signup",
 			Body:             request,
 			RawBody:          rawBody,
@@ -51437,9 +51610,10 @@ func (s *Server) handleUploadAiDocumentRequest(args [1]string, argsEscaped bool,
 
 // handleUpsertPlanRequest handles upsertPlan operation.
 //
-// Change a plan — name, self-service flag and limits (platform_admin; applies to every tenant on
-// the plan within a minute). Adds none — the catalog is Community, Commercial and Enterprise; an
-// unknown key is 404.
+// Change an edition — name, self-service flag and limits (platform_admin; applies to every tenant
+// on the edition within a minute). Adds none — the catalog is Community, Commercial and Enterprise;
+//
+//	an unknown key is 404.
 //
 // PUT /api/admin/plans/{key}
 func (s *Server) handleUpsertPlanRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -51590,7 +51764,7 @@ func (s *Server) handleUpsertPlanRequest(args [1]string, argsEscaped bool, w htt
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    UpsertPlanOperation,
-			OperationSummary: "Change a plan — name, self-service flag and limits (platform_admin; applies to every tenant on the plan within a minute). Adds none — the catalog is Community, Commercial and Enterprise; an unknown key is 404",
+			OperationSummary: "Change an edition — name, self-service flag and limits (platform_admin; applies to every tenant on the edition within a minute). Adds none — the catalog is Community, Commercial and Enterprise; an unknown key is 404",
 			OperationID:      "upsertPlan",
 			Body:             request,
 			RawBody:          rawBody,

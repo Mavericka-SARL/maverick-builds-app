@@ -143,6 +143,12 @@ func (h *handler) tenantRouting(next http.Handler) http.Handler {
 				// A request is activity: the tenant's background loops wake
 				// (pkg/tenantdb Waker).
 				router.Touch(ctx, target)
+				// The tenant's own people and API clients keep it from being
+				// retired as unused (internal/dormancy); a platform
+				// administrator looking at it does not.
+				if !platformLevel {
+					router.Used(ctx, target)
+				}
 				ctx = tenantdb.WithScope(ctx, tenantdb.Scope{CustomerID: target, Pool: pool})
 				// Someone platform-level, addressing a tenant: their account
 				// is in the control plane (platformActorOnControl).

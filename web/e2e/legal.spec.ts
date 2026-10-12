@@ -1,14 +1,14 @@
 /**
  * /terms and /privacy: the documents a visitor is asked to agree to on
  * /signup. Three things are worth holding still — that the documents render
- * outside the auth layer, that the terms quote the plan the server actually
+ * outside the auth layer, that the terms quote the edition the server actually
  * offers rather than a number typed into the page, and that a deployment which
  * has published nothing says so instead of showing an unsigned policy.
  */
 import { test, expect } from "@playwright/test";
 import { mockApi, legalInfo, legalUnpublished, signupOptionsSmall } from "./mocks";
 
-test("the terms name the operator and quote the server's plan", async ({ page }) => {
+test("the terms name the operator and quote the server's edition", async ({ page }) => {
   await mockApi(page);
   await page.goto("/terms");
   const doc = page.getByTestId("legal-terms");
@@ -18,23 +18,23 @@ test("the terms name the operator and quote the server's plan", async ({ page })
   await expect(doc).toContainText("1 Rue de Test, L-1000 Luxembourg");
   await expect(doc).toContainText("legal@acme.test");
   await expect(doc).toContainText("In force from 18 September 2026");
-  // The plan clause is the plan from GET /api/signup/options: free, no
+  // The edition clause is the edition from GET /api/signup/options: free, no
   // end date, 100 MB of data, read-only when the space is used up.
-  await expect(doc).toContainText("Community plan costs nothing and has no end date");
+  await expect(doc).toContainText("Community Edition costs nothing and has no end date");
   await expect(doc).toContainText("limited to 100 MB of data");
   await expect(doc).toContainText("becomes read-only");
-  // …and the plan's own way forward, never "a plan is agreed".
+  // …and the edition's own way forward, never "an edition is agreed".
   await expect(doc).toContainText("run the platform on your own infrastructure");
-  await expect(doc).not.toContainText("a plan is agreed");
+  await expect(doc).not.toContainText("an edition is agreed");
   await expect(doc).toContainText("law of Luxembourg");
   await expect(doc.getByRole("link", { name: "Privacy notice" })).toHaveAttribute("href", "/privacy");
 });
 
-test("a plan without a note of its own still gets the plan clause, with no trial in it", async ({ page }) => {
+test("an edition without a note of its own still gets the edition clause, with no trial in it", async ({ page }) => {
   await mockApi(page, { signup: signupOptionsSmall });
   await page.goto("/terms");
   const doc = page.getByTestId("legal-terms");
-  await expect(doc).toContainText("Small plan costs nothing and has no end date");
+  await expect(doc).toContainText("Small Edition costs nothing and has no end date");
   await expect(doc).toContainText("5 users, 2 applications and 3 models");
   await expect(doc).not.toContainText(/trial/i);
 });

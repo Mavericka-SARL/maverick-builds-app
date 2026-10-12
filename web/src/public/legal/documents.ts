@@ -44,8 +44,10 @@ export interface LegalDocument {
 export interface PlanFacts {
   name: string;
   allowance: string;
-  /** The plan's own "where to go from here", if it has one. */
+  /** The edition's own "where to go from here", if it has one. */
   next?: string;
+  /** When a Playground workspace nobody uses is retired; absent anywhere else. */
+  dormancy?: { warnDays: number; deleteDays: number; backupDays: number };
 }
 
 /** "Acme SARL, 1 Rue de Test, Luxembourg" from whichever parts are configured. */
@@ -58,15 +60,15 @@ function compact(sections: LegalSection[]): LegalSection[] {
 }
 
 export function termsDocument(l: LegalInfo, product: string, plan?: PlanFacts): LegalDocument {
-  // The plan sign-up hands out, by its own name ("the Community plan").
-  const freePlan = plan ? `the ${plan.name} plan` : "the free plan";
+  // The edition sign-up hands out, by its own name ("the Community Edition").
+  const freePlan = plan ? `the ${plan.name} Edition` : "the free edition";
   const planClause: Block[] = plan
     ? [
-        `The ${plan.name} plan costs nothing and has no end date. It is limited${plan.allowance ? ` to ${plan.allowance}` : ""}, and the service tells you when a limit stops an action.`,
+        `The ${plan.name} Edition costs nothing and has no end date. It is limited${plan.allowance ? ` to ${plan.allowance}` : ""}, and the service tells you when a limit stops an action.`,
         `A workspace that has used up its allowance becomes read-only: everything you built is still there and can still be read and exported, but nothing new can be created or changed until some of it is deleted.${plan.next ? ` ${plan.next}` : ""}`,
       ]
     : [
-        "The plan in force for your workspace sets what it may hold. The service tells you when a limit stops an action, and a workspace over its plan's limits becomes read-only rather than being deleted: everything in it can still be read and exported.",
+        "The edition in force for your workspace sets what it may hold. The service tells you when a limit stops an action, and a workspace over its edition's limits becomes read-only rather than being deleted: everything in it can still be read and exported.",
       ];
 
   return {
@@ -88,14 +90,14 @@ export function termsDocument(l: LegalInfo, product: string, plan?: PlanFacts): 
           "You are responsible for what the people you invite do in your workspace, and for telling us when someone should no longer have access.",
         ],
       },
-      { heading: "3. What the plan includes", body: planClause },
+      { heading: "3. What the edition includes", body: planClause },
       {
         heading: "4. What you may not do",
         body: [
           "Use of the service is subject to a few limits:",
           [
             "do not use it to store or process unlawful content, or content you have no right to process",
-            "do not try to circumvent the limits of your plan, to reach another organisation's workspace, or to disrupt the service for others",
+            "do not try to circumvent the limits of your edition, to reach another organisation's workspace, or to disrupt the service for others",
             "do not resell or sublicense access to the service without a written agreement with us",
             "do not probe or attack the service; security research is welcome, but write to us first",
           ],
@@ -119,7 +121,7 @@ export function termsDocument(l: LegalInfo, product: string, plan?: PlanFacts): 
       {
         heading: "7. Price",
         body: [
-          `${freePlan.charAt(0).toUpperCase()}${freePlan.slice(1)} needs no payment details. If you move to a paid plan, the price, the billing period and the payment terms are agreed with you in writing before that plan starts. Nothing here creates an obligation to pay for something you did not agree to.`,
+          `${freePlan.charAt(0).toUpperCase()}${freePlan.slice(1)} needs no payment details. If you move to a paid edition, the price, the billing period and the payment terms are agreed with you in writing before that edition starts. Nothing here creates an obligation to pay for something you did not agree to.`,
         ],
       },
       {
@@ -133,6 +135,9 @@ export function termsDocument(l: LegalInfo, product: string, plan?: PlanFacts): 
         heading: "9. Ending the agreement",
         body: [
           `You may stop using the service at any time and ask us to delete your workspace by writing to ${l.email}. We delete it, and the personal data in it, within thirty days of that request, except where we must keep something longer by law.`,
+          ...(plan?.dormancy
+            ? [`In the Playground, a workspace nobody uses for ${plan.dormancy.warnDays} days — no one signs in to it and no API client reaches it — is deleted. We first e-mail its administrators; if nobody uses it within ${plan.dormancy.deleteDays - plan.dormancy.warnDays} days of that message, we delete it and the personal data in it. Backups keep a copy for ${plan.dormancy.backupDays} days after that: write to ${l.email} within that time to have it restored.`]
+            : []),
           "We may suspend a workspace that breaches section 4 or that has not paid an agreed fee, and will say why. Where a suspension can be resolved we will give you a reasonable chance to resolve it before deleting anything.",
         ],
       },
@@ -140,7 +145,7 @@ export function termsDocument(l: LegalInfo, product: string, plan?: PlanFacts): 
         heading: "10. Liability",
         body: [
           `The service is provided as it is. On ${freePlan} we accept no liability beyond what the law requires of us, which in particular means we are not liable for lost profit, lost data or indirect loss.`,
-          "Under a paid plan our total liability in any twelve-month period is limited to the fees you paid us in that period. Nothing in this agreement limits liability for death or personal injury caused by negligence, for fraud, or for anything else that cannot lawfully be limited.",
+          "Under a paid edition our total liability in any twelve-month period is limited to the fees you paid us in that period. Nothing in this agreement limits liability for death or personal injury caused by negligence, for fraud, or for anything else that cannot lawfully be limited.",
         ],
       },
       {

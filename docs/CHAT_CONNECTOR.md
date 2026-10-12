@@ -80,7 +80,7 @@ give it to them, in the model's active revision.
 as the console checks a typed one before writing any: an input metric (never a
 calculated one or a total), a leaf member of each of its dimensions, the
 person's access rules (read-only and hidden members and metrics), workflow
-locks, a system-managed revision, and the workspace's plan limits. One refused
+locks, a system-managed revision, and the workspace's edition limits. One refused
 cell refuses the call, listing each refused cell by its index, and nothing is
 written; otherwise every cell is written in one transaction, the grid is
 recalculated once, and `grid_change` automation rules fire as for a typed

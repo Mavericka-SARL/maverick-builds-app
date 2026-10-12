@@ -125,8 +125,12 @@ func TestPollDueSchedulesFiresDueRuleOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAutomationRules: %v", err)
 	}
-	if len(rules) != 1 || rules[0].NextFireAt == nil || !rules[0].NextFireAt.After(time.Now()) {
-		t.Fatalf("expected next_fire_at advanced into the future, got %+v", rules[0])
+	// Advanced past the tick that was due, and past the moment it fired.
+	// Not "after now": with an every-minute cron the next tick can be the
+	// very next second, which a slow run has already reached.
+	if len(rules) != 1 || rules[0].NextFireAt == nil || !rules[0].NextFireAt.After(*rule.NextFireAt) ||
+		(rules[0].LastFireAt != nil && !rules[0].NextFireAt.After(*rules[0].LastFireAt)) {
+		t.Fatalf("expected next_fire_at advanced past the due tick, got %+v", rules[0])
 	}
 	if rules[0].LastFireAt == nil {
 		t.Fatal("expected last_fire_at to be set after firing")
@@ -173,6 +177,7 @@ func TestMisfirePolicySkipDoesNotFireButAdvances(t *testing.T) {
 	rule := createDueScheduleRule(t, store, appID, userID, time.Hour,
 		workflow.ScheduleConfig{CronExpr: "* * * * *", MisfirePolicy: "skip"})
 
+	polledAt := time.Now()
 	if err := store.PollDueSchedules(context.Background(), zerolog.Nop(), "worker-1", time.Second); err != nil {
 		t.Fatalf("PollDueSchedules: %v", err)
 	}
@@ -184,7 +189,9 @@ func TestMisfirePolicySkipDoesNotFireButAdvances(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAutomationRules: %v", err)
 	}
-	if rules[0].NextFireAt == nil || !rules[0].NextFireAt.After(time.Now()) {
+	// Past the poll, not "after now": the next every-minute tick can be the
+	// very next second, which a slow run has already reached.
+	if rules[0].NextFireAt == nil || !rules[0].NextFireAt.After(polledAt) {
 		t.Fatalf("expected next_fire_at fast-forwarded past the missed tick, got %+v", rules[0].NextFireAt)
 	}
 }

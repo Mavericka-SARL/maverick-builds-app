@@ -18,6 +18,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/mavericks-engine/mavericks/internal/calculation"
+	"github.com/mavericks-engine/mavericks/internal/dormancy"
 	"github.com/mavericks-engine/mavericks/internal/gateway"
 	"github.com/mavericks-engine/mavericks/internal/identity"
 	"github.com/mavericks-engine/mavericks/internal/notification"
@@ -105,6 +106,15 @@ type cfg struct {
 	// in every plan-limit refusal.
 	SignupEnabled  bool   `mapstructure:"SIGNUP_ENABLED"`
 	PlanContactURL string `mapstructure:"PLAN_CONTACT_URL"`
+	// Playground marks the deployment as the hosted Playground, the free
+	// Community Edition Mavericka runs for the public. Only there are
+	// workspaces nobody uses retired (internal/dormancy); everywhere else
+	// that rule cannot be switched on.
+	Playground bool `mapstructure:"PLAYGROUND"`
+	// BackupRetentionDays is the backup job's setting of the same name
+	// (deploy/docker/pg-backup), read here to say how long a deleted
+	// workspace can still be restored. Default 14, as there.
+	BackupRetentionDays int `mapstructure:"BACKUP_RETENTION_DAYS"`
 	// Who operates this deployment, for the terms of service and the
 	// privacy notice the front-door pages serve (internal/gateway/legal.go,
 	// docs/LEGAL_AND_PRIVACY.md). Unset means this deployment publishes no
@@ -162,6 +172,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	if c.BackupRetentionDays <= 0 {
+		c.BackupRetentionDays = 14
+	}
 	if c.DatabaseURL == "" {
 		c.DatabaseURL = "postgres://mavericks:mavericks@localhost:5432/mavericks?sslmode=disable"
 	}
@@ -359,14 +372,19 @@ func main() {
 	// Model links read their source through the handler's own grid route,
 	// so they run here rather than in the integration worker.
 	modelLinks := gateway.NewModelLinks()
+	// Retiring unused workspaces (internal/dormancy) deletes through the
+	// handler's one tenant deletion path.
+	tenantDeleter := gateway.NewTenantDeleter()
 	handler := otelhttp.NewHandler(
 		gateway.NewHandlerWithDeps(log, pool, jwks, gateway.Deps{
-			Plans:       planEnforcer,
-			ObjectStore: objStore,
-			Keycloak:    kc,
-			License:     lic,
-			Router:      router,
-			Signup:      gateway.SignupConfig{Enabled: c.SignupEnabled, ContactURL: c.PlanContactURL},
+			Plans:         planEnforcer,
+			TenantDeleter: tenantDeleter,
+			ObjectStore:   objStore,
+			Keycloak:      kc,
+			License:       lic,
+			Router:        router,
+			Signup: gateway.SignupConfig{Enabled: c.SignupEnabled, ContactURL: c.PlanContactURL,
+				BackupRetentionDays: c.BackupRetentionDays, Playground: c.Playground},
 			Legal: gateway.LegalConfig{
 				Entity: c.LegalEntity, Address: c.LegalAddress, Email: c.LegalEmail,
 				Jurisdiction: c.LegalJurisdiction, Hosting: c.LegalHosting, Updated: c.LegalUpdated,
@@ -466,6 +484,19 @@ func main() {
 			})
 		waker.Start(schedCtx)
 		router.SetWaker(waker)
+		// In the Playground only, workspaces nobody uses are told, then
+		// deleted, per their edition's dormant_warn_days/dormant_delete_days.
+		// Every replica runs it; an advisory lock lets one sweep at a time.
+		if c.Playground {
+			go dormancy.Run(schedCtx, dormancy.Deps{
+				Control: pool, Router: router, Mailer: mailer,
+				Delete: func(ctx context.Context, customerID string) error {
+					return tenantDeleter.Delete(ctx, customerID, "unused in the Playground")
+				},
+				ConsoleURL: c.ConsoleURL, ContactEmail: c.LegalEmail,
+				BackupRetentionDays: c.BackupRetentionDays, Log: log.With().Str("job", "dormancy").Logger(),
+			}, 6*time.Hour)
+		}
 		router.Watch(schedCtx, tenantWatchInterval, func(t tenantdb.Tenant, tpool *pgxpool.Pool) {
 			startBackground(tpool, t.CustomerID, log.With().Str("tenant", t.CustomerID).Logger(), workerID+"-"+t.CustomerID[:8], router.Gate(t.CustomerID, tpool))
 		})

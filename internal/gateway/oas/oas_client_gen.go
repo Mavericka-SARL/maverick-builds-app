@@ -1096,6 +1096,13 @@ type Invoker interface {
 	//
 	// GET /api/developer/dimensions
 	ListDimensions(ctx context.Context, params ListDimensionsParams) ([]Dimension, error)
+	// ListDormancy invokes listDormancy operation.
+	//
+	// Each dedicated tenant's last use, and when an unused one will be told or deleted (platform_admin;
+	// internal/dormancy).
+	//
+	// GET /api/admin/dormancy
+	ListDormancy(ctx context.Context) (ListDormancyRes, error)
 	// ListFormMappings invokes listFormMappings operation.
 	//
 	// List form-to-metric mappings for a model.
@@ -1173,7 +1180,7 @@ type Invoker interface {
 	ListNotifications(ctx context.Context) ([]Notification, error)
 	// ListPlans invokes listPlans operation.
 	//
-	// The plan catalog in display order (platform_admin and tenant_admin; internal/plan).
+	// The edition catalog in display order (platform_admin and tenant_admin; internal/plan).
 	//
 	// GET /api/admin/plans
 	ListPlans(ctx context.Context) (ListPlansRes, error)
@@ -1424,9 +1431,9 @@ type Invoker interface {
 	//
 	// Run a saved integration — a csv_import with the CSV or workbook in the body, a google_sheets by
 	// re-fetching its sheet — into its form, dimension or grid. A grid run resolves names, checks
-	// members are leaves, commits valid rows through the write guard and the plan's limits (invalid rows
-	// are listed), and recalculates; every run is recorded in the integration's history. A file_export
-	// is downloaded instead (GET /api/integrations/{id}/export).
+	// members are leaves, commits valid rows through the write guard and the edition's limits (invalid
+	// rows are listed), and recalculates; every run is recorded in the integration's history. A
+	// file_export is downloaded instead (GET /api/integrations/{id}/export).
 	//
 	// POST /api/integrations/{id}/run
 	RunIntegration(ctx context.Context, request *IntegrationRunRequest, params RunIntegrationParams) (RunIntegrationRes, error)
@@ -1902,9 +1909,9 @@ type Invoker interface {
 	UploadAiDocument(ctx context.Context, request *UploadAiDocumentReq, params UploadAiDocumentParams) (UploadAiDocumentRes, error)
 	// UpsertPlan invokes upsertPlan operation.
 	//
-	// Change a plan — name, self-service flag and limits (platform_admin; applies to every tenant on
-	// the plan within a minute). Adds none — the catalog is Community, Commercial and Enterprise; an
-	// unknown key is 404.
+	// Change an edition — name, self-service flag and limits (platform_admin; applies to every tenant
+	// on the edition within a minute). Adds none — the catalog is Community, Commercial and Enterprise;
+	//  an unknown key is 404.
 	//
 	// PUT /api/admin/plans/{key}
 	UpsertPlan(ctx context.Context, request *PlanInput, params UpsertPlanParams) (UpsertPlanRes, error)
@@ -21587,6 +21594,114 @@ func (c *Client) sendListDimensions(ctx context.Context, params ListDimensionsPa
 	return result, nil
 }
 
+// ListDormancy invokes listDormancy operation.
+//
+// Each dedicated tenant's last use, and when an unused one will be told or deleted (platform_admin;
+// internal/dormancy).
+//
+// GET /api/admin/dormancy
+func (c *Client) ListDormancy(ctx context.Context) (ListDormancyRes, error) {
+	res, err := c.sendListDormancy(ctx)
+	return res, err
+}
+
+func (c *Client) sendListDormancy(ctx context.Context) (res ListDormancyRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("listDormancy"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/admin/dormancy"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ListDormancyOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/admin/dormancy"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ListDormancyOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeListDormancyResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // ListFormMappings invokes listFormMappings operation.
 //
 // List form-to-metric mappings for a model.
@@ -22973,7 +23088,7 @@ func (c *Client) sendListNotifications(ctx context.Context) (res []Notification,
 
 // ListPlans invokes listPlans operation.
 //
-// The plan catalog in display order (platform_admin and tenant_admin; internal/plan).
+// The edition catalog in display order (platform_admin and tenant_admin; internal/plan).
 //
 // GET /api/admin/plans
 func (c *Client) ListPlans(ctx context.Context) (ListPlansRes, error) {
@@ -27422,9 +27537,9 @@ func (c *Client) sendRevokeScimToken(ctx context.Context, params RevokeScimToken
 //
 // Run a saved integration — a csv_import with the CSV or workbook in the body, a google_sheets by
 // re-fetching its sheet — into its form, dimension or grid. A grid run resolves names, checks
-// members are leaves, commits valid rows through the write guard and the plan's limits (invalid rows
-// are listed), and recalculates; every run is recorded in the integration's history. A file_export
-// is downloaded instead (GET /api/integrations/{id}/export).
+// members are leaves, commits valid rows through the write guard and the edition's limits (invalid
+// rows are listed), and recalculates; every run is recorded in the integration's history. A
+// file_export is downloaded instead (GET /api/integrations/{id}/export).
 //
 // POST /api/integrations/{id}/run
 func (c *Client) RunIntegration(ctx context.Context, request *IntegrationRunRequest, params RunIntegrationParams) (RunIntegrationRes, error) {
@@ -36215,9 +36330,10 @@ func (c *Client) sendUploadAiDocument(ctx context.Context, request *UploadAiDocu
 
 // UpsertPlan invokes upsertPlan operation.
 //
-// Change a plan — name, self-service flag and limits (platform_admin; applies to every tenant on
-// the plan within a minute). Adds none — the catalog is Community, Commercial and Enterprise; an
-// unknown key is 404.
+// Change an edition — name, self-service flag and limits (platform_admin; applies to every tenant
+// on the edition within a minute). Adds none — the catalog is Community, Commercial and Enterprise;
+//
+//	an unknown key is 404.
 //
 // PUT /api/admin/plans/{key}
 func (c *Client) UpsertPlan(ctx context.Context, request *PlanInput, params UpsertPlanParams) (UpsertPlanRes, error) {

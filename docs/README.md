@@ -16,7 +16,7 @@ tests, and build configuration remain authoritative.
 | [`docs/DEVELOPMENT.md`](DEVELOPMENT.md) | current | Local development, generation, and validation |
 | [`docs/API.md`](API.md) | current | Actual HTTP route groups and API conventions |
 | [`docs/LICENSING.md`](LICENSING.md) | current | Editions, the signed license key, and the `ee/` enterprise tree |
-| [`docs/PLANS_AND_SIGNUP.md`](PLANS_AND_SIGNUP.md) | current | Plans and their limits, the read-only state, and public self-service sign-up |
+| [`docs/PLANS_AND_SIGNUP.md`](PLANS_AND_SIGNUP.md) | current | Editions and their limits, the read-only state, and public self-service sign-up |
 | [`docs/STAGING_AND_LOAD_TESTING.md`](STAGING_AND_LOAD_TESTING.md) | current | The staging environment, the load harness (`cmd/loadtest`) and the measured baseline |
 | [`docs/BRAND.md`](BRAND.md) | current | The look of the pages a visitor sees before they have an account, and how a deployment overrides it |
 | [`docs/LEGAL_AND_PRIVACY.md`](LEGAL_AND_PRIVACY.md) | current | The terms of service and privacy notice at `/terms` and `/privacy`, and the operator identity a deployment must configure |

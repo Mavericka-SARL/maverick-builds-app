@@ -180,13 +180,13 @@ They are the **Tenant admin** group in the sidebar:
 - **Provisioning (SCIM)** — let your directory create and deactivate accounts *(Enterprise)*
 - **Branding** — your name, colour and logo on the console *(Commercial and Enterprise)*`, 356),
 
-		taText(`## Edition and plan
+		taText(`## Edition
 
-Two different things. The **edition** is what this deployment can do — *Community*, *Commercial* or *Enterprise*, decided by its licence key. Click your initials at the top right: the account menu names the edition under your roles, and holds the **Theme** switch (**Light**, **Dark** or **System**), which your account remembers.
+The **edition** decides what may be used. This deployment's licence key gives it its edition — *Community*, *Commercial* or *Enterprise*. Click your initials at the top right: the account menu names it under your roles, and holds the **Theme** switch (**Light**, **Dark** or **System**), which your account remembers.
 
-The **plan** is how much your tenant may use — storage, for example, or AI messages a day. Whoever runs the platform sets it; you cannot change it yourself. Its name is on your tenant's card under **Tenant admin › Applications**, and below it the storage your data uses — on a plan with a storage limit, also how much is left, measured every few minutes. If the tenant goes over a limit, it turns read-only and a banner at the top of the console says why. Deleting still works, so removing what you no longer need is how you make room.
+Your tenant runs an edition of its own, which sets how much it may use — storage, for example, or AI messages a day. Whoever runs the platform sets it; you cannot change it yourself. Its name is on your tenant's card under **Tenant admin › Applications**, and below it the storage your data uses — with a storage limit, also how much is left, measured every few minutes. If the tenant goes over a limit, it turns read-only and a banner at the top of the console says why. Deleting still works, so removing what you no longer need is how you make room.
 
-More: `+taDoc("editions and licensing", "LICENSING.md")+` · `+taDoc("plans", "PLANS_AND_SIGNUP.md")+``, 240),
+More: `+taDoc("editions and licensing", "LICENSING.md")+` · `+taDoc("editions and sign-up", "PLANS_AND_SIGNUP.md")+``, 240),
 
 		taText(`## Reading this guide
 
@@ -264,7 +264,7 @@ Under **Revisions**, each revision has two export icons of its own: *with data* 
 
 		taText(`## Importing
 
-Under an application, press **Import model** and choose a `+tick+`.mavericks-model.json`+tick+` file. It arrives as a new model with a single revision, which is live, and its calculated values are worked out as it lands. Your plan's limits are checked first: an import that would not fit is refused before anything is created.`, 132),
+Under an application, press **Import model** and choose a `+tick+`.mavericks-model.json`+tick+` file. It arrives as a new model with a single revision, which is live, and its calculated values are worked out as it lands. Your edition's limits are checked first: an import that would not fit is refused before anything is created.`, 132),
 
 		taText(`## What a package carries
 

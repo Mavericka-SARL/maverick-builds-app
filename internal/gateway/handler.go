@@ -181,6 +181,9 @@ type Deps struct {
 	// ModelLinks, when set, is filled in with this handler so the caller
 	// can run model links (model_links.go) on its databases.
 	ModelLinks *ModelLinks
+	// TenantDeleter, when set, is filled in with this handler so a
+	// background job can delete tenants through the one deletion path.
+	TenantDeleter *TenantDeleter
 }
 
 // DefaultTokenClients is the console's own client, the only one whose tokens
@@ -262,6 +265,9 @@ func NewHandlerWithDeps(log zerolog.Logger, pool *pgxpool.Pool, jwks *identity.J
 	// in the context; the plan guard needs the routed tenant. The connector's
 	// reads run through this same chain (mcpReader), behind delegatedReadGate.
 	api := appIDMiddleware(h.tenantRouting(h.delegatedReadGate(h.planGuard(mux))))
+	if deps.TenantDeleter != nil {
+		deps.TenantDeleter.h = h
+	}
 	if deps.ModelLinks != nil {
 		deps.ModelLinks.h, deps.ModelLinks.api = h, api
 	}
@@ -370,6 +376,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/legal", "public", cors(h.legalInfo))
 	register("POST", "/api/signup", "public", cors(h.signup))
 	register("GET", "/api/admin/plans", "admin", cors(h.adminPlans))
+	register("GET", "/api/admin/dormancy", "admin", adm(h.adminDormancy))
 	register("PUT", "/api/admin/plans/{key}", "admin", cors(h.adminPlanAction))
 	register("POST", "/api/formula/refs", "any", cors(h.formulaRefs))
 	register("GET", "/api/metrics", "any", cors(h.metrics))
@@ -12910,7 +12917,7 @@ func (h *handler) adminTenantAction(w http.ResponseWriter, r *http.Request) {
 			// The plan is the platform's side of the relationship: a tenant
 			// admin cannot lift their own tenant's limits.
 			if !isPlatformAdmin {
-				jsonErr(w, fmt.Errorf("forbidden: only platform_admin can change a tenant's plan"), http.StatusForbidden)
+				jsonErr(w, fmt.Errorf("forbidden: only platform_admin can change a tenant's edition"), http.StatusForbidden)
 				return
 			}
 			changed, err := h.applyTenantPlan(ctx, tctx, id, body.Plan)
@@ -12934,70 +12941,89 @@ func (h *handler) adminTenantAction(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("forbidden: only platform_admin can delete tenants"), http.StatusForbidden)
 			return
 		}
-		// Cascade: delete applications (models/scenarios cascade from there)
-		if _, err := h.db.Exec(tctx, `DELETE FROM core.application WHERE customer_id=$1::uuid`, id); err != nil {
+		if _, err := h.deleteTenant(ctx, id, act.UserID, act.UserID, strings.Join(act.Roles, ","), ""); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
-		}
-		// The tenant's people go with it — the ones it owns (signed up
-		// into it or created by its administrators), each removed exactly
-		// as deleting them one by one would, Keycloak account included.
-		// The customer's ON DELETE SET NULL alone would leave orphan
-		// logins that resolve to no tenant and keep their addresses. A
-		// platform administrator is never a tenant's to delete, and the
-		// caller never deletes themselves this way.
-		rows, err := h.db.Query(tctx, `
-			SELECT u.id::text, u.keycloak_sub FROM identity.user u
-			WHERE u.customer_id = $1::uuid AND u.id <> $2::uuid
-			  AND NOT EXISTS (SELECT 1 FROM identity.role_assignment ra WHERE ra.user_id = u.id AND ra.role = 'platform_admin')`,
-			id, act.UserID)
-		if err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
-		}
-		type member struct{ id, sub string }
-		var members []member
-		for rows.Next() {
-			var m member
-			if err := rows.Scan(&m.id, &m.sub); err == nil {
-				members = append(members, m)
-			}
-		}
-		rows.Close()
-		for _, m := range members {
-			if err := h.removeUserAccount(tctx, m.id, m.sub); err != nil {
-				jsonErr(w, err, http.StatusInternalServerError)
-				return
-			}
-			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
-				Category: auditlog.CategoryAdmin, EventType: auditlog.EventUserDeleted,
-				ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
-				ResourceType: "identity_user", ResourceID: m.id,
-				Metadata: map[string]string{"tenant_id": id, "reason": "tenant deleted"},
-			})
-		}
-		if _, err := h.db.Exec(tctx, `DELETE FROM core.customer WHERE id=$1::uuid`, id); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
-		}
-		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
-			Category: auditlog.CategoryAdmin, EventType: auditlog.EventTenantDeleted,
-			ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
-			ResourceType: "tenant", ResourceID: id,
-			Metadata: map[string]string{"users_removed": strconv.Itoa(len(members))},
-		})
-		if router := h.db.Router(); router != nil {
-			// For a dedicated tenant the deletion IS dropping the database;
-			// the statements above ran inside it and are moot, while keeping
-			// the shared-database path working unchanged.
-			if err := router.Deprovision(ctx, id); err != nil {
-				h.log.Error().Err(err).Str("tenant", id).Msg("tenant database was not dropped")
-			}
 		}
 		jsonOK(w, map[string]string{"status": "deleted"})
 	default:
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
 	}
+}
+
+// deleteTenant removes a tenant: its applications (models and scenarios
+// cascade from them), the people it owns, the customer row and, for a tenant
+// with a database of its own, that database. It is the one deletion path:
+// DELETE /api/admin/tenants/{id} and retiring unused workspaces
+// (internal/dormancy) both come here. keep is a user never removed this way
+// (the platform administrator asking); actorID and actorRole sign the audit
+// events, and reason, when set, is recorded with them. It returns how many
+// people were removed.
+func (h *handler) deleteTenant(ctx context.Context, id, keep, actorID, actorRole, reason string) (int, error) {
+	if keep == "" {
+		keep = "00000000-0000-0000-0000-000000000000"
+	}
+	tctx := h.tenantCtx(ctx, id)
+	if _, err := h.db.Exec(tctx, `DELETE FROM core.application WHERE customer_id=$1::uuid`, id); err != nil {
+		return 0, err
+	}
+	// The tenant's people go with it — the ones it owns (signed up into it
+	// or created by its administrators), each removed exactly as deleting
+	// them one by one would, Keycloak account included. The customer's ON
+	// DELETE SET NULL alone would leave orphan logins that resolve to no
+	// tenant and keep their addresses. A platform administrator is never a
+	// tenant's to delete, and the caller never deletes themselves this way.
+	rows, err := h.db.Query(tctx, `
+		SELECT u.id::text, u.keycloak_sub FROM identity.user u
+		WHERE u.customer_id = $1::uuid AND u.id <> $2::uuid
+		  AND NOT EXISTS (SELECT 1 FROM identity.role_assignment ra WHERE ra.user_id = u.id AND ra.role = 'platform_admin')`,
+		id, keep)
+	if err != nil {
+		return 0, err
+	}
+	type member struct{ id, sub string }
+	var members []member
+	for rows.Next() {
+		var m member
+		if err := rows.Scan(&m.id, &m.sub); err == nil {
+			members = append(members, m)
+		}
+	}
+	rows.Close()
+	userMeta := map[string]string{"tenant_id": id, "reason": "tenant deleted"}
+	for _, m := range members {
+		if err := h.removeUserAccount(tctx, m.id, m.sub); err != nil {
+			return 0, err
+		}
+		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+			Category: auditlog.CategoryAdmin, EventType: auditlog.EventUserDeleted,
+			ActorUserID: actorID, ActorRole: actorRole,
+			ResourceType: "identity_user", ResourceID: m.id,
+			Metadata: userMeta,
+		})
+	}
+	if _, err := h.db.Exec(tctx, `DELETE FROM core.customer WHERE id=$1::uuid`, id); err != nil {
+		return 0, err
+	}
+	meta := map[string]string{"users_removed": strconv.Itoa(len(members))}
+	if reason != "" {
+		meta["reason"] = reason
+	}
+	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+		Category: auditlog.CategoryAdmin, EventType: auditlog.EventTenantDeleted,
+		ActorUserID: actorID, ActorRole: actorRole,
+		ResourceType: "tenant", ResourceID: id,
+		Metadata: meta,
+	})
+	if router := h.db.Router(); router != nil {
+		// For a dedicated tenant the deletion IS dropping the database; the
+		// statements above ran inside it and are moot, while keeping the
+		// shared-database path working unchanged.
+		if err := router.Deprovision(ctx, id); err != nil {
+			h.log.Error().Err(err).Str("tenant", id).Msg("tenant database was not dropped")
+		}
+	}
+	return len(members), nil
 }
 
 // ── /api/admin/applications[/{id}] ───────────────────────────────────────────

@@ -48,10 +48,19 @@ func TestValidate(t *testing.T) {
 		{Key: "ok", Name: ""},
 		{Key: "ok", Name: "x", Description: strings.Repeat("x", 301)},
 		{Key: "ok", Name: "x", Limits: Limits{MaxUsers: -1}},
+		// Unused workspaces: both 0 (never), or warned before deleted.
+		{Key: "ok", Name: "x", DormantWarnDays: 30},
+		{Key: "ok", Name: "x", DormantDeleteDays: 45},
+		{Key: "ok", Name: "x", DormantWarnDays: 45, DormantDeleteDays: 45},
+		{Key: "ok", Name: "x", DormantWarnDays: -1, DormantDeleteDays: 10},
+		{Key: "ok", Name: "x", DormantWarnDays: 30, DormantDeleteDays: 3651},
 	} {
 		if err := bad.Validate(); err == nil {
 			t.Errorf("plan %+v validated", bad)
 		}
+	}
+	if err := (Plan{Key: "free", Name: "Free", DormantWarnDays: 30, DormantDeleteDays: 45}).Validate(); err != nil {
+		t.Errorf("warn at 30, delete at 45: %v", err)
 	}
 }
 
@@ -141,7 +150,7 @@ func TestCatalogChecksAndSweep(t *testing.T) {
 		}
 	}
 	// Crossing: a fourth user is fine, a fourth application is not.
-	if err := e.CheckApplications(ctx, pool, cust, 2); err == nil || !IsLimit(err) || !strings.Contains(err.Error(), "Small plan allows 2 applications; this tenant has 1") {
+	if err := e.CheckApplications(ctx, pool, cust, 2); err == nil || !IsLimit(err) || !strings.Contains(err.Error(), "Small Edition allows 2 applications; this tenant has 1") {
 		t.Fatalf("apps over: %v", err)
 	}
 	if err := e.CheckMetrics(ctx, pool, cust, model, 51); err == nil || !strings.Contains(err.Error(), "50 metrics per model") {
@@ -230,7 +239,7 @@ func TestCatalogChecksAndSweep(t *testing.T) {
 	if b, err := StorageBytes(ctx, pool, cust); err != nil || b < 20000*100 {
 		t.Fatalf("storage after 20000 rows = %d err=%v", b, err)
 	}
-	if err := e.CheckStorage(ctx, pool, cust); err == nil || !IsLimit(err) || !strings.Contains(err.Error(), "Tiny plan allows 1 MB of storage; this tenant uses") || !strings.HasSuffix(err.Error(), "Change the plan to add more.") {
+	if err := e.CheckStorage(ctx, pool, cust); err == nil || !IsLimit(err) || !strings.Contains(err.Error(), "Tiny Edition allows 1 MB of storage; this tenant uses") || !strings.HasSuffix(err.Error(), "Change the edition to add more.") {
 		t.Fatalf("storage over: %v", err)
 	}
 	// A plan with a note says that instead of "change the plan", in every

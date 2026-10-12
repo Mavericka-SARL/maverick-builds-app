@@ -39,6 +39,14 @@ type SignupConfig struct {
 	// ContactURL is where "change the plan" leads — a pricing page or a
 	// mailto:. Shown with every plan-limit notice.
 	ContactURL string
+	// BackupRetentionDays is how long backups keep a deleted workspace, the
+	// window the terms and the dormancy mails promise a restore in. It is
+	// the backup job's own BACKUP_RETENTION_DAYS.
+	BackupRetentionDays int
+	// Playground is the hosted Playground (PLAYGROUND): the one deployment
+	// where workspaces nobody uses are retired. Elsewhere an edition's
+	// dormant_* settings are refused and nothing is retired.
+	Playground bool
 }
 
 // actorCtxKey caches the actor planGuard resolved, so the handler's own
@@ -276,6 +284,10 @@ func (h *handler) adminPlanAction(w http.ResponseWriter, r *http.Request) {
 	}
 	body.Key = key
 	ctx := r.Context()
+	if !h.signupCfg.Playground && (body.DormantWarnDays != 0 || body.DormantDeleteDays != 0) {
+		jsonErr(w, fmt.Errorf("retiring unused workspaces exists only in the hosted Playground"), http.StatusBadRequest)
+		return
+	}
 	saved, err := plan.Update(ctx, h.db.Control(), body)
 	if errors.Is(err, plan.ErrUnknownPlan) {
 		jsonErr(w, err, http.StatusNotFound)

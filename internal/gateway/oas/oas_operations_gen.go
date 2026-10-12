@@ -163,6 +163,7 @@ const (
 	ListDeveloperIntegrationsOperation    OperationName = "ListDeveloperIntegrations"
 	ListDimensionPropertiesOperation      OperationName = "ListDimensionProperties"
 	ListDimensionsOperation               OperationName = "ListDimensions"
+	ListDormancyOperation                 OperationName = "ListDormancy"
 	ListFormMappingsOperation             OperationName = "ListFormMappings"
 	ListFormRecordsOperation              OperationName = "ListFormRecords"
 	ListFormsOperation                    OperationName = "ListForms"

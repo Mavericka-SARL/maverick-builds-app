@@ -52,6 +52,9 @@ func (h *handler) signupOptions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	out := map[string]any{"enabled": false, "contact_url": h.signupCfg.ContactURL}
 	p, ok, err := h.selfServicePlan(ctx)
+	// The hosted Playground, where unused workspaces are retired: the
+	// terms and the console's edition settings say so only there.
+	out["playground"] = h.signupCfg.Playground
 	switch {
 	case !h.signupCfg.Enabled:
 		out["reason"] = "Self-service sign-up is not enabled on this deployment."
@@ -60,10 +63,18 @@ func (h *handler) signupOptions(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		out["reason"] = "Sign-up is temporarily unavailable."
 	case !ok:
-		out["reason"] = "No plan is open for self-service sign-up."
+		out["reason"] = "No edition is open for self-service sign-up."
 	default:
 		out["enabled"] = true
-		out["plan"] = map[string]any{"key": p.Key, "name": p.Name, "description": p.Description, "limits": p.Limits, "limit_note": p.LimitNote}
+		offered := map[string]any{"key": p.Key, "name": p.Name, "description": p.Description, "limits": p.Limits, "limit_note": p.LimitNote}
+		if h.signupCfg.Playground {
+			// The terms quote these, in the Playground only: when a
+			// workspace nobody uses is deleted, and how long a backup can
+			// bring it back.
+			offered["dormant_warn_days"], offered["dormant_delete_days"] = p.DormantWarnDays, p.DormantDeleteDays
+			offered["backup_retention_days"] = h.signupCfg.BackupRetentionDays
+		}
+		out["plan"] = offered
 	}
 	jsonOK(w, out)
 }
@@ -109,7 +120,7 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		jsonErr(w, fmt.Errorf("no plan is open for self-service sign-up"), http.StatusServiceUnavailable)
+		jsonErr(w, fmt.Errorf("no edition is open for self-service sign-up"), http.StatusServiceUnavailable)
 		return
 	}
 
@@ -200,7 +211,7 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := plan.SetPlan(tctx, h.db.For(tctx), customerID, p.Key); err != nil {
-		fail(http.StatusInternalServerError, fmt.Errorf("assign plan: %w", err))
+		fail(http.StatusInternalServerError, fmt.Errorf("assign edition: %w", err))
 		return
 	}
 

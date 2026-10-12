@@ -19,7 +19,7 @@ const LIMIT_FIELDS: { key: keyof PlanLimits; label: string }[] = [
  * Platform › Plans: the catalog every tenant's plan points at — Community,
  * Commercial and Enterprise, no more (migration 123; there is no way to add
  * a plan) — tuned by the platform administrators for every tenant. A plan bounds how much a tenant
- * may use — never for how long. Limits are numbers here
+ * may use, and may retire a workspace nobody uses (internal/dormancy). Limits are numbers here
  * rather than constants in code, so tuning the Community plan is an edit,
  * not a release. 0 means unlimited. A change applies to every tenant on the
  * plan within a minute; the read-only verdict for a tenant already over a
@@ -27,22 +27,25 @@ const LIMIT_FIELDS: { key: keyof PlanLimits; label: string }[] = [
  */
 export function PlansTab() {
   const { data, isLoading, error } = useQuery({ queryKey: ["admin-plans"], queryFn: api.getPlans });
-  if (isLoading) return <LoadingState label="Loading plans…" />;
+  // Retiring unused workspaces exists only in the hosted Playground.
+  const { data: signup } = useQuery({ queryKey: ["signup-options"], queryFn: api.signupOptions });
+  const playground = signup?.playground === true;
+  if (isLoading) return <LoadingState label="Loading editions…" />;
   if (error) return <InlineAlert tone="danger">{(error as Error).message}</InlineAlert>;
   return (
     <div className="mvx-admin-stack" data-testid="plans-tab">
       <p className="mvx-admin-muted" style={{ marginTop: 0 }}>
-        Plans apply to every tenant of this deployment; each tenant is on one (Applications › tenant › Change plan). A plan
-        bounds how much a tenant may use, never for how long. A limit of 0 means unlimited. The first self-service plan is
-        the one public sign-up assigns — Community. The plans share their names with the editions, but the edition this
-        deployment runs is its licence key (Platform › License); a plan only bounds one tenant.
+        Editions apply to every tenant of this deployment; each tenant runs one (Applications › tenant › Change edition). An
+        edition bounds how much a tenant may use. A limit of 0 means unlimited. The first self-service edition is the one public
+        sign-up assigns — Community. The edition the deployment itself runs is its licence key (Platform › License); a
+        tenant's edition bounds that tenant only.
       </p>
-      {(data ?? []).map((p) => <PlanCard key={p.key} plan={p} />)}
+      {(data ?? []).map((p) => <PlanCard key={p.key} plan={p} playground={playground} />)}
     </div>
   );
 }
 
-function PlanCard({ plan }: { plan: PlanDef }) {
+function PlanCard({ plan, playground }: { plan: PlanDef; playground: boolean }) {
   const qc = useQueryClient();
   const [draft, setDraft] = useState<PlanDef | null>(null);
   const [saved, setSaved] = useState(false);
@@ -52,6 +55,7 @@ function PlanCard({ plan }: { plan: PlanDef }) {
   const save = useMutation({
     mutationFn: () => api.updatePlan(plan.key, {
       name: form.name, description: form.description, self_service: form.self_service, limits: form.limits, limit_note: form.limit_note, sort_order: form.sort_order,
+      dormant_warn_days: form.dormant_warn_days, dormant_delete_days: form.dormant_delete_days,
     }),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ["admin-plans"] }); setDraft(null); setSaved(true); setTimeout(() => setSaved(false), 2000); },
   });
@@ -71,7 +75,7 @@ function PlanCard({ plan }: { plan: PlanDef }) {
           <Checkbox checked={form.self_service} onChange={(e) => set({ self_service: e.target.checked })} label="Open to self-service sign-up" />
         </div>
         <div style={{ maxWidth: 900, marginBottom: 10 }}>
-          <Field label="When a limit stops the tenant" description='Shown with every refusal instead of "Change the plan to add more." — where to go from here.'>
+          <Field label="When a limit stops the tenant" description='Shown with every refusal instead of "Change the edition to add more." — where to go from here.'>
             <Textarea rows={2} value={form.limit_note} onChange={(e) => set({ limit_note: e.target.value })} aria-label={`Limit note of ${plan.key}`} />
           </Field>
         </div>
@@ -82,9 +86,19 @@ function PlanCard({ plan }: { plan: PlanDef }) {
             </Field>
           ))}
         </div>
+        {playground && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, maxWidth: 900, marginTop: 12 }}>
+            <Field label="Unused: tell administrators after (days)" description="People and API clients using the workspace keep it; its scheduled jobs do not. 0 and 0: never.">
+              <NumberInput min={0} value={form.dormant_warn_days} onChange={(e) => set({ dormant_warn_days: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} aria-label={`Days unused before ${plan.key} administrators are told`} />
+            </Field>
+            <Field label="Unused: delete after (days)" description="Later than the notice; the difference is how much notice they get. Only workspaces with a database of their own.">
+              <NumberInput min={0} value={form.dormant_delete_days} onChange={(e) => set({ dormant_delete_days: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} aria-label={`Days unused before a ${plan.key} workspace is deleted`} />
+            </Field>
+          </div>
+        )}
         <div className="mvx-admin-inline-form" style={{ marginTop: 12 }}>
           <Button variant="primary" size="sm" loading={save.isPending} loadingLabel="Saving…" disabled={!draft} onClick={() => save.mutate()}>
-            {saved ? "Saved" : "Save plan"}
+            {saved ? "Saved" : "Save edition"}
           </Button>
           {draft && <Button size="sm" onClick={() => setDraft(null)}>Discard</Button>}
           {save.isError && <span className="mvx-admin-error">{(save.error as Error).message}</span>}

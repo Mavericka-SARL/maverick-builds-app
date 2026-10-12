@@ -303,8 +303,27 @@ export interface PlanDef {
   limits: PlanLimits;
   /** What a tenant is told when a limit stops it; "" means "change the plan". */
   limit_note: string;
+  /**
+   * Retiring workspaces nobody uses: after dormant_warn_days without use its
+   * administrators are told, at dormant_delete_days it is deleted. 0 and 0:
+   * never.
+   */
+  dormant_warn_days: number;
+  dormant_delete_days: number;
   sort_order: number;
   updated_at?: string;
+}
+
+/** One dedicated tenant's use (GET /api/admin/dormancy). */
+export interface DormancyRow {
+  customer_id: string;
+  last_used_at: string;
+  /** When its administrators were told it will be deleted. */
+  warned_at?: string;
+  /** When they will be told, while not yet told. */
+  warn_on?: string;
+  /** When it will be deleted, once they have been told. */
+  delete_on?: string;
 }
 
 /** A tenant's plan as it applies right now (GET /api/me, tenant listing). */
@@ -359,9 +378,17 @@ export interface LegalInfo {
 
 export interface SignupOptions {
   enabled: boolean;
+  /** The hosted Playground: the one deployment that retires unused workspaces. */
+  playground?: boolean;
   reason?: string;
   contact_url?: string;
-  plan?: { key: string; name: string; description: string; limits: PlanLimits; limit_note: string };
+  plan?: {
+    key: string; name: string; description: string; limits: PlanLimits; limit_note: string;
+    /** Retiring unused workspaces, quoted in the terms; 0 never. */
+    dormant_warn_days?: number; dormant_delete_days?: number;
+    /** How long backups keep a deleted workspace. */
+    backup_retention_days?: number;
+  };
 }
 
 export interface SignupRequest {
@@ -2114,6 +2141,7 @@ export const api = {
   getPlans: () => apiFetch<PlanDef[]>("/api/admin/plans"),
   updatePlan: (key: string, body: Omit<PlanDef, "key" | "updated_at">) =>
     apiFetch<PlanDef>(`/api/admin/plans/${encodeURIComponent(key)}`, { method: "PUT", body: JSON.stringify(body) }),
+  adminDormancy: () => apiFetch<DormancyRow[]>("/api/admin/dormancy"),
   getLicense: () => apiFetch<LicenseInfo>("/api/license"),
   getConnectorSettings: () => apiFetch<ConnectorSettings>("/api/admin/connector-settings"),
   updateConnectorSettings: (body: { chat_writes: boolean }) =>

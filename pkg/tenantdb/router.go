@@ -70,6 +70,8 @@ type Router struct {
 	// their database: refused by Pool, and migrated again in the background.
 	unreached map[string]Tenant
 	retrying  bool
+	// used is when this process last recorded each tenant's use (Used).
+	used map[string]time.Time
 }
 
 // SetWaker lets this process's background loops sleep while their tenant is

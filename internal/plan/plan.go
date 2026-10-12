@@ -75,9 +75,15 @@ type Plan struct {
 	// from here. Empty means "change the plan": the words the engine uses
 	// for a deployment whose answer is another plan. A deployment whose
 	// answer is elsewhere (run it yourself, a licence) says so here.
-	LimitNote string    `json:"limit_note"`
-	SortOrder int       `json:"sort_order"`
-	UpdatedAt time.Time `json:"updated_at"`
+	LimitNote string `json:"limit_note"`
+	// DormantWarnDays and DormantDeleteDays retire workspaces nobody uses
+	// (internal/dormancy): after DormantWarnDays without use the tenant's
+	// administrators are told it will be deleted, and at DormantDeleteDays it
+	// is. Both 0 means never.
+	DormantWarnDays   int       `json:"dormant_warn_days"`
+	DormantDeleteDays int       `json:"dormant_delete_days"`
+	SortOrder         int       `json:"sort_order"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // NextStep is the sentence appended to every refusal: the plan's note, or
@@ -86,21 +92,21 @@ func (p Plan) NextStep() string {
 	if n := strings.TrimSpace(p.LimitNote); n != "" {
 		return n
 	}
-	return "Change the plan to add more."
+	return "Change the edition to add more."
 }
 
 // ErrUnknownPlan is returned by Get for a key with no row.
-var ErrUnknownPlan = errors.New("unknown plan")
+var ErrUnknownPlan = errors.New("unknown edition")
 
 var keyRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 
 // Validate checks a plan before it is stored.
 func (p Plan) Validate() error {
 	if !keyRe.MatchString(p.Key) {
-		return fmt.Errorf("plan key must be 1-32 lower-case letters, digits, '-' or '_'")
+		return fmt.Errorf("edition key must be 1-32 lower-case letters, digits, '-' or '_'")
 	}
 	if n := strings.TrimSpace(p.Name); n == "" || len(n) > 60 {
-		return fmt.Errorf("plan name is required (at most 60 characters)")
+		return fmt.Errorf("edition name is required (at most 60 characters)")
 	}
 	if len(p.Description) > 300 {
 		return fmt.Errorf("description is at most 300 characters")
@@ -114,15 +120,21 @@ func (p Plan) Validate() error {
 			return fmt.Errorf("a limit cannot be negative (0 means unlimited)")
 		}
 	}
+	switch w, d := p.DormantWarnDays, p.DormantDeleteDays; {
+	case w == 0 && d == 0:
+	case w <= 0 || d <= w || d > 3650:
+		return fmt.Errorf("unused workspaces: warn after at least 1 day and delete later than that (at most 3650 days), or set both to 0 for never")
+	}
 	return nil
 }
 
-const planColumns = `key, name, description, self_service, limits, limit_note, sort_order, updated_at`
+const planColumns = `key, name, description, self_service, limits, limit_note, dormant_warn_days, dormant_delete_days, sort_order, updated_at`
 
 func scanPlan(row pgx.Row) (Plan, error) {
 	var p Plan
 	var limits []byte
-	if err := row.Scan(&p.Key, &p.Name, &p.Description, &p.SelfService, &limits, &p.LimitNote, &p.SortOrder, &p.UpdatedAt); err != nil {
+	if err := row.Scan(&p.Key, &p.Name, &p.Description, &p.SelfService, &limits, &p.LimitNote,
+		&p.DormantWarnDays, &p.DormantDeleteDays, &p.SortOrder, &p.UpdatedAt); err != nil {
 		return Plan{}, err
 	}
 	if len(limits) > 0 {
@@ -185,10 +197,11 @@ func Update(ctx context.Context, db DB, p Plan) (Plan, error) {
 	limits, _ := json.Marshal(p.Limits)
 	saved, err := scanPlan(db.QueryRow(ctx, `
 		UPDATE platform.plan SET name = $2, description = $3, self_service = $4, limits = $5::jsonb,
-		    limit_note = $6, sort_order = $7, updated_at = now()
+		    limit_note = $6, sort_order = $7, dormant_warn_days = $8, dormant_delete_days = $9, updated_at = now()
 		WHERE key = $1
 		RETURNING `+planColumns,
-		p.Key, strings.TrimSpace(p.Name), strings.TrimSpace(p.Description), p.SelfService, limits, strings.TrimSpace(p.LimitNote), p.SortOrder))
+		p.Key, strings.TrimSpace(p.Name), strings.TrimSpace(p.Description), p.SelfService, limits, strings.TrimSpace(p.LimitNote), p.SortOrder,
+		p.DormantWarnDays, p.DormantDeleteDays))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Plan{}, fmt.Errorf("%w: %q", ErrUnknownPlan, p.Key)
 	}
@@ -258,7 +271,7 @@ func Evaluate(p Plan, known bool, t Tenant) State {
 	if t.LimitState == "over" {
 		st.ReadOnly = true
 		st.Code = CodeOverLimit
-		st.Reason = fmt.Sprintf("This tenant is over its plan's limits (%s). The workspace is read-only, except for deleting, until it is back within them.", t.LimitReason)
+		st.Reason = fmt.Sprintf("This tenant is over its edition's limits (%s). The workspace is read-only, except for deleting, until it is back within them.", t.LimitReason)
 	}
 	return st
 }

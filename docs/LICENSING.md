@@ -47,8 +47,8 @@ once, in `pkg/license/features.go`, and reported by `GET /api/license`.
 | `deployment_settings` | Deployment-wide defaults for notification delivery, audit retention and the AI key, inherited by tenants without their own | Enterprise |
 
 A key can name extra features beyond its edition's defaults, for tailored
-contracts. Keys carry no numeric limits: what a *tenant* may use is a plan
-question, enforced per tenant — see
+contracts. Keys carry no numeric limits: what a *tenant* may use is a question of
+its edition, enforced per tenant — see
 [`docs/PLANS_AND_SIGNUP.md`](PLANS_AND_SIGNUP.md). (Keys issued before
 2026-10-07 could carry `limits`; nothing ever enforced them, and they are now
 ignored.)

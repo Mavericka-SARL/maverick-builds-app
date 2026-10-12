@@ -139,8 +139,8 @@ ingress's keep-alive settings rather than in the engine.
 
 ### After the release (2026-09-18)
 
-The same profile against staging once it ran the release that adds plans,
-quotas and sign-up — every mutating request now passes the plan guard, and
+The same profile against staging once it ran the release that adds editions,
+quotas and sign-up — every mutating request now passes the edition guard, and
 creations ask the enforcer:
 
 | Op | Requests | Errors | rps | p50 | p95 | p99 |
@@ -150,7 +150,7 @@ creations ask the enforcer:
 
 Within noise of the numbers above (1.74 s / 4.98 s), so the guard costs
 nothing measurable: its per-tenant state is cached for a minute and the
-limit counts only run for limits a plan actually sets.
+limit counts only run for limits an edition actually sets.
 
 ## What to do with them
 
