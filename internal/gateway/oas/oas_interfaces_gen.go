@@ -261,10 +261,6 @@ type ExportGridRes interface {
 	exportGridRes()
 }
 
-type ExportModelPackageRes interface {
-	exportModelPackageRes()
-}
-
 type ExportModelRes interface {
 	exportModelRes()
 }

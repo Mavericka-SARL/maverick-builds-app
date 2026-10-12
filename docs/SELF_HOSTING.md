@@ -118,7 +118,7 @@ The stack lives in [`deploy/compose/`](../deploy/compose/):
 | `integration` | Runs REST API connector syncs and SFTP file imports |
 | `keycloak` | Sign-in, passwords, invitations |
 | `postgres` | PostgreSQL 16: the platform's database, Keycloak's database, and one database per tenant if you choose that |
-| `minio` | Object storage for model package exports and, by default, the backups |
+| `minio` | Object storage for the backups, by default |
 | `backup` | Dumps every database once a day |
 
 ### Step 1 — Prepare the server
@@ -560,9 +560,8 @@ of your own. Then edit it:
    own images, replace the block with the one `build-images.sh` printed.
 3. **Object storage.** By default MinIO runs in the cluster and holds the
    backups and WAL archive. To keep them outside the cluster, as you should in
-   production: set `MINIO_URL` (the endpoint, `https://`), `MINIO_ROOT_USER`
-   (the access key) and `OBJECT_STORE_BUCKET` in `site.yaml`'s
-   `mavericks-config`; set the bucket's region as `AWS_REGION` on both
+   production: set `MINIO_URL` (the endpoint, `https://`) and `MINIO_ROOT_USER`
+   (the access key) in `site.yaml`'s `mavericks-config`; set the bucket's region as `AWS_REGION` on both
    containers of the `postgres` StatefulSet if it is not `us-east-1`; and
    uncomment `minio-remove.yaml` and `networkpolicy-external-objectstore.yaml`
    in `kustomization.yaml`, deleting the `minio-data` patch from `site.yaml`.

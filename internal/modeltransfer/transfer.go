@@ -9,9 +9,8 @@
 //
 // This package holds no HTTP/auth concerns — those live in
 // internal/gateway/model_transfer.go (the tenant_admin-gated HTTP
-// handlers) and internal/deployment/builder.go (the tarball builder), both
-// of which call CollectExport/Import directly rather than re-deriving
-// these queries.
+// handlers), which calls CollectExport/Import directly rather than
+// re-deriving these queries.
 package modeltransfer
 
 import (

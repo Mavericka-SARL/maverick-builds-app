@@ -51,7 +51,6 @@ import (
 	"github.com/mavericks-engine/mavericks/pkg/dbx"
 	"github.com/mavericks-engine/mavericks/pkg/keycloak"
 	"github.com/mavericks-engine/mavericks/pkg/license"
-	"github.com/mavericks-engine/mavericks/pkg/objectstore"
 	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
 )
 
@@ -82,11 +81,6 @@ type handler struct {
 	// sheetsTokenURL / sheetsAPIBase point a tenant's stored Google service
 	// account at a test's fake Google; empty in production.
 	sheetsTokenURL, sheetsAPIBase string
-	// store backs the standalone deployment package export route
-	// (adminModelExportPackage) — nil unless constructed via
-	// NewHandlerWithObjectStore. A nil store means that one route 500s;
-	// every other route is unaffected.
-	store *objectstore.Store
 	// kc provisions real Keycloak accounts for console-created users. nil
 	// means "no identity provider wired", which is the normal state for the
 	// dev stack: there, X-Dev-User personas stand in for real accounts and
@@ -147,8 +141,7 @@ type handler struct {
 // Deps are the optional collaborators a handler can be built with. Every field
 // may be zero; each route that needs one says what happens when it is missing.
 type Deps struct {
-	ObjectStore *objectstore.Store
-	Keycloak    *keycloak.Client
+	Keycloak *keycloak.Client
 	// Router gives each tenant its own database. nil keeps every tenant in
 	// the database DATABASE_URL points at, which is what the dev stack and
 	// every existing deployment do until they are migrated.
@@ -222,25 +215,16 @@ var devPersonas = map[string]string{
 }
 
 func NewHandler(log zerolog.Logger, pool *pgxpool.Pool, jwks *identity.JWKSValidator) http.Handler {
-	return NewHandlerWithObjectStore(log, pool, jwks, nil)
+	return NewHandlerWithDeps(log, pool, jwks, Deps{})
 }
 
-// NewHandlerWithObjectStore is NewHandler plus an object store for the
-// standalone deployment package export route. store may be nil (e.g. if
-// object store configuration/bootstrap failed) — every route except
-// adminModelExportPackage is unaffected either way.
-func NewHandlerWithObjectStore(log zerolog.Logger, pool *pgxpool.Pool, jwks *identity.JWKSValidator, store *objectstore.Store) http.Handler {
-	return NewHandlerWithDeps(log, pool, jwks, Deps{ObjectStore: store})
-}
-
-// NewHandlerWithDeps is the full constructor; the two above delegate to it.
+// NewHandlerWithDeps is the full constructor; NewHandler delegates to it.
 func NewHandlerWithDeps(log zerolog.Logger, pool *pgxpool.Pool, jwks *identity.JWKSValidator, deps Deps) http.Handler {
 	h := &handler{
 		log:         log,
 		db:          tenantdb.NewHandle(pool, deps.Router),
 		devMode:     os.Getenv("DEV_MODE") == "true",
 		jwks:        jwks,
-		store:       deps.ObjectStore,
 		kc:          deps.Keycloak,
 		lic:         deps.License,
 		kcPublicURL: deps.KeycloakPublicURL, kcRealm: deps.KeycloakRealm, publicURL: deps.PublicURL,
@@ -566,7 +550,6 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 		return cors(h.guard(adminRoute(fn), "tenant_admin", "platform_admin"))
 	}
 	register("GET", "/api/admin/models/{id}/export", "admin", tenantAdm(h.adminModelExport))
-	register("GET", "/api/admin/models/{id}/export/package", "admin", tenantAdm(h.adminModelExportPackage))
 	register("POST", "/api/admin/models/import", "admin", tenantAdm(h.adminModelImport))
 	register("POST", "/api/admin/revisions", "admin", adm(h.adminRevisions))
 	register("PATCH", "/api/admin/revisions/{id}", "admin", adm(h.adminRevisionAction))

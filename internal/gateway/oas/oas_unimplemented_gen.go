@@ -838,17 +838,6 @@ func (UnimplementedHandler) ExportModel(ctx context.Context, params ExportModelP
 	return r, ht.ErrNotImplemented
 }
 
-// ExportModelPackage implements exportModelPackage operation.
-//
-// Download a standalone deployment package for a model revision — a tar.gz containing the entity
-// graph (package.json), the complete database migrations, a provenance manifest, and an infra-only
-// docker-compose (tenant admins for their own tenant, platform admins for any).
-//
-// GET /api/admin/models/{id}/export/package
-func (UnimplementedHandler) ExportModelPackage(ctx context.Context, params ExportModelPackageParams) (r ExportModelPackageRes, _ error) {
-	return r, ht.ErrNotImplemented
-}
-
 // ExtractFormulaRefs implements extractFormulaRefs operation.
 //
 // Parse a formula string and return the metric/dimension names it references.

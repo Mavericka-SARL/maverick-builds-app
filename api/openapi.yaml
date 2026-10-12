@@ -6688,36 +6688,6 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
-  /api/admin/models/{id}/export/package:
-    get:
-      operationId: exportModelPackage
-      tags: [Admin]
-      summary: Download a standalone deployment package for a model revision — a tar.gz containing the entity graph (package.json), the complete database migrations, a provenance manifest, and an infra-only docker-compose (tenant admins for their own tenant, platform admins for any)
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-        - name: revision_id
-          in: query
-          schema: { type: string, format: uuid }
-          description: Defaults to the model's active revision.
-        - name: include_data
-          in: query
-          schema: { type: boolean, default: true }
-          description: >-
-            false exports the model's definitions only — no entered values and
-            no form records; true (the default) includes them.
-      responses:
-        "200":
-          description: tar.gz deployment package (sent with a Content-Disposition attachment header)
-          content:
-            application/gzip:
-              schema: { type: string, format: binary }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/NotFound" }
-
   /api/admin/models/import:
     post:
       operationId: importModel

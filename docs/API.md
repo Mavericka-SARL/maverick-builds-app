@@ -95,7 +95,7 @@ user with a role; the handler then applies the scope checks above.
 | `/api/business-admin/*` (everything else) | users, dashboards, access rules | `business_admin` of the application's workspace |
 | `/api/admin/users*`, `/api/admin/workspaces*` | user and workspace administration | `platform_admin`, `tenant_admin` or `developer` |
 | `/api/admin/*` (everything else) | tenants, applications, models, revisions, grants, audit (listing, export, retention settings), usage, editions, branding, SSO, SCIM tokens, AI settings, infrastructure nodes | `platform_admin` or `tenant_admin` |
-| `GET /api/admin/models/{id}/export`, `…/export/package`, `POST /api/admin/models/import` | revision-aware model export (`?include_data=`), standalone package, import | `platform_admin` or `tenant_admin` |
+| `GET /api/admin/models/{id}/export`, `POST /api/admin/models/import` | revision-aware model export (`?include_data=`), import | `platform_admin` or `tenant_admin` |
 
 Enterprise and commercial features answer **403** with the feature name when
 the deployment's licence does not include them. A tenant whose edition has ended

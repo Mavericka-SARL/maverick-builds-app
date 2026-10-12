@@ -122,8 +122,7 @@ is the readable overview.
 | `internal/identity` | JWKS validation of Keycloak tokens |
 | `internal/aiassistant` | Provider adapters, chat/session stores, documents, proposals, read tools, and isolated-revision writes |
 | `internal/schemamigration` | Model-driven schema migration generation and tracking |
-| `internal/deployment` | Standalone deployment package builder (tar.gz: entity graph via `internal/modeltransfer`, full migrations tree, provenance manifest, infra-only compose), fully in-memory, retention through `pkg/objectstore` |
-| `internal/modeltransfer` | Model entity-graph export/import — the shared core behind both the admin JSON export/import HTTP endpoints and `internal/deployment`'s tarball builder |
+| `internal/modeltransfer` | Model entity-graph export/import — the core behind the admin JSON export/import HTTP endpoints |
 | `internal/notification` | Notification persistence, e-mail dispatch (SMTP, STARTTLS or implicit TLS) and task reminders |
 | `internal/integration` | REST API connector definitions, sealed connections, the durable run queue and the worker |
 | `internal/rollup` | Shared hierarchy rollups used by the grid, charts and the calculation scheduler |
@@ -390,27 +389,7 @@ facts with sum/replace-style aggregation. Integration definitions and saved
 import jobs are managed from the Developer Console.
 
 Tenant and platform admins can export (with or without data) and import a revision-aware model package over the
-admin HTTP API (`internal/modeltransfer`), and download a standalone
-deployment package (`GET /api/admin/models/{id}/export/package`) — a tar.gz
-containing that same entity graph, the complete `migrations/` tree, a
-provenance manifest (source commit, build command, facts export policy), and
-an infra-only docker-compose. `internal/deployment`'s builder delegates to
-`internal/modeltransfer` rather than its own queries — the previous
-implementation queried a removed `dimension_def.code` column and suppressed
-query/scan errors, so a schema mismatch could emit an empty local archive
-instead of failing; it also had no revision scoping and covered only
-dimensions/metrics. The built package is
-retained via `pkg/objectstore` (a thin `minio-go/v7` client plus a
-`storage.object` PostgreSQL metadata table, one row per revision — a
-re-export overwrites the previous package rather than accumulating
-history) instead of the local-disk write the builder used before: that was
-the one production code path anywhere in this repository that touched a
-filesystem, and it was concretely broken under the real Kubernetes topology
-(`readOnlyRootFilesystem: true`, no writable volume on the gateway pod).
-Access-control configuration
-(`security.*`, `identity.business_role*`) and per-model test definitions are
-deliberately not included — both are documented as known gaps in the
-package's own manifest rather than silently omitted.
+admin HTTP API (`internal/modeltransfer`).
 
 ## AI assistant architecture
 
@@ -541,9 +520,6 @@ transfer, chart, workflow, import, and rollup behavior.
   boundaries.
 - A migration file and its registry insert are not applied in one transaction.
 - Import accepts a non-input metric; `/api/cells` skips unknown dimension codes.
-- Standalone deployment packages omit access-control configuration and
-  per-model test definitions by design (see `internal/deployment`'s
-  manifest.json known_gaps).
 - AI provider-key encryption is configuration-dependent, and uploaded document
   content (extracted text, not the original file) is persisted in PostgreSQL.
   Neither AI document upload nor CSV/XLSX import retains original file bytes.

@@ -254,10 +254,9 @@ A model can leave your tenant as one file and arrive somewhere else as a new mod
 
 		taText(`## Exporting
 
-Beside each model's name there are three icons; hover one to see its name.
+Beside each model's name there are two icons; hover one to see its name.
 
-- **Download** — *Export model (active revision)*: the live revision with its data, as a `+tick+`.mavericks-model.json`+tick+` file
-- **Package** — *Download standalone deployment package*: the same model and data with the database migrations and a manifest, as a `+tick+`.tar.gz`+tick+`, for a deployment of its own
+- **Download** — *Export model (active revision)*: the live revision with its data, as a `+tick+`.mavericks-model.json`+tick+` file. A model with no revisions has nothing to export, so it shows no Download icon.
 - **Bin** — *Delete model*, below
 
 Under **Revisions**, each revision has two export icons of its own: *with data* (its values and form records) and *definitions only* (the structure with no numbers — the usual choice when you hand a model to someone else).`, 248),

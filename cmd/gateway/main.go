@@ -7,7 +7,6 @@ import (
 	"github.com/mavericks-engine/mavericks/ee/auditexport"
 	"github.com/mavericks-engine/mavericks/ee/branding"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -34,7 +33,6 @@ import (
 	"github.com/mavericks-engine/mavericks/pkg/license"
 	"github.com/mavericks-engine/mavericks/pkg/logger"
 	"github.com/mavericks-engine/mavericks/pkg/migrate"
-	"github.com/mavericks-engine/mavericks/pkg/objectstore"
 	"github.com/mavericks-engine/mavericks/pkg/telemetry"
 	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
 	"github.com/mavericks-engine/mavericks/pkg/wake"
@@ -66,16 +64,6 @@ type cfg struct {
 	HTTPPort          int    `mapstructure:"HTTP_PORT"`
 	OTelEndpoint      string `mapstructure:"OTEL_EXPORTER_OTLP_ENDPOINT"`
 	ServiceVersion    string `mapstructure:"SERVICE_VERSION"`
-	// Object storage backs exactly one feature (standalone deployment
-	// package export) as of this item — gateway-only config, not
-	// pkg/config.BaseConfig, since every other cmd/* binary has no need
-	// for it. MINIO_URL/MINIO_ROOT_USER/MINIO_ROOT_PASSWORD are already
-	// provisioned in deploy/k8s/base/configmap.yaml and secrets.yaml;
-	// OBJECT_STORE_BUCKET is the one genuinely new key.
-	ObjectStoreURL       string `mapstructure:"MINIO_URL"`
-	ObjectStoreAccessKey string `mapstructure:"MINIO_ROOT_USER"`
-	ObjectStoreSecretKey string `mapstructure:"MINIO_ROOT_PASSWORD"`
-	ObjectStoreBucket    string `mapstructure:"OBJECT_STORE_BUCKET"`
 	// License key for the commercial/enterprise editions (pkg/license). The
 	// key itself, or a file holding it; empty runs the community edition.
 	// The keys it is verified against are compiled in; there is no setting
@@ -163,10 +151,6 @@ func main() {
 	c.SMTPPort = 587
 	c.KeycloakURL = "http://localhost:8180"
 	c.KeycloakRealm = "mavericks"
-	c.ObjectStoreURL = "http://localhost:9000"
-	c.ObjectStoreAccessKey = "mavericks"
-	c.ObjectStoreSecretKey = "mavericks123"
-	c.ObjectStoreBucket = "mavericks"
 	if err := config.Load(&c); err != nil {
 		log.Fatal().Err(err).Msg("failed to load config")
 		os.Exit(1)
@@ -227,29 +211,6 @@ func main() {
 			log.Fatal().Err(err).Msg("failed to initialize JWKS validator")
 			os.Exit(1)
 		}
-	}
-
-	// Object storage backs standalone deployment package export. Client
-	// construction never dials the network (minio.New only validates the
-	// URL/credential shape), so a failure here means genuinely broken
-	// config, not transient unavailability — still non-fatal: the rest of
-	// the gateway has nothing to do with this feature, so store stays nil
-	// and the one handler that needs it fails loudly per-request instead of
-	// refusing to start the whole process. EnsureBucket, by contrast, DOES
-	// touch the network — best-effort at boot (warn, continue), mirroring
-	// the OTel setup above, since MinIO being briefly unreachable at boot
-	// shouldn't crash-loop every other route.
-	var objStore *objectstore.Store
-	endpoint, useSSL, err := parseObjectStoreEndpoint(c.ObjectStoreURL)
-	if err != nil {
-		log.Warn().Err(err).Str("url", c.ObjectStoreURL).Msg("invalid object store URL — package export will be unavailable")
-	} else if objClient, err := objectstore.NewClient(endpoint, c.ObjectStoreAccessKey, c.ObjectStoreSecretKey, c.ObjectStoreBucket, useSSL); err != nil {
-		log.Warn().Err(err).Msg("object store client construction failed — package export will be unavailable")
-	} else {
-		if err := objClient.EnsureBucket(ctx); err != nil {
-			log.Warn().Err(err).Msg("object store bucket setup failed — continuing, package export may fail until it's reachable")
-		}
-		objStore = objectstore.NewStore(objClient, objectstore.NewMetaStore(pool))
 	}
 
 	// Keycloak admin client, used to provision real accounts for users created
@@ -379,7 +340,6 @@ func main() {
 		gateway.NewHandlerWithDeps(log, pool, jwks, gateway.Deps{
 			Plans:         planEnforcer,
 			TenantDeleter: tenantDeleter,
-			ObjectStore:   objStore,
 			Keycloak:      kc,
 			License:       lic,
 			Router:        router,
@@ -520,21 +480,6 @@ func main() {
 	if err := srv.Shutdown(context.Background()); err != nil {
 		log.Error().Err(err).Msg("shutdown error")
 	}
-}
-
-// parseObjectStoreEndpoint splits a "http(s)://host:port" URL (the shape
-// MINIO_URL is always configured as, in both docker-compose.dev.yml and
-// deploy/k8s/base/configmap.yaml) into the bare host:port minio-go/v7
-// expects plus whether TLS should be used.
-func parseObjectStoreEndpoint(rawURL string) (endpoint string, useSSL bool, err error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return "", false, fmt.Errorf("parse object store URL: %w", err)
-	}
-	if u.Host == "" {
-		return "", false, fmt.Errorf("object store URL %q has no host", rawURL)
-	}
-	return u.Host, u.Scheme == "https", nil
 }
 
 func firstNonEmptyString(vals ...string) string {

@@ -9,7 +9,7 @@
 #   docker build -t mavericks-minio deploy/docker/minio
 #
 # The self-hosted Compose stack (deploy/compose) builds it for the object store
-# behind package export and the nightly database dumps.
+# behind the nightly database dumps.
 FROM golang:1.26 AS build
 ARG MINIO_VERSION=RELEASE.2025-09-07T16-13-09Z
 RUN git clone --depth 1 --branch ${MINIO_VERSION} https://github.com/minio/minio.git /src

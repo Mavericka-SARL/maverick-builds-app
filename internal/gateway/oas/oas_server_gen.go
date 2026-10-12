@@ -580,14 +580,6 @@ type Handler interface {
 	//
 	// GET /api/admin/models/{id}/export
 	ExportModel(ctx context.Context, params ExportModelParams) (ExportModelRes, error)
-	// ExportModelPackage implements exportModelPackage operation.
-	//
-	// Download a standalone deployment package for a model revision — a tar.gz containing the entity
-	// graph (package.json), the complete database migrations, a provenance manifest, and an infra-only
-	// docker-compose (tenant admins for their own tenant, platform admins for any).
-	//
-	// GET /api/admin/models/{id}/export/package
-	ExportModelPackage(ctx context.Context, params ExportModelPackageParams) (ExportModelPackageRes, error)
 	// ExtractFormulaRefs implements extractFormulaRefs operation.
 	//
 	// Parse a formula string and return the metric/dimension names it references.

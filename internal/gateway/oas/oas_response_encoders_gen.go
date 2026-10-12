@@ -3258,67 +3258,6 @@ func encodeExportModelResponse(response ExportModelRes, w http.ResponseWriter, s
 	}
 }
 
-func encodeExportModelPackageResponse(response ExportModelPackageRes, w http.ResponseWriter, span trace.Span) error {
-	switch response := response.(type) {
-	case *ExportModelPackageOK:
-		w.Header().Set("Content-Type", "application/gzip")
-		w.WriteHeader(200)
-		span.SetStatus(codes.Ok, http.StatusText(200))
-
-		writer := w
-		if closer, ok := response.Data.(io.Closer); ok {
-			defer closer.Close()
-		}
-		if _, err := io.Copy(writer, response); err != nil {
-			return errors.Wrap(err, "write")
-		}
-
-		return nil
-
-	case *ExportModelPackageBadRequest:
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(400)
-		span.SetStatus(codes.Error, http.StatusText(400))
-
-		e := new(jx.Encoder)
-		response.Encode(e)
-		if _, err := e.WriteTo(w); err != nil {
-			return errors.Wrap(err, "write")
-		}
-
-		return nil
-
-	case *ExportModelPackageForbidden:
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(403)
-		span.SetStatus(codes.Error, http.StatusText(403))
-
-		e := new(jx.Encoder)
-		response.Encode(e)
-		if _, err := e.WriteTo(w); err != nil {
-			return errors.Wrap(err, "write")
-		}
-
-		return nil
-
-	case *ExportModelPackageNotFound:
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(404)
-		span.SetStatus(codes.Error, http.StatusText(404))
-
-		e := new(jx.Encoder)
-		response.Encode(e)
-		if _, err := e.WriteTo(w); err != nil {
-			return errors.Wrap(err, "write")
-		}
-
-		return nil
-
-	default:
-		return errors.Errorf("unexpected response type: %T", response)
-	}
-}
-
 func encodeExtractFormulaRefsResponse(response *ExtractFormulaRefsOK, w http.ResponseWriter, span trace.Span) error {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(200)

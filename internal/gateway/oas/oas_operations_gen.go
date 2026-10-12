@@ -90,7 +90,6 @@ const (
 	ExportFormRecordsOperation            OperationName = "ExportFormRecords"
 	ExportGridOperation                   OperationName = "ExportGrid"
 	ExportModelOperation                  OperationName = "ExportModel"
-	ExportModelPackageOperation           OperationName = "ExportModelPackage"
 	ExtractFormulaRefsOperation           OperationName = "ExtractFormulaRefs"
 	GenerateDimensionPeriodsOperation     OperationName = "GenerateDimensionPeriods"
 	GenerateMigrationOperation            OperationName = "GenerateMigration"

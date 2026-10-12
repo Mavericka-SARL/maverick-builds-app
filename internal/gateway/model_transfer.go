@@ -4,9 +4,8 @@ package gateway
 // self-contained JSON package, and the reverse — recreating a model from
 // such a package under a new application with every cross-entity reference
 // remapped to freshly generated IDs. The entity graph and remapping logic
-// live in internal/modeltransfer (also used by internal/deployment's
-// tarball builder — see that package's doc comment); this file is HTTP
-// framing only: auth, tenant-scope checks, and audit logging.
+// live in internal/modeltransfer; this file is HTTP framing only: auth,
+// tenant-scope checks, and audit logging.
 //
 // Both endpoints are restricted to the tenant_admin role — see the route
 // registrations in NewHandler.

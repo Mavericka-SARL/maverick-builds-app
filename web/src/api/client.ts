@@ -2441,12 +2441,6 @@ export const api = {
     apiFetch<ModelExportPackage>(`/api/admin/models/${modelId}/export${exportQuery(revisionId, includeData)}`),
   importModel: (body: { application_id: string; model_name?: string; revision_name?: string; package: ModelExportPackage }) =>
     apiFetch<{ model_id: string; revision_id: string }>("/api/admin/models/import", { method: "POST", body: JSON.stringify(body) }),
-  // Standalone deployment package (tar.gz): the model's full entity graph
-  // plus the complete database migrations, a provenance manifest, and an
-  // infra-only docker-compose — everything exportModel's plain JSON doesn't
-  // carry. Same tenant_admin-only gate.
-  exportModelPackage: (modelId: string, revisionId?: string, includeData = true) =>
-    apiFetchBlob(`/api/admin/models/${modelId}/export/package${exportQuery(revisionId, includeData)}`),
 
   createAdminRevision: (body: { model_id: string; name: string }) =>
     apiFetch<{ id: string }>("/api/admin/revisions", { method: "POST", body: JSON.stringify({ ...body, description: "" }) }),

@@ -2,7 +2,7 @@ import { createContext, useContext, useRef, useState } from "react";
 import { tenancyMatches } from "./tenancySearch";
 import { AuditExportPanel } from "../../ee/auditexport/AuditExportPanel";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { Plus, Pencil, Trash2, Download, Upload, Package, Braces } from "lucide-react";
+import { Plus, Pencil, Trash2, Download, Upload, Braces } from "lucide-react";
 import { api, withTenant, CONTROL_PLANE, type AccessRemovalResult, type AdminTenant, type AdminModel, type AdminApp, type AdminAuditEvent, type AdminRevision, type ModelExportPackage } from "../../api/client";
 import { downloadJSON } from "../../api/download";
 import { accessRemovalNotice } from "../admin/accessRemoval";
@@ -158,6 +158,10 @@ function ModelRevisionsSection({ model, tenantId, canTransferModels }: { model: 
           );
         })}
       </div>
+      {exportRevision.isError && <p className="mvx-admin-error" role="alert">Export failed: {(exportRevision.error as Error).message}</p>}
+      {createRevision.isError && <p className="mvx-admin-error" role="alert">{(createRevision.error as Error).message}</p>}
+      {deleteRevision.isError && <p className="mvx-admin-error" role="alert">{(deleteRevision.error as Error).message}</p>}
+      {setActive.isError && <p className="mvx-admin-error" role="alert">{(setActive.error as Error).message}</p>}
       {addRevision ? (
         <div className="mvx-admin-inline-form">
           <TextInput
@@ -209,25 +213,12 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
     onSuccess: () => { inv(); qc.invalidateQueries({ queryKey: ["admin-users"] }); },
   });
   // Export/import is tenant_admin only — the server rejects everyone else,
-  // the buttons are simply hidden for other roles.
+  // the buttons are simply hidden for other roles. A model with no revisions
+  // has nothing to export, so its button is hidden too.
   const exportModel = useMutation({
     mutationFn: async (m: AdminModel) => {
       const pkg = await withTenant(tenantId, () => api.exportModel(m.id));
       downloadJSON(`${m.name}-${pkg.revision_name || "export"}.mavericks-model.json`, pkg);
-    },
-  });
-  // The standalone tar.gz package (definitions + facts + full migrations +
-  // manifest + infra-only compose) — distinct from exportModel's plain JSON
-  // above, which carries only the entity graph.
-  const exportModelPackage = useMutation({
-    mutationFn: async (m: AdminModel) => {
-      const { blob, filename } = await withTenant(tenantId, () => api.exportModelPackage(m.id));
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
     },
   });
   const importModel = useMutation({
@@ -284,6 +275,7 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
               Add model
             </Button>
             <Button size="sm" onClick={() => setAddModel(false)}>Cancel</Button>
+            {createModel.isError && <span className="mvx-admin-error">{(createModel.error as Error).message}</span>}
           </div>
         ) : (
           <div style={{ display: "flex", gap: 8, alignSelf: "flex-start", alignItems: "center" }}>
@@ -333,24 +325,15 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
                 </span>
               )}
               {!modelOpen && <span className="mvx-admin-muted">{revisions} revision{revisions !== 1 ? "s" : ""}{m.active_revision ? ` · active: ${m.active_revision}` : ""}</span>}
-              {canTransferModels && (
+              {canTransferModels && revisions > 0 && (
                 <IconButton
                   aria-label={`Export model ${m.name}`}
                   title="Export model (active revision)"
                   size={26}
                   onClick={() => exportModel.mutate(m)}
+                  disabled={exportModel.isPending}
                 >
                   <Download size={13} />
-                </IconButton>
-              )}
-              {canTransferModels && (
-                <IconButton
-                  aria-label={`Download deployment package for ${m.name}`}
-                  title="Download standalone deployment package (data + migrations + manifest)"
-                  size={26}
-                  onClick={() => exportModelPackage.mutate(m)}
-                >
-                  <Package size={13} />
                 </IconButton>
               )}
               <IconButton
@@ -367,6 +350,7 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
           </div>
           );
         })}
+        {exportModel.isError && <p className="mvx-admin-error" role="alert">Export failed: {(exportModel.error as Error).message}</p>}
         {deleteModel.isError && <p className="mvx-admin-error" role="alert">{(deleteModel.error as Error).message}</p>}
         {deleteModel.isSuccess && <RemovalNotice result={deleteModel.data} />}
 
@@ -533,6 +517,7 @@ function TenantSection({ tenant, onDelete, isPlatformAdmin, canTransferModels }:
               Save
             </Button>
             <Button size="sm" onClick={() => setEditing(false)}>Cancel</Button>
+            {renameTenant.isError && <span className="mvx-admin-error">{(renameTenant.error as Error).message}</span>}
           </div>
         ) : (
           <div className="mvx-admin-object__title">
@@ -694,6 +679,7 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
           <TenantSection key={tenant.id} tenant={tenant} onDelete={() => deleteTenant.mutate(tenant.id)} isPlatformAdmin={isPlatformAdmin} canTransferModels={canTransferModels} />
         ))}
       </SearchMatches.Provider>
+      {deleteTenant.isError && <p className="mvx-admin-error" role="alert">{(deleteTenant.error as Error).message}</p>}
 
     </div>
   );

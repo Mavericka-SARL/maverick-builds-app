@@ -9303,34 +9303,6 @@ type ExportModelNotFound Error
 
 func (*ExportModelNotFound) exportModelRes() {}
 
-type ExportModelPackageBadRequest Error
-
-func (*ExportModelPackageBadRequest) exportModelPackageRes() {}
-
-type ExportModelPackageForbidden Error
-
-func (*ExportModelPackageForbidden) exportModelPackageRes() {}
-
-type ExportModelPackageNotFound Error
-
-func (*ExportModelPackageNotFound) exportModelPackageRes() {}
-
-type ExportModelPackageOK struct {
-	Data io.Reader
-}
-
-// Read reads data from the Data reader.
-//
-// Kept to satisfy the io.Reader interface.
-func (s ExportModelPackageOK) Read(p []byte) (n int, err error) {
-	if s.Data == nil {
-		return 0, io.EOF
-	}
-	return s.Data.Read(p)
-}
-
-func (*ExportModelPackageOK) exportModelPackageRes() {}
-
 // A file_export integration's config. Names, not ids, so it survives revision copies and model
 // export. Leaf-level only — a dimension that is not a column must be filtered to exactly one leaf.
 // Ref: #/components/schemas/ExportSpec

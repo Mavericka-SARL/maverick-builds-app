@@ -121,7 +121,6 @@ var operationRolesBearerAuth = map[string][]string{
 	ExportFormRecordsOperation:            []string{},
 	ExportGridOperation:                   []string{},
 	ExportModelOperation:                  []string{},
-	ExportModelPackageOperation:           []string{},
 	ExtractFormulaRefsOperation:           []string{},
 	GenerateDimensionPeriodsOperation:     []string{},
 	GenerateMigrationOperation:            []string{},
