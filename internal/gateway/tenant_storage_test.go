@@ -51,9 +51,10 @@ func TestTenantAdminSeesStorageSpace(t *testing.T) {
 		return planState{}
 	}
 
-	// Before the first sweep there is nothing measured to show.
-	if st := listed(); st.StorageBytes != nil || st.Plan.Limits.MaxStorageMB != 100 {
-		t.Fatalf("before the sweep: storage %v of %d MB", st.StorageBytes, st.Plan.Limits.MaxStorageMB)
+	// Moving the tenant to an edition judges it by that edition at once:
+	// the storage is measured with the change, not at the next sweep.
+	if st := listed(); st.StorageBytes == nil || st.Plan.Limits.MaxStorageMB != 100 {
+		t.Fatalf("after the edition change: storage %v of %d MB", st.StorageBytes, st.Plan.Limits.MaxStorageMB)
 	}
 
 	// The sweep measures Acme's own database — the plan does limit storage

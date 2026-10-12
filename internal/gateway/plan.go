@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/mavericks-engine/mavericks/internal/plan"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
@@ -333,6 +335,12 @@ func (h *handler) applyTenantPlan(ctx, tctx context.Context, customerID string, 
 		}
 	}
 	h.plans.Invalidate(customerID)
+	// Judged by the new edition at once: its storage limit (and the guard
+	// that refuses writes past it) applies or lifts now, not at the next
+	// sweep.
+	if _, err := h.plans.Sweep(tctx, h.db.For(tctx), customerID); err != nil {
+		h.log.Warn().Err(err).Str("tenant", customerID).Msg("sweep after an edition change failed; the next sweep judges it")
+	}
 	return changed, nil
 }
 
@@ -344,15 +352,22 @@ const flushStatsSQL = `SELECT pg_stat_force_next_flush()`
 // remeasureStorage re-measures a tenant's storage straight after a delete,
 // so the console shows the space given back — and a workspace read-only
 // for its storage is writable again — at once rather than at the next
-// sweep. The delete's transaction ran flushStatsSQL. A failure only logs:
-// the next sweep measures it.
+// sweep. The delete's transaction ran flushStatsSQL. Then, in the
+// background, it gives the deleted rows' disk back (plan.CompactTenant,
+// forced). A failure only logs: the next sweep measures and compacts.
 func (h *handler) remeasureStorage(ctx context.Context, customerID string) {
 	if h.plans == nil || customerID == "" {
 		return
 	}
-	if _, err := h.plans.Sweep(ctx, h.db.For(ctx), customerID); err != nil {
+	db := h.db.For(ctx)
+	if _, err := h.plans.Sweep(ctx, db, customerID); err != nil {
 		h.log.Warn().Err(err).Str("tenant", customerID).Msg("storage re-measure after a delete failed; the next sweep measures it")
 	}
+	go func(ctx context.Context) {
+		if _, err := plan.CompactTenant(ctx, db, customerID, true); err != nil {
+			h.log.Warn().Err(err).Str("tenant", customerID).Msg("compaction after a delete failed; the next sweep compacts")
+		}
+	}(context.WithoutCancel(ctx))
 }
 
 // deleteAndRemeasure runs one delete of a model's structure (a revision, a
@@ -374,4 +389,11 @@ func (h *handler) deleteAndRemeasure(ctx context.Context, customerID, sql string
 	}
 	h.remeasureStorage(ctx, customerID)
 	return nil
+}
+
+// isStorageRefusal reports whether err is the storage guard refusing a
+// write that would take the workspace past its edition's limit.
+func isStorageRefusal(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == plan.StorageGuardCode
 }

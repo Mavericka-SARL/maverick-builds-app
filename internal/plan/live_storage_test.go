@@ -111,6 +111,20 @@ func TestStorageCountsLiveDataAndFallsWhenAModelIsDeleted(t *testing.T) {
 		t.Fatalf("cell history after deleting the model = %s, want 0", n)
 	}
 
+	// Compacting gives the deleted model's disk back: the files shrink to
+	// about the data left, and a second pass finds nothing to do.
+	freed, err := Compact(ctx, pool, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("compaction gave back %d bytes; data files %d -> %d", freed, filesBefore, dataFiles())
+	if dataFiles() > filesBefore/4 || freed < filesBefore/2 {
+		t.Fatalf("after compaction the data files are %d (were %d), %d given back", dataFiles(), filesBefore, freed)
+	}
+	if again, err := Compact(ctx, pool, true); err != nil || again != 0 {
+		t.Fatalf("second compaction = %d err=%v, want nothing to do", again, err)
+	}
+
 	// An ordinary delete of cells is archived; deleting the revision takes
 	// its cells and their history.
 	exec(`DELETE FROM runtime.fact_input WHERE model_id = $1::uuid AND (dim_members->>'i')::int <= 10`, small.id)

@@ -82,6 +82,10 @@ func (e *Enforcer) InvalidateAll() {
 	e.mu.Unlock()
 }
 
+// StorageGuardCode is the SQLSTATE the storage guard (migration 135) refuses
+// a write with: one that would take a workspace past its edition's limit.
+const StorageGuardCode = "MV402"
+
 // LimitError is a refused creation: which limit, the plan's number and the
 // tenant's. HTTP maps it to 402 so the console can offer the upgrade path.
 type LimitError struct {
@@ -258,7 +262,7 @@ func megabytes(b int64) int {
 // was. Each table counts its live rows (pg_stat_user_tables, which a
 // delete changes at once) times the row width the planner statistics give
 // (pg_stats), and its indexes and TOAST in the same proportion of the
-// table's files (liveTablesCTE); the data-bearing tables (facts,
+// table's files (runtime.live_tables); the data-bearing tables (facts,
 // calculated results, cell history) count the tenant's rows exactly, times
 // the table's live bytes per row (ModelStorage). In a dedicated tenant
 // database (pkg/tenantdb) every other table counts too; in a shared one the
@@ -285,38 +289,10 @@ func dedicatedTo(ctx context.Context, db DB, customerID string) (bool, error) {
 	return current == "tenant_"+strings.ReplaceAll(customerID, "-", ""), nil
 }
 
-// liveTablesCTE is every ordinary table of the database (catalogs
-// excluded) with its root (the partitioned table a partition belongs to,
-// else itself), its live rows and the bytes they take:
-//
-//   - live rows from the statistics collector, or the planner's count when
-//     the collector has nothing (just after a restart);
-//   - a row's width as the planner statistics give it: the columns' average
-//     stored widths, a 24-byte header, alignment, and a 4-byte line pointer;
-//   - the table's indexes and TOAST in the proportion its live rows take of
-//     its main file, as they hold the same rows;
-//   - a table the planner has not analysed yet at its files' size.
-const liveTablesCTE = `WITH stat AS (
-	    SELECT schemaname, tablename, sum(avg_width * (1 - null_frac)) AS width
-	    FROM pg_stats WHERE NOT inherited GROUP BY schemaname, tablename),
-	tbl AS (
-	    SELECT c.oid, COALESCE(pg_partition_root(c.oid), c.oid) AS root,
-	           CASE WHEN s.n_live_tup + s.n_dead_tup + s.n_tup_ins + s.n_tup_del > 0 THEN s.n_live_tup
-	                ELSE GREATEST(c.reltuples, 0)::bigint END AS live,
-	           pg_relation_size(c.oid) AS heap,
-	           pg_total_relation_size(c.oid) - pg_relation_size(c.oid) AS rest,
-	           ceil((24 + st.width) / 8.0) * 8 + 4 AS row_bytes
-	    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-	    LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid
-	    LEFT JOIN stat st ON st.schemaname = n.nspname AND st.tablename = c.relname
-	    WHERE c.relkind IN ('r', 'm') AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')),
-	live_tables AS (
-	    SELECT oid, root, live,
-	           CASE WHEN live = 0 THEN 0
-	                WHEN row_bytes IS NULL OR heap = 0 THEN heap + rest
-	                ELSE live * row_bytes + rest * LEAST(1, live * row_bytes / heap::numeric)
-	           END AS bytes
-	    FROM tbl)`
+// liveTablesCTE is every ordinary table of the database with its live rows
+// and the bytes they take (runtime.live_tables, migration 135: the same
+// measure the storage guard refuses writes by).
+const liveTablesCTE = `WITH live_tables AS (SELECT * FROM runtime.live_tables())`
 
 // dedicatedStorageBytes is the live data of every table in the database:
 // the models' data as ModelStorage counts it — rows counted exactly, so a
@@ -358,19 +334,16 @@ func total(models map[string]int64) int64 {
 }
 
 // ModelStorage is each of the tenant's models with its rows in each data
-// table times that table's live bytes per row (liveTablesCTE; 200 while the
-// table has no rows the statistics know of) — the model's share of the
-// data those tables hold, indexes included. Definitions are small next to
-// the data and left out.
+// table times that table's bytes per row (runtime.bytes_per_row) — the
+// model's share of the data those tables hold, indexes included.
+// Definitions are small next to the data and left out.
 func ModelStorage(ctx context.Context, db DB, customerID string) (map[string]int64, error) {
 	rows, err := db.Query(ctx, liveTablesCTE+`,
 		`+strings.TrimPrefix(appsCTE, "WITH ")+`,
 		models AS (SELECT id FROM core.model WHERE application_id IN (SELECT id FROM apps)),
 		width AS (
-		    SELECT t.name, COALESCE(sum(l.bytes) / NULLIF(sum(l.live), 0), 200) AS bytes
-		    FROM (VALUES ('runtime.fact_input'), ('runtime.calc_result'), ('runtime.fact_input_history')) t(name)
-		    LEFT JOIN live_tables l ON l.root = t.name::regclass::oid
-		    GROUP BY t.name),
+		    SELECT t.name, runtime.bytes_per_row(t.name::regclass::oid) AS bytes
+		    FROM (VALUES ('runtime.fact_input'), ('runtime.calc_result'), ('runtime.fact_input_history')) t(name)),
 		rows_of AS (
 		    SELECT 'runtime.fact_input' AS name, model_id, count(*) AS n FROM runtime.fact_input WHERE model_id IN (SELECT id FROM models) GROUP BY model_id
 		    UNION ALL SELECT 'runtime.calc_result', model_id, count(*) FROM runtime.calc_result WHERE model_id IN (SELECT id FROM models) GROUP BY model_id
@@ -464,6 +437,18 @@ func (e *Enforcer) Sweep(ctx context.Context, db DB, customerID string) (Tenant,
 		return Tenant{}, fmt.Errorf("sweep tenant %s: %w", customerID, err)
 	}
 	if dedicated || p.Limits.MaxStorageMB > 0 {
+		// The storage guard counts from this measurement: each table's insert
+		// and delete counters now, before the rows are counted, so a row
+		// written in between is counted twice rather than not at all
+		// (runtime.storage_used, migration 135).
+		if dedicated {
+			if _, err := db.Exec(ctx, `
+				INSERT INTO runtime.storage_mark (relid, ins, del)
+				SELECT relid, n_tup_ins, n_tup_del FROM pg_stat_user_tables
+				ON CONFLICT (relid) DO UPDATE SET ins = EXCLUDED.ins, del = EXCLUDED.del`); err != nil {
+				return Tenant{}, fmt.Errorf("sweep tenant %s: storage mark: %w", customerID, err)
+			}
+		}
 		models, err := ModelStorage(ctx, db, customerID)
 		if err == nil {
 			err = recordModelStorage(ctx, db, models)
@@ -490,12 +475,38 @@ func (e *Enforcer) Sweep(ctx context.Context, db DB, customerID string) (Tenant,
 	if reason != "" {
 		state = "over"
 	}
-	if _, err := db.Exec(ctx, `UPDATE core.customer SET limit_state = $2, limit_reason = $3, storage_bytes = $4, usage_checked_at = now() WHERE id = $1::uuid`,
-		customerID, state, reason, storage); err != nil {
+	// The limit goes on the tenant's own row for the storage guard, which
+	// refuses a write that would cross it (migration 135) — in a dedicated
+	// database only: a shared one holds every tenant's rows at once.
+	var limitBytes *int64
+	var limitText *string
+	if dedicated && p.Limits.MaxStorageMB > 0 {
+		b := int64(p.Limits.MaxStorageMB) << 20
+		txt := fmt.Sprintf("The %s Edition allows %d MB of storage. %s", p.Name, p.Limits.MaxStorageMB, p.NextStep())
+		limitBytes, limitText = &b, &txt
+	}
+	if _, err := db.Exec(ctx, `UPDATE core.customer SET limit_state = $2, limit_reason = $3, storage_bytes = $4, usage_checked_at = now(),
+		storage_limit_bytes = $5, storage_limit_text = $6 WHERE id = $1::uuid`,
+		customerID, state, reason, storage, limitBytes, limitText); err != nil {
 		return Tenant{}, err
 	}
+	if dedicated {
+		if _, err := db.Exec(ctx, `SELECT runtime.set_storage_guard($1)`, limitBytes != nil); err != nil {
+			return Tenant{}, fmt.Errorf("sweep tenant %s: storage guard: %w", customerID, err)
+		}
+	}
 	e.Invalidate(customerID)
-	return LoadTenant(ctx, db, customerID)
+	t, err = LoadTenant(ctx, db, customerID)
+	if err != nil {
+		return Tenant{}, err
+	}
+	// Deleted rows' disk goes back to the server, in every edition.
+	if dedicated {
+		if _, err := Compact(ctx, db, false); err != nil {
+			return t, fmt.Errorf("sweep tenant %s: compact: %w", customerID, err)
+		}
+	}
+	return t, nil
 }
 
 // firstViolation returns a sentence for the first limit the tenant exceeds,

@@ -111,14 +111,51 @@ cell of a metric, and add a `'{}'` total per pass without removing the last
 one, so a busy workspace held mostly rows nobody would read again — one tenant
 260 MB for 200,000 live rows; migration 134 removed the piled-up rows.
 
+**The disk goes back too.** PostgreSQL keeps a deleted row's space in the
+table's files for later writes; `plan.Compact` rewrites a table without it
+(`VACUUM (FULL, SKIP_LOCKED)`) in a tenant's own database, in every edition:
+straight after a console delete, in the background, for every table that
+changed since it was last rewritten and holds a megabyte more on disk than in
+data; and at each usage sweep for those holding a fifth of their files or more
+that way — any path that deleted, the AI developer and imports included
+(`runtime.table_compaction` remembers what was rewritten). The rewrite locks a
+table while it runs: about a second at a Playground workspace's size. A
+committed import's staged rows are deleted at commit (migration 135 removed the
+ones kept before). A shared database's tables hold every tenant at once and are
+not rewritten.
+
 That is what "read-only, except for deleting" means for a storage-bounded
-edition. The disk is not given back: the deleted rows' space stays in the files
-for the tenant's next writes. Proven by
+edition. Proven by
 `TestDeletingAModelBringsAWorkspaceBackUnderItsStorageLimit` (a real gateway
 and a dedicated tenant database: a model deleted over HTTP, 49 MB to 2 MB and
-writable again in the listing that follows) and
+writable again in the listing that follows),
 `TestDeletingAModelLowersStorageInAnUnlimitedEdition` (an Enterprise tenant,
-37 MB to 2 MB). A tenant that names an edition with no row is treated
+37 MB to 2 MB) and `TestStorageLimitRefusesTheWriteThatWouldCrossIt` (the
+database's files 72 MB to 16 MB within seconds of the delete).
+
+**A write that would cross the limit is refused.** On an edition with a storage
+limit — on the hosted service, the Community Edition of the Playground; the
+Commercial and Enterprise Editions set none — the sweep puts a guard on the
+tables a workspace fills: facts, staged imports, form records and dimension
+members (`runtime.set_storage_guard`, migration 135, with the limit and its
+sentence on `core.customer.storage_limit_bytes` / `storage_limit_text`). Every
+statement that adds rows there takes them, at the table's bytes per row
+(`runtime.bytes_per_row`), from the room the workspace has left, measured once
+per transaction (`runtime.storage_used`: the sweep's last measurement plus the
+rows inserted and deleted since, by the statistics' exact counters, taken just
+before it measured — `runtime.storage_mark`); the statement that would go past the
+limit fails the whole transaction with SQLSTATE `MV402`, whichever path wrote
+it — cell entry, a form, an import, a model copy, the AI developer. The gateway
+answers `402 {"code": "plan_limit", "limit": "max_storage_mb"}` with the
+sentence: "Not saved: this would take the workspace to about 104 MB. The
+Community Edition allows 100 MB of storage. A Community workspace holds up to
+100 MB. …". A dimension-member file is refused whole, not up to the row that
+fits. A transaction that only deletes is never refused. Moving a workspace to
+another edition puts the guard on or takes it off at once; an edition without a
+limit has no guard and pays nothing for it. A shared database has no guard: its
+tenants are checked before bulk writes (`plan.CheckStorage`) and by the sweep.
+
+A tenant that names an edition with no row is treated
 as unlimited and shown as "(no such edition)": a catalog gap must never lock a
 paying customer out.
 
@@ -365,6 +402,11 @@ Enterprise keep their workspaces:
   they are not part of the sweep and reset by themselves at midnight UTC.
 - The sweep counts; it does not archive. A tenant over a storage limit has to
   delete, or be moved to a larger edition.
+- The storage guard measures the room left once per transaction and prices a
+  row at its table's average: two writes at the same moment can each fit and
+  together pass the limit, and rows much wider than their table's average
+  count for less than they take. The next sweep finds such a workspace over
+  and makes it read-only.
 - Sign-up creates one person per tenant. Inviting colleagues is the tenant
   administrator's first job, under Users, and counts against `max_users`.
 - Keycloak's own registration is not used and stays off: the platform must

@@ -411,6 +411,11 @@ func (s *Store) CommitImport(ctx context.Context, jobID, modelID, revisionID, us
 	if err != nil {
 		return nil, fmt.Errorf("flush staging: %w", err)
 	}
+	// The staged rows are facts now and nothing reads them again; kept, they
+	// counted towards the workspace's storage for an import that was done.
+	if _, err = tx.Exec(ctx, `DELETE FROM import.import_staging WHERE job_id = $1::uuid`, jobID); err != nil {
+		return nil, fmt.Errorf("clear staging: %w", err)
+	}
 
 	_, err = tx.Exec(ctx, `
 		UPDATE import.import_job

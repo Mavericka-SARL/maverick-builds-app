@@ -8328,14 +8328,16 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 	if !isTime && (hasStart || hasEnd) {
 		return 0, 0, isTime, &timedim.Error{Code: timedim.CodeInvalidTimeMember, Message: "period_start/period_end apply only to a time dimension"}
 	}
-	var tx pgx.Tx
-	if isTime {
-		var err error
-		if tx, err = db.Begin(ctx); err != nil {
-			return 0, 0, isTime, err
-		}
-		defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+	// One transaction for the file: a time dimension is validated and
+	// reindexed whole, and a file that would take the workspace past its
+	// storage limit is refused whole (isStorageRefusal) instead of stopping
+	// part-way. A row that fails otherwise is skipped and counted, as it
+	// always was, by rolling back to a savepoint of its own.
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		return 0, 0, isTime, err
 	}
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
 	type propCol struct {
 		name string
 		idx  int
@@ -8353,11 +8355,20 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 	// can't find it in the properties"). Idempotent via the (dimension_id,
 	// name) unique constraint; default type "text".
 	for _, pc := range propCols {
-		if _, err := db.Exec(ctx,
+		sp, err := tx.Begin(ctx)
+		if err != nil {
+			return 0, 0, isTime, err
+		}
+		if _, err := sp.Exec(ctx,
 			`INSERT INTO model.dimension_property (dimension_id, name, data_type)
 			 VALUES ($1::uuid, $2, 'text') ON CONFLICT (dimension_id, name) DO NOTHING`,
 			dimensionID, pc.name); err != nil {
+			_ = sp.Rollback(ctx)
 			h.log.Warn().Err(err).Str("property", pc.name).Msg("declare imported dimension property")
+			continue
+		}
+		if err := sp.Commit(ctx); err != nil {
+			return 0, 0, isTime, err
 		}
 	}
 
@@ -8368,6 +8379,14 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 		return strings.TrimSpace(record[idx])
 	}
 
+	// New members are appended after the dimension's last (MAX+1, as the
+	// connector and AI paths do), counted here once rather than looked up
+	// per row — a scan of the whole dimension each time, which made a large
+	// file quadratic.
+	var lastSort int
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(sort_order), 0) FROM model.dimension_member WHERE dimension_id = $1::uuid`, dimensionID).Scan(&lastSort); err != nil {
+		return 0, 0, isTime, err
+	}
 	for {
 		record, err := cr.Read()
 		if err != nil {
@@ -8389,7 +8408,7 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 				errs++
 				continue
 			}
-			code, err = h.autoMemberCodeOn(ctx, db, dimensionID, label)
+			code, err = h.autoMemberCodeOn(ctx, tx, dimensionID, label)
 			if err != nil {
 				errs++
 				continue
@@ -8399,7 +8418,7 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 		if hasParent {
 			if parentCode := cell(record, parentCol); parentCode != "" {
 				var pid string
-				if err := db.QueryRow(ctx,
+				if err := tx.QueryRow(ctx,
 					`SELECT id::text FROM model.dimension_member WHERE dimension_id=$1::uuid AND code=$2`,
 					dimensionID, parentCode,
 				).Scan(&pid); err == nil {
@@ -8453,30 +8472,44 @@ func (h *handler) importDimensionMembersOn(ctx context.Context, db dbx.DB, dimen
 			imported++
 			continue
 		}
-		_, err = db.Exec(ctx,
-			// A new member is appended (MAX+1, as the connector and AI
-			// paths do); a re-imported one keeps its place.
+		row, err := tx.Begin(ctx)
+		if err != nil {
+			return 0, 0, isTime, err
+		}
+		// A new member is appended; a re-imported one keeps its place.
+		var inserted bool
+		err = row.QueryRow(ctx,
 			`INSERT INTO model.dimension_member (dimension_id, code, label, parent_member_id, properties, sort_order)
-			 VALUES ($1::uuid, $2, $3, NULLIF($4,'')::uuid, $5::jsonb,
-			         (SELECT COALESCE(MAX(sort_order),0)+1 FROM model.dimension_member WHERE dimension_id=$1::uuid))
+			 VALUES ($1::uuid, $2, $3, NULLIF($4,'')::uuid, $5::jsonb, $6)
 			 ON CONFLICT (dimension_id, code) DO UPDATE SET
 			   label = EXCLUDED.label,
 			   parent_member_id = COALESCE(EXCLUDED.parent_member_id, model.dimension_member.parent_member_id),
-			   properties = model.dimension_member.properties || EXCLUDED.properties`,
-			dimensionID, code, label, deref(parentID), string(propsJSON))
-		if err != nil {
-			errs++
-		} else {
-			imported++
+			   properties = model.dimension_member.properties || EXCLUDED.properties
+			 RETURNING xmax = 0`,
+			dimensionID, code, label, deref(parentID), string(propsJSON), lastSort+1).Scan(&inserted)
+		if err == nil && inserted {
+			lastSort++
 		}
+		if err != nil {
+			_ = row.Rollback(ctx)
+			if isStorageRefusal(err) {
+				return 0, 0, isTime, err
+			}
+			errs++
+			continue
+		}
+		if err := row.Commit(ctx); err != nil {
+			return 0, 0, isTime, err
+		}
+		imported++
 	}
 	if isTime {
 		if err := timedim.ValidateAndReindex(ctx, tx, dimensionID); err != nil {
 			return 0, 0, isTime, err
 		}
-		if err := tx.Commit(ctx); err != nil {
-			return 0, 0, isTime, err
-		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, 0, isTime, err
 	}
 	return imported, errs, isTime, nil
 }
@@ -14787,6 +14820,14 @@ func jsonOK(w http.ResponseWriter, v any) {
 
 func jsonErr(w http.ResponseWriter, err error, code int) {
 	w.Header().Set("Content-Type", "application/json")
+	// A write the storage guard refused (migration 135), on whichever path
+	// it came: 402 with the guard's sentence, as a refused creation is.
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == plan.StorageGuardCode {
+		w.WriteHeader(http.StatusPaymentRequired)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": pgErr.Message, "code": "plan_limit", "limit": "max_storage_mb"})
+		return
+	}
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 }
