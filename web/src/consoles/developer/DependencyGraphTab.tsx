@@ -4,7 +4,7 @@ import type { DevModel, DevMetric, DevDimension, GridDef } from "../../api/clien
 import { IconButton, SearchInput } from "../../ui";
 
 const NODE_W = 180;
-const NODE_H = 72;
+const NODE_H = 84;
 const COL_GAP = 220;
 const ROW_GAP = 72;
 const PAD = 24;
@@ -261,14 +261,16 @@ export function DepGraph({ model, grids, dims }: { model: DevModel; grids: GridD
                 <text x={NODE_W / 2} y={14} textAnchor="middle" fontSize={10} fill="var(--color-text-quiet)" fontFamily="ui-monospace, monospace">
                   {m.is_input ? "INPUT" : "CALC"}
                 </text>
-                <text x={NODE_W / 2} y={30} textAnchor="middle" fontSize={12} fill="var(--color-text)" fontWeight={600} fontFamily="system-ui, sans-serif">
-                  {m.label}
-                </text>
-                <text x={NODE_W / 2} y={47} textAnchor="middle" fontSize={9.5} fontFamily="system-ui, sans-serif"
+                {/* SVG text does not wrap: a long label ran out of the node.
+                    It wraps here, two lines at most; the tooltip has it all. */}
+                <foreignObject x={8} y={18} width={NODE_W - 16} height={34}>
+                  <div className="mvx-graph-node__label"><span>{m.label}</span></div>
+                </foreignObject>
+                <text x={NODE_W / 2} y={64} textAnchor="middle" fontSize={9.5} fontFamily="system-ui, sans-serif"
                   fill={gridNames.length ? "var(--color-text-quiet)" : "var(--color-warning)"}>
                   {gridNames.length ? `Grid: ${gridsLabel}` : "Not on any grid"}
                 </text>
-                <text x={NODE_W / 2} y={61} textAnchor="middle" fontSize={9.5} fill="var(--color-text-quiet)" fontFamily="system-ui, sans-serif">
+                <text x={NODE_W / 2} y={77} textAnchor="middle" fontSize={9.5} fill="var(--color-text-quiet)" fontFamily="system-ui, sans-serif">
                   {dimNames.length ? `Dim: ${dimsLabel}` : ""}
                 </text>
               </g>

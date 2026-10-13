@@ -248,6 +248,7 @@ const (
 	TestTenantAISettingsOperation         OperationName = "TestTenantAISettings"
 	TriggerAutomationRuleOperation        OperationName = "TriggerAutomationRule"
 	UpdateAdminApplicationOperation       OperationName = "UpdateAdminApplication"
+	UpdateAdminModelOperation             OperationName = "UpdateAdminModel"
 	UpdateAdminRevisionOperation          OperationName = "UpdateAdminRevision"
 	UpdateAdminUserOperation              OperationName = "UpdateAdminUser"
 	UpdateAuditSettingsOperation          OperationName = "UpdateAuditSettings"

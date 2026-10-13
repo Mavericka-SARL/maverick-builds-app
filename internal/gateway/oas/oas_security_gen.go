@@ -257,6 +257,7 @@ var operationRolesBearerAuth = map[string][]string{
 	TestTenantAISettingsOperation:         []string{},
 	TriggerAutomationRuleOperation:        []string{},
 	UpdateAdminApplicationOperation:       []string{},
+	UpdateAdminModelOperation:             []string{},
 	UpdateAdminRevisionOperation:          []string{},
 	UpdateAdminUserOperation:              []string{},
 	UpdateAuditSettingsOperation:          []string{},

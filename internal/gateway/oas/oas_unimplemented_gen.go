@@ -2411,10 +2411,20 @@ func (UnimplementedHandler) TriggerAutomationRule(ctx context.Context, req OptTr
 
 // UpdateAdminApplication implements updateAdminApplication operation.
 //
-// Rename an application.
+// Rename an application or change its description.
 //
 // PATCH /api/admin/applications/{id}
 func (UnimplementedHandler) UpdateAdminApplication(ctx context.Context, req *UpdateApplicationRequest, params UpdateAdminApplicationParams) (r *UpdateAdminApplicationOK, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// UpdateAdminModel implements updateAdminModel operation.
+//
+// For the tenant admin of the model's tenant and the platform admin, who create models; audited as
+// model.updated.
+//
+// PATCH /api/admin/models/{id}
+func (UnimplementedHandler) UpdateAdminModel(ctx context.Context, req *UpdateAdminModelRequest, params UpdateAdminModelParams) (r UpdateAdminModelRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 

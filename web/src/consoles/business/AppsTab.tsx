@@ -59,6 +59,7 @@ export function AppsTab() {
               <div className="mvx-admin-avatar mvx-admin-avatar--app">{app.name[0]}</div>
               <div className="mvx-admin-object__title">
                 <div className="mvx-admin-object__name">{app.name}</div>
+                {app.description && <div className="mvx-admin-object__meta" style={{ whiteSpace: "normal" }}>{app.description}</div>}
                 <div className="mvx-admin-object__meta">
                   {app.tenant_name && new Set(apps.map((a) => a.tenant_id ?? "")).size > 1 ? `${app.tenant_name} · ${app.workspace_name}` : app.workspace_name}
                 </div>
@@ -77,7 +78,10 @@ export function AppsTab() {
                     const isActiveModel = isCurrent && shown?.id === m.id;
                     return (
                       <div key={m.id} className="mvx-panel" style={{ padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontWeight: 600, fontSize: 13 }}>{m.name}</span>
+                        <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                          <span style={{ fontWeight: 600, fontSize: 13 }}>{m.name}</span>
+                          {m.description && <span className="mvx-admin-muted" style={{ fontSize: 12 }}>{m.description}</span>}
+                        </span>
                         {m.is_default && <StatusBadge tone="success">default</StatusBadge>}
                         {m.active_revision && <span className="mvx-admin-muted" style={{ fontSize: 11 }}>rev: {m.active_revision}</span>}
                         <span style={{ marginLeft: "auto" }}>
@@ -98,6 +102,7 @@ export function AppsTab() {
                 <div className="mvx-admin-model__header">
                   <span className="mvx-admin-model__name">{shown?.name || app.model_name || app.name}</span>
                 </div>
+                {shown?.description && <p className="mvx-admin-muted" style={{ margin: "2px 0 6px" }}>{shown.description}</p>}
                 <div className="mvx-admin-revisions">
                   <div className="mvx-admin-revisions__label">Active Revision</div>
                   {shownRevision ? (

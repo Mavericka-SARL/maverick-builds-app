@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Trash2, Plus } from "lucide-react";
+import { Trash2, Plus, Pencil } from "lucide-react";
 import { api, withTenant, type AdminModel, type AdminTenant } from "../../api/client";
+import { DetailsEditor } from "../DetailsEditor";
 import { Button, IconButton, TextInput, Select, Field, Toolbar, ToolbarGroup, LoadingState, EmptyState, StatusBadge, RevisionBadge, KindTag, kindHint, useConfirm, useCollapsed, CollapseToggle } from "../../ui";
 
 function DevModelRevisions({
@@ -78,19 +79,23 @@ function DevModelRevisions({
       <div className="mvx-admin-revisions__list">
         {(model.revisions ?? []).map((s) => {
           const isWorking = s.id === revisionId;
+          // A large revision takes a while to delete: the row says so and
+          // takes no further clicks until the server answers.
+          const isDeleting = del.isPending && del.variables === s.id;
           return (
             <div
               key={s.id}
               className={["mvx-admin-revision", isWorking ? "mvx-admin-revision--working" : ""].filter(Boolean).join(" ")}
-              style={{ cursor: "pointer" }}
-              onClick={() => { localStorage.setItem("selected_app_id", appId); onSelect(s.id, s.name); }}
+              style={{ cursor: isDeleting ? "progress" : "pointer", opacity: isDeleting ? 0.6 : undefined }}
+              aria-busy={isDeleting || undefined}
+              onClick={() => { if (isDeleting) return; localStorage.setItem("selected_app_id", appId); onSelect(s.id, s.name); }}
             >
               <div className="mvx-admin-revision__info">
                 <div className="mvx-admin-revision__name" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {s.name}
                 </div>
                 <div className="mvx-admin-revision__meta">
-                  {s.id.slice(0, 8)} · {s.created_at ? s.created_at.slice(0, 10) : ""}
+                  {isDeleting ? "Deleting…" : <>{s.id.slice(0, 8)} · {s.created_at ? s.created_at.slice(0, 10) : ""}</>}
                 </div>
               </div>
               {s.name === model.active_revision && <RevisionBadge status="live" />}
@@ -101,7 +106,7 @@ function DevModelRevisions({
                   <Button
                     size="sm"
                     title="Set as active revision"
-                    disabled={activate.isPending}
+                    disabled={activate.isPending || isDeleting}
                     onClick={(e) => {
                       e.stopPropagation();
                       confirm({ title: "Set as active revision?", body: `"${s.name}" becomes the live revision everyone sees. This can be changed again later.`, confirmLabel: "Set active", destructive: false, onConfirm: () => activate.mutate(s.id) });
@@ -114,6 +119,7 @@ function DevModelRevisions({
                     title="Delete revision"
                     danger
                     size={26}
+                    disabled={del.isPending}
                     onClick={(e) => {
                       e.stopPropagation();
                       confirm({ title: "Delete revision?", body: `This permanently removes "${s.name}". This cannot be undone.`, confirmLabel: "Delete revision", onConfirm: () => del.mutate(s.id) });
@@ -127,6 +133,8 @@ function DevModelRevisions({
           );
         })}
       </div>
+      {del.isError && <p className="mvx-admin-error" role="alert">Not deleted: {(del.error as Error).message}</p>}
+      {activate.isError && <p className="mvx-admin-error" role="alert">Not activated: {(activate.error as Error).message}</p>}
 
       {/* New revision */}
       {showNew ? (
@@ -281,6 +289,13 @@ export function DevApplicationsTab({
   });
   const qc = useQueryClient();
   const { isCollapsed, toggle } = useCollapsed();
+  // Renaming and describing an application or model belongs to whoever may
+  // create them: the administrator of that row's tenant.
+  const { data: adminTenants = [] } = useQuery({ queryKey: ["admin-tenants"], queryFn: api.getAdminTenants, enabled: canCreate });
+  const administered = new Set(adminTenants.map((t) => t.id));
+  const canEdit = (tenantId: string) => canCreate && administered.has(tenantId);
+  // The row being edited: "app:<id>" or "model:<id>".
+  const [editing, setEditing] = useState("");
   const setDefault = useMutation({
     mutationFn: ({ modelId, tenantId }: { modelId: string; tenantId: string }) =>
       withTenant(tenantId, () => api.setDefaultModel(modelId)),
@@ -346,9 +361,18 @@ export function DevApplicationsTab({
             <div className="mvx-admin-avatar mvx-admin-avatar--app">{app.name[0]}</div>
             <div className="mvx-admin-object__title">
               <div className="mvx-admin-object__name"><KindTag kind="application" />{app.name}</div>
+              {app.description && <div className="mvx-admin-object__meta" style={{ whiteSpace: "normal" }}>{app.description}</div>}
               <div className="mvx-admin-object__meta">{app.models.length} model{app.models.length !== 1 ? "s" : ""}</div>
             </div>
+            {canEdit(tenantOfApp.get(app.id) ?? "") && editing !== `app:${app.id}` && (
+              <Button size="sm" variant="ghost" leadingIcon={<Pencil size={13} />} aria-label={`Edit application ${app.name}`} onClick={() => setEditing(`app:${app.id}`)}>
+                Edit
+              </Button>
+            )}
           </div>
+          {editing === `app:${app.id}` && (
+            <DetailsEditor kind="application" id={app.id} tenantId={tenantOfApp.get(app.id) ?? ""} name={app.name} description={app.description ?? ""} onClose={() => setEditing("")} />
+          )}
 
           {/* Models */}
           {appOpen && <div className="mvx-admin-object__body">
@@ -362,6 +386,11 @@ export function DevApplicationsTab({
                   <CollapseToggle expanded={modelOpen} onToggle={() => toggle(`model:${m.id}`)} label={`model ${m.name}`} />
                   <span className="mvx-admin-model__name"><KindTag kind="model" />{m.name}</span>
                   {!modelOpen && <span className="mvx-admin-muted">{revisions} revision{revisions !== 1 ? "s" : ""}{m.active_revision ? ` · active: ${m.active_revision}` : ""}</span>}
+                  {canEdit(tenantOfApp.get(app.id) ?? "") && editing !== `model:${m.id}` && (
+                    <Button size="sm" variant="ghost" leadingIcon={<Pencil size={13} />} aria-label={`Edit model ${m.name}`} onClick={() => setEditing(`model:${m.id}`)}>
+                      Edit
+                    </Button>
+                  )}
                   {m.is_default ? (
                     <StatusBadge tone="success">business default</StatusBadge>
                   ) : (
@@ -375,6 +404,10 @@ export function DevApplicationsTab({
                     </Button>
                   )}
                 </div>
+                {m.description && <p className="mvx-admin-muted" style={{ margin: "2px 0 6px" }}>{m.description}</p>}
+                {editing === `model:${m.id}` && (
+                  <DetailsEditor kind="model" id={m.id} tenantId={tenantOfApp.get(app.id) ?? ""} name={m.name} description={m.description ?? ""} onClose={() => setEditing("")} />
+                )}
                 {modelOpen && <DevModelRevisions model={m} appId={app.id} tenantId={tenantOfApp.get(app.id) ?? ""} revisionId={revisionId} onSelect={onSelect} />}
               </div>
               );

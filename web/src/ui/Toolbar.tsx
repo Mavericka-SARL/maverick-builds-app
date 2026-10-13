@@ -46,7 +46,7 @@ export function FilterChip({ active = false, onClear, children, className, ...re
       {...rest}
       className={["mvx-filter-chip", active ? "mvx-filter-chip--active" : "", className].filter(Boolean).join(" ")}
     >
-      {children}
+      <span className="mvx-filter-chip__label">{children}</span>
       {onClear && (
         <X
           size={12}

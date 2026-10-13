@@ -441,6 +441,7 @@ export interface LicenseInfo {
 export interface AppModelInfo {
   id: string;
   name: string;
+  description?: string;
   is_default: boolean;
   active_revision: string;
 }
@@ -448,6 +449,7 @@ export interface AppModelInfo {
 export interface AppInfo {
   id: string;
   name: string;
+  description?: string;
   mode: string;
   workspace_name: string;
   model_name: string;
@@ -975,6 +977,8 @@ export interface DevRevision {
 export interface AdminModel {
   id: string;
   name: string;
+  /** What the model is for, as its creator wrote it; empty when none. */
+  description?: string;
   storage_type: string;
   active_revision: string | null;
   // The app's business-default model — what business consoles resolve.
@@ -1008,6 +1012,8 @@ export interface ModelExportPackage {
 export interface AdminApp {
   id: string;
   name: string;
+  /** What the application is for, as its creator wrote it; empty when none. */
+  description?: string;
   mode: string;
   status: string;
   models: AdminModel[];
@@ -2432,10 +2438,16 @@ export const api = {
     apiFetch<{ status: string }>(`/api/admin/tenants/${id}`, { method: "DELETE" }),
   createAdminApplication: (body: { customer_id: string; name: string; mode: string }) =>
     apiFetch<{ id: string }>("/api/admin/applications", { method: "POST", body: JSON.stringify(body) }),
+  // Rename an application or change its description; a field left out stays.
+  updateAdminApplication: (id: string, body: { name?: string; description?: string }) =>
+    apiFetch<{ status: string }>(`/api/admin/applications/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteAdminApplication: (id: string) =>
     apiFetch<{ status: string }>(`/api/admin/applications/${id}`, { method: "DELETE" }),
   createAdminModel: (body: { application_id: string; name: string; storage_type: string }) =>
     apiFetch<{ id: string }>("/api/admin/models", { method: "POST", body: JSON.stringify(body) }),
+  // Rename a model or change its description; a field left out stays.
+  updateAdminModel: (id: string, body: { name?: string; description?: string }) =>
+    apiFetch<{ status: string }>(`/api/admin/models/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteAdminModel: (id: string) =>
     apiFetch<{ status: string }>(`/api/admin/models/${id}`, { method: "DELETE" }),
   setActiveRevision: (modelId: string, body: { revision_name: string }) =>

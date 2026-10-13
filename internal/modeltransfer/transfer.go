@@ -290,13 +290,15 @@ type Fact struct {
 }
 
 type Package struct {
-	Format       string    `json:"format"`
-	Version      int       `json:"version"`
-	ExportedAt   time.Time `json:"exported_at"`
-	ModelName    string    `json:"model_name"`
-	StorageType  string    `json:"storage_type"`
-	RevisionName string    `json:"revision_name"`
-	FactsPolicy  string    `json:"facts_policy"`
+	Format     string    `json:"format"`
+	Version    int       `json:"version"`
+	ExportedAt time.Time `json:"exported_at"`
+	ModelName  string    `json:"model_name"`
+	// ModelDescription is the model's description, recreated on import.
+	ModelDescription string `json:"model_description,omitempty"`
+	StorageType      string `json:"storage_type"`
+	RevisionName     string `json:"revision_name"`
+	FactsPolicy      string `json:"facts_policy"`
 	// IncludeData says whether runtime data (fact values and form records)
 	// travels with the definitions. A definitions-only package recreates
 	// the model's structure — dimensions, metrics, grids, forms, mappings,
@@ -382,8 +384,8 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 		pkg.FactsPolicy = "definitions_only"
 	}
 	if err := q.QueryRow(ctx,
-		`SELECT name, storage_type::text FROM core.model WHERE id=$1::uuid`, modelID,
-	).Scan(&pkg.ModelName, &pkg.StorageType); err != nil {
+		`SELECT name, description, storage_type::text FROM core.model WHERE id=$1::uuid`, modelID,
+	).Scan(&pkg.ModelName, &pkg.ModelDescription, &pkg.StorageType); err != nil {
 		return nil, fmt.Errorf("model not found: %w", err)
 	}
 
@@ -1629,8 +1631,8 @@ func Import(ctx context.Context, tx pgx.Tx, req ImportRequest, importerID string
 	}
 
 	if err = tx.QueryRow(ctx,
-		`INSERT INTO core.model (application_id, name, storage_type) VALUES ($1::uuid, $2, $3::core.storage_type) RETURNING id::text`,
-		req.ApplicationID, modelName, storageType).Scan(&modelID); err != nil {
+		`INSERT INTO core.model (application_id, name, description, storage_type) VALUES ($1::uuid, $2, $3, $4::core.storage_type) RETURNING id::text`,
+		req.ApplicationID, modelName, pkg.ModelDescription, storageType).Scan(&modelID); err != nil {
 		return "", "", fmt.Errorf("create model: %w", err)
 	}
 	if revisionID, err = importRevision(ctx, tx, modelID, revisionName, pkg, importerID); err != nil {

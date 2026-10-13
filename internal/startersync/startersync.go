@@ -269,15 +269,22 @@ func (t *tenant) importerID(ctx context.Context) (string, error) {
 	return t.importer, err
 }
 
-// application is the tenant's "Getting started" application, made again in
-// its first workspace when it has none.
+// application is where the tenant's starters live: the application an
+// earlier starter went into, under whatever name its administrator has
+// given it since, else its "Getting started" application, made again in its
+// first workspace when it has none.
 func (t *tenant) application(ctx context.Context) (string, error) {
 	if t.appID != "" {
 		return t.appID, nil
 	}
 	err := t.tx.QueryRow(ctx, `
-		SELECT id::text FROM core.application WHERE customer_id = $1::uuid AND name = $2
-		ORDER BY created_at LIMIT 1`, t.customerID, AppName).Scan(&t.appID)
+		SELECT id::text FROM (
+		    SELECT m.application_id AS id, 0 AS pref, s.updated_at AS at
+		    FROM core.starter_model s JOIN core.model m ON m.id = s.model_id
+		    WHERE s.customer_id = $1::uuid
+		    UNION ALL
+		    SELECT id, 1, created_at FROM core.application WHERE customer_id = $1::uuid AND name = $2
+		) c ORDER BY pref, at LIMIT 1`, t.customerID, AppName).Scan(&t.appID)
 	if err == nil {
 		return t.appID, nil
 	}

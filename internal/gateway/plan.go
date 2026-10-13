@@ -375,6 +375,18 @@ func (h *handler) remeasureStorage(ctx context.Context, customerID string) {
 	}(context.WithoutCancel(ctx))
 }
 
+// errAlreadyDeleted is deleteAndRemeasure finding nothing to delete: a
+// repeated click whose first request took the row while it waited.
+var errAlreadyDeleted = errors.New("already deleted")
+
+// deleteStatus is the HTTP status for a deleteAndRemeasure error.
+func deleteStatus(err error) int {
+	if errors.Is(err, errAlreadyDeleted) {
+		return http.StatusNotFound
+	}
+	return http.StatusInternalServerError
+}
+
 // deleteAndRemeasure runs one delete of a model's structure (a revision, a
 // metric) with flushStatsSQL in its transaction, then remeasureStorage.
 func (h *handler) deleteAndRemeasure(ctx context.Context, customerID, sql string, args ...any) error {
@@ -383,8 +395,12 @@ func (h *handler) deleteAndRemeasure(ctx context.Context, customerID, sql string
 		return err
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // a no-op after Commit
-	if _, err := tx.Exec(ctx, sql, args...); err != nil {
+	tag, err := tx.Exec(ctx, sql, args...)
+	if err != nil {
 		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errAlreadyDeleted
 	}
 	if _, err := tx.Exec(ctx, flushStatsSQL); err != nil {
 		return err

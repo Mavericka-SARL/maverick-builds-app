@@ -733,6 +733,10 @@ type TriggerAutomationRuleRes interface {
 	triggerAutomationRuleRes()
 }
 
+type UpdateAdminModelRes interface {
+	updateAdminModelRes()
+}
+
 type UpdateAdminUserRes interface {
 	updateAdminUserRes()
 }

@@ -2,6 +2,7 @@ package startersync
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -282,6 +283,29 @@ func TestSyncRemakesTheApplication(t *testing.T) {
 	landing := f.one(`SELECT model_id::text FROM core.starter_model WHERE customer_id=$1::uuid AND starter_key=$2`, cust, starter.LandingKey)
 	if def := f.one(`SELECT COALESCE(default_model_id::text, '') FROM core.application WHERE customer_id=$1::uuid AND name=$2`, cust, AppName); def != landing {
 		t.Errorf("default model %q, want the landing model %s", def, landing)
+	}
+}
+
+// TestSyncFollowsARenamedApplication: once the tenant admin renames
+// "Getting started", a starter added later still goes into it — not into a
+// second "Getting started" made next to it.
+func TestSyncFollowsARenamedApplication(t *testing.T) {
+	ctx := context.Background()
+	f := fixture{t: t, ctx: ctx, pool: testdb.New(t, migrationfs.FS, ".")}
+	cust, _, app := f.signedUp("Renamed Co", true)
+	all := starter.Starters()
+	if got := f.sync(cust, all[:1]); len(got) != 1 {
+		t.Fatalf("installed %d, want 1", len(got))
+	}
+	f.exec(`UPDATE core.application SET name='Onboarding' WHERE id=$1::uuid`, app)
+	if got := f.sync(cust, all); len(got) != len(all)-1 {
+		t.Fatalf("installed %d, want %d", len(got), len(all)-1)
+	}
+	if n := f.one(`SELECT count(*)::text FROM core.application WHERE customer_id=$1::uuid`, cust); n != "1" {
+		t.Errorf("%s applications, want the renamed one only", n)
+	}
+	if n := f.one(`SELECT count(*)::text FROM core.model WHERE application_id=$1::uuid`, app); n != strconv.Itoa(len(all)) {
+		t.Errorf("%s models in the renamed application, want %d", n, len(all))
 	}
 }
 

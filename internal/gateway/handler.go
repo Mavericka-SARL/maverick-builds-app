@@ -540,6 +540,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("PATCH", "/api/admin/applications/{id}", "admin", adm(h.adminApplicationAction))
 	register("DELETE", "/api/admin/applications/{id}", "admin", adm(h.adminApplicationAction))
 	register("POST", "/api/admin/models", "admin", adm(h.adminModels))
+	register("PATCH", "/api/admin/models/{id}", "admin", adm(h.adminModelAction))
 	register("PUT", "/api/admin/models/{id}/active-revision", "admin", adm(h.adminModelAction))
 	register("DELETE", "/api/admin/models/{id}", "admin", adm(h.adminModelAction))
 	// Model export/import: the tenant's own administrator and the platform
@@ -5300,7 +5301,7 @@ func (h *handler) developerRevisionAction(w http.ResponseWriter, r *http.Request
 	var revModelID string
 	_ = h.db.QueryRow(ctx, `SELECT model_id::text FROM model.revision WHERE id=$1::uuid`, id).Scan(&revModelID)
 	if err := h.deleteAndRemeasure(ctx, h.customerOfModel(ctx, revModelID), `DELETE FROM model.revision WHERE id=$1::uuid`, id); err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
+		jsonErr(w, err, deleteStatus(err))
 		return
 	}
 	delAct, _ := h.resolveActor(ctx, r)
@@ -6666,6 +6667,7 @@ type adminRevisionItem struct {
 type adminModelItem struct {
 	ID             string `json:"id"`
 	Name           string `json:"name"`
+	Description    string `json:"description"`
 	StorageType    string `json:"storage_type"`
 	ActiveRevision string `json:"active_revision"`
 	// The app's business-default model: what every business console
@@ -6679,11 +6681,12 @@ type adminModelItem struct {
 }
 
 type adminAppItem struct {
-	ID     string           `json:"id"`
-	Name   string           `json:"name"`
-	Mode   string           `json:"mode"`
-	Status string           `json:"status"`
-	Models []adminModelItem `json:"models"`
+	ID          string           `json:"id"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	Mode        string           `json:"mode"`
+	Status      string           `json:"status"`
+	Models      []adminModelItem `json:"models"`
 }
 
 type adminTenantItem struct {
@@ -6985,7 +6988,7 @@ func (h *handler) tenantsIn(ctx context.Context, act *actor) ([]adminTenantItem,
 			// applications (grantedAppSQL), whose models the grants narrow
 			// as a developer's (below).
 			aRows, err = h.db.Query(ctx, `
-				SELECT a.id::text, a.name, a.mode::text, a.status::text
+				SELECT a.id::text, a.name, a.mode::text, a.status::text, a.description
 				FROM core.application a
 				LEFT JOIN core.workspace aw ON aw.id = a.workspace_id
 				WHERE (a.customer_id=$1::uuid OR aw.customer_id=$1::uuid) AND `+grantedAppSQL("a", "$2::uuid")+`
@@ -7000,7 +7003,7 @@ func (h *handler) tenantsIn(ctx context.Context, act *actor) ([]adminTenantItem,
 			// customer_id alone made every workspace-scoped app invisible
 			// here regardless of role.
 			aRows, err = h.db.Query(ctx, `
-				SELECT DISTINCT a.id::text, a.name, a.mode::text, a.status::text
+				SELECT DISTINCT a.id::text, a.name, a.mode::text, a.status::text, a.description
 					FROM core.application a
 					LEFT JOIN core.workspace aw ON aw.id = a.workspace_id
 					WHERE (a.customer_id=$1::uuid OR aw.customer_id=$1::uuid)
@@ -7030,7 +7033,7 @@ func (h *handler) tenantsIn(ctx context.Context, act *actor) ([]adminTenantItem,
 		} else {
 			// Same customer_id-or-workspace fallback for platform_admin/tenant_admin.
 			aRows, err = h.db.Query(ctx, `
-				SELECT a.id::text, a.name, a.mode::text, a.status::text
+				SELECT a.id::text, a.name, a.mode::text, a.status::text, a.description
 				FROM core.application a
 				LEFT JOIN core.workspace aw ON aw.id = a.workspace_id
 				WHERE a.customer_id=$1::uuid OR aw.customer_id=$1::uuid
@@ -7043,7 +7046,7 @@ func (h *handler) tenantsIn(ctx context.Context, act *actor) ([]adminTenantItem,
 		}
 		for aRows.Next() {
 			var ap adminAppItem
-			if err := aRows.Scan(&ap.ID, &ap.Name, &ap.Mode, &ap.Status); err != nil {
+			if err := aRows.Scan(&ap.ID, &ap.Name, &ap.Mode, &ap.Status, &ap.Description); err != nil {
 				continue
 			}
 			var mRows interface {
@@ -7055,7 +7058,7 @@ func (h *handler) tenantsIn(ctx context.Context, act *actor) ([]adminTenantItem,
 			// only a scoped developer's and a grant's are narrowed.
 			if isScopedDeveloper || grantOnly[t.ID] {
 				mRows, _ = h.db.Query(ctx, `
-						SELECT id::text, name, storage_type::text, COALESCE(active_revision_name,''),
+						SELECT id::text, name, storage_type::text, COALESCE(active_revision_name,''), description,
 						       (m.id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) IS TRUE
 						FROM core.model m
 						WHERE m.application_id=$1::uuid
@@ -7072,7 +7075,7 @@ func (h *handler) tenantsIn(ctx context.Context, act *actor) ([]adminTenantItem,
 				// created_at; the application's default goes first among
 				// them, then name and id, so the list does not reshuffle.
 				mRows, _ = h.db.Query(ctx,
-					`SELECT id::text, name, storage_type::text, COALESCE(active_revision_name,''),
+					`SELECT id::text, name, storage_type::text, COALESCE(active_revision_name,''), description,
 					        (id = (SELECT default_model_id FROM core.application WHERE id=$1::uuid)) IS TRUE
 					 FROM core.model WHERE application_id=$1::uuid
 					 ORDER BY created_at,
@@ -7096,7 +7099,7 @@ func (h *handler) tenantsIn(ctx context.Context, act *actor) ([]adminTenantItem,
 			if mRows != nil {
 				for mRows.Next() {
 					var m adminModelItem
-					_ = mRows.Scan(&m.ID, &m.Name, &m.StorageType, &m.ActiveRevision, &m.IsDefault)
+					_ = mRows.Scan(&m.ID, &m.Name, &m.StorageType, &m.ActiveRevision, &m.Description, &m.IsDefault)
 					if b, ok := sizes[m.ID]; ok {
 						m.StorageBytes = &b
 					}
@@ -10170,6 +10173,7 @@ func (h *handler) appIDFromModelID(ctx context.Context, modelID string) (string,
 type appModelInfo struct {
 	ID             string `json:"id"`
 	Name           string `json:"name"`
+	Description    string `json:"description"`
 	IsDefault      bool   `json:"is_default"`
 	ActiveRevision string `json:"active_revision"`
 }
@@ -10177,6 +10181,7 @@ type appModelInfo struct {
 type appInfo struct {
 	ID             string `json:"id"`
 	Name           string `json:"name"`
+	Description    string `json:"description"`
 	Mode           string `json:"mode"`
 	WorkspaceName  string `json:"workspace_name"`
 	ModelName      string `json:"model_name"`
@@ -10244,7 +10249,7 @@ func (h *handler) appsIn(ctx context.Context, a *actor) ([]appInfo, error) {
 	}
 	if platformWide {
 		rows, err = h.db.Query(ctx, `
-			SELECT a.id::text, a.name, COALESCE(a.mode, 'planning'), w.name,
+			SELECT a.id::text, a.name, a.description, COALESCE(a.mode, 'planning'), w.name,
 			       COALESCE((SELECT name FROM core.model WHERE application_id = a.id ORDER BY (id = a.default_model_id) IS TRUE DESC, created_at DESC, name, id LIMIT 1), ''),
 			       COALESCE((SELECT active_revision_name FROM core.model WHERE application_id = a.id ORDER BY (id = a.default_model_id) IS TRUE DESC, created_at DESC, name, id LIMIT 1), ''),
 			       w.customer_id::text, COALESCE((SELECT c.name FROM core.customer c WHERE c.id = w.customer_id), '')
@@ -10257,7 +10262,7 @@ func (h *handler) appsIn(ctx context.Context, a *actor) ([]appInfo, error) {
 		// A tenant admin's tenants, plus whatever a workspace role held in
 		// another tenant opens for it (actorCanAccessApp).
 		rows, err = h.db.Query(ctx, `
-			SELECT a.id::text, a.name, COALESCE(a.mode, 'planning'), w.name,
+			SELECT a.id::text, a.name, a.description, COALESCE(a.mode, 'planning'), w.name,
 			       COALESCE((SELECT name FROM core.model WHERE application_id = a.id ORDER BY (id = a.default_model_id) IS TRUE DESC, created_at DESC, name, id LIMIT 1), ''),
 			       COALESCE((SELECT active_revision_name FROM core.model WHERE application_id = a.id ORDER BY (id = a.default_model_id) IS TRUE DESC, created_at DESC, name, id LIMIT 1), ''),
 			       w.customer_id::text, COALESCE((SELECT c.name FROM core.customer c WHERE c.id = w.customer_id), '')
@@ -10282,7 +10287,7 @@ func (h *handler) appsIn(ctx context.Context, a *actor) ([]appInfo, error) {
 		`, customerIDs, a.UserID)
 	} else {
 		rows, err = h.db.Query(ctx, `
-			SELECT DISTINCT a.id::text, a.name, COALESCE(a.mode, 'planning'), w.name,
+			SELECT DISTINCT a.id::text, a.name, a.description, COALESCE(a.mode, 'planning'), w.name,
 			       COALESCE((
 			           SELECT m.name FROM core.model m
 			           WHERE m.application_id = a.id
@@ -10331,7 +10336,7 @@ func (h *handler) appsIn(ctx context.Context, a *actor) ([]appInfo, error) {
 	apps := []appInfo{}
 	for rows.Next() {
 		var app appInfo
-		if err := rows.Scan(&app.ID, &app.Name, &app.Mode, &app.WorkspaceName, &app.ModelName, &app.ActiveRevision,
+		if err := rows.Scan(&app.ID, &app.Name, &app.Description, &app.Mode, &app.WorkspaceName, &app.ModelName, &app.ActiveRevision,
 			&app.TenantID, &app.TenantName); err != nil {
 			return nil, err
 		}
@@ -10348,7 +10353,7 @@ func (h *handler) appsIn(ctx context.Context, a *actor) ([]appInfo, error) {
 	// model deleted) listed no models at all.
 	for i := range apps {
 		mRows, mErr := h.db.Query(ctx, `
-			SELECT m.id::text, m.name,
+			SELECT m.id::text, m.name, m.description,
 			       (m.id = (SELECT default_model_id FROM core.application WHERE id = $1::uuid)) IS TRUE,
 			       COALESCE(m.active_revision_name, '')
 			FROM core.model m
@@ -10364,7 +10369,7 @@ func (h *handler) appsIn(ctx context.Context, a *actor) ([]appInfo, error) {
 		}
 		for mRows.Next() {
 			var mi appModelInfo
-			if mRows.Scan(&mi.ID, &mi.Name, &mi.IsDefault, &mi.ActiveRevision) == nil {
+			if mRows.Scan(&mi.ID, &mi.Name, &mi.Description, &mi.IsDefault, &mi.ActiveRevision) == nil {
 				apps[i].Models = append(apps[i].Models, mi)
 			}
 		}
@@ -11920,7 +11925,7 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 
 		h.dropWidgetsReferencing(ctx, metricID)
 		if err := h.deleteAndRemeasure(ctx, h.customerOfModel(ctx, modelID), `DELETE FROM model.metric_def WHERE id=$1::uuid`, metricID); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
+			jsonErr(w, err, deleteStatus(err))
 			return
 		}
 		if modelID != "" {
@@ -13178,14 +13183,20 @@ func (h *handler) adminApplicationAction(w http.ResponseWriter, r *http.Request)
 	}
 	switch r.Method {
 	case http.MethodPatch:
-		var body struct {
-			Name string `json:"name"`
-		}
+		// Its name, its description, or both.
+		var body detailsPatch
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
 			return
 		}
-		if _, err := h.db.Exec(tctx, `UPDATE core.application SET name=$2 WHERE id=$1::uuid`, id, body.Name); err != nil {
+		if err := body.clean(); err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		}
+		if _, err := h.db.Exec(tctx, `
+			UPDATE core.application
+			SET name = COALESCE($2, name), description = COALESCE($3, description), updated_at = now()
+			WHERE id=$1::uuid`, id, body.Name, body.Description); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -13194,7 +13205,7 @@ func (h *handler) adminApplicationAction(w http.ResponseWriter, r *http.Request)
 				Category: auditlog.CategoryAdmin, EventType: auditlog.EventApplicationUpdated,
 				ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
 				ApplicationID: id, ResourceType: "application", ResourceID: id,
-				Metadata: map[string]string{"name": body.Name},
+				Metadata: body.auditMetadata(),
 			})
 		}
 		jsonOK(w, map[string]string{"status": "ok"})
@@ -13368,6 +13379,37 @@ func (h *handler) adminModelAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Its name, its description, or both — as for an application.
+	if subPath == "" && r.Method == http.MethodPatch {
+		var body detailsPatch
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
+			return
+		}
+		if err := body.clean(); err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		}
+		var appID string
+		if err := h.db.QueryRow(ctx, `
+			UPDATE core.model
+			SET name = COALESCE($2, name), description = COALESCE($3, description), updated_at = now()
+			WHERE id=$1::uuid RETURNING application_id::text`, id, body.Name, body.Description).Scan(&appID); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+		if a, e := h.resolveActor(ctx, r); e == nil {
+			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
+				Category: auditlog.CategoryAdmin, EventType: auditlog.EventModelUpdated,
+				ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
+				ApplicationID: appID, ResourceType: "model", ResourceID: id,
+				Metadata: body.auditMetadata(),
+			})
+		}
+		jsonOK(w, map[string]string{"status": "ok"})
+		return
+	}
+
 	if r.Method != http.MethodDelete {
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
 		return
@@ -13490,7 +13532,7 @@ func (h *handler) adminRevisionAction(w http.ResponseWriter, r *http.Request) {
 			SELECT m.application_id::text FROM model.revision r
 			JOIN core.model m ON m.id = r.model_id WHERE r.id=$1::uuid`, id).Scan(&appID)
 		if err := h.deleteAndRemeasure(ctx, h.customerOfApplication(ctx, appID), `DELETE FROM model.revision WHERE id=$1::uuid`, id); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
+			jsonErr(w, err, deleteStatus(err))
 			return
 		}
 		if a, e := h.resolveActor(ctx, r); e == nil {

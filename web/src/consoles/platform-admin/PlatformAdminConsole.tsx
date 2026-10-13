@@ -6,6 +6,7 @@ import { Plus, Pencil, Trash2, Download, Upload, Braces } from "lucide-react";
 import { api, withTenant, CONTROL_PLANE, type AccessRemovalResult, type AdminTenant, type AdminModel, type AdminApp, type AdminAuditEvent, type AdminRevision, type ModelExportPackage } from "../../api/client";
 import { downloadJSON } from "../../api/download";
 import { accessRemovalNotice } from "../admin/accessRemoval";
+import { DetailsEditor } from "../DetailsEditor";
 import {
   Button,
   IconButton,
@@ -233,6 +234,8 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
   });
   const { confirm, confirmElement } = useConfirm();
   const { isCollapsed, toggle } = useCollapsed();
+  // The row being renamed or described: "app:<id>" or "model:<id>".
+  const [editing, setEditing] = useState("");
   const matches = useContext(SearchMatches);
   const appOpen = !!matches?.has(`open:app:${app.id}`) || !isCollapsed(`app:${app.id}`);
 
@@ -243,8 +246,12 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
         <div className="mvx-admin-avatar mvx-admin-avatar--app">{app.name[0]}</div>
         <div className="mvx-admin-object__title">
           <div className="mvx-admin-object__name"><KindTag kind="application" />{app.name}</div>
+          {app.description && <div className="mvx-admin-object__meta" style={{ whiteSpace: "normal" }}>{app.description}</div>}
           <div className="mvx-admin-object__meta">{app.models.length} model{app.models.length !== 1 ? "s" : ""}</div>
         </div>
+        <IconButton aria-label={`Edit application ${app.name}`} title="Rename or describe" onClick={() => setEditing(`app:${app.id}`)}>
+          <Pencil size={14} />
+        </IconButton>
         <IconButton
           aria-label={`Delete application ${app.name}`}
           title="Delete application"
@@ -254,6 +261,9 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
           <Trash2 size={14} />
         </IconButton>
       </div>
+      {editing === `app:${app.id}` && (
+        <DetailsEditor kind="application" id={app.id} tenantId={tenantId} name={app.name} description={app.description ?? ""} onClose={() => setEditing("")} />
+      )}
 
       {appOpen && <div className="mvx-admin-object__body">
         {addModel ? (
@@ -337,6 +347,9 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
                   <Download size={13} />
                 </IconButton>
               )}
+              <IconButton aria-label={`Edit model ${m.name}`} title="Rename or describe" size={26} onClick={() => setEditing(`model:${m.id}`)}>
+                <Pencil size={13} />
+              </IconButton>
               <IconButton
                 aria-label={`Delete model ${m.name}`}
                 title="Delete model"
@@ -347,6 +360,10 @@ function AppSection({ app, tenantId, onDelete, canTransferModels }: { app: Admin
                 <Trash2 size={13} />
               </IconButton>
             </div>
+            {m.description && <p className="mvx-admin-muted" style={{ margin: "2px 0 6px" }}>{m.description}</p>}
+            {editing === `model:${m.id}` && (
+              <DetailsEditor kind="model" id={m.id} tenantId={tenantId} name={m.name} description={m.description ?? ""} onClose={() => setEditing("")} />
+            )}
             {modelOpen && <ModelRevisionsSection model={m} tenantId={tenantId} canTransferModels={canTransferModels} />}
           </div>
           );

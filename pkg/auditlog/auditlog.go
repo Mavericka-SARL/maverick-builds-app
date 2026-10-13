@@ -77,6 +77,7 @@ const (
 	EventApplicationUpdated       EventType = "application.updated"
 	EventApplicationDeleted       EventType = "application.deleted"
 	EventModelCreated             EventType = "model.created"
+	EventModelUpdated             EventType = "model.updated"
 	// EventModelActiveRevisionSet is deliberately distinct from
 	// EventRevisionActivated (the developer-console path): both flip a
 	// model's active revision, but through different UIs/roles, and should

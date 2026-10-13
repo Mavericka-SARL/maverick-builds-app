@@ -1673,10 +1673,17 @@ type Handler interface {
 	TriggerAutomationRule(ctx context.Context, req OptTriggerAutomationRequest, params TriggerAutomationRuleParams) (TriggerAutomationRuleRes, error)
 	// UpdateAdminApplication implements updateAdminApplication operation.
 	//
-	// Rename an application.
+	// Rename an application or change its description.
 	//
 	// PATCH /api/admin/applications/{id}
 	UpdateAdminApplication(ctx context.Context, req *UpdateApplicationRequest, params UpdateAdminApplicationParams) (*UpdateAdminApplicationOK, error)
+	// UpdateAdminModel implements updateAdminModel operation.
+	//
+	// For the tenant admin of the model's tenant and the platform admin, who create models; audited as
+	// model.updated.
+	//
+	// PATCH /api/admin/models/{id}
+	UpdateAdminModel(ctx context.Context, req *UpdateAdminModelRequest, params UpdateAdminModelParams) (UpdateAdminModelRes, error)
 	// UpdateAdminRevision implements updateAdminRevision operation.
 	//
 	// Rename or redescribe a revision.

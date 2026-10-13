@@ -1626,6 +1626,7 @@ components:
       properties:
         id:              { type: string, format: uuid }
         name:            { type: string }
+        description:     { type: string, description: "What the model is for, as its creator wrote it" }
         storage_type:    { type: string }
         active_revision: { type: string, nullable: true }
         revisions:       { type: array, items: { $ref: "#/components/schemas/AdminRevisionItem" } }
@@ -1637,6 +1638,7 @@ components:
       properties:
         id:     { type: string, format: uuid }
         name:   { type: string }
+        description: { type: string, description: "What the application is for, as its creator wrote it" }
         mode:   { type: string, enum: [planning, crud, execution] }
         status: { type: string }
         models: { type: array, items: { $ref: "#/components/schemas/AdminModel" } }
@@ -1734,8 +1736,17 @@ components:
 
     UpdateApplicationRequest:
       type: object
+      description: A field left out stays as it is; at least one is required.
       properties:
-        name: { type: string }
+        name:        { type: string, maxLength: 120, description: "Not empty once trimmed" }
+        description: { type: string, maxLength: 300, description: "What the application is for, shown under its name; empty clears it" }
+
+    UpdateAdminModelRequest:
+      type: object
+      description: A field left out stays as it is; at least one is required.
+      properties:
+        name:        { type: string, maxLength: 120, description: "Not empty once trimmed" }
+        description: { type: string, maxLength: 300, description: "What the model is for, shown under its name; empty clears it" }
 
     CreateAdminModelRequest:
       type: object
@@ -1799,6 +1810,7 @@ components:
         include_data:     { type: boolean, description: "false = definitions only (no facts, no form records)" }
         exported_at:      { type: string, format: date-time }
         model_name:       { type: string }
+        model_description: { type: string, description: "The model's description; recreated on import" }
         storage_type:     { type: string }
         revision_name:    { type: string }
         facts_policy:     { type: string, description: "Explicit, inspectable statement of the export policy applied to facts: one latest-wins value per cell for direct entries, plus every form-posted value for that same cell (both survive — they are summed, not alternatives)." }
@@ -2470,10 +2482,23 @@ components:
         tenant_name: { type: string }
         id:              { type: string, format: uuid }
         name:            { type: string }
+        description:     { type: string, description: "What the application is for, as its creator wrote it" }
         mode:            { type: string, enum: [planning, crud, execution] }
         workspace_name:  { type: string }
         model_name:      { type: string }
         active_revision: { type: string }
+        models:
+          type: array
+          description: The models of the application the person may open, the default first.
+          items:
+            type: object
+            required: [id, name, is_default, active_revision]
+            properties:
+              id:              { type: string, format: uuid }
+              name:            { type: string }
+              description:     { type: string, description: "What the model is for, as its creator wrote it" }
+              is_default:      { type: boolean }
+              active_revision: { type: string }
 
     FormulaRefsRequest:
       type: object
@@ -6545,7 +6570,7 @@ paths:
     patch:
       operationId: updateAdminApplication
       tags: [Admin]
-      summary: Rename an application
+      summary: Rename an application or change its description
       parameters:
         - name: id
           in: path
@@ -6641,6 +6666,34 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
 
   /api/admin/models/{id}:
+    patch:
+      operationId: updateAdminModel
+      tags: [Admin]
+      summary: Rename a model or change its description
+      description: >-
+        For the tenant admin of the model's tenant and the platform admin, who
+        create models; audited as model.updated.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateAdminModelRequest" }
+      responses:
+        "200":
+          description: Model updated
+          content:
+            application/json:
+              schema: { type: object, properties: { status: { type: string } } }
+        "400":
+          description: Nothing to change, an empty name, or a field too long
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
     delete:
       operationId: deleteAdminModel
       tags: [Admin]

@@ -72,6 +72,7 @@ var (
 	}
 	rn98AllowedHeaders = map[string]string{
 		"DELETE": "Authorization",
+		"PATCH":  "Authorization,Content-Type",
 	}
 	rn287AllowedHeaders = map[string]string{
 		"PUT": "Authorization,Content-Type",
@@ -1329,12 +1330,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 												s.handleDeleteAdminModelRequest([1]string{
 													args[0],
 												}, elemIsEscaped, w, r)
+											case "PATCH":
+												s.handleUpdateAdminModelRequest([1]string{
+													args[0],
+												}, elemIsEscaped, w, r)
 											default:
 												s.notAllowed(w, r, notAllowedParams{
-													allowedMethods: "DELETE",
+													allowedMethods: "DELETE,PATCH",
 													allowedHeaders: rn98AllowedHeaders,
 													acceptPost:     "",
-													acceptPatch:    "",
+													acceptPatch:    "application/json",
 												})
 											}
 
@@ -8041,7 +8046,7 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 											return r, true
 										case "PATCH":
 											r.name = UpdateAdminApplicationOperation
-											r.summary = "Rename an application"
+											r.summary = "Rename an application or change its description"
 											r.operationID = "updateAdminApplication"
 											r.operationGroup = ""
 											r.pathPattern = "/api/admin/applications/{id}"
@@ -8479,6 +8484,15 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 												r.name = DeleteAdminModelOperation
 												r.summary = "Delete a model"
 												r.operationID = "deleteAdminModel"
+												r.operationGroup = ""
+												r.pathPattern = "/api/admin/models/{id}"
+												r.args = args
+												r.count = 1
+												return r, true
+											case "PATCH":
+												r.name = UpdateAdminModelOperation
+												r.summary = "Rename a model or change its description"
+												r.operationID = "updateAdminModel"
 												r.operationGroup = ""
 												r.pathPattern = "/api/admin/models/{id}"
 												r.args = args

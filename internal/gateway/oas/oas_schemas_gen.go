@@ -336,11 +336,13 @@ func (s *AddUserRoleRequest) SetWorkspaceID(val OptUUID) {
 
 // Ref: #/components/schemas/AdminApp
 type AdminApp struct {
-	ID     uuid.UUID    `json:"id"`
-	Name   string       `json:"name"`
-	Mode   AdminAppMode `json:"mode"`
-	Status string       `json:"status"`
-	Models []AdminModel `json:"models"`
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+	// What the application is for, as its creator wrote it.
+	Description OptString    `json:"description"`
+	Mode        AdminAppMode `json:"mode"`
+	Status      string       `json:"status"`
+	Models      []AdminModel `json:"models"`
 }
 
 // GetID returns the value of ID.
@@ -351,6 +353,11 @@ func (s *AdminApp) GetID() uuid.UUID {
 // GetName returns the value of Name.
 func (s *AdminApp) GetName() string {
 	return s.Name
+}
+
+// GetDescription returns the value of Description.
+func (s *AdminApp) GetDescription() OptString {
+	return s.Description
 }
 
 // GetMode returns the value of Mode.
@@ -376,6 +383,11 @@ func (s *AdminApp) SetID(val uuid.UUID) {
 // SetName sets the value of Name.
 func (s *AdminApp) SetName(val string) {
 	s.Name = val
+}
+
+// SetDescription sets the value of Description.
+func (s *AdminApp) SetDescription(val OptString) {
+	s.Description = val
 }
 
 // SetMode sets the value of Mode.
@@ -663,8 +675,10 @@ func (s *AdminInfraNodesOKItem) SetStale(val bool) {
 
 // Ref: #/components/schemas/AdminModel
 type AdminModel struct {
-	ID             uuid.UUID           `json:"id"`
-	Name           string              `json:"name"`
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+	// What the model is for, as its creator wrote it.
+	Description    OptString           `json:"description"`
 	StorageType    string              `json:"storage_type"`
 	ActiveRevision NilString           `json:"active_revision"`
 	Revisions      []AdminRevisionItem `json:"revisions"`
@@ -682,6 +696,11 @@ func (s *AdminModel) GetID() uuid.UUID {
 // GetName returns the value of Name.
 func (s *AdminModel) GetName() string {
 	return s.Name
+}
+
+// GetDescription returns the value of Description.
+func (s *AdminModel) GetDescription() OptString {
+	return s.Description
 }
 
 // GetStorageType returns the value of StorageType.
@@ -712,6 +731,11 @@ func (s *AdminModel) SetID(val uuid.UUID) {
 // SetName sets the value of Name.
 func (s *AdminModel) SetName(val string) {
 	s.Name = val
+}
+
+// SetDescription sets the value of Description.
+func (s *AdminModel) SetDescription(val OptString) {
+	s.Description = val
 }
 
 // SetStorageType sets the value of StorageType.
@@ -9083,6 +9107,7 @@ func (*Error) setActiveRevisionRes()           {}
 func (*Error) setDefaultModelRes()             {}
 func (*Error) startIntegrationOAuthRes()       {}
 func (*Error) testIntegrationConnectionRes()   {}
+func (*Error) updateAdminModelRes()            {}
 func (*Error) updateAutomationRuleRes()        {}
 func (*Error) updateConnectorSettingsRes()     {}
 func (*Error) updateDashboardRes()             {}
@@ -15798,11 +15823,13 @@ type ModelExportPackage struct {
 	Format  string `json:"format"`
 	Version int    `json:"version"`
 	// False = definitions only (no facts, no form records).
-	IncludeData  OptBool   `json:"include_data"`
-	ExportedAt   time.Time `json:"exported_at"`
-	ModelName    string    `json:"model_name"`
-	StorageType  string    `json:"storage_type"`
-	RevisionName string    `json:"revision_name"`
+	IncludeData OptBool   `json:"include_data"`
+	ExportedAt  time.Time `json:"exported_at"`
+	ModelName   string    `json:"model_name"`
+	// The model's description; recreated on import.
+	ModelDescription OptString `json:"model_description"`
+	StorageType      string    `json:"storage_type"`
+	RevisionName     string    `json:"revision_name"`
 	// Explicit, inspectable statement of the export policy applied to facts: one latest-wins value per
 	// cell for direct entries, plus every form-posted value for that same cell (both survive — they
 	// are summed, not alternatives).
@@ -15845,6 +15872,11 @@ func (s *ModelExportPackage) GetExportedAt() time.Time {
 // GetModelName returns the value of ModelName.
 func (s *ModelExportPackage) GetModelName() string {
 	return s.ModelName
+}
+
+// GetModelDescription returns the value of ModelDescription.
+func (s *ModelExportPackage) GetModelDescription() OptString {
+	return s.ModelDescription
 }
 
 // GetStorageType returns the value of StorageType.
@@ -15950,6 +15982,11 @@ func (s *ModelExportPackage) SetExportedAt(val time.Time) {
 // SetModelName sets the value of ModelName.
 func (s *ModelExportPackage) SetModelName(val string) {
 	s.ModelName = val
+}
+
+// SetModelDescription sets the value of ModelDescription.
+func (s *ModelExportPackage) SetModelDescription(val OptString) {
+	s.ModelDescription = val
 }
 
 // SetStorageType sets the value of StorageType.
@@ -27061,6 +27098,51 @@ func (s *UpdateAdminApplicationOK) SetStatus(val OptString) {
 	s.Status = val
 }
 
+type UpdateAdminModelOK struct {
+	Status OptString `json:"status"`
+}
+
+// GetStatus returns the value of Status.
+func (s *UpdateAdminModelOK) GetStatus() OptString {
+	return s.Status
+}
+
+// SetStatus sets the value of Status.
+func (s *UpdateAdminModelOK) SetStatus(val OptString) {
+	s.Status = val
+}
+
+func (*UpdateAdminModelOK) updateAdminModelRes() {}
+
+// A field left out stays as it is; at least one is required.
+// Ref: #/components/schemas/UpdateAdminModelRequest
+type UpdateAdminModelRequest struct {
+	// Not empty once trimmed.
+	Name OptString `json:"name"`
+	// What the model is for, shown under its name; empty clears it.
+	Description OptString `json:"description"`
+}
+
+// GetName returns the value of Name.
+func (s *UpdateAdminModelRequest) GetName() OptString {
+	return s.Name
+}
+
+// GetDescription returns the value of Description.
+func (s *UpdateAdminModelRequest) GetDescription() OptString {
+	return s.Description
+}
+
+// SetName sets the value of Name.
+func (s *UpdateAdminModelRequest) SetName(val OptString) {
+	s.Name = val
+}
+
+// SetDescription sets the value of Description.
+func (s *UpdateAdminModelRequest) SetDescription(val OptString) {
+	s.Description = val
+}
+
 type UpdateAdminRevisionOK struct {
 	Status OptString `json:"status"`
 }
@@ -27157,9 +27239,13 @@ func (s *UpdateAdminUserRequest) SetDisplayName(val OptString) {
 	s.DisplayName = val
 }
 
+// A field left out stays as it is; at least one is required.
 // Ref: #/components/schemas/UpdateApplicationRequest
 type UpdateApplicationRequest struct {
+	// Not empty once trimmed.
 	Name OptString `json:"name"`
+	// What the application is for, shown under its name; empty clears it.
+	Description OptString `json:"description"`
 }
 
 // GetName returns the value of Name.
@@ -27167,9 +27253,19 @@ func (s *UpdateApplicationRequest) GetName() OptString {
 	return s.Name
 }
 
+// GetDescription returns the value of Description.
+func (s *UpdateApplicationRequest) GetDescription() OptString {
+	return s.Description
+}
+
 // SetName sets the value of Name.
 func (s *UpdateApplicationRequest) SetName(val OptString) {
 	s.Name = val
+}
+
+// SetDescription sets the value of Description.
+func (s *UpdateApplicationRequest) SetDescription(val OptString) {
+	s.Description = val
 }
 
 // UpdateAuditSettingsBadRequest is response for UpdateAuditSettings operation.
@@ -28821,14 +28917,18 @@ func (s *UserAccessRule) SetAccess(val string) {
 // Ref: #/components/schemas/UserApp
 type UserApp struct {
 	// The tenant the application belongs to; a person's applications span every database that holds them.
-	TenantID       OptString   `json:"tenant_id"`
-	TenantName     OptString   `json:"tenant_name"`
-	ID             uuid.UUID   `json:"id"`
-	Name           string      `json:"name"`
+	TenantID   OptString `json:"tenant_id"`
+	TenantName OptString `json:"tenant_name"`
+	ID         uuid.UUID `json:"id"`
+	Name       string    `json:"name"`
+	// What the application is for, as its creator wrote it.
+	Description    OptString   `json:"description"`
 	Mode           UserAppMode `json:"mode"`
 	WorkspaceName  string      `json:"workspace_name"`
 	ModelName      string      `json:"model_name"`
 	ActiveRevision string      `json:"active_revision"`
+	// The models of the application the person may open, the default first.
+	Models []UserAppModelsItem `json:"models"`
 }
 
 // GetTenantID returns the value of TenantID.
@@ -28851,6 +28951,11 @@ func (s *UserApp) GetName() string {
 	return s.Name
 }
 
+// GetDescription returns the value of Description.
+func (s *UserApp) GetDescription() OptString {
+	return s.Description
+}
+
 // GetMode returns the value of Mode.
 func (s *UserApp) GetMode() UserAppMode {
 	return s.Mode
@@ -28869,6 +28974,11 @@ func (s *UserApp) GetModelName() string {
 // GetActiveRevision returns the value of ActiveRevision.
 func (s *UserApp) GetActiveRevision() string {
 	return s.ActiveRevision
+}
+
+// GetModels returns the value of Models.
+func (s *UserApp) GetModels() []UserAppModelsItem {
+	return s.Models
 }
 
 // SetTenantID sets the value of TenantID.
@@ -28891,6 +29001,11 @@ func (s *UserApp) SetName(val string) {
 	s.Name = val
 }
 
+// SetDescription sets the value of Description.
+func (s *UserApp) SetDescription(val OptString) {
+	s.Description = val
+}
+
 // SetMode sets the value of Mode.
 func (s *UserApp) SetMode(val UserAppMode) {
 	s.Mode = val
@@ -28909,6 +29024,11 @@ func (s *UserApp) SetModelName(val string) {
 // SetActiveRevision sets the value of ActiveRevision.
 func (s *UserApp) SetActiveRevision(val string) {
 	s.ActiveRevision = val
+}
+
+// SetModels sets the value of Models.
+func (s *UserApp) SetModels(val []UserAppModelsItem) {
+	s.Models = val
 }
 
 type UserAppMode string
@@ -28957,6 +29077,65 @@ func (s *UserAppMode) UnmarshalText(data []byte) error {
 	default:
 		return errors.Errorf("invalid value: %q", data)
 	}
+}
+
+type UserAppModelsItem struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+	// What the model is for, as its creator wrote it.
+	Description    OptString `json:"description"`
+	IsDefault      bool      `json:"is_default"`
+	ActiveRevision string    `json:"active_revision"`
+}
+
+// GetID returns the value of ID.
+func (s *UserAppModelsItem) GetID() uuid.UUID {
+	return s.ID
+}
+
+// GetName returns the value of Name.
+func (s *UserAppModelsItem) GetName() string {
+	return s.Name
+}
+
+// GetDescription returns the value of Description.
+func (s *UserAppModelsItem) GetDescription() OptString {
+	return s.Description
+}
+
+// GetIsDefault returns the value of IsDefault.
+func (s *UserAppModelsItem) GetIsDefault() bool {
+	return s.IsDefault
+}
+
+// GetActiveRevision returns the value of ActiveRevision.
+func (s *UserAppModelsItem) GetActiveRevision() string {
+	return s.ActiveRevision
+}
+
+// SetID sets the value of ID.
+func (s *UserAppModelsItem) SetID(val uuid.UUID) {
+	s.ID = val
+}
+
+// SetName sets the value of Name.
+func (s *UserAppModelsItem) SetName(val string) {
+	s.Name = val
+}
+
+// SetDescription sets the value of Description.
+func (s *UserAppModelsItem) SetDescription(val OptString) {
+	s.Description = val
+}
+
+// SetIsDefault sets the value of IsDefault.
+func (s *UserAppModelsItem) SetIsDefault(val bool) {
+	s.IsDefault = val
+}
+
+// SetActiveRevision sets the value of ActiveRevision.
+func (s *UserAppModelsItem) SetActiveRevision(val string) {
+	s.ActiveRevision = val
 }
 
 // Ref: #/components/schemas/UserAssignment

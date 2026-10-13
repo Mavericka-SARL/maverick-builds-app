@@ -1217,6 +1217,16 @@
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  /* One line in the pill's fixed height: a hyphenated tag ("sales-planning")
+     wrapped at the hyphen and spilled out of the shape in a narrow column. */
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+.mvx-filter-chip__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mvx-filter-chip--active {
@@ -2674,4 +2684,25 @@ tr:hover .mvx-member-label__actions,
 
 .mvx-user-menu__action:hover {
   background: var(--color-surface-subtle);
+}
+
+/* A dependency-graph node's metric label (DependencyGraphTab), inside the
+   node's foreignObject: centred, wrapped, two lines at most. */
+.mvx-graph-node__label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  font: 600 12px/16px system-ui, sans-serif;
+  color: var(--color-text);
+}
+
+.mvx-graph-node__label > span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
