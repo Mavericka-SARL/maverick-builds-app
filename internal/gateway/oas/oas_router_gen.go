@@ -8863,7 +8863,7 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 									return r, true
 								case "POST":
 									r.name = CreateTenantOperation
-									r.summary = "Create a tenant (platform_admin only) with a default workspace"
+									r.summary = "Create a tenant (platform_admin only) with a default workspace and the Getting started application"
 									r.operationID = "createTenant"
 									r.operationGroup = ""
 									r.pathPattern = "/api/admin/tenants"

@@ -196,6 +196,16 @@ func main() {
 	log.Info().Msg("migrations applied")
 	defer pool.Close()
 
+	// The Community Edition's 100 MB is the Playground's: a deployment that
+	// is not the Playground starts without it (plan.ReleasePlaygroundAllowance).
+	if !c.Playground {
+		if released, err := plan.ReleasePlaygroundAllowance(ctx, pool); err != nil {
+			log.Warn().Err(err).Msg("the Community Edition keeps the Playground's storage limit")
+		} else if released {
+			log.Info().Msg("the Community Edition has no storage limit outside the Playground: the 100 MB allowance was released")
+		}
+	}
+
 	// Outside DEV_MODE, a working JWKS validator is mandatory: resolveActor
 	// refuses every request when h.jwks is nil rather than falling back to
 	// X-Dev-User persona auth (see internal/gateway/handler.go), so refusing

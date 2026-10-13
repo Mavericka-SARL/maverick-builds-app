@@ -305,7 +305,7 @@ type Handler interface {
 	CreateScimToken(ctx context.Context, req *ScimToken) (CreateScimTokenRes, error)
 	// CreateTenant implements createTenant operation.
 	//
-	// Create a tenant (platform_admin only) with a default workspace.
+	// Create a tenant (platform_admin only) with a default workspace and the Getting started application.
 	//
 	// POST /api/admin/tenants
 	CreateTenant(ctx context.Context, req *CreateTenantRequest) (CreateTenantRes, error)

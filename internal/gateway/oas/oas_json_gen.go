@@ -302,9 +302,15 @@ func (s *Actor) encodeFields(e *jx.Encoder) {
 			s.Preferences.Encode(e)
 		}
 	}
+	{
+		if s.JoinNewTenant.Set {
+			e.FieldStart("join_new_tenant")
+			s.JoinNewTenant.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfActor = [8]string{
+var jsonFieldsNameOfActor = [9]string{
 	0: "user_id",
 	1: "email",
 	2: "display_name",
@@ -313,6 +319,7 @@ var jsonFieldsNameOfActor = [8]string{
 	5: "plan",
 	6: "contact_url",
 	7: "preferences",
+	8: "join_new_tenant",
 }
 
 // Decode decodes Actor from json.
@@ -320,7 +327,7 @@ func (s *Actor) Decode(d *jx.Decoder) error {
 	if s == nil {
 		return errors.New("invalid: unable to decode Actor to nil")
 	}
-	var requiredBitSet [1]uint8
+	var requiredBitSet [2]uint8
 
 	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
 		switch string(k) {
@@ -420,6 +427,16 @@ func (s *Actor) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"preferences\"")
 			}
+		case "join_new_tenant":
+			if err := func() error {
+				s.JoinNewTenant.Reset()
+				if err := s.JoinNewTenant.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"join_new_tenant\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -429,8 +446,9 @@ func (s *Actor) Decode(d *jx.Decoder) error {
 	}
 	// Validate required fields.
 	var failures []validate.FieldError
-	for i, mask := range [1]uint8{
+	for i, mask := range [2]uint8{
 		0b00001111,
+		0b00000000,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -17818,11 +17836,25 @@ func (s *CreateTenantOK) encodeFields(e *jx.Encoder) {
 			s.WorkspaceID.Encode(e)
 		}
 	}
+	{
+		if s.ApplicationID.Set {
+			e.FieldStart("application_id")
+			s.ApplicationID.Encode(e)
+		}
+	}
+	{
+		if s.ModelID.Set {
+			e.FieldStart("model_id")
+			s.ModelID.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfCreateTenantOK = [2]string{
+var jsonFieldsNameOfCreateTenantOK = [4]string{
 	0: "id",
 	1: "workspace_id",
+	2: "application_id",
+	3: "model_id",
 }
 
 // Decode decodes CreateTenantOK from json.
@@ -17852,6 +17884,26 @@ func (s *CreateTenantOK) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"workspace_id\"")
+			}
+		case "application_id":
+			if err := func() error {
+				s.ApplicationID.Reset()
+				if err := s.ApplicationID.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"application_id\"")
+			}
+		case "model_id":
+			if err := func() error {
+				s.ModelID.Reset()
+				if err := s.ModelID.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"model_id\"")
 			}
 		default:
 			return d.Skip()
@@ -17896,11 +17948,25 @@ func (s *CreateTenantRequest) encodeFields(e *jx.Encoder) {
 			s.Plan.Encode(e)
 		}
 	}
+	{
+		if s.GettingStarted.Set {
+			e.FieldStart("getting_started")
+			s.GettingStarted.Encode(e)
+		}
+	}
+	{
+		if s.Join.Set {
+			e.FieldStart("join")
+			s.Join.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfCreateTenantRequest = [2]string{
+var jsonFieldsNameOfCreateTenantRequest = [4]string{
 	0: "name",
 	1: "plan",
+	2: "getting_started",
+	3: "join",
 }
 
 // Decode decodes CreateTenantRequest from json.
@@ -17934,6 +18000,26 @@ func (s *CreateTenantRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"plan\"")
+			}
+		case "getting_started":
+			if err := func() error {
+				s.GettingStarted.Reset()
+				if err := s.GettingStarted.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"getting_started\"")
+			}
+		case "join":
+			if err := func() error {
+				s.Join.Reset()
+				if err := s.Join.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"join\"")
 			}
 		default:
 			return d.Skip()

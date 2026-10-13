@@ -1747,6 +1747,12 @@ func encodeCreateTenantResponse(response CreateTenantRes, w http.ResponseWriter,
 
 		return nil
 
+	case *CreateTenantConflict:
+		w.WriteHeader(409)
+		span.SetStatus(codes.Error, http.StatusText(409))
+
+		return nil
+
 	default:
 		return errors.Errorf("unexpected response type: %T", response)
 	}

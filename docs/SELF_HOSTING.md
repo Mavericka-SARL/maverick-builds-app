@@ -195,7 +195,7 @@ Certificates cannot be issued until they do.
 ```bash
 git clone https://github.com/Mavericka-SARL/maverick-builds-app.git maverickbuilds
 cd maverickbuilds
-git checkout 2026.10.12.1        # a release: the newest is on the Releases page
+git checkout 2026.10.13        # a release: the newest is on the Releases page
 cd deploy/compose
 ```
 
@@ -225,7 +225,10 @@ Two choices are easier to make now than later:
 - **`TENANT_DB_MODE`** — `shared` (the default) keeps every tenant in one
   database; `dedicated` gives each tenant a database of its own on the same
   server ([TENANT_DATABASES.md](TENANT_DATABASES.md)). Switching later only
-  affects tenants created afterwards.
+  affects tenants created afterwards. With `dedicated`, a platform
+  administrator works in every tenant as platform administrator only, so
+  the first administrator cannot take a tenant as their own (step 8):
+  invite a second account to hold its roles.
 - **`CADDY_CERTS`** — empty for Let's Encrypt certificates, which needs both
   names publicly resolvable and ports 80/443 reachable from the internet. On a
   private network, set it to `local_certs`: Caddy then issues certificates from
@@ -247,7 +250,7 @@ lines to `.env`:
 
 ```bash
 COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml
-MAVERICKS_RELEASE=2026.10.12.1   # the release you checked out
+MAVERICKS_RELEASE=2026.10.13   # the release you checked out
 ```
 
 ```bash
@@ -303,7 +306,8 @@ administrator can add people. Create the first one:
 
 It asks for a password (12 characters or more). This person is a **platform
 administrator**: they manage tenants, applications and users across the
-whole deployment.
+whole deployment. Their first sign-in sets up their own organisation, with
+every other role in it ([step 8](#step-8--first-steps-in-the-console)).
 
 ### Step 7 — Check
 
@@ -342,16 +346,37 @@ developers build and users work in. People are given
 | `business_admin` | Administers business consoles within a workspace |
 | `business_user` | Enters and reviews data |
 
-As the platform administrator:
+A self-hosted deployment starts where a sign-up on the hosted Playground
+does, without the Playground's 100 MB limit. As the platform administrator:
 
-1. **Applications › New tenant** — name your organisation.
-2. In the tenant, **New application**, then **Add model** inside it.
-3. **Users › Invite user** — e-mail, name and a role, e.g. `developer`. The
+1. **Applications › New tenant** — name your organisation. Leave both boxes
+   ticked:
+   - **Getting started application** — the *Learn the platform* tour and a
+     guide for each role (developer, business administrator, tenant
+     administrator), the same as every Playground workspace gets. New
+     releases bring them up to date.
+   - **Make it my own, with every role** — you become the tenant's
+     administrator, developer, business administrator and user, beside
+     platform administrator. It is offered while your account has no tenant
+     of its own, with the default single database.
+
+   The console starts again and opens on the tour. Every tenant you create
+   later gets the Getting started application too, unless you untick it.
+   No edition carries a limit here — the Community Edition's 100 MB is the
+   Playground's alone, and the gateway takes it off at start-up anywhere
+   else. To set limits of your own, edit an edition under **Platform ›
+   Editions**.
+2. **Users › Invite user** — e-mail, name and a role, e.g. `developer`. The
    person receives an e-mail with a link to set their password; the link is
    valid for three days. Business roles are also given a workspace.
+3. To build your own application: **New application** in the tenant, then
+   **Add model** inside it. The developer finds the model under **Models**,
+   creates its first revision and starts building.
 
-The developer signs in, finds the model under **Models**, creates its first
-revision and starts building. The console's screens are described in the
+The Playground runs the Enterprise Edition. Single sign-on, SCIM, cell
+history, audit export, usage analytics, white-labelling, tenant AI keys and
+deployment settings need a Commercial or Enterprise licence key here
+(**Platform › License**). Everything else works as it does there. The console's screens are described in the
 [developer manual](developer-manual/), and the formula language in the
 [formulas manual](formulas-manual/). Your deployment serves both itself, at
 `https://<console host>/docs/developer-manual/manual.html` and
@@ -612,7 +637,7 @@ of your own. Then edit it:
    appear several times and must agree everywhere), the storage class, the
    SMTP relay and sender, and the address the backup watchdog alerts.
 2. **`kustomization.yaml`** — its `images:` block pins every image to the
-   release `2026.10.12.1`; set the release you deploy, or, if you built your
+   release `2026.10.13`; set the release you deploy, or, if you built your
    own images, replace the block with the one `build-images.sh` printed.
 3. **Object storage.** By default MinIO runs in the cluster and holds the
    backups and WAL archive. To keep them outside the cluster, as you should in
@@ -788,7 +813,7 @@ start again. `pg-restore.sh` drops the database and loads the dump into an
 empty one; `latest` is the newest dump of the database the URL names:
 
 ```bash
-IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.10.12.1   # the one your overlay runs
+IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.10.13   # the one your overlay runs
 kubectl -n mavericks scale deployment --replicas=0 \
   -l 'app.kubernetes.io/component in (api-gateway,service,identity)'
 for db in mavericks keycloak; do          # and each tenant_… database, if dedicated

@@ -1839,7 +1839,8 @@ func (h *handler) me(w http.ResponseWriter, r *http.Request) {
 	if !act.hasRole("platform_admin") {
 		cid = h.requestCustomerID(ctx, r, act)
 	}
-	jsonOK(w, meResponse{actor: act, Plan: h.planStateFor(ctx, cid), ContactURL: h.signupCfg.ContactURL, Preferences: h.preferencesFor(personalCtx(ctx, act), act.UserID)})
+	jsonOK(w, meResponse{actor: act, Plan: h.planStateFor(ctx, cid), ContactURL: h.signupCfg.ContactURL, Preferences: h.preferencesFor(personalCtx(ctx, act), act.UserID),
+		JoinNewTenant: !act.onControl && h.joinNewTenantRefusal(act) == ""})
 }
 
 func (h *handler) demo(w http.ResponseWriter, r *http.Request) {
@@ -6784,52 +6785,17 @@ func (h *handler) adminTenants(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("forbidden: only platform_admin can create tenants"), http.StatusForbidden)
 			return
 		}
-		var body struct {
-			Name string `json:"name"`
-			Plan string `json:"plan"`
-		}
+		var body createTenantRequest
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
 			jsonErr(w, fmt.Errorf("name is required"), http.StatusBadRequest)
 			return
 		}
-		if body.Plan == "" {
-			body.Plan = "commercial"
+		out, status, err := h.createTenant(ctx, act, body)
+		if err != nil {
+			jsonErr(w, err, status)
+			return
 		}
-		var id, wsID string
-		if h.db.Dedicated() {
-			// Dedicated mode: the tenant gets its own database, carrying the
-			// customer row and default workspace. Everything below (audit,
-			// response) is identical either way.
-			var pErr error
-			id, wsID, pErr = h.provisionTenant(ctx, body.Name, body.Plan)
-			if pErr != nil {
-				jsonErr(w, pErr, http.StatusInternalServerError)
-				return
-			}
-		} else {
-			if err := h.db.QueryRow(ctx,
-				`INSERT INTO core.customer (name, plan) VALUES ($1, $2) RETURNING id::text`,
-				body.Name, body.Plan).Scan(&id); err != nil {
-				jsonErr(w, err, http.StatusInternalServerError)
-				return
-			}
-			// A tenant needs at least one workspace before workspace-scoped
-			// roles can be assigned to its users — create a default one right
-			// away so a fresh tenant is immediately usable.
-			if err := h.db.QueryRow(ctx,
-				`INSERT INTO core.workspace (customer_id, name) VALUES ($1::uuid, 'Default') RETURNING id::text`,
-				id).Scan(&wsID); err != nil {
-				jsonErr(w, err, http.StatusInternalServerError)
-				return
-			}
-		}
-		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
-			Category: auditlog.CategoryAdmin, EventType: auditlog.EventTenantCreated,
-			ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
-			ResourceType: "tenant", ResourceID: id,
-			Metadata: map[string]string{"name": body.Name, "plan": body.Plan},
-		})
-		jsonOK(w, map[string]string{"id": id, "workspace_id": wsID})
+		jsonOK(w, out)
 		return
 	}
 
@@ -10558,19 +10524,23 @@ func (h *handler) resolveDemoModelID(ctx context.Context, r *http.Request) (stri
 	// sign-up makes its tour the default — then the largest model, the
 	// newest application, name and id. Platform-wide callers keep the
 	// largest model first: every signed-up tenant has a default, so there it
-	// would open an arbitrary tenant's tour. resolveDemoAppID orders by the
-	// same keys, so the application and the model agree.
+	// would open an arbitrary tenant's tour — unless they have a tenant of
+	// their own (a self-hosted deployment's first administrator, who took
+	// theirs with every role: createTenantRequest.Join), whose default they
+	// open first, as a sign-up does. resolveDemoAppID orders by the same
+	// keys, so the application and the model agree.
 	var modelID string
 	if act.hasRole("platform_admin") || h.isGlobalBuilder(ctx, act) {
 		err = h.db.QueryRow(ctx, `
 			SELECT m.id::text
 			FROM core.application a
 			JOIN core.model m ON m.application_id = a.id
-			ORDER BY (SELECT COUNT(*) FROM model.metric_def WHERE model_id = m.id) DESC,
+			ORDER BY (a.customer_id = NULLIF($1, '')::uuid AND m.id = a.default_model_id) IS TRUE DESC,
+			         (SELECT COUNT(*) FROM model.metric_def WHERE model_id = m.id) DESC,
 			         a.created_at DESC,
 			         (m.id = a.default_model_id) IS TRUE DESC, m.name, m.id
 			LIMIT 1
-		`).Scan(&modelID)
+		`, act.CustomerID).Scan(&modelID)
 	} else {
 		scoped := false
 		if act.hasRole("tenant_admin") { // narrowed on a developer-only route (builderAdminScope)
@@ -10684,11 +10654,12 @@ func (h *handler) resolveDemoAppID(ctx context.Context, r *http.Request) (string
 			SELECT a.id::text
 			FROM core.application a
 			JOIN core.model m ON m.application_id = a.id
-			ORDER BY (SELECT COUNT(*) FROM model.metric_def WHERE model_id = m.id) DESC,
+			ORDER BY (a.customer_id = NULLIF($1, '')::uuid AND m.id = a.default_model_id) IS TRUE DESC,
+			         (SELECT COUNT(*) FROM model.metric_def WHERE model_id = m.id) DESC,
 			         a.created_at DESC,
 			         (m.id = a.default_model_id) IS TRUE DESC, m.name, m.id
 			LIMIT 1
-		`).Scan(&appID)
+		`, act.CustomerID).Scan(&appID)
 	} else {
 		scoped := false
 		if act.hasRole("tenant_admin") { // narrowed on a developer-only route (builderAdminScope)

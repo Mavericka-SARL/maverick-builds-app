@@ -10,21 +10,17 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/mavericks-engine/mavericks/internal/modeltransfer"
 	"github.com/mavericks-engine/mavericks/internal/plan"
-	"github.com/mavericks-engine/mavericks/internal/starter"
 	"github.com/mavericks-engine/mavericks/internal/startersync"
 	"github.com/mavericks-engine/mavericks/pkg/auditlog"
 )
 
 // Self-service sign-up: a visitor with a company name and a work address
-// gets a tenant on the self-service plan, an application holding the
-// starter models (starter.Packages: the "Learn the platform" tour and one
-// guide per role — the tour, starter.LandingKey, is the application's
-// default and what they first see), and an invitation to
-// set their password. They arrive as the tenant's administrator, developer
-// and business administrator, which is everything one person needs to
-// build and run an application on their own.
+// gets a tenant on the self-service plan, the "Getting started" application
+// (installGettingStarted: the "Learn the platform" tour, what they first
+// see, and one guide per role), and an invitation to set their password.
+// They arrive holding every tenant role (grantEveryTenantRole), which is
+// everything one person needs to build and run an application on their own.
 //
 // Public by nature (nobody is signed in yet), so it is rate-limited per
 // address, refuses an address that already has an account, and creates
@@ -163,7 +159,7 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 				h.log.Error().Err(err).Str("email", req.Email).Msg("sign-up rollback: identity provider account not removed")
 			}
 		})
-		for _, role := range []string{"tenant_admin", "developer", "business_admin", "business_user"} {
+		for _, role := range everyTenantRole {
 			if err := h.kc.AssignRealmRole(ctx, sub, role); err != nil {
 				fail(http.StatusBadGateway, fmt.Errorf("assign %s role in identity provider: %w", role, err))
 				return
@@ -215,12 +211,11 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. The person, the application and the starter models, in one
-	//    transaction on the tenant's database: all of them or none.
-	type imported struct{ key, modelID, revisionID string }
-	var userID, appID string
-	var models []imported // starter.Starters order
-	landing := -1         // the one sign-up makes the default: starter.LandingKey
+	// 3. The person, every tenant role, and the "Getting started"
+	//    application, in one transaction on the tenant's database: all of
+	//    them or none.
+	var userID string
+	var gs gettingStarted
 	err = pgx.BeginFunc(tctx, h.db.For(tctx), func(tx pgx.Tx) error {
 		if err := tx.QueryRow(tctx, `
 			INSERT INTO identity.user (keycloak_sub, email, display_name, customer_id)
@@ -228,73 +223,21 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 			sub, req.Email, req.FirstName+" "+req.LastName, customerID).Scan(&userID); err != nil {
 			return fmt.Errorf("create user: %w", err)
 		}
-		// business_user is the user role: the console's User group comes from
-		// it alone, not from business_admin.
-		for _, ra := range []struct{ role, ws string }{{"tenant_admin", ""}, {"developer", ""}, {"business_admin", workspaceID}, {"business_user", workspaceID}} {
-			if _, err := tx.Exec(tctx, `
-				INSERT INTO identity.role_assignment (user_id, role, workspace_id, assigned_by)
-				VALUES ($1::uuid, $2::identity.user_role, NULLIF($3,'')::uuid, $1::uuid) ON CONFLICT DO NOTHING`,
-				userID, ra.role, ra.ws); err != nil {
-				return fmt.Errorf("assign %s: %w", ra.role, err)
-			}
+		if err := grantEveryTenantRole(tctx, tx, userID, workspaceID, userID); err != nil {
+			return err
 		}
-		if err := tx.QueryRow(tctx, `
-			INSERT INTO core.application (customer_id, workspace_id, name, mode)
-			VALUES ($1::uuid, $2::uuid, $3, 'planning'::core.application_mode) RETURNING id::text`,
-			customerID, workspaceID, signupAppName).Scan(&appID); err != nil {
-			return fmt.Errorf("create application: %w", err)
-		}
-		for _, s := range starter.Starters() {
-			mID, rID, err := modeltransfer.Import(tctx, tx, modeltransfer.ImportRequest{ApplicationID: appID, Package: s.Package}, userID)
-			if err != nil {
-				return fmt.Errorf("starter model %q: %w", s.Package.ModelName, err)
-			}
-			// Recorded, so later content reaches this tenant as a new
-			// revision (internal/startersync) rather than not at all.
-			if err := startersync.Record(tctx, tx, customerID, s.Key, mID, rID, startersync.Hash(s.Package)); err != nil {
-				return fmt.Errorf("record starter model %q: %w", s.Package.ModelName, err)
-			}
-			if s.Key == starter.LandingKey {
-				landing = len(models)
-			}
-			models = append(models, imported{s.Key, mID, rID})
-		}
-		if landing < 0 {
-			return fmt.Errorf("no starter %q to land on", starter.LandingKey)
-		}
-		// They share one created_at (the transaction's), so "newest
-		// model" cannot pick the one to land on: name it as the
-		// application's default, the same setting a developer changes later
-		// under Developer › Models.
-		if _, err := setApplicationDefaultModel(tctx, tx, models[landing].modelID); err != nil {
-			return fmt.Errorf("set default model: %w", err)
-		}
-		return nil
+		var err error
+		gs, err = installGettingStarted(tctx, tx, customerID, workspaceID, userID)
+		return err
 	})
 	if err != nil {
 		fail(http.StatusInternalServerError, err)
 		return
 	}
-	// model_id is the model the tenant lands on; guide_model_ids the other
-	// starters, in starter.Starters order.
-	modelID := models[landing].modelID
-	guideIDs := make([]string, 0, len(models)-1)
-	for i, m := range models {
-		if i != landing {
-			guideIDs = append(guideIDs, m.modelID)
-		}
-	}
+	appID, modelID := gs.appID, gs.landingModelID()
 	h.noteUser(tctx, sub, req.Email)
 	h.noteApplication(tctx, appID)
-	// Every calculated metric of every model, not only those an input
-	// reaches: recalcRevisionFromInputs skips a model with no input metric,
-	// and misses the dependents of a metric that reads only dimensions or
-	// properties. recalcRevisionCalculated recomputes
-	// the whole set in dependency order and logs its own failures, which,
-	// like any recalculation failure here, leave the sign-up standing.
-	for _, m := range models {
-		h.recalcRevisionCalculated(tctx, m.modelID, m.revisionID)
-	}
+	h.recalcGettingStarted(tctx, gs)
 
 	// 4. The invitation, which is what makes the account usable. Without
 	//    it there is nothing to show for the sign-up, so its failure undoes
@@ -309,7 +252,7 @@ func (h *handler) signup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	meta := map[string]string{"email": req.Email, "company": req.Company, "plan": p.Key, "ip": ip, "application_id": appID,
-		"model_id": modelID, "guide_model_ids": strings.Join(guideIDs, ",")}
+		"model_id": modelID, "guide_model_ids": strings.Join(gs.guideModelIDs(), ",")}
 	auditlog.Log(tctx, h.db.For(tctx), h.log, auditlog.Fields{
 		Category: auditlog.CategoryAdmin, EventType: auditlog.EventTenantSignedUp,
 		ActorUserID: userID, ActorRole: "signup",

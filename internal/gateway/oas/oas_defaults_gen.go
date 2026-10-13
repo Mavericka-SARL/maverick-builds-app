@@ -121,8 +121,16 @@ func (s *CreateRecordRequest) setDefaults() {
 // setDefaults set default value of fields.
 func (s *CreateTenantRequest) setDefaults() {
 	{
-		val := string("standard")
+		val := string("commercial")
 		s.Plan.SetTo(val)
+	}
+	{
+		val := bool(true)
+		s.GettingStarted.SetTo(val)
+	}
+	{
+		val := bool(false)
+		s.Join.SetTo(val)
 	}
 }
 

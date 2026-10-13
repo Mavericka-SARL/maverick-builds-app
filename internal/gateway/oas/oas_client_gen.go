@@ -325,7 +325,7 @@ type Invoker interface {
 	CreateScimToken(ctx context.Context, request *ScimToken) (CreateScimTokenRes, error)
 	// CreateTenant invokes createTenant operation.
 	//
-	// Create a tenant (platform_admin only) with a default workspace.
+	// Create a tenant (platform_admin only) with a default workspace and the Getting started application.
 	//
 	// POST /api/admin/tenants
 	CreateTenant(ctx context.Context, request *CreateTenantRequest) (CreateTenantRes, error)
@@ -7149,7 +7149,7 @@ func (c *Client) sendCreateScimToken(ctx context.Context, request *ScimToken) (r
 
 // CreateTenant invokes createTenant operation.
 //
-// Create a tenant (platform_admin only) with a default workspace.
+// Create a tenant (platform_admin only) with a default workspace and the Getting started application.
 //
 // POST /api/admin/tenants
 func (c *Client) CreateTenant(ctx context.Context, request *CreateTenantRequest) (CreateTenantRes, error) {

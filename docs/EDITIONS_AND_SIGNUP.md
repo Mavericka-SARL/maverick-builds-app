@@ -9,9 +9,16 @@ platform administrators — the operator's own people, with reach over every
 tenant — edit in the console, not constants in code: tuning the Community
 Edition is an edit, not a release.
 
-**Community** is where a self-service sign-up lands (its one limit is 100 MB
-of data), **Commercial** is where a tenant an administrator creates starts,
-and **Enterprise** is the third.
+**Community** is where a self-service sign-up lands (in the Playground its
+one limit is 100 MB of data), **Commercial** is where a tenant an
+administrator creates starts, and **Enterprise** is the third.
+
+The 100 MB is the Playground's (`PLAYGROUND=true`). Migrations seed it on
+every deployment, since a migration cannot tell which one is the Playground,
+so the gateway of any other deployment takes it off the Community Edition at
+start-up (`plan.ReleasePlaygroundAllowance`) — only while the row still holds
+exactly the seeded limit, description and note, so a limit an administrator
+set stays.
 
 A deployment with no licence key has editions too, because a sign-up funnel is
 not an enterprise capability. The licence key (`docs/LICENSING.md`) decides the
@@ -299,8 +306,11 @@ brings them forward, and tenants that signed up before the guides existed
 (a "Budget vs Actual" model until 2026-09-20, the tour alone until
 2026-09-29) never had them. `internal/startersync` runs on every gateway
 start, once per database, for every tenant that signed up for itself (its
-`tenant.signed_up` audit event, or a `core.starter_model` record). Per
-starter key:
+`tenant.signed_up` audit event) or holds a `core.starter_model` record —
+which includes every tenant a platform administrator created with the
+**Getting started application** box ticked, the default since 2026-10-13
+(`POST /api/admin/tenants` `getting_started`). One created with it unticked,
+or before that day, has no record and is left alone. Per starter key:
 
 - **never had it** — imported into the tenant's "Getting started"
   application (made again in its first workspace if it was deleted), as by

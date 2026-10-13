@@ -66,10 +66,12 @@ func newDedicatedFixture(t *testing.T, deps Deps) *dedicatedFixture {
 }
 
 // tenant creates a dedicated tenant as the platform admin does, and returns
-// its id, its workspace and a context routed to its database.
+// its id, its workspace and a context routed to its database. It starts
+// empty — without the Getting started application, which tenant_create_test
+// covers — so a test sees only what it puts there.
 func (f *dedicatedFixture) tenant(t *testing.T, name string) (id, workspace string, tctx context.Context) {
 	t.Helper()
-	code, body := do(t, f.srv, f.pa, http.MethodPost, "/api/admin/tenants", map[string]string{"name": name, "plan": "enterprise"})
+	code, body := do(t, f.srv, f.pa, http.MethodPost, "/api/admin/tenants", map[string]any{"name": name, "plan": "enterprise", "getting_started": false})
 	var out struct {
 		ID          string `json:"id"`
 		WorkspaceID string `json:"workspace_id"`

@@ -24,6 +24,7 @@ import {
   useCollapsed,
   CollapseToggle,
   InlineAlert,
+  Checkbox,
   type DesignTone,
 } from "../../ui";
 
@@ -603,6 +604,16 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
   const [addTenant, setAddTenant] = useState(false);
   const [tenantName, setTenantName] = useState("");
   const [tenantPlan, setTenantPlan] = useState("commercial");
+  // The "Getting started" application (the tour and one guide per role), as
+  // every sign-up gets it.
+  const [gettingStarted, setGettingStarted] = useState(true);
+  // A platform administrator with no tenant of their own (a self-hosted
+  // deployment's first) can take the new one as theirs, holding every role
+  // in it as a sign-up does; on by default when offered.
+  const { data: me } = useQuery({ queryKey: ["me"], queryFn: api.getMe, enabled: isPlatformAdmin });
+  const canJoin = !!me?.join_new_tenant;
+  const [joinChoice, setJoinChoice] = useState<boolean | null>(null);
+  const join = canJoin && (joinChoice ?? true);
   const [query, setQuery] = useState("");
   const matches = tenancyMatches(tenants, query);
   const shownTenants = matches ? tenants.filter(t => matches.has(`tenant:${t.id}`)) : tenants;
@@ -612,8 +623,13 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
   const inv = () => invalidateTenancy(qc);
 
   const createTenant = useMutation({
-    mutationFn: () => api.createAdminTenant({ name: tenantName, plan: tenantPlan }),
-    onSuccess: () => { inv(); setAddTenant(false); setTenantName(""); setTenantPlan("commercial"); },
+    mutationFn: () => api.createAdminTenant({ name: tenantName, plan: tenantPlan, getting_started: gettingStarted, join }),
+    onSuccess: () => {
+      // Roles are read once, at sign-in: start the console again so it is
+      // composed from every role just taken, and opens on the tour.
+      if (join) { window.location.assign("/"); return; }
+      inv(); setAddTenant(false); setTenantName(""); setTenantPlan("commercial"); setGettingStarted(true);
+    },
   });
   const deleteTenant = useMutation({
     mutationFn: (id: string) => api.deleteAdminTenant(id),
@@ -634,7 +650,9 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
       )}
       {tenants.length === 0 && !addTenant && (
         <EmptyState
-          label="No tenants yet. Create the first one."
+          label={canJoin
+            ? "No tenants yet. Create your organisation's tenant: it gets the Getting started application, and you every role in it."
+            : "No tenants yet. Create the first one."}
           action={isPlatformAdmin ? "New tenant" : undefined}
           onAction={isPlatformAdmin ? () => { setAddTenant(true); setTenantName(""); } : undefined}
         />
@@ -650,7 +668,7 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
             autoFocus
             onKeyDown={e => { if (e.key === "Enter" && tenantName) createTenant.mutate(); }}
           />
-          <Select value={tenantPlan} onChange={e => setTenantPlan(e.target.value)} style={{ width: 160 }} aria-label="Plan of the new tenant">
+          <Select value={tenantPlan} onChange={e => setTenantPlan(e.target.value)} style={{ width: 160 }} aria-label="Edition of the new tenant">
             {(plans ?? [{ key: "commercial", name: "Commercial" }]).map(p => <option key={p.key} value={p.key}>{p.name}</option>)}
           </Select>
           <Button
@@ -663,6 +681,22 @@ export function ApplicationsView({ tenants, isPlatformAdmin, canTransferModels }
             Create tenant
           </Button>
           <Button onClick={() => setAddTenant(false)}>Cancel</Button>
+          <div style={{ flexBasis: "100%", display: "flex", flexWrap: "wrap", gap: "8px 24px" }}>
+            <Checkbox
+              label="Getting started application"
+              title="The tour and one guide per role, as every sign-up gets them"
+              checked={gettingStarted}
+              onChange={e => setGettingStarted(e.target.checked)}
+            />
+            {canJoin && (
+              <Checkbox
+                label="Make it my own, with every role"
+                title="You become this tenant's administrator, developer, business administrator and user, beside platform administrator"
+                checked={join}
+                onChange={e => setJoinChoice(e.target.checked)}
+              />
+            )}
+          </div>
           {createTenant.isError && <span className="mvx-admin-error">{(createTenant.error as Error).message}</span>}
         </div>
       ) : isPlatformAdmin && tenants.length > 0 ? (

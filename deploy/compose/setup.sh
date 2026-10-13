@@ -166,7 +166,8 @@ cmd_admin() {
   ADMIN_EMAIL="$email" ADMIN_PASSWORD="$password" ADMIN_NAME="$name" \
   PSQL="docker compose exec -T postgres psql -q -v ON_ERROR_STOP=1 -U mavericks -d mavericks" \
     bash "$ROOT/scripts/bootstrap-platform-admin.sh"
-  log "sign in at https://$(env_get CONSOLE_HOST) as ${email}"
+  log "sign in at https://$(env_get CONSOLE_HOST) as ${email}, then Applications › New tenant:"
+  log "name your organisation; it gets the Getting started application, and you every role in it"
 }
 
 cmd_check() {

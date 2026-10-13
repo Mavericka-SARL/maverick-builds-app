@@ -53,14 +53,15 @@ func (s *ActiveRevisionRequest) SetRevisionName(val string) {
 
 // Ref: #/components/schemas/Actor
 type Actor struct {
-	UserID      uuid.UUID         `json:"user_id"`
-	Email       string            `json:"email"`
-	DisplayName string            `json:"display_name"`
-	Roles       []string          `json:"roles"`
-	CustomerID  OptUUID           `json:"customer_id"`
-	Plan        OptPlanState      `json:"plan"`
-	ContactURL  OptString         `json:"contact_url"`
-	Preferences OptNilPreferences `json:"preferences"`
+	UserID        uuid.UUID         `json:"user_id"`
+	Email         string            `json:"email"`
+	DisplayName   string            `json:"display_name"`
+	Roles         []string          `json:"roles"`
+	CustomerID    OptUUID           `json:"customer_id"`
+	Plan          OptPlanState      `json:"plan"`
+	ContactURL    OptString         `json:"contact_url"`
+	Preferences   OptNilPreferences `json:"preferences"`
+	JoinNewTenant OptBool           `json:"join_new_tenant"`
 }
 
 // GetUserID returns the value of UserID.
@@ -103,6 +104,11 @@ func (s *Actor) GetPreferences() OptNilPreferences {
 	return s.Preferences
 }
 
+// GetJoinNewTenant returns the value of JoinNewTenant.
+func (s *Actor) GetJoinNewTenant() OptBool {
+	return s.JoinNewTenant
+}
+
 // SetUserID sets the value of UserID.
 func (s *Actor) SetUserID(val uuid.UUID) {
 	s.UserID = val
@@ -141,6 +147,11 @@ func (s *Actor) SetContactURL(val OptString) {
 // SetPreferences sets the value of Preferences.
 func (s *Actor) SetPreferences(val OptNilPreferences) {
 	s.Preferences = val
+}
+
+// SetJoinNewTenant sets the value of JoinNewTenant.
+func (s *Actor) SetJoinNewTenant(val OptBool) {
+	s.JoinNewTenant = val
 }
 
 func (*Actor) getMeRes() {}
@@ -6813,6 +6824,11 @@ type CreateTenantBadRequest Error
 
 func (*CreateTenantBadRequest) createTenantRes() {}
 
+// CreateTenantConflict is response for CreateTenant operation.
+type CreateTenantConflict struct{}
+
+func (*CreateTenantConflict) createTenantRes() {}
+
 type CreateTenantForDeveloperBadRequest Error
 
 func (*CreateTenantForDeveloperBadRequest) createTenantForDeveloperRes() {}
@@ -6853,8 +6869,10 @@ type CreateTenantForbidden Error
 func (*CreateTenantForbidden) createTenantRes() {}
 
 type CreateTenantOK struct {
-	ID          OptUUID `json:"id"`
-	WorkspaceID OptUUID `json:"workspace_id"`
+	ID            OptUUID `json:"id"`
+	WorkspaceID   OptUUID `json:"workspace_id"`
+	ApplicationID OptUUID `json:"application_id"`
+	ModelID       OptUUID `json:"model_id"`
 }
 
 // GetID returns the value of ID.
@@ -6867,6 +6885,16 @@ func (s *CreateTenantOK) GetWorkspaceID() OptUUID {
 	return s.WorkspaceID
 }
 
+// GetApplicationID returns the value of ApplicationID.
+func (s *CreateTenantOK) GetApplicationID() OptUUID {
+	return s.ApplicationID
+}
+
+// GetModelID returns the value of ModelID.
+func (s *CreateTenantOK) GetModelID() OptUUID {
+	return s.ModelID
+}
+
 // SetID sets the value of ID.
 func (s *CreateTenantOK) SetID(val OptUUID) {
 	s.ID = val
@@ -6877,12 +6905,24 @@ func (s *CreateTenantOK) SetWorkspaceID(val OptUUID) {
 	s.WorkspaceID = val
 }
 
+// SetApplicationID sets the value of ApplicationID.
+func (s *CreateTenantOK) SetApplicationID(val OptUUID) {
+	s.ApplicationID = val
+}
+
+// SetModelID sets the value of ModelID.
+func (s *CreateTenantOK) SetModelID(val OptUUID) {
+	s.ModelID = val
+}
+
 func (*CreateTenantOK) createTenantRes() {}
 
 // Ref: #/components/schemas/CreateTenantRequest
 type CreateTenantRequest struct {
-	Name string    `json:"name"`
-	Plan OptString `json:"plan"`
+	Name           string    `json:"name"`
+	Plan           OptString `json:"plan"`
+	GettingStarted OptBool   `json:"getting_started"`
+	Join           OptBool   `json:"join"`
 }
 
 // GetName returns the value of Name.
@@ -6895,6 +6935,16 @@ func (s *CreateTenantRequest) GetPlan() OptString {
 	return s.Plan
 }
 
+// GetGettingStarted returns the value of GettingStarted.
+func (s *CreateTenantRequest) GetGettingStarted() OptBool {
+	return s.GettingStarted
+}
+
+// GetJoin returns the value of Join.
+func (s *CreateTenantRequest) GetJoin() OptBool {
+	return s.Join
+}
+
 // SetName sets the value of Name.
 func (s *CreateTenantRequest) SetName(val string) {
 	s.Name = val
@@ -6903,6 +6953,16 @@ func (s *CreateTenantRequest) SetName(val string) {
 // SetPlan sets the value of Plan.
 func (s *CreateTenantRequest) SetPlan(val OptString) {
 	s.Plan = val
+}
+
+// SetGettingStarted sets the value of GettingStarted.
+func (s *CreateTenantRequest) SetGettingStarted(val OptBool) {
+	s.GettingStarted = val
+}
+
+// SetJoin sets the value of Join.
+func (s *CreateTenantRequest) SetJoin(val OptBool) {
+	s.Join = val
 }
 
 // Ref: #/components/schemas/CreateWidgetRequest

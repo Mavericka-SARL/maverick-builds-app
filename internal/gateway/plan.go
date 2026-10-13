@@ -243,6 +243,11 @@ type meResponse struct {
 	// could not be read, {} when none are chosen — no omitempty, which would
 	// erase that difference.
 	Preferences map[string]json.RawMessage `json:"preferences"`
+	// JoinNewTenant: a tenant this person creates can be their own, with
+	// every tenant role (createTenantRequest.Join) — a platform
+	// administrator with no tenant yet, as a self-hosted deployment's first
+	// administrator is.
+	JoinNewTenant bool `json:"join_new_tenant,omitempty"`
 }
 
 // ── administration ───────────────────────────────────────────────────────────

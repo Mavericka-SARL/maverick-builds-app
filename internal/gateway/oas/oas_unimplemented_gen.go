@@ -436,7 +436,7 @@ func (UnimplementedHandler) CreateScimToken(ctx context.Context, req *ScimToken)
 
 // CreateTenant implements createTenant operation.
 //
-// Create a tenant (platform_admin only) with a default workspace.
+// Create a tenant (platform_admin only) with a default workspace and the Getting started application.
 //
 // POST /api/admin/tenants
 func (UnimplementedHandler) CreateTenant(ctx context.Context, req *CreateTenantRequest) (r CreateTenantRes, _ error) {

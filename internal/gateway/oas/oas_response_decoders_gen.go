@@ -4268,6 +4268,9 @@ func decodeCreateTenantResponse(resp *http.Response) (res CreateTenantRes, _ err
 		default:
 			return res, validate.InvalidContentType(ct)
 		}
+	case 409:
+		// Code 409.
+		return &CreateTenantConflict{}, nil
 	}
 	return res, validate.UnexpectedStatusCodeWithResponse(resp)
 }

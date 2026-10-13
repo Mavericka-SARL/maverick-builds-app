@@ -471,6 +471,9 @@ components:
         preferences:
           nullable: true
           allOf: [{ $ref: "#/components/schemas/Preferences" }]
+        # /api/me only: a tenant this person creates can be their own, with
+        # every tenant role (CreateTenantRequest.join).
+        join_new_tenant: { type: boolean }
 
     # A person's own display choices, kept on their account. Only these keys
     # are stored; an absent key means the console default.
@@ -1693,7 +1696,15 @@ components:
       required: [name]
       properties:
         name: { type: string }
-        plan: { type: string, default: standard }
+        # The edition's key; commercial carries no limits.
+        plan: { type: string, default: commercial }
+        # Install the "Getting started" application (the tour and one guide
+        # per role), as sign-up does.
+        getting_started: { type: boolean, default: true }
+        # Make the tenant the creator's own, holding every tenant role in it.
+        # Only for a platform administrator with no tenant yet, in a
+        # single-database deployment (see join_new_tenant on /api/me).
+        join: { type: boolean, default: false }
 
     UpdateTenantRequest:
       type: object
@@ -6396,7 +6407,7 @@ paths:
     post:
       operationId: createTenant
       tags: [Admin]
-      summary: Create a tenant (platform_admin only) with a default workspace
+      summary: Create a tenant (platform_admin only) with a default workspace and the Getting started application
       requestBody:
         required: true
         content:
@@ -6412,8 +6423,13 @@ paths:
                 properties:
                   id:           { type: string, format: uuid }
                   workspace_id: { type: string, format: uuid }
+                  # With getting_started: the application, and the model it opens on.
+                  application_id: { type: string, format: uuid }
+                  model_id:       { type: string, format: uuid }
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: join was asked, and the account already belongs to a tenant
 
   /api/admin/tenants/{id}:
     patch:

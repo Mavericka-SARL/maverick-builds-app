@@ -84,7 +84,7 @@ func TestTenantsGetTheirOwnDatabase(t *testing.T) {
 
 	// Two tenants, created the way the console creates them.
 	newTenant := func(name string) string {
-		code, body := do(t, srv, pa, http.MethodPost, "/api/admin/tenants", map[string]string{"name": name, "plan": "enterprise"})
+		code, body := do(t, srv, pa, http.MethodPost, "/api/admin/tenants", map[string]any{"name": name, "plan": "enterprise", "getting_started": false})
 		if code != http.StatusOK {
 			t.Fatalf("create %s: %d %s", name, code, body)
 		}
@@ -250,7 +250,7 @@ func TestSharedModeIsUnchanged(t *testing.T) {
 	srv := httptest.NewServer(NewHandler(logger.New("test"), pool, nil))
 	defer srv.Close()
 
-	code, body := do(t, srv, call{persona: "shared-pa"}, http.MethodPost, "/api/admin/tenants", map[string]string{"name": "Shared Co", "plan": "standard"})
+	code, body := do(t, srv, call{persona: "shared-pa"}, http.MethodPost, "/api/admin/tenants", map[string]any{"name": "Shared Co", "plan": "standard", "getting_started": false})
 	if code != http.StatusOK {
 		t.Fatalf("create tenant: %d %s", code, body)
 	}

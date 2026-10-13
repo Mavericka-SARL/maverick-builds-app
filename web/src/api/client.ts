@@ -352,6 +352,10 @@ export interface Me {
    *  means the console default; null means they could not be read (unknown,
    *  not "nothing chosen"). */
   preferences?: Preferences | null;
+  /** A tenant this person creates can be their own, with every tenant role:
+   *  a platform administrator with no tenant yet, in a single-database
+   *  deployment — a self-hosted deployment's first administrator. */
+  join_new_tenant?: boolean;
 }
 
 export interface Preferences {
@@ -2416,8 +2420,11 @@ export const api = {
     apiFetch<{ status: string }>(`/api/admin/users/${id}/access/models/${modelId}`, { method: "POST" }),
   revokeUserModelAccess: (id: string, modelId: string) =>
     apiFetch<AccessRemovalResult>(`/api/admin/users/${id}/access/models/${modelId}`, { method: "DELETE" }),
-  createAdminTenant: (body: { name: string; plan: string }) =>
-    apiFetch<{ id: string }>("/api/admin/tenants", { method: "POST", body: JSON.stringify(body) }),
+  // getting_started (default on) installs the tour and the role guides, as
+  // sign-up does; join makes the tenant the caller's own, with every tenant
+  // role (only when Me.join_new_tenant).
+  createAdminTenant: (body: { name: string; plan: string; getting_started?: boolean; join?: boolean }) =>
+    apiFetch<{ id: string; workspace_id: string; application_id?: string; model_id?: string }>("/api/admin/tenants", { method: "POST", body: JSON.stringify(body) }),
   // name renames; the plan is the platform admin's to change.
   updateAdminTenant: (id: string, body: { name?: string; plan?: string }) =>
     apiFetch<{ status: string }>(`/api/admin/tenants/${id}`, { method: "PATCH", body: JSON.stringify(body) }),

@@ -8113,7 +8113,7 @@ func (s *Server) handleCreateScimTokenRequest(args [0]string, argsEscaped bool, 
 
 // handleCreateTenantRequest handles createTenant operation.
 //
-// Create a tenant (platform_admin only) with a default workspace.
+// Create a tenant (platform_admin only) with a default workspace and the Getting started application.
 //
 // POST /api/admin/tenants
 func (s *Server) handleCreateTenantRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -8254,7 +8254,7 @@ func (s *Server) handleCreateTenantRequest(args [0]string, argsEscaped bool, w h
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    CreateTenantOperation,
-			OperationSummary: "Create a tenant (platform_admin only) with a default workspace",
+			OperationSummary: "Create a tenant (platform_admin only) with a default workspace and the Getting started application",
 			OperationID:      "createTenant",
 			Body:             request,
 			RawBody:          rawBody,

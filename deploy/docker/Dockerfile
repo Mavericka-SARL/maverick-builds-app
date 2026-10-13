@@ -10,6 +10,11 @@
 ARG GO_VERSION=1.26-bookworm
 FROM golang:${GO_VERSION} AS builder
 
+# go.mod names the Go release the build needs. A golang:1.26 image cached
+# from before that release (Compose's --build never pulls a newer one)
+# fetches it instead of failing at `go mod download`.
+ENV GOTOOLCHAIN=auto
+
 WORKDIR /src
 
 COPY go.mod go.sum ./

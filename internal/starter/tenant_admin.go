@@ -161,13 +161,13 @@ Your company is one **tenant**. Everything else sits inside it.`, 88),
 		taPicture(taOwnership(), "A tenant holds applications, an application holds models, a model holds revisions, one of them live; people get business roles in a workspace", 860, 200),
 
 		taText(`- **Workspace** — where people are given business roles. A tenant that began with self-service sign-up has one, named *Default*.
-- **Application** — a group of related models. At sign-up the tenant gets one, *Getting started*, holding the tour and the guides.
+- **Application** — a group of related models. A new tenant gets one, *Getting started*, holding the tour and the guides.
 - **Model** — the dimensions, metrics, grids, dashboards, forms and workflows that belong together.
 - **Revision** — a complete copy of a model. One revision is live; a developer prepares the next and presses **Set active** when it is ready.`, 140),
 
 		taText(`## Your screens
 
-They are the **Tenant admin** group in the sidebar:
+They are the **Tenant admin** group in the sidebar. A platform admin who is also your tenant admin — whoever runs the platform on their own servers, say — finds the same screens in the **Platform** group, covering every tenant:
 
 - **Applications** — your tenant's applications, models and revisions: search them all from one box, create (at the top), export, import and delete
 - **Users** — invite people, give them roles, decide what they reach
@@ -178,7 +178,7 @@ They are the **Tenant admin** group in the sidebar:
 - **AI keys** — one AI provider key for the whole tenant *(Enterprise)*
 - **Single sign-on** — sign in with your company's identity provider *(Enterprise)*
 - **Provisioning (SCIM)** — let your directory create and deactivate accounts *(Enterprise)*
-- **Branding** — your name, colour and logo on the console *(Commercial and Enterprise)*`, 356),
+- **Branding** — your name, colour and logo on the console *(Commercial and Enterprise)*`, 380),
 
 		taText(`## Edition
 
