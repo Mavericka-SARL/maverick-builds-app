@@ -373,10 +373,11 @@ does, without the Playground's 100 MB limit. As the platform administrator:
    **Add model** inside it. The developer finds the model under **Models**,
    creates its first revision and starts building.
 
-The Playground runs the Enterprise Edition. Single sign-on, SCIM, cell
-history, audit export, usage analytics, white-labelling, tenant AI keys and
-deployment settings need a Commercial or Enterprise licence key here
-(**Platform › License**). Everything else works as it does there. The console's screens are described in the
+Without a licence key your deployment runs the Community Edition, as the
+Playground does. Single sign-on, SCIM, cell history, audit export, usage
+analytics, white-labelling, tenant AI keys and deployment settings need a
+Commercial or Enterprise licence key (**Platform › License**), here and in
+the Playground alike. Everything else works as it does there. The console's screens are described in the
 [developer manual](developer-manual/), and the formula language in the
 [formulas manual](formulas-manual/). Your deployment serves both itself, at
 `https://<console host>/docs/developer-manual/manual.html` and
