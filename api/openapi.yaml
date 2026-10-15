@@ -2037,6 +2037,24 @@ components:
         model:    { type: string, description: "Falls back to the caller's stored settings, then the provider's default model" }
         api_key:  { type: string, description: "Falls back to the caller's stored (decrypted) key, then a provider-specific env var" }
 
+    ClearValuesRequest:
+      type: object
+      properties:
+        metric_ids: { type: array, items: { type: string, format: uuid }, description: "A grid's clear: only these of its input metrics" }
+        members:
+          type: object
+          description: Dimension id → member codes; only cells under these members
+          additionalProperties: { type: array, items: { type: string } }
+        dry_run: { type: boolean }
+
+    ClearValuesResult:
+      type: object
+      properties:
+        cells:    { type: integer, description: Cells cleared (or that would be) }
+        withheld: { type: integer, description: Cells left that the caller may not write }
+        posted:   { type: integer, description: Cells left that tables of records post }
+        dry_run:  { type: boolean }
+
     APIToken:
       type: object
       properties:
@@ -4459,6 +4477,108 @@ paths:
                 properties:
                   recalculating: { type: boolean, description: "false when the revision has no calculated metric" }
                   metrics:       { type: integer, description: The calculated metrics being recalculated }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/developer/grids/{id}/clear-values:
+    post:
+      operationId: clearGridValues
+      tags: [Developer Console]
+      summary: Clear a grid's typed values (its input metrics), under chosen members or all
+      description: >-
+        Deletes, in the grid's revision, the typed values the caller may write:
+        members they may only read and values a table's records post stay.
+        Each cell's history keeps what was cleared. A dry run counts.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClearValuesRequest" }
+      responses:
+        "200":
+          description: Cleared (or, dry, would be)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClearValuesResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/developer/metrics/{id}/clear-values:
+    post:
+      operationId: clearMetricValues
+      tags: [Developer Console]
+      summary: Clear one input metric's typed values, under chosen members or all
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClearValuesRequest" }
+      responses:
+        "200":
+          description: Cleared (or, dry, would be)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClearValuesResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/developer/grids/{id}/sample-values:
+    post:
+      operationId: fillSampleValues
+      tags: [Developer Console]
+      summary: Fill a grid's input metrics with sample values across its leaf combinations
+      description: >-
+        Draws a value per writable leaf combination (at most 500,000 cells) and
+        commits them as a replace import. A dry run answers the count and the
+        first rows, or with format csv every row as a CSV the import wizard reads.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                metrics:
+                  type: object
+                  description: Metric id or name → how its values are drawn; every numeric input metric of the grid, 0–1000, when omitted
+                  additionalProperties:
+                    type: object
+                    properties:
+                      min:      { type: number }
+                      max:      { type: number }
+                      decimals: { type: integer }
+                      value:    { type: number, description: A fixed value instead of a range }
+                members:
+                  type: object
+                  additionalProperties: { type: array, items: { type: string } }
+                only_empty: { type: boolean }
+                seed:       { type: integer, description: The same seed draws the same values }
+                dry_run:    { type: boolean }
+                format:     { type: string, enum: [csv], description: With dry_run, every row as text/csv }
+      responses:
+        "200":
+          description: Filled, or the dry run's count and sample (a CSV with format csv)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cells:    { type: integer }
+                  withheld: { type: integer }
+                  dry_run:  { type: boolean }
+                  columns:  { type: array, items: { type: string } }
+                  sample:   { type: array, items: { type: array, items: { type: string } } }
+                  job_id:   { type: string, format: uuid }
+            text/csv:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "402": { description: The edition's row or storage limit }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 

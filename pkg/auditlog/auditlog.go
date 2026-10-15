@@ -75,6 +75,11 @@ const (
 	// Whether people may change grid data from a chat connection
 	// (ChatGPT, Claude) in a tenant.
 	EventConnectorSettingsUpdated EventType = "connector.settings_updated"
+	// Typed values cleared in bulk: a grid's input metrics or a metric's,
+	// possibly under chosen members (the count and filter in metadata).
+	EventValuesCleared EventType = "values.cleared"
+	// A grid's input metrics filled with sample values.
+	EventValuesGenerated EventType = "values.generated"
 	// A person's API token for scripts, made or revoked (the token itself is
 	// never logged).
 	EventAPITokenCreated    EventType = "api_token.created"

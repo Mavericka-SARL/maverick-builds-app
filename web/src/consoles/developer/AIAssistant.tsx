@@ -250,7 +250,7 @@ const TOOL_LABELS: Record<string, string> = {
   create_api_integration: "Create REST API connector", update_api_integration: "Update REST API connector",
   create_connection: "Create sign-in connection", update_connection: "Update sign-in connection",
   run_integration: "Run integration", trigger_automation_rule: "Trigger automation rule",
-  recalculate_revision: "Recalculate revision",
+  recalculate_revision: "Recalculate revision", clear_input_values: "Clear values", fill_sample_values: "Fill with sample values",
 };
 function friendlyTool(tool: string): string {
   return TOOL_LABELS[tool] ?? tool.replace(/_/g, " ");

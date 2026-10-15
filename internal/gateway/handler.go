@@ -391,6 +391,9 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("POST", "/api/developer/revisions", "developer", dev(h.developerRevisions))
 	register("PUT", "/api/developer/revisions/{id}/activate", "developer", dev(h.developerRevisionAction))
 	register("POST", "/api/developer/revisions/{id}/recalculate", "developer", dev(h.recalculateRevision))
+	register("POST", "/api/developer/grids/{id}/clear-values", "developer", dev(h.clearGridValues))
+	register("POST", "/api/developer/grids/{id}/sample-values", "developer", dev(h.fillSampleValues))
+	register("POST", "/api/developer/metrics/{id}/clear-values", "developer", dev(h.clearMetricValues))
 	register("DELETE", "/api/developer/revisions/{id}", "developer", dev(h.developerRevisionAction))
 	register("GET", "/api/developer/model", "developer", dev(h.developerModel))
 	register("POST", "/api/developer/metrics", "developer", dev(h.developerMetrics))
@@ -3052,6 +3055,18 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("forbidden: model is outside your access scope"), http.StatusForbidden)
 		return
 	}
+	// A full read holds the grid's cells in memory while it is answered:
+	// reads arriving together take their turn (gridReadSlot), so a script
+	// or an assistant reading many grids at once cannot take the gateway
+	// past its memory. Metadata and totals reads are small and not counted.
+	if q := r.URL.Query(); q.Get("meta_only") != "1" && q.Get("totals_only") != "1" {
+		release, slotErr := gridReadSlot(ctx)
+		if slotErr != nil {
+			jsonErr(w, fmt.Errorf("the read was cancelled while waiting its turn"), http.StatusServiceUnavailable)
+			return
+		}
+		defer release()
+	}
 
 	// ── resolve revision ─────────────────────────────────────────────────────
 	revisionID, _, err := h.businessRevisionCtx(ctx, r, r.URL.Query().Get("revision_id"), modelID)
@@ -3979,7 +3994,17 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		// calc_result rows verbatim, including the '{}' company-wide
 		// aggregate as each metric's total. Cheapest path.
 		calcStore := calculation.NewStore(h.db.For(ctx))
-		allCalc, ccErr := calcStore.LoadAllCalcValueMaps(ctx, modelID, revisionID)
+		var allCalc map[string]map[string]float64
+		var ccErr error
+		if gridDefID != "" {
+			// A grid's read needs its own metrics' results alone (see
+			// keepGridMetrics): the whole model's were the bulk of a read's
+			// memory.
+			allCalc, ccErr = calcStore.LoadAllCalcValueMapsScoped(ctx, modelID, revisionID,
+				` AND metric_id::text = ANY($3::text[])`, []any{gridMetricIDs(metrics)})
+		} else {
+			allCalc, ccErr = calcStore.LoadAllCalcValueMaps(ctx, modelID, revisionID)
+		}
 		if ccErr != nil {
 			jsonErr(w, ccErr, http.StatusInternalServerError)
 			return
@@ -4092,6 +4117,16 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		withheld = kept
+	}
+
+	// A grid's read answers for the metrics it shows: every other metric's
+	// cells rode along in every answer, so reading one grid of a 618-metric
+	// model carried the whole model (a six-metric grid answered 132,183
+	// cells, 135 of them its own), and a few reads at once took the gateway
+	// past its memory. A whole-model read (no grid_def_id) still answers for
+	// every metric.
+	if gridDefID != "" {
+		withheld = keepGridMetrics(gridMetricSet(metrics), cells, texts, totals, withheld)
 	}
 
 	allDimNames := make(map[string]string, len(allDims))

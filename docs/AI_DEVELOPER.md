@@ -353,7 +353,10 @@ a dashboard's Integration button downloads one for users.
   runs them, and fires manual triggers (since 2026-10-09: `create_api_integration`,
   `update_api_integration`, `create_connection`, `update_connection`,
   `run_integration`, `trigger_automation_rule`, and since 2026-10-15
-  `recalculate_revision` (Models › revision › Recalculate); saves go through the
+  `recalculate_revision` (Models › revision › Recalculate), `clear_input_values`
+  and `fill_sample_values` (Grids › Values; `as_file` attaches the rows as a CSV
+  instead of writing them), and the immediate `create_csv_file` (a CSV it writes,
+  attached to the chat and listed under Converted files); saves go through the
   wizard's own `restAPISave`, tests, runs and triggers through the
   developer's own routes in-process, `callAsCaller`). A credential's secret
   parts never pass through it: a proposal carrying one is refused, and the

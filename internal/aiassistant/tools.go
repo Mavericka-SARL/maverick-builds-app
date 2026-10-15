@@ -89,6 +89,11 @@ func ReadTools() []providers.ToolDef {
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"table_id":{"type":"string","description":"The table's id from list_forms, or its exact name"},"filters":{"type":"array","items":{"type":"object","properties":{"field":{"type":"string"},"op":{"type":"string","enum":["eq","ne","in","not_in","gt","gte","lt","lte","between","contains","starts_with","empty","not_empty"]},"value":{"description":"One value"},"values":{"type":"array","description":"Values for in, not_in and between","items":{}}},"required":["field"]}},"search":{"type":"string"},"sort":{"type":"array","items":{"type":"object","properties":{"field":{"type":"string"},"desc":{"type":"boolean"}},"required":["field"]}},"group_by":{"type":"array","items":{"type":"object","properties":{"field":{"type":"string"},"period":{"type":"string","enum":["day","week","month","quarter","year"]}},"required":["field"]}},"aggregates":{"type":"array","items":{"type":"object","properties":{"op":{"type":"string","enum":["count","count_distinct","sum","avg","min","max"]},"field":{"type":"string"}},"required":["op"]}},"limit":{"type":"integer"},"offset":{"type":"integer"}},"required":["table_id"]}`),
 		},
 		{
+			Name:        "create_csv_file",
+			Description: "Writes a CSV file and attaches it to this chat at once (no confirmation: it changes nothing in the model). The developer downloads it under \"Converted files\" as CSV or Excel, and import_file_data or preview_file_import read it like any attached file. For a load file, a template, or a small dataset you write row by row (at most 5,000 rows); draw a larger dataset on the server with fill_sample_values and as_file.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"filename":{"type":"string","description":"The file's name; .csv is added when missing"},"columns":{"type":"array","items":{"type":"string"},"description":"The header"},"rows":{"type":"array","items":{"type":"array","items":{}},"description":"The rows, each as many cells as columns"}},"required":["filename","columns","rows"]}`),
+		},
+		{
 			Name:        "list_form_integrations",
 			Description: "Returns every table integration in the working revision: which field of a table posts into which metric, with what aggregation, for which record statuses, and how its fields map to dimensions. Without one, a table's numbers never reach the model.",
 			Parameters:  noParams,
@@ -142,7 +147,7 @@ var WriteToolNames = []string{
 	"set_user_access_rules",
 	"create_file_integration", "import_file_data", "write_input_values", "create_export_integration", "update_integration", "delete_integration",
 	"create_api_integration", "update_api_integration", "create_connection", "update_connection", "run_integration", "trigger_automation_rule",
-	"recalculate_revision",
+	"recalculate_revision", "clear_input_values", "fill_sample_values",
 }
 
 // proposeActionsTool is the single write-side tool the LLM can call.
@@ -235,6 +240,8 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, args json.RawMe
 		return e.listFormIntegrations(ctx)
 	case "query_records":
 		return e.queryRecords(ctx, args)
+	case "create_csv_file":
+		return e.createCSVFile(ctx, args)
 	case "get_model_summary":
 		return e.modelSummary(ctx)
 	case "list_metrics":

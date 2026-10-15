@@ -5014,6 +5014,30 @@ type ClearAuditSettingsForbidden struct{}
 
 func (*ClearAuditSettingsForbidden) clearAuditSettingsRes() {}
 
+type ClearGridValuesBadRequest Error
+
+func (*ClearGridValuesBadRequest) clearGridValuesRes() {}
+
+type ClearGridValuesForbidden Error
+
+func (*ClearGridValuesForbidden) clearGridValuesRes() {}
+
+type ClearGridValuesNotFound Error
+
+func (*ClearGridValuesNotFound) clearGridValuesRes() {}
+
+type ClearMetricValuesBadRequest Error
+
+func (*ClearMetricValuesBadRequest) clearMetricValuesRes() {}
+
+type ClearMetricValuesForbidden Error
+
+func (*ClearMetricValuesForbidden) clearMetricValuesRes() {}
+
+type ClearMetricValuesNotFound Error
+
+func (*ClearMetricValuesNotFound) clearMetricValuesRes() {}
+
 // ClearNotificationSettingsBadRequest is response for ClearNotificationSettings operation.
 type ClearNotificationSettingsBadRequest struct{}
 
@@ -5028,6 +5052,111 @@ func (*ClearNotificationSettingsForbidden) clearNotificationSettingsRes() {}
 type ClearTenantAIKeyForbidden struct{}
 
 func (*ClearTenantAIKeyForbidden) clearTenantAIKeyRes() {}
+
+// Ref: #/components/schemas/ClearValuesRequest
+type ClearValuesRequest struct {
+	// A grid's clear: only these of its input metrics.
+	MetricIds []uuid.UUID `json:"metric_ids"`
+	// Dimension id → member codes; only cells under these members.
+	Members OptClearValuesRequestMembers `json:"members"`
+	DryRun  OptBool                      `json:"dry_run"`
+}
+
+// GetMetricIds returns the value of MetricIds.
+func (s *ClearValuesRequest) GetMetricIds() []uuid.UUID {
+	return s.MetricIds
+}
+
+// GetMembers returns the value of Members.
+func (s *ClearValuesRequest) GetMembers() OptClearValuesRequestMembers {
+	return s.Members
+}
+
+// GetDryRun returns the value of DryRun.
+func (s *ClearValuesRequest) GetDryRun() OptBool {
+	return s.DryRun
+}
+
+// SetMetricIds sets the value of MetricIds.
+func (s *ClearValuesRequest) SetMetricIds(val []uuid.UUID) {
+	s.MetricIds = val
+}
+
+// SetMembers sets the value of Members.
+func (s *ClearValuesRequest) SetMembers(val OptClearValuesRequestMembers) {
+	s.Members = val
+}
+
+// SetDryRun sets the value of DryRun.
+func (s *ClearValuesRequest) SetDryRun(val OptBool) {
+	s.DryRun = val
+}
+
+// Dimension id → member codes; only cells under these members.
+type ClearValuesRequestMembers map[string][]string
+
+func (s *ClearValuesRequestMembers) init() ClearValuesRequestMembers {
+	m := *s
+	if m == nil {
+		m = map[string][]string{}
+		*s = m
+	}
+	return m
+}
+
+// Ref: #/components/schemas/ClearValuesResult
+type ClearValuesResult struct {
+	// Cells cleared (or that would be).
+	Cells OptInt `json:"cells"`
+	// Cells left that the caller may not write.
+	Withheld OptInt `json:"withheld"`
+	// Cells left that tables of records post.
+	Posted OptInt  `json:"posted"`
+	DryRun OptBool `json:"dry_run"`
+}
+
+// GetCells returns the value of Cells.
+func (s *ClearValuesResult) GetCells() OptInt {
+	return s.Cells
+}
+
+// GetWithheld returns the value of Withheld.
+func (s *ClearValuesResult) GetWithheld() OptInt {
+	return s.Withheld
+}
+
+// GetPosted returns the value of Posted.
+func (s *ClearValuesResult) GetPosted() OptInt {
+	return s.Posted
+}
+
+// GetDryRun returns the value of DryRun.
+func (s *ClearValuesResult) GetDryRun() OptBool {
+	return s.DryRun
+}
+
+// SetCells sets the value of Cells.
+func (s *ClearValuesResult) SetCells(val OptInt) {
+	s.Cells = val
+}
+
+// SetWithheld sets the value of Withheld.
+func (s *ClearValuesResult) SetWithheld(val OptInt) {
+	s.Withheld = val
+}
+
+// SetPosted sets the value of Posted.
+func (s *ClearValuesResult) SetPosted(val OptInt) {
+	s.Posted = val
+}
+
+// SetDryRun sets the value of DryRun.
+func (s *ClearValuesResult) SetDryRun(val OptBool) {
+	s.DryRun = val
+}
+
+func (*ClearValuesResult) clearGridValuesRes()   {}
+func (*ClearValuesResult) clearMetricValuesRes() {}
 
 // Ref: #/components/schemas/ColumnMapping
 type ColumnMapping struct {
@@ -10180,6 +10309,290 @@ func (s *ExtractFormulaRefsOK) SetRefs(val []string) {
 // SetError sets the value of Error.
 func (s *ExtractFormulaRefsOK) SetError(val OptString) {
 	s.Error = val
+}
+
+type FillSampleValuesBadRequest Error
+
+func (*FillSampleValuesBadRequest) fillSampleValuesRes() {}
+
+type FillSampleValuesForbidden Error
+
+func (*FillSampleValuesForbidden) fillSampleValuesRes() {}
+
+type FillSampleValuesNotFound Error
+
+func (*FillSampleValuesNotFound) fillSampleValuesRes() {}
+
+type FillSampleValuesOKApplicationJSON struct {
+	Cells    OptInt     `json:"cells"`
+	Withheld OptInt     `json:"withheld"`
+	DryRun   OptBool    `json:"dry_run"`
+	Columns  []string   `json:"columns"`
+	Sample   [][]string `json:"sample"`
+	JobID    OptUUID    `json:"job_id"`
+}
+
+// GetCells returns the value of Cells.
+func (s *FillSampleValuesOKApplicationJSON) GetCells() OptInt {
+	return s.Cells
+}
+
+// GetWithheld returns the value of Withheld.
+func (s *FillSampleValuesOKApplicationJSON) GetWithheld() OptInt {
+	return s.Withheld
+}
+
+// GetDryRun returns the value of DryRun.
+func (s *FillSampleValuesOKApplicationJSON) GetDryRun() OptBool {
+	return s.DryRun
+}
+
+// GetColumns returns the value of Columns.
+func (s *FillSampleValuesOKApplicationJSON) GetColumns() []string {
+	return s.Columns
+}
+
+// GetSample returns the value of Sample.
+func (s *FillSampleValuesOKApplicationJSON) GetSample() [][]string {
+	return s.Sample
+}
+
+// GetJobID returns the value of JobID.
+func (s *FillSampleValuesOKApplicationJSON) GetJobID() OptUUID {
+	return s.JobID
+}
+
+// SetCells sets the value of Cells.
+func (s *FillSampleValuesOKApplicationJSON) SetCells(val OptInt) {
+	s.Cells = val
+}
+
+// SetWithheld sets the value of Withheld.
+func (s *FillSampleValuesOKApplicationJSON) SetWithheld(val OptInt) {
+	s.Withheld = val
+}
+
+// SetDryRun sets the value of DryRun.
+func (s *FillSampleValuesOKApplicationJSON) SetDryRun(val OptBool) {
+	s.DryRun = val
+}
+
+// SetColumns sets the value of Columns.
+func (s *FillSampleValuesOKApplicationJSON) SetColumns(val []string) {
+	s.Columns = val
+}
+
+// SetSample sets the value of Sample.
+func (s *FillSampleValuesOKApplicationJSON) SetSample(val [][]string) {
+	s.Sample = val
+}
+
+// SetJobID sets the value of JobID.
+func (s *FillSampleValuesOKApplicationJSON) SetJobID(val OptUUID) {
+	s.JobID = val
+}
+
+func (*FillSampleValuesOKApplicationJSON) fillSampleValuesRes() {}
+
+type FillSampleValuesOKTextCsv struct {
+	Data io.Reader
+}
+
+// Read reads data from the Data reader.
+//
+// Kept to satisfy the io.Reader interface.
+func (s FillSampleValuesOKTextCsv) Read(p []byte) (n int, err error) {
+	if s.Data == nil {
+		return 0, io.EOF
+	}
+	return s.Data.Read(p)
+}
+
+func (*FillSampleValuesOKTextCsv) fillSampleValuesRes() {}
+
+// FillSampleValuesPaymentRequired is response for FillSampleValues operation.
+type FillSampleValuesPaymentRequired struct{}
+
+func (*FillSampleValuesPaymentRequired) fillSampleValuesRes() {}
+
+type FillSampleValuesReq struct {
+	// Metric id or name → how its values are drawn; every numeric input metric of the grid, 0–1000,
+	// when omitted.
+	Metrics   OptFillSampleValuesReqMetrics `json:"metrics"`
+	Members   OptFillSampleValuesReqMembers `json:"members"`
+	OnlyEmpty OptBool                       `json:"only_empty"`
+	// The same seed draws the same values.
+	Seed   OptInt  `json:"seed"`
+	DryRun OptBool `json:"dry_run"`
+	// With dry_run.
+	Format OptFillSampleValuesReqFormat `json:"format"`
+}
+
+// GetMetrics returns the value of Metrics.
+func (s *FillSampleValuesReq) GetMetrics() OptFillSampleValuesReqMetrics {
+	return s.Metrics
+}
+
+// GetMembers returns the value of Members.
+func (s *FillSampleValuesReq) GetMembers() OptFillSampleValuesReqMembers {
+	return s.Members
+}
+
+// GetOnlyEmpty returns the value of OnlyEmpty.
+func (s *FillSampleValuesReq) GetOnlyEmpty() OptBool {
+	return s.OnlyEmpty
+}
+
+// GetSeed returns the value of Seed.
+func (s *FillSampleValuesReq) GetSeed() OptInt {
+	return s.Seed
+}
+
+// GetDryRun returns the value of DryRun.
+func (s *FillSampleValuesReq) GetDryRun() OptBool {
+	return s.DryRun
+}
+
+// GetFormat returns the value of Format.
+func (s *FillSampleValuesReq) GetFormat() OptFillSampleValuesReqFormat {
+	return s.Format
+}
+
+// SetMetrics sets the value of Metrics.
+func (s *FillSampleValuesReq) SetMetrics(val OptFillSampleValuesReqMetrics) {
+	s.Metrics = val
+}
+
+// SetMembers sets the value of Members.
+func (s *FillSampleValuesReq) SetMembers(val OptFillSampleValuesReqMembers) {
+	s.Members = val
+}
+
+// SetOnlyEmpty sets the value of OnlyEmpty.
+func (s *FillSampleValuesReq) SetOnlyEmpty(val OptBool) {
+	s.OnlyEmpty = val
+}
+
+// SetSeed sets the value of Seed.
+func (s *FillSampleValuesReq) SetSeed(val OptInt) {
+	s.Seed = val
+}
+
+// SetDryRun sets the value of DryRun.
+func (s *FillSampleValuesReq) SetDryRun(val OptBool) {
+	s.DryRun = val
+}
+
+// SetFormat sets the value of Format.
+func (s *FillSampleValuesReq) SetFormat(val OptFillSampleValuesReqFormat) {
+	s.Format = val
+}
+
+// With dry_run.
+type FillSampleValuesReqFormat string
+
+const (
+	FillSampleValuesReqFormatCsv FillSampleValuesReqFormat = "csv"
+)
+
+// AllValues returns all FillSampleValuesReqFormat values.
+func (FillSampleValuesReqFormat) AllValues() []FillSampleValuesReqFormat {
+	return []FillSampleValuesReqFormat{
+		FillSampleValuesReqFormatCsv,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s FillSampleValuesReqFormat) MarshalText() ([]byte, error) {
+	switch s {
+	case FillSampleValuesReqFormatCsv:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *FillSampleValuesReqFormat) UnmarshalText(data []byte) error {
+	switch FillSampleValuesReqFormat(data) {
+	case FillSampleValuesReqFormatCsv:
+		*s = FillSampleValuesReqFormatCsv
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type FillSampleValuesReqMembers map[string][]string
+
+func (s *FillSampleValuesReqMembers) init() FillSampleValuesReqMembers {
+	m := *s
+	if m == nil {
+		m = map[string][]string{}
+		*s = m
+	}
+	return m
+}
+
+// Metric id or name → how its values are drawn; every numeric input metric of the grid, 0–1000,
+// when omitted.
+type FillSampleValuesReqMetrics map[string]FillSampleValuesReqMetricsItem
+
+func (s *FillSampleValuesReqMetrics) init() FillSampleValuesReqMetrics {
+	m := *s
+	if m == nil {
+		m = map[string]FillSampleValuesReqMetricsItem{}
+		*s = m
+	}
+	return m
+}
+
+type FillSampleValuesReqMetricsItem struct {
+	Min      OptFloat64 `json:"min"`
+	Max      OptFloat64 `json:"max"`
+	Decimals OptInt     `json:"decimals"`
+	// A fixed value instead of a range.
+	Value OptFloat64 `json:"value"`
+}
+
+// GetMin returns the value of Min.
+func (s *FillSampleValuesReqMetricsItem) GetMin() OptFloat64 {
+	return s.Min
+}
+
+// GetMax returns the value of Max.
+func (s *FillSampleValuesReqMetricsItem) GetMax() OptFloat64 {
+	return s.Max
+}
+
+// GetDecimals returns the value of Decimals.
+func (s *FillSampleValuesReqMetricsItem) GetDecimals() OptInt {
+	return s.Decimals
+}
+
+// GetValue returns the value of Value.
+func (s *FillSampleValuesReqMetricsItem) GetValue() OptFloat64 {
+	return s.Value
+}
+
+// SetMin sets the value of Min.
+func (s *FillSampleValuesReqMetricsItem) SetMin(val OptFloat64) {
+	s.Min = val
+}
+
+// SetMax sets the value of Max.
+func (s *FillSampleValuesReqMetricsItem) SetMax(val OptFloat64) {
+	s.Max = val
+}
+
+// SetDecimals sets the value of Decimals.
+func (s *FillSampleValuesReqMetricsItem) SetDecimals(val OptInt) {
+	s.Decimals = val
+}
+
+// SetValue sets the value of Value.
+func (s *FillSampleValuesReqMetricsItem) SetValue(val OptFloat64) {
+	s.Value = val
 }
 
 // Ref: #/components/schemas/FolderRequest
@@ -18231,6 +18644,98 @@ func (o OptChartRuntimeRequestContext) Or(d ChartRuntimeRequestContext) ChartRun
 	return d
 }
 
+// NewOptClearValuesRequest returns new OptClearValuesRequest with value set to v.
+func NewOptClearValuesRequest(v ClearValuesRequest) OptClearValuesRequest {
+	return OptClearValuesRequest{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptClearValuesRequest is optional ClearValuesRequest.
+type OptClearValuesRequest struct {
+	Value ClearValuesRequest
+	Set   bool
+}
+
+// IsSet returns true if OptClearValuesRequest was set.
+func (o OptClearValuesRequest) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptClearValuesRequest) Reset() {
+	var v ClearValuesRequest
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptClearValuesRequest) SetTo(v ClearValuesRequest) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptClearValuesRequest) Get() (v ClearValuesRequest, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptClearValuesRequest) Or(d ClearValuesRequest) ClearValuesRequest {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptClearValuesRequestMembers returns new OptClearValuesRequestMembers with value set to v.
+func NewOptClearValuesRequestMembers(v ClearValuesRequestMembers) OptClearValuesRequestMembers {
+	return OptClearValuesRequestMembers{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptClearValuesRequestMembers is optional ClearValuesRequestMembers.
+type OptClearValuesRequestMembers struct {
+	Value ClearValuesRequestMembers
+	Set   bool
+}
+
+// IsSet returns true if OptClearValuesRequestMembers was set.
+func (o OptClearValuesRequestMembers) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptClearValuesRequestMembers) Reset() {
+	var v ClearValuesRequestMembers
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptClearValuesRequestMembers) SetTo(v ClearValuesRequestMembers) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptClearValuesRequestMembers) Get() (v ClearValuesRequestMembers, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptClearValuesRequestMembers) Or(d ClearValuesRequestMembers) ClearValuesRequestMembers {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptConnectorSettingsScope returns new OptConnectorSettingsScope with value set to v.
 func NewOptConnectorSettingsScope(v ConnectorSettingsScope) OptConnectorSettingsScope {
 	return OptConnectorSettingsScope{
@@ -19375,6 +19880,144 @@ func (o OptExportSpecMetricDisplay) Get() (v ExportSpecMetricDisplay, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptExportSpecMetricDisplay) Or(d ExportSpecMetricDisplay) ExportSpecMetricDisplay {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptFillSampleValuesReqFormat returns new OptFillSampleValuesReqFormat with value set to v.
+func NewOptFillSampleValuesReqFormat(v FillSampleValuesReqFormat) OptFillSampleValuesReqFormat {
+	return OptFillSampleValuesReqFormat{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptFillSampleValuesReqFormat is optional FillSampleValuesReqFormat.
+type OptFillSampleValuesReqFormat struct {
+	Value FillSampleValuesReqFormat
+	Set   bool
+}
+
+// IsSet returns true if OptFillSampleValuesReqFormat was set.
+func (o OptFillSampleValuesReqFormat) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptFillSampleValuesReqFormat) Reset() {
+	var v FillSampleValuesReqFormat
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptFillSampleValuesReqFormat) SetTo(v FillSampleValuesReqFormat) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptFillSampleValuesReqFormat) Get() (v FillSampleValuesReqFormat, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptFillSampleValuesReqFormat) Or(d FillSampleValuesReqFormat) FillSampleValuesReqFormat {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptFillSampleValuesReqMembers returns new OptFillSampleValuesReqMembers with value set to v.
+func NewOptFillSampleValuesReqMembers(v FillSampleValuesReqMembers) OptFillSampleValuesReqMembers {
+	return OptFillSampleValuesReqMembers{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptFillSampleValuesReqMembers is optional FillSampleValuesReqMembers.
+type OptFillSampleValuesReqMembers struct {
+	Value FillSampleValuesReqMembers
+	Set   bool
+}
+
+// IsSet returns true if OptFillSampleValuesReqMembers was set.
+func (o OptFillSampleValuesReqMembers) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptFillSampleValuesReqMembers) Reset() {
+	var v FillSampleValuesReqMembers
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptFillSampleValuesReqMembers) SetTo(v FillSampleValuesReqMembers) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptFillSampleValuesReqMembers) Get() (v FillSampleValuesReqMembers, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptFillSampleValuesReqMembers) Or(d FillSampleValuesReqMembers) FillSampleValuesReqMembers {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptFillSampleValuesReqMetrics returns new OptFillSampleValuesReqMetrics with value set to v.
+func NewOptFillSampleValuesReqMetrics(v FillSampleValuesReqMetrics) OptFillSampleValuesReqMetrics {
+	return OptFillSampleValuesReqMetrics{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptFillSampleValuesReqMetrics is optional FillSampleValuesReqMetrics.
+type OptFillSampleValuesReqMetrics struct {
+	Value FillSampleValuesReqMetrics
+	Set   bool
+}
+
+// IsSet returns true if OptFillSampleValuesReqMetrics was set.
+func (o OptFillSampleValuesReqMetrics) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptFillSampleValuesReqMetrics) Reset() {
+	var v FillSampleValuesReqMetrics
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptFillSampleValuesReqMetrics) SetTo(v FillSampleValuesReqMetrics) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptFillSampleValuesReqMetrics) Get() (v FillSampleValuesReqMetrics, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptFillSampleValuesReqMetrics) Or(d FillSampleValuesReqMetrics) FillSampleValuesReqMetrics {
 	if v, ok := o.Get(); ok {
 		return v
 	}

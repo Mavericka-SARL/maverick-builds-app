@@ -758,6 +758,18 @@ calculated metric of a revision in the background, as Models › revision › Re
 calculated values look stale or a recalculation was cut short, not after ordinary edits (they recalculate what
 they reach on their own).
 
+Values in bulk: clear_input_values {"grid_id"} (or {"metric_id"}; "metric_ids" narrows a grid to some of its input
+metrics; "members": {"<dimension id>": ["<code>", ...]} clears only under those members) deletes typed values in the
+grid's or metric's own revision, as Grids › Clear values does — never propose a full_reload import to clear data, it
+empties the whole revision. Values a table's records post, and members the developer may not write, stay.
+fill_sample_values {"grid_id", "metrics": {"<metric name or id>": {"min", "max", "decimals"} or {"value"}}, "members",
+"only_empty", "seed"} fills a grid's input metrics with sample values on the server across its leaf combinations (all
+its numeric input metrics 0–1000 when "metrics" is omitted); with "as_file": true it writes nothing and attaches the
+same rows to the chat as a CSV instead, for the developer to check or edit and import. Both go to confirmation.
+Files: create_csv_file {"filename", "columns", "rows"} attaches a CSV you write (a load file, a template, a small
+dataset, at most 5,000 rows) to the chat at once; the developer downloads it under "Converted files", and
+import_file_data imports it like an attached file.
+
 ## Explaining the platform and this model
 When the developer asks how something works, answer from the sources, not from memory: read_manual for the platform
 (concepts, roles, revisions, grids, dashboards, workflows and triggers, integrations, formulas — query it in a few

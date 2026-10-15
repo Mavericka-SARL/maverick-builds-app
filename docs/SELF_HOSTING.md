@@ -195,7 +195,7 @@ Certificates cannot be issued until they do.
 ```bash
 git clone https://github.com/Mavericka-SARL/maverick-builds-app.git maverickbuilds
 cd maverickbuilds
-git checkout 2026.10.15        # a release: the newest is on the Releases page
+git checkout 2026.10.15.1        # a release: the newest is on the Releases page
 cd deploy/compose
 ```
 
@@ -250,7 +250,7 @@ lines to `.env`:
 
 ```bash
 COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml
-MAVERICKS_RELEASE=2026.10.15   # the release you checked out
+MAVERICKS_RELEASE=2026.10.15.1   # the release you checked out
 ```
 
 ```bash
@@ -464,7 +464,7 @@ restore.
 
 ```bash
 docker compose exec backup backup-schedule.sh now   # a restore point
-git fetch --tags && git checkout <new release>       # e.g. 2026.10.15
+git fetch --tags && git checkout <new release>       # e.g. 2026.10.15.1
 # published images: set MAVERICKS_RELEASE=<new release> in .env, then
 docker compose pull && docker compose up -d
 # built from source instead:
@@ -545,6 +545,7 @@ Each container keeps five log files of 20 MB.
 | **Invite user** answers 502 and names the e-mail step | Keycloak could not send the invitation. Rerun `SMTP_TEST_TO=you@example.com ./setup.sh keycloak` and read what the relay says. |
 | Keycloak stops with `database "keycloak" does not exist` | The database volume was created before the stack's init script ran. Create it: `docker compose exec postgres psql -U mavericks -c 'CREATE DATABASE keycloak OWNER mavericks'`, then `docker compose up -d`. |
 | The `web` container restarts over and over; its log says `99-runtime-config.sh: not found` | The clone has Windows (CRLF) line endings: Git for Windows made it, from a release before 2026.10.12.1. Repair it in place from `deploy/compose`, in the Ubuntu terminal: `git config core.autocrlf false`, then `(cd ../.. && git rm -rq --cached . && git reset -q --hard)` and `sed -i 's/\r$//' .env`, then `docker compose up -d --build`. |
+| The gateway restarts, `docker inspect` says `OOMKilled`, or its CPU stays high with nothing in its log | A recalculation or a grid read of a large model held more than its memory allows. The gateway takes 90% of its container's memory limit as Go's own (`GOMEMLIMIT` overrides it), and answers `GRID_READ_CONCURRENCY` full grid reads at once (default 4). To see what it is doing, read its Go profiles on `127.0.0.1:6060` inside its container (`PPROF_ADDR`, `off` to turn them off) — on Kubernetes `kubectl port-forward pod/<gateway> 6060`, then `go tool pprof http://localhost:6060/debug/pprof/heap`. |
 | `./setup.sh check` shows no backups the day after installing | `docker compose logs backup` names the failing step; for an external bucket it is usually the credentials or `BACKUP_REGION`. |
 
 ---
@@ -638,7 +639,7 @@ of your own. Then edit it:
    appear several times and must agree everywhere), the storage class, the
    SMTP relay and sender, and the address the backup watchdog alerts.
 2. **`kustomization.yaml`** — its `images:` block pins every image to the
-   release `2026.10.15`; set the release you deploy, or, if you built your
+   release `2026.10.15.1`; set the release you deploy, or, if you built your
    own images, replace the block with the one `build-images.sh` printed.
 3. **Object storage.** By default MinIO runs in the cluster and holds the
    backups and WAL archive. To keep them outside the cluster, as you should in
@@ -814,7 +815,7 @@ start again. `pg-restore.sh` drops the database and loads the dump into an
 empty one; `latest` is the newest dump of the database the URL names:
 
 ```bash
-IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.10.15   # the one your overlay runs
+IMG=ghcr.io/mavericka-sarl/mavericks/postgres-backup:2026.10.15.1   # the one your overlay runs
 kubectl -n mavericks scale deployment --replicas=0 \
   -l 'app.kubernetes.io/component in (api-gateway,service,identity)'
 for db in mavericks keycloak; do          # and each tenant_… database, if dedicated

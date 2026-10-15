@@ -158,6 +158,26 @@ func (UnimplementedHandler) ClearAuditSettings(ctx context.Context) (r ClearAudi
 	return r, ht.ErrNotImplemented
 }
 
+// ClearGridValues implements clearGridValues operation.
+//
+// Deletes, in the grid's revision, the typed values the caller may write: members they may only read
+// and values a table's records post stay. Each cell's history keeps what was cleared. A dry run
+// counts.
+//
+// POST /api/developer/grids/{id}/clear-values
+func (UnimplementedHandler) ClearGridValues(ctx context.Context, req OptClearValuesRequest, params ClearGridValuesParams) (r ClearGridValuesRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// ClearMetricValues implements clearMetricValues operation.
+//
+// Clear one input metric's typed values, under chosen members or all.
+//
+// POST /api/developer/metrics/{id}/clear-values
+func (UnimplementedHandler) ClearMetricValues(ctx context.Context, req OptClearValuesRequest, params ClearMetricValuesParams) (r ClearMetricValuesRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // ClearNotificationSettings implements clearNotificationSettings operation.
 //
 // Drop the tenant's own delivery settings so it inherits the deployment's again (administrators).
@@ -859,6 +879,17 @@ func (UnimplementedHandler) ExportModel(ctx context.Context, params ExportModelP
 //
 // POST /api/formula/refs
 func (UnimplementedHandler) ExtractFormulaRefs(ctx context.Context, req *FormulaRefsRequest) (r *ExtractFormulaRefsOK, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// FillSampleValues implements fillSampleValues operation.
+//
+// Draws a value per writable leaf combination (at most 500,000 cells) and commits them as a replace
+// import. A dry run answers the count and the first rows, or with format csv every row as a CSV the
+// import wizard reads.
+//
+// POST /api/developer/grids/{id}/sample-values
+func (UnimplementedHandler) FillSampleValues(ctx context.Context, req *FillSampleValuesReq, params FillSampleValuesParams) (r FillSampleValuesRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 

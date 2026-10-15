@@ -128,6 +128,20 @@ type Invoker interface {
 	//
 	// DELETE /api/admin/audit/settings
 	ClearAuditSettings(ctx context.Context) (ClearAuditSettingsRes, error)
+	// ClearGridValues invokes clearGridValues operation.
+	//
+	// Deletes, in the grid's revision, the typed values the caller may write: members they may only read
+	// and values a table's records post stay. Each cell's history keeps what was cleared. A dry run
+	// counts.
+	//
+	// POST /api/developer/grids/{id}/clear-values
+	ClearGridValues(ctx context.Context, request OptClearValuesRequest, params ClearGridValuesParams) (ClearGridValuesRes, error)
+	// ClearMetricValues invokes clearMetricValues operation.
+	//
+	// Clear one input metric's typed values, under chosen members or all.
+	//
+	// POST /api/developer/metrics/{id}/clear-values
+	ClearMetricValues(ctx context.Context, request OptClearValuesRequest, params ClearMetricValuesParams) (ClearMetricValuesRes, error)
 	// ClearNotificationSettings invokes clearNotificationSettings operation.
 	//
 	// Drop the tenant's own delivery settings so it inherits the deployment's again (administrators).
@@ -618,6 +632,14 @@ type Invoker interface {
 	//
 	// POST /api/formula/refs
 	ExtractFormulaRefs(ctx context.Context, request *FormulaRefsRequest) (*ExtractFormulaRefsOK, error)
+	// FillSampleValues invokes fillSampleValues operation.
+	//
+	// Draws a value per writable leaf combination (at most 500,000 cells) and commits them as a replace
+	// import. A dry run answers the count and the first rows, or with format csv every row as a CSV the
+	// import wizard reads.
+	//
+	// POST /api/developer/grids/{id}/sample-values
+	FillSampleValues(ctx context.Context, request *FillSampleValuesReq, params FillSampleValuesParams) (FillSampleValuesRes, error)
 	// GenerateDimensionPeriods invokes generateDimensionPeriods operation.
 	//
 	// Bulk-generate a time dimension's periods between two dates (same validation and chronological
@@ -3904,6 +3926,266 @@ func (c *Client) sendClearAuditSettings(ctx context.Context) (res ClearAuditSett
 
 	stage = "DecodeResponse"
 	result, err := decodeClearAuditSettingsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// ClearGridValues invokes clearGridValues operation.
+//
+// Deletes, in the grid's revision, the typed values the caller may write: members they may only read
+// and values a table's records post stay. Each cell's history keeps what was cleared. A dry run
+// counts.
+//
+// POST /api/developer/grids/{id}/clear-values
+func (c *Client) ClearGridValues(ctx context.Context, request OptClearValuesRequest, params ClearGridValuesParams) (ClearGridValuesRes, error) {
+	res, err := c.sendClearGridValues(ctx, request, params)
+	return res, err
+}
+
+func (c *Client) sendClearGridValues(ctx context.Context, request OptClearValuesRequest, params ClearGridValuesParams) (res ClearGridValuesRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("clearGridValues"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/developer/grids/{id}/clear-values"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ClearGridValuesOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/developer/grids/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/clear-values"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeClearGridValuesRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ClearGridValuesOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeClearGridValuesResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// ClearMetricValues invokes clearMetricValues operation.
+//
+// Clear one input metric's typed values, under chosen members or all.
+//
+// POST /api/developer/metrics/{id}/clear-values
+func (c *Client) ClearMetricValues(ctx context.Context, request OptClearValuesRequest, params ClearMetricValuesParams) (ClearMetricValuesRes, error) {
+	res, err := c.sendClearMetricValues(ctx, request, params)
+	return res, err
+}
+
+func (c *Client) sendClearMetricValues(ctx context.Context, request OptClearValuesRequest, params ClearMetricValuesParams) (res ClearMetricValuesRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("clearMetricValues"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/developer/metrics/{id}/clear-values"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ClearMetricValuesOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/developer/metrics/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/clear-values"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeClearMetricValuesRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ClearMetricValuesOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeClearMetricValuesResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -13053,6 +13335,137 @@ func (c *Client) sendExtractFormulaRefs(ctx context.Context, request *FormulaRef
 
 	stage = "DecodeResponse"
 	result, err := decodeExtractFormulaRefsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// FillSampleValues invokes fillSampleValues operation.
+//
+// Draws a value per writable leaf combination (at most 500,000 cells) and commits them as a replace
+// import. A dry run answers the count and the first rows, or with format csv every row as a CSV the
+// import wizard reads.
+//
+// POST /api/developer/grids/{id}/sample-values
+func (c *Client) FillSampleValues(ctx context.Context, request *FillSampleValuesReq, params FillSampleValuesParams) (FillSampleValuesRes, error) {
+	res, err := c.sendFillSampleValues(ctx, request, params)
+	return res, err
+}
+
+func (c *Client) sendFillSampleValues(ctx context.Context, request *FillSampleValuesReq, params FillSampleValuesParams) (res FillSampleValuesRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("fillSampleValues"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/developer/grids/{id}/sample-values"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, FillSampleValuesOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/developer/grids/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/sample-values"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeFillSampleValuesRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, FillSampleValuesOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeFillSampleValuesResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

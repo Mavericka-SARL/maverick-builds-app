@@ -58,6 +58,7 @@
 <tr><td><b>Search dimensions…</b></td><td>Filters by dimension name.</td></tr>
 <tr><td>Dimension checkboxes</td><td>Ticked = axis of this grid. Shows the member count.</td></tr>
 <tr><td><b>Show:</b> level select</td><td>Appears only for a ticked dimension that has a hierarchy. Options: <b>All levels (hierarchy)</b>, <b>Root only (level 0)</b>, <b>Level 1 only</b> … <b>Level N only</b>, <b>Leaves only</b>. Controls which level of the hierarchy the grid shows as its axis.</td></tr>
+<tr><td><b>Values</b></td><td>The grid's typed values in bulk, in the revision you work in. <b>Fill with sample values</b>: tick the input metrics, give each a range (from, to, decimals) or a <b>Fixed</b> value, and optionally the member codes to fill under per dimension (a parent stands for everything under it; empty fills all). <b>Only cells holding no value</b> keeps what is entered. <b>Preview</b> counts the cells, <b>Download CSV</b> gives every row it would write (the layout the import wizard reads), <b>Fill</b> writes them. <b>Clear values</b>: the same metrics and members; <b>Count</b> first, then <b>Clear values</b> deletes them. Members you may only read, and values a table's records post, stay; each cell's history keeps what was cleared. The AI Developer does both with <code>fill_sample_values</code> and <code>clear_input_values</code>.</td></tr>
 <tr><td>Delete icon</td><td>Confirm <b>Delete grid?</b>: "This removes the grid from all dashboards that use it."</td></tr>
 </table>
 <h3>Rules and behaviour</h3>

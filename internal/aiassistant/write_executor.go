@@ -122,6 +122,12 @@ type Hooks struct {
 	// Recalculate recalculates every calculated metric of a revision through
 	// the developer's own route (POST /api/developer/revisions/{id}/recalculate).
 	Recalculate func(ctx context.Context, revisionID string) (string, error)
+	// ClearValues clears a grid's or a metric's typed values (kind "grid" or
+	// "metric") through the developer's Clear values route.
+	ClearValues func(ctx context.Context, kind, id string, body json.RawMessage) (string, error)
+	// FillSample fills a grid with sample values through its route, or with
+	// asFile attaches the rows it would write to the chat as a CSV.
+	FillSample func(ctx context.Context, gridID string, body json.RawMessage, asFile bool) (string, error)
 	// RepostTable re-posts every record of a table through its live
 	// mappings, as the developer: what saving a table that gained or lost
 	// its status field runs, since which records count changed.
@@ -543,6 +549,10 @@ func (e *WriteExecutor) Execute(ctx context.Context, tool string, params json.Ra
 		return e.triggerAutomationRule(ctx, params)
 	case "recalculate_revision":
 		return e.recalculateRevision(ctx, params)
+	case "clear_input_values":
+		return e.clearInputValues(ctx, params)
+	case "fill_sample_values":
+		return e.fillSampleValues(ctx, params)
 	}
 	if fn, ok := e.editTools()[tool]; ok {
 		return fn(ctx, params)

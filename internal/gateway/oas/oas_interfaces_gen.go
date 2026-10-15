@@ -45,6 +45,14 @@ type ClearAuditSettingsRes interface {
 	clearAuditSettingsRes()
 }
 
+type ClearGridValuesRes interface {
+	clearGridValuesRes()
+}
+
+type ClearMetricValuesRes interface {
+	clearMetricValuesRes()
+}
+
 type ClearNotificationSettingsRes interface {
 	clearNotificationSettingsRes()
 }
@@ -267,6 +275,10 @@ type ExportGridRes interface {
 
 type ExportModelRes interface {
 	exportModelRes()
+}
+
+type FillSampleValuesRes interface {
+	fillSampleValuesRes()
 }
 
 type GenerateDimensionPeriodsRes interface {

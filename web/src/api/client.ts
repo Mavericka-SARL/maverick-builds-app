@@ -1,5 +1,24 @@
 import keycloak from "../auth/keycloak";
 
+/** Which typed values a Clear values or sample fill touches. */
+export interface ValuesBody {
+  metric_ids?: string[];
+  /** dimension id → member codes; under these members only. */
+  members?: Record<string, string[]>;
+  dry_run?: boolean;
+}
+export interface ClearValuesResult { cells: number; withheld: number; posted: number; dry_run: boolean }
+export interface SampleSpec { min?: number; max?: number; decimals?: number; value?: number }
+export interface SampleValuesBody {
+  /** metric id or name → how its values are drawn; all numeric inputs 0–1000 when omitted. */
+  metrics?: Record<string, SampleSpec>;
+  members?: Record<string, string[]>;
+  only_empty?: boolean;
+  seed?: number;
+  dry_run?: boolean;
+}
+export interface SampleValuesResult { cells: number; withheld: number; dry_run?: boolean; columns?: string[]; sample?: string[][] }
+
 /** A personal API token as its owner's list shows it (never the token). */
 export interface ApiToken {
   id: string;
@@ -2188,6 +2207,18 @@ export const api = {
   // (for values a recalculation cut short left stale).
   recalculateDevRevision: (id: string) =>
     apiFetch<{ recalculating: boolean; metrics: number }>(`/api/developer/revisions/${id}/recalculate`, { method: "POST" }),
+
+  // Typed values in bulk: a grid's input metrics (or one metric) cleared,
+  // or filled with sample values, under chosen members or all. A dry run
+  // counts; the sample CSV is what a fill would write.
+  clearGridValues: (gridId: string, body: ValuesBody) =>
+    apiFetch<ClearValuesResult>(`/api/developer/grids/${gridId}/clear-values`, { method: "POST", body: JSON.stringify(body) }),
+  clearMetricValues: (metricId: string, body: ValuesBody) =>
+    apiFetch<ClearValuesResult>(`/api/developer/metrics/${metricId}/clear-values`, { method: "POST", body: JSON.stringify(body) }),
+  sampleGridValues: (gridId: string, body: SampleValuesBody) =>
+    apiFetch<SampleValuesResult>(`/api/developer/grids/${gridId}/sample-values`, { method: "POST", body: JSON.stringify(body) }),
+  sampleGridValuesCSV: (gridId: string, body: SampleValuesBody) =>
+    apiFetchBlob(`/api/developer/grids/${gridId}/sample-values`, { ...body, dry_run: true, format: "csv" }),
 
   // Personal API tokens: made, listed and revoked by the signed-in person
   // (Account › API tokens). The token itself is in createApiToken's answer

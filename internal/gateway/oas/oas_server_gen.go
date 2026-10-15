@@ -108,6 +108,20 @@ type Handler interface {
 	//
 	// DELETE /api/admin/audit/settings
 	ClearAuditSettings(ctx context.Context) (ClearAuditSettingsRes, error)
+	// ClearGridValues implements clearGridValues operation.
+	//
+	// Deletes, in the grid's revision, the typed values the caller may write: members they may only read
+	// and values a table's records post stay. Each cell's history keeps what was cleared. A dry run
+	// counts.
+	//
+	// POST /api/developer/grids/{id}/clear-values
+	ClearGridValues(ctx context.Context, req OptClearValuesRequest, params ClearGridValuesParams) (ClearGridValuesRes, error)
+	// ClearMetricValues implements clearMetricValues operation.
+	//
+	// Clear one input metric's typed values, under chosen members or all.
+	//
+	// POST /api/developer/metrics/{id}/clear-values
+	ClearMetricValues(ctx context.Context, req OptClearValuesRequest, params ClearMetricValuesParams) (ClearMetricValuesRes, error)
 	// ClearNotificationSettings implements clearNotificationSettings operation.
 	//
 	// Drop the tenant's own delivery settings so it inherits the deployment's again (administrators).
@@ -598,6 +612,14 @@ type Handler interface {
 	//
 	// POST /api/formula/refs
 	ExtractFormulaRefs(ctx context.Context, req *FormulaRefsRequest) (*ExtractFormulaRefsOK, error)
+	// FillSampleValues implements fillSampleValues operation.
+	//
+	// Draws a value per writable leaf combination (at most 500,000 cells) and commits them as a replace
+	// import. A dry run answers the count and the first rows, or with format csv every row as a CSV the
+	// import wizard reads.
+	//
+	// POST /api/developer/grids/{id}/sample-values
+	FillSampleValues(ctx context.Context, req *FillSampleValuesReq, params FillSampleValuesParams) (FillSampleValuesRes, error)
 	// GenerateDimensionPeriods implements generateDimensionPeriods operation.
 	//
 	// Bulk-generate a time dimension's periods between two dates (same validation and chronological

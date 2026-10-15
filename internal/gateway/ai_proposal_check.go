@@ -83,7 +83,13 @@ func (h *handler) runStepsOn(ctx context.Context, tx pgx.Tx, sessionID, modelID,
 		TriggerRule: func(context.Context, string, map[string]any) (string, error) {
 			return "", aiassistant.ErrNotDryRunnable
 		},
-		Recalculate:  func(context.Context, string) (string, error) { return "", aiassistant.ErrNotDryRunnable },
+		Recalculate: func(context.Context, string) (string, error) { return "", aiassistant.ErrNotDryRunnable },
+		ClearValues: func(context.Context, string, string, json.RawMessage) (string, error) {
+			return "", aiassistant.ErrNotDryRunnable
+		},
+		FillSample: func(context.Context, string, json.RawMessage, bool) (string, error) {
+			return "", aiassistant.ErrNotDryRunnable
+		},
 		CheckMetrics: live.CheckMetrics, CheckMembers: live.CheckMembers,
 		ImportFile: func(ctx context.Context, req aiassistant.FileImportRequest) (string, error) {
 			return h.aiCheckImportFile(ctx, tx, sessionID, req)

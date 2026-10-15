@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
 import { api, type GridDef, type DevDimension } from "../../api/client";
+import { GridValuesDialog } from "./GridValuesDialog";
 import { Toolbar, ToolbarGroup, Button, Field, TextInput, SearchInput, EmptyState, IconButton, Checkbox, StatusBadge, Select, FilterChip, TagInput, TagFilter, useConfirm } from "../../ui";
 
 /**
@@ -68,6 +69,8 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
   const { data: model } = useQuery({ queryKey: ["dev-model", revisionId], queryFn: () => api.getDevModel(revisionId) });
   const { data: dims = [] } = useQuery({ queryKey: ["dev-dimensions", revisionId], queryFn: () => api.getDevDimensions(revisionId) });
   const { data: grids = [] } = useQuery({ queryKey: ["dev-grids", revisionId], queryFn: () => api.listGrids(revisionId) });
+  // The grid whose values dialog is open (Fill with sample values / Clear values).
+  const [valuesGrid, setValuesGrid] = useState<string | null>(null);
 
   const inv = () => qc.invalidateQueries({ queryKey: ["dev-grids", revisionId] });
 
@@ -206,6 +209,10 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
                     be. */}
                 <Button size="sm" onClick={() => openGrid(expandedGrid === g.id ? null : g.id)}>
                   {expandedGrid === g.id ? "Done" : "Configure"}
+                </Button>
+                <Button size="sm" variant="ghost" aria-label={`Values of ${g.name}`} title="Fill with sample values, or clear values"
+                  onClick={() => setValuesGrid(g.id)}>
+                  Values
                 </Button>
                 <IconButton
                   aria-label={`Delete grid ${g.name}`}
@@ -363,6 +370,10 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
         </div>
       )}
       {confirmElement}
+      {valuesGrid && model && (() => {
+        const g = grids.find(x => x.id === valuesGrid);
+        return g ? <GridValuesDialog grid={g} metrics={model.metrics} dims={dims} open onClose={() => setValuesGrid(null)} /> : null;
+      })()}
     </div>
   );
 }

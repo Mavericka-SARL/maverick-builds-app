@@ -516,6 +516,9 @@ func (h *handler) aiReadHooks(r *http.Request, sessionID, modelID, userID string
 		AttachGoogleSheet: func(ctx context.Context, sheetURL string) (string, error) {
 			return h.aiAttachGoogleSheet(ctx, r, sessionID, userID, sheetURL)
 		},
+		AttachCSV: func(ctx context.Context, filename string, data []byte) (string, error) {
+			return h.aiAttachCSV(ctx, sessionID, userID, filename, data, "ai_written")
+		},
 		QueryRecords: func(ctx context.Context, tableID string, query json.RawMessage) (string, error) {
 			status, body := h.callAsCaller(ctx, r, http.MethodPost, "/api/forms/"+url.PathEscape(tableID)+"/records/query", nil, query)
 			if status != http.StatusOK {

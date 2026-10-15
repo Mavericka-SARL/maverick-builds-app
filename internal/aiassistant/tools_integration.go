@@ -72,6 +72,9 @@ type ReadHooks struct {
 	// AttachGoogleSheet fetches a Google Sheet through the Sheets import's
 	// own route, as the developer, and attaches it to the chat as a CSV file.
 	AttachGoogleSheet func(ctx context.Context, sheetURL string) (string, error)
+	// AttachCSV attaches a CSV the assistant wrote to the chat, downloadable
+	// and importable like an attached file.
+	AttachCSV func(ctx context.Context, filename string, data []byte) (string, error)
 	// ModelLinkSources lists the models a link may read (the developer's own
 	// model-link-sources route).
 	ModelLinkSources func(ctx context.Context, modelID, grid string) (string, error)

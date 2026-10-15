@@ -966,6 +966,12 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 	hooks.Recalculate = func(ctx context.Context, revisionID string) (string, error) {
 		return h.aiRecalculate(ctx, r, revisionID)
 	}
+	hooks.ClearValues = func(ctx context.Context, kind, id string, body json.RawMessage) (string, error) {
+		return h.aiClearValues(ctx, r, kind, id, body)
+	}
+	hooks.FillSample = func(ctx context.Context, gridID string, body json.RawMessage, asFile bool) (string, error) {
+		return h.aiFillSample(ctx, r, sessionID, a.UserID, gridID, body, asFile)
+	}
 	executor := aiassistant.NewWriteExecutorWithActor(h.db.For(ctx), modelID, revID, a.UserID).WithHooks(hooks)
 	_ = pStore.SetStatus(ctx, proposalID, "confirmed")
 

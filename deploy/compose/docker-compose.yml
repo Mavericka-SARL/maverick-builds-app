@@ -105,6 +105,7 @@ services:
     environment:
       <<: *app-env
       DEV_MODE: "false"
+      GRID_READ_CONCURRENCY: ${GRID_READ_CONCURRENCY:-}
       # Keys are fetched from inside the network; tokens carry the public
       # address as their issuer.
       KEYCLOAK_URL: http://keycloak:8080
