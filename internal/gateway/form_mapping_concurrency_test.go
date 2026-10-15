@@ -51,7 +51,8 @@ func TestFormMappingConcurrentPostingsConverge(t *testing.T) {
 	formID := q(`
 		INSERT INTO model.form_def (model_id, revision_id, name, label, fields)
 		VALUES ($1::uuid, $2::uuid, 'concurrency_form', 'Concurrency Form',
-			jsonb_build_array(jsonb_build_object('name','amount','label','Amount','type','number')))
+			jsonb_build_array(jsonb_build_object('name','amount','label','Amount','type','number'),
+			                  jsonb_build_object('name','status','label','Status','type','status')))
 		RETURNING id::text`, f.modelID, f.workingRevID)
 
 	mappingID := q(`
@@ -194,7 +195,8 @@ func TestFormMappingRecalculatesItsOwnRevisionNotTheModelsActiveOne(t *testing.T
 	formID := q(`
 		INSERT INTO model.form_def (model_id, revision_id, name, label, fields)
 		VALUES ($1::uuid, $2::uuid, 'annual_form', 'Annual Form',
-			jsonb_build_array(jsonb_build_object('name','amount','label','Amount','type','number')))
+			jsonb_build_array(jsonb_build_object('name','amount','label','Amount','type','number'),
+			                  jsonb_build_object('name','status','label','Status','type','status')))
 		RETURNING id::text`, f.modelID, otherRevID)
 	mappingID := q(`
 		INSERT INTO model.form_metric_mapping

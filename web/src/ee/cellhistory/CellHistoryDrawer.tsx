@@ -55,7 +55,7 @@ function HistoryList({ cell }: { cell: CellRef }) {
             </td>
             <td>{e.entered_by.name || e.entered_by.email || "—"}</td>
             <td className="mvx-admin-muted">
-              {e.source.kind === "form" ? `form: ${e.source.label}` : e.source.kind === "copied" ? e.source.label : "typed"}
+              {e.source.kind === "form" ? `records: ${e.source.label}` : e.source.kind === "copied" ? e.source.label : "typed"}
               {e.deleted_at && <div>Removed {when(e.deleted_at)} — {e.delete_reason}</div>}
             </td>
           </tr>

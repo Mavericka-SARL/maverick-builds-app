@@ -82,7 +82,7 @@ function UsageView({ scope }: { scope: "platform" | "tenant" }) {
               <Stat label="Revisions" value={num(t.revisions)} />
               <Stat label="Fact rows" value={num(t.fact_rows)} />
               <Stat label="Calculated rows" value={num(t.calc_rows)} />
-              <Stat label="Form records" value={num(t.form_records)} />
+              <Stat label="Records" value={num(t.form_records)} />
               <Stat label={`Workflow instances (${period})`} value={num(t.workflow_instances)} />
               <Stat label={`Integration runs (${period})`} value={num(t.integration_runs)} />
               <Stat label={`AI messages (${period})`} value={num(t.ai_messages)} />

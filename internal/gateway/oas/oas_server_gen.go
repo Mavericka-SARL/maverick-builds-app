@@ -82,7 +82,7 @@ type Handler interface {
 	ArchiveWorkflow(ctx context.Context, params ArchiveWorkflowParams) (*WorkflowDefFull, error)
 	// BackfillFormMapping implements backfillFormMapping operation.
 	//
-	// Re-apply a form-to-metric mapping against all already-submitted records.
+	// Re-apply a table-to-metric mapping against all already-submitted records.
 	//
 	// POST /api/developer/form-integrations/{id}/backfill
 	BackfillFormMapping(ctx context.Context, params BackfillFormMappingParams) (*BackfillFormMappingOK, error)
@@ -133,6 +133,12 @@ type Handler interface {
 	//
 	// POST /api/ai/sessions/{id}/proposals/{pid}/confirm
 	ConfirmAiProposal(ctx context.Context, params ConfirmAiProposalParams) (ConfirmAiProposalRes, error)
+	// CreateAPIToken implements createAPIToken operation.
+	//
+	// Make a personal API token for a script; the answer carries the token, once.
+	//
+	// POST /api/me/api-tokens
+	CreateAPIToken(ctx context.Context, req *APITokenCreate) (CreateAPITokenRes, error)
 	// CreateAdminApplication implements createAdminApplication operation.
 	//
 	// Create an application under a tenant (a tenant admin: their own tenant only).
@@ -246,21 +252,27 @@ type Handler interface {
 	CreateFolder(ctx context.Context, req *FolderRequest, params CreateFolderParams) (CreateFolderRes, error)
 	// CreateForm implements createForm operation.
 	//
-	// Create a CRUD form.
+	// Create a table of records.
 	//
 	// POST /api/forms
 	CreateForm(ctx context.Context, req *CreateFormRequest, params CreateFormParams) (CreateFormRes, error)
 	// CreateFormMapping implements createFormMapping operation.
 	//
-	// Create a form-to-metric mapping (posts submitted form field values into a metric's facts).
+	// The table, grid, input metric and dimensions must be the model's, in the revision (400 otherwise,
+	// without saying whether the id exists elsewhere); the source field and every mapped field must be
+	// fields of the table.
 	//
 	// POST /api/developer/form-integrations
 	CreateFormMapping(ctx context.Context, req *CreateFormMappingRequest) (CreateFormMappingRes, error)
 	// CreateFormRecord implements createFormRecord operation.
 	//
-	// For a caller who reaches the form's application (404 otherwise). The caller becomes the record's
-	// creator. A record created submitted dispatches form_submit rules, one created approved (by an
-	// administrator) form_approval rules.
+	// For a caller who reaches the table's application (404 otherwise). The caller becomes the record's
+	// creator; each autocode field gives it the next code. Its values are checked (400, with every
+	// problem listed): a member or metric hidden from the caller is no member or metric to them. A
+	// record that would post into a cell the caller may not write — a read-only member or metric, a
+	// locked cell — is refused (403) rather than saved without its posting. A record created without a
+	// status or as submitted dispatches form_submit rules, one created approved (by an administrator)
+	// form_approval rules.
 	//
 	// POST /api/forms/{id}/records
 	CreateFormRecord(ctx context.Context, req *CreateRecordRequest, params CreateFormRecordParams) (CreateFormRecordRes, error)
@@ -440,14 +452,14 @@ type Handler interface {
 	DeleteFolder(ctx context.Context, params DeleteFolderParams) (*DeleteFolderOK, error)
 	// DeleteForm implements deleteForm operation.
 	//
-	// Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
-	// Deletes every record of the form with it.
+	// Within the caller's builder scope (403 for a table outside it, 404 for one that does not exist).
+	// Deletes every record of the table with it.
 	//
 	// DELETE /api/forms/{id}
 	DeleteForm(ctx context.Context, params DeleteFormParams) (DeleteFormRes, error)
 	// DeleteFormMapping implements deleteFormMapping operation.
 	//
-	// Delete a form-to-metric mapping.
+	// Delete a table-to-metric mapping.
 	//
 	// DELETE /api/developer/form-integrations/{id}
 	DeleteFormMapping(ctx context.Context, params DeleteFormMappingParams) (*DeleteFormMappingOK, error)
@@ -561,8 +573,8 @@ type Handler interface {
 	ExportAudit(ctx context.Context, params ExportAuditParams) (ExportAuditRes, error)
 	// ExportFormRecords implements exportFormRecords operation.
 	//
-	// For a caller who reaches the form's application (404 otherwise); records the caller's access rules
-	// withhold are left out.
+	// For a caller who reaches the table's application (404 otherwise); records the caller's access
+	// rules withhold are left out.
 	//
 	// GET /api/forms/{id}/export
 	ExportFormRecords(ctx context.Context, params ExportFormRecordsParams) (ExportFormRecordsRes, error)
@@ -685,9 +697,9 @@ type Handler interface {
 	GetDeveloperModel(ctx context.Context, params GetDeveloperModelParams) (*GetDeveloperModelOK, error)
 	// GetFormRecord implements getFormRecord operation.
 	//
-	// For a caller who reaches the record's form's application the way the business console opens it and
-	// whose access rules do not withhold the record; anyone else gets 404, as for a record that does not
-	// exist.
+	// For a caller who reaches the record's table's application the way the business console opens it
+	// and whose access rules do not withhold the record; anyone else gets 404, as for a record that does
+	// not exist.
 	//
 	// GET /api/records/{id}
 	GetFormRecord(ctx context.Context, params GetFormRecordParams) (GetFormRecordRes, error)
@@ -854,9 +866,9 @@ type Handler interface {
 	ImportDimensionMembers(ctx context.Context, req *ImportDimensionMembersReq) (ImportDimensionMembersRes, error)
 	// ImportFormRecords implements importFormRecords operation.
 	//
-	// For a caller who reaches the form's application (404 otherwise), who becomes each record's creator.
-	//  A row's optional status column sets its status; a row whose status the caller may not create
-	// (approved or rejected, unless the caller administers the application) fails validation.
+	// For a caller who reaches the table's application (404 otherwise), who becomes each record's
+	// creator. A row's optional status column sets its status; a row whose status the caller may not
+	// create (approved or rejected, unless the caller administers the application) fails validation.
 	//
 	// POST /api/forms/{id}/import
 	ImportFormRecords(ctx context.Context, req *FormImportRequest, params ImportFormRecordsParams) (ImportFormRecordsRes, error)
@@ -891,10 +903,14 @@ type Handler interface {
 	ImportTemplateWorkbook(ctx context.Context, req *ImportTemplateWorkbookReq) (ImportTemplateWorkbookRes, error)
 	// ImportUpload implements importUpload operation.
 	//
-	// Import facts from a CSV or XLSX file (atomic — any row failing validation rejects the whole file).
+	// A file is its rows entered top to bottom: rows naming the same cell combine as entering them one
+	// after another would (incremental adds each number; replace and full_reload keep the cell's last
+	// row; a text or pick-list cell takes its last row in every mode). A client that may send an import
+	// again — after a closed connection, a timeout or a 502 — sends an Idempotency-Key: the same key
+	// from the same person for the same model returns the first import's answer and applies nothing.
 	//
 	// POST /api/import/upload
-	ImportUpload(ctx context.Context, req *ImportUploadRequest) (ImportUploadRes, error)
+	ImportUpload(ctx context.Context, req *ImportUploadRequest, params ImportUploadParams) (ImportUploadRes, error)
 	// IntegrationOAuthCallback implements integrationOAuthCallback operation.
 	//
 	// Where the provider sends the browser after consent (public: the person arrives with the state
@@ -903,6 +919,12 @@ type Handler interface {
 	//
 	// GET /api/integrations/oauth/callback
 	IntegrationOAuthCallback(ctx context.Context, params IntegrationOAuthCallbackParams) error
+	// ListAPITokens implements listAPITokens operation.
+	//
+	// The caller's personal API tokens not revoked (signed in, never with a token).
+	//
+	// GET /api/me/api-tokens
+	ListAPITokens(ctx context.Context) (ListAPITokensRes, error)
 	// ListAdminApplications implements listAdminApplications operation.
 	//
 	// List the applications in the caller's scope — every tenant's for a platform admin, their own
@@ -1077,23 +1099,23 @@ type Handler interface {
 	ListDormancy(ctx context.Context) (ListDormancyRes, error)
 	// ListFormMappings implements listFormMappings operation.
 	//
-	// List form-to-metric mappings for a model.
+	// List table-to-metric mappings for a model.
 	//
 	// GET /api/developer/form-integrations
 	ListFormMappings(ctx context.Context, params ListFormMappingsParams) (ListFormMappingsRes, error)
 	// ListFormRecords implements listFormRecords operation.
 	//
-	// For a caller who reaches the form's application the way the business console opens it; anyone else
-	// gets 404, as for a form that does not exist. Records the caller's access rules withhold are left
-	// out before the page is filled, so they neither shorten a page nor end the list early. Each record
-	// carries the caller's permissions on it. When more records may follow, the X-Next-Cursor response
-	// header carries the cursor for the next page.
+	// For a caller who reaches the table's application the way the business console opens it; anyone
+	// else gets 404, as for a table that does not exist. Records the caller's access rules withhold are
+	// left out before the page is filled, so they neither shorten a page nor end the list early. Each
+	// record carries the caller's permissions on it. When more records may follow, the X-Next-Cursor
+	// response header carries the cursor for the next page.
 	//
 	// GET /api/forms/{id}/records
 	ListFormRecords(ctx context.Context, params ListFormRecordsParams) (ListFormRecordsRes, error)
 	// ListForms implements listForms operation.
 	//
-	// List CRUD forms for the current model's revision.
+	// List tables of records for the current model's revision.
 	//
 	// GET /api/forms
 	ListForms(ctx context.Context, params ListFormsParams) (ListFormsRes, error)
@@ -1276,6 +1298,26 @@ type Handler interface {
 	//
 	// PUT /api/developer/integrations/google-service-account
 	PutGoogleConnection(ctx context.Context, req *PutGoogleConnectionReq) (PutGoogleConnectionRes, error)
+	// QueryFormRecords implements queryFormRecords operation.
+	//
+	// Read-only, for a caller who reaches the table's application (404 otherwise), over exactly the
+	// records the record list shows them: a table showing each person their own records shows a
+	// non-administrator theirs, and records naming a member or metric hidden from them are left out of
+	// pages, counts and totals alike. Without group_by or aggregates it answers a page of records (each
+	// with the caller's permissions) and how many match in all; with them, one row per group holding
+	// each aggregate, and how many groups there are. A dimension or person group also carries its name
+	// (key_label). The chat connector's query_records and the AI assistant's query_records are this
+	// route.
+	//
+	// POST /api/forms/{id}/records/query
+	QueryFormRecords(ctx context.Context, req OptRecordsQuery, params QueryFormRecordsParams) (QueryFormRecordsRes, error)
+	// RecalculateRevision implements recalculateRevision operation.
+	//
+	// Answers at once; GET /api/grid reports recalc_pending until the pass lands. For values a
+	// recalculation cut short left stale.
+	//
+	// POST /api/developer/revisions/{id}/recalculate
+	RecalculateRevision(ctx context.Context, params RecalculateRevisionParams) (RecalculateRevisionRes, error)
 	// RejectAiProposal implements rejectAiProposal operation.
 	//
 	// Reject a pending proposal without executing it.
@@ -1375,6 +1417,12 @@ type Handler interface {
 	//
 	// POST /api/developer/workflows/{id}/restore
 	RestoreWorkflow(ctx context.Context, params RestoreWorkflowParams) (RestoreWorkflowRes, error)
+	// RevokeAPIToken implements revokeAPIToken operation.
+	//
+	// Revoke one of the caller's personal API tokens; it stops working at once.
+	//
+	// DELETE /api/me/api-tokens/{id}
+	RevokeAPIToken(ctx context.Context, params RevokeAPITokenParams) (RevokeAPITokenRes, error)
 	// RevokeAdminUserAppAccess implements revokeAdminUserAppAccess operation.
 	//
 	// Requires platform_admin or tenant_admin. See grantAdminUserAppAccess. When this is the last
@@ -1607,9 +1655,9 @@ type Handler interface {
 	SwitchModelLinkSource(ctx context.Context, req *SwitchModelLinkSourceReq, params SwitchModelLinkSourceParams) (SwitchModelLinkSourceRes, error)
 	// SyncFormMappings implements syncFormMappings operation.
 	//
-	// For an administrator of the form's application (a business_admin of its workspace, a developer or
-	// tenant admin within their scope, a platform admin): a sync re-posts every record of the form,
-	// other people's included. 403 for a caller who reaches the form without administering it, 404 for
+	// For an administrator of the table's application (a business_admin of its workspace, a developer or
+	// tenant admin within their scope, a platform admin): a sync re-posts every record of the table,
+	// other people's included. 403 for a caller who reaches the table without administering it, 404 for
 	// anyone else. A record whose re-post the caller's write guard refuses keeps the posting it has.
 	//
 	// POST /api/forms/{id}/sync
@@ -1777,13 +1825,14 @@ type Handler interface {
 	UpdateFolder(ctx context.Context, req *FolderRequest, params UpdateFolderParams) (UpdateFolderRes, error)
 	// UpdateForm implements updateForm operation.
 	//
-	// Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
+	// Within the caller's builder scope (403 for a table outside it, 404 for one that does not exist).
 	//
 	// PATCH /api/forms/{id}
 	UpdateForm(ctx context.Context, req *CreateFormRequest, params UpdateFormParams) (UpdateFormRes, error)
 	// UpdateFormMapping implements updateFormMapping operation.
 	//
-	// Update a form-to-metric mapping (immediately re-applies it to already-submitted records).
+	// What the mapping names is checked as on create, against the mapping's own model, revision and
+	// table (400).
 	//
 	// PATCH /api/developer/form-integrations/{id}
 	UpdateFormMapping(ctx context.Context, req *UpdateFormMappingRequest, params UpdateFormMappingParams) (UpdateFormMappingRes, error)

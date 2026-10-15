@@ -13,10 +13,11 @@ import (
 	"github.com/mavericks-engine/mavericks/pkg/dbx"
 )
 
+// FormField is one field of a table of records (model.form_def.fields).
 type FormField struct {
 	Name     string   `json:"name"`
 	Label    string   `json:"label"`
-	Type     string   `json:"type"` // text, number, select, date, boolean, dimension, metric
+	Type     string   `json:"type"` // text, number, select, date, boolean, dimension, metric, autocode, status
 	Required bool     `json:"required"`
 	Options  []string `json:"options,omitempty"`
 	// dimension type
@@ -25,22 +26,55 @@ type FormField struct {
 	// metric type
 	MetricID   string `json:"metric_id,omitempty"`
 	ValueField string `json:"value_field,omitempty"` // name of sibling field that holds the numeric amount
+	// autocode type: the code a new record is given is CodePrefix followed
+	// by the next number, padded with zeros to CodeDigits (EXP-0042).
+	CodePrefix string `json:"code_prefix,omitempty"`
+	CodeDigits int    `json:"code_digits,omitempty"`
 }
 
+// Field types the server gives values to rather than the person saving a
+// record: an autocode field's code, and a status field's status (which
+// lives in the record's status, not its data).
+const (
+	FieldAutoCode = "autocode"
+	FieldStatus   = "status"
+)
+
+// FormDef is a table of records: its fields, and whether each person sees
+// only the records they created.
 type FormDef struct {
-	ID        string      `json:"id"`
-	ModelID   string      `json:"model_id"`
-	Name      string      `json:"name"`
-	Label     string      `json:"label"`
-	Fields    []FormField `json:"fields"`
-	CreatedAt time.Time   `json:"created_at"`
+	ID      string      `json:"id"`
+	ModelID string      `json:"model_id"`
+	Name    string      `json:"name"`
+	Label   string      `json:"label"`
+	Fields  []FormField `json:"fields"`
+	// OwnRecordsOnly: a person who does not administer the table's
+	// application sees only the records they created.
+	OwnRecordsOnly bool      `json:"own_records_only"`
+	CreatedAt      time.Time `json:"created_at"`
 }
+
+// StatusField is the table's status field, nil when it has none: a table
+// without one gives its records no status.
+func (f *FormDef) StatusField() *FormField {
+	for i := range f.Fields {
+		if f.Fields[i].Type == FieldStatus {
+			return &f.Fields[i]
+		}
+	}
+	return nil
+}
+
+// HasStatus reports whether the table's records have a status.
+func (f *FormDef) HasStatus() bool { return f.StatusField() != nil }
 
 type FormRecord struct {
 	ID     string         `json:"id"`
 	FormID string         `json:"form_id"`
 	Data   map[string]any `json:"data"`
-	Status string         `json:"status"`
+	// Status is "" for a record without one: every record of a table
+	// without a status field, and one saved before its table got one.
+	Status string `json:"status"`
 	// CreatedBy is the user who created the record; nil for a legacy row
 	// whose creator was never recorded or has been deleted.
 	CreatedBy *string   `json:"created_by"`
@@ -125,9 +159,9 @@ func (s *Store) GetForm(ctx context.Context, formID string) (*FormDef, error) {
 	var fieldsJSON []byte
 
 	err := s.db.QueryRow(ctx, `
-		SELECT id::text, model_id::text, name, label, fields, created_at
+		SELECT id::text, model_id::text, name, label, fields, own_records_only, created_at
 		FROM model.form_def WHERE id = $1::uuid
-	`, formID).Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.CreatedAt)
+	`, formID).Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.OwnRecordsOnly, &f.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("form %s not found", formID)
 	}
@@ -143,7 +177,7 @@ func (s *Store) GetForm(ctx context.Context, formID string) (*FormDef, error) {
 // ones. An empty revisionID lists every form for the model.
 func (s *Store) ListForms(ctx context.Context, modelID, revisionID string) ([]*FormDef, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id::text, model_id::text, name, label, fields, created_at
+		SELECT id::text, model_id::text, name, label, fields, own_records_only, created_at
 		FROM model.form_def
 		WHERE model_id = $1::uuid
 		  AND ($2 = '' OR revision_id IS NULL OR revision_id::text = $2)
@@ -158,7 +192,7 @@ func (s *Store) ListForms(ctx context.Context, modelID, revisionID string) ([]*F
 	for rows.Next() {
 		var f FormDef
 		var fieldsJSON []byte
-		if err := rows.Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.CreatedAt); err != nil {
+		if err := rows.Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.OwnRecordsOnly, &f.CreatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(fieldsJSON, &f.Fields)
@@ -167,17 +201,62 @@ func (s *Store) ListForms(ctx context.Context, modelID, revisionID string) ([]*F
 	return forms, rows.Err()
 }
 
-func (s *Store) UpdateForm(ctx context.Context, formID, name, label string, fields []FormField) error {
+// FormChange is what an UpdateForm changed that its caller acts on.
+type FormChange struct {
+	// StatusChanged: the table gained or lost its status field, so which of
+	// its records count in their metrics changed — the caller re-posts them.
+	StatusChanged bool
+	// CodesAssigned: records given a code by an auto-code field the update
+	// added.
+	CodesAssigned int
+}
+
+// UpdateForm saves a table's name, label and fields. Records without a
+// value in an auto-code field — every record, when the field is new — are
+// given codes, oldest first, so every record of the table is identifiable.
+func (s *Store) UpdateForm(ctx context.Context, formID, name, label string, fields []FormField) (FormChange, error) {
+	var change FormChange
 	if fields == nil {
 		fields = []FormField{}
 	}
 	fieldsJSON, err := json.Marshal(fields)
 	if err != nil {
-		return err
+		return change, err
 	}
-	_, err = s.db.Exec(ctx,
+	before, err := s.GetForm(ctx, formID)
+	if err != nil {
+		return change, err
+	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return change, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err = tx.Exec(ctx,
 		`UPDATE model.form_def SET name=$2, label=$3, fields=$4 WHERE id=$1::uuid`,
-		formID, name, label, fieldsJSON)
+		formID, name, label, fieldsJSON); err != nil {
+		return change, err
+	}
+	after := *before
+	after.Fields = fields
+	change.StatusChanged = before.HasStatus() != after.HasStatus()
+	for _, f := range fields {
+		if f.Type != FieldAutoCode {
+			continue
+		}
+		n, err := assignMissingCodes(ctx, tx, formID, f)
+		if err != nil {
+			return change, err
+		}
+		change.CodesAssigned += n
+	}
+	return change, tx.Commit(ctx)
+}
+
+// SetOwnRecordsOnly sets whether the table shows each person only the
+// records they created.
+func (s *Store) SetOwnRecordsOnly(ctx context.Context, formID string, on bool) error {
+	_, err := s.db.Exec(ctx, `UPDATE model.form_def SET own_records_only=$2 WHERE id=$1::uuid`, formID, on)
 	return err
 }
 
@@ -295,14 +374,49 @@ func (s *Store) DeleteMappingPostings(ctx context.Context, mappingIDs []string, 
 	return posted, tx.Commit(ctx)
 }
 
-// CreateRecord creates a draft record.
+// CreateRecord creates a record in the status a new record of its table
+// starts in: a draft when the table has a status field, no status otherwise.
 func (s *Store) CreateRecord(ctx context.Context, formID, userID string, data map[string]any) (*FormRecord, error) {
-	return s.CreateRecordWithStatus(ctx, formID, userID, StatusDraft, data)
+	form, err := s.GetForm(ctx, formID)
+	if err != nil {
+		return nil, err
+	}
+	status := ""
+	if form.HasStatus() {
+		status = StatusDraft
+	}
+	return s.CreateRecordWithStatus(ctx, formID, userID, status, data)
 }
 
-// CreateRecordWithStatus creates a record in status. Who may create a
-// record in which status is RecordAccess.CanCreate's, decided by the caller.
+// CreateRecordWithStatus creates a record in status ("" for none). Who may
+// create a record in which status is RecordAccess.CanCreate's, decided by
+// the caller. Each auto-code field of the table gives the record the next
+// code, whatever data holds for it.
 func (s *Store) CreateRecordWithStatus(ctx context.Context, formID, userID, status string, data map[string]any) (*FormRecord, error) {
+	form, err := s.GetForm(ctx, formID)
+	if err != nil {
+		return nil, err
+	}
+	if data == nil {
+		data = map[string]any{}
+	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	for _, f := range form.Fields {
+		switch f.Type {
+		case FieldAutoCode:
+			code, err := nextCode(ctx, tx, formID, f)
+			if err != nil {
+				return nil, err
+			}
+			data[f.Name] = code
+		case FieldStatus:
+			delete(data, f.Name) // the status is the record's, not a value in its data
+		}
+	}
 	dataJSON, err := json.Marshal(data)
 	if err != nil {
 		return nil, err
@@ -310,22 +424,28 @@ func (s *Store) CreateRecordWithStatus(ctx context.Context, formID, userID, stat
 
 	var id string
 	var createdAt, updatedAt time.Time
-	err = s.db.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO runtime.form_record (form_id, data, status, created_by)
-		VALUES ($1::uuid, $2, $3::runtime.record_status, $4::uuid)
+		VALUES ($1::uuid, $2, NULLIF($3,'')::runtime.record_status, NULLIF($4,'')::uuid)
 		RETURNING id::text, created_at, updated_at
 	`, formID, dataJSON, status, userID).Scan(&id, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("create record: %w", err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
 
-	createdBy := userID
+	var createdBy *string
+	if userID != "" {
+		createdBy = &userID
+	}
 	return &FormRecord{
 		ID:        id,
 		FormID:    formID,
 		Data:      data,
 		Status:    status,
-		CreatedBy: &createdBy,
+		CreatedBy: createdBy,
 		CreatedAt: createdAt,
 		UpdatedAt: updatedAt,
 	}, nil
@@ -333,7 +453,7 @@ func (s *Store) CreateRecordWithStatus(ctx context.Context, formID, userID, stat
 
 func (s *Store) ListRecords(ctx context.Context, formID string, limit int) ([]*FormRecord, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id::text, form_id::text, data, status::text, created_by::text, created_at, updated_at
+		SELECT id::text, form_id::text, data, COALESCE(status::text,''), created_by::text, created_at, updated_at
 		FROM runtime.form_record WHERE form_id = $1::uuid
 		ORDER BY created_at DESC LIMIT $2
 	`, formID, limit)
@@ -371,7 +491,7 @@ func (s *Store) ListRecordsPage(ctx context.Context, formID string, after *Recor
 		afterAt, afterID = &after.CreatedAt, &after.ID
 	}
 	rows, err := s.db.Query(ctx, `
-		SELECT id::text, form_id::text, data, status::text, created_by::text, created_at, updated_at
+		SELECT id::text, form_id::text, data, COALESCE(status::text,''), created_by::text, created_at, updated_at
 		FROM runtime.form_record
 		WHERE form_id = $1::uuid
 		  AND ($2::timestamptz IS NULL OR (created_at, id) < ($2::timestamptz, $3::uuid))
@@ -397,7 +517,7 @@ func (s *Store) GetRecord(ctx context.Context, recordID string) (*FormRecord, er
 	var r FormRecord
 	var dataJSON []byte
 	err := s.db.QueryRow(ctx, `
-		SELECT id::text, form_id::text, data, status::text, created_by::text, created_at, updated_at
+		SELECT id::text, form_id::text, data, COALESCE(status::text,''), created_by::text, created_at, updated_at
 		FROM runtime.form_record WHERE id = $1::uuid
 	`, recordID).Scan(&r.ID, &r.FormID, &dataJSON, &r.Status, &r.CreatedBy, &r.CreatedAt, &r.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -418,7 +538,7 @@ func (s *Store) UpdateRecord(ctx context.Context, recordID, status string, data 
 
 	tag, err := s.db.Exec(ctx, `
 		UPDATE runtime.form_record
-		SET data = $2, status = $3::runtime.record_status, updated_at = now()
+		SET data = $2, status = NULLIF($3,'')::runtime.record_status, updated_at = now()
 		WHERE id = $1::uuid
 	`, recordID, dataJSON, status)
 	if err != nil {
@@ -445,8 +565,8 @@ func (s *Store) UpdateRecordFrom(ctx context.Context, recordID, fromStatus, stat
 	}
 	tag, err := s.db.Exec(ctx, `
 		UPDATE runtime.form_record
-		SET data = $2, status = $3::runtime.record_status, updated_at = now()
-		WHERE id = $1::uuid AND status = $4::runtime.record_status
+		SET data = $2, status = NULLIF($3,'')::runtime.record_status, updated_at = now()
+		WHERE id = $1::uuid AND status IS NOT DISTINCT FROM NULLIF($4,'')::runtime.record_status
 	`, recordID, dataJSON, status, fromStatus)
 	if err != nil {
 		return fmt.Errorf("update record: %w", err)
@@ -461,7 +581,7 @@ func (s *Store) UpdateRecordFrom(ctx context.Context, recordID, fromStatus, stat
 // (UpdateRecordFrom's guard). ErrRecordChanged otherwise.
 func (s *Store) DeleteRecordFrom(ctx context.Context, recordID, fromStatus string) error {
 	tag, err := s.db.Exec(ctx,
-		`DELETE FROM runtime.form_record WHERE id = $1::uuid AND status = $2::runtime.record_status`,
+		`DELETE FROM runtime.form_record WHERE id = $1::uuid AND status IS NOT DISTINCT FROM NULLIF($2,'')::runtime.record_status`,
 		recordID, fromStatus)
 	if err != nil {
 		return err

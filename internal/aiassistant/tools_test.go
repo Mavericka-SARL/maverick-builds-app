@@ -279,7 +279,7 @@ func TestListForms_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list_forms: %v", err)
 	}
-	if result != "No forms defined yet." {
+	if result != "No tables of records defined yet." {
 		t.Fatalf("unexpected result: %q", result)
 	}
 }

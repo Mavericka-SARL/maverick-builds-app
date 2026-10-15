@@ -191,9 +191,20 @@ function ProdAuthProvider({ children }: { children: ReactNode }) {
           });
 
         setInterval(() => {
-          keycloak.updateToken(60).then((refreshed) => {
-            if (refreshed) setToken(keycloak.token);
-          });
+          keycloak.updateToken(60)
+            .then((refreshed) => {
+              if (refreshed) setToken(keycloak.token);
+            })
+            .catch(() => {
+              // The sign-in has ended (its session expired or was ended
+              // elsewhere). The console used to go on sending the expired
+              // token, and every request failed with nothing saying why;
+              // now it signs in again and comes back to this page. A
+              // refusal clears the token (keycloak-js, on a 400); a failure
+              // while the token is still good (the network) waits for the
+              // next try.
+              if (!keycloak.token || keycloak.isTokenExpired(5)) void keycloak.login();
+            });
         }, 30_000);
       });
   }, []);

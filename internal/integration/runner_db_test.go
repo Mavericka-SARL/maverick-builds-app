@@ -129,17 +129,31 @@ func TestRunner_PaginatedPullCommitsFacts(t *testing.T) {
 	if run.Pages != 2 || run.RecordsRead != 3 || run.RecordsWritten != 3 {
 		t.Fatalf("counters: pages=%d read=%d written=%d", run.Pages, run.RecordsRead, run.RecordsWritten)
 	}
-	// The facts are REALLY there, keyed by the region dimension.
-	var n int
-	var sum float64
-	if err := st.Pool().QueryRow(context.Background(), `
-		SELECT COUNT(*), COALESCE(SUM(value),0) FROM runtime.fact_input
+	// The facts are REALLY there, keyed by the region dimension, as the
+	// reads show them (each cell's latest row). The pull is incremental, so
+	// region A's two records add up: its two rows used to be stored with one
+	// entered_at, and A read as 10 or 5 by the random id's tie-break.
+	rows, err := st.Pool().Query(context.Background(), `
+		SELECT DISTINCT ON (dim_members) (SELECT value FROM jsonb_each_text(dim_members) LIMIT 1), value::float8
+		FROM runtime.fact_input
 		WHERE model_id=$1::uuid AND revision_id=$2::uuid
-	`, modelID, revID).Scan(&n, &sum); err != nil {
+		ORDER BY dim_members, entered_at DESC, id DESC
+	`, modelID, revID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 3 || sum != 35 {
-		t.Fatalf("facts: n=%d sum=%v (want 3 rows summing 35)", n, sum)
+	got := map[string]float64{}
+	for rows.Next() {
+		var region string
+		var v float64
+		if err := rows.Scan(&region, &v); err != nil {
+			t.Fatal(err)
+		}
+		got[region] = v
+	}
+	rows.Close()
+	if len(got) != 2 || got["A"] != 15 || got["B"] != 20 {
+		t.Fatalf("facts: %v, want A 15 (10 + 5) and B 20", got)
 	}
 	// Attempt log carries sanitized URLs (no query string).
 	var att int

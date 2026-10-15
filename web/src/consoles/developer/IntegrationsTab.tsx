@@ -65,9 +65,9 @@ function FormMappingEditor({
           <TextInput value={name} onChange={e => setName(e.target.value)}
             placeholder="e.g. HC Requests → hc_cost" />
         </Field>
-        <Field label="Source form">
+        <Field label="Source table">
           <Select value={formId} onChange={e => { setFormId(e.target.value); setSourceField(""); setDimMappings({}); }}>
-            <option value="">Select form…</option>
+            <option value="">Select table…</option>
             {forms.map(f => <option key={f.id} value={f.id}>{f.label || f.name}</option>)}
           </Select>
         </Field>
@@ -115,15 +115,24 @@ function FormMappingEditor({
             {AGG_OPTIONS.map(a => <option key={a} value={a}>{a}</option>)}
           </Select>
         </Field>
-        <Field label="Post when status is">
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {STATUS_OPTIONS.map(s => (
-              <FilterChip key={s} active={postingStatuses.includes(s)} onClick={() => toggleStatus(s)}>
-                {s}
-              </FilterChip>
-            ))}
-          </div>
-        </Field>
+        {/* Statuses decide only in a table with a status field: elsewhere every record posts as it is saved. */}
+        {!selectedForm || selectedForm.fields.some(f => f.type === "status") ? (
+          <Field label="Post when status is">
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {STATUS_OPTIONS.map(s => (
+                <FilterChip key={s} active={postingStatuses.includes(s)} onClick={() => toggleStatus(s)}>
+                  {s}
+                </FilterChip>
+              ))}
+            </div>
+          </Field>
+        ) : (
+          <Field label="Posts">
+            <p className="mvx-admin-muted" style={{ fontSize: 13, margin: 0 }}>
+              Every record, as soon as it is saved: this table has no status field.
+            </p>
+          </Field>
+        )}
       </div>
 
       {relevantDims.length > 0 && formFields.length > 0 && (
@@ -158,7 +167,7 @@ function FormMappingEditor({
       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginBottom: 12 }}>
         <Switch checked={livePosting} onChange={setLivePosting} aria-label="Live update" />
         <span style={{ fontWeight: 500 }}>Live update</span>
-        <span className="mvx-admin-muted">— automatically sync when record status changes</span>
+        <span className="mvx-admin-muted">— post records as they are saved or change status</span>
       </div>
 
       <div className="mvx-admin-inline-form">
@@ -244,17 +253,21 @@ function FormMappingCard({
             {grid && <StatusBadge tone="success">Grid: {grid.name}</StatusBadge>}
           </div>
           <div className="mvx-admin-muted">
-            <span style={{ marginRight: 12 }}>Form: <b>{form?.label || form?.name || mapping.form_id.slice(0, 8)}</b></span>
+            <span style={{ marginRight: 12 }}>Table: <b>{form?.label || form?.name || mapping.form_id.slice(0, 8)}</b></span>
             <span style={{ marginRight: 12 }}>Field: <b>{mapping.source_field}</b></span>
             <span style={{ marginRight: 12 }}>→ Metric: <b>{metric?.name || mapping.target_metric_id.slice(0, 8)}</b></span>
             <span style={{ marginRight: 12 }}>→ {grid ? <><b>{grid.name}</b> grid</> : "all grids using this metric"}</span>
             <span>Agg: <b>{mapping.aggregation}</b></span>
           </div>
           <div className="mvx-admin-muted" style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-              Posts when:
-              {mapping.posting_statuses.map(s => <StatusBadge key={s} tone="brand">{s}</StatusBadge>)}
-            </span>
+            {form && !form.fields.some(f => f.type === "status") ? (
+              <span>Posts every record as it is saved</span>
+            ) : (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                Posts when:
+                {mapping.posting_statuses.map(s => <StatusBadge key={s} tone="brand">{s}</StatusBadge>)}
+              </span>
+            )}
             <StatusBadge tone={mapping.live_posting ? "success" : "neutral"}>
               {mapping.live_posting ? "live update on" : "live update off"}
             </StatusBadge>
@@ -332,7 +345,7 @@ function FormRecordsSection() {
   const doDelete = (id: string) => {
     confirm({
       title: "Delete integration?",
-      body: "This removes the form-to-metric mapping and stops future postings.",
+      body: "This removes the table-to-metric mapping and stops future postings.",
       confirmLabel: "Delete integration",
       onConfirm: async () => { await api.deleteFormMapping(id); inv(); },
     });
@@ -341,8 +354,8 @@ function FormRecordsSection() {
   return (
     <div>
       <SectionHeader
-        title="Form Records → Metrics"
-        subtitle="Post submitted or approved form records to input metrics with aggregation rules."
+        title="Records → Metrics"
+        subtitle="Post the records of a table to input metrics with aggregation rules. In a table with a status field, only records in the posting statuses post."
         actions={
           <Button variant="primary" leadingIcon={<Plus size={14} />} onClick={() => setShowNew(true)}>
             New integration
@@ -361,7 +374,7 @@ function FormRecordsSection() {
       )}
 
       {mappings.length === 0 && !showNew && (
-        <EmptyState label="No form integrations yet. Create one to automatically post form record values to input metrics." />
+        <EmptyState label="No table integrations yet. Create one to post the values of a table's records to input metrics." />
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -434,8 +447,8 @@ export function IntegrationsTab({ revisionId }: { revisionId?: string } = {}) {
     {
       id: "form_records",
       icon: <ClipboardList size={24} />,
-      title: "Form Records",
-      description: "Post submitted or approved form records to input metrics.",
+      title: "Records",
+      description: "Post the records of a table to input metrics.",
       available: true,
     },
     {

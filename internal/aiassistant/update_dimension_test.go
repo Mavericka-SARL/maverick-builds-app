@@ -78,18 +78,17 @@ func TestUpdateDimension(t *testing.T) {
 		"time_granularity": "month", "fiscal_year_start_month": 1})
 	groupID := mustRun("create_dimension", map[string]any{"name": "grp"})
 
-	// Name, rollup rule: partial; the rest keeps its value.
+	// Name: partial; the rest keeps its value.
 	if _, _, err := run("update_dimension", map[string]any{"dimension_id": "grp", "name": "grouping"}); err != nil {
 		t.Fatal(err)
 	}
 	if r := load(groupID); r.name != "grouping" || r.agg != "sum" {
 		t.Errorf("after rename: %+v", r)
 	}
-	if _, _, err := run("update_dimension", map[string]any{"dimension_id": groupID, "agg_rule": "average"}); err != nil {
-		t.Fatal(err)
-	}
-	if r := load(groupID); r.name != "grouping" || r.agg != "average" {
-		t.Errorf("after agg_rule: %+v", r)
+	// A dimension has no rollup rule of its own (a metric's agg_rule
+	// decides): the tool does not take one.
+	if _, _, err := run("update_dimension", map[string]any{"dimension_id": groupID, "agg_rule": "average"}); err == nil {
+		t.Error("update_dimension took an agg_rule")
 	}
 	_, _, err := run("update_dimension", map[string]any{"dimension_id": groupID, "name": "dept"})
 	wantCode("a taken name", err, metricformula.CodeDimensionNameTaken)

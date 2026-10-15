@@ -9,7 +9,7 @@ import (
 
 // The developer guide: seven pages for the person who builds models — a
 // first model from nothing, working in a revision, dimensions and metrics,
-// formulas, grids and dashboards, forms/workflows/integrations, and the AI
+// formulas, grids and dashboards, records/workflows/integrations, and the AI
 // Developer.
 //
 // It carries its own example, as small as the tour's: two products over the
@@ -246,7 +246,7 @@ func devRevisionsPage() modeltransfer.Dashboard {
 	return devDashboard("dev-dash-2-revisions", "2 · Revisions",
 		devText(`# Work in a revision of your own
 
-Everything you build — dimensions, metrics, grids, dashboards, forms, workflows, triggers, integrations — belongs to a **revision** of a model: a complete copy of it, including the numbers entered so far. One revision is *live*: it is what everyone else sees. Build in a copy, and make it live when it is ready.`, 132),
+Everything you build — dimensions, metrics, grids, dashboards, tables of records, workflows, triggers, integrations — belongs to a **revision** of a model: a complete copy of it, including the numbers entered so far. One revision is *live*: it is what everyone else sees. Build in a copy, and make it live when it is ready.`, 132),
 
 		devText(`## Check where you are
 
@@ -442,7 +442,7 @@ A grid has no layout of its own. Where each dimension sits — rows, columns or 
 
 1. Open **Developer › Dashboards** and press **New dashboard**. Give it a **Name** — a **Folder** and **Tags** too, if you like — and press **Create**.
 2. Press **Design** on its row.
-3. Click a widget type in the palette — Grid, Chart, Form, Metric KPI, Trigger, Integration, Text, Image or Import — choose what it shows under *Configure & place*, and press **Add widget**. It lands on the canvas, already saved.
+3. Click a widget type in the palette — Grid, Chart, Records, Metric KPI, Trigger, Integration, Text, Image or Import — choose what it shows under *Configure & place*, and press **Add widget**. It lands on the canvas, already saved.
 4. Drag a widget to move it; pull its handles to resize it.
 5. Moves, resizes and property changes wait for **Save**, in the bar that appears when there is something to save.`, 216),
 
@@ -488,27 +488,29 @@ Next: [6 · Data in, workflows](dashboard:6 · Data in, workflows).`, 340),
 
 func devFlowPage() modeltransfer.Dashboard {
 	return devDashboard("dev-dash-6-flow", "6 · Data in, workflows",
-		devText(`# Forms, workflows and integrations
+		devText(`# Records, workflows and integrations
 
-Numbers do not only arrive by typing into a grid. Forms collect entries, integrations bring data in from files and other systems, and workflows move a request through the people who must agree to it. Each is built in its own Build screen and belongs to the revision like everything else.`, 136),
+Numbers do not only arrive by typing into a grid. Tables of records collect entries, integrations bring data in from files and other systems, and workflows move a request through the people who must agree to it. Each is built in its own Build screen and belongs to the revision like everything else.`, 136),
 
-		devPicture(devWiring(), "A form posts into an input metric through a Form Records mapping; an event fires a trigger that starts a workflow; imports fill a grid, a form or a dimension", 860, 270),
+		devPicture(devWiring(), "A record posts into an input metric through a Records mapping; an event fires a trigger that starts a workflow; imports fill a grid, a table or a dimension", 860, 270),
 
-		devText(`## Forms
+		devText(`## Records
 
-**Developer › Forms** → **New form**: a **Form name**, a **Display label**, then the fields — **Add field** for each: Text, Number, Date, Select, Boolean, Metric, or one of the model's dimensions — and **Create form**. People — users and business admins alike — work on its records only through a **Form** widget on a dashboard, so place each form on a dashboard their role can open: there they add, edit, export and import records, and an administrator changes their status and syncs them.
+**Developer › Records** → **New table**: a **Table name**, a **Display label**, then the fields — **Add field** for each: Text, Number, Date, Select, Boolean, Metric, **Auto code** (a code each record is given, such as EXP-0042), **Status**, or one of the model's dimensions — and **Create table**. **Each person sees only their own records** keeps a person's records to themselves; administrators still see all. People work on records only through a **Records** widget on a dashboard, so place each table on a dashboard their role can open: there they search, filter, sort, edit, export and import records, and add them when you tick the widget's **Show the + New record button**.
 
-A form on its own only stores its records. To post their numbers into the model, map it: **Developer › Integrations** → **Form Records** → **New integration**. Choose the **Source form**, the **Target grid** and its **Target input metric**, the **Source value field**, how records combine (**Aggregation**), which statuses post (**Post when status is**), and the **Dimension field mappings**. With **Live update** on, a record posts as soon as it reaches one of those statuses; **Backfill** posts the ones already there.`, 232),
+A table without a **Status** field has records that count as soon as they are saved. Give it one when records need approval: a new record is then a draft, and a workflow whose subject is the table (*Single saved record in a table*) moves it — submitted while it runs, approved or rejected by its decision.
+
+A table on its own only stores its records. To post their numbers into the model, map it: **Developer › Integrations** → **Records** → **New integration**. Choose the **Source table**, the **Target grid** and its **Target input metric**, the **Source value field**, how records combine (**Aggregation**), which statuses post (**Post when status is**, for a table with a status field), and the **Dimension field mappings**. With **Live update** on, a record posts as soon as it is saved or reaches one of those statuses; **Backfill** posts the ones already there. A record posts within its creator's access rules: a member they may only read is not offered where it would post.`, 300),
 
 		devText(`## Workflows
 
-**Developer › Workflows** → **From Template** (Simple Approval, Two-Level Approval, Amount-Based Approval or Notify Only) or **New Workflow**, which asks for a **Name** and a **Trigger event**: *Manual*, a form submitted, an import completed or failed, or an *API trigger*. A template starts as *Manual*. Open it and add steps with **Add step**: Task, Approval, Condition, Notification or Join. An approval or a task goes to roles, not to named people (**Approver roles**, **Assignee roles**), so it keeps working when someone is away.
+**Developer › Workflows** → **From Template** (Simple Approval, Two-Level Approval, Amount-Based Approval or Notify Only) or **New Workflow**, which asks for a **Name** and a **Trigger event**: *Manual*, a record submitted, an import completed or failed, or an *API trigger*. A template starts as *Manual*. Open it and add steps with **Add step**: Task, Approval, Condition, Notification or Join. An approval or a task goes to roles, not to named people (**Approver roles**, **Assignee roles**), so it keeps working when someone is away.
 
 Then **Save**, **Validate**, try it with **Test Run**, and **Publish**. What you save later applies to new requests; one already running keeps the definition it started with.`, 208),
 
 		devText(`## Triggers
 
-Once published, a *Manual* workflow can be started by people themselves: it is listed under *Start a workflow* in **User › Workflow Inbox**. Anything else — a dashboard button, a schedule, a form, an import or an outside call — starts a workflow through a rule.
+Once published, a *Manual* workflow can be started by people themselves: it is listed under *Start a workflow* in **User › Workflow Inbox**. Anything else — a dashboard button, a schedule, a saved record, an import or an outside call — starts a workflow through a rule.
 
 **Developer › Triggers** → **New rule**: choose the **Workflow**, and the **Trigger type** follows its trigger event. A *Manual* workflow offers *manual* (a button) or *schedule* (a cron expression); any other is fixed to its event — *form_submit*, *integration_completed*, *integration_failed* or *api*. Then press **Create rule**. **Create Trigger** in a workflow's row menu does the same from the Workflows list.
 
@@ -518,11 +520,11 @@ A **Trigger** widget on a dashboard runs a manual rule that is enabled. Until a 
 
 Everything that brings data in is under **Developer › Integrations**:
 
-- **Excel / CSV Import** — **New Import** opens a wizard: upload the file and choose what it fills (a grid, a form, or a dimension's members), **Shape** a sheet laid out for people (titles, merged headers, months across) into rows, map its columns, validate, and commit. **Save as Integration** keeps the mapping for the next file.
+- **Excel / CSV Import** — **New Import** opens a wizard: upload the file and choose what it fills (a grid, a table of records, or a dimension's members), **Shape** a sheet laid out for people (titles, merged headers, months across) into rows, map its columns, validate, and commit. **Save as Integration** keeps the mapping for the next file.
 - **Google Sheets** — **Import from Sheet**, paste the sheet's link, **Fetch sheet**. A sheet shared as *Anyone with the link* works as it is. A private one needs a Google service account: store its key under *Private sheets*, and share the sheet with that account. A saved sheet refreshes with **Sync Now**.
 - **REST API** — **New integration** walks through six steps, from *Basics* to *Run & schedule*, and **Activate** turns it on. It runs by hand or on a schedule.
 - **SFTP file** — a REST API integration whose **Source** is an **SFTP server** reads one .csv, .xlsx or .xlsm file (a fixed path, or the newest file in a folder whose name matches a pattern such as `+devCode("sales_*.xlsx")+`) and leaves it on the server. The first **Test: read the file** shows the server's key fingerprint; compare it with the server's own and press **Trust this key**. The wizard sets the sheet, header row and CSV delimiter; a file laid out for people (fill-down, months across) is shaped only through the HTTP API for now.
-- **Form Records** — the form mapping above.
+- **Records** — the table mapping above.
 - **Data Export** — **New export** saves a fixed download of a grid's values as CSV, Excel or JSON: which metrics, which dimensions as columns, and which members.
 
 On a dashboard, an **Integration** widget runs a saved integration from a button, and an **Import** widget gives people an upload box for a grid, with a template to download.
@@ -536,7 +538,7 @@ func devAIPage() modeltransfer.Dashboard {
 	return devDashboard("dev-dash-7-ai", "7 · AI and going live",
 		devText(`# The AI Developer, and going live
 
-**Developer › AI Developer** builds with you. Describe a change in plain words and it proposes the steps — dimensions, metrics, grids, dashboards, forms, workflows — for you to confirm. It works under the same checks as the Developer screens, and nothing is written until you confirm.
+**Developer › AI Developer** builds with you. Describe a change in plain words and it proposes the steps — dimensions, metrics, grids, dashboards, tables of records, workflows — for you to confirm. It works under the same checks as the Developer screens, and nothing is written until you confirm.
 
 ## Set it up
 
@@ -552,7 +554,7 @@ The first plan you confirm in a session creates a revision for it, named *AI Dra
 
 The draft is listed in **Developer › Models** like any revision: click its row to look through the result in every Developer screen. Back in the chat, the draft's banner has **Use as working revision**, which switches you to it (live only once you **Set active**), and **Discard**.
 
-Three kinds of change are not revision-scoped and take effect as soon as you confirm: business roles, user access rules, and form records posted into the model.
+Three kinds of change are not revision-scoped and take effect as soon as you confirm: business roles, user access rules, and records posted into the model.
 
 ## What stays with you
 
@@ -687,17 +689,17 @@ func devTotals() string {
 	return s + `</svg>`
 }
 
-// devWiring: how forms, triggers, workflows and imports connect to the model.
+// devWiring: how records, triggers, workflows and imports connect to the model.
 func devWiring() string {
 	s := svgHead(860, 270) + devCard(860, 270)
-	// Row 1: a form reaches a metric only through a mapping.
-	s += box(20, 20, 180, 62, "Form", "entries people submit", false)
+	// Row 1: a record reaches a metric only through a mapping.
+	s += box(20, 20, 180, 62, "Records", "entries people save", false)
 	s += arrow(206, 51, 38)
-	s += box(250, 20, 180, 62, "Form Records", "a mapping", true)
+	s += box(250, 20, 180, 62, "Records mapping", "Developer › Integrations", true)
 	s += arrow(436, 51, 38)
 	s += box(480, 20, 180, 62, "Input metric", "numbers on a grid", false)
 	// Row 2: nothing starts a workflow but a rule.
-	s += box(20, 104, 180, 62, "An event", "button, schedule, form…", false)
+	s += box(20, 104, 180, 62, "An event", "button, schedule, record…", false)
 	s += arrow(206, 135, 38)
 	s += box(250, 104, 180, 62, "Trigger", "a rule", true)
 	s += arrow(436, 135, 38)
@@ -707,6 +709,6 @@ func devWiring() string {
 	// Row 3: imports fill the model.
 	s += box(20, 188, 410, 62, "Excel / CSV · Google Sheets · REST API", "Developer › Integrations", false)
 	s += arrow(436, 219, 38)
-	s += box(480, 188, 180, 62, "Grid, form", "or dimension members", false)
+	s += box(480, 188, 180, 62, "Grid, table", "or dimension members", false)
 	return s + `</svg>`
 }

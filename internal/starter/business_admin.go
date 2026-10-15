@@ -152,7 +152,7 @@ Five pages, in order. The fourth has a small model of its own to try things on. 
 
 **User** is where the day's work happens:
 
-- **Dashboards** — every dashboard of the model you have open, with grids you can type into, and forms whose records you review
+- **Dashboards** — every dashboard of the model you have open, with grids you can type into, and records you review
 - **Workflow Inbox** — the requests waiting for your decision
 
 **Business Admin** is where you set things up:
@@ -183,7 +183,7 @@ func baTheModel() modeltransfer.Dashboard {
 	return baPage("ba-dash-2-model", "2 · The model you work in",
 		baText(`# The model you work in
 
-**Dashboards** (with the forms on them), **Roles** and **Access Rules** work on one model at a time: the one you have open. An application can hold several — *Getting started* holds the tour and a guide for each role — so before you change who sees what, check which model you are in: the **Model** in the bar at the top of the page names it, beside the **Revision**. The inbox and **History** are different: they list requests from every model at once.`, 156),
+**Dashboards** (with the records on them), **Roles** and **Access Rules** work on one model at a time: the one you have open. An application can hold several — *Getting started* holds the tour and a guide for each role — so before you change who sees what, check which model you are in: the **Model** in the bar at the top of the page names it, beside the **Revision**. The inbox and **History** are different: they list requests from every model at once.`, 156),
 
 		baText(`## Switching models
 
@@ -339,11 +339,11 @@ A request about part of the model — Oslo's budget, say — locks those numbers
 
 Open steps are listed under **Pending Actions**, where you can decide the ones assigned to you.`, 224),
 
-		baText(`## Forms
+		baText(`## Records
 
-Forms have no screen of their own: a developer places each one on a dashboard as a **Form** widget, and you work on its records there, under **User › Dashboards**, as users do. The widget lists the records entered so far. **New record** adds one. The pencil edits one, and the status list on its row changes its **Status**: draft, submitted, approved or rejected. Changing the status is a decision in its own right: moving a record to submitted or approved can start a workflow, if a developer set one to listen for it.
+Records — requests, expenses, deals — have no screen of their own: a developer places each table of them on a dashboard as a **Records** widget, and you work on them there, under **User › Dashboards**, as users do. The widget lists every record you may see: **Search**, **Filter** and a click on a column's name narrow and sort it. **+ New record** adds one where the developer offers it. The pencil edits one. In a table whose records have a status, the list on a record's row changes it — draft, submitted, approved or rejected — and the workflow that approves the table's records moves it too.
 
-**Export** downloads the records as Excel; **Import** reads CSV or Excel. **Sync to grid** posts the records into the model through the form's mappings. A form that is on no dashboard cannot be reached; ask a developer to place it.`, 188),
+**Export** downloads what the widget shows as Excel; **Import** reads CSV or Excel. **Sync to grid** posts the records into the model through the table's mappings. A table that is on no dashboard cannot be reached; ask a developer to place it.`, 188),
 
 		baText(`## Notifications and cell history
 

@@ -534,6 +534,38 @@ func (e *WriteExecutor) triggerAutomationRule(ctx context.Context, raw json.RawM
 	return out, p.RuleID, nil
 }
 
+// recalculateRevision is recalculate_revision: every calculated metric of a
+// revision of this model recalculated, as the developer asks for it in the
+// console (Models › revision › Recalculate). The working revision unless
+// another is named.
+func (e *WriteExecutor) recalculateRevision(ctx context.Context, raw json.RawMessage) (string, string, error) {
+	var p struct {
+		RevisionID string `json:"revision_id"`
+	}
+	if err := decodeParams(raw, &p); err != nil {
+		return "", "", fmt.Errorf("invalid params: %w", err)
+	}
+	rev := strings.TrimSpace(p.RevisionID)
+	if rev == "" {
+		rev = e.revID
+	}
+	var ok bool
+	if err := e.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM model.revision WHERE id::text = $1 AND model_id = $2::uuid)`, rev, e.modelID).Scan(&ok); err != nil {
+		return "", "", err
+	}
+	if !ok {
+		return "", "", fmt.Errorf("revision_id names no revision of this model (list_revisions)")
+	}
+	if e.hooks.Recalculate == nil {
+		return "", "", fmt.Errorf("revisions are recalculated through the gateway, which is not available here")
+	}
+	out, err := e.hooks.Recalculate(ctx, rev)
+	if err != nil {
+		return "", "", err
+	}
+	return out, rev, nil
+}
+
 // ── Read tools ────────────────────────────────────────────────────────────────
 
 // readIntegrationRef resolves an integration of this model by id or exact

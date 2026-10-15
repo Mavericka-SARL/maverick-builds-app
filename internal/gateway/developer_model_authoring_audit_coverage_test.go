@@ -52,7 +52,8 @@ func setupDevAuthoringFixture(t *testing.T) *devAuthoringFixture {
 	revID := q(`INSERT INTO model.revision (model_id, name) VALUES ($1::uuid, 'v1') RETURNING id::text`, modelID)
 
 	dimID := q(`INSERT INTO model.dimension_def (model_id, name, agg_rule, revision_id) VALUES ($1::uuid, 'FixtureRegion', 'sum', $2::uuid) RETURNING id::text`, modelID, revID)
-	formID := q(`INSERT INTO model.form_def (model_id, name, label) VALUES ($1::uuid, 'expense_form', 'Expense Form') RETURNING id::text`, modelID)
+	formID := q(`INSERT INTO model.form_def (model_id, name, label, fields) VALUES ($1::uuid, 'expense_form', 'Expense Form',
+		'[{"name":"amount","label":"Amount","type":"number"}]') RETURNING id::text`, modelID)
 	metricID := q(`INSERT INTO model.metric_def (model_id, name, is_input, agg_rule, revision_id) VALUES ($1::uuid, 'FixtureRevenue', true, 'sum', $2::uuid) RETURNING id::text`, modelID, revID)
 
 	developerID := q(`INSERT INTO identity.user (keycloak_sub, email, display_name) VALUES ('dev-audit-pa', 'dev@devaudit.dev', 'Dev') RETURNING id::text`)

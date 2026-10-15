@@ -128,8 +128,24 @@ func lockRevision(modelID, revisionID string) func() {
 
 // recalcMetricIDs is RecalcAffected's execution core, factored out so
 // RecalcSpecific can drive it directly with an explicit target list instead
-// of deriving one from AffectedMetricIDs's graph walk.
+// of deriving one from AffectedMetricIDs's graph walk. On a pool, requests
+// that arrive while a pass runs share the next pass (passQueue).
 func (s *Scheduler) recalcMetricIDs(ctx context.Context, modelID, revisionID string, defs map[string]*MetricDef, affectedIDs []string) error {
+	if s.store.pool == nil {
+		return s.recalcPass(ctx, modelID, revisionID, defs, affectedIDs)
+	}
+	return queueFor(s.store.pool, modelID, revisionID).run(affectedIDs, func(ids []string) error {
+		// The pass may calculate other requests' metrics as well: it runs
+		// on when this caller's request is cancelled, bounded as a
+		// background recalculation is.
+		passCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), RecalcTimeout)
+		defer cancel()
+		return s.recalcPass(passCtx, modelID, revisionID, defs, ids)
+	})
+}
+
+// recalcPass is one recalculation pass over affectedIDs.
+func (s *Scheduler) recalcPass(ctx context.Context, modelID, revisionID string, defs map[string]*MetricDef, affectedIDs []string) error {
 	defer lockRevision(modelID, revisionID)()
 	// Definitions were loaded before the lock; reload so a pass that queued
 	// behind another sees the graph as it is now.

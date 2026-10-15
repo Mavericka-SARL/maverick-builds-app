@@ -8,6 +8,9 @@ import { inputStyle, btnPrimary, btnSecondary, TRIGGER_FALLBACK, useTriggerEvent
 import { CreateAutomationModal } from "./CreateAutomationModal";
 import { useCancelRun } from "./useCancelRun";
 
+// "Form record" is the stored name of a record variable; it reads as "Record".
+const contextTypeLabel = (t: string) => (t === "Form record" ? "Record" : t);
+
 const CONTEXT_DATA_TYPES = [
   "Text", "Number", "Boolean", "Date", "User", "Role",
   "Dimension member", "Metric", "Form record",
@@ -17,8 +20,8 @@ const SUBJECT_TYPE_OPTIONS: { value: WorkflowSubjectType; label: string; descrip
   { value: "",            label: "Not specified",                  description: "General workflow, no linked entity" },
   { value: "grid",        label: "Specific planning grid",         description: "Approve changes in a planning grid" },
   { value: "grid_metric", label: "Metric in a planning grid",      description: "Approve a specific metric value in a grid" },
-  { value: "form_records",label: "Selected records in a form",     description: "Approve a set of selected form records" },
-  { value: "form_record", label: "Single saved record in a form",  description: "Approve one specific form record" },
+  { value: "form_records",label: "Selected records in a table",    description: "Approve a set of selected records; the workflow sets their status" },
+  { value: "form_record", label: "Single saved record in a table", description: "Approve one record; the workflow sets its status" },
 ];
 
 // ── Properties Panels ─────────────────────────────────────────────────────────
@@ -94,7 +97,7 @@ function UsageSection({ workflow, usage, revisionId }: { workflow: WorkflowDef; 
       {usage.length === 0 ? (
         <div style={{ fontSize: 13, color: "var(--color-disabled)", lineHeight: 1.6, marginBottom: 12 }}>
           This workflow is not started by any trigger yet.
-          Create a trigger to start it from a form, button, or API call.
+          Create a trigger to start it from a saved record, a button, or an API call.
         </div>
       ) : (
         usage.map(u => (
@@ -205,12 +208,23 @@ function WorkflowObjectPicker({ subjectType, subjectConfig, revisionId, onChange
           onChange={e => onChange(subjectType, { form_id: e.target.value })}
           style={{ ...inputStyle, marginTop: 8 }}
         >
-          <option value="">— select form —</option>
+          <option value="">— select table —</option>
           {(formsQuery.data ?? []).map(f => (
             <option key={f.id} value={f.id}>{f.label || f.name}</option>
           ))}
         </select>
       )}
+      {(subjectType === "form_record" || subjectType === "form_records") && subjectConfig.form_id && (() => {
+        const table = (formsQuery.data ?? []).find(f => f.id === subjectConfig.form_id);
+        if (!table) return null;
+        return (
+          <p style={{ fontSize: 12, color: "var(--color-text-muted)", margin: "6px 0 0" }}>
+            {table.fields?.some(f => f.type === "status")
+              ? "The workflow sets the status of the record it runs on: submitted while it runs, approved or rejected by its decision, a draft again if the run is cancelled."
+              : "This table has no status field, so the workflow cannot set its records' status. Add a Status field to it under Records."}
+          </p>
+        );
+      })()}
     </Field>
   );
 }
@@ -339,7 +353,7 @@ export function WorkflowPropertiesPanel({ workflow, usage, onChange, application
                 </Field>
                 <Field label="Type">
                   <select value={cv.data_type} onChange={e => updateCtxVar(idx, { data_type: e.target.value })} style={inputStyle}>
-                    {CONTEXT_DATA_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                    {CONTEXT_DATA_TYPES.map(t => <option key={t} value={t}>{contextTypeLabel(t)}</option>)}
                   </select>
                 </Field>
                 {cv.data_type === "Dimension member" && (

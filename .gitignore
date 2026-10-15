@@ -77,3 +77,8 @@ web/playwright-report/
 deploy/k8s/overlays/staging/
 # Every secret of a Compose deployment (deploy/compose/.env.example shows the shape).
 deploy/compose/.env
+
+# A file sync (iCloud Drive over ~/Documents) leaves "name 2.ext" copies when a
+# generator deletes and rewrites files (make oas --clean): 17 such copies of the
+# generated API code were committed on 2026-10-15 and broke the build in CI.
+* [2-9].*

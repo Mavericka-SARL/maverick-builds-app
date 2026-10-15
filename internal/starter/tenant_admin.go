@@ -162,7 +162,7 @@ Your company is one **tenant**. Everything else sits inside it.`, 88),
 
 		taText(`- **Workspace** — where people are given business roles. A tenant that began with self-service sign-up has one, named *Default*.
 - **Application** — a group of related models. A new tenant gets one, *Getting started*, holding the tour and the guides.
-- **Model** — the dimensions, metrics, grids, dashboards, forms and workflows that belong together.
+- **Model** — the dimensions, metrics, grids, dashboards, tables of records and workflows that belong together.
 - **Revision** — a complete copy of a model. One revision is live; a developer prepares the next and presses **Set active** when it is ready.`, 140),
 
 		taText(`## Your screens
@@ -214,9 +214,9 @@ They get an e-mail asking them to set a password, and its link works for three d
 
 		taText(`## Which role to give
 
-- **User** — enters numbers, fills in forms, submits requests, reads dashboards.
+- **User** — enters numbers, saves records, submits requests, reads dashboards.
 - **Business admin** — approves requests, and decides who sees which dashboards and which data inside a model. Dashboards themselves come with **User**: give both to someone who also plans.
-- **Developer** — builds models: dimensions, metrics, grids, dashboards, forms, workflows, integrations.
+- **Developer** — builds models: dimensions, metrics, grids, dashboards, tables of records, workflows, integrations.
 
 You can give these three here, but not your own role; a platform admin — whoever runs this deployment — can make another tenant admin. A developer can invite people too, with the two business roles only, and cannot decide which applications or models they reach.`, 216),
 
@@ -259,7 +259,7 @@ Beside each model's name there are two icons; hover one to see its name.
 - **Download** — *Export model (active revision)*: the live revision with its data, as a `+tick+`.mavericks-model.json`+tick+` file. A model with no revisions has nothing to export, so it shows no Download icon.
 - **Bin** — *Delete model*, below
 
-Under **Revisions**, each revision has two export icons of its own: *with data* (its values and form records) and *definitions only* (the structure with no numbers — the usual choice when you hand a model to someone else).`, 248),
+Under **Revisions**, each revision has two export icons of its own: *with data* (its values and records) and *definitions only* (the structure with no numbers — the usual choice when you hand a model to someone else).`, 248),
 
 		taText(`## Importing
 
@@ -267,7 +267,7 @@ Under an application, press **Import model** and choose a `+tick+`.mavericks-mod
 
 		taText(`## What a package carries
 
-- **It carries** the model: dimensions, metrics, grids, dashboards, forms, workflows, triggers and integrations (without stored connection credentials) — and, with data, the values and form records.
+- **It carries** the model: dimensions, metrics, grids, dashboards, tables of records, workflows, triggers and integrations (without stored connection credentials) — and, with data, the values and records.
 - **It does not carry** people, their roles, business roles, access rules, or the tenant's own settings: notifications, AI keys, sign-in and branding. Set those up again where the model lands.`, 156),
 
 		taText(`## Which model people open first
@@ -321,7 +321,7 @@ Your product name, tagline, colour, logo and favicon on the console and the sign
 
 ## Usage — Enterprise
 
-What your tenant holds now: applications and models, revisions, data rows, form records and storage. Plus what happened over the last 7, 30 or 90 days: active users, workflow and integration runs, AI messages and audit events. `+taDoc("Usage analytics", "USAGE_ANALYTICS.md")+`
+What your tenant holds now: applications and models, revisions, data rows, records and storage. Plus what happened over the last 7, 30 or 90 days: active users, workflow and integration runs, AI messages and audit events. `+taDoc("Usage analytics", "USAGE_ANALYTICS.md")+`
 
 ## Model links
 

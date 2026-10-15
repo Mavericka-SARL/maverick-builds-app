@@ -588,7 +588,6 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, open, onToggleOpen
               {dim.members.length} member{dim.members.length !== 1 ? "s" : ""}
               {roots.length > 0 && ` · ${roots.length} root${roots.length !== 1 ? "s" : ""}`}
               {isHierarchy && ` · depth ${maxDepth + 1}`}
-              {dim.agg_rule && ` · rollup: ${dim.agg_rule}`}
             </span>
             {isHierarchy && <StatusBadge tone="success">hierarchy</StatusBadge>}
             {parentDim && <StatusBadge tone="brand">child of {parentDim.name}</StatusBadge>}

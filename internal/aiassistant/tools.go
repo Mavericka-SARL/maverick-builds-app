@@ -70,22 +70,27 @@ func ReadTools() []providers.ToolDef {
 		},
 		{
 			Name:        "list_automation_rules",
-			Description: "Returns every automation rule in the working revision: id, name, trigger type, the workflow it starts, its source form/grid/integration, schedule and enabled state. A workflow only ever fires through one of these.",
+			Description: "Returns every automation rule in the working revision: id, name, trigger type, the workflow it starts, its source table/grid/integration, schedule and enabled state. A workflow only ever fires through one of these.",
 			Parameters:  noParams,
 		},
 		{
 			Name:        "list_forms",
-			Description: "Returns every form definition in the working revision: name, id, label, and field count. Call get_form for a form's fields.",
+			Description: "Returns every table of records (the Records tab) in the working revision: name, id, label, field count, whether its records have a status, and whether each person sees only their own. Call get_form for a table's fields.",
 			Parameters:  noParams,
 		},
 		{
 			Name:        "get_form",
-			Description: "Returns one form in full — its fields as JSON, the integrations posting from it, and its record count. Call it before update_form_def on an existing form: fields are replaced as a whole list, so you must resupply the current ones plus your change.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"form_id":{"type":"string","description":"The form's id from list_forms, or its exact name"}},"required":["form_id"]}`),
+			Description: "Returns one table of records in full — its fields as JSON, the integrations posting from it, and its record count. Call it before update_form_def on an existing table: fields are replaced as a whole list, so you must resupply the current ones plus your change.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"form_id":{"type":"string","description":"The table's id from list_forms, or its exact name"}},"required":["form_id"]}`),
+		},
+		{
+			Name:        "query_records",
+			Description: "Reads a table's records, read-only, as the developer may see them: a page of records matching filters, a search and a sort, or — with group_by and/or aggregates — totals over them (count, count_distinct, sum, avg, min, max; group by a field, or a date field by day/week/month/quarter/year). A filter's field is a field name, or status, created_at, updated_at or created_by (\"me\" is the developer); ops: eq, ne, in, not_in, gt, gte, lt, lte, between (values: [low, high]), contains, starts_with, empty, not_empty. Dates are YYYY-MM-DD. Use it to answer questions about the records people saved (how many, how much, by what) — never estimate from a page of records what a totals query can count.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"table_id":{"type":"string","description":"The table's id from list_forms, or its exact name"},"filters":{"type":"array","items":{"type":"object","properties":{"field":{"type":"string"},"op":{"type":"string","enum":["eq","ne","in","not_in","gt","gte","lt","lte","between","contains","starts_with","empty","not_empty"]},"value":{"description":"One value"},"values":{"type":"array","description":"Values for in, not_in and between","items":{}}},"required":["field"]}},"search":{"type":"string"},"sort":{"type":"array","items":{"type":"object","properties":{"field":{"type":"string"},"desc":{"type":"boolean"}},"required":["field"]}},"group_by":{"type":"array","items":{"type":"object","properties":{"field":{"type":"string"},"period":{"type":"string","enum":["day","week","month","quarter","year"]}},"required":["field"]}},"aggregates":{"type":"array","items":{"type":"object","properties":{"op":{"type":"string","enum":["count","count_distinct","sum","avg","min","max"]},"field":{"type":"string"}},"required":["op"]}},"limit":{"type":"integer"},"offset":{"type":"integer"}},"required":["table_id"]}`),
 		},
 		{
 			Name:        "list_form_integrations",
-			Description: "Returns every form integration in the working revision: which form field posts into which metric, with what aggregation, for which record statuses, and how form fields map to dimensions. Without one, a form's submitted numbers never reach the model.",
+			Description: "Returns every table integration in the working revision: which field of a table posts into which metric, with what aggregation, for which record statuses, and how its fields map to dimensions. Without one, a table's numbers never reach the model.",
 			Parameters:  noParams,
 		},
 		{
@@ -137,6 +142,7 @@ var WriteToolNames = []string{
 	"set_user_access_rules",
 	"create_file_integration", "import_file_data", "write_input_values", "create_export_integration", "update_integration", "delete_integration",
 	"create_api_integration", "update_api_integration", "create_connection", "update_connection", "run_integration", "trigger_automation_rule",
+	"recalculate_revision",
 }
 
 // proposeActionsTool is the single write-side tool the LLM can call.
@@ -164,7 +170,7 @@ func proposeActionsSchema() json.RawMessage {
 						"description": map[string]any{"type": "string",
 							"description": "One-line human-readable description of this step shown to the developer"},
 						"params": map[string]any{"type": "object",
-							"description": "Parameters for the tool (must match the tool's required fields). create_dimension takes name, and optionally agg_rule, parent_dimension_name, dimension_type/time_granularity/fiscal_year_start_month, tags, members, and for a property grouping source_dimension_id (id or name) + source_property (declared on the source) + derive_members"},
+							"description": "Parameters for the tool (must match the tool's required fields). create_dimension takes name, and optionally parent_dimension_name, dimension_type/time_granularity/fiscal_year_start_month, tags, members, and for a property grouping source_dimension_id (id or name) + source_property (declared on the source) + derive_members"},
 					},
 					"required": []string{"tool", "description", "params"},
 				},
@@ -227,6 +233,8 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, args json.RawMe
 		return e.getForm(ctx, args)
 	case "list_form_integrations":
 		return e.listFormIntegrations(ctx)
+	case "query_records":
+		return e.queryRecords(ctx, args)
 	case "get_model_summary":
 		return e.modelSummary(ctx)
 	case "list_metrics":
@@ -283,6 +291,35 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, args json.RawMe
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
+}
+
+// queryRecords answers query_records through the gateway's records query,
+// as the developer: the table is resolved by id or name in the working
+// revision, and the rest of the arguments are the query.
+func (e *ToolExecutor) queryRecords(ctx context.Context, args json.RawMessage) (string, error) {
+	var q map[string]json.RawMessage
+	if err := json.Unmarshal(args, &q); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+	var ref string
+	for _, key := range []string{"table_id", "form_id"} {
+		if raw, ok := q[key]; ok {
+			_ = json.Unmarshal(raw, &ref)
+			delete(q, key)
+		}
+	}
+	id, err := resolveFormDefRef(ctx, e.pool, e.modelID, e.revID, ref)
+	if err != nil {
+		return "", err
+	}
+	if e.hooks.QueryRecords == nil {
+		return "", fmt.Errorf("records are read through the gateway, which is not available here")
+	}
+	query, err := json.Marshal(q)
+	if err != nil {
+		return "", err
+	}
+	return e.hooks.QueryRecords(ctx, id, query)
 }
 
 func (e *ToolExecutor) modelSummary(ctx context.Context) (string, error) {
@@ -720,7 +757,10 @@ func (e *ToolExecutor) listWorkflows(ctx context.Context) (string, error) {
 
 func (e *ToolExecutor) listForms(ctx context.Context) (string, error) {
 	rows, err := e.pool.Query(ctx, `
-		SELECT id::text, name, label, jsonb_array_length(CASE WHEN jsonb_typeof(fields) = 'array' THEN fields ELSE '[]'::jsonb END)
+		SELECT id::text, name, label, jsonb_array_length(CASE WHEN jsonb_typeof(fields) = 'array' THEN fields ELSE '[]'::jsonb END),
+		       EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(fields) = 'array' THEN fields ELSE '[]'::jsonb END) e
+		               WHERE e->>'type' = 'status'),
+		       own_records_only
 		FROM model.form_def
 		WHERE model_id=$1::uuid AND (revision_id IS NULL OR revision_id=$2::uuid)
 		ORDER BY name`, e.modelID, e.revID)
@@ -730,22 +770,30 @@ func (e *ToolExecutor) listForms(ctx context.Context) (string, error) {
 	defer rows.Close()
 
 	var sb strings.Builder
-	sb.WriteString("Forms:\n")
+	sb.WriteString("Tables of records:\n")
 	var count int
 	for rows.Next() {
 		var id, name, label string
 		var fieldCount int
-		if rows.Scan(&id, &name, &label, &fieldCount) != nil {
+		var hasStatus, ownOnly bool
+		if rows.Scan(&id, &name, &label, &fieldCount, &hasStatus, &ownOnly) != nil {
 			continue
 		}
 		count++
-		fmt.Fprintf(&sb, "  %s (id:%s, %s) — %d field(s)\n", name, id, label, fieldCount)
+		notes := ""
+		if hasStatus {
+			notes += ", records have a status"
+		}
+		if ownOnly {
+			notes += ", each person sees only their own"
+		}
+		fmt.Fprintf(&sb, "  %s (id:%s, %s) — %d field(s)%s\n", name, id, label, fieldCount, notes)
 	}
 	if err := rows.Err(); err != nil {
 		return "", err
 	}
 	if count == 0 {
-		return "No forms defined yet.", nil
+		return "No tables of records defined yet.", nil
 	}
 	return sb.String(), nil
 }

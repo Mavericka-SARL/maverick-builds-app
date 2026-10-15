@@ -49,7 +49,7 @@ test("enterprise: the history drawer lists every value, marks the current one an
   await expect(deleted).toContainText("250");
   await expect(deleted).toContainText("Bob Lee");
   await expect(deleted).toContainText("removed by an import in full-reload mode");
-  await expect(table.getByTestId("cell-history-row")).toContainText("form: Post expenses");
+  await expect(table.getByTestId("cell-history-row")).toContainText("records: Post expenses");
   await page.keyboard.press("Escape");
   await expect(table).toHaveCount(0);
 });

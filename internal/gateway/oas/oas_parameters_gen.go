@@ -1468,7 +1468,7 @@ func decodeCreateFolderParams(args [0]string, argsEscaped bool, r *http.Request)
 
 // CreateFormParams is parameters of createForm operation.
 type CreateFormParams struct {
-	// The revision the form belongs to; it must be a revision of the model (404 otherwise, a malformed
+	// The revision the table belongs to; it must be a revision of the model (404 otherwise, a malformed
 	// id included). Omitted, the model's active revision.
 	RevisionID OptUUID `json:",omitempty,omitzero"`
 }
@@ -4954,6 +4954,9 @@ func decodeExportAuditParams(args [0]string, argsEscaped bool, r *http.Request) 
 type ExportFormRecordsParams struct {
 	ID     uuid.UUID
 	Format OptExportFormRecordsFormat `json:",omitempty,omitzero"`
+	// Optional records query (RecordsQuery as JSON, without group_by or aggregates): the export then
+	// holds the records it matches, in its order — what the records widget shows.
+	Query OptString `json:",omitempty,omitzero"`
 }
 
 func unpackExportFormRecordsParams(packed middleware.Parameters) (params ExportFormRecordsParams) {
@@ -4971,6 +4974,15 @@ func unpackExportFormRecordsParams(packed middleware.Parameters) (params ExportF
 		}
 		if v, ok := packed[key]; ok {
 			params.Format = v.(OptExportFormRecordsFormat)
+		}
+	}
+	{
+		key := middleware.ParameterKey{
+			Name: "query",
+			In:   "query",
+		}
+		if v, ok := packed[key]; ok {
+			params.Query = v.(OptString)
 		}
 	}
 	return params
@@ -5080,6 +5092,47 @@ func decodeExportFormRecordsParams(args [1]string, argsEscaped bool, r *http.Req
 	}(); err != nil {
 		return params, &ogenerrors.DecodeParamError{
 			Name: "format",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	// Decode query: query.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "query",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotQueryVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotQueryVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.Query.SetTo(paramsDotQueryVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "query",
 			In:   "query",
 			Err:  err,
 		}
@@ -7723,6 +7776,97 @@ func decodeImportFormRecordsParams(args [1]string, argsEscaped bool, r *http.Req
 	return params, nil
 }
 
+// ImportUploadParams is parameters of importUpload operation.
+type ImportUploadParams struct {
+	// Any string up to 255 characters naming this import, new for each file. Sent again, the import is
+	// not applied a second time.
+	IdempotencyKey OptString `json:",omitempty,omitzero"`
+}
+
+func unpackImportUploadParams(packed middleware.Parameters) (params ImportUploadParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "Idempotency-Key",
+			In:   "header",
+		}
+		if v, ok := packed[key]; ok {
+			params.IdempotencyKey = v.(OptString)
+		}
+	}
+	return params
+}
+
+func decodeImportUploadParams(args [0]string, argsEscaped bool, r *http.Request) (params ImportUploadParams, _ error) {
+	h := uri.NewHeaderDecoder(r.Header)
+	// Decode header: Idempotency-Key.
+	if err := func() error {
+		cfg := uri.HeaderParameterDecodingConfig{
+			Name:    "Idempotency-Key",
+			Explode: false,
+		}
+		if err := h.HasParam(cfg); err == nil {
+			if err := h.DecodeParam(cfg, func(d uri.Decoder) error {
+				var paramsDotIdempotencyKeyVal string
+				if err := func() error {
+					val, err := d.DecodeValue()
+					if err != nil {
+						return err
+					}
+
+					c, err := conv.ToString(val)
+					if err != nil {
+						return err
+					}
+
+					paramsDotIdempotencyKeyVal = c
+					return nil
+				}(); err != nil {
+					return err
+				}
+				params.IdempotencyKey.SetTo(paramsDotIdempotencyKeyVal)
+				return nil
+			}); err != nil {
+				return err
+			}
+			if err := func() error {
+				if value, ok := params.IdempotencyKey.Get(); ok {
+					if err := func() error {
+						if err := (validate.String{
+							MinLength:     0,
+							MinLengthSet:  false,
+							MaxLength:     255,
+							MaxLengthSet:  true,
+							Email:         false,
+							Hostname:      false,
+							Regex:         nil,
+							MinNumeric:    0,
+							MinNumericSet: false,
+							MaxNumeric:    0,
+							MaxNumericSet: false,
+						}).Validate(string(value)); err != nil {
+							return errors.Wrap(err, "string")
+						}
+						return nil
+					}(); err != nil {
+						return err
+					}
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "Idempotency-Key",
+			In:   "header",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // IntegrationOAuthCallbackParams is parameters of integrationOAuthCallback operation.
 type IntegrationOAuthCallbackParams struct {
 	State            string
@@ -10219,6 +10363,136 @@ func decodePublishWorkflowParams(args [1]string, argsEscaped bool, r *http.Reque
 	return params, nil
 }
 
+// QueryFormRecordsParams is parameters of queryFormRecords operation.
+type QueryFormRecordsParams struct {
+	ID uuid.UUID
+}
+
+func unpackQueryFormRecordsParams(packed middleware.Parameters) (params QueryFormRecordsParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeQueryFormRecordsParams(args [1]string, argsEscaped bool, r *http.Request) (params QueryFormRecordsParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// RecalculateRevisionParams is parameters of recalculateRevision operation.
+type RecalculateRevisionParams struct {
+	ID uuid.UUID
+}
+
+func unpackRecalculateRevisionParams(packed middleware.Parameters) (params RecalculateRevisionParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeRecalculateRevisionParams(args [1]string, argsEscaped bool, r *http.Request) (params RecalculateRevisionParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // RejectAiProposalParams is parameters of rejectAiProposal operation.
 type RejectAiProposalParams struct {
 	ID  uuid.UUID
@@ -11205,6 +11479,71 @@ func unpackRestoreWorkflowParams(packed middleware.Parameters) (params RestoreWo
 }
 
 func decodeRestoreWorkflowParams(args [1]string, argsEscaped bool, r *http.Request) (params RestoreWorkflowParams, _ error) {
+	// Decode path: id.
+	if err := func() error {
+		param := args[0]
+		if argsEscaped {
+			unescaped, err := url.PathUnescape(args[0])
+			if err != nil {
+				return errors.Wrap(err, "unescape path")
+			}
+			param = unescaped
+		}
+		if len(param) > 0 {
+			d := uri.NewPathDecoder(uri.PathDecoderConfig{
+				Param:   "id",
+				Value:   param,
+				Style:   uri.PathStyleSimple,
+				Explode: false,
+			})
+
+			if err := func() error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToUUID(val)
+				if err != nil {
+					return err
+				}
+
+				params.ID = c
+				return nil
+			}(); err != nil {
+				return err
+			}
+		} else {
+			return validate.ErrFieldRequired
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "id",
+			In:   "path",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
+// RevokeAPITokenParams is parameters of revokeAPIToken operation.
+type RevokeAPITokenParams struct {
+	ID uuid.UUID
+}
+
+func unpackRevokeAPITokenParams(packed middleware.Parameters) (params RevokeAPITokenParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "id",
+			In:   "path",
+		}
+		params.ID = packed[key].(uuid.UUID)
+	}
+	return params
+}
+
+func decodeRevokeAPITokenParams(args [1]string, argsEscaped bool, r *http.Request) (params RevokeAPITokenParams, _ error) {
 	// Decode path: id.
 	if err := func() error {
 		param := args[0]

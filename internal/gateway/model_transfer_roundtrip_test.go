@@ -82,7 +82,8 @@ func setupRoundTripFixture(t *testing.T) *roundTripFixture {
 		INSERT INTO model.form_def (model_id, revision_id, name, label, fields)
 		VALUES ($1::uuid, $2::uuid, 'expense', 'Expense', jsonb_build_array(
 			jsonb_build_object('name','staff','label','Staff','type','dimension','dimension_id',$3::text),
-			jsonb_build_object('name','amt','label','Amt','type','metric','metric_id',$4::text)
+			jsonb_build_object('name','amt','label','Amt','type','metric','metric_id',$4::text),
+			jsonb_build_object('name','status','label','Status','type','status')
 		)) RETURNING id::text`, f.modelID, f.workingRevID, f.staffDimID, f.amountMetricID)
 	f.mappingID = q(`
 		INSERT INTO model.form_metric_mapping (model_id, revision_id, form_id, grid_id, name, source_field, target_metric_id, dimension_mappings)

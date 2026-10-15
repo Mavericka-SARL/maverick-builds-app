@@ -13,7 +13,7 @@ days from 1 to 365; default 30).
 |---|---|
 | users, active users | `identity.user` of the tenant; active = seen by the gateway (`last_seen_at`) or signed in (`last_login_at`) within the period |
 | applications, models, revisions | `core.application` (by customer or workspace), `core.model`, `model.revision` |
-| fact rows, calculated rows, form records | `runtime.fact_input`, `runtime.calc_result`, `runtime.form_record` of the tenant's models |
+| fact rows, calculated rows, records | `runtime.fact_input`, `runtime.calc_result`, `runtime.form_record` of the tenant's models |
 | uploaded files | `storage.object` bytes by uploading user |
 | database | `pg_database_size` of the tenant's own database (dedicated databases only; 0 on a shared one, because that number would be everyone's) |
 | workflow instances, integration runs, AI messages, audit events | started / run / sent / recorded within the period |

@@ -1,5 +1,5 @@
 /**
- * Form records carry what the caller may do with them — "permissions", worked
+ * Records carry what the caller may do with them — "permissions", worked
  * out by the server with the same function that authorises PUT/DELETE
  * /api/records/{id} ("submitter + admins": the person who created a record may
  * edit or delete it and move it between draft and submitted while it is
@@ -66,6 +66,11 @@ async function serveRecords(page: Page, records: Rec[]): Promise<Server> {
   const server: Server = { records, sent: [] };
   // Registered after mockApi, so these answer first.
   await page.route("**/api/forms/*/records", (route) => route.fulfill({ json: server.records.map(toJSON) }));
+  // The records widget reads its list through the records query.
+  await page.route("**/api/forms/*/records/query", (route) => route.fulfill({ json: {
+    kind: "records", table: { id: "form-1", name: "purchase_request", label: "Purchase Request" }, columns: [],
+    records: server.records.map(toJSON), total: server.records.length, statuses: ALL_STATUSES,
+  } }));
   await page.route("**/api/records/*", (route) => {
     const req = route.request();
     const s: Sent = { method: req.method(), path: new URL(req.url()).pathname, body: req.postData() ? req.postDataJSON() : null };

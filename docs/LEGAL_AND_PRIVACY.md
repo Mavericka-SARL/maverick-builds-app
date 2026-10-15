@@ -60,7 +60,7 @@ checkable in this repository:
 | Backups are kept for fourteen days | `BACKUP_RETENTION_DAYS` in `deploy/docker/pg-backup/pg-backup.sh` |
 | No analytics, tracking, or third-party script | `web/index.html` loads none, and the CSP-relevant surface is the app's own bundle |
 | Sign-in stores a cookie and an in-memory token | `web/src/auth/AuthProvider.tsx` — `check-sso` with PKCE, the token in React state |
-| You can take your data out | The model, grid, form and audit export endpoints in `internal/gateway/handler.go` |
+| You can take your data out | The model, grid, records and audit export endpoints in `internal/gateway/handler.go` |
 | An audit record of who changed what | `pkg/auditlog`; retention per tenant, else the deployment default (`ee/auditexport`, enterprise) |
 | The assistant runs only on a configured key — the tenant's, the developer's own, or the deployment's env key | `buildProviderForRequest` in `internal/gateway/ai_handler.go` |
 | ChatGPT or Claude read only what the person may see (grid names and values, dashboard and workflow text), and write only the cells they may edit, saved as theirs, in the cell history and audit log; an administrator can turn writes off (shown only where `MCP_ENABLED`) | `internal/gateway/mcp.go`, `cell_batch.go`, `connector_settings.go`; [CHAT_CONNECTOR.md](CHAT_CONNECTOR.md) |

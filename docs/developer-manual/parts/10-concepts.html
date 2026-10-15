@@ -2,7 +2,7 @@
 <h2 class="first">Contents</h2>
 <div style="columns:2; column-gap:2em">
 <p><b>Part I: General</b><br>About this manual<br>The platform and the developer role<br>Core concepts<br>Getting around the console</p>
-<p><b>Part II: Screens</b><br>Models<br>Metrics<br>Dimensions<br>Dependency Graph<br>Forms<br>Grids<br>Dashboards<br>Workflows<br>Triggers<br>Integrations<br>AI Developer<br>Users<br>Roles</p>
+<p><b>Part II: Screens</b><br>Models<br>Metrics<br>Dimensions<br>Dependency Graph<br>Records<br>Grids<br>Dashboards<br>Workflows<br>Triggers<br>Integrations<br>AI Developer<br>Users<br>Roles</p>
 <p><b>Part III: Reference</b><br>Limits and what is not supported<br>Troubleshooting<br>Glossary</p>
 </div>
 </section>
@@ -17,10 +17,10 @@
 <table>
 <tr><th style="width:18%">Mode</th><th>What the developer builds</th><th>What users do</th></tr>
 <tr><td>Planning</td><td>Dimensions, metrics and formulas, grids, dashboards, revisions</td><td>Type and import values, read charts and KPIs, plan in grids</td></tr>
-<tr><td>CRUD</td><td>Forms, form-to-metric posting, imports, integrations</td><td>Submit and manage records that feed the plan</td></tr>
+<tr><td>CRUD</td><td>Tables of records, record-to-metric posting, imports, integrations</td><td>Submit and manage records that feed the plan</td></tr>
 <tr><td>Execution</td><td>Workflows, triggers, notifications</td><td>Start approvals, act on tasks in their inbox, get notified</td></tr>
 </table>
-<p>The console is one application with one sidebar. Roles are additive: each role adds groups to the sidebar, never a second console. A developer sees the <b>Build</b> group (AI Developer, Metrics, Dimensions, Forms, Grids, Dashboards, Workflows, Roles, Triggers, Integrations, Dependency Graph, Models) and the <b>Govern</b> group (Users). A developer who also holds business_admin sees the business <b>Run</b> and <b>Business Admin</b> groups as well; a tenant or platform administrator sees the administration groups.</p>
+<p>The console is one application with one sidebar. Roles are additive: each role adds groups to the sidebar, never a second console. A developer sees the <b>Build</b> group (AI Developer, Metrics, Dimensions, Records, Grids, Dashboards, Workflows, Roles, Triggers, Integrations, Dependency Graph, Models) and the <b>Govern</b> group (Users). A developer who also holds business_admin sees the business <b>Run</b> and <b>Business Admin</b> groups as well; a tenant or platform administrator sees the administration groups.</p>
 <h3>The five roles</h3>
 <table>
 <tr><th style="width:18%">Role</th><th>What it does</th><th style="width:34%">Relation to the developer</th></tr>
@@ -28,7 +28,7 @@
 <tr><td>tenant_admin</td><td>Own tenant: applications, models, users, application and model access, model export and import</td><td>Same, within one tenant</td></tr>
 <tr><td>developer</td><td>Everything under Build; invites users and grants business roles</td><td>This manual</td></tr>
 <tr><td>business_admin</td><td>Decides approvals, manages business roles, dashboard access and access rules, sees workflow history</td><td>Configures who sees what you built</td></tr>
-<tr><td>business_user</td><td>Plans in dashboards, submits forms, starts workflows, acts on own tasks</td><td>The audience of what you build</td></tr>
+<tr><td>business_user</td><td>Plans in dashboards, saves records, starts workflows, acts on own tasks</td><td>The audience of what you build</td></tr>
 </table>
 <p>A developer can grant business_admin and business_user, never developer or administrator roles. A developer works inside the tenants they have been given; objects in other tenants are invisible.</p>
 
@@ -41,7 +41,7 @@
               ├ dimensions, members, properties
               ├ metrics, formulas, dependency graph
               ├ grids, dashboards, folders, widgets
-              ├ forms, form mappings, integrations, imports
+              ├ tables of records, their mappings, integrations, imports
               ├ workflows, automation rules
               └ facts (the values)</pre>
 <ul>
@@ -52,7 +52,7 @@
 </ul>
 <h3>Revisions</h3>
 <ul>
-  <li><b>Creating a revision copies the model.</b> A new revision is a deep copy of the current one: metrics and their dependencies, dimensions with members and properties, grids, dashboards with widgets and folders, forms with their records and mappings, integrations, workflows and automation rules, and the latest value of every cell. Internal references are remapped so the copy is self-contained.</li>
+  <li><b>Creating a revision copies the model.</b> A new revision is a deep copy of the current one: metrics and their dependencies, dimensions with members and properties, grids, dashboards with widgets and folders, tables of records with their records and mappings, integrations, workflows and automation rules, and the latest value of every cell. Internal references are remapped so the copy is self-contained.</li>
   <li><b>Activating</b> switches the live revision; it can be changed again. The active revision cannot be deleted.</li>
   <li><b>Build in a non-active revision, then activate.</b> Users are not affected until you do. Workflow instances that were running keep the definition they started with.</li>
   <li><b>System-managed revisions</b> are written only by workflow approvals (approved scopes are copied into them) and are read-only for typing and imports.</li>
@@ -61,14 +61,14 @@
 </ul>
 <h3>Dimensions and members</h3>
 <ul>
-  <li>A dimension is an axis; members are its values, identified by a <b>code</b> and shown by a <b>label</b>. Members can have parents, forming a hierarchy; parents are totals of their children under the dimension's rollup rule.</li>
+  <li>A dimension is an axis; members are its values, identified by a <b>code</b> and shown by a <b>label</b>. Members can have parents, forming a hierarchy; parents are totals of their children under each metric's aggregation rule.</li>
   <li>A dimension can be declared a child of another dimension (for example Cost Centre under Department); its members are then attached to members of the parent dimension.</li>
   <li>Properties are typed attributes on members (text, number, date) that can drive groupings and rollups, and that formulas read as <code>dimension.property</code> (for example <code>employees.salary</code>).</li>
 </ul>
 <h3>Metrics, formulas and calculation</h3>
 <ul>
   <li><b>Input</b> metrics hold typed, imported or posted values. <b>Calculated</b> metrics are defined by a formula over other metrics and are never typed into.</li>
-  <li><b>Calculation is server-side and immediate.</b> Writing a cell, changing a formula, deleting a metric or member, posting a form record and committing an import all recalculate every dependent metric before the screen refreshes. There is no "recalculate" button.</li>
+  <li><b>Calculation is server-side and immediate.</b> Writing a cell, changing a formula, deleting a metric or member, posting a record and committing an import all recalculate every dependent metric before the screen refreshes. There is no "recalculate" button.</li>
   <li><b>Dependency graph.</b> The server derives which metrics depend on which from the formulas, orders them, refuses cycles and self-references, and shows the result in the Metrics "Used by" column and the Dependency Graph screen.</li>
   <li><b>Aggregation rules</b> decide totals: Sum, Average, Count, Rate (numerator ÷ denominator), Formula (evaluate the formula on the aggregated inputs, for ratios and percentages).</li>
   <li><b>A missing input</b> leaves the calculated cell blank at that intersection; totals are computed over the intersections that exist.</li>
@@ -113,7 +113,7 @@
 <h3>Grids, dashboards and what users see</h3>
 <ul>
   <li>A <b>grid</b> is a selection of metrics and dimensions. A metric belongs to one grid at most.</li>
-  <li>A <b>dashboard</b> is a canvas of widgets. A grid widget decides which dimension is rows, columns or a selector; charts and KPIs read from grids and metrics; form, trigger, integration, text and import widgets complete the page.</li>
+  <li>A <b>dashboard</b> is a canvas of widgets. A grid widget decides which dimension is rows, columns or a selector; charts and KPIs read from grids and metrics; records, trigger, integration, text and import widgets complete the page.</li>
   <li>Users reach a dashboard only when a <b>business role</b> they belong to has been granted it. Roles, grants and per-user access rules are managed in the Business Admin console.</li>
 </ul>
 <h3>Visibility and locks</h3>

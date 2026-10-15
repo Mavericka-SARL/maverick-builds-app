@@ -61,6 +61,10 @@ type ConfirmAiProposalRes interface {
 	confirmAiProposalRes()
 }
 
+type CreateAPITokenRes interface {
+	createAPITokenRes()
+}
+
 type CreateAdminApplicationRes interface {
 	createAdminApplicationRes()
 }
@@ -393,6 +397,10 @@ type ImportUploadRes interface {
 	importUploadRes()
 }
 
+type ListAPITokensRes interface {
+	listAPITokensRes()
+}
+
 type ListAiConversionsRes interface {
 	listAiConversionsRes()
 }
@@ -533,6 +541,14 @@ type PutGoogleConnectionRes interface {
 	putGoogleConnectionRes()
 }
 
+type QueryFormRecordsRes interface {
+	queryFormRecordsRes()
+}
+
+type RecalculateRevisionRes interface {
+	recalculateRevisionRes()
+}
+
 type RejectAiProposalRes interface {
 	rejectAiProposalRes()
 }
@@ -579,6 +595,10 @@ type ResendAdminUserInvitationRes interface {
 
 type RestoreWorkflowRes interface {
 	restoreWorkflowRes()
+}
+
+type RevokeAPITokenRes interface {
+	revokeAPITokenRes()
 }
 
 type RevokeAdminUserAppAccessRes interface {

@@ -43,7 +43,7 @@ function readImageAsDataURL(file: File): Promise<string> {
 const PALETTE_TYPES = [
   { type: "grid",               label: "Grid" },
   { type: "chart",              label: "Chart" },
-  { type: "form",               label: "Form" },
+  { type: "form",               label: "Records" },
   { type: "metric_kpi",         label: "Metric KPI" },
   { type: "automation_button",  label: "Trigger" },
   { type: "integration_button", label: "Integration" },
@@ -111,6 +111,8 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [newWidget, setNewWidget] = useState({ widget_type: "grid", ref_id: "", content: "" });
+  // A new records widget: whether it offers "+ New record" (off by default).
+  const [newRecordButton, setNewRecordButton] = useState(false);
   const [imageError, setImageError] = useState("");
   const [propsDraft, setPropsDraft] = useState<Record<string, { ref_id?: string; content?: string; title?: string | null; show_title?: boolean; widget_props?: WidgetProps | null }>>({});
 
@@ -312,13 +314,16 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
         content: newWidget.content || undefined,
         pos_x: x, pos_y: y, size_w: defW, size_h: defH,
         sort_order: existing.length, col_start: 1, col_span: 12,
-        widget_props: chartCfg ? { chart: chartCfg } : undefined,
+        widget_props: chartCfg ? { chart: chartCfg }
+          : newWidget.widget_type === "form" && newRecordButton ? { new_record_button: true }
+          : undefined,
       });
     },
     onSuccess: () => {
       invalidateAll();
       setShowAdd(false);
       setNewWidget({ widget_type: "grid", ref_id: "", content: "" });
+      setNewRecordButton(false);
       setNewChartDraft({ chart_type: "bar", context_defaults: {} });
       markSaved();
     },
@@ -614,12 +619,19 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
               </div>
             )}
             {newWidget.widget_type === "form" && (
-              <Field label="Form">
-                <Select value={newWidget.ref_id} onChange={e => setNewWidget(w => ({ ...w, ref_id: e.target.value }))}>
-                  <option value="">— select —</option>
-                  {(forms as FormDef[]).map(f => <option key={f.id} value={f.id}>{f.label || f.name}</option>)}
-                </Select>
-              </Field>
+              <>
+                <Field label="Table">
+                  <Select value={newWidget.ref_id} onChange={e => setNewWidget(w => ({ ...w, ref_id: e.target.value }))}>
+                    <option value="">— select —</option>
+                    {(forms as FormDef[]).map(f => <option key={f.id} value={f.id}>{f.label || f.name}</option>)}
+                  </Select>
+                </Field>
+                <Checkbox
+                  checked={newRecordButton}
+                  onChange={e => setNewRecordButton(e.target.checked)}
+                  label="Show the + New record button"
+                />
+              </>
             )}
             {newWidget.widget_type === "metric_kpi" && (
               <Field label="Metric">
@@ -770,7 +782,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
               <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "var(--color-disabled)", gap: 6 }}>
                 <div style={{ fontSize: 28 }}>⬚</div>
                 <div style={{ fontSize: 13 }}>No widgets yet.</div>
-                <div style={{ fontSize: 12 }}>Add a Grid, KPI, Form, or Text widget to start designing this dashboard.</div>
+                <div style={{ fontSize: 12 }}>Add a Grid, KPI, Records, or Text widget to start designing this dashboard.</div>
               </div>
             )}
 
@@ -1163,6 +1175,31 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
               );
             })()}
 
+            {/* "+ New record" — records widgets only, off unless the developer adds it */}
+            {selectedWidget.widget_type === "form" && (() => {
+              const wp = { ...(selectedWidget.widget_props ?? {}), ...(propsDraft[selectedWidget.id]?.widget_props ?? {}) };
+              return (
+                <div style={{ marginBottom: 12 }}>
+                  <div className="mvx-prop-section">Entry</div>
+                  <Checkbox
+                    checked={!!wp.new_record_button}
+                    onChange={e => {
+                      const wid = selectedWidget!.id;
+                      setPropsDraft(prev => ({
+                        ...prev,
+                        [wid]: { ...prev[wid], widget_props: { ...wp, new_record_button: e.target.checked || undefined } },
+                      }));
+                    }}
+                    label="Show the + New record button"
+                  />
+                  <p style={{ fontSize: 11, color: "var(--color-text-quiet)", marginTop: 4 }}>
+                    Off, people only read, search and work on the records here;
+                    Import still adds records for those who may create them.
+                  </p>
+                </div>
+              );
+            })()}
+
             {/* Row hierarchy — grid only */}
             {selectedWidget.widget_type === "grid" && (() => {
               const wp = { ...(selectedWidget.widget_props ?? {}), ...(propsDraft[selectedWidget.id]?.widget_props ?? {}) };
@@ -1305,7 +1342,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
             {selectedWidget.widget_type !== "text" && selectedWidget.widget_type !== "grid" && selectedWidget.widget_type !== "chart" && selectedWidget.widget_type !== "import" && (
               <div style={{ marginBottom: 12 }}>
                 <div className="mvx-prop-section">
-                  {selectedWidget.widget_type === "form" ? "Form source"
+                  {selectedWidget.widget_type === "form" ? "Table"
                   : selectedWidget.widget_type === "metric_kpi" ? "Metric"
                   : selectedWidget.widget_type === "automation_button" ? "Trigger"
                   : "Integration"}

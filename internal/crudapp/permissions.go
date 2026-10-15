@@ -22,6 +22,10 @@ var creatorStatuses = []string{StatusDraft, StatusSubmitted}
 // ValidRecordStatus reports whether s is a record status.
 func ValidRecordStatus(s string) bool { return slices.Contains(RecordStatuses, s) }
 
+// ErrNoStatus refuses a status for a record of a table without a status
+// field: its records have none.
+const ErrNoStatus = "this table has no status field, so its records have no status"
+
 // RecordAccess is who a caller is to one form record. The caller decides
 // the three facts (the gateway, from the caller's roles and the record's
 // form); Permissions turns them into what the caller may do.
@@ -37,6 +41,9 @@ type RecordAccess struct {
 	// Creator: the caller created the record. A legacy record with no
 	// creator has none.
 	Creator bool
+	// Statuses: the record's table has a status field. Without one no
+	// record of it has a status to set, and none is created with one.
+	Statuses bool
 }
 
 // RecordPermissions is what one caller may do to one record. It is served
@@ -53,27 +60,33 @@ type RecordPermissions struct {
 	SetStatus []string `json:"set_status"`
 }
 
-// Permissions is the rule for form records ("submitter + admins"):
+// Permissions is the rule for records ("submitter + admins"):
 //
 //   - An administrator of the record's application may edit any record's
 //     fields, set any status and delete it.
-//   - The record's creator may edit its fields and delete it while it is a
-//     draft or submitted, and may move it only between draft and submitted:
-//     never to a decided status, and not once it is decided.
-//   - Anyone else who reaches the form may read the record, and do nothing
-//     else to it.
+//   - The record's creator may edit its fields and delete it while it has
+//     no status, is a draft or is submitted, and may move it only between
+//     draft and submitted: never to a decided status, and not once it is
+//     decided.
+//   - Anyone else who reaches the table may read the record, and do
+//     nothing else to it.
 //
-// A caller who does not reach the record may do nothing at all.
+// Statuses are set only on a record of a table with a status field. A
+// caller who does not reach the record may do nothing at all.
 func (a RecordAccess) Permissions(status string) RecordPermissions {
 	p := RecordPermissions{SetStatus: []string{}}
 	switch {
 	case !a.Reach:
 	case a.Admin:
 		p.Edit, p.Delete = true, true
-		p.SetStatus = otherStatuses(RecordStatuses, status)
-	case a.Creator && slices.Contains(creatorStatuses, status):
+		if a.Statuses {
+			p.SetStatus = otherStatuses(RecordStatuses, status)
+		}
+	case a.Creator && (status == "" || slices.Contains(creatorStatuses, status)):
 		p.Edit, p.Delete = true, true
-		p.SetStatus = otherStatuses(creatorStatuses, status)
+		if a.Statuses {
+			p.SetStatus = otherStatuses(creatorStatuses, status)
+		}
 	}
 	return p
 }
@@ -89,11 +102,19 @@ func (a RecordAccess) CanUpdate(from, to string) bool {
 // CanDelete reports whether the caller may delete a record in status.
 func (a RecordAccess) CanDelete(status string) bool { return a.Permissions(status).Delete }
 
-// CanCreate reports whether the caller may create a record in status: an
-// administrator in any status, anyone else who reaches the form as a draft
-// or submitted. (The caller of a create is its creator.)
+// CanCreate reports whether the caller may create a record in status: in
+// a table with a status field an administrator in any status and anyone
+// else who reaches the table as a draft or submitted; in a table without
+// one, anyone who reaches it, with no status. (The caller of a create is
+// its creator.)
 func (a RecordAccess) CanCreate(status string) bool {
-	if !a.Reach || !ValidRecordStatus(status) {
+	if !a.Reach {
+		return false
+	}
+	if !a.Statuses {
+		return status == ""
+	}
+	if !ValidRecordStatus(status) {
 		return false
 	}
 	return a.Admin || slices.Contains(creatorStatuses, status)

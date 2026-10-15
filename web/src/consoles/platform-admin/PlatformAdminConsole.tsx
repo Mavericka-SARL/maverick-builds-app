@@ -116,7 +116,7 @@ function ModelRevisionsSection({ model, tenantId, canTransferModels }: { model: 
                 <>
                   <IconButton
                     aria-label={`Export revision ${s.name} of ${model.name} with data`}
-                    title={`Export this revision with data (${s.name}: values and form records)`}
+                    title={`Export this revision with data (${s.name}: values and records)`}
                     size={26}
                     onClick={() => exportRevision.mutate({ s, includeData: true })}
                     disabled={exportRevision.isPending}
@@ -125,7 +125,7 @@ function ModelRevisionsSection({ model, tenantId, canTransferModels }: { model: 
                   </IconButton>
                   <IconButton
                     aria-label={`Export revision ${s.name} of ${model.name} definitions only`}
-                    title={`Export this revision, definitions only (${s.name}: no values, no form records)`}
+                    title={`Export this revision, definitions only (${s.name}: no values, no records)`}
                     size={26}
                     onClick={() => exportRevision.mutate({ s, includeData: false })}
                     disabled={exportRevision.isPending}

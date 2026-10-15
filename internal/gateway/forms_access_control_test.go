@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -117,7 +118,8 @@ func TestFormPostingRejectsHiddenMemberWrite(t *testing.T) {
 		VALUES ($1::uuid, $2::uuid, 'access_form', 'Access Form',
 			jsonb_build_array(
 				jsonb_build_object('name','amount','label','Amount','type','number'),
-				jsonb_build_object('name','staff_code','label','Staff','type','text')
+				jsonb_build_object('name','staff_code','label','Staff','type','text'),
+				jsonb_build_object('name','status','label','Status','type','status')
 			))
 		RETURNING id::text`, f.modelID, f.workingRevID)
 
@@ -130,28 +132,25 @@ func TestFormPostingRejectsHiddenMemberWrite(t *testing.T) {
 		        'sum', ARRAY['submitted'], $5::jsonb, true)
 		RETURNING id::text`, f.modelID, f.workingRevID, formID, f.amountMetricID, dimMappingsJSON)
 
-	// The mapping posts on submission: the write guard checks the user who
-	// makes the eligible transition, and a business user may submit their
-	// own record but not approve it (crudapp.RecordAccess).
-	submitRecord := func(t *testing.T, persona, staffCode string, amount float64) string {
+	// The mapping posts on submission, and a record posts within its
+	// creator's access: a draft that would post into a cell its creator may
+	// not write once submitted is refused when it is saved, saying so — it
+	// used to save while its posting was dropped in the background.
+	submitRecord := func(t *testing.T, persona, staffCode string, amount float64) (int, map[string]any) {
 		t.Helper()
 		status, body := f.do(t, "POST", "/api/forms/"+formID+"/records", persona, map[string]any{
 			"data": map[string]any{"amount": amount, "staff_code": staffCode},
 		})
 		if status != 200 {
-			t.Fatalf("create record as %s: status=%d body=%v", persona, status, body)
+			return status, body
 		}
 		recID, _ := body["id"].(string)
 		if recID == "" {
-			t.Fatalf("create record as %s: no id in response %v", persona, body)
+			t.Fatalf("create draft as %s: no id in response %v", persona, body)
 		}
-		status, body = f.do(t, "PUT", "/api/records/"+recID, persona, map[string]any{
+		return f.do(t, "PUT", "/api/records/"+recID, persona, map[string]any{
 			"data": map[string]any{"amount": amount, "staff_code": staffCode}, "status": "submitted",
 		})
-		if status != 200 {
-			t.Fatalf("submit record as %s: status=%d body=%v", persona, status, body)
-		}
-		return recID
 	}
 
 	postingCount := func(t *testing.T) int {
@@ -167,10 +166,13 @@ func TestFormPostingRejectsHiddenMemberWrite(t *testing.T) {
 
 	// rollup-test-manager is hidden from DEPT_B (and, by cascade, STAFF_B1)
 	// — the same restriction TestCellsRejectsDirectWriteToHiddenMember
-	// proves cells() enforces. Posting a form record against STAFF_B1 must
-	// be silently withheld: the record itself still saves (record-saving
-	// and metric-posting are decoupled), but no posting/fact row appears.
-	submitRecord(t, "rollup-test-manager", "STAFF_B1", 999)
+	// proves cells() enforces. A record that posts against STAFF_B1 is
+	// refused, and no posting/fact row appears.
+	if status, body := submitRecord(t, "rollup-test-manager", "STAFF_B1", 999); status != http.StatusForbidden {
+		t.Errorf("a record posting into hidden STAFF_B1: status=%d body=%v, want 403", status, body)
+	} else if msg, _ := body["error"].(string); strings.Contains(msg, "STAFF_B1") || strings.Contains(msg, "DEPT_B") {
+		t.Errorf("the refusal names the hidden member: %q", msg)
+	}
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -192,7 +194,9 @@ func TestFormPostingRejectsHiddenMemberWrite(t *testing.T) {
 	// rollup-test-manager-b CAN see DEPT_B/STAFF_B1 (hidden from DEPT_A
 	// instead) — the identical submission from them must succeed, proving
 	// the guard blocks the specific restricted user, not everyone.
-	submitRecord(t, "rollup-test-manager-b", "STAFF_B1", 123)
+	if status, body := submitRecord(t, "rollup-test-manager-b", "STAFF_B1", 123); status != http.StatusOK {
+		t.Fatalf("submission by rollup-test-manager-b: status=%d body=%v", status, body)
+	}
 
 	deadline = time.Now().Add(5 * time.Second)
 	for {
@@ -250,7 +254,8 @@ func TestFormPostingRejectsHiddenMetricWrite(t *testing.T) {
 	formID := q(`
 		INSERT INTO model.form_def (model_id, revision_id, name, label, fields)
 		VALUES ($1::uuid, $2::uuid, 'metric_access_form', 'Metric Access Form',
-			jsonb_build_array(jsonb_build_object('name','amount','label','Amount','type','number')))
+			jsonb_build_array(jsonb_build_object('name','amount','label','Amount','type','number'),
+			                  jsonb_build_object('name','status','label','Status','type','status')))
 		RETURNING id::text`, f.modelID, f.workingRevID)
 	mappingID := q(`
 		INSERT INTO model.form_metric_mapping
@@ -263,24 +268,27 @@ func TestFormPostingRejectsHiddenMetricWrite(t *testing.T) {
 	// The mapping posts on submission: the write guard checks the user who
 	// makes the eligible transition, and a business user may submit their
 	// own record but not approve it (crudapp.RecordAccess).
-	submitRecord := func(t *testing.T, persona string, amount float64) {
+	submitRecord := func(t *testing.T, persona string, amount float64) (int, map[string]any) {
 		t.Helper()
 		status, body := f.do(t, "POST", "/api/forms/"+formID+"/records", persona, map[string]any{
 			"data": map[string]any{"amount": amount},
 		})
 		if status != 200 {
-			t.Fatalf("create record as %s: status=%d body=%v", persona, status, body)
+			return status, body
 		}
 		recID, _ := body["id"].(string)
-		status, body = f.do(t, "PUT", "/api/records/"+recID, persona, map[string]any{
+		return f.do(t, "PUT", "/api/records/"+recID, persona, map[string]any{
 			"data": map[string]any{"amount": amount}, "status": "submitted",
 		})
-		if status != 200 {
-			t.Fatalf("submit record as %s: status=%d body=%v", persona, status, body)
-		}
 	}
 
-	submitRecord(t, "rollup-test-metric-hidden", 999)
+	// The record would post into a metric hidden from its creator: refused
+	// as it is saved, without naming the metric.
+	if status, body := submitRecord(t, "rollup-test-metric-hidden", 999); status != http.StatusForbidden {
+		t.Errorf("a record posting into a hidden metric: status=%d body=%v, want 403", status, body)
+	} else if msg, _ := body["error"].(string); strings.Contains(msg, "metric_hidden_target") {
+		t.Errorf("the refusal names the hidden metric: %q", msg)
+	}
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -297,7 +305,9 @@ func TestFormPostingRejectsHiddenMetricWrite(t *testing.T) {
 	}
 
 	// Unrestricted persona: identical submission must succeed.
-	submitRecord(t, "rollup-test-approver", 456)
+	if status, body := submitRecord(t, "rollup-test-approver", 456); status != http.StatusOK {
+		t.Fatalf("unrestricted submission: status=%d body=%v", status, body)
+	}
 	deadline = time.Now().Add(5 * time.Second)
 	for {
 		if err := f.pool.QueryRow(ctx,

@@ -1009,6 +1009,7 @@ func TestSalesDemoFormImportAndGridSync(t *testing.T) {
 			{"name": "product", "label": "Product", "type": "dimension", "required": true, "dimension_id": d.prodDim},
 			{"name": "period", "label": "Period", "type": "dimension", "required": true, "dimension_id": d.periodDim},
 			{"name": "amount", "label": "Adjustment", "type": "number", "required": true},
+			{"name": "status", "label": "Status", "type": "status"},
 		},
 	}))
 

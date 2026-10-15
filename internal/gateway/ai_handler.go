@@ -963,6 +963,9 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 	hooks.TriggerRule = func(ctx context.Context, ruleID string, payload map[string]any) (string, error) {
 		return h.aiTriggerRule(ctx, r, ruleID, payload)
 	}
+	hooks.Recalculate = func(ctx context.Context, revisionID string) (string, error) {
+		return h.aiRecalculate(ctx, r, revisionID)
+	}
 	executor := aiassistant.NewWriteExecutorWithActor(h.db.For(ctx), modelID, revID, a.UserID).WithHooks(hooks)
 	_ = pStore.SetStatus(ctx, proposalID, "confirmed")
 
@@ -2039,6 +2042,12 @@ func (h *handler) aiWriteHooks(modelID, userID string) aiassistant.Hooks {
 		},
 		PostFormIntegration: func(ctx context.Context, integrationID string) (int, error) {
 			return h.backfillFormMapping(ctx, integrationID, userID)
+		},
+		// As the developer console's table save: in the background.
+		RepostTable: func(ctx context.Context, formID string) error {
+			bgCtx := context.WithoutCancel(ctx)
+			go h.repostTable(bgCtx, formID, userID)
+			return nil
 		},
 	}
 }

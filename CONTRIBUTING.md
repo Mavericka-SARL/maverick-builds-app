@@ -34,7 +34,7 @@ administrator, business user) and what they cannot do today.
 
 A model you built can be exported as a package and imported by anyone else
 running maverickbuilds.app. [examples/README.md](examples/README.md) explains
-how to export one **definitions only** (no values, no form records), what to
+how to export one **definitions only** (no values, no records), what to
 check before you post it, and how to import one. The sales-planning model
 there is a ready-made example.
 

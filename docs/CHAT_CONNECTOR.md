@@ -1,7 +1,8 @@
 # Chat connector (ChatGPT, Claude)
 
-> **Last verified:** 2026-10-10 — `go test ./internal/gateway -run 'TestMCPConnector|TestConnectorTokens|TestDelegatedReadGate|TestChatWritesCells|TestCellsBatchRoute|TestChatPluginReviewCases'`
-> (cell writes, 2026-10-10); 2026-10-02 for the rest (shared and dedicated
+> **Last verified:** 2026-10-14 — `go test ./internal/gateway -run 'TestMCPConnector|TestConnectorReachesTheRecordsQueryOnly|TestRecordTables'`
+> (tables of records); 2026-10-10 — `go test ./internal/gateway -run 'TestMCPConnector|TestConnectorTokens|TestDelegatedReadGate|TestChatWritesCells|TestCellsBatchRoute|TestChatPluginReviewCases'`
+> (cell writes); 2026-10-02 for the rest (shared and dedicated
 > tenant databases);
 > `MAVERICKS_KEYCLOAK_IT=1 go test ./internal/gateway -run TestConnectorClientsAgainstKeycloak`
 > (Keycloak 24, both hosts' sign-in flows); the in-chat view in Chromium with a
@@ -35,6 +36,8 @@ Claude** shows the connector URL and each host's client ID and secret.
 | `describe_dashboard` | a dashboard as a page: its text widgets' Markdown, its links to other dashboards resolved so they can be followed, and what each widget shows (grid, metrics, axis, fixed filters) or does — no numbers |
 | `list_workflows` | a model's published workflows with their descriptions |
 | `describe_workflow` | one workflow's start fields and steps: name, type, instructions, the roles that act on each, deadlines, which step follows |
+| `list_tables` | a model's tables of records (requests, expenses, deals) with their fields, and whether their records have a status |
+| `query_records` | a table's records, read-only: a page matching filters (by field, status or date), a search and a sort, with how many match; or totals over every matching record — count, count_distinct, sum, avg, min, max — grouped by up to 4 fields or a date's day, week, month, quarter or year |
 | `write_cells` | enters up to 500 input cells of the active revision as you — numbers, texts, dates, pick-list choices, or clears — all or nothing; `dry_run` checks without writing |
 
 Charts and reports take **grid queries, never numbers**: each call reads the
@@ -44,10 +47,22 @@ MCP Apps (Claude, ChatGPT) shows an interactive view (switch chart type,
 refresh); every host also receives a text summary with the data table and a
 PNG of each chart.
 
-Not read through the connector: forms and their records, a widget's data,
-running workflow instances and tasks, triggers, notifications, integrations,
-audit. Nothing but input cells can be changed: not the model, its members,
-forms, workflows or anyone's access.
+Not read through the connector: a widget's data, running workflow instances
+and tasks, triggers, notifications, integrations, audit. Nothing but input
+cells can be changed: not the model, its members, tables or records,
+workflows or anyone's access.
+
+### Reading records
+
+A model's tables hold the records people save. `list_tables` reads
+`GET /api/forms` and `query_records` the records query,
+`POST /api/forms/{id}/records/query` — the route the records widget lists
+records with, and the only route of a table the connector may reach (a POST
+only for its body; it changes nothing). It reads exactly the records the
+person sees in the console: in a table that shows each person their own
+records, theirs unless they administer the application; never a record
+naming a member or metric hidden from them. Totals are counted by the engine
+over every such record, so the assistant never adds up a page.
 
 ### Reading the process
 

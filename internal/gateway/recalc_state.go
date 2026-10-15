@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"context"
+
+	"github.com/mavericks-engine/mavericks/internal/calculation"
 )
 
 // A write that answers before its dependents are recalculated leaves the
@@ -28,6 +30,18 @@ func (h *handler) recalcInBackground(ctx context.Context, revisionID, what strin
 		defer h.recalcDone(keep, revisionID, seq)
 		fn(bg)
 	}()
+}
+
+// recalcAfterImport recalculates what an import's metrics reach after the
+// request has answered, as a cell write's recalculation runs: the grid shows
+// the revision's calculated cells as pending until it lands. An import used
+// to start a bare pass nothing recorded, so the grid showed old totals with
+// nothing saying they were about to change.
+func (h *handler) recalcAfterImport(ctx context.Context, modelID, revisionID, what string, metricIDs []string) {
+	sched := calculation.NewScheduler(h.log, calculation.NewStore(h.db.For(ctx)))
+	h.recalcInBackground(ctx, revisionID, "recalculation after an "+what, func(bg context.Context) {
+		_ = sched.RecalcAffected(bg, modelID, revisionID, metricIDs)
+	})
 }
 
 func (h *handler) requestRecalc(ctx context.Context, revisionID string) int64 {

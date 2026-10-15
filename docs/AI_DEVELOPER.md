@@ -23,7 +23,7 @@ undo them:
 - business roles (`create_business_role`, `update_business_role`,
   `delete_business_role`) — the tenant's roles, as on the Roles screens;
 - user access rules (`set_user_access_rules`, the exception below);
-- form-record posting (`backfill_form_integration`, and the re-post
+- record posting (`backfill_form_integration`, and the re-post
   `update_form_integration` runs) — input values posted into the working
   revision.
 
@@ -57,8 +57,9 @@ posting runs the gateway's own posting code the same way.
 | `validate_workflow` | the editor's Validate button, for stored or not-yet-proposed steps |
 | `list_workflow_roles` | what `assignee_roles` may contain: platform role codes and the tenant's business roles, with each role's member count and the dashboards of the revision it may open |
 | `list_automation_rules` | what starts each workflow |
-| `list_forms`, `get_form` | forms; one in full — fields, integrations, record count |
-| `list_form_integrations` | which form field posts into which metric |
+| `list_forms`, `get_form` | tables of records (the Records tab); one in full — fields, "own records only", integrations, record count |
+| `query_records` | a table's records, read-only, through the records query as the developer: a page (filters, search, sort) or totals (count, count_distinct, sum, avg, min, max, grouped by fields or a date period) |
+| `list_form_integrations` | which field of a table posts into which metric |
 | `list_integrations` | every data integration — Excel/CSV imports, Google Sheets, REST API, data exports — with its target, column map or export spec, and last run |
 | `preview_file_import` | a dry run of importing an attached spreadsheet: its first rows as read, its columns and first rows after the reshape and column map, every row that would fail and why, what would be imported. Writes nothing |
 | `read_attached_sheet` | one sheet of an attached workbook: any rows as stored, the whole formulas of those rows (compressed into ranges sharing a formula), its layout, drop-down lists, highlights and comments. Writes nothing |
@@ -165,10 +166,12 @@ dimension is refused with `INVALID_PARENT_DIMENSION`.
 
 `update_dimension` is the developer's `PATCH /api/developer/dimensions/{id}`:
 `dimension_id` (id or exact name) and only the fields to change — `name`,
-`agg_rule`, `tags`, `parent_dimension_id` or `parent_dimension_name` (null
+`tags`, `parent_dimension_id` or `parent_dimension_name` (null
 detaches), `source_dimension_id` or `source_dimension_name` (null clears the
 grouping), `source_property`, and `derive_members: true` to add a member for
 every source value with none yet (also on its own, after new values appear).
+Neither it nor `create_dimension` takes an `agg_rule`: a dimension's is read by
+nothing — each metric's own `agg_rule` decides how it rolls up.
 It shares the PATCH's rules (`metricformula.ValidateParentDimension`,
 `metricformula.PlanGroupingPatch`): `INVALID_PARENT_DIMENSION`,
 `INVALID_GROUPING`, `DIMENSION_IN_USE` when clearing or replacing a grouping's
@@ -184,7 +187,7 @@ Tags mirror the console's tag editors: `create_metric`, `update_metric`,
 name; `tags`) replaces the tags of one that already exists. `list_metrics`,
 `list_dimensions`, `list_grids` and `list_dashboards` show them.
 
-Workflows and forms (added 2026-09-16, programme item 5):
+Workflows and tables of records (added 2026-09-16, programme item 5; tables 2026-10-14):
 
 | Tool | Mirrors |
 |---|---|
@@ -192,8 +195,8 @@ Workflows and forms (added 2026-09-16, programme item 5):
 | `archive_workflow_def`, `restore_workflow_def`, `duplicate_workflow_def` | the Workflows list's Archive, Restore and Duplicate |
 | `create_automation_rule`, `update_automation_rule`, `delete_automation_rule` | the Triggers screen: every trigger type, sources, cron schedules |
 | `create_business_role`, `update_business_role`, `delete_business_role`, `set_role_dashboards` | the developer's Roles tab (the `baOrDev` guard); a rename or delete names the workflows whose steps still name the old role |
-| `create_form_def`, `update_form_def`, `delete_form_def` | the Forms builder |
-| `create_form_integration`, `update_form_integration`, `delete_form_integration`, `backfill_form_integration` | the form-to-metric posting screen and its **Backfill**; an update re-posts, as the screen's does |
+| `create_form_def`, `update_form_def`, `delete_form_def` | the Records tab: every field type — autocode (`code_prefix`, `code_digits`) and status included — and `own_records_only`; an update that adds or removes the status field re-posts the table (`Hooks.RepostTable`), as the tab's save does |
+| `create_form_integration`, `update_form_integration`, `delete_form_integration`, `backfill_form_integration` | the record-to-metric posting screen (Integrations › Records) and its **Backfill**; an update re-posts, as the screen's does |
 
 ## A plan is checked before the developer sees it
 
@@ -349,7 +352,8 @@ a dashboard's Integration button downloads one for users.
   model links), Google Sheets integrations and sign-in connections, tests and
   runs them, and fires manual triggers (since 2026-10-09: `create_api_integration`,
   `update_api_integration`, `create_connection`, `update_connection`,
-  `run_integration`, `trigger_automation_rule`; saves go through the
+  `run_integration`, `trigger_automation_rule`, and since 2026-10-15
+  `recalculate_revision` (Models › revision › Recalculate); saves go through the
   wizard's own `restAPISave`, tests, runs and triggers through the
   developer's own routes in-process, `callAsCaller`). A credential's secret
   parts never pass through it: a proposal carrying one is refused, and the
@@ -358,9 +362,10 @@ a dashboard's Integration button downloads one for users.
   message or audit row. An OAuth authorization-code connection's **Connect**
   click and trusting an SFTP host key after comparing its fingerprint stay
   the developer's.
-- **Business data** — typing cells and entering form records. The assistant
+- **Business data** — typing cells and entering records. The assistant
   imports a spreadsheet the developer attaches to its chat (into the draft)
-  and posts saved form records through a form integration, and nothing else.
+  and posts saved records through a table integration, and nothing else. It
+  reads records (`query_records`) but never changes one.
 - **Applications**, which the assistant does not create: a session works in
   one model.
 - **Database migrations.** There is no migration tool: the gateway migrates a

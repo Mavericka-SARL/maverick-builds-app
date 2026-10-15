@@ -200,8 +200,12 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 	picklistOf := func(metricID string) string { return kindOf(metricID).picklistDim }
 	isText := func(metricID string) bool { return kindOf(metricID).text }
 	metricNameToID := map[string]string{} // populated lazily for legacy metric_id-as-name references
+	metricIDOK := map[string]bool{}       // a UUID reference, checked once (every value of a metric column is one)
 	resolveMetricRef := func(ref string) (id string, ok bool) {
 		if looksLikeUUID.MatchString(ref) {
+			if ok, checked := metricIDOK[ref]; checked {
+				return ref, ok
+			}
 			// A UUID-shaped legacy metric_id reference must still belong to
 			// this model/revision — accepting it as-is would let a caller
 			// supply any metric UUID, including one from a different
@@ -210,7 +214,11 @@ func ResolveRows(ctx context.Context, pool Querier, modelID, revisionID string, 
 			if err := pool.QueryRow(ctx,
 				`SELECT EXISTS(SELECT 1 FROM model.metric_def WHERE id=$1::uuid AND model_id=$2::uuid AND (revision_id=$3::uuid OR revision_id IS NULL))`,
 				ref, modelID, revisionID,
-			).Scan(&exists); err != nil || !exists {
+			).Scan(&exists); err != nil {
+				return "", false
+			}
+			metricIDOK[ref] = exists
+			if !exists {
 				return "", false
 			}
 			return ref, true

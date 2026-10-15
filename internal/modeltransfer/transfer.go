@@ -30,8 +30,15 @@ import (
 )
 
 const (
-	PackageFormat  = "mavericks-model-export"
-	PackageVersion = 1
+	PackageFormat = "mavericks-model-export"
+	// PackageVersion is the version an export writes. Version 2 (tables
+	// of records): a table's records have a status only when it has a
+	// status field. A version 1 package is still imported; its tables are
+	// given the status field their records then always had
+	// (Package.upgrade).
+	PackageVersion = 2
+	// OldestPackageVersion is the oldest version an import takes.
+	OldestPackageVersion = 1
 	// FactsPolicy documents, as an explicit and inspectable field rather
 	// than only an in-code comment, the policy CollectExport applies when
 	// gathering runtime.fact_input rows: one latest-wins row per cell for
@@ -202,12 +209,16 @@ type Form struct {
 	Name   string          `json:"name"`
 	Label  string          `json:"label"`
 	Fields json.RawMessage `json:"fields"`
+	// OwnRecordsOnly: each person sees only the records they created.
+	OwnRecordsOnly bool `json:"own_records_only,omitempty"`
 }
 
 type FormRecord struct {
 	FormID string          `json:"form_id"`
 	Data   json.RawMessage `json:"data"`
-	Status string          `json:"status"`
+	// Status is "" for a record without one (a table without a status
+	// field).
+	Status string `json:"status"`
 }
 
 type FormMapping struct {
@@ -638,7 +649,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 
 	// Forms, records, metric mappings.
 	rows, err = q.Query(ctx, `
-		SELECT id::text, name, label, COALESCE(fields,'[]'::jsonb)
+		SELECT id::text, name, label, COALESCE(fields,'[]'::jsonb), own_records_only
 		FROM model.form_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -646,7 +657,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 	for rows.Next() {
 		var f Form
-		if err := rows.Scan(&f.ID, &f.Name, &f.Label, &f.Fields); err != nil {
+		if err := rows.Scan(&f.ID, &f.Name, &f.Label, &f.Fields, &f.OwnRecordsOnly); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -659,7 +670,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 
 	if opts.IncludeData {
 		rows, err = q.Query(ctx, `
-			SELECT fr.form_id::text, fr.data, fr.status::text
+			SELECT fr.form_id::text, fr.data, COALESCE(fr.status::text, '')
 			FROM runtime.form_record fr
 			JOIN model.form_def fd ON fd.id = fr.form_id
 			WHERE fd.model_id=$1::uuid AND (fd.revision_id=$2::uuid OR fd.revision_id IS NULL)
@@ -1662,6 +1673,70 @@ func ImportRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 	return importRevision(ctx, tx, modelID, revisionName, &pkg, importerID)
 }
 
+// upgrade brings a package of an older version up to PackageVersion, in
+// place, as migration 139 brought a database's tables up: version 1 tables
+// gave every record a status, so each gets a status field (named "status",
+// or "record_status" when a field of its own is called "status"), and its
+// records widgets keep their "+ New record" button.
+func (pkg *Package) upgrade() {
+	// Only a package that says it is version 1: one that names no version
+	// is made by hand (the gateway refuses it), and means what it says now.
+	if pkg.Version != 1 {
+		return
+	}
+	// A version 1 import gave a record without a status a draft's.
+	for i := range pkg.FormRecords {
+		if pkg.FormRecords[i].Status == "" {
+			pkg.FormRecords[i].Status = "draft"
+		}
+	}
+	for i := range pkg.Forms {
+		var fields []map[string]any
+		if err := json.Unmarshal(pkg.Forms[i].Fields, &fields); err != nil {
+			fields = nil
+		}
+		hasStatus, statusTaken := false, false
+		for _, f := range fields {
+			if f["type"] == "status" {
+				hasStatus = true
+			}
+			if f["name"] == "status" {
+				statusTaken = true
+			}
+		}
+		if hasStatus {
+			continue
+		}
+		name := "status"
+		if statusTaken {
+			name = "record_status"
+		}
+		fields = append(fields, map[string]any{"name": name, "label": "Status", "type": "status", "required": false})
+		if raw, err := json.Marshal(fields); err == nil {
+			pkg.Forms[i].Fields = raw
+		}
+	}
+	// A version 1 records widget always offered "+ New record"; a widget
+	// now shows it only when it says so.
+	for di := range pkg.Dashboards {
+		for wi := range pkg.Dashboards[di].Widgets {
+			w := &pkg.Dashboards[di].Widgets[wi]
+			if w.WidgetType != "form" {
+				continue
+			}
+			var props map[string]any
+			if json.Unmarshal(w.Props, &props) != nil || props == nil {
+				props = map[string]any{}
+			}
+			props["new_record_button"] = true
+			if raw, err := json.Marshal(props); err == nil {
+				w.Props = raw
+			}
+		}
+	}
+	pkg.Version = PackageVersion
+}
+
 // importRevision writes a package's rows into a new revision of modelID.
 // StripUnreadWidgetProps drops, in place, the widget_props keys the console
 // does not read (modeledit.WidgetPropKeys) from every widget of the package,
@@ -1695,6 +1770,7 @@ func (pkg *Package) StripUnreadWidgetProps() []string {
 const ImportedDescription = "Imported from package"
 
 func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string, pkg *Package, importerID string) (revisionID string, err error) {
+	pkg.upgrade()
 	pkg.StripUnreadWidgetProps()
 	if err = tx.QueryRow(ctx,
 		`INSERT INTO model.revision (model_id, name, description) VALUES ($1::uuid, $2, $3) RETURNING id::text`,
@@ -1957,10 +2033,10 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 		fields := refs.doc(f.Fields, jsonRefs{})
 		var newID string
 		if err = tx.QueryRow(ctx, `
-			INSERT INTO model.form_def (model_id, revision_id, name, label, fields)
-			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE($5::jsonb,'[]'::jsonb))
+			INSERT INTO model.form_def (model_id, revision_id, name, label, fields, own_records_only)
+			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE($5::jsonb,'[]'::jsonb), $6)
 			RETURNING id::text`,
-			modelID, revisionID, f.Name, f.Label, jsonArg(fields)).Scan(&newID); err != nil {
+			modelID, revisionID, f.Name, f.Label, jsonArg(fields), f.OwnRecordsOnly).Scan(&newID); err != nil {
 			return "", fmt.Errorf("form %q: %w", f.Name, err)
 		}
 		formMap[f.ID] = newID
@@ -1974,7 +2050,7 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 		// not exist in this database, so records are attributed to the importer.
 		if _, err = tx.Exec(ctx, `
 			INSERT INTO runtime.form_record (form_id, data, status, created_by)
-			VALUES ($1::uuid, COALESCE($2::jsonb,'{}'::jsonb), COALESCE(NULLIF($3::text,''),'draft')::runtime.record_status, $4::uuid)`,
+			VALUES ($1::uuid, COALESCE($2::jsonb,'{}'::jsonb), NULLIF($3::text,'')::runtime.record_status, $4::uuid)`,
 			fid, jsonArg(rec.Data), rec.Status, importerID); err != nil {
 			return "", fmt.Errorf("form record: %w", err)
 		}

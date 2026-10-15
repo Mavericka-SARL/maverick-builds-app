@@ -162,7 +162,7 @@ test("the import wizard's targets, saved integrations and new integration are th
   const optionsOf = (label: string) => page.getByLabel(label, { exact: true }).locator("option");
   await expect(optionsOf("Grid")).toHaveText(["— select —", "Sales Plan Grid"]);
   await targetType.selectOption("form");
-  await expect(optionsOf("Form")).toHaveText(["— select —", "Deal"]);
+  await expect(optionsOf("Table")).toHaveText(["— select —", "Deal"]);
   await targetType.selectOption("dimension");
   await expect(optionsOf("Dimension")).toHaveText(["— select —", "Channel"]);
   // Back to a grid: the working revision is the target again.

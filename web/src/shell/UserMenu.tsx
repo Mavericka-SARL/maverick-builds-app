@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { LogOut, MessageSquare } from "lucide-react";
+import { KeyRound, LogOut, MessageSquare } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { RoleBadge } from "../ui";
 import { useAuth } from "../auth/useAuth";
@@ -8,6 +8,7 @@ import { api } from "../api/client";
 import { EDITION_LABELS, licenseDate, useLicense } from "../license/useLicense";
 import { useThemePreference, type ThemePreference } from "../theme/theme";
 import { ChatConnectorDialog } from "./ChatConnectorDialog";
+import { ApiTokensDialog } from "./ApiTokensDialog";
 import { useConnectorInfo } from "./connectorInfo";
 
 const THEMES: { id: ThemePreference; label: string }[] = [
@@ -55,6 +56,7 @@ export function UserMenu() {
   const [theme, setTheme] = useThemePreference();
   const { data: connector } = useConnectorInfo();
   const [connectorOpen, setConnectorOpen] = useState(false);
+  const [tokensOpen, setTokensOpen] = useState(false);
   const [open, setOpen] = useState(false);
   const [style, setStyle] = useState<React.CSSProperties>({});
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -181,6 +183,18 @@ export function UserMenu() {
             className="mvx-user-menu__action"
             onClick={() => {
               setOpen(false);
+              setTokensOpen(true);
+            }}
+          >
+            <KeyRound size={14} aria-hidden="true" />
+            API tokens
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="mvx-user-menu__action"
+            onClick={() => {
+              setOpen(false);
               logout();
             }}
           >
@@ -191,6 +205,7 @@ export function UserMenu() {
         document.body,
       )}
       <ChatConnectorDialog open={connectorOpen} onClose={() => setConnectorOpen(false)} />
+      <ApiTokensDialog open={tokensOpen} onClose={() => setTokensOpen(false)} />
     </>
   );
 }

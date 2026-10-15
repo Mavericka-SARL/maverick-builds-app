@@ -33,7 +33,7 @@ func TestFormListCarriesCallerPermissions(t *testing.T) {
 	f := setupRecordFixture(t)
 	status, body := f.do(http.MethodPost, "/api/forms", prDev, map[string]any{
 		"name": "expense_two", "label": "Expense two",
-		"fields": []map[string]any{{"name": "amount", "label": "Amount", "type": "number"}},
+		"fields": []map[string]any{{"name": "amount", "label": "Amount", "type": "number"}, {"name": "status", "label": "Status", "type": "status"}},
 	})
 	if status != http.StatusOK {
 		t.Fatalf("create second form as developer: %d %s", status, body)

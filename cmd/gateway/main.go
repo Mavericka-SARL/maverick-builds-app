@@ -32,6 +32,7 @@ import (
 	"github.com/mavericks-engine/mavericks/pkg/keycloak"
 	"github.com/mavericks-engine/mavericks/pkg/license"
 	"github.com/mavericks-engine/mavericks/pkg/logger"
+	"github.com/mavericks-engine/mavericks/pkg/memlimit"
 	"github.com/mavericks-engine/mavericks/pkg/migrate"
 	"github.com/mavericks-engine/mavericks/pkg/telemetry"
 	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
@@ -143,6 +144,10 @@ type cfg struct {
 
 func main() {
 	log := logger.New("gateway")
+	if limit, ok := memlimit.Set(); ok {
+		log.Info().Int64("bytes", limit).Msg("Go memory limit set from the container's")
+	}
+	startProfiler(log)
 	ctx := context.Background()
 
 	var c cfg

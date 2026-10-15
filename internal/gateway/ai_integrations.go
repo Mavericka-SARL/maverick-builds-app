@@ -209,6 +209,20 @@ func (h *handler) aiTriggerRule(ctx context.Context, r *http.Request, ruleID str
 	return "Rule triggered: " + clippedJSON(body), nil
 }
 
+// aiRecalculate is recalculate_revision: the developer's own recalculate
+// route, as the developer.
+func (h *handler) aiRecalculate(ctx context.Context, r *http.Request, revisionID string) (string, error) {
+	status, body := h.callAsCaller(ctx, r, http.MethodPost, "/api/developer/revisions/"+url.PathEscape(revisionID)+"/recalculate", nil, nil)
+	if status >= 300 {
+		return "", routeError(status, body)
+	}
+	var out struct {
+		Metrics int `json:"metrics"`
+	}
+	_ = json.Unmarshal(body, &out)
+	return fmt.Sprintf("Recalculating %d calculated metric(s) of the revision; the grids show them as pending until it lands", out.Metrics), nil
+}
+
 // aiSaveConnector is SaveConnector: restAPISave on db as a.
 func (h *handler) aiSaveConnector(ctx context.Context, db dbx.DB, a *actor, modelID, revID string, req aiassistant.ConnectorSave) (string, error) {
 	body := &restAPICreateBody{Name: req.Name, Description: req.Description, Tags: req.Tags, Status: req.Status,

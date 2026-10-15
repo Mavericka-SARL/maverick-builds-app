@@ -88,7 +88,6 @@ func TestImportMinimalPackage(t *testing.T) {
 		{"model.metric_def", "time_summary", byRev},
 		{"model.metric_def", "tags", byRev},
 		{"model.form_def", "fields", byRev},
-		{"runtime.form_record", "status", byForm},
 		{"model.form_metric_mapping", "aggregation", byRev},
 		{"model.form_metric_mapping", "posting_statuses", byRev},
 		{"model.form_metric_mapping", "dimension_mappings", byRev},
@@ -118,6 +117,12 @@ func TestImportMinimalPackage(t *testing.T) {
 				t.Errorf("%s.%s = %q, want the column default %q", c.table, c.column, g, want)
 			}
 		}
+	}
+
+	// A record left without a status, of a table without a status field,
+	// has none (migration 139: the column has no default).
+	if got := texts(t, ctx, pool, `SELECT COALESCE(status::text, 'none') FROM runtime.form_record WHERE `+byForm, revID); len(got) != 1 || got[0] != "none" {
+		t.Errorf("an imported record without a status has %v, want none", got)
 	}
 
 	// The geometry derivation leans on two column defaults of its own.

@@ -136,8 +136,8 @@ func (h *handler) adminModelImport(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("unrecognized package format %q", req.Package.Format), http.StatusBadRequest)
 		return
 	}
-	if req.Package.Version != modeltransfer.PackageVersion {
-		jsonErr(w, fmt.Errorf("unsupported package version %d (supported: %d)", req.Package.Version, modeltransfer.PackageVersion), http.StatusBadRequest)
+	if req.Package.Version < modeltransfer.OldestPackageVersion || req.Package.Version > modeltransfer.PackageVersion {
+		jsonErr(w, fmt.Errorf("unsupported package version %d (supported: %d to %d)", req.Package.Version, modeltransfer.OldestPackageVersion, modeltransfer.PackageVersion), http.StatusBadRequest)
 		return
 	}
 	// Same scope check as export, mirrored: the route guard only checks

@@ -54,7 +54,7 @@ export function BasicsStep({
           <Select value={config.target_type} aria-label="Target type"
             onChange={e => onConfig({ target_type: e.target.value as ApiIntegrationConfig["target_type"], target_id: "" })}>
             <option value="grid">Grid</option>
-            <option value="form">Form</option>
+            <option value="form">Table of records</option>
             <option value="dimension">Dimension</option>
           </Select>
         </Field>

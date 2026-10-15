@@ -1,6 +1,6 @@
 <h2>Dashboards</h2>
 <p class="path">Sidebar: Developer › Dashboards</p>
-<p>A dashboard is the page a user opens. It is a free-form canvas of widgets: grids to plan in, charts and KPIs to read, forms to submit, buttons that start workflows or integrations, text and pictures, and an import box. Dashboards are organised in folders and tagged, and are granted to business roles on the Users screen.</p>
+<p>A dashboard is the page a user opens. It is a free-form canvas of widgets: grids to plan in, charts and KPIs to read, records to enter and review, buttons that start workflows or integrations, text and pictures, and an import box. Dashboards are organised in folders and tagged, and are granted to business roles on the Users screen.</p>
 <figure><img src="img/06-dashboards.png" alt="Dashboards list with tag filters, tag chips and a Design button per dashboard"><figcaption>The dashboard list. Folders group dashboards; the Folder control on a row moves it; Design opens the canvas.</figcaption></figure>
 
 <h3>The list</h3>
@@ -20,8 +20,8 @@
 <div class="note"><b>Per revision.</b> The list shows the dashboards of the selected revision. A dashboard whose folder belongs to another revision is shown under "Unfiled (folder not in this revision)".</div>
 
 <h3>The canvas: Design and Preview</h3>
-<figure><img src="img/25-dashboard-design.png" alt="Dashboard canvas in Design mode with text, KPI, chart, grid and form widgets and a workflow button"><figcaption>Design mode. The toolbar carries the mode switch and one chip per widget type; widgets sit on a dotted 20-pixel grid.</figcaption></figure>
-<p>The toolbar shows <b>Dashboards</b> (back), the dashboard name, the widget count, the <b>Design</b> / <b>Preview</b> switch and, in Design mode, the widget palette: <b>Grid</b>, <b>Chart</b>, <b>Form</b>, <b>Metric KPI</b>, <b>Trigger</b>, <b>Integration</b>, <b>Text</b>, <b>Image</b>, <b>Import</b>.</p>
+<figure><img src="img/25-dashboard-design.png" alt="Dashboard canvas in Design mode with text, KPI, chart, grid and records widgets and a workflow button"><figcaption>Design mode. The toolbar carries the mode switch and one chip per widget type; widgets sit on a dotted 20-pixel grid.</figcaption></figure>
+<p>The toolbar shows <b>Dashboards</b> (back), the dashboard name, the widget count, the <b>Design</b> / <b>Preview</b> switch and, in Design mode, the widget palette: <b>Grid</b>, <b>Chart</b>, <b>Records</b>, <b>Metric KPI</b>, <b>Trigger</b>, <b>Integration</b>, <b>Text</b>, <b>Image</b>, <b>Import</b>.</p>
 <p><b>Text</b> takes a small Markdown subset — <code>#</code> headings, <code>**bold**</code>, <code>*italic*</code>, <code>`code`</code>, bullet and numbered lists, <code>&gt;</code> quotes, <code>---</code> rules and links — <code>[label](https://example.com)</code> to another site, or <code>[label](/docs/formulas-manual/manual.html)</code> to a page of this deployment such as the manuals it ships with. Both open in a new tab, so the console stays where it was. A link can also open another dashboard in place: <code>[label](dashboard:Dashboard name)</code> for one of the same model, <code>[label](dashboard:Model name/Dashboard name)</code> for one of another model, and <code>[label](dashboard:Model name/)</code> for another model's first dashboard. <b>Link to a dashboard…</b> under the text box writes one for you: pick a model and a dashboard, then <b>Insert link</b>. Such a link names the model and the dashboard rather than pointing at them, so it keeps working through a revision copy, an export and an import; rename the target and the link says it cannot find it. It follows the reader's own access: a model they cannot open or a dashboard their roles hide is reported, never shown. In Design and Preview a dashboard link is inert; it works under <b>User › Dashboards</b>. Plain text that uses none of it is shown as typed. <b>Image</b> takes a PNG, JPEG, SVG, WebP or GIF of up to 512 KB, chosen with a file picker; the picture is stored with the dashboard, so it travels with a revision copy, an export and an import, and it takes alternative text for screen readers and a <b>Fit</b> of "show all of it" or "fill the box". Together they are what an explanatory page is built from — the tour a new workspace starts with is written in exactly these widgets.</p>
 <ul>
   <li><b>Design</b> is for placing and configuring widgets. Nothing is live.</li>
@@ -34,7 +34,7 @@
 <tr><th>Widget</th><th>Source and what it shows</th></tr>
 <tr><td><b>Grid</b></td><td><b>Grid</b>: one grid of the revision. Renders the editable planning table (below).</td></tr>
 <tr><td><b>Chart</b></td><td><b>Grid (source)</b>, then the chart editor (below). Add widget stays disabled until the chart configuration is complete.</td></tr>
-<tr><td><b>Form</b></td><td><b>Form</b>: users submit records of that form here.</td></tr>
+<tr><td><b>Records</b></td><td><b>Table</b>: people search, filter, sort, edit, import and export that table's records here. <b>Show the + New record button</b> (off by default) also lets them add records here.</td></tr>
 <tr><td><b>Metric KPI</b></td><td><b>Metric</b>: one number tile with a default context (whole model, follow selectors, or pinned to a member).</td></tr>
 <tr><td><b>Trigger</b></td><td><b>Trigger</b>: an automation rule with trigger type manual that is enabled. If none exists the panel says so. Renders a button that starts the rule's workflow.</td></tr>
 <tr><td><b>Integration</b></td><td><b>Integration</b>: a REST API integration. Renders a button that runs it.</td></tr>
@@ -47,8 +47,8 @@
   <li>Drag the widget header to move; drag the right edge, bottom edge or corner to resize. Everything snaps to 20 px.</li>
   <li>Keyboard: arrow keys nudge by 20 px, Shift+arrow by 100 px, Alt+arrow resizes, Escape deselects.</li>
   <li>Widgets may not overlap. A colliding drop snaps back and the other widget shows "Overlaps another widget" while you drag.</li>
-  <li>Minimum sizes: grid 600×300, chart 360×240, form 360×300, KPI 220×120, import 320×280, text 240×100, buttons 40×20.</li>
-  <li>The <b>×</b> on a card asks <b>Delete widget?</b>; the source object (grid, form, rule) is not deleted.</li>
+  <li>Minimum sizes: grid 600×300, chart 360×240, records 360×300, KPI 220×120, import 320×280, text 240×100, buttons 40×20.</li>
+  <li>The <b>×</b> on a card asks <b>Delete widget?</b>; the source object (grid, table, rule) is not deleted.</li>
 </ul>
 <p>Each card in Design mode shows a <b>Selectors</b> strip: which dimensions this widget lets the user choose, whether they are <b>synced</b>, <b>own</b>, <b>pinned</b> or <b>total</b>, and, when another widget owns the shared selector, "dim → Owner".</p>
 
@@ -67,7 +67,7 @@
 <tr><td><b>Default context</b> (KPI)</td><td><b>Whole-model total</b>, <b>Follow dashboard selectors</b>, or <b>Pin to a member</b> with a <b>Scope dimension</b> and <b>Scope member</b>.</td></tr>
 <tr><td><b>Chart configuration</b></td><td>The chart editor (below).</td></tr>
 <tr><td>Buttons (Trigger, Integration)</td><td><b>Button label</b>, <b>Button color</b>, <b>Corners</b> (<b>Rounded</b>, the default; <b>Sharp</b>; <b>Pill</b> — the same in Design, Preview and on the dashboard), and for triggers a <b>Confirmation message</b> shown before the run (blank runs immediately).</td></tr>
-<tr><td><b>Source object</b> (form, KPI, trigger, integration)</td><td>Change the source. Grid, chart and import sources are fixed at placement.</td></tr>
+<tr><td><b>Source object</b> (table, KPI, trigger, integration)</td><td>Change the source. Grid, chart and import sources are fixed at placement. A Records widget's <b>Entry</b> section turns <b>Show the + New record button</b> on or off.</td></tr>
 <tr><td><b>Text style</b></td><td>Content, <b>Size (px)</b> 8–120, <b>Weight</b>, <b>Font family</b>, <b>Color</b>.</td></tr>
 <tr><td><b>Position</b> / <b>Size</b></td><td>Read-out of x and y; <b>Width (px)</b> and <b>Height (px)</b> in steps of 20.</td></tr>
 <tr><td><b>Duplicate</b> / <b>Delete</b></td><td>Duplicate copies the widget with its current, even unsaved, settings to a free spot.</td></tr>
@@ -90,7 +90,7 @@
 <p>A configuration is complete when it has a type, a plotted dimension and the required metrics.</p>
 
 <h3>What users get: the planning grid</h3>
-<figure><img src="img/28-dashboard-preview.png" alt="Preview of the Regional Finance Overview dashboard with KPIs, a bar chart, an editable grid, a form and a workflow button"><figcaption>Preview. Input rows are editable, the calculated row is tinted and marked CALC, and the legend explains the tints.</figcaption></figure>
+<figure><img src="img/28-dashboard-preview.png" alt="Preview of the Regional Finance Overview dashboard with KPIs, a bar chart, an editable grid, a records widget and a workflow button"><figcaption>Preview. Input rows are editable, the calculated row is tinted and marked CALC, and the legend explains the tints.</figcaption></figure>
 <ul>
   <li><b>Editing.</b> Input metrics are inputs; a value is committed on Enter or when leaving the cell. Non-numeric text is discarded. "Saving…" and "Save failed: …" appear while writing.</li>
   <li><b>Read-only cells.</b> Calculated metrics, aggregated parent members, members or metrics the user's access rules mark read-only, and grids that mirror another grid are not editable.</li>

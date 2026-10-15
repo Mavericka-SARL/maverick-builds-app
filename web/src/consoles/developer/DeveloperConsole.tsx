@@ -30,7 +30,7 @@ const TAB_LABELS: Record<Tab, string> = {
   dimensions:   "Dimensions",
   graph:        "Dependency Graph",
   automation:   "Triggers",
-  forms:        "Forms",
+  forms:        "Records",
   grids:        "Grids",
   dashboards:   "Dashboards",
   workflows:    "Workflows",

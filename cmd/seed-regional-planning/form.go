@@ -20,6 +20,8 @@ func buildForm(dev *api, d dims, m metrics) formResult {
 			{"name": "period", "label": "Period", "type": "dimension", "required": true, "dimension_id": d.periodID},
 			{"name": "amount", "label": "Amount", "type": "number", "required": true},
 			{"name": "justification", "label": "Justification", "type": "text", "required": false},
+			// Requests go through approval: a status field gives each one its status.
+			{"name": "status", "label": "Status", "type": "status"},
 		},
 	})
 	formID := id(form)

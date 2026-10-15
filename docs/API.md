@@ -17,6 +17,18 @@ Request context:
   have been issued to one of `GATEWAY_TOKEN_CLIENTS` (its `azp`; default
   `mavericks-web`): a token of any other client of the realm — a chat
   connector's above all — opens no REST route;
+- `Authorization: Bearer mvx_pat_…` — a personal API token, for a script. A
+  person makes it under **Account › API tokens** (`/api/me/api-tokens`), sees
+  it once, and revokes it there; it expires (1–365 days, 90 by default). It
+  acts as that person — their tenant, roles and access rules — and stops
+  working when they are disabled. A read-only token sends GET (and
+  `POST /api/forms/{id}/records/query`) and nothing else; a read and write
+  token does what the person may. No token reaches `/api/me/api-tokens`, so a
+  leaked one cannot make another. What a token changes is audited as the
+  person, with `"via": "api_token:<name>"` in the event's metadata. Only a
+  hash is kept, in the control plane next to the user directory: a token is
+  resolved to its person before the request is routed to their tenant. It
+  works in every edition and with `DEV_MODE` on or off;
 - `X-Dev-User: <persona-or-keycloak-sub>` only when the gateway runs with
   `DEV_MODE=true`; and
 - `X-App-Id: <application UUID>` to select the current application.
@@ -81,15 +93,17 @@ user with a role; the handler then applies the scope checks above.
 | `/api/notifications/settings*` | per-tenant e-mail delivery settings and a test send | `platform_admin` or `tenant_admin` |
 | `GET /api/workflow/definitions/{id}` | one published workflow with its steps (name, type, instructions, role names, deadlines, routing — never conditions or recipients) | authenticated + model access |
 | `/api/admin/connector-settings` | whether the tenant's people may change grid values from a chat connection (on by default) | `platform_admin` or `tenant_admin` |
-| `/api/forms*`, `/api/records*` | form runtime and record actions; CSV/XLSX form export/import; `GET /api/forms/{id}/records` pages the records the caller may see (`limit` ≤ 1000, `cursor` from the `X-Next-Cursor` header), withheld records neither filling a page nor ending the list | reach of the form's application, plus per-record permissions: the creator edits and deletes their own draft or submitted records and moves them only between draft and submitted; business admins of the workspace, developers and tenant admins within their scope, and platform admins do everything; `POST /api/forms/{id}/sync` is admin-only |
-| form definition create/update/delete under `/api/forms` | building forms | `developer` |
+| `/api/forms*`, `/api/records*` | tables of records (the API's "forms") and their records: record actions; CSV/XLSX export (`?query=` exports what a records query matches) and import; `GET /api/forms/{id}/records` pages the records the caller may see (`limit` ≤ 1000, `cursor` from the `X-Next-Cursor` header), withheld records neither filling a page nor ending the list; `POST /api/forms/{id}/records/query` — read-only, a filtered, searched, sorted page of records or totals grouped by fields (what the records widget, the chat connector's `query_records` and the AI Developer's `query_records` read). A record's values are checked on save (400, every problem listed: a hidden member or metric is answered as an unknown one), and a save, status change or delete that would post into, or withdraw from, a cell the caller may not write is refused (403) — never saved without its posting. A record has a status only in a table with a status field; elsewhere it counts as soon as it is saved. An autocode field's value is the server's | reach of the table's application, plus per-record permissions: the creator edits and deletes their own record while it has no status, is draft or submitted, and moves it only between draft and submitted; business admins of the workspace, developers and tenant admins within their scope, and platform admins do everything; in a table showing each person their own records (`own_records_only`) a non-administrator reads only theirs; `POST /api/forms/{id}/sync` is admin-only |
+| table definition create/update/delete under `/api/forms` | building tables of records (fields, `own_records_only`); an update that adds an autocode field gives the records already saved their codes, and one that adds or removes the status field re-posts the table | `developer` |
 | `/api/automation/rules*` | automation rules (list: authenticated; create/update/delete, including cron schedules) | `developer` |
 | `/api/automation/trigger/{id}`, `/api/automation/executions` | fire a manual rule, execution log | authenticated + app scope |
-| `/api/import/upload`, `/api/import/jobs*`, `/api/import/sheets/*` | CSV/XLSX/Google Sheets stage, validate, commit, jobs | authenticated + model scope + shared write guard |
+| `/api/import/upload`, `/api/import/jobs*`, `/api/import/sheets/*` | CSV/XLSX/Google Sheets stage, validate, commit, jobs. `import_mode` `incremental` (the default) adds each number to the cell's value, `replace` sets the file's cells, `full_reload` first removes the revision's typed values the caller may write. A file is its rows entered top to bottom: rows naming one cell add up in `incremental` and the last one counts in `replace`; a text or pick-list cell takes its last row in every mode. Sent again, an `incremental` file adds again: a client that may resend (after a timeout, a closed connection, a 502) sends an `Idempotency-Key` header, new for each file — the same key from the same person for the same model answers the first import (`"replayed": true`) and applies nothing, and 409 while that import still runs. An import has 10 minutes to arrive and answer; its recalculation runs after it answers, and the grid shows calculated cells as pending until it lands | authenticated + model scope + shared write guard |
 | `POST /api/import/dimension-members` | bulk member import | `developer` |
 | `/api/integrations/*` | run saved integrations | authenticated + model scope |
+| `/api/me/api-tokens*` | the caller's personal API tokens: list, make (`name`, `access` read or write, `expires_in_days`), revoke — signed in, never with a token | authenticated |
+| `POST /api/developer/revisions/{id}/recalculate` | every calculated metric of the revision recalculated in the background (grids report `recalc_pending` until it lands): for values a recalculation cut short left stale | `developer` with access to the revision |
 | `/api/developer/applications*` | application list/create for builders | `developer`, `platform_admin` or `tenant_admin` |
-| `/api/developer/*` (everything else) | models, revisions, metrics, dimensions, grids, dashboards, folders, workflows, workflow roles and trigger events, integrations and connections, form integrations, migrations, debug facts | `developer` |
+| `/api/developer/*` (everything else) | models, revisions, metrics, dimensions, grids, dashboards, folders, workflows, workflow roles and trigger events, integrations and connections, table (form) integrations, migrations, debug facts | `developer` |
 | `/api/ai/*` | AI sessions, documents, settings, proposals, draft promotion/discard | `developer` |
 | `/api/business-admin/roles*` | business roles and their members | `business_admin` of the application's workspace, or a `developer` of its tenant |
 | `/api/business-admin/*` (everything else) | users, dashboards, access rules | `business_admin` of the application's workspace |

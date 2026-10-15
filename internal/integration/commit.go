@@ -13,6 +13,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/calculation"
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
+	"github.com/mavericks-engine/mavericks/internal/recordpost"
 	"github.com/mavericks-engine/mavericks/internal/timedim"
 )
 
@@ -291,33 +292,56 @@ func (c *DBCommitter) commitTimeDimension(ctx context.Context, dimID string, cfg
 	return len(parsed), len(rows) - len(parsed), nil
 }
 
+// commitForm creates a record of the target table for each row through
+// recordpost.ImportRows — the checks and posting a record saved by hand
+// gets: its values, where it may post within the run principal's access,
+// the next auto-code, its posting into metrics and the rules a new record
+// fires. A row that fails is skipped and counted, as a grid target's is.
+// The run's principal is the developer who set the connector up, so a row
+// may name any status a table with a status field has.
 func (c *DBCommitter) commitForm(ctx context.Context, def *Definition, header []string, rows [][]string, dryRun bool, runBy string) (int, int, error) {
-	store := crudapp.NewStore(c.Pool)
-	written, skipped := 0, 0
-	for _, r := range rows {
-		data := make(map[string]any, len(header))
-		empty := true
-		for i, h := range header {
-			if i < len(r) && r[i] != "" {
-				data[h] = r[i]
-				empty = false
+	form, err := crudapp.NewStore(c.Pool).GetForm(ctx, def.Config.TargetID)
+	if err != nil {
+		return 0, 0, err
+	}
+	var appID, revisionID string
+	if err := c.Pool.QueryRow(ctx, `
+		SELECT m.application_id::text, COALESCE(fd.revision_id::text, '')
+		FROM model.form_def fd JOIN core.model m ON m.id = fd.model_id
+		WHERE fd.id = $1::uuid`, form.ID).Scan(&appID, &revisionID); err != nil {
+		return 0, 0, err
+	}
+	raw := make([]importpkg.RawRow, 0, len(rows))
+	for i, r := range rows {
+		cells := make(map[string]string, len(header))
+		for j, h := range header {
+			if j < len(r) {
+				cells[h] = r[j]
 			}
 		}
-		if empty {
-			skipped++
-			continue
-		}
-		if dryRun {
-			written++
-			continue
-		}
-		if _, err := store.CreateRecord(ctx, def.Config.TargetID, runBy, data); err != nil {
-			skipped++
-			continue
-		}
-		written++
+		raw = append(raw, importpkg.RawRow{RowNumber: i + 1, Cells: cells})
 	}
-	return written, skipped, nil
+	newStatus := ""
+	if form.HasStatus() {
+		newStatus = crudapp.StatusDraft
+	}
+	written, rowErrs, err := recordpost.OnPool(c.Pool, c.Log).ImportRows(ctx, recordpost.ImportRequest{
+		Form: form, CreatorID: runBy, Header: header, Rows: raw, NewStatus: newStatus,
+		StatusRefusal: func(string) string { return "" },
+		AppID:         appID, RevisionID: revisionID,
+		DryRun: dryRun, Inline: true, Partial: true,
+	})
+	if err != nil {
+		return written, len(rowErrs), err
+	}
+	for i, e := range rowErrs {
+		if i == 5 {
+			c.Log.Warn().Int("more", len(rowErrs)-i).Str("integration", def.ID).Msg("connector rows skipped")
+			break
+		}
+		c.Log.Warn().Int("row", e.Row).Str("column", e.Column).Str("problem", e.Message).Str("integration", def.ID).Msg("connector row skipped")
+	}
+	return written, len(rowErrs), nil
 }
 
 // LoadPushRows reads the push source rows.

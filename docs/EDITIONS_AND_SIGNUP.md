@@ -98,7 +98,7 @@ within about a tenth of their files' size.
 **Making room.** Deleting a **model**, a **revision**, a **metric** or the
 application holding them gives the space back at once, in every edition.
 Everything the model held goes with it (ON DELETE CASCADE: facts, calculated
-results, imports and their staged rows, form records, grants), and its cell
+results, imports and their staged rows, records, grants), and its cell
 history by trigger — the archive skips facts whose model or metric is being
 deleted and drops their earlier history, which no screen could show once they
 are gone (migration 089 for models; 111 lost the check, 133 restored it and
@@ -143,7 +143,7 @@ database's files 72 MB to 16 MB within seconds of the delete).
 **A write that would cross the limit is refused.** On an edition with a storage
 limit — on the hosted service, the Community Edition of the Playground; the
 Commercial and Enterprise Editions set none — the sweep puts a guard on the
-tables a workspace fills: facts, staged imports, form records and dimension
+tables a workspace fills: facts, staged imports, records and dimension
 members (`runtime.set_storage_guard`, migration 135, with the limit and its
 sentence on `core.customer.storage_limit_bytes` / `storage_limit_text`). Every
 statement that adds rows there takes them, at the table's bytes per row
@@ -152,7 +152,7 @@ per transaction (`runtime.storage_used`: the sweep's last measurement plus the
 rows inserted and deleted since, by the statistics' exact counters, taken just
 before it measured — `runtime.storage_mark`); the statement that would go past the
 limit fails the whole transaction with SQLSTATE `MV402`, whichever path wrote
-it — cell entry, a form, an import, a model copy, the AI developer. The gateway
+it — cell entry, a record, an import, a model copy, the AI developer. The gateway
 answers `402 {"code": "plan_limit", "limit": "max_storage_mb"}` with the
 sentence: "Not saved: this would take the workspace to about 104 MB. The
 Community Edition allows 100 MB of storage. A Community workspace holds up to

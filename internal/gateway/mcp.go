@@ -154,8 +154,9 @@ func delegatedWrite(ctx context.Context) (string, bool) {
 }
 
 // delegatedReadRoutes are the routes a connector's read may reach: who the
-// person is, which models they open, grid data, and the dashboards and
-// workflows that explain the process around it. Each decides its own
+// person is, which models they open, grid data, the tables of records saved
+// in a model, and the dashboards and workflows that explain the process
+// around them. Each decides its own
 // access as for the console. Anything else answers 403 before any handler
 // runs, so a tool that asked for another route, by mistake or otherwise,
 // could not reach it.
@@ -174,6 +175,10 @@ var delegatedReadRoutes = []struct{ method, pattern string }{
 	{http.MethodGet, "/api/folders"},
 	{http.MethodGet, "/api/workflow/definitions"},
 	{http.MethodGet, "/api/workflow/definitions/{}"},
+	// Tables of records and the read-only records query (a POST only for
+	// its body: it changes nothing).
+	{http.MethodGet, "/api/forms"},
+	{http.MethodPost, "/api/forms/{}/records/query"},
 }
 
 // delegatedWriteRoutes are the routes a chat connection's write may reach:

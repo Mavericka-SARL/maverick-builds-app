@@ -1,7 +1,8 @@
 // Package mcpserver is the chat connector's Model Context Protocol server:
 // the tools ChatGPT, Claude and other MCP hosts call to analyse a person's
 // grid data and chart it, compare it and report on it in the conversation,
-// and to write the grid cells the person may write. The protocol lives
+// to read and total the records saved in a model's tables, and to write the
+// grid cells the person may write. The protocol lives
 // here; the reads and writes are internal/reporting's, made as the person
 // the host's token was issued for (the token's subject, verified by the
 // gateway before any call reaches a tool).
@@ -32,9 +33,11 @@ import (
 type Observer func(ctx context.Context, subject, tool string, took time.Duration, err error)
 
 // Instructions is what the server tells a host about itself.
-const Instructions = `Analysis of maverickbuilds.app grid data, the process around it, and entry of grid values, as the signed-in person.
+const Instructions = `Analysis of maverickbuilds.app grid data and records, the process around them, and entry of grid values, as the signed-in person.
 
 Start with list_models, then pass its application_id and model_id to every other tool. Discover before querying: list_sources lists the grids, describe_source their metrics and dimensions, list_members the members you can filter or group by. Never guess an id.
+
+A model's tables hold the records people save — requests, expenses, deals. list_tables lists them with their fields; query_records reads a page of records (filter by a field, status or date; search; sort) or totals over them: count, sum, average, minimum and maximum, grouped by a field or a date's month or another period. Ask query_records for totals instead of adding up a page of records.
 
 To understand how a model is meant to be used, read its dashboards and workflows: list_dashboards, then describe_dashboard gives a page's text (instructions and explanations), its links to other dashboards (follow them with describe_dashboard) and which grid, metrics and filters each widget shows — fetch those numbers with query_grid. list_workflows and describe_workflow give the approval and submission processes with their steps and the roles that act on each.
 
@@ -66,6 +69,7 @@ func New(svc *reporting.Service, opts Options) *sdk.Server {
 	t.register(s)
 	t.registerPresentation(s)
 	t.registerProcess(s)
+	t.registerRecords(s)
 	t.registerWrites(s)
 	return s
 }

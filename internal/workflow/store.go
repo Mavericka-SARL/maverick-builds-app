@@ -28,9 +28,10 @@ import (
 )
 
 type Store struct {
-	pool *pgxpool.Pool
-	db   dbx.DB // what the store\'s statements run on: the pool, or a transaction
-	log  zerolog.Logger
+	pool         *pgxpool.Pool
+	db           dbx.DB         // what the store\'s statements run on: the pool, or a transaction
+	log          zerolog.Logger // recordStatus sets the status of a record a run drives (record_status.go).
+	recordStatus RecordStatusFunc
 }
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool, db: pool, log: zerolog.Nop()} }
@@ -217,6 +218,9 @@ func (s *Store) startWorkflow(ctx context.Context, defID, startedByUserID string
 			return nil, fmt.Errorf("create step %s: %w", step.Id, err)
 		}
 	}
+
+	// The records the run is about are under review while it runs.
+	s.driveRecords(ctx, instanceID, runStarted, startedByUserID)
 
 	// A workflow may open with a notification or condition step: neither needs
 	// human action, so process it (and anything it cascades into) immediately.
@@ -1276,11 +1280,15 @@ func (s *Store) closeInstanceIfIdle(ctx context.Context, instanceID, finalStatus
 		UPDATE workflow.workflow_step SET status = 'skipped'
 		WHERE instance_id = $1::uuid AND status = 'pending'
 	`, instanceID)
-	_, _ = s.db.Exec(ctx, `
+	tag, _ := s.db.Exec(ctx, `
 		UPDATE workflow.workflow_instance
 		SET status = $2::workflow.workflow_status, completed_at = now()
 		WHERE id = $1::uuid AND status = 'running'
 	`, instanceID, finalStatus)
+	// The records the run was about take its decision, once.
+	if tag.RowsAffected() == 1 && finalStatus == "completed" {
+		s.driveRecords(ctx, instanceID, runFinished, "")
+	}
 	execStatus := "completed"
 	if finalStatus != "completed" {
 		execStatus = "cancelled"

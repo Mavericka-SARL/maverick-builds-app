@@ -8,7 +8,6 @@ package gateway
 
 import (
 	"context"
-	"slices"
 
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
 )
@@ -18,8 +17,11 @@ type formPermissions struct {
 	// Sync: the caller may re-post the form's records into their metrics
 	// (POST /api/forms/{id}/sync).
 	Sync bool `json:"sync"`
-	// CreateStatuses: the statuses the caller may create a record in, in
-	// lifecycle order; empty when they may create none.
+	// Create: the caller may create records (POST /api/forms/{id}/records,
+	// an import).
+	Create bool `json:"create"`
+	// CreateStatuses: in a table with a status field, the statuses the
+	// caller may create a record in, in lifecycle order; empty otherwise.
 	CreateStatuses []string `json:"create_statuses"`
 }
 
@@ -27,47 +29,60 @@ type formPermissions struct {
 func (s formRecordScope) formPermissions() formPermissions {
 	p := formPermissions{Sync: s.reach && s.admin, CreateStatuses: []string{}}
 	create := s.createAccess()
-	for _, st := range crudapp.RecordStatuses {
-		if create.CanCreate(st) {
-			p.CreateStatuses = append(p.CreateStatuses, st)
+	if s.hasStatus() {
+		for _, st := range crudapp.RecordStatuses {
+			if create.CanCreate(st) {
+				p.CreateStatuses = append(p.CreateStatuses, st)
+			}
 		}
 	}
+	p.Create = len(p.CreateStatuses) > 0 || create.CanCreate("")
 	return p
 }
 
-// servedForm is a form as GET /api/forms serves it: its definition and what
-// the caller may do with its records.
+// servedForm is a form as GET /api/forms serves it: its definition, what
+// the caller may do with its records, and where its records post.
 type servedForm struct {
 	*crudapp.FormDef
 	Permissions formPermissions `json:"permissions"`
+	// PostingFields: each field a live mapping takes a member from, with
+	// the statuses a record posts in ("" for a record without a status) —
+	// where a member the person may only read cannot be chosen, since the
+	// save would post into it.
+	PostingFields map[string][]string `json:"posting_fields"`
 }
 
 // withFormPermissions pairs each form with act's permissions on it. A caller
-// who cannot be resolved may do nothing. Reach and admin — all the
-// permissions depend on — are the model's and its application's, so the
-// scope is resolved once per model (GET /api/forms lists one model's forms)
-// rather than once per form, through the same resolveFormRecordScope the
-// sync and the create decide by.
+// who cannot be resolved may do nothing. Reach and admin are the model's and
+// its application's, so they are resolved once per model (GET /api/forms
+// lists one model's forms) through the same resolveFormRecordScope the sync
+// and the create decide by; what depends on the table itself — whether it
+// has a status field — is the table's.
 func (h *handler) withFormPermissions(ctx context.Context, act *actor, forms []*crudapp.FormDef) ([]servedForm, error) {
 	out := make([]servedForm, 0, len(forms))
-	byModel := map[string]formPermissions{}
+	byModel := map[string]formRecordScope{}
 	for _, f := range forms {
-		p := formRecordScope{}.formPermissions()
+		served := servedForm{FormDef: f, Permissions: formRecordScope{}.formPermissions()}
 		if act != nil {
-			cached, ok := byModel[f.ModelID]
+			scope, ok := byModel[f.ModelID]
 			if !ok || f.ModelID == "" {
-				scope, err := h.resolveFormRecordScope(ctx, act, f.ID)
-				if err != nil {
+				var err error
+				if scope, err = h.resolveFormRecordScope(ctx, act, f.ID); err != nil {
 					return nil, err
 				}
-				cached = scope.formPermissions()
 				if f.ModelID != "" {
-					byModel[f.ModelID] = cached
+					byModel[f.ModelID] = scope
 				}
 			}
-			p = formPermissions{Sync: cached.Sync, CreateStatuses: slices.Clone(cached.CreateStatuses)}
+			scope.formID, scope.form = f.ID, f
+			served.Permissions = scope.formPermissions()
 		}
-		out = append(out, servedForm{FormDef: f, Permissions: p})
+		posting, err := h.postingFields(ctx, f)
+		if err != nil {
+			return nil, err
+		}
+		served.PostingFields = posting
+		out = append(out, served)
 	}
 	return out, nil
 }

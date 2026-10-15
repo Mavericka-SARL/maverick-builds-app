@@ -136,7 +136,7 @@ export function AutomationTab({ revisionId }: { revisionId?: string } = {}) {
                   </div>
                   <div className="mvx-admin-muted" style={{ marginTop: 2, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                     <StatusBadge>{rule.trigger_type}</StatusBadge>
-                    {rule.source_form_id && (() => { const f = forms.find(x => x.id === rule.source_form_id); return f ? <StatusBadge tone="success">form: {f.label || f.name}</StatusBadge> : null; })()}
+                    {rule.source_form_id && (() => { const f = forms.find(x => x.id === rule.source_form_id); return f ? <StatusBadge tone="success">table: {f.label || f.name}</StatusBadge> : null; })()}
                     {rule.trigger_type === "schedule" && rule.cron_expr && (
                       <StatusBadge tone="info">{rule.cron_expr} ({rule.timezone || "UTC"})</StatusBadge>
                     )}
@@ -187,7 +187,7 @@ export function AutomationTab({ revisionId }: { revisionId?: string } = {}) {
                       }
                       confirm({
                         title: "Disable this trigger?",
-                        body: `"${rule.name}" will stop firing — the "Trigger" button and any event it listens for (e.g. form submit) will no longer start "${rule.workflow_name}". The rule itself, the workflow, and any already-running instances are unaffected. You can re-enable it anytime.`,
+                        body: `"${rule.name}" will stop firing — the "Trigger" button and any event it listens for (e.g. a record submitted) will no longer start "${rule.workflow_name}". The rule itself, the workflow, and any already-running instances are unaffected. You can re-enable it anytime.`,
                         confirmLabel: "Disable",
                         onConfirm: () => toggleEnabled.mutate({ ruleId: rule.id, enabled: false }),
                       });
@@ -337,8 +337,8 @@ function RuleForm({
           <option value="manual">manual — trigger manually</option>
           <option value="schedule">schedule — on a cron schedule</option>
           {!onlyManualOrSchedule && <>
-            <option value="form_submit">form_submit — on record creation</option>
-            <option value="form_approval">form_approval — on record approved / closed</option>
+            <option value="form_submit">form_submit — a record is submitted (saved, in a table without a status field)</option>
+            <option value="form_approval">form_approval — a record is approved</option>
             <option value="grid_change">grid_change — on cell writeback</option>
             <option value="integration_completed">integration_completed — an integration run finished</option>
             <option value="integration_failed">integration_failed — an integration run failed</option>
@@ -363,9 +363,9 @@ function RuleForm({
         </Field>
       </>}
       {needsForm && (
-        <Field label="Source form" description="optional — leave blank for any form">
+        <Field label="Source table" description="optional — leave blank for any table">
           <Select value={rule.source_form_id} onChange={(e) => onChange({ ...rule, source_form_id: e.target.value })}>
-            <option value="">— any form —</option>
+            <option value="">— any table —</option>
             {forms.map(f => <option key={f.id} value={f.id}>{f.label || f.name}</option>)}
           </Select>
         </Field>

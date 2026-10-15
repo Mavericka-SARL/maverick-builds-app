@@ -27,8 +27,15 @@ const FORM = {
   fields: [
     { name: "vendor", label: "Vendor", type: "text", required: true },
     { name: "amount", label: "Amount", type: "number", required: true },
+    { name: "status", label: "Status", type: "status", required: false },
   ],
   created_at: "2026-05-01T09:00:00Z",
+};
+
+const RECORD = {
+  id: "rec-1", form_id: "form-1", data: { vendor: "Acme Cloud", amount: 100 }, status: "submitted", created_by: "u-1",
+  created_at: "2026-09-20T09:00:00Z", updated_at: "2026-09-20T09:00:00Z",
+  permissions: { edit: false, delete: false, set_status: [] },
 };
 
 type Server = { posts: Record<string, unknown>[]; syncs: number; perms: FormPerms | undefined };
@@ -46,18 +53,14 @@ async function serveForm(page: Page, perms: FormPerms | undefined, syncStatus = 
       server.posts.push(req.postDataJSON());
       return route.fulfill({ json: { id: "rec-new", form_id: "form-1", data: {}, status: "draft", created_by: "u-1", created_at: "", updated_at: "" } });
     }
-    return route.fulfill({
-      json: [{
-        id: "rec-1", form_id: "form-1", data: { vendor: "Acme Cloud", amount: 100 }, status: "submitted", created_by: "u-1",
-        created_at: "2026-09-20T09:00:00Z", updated_at: "2026-09-20T09:00:00Z",
-        permissions: { edit: false, delete: false, set_status: [] },
-      }],
-    });
+    return route.fulfill({ json: [RECORD] });
   });
+  await page.route((url) => url.pathname === "/api/forms/form-1/records/query", (route) =>
+    route.fulfill({ json: { kind: "records", table: { id: "form-1", name: FORM.name, label: FORM.label }, columns: [], records: [RECORD], total: 1, statuses: ALL_STATUSES } }));
   await page.route((url) => url.pathname === "/api/forms/form-1/sync", (route) => {
     server.syncs++;
     if (syncStatus === 403) {
-      return route.fulfill({ status: 403, json: { error: "forbidden: only an administrator of this application syncs a form's records" } });
+      return route.fulfill({ status: 403, json: { error: "forbidden: only an administrator of this application syncs a table's records" } });
     }
     return route.fulfill({ json: { status: "ok", mappings: 1, records_processed: 1 } });
   });

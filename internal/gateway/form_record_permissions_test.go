@@ -112,7 +112,7 @@ func setupRecordFixture(t *testing.T) *recordFixture {
 	// The form is a developer's, made the developer's way.
 	status, body := f.do(http.MethodPost, "/api/forms", prDev, map[string]any{
 		"name": "expense", "label": "Expense",
-		"fields": []map[string]any{{"name": "amount", "label": "Amount", "type": "number"}},
+		"fields": []map[string]any{{"name": "amount", "label": "Amount", "type": "number"}, {"name": "status", "label": "Status", "type": "status"}},
 	})
 	if status != http.StatusOK {
 		t.Fatalf("create form as developer: %d %s", status, body)

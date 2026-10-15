@@ -15,7 +15,7 @@ every write is a new row, and every reader takes the latest row
 rows in that order, with the first one being what the grid shows.
 
 The one hole was deletion. Three paths delete rows — an import in
-**full-reload** mode, a form integration **re-posting** its aggregates, and
+**full-reload** mode, a table integration **re-posting** its aggregates, and
 **re-parenting** a dimension member (its facts are re-keyed) — and a deleted
 row was a change that vanished from the record. Migration 081 adds
 `runtime.fact_input_history` and a `BEFORE DELETE` trigger that copies every
@@ -28,7 +28,7 @@ deleting a metric or a model must not fail because its history exists.
 | Field | Meaning |
 |---|---|
 | `entered_by` | the account that wrote the row |
-| `source.kind` | `typed` — a person in the grid, or an import they ran; `form` — a form integration's posting, with the mapping's name; `copied` — the row came with a revision copy (it predates the revision) |
+| `source.kind` | `typed` — a person in the grid, or an import they ran; `form` — a table integration's posting of records, with the mapping's name (shown as "records: …"); `copied` — the row came with a revision copy (it predates the revision) |
 | `current` | the row the grid shows now |
 | `deleted_at`, `delete_reason` | for archived rows: when and why |
 

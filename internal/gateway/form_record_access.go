@@ -33,6 +33,8 @@ var errRecordNotReached = errors.New("not found")
 type formRecordScope struct {
 	formID, modelID, appID, revisionID string
 	userID                             string
+	// form is the table, once it is known to exist.
+	form *crudapp.FormDef
 	// reach: the caller opens the form's model the way the business console
 	// does (actorCanAccessModel on a business route).
 	reach bool
@@ -61,6 +63,9 @@ func (h *handler) resolveFormRecordScope(ctx context.Context, act *actor, formID
 	}
 	if err != nil {
 		return s, fmt.Errorf("resolve form: %w", err)
+	}
+	if s.form, err = crudapp.NewStore(h.db.For(ctx)).GetForm(ctx, formID); err != nil {
+		return s, err
 	}
 
 	// Records are the business surface: whatever route the request came
@@ -128,15 +133,29 @@ func (h *handler) administersModel(ctx context.Context, act *actor, modelID stri
 // access is who the scope's caller is to rec.
 func (s formRecordScope) access(rec *crudapp.FormRecord) crudapp.RecordAccess {
 	return crudapp.RecordAccess{
-		Reach:   s.reach,
-		Admin:   s.admin,
-		Creator: rec != nil && rec.CreatedBy != nil && *rec.CreatedBy == s.userID,
+		Reach:    s.reach,
+		Admin:    s.admin,
+		Creator:  rec != nil && rec.CreatedBy != nil && *rec.CreatedBy == s.userID,
+		Statuses: s.hasStatus(),
 	}
 }
 
 // createAccess is who the scope's caller is to a record they are creating.
 func (s formRecordScope) createAccess() crudapp.RecordAccess {
-	return crudapp.RecordAccess{Reach: s.reach, Admin: s.admin, Creator: true}
+	return crudapp.RecordAccess{Reach: s.reach, Admin: s.admin, Creator: true, Statuses: s.hasStatus()}
+}
+
+// hasStatus reports whether the scope's table has a status field.
+func (s formRecordScope) hasStatus() bool { return s.form != nil && s.form.HasStatus() }
+
+// newRecordStatus is the status a new record of the scope's table starts
+// in when its creator names none: a draft, or none in a table without a
+// status field.
+func (s formRecordScope) newRecordStatus() string {
+	if s.hasStatus() {
+		return crudapp.StatusDraft
+	}
+	return ""
 }
 
 // permit sets rec.Permissions for the scope's caller — the record permissions
@@ -151,8 +170,8 @@ func (s formRecordScope) permit(rec *crudapp.FormRecord) crudapp.RecordAccess {
 
 // reachRecord loads recordID for act, with its form's scope and the access
 // act has to it. errRecordNotReached when the record does not exist, its
-// form is outside act's reach, or act's access rules withhold it
-// (filterFormRecords, as the record list does).
+// form is outside act's reach, or act may not see it (recordVisibility, as
+// the record list decides).
 func (h *handler) reachRecord(ctx context.Context, act *actor, store *crudapp.Store, recordID string) (*crudapp.FormRecord, formRecordScope, crudapp.RecordAccess, error) {
 	if _, err := uuid.Parse(recordID); err != nil {
 		return nil, formRecordScope{}, crudapp.RecordAccess{}, errRecordNotReached
@@ -171,16 +190,16 @@ func (h *handler) reachRecord(ctx context.Context, act *actor, store *crudapp.St
 	if !scope.reach {
 		return nil, scope, crudapp.RecordAccess{}, errRecordNotReached
 	}
-	form, err := store.GetForm(ctx, rec.FormID)
+	vis, err := h.recordVisibility(ctx, scope)
 	if err != nil {
 		return nil, scope, crudapp.RecordAccess{}, err
 	}
-	kept, err := h.filterFormRecords(ctx, act, form, []*crudapp.FormRecord{rec})
-	if err != nil {
-		return nil, scope, crudapp.RecordAccess{}, err
-	}
-	if len(kept) == 0 {
+	rec, err = store.VisibleRecord(ctx, scope.form, vis, recordID)
+	if errors.Is(err, crudapp.ErrRecordNotFound) {
 		return nil, scope, crudapp.RecordAccess{}, errRecordNotReached
+	}
+	if err != nil {
+		return nil, scope, crudapp.RecordAccess{}, err
 	}
 	return rec, scope, scope.permit(rec), nil
 }
@@ -269,39 +288,27 @@ func recordPageParams(r *http.Request) (limit int, after *crudapp.RecordPosition
 	return limit, after, nil
 }
 
-// visibleRecordPage is up to limit records of form the caller may see,
-// newest first, after `after`: pages of the form's records are read and
-// filtered (filterFormRecords) until limit are kept or none are left, so
-// records the caller's access rules withhold neither fill the page nor end
-// the list early — a list of the newest 100 rows, filtered, did both. next
-// continues after the last record served, never after a withheld one, whose
-// place would otherwise be disclosed; "" when no more can follow.
-func (h *handler) visibleRecordPage(ctx context.Context, act *actor, store *crudapp.Store, form *crudapp.FormDef, after *crudapp.RecordPosition, limit int) (records []*crudapp.FormRecord, next string, err error) {
-	pos := after
-	for {
-		batch, err := store.ListRecordsPage(ctx, form.ID, pos, limit)
-		if err != nil {
-			return nil, "", err
-		}
-		if len(batch) == 0 {
-			return records, "", nil
-		}
-		last := batch[len(batch)-1]
-		pos = &crudapp.RecordPosition{CreatedAt: last.CreatedAt, ID: last.ID}
-		kept, err := h.filterFormRecords(ctx, act, form, batch)
-		if err != nil {
-			return nil, "", err
-		}
-		for _, rec := range kept {
-			records = append(records, rec)
-			if len(records) == limit {
-				return records, encodeRecordCursor(rec), nil
-			}
-		}
-		if len(batch) < limit {
-			return records, "", nil
-		}
+// visibleRecordPage is up to limit records of the scope's table its caller
+// may see, newest first, after `after`. What they may not see is left out
+// by the query itself (recordVisibility), so it neither fills the page nor
+// ends the list early — a list of the newest 100 rows, filtered, did both.
+// next continues after the last record served, never after a withheld one,
+// whose place would otherwise be disclosed; "" when no more can follow.
+func (h *handler) visibleRecordPage(ctx context.Context, scope formRecordScope, store *crudapp.Store, after *crudapp.RecordPosition, limit int) (records []*crudapp.FormRecord, next string, err error) {
+	vis, err := h.recordVisibility(ctx, scope)
+	if err != nil {
+		return nil, "", err
 	}
+	// One more than the page shows whether another page follows.
+	records, err = store.VisibleRecordsPage(ctx, scope.form, vis, after, limit+1)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(records) > limit {
+		records = records[:limit]
+		return records, encodeRecordCursor(records[limit-1]), nil
+	}
+	return records, "", nil
 }
 
 // A record cursor is the position of the last record served, opaque to the

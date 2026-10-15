@@ -160,8 +160,9 @@ func TestCreateAndListRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRecord: %v", err)
 	}
-	if rec.Status != "draft" {
-		t.Errorf("status = %q, want draft", rec.Status)
+	// sampleFields has no status field, so a record has no status.
+	if rec.Status != "" {
+		t.Errorf("status = %q, want none", rec.Status)
 	}
 
 	records, err := store.ListRecords(ctx, form.ID, 10)

@@ -78,7 +78,7 @@ export const TRIGGER_CATEGORY_ORDER: TriggerEventCatalogItem["category"][] = [
 ];
 export const TRIGGER_CATEGORY_LABELS: Record<TriggerEventCatalogItem["category"], string> = {
   manual: "Manual",
-  form: "Forms",
+  form: "Records",
   integration: "Integrations",
   planning: "Planning & Grids",
   api: "API",

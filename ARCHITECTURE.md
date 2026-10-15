@@ -12,7 +12,7 @@ application can combine three operating modes:
 
 - planning: dimensions, metrics, formulas, grids, revisions, writeback, and
   dashboards;
-- CRUD: forms, records, mappings, integrations, and audit history; and
+- CRUD: tables of records (the API's "forms"), records, mappings, integrations, and audit history; and
 - execution: workflows, tasks, approvals, automations, notifications, and
   controlled business actions.
 
@@ -93,7 +93,7 @@ groups are:
   `/api/dashboard-widgets/{id}/chart-data`;
 - tasks, workflows, and notifications: `/api/tasks`, `/api/workflow/*`, and
   `/api/notifications`;
-- forms and automations: `/api/forms`, `/api/records`, and `/api/automation/*`;
+- tables of records and automations: `/api/forms` (with the read-only records query, `POST /api/forms/{id}/records/query`), `/api/records`, and `/api/automation/*`;
 - imports and integrations: `/api/import/*`, `/api/integrations/*`, and
   developer integration configuration;
 - developer model-building: `/api/developer/*`;
@@ -115,7 +115,8 @@ is the readable overview.
 | `internal/formula` | Lexer, parser, AST, references, typed values, functions, and Excel-style evaluation |
 | `internal/calculation` | Dependency-aware affected-metric traversal, partition state, evaluation, result persistence |
 | `internal/query` | Chart data resolution and access-filtered aggregation |
-| `internal/crudapp` | Form definitions and record persistence |
+| `internal/crudapp` | Tables of records (`form_def`), record persistence, auto-codes, and the records query (`query.go`: visibility, filters, search, sort, totals in one SQL statement) |
+| `internal/recordpost` | What access rules mean for a table's records (visibility, value checks, where a record may post — within its creator's access), posting records into metrics, imports of table rows; shared by the gateway and the integration worker |
 | `internal/workflow` | Definitions, instances, steps, routing, joins, automations, and execution logs |
 | `internal/importpkg` | CSV/XLSX parsing, name/ID resolution, staging, validation, and commit |
 | `internal/writeguard` | Shared system-managed, member-access, ancestor-cascade, and workflow-lock checks |
@@ -152,7 +153,7 @@ Fourteen named schemas organize the data:
 | `identity` | users, role assignments, business roles, dashboard membership, access rules, app/model grants, API keys |
 | `security` | RACI, dimension-member, metric, cell, and ABAC policy definitions |
 | `model` | revisions, dimensions, members, properties, metrics, dependencies, grids, dashboards, forms, mappings, integrations |
-| `runtime` | input facts, calculated results, partition state, form records, form postings |
+| `runtime` | input facts, calculated results, partition state, records, record postings, auto-code counters |
 | `workflow` | workflow definitions and runtime, steps, automation rules and executions |
 | `import` | import jobs, errors, and staging rows |
 | `audit` | partitioned audit events and partition registry |
@@ -330,7 +331,7 @@ Authorization is layered rather than represented by one role check:
 
 The HTTP gateway applies role guards plus explicit app/model access checks,
 and checks resource ownership for IDs taken from the path and the request
-body. Direct HTTP cells, forms and imports use the shared write guard. `writeguard.HiddenAccess` fails closed on a database error, and
+body. Direct HTTP cells, records and imports use the shared write guard; a record save that would post into a cell its author may not write is refused up front (`internal/gateway/record_rules.go`). `writeguard.HiddenAccess` fails closed on a database error, and
 `HiddenInChain` / `ExpandHidden` cascade a hidden rule from any ancestor to its
 descendants. Two known gaps remain: import does not refuse a non-input
 (`is_input=false`) metric, and `/api/cells` skips unknown dimension codes
@@ -357,8 +358,8 @@ The workflow engine supports sequential routing, conditional routes, parallel
 fan-out, join synchronization, required comments, role/user assignment, inbox
 and history views, and dashboard actions that start workflows.
 
-Automation rules can be triggered manually, through the API, on form submit,
-on form approval, on grid change, when an integration run completes or fails,
+Automation rules can be triggered manually, through the API, on a record
+submitted (in a table without a status field: saved), on a record approved, on grid change, when an integration run completes or fails,
 or on a cron schedule. Event-driven rules are dispatched by the HTTP gateway;
 schedule rules are claimed and fired by `internal/workflow/scheduler.go`
 (migration 059: cron expression, IANA time zone, misfire policy, retries), and
@@ -384,8 +385,11 @@ import service, not demo-specific endpoints.
 Name- and UUID-based import resolution is scoped to the selected
 model/revision. Import does not yet refuse a calculated (non-input) metric.
 
-Form-to-metric mappings post approved or selected record states into planning
-facts with sum/replace-style aggregation. Integration definitions and saved
+Record-to-metric mappings post records into planning facts with
+sum/replace-style aggregation: every record of a table without a status field,
+and in a table with one, the records in the mapping's posting statuses. A
+workflow whose subject is the table moves a record's status
+(`internal/workflow/record_status.go`). Integration definitions and saved
 import jobs are managed from the Developer Console.
 
 Tenant and platform admins can export (with or without data) and import a revision-aware model package over the

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Trash2, Plus, Pencil } from "lucide-react";
+import { Trash2, Plus, Pencil, RefreshCw } from "lucide-react";
 import { api, withTenant, type AdminModel, type AdminTenant } from "../../api/client";
 import { DetailsEditor } from "../DetailsEditor";
 import { Button, IconButton, TextInput, Select, Field, Toolbar, ToolbarGroup, LoadingState, EmptyState, StatusBadge, RevisionBadge, KindTag, kindHint, useConfirm, useCollapsed, CollapseToggle } from "../../ui";
@@ -59,6 +59,13 @@ function DevModelRevisions({
     onSuccess: () => inv(),
   });
 
+  // Recalculates every calculated metric of a revision, for values a
+  // recalculation cut short (a restart) left stale: passes otherwise start
+  // only from writes and edits.
+  const recalc = useMutation({
+    mutationFn: (id: string) => at(() => api.recalculateDevRevision(id)),
+  });
+
   const del = useMutation({
     mutationFn: (id: string) => at(() => api.deleteDevRevision(id)),
     onSuccess: (_, id) => {
@@ -100,6 +107,15 @@ function DevModelRevisions({
               </div>
               {s.name === model.active_revision && <RevisionBadge status="live" />}
               {isWorking && <StatusBadge tone="brand">Working</StatusBadge>}
+              <IconButton
+                aria-label={`Recalculate revision ${s.name}`}
+                title="Recalculate every calculated metric of this revision"
+                size={26}
+                disabled={recalc.isPending || isDeleting}
+                onClick={(e) => { e.stopPropagation(); recalc.mutate(s.id); }}
+              >
+                <RefreshCw size={13} />
+              </IconButton>
               {/* Set Active + Delete — not allowed on the LIVE revision */}
               {s.name !== model.active_revision && (
                 <>
@@ -135,6 +151,14 @@ function DevModelRevisions({
       </div>
       {del.isError && <p className="mvx-admin-error" role="alert">Not deleted: {(del.error as Error).message}</p>}
       {activate.isError && <p className="mvx-admin-error" role="alert">Not activated: {(activate.error as Error).message}</p>}
+      {recalc.isError && <p className="mvx-admin-error" role="alert">Not recalculated: {(recalc.error as Error).message}</p>}
+      {recalc.isSuccess && (
+        <p className="mvx-admin-muted" role="status">
+          {recalc.data.metrics > 0
+            ? `Recalculating ${recalc.data.metrics} calculated metric${recalc.data.metrics === 1 ? "" : "s"} — grids show them as pending until it lands.`
+            : "This revision has no calculated metric to recalculate."}
+        </p>
+      )}
 
       {/* New revision */}
       {showNew ? (

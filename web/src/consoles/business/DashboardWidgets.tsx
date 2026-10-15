@@ -136,7 +136,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
   } else if (widget.widget_type === "form" && widget.ref_id) {
     inner = (
       <div className="mvx-panel" style={{ padding: 0, overflow: "hidden" }}>
-        <FormWidgetPanel formId={widget.ref_id} ctx={ctx} />
+        <FormWidgetPanel formId={widget.ref_id} ctx={ctx} newRecordButton={!!widget.widget_props?.new_record_button} />
       </div>
     );
   } else if (widget.widget_type === "integration_button" && widget.ref_id) {
@@ -428,7 +428,7 @@ export function AutomationButtonWidget({ ruleId, label, buttonColor, corners, ct
     rulesLoading ? null
     : !rule ? "This automation isn't available to you, or no longer exists."
     : !rule.enabled ? `"${rule.name}" is disabled.`
-    : rule.trigger_type !== "manual" ? `"${rule.name}" runs on ${rule.trigger_type.replace(/_/g, " ")}, not on demand.`
+    : rule.trigger_type !== "manual" ? `"${rule.name}" runs ${triggerWhen(rule.trigger_type)}, not on demand.`
     : null;
 
   if (blocked) {
@@ -487,11 +487,25 @@ export function AutomationButtonWidget({ ruleId, label, buttonColor, corners, ct
   );
 }
 
-// A form widget: the form of the dashboard's revision (hostCtx) — "Form not
+// When an event rule runs, in words: its trigger type's event.
+function triggerWhen(triggerType: string): string {
+  switch (triggerType) {
+    case "form_submit": return "when a record is submitted";
+    case "form_approval": return "when a record is approved";
+    case "grid_change": return "when grid values change";
+    case "schedule": return "on its schedule";
+    case "integration_completed": return "when an integration run completes";
+    case "integration_failed": return "when an integration run fails";
+    default: return `on ${triggerType.replace(/_/g, " ")}`;
+  }
+}
+
+// A records widget: the table of the dashboard's revision (hostCtx) — "not
 // found" appeared for a dashboard previewed in a non-active revision because
-// the list defaulted to the active one (found live, 2026-09-11). Forms reach
-// business users and business admins only this way; see FormPanel.
-export function FormWidgetPanel({ formId, ctx: hostCtx }: { formId: string; ctx?: DemoContext }) {
+// the list defaulted to the active one (found live, 2026-09-11). Tables reach
+// business users and business admins only this way; see FormPanel. The
+// widget offers "+ New record" only when its developer added the button.
+export function FormWidgetPanel({ formId, ctx: hostCtx, newRecordButton }: { formId: string; ctx?: DemoContext; newRecordButton?: boolean }) {
   const { data: formsRaw = [], isLoading } = useQuery({
     queryKey: ["forms", hostCtx?.revision_id ?? ""],
     queryFn: () => api.listForms(hostCtx?.revision_id),
@@ -500,6 +514,6 @@ export function FormWidgetPanel({ formId, ctx: hostCtx }: { formId: string; ctx?
   const { data: demoCtx } = useQuery({ queryKey: ["demo"], queryFn: api.getDemo, enabled: !hostCtx });
   const revisionId = (hostCtx ?? demoCtx)?.revision_id ?? "";
   const form = (formsRaw as FormDef[]).find((f) => f.id === formId);
-  if (!form) return isLoading ? <LoadingState /> : <EmptyState label="Form not found." />;
-  return <FormPanel form={form} revisionId={revisionId} />;
+  if (!form) return isLoading ? <LoadingState /> : <EmptyState label="Table not found." />;
+  return <FormPanel form={form} revisionId={revisionId} newRecordButton={newRecordButton} />;
 }

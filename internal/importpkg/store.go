@@ -179,14 +179,29 @@ func (s *Store) StageRows(ctx context.Context, jobID string, rows []StagingRow, 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	for _, row := range rows {
-		dimJSON, _ := json.Marshal(row.DimMembers)
+	// A statement per batch, not per row: 8,000 rows of two metrics were
+	// 16,000 round trips to the database. Values go as numeric, every digit
+	// of the float64 kept (a float8 cast keeps 15): a pick-list option's key
+	// is a 16-digit number.
+	const stageBatch = 5000
+	for start := 0; start < len(rows); start += stageBatch {
+		batch := rows[start:min(start+stageBatch, len(rows))]
+		metricIDs := make([]string, len(batch))
+		dims := make([]string, len(batch))
+		values := make([]float64, len(batch))
+		rowNumbers := make([]int32, len(batch))
+		texts := make([]*string, len(batch))
+		for i, row := range batch {
+			dimJSON, _ := json.Marshal(row.DimMembers)
+			metricIDs[i], dims[i], values[i], rowNumbers[i], texts[i] = row.MetricID, string(dimJSON), row.Value, int32(row.RowNumber), row.Text
+		}
 		_, err = tx.Exec(ctx, `
 			INSERT INTO import.import_staging (job_id, metric_id, dim_members, value, row_number, text_value)
-			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)
-		`, jobID, row.MetricID, dimJSON, row.Value, row.RowNumber, row.Text)
+			SELECT $1::uuid, m::uuid, d::jsonb, v, r, t
+			FROM unnest($2::text[], $3::text[], $4::numeric[], $5::int4[], $6::text[]) AS u(m, d, v, r, t)
+		`, jobID, metricIDs, dims, values, rowNumbers, texts)
 		if err != nil {
-			return fmt.Errorf("stage row %d: %w", row.RowNumber, err)
+			return fmt.Errorf("stage rows %d-%d: %w", batch[0].RowNumber, batch[len(batch)-1].RowNumber, err)
 		}
 	}
 
@@ -379,34 +394,76 @@ func (s *Store) CommitImport(ctx context.Context, jobID, modelID, revisionID, us
 		}
 	}
 
+	// A file is its rows entered top to bottom, so rows naming the same cell
+	// combine as entering them one after another would, and each cell gets
+	// one new row. Every row used to be inserted with the same entered_at,
+	// so which of a cell's rows the reads took was the random id's tie-break.
 	switch mode {
 	case ModeFullReload, ModeReplace:
-		// Both insert the staged value as-is; full_reload already deleted
+		// Both insert the cell's last row as-is; full_reload already deleted
 		// every prior row above, replace leaves untouched cells alone and
 		// relies on latest-wins to make the new row authoritative.
 		_, err = tx.Exec(ctx, `
 			INSERT INTO runtime.fact_input (model_id, revision_id, metric_id, dim_members, value, entered_by, text_value)
-			SELECT $1::uuid, NULLIF($2,'')::uuid, metric_id, dim_members, value, $3::uuid, text_value
+			SELECT DISTINCT ON (metric_id, dim_members)
+			       $1::uuid, NULLIF($2,'')::uuid, metric_id, dim_members, value, $3::uuid, text_value
 			FROM import.import_staging WHERE job_id = $4::uuid
+			ORDER BY metric_id, dim_members, row_number DESC
 		`, modelID, revisionID, userID, jobID)
 	default: // ModeIncremental
-		_, err = tx.Exec(ctx, `
-			INSERT INTO runtime.fact_input (model_id, revision_id, metric_id, dim_members, value, entered_by, text_value)
-			SELECT $1::uuid, NULLIF($2,'')::uuid, s.metric_id, s.dim_members,
-			       -- A text replaces the cell's text; only numbers add up.
-			       CASE WHEN s.text_value IS NOT NULL THEN 0 ELSE s.value + COALESCE((
-			           SELECT fi.value FROM runtime.fact_input fi
-			           WHERE fi.model_id   = $1::uuid
-			             AND fi.revision_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid
-			             AND fi.metric_id  = s.metric_id
-			             AND fi.dim_members = s.dim_members
-			           ORDER BY fi.entered_at DESC
-			           LIMIT 1
-			       ), 0) END,
-			       $3::uuid, s.text_value
+		// Numbers add to the cell's latest value. A text or pick-list cell
+		// holds a word or a member, not an amount: it takes the last row's,
+		// as a typed value would (a pick-list's stored member key used to be
+		// added to the new one, naming no member at all). The latest values
+		// are read in one pass over the staged cells' history: a lookup per
+		// row scanned the metric's whole history each time, so every load
+		// of the same file took longer than the one before (8,000 rows: 5 s,
+		// then 25, 46, 95, then past the gateway's 2-minute answer).
+		//
+		// The cells go into a table of this transaction's own, analysed, so
+		// the plan knows how many there are: rows staged a moment ago are
+		// absent from the statistics, and a plan made for one cell read the
+		// whole history once per cell.
+		if _, err = tx.Exec(ctx, `
+			CREATE TEMP TABLE import_cells (
+			    metric_id uuid, dim_members jsonb, replaces boolean,
+			    added numeric, last_value numeric, last_text text
+			) ON COMMIT DROP`); err != nil {
+			return nil, fmt.Errorf("stage cells: %w", err)
+		}
+		if _, err = tx.Exec(ctx, `
+			INSERT INTO import_cells
+			SELECT s.metric_id, s.dim_members,
+			       bool_or(s.text_value IS NOT NULL OR md.picklist_dimension_id IS NOT NULL),
+			       sum(s.value),
+			       (array_agg(s.value ORDER BY s.row_number DESC))[1],
+			       (array_agg(s.text_value ORDER BY s.row_number DESC))[1]
 			FROM import.import_staging s
-			WHERE s.job_id = $4::uuid
-		`, modelID, revisionID, userID, jobID)
+			JOIN model.metric_def md ON md.id = s.metric_id
+			WHERE s.job_id = $1::uuid
+			GROUP BY s.metric_id, s.dim_members
+		`, jobID); err != nil {
+			return nil, fmt.Errorf("stage cells: %w", err)
+		}
+		if _, err = tx.Exec(ctx, `ANALYZE import_cells`); err != nil {
+			return nil, fmt.Errorf("stage cells: %w", err)
+		}
+		_, err = tx.Exec(ctx, `
+			WITH latest AS (
+			    SELECT DISTINCT ON (fi.metric_id, fi.dim_members) fi.metric_id, fi.dim_members, fi.value
+			    FROM runtime.fact_input fi
+			    JOIN import_cells c ON c.metric_id = fi.metric_id AND c.dim_members = fi.dim_members AND NOT c.replaces
+			    WHERE fi.model_id = $1::uuid
+			      AND fi.revision_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid
+			    ORDER BY fi.metric_id, fi.dim_members, fi.entered_at DESC, fi.id DESC
+			)
+			INSERT INTO runtime.fact_input (model_id, revision_id, metric_id, dim_members, value, entered_by, text_value)
+			SELECT $1::uuid, NULLIF($2,'')::uuid, c.metric_id, c.dim_members,
+			       CASE WHEN c.replaces THEN c.last_value ELSE c.added + COALESCE(l.value, 0) END,
+			       $3::uuid, CASE WHEN c.replaces THEN c.last_text END
+			FROM import_cells c
+			LEFT JOIN latest l ON l.metric_id = c.metric_id AND l.dim_members = c.dim_members
+		`, modelID, revisionID, userID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("flush staging: %w", err)

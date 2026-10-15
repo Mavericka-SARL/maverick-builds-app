@@ -107,18 +107,19 @@ func (e *ToolExecutor) getForm(ctx context.Context, raw json.RawMessage) (string
 	}
 	var name, label string
 	var fields json.RawMessage
-	if err := e.pool.QueryRow(ctx, `SELECT name, label, fields FROM model.form_def WHERE id=$1::uuid`, id).Scan(&name, &label, &fields); err != nil {
-		return "", fmt.Errorf("load form: %w", err)
+	var ownOnly bool
+	if err := e.pool.QueryRow(ctx, `SELECT name, label, fields, own_records_only FROM model.form_def WHERE id=$1::uuid`, id).Scan(&name, &label, &fields, &ownOnly); err != nil {
+		return "", fmt.Errorf("load table: %w", err)
 	}
-	out := map[string]any{"id": id, "name": name, "label": label, "fields": rawOrNull(fields)}
+	out := map[string]any{"id": id, "name": name, "label": label, "fields": rawOrNull(fields), "own_records_only": ownOnly}
 	b, _ := json.MarshalIndent(out, "", "  ")
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "Form '%s' (id:%s):\n%s\n", name, id, b)
+	fmt.Fprintf(&sb, "Table '%s' (id:%s):\n%s\n", name, id, b)
 	integrations, _ := e.integrationsForForm(ctx, id)
 	if len(integrations) == 0 {
-		sb.WriteString("No form integration posts this form's values into a metric yet (create_form_integration).\n")
+		sb.WriteString("No table integration posts this table's values into a metric yet (create_form_integration).\n")
 	} else {
-		sb.WriteString("Integrations posting from this form:\n")
+		sb.WriteString("Integrations posting from this table:\n")
 		for _, line := range integrations {
 			sb.WriteString("  " + line + "\n")
 		}

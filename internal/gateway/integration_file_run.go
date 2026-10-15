@@ -30,7 +30,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/mavericks-engine/mavericks/internal/calculation"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
 	"github.com/mavericks-engine/mavericks/internal/plan"
 	"github.com/mavericks-engine/mavericks/internal/writeguard"
@@ -122,13 +121,7 @@ func (h *handler) commitGridRows(ctx context.Context, act *actor, modelID, revis
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 	if len(metricIDs) > 0 {
-		calcStore := calculation.NewStore(h.db.For(ctx))
-		sched := calculation.NewScheduler(h.log, calcStore)
-		go func() { //nolint:contextcheck // outlives the request
-			bg, done := h.backgroundRecalc(context.Background(), "recalculation after "+source+" import")
-			defer done()
-			_ = sched.RecalcAffected(bg, modelID, revisionID, metricIDs)
-		}()
+		h.recalcAfterImport(ctx, modelID, revisionID, source+" import", metricIDs)
 	}
 	return metricIDs, nil
 }

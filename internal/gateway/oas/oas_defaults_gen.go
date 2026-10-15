@@ -3,6 +3,14 @@
 package oas
 
 // setDefaults set default value of fields.
+func (s *APITokenCreate) setDefaults() {
+	{
+		val := int(90)
+		s.ExpiresInDays.SetTo(val)
+	}
+}
+
+// setDefaults set default value of fields.
 func (s *AiSaveSettingsRequest) setDefaults() {
 	{
 		val := string("openai")
@@ -111,14 +119,6 @@ func (s *CreateMetricRequest) setDefaults() {
 }
 
 // setDefaults set default value of fields.
-func (s *CreateRecordRequest) setDefaults() {
-	{
-		val := CreateRecordRequestStatus("draft")
-		s.Status.SetTo(val)
-	}
-}
-
-// setDefaults set default value of fields.
 func (s *CreateTenantRequest) setDefaults() {
 	{
 		val := string("commercial")
@@ -203,6 +203,14 @@ func (s *PropertyRequest) setDefaults() {
 	{
 		val := string("text")
 		s.DataType.SetTo(val)
+	}
+}
+
+// setDefaults set default value of fields.
+func (s *RecordsQueryFiltersItem) setDefaults() {
+	{
+		val := RecordsQueryFiltersItemOp("eq")
+		s.Op.SetTo(val)
 	}
 }
 

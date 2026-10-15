@@ -14,6 +14,10 @@ import (
 // SecurityHandler is handler for security parameters.
 type SecurityHandler interface {
 	// HandleBearerAuth handles bearerAuth security.
+	// A sign-in token (a JWT the console holds), or a personal API token (mvx_pat_…) a person made
+	// under Account › API tokens for a script. A personal token acts as its owner — their tenant,
+	// roles and access rules — until it expires or is revoked; a read-only one reads (GET, and POST
+	// /api/forms/{id}/records/query) and nothing else. No token reaches /api/me/api-tokens.
 	HandleBearerAuth(ctx context.Context, operationName OperationName, t BearerAuth) (context.Context, error)
 	// HandleScimBearer handles scimBearer security.
 	// A tenant's SCIM token (mvx_scim_…), issued under Admin › SCIM; not a user's JWT.
@@ -56,6 +60,7 @@ var operationRolesBearerAuth = map[string][]string{
 	ClearTenantAIKeyOperation:             []string{},
 	CompleteTaskOperation:                 []string{},
 	ConfirmAiProposalOperation:            []string{},
+	CreateAPITokenOperation:               []string{},
 	CreateAdminApplicationOperation:       []string{},
 	CreateAdminModelOperation:             []string{},
 	CreateAdminRevisionOperation:          []string{},
@@ -163,6 +168,7 @@ var operationRolesBearerAuth = map[string][]string{
 	ImportSheetFetchOperation:             []string{},
 	ImportTemplateWorkbookOperation:       []string{},
 	ImportUploadOperation:                 []string{},
+	ListAPITokensOperation:                []string{},
 	ListAdminApplicationsOperation:        []string{},
 	ListAdminTenantsOperation:             []string{},
 	ListAdminUsersOperation:               []string{},
@@ -219,6 +225,8 @@ var operationRolesBearerAuth = map[string][]string{
 	PromoteAiDraftOperation:               []string{},
 	PublishWorkflowOperation:              []string{},
 	PutGoogleConnectionOperation:          []string{},
+	QueryFormRecordsOperation:             []string{},
+	RecalculateRevisionOperation:          []string{},
 	RejectAiProposalOperation:             []string{},
 	RemoveAdminUserFromTenantOperation:    []string{},
 	RemoveAdminUserRoleOperation:          []string{},
@@ -232,6 +240,7 @@ var operationRolesBearerAuth = map[string][]string{
 	ReorderGridMetricsOperation:           []string{},
 	ResendAdminUserInvitationOperation:    []string{},
 	RestoreWorkflowOperation:              []string{},
+	RevokeAPITokenOperation:               []string{},
 	RevokeAdminUserAppAccessOperation:     []string{},
 	RevokeAdminUserModelAccessOperation:   []string{},
 	RevokeScimTokenOperation:              []string{},
@@ -394,6 +403,10 @@ func (s *Server) securityScimBearer(ctx context.Context, operationName Operation
 // SecuritySource is provider of security values (tokens, passwords, etc.).
 type SecuritySource interface {
 	// BearerAuth provides bearerAuth security value.
+	// A sign-in token (a JWT the console holds), or a personal API token (mvx_pat_…) a person made
+	// under Account › API tokens for a script. A personal token acts as its owner — their tenant,
+	// roles and access rules — until it expires or is revoked; a read-only one reads (GET, and POST
+	// /api/forms/{id}/records/query) and nothing else. No token reaches /api/me/api-tokens.
 	BearerAuth(ctx context.Context, operationName OperationName) (BearerAuth, error)
 	// ScimBearer provides scimBearer security value.
 	// A tenant's SCIM token (mvx_scim_…), issued under Admin › SCIM; not a user's JWT.

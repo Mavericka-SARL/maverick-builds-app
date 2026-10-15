@@ -53,7 +53,7 @@ export function CreateAutomationModal({ workflow, revisionId, onClose }: { workf
         </div>
         {trigger.unresolved && !catalogLoading && (
           <div role="alert" style={{ color: "var(--color-danger)", fontSize: 13 }}>
-            This workflow starts on “{workflow.trigger_event}”, which names no form or integration of this revision.
+            This workflow starts on “{workflow.trigger_event}”, which names no table or integration of this revision.
             Choose its trigger event again in the workflow's properties, or create the trigger in Developer › Triggers.
           </div>
         )}

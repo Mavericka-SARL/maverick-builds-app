@@ -248,7 +248,9 @@ func NewHandlerWithDeps(log zerolog.Logger, pool *pgxpool.Pool, jwks *identity.J
 	// appIDMiddleware first: tenant routing reads the application id it puts
 	// in the context; the plan guard needs the routed tenant. The connector's
 	// reads run through this same chain (mcpReader), behind delegatedReadGate.
-	api := appIDMiddleware(h.tenantRouting(h.delegatedReadGate(h.planGuard(mux))))
+	// A personal API token is resolved to its person before routing, which
+	// needs to know whose request it is.
+	api := appIDMiddleware(h.apiTokenAuth(h.tenantRouting(h.delegatedReadGate(h.planGuard(mux)))))
 	if deps.TenantDeleter != nil {
 		deps.TenantDeleter.h = h
 	}
@@ -351,6 +353,9 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/demo", "any", cors(h.demo))
 	register("GET", "/api/me", "any", cors(h.me))
 	register("PATCH", "/api/me/preferences", "any", cors(h.updateMyPreferences))
+	register("GET", "/api/me/api-tokens", "any", cors(h.listAPITokens))
+	register("POST", "/api/me/api-tokens", "any", cors(h.createAPIToken))
+	register("DELETE", "/api/me/api-tokens/{id}", "any", cors(h.revokeAPIToken))
 	register("GET", "/api/license", "any", cors(h.licenseInfo))
 	// Self-service sign-up (public; signup.go) and the plan catalog
 	// (plan.go). Both handlers guard themselves.
@@ -385,6 +390,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/developer/revisions", "developer", dev(h.developerRevisions))
 	register("POST", "/api/developer/revisions", "developer", dev(h.developerRevisions))
 	register("PUT", "/api/developer/revisions/{id}/activate", "developer", dev(h.developerRevisionAction))
+	register("POST", "/api/developer/revisions/{id}/recalculate", "developer", dev(h.recalculateRevision))
 	register("DELETE", "/api/developer/revisions/{id}", "developer", dev(h.developerRevisionAction))
 	register("GET", "/api/developer/model", "developer", dev(h.developerModel))
 	register("POST", "/api/developer/metrics", "developer", dev(h.developerMetrics))
@@ -693,6 +699,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("POST", "/api/forms/{id}/sync", "any", cors(h.formsRouter))
 	register("GET", "/api/forms/{id}/records", "any", cors(h.formsRouter))
 	register("POST", "/api/forms/{id}/records", "any", cors(h.formsRouter))
+	register("POST", "/api/forms/{id}/records/query", "any", cors(h.formsRouter))
 	register("PATCH", "/api/forms/{id}", "developer", dev(h.formsRouter))
 	register("DELETE", "/api/forms/{id}", "developer", dev(h.formsRouter))
 	// Every signed-in user reaches these routes; recordAction decides, per
@@ -803,7 +810,12 @@ func (h *handler) resolveActor(ctx context.Context, r *http.Request) (*actor, er
 	}
 	var a *actor
 	var err error
-	if sub, ok := delegatedSubject(ctx); ok {
+	if t, ok := apiTokenOf(ctx); ok {
+		// A personal API token (api_tokens.go): the person it acts as,
+		// resolved like any account — never provisioned, never followed —
+		// so a disabled or removed account's tokens open nothing.
+		a, err = h.actorByKeycloakSub(ctx, t.Subject)
+	} else if sub, ok := delegatedSubject(ctx); ok {
 		// A connector's read (mcp.go): the subject of a token verified for
 		// /mcp, resolved like any account — never provisioned, never
 		// followed — so a disabled or removed account reads nothing.
@@ -2646,6 +2658,21 @@ func (h *handler) taskAction(w http.ResponseWriter, r *http.Request) {
 	if stepType == "condition" || stepType == "4" {
 		if req.Decision != "true" && req.Decision != "false" {
 			jsonErr(w, fmt.Errorf("a condition step is routed by deciding \"true\" or \"false\""), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// An approval in a run that decides a record's status approves the
+	// record: refused, saying why, when the record could not post where it
+	// would — a record posts within its creator's access, and its creator
+	// may have lost write access since saving it. The approval used to go
+	// through and the posting be dropped with only a log line.
+	if req.Decision == "approve" || req.Decision == "approved" {
+		if code, msg, err := h.approvalRefusal(ctx, a, instanceID); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		} else if code != 0 {
+			jsonErr(w, errors.New(msg), code)
 			return
 		}
 	}
@@ -4749,7 +4776,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 			WHERE o.model_id=$1::uuid AND o.revision_id=$3::uuid
 		),
 		new_forms AS (
-			INSERT INTO model.form_def (model_id, name, label, fields, revision_id)
+			INSERT INTO model.form_def (model_id, name, label, fields, revision_id, own_records_only)
 			SELECT f.model_id, f.name, f.label,
 				COALESCE((
 					SELECT jsonb_agg(
@@ -4759,7 +4786,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 						ORDER BY e.ord)
 					FROM jsonb_array_elements(CASE WHEN jsonb_typeof(f.fields) = 'array' THEN f.fields ELSE '[]'::jsonb END) WITH ORDINALITY AS e(elem, ord)
 				), '[]'::jsonb),
-				$2::uuid
+				$2::uuid, f.own_records_only
 			FROM model.form_def f
 			WHERE f.model_id=$1::uuid AND f.revision_id=$3::uuid
 			RETURNING id AS new_id, name
@@ -6349,6 +6376,10 @@ type devMember struct {
 	Code           string  `json:"code"`
 	Label          string  `json:"label"`
 	ParentMemberID *string `json:"parent_member_id"`
+	// Access is "read" for a member the caller may only read (GET
+	// /api/dimensions, where a record's member picker cannot offer it for a
+	// save that would post into it).
+	Access string `json:"access,omitempty"`
 	// Formula marks a calculated member ({RF} - {LY}).
 	Formula string `json:"formula,omitempty"`
 	// Time members only (spec §3.2): the period and the server-owned
@@ -7631,8 +7662,13 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
 		return
 	}
+	extendImportDeadlines(w)
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<20) // 16 MB limit
 	ctx := r.Context()
+	key, ok := importIdempotencyKey(w, r)
+	if !ok {
+		return
+	}
 
 	modelID, err := h.resolveDemoModelID(ctx, r)
 	if err != nil {
@@ -7679,6 +7715,10 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := act.UserID
+	store := importpkg.NewStore(h.db.For(ctx))
+	if key != "" && !h.replayKeyedImport(w, ctx, store, modelID, userID, key) {
+		return
+	}
 
 	// Check system_managed FIRST, before any file parsing: a system_managed
 	// revision typically has no metric_def/dimension_def rows of its own
@@ -7751,11 +7791,20 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	store := importpkg.NewStore(h.db.For(ctx))
 	job, err := store.CreateImportJob(ctx, modelID, revisionID, "upload", userID, nil)
 	if err != nil {
 		jsonErr(w, fmt.Errorf("create job: %w", err), http.StatusInternalServerError)
 		return
+	}
+	if key != "" {
+		if err := store.SetJobKey(ctx, job.Id, key); errors.Is(err, importpkg.ErrImportKeyInUse) {
+			_ = store.ReleaseKey(ctx, job.Id)
+			jsonErr(w, err, http.StatusConflict)
+			return
+		} else if err != nil {
+			jsonErr(w, fmt.Errorf("record the idempotency key: %w", err), http.StatusInternalServerError)
+			return
+		}
 	}
 	if err := store.StageRows(ctx, job.Id, staged, nil); err != nil {
 		jsonErr(w, fmt.Errorf("stage: %w", err), http.StatusInternalServerError)
@@ -7773,13 +7822,8 @@ func (h *handler) importUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Best-effort recalc, in-process
 	if len(metricIDs) > 0 {
-		calcStore := calculation.NewStore(h.db.For(ctx))
-		sched := calculation.NewScheduler(h.log, calcStore)
-		go func() { //nolint:contextcheck
-			_ = sched.RecalcAffected(context.Background(), modelID, revisionID, metricIDs)
-		}()
+		h.recalcAfterImport(ctx, modelID, revisionID, "import", metricIDs)
 	}
 
 	var appID string
@@ -8106,6 +8150,7 @@ type integrationDef struct {
 // already logical field names (code, label, parent_code, property:<name>);
 // the same shared importer backs saved-integration runs.
 func (h *handler) importDimensionMembers(w http.ResponseWriter, r *http.Request) {
+	extendImportDeadlines(w)
 	if r.Method != http.MethodPost {
 		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
 		return
@@ -8902,6 +8947,7 @@ func (h *handler) listIntegrations(w http.ResponseWriter, r *http.Request) {
 
 // integrationRun handles POST /api/integrations/{id}/run — executes a CSV import.
 func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
+	extendImportDeadlines(w)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -9062,12 +9108,12 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !scope.reach {
-			jsonRecordErr(w, errRecordNotReached, "form")
+			jsonRecordErr(w, errRecordNotReached, "table")
 			return
 		}
 		form, fErr := crudapp.NewStore(h.db.For(ctx)).GetForm(ctx, intg.TargetID)
 		if fErr != nil {
-			jsonErr(w, fmt.Errorf("form not found"), http.StatusNotFound)
+			jsonErr(w, fmt.Errorf("table not found"), http.StatusNotFound)
 			return
 		}
 		imported, rowErrs, iErr := h.importFormRows(ctx, act, scope, form, header, rows)
@@ -9168,6 +9214,19 @@ func (h *handler) developerFormIntegrations(w http.ResponseWriter, r *http.Reque
 		}
 		if body.DimensionMappings == nil {
 			body.DimensionMappings = map[string]string{}
+		}
+		// Only this model's table, grid, metric and dimensions, in this
+		// revision: a mapping naming another tenant's table read its
+		// records into this model's facts.
+		if err := crudapp.CheckMappingRefs(ctx, h.db.For(ctx), modelID, revisionID, crudapp.MappingRefs{
+			FormID: body.FormID, GridID: body.GridID, TargetMetricID: body.TargetMetricID,
+			SourceField: body.SourceField, DimensionMappings: body.DimensionMappings,
+		}); crudapp.IsMappingRefError(err) {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		} else if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
 		}
 		dimJSON, _ := json.Marshal(body.DimensionMappings)
 
@@ -9302,6 +9361,25 @@ func (h *handler) developerFormIntegrationAction(w http.ResponseWriter, r *http.
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
 			return
 		}
+		// The mapping keeps its model, revision and table; what it names
+		// now must be theirs.
+		var mapModel, mapRevision, mapForm string
+		if err := h.db.QueryRow(ctx, `
+			SELECT model_id::text, COALESCE(revision_id::text, ''), form_id::text
+			FROM model.form_metric_mapping WHERE id = $1::uuid`, mappingID).Scan(&mapModel, &mapRevision, &mapForm); err != nil {
+			jsonErr(w, fmt.Errorf("integration not found"), http.StatusNotFound)
+			return
+		}
+		if err := crudapp.CheckMappingRefs(ctx, h.db.For(ctx), mapModel, mapRevision, crudapp.MappingRefs{
+			FormID: mapForm, GridID: body.GridID, TargetMetricID: body.TargetMetricID,
+			SourceField: body.SourceField, DimensionMappings: body.DimensionMappings,
+		}); crudapp.IsMappingRefError(err) {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		} else if err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
 		dimJSON, _ := json.Marshal(body.DimensionMappings)
 		livePosting := true
 		if body.LivePosting != nil {
@@ -9407,517 +9485,6 @@ func (h *handler) formIntegrationScope(ctx context.Context, mappingID string) (r
 		FROM model.form_metric_mapping fm JOIN core.model m ON m.id = fm.model_id
 		WHERE fm.id = $1::uuid`, mappingID).Scan(&revisionID, &appID)
 	return
-}
-
-// applyFormMappings evaluates all live form-metric mappings for a given record
-// and posts (or retracts) values to runtime.fact_input based on status rules.
-// retryTransient runs op up to attempts times, pausing between tries.
-//
-// applyFormMappings and recomputeFactInput run in a goroutine detached from
-// the request (`go func()` per record status-transition), so there is no
-// caller to return an error to and nothing schedules a second attempt. Every
-// failure path in them therefore used to `continue` or `return` — which left
-// the mapping's aggregate PERMANENTLY wrong, not merely late: a posting that
-// failed to insert is never re-posted, and a recompute that failed leaves
-// whatever the previous one wrote. One transient error under load (a pool
-// acquire timeout, a lock wait) silently under-counts a metric with nothing
-// surfaced to any user.
-//
-// That is what CI caught in TestFormMappingConcurrentPostingsConverge: eight
-// concurrent approvals settled at 300 instead of 360 and STAYED there for the
-// full 10s the test polls — a stable wrong value, with rowCount=1 ruling out
-// the duplicate-snapshot race the test was originally written for.
-//
-// Retrying is safe because every operation wrapped here is idempotent: the
-// access checks are pure reads, the posting insert is ON CONFLICT DO UPDATE,
-// and the recompute derives the aggregate from all posting rows rather than
-// adjusting it incrementally.
-func retryTransient(ctx context.Context, attempts int, op func() error) error {
-	var err error
-	for i := 0; i < attempts; i++ {
-		if i > 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(time.Duration(i) * 100 * time.Millisecond):
-			}
-		}
-		if err = op(); err == nil {
-			return nil
-		}
-	}
-	return err
-}
-
-func (h *handler) applyFormMappings(ctx context.Context, recordID, formID, status string, data map[string]any, userID string) error {
-	// Every caller fires this from its own `go func()` per record
-	// status-transition, so two calls for the SAME record (e.g. its
-	// creation-as-draft call and a subsequent approve call) race with no
-	// ordering guarantee — a stale call captured at spawn time can run
-	// AFTER a chronologically later one and wrongly retract its posting.
-	// Re-reading the record's current status/data here (rather than
-	// trusting the possibly-stale status/data parameters) makes every
-	// invocation reconcile against ground truth: a late-arriving stale
-	// call sees the record's real current state and becomes a no-op or a
-	// harmless re-post of the same value, instead of undoing a newer
-	// call's work.
-	var rawData []byte
-	if err := h.db.QueryRow(ctx,
-		`SELECT status::text, data FROM runtime.form_record WHERE id=$1::uuid`, recordID,
-	).Scan(&status, &rawData); err != nil {
-		h.log.Warn().Err(err).Str("record_id", recordID).Msg("applyFormMappings: re-read current record state failed")
-		return err
-	}
-	data = map[string]any{}
-	_ = json.Unmarshal(rawData, &data)
-
-	rows, err := h.db.Query(ctx, `
-		SELECT id::text, source_field, target_metric_id::text,
-		       aggregation, posting_statuses, dimension_mappings,
-		       model_id::text, COALESCE(revision_id::text,'')
-		FROM model.form_metric_mapping
-		WHERE form_id=$1::uuid AND live_posting = TRUE`, formID)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	type mapping struct {
-		id, sourceField, targetMetricID string
-		aggregation                     string
-		postingStatuses                 []string
-		dimMappings                     map[string]string
-		modelID                         string
-		revisionID                      string
-	}
-
-	var mappings []mapping
-	for rows.Next() {
-		var m mapping
-		var dimRaw []byte
-		if err := rows.Scan(
-			&m.id, &m.sourceField, &m.targetMetricID,
-			&m.aggregation, &m.postingStatuses, &dimRaw,
-			&m.modelID, &m.revisionID,
-		); err != nil {
-			h.log.Warn().Err(err).Str("form_id", formID).Msg("applyFormMappings: scan mapping row")
-			continue
-		}
-		_ = json.Unmarshal(dimRaw, &m.dimMappings)
-		mappings = append(mappings, m)
-	}
-	rows.Close()
-
-	var affected []struct{ RevisionID, MetricID string }
-	var affectedModelID string
-
-	for _, m := range mappings {
-		eligible := false
-		for _, s := range m.postingStatuses {
-			if s == status {
-				eligible = true
-				break
-			}
-		}
-
-		// Post into the mapping's own revision; revision-global (legacy)
-		// mappings fall back to the model's active revision, then most-recent.
-		revisionID := m.revisionID
-		if revisionID == "" {
-			_ = h.db.QueryRow(ctx, `
-				SELECT COALESCE(
-					m.active_revision_id::text,
-					(SELECT s.id::text FROM model.revision s WHERE s.model_id=m.id ORDER BY s.created_at DESC LIMIT 1)
-				) FROM core.model m WHERE m.id=$1::uuid`, m.modelID,
-			).Scan(&revisionID)
-		}
-
-		// Resolve source value. A record with no numeric value in the
-		// source field contributes nothing, like one whose status is not
-		// eligible.
-		var val float64
-		hasValue := true
-		switch v := data[m.sourceField].(type) {
-		case float64:
-			val = v
-		case json.Number:
-			val, _ = v.Float64()
-		case int:
-			val = float64(v)
-		default:
-			hasValue = false
-		}
-
-		if !eligible || !hasValue {
-			// Retract this record's posting and re-aggregate the postings
-			// that remain. A missing value used to retract without
-			// re-aggregating, leaving the old value in the metric until
-			// something else recomputed it.
-			_, _ = h.db.Exec(ctx,
-				`DELETE FROM runtime.form_record_posting WHERE mapping_id=$1::uuid AND form_record_id=$2::uuid`,
-				m.id, recordID)
-			h.recomputeFactInput(ctx, m.id, revisionID, userID)
-			affected = append(affected, struct{ RevisionID, MetricID string }{revisionID, m.targetMetricID})
-			affectedModelID = m.modelID
-			continue
-		}
-
-		// Build dim_members from dimension_mappings {dim_id: form_field_name}
-		dimMembers := map[string]string{}
-		for dimID, fieldName := range m.dimMappings {
-			if fv, ok := data[fieldName]; ok && fv != nil {
-				dimMembers[dimID] = fmt.Sprintf("%v", fv)
-			}
-		}
-
-		// Generic write guard — the same check cells() applies to every
-		// interactive grid writeback (writeguard.MetricAccess +
-		// writeguard.CheckWrite), never previously wired into the forms
-		// path: a user hidden/read-restricted from this metric or from one
-		// of the dimension members this posting targets must not have that
-		// restriction silently bypassed by submitting a form instead of
-		// writing the cell directly. Skip-and-log rather than surface an
-		// error: this runs from a detached goroutine after the HTTP
-		// response has already returned (the record itself always saves;
-		// only this mapping's derived posting is withheld).
-		//
-		// A refused re-post leaves the record's existing posting as it is:
-		// the checks run before anything is retracted, and the upsert below
-		// replaces the posting in place. The posting used to be deleted
-		// first, so a caller the guard refuses — a restricted user's own
-		// edit, or a restricted administrator's form sync re-posting other
-		// people's records — withdrew the contribution without writing
-		// anything, and the next recompute dropped it from the metric.
-		// A transient error here is NOT a denial, but both used to `continue`
-		// and drop the posting for good. Retry the read; only give up — and
-		// say so at error level — once it keeps failing.
-		var access string
-		if maErr := retryTransient(ctx, 3, func() error {
-			a, e := writeguard.MetricAccess(ctx, h.db.For(ctx), userID, m.targetMetricID)
-			access = a
-			return e
-		}); maErr != nil {
-			h.log.Error().Err(maErr).Str("mapping_id", m.id).Str("record_id", recordID).Msg("applyFormMappings: metric access check kept failing — posting dropped, aggregate now under-counts")
-			continue
-		} else if access == "hidden" || access == "read" {
-			h.log.Warn().Str("mapping_id", m.id).Str("metric_id", m.targetMetricID).Msg("applyFormMappings: posting rejected, caller lacks write access to metric")
-			continue
-		}
-		// A record naming a code the dimension does not have, a parent or a
-		// calculated member posts nowhere: the posting used to be stored at
-		// that code, where no grid or total reads it. Its earlier posting is
-		// retracted, as for a record with no value — the record no longer
-		// names that coordinate.
-		var memberIDs []string
-		var refused error
-		if rErr := retryTransient(ctx, 3, func() error {
-			ids, e := writeguard.ResolveWriteMembers(ctx, h.db.For(ctx), m.modelID, revisionID, dimMembers)
-			memberIDs = ids
-			if writeguard.IsMemberError(e) {
-				refused = e // a refusal, not a failed read: no retry
-				return nil
-			}
-			return e
-		}); refused != nil {
-			h.log.Warn().Err(refused).Str("mapping_id", m.id).Str("record_id", recordID).Msg("applyFormMappings: record names no leaf member — nothing posted")
-			_, _ = h.db.Exec(ctx,
-				`DELETE FROM runtime.form_record_posting WHERE mapping_id=$1::uuid AND form_record_id=$2::uuid`,
-				m.id, recordID)
-			h.recomputeFactInput(ctx, m.id, revisionID, userID)
-			affected = append(affected, struct{ RevisionID, MetricID string }{revisionID, m.targetMetricID})
-			affectedModelID = m.modelID
-			continue
-		} else if rErr != nil {
-			h.log.Error().Err(rErr).Str("mapping_id", m.id).Str("record_id", recordID).Msg("applyFormMappings: member lookup kept failing — posting dropped, aggregate now under-counts")
-			continue
-		}
-		var reason string
-		if gErr := retryTransient(ctx, 3, func() error {
-			r, e := writeguard.CheckWriteMetrics(ctx, h.db.For(ctx), m.modelID, revisionID, userID, memberIDs, []string{m.targetMetricID})
-			reason = r
-			return e
-		}); gErr != nil {
-			h.log.Error().Err(gErr).Str("mapping_id", m.id).Str("record_id", recordID).Msg("applyFormMappings: write guard check kept failing — posting dropped, aggregate now under-counts")
-			continue
-		} else if reason != "" {
-			h.log.Warn().Str("mapping_id", m.id).Str("reason", reason).Msg("applyFormMappings: posting rejected by write guard")
-			continue
-		}
-
-		dimJSON, _ := json.Marshal(dimMembers)
-
-		// Insert posting record. This is the failure that most directly
-		// under-counts a total: the posting row IS the record's contribution,
-		// so losing it loses that record's value until something else happens
-		// to re-post it. ON CONFLICT DO UPDATE makes the retry idempotent.
-		// A foreign key refusal is not a failure: the mapping (or the record)
-		// was deleted after this call read it, and there is nothing to post.
-		gone := false
-		if postErr := retryTransient(ctx, 3, func() error {
-			_, e := h.db.Exec(ctx, `
-				INSERT INTO runtime.form_record_posting
-				  (mapping_id, form_record_id, target_metric_id, revision_id, dim_members, posted_value)
-				VALUES ($1::uuid, $2::uuid, $3::uuid, NULLIF($4,'')::uuid, $5, $6)
-				ON CONFLICT (mapping_id, form_record_id) DO UPDATE
-				  SET target_metric_id=$3::uuid, revision_id=NULLIF($4,'')::uuid,
-				      dim_members=$5, posted_value=$6, posted_at=now()`,
-				m.id, recordID, m.targetMetricID, revisionID, dimJSON, val)
-			if isForeignKeyViolation(e) {
-				gone = true
-				return nil
-			}
-			return e
-		}); gone {
-			continue
-		} else if postErr != nil {
-			h.log.Error().Err(postErr).Str("mapping_id", m.id).Str("record_id", recordID).Msg("form posting insert kept failing — this record's value is missing from the metric total")
-			continue
-		}
-
-		h.recomputeFactInput(ctx, m.id, revisionID, userID)
-
-		affected = append(affected, struct{ RevisionID, MetricID string }{revisionID, m.targetMetricID})
-		affectedModelID = m.modelID
-	}
-
-	// Recalc against each mapping's OWN revision (captured above, per
-	// mapping — revision-scoped mappings can legitimately target a
-	// different revision than the model's current active one), not a
-	// single re-derived active_revision_id: that discarded per-mapping
-	// scoping entirely, silently skipping recalc altogether whenever the
-	// model had no active revision yet (e.g. pre-promote), or recalculating
-	// the wrong revision when a mapping's own revision differed from it.
-	h.recalcAfterDimChange(ctx, affectedModelID, affected)
-	return nil
-}
-
-// recomputeFactInput aggregates all active postings for a mapping/metric
-// and upserts a single fact_input row tagged with source_ref=mapping_id.
-//
-// Runs inside a transaction holding a Postgres advisory lock keyed on
-// mappingID for its duration: applyFormMappings is invoked from an
-// unguarded `go func()` per record status-transition (see recordAction/the
-// /api/forms/{id}/records POST handler), so e.g. approving several records
-// against the same mapping in quick succession schedules multiple
-// concurrent calls here. Without serialization, two overlapping
-// delete-then-insert passes can interleave (both DELETE, then both INSERT)
-// and leave more than one stale snapshot behind — and since the grid read
-// path sums every source_ref-tagged fact_input row for a cell (form
-// postings are additive by design, unlike direct-entry rows which are
-// latest-wins), a leftover stale snapshot silently gets counted again on
-// top of the correct one. Found via cmd/qa-engine-test: 3 records posting
-// 10/20/30 into a sum-aggregation mapping intermittently produced 2-3
-// distinct fact_input rows for the one mapping (e.g. 30 AND 60, timestamps
-// microseconds apart) instead of one settled 60, inflating the metric's
-// total by the stale rows' values.
-// recomputeFactInput rebuilds the mapping's aggregate from every posting row.
-//
-// Retried because a failed recompute is not a delayed one: nothing else
-// recalculates this mapping until the next posting happens to arrive, so a
-// single transient failure leaves the metric showing whatever the previous
-// recompute wrote — silently stale, indistinguishable from a correct total.
-// The whole operation is idempotent (it derives the value from ground truth
-// inside one transaction), so re-running it is always safe.
-//
-// It takes the mapping's target, aggregation and model from the mapping row
-// itself, not from its caller: a re-apply runs in the background, and a
-// retarget or a delete can land between the moment its caller read the
-// mapping and this write. revisionID is only the fallback for legacy
-// postings that carry none.
-func (h *handler) recomputeFactInput(ctx context.Context, mappingID, revisionID, userID string) {
-	if err := retryTransient(ctx, 3, func() error {
-		return h.recomputeFactInputOnce(ctx, mappingID, revisionID, userID)
-	}); err != nil {
-		h.log.Error().Err(err).Str("mapping_id", mappingID).Msg("recomputeFactInput kept failing — this metric's form-posted total is now stale")
-	}
-}
-
-func (h *handler) recomputeFactInputOnce(ctx context.Context, mappingID, revisionID, userID string) error {
-	tx, err := h.db.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, mappingID); err != nil {
-		return fmt.Errorf("advisory lock: %w", err)
-	}
-
-	// The mapping as it is now, held FOR SHARE until this commits, so its
-	// delete (crudapp.DeleteMappings, which deletes the row before it
-	// withdraws the totals) waits for this write instead of withdrawing
-	// under it. A mapping already gone posts nothing: a re-apply still in
-	// flight when it was deleted used to post its total back, under the id
-	// of a mapping that no longer existed, where nothing could take it out.
-	var targetMetricID, aggregation, modelID string
-	err = tx.QueryRow(ctx, `
-		SELECT target_metric_id::text, COALESCE(aggregation, ''), model_id::text
-		FROM model.form_metric_mapping WHERE id=$1::uuid FOR SHARE`, mappingID,
-	).Scan(&targetMetricID, &aggregation, &modelID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("read mapping: %w", err)
-	}
-
-	rows, err := tx.Query(ctx, `
-		SELECT revision_id::text, dim_members, SUM(posted_value), AVG(posted_value),
-		       MIN(posted_value), MAX(posted_value), COUNT(*),
-		       MAX(posted_value) FILTER (WHERE posted_at = (SELECT MAX(p2.posted_at) FROM runtime.form_record_posting p2 WHERE p2.mapping_id=$1::uuid))
-		FROM runtime.form_record_posting
-		WHERE mapping_id=$1::uuid
-		GROUP BY revision_id, dim_members`, mappingID)
-	if err != nil {
-		return fmt.Errorf("query postings: %w", err)
-	}
-
-	type aggRow struct {
-		revisionID                     string
-		dimMembers                     []byte
-		sumVal, avgVal, minVal, maxVal *float64
-		cnt                            int64
-		lastVal                        *float64
-	}
-	var aggs []aggRow
-	for rows.Next() {
-		var ag aggRow
-		if err := rows.Scan(&ag.revisionID, &ag.dimMembers,
-			&ag.sumVal, &ag.avgVal, &ag.minVal, &ag.maxVal, &ag.cnt, &ag.lastVal,
-		); err == nil {
-			aggs = append(aggs, ag)
-		}
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate postings: %w", err)
-	}
-
-	// Delete existing fact_input rows for this mapping source.
-	// For "replace" aggregation also remove direct-entry rows for the same
-	// (metric, dim) combos so the form value fully replaces them.
-	// The reason travels with the transaction: the archive trigger on
-	// runtime.fact_input records it against every row it keeps.
-	_, _ = tx.Exec(ctx, `SET LOCAL mvx.delete_reason = 'form_reposted'`)
-	if _, err := tx.Exec(ctx,
-		`DELETE FROM runtime.fact_input WHERE source_ref=$1::uuid AND metric_id=$2::uuid`,
-		mappingID, targetMetricID); err != nil {
-		return fmt.Errorf("delete existing fact rows: %w", err)
-	}
-
-	if len(aggs) > 0 {
-		// Resolve user ID for entered_by FK — use passed userID if valid, else any real user.
-		systemUserID := userID
-		if systemUserID == "" {
-			_ = tx.QueryRow(ctx, `SELECT id::text FROM identity.user LIMIT 1`).Scan(&systemUserID)
-		}
-
-		for _, ag := range aggs {
-			var val float64
-			switch aggregation {
-			case "sum", "":
-				if ag.sumVal != nil {
-					val = *ag.sumVal
-				}
-			case "average":
-				if ag.avgVal != nil {
-					val = *ag.avgVal
-				}
-			case "min":
-				if ag.minVal != nil {
-					val = *ag.minVal
-				}
-			case "max":
-				if ag.maxVal != nil {
-					val = *ag.maxVal
-				}
-			case "count":
-				val = float64(ag.cnt)
-			case "last", "replace":
-				if ag.lastVal != nil {
-					val = *ag.lastVal
-				} else if ag.sumVal != nil {
-					val = *ag.sumVal
-				}
-			}
-
-			useRevID := ag.revisionID
-			if useRevID == "" {
-				useRevID = revisionID
-			}
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO runtime.fact_input
-				  (model_id, revision_id, metric_id, dim_members, value, entered_by, source_ref)
-				VALUES ($1::uuid, NULLIF($2,'')::uuid, $3::uuid, $4, $5, $6::uuid, $7::uuid)`,
-				modelID, useRevID, targetMetricID, ag.dimMembers, val, systemUserID, mappingID); err != nil {
-				return fmt.Errorf("insert aggregate row: %w", err)
-			}
-		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit: %w", err)
-	}
-	return nil
-}
-
-// backfillFormMapping processes all existing records that match the posting status rule.
-func (h *handler) backfillFormMapping(ctx context.Context, mappingID, userID string) (int, error) {
-	var formIDStr, status0 string
-	var postingStatuses []string
-	if err := h.db.QueryRow(ctx, `
-		SELECT form_id::text, posting_statuses[1]
-		FROM model.form_metric_mapping WHERE id=$1::uuid`, mappingID,
-	).Scan(&formIDStr, &status0); err != nil {
-		return 0, fmt.Errorf("mapping not found: %w", err)
-	}
-	// Get all posting statuses for the mapping
-	rows, err := h.db.Query(ctx, `
-		SELECT fr.id::text, fr.data, fr.status::text
-		FROM runtime.form_record fr
-		JOIN model.form_metric_mapping m ON m.form_id = fr.form_id
-		WHERE m.id=$1::uuid`, mappingID)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-
-	_ = status0
-	_ = formIDStr
-	_ = postingStatuses
-
-	type recRow struct {
-		id, status string
-		data       []byte
-	}
-	var recs []recRow
-	for rows.Next() {
-		var rec recRow
-		if err := rows.Scan(&rec.id, &rec.data, &rec.status); err == nil {
-			recs = append(recs, rec)
-		}
-	}
-	rows.Close()
-
-	// Resolve a valid entered_by user — prefer the passed userID, fall back to first user in DB.
-	resolvedUser := userID
-	if resolvedUser == "" {
-		_ = h.db.QueryRow(ctx, `SELECT id::text FROM identity.user LIMIT 1`).Scan(&resolvedUser)
-	}
-
-	count := 0
-	for _, rec := range recs {
-		var data map[string]any
-		if err := json.Unmarshal(rec.data, &data); err != nil {
-			continue
-		}
-		var fid string
-		_ = h.db.QueryRow(ctx, `SELECT form_id::text FROM runtime.form_record WHERE id=$1::uuid`, rec.id).Scan(&fid)
-		if err := h.applyFormMappings(ctx, rec.id, fid, rec.status, data, resolvedUser); err == nil {
-			count++
-		}
-	}
-	return count, nil
 }
 
 // previewFormMapping returns what postings would be created for eligible records.
@@ -10749,15 +10316,29 @@ func (h *handler) forms(w http.ResponseWriter, r *http.Request) {
 			Name   string              `json:"name"`
 			Label  string              `json:"label"`
 			Fields []crudapp.FormField `json:"fields"`
+			// OwnRecordsOnly: each person who does not administer the
+			// application sees only the records they created.
+			OwnRecordsOnly bool `json:"own_records_only"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
+			return
+		}
+		if err := crudapp.ValidateFields(body.Fields); err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
 		form, err := store.CreateForm(ctx, modelID, revisionID, body.Name, body.Label, body.Fields)
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
+		}
+		if body.OwnRecordsOnly {
+			if err := store.SetOwnRecordsOnly(ctx, form.ID, true); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+			form.OwnRecordsOnly = true
 		}
 		if a, e := h.resolveActor(ctx, r); e == nil {
 			var appID string
@@ -10870,8 +10451,9 @@ func (h *handler) publicDimensions(w http.ResponseWriter, r *http.Request) {
 	// hidden/read restrictions. Mirrors grid()'s own dimRules+cascade
 	// block (handler.go ~2139-2196): a "hidden" rule, direct or cascaded
 	// through the dimension hierarchy via ExpandHidden, removes the
-	// member; "read" leaves it visible in the picker (only the actual
-	// write is blocked, in applyFormMappings).
+	// member; "read" leaves it in the picker, marked, so a record's picker
+	// can refuse it where the save would post into it (the server refuses
+	// that save too: postingRefusal).
 	// Rules resolve by lineage against the requested revision; an
 	// unreadable rule set fails closed.
 	dimRules, _, arErr := loadUserAccessRules(ctx, h.db, a.UserID, revisionID)
@@ -10897,6 +10479,9 @@ func (h *handler) publicDimensions(w http.ResponseWriter, r *http.Request) {
 			kept := d.Members[:0]
 			for _, m := range d.Members {
 				if dimRules[m.ID] != "hidden" {
+					if dimRules[m.ID] == "read" {
+						m.Access = "read"
+					}
 					kept = append(kept, m)
 				}
 			}
@@ -10949,47 +10534,29 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !scope.reach {
-			jsonRecordErr(w, errRecordNotReached, "form")
+			jsonRecordErr(w, errRecordNotReached, "table")
 			return
 		}
 		if !scope.admin {
-			jsonErr(w, fmt.Errorf("forbidden: only an administrator of this application syncs a form's records"), http.StatusForbidden)
+			jsonErr(w, fmt.Errorf("forbidden: only an administrator of this application syncs a table's records"), http.StatusForbidden)
 			return
 		}
 
-		// Find all live mappings for this form
-		mrows, err := h.db.Query(ctx, `
-			SELECT id::text FROM model.form_metric_mapping
-			WHERE form_id=$1::uuid AND live_posting = TRUE`, formID)
-		if err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
-		}
-		var mappingIDs []string
-		for mrows.Next() {
-			var mid string
-			if err := mrows.Scan(&mid); err == nil {
-				mappingIDs = append(mappingIDs, mid)
-			}
-		}
-		mrows.Close()
-
-		totalProcessed := 0
-		for _, mid := range mappingIDs {
-			n, err := h.backfillFormMapping(ctx, mid, act.UserID)
-			if err != nil {
-				h.log.Warn().Err(err).Str("mapping_id", mid).Msg("form sync: backfill failed")
-				continue
-			}
-			totalProcessed += n
-		}
+		mappings, totalProcessed := h.repostTable(ctx, formID, act.UserID)
 		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 			Category: auditlog.CategoryDataChange, EventType: auditlog.EventFormSynced,
 			ActorUserID: act.UserID, ActorRole: strings.Join(act.Roles, ","),
 			ApplicationID: scope.appID, ResourceType: "form", ResourceID: formID,
-			Metadata: map[string]string{"mappings": strconv.Itoa(len(mappingIDs)), "records_processed": strconv.Itoa(totalProcessed)},
+			Metadata: map[string]string{"mappings": strconv.Itoa(mappings), "records_processed": strconv.Itoa(totalProcessed)},
 		})
-		jsonOK(w, map[string]any{"status": "ok", "mappings": len(mappingIDs), "records_processed": totalProcessed})
+		jsonOK(w, map[string]any{"status": "ok", "mappings": mappings, "records_processed": totalProcessed})
+		return
+	}
+
+	// /api/forms/{id}/records/query — the records query: a page of records
+	// matching filters, a search and a sort, or totals grouped by fields.
+	if len(parts) == 2 && parts[1] == "records/query" && r.Method == http.MethodPost {
+		h.recordsQuery(w, r, formID)
 		return
 	}
 
@@ -11010,7 +10577,7 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !scope.reach {
-			jsonRecordErr(w, errRecordNotReached, "form")
+			jsonRecordErr(w, errRecordNotReached, "table")
 			return
 		}
 		userID := act.UserID
@@ -11027,16 +10594,33 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if body.Status == "" {
-				body.Status = crudapp.StatusDraft
+				body.Status = scope.newRecordStatus()
 			}
-			if !crudapp.ValidRecordStatus(body.Status) {
+			switch {
+			case !scope.hasStatus() && body.Status != "":
+				jsonErr(w, errors.New(crudapp.ErrNoStatus), http.StatusBadRequest)
+				return
+			case scope.hasStatus() && !crudapp.ValidRecordStatus(body.Status):
 				jsonErr(w, fmt.Errorf("status must be one of draft, submitted, approved, rejected"), http.StatusBadRequest)
 				return
 			}
-			// Anyone who reaches the form creates drafts and submissions;
+			// Anyone who reaches the table creates drafts and submissions;
 			// a decided record is an administrator's.
 			if !scope.createAccess().CanCreate(body.Status) {
 				jsonErr(w, fmt.Errorf("forbidden: only an administrator of this application creates a record as %s", body.Status), http.StatusForbidden)
+				return
+			}
+			if body.Data == nil {
+				body.Data = map[string]any{}
+			}
+			if code, msg, problems, err := h.checkRecordSave(ctx, scope, nil, &recordState{Status: body.Status, Data: body.Data}, true); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			} else if len(problems) > 0 {
+				jsonFieldProblems(w, problems)
+				return
+			} else if code != 0 {
+				jsonErr(w, errors.New(msg), code)
 				return
 			}
 			rec, err := store.CreateRecordWithStatus(ctx, formID, userID, body.Status, body.Data)
@@ -11064,12 +10648,7 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
-		form, err := store.GetForm(ctx, formID)
-		if err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
-		}
-		records, next, err := h.visibleRecordPage(ctx, act, store, form, after, limit)
+		records, next, err := h.visibleRecordPage(ctx, scope, store, after, limit)
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
@@ -11102,25 +10681,56 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			Name   string              `json:"name"`
 			Label  string              `json:"label"`
 			Fields []crudapp.FormField `json:"fields"`
+			// Omitted, the table keeps its setting.
+			OwnRecordsOnly *bool `json:"own_records_only"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
 			return
 		}
-		if err := store.UpdateForm(ctx, formID, body.Name, body.Label, body.Fields); err != nil {
+		if err := crudapp.ValidateFields(body.Fields); err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		}
+		change, err := store.UpdateForm(ctx, formID, body.Name, body.Label, body.Fields)
+		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
-		if a, e := h.resolveActor(ctx, r); e == nil {
+		if body.OwnRecordsOnly != nil {
+			if err := store.SetOwnRecordsOnly(ctx, formID, *body.OwnRecordsOnly); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+		}
+		a, actErr := h.resolveActor(ctx, r)
+		// A table that gained or lost its status field counts other records
+		// in its metrics: every record is posted again.
+		if change.StatusChanged && actErr == nil {
+			userID := a.UserID
+			bgCtx := context.WithoutCancel(ctx)
+			go func() { h.repostTable(bgCtx, formID, userID) }()
+		}
+		if actErr == nil {
 			appID, _ := h.appIDFromFormID(ctx, formID)
+			meta := map[string]string{"name": body.Name}
+			if change.CodesAssigned > 0 {
+				meta["codes_assigned"] = strconv.Itoa(change.CodesAssigned)
+			}
+			if change.StatusChanged {
+				meta["status_field_changed"] = "true"
+			}
+			if body.OwnRecordsOnly != nil {
+				meta["own_records_only"] = strconv.FormatBool(*body.OwnRecordsOnly)
+			}
 			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 				Category: auditlog.CategoryModelChange, EventType: auditlog.EventFormUpdated,
 				ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
 				ApplicationID: appID, ResourceType: "form", ResourceID: formID,
-				Metadata: map[string]string{"name": body.Name},
+				Metadata: meta,
 			})
 		}
-		jsonOK(w, map[string]string{"status": "ok"})
+		jsonOK(w, map[string]any{"status": "ok", "codes_assigned": change.CodesAssigned, "status_field_changed": change.StatusChanged})
 	case http.MethodDelete:
 		appID, _ := h.appIDFromFormID(ctx, formID)
 		posted, err := store.DeleteForm(ctx, formID)
@@ -11140,21 +10750,6 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 	default:
 		jsonErr(w, fmt.Errorf("not found"), http.StatusNotFound)
 	}
-}
-
-// dispatchRecordCreated fires, in the background, the form_submit automation
-// rules for a new record (DispatchEventRules fires them for a submitted
-// record only), and form_approval for one created approved — for a record
-// created through the API and one a form import creates alike.
-func (h *handler) dispatchRecordCreated(ctx context.Context, appID, revisionID, formID, recordID, status, userID string) {
-	bgCtx := context.WithoutCancel(ctx)
-	go func() {
-		payload := map[string]string{"form_id": formID, "record_id": recordID, "status": status}
-		h.workflowStore(ctx).DispatchEventRules(bgCtx, appID, revisionID, "form_submit", formID, userID, payload)
-		if status == crudapp.StatusApproved {
-			h.workflowStore(ctx).DispatchEventRules(bgCtx, appID, revisionID, "form_approval", formID, userID, payload)
-		}
-	}()
 }
 
 // recordAction handles /api/records/{recordId} (GET, PUT, DELETE).
@@ -11207,7 +10802,11 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 		if newStatus == "" {
 			newStatus = oldStatus
 		}
-		if !crudapp.ValidRecordStatus(newStatus) {
+		switch {
+		case body.Status != "" && !scope.hasStatus():
+			jsonErr(w, errors.New(crudapp.ErrNoStatus), http.StatusBadRequest)
+			return
+		case newStatus != "" && !crudapp.ValidRecordStatus(newStatus):
 			jsonErr(w, fmt.Errorf("status must be one of draft, submitted, approved, rejected"), http.StatusBadRequest)
 			return
 		}
@@ -11219,9 +10818,20 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		data := body.Data
-		if data == nil {
-			data = rec.Data
+		data := rec.Data
+		if body.Data != nil {
+			// A code the server gave and the status are not the person's to change.
+			data = crudapp.KeepServerValues(scope.form, rec.Data, body.Data)
+		}
+		if code, msg, problems, err := h.checkRecordSave(ctx, scope, rec, &recordState{Status: newStatus, Data: data}, body.Data != nil); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		} else if len(problems) > 0 {
+			jsonFieldProblems(w, problems)
+			return
+		} else if code != 0 {
+			jsonErr(w, errors.New(msg), code)
+			return
 		}
 		if err := store.UpdateRecordFrom(ctx, recordID, oldStatus, newStatus, data); errors.Is(err, crudapp.ErrRecordChanged) {
 			jsonErr(w, fmt.Errorf("the record changed since it was read; reload it and try again"), http.StatusConflict)
@@ -11267,6 +10877,19 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 		if !access.CanDelete(rec.Status) {
 			jsonErr(w, fmt.Errorf("forbidden: you may not delete this record"), http.StatusForbidden)
 			return
+		}
+		// A creator deleting their record withdraws what it posted: only
+		// from cells they may write. An administrator removing someone's
+		// record needs no write access there (a record posts within its
+		// creator's access).
+		if rec.CreatedBy != nil && *rec.CreatedBy == act.UserID {
+			if code, msg, err := h.postingRefusal(ctx, act.UserID, true, scope.form, recordID, nil); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			} else if code != 0 {
+				jsonErr(w, errors.New(msg), code)
+				return
+			}
 		}
 		// What the record posted into metrics, taken back out once it is
 		// gone (retractPostings).
@@ -16601,7 +16224,7 @@ func (h *handler) memberHasAncestor(ctx context.Context, startID, targetID strin
 // fails, a recalculation it may not fail the request for. Built bare, the
 // store discarded them, so a broken query notified nobody unseen.
 func (h *handler) workflowStore(ctx context.Context) *workflow.Store {
-	return workflow.NewStore(h.db.For(ctx)).WithLogger(h.log)
+	return workflow.NewStore(h.db.For(ctx)).WithLogger(h.log).WithRecordStatus(h.workflowSetsRecordStatus)
 }
 
 // recalcAfterDimChange triggers RecalcAffected for every (revision, input-metric) pair that
@@ -18188,8 +17811,8 @@ func buildWorkflowTriggerEventCatalog(ctx context.Context, pool *pgxpool.Pool, a
 		// ── Form-generated events ──────────────────────────────────────────────
 		catalog = append(catalog, TriggerEventCatalogItem{
 			Key:         "form.submit",
-			Label:       "Any form submitted",
-			Description: "Starts when any form record in this application is submitted.",
+			Label:       "A record submitted in any table",
+			Description: "Starts when a record of any table in this application is submitted (in a table without a status field: saved).",
 			Category:    "form",
 			SourceType:  "system",
 			PayloadSchema: []TriggerPayloadField{
@@ -18238,7 +17861,7 @@ func buildWorkflowTriggerEventCatalog(ctx context.Context, pool *pgxpool.Pool, a
 				catalog = append(catalog, TriggerEventCatalogItem{
 					Key:           eventKey,
 					Label:         flabel + " submitted",
-					Description:   "Starts when a " + flabel + " form record is submitted.",
+					Description:   "Starts when a " + flabel + " record is submitted (in a table without a status field: saved).",
 					Category:      "form",
 					SourceType:    "form",
 					SourceID:      fid,
@@ -18659,12 +18282,6 @@ func isUniqueViolation(err error) bool {
 // a name another app's role uses is taken (it was a raw 500).
 func roleNameTaken(name string) error {
 	return fmt.Errorf("a business role named %q already exists in this workspace — roles are shared by its applications: give this one another name, or reuse that role", name)
-}
-
-// isForeignKeyViolation reports a foreign key refusal (SQLSTATE 23503).
-func isForeignKeyViolation(err error) bool {
-	var pe *pgconn.PgError
-	return errors.As(err, &pe) && pe.Code == "23503"
 }
 
 // isCheckViolation reports a CHECK or trigger refusal (SQLSTATE 23514), such

@@ -1,31 +1,44 @@
-<h2>Forms</h2>
-<p class="path">Sidebar: Developer › Forms</p>
-<p>A form is a structured record type that users fill in: a purchase request, an expense claim, a headcount change. This screen defines the <em>schema</em> only. Records are entered and reviewed through a <b>Form</b> widget on a dashboard; posting form values into planning cells is configured under Integrations › Form Records.</p>
-<figure><img src="img/04-forms.png" alt="Forms screen listing the Travel Expense Request form with four fields"><figcaption>The form list. Each card shows the display label, the technical name, the field count and the field labels.</figcaption></figure>
+<h2>Records</h2>
+<p class="path">Sidebar: Developer › Records</p>
+<p>A table holds the records people save: purchase requests, expense claims, headcount changes, deals. This screen defines each table's fields. Records are entered, searched and reviewed through a <b>Records</b> widget on a dashboard; posting record values into planning cells is configured under Integrations › Records.</p>
+<figure><img src="img/04-records.png" alt="Records screen listing the Travel Expense Request table with its fields"><figcaption>The table list. Each card shows the display label, the technical name, the field count, whether its records have a status, and the field labels.</figcaption></figure>
 <h3>Controls</h3>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
-<tr><td><b>Search forms and fields…</b></td><td>Keeps the forms whose name, label, or any field's name or label matches. The form being edited stays in view.</td></tr>
-<tr><td><b>New form</b> / <b>Cancel</b></td><td>Opens or closes the create panel. Closing resets it to one blank text field.</td></tr>
-<tr><td><b>Form name</b></td><td>Technical name, snake_case. Typing is coerced: lowercase, any character other than a–z, 0–9 and underscore becomes an underscore. Example placeholder: <code>purchase_request</code>.</td></tr>
+<tr><td><b>Search tables and fields…</b></td><td>Keeps the tables whose name, label, or any field's name or label matches. The table being edited stays in view.</td></tr>
+<tr><td><b>New table</b> / <b>Cancel</b></td><td>Opens or closes the create panel. Closing resets it to one blank text field.</td></tr>
+<tr><td><b>Table name</b></td><td>Technical name, snake_case. Typing is coerced: lowercase, any character other than a–z, 0–9 and underscore becomes an underscore. Example placeholder: <code>purchase_request</code>.</td></tr>
 <tr><td><b>Display label</b></td><td>What users see, free text.</td></tr>
-<tr><td><b>Fields</b> rows</td><td>One row per field: <b>field_name</b> (same coercion as the form name), <b>Field label</b>, <b>Field type</b>, <b>Required</b> checkbox, remove icon. <b>Add field</b> appends a text field.</td></tr>
-<tr><td><b>Field type</b></td><td><b>Text</b>, <b>Number</b>, <b>Date</b>, <b>Select</b>, <b>Boolean</b>, <b>Metric</b>, and under the group <b>Dimensions</b> one entry per dimension of the model. A dimension field stores a member of that dimension. Changing the type clears any type-specific settings.</td></tr>
-<tr><td><b>Metric</b> field options</td><td><b>By ID (fixed)</b>: the field is tied to one input metric chosen from <b>Metric</b> (only input metrics are offered). <b>By name (dynamic)</b>: the record names the metric at runtime and the <b>Amount field</b> select picks which Number field of the form carries the value.</td></tr>
-<tr><td><b>Create form</b></td><td>Enabled once name, label and every field name are filled. Errors are shown under the button.</td></tr>
-<tr><td><b>Edit</b> on a card</td><td>Opens the same editor inline for that form. <b>Save</b> shows a green <b>Saved</b> for a moment and closes; <b>Cancel</b> discards.</td></tr>
-<tr><td>Delete icon</td><td>Confirm <b>Delete form?</b>: "This removes the form and all its submitted records."</td></tr>
+<tr><td><b>Fields</b> rows</td><td>One row per field: <b>field_name</b> (same coercion as the table name), <b>Field label</b>, <b>Field type</b>, <b>Required</b> checkbox, remove icon. <b>Add field</b> appends a text field.</td></tr>
+<tr><td><b>Field type</b></td><td><b>Text</b>, <b>Number</b>, <b>Date</b>, <b>Select</b>, <b>Boolean</b>, <b>Metric</b>, <b>Auto code</b>, <b>Status</b>, and under the group <b>Dimensions</b> one entry per dimension of the model. A dimension field stores a member of that dimension. Changing the type clears any type-specific settings.</td></tr>
+<tr><td><b>Metric</b> field options</td><td><b>By ID (fixed)</b>: the field is tied to one input metric chosen from <b>Metric</b> (only input metrics are offered). <b>By name (dynamic)</b>: the record names the metric at runtime and the <b>Amount field</b> select picks which Number field of the table carries the value.</td></tr>
+<tr><td><b>Auto code</b> field options</td><td><b>Prefix</b> and <b>Digits</b>: each new record is given the prefix and the next number, padded to that many digits (<code>EXP-0042</code>). Nobody types it, and it cannot be changed. Records saved before the field was added are given codes, oldest first, when the table is saved. A deleted record's code is never given out again.</td></tr>
+<tr><td><b>Status</b> field</td><td>Gives the table's records a status: <i>draft</i>, <i>submitted</i>, <i>approved</i> or <i>rejected</i>. A table has at most one. See <i>Status and workflows</i> below.</td></tr>
+<tr><td><b>Each person sees only their own records</b></td><td>People who do not administer the application see, search, total and export only the records they created. Business admins (and developers and tenant admins within their scope) still see every record.</td></tr>
+<tr><td><b>Create table</b></td><td>Enabled once name, label and every field name are filled. Errors are shown under the button.</td></tr>
+<tr><td><b>Edit</b> on a card</td><td>Opens the same editor inline for that table. <b>Save</b> shows a green <b>Saved</b> — with how many records were given a code, or that records are being posted again — and closes; <b>Cancel</b> discards.</td></tr>
+<tr><td>Delete icon</td><td>Confirm <b>Delete table?</b>: "This removes the table and all its records."</td></tr>
 </table>
+<h3>Status and workflows</h3>
+<ul>
+  <li><b>No status field, no status.</b> A table without a status field gives its records no status: a record counts in the metrics its integrations post into as soon as it is saved, and saving it fires the table's <i>submitted</i> trigger.</li>
+  <li><b>A status field means approval.</b> With one, a new record starts as a draft. Its creator may move it between draft and submitted; an administrator may set any status. An integration posts a record only in the statuses it names (<i>approved</i> by default). Records saved before the field was added keep no status and keep counting.</li>
+  <li><b>The workflow moves it.</b> A workflow whose subject is the table (<i>Single saved record in a table</i> or <i>Selected records in a table</i>, under the workflow's Properties) and which has an approval step drives the status of the record its run is about — the record a <i>form_submit</i> trigger names: <i>submitted</i> while the run is open, <i>approved</i> or <i>rejected</i> by its last decision, a draft again if the run is cancelled. The record is posted again as it moves, as the approver. A test run moves nothing.</li>
+  <li><b>Adding or removing the field re-posts the table.</b> Removing a table's status field makes every record count, so its records are posted again; the Save message says so.</li>
+</ul>
 <h3>Rules and behaviour</h3>
 <ul>
-  <li><b>Forms are per revision.</b> The list and the create action use the selected revision. Editing never moves a form to another revision.</li>
-  <li><b>Same name overwrites.</b> Creating a form whose technical name already exists in the revision silently replaces that form's label and fields. Pick a new name for a new form.</li>
-  <li><b>Delete cascades.</b> Deleting a form removes every dashboard widget that shows it and every record ever submitted to it.</li>
-  <li><b>Records live on dashboards.</b> Users and business admins work on records only in a dashboard <b>Form</b> widget: <b>New record</b>, the pencil to edit one, the status list, delete, <b>Export</b> and <b>Import</b> (CSV and XLSX), and, for an administrator, <b>Sync to grid</b> — each offered only when the server allows it to that person. There is no Forms screen in the User group. The developer screen has no record controls.</li>
-  <li><b>Posting to cells is a separate object.</b> A form mapping (Integrations › Form Records) decides which field feeds which input metric, at which dimension members, for which record statuses. Metric and Dimension field types exist so the mapping has something to read.</li>
-  <li><b>Where forms appear.</b> Users and business admins open a form through a dashboard <b>Form</b> widget. A form that is on no dashboard is not reachable by them: place every form people fill in on a dashboard their business role is granted.</li>
+  <li><b>Tables are per revision.</b> The list and the create action use the selected revision. Editing never moves a table to another revision.</li>
+  <li><b>Same name overwrites.</b> Creating a table whose technical name already exists in the revision silently replaces that table's label and fields. Pick a new name for a new table.</li>
+  <li><b>Delete cascades.</b> Deleting a table removes every dashboard widget that shows it and every record ever saved in it.</li>
+  <li><b>Records live on dashboards.</b> Users and business admins work on records only in a dashboard <b>Records</b> widget: search, filters and a sort by any column (they cover every record the person may see, not one page), the pencil to edit a record, the status list, delete, <b>Export</b> (of what the widget shows) and <b>Import</b> (CSV and XLSX), and, for an administrator, <b>Sync to grid</b> — each offered only when the server allows it to that person. <b>+ New record</b> is shown only when the widget's developer added it (the widget's <i>Show the + New record button</i>). The developer screen has no record controls.</li>
+  <li><b>Values are checked on the server.</b> A dimension field takes a leaf member the person can see — a hidden member is answered like an unknown code; a metric field chosen by name takes an input metric the person can see; required fields must be filled; numbers, dates and true/false are checked. An import checks every row the same way and imports nothing if one fails.</li>
+  <li><b>Access rules decide where a record may post.</b> A save that would post into a cell the person may not write — a member or metric that is read-only for them, a workflow-locked cell — is refused with a message naming the member or metric (a hidden one is not named). Where a field posts on save, the member picker leaves out the members the person may only read. A draft that does not post yet may name such a member: an approver who may write there approves it.</li>
+  <li><b>What people see follows their access rules.</b> A record naming a member or a metric hidden from a person — through a dimension field, a fixed metric field, or a metric field chosen by name — is left out of their list, search, totals and export.</li>
+  <li><b>Posting to cells is a separate object.</b> A table mapping (Integrations › Records) decides which field feeds which input metric, at which dimension members, for which record statuses. Metric and Dimension field types exist so the mapping has something to read.</li>
+  <li><b>Where tables appear.</b> Users and business admins open a table through a dashboard <b>Records</b> widget. A table that is on no dashboard is not reachable by them: place every table people fill in on a dashboard their business role is granted. The chat connector and the AI Developer read a table's records too (read-only; <i>query_records</i>).</li>
 </ul>
-<figure><img src="img/23-form-editor.png" alt="Inline form editor with field rows, types and Required checkboxes"><figcaption>The inline editor. Field rows carry a name, a label, a type and a Required flag; a Metric field shows its By ID / By name choice below the row.</figcaption></figure>
+<figure><img src="img/23-form-editor.png" alt="Inline table editor with field rows, types and Required checkboxes"><figcaption>The inline editor. Field rows carry a name, a label, a type and a Required flag; a Metric field shows its By ID / By name choice below the row, an Auto code field its prefix and digits.</figcaption></figure>
 
 <h2>Grids</h2>
 <p class="path">Sidebar: Developer › Grids</p>

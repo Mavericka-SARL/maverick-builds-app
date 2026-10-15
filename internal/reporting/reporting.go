@@ -324,7 +324,7 @@ func (s *Session) Access(ctx context.Context, writes bool) (Access, error) {
 		a.Roles = []string{}
 	}
 	a.ReadOnly = !writes || s.s.writer == nil
-	a.Note = "Every read and write is made as you, under the access your administrators and developers configured in maverickbuilds.app, and is decided again on every call. This connection reads grid data, dashboards and workflows of each model's active revision; charts and reports made from it are not saved in maverickbuilds.app."
+	a.Note = "Every read and write is made as you, under the access your administrators and developers configured in maverickbuilds.app, and is decided again on every call. This connection reads grid data, tables of records, dashboards and workflows of each model's active revision; charts and reports made from it are not saved in maverickbuilds.app."
 	if a.ReadOnly {
 		a.Note += " It cannot change data: to write cells from this chat, disconnect maverickbuilds.app and connect it again, allowing it to change grid values."
 	} else {
@@ -335,6 +335,8 @@ func (s *Session) Access(ctx context.Context, writes bool) (Access, error) {
 			DecidedBy: "your application and model grants"},
 		{Family: "grids", Tools: []string{"list_sources", "describe_source", "list_members", "query_grid", "compare_grid", "render_chart", "render_report"}, Available: true,
 			DecidedBy: "model access; hidden members and metrics are left out, and values that depend on them are withheld"},
+		{Family: "records", Tools: []string{"list_tables", "query_records"}, Available: true,
+			DecidedBy: "model access, and per record: a table that shows each person their own records shows you yours, and records naming members or metrics hidden from you are left out of pages and totals alike"},
 		{Family: "process", Tools: []string{"list_dashboards", "describe_dashboard", "list_workflows", "describe_workflow"}, Available: true,
 			DecidedBy: "the dashboards your business roles give you and the model's published workflows; widgets name only the metrics and members you can see, and show no data"},
 		{Family: "cells", Tools: []string{"write_cells"}, Available: !a.ReadOnly,

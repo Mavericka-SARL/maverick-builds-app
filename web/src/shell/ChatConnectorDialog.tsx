@@ -11,7 +11,7 @@ import { useConnectorInfo } from "./connectorInfo";
  * deployment; each person still signs in with their own account, and reads
  * and changes only grid data their own access allows.
  */
-function CopyField({ label, value, secret }: { label: string; value: string; secret?: boolean }) {
+export function CopyField({ label, value, secret }: { label: string; value: string; secret?: boolean }) {
   const [shown, setShown] = useState(!secret);
   const [copied, setCopied] = useState(false);
   const copy = () => {

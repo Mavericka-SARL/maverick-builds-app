@@ -79,7 +79,6 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 	var p struct {
 		DimensionID   string    `json:"dimension_id"`
 		Name          string    `json:"name"`
-		AggRule       string    `json:"agg_rule"`
 		Tags          *[]string `json:"tags"`
 		DeriveMembers bool      `json:"derive_members"`
 		// Read from sent below: a string, or null to clear.
@@ -167,12 +166,12 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 		propSent, prop = true, nil
 	}
 
-	name, aggRule := strings.TrimSpace(p.Name), strings.TrimSpace(p.AggRule)
+	name := strings.TrimSpace(p.Name)
 	if err := metricformula.CheckRenameFreeOfOtherKind(ctx, e.pool, dimID, name, "dimension"); err != nil {
 		return "", "", err
 	}
-	if name == "" && aggRule == "" && p.Tags == nil && !parentSent && !sourceSent && !propSent && !p.DeriveMembers {
-		return "", "", fmt.Errorf("nothing to change: provide name, agg_rule, tags, parent_dimension_id, " +
+	if name == "" && p.Tags == nil && !parentSent && !sourceSent && !propSent && !p.DeriveMembers {
+		return "", "", fmt.Errorf("nothing to change: provide name, tags, parent_dimension_id, " +
 			"source_dimension_id, source_property or derive_members")
 	}
 
@@ -192,13 +191,13 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 	}
 	if _, err := e.pool.Exec(ctx, `
 		UPDATE model.dimension_def
-		SET name=COALESCE(NULLIF($2,''), name), agg_rule=COALESCE(NULLIF($3,''), agg_rule),
-		    parent_dimension_id=CASE WHEN $5::boolean THEN $4::uuid ELSE parent_dimension_id END,
-		    tags=COALESCE($6, tags),
-		    source_dimension_id=CASE WHEN $7::boolean THEN $8::uuid ELSE source_dimension_id END,
-		    source_property=CASE WHEN $7::boolean THEN $9 ELSE source_property END
+		SET name=COALESCE(NULLIF($2,''), name),
+		    parent_dimension_id=CASE WHEN $4::boolean THEN $3::uuid ELSE parent_dimension_id END,
+		    tags=COALESCE($5, tags),
+		    source_dimension_id=CASE WHEN $6::boolean THEN $7::uuid ELSE source_dimension_id END,
+		    source_property=CASE WHEN $6::boolean THEN $8 ELSE source_property END
 		WHERE id=$1::uuid`,
-		dimID, name, aggRule, newParent, parentSent, newTags,
+		dimID, name, newParent, parentSent, newTags,
 		grouping.Write, grouping.Source, grouping.Property); err != nil {
 		if metricformula.IsUniqueViolation(err) {
 			return "", "", metricformula.DimensionNameTaken(err, name)
@@ -231,9 +230,6 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 	}
 	if name != "" && name != curName {
 		changes = append(changes, fmt.Sprintf("renamed from '%s'", curName))
-	}
-	if aggRule != "" {
-		changes = append(changes, "rollup rule "+aggRule)
 	}
 	if p.Tags != nil {
 		changes = append(changes, "tags set")

@@ -118,6 +118,8 @@ func (s *Store) CancelInstance(ctx context.Context, instanceID, userID, reason s
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	// The records the run was about go back to their creators as drafts.
+	s.driveRecords(ctx, instanceID, runCancelled, userID)
 
 	if testRun {
 		return res, nil

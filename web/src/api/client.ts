@@ -1,5 +1,17 @@
 import keycloak from "../auth/keycloak";
 
+/** A personal API token as its owner's list shows it (never the token). */
+export interface ApiToken {
+  id: string;
+  name: string;
+  hint: string;
+  access: "read" | "write";
+  created_at: string;
+  expires_at: string;
+  last_used_at: string | null;
+  expired: boolean;
+}
+
 export interface DevMetric {
   id: string;
   name: string;
@@ -593,6 +605,9 @@ export interface DevDimensionMember {
   // A calculated member: its value, for every metric, is this formula over
   // the dimension's other members ({RF} - {LY}).
   formula?: string;
+  /** GET /api/dimensions: "read" for a member the caller may only read. A
+      record's picker cannot offer it for a save that would post into it. */
+  access?: "read";
 }
 
 export interface DimProperty {
@@ -751,6 +766,8 @@ export interface WidgetProps {
   /** Grid widgets: a context selector takes several members (Region 1 +
       Region 3), and the grid shows their aggregate, read-only. */
   multi_select?: boolean;
+  /** Records widgets: offer "+ New record" (to people who may create one). Off by default. */
+  new_record_button?: boolean;
   /** Widget surface: "white" draws the widget on a card (surface + border),
       "none" draws it straight on the page. Absent = the type's default
       (KPI tiles are cards, everything else is bare). */
@@ -1144,10 +1161,13 @@ export interface Notification {
   resource_id?: string;
 }
 
+/** A field of a table of records. */
 export interface FormField {
   name: string;
   label: string;
-  type: "text" | "number" | "select" | "date" | "boolean" | "dimension" | "metric";
+  /** autocode: a code the server gives each new record; status: the records'
+      status (draft, submitted, approved, rejected), set by a workflow. */
+  type: "text" | "number" | "select" | "date" | "boolean" | "dimension" | "metric" | "autocode" | "status";
   required: boolean;
   options?: string[];
   // dimension type
@@ -1156,17 +1176,32 @@ export interface FormField {
   // metric type
   metric_id?: string;
   value_field?: string;
+  // autocode type: the code is the prefix and the next number, padded to
+  // code_digits (0 = 4).
+  code_prefix?: string;
+  code_digits?: number;
 }
 
+/** A table of records (the API still says "form"). */
 export interface FormDef {
   id: string;
   model_id: string;
   name: string;
   label: string;
   fields: FormField[];
+  /** Each person who does not administer the application sees only the records they created. */
+  own_records_only?: boolean;
   created_at: string;
   /** Served by GET /api/forms; absent from an older server, which the UI then treats as no permission. */
   permissions?: FormPermissions;
+  /** Each field a live mapping takes a member from, with the statuses in
+      which a record posts ("" for a record without a status). */
+  posting_fields?: Record<string, string[]>;
+}
+
+/** The table's status field, when it has one. */
+export function statusFieldOf(form: FormDef | null | undefined): FormField | undefined {
+  return form?.fields.find(f => f.type === "status");
 }
 
 // What the caller may do with a form's records as a whole, computed
@@ -1175,7 +1210,9 @@ export interface FormDef {
 export interface FormPermissions {
   /** May re-post every record of the form into its metrics ("Sync to grid"). */
   sync: boolean;
-  /** Statuses a new record may take, in lifecycle order; empty when none. */
+  /** May create records (absent from an older server: then create_statuses decides). */
+  create?: boolean;
+  /** In a table with a status field, the statuses a new record may take, in lifecycle order; empty otherwise. */
   create_statuses: string[];
 }
 
@@ -1193,6 +1230,7 @@ export interface FormRecord {
   id: string;
   form_id: string;
   data: Record<string, unknown>;
+  /** "" for a record without a status (its table has no status field). */
   status: string;
   /** The creating user's id; null for records that predate it being kept. */
   created_by: string | null;
@@ -1204,6 +1242,46 @@ export interface FormRecord {
 
 /** Every record status, in the order a record moves through them. */
 export const RECORD_STATUSES = ["draft", "submitted", "approved", "rejected"] as const;
+
+/** A filter of the records query. */
+export interface RecordFilter {
+  /** A field name, or status, created_at, updated_at, created_by ("me" is the caller). */
+  field: string;
+  op?: "eq" | "ne" | "in" | "not_in" | "gt" | "gte" | "lt" | "lte" | "between" | "contains" | "starts_with" | "empty" | "not_empty";
+  value?: unknown;
+  values?: unknown[];
+}
+
+/** The records query: a page of records, or with group_by/aggregates totals over them. */
+export interface RecordsQuery {
+  filters?: RecordFilter[];
+  search?: string;
+  sort?: { field: string; desc?: boolean }[];
+  group_by?: { field: string; period?: "day" | "week" | "month" | "quarter" | "year" }[];
+  aggregates?: { op: "count" | "count_distinct" | "sum" | "avg" | "min" | "max"; field?: string }[];
+  limit?: number;
+  offset?: number;
+}
+
+/** A column a records query names: a field, or one every record has. */
+export interface RecordColumn {
+  key: string;
+  label: string;
+  kind: "text" | "number" | "date" | "boolean" | "datetime" | "status" | "user";
+  type?: string;
+  dimension_id?: string;
+}
+
+export interface RecordsQueryResult {
+  kind: "records" | "totals";
+  table: { id: string; name: string; label: string };
+  columns: RecordColumn[];
+  records?: FormRecord[];
+  total?: number;
+  rows?: Record<string, unknown>[];
+  total_groups?: number;
+  statuses?: string[];
+}
 
 /**
  * The statuses to offer for a record: the current one plus the ones the
@@ -2106,6 +2184,20 @@ export const api = {
   activateDevRevision: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/revisions/${id}/activate`, { method: "PUT" }),
 
+  // Every calculated metric of the revision recalculated in the background
+  // (for values a recalculation cut short left stale).
+  recalculateDevRevision: (id: string) =>
+    apiFetch<{ recalculating: boolean; metrics: number }>(`/api/developer/revisions/${id}/recalculate`, { method: "POST" }),
+
+  // Personal API tokens: made, listed and revoked by the signed-in person
+  // (Account › API tokens). The token itself is in createApiToken's answer
+  // alone.
+  listApiTokens: () => apiFetch<ApiToken[]>("/api/me/api-tokens"),
+  createApiToken: (body: { name: string; access: "read" | "write"; expires_in_days: number }) =>
+    apiFetch<{ token: string; api_token: ApiToken }>("/api/me/api-tokens", { method: "POST", body: JSON.stringify(body) }),
+  revokeApiToken: (id: string) =>
+    apiFetch<{ revoked: boolean }>(`/api/me/api-tokens/${id}`, { method: "DELETE" }),
+
   getDevModel: (revisionId?: string) =>
     apiFetch<DevModel>(`/api/developer/model${revisionId ? `?revision_id=${revisionId}` : ""}`),
 
@@ -2309,14 +2401,18 @@ export const api = {
   getDimensions: () => apiFetch<DevDimension[]>("/api/dimensions"),
   listForms: (revisionId?: string) =>
     apiFetch<FormDef[]>(`/api/forms${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
-  createForm: (body: { name: string; label: string; fields: FormField[] }, revisionId?: string) =>
+  createForm: (body: { name: string; label: string; fields: FormField[]; own_records_only?: boolean }, revisionId?: string) =>
     apiFetch<FormDef>(`/api/forms${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, { method: "POST", body: JSON.stringify(body) }),
-  updateForm: (id: string, body: { name: string; label: string; fields: FormField[] }) =>
-    apiFetch<{ status: string }>(`/api/forms/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  updateForm: (id: string, body: { name: string; label: string; fields: FormField[]; own_records_only?: boolean }) =>
+    apiFetch<{ status: string; codes_assigned?: number; status_field_changed?: boolean }>(`/api/forms/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteForm: (id: string) =>
     apiFetch<{ status: string }>(`/api/forms/${id}`, { method: "DELETE" }),
   listRecords: (formId: string) => apiFetch<FormRecord[]>(`/api/forms/${formId}/records`),
-  // Without a status the server creates a draft.
+  /** The records query: a filtered, searched, sorted page of records, or totals. */
+  queryRecords: (formId: string, query: RecordsQuery) =>
+    apiFetch<RecordsQueryResult>(`/api/forms/${formId}/records/query`, { method: "POST", body: JSON.stringify(query) }),
+  // Without a status the server creates a draft — or, in a table without a
+  // status field, a record without one.
   createRecord: (formId: string, data: Record<string, unknown>, revisionId?: string, status?: string) =>
     apiFetch<FormRecord>(`/api/forms/${formId}/records`, { method: "POST", body: JSON.stringify({ data, revision_id: revisionId, status }) }),
   updateRecord: (recordId: string, change: FormRecordChange) =>
@@ -2329,8 +2425,9 @@ export const api = {
   // Exports this form's records — one row per record, field names as columns
   // (plus id/status/created_at) — the shape importFormRecords/
   // importFormRecordsXlsx expect back.
-  exportFormRecords: (formId: string, format: "csv" | "xlsx" = "xlsx") =>
-    apiFetchBlob(`/api/forms/${formId}/export?format=${format}`),
+  // Given a query (without totals), the export holds what it matches, in its order.
+  exportFormRecords: (formId: string, format: "csv" | "xlsx" = "xlsx", query?: RecordsQuery) =>
+    apiFetchBlob(`/api/forms/${formId}/export?format=${format}${query ? `&query=${encodeURIComponent(JSON.stringify(query))}` : ""}`),
   importFormRecords: (formId: string, csv: string) =>
     apiFetch<{ status: string; records_created: number }>(`/api/forms/${formId}/import`, {
       method: "POST",

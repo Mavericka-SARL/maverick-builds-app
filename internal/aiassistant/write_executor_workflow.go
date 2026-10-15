@@ -477,6 +477,11 @@ func (e *WriteExecutor) createFormIntegration(ctx context.Context, raw json.RawM
 	if err := e.checkIntegrationFields(ctx, formID, &p); err != nil {
 		return "", "", err
 	}
+	if err := crudapp.CheckMappingRefs(ctx, e.pool, e.modelID, e.revID, crudapp.MappingRefs{
+		FormID: formID, GridID: p.GridID, TargetMetricID: metricID, SourceField: p.SourceField, DimensionMappings: p.DimensionMappings,
+	}); err != nil {
+		return "", "", err
+	}
 	if p.Aggregation == "" {
 		p.Aggregation = "sum"
 	}
@@ -576,6 +581,11 @@ func (e *WriteExecutor) updateFormIntegration(ctx context.Context, raw json.RawM
 		p.LivePosting = &live
 	}
 	if err := e.checkIntegrationFields(ctx, formID, &p); err != nil {
+		return "", "", err
+	}
+	if err := crudapp.CheckMappingRefs(ctx, e.pool, e.modelID, e.revID, crudapp.MappingRefs{
+		FormID: formID, GridID: p.GridID, TargetMetricID: p.TargetMetricID, SourceField: p.SourceField, DimensionMappings: p.DimensionMappings,
+	}); err != nil {
 		return "", "", err
 	}
 	dimJSON, _ := json.Marshal(p.DimensionMappings)

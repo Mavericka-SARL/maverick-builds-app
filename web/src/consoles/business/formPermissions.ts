@@ -1,4 +1,4 @@
-// What User › Forms and the dashboard form widget offer on a form as a whole,
+// What the records widget offers on a table of records as a whole,
 // read from the permissions GET /api/forms serves on each form (the server
 // computes them from the scope that authorises the sync and the create).
 // A form without permissions — an older server — gets nothing offered.
@@ -9,9 +9,14 @@ export function canSyncForm(form: FormDef | null | undefined): boolean {
   return !!form?.permissions?.sync;
 }
 
-/** The statuses a new record of form may be created in, in lifecycle order. */
+/** The statuses a new record of form may be created in, in lifecycle order (none in a table without a status field). */
 export function createStatusesOf(form: FormDef | null | undefined): string[] {
   return form?.permissions?.create_statuses ?? [];
+}
+
+/** Whether the caller may create records of form (and so import them). */
+export function canCreateRecords(form: FormDef | null | undefined): boolean {
+  return form?.permissions?.create ?? createStatusesOf(form).length > 0;
 }
 
 /**

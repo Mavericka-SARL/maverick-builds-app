@@ -42,6 +42,9 @@ func (h *handler) subjectOf(r *http.Request) string {
 	if sub, ok := delegatedSubject(r.Context()); ok {
 		return sub // a connector's read (mcp.go), verified at /mcp
 	}
+	if t, ok := apiTokenOf(r.Context()); ok {
+		return t.Subject // a personal API token, verified by apiTokenAuth
+	}
 	if h.devMode {
 		persona := r.Header.Get("X-Dev-User")
 		if persona == "" {

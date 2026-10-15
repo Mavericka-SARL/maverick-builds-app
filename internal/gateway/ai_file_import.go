@@ -516,6 +516,13 @@ func (h *handler) aiReadHooks(r *http.Request, sessionID, modelID, userID string
 		AttachGoogleSheet: func(ctx context.Context, sheetURL string) (string, error) {
 			return h.aiAttachGoogleSheet(ctx, r, sessionID, userID, sheetURL)
 		},
+		QueryRecords: func(ctx context.Context, tableID string, query json.RawMessage) (string, error) {
+			status, body := h.callAsCaller(ctx, r, http.MethodPost, "/api/forms/"+url.PathEscape(tableID)+"/records/query", nil, query)
+			if status != http.StatusOK {
+				return "", routeError(status, body)
+			}
+			return clippedJSON(body), nil
+		},
 		ModelLinkSources: func(ctx context.Context, sourceModelID, grid string) (string, error) {
 			q := url.Values{}
 			if sourceModelID != "" {

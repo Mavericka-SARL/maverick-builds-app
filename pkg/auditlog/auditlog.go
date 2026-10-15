@@ -38,7 +38,10 @@ const (
 	EventRevisionCreated   EventType = "revision.created"
 	EventRevisionActivated EventType = "revision.activated"
 	EventRevisionDeleted   EventType = "revision.deleted"
-	EventCellWritten       EventType = "cell.written"
+	// Every calculated metric of a revision recalculated on a developer's
+	// request.
+	EventRevisionRecalculated EventType = "revision.recalculated"
+	EventCellWritten          EventType = "cell.written"
 	// A batch of cells written at once (POST /api/cells/batch): one event
 	// for the batch, not one per cell.
 	EventCellsWritten           EventType = "cells.written"
@@ -72,12 +75,16 @@ const (
 	// Whether people may change grid data from a chat connection
 	// (ChatGPT, Claude) in a tenant.
 	EventConnectorSettingsUpdated EventType = "connector.settings_updated"
-	EventTenantDeleted            EventType = "tenant.deleted"
-	EventApplicationCreated       EventType = "application.created"
-	EventApplicationUpdated       EventType = "application.updated"
-	EventApplicationDeleted       EventType = "application.deleted"
-	EventModelCreated             EventType = "model.created"
-	EventModelUpdated             EventType = "model.updated"
+	// A person's API token for scripts, made or revoked (the token itself is
+	// never logged).
+	EventAPITokenCreated    EventType = "api_token.created"
+	EventAPITokenRevoked    EventType = "api_token.revoked"
+	EventTenantDeleted      EventType = "tenant.deleted"
+	EventApplicationCreated EventType = "application.created"
+	EventApplicationUpdated EventType = "application.updated"
+	EventApplicationDeleted EventType = "application.deleted"
+	EventModelCreated       EventType = "model.created"
+	EventModelUpdated       EventType = "model.updated"
 	// EventModelActiveRevisionSet is deliberately distinct from
 	// EventRevisionActivated (the developer-console path): both flip a
 	// model's active revision, but through different UIs/roles, and should
@@ -244,6 +251,16 @@ const (
 // RevisionID are all optional ("" -> NULL / not attributed); which ones are
 // meaningful depends on the event — e.g. a scheduler-fired event has no
 // actor, and a tenant/user-management event has no revision.
+type viaKey struct{}
+
+// WithVia marks ctx's request as made through a credential other than a
+// person's own sign-in — an API token — so every event Log writes for it
+// says so in its metadata ("via"): an audit trail that showed the person
+// alone could not tell their clicks from their script's.
+func WithVia(ctx context.Context, via string) context.Context {
+	return context.WithValue(ctx, viaKey{}, via)
+}
+
 type Fields struct {
 	Category      Category
 	EventType     EventType
@@ -287,6 +304,16 @@ func Log(ctx context.Context, pool Execer, log zerolog.Logger, f Fields) {
 		// A nil map marshals to the JSON scalar null; every reader expects an
 		// object, and exports render null as the word "null".
 		f.Metadata = map[string]string{}
+	}
+	if via, ok := ctx.Value(viaKey{}).(string); ok && via != "" {
+		if _, set := f.Metadata["via"]; !set {
+			md := make(map[string]string, len(f.Metadata)+1)
+			for k, v := range f.Metadata {
+				md[k] = v
+			}
+			md["via"] = via
+			f.Metadata = md
+		}
 	}
 	metaJSON, err := json.Marshal(f.Metadata)
 	if err != nil {

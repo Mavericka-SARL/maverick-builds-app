@@ -13,7 +13,7 @@ func TestFormsCRUDMutationsAreAudited(t *testing.T) {
 	// ── form: create, update, delete ───────────────────────────────────
 	status, body := f.do(t, "POST", "/api/forms", map[string]any{
 		"name": "expenses", "label": "Expenses",
-		"fields": []map[string]any{{"name": "amount", "label": "Amount", "type": "number"}},
+		"fields": []map[string]any{{"name": "amount", "label": "Amount", "type": "number"}, {"name": "status", "label": "Status", "type": "status"}},
 	})
 	if status != http.StatusOK {
 		t.Fatalf("create form: status=%d body=%v", status, body)
@@ -72,7 +72,7 @@ func TestFormsCRUDMutationsAreAudited(t *testing.T) {
 	// ── form update / delete ────────────────────────────────────────────
 	status, _ = f.do(t, "PATCH", "/api/forms/"+formID, map[string]any{
 		"name": "expenses", "label": "Expenses v2",
-		"fields": []map[string]any{{"name": "amount", "label": "Amount", "type": "number"}},
+		"fields": []map[string]any{{"name": "amount", "label": "Amount", "type": "number"}, {"name": "status", "label": "Status", "type": "status"}},
 	})
 	if status != http.StatusOK {
 		t.Fatalf("update form: status=%d", status)

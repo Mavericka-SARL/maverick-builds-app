@@ -2136,7 +2136,7 @@ func (s *Server) handleArchiveWorkflowRequest(args [1]string, argsEscaped bool, 
 
 // handleBackfillFormMappingRequest handles backfillFormMapping operation.
 //
-// Re-apply a form-to-metric mapping against all already-submitted records.
+// Re-apply a table-to-metric mapping against all already-submitted records.
 //
 // POST /api/developer/form-integrations/{id}/backfill
 func (s *Server) handleBackfillFormMappingRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -2272,7 +2272,7 @@ func (s *Server) handleBackfillFormMappingRequest(args [1]string, argsEscaped bo
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    BackfillFormMappingOperation,
-			OperationSummary: "Re-apply a form-to-metric mapping against all already-submitted records",
+			OperationSummary: "Re-apply a table-to-metric mapping against all already-submitted records",
 			OperationID:      "backfillFormMapping",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -3620,6 +3620,193 @@ func (s *Server) handleConfirmAiProposalRequest(args [2]string, argsEscaped bool
 	}
 
 	if err := encodeConfirmAiProposalResponse(response, w, span); err != nil {
+		defer recordError("EncodeResponse", err)
+		if !errors.Is(err, ht.ErrInternalServerErrorResponse) {
+			s.cfg.ErrorHandler(ctx, w, r, err)
+		}
+		return
+	}
+}
+
+// handleCreateAPITokenRequest handles createAPIToken operation.
+//
+// Make a personal API token for a script; the answer carries the token, once.
+//
+// POST /api/me/api-tokens
+func (s *Server) handleCreateAPITokenRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
+	statusWriter := &codeRecorder{ResponseWriter: w}
+	w = statusWriter
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("createAPIToken"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.HTTPRouteKey.String("/api/me/api-tokens"),
+	}
+	// Add attributes from config.
+	otelAttrs = append(otelAttrs, s.cfg.Attributes...)
+
+	// Start a span for this request.
+	ctx, span := s.cfg.Tracer.Start(r.Context(), CreateAPITokenOperation,
+		trace.WithAttributes(otelAttrs...),
+		serverSpanKind,
+	)
+	defer span.End()
+
+	// Add Labeler to context.
+	labeler := &Labeler{attrs: otelAttrs}
+	ctx = contextWithLabeler(ctx, labeler)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		elapsedDuration := time.Since(startTime)
+
+		attrSet := labeler.AttributeSet()
+		attrs := attrSet.ToSlice()
+		code := statusWriter.status
+		if code != 0 {
+			codeAttr := semconv.HTTPResponseStatusCode(code)
+			attrs = append(attrs, codeAttr)
+			span.SetAttributes(codeAttr)
+		}
+		attrOpt := metric.WithAttributes(attrs...)
+
+		// Increment request counter.
+		s.requests.Add(ctx, 1, attrOpt)
+
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		s.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), attrOpt)
+	}()
+
+	var (
+		recordError = func(stage string, err error) {
+			span.RecordError(err)
+
+			// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#status
+			// Span Status MUST be left unset if HTTP status code was in the 1xx, 2xx or 3xx ranges,
+			// unless there was another error (e.g., network error receiving the response body; or 3xx codes with
+			// max redirects exceeded), in which case status MUST be set to Error.
+			code := statusWriter.status
+			if code < 100 || code >= 500 {
+				span.SetStatus(codes.Error, stage)
+			}
+
+			attrSet := labeler.AttributeSet()
+			attrs := attrSet.ToSlice()
+			if code != 0 {
+				attrs = append(attrs, semconv.HTTPResponseStatusCode(code))
+			}
+
+			s.errors.Add(ctx, 1, metric.WithAttributes(attrs...))
+		}
+		err          error
+		opErrContext = ogenerrors.OperationContext{
+			Name: CreateAPITokenOperation,
+			ID:   "createAPIToken",
+		}
+	)
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			sctx, ok, err := s.securityBearerAuth(ctx, CreateAPITokenOperation, r)
+			if err != nil {
+				err = &ogenerrors.SecurityError{
+					OperationContext: opErrContext,
+					Security:         "BearerAuth",
+					Err:              err,
+				}
+				defer recordError("Security:BearerAuth", err)
+				s.cfg.ErrorHandler(ctx, w, r, err)
+				return
+			}
+			if ok {
+				satisfied[0] |= 1 << 0
+				ctx = sctx
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			err = &ogenerrors.SecurityError{
+				OperationContext: opErrContext,
+				Err:              ogenerrors.ErrSecurityRequirementIsNotSatisfied,
+			}
+			defer recordError("Security", err)
+			s.cfg.ErrorHandler(ctx, w, r, err)
+			return
+		}
+	}
+
+	var rawBody []byte
+	request, rawBody, close, err := s.decodeCreateAPITokenRequest(r)
+	if err != nil {
+		err = &ogenerrors.DecodeRequestError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeRequest", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+	defer func() {
+		if err := close(); err != nil {
+			recordError("CloseRequest", err)
+		}
+	}()
+
+	var response CreateAPITokenRes
+	if m := s.cfg.Middleware; m != nil {
+		mreq := middleware.Request{
+			Context:          ctx,
+			OperationName:    CreateAPITokenOperation,
+			OperationSummary: "Make a personal API token for a script; the answer carries the token, once",
+			OperationID:      "createAPIToken",
+			Body:             request,
+			RawBody:          rawBody,
+			Params:           middleware.Parameters{},
+			Raw:              r,
+		}
+
+		type (
+			Request  = *APITokenCreate
+			Params   = struct{}
+			Response = CreateAPITokenRes
+		)
+		response, err = middleware.HookMiddleware[
+			Request,
+			Params,
+			Response,
+		](
+			m,
+			mreq,
+			nil,
+			func(ctx context.Context, request Request, params Params) (response Response, err error) {
+				response, err = s.h.CreateAPIToken(ctx, request)
+				return response, err
+			},
+		)
+	} else {
+		response, err = s.h.CreateAPIToken(ctx, request)
+	}
+	if err != nil {
+		defer recordError("Internal", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	if err := encodeCreateAPITokenResponse(response, w, span); err != nil {
 		defer recordError("EncodeResponse", err)
 		if !errors.Is(err, ht.ErrInternalServerErrorResponse) {
 			s.cfg.ErrorHandler(ctx, w, r, err)
@@ -6350,7 +6537,7 @@ func (s *Server) handleCreateFolderRequest(args [0]string, argsEscaped bool, w h
 
 // handleCreateFormRequest handles createForm operation.
 //
-// Create a CRUD form.
+// Create a table of records.
 //
 // POST /api/forms
 func (s *Server) handleCreateFormRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -6501,7 +6688,7 @@ func (s *Server) handleCreateFormRequest(args [0]string, argsEscaped bool, w htt
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    CreateFormOperation,
-			OperationSummary: "Create a CRUD form",
+			OperationSummary: "Create a table of records",
 			OperationID:      "createForm",
 			Body:             request,
 			RawBody:          rawBody,
@@ -6552,7 +6739,9 @@ func (s *Server) handleCreateFormRequest(args [0]string, argsEscaped bool, w htt
 
 // handleCreateFormMappingRequest handles createFormMapping operation.
 //
-// Create a form-to-metric mapping (posts submitted form field values into a metric's facts).
+// The table, grid, input metric and dimensions must be the model's, in the revision (400 otherwise,
+// without saying whether the id exists elsewhere); the source field and every mapped field must be
+// fields of the table.
 //
 // POST /api/developer/form-integrations
 func (s *Server) handleCreateFormMappingRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -6693,7 +6882,7 @@ func (s *Server) handleCreateFormMappingRequest(args [0]string, argsEscaped bool
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    CreateFormMappingOperation,
-			OperationSummary: "Create a form-to-metric mapping (posts submitted form field values into a metric's facts)",
+			OperationSummary: "Create a table-to-metric mapping (posts table field values into a metric's facts)",
 			OperationID:      "createFormMapping",
 			Body:             request,
 			RawBody:          rawBody,
@@ -6739,9 +6928,13 @@ func (s *Server) handleCreateFormMappingRequest(args [0]string, argsEscaped bool
 
 // handleCreateFormRecordRequest handles createFormRecord operation.
 //
-// For a caller who reaches the form's application (404 otherwise). The caller becomes the record's
-// creator. A record created submitted dispatches form_submit rules, one created approved (by an
-// administrator) form_approval rules.
+// For a caller who reaches the table's application (404 otherwise). The caller becomes the record's
+// creator; each autocode field gives it the next code. Its values are checked (400, with every
+// problem listed): a member or metric hidden from the caller is no member or metric to them. A
+// record that would post into a cell the caller may not write — a read-only member or metric, a
+// locked cell — is refused (403) rather than saved without its posting. A record created without a
+// status or as submitted dispatches form_submit rules, one created approved (by an administrator)
+// form_approval rules.
 //
 // POST /api/forms/{id}/records
 func (s *Server) handleCreateFormRecordRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -6892,7 +7085,7 @@ func (s *Server) handleCreateFormRecordRequest(args [1]string, argsEscaped bool,
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    CreateFormRecordOperation,
-			OperationSummary: "Submit a new record to a form (posts to any live form-metric mappings and dispatches form_submit automation rules)",
+			OperationSummary: "Submit a new record to a table (posts to any live form-metric mappings and dispatches form_submit automation rules)",
 			OperationID:      "createFormRecord",
 			Body:             request,
 			RawBody:          rawBody,
@@ -11912,8 +12105,8 @@ func (s *Server) handleDeleteFolderRequest(args [1]string, argsEscaped bool, w h
 
 // handleDeleteFormRequest handles deleteForm operation.
 //
-// Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
-// Deletes every record of the form with it.
+// Within the caller's builder scope (403 for a table outside it, 404 for one that does not exist).
+// Deletes every record of the table with it.
 //
 // DELETE /api/forms/{id}
 func (s *Server) handleDeleteFormRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -12049,7 +12242,7 @@ func (s *Server) handleDeleteFormRequest(args [1]string, argsEscaped bool, w htt
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    DeleteFormOperation,
-			OperationSummary: "Delete a form",
+			OperationSummary: "Delete a table",
 			OperationID:      "deleteForm",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -12100,7 +12293,7 @@ func (s *Server) handleDeleteFormRequest(args [1]string, argsEscaped bool, w htt
 
 // handleDeleteFormMappingRequest handles deleteFormMapping operation.
 //
-// Delete a form-to-metric mapping.
+// Delete a table-to-metric mapping.
 //
 // DELETE /api/developer/form-integrations/{id}
 func (s *Server) handleDeleteFormMappingRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -12236,7 +12429,7 @@ func (s *Server) handleDeleteFormMappingRequest(args [1]string, argsEscaped bool
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    DeleteFormMappingOperation,
-			OperationSummary: "Delete a form-to-metric mapping",
+			OperationSummary: "Delete a table-to-metric mapping",
 			OperationID:      "deleteFormMapping",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -12424,7 +12617,7 @@ func (s *Server) handleDeleteFormRecordRequest(args [1]string, argsEscaped bool,
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    DeleteFormRecordOperation,
-			OperationSummary: "Delete a form record",
+			OperationSummary: "Delete a table record",
 			OperationID:      "deleteFormRecord",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -15504,8 +15697,8 @@ func (s *Server) handleExportAuditRequest(args [0]string, argsEscaped bool, w ht
 
 // handleExportFormRecordsRequest handles exportFormRecords operation.
 //
-// For a caller who reaches the form's application (404 otherwise); records the caller's access rules
-// withhold are left out.
+// For a caller who reaches the table's application (404 otherwise); records the caller's access
+// rules withhold are left out.
 //
 // GET /api/forms/{id}/export
 func (s *Server) handleExportFormRecordsRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -15641,7 +15834,7 @@ func (s *Server) handleExportFormRecordsRequest(args [1]string, argsEscaped bool
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    ExportFormRecordsOperation,
-			OperationSummary: "Export a form's records as CSV or XLSX",
+			OperationSummary: "Export a table's records as CSV or XLSX",
 			OperationID:      "exportFormRecords",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -15654,6 +15847,10 @@ func (s *Server) handleExportFormRecordsRequest(args [1]string, argsEscaped bool
 					Name: "format",
 					In:   "query",
 				}: params.Format,
+				{
+					Name: "query",
+					In:   "query",
+				}: params.Query,
 			},
 			Raw: r,
 		}
@@ -18950,9 +19147,9 @@ func (s *Server) handleGetDeveloperModelRequest(args [0]string, argsEscaped bool
 
 // handleGetFormRecordRequest handles getFormRecord operation.
 //
-// For a caller who reaches the record's form's application the way the business console opens it and
-// whose access rules do not withhold the record; anyone else gets 404, as for a record that does not
-// exist.
+// For a caller who reaches the record's table's application the way the business console opens it
+// and whose access rules do not withhold the record; anyone else gets 404, as for a record that does
+// not exist.
 //
 // GET /api/records/{id}
 func (s *Server) handleGetFormRecordRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -19088,7 +19285,7 @@ func (s *Server) handleGetFormRecordRequest(args [1]string, argsEscaped bool, w 
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    GetFormRecordOperation,
-			OperationSummary: "Read one form record, with the caller's permissions on it",
+			OperationSummary: "Read one table record, with the caller's permissions on it",
 			OperationID:      "getFormRecord",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -23218,11 +23415,9 @@ func (s *Server) handleImportDimensionMembersRequest(args [0]string, argsEscaped
 
 // handleImportFormRecordsRequest handles importFormRecords operation.
 //
-// For a caller who reaches the form's application (404 otherwise), who becomes each record's creator.
-//
-//	A row's optional status column sets its status; a row whose status the caller may not create
-//
-// (approved or rejected, unless the caller administers the application) fails validation.
+// For a caller who reaches the table's application (404 otherwise), who becomes each record's
+// creator. A row's optional status column sets its status; a row whose status the caller may not
+// create (approved or rejected, unless the caller administers the application) fails validation.
 //
 // POST /api/forms/{id}/import
 func (s *Server) handleImportFormRecordsRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -23373,7 +23568,7 @@ func (s *Server) handleImportFormRecordsRequest(args [1]string, argsEscaped bool
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    ImportFormRecordsOperation,
-			OperationSummary: "Bulk-create form records from an uploaded CSV or XLSX (atomic — any row failing validation rejects the whole file)",
+			OperationSummary: "Bulk-create table records from an uploaded CSV or XLSX (atomic — any row failing validation rejects the whole file)",
 			OperationID:      "importFormRecords",
 			Body:             request,
 			RawBody:          rawBody,
@@ -24178,7 +24373,11 @@ func (s *Server) handleImportTemplateWorkbookRequest(args [0]string, argsEscaped
 
 // handleImportUploadRequest handles importUpload operation.
 //
-// Import facts from a CSV or XLSX file (atomic — any row failing validation rejects the whole file).
+// A file is its rows entered top to bottom: rows naming the same cell combine as entering them one
+// after another would (incremental adds each number; replace and full_reload keep the cell's last
+// row; a text or pick-list cell takes its last row in every mode). A client that may send an import
+// again — after a closed connection, a timeout or a 502 — sends an Idempotency-Key: the same key
+// from the same person for the same model returns the first import's answer and applies nothing.
 //
 // POST /api/import/upload
 func (s *Server) handleImportUploadRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -24296,6 +24495,16 @@ func (s *Server) handleImportUploadRequest(args [0]string, argsEscaped bool, w h
 			return
 		}
 	}
+	params, err := decodeImportUploadParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
 
 	var rawBody []byte
 	request, rawBody, close, err := s.decodeImportUploadRequest(r)
@@ -24323,13 +24532,18 @@ func (s *Server) handleImportUploadRequest(args [0]string, argsEscaped bool, w h
 			OperationID:      "importUpload",
 			Body:             request,
 			RawBody:          rawBody,
-			Params:           middleware.Parameters{},
-			Raw:              r,
+			Params: middleware.Parameters{
+				{
+					Name: "Idempotency-Key",
+					In:   "header",
+				}: params.IdempotencyKey,
+			},
+			Raw: r,
 		}
 
 		type (
 			Request  = *ImportUploadRequest
-			Params   = struct{}
+			Params   = ImportUploadParams
 			Response = ImportUploadRes
 		)
 		response, err = middleware.HookMiddleware[
@@ -24339,14 +24553,14 @@ func (s *Server) handleImportUploadRequest(args [0]string, argsEscaped bool, w h
 		](
 			m,
 			mreq,
-			nil,
+			unpackImportUploadParams,
 			func(ctx context.Context, request Request, params Params) (response Response, err error) {
-				response, err = s.h.ImportUpload(ctx, request)
+				response, err = s.h.ImportUpload(ctx, request, params)
 				return response, err
 			},
 		)
 	} else {
-		response, err = s.h.ImportUpload(ctx, request)
+		response, err = s.h.ImportUpload(ctx, request, params)
 	}
 	if err != nil {
 		defer recordError("Internal", err)
@@ -24512,6 +24726,178 @@ func (s *Server) handleIntegrationOAuthCallbackRequest(args [0]string, argsEscap
 	}
 
 	if err := encodeIntegrationOAuthCallbackResponse(response, w, span); err != nil {
+		defer recordError("EncodeResponse", err)
+		if !errors.Is(err, ht.ErrInternalServerErrorResponse) {
+			s.cfg.ErrorHandler(ctx, w, r, err)
+		}
+		return
+	}
+}
+
+// handleListAPITokensRequest handles listAPITokens operation.
+//
+// The caller's personal API tokens not revoked (signed in, never with a token).
+//
+// GET /api/me/api-tokens
+func (s *Server) handleListAPITokensRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
+	statusWriter := &codeRecorder{ResponseWriter: w}
+	w = statusWriter
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("listAPITokens"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.HTTPRouteKey.String("/api/me/api-tokens"),
+	}
+	// Add attributes from config.
+	otelAttrs = append(otelAttrs, s.cfg.Attributes...)
+
+	// Start a span for this request.
+	ctx, span := s.cfg.Tracer.Start(r.Context(), ListAPITokensOperation,
+		trace.WithAttributes(otelAttrs...),
+		serverSpanKind,
+	)
+	defer span.End()
+
+	// Add Labeler to context.
+	labeler := &Labeler{attrs: otelAttrs}
+	ctx = contextWithLabeler(ctx, labeler)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		elapsedDuration := time.Since(startTime)
+
+		attrSet := labeler.AttributeSet()
+		attrs := attrSet.ToSlice()
+		code := statusWriter.status
+		if code != 0 {
+			codeAttr := semconv.HTTPResponseStatusCode(code)
+			attrs = append(attrs, codeAttr)
+			span.SetAttributes(codeAttr)
+		}
+		attrOpt := metric.WithAttributes(attrs...)
+
+		// Increment request counter.
+		s.requests.Add(ctx, 1, attrOpt)
+
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		s.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), attrOpt)
+	}()
+
+	var (
+		recordError = func(stage string, err error) {
+			span.RecordError(err)
+
+			// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#status
+			// Span Status MUST be left unset if HTTP status code was in the 1xx, 2xx or 3xx ranges,
+			// unless there was another error (e.g., network error receiving the response body; or 3xx codes with
+			// max redirects exceeded), in which case status MUST be set to Error.
+			code := statusWriter.status
+			if code < 100 || code >= 500 {
+				span.SetStatus(codes.Error, stage)
+			}
+
+			attrSet := labeler.AttributeSet()
+			attrs := attrSet.ToSlice()
+			if code != 0 {
+				attrs = append(attrs, semconv.HTTPResponseStatusCode(code))
+			}
+
+			s.errors.Add(ctx, 1, metric.WithAttributes(attrs...))
+		}
+		err          error
+		opErrContext = ogenerrors.OperationContext{
+			Name: ListAPITokensOperation,
+			ID:   "listAPITokens",
+		}
+	)
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			sctx, ok, err := s.securityBearerAuth(ctx, ListAPITokensOperation, r)
+			if err != nil {
+				err = &ogenerrors.SecurityError{
+					OperationContext: opErrContext,
+					Security:         "BearerAuth",
+					Err:              err,
+				}
+				defer recordError("Security:BearerAuth", err)
+				s.cfg.ErrorHandler(ctx, w, r, err)
+				return
+			}
+			if ok {
+				satisfied[0] |= 1 << 0
+				ctx = sctx
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			err = &ogenerrors.SecurityError{
+				OperationContext: opErrContext,
+				Err:              ogenerrors.ErrSecurityRequirementIsNotSatisfied,
+			}
+			defer recordError("Security", err)
+			s.cfg.ErrorHandler(ctx, w, r, err)
+			return
+		}
+	}
+
+	var rawBody []byte
+
+	var response ListAPITokensRes
+	if m := s.cfg.Middleware; m != nil {
+		mreq := middleware.Request{
+			Context:          ctx,
+			OperationName:    ListAPITokensOperation,
+			OperationSummary: "The caller's personal API tokens not revoked (signed in, never with a token)",
+			OperationID:      "listAPITokens",
+			Body:             nil,
+			RawBody:          rawBody,
+			Params:           middleware.Parameters{},
+			Raw:              r,
+		}
+
+		type (
+			Request  = struct{}
+			Params   = struct{}
+			Response = ListAPITokensRes
+		)
+		response, err = middleware.HookMiddleware[
+			Request,
+			Params,
+			Response,
+		](
+			m,
+			mreq,
+			nil,
+			func(ctx context.Context, request Request, params Params) (response Response, err error) {
+				response, err = s.h.ListAPITokens(ctx)
+				return response, err
+			},
+		)
+	} else {
+		response, err = s.h.ListAPITokens(ctx)
+	}
+	if err != nil {
+		defer recordError("Internal", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	if err := encodeListAPITokensResponse(response, w, span); err != nil {
 		defer recordError("EncodeResponse", err)
 		if !errors.Is(err, ht.ErrInternalServerErrorResponse) {
 			s.cfg.ErrorHandler(ctx, w, r, err)
@@ -29220,7 +29606,7 @@ func (s *Server) handleListDormancyRequest(args [0]string, argsEscaped bool, w h
 
 // handleListFormMappingsRequest handles listFormMappings operation.
 //
-// List form-to-metric mappings for a model.
+// List table-to-metric mappings for a model.
 //
 // GET /api/developer/form-integrations
 func (s *Server) handleListFormMappingsRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -29356,7 +29742,7 @@ func (s *Server) handleListFormMappingsRequest(args [0]string, argsEscaped bool,
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    ListFormMappingsOperation,
-			OperationSummary: "List form-to-metric mappings for a model",
+			OperationSummary: "List table-to-metric mappings for a model",
 			OperationID:      "listFormMappings",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -29407,11 +29793,11 @@ func (s *Server) handleListFormMappingsRequest(args [0]string, argsEscaped bool,
 
 // handleListFormRecordsRequest handles listFormRecords operation.
 //
-// For a caller who reaches the form's application the way the business console opens it; anyone else
-// gets 404, as for a form that does not exist. Records the caller's access rules withhold are left
-// out before the page is filled, so they neither shorten a page nor end the list early. Each record
-// carries the caller's permissions on it. When more records may follow, the X-Next-Cursor response
-// header carries the cursor for the next page.
+// For a caller who reaches the table's application the way the business console opens it; anyone
+// else gets 404, as for a table that does not exist. Records the caller's access rules withhold are
+// left out before the page is filled, so they neither shorten a page nor end the list early. Each
+// record carries the caller's permissions on it. When more records may follow, the X-Next-Cursor
+// response header carries the cursor for the next page.
 //
 // GET /api/forms/{id}/records
 func (s *Server) handleListFormRecordsRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -29547,7 +29933,7 @@ func (s *Server) handleListFormRecordsRequest(args [1]string, argsEscaped bool, 
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    ListFormRecordsOperation,
-			OperationSummary: "List a form's records the caller may see, newest first, a page at a time",
+			OperationSummary: "List a table's records the caller may see, newest first, a page at a time",
 			OperationID:      "listFormRecords",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -29606,7 +29992,7 @@ func (s *Server) handleListFormRecordsRequest(args [1]string, argsEscaped bool, 
 
 // handleListFormsRequest handles listForms operation.
 //
-// List CRUD forms for the current model's revision.
+// List tables of records for the current model's revision.
 //
 // GET /api/forms
 func (s *Server) handleListFormsRequest(args [0]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -29742,7 +30128,7 @@ func (s *Server) handleListFormsRequest(args [0]string, argsEscaped bool, w http
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    ListFormsOperation,
-			OperationSummary: "List CRUD forms for the current model's revision",
+			OperationSummary: "List tables of records for the current model's revision",
 			OperationID:      "listForms",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -34734,6 +35120,403 @@ func (s *Server) handlePutGoogleConnectionRequest(args [0]string, argsEscaped bo
 	}
 }
 
+// handleQueryFormRecordsRequest handles queryFormRecords operation.
+//
+// Read-only, for a caller who reaches the table's application (404 otherwise), over exactly the
+// records the record list shows them: a table showing each person their own records shows a
+// non-administrator theirs, and records naming a member or metric hidden from them are left out of
+// pages, counts and totals alike. Without group_by or aggregates it answers a page of records (each
+// with the caller's permissions) and how many match in all; with them, one row per group holding
+// each aggregate, and how many groups there are. A dimension or person group also carries its name
+// (key_label). The chat connector's query_records and the AI assistant's query_records are this
+// route.
+//
+// POST /api/forms/{id}/records/query
+func (s *Server) handleQueryFormRecordsRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
+	statusWriter := &codeRecorder{ResponseWriter: w}
+	w = statusWriter
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("queryFormRecords"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.HTTPRouteKey.String("/api/forms/{id}/records/query"),
+	}
+	// Add attributes from config.
+	otelAttrs = append(otelAttrs, s.cfg.Attributes...)
+
+	// Start a span for this request.
+	ctx, span := s.cfg.Tracer.Start(r.Context(), QueryFormRecordsOperation,
+		trace.WithAttributes(otelAttrs...),
+		serverSpanKind,
+	)
+	defer span.End()
+
+	// Add Labeler to context.
+	labeler := &Labeler{attrs: otelAttrs}
+	ctx = contextWithLabeler(ctx, labeler)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		elapsedDuration := time.Since(startTime)
+
+		attrSet := labeler.AttributeSet()
+		attrs := attrSet.ToSlice()
+		code := statusWriter.status
+		if code != 0 {
+			codeAttr := semconv.HTTPResponseStatusCode(code)
+			attrs = append(attrs, codeAttr)
+			span.SetAttributes(codeAttr)
+		}
+		attrOpt := metric.WithAttributes(attrs...)
+
+		// Increment request counter.
+		s.requests.Add(ctx, 1, attrOpt)
+
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		s.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), attrOpt)
+	}()
+
+	var (
+		recordError = func(stage string, err error) {
+			span.RecordError(err)
+
+			// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#status
+			// Span Status MUST be left unset if HTTP status code was in the 1xx, 2xx or 3xx ranges,
+			// unless there was another error (e.g., network error receiving the response body; or 3xx codes with
+			// max redirects exceeded), in which case status MUST be set to Error.
+			code := statusWriter.status
+			if code < 100 || code >= 500 {
+				span.SetStatus(codes.Error, stage)
+			}
+
+			attrSet := labeler.AttributeSet()
+			attrs := attrSet.ToSlice()
+			if code != 0 {
+				attrs = append(attrs, semconv.HTTPResponseStatusCode(code))
+			}
+
+			s.errors.Add(ctx, 1, metric.WithAttributes(attrs...))
+		}
+		err          error
+		opErrContext = ogenerrors.OperationContext{
+			Name: QueryFormRecordsOperation,
+			ID:   "queryFormRecords",
+		}
+	)
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			sctx, ok, err := s.securityBearerAuth(ctx, QueryFormRecordsOperation, r)
+			if err != nil {
+				err = &ogenerrors.SecurityError{
+					OperationContext: opErrContext,
+					Security:         "BearerAuth",
+					Err:              err,
+				}
+				defer recordError("Security:BearerAuth", err)
+				s.cfg.ErrorHandler(ctx, w, r, err)
+				return
+			}
+			if ok {
+				satisfied[0] |= 1 << 0
+				ctx = sctx
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			err = &ogenerrors.SecurityError{
+				OperationContext: opErrContext,
+				Err:              ogenerrors.ErrSecurityRequirementIsNotSatisfied,
+			}
+			defer recordError("Security", err)
+			s.cfg.ErrorHandler(ctx, w, r, err)
+			return
+		}
+	}
+	params, err := decodeQueryFormRecordsParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	var rawBody []byte
+	request, rawBody, close, err := s.decodeQueryFormRecordsRequest(r)
+	if err != nil {
+		err = &ogenerrors.DecodeRequestError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeRequest", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+	defer func() {
+		if err := close(); err != nil {
+			recordError("CloseRequest", err)
+		}
+	}()
+
+	var response QueryFormRecordsRes
+	if m := s.cfg.Middleware; m != nil {
+		mreq := middleware.Request{
+			Context:          ctx,
+			OperationName:    QueryFormRecordsOperation,
+			OperationSummary: "Query a table's records — a filtered, searched, sorted page, or totals grouped by fields",
+			OperationID:      "queryFormRecords",
+			Body:             request,
+			RawBody:          rawBody,
+			Params: middleware.Parameters{
+				{
+					Name: "id",
+					In:   "path",
+				}: params.ID,
+			},
+			Raw: r,
+		}
+
+		type (
+			Request  = OptRecordsQuery
+			Params   = QueryFormRecordsParams
+			Response = QueryFormRecordsRes
+		)
+		response, err = middleware.HookMiddleware[
+			Request,
+			Params,
+			Response,
+		](
+			m,
+			mreq,
+			unpackQueryFormRecordsParams,
+			func(ctx context.Context, request Request, params Params) (response Response, err error) {
+				response, err = s.h.QueryFormRecords(ctx, request, params)
+				return response, err
+			},
+		)
+	} else {
+		response, err = s.h.QueryFormRecords(ctx, request, params)
+	}
+	if err != nil {
+		defer recordError("Internal", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	if err := encodeQueryFormRecordsResponse(response, w, span); err != nil {
+		defer recordError("EncodeResponse", err)
+		if !errors.Is(err, ht.ErrInternalServerErrorResponse) {
+			s.cfg.ErrorHandler(ctx, w, r, err)
+		}
+		return
+	}
+}
+
+// handleRecalculateRevisionRequest handles recalculateRevision operation.
+//
+// Answers at once; GET /api/grid reports recalc_pending until the pass lands. For values a
+// recalculation cut short left stale.
+//
+// POST /api/developer/revisions/{id}/recalculate
+func (s *Server) handleRecalculateRevisionRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
+	statusWriter := &codeRecorder{ResponseWriter: w}
+	w = statusWriter
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("recalculateRevision"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.HTTPRouteKey.String("/api/developer/revisions/{id}/recalculate"),
+	}
+	// Add attributes from config.
+	otelAttrs = append(otelAttrs, s.cfg.Attributes...)
+
+	// Start a span for this request.
+	ctx, span := s.cfg.Tracer.Start(r.Context(), RecalculateRevisionOperation,
+		trace.WithAttributes(otelAttrs...),
+		serverSpanKind,
+	)
+	defer span.End()
+
+	// Add Labeler to context.
+	labeler := &Labeler{attrs: otelAttrs}
+	ctx = contextWithLabeler(ctx, labeler)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		elapsedDuration := time.Since(startTime)
+
+		attrSet := labeler.AttributeSet()
+		attrs := attrSet.ToSlice()
+		code := statusWriter.status
+		if code != 0 {
+			codeAttr := semconv.HTTPResponseStatusCode(code)
+			attrs = append(attrs, codeAttr)
+			span.SetAttributes(codeAttr)
+		}
+		attrOpt := metric.WithAttributes(attrs...)
+
+		// Increment request counter.
+		s.requests.Add(ctx, 1, attrOpt)
+
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		s.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), attrOpt)
+	}()
+
+	var (
+		recordError = func(stage string, err error) {
+			span.RecordError(err)
+
+			// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#status
+			// Span Status MUST be left unset if HTTP status code was in the 1xx, 2xx or 3xx ranges,
+			// unless there was another error (e.g., network error receiving the response body; or 3xx codes with
+			// max redirects exceeded), in which case status MUST be set to Error.
+			code := statusWriter.status
+			if code < 100 || code >= 500 {
+				span.SetStatus(codes.Error, stage)
+			}
+
+			attrSet := labeler.AttributeSet()
+			attrs := attrSet.ToSlice()
+			if code != 0 {
+				attrs = append(attrs, semconv.HTTPResponseStatusCode(code))
+			}
+
+			s.errors.Add(ctx, 1, metric.WithAttributes(attrs...))
+		}
+		err          error
+		opErrContext = ogenerrors.OperationContext{
+			Name: RecalculateRevisionOperation,
+			ID:   "recalculateRevision",
+		}
+	)
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			sctx, ok, err := s.securityBearerAuth(ctx, RecalculateRevisionOperation, r)
+			if err != nil {
+				err = &ogenerrors.SecurityError{
+					OperationContext: opErrContext,
+					Security:         "BearerAuth",
+					Err:              err,
+				}
+				defer recordError("Security:BearerAuth", err)
+				s.cfg.ErrorHandler(ctx, w, r, err)
+				return
+			}
+			if ok {
+				satisfied[0] |= 1 << 0
+				ctx = sctx
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			err = &ogenerrors.SecurityError{
+				OperationContext: opErrContext,
+				Err:              ogenerrors.ErrSecurityRequirementIsNotSatisfied,
+			}
+			defer recordError("Security", err)
+			s.cfg.ErrorHandler(ctx, w, r, err)
+			return
+		}
+	}
+	params, err := decodeRecalculateRevisionParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	var rawBody []byte
+
+	var response RecalculateRevisionRes
+	if m := s.cfg.Middleware; m != nil {
+		mreq := middleware.Request{
+			Context:          ctx,
+			OperationName:    RecalculateRevisionOperation,
+			OperationSummary: "Recalculate every calculated metric of a revision, in the background",
+			OperationID:      "recalculateRevision",
+			Body:             nil,
+			RawBody:          rawBody,
+			Params: middleware.Parameters{
+				{
+					Name: "id",
+					In:   "path",
+				}: params.ID,
+			},
+			Raw: r,
+		}
+
+		type (
+			Request  = struct{}
+			Params   = RecalculateRevisionParams
+			Response = RecalculateRevisionRes
+		)
+		response, err = middleware.HookMiddleware[
+			Request,
+			Params,
+			Response,
+		](
+			m,
+			mreq,
+			unpackRecalculateRevisionParams,
+			func(ctx context.Context, request Request, params Params) (response Response, err error) {
+				response, err = s.h.RecalculateRevision(ctx, params)
+				return response, err
+			},
+		)
+	} else {
+		response, err = s.h.RecalculateRevision(ctx, params)
+	}
+	if err != nil {
+		defer recordError("Internal", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	if err := encodeRecalculateRevisionResponse(response, w, span); err != nil {
+		defer recordError("EncodeResponse", err)
+		if !errors.Is(err, ht.ErrInternalServerErrorResponse) {
+			s.cfg.ErrorHandler(ctx, w, r, err)
+		}
+		return
+	}
+}
+
 // handleRejectAiProposalRequest handles rejectAiProposal operation.
 //
 // Reject a pending proposal without executing it.
@@ -37217,6 +38000,193 @@ func (s *Server) handleRestoreWorkflowRequest(args [1]string, argsEscaped bool, 
 	}
 
 	if err := encodeRestoreWorkflowResponse(response, w, span); err != nil {
+		defer recordError("EncodeResponse", err)
+		if !errors.Is(err, ht.ErrInternalServerErrorResponse) {
+			s.cfg.ErrorHandler(ctx, w, r, err)
+		}
+		return
+	}
+}
+
+// handleRevokeAPITokenRequest handles revokeAPIToken operation.
+//
+// Revoke one of the caller's personal API tokens; it stops working at once.
+//
+// DELETE /api/me/api-tokens/{id}
+func (s *Server) handleRevokeAPITokenRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
+	statusWriter := &codeRecorder{ResponseWriter: w}
+	w = statusWriter
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("revokeAPIToken"),
+		semconv.HTTPRequestMethodKey.String("DELETE"),
+		semconv.HTTPRouteKey.String("/api/me/api-tokens/{id}"),
+	}
+	// Add attributes from config.
+	otelAttrs = append(otelAttrs, s.cfg.Attributes...)
+
+	// Start a span for this request.
+	ctx, span := s.cfg.Tracer.Start(r.Context(), RevokeAPITokenOperation,
+		trace.WithAttributes(otelAttrs...),
+		serverSpanKind,
+	)
+	defer span.End()
+
+	// Add Labeler to context.
+	labeler := &Labeler{attrs: otelAttrs}
+	ctx = contextWithLabeler(ctx, labeler)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		elapsedDuration := time.Since(startTime)
+
+		attrSet := labeler.AttributeSet()
+		attrs := attrSet.ToSlice()
+		code := statusWriter.status
+		if code != 0 {
+			codeAttr := semconv.HTTPResponseStatusCode(code)
+			attrs = append(attrs, codeAttr)
+			span.SetAttributes(codeAttr)
+		}
+		attrOpt := metric.WithAttributes(attrs...)
+
+		// Increment request counter.
+		s.requests.Add(ctx, 1, attrOpt)
+
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		s.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), attrOpt)
+	}()
+
+	var (
+		recordError = func(stage string, err error) {
+			span.RecordError(err)
+
+			// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#status
+			// Span Status MUST be left unset if HTTP status code was in the 1xx, 2xx or 3xx ranges,
+			// unless there was another error (e.g., network error receiving the response body; or 3xx codes with
+			// max redirects exceeded), in which case status MUST be set to Error.
+			code := statusWriter.status
+			if code < 100 || code >= 500 {
+				span.SetStatus(codes.Error, stage)
+			}
+
+			attrSet := labeler.AttributeSet()
+			attrs := attrSet.ToSlice()
+			if code != 0 {
+				attrs = append(attrs, semconv.HTTPResponseStatusCode(code))
+			}
+
+			s.errors.Add(ctx, 1, metric.WithAttributes(attrs...))
+		}
+		err          error
+		opErrContext = ogenerrors.OperationContext{
+			Name: RevokeAPITokenOperation,
+			ID:   "revokeAPIToken",
+		}
+	)
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			sctx, ok, err := s.securityBearerAuth(ctx, RevokeAPITokenOperation, r)
+			if err != nil {
+				err = &ogenerrors.SecurityError{
+					OperationContext: opErrContext,
+					Security:         "BearerAuth",
+					Err:              err,
+				}
+				defer recordError("Security:BearerAuth", err)
+				s.cfg.ErrorHandler(ctx, w, r, err)
+				return
+			}
+			if ok {
+				satisfied[0] |= 1 << 0
+				ctx = sctx
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			err = &ogenerrors.SecurityError{
+				OperationContext: opErrContext,
+				Err:              ogenerrors.ErrSecurityRequirementIsNotSatisfied,
+			}
+			defer recordError("Security", err)
+			s.cfg.ErrorHandler(ctx, w, r, err)
+			return
+		}
+	}
+	params, err := decodeRevokeAPITokenParams(args, argsEscaped, r)
+	if err != nil {
+		err = &ogenerrors.DecodeParamsError{
+			OperationContext: opErrContext,
+			Err:              err,
+		}
+		defer recordError("DecodeParams", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	var rawBody []byte
+
+	var response RevokeAPITokenRes
+	if m := s.cfg.Middleware; m != nil {
+		mreq := middleware.Request{
+			Context:          ctx,
+			OperationName:    RevokeAPITokenOperation,
+			OperationSummary: "Revoke one of the caller's personal API tokens; it stops working at once",
+			OperationID:      "revokeAPIToken",
+			Body:             nil,
+			RawBody:          rawBody,
+			Params: middleware.Parameters{
+				{
+					Name: "id",
+					In:   "path",
+				}: params.ID,
+			},
+			Raw: r,
+		}
+
+		type (
+			Request  = struct{}
+			Params   = RevokeAPITokenParams
+			Response = RevokeAPITokenRes
+		)
+		response, err = middleware.HookMiddleware[
+			Request,
+			Params,
+			Response,
+		](
+			m,
+			mreq,
+			unpackRevokeAPITokenParams,
+			func(ctx context.Context, request Request, params Params) (response Response, err error) {
+				response, err = s.h.RevokeAPIToken(ctx, params)
+				return response, err
+			},
+		)
+	} else {
+		response, err = s.h.RevokeAPIToken(ctx, params)
+	}
+	if err != nil {
+		defer recordError("Internal", err)
+		s.cfg.ErrorHandler(ctx, w, r, err)
+		return
+	}
+
+	if err := encodeRevokeAPITokenResponse(response, w, span); err != nil {
 		defer recordError("EncodeResponse", err)
 		if !errors.Is(err, ht.ErrInternalServerErrorResponse) {
 			s.cfg.ErrorHandler(ctx, w, r, err)
@@ -43300,9 +44270,9 @@ func (s *Server) handleSwitchModelLinkSourceRequest(args [1]string, argsEscaped 
 
 // handleSyncFormMappingsRequest handles syncFormMappings operation.
 //
-// For an administrator of the form's application (a business_admin of its workspace, a developer or
-// tenant admin within their scope, a platform admin): a sync re-posts every record of the form,
-// other people's included. 403 for a caller who reaches the form without administering it, 404 for
+// For an administrator of the table's application (a business_admin of its workspace, a developer or
+// tenant admin within their scope, a platform admin): a sync re-posts every record of the table,
+// other people's included. 403 for a caller who reaches the table without administering it, 404 for
 // anyone else. A record whose re-post the caller's write guard refuses keeps the posting it has.
 //
 // POST /api/forms/{id}/sync
@@ -43439,7 +44409,7 @@ func (s *Server) handleSyncFormMappingsRequest(args [1]string, argsEscaped bool,
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    SyncFormMappingsOperation,
-			OperationSummary: "Re-apply every live form-metric mapping against all of a form's existing records",
+			OperationSummary: "Re-apply every live form-metric mapping against all of a table's existing records",
 			OperationID:      "syncFormMappings",
 			Body:             nil,
 			RawBody:          rawBody,
@@ -48229,7 +49199,7 @@ func (s *Server) handleUpdateFolderRequest(args [1]string, argsEscaped bool, w h
 
 // handleUpdateFormRequest handles updateForm operation.
 //
-// Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
+// Within the caller's builder scope (403 for a table outside it, 404 for one that does not exist).
 //
 // PATCH /api/forms/{id}
 func (s *Server) handleUpdateFormRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -48380,7 +49350,7 @@ func (s *Server) handleUpdateFormRequest(args [1]string, argsEscaped bool, w htt
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    UpdateFormOperation,
-			OperationSummary: "Update a form's name, label, or fields",
+			OperationSummary: "Update a table's name, label, or fields",
 			OperationID:      "updateForm",
 			Body:             request,
 			RawBody:          rawBody,
@@ -48431,7 +49401,8 @@ func (s *Server) handleUpdateFormRequest(args [1]string, argsEscaped bool, w htt
 
 // handleUpdateFormMappingRequest handles updateFormMapping operation.
 //
-// Update a form-to-metric mapping (immediately re-applies it to already-submitted records).
+// What the mapping names is checked as on create, against the mapping's own model, revision and
+// table (400).
 //
 // PATCH /api/developer/form-integrations/{id}
 func (s *Server) handleUpdateFormMappingRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -48582,7 +49553,7 @@ func (s *Server) handleUpdateFormMappingRequest(args [1]string, argsEscaped bool
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    UpdateFormMappingOperation,
-			OperationSummary: "Update a form-to-metric mapping (immediately re-applies it to already-submitted records)",
+			OperationSummary: "Update a table-to-metric mapping (immediately re-applies it to already-submitted records)",
 			OperationID:      "updateFormMapping",
 			Body:             request,
 			RawBody:          rawBody,
@@ -48787,7 +49758,7 @@ func (s *Server) handleUpdateFormRecordRequest(args [1]string, argsEscaped bool,
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    UpdateFormRecordOperation,
-			OperationSummary: "Update a form record's data and/or status (dispatches form_submit/form_approval automation rules on status transitions)",
+			OperationSummary: "Update a table record's data and/or status (dispatches form_submit/form_approval automation rules on status transitions)",
 			OperationID:      "updateFormRecord",
 			Body:             request,
 			RawBody:          rawBody,

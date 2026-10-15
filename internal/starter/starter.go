@@ -309,7 +309,7 @@ Every guide links back here. You can also come back by picking *Learn the platfo
 
 	p.text(`## A model starts with four things
 
-You describe **what you slice by** and **what you measure**. Then you lay out grids to hold the numbers and dashboards to show them, and the platform keeps every total and calculation in step. Forms, workflows and triggers belong to the model too; page 4 covers them.`, 108)
+You describe **what you slice by** and **what you measure**. Then you lay out grids to hold the numbers and dashboards to show them, and the platform keeps every total and calculation in step. Tables of records, workflows and triggers belong to the model too; page 4 covers them.`, 108)
 
 	p.picture(buildFlow(), "Dimensions and metrics feed a grid, which feeds a dashboard", 880, 155)
 
@@ -321,7 +321,7 @@ To build one, open **Developer › Dashboards**, press **New dashboard**, give i
 
 	p.text(`## The badge at the top names the revision you are in
 
-A **revision** is a complete copy of the model: its dimensions, metrics, grids, dashboards, forms, workflows and the numbers entered so far. One revision is *live*: it is what everyone else sees.
+A **revision** is a complete copy of the model: its dimensions, metrics, grids, dashboards, tables of records, workflows and the numbers entered so far. One revision is *live*: it is what everyone else sees.
 
 The revision you are reading is the live one, so a change you make here shows at once. For anything bigger, press **New revision** under this model in **Developer › Models**, name it and press **Save**: you get a copy to work in, out of everyone's way. Change it as much as you like, then press **Set active** beside it when it is right.
 
@@ -427,7 +427,7 @@ The same numbers, shown the way each person needs them. The chart below is the e
 - **Grid** — numbers to read and to type into
 - **Chart** — bar, line, pie, scatter or histogram, drawn from a grid
 - **Metric KPI** — one number, large
-- **Form** — structured entry, filled in on the page
+- **Records** — the records of a table: search, filter, sort, and entry on the page
 - **Trigger** — a button that starts a workflow, through a manual trigger made under **Developer › Triggers**
 - **Integration** — a button that runs one of your integrations
 - **Import** — an upload box that loads a spreadsheet into a grid, with a template to download
@@ -463,13 +463,13 @@ Press **Save as Integration** while mapping a file or a sheet to keep the mappin
 
 	p.text(`## Asking people for numbers
 
-A **form** collects structured entries — an expense, a request, a headcount change. Forms are designed under **Developer › Forms**, and people — users and business admins alike — make entries through a **Form** widget placed on a dashboard. To turn entries into numbers, add a **Form Records** integration under **Developer › Integrations**: it posts each record into an input metric once the record reaches a status you choose, such as approved.
+A **table of records** collects structured entries — an expense, a request, a headcount change. Tables are designed under **Developer › Records**, and people — users and business admins alike — find, review and make entries through a **Records** widget placed on a dashboard. To turn entries into numbers, add a **Records** integration under **Developer › Integrations**: it posts each record into an input metric as soon as it is saved — or, in a table with a **Status** field, once a workflow or an administrator approves it.
 
 ## Getting things agreed
 
 A **workflow** moves something through the people who must see it: submit, review, approve, rework. Steps are assigned to *roles*, not to named people, so the chain keeps working when someone is away or leaves.
 
-Workflows are built under **Developer › Workflows**, tried with **Test Run** and opened to people with **Publish**. A user starts one from their **Workflow Inbox**; a step waiting for you appears under **User › Workflow Inbox**. A **trigger**, made under **Developer › Triggers**, starts one for you: from a button on a dashboard, on a schedule, or each time a form entry is submitted or an integration run ends. A running workflow keeps the definition it started with, so changing the process never rewrites history.`, 340)
+Workflows are built under **Developer › Workflows**, tried with **Test Run** and opened to people with **Publish**. A user starts one from their **Workflow Inbox**; a step waiting for you appears under **User › Workflow Inbox**. A **trigger**, made under **Developer › Triggers**, starts one for you: from a button on a dashboard, on a schedule, or each time a record is submitted or an integration run ends. A running workflow keeps the definition it started with, so changing the process never rewrites history.`, 340)
 
 	p.text(`## Who sees what
 

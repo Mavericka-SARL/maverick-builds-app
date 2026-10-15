@@ -419,11 +419,11 @@ function UploadStep({
             onChange={e => onConfigChange({ ...config, targetType: e.target.value as TargetType, targetId: "", targetLabel: "", revisionId: workingRevisionId ?? "", revisionName: "" })}
           >
             <option value="grid">Grid</option>
-            <option value="form">Form</option>
+            <option value="form">Table of records</option>
             <option value="dimension">Dimension</option>
           </Select>
         </Field>
-        <Field label={config.targetType === "grid" ? "Grid" : config.targetType === "form" ? "Form" : "Dimension"}>
+        <Field label={config.targetType === "grid" ? "Grid" : config.targetType === "form" ? "Table" : "Dimension"}>
           <Select
             value={config.targetId}
             onChange={e => {
@@ -463,7 +463,12 @@ function UploadStep({
                     { value: "full_reload", label: "Full reload", hint: "Delete all data for this revision, then insert" },
                   ] as const
                 : [
-                    { value: "incremental", label: "Incremental", hint: "Add / update rows, keep existing data" },
+                    // A file imported again — a corrected one, or the same
+                    // one sent twice — used to have only adding (which
+                    // doubled it) or wiping the revision: "Add / update rows"
+                    // hid that incremental adds.
+                    { value: "incremental", label: "Incremental", hint: "Add each value to the cell's current value — importing the same file again adds it again" },
+                    { value: "replace", label: "Replace listed cells", hint: "The file's cells take its values, other cells keep theirs — importing the same file again changes nothing" },
                     { value: "full_reload", label: "Full reload", hint: "Delete all data for this revision, then insert" },
                   ] as const
               ).map(mode => (
@@ -1005,7 +1010,7 @@ function CommitStep({
     },
   });
 
-  const TARGET_LABEL: Record<string, string> = { grid: "Grid", form: "Form", dimension: "Dimension" };
+  const TARGET_LABEL: Record<string, string> = { grid: "Grid", form: "Table", dimension: "Dimension" };
 
   if (result) {
     return (
@@ -1422,7 +1427,7 @@ function SavedIntegrationsList({
   });
   const { confirm, confirmElement } = useConfirm();
 
-  const TARGET_LABEL: Record<string, string> = { grid: "Grid", form: "Form", dimension: "Dimension" };
+  const TARGET_LABEL: Record<string, string> = { grid: "Grid", form: "Table", dimension: "Dimension" };
   const shown = (integrations as IntegrationDef[]).filter(d =>
     sourceType === "google_sheets" ? d.type === "google_sheets" : d.type !== "google_sheets"
   );
@@ -1683,7 +1688,7 @@ export function ExcelImportSection({ revisionId }: { revisionId?: string } = {})
         <>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 20 }}>
             <p className="mvx-admin-muted" style={{ fontSize: 13, margin: 0 }}>
-              Upload a CSV or Excel file, map columns to your model fields, validate, and commit data to a Grid, Form, or Dimension.
+              Upload a CSV or Excel file, map columns to your model fields, validate, and commit data to a Grid, a Table of records, or a Dimension.
             </p>
             <Button variant="primary" leadingIcon={<PlusIcon size={14} />} style={{ whiteSpace: "nowrap" }} onClick={() => openWizard()}>
               New Import
@@ -1697,7 +1702,7 @@ export function ExcelImportSection({ revisionId }: { revisionId?: string } = {})
             <strong style={{ color: "var(--color-text)" }}>CSV format by target type:</strong>
             <ul style={{ margin: "8px 0 0", paddingLeft: 20, lineHeight: 1.8 }}>
               <li><strong>Grid:</strong> <code>metric_id, value</code> + one column per dimension with member codes</li>
-              <li><strong>Form:</strong> columns = form field names (e.g. <code>amount, description, date</code>)</li>
+              <li><strong>Table of records:</strong> columns = field names (e.g. <code>amount, description, date</code>)</li>
               <li><strong>Dimension:</strong> <code>code, label</code> and optionally <code>parent_code</code></li>
             </ul>
           </div>

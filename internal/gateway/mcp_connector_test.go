@@ -171,10 +171,10 @@ func TestMCPConnectorReadsAsThePerson(t *testing.T) {
 		}
 		slices.Sort(names)
 		want := []string{"compare_grid", "describe_dashboard", "describe_source", "describe_workflow", "get_connection_access",
-			"list_dashboards", "list_members", "list_models", "list_sources", "list_workflows", "query_grid", "render_chart",
-			"render_report", "write_cells"}
+			"list_dashboards", "list_members", "list_models", "list_sources", "list_tables", "list_workflows", "query_grid",
+			"query_records", "render_chart", "render_report", "write_cells"}
 		if !slices.Equal(names, want) {
-			t.Errorf("tools = %v, want the grid tools only %v", names, want)
+			t.Errorf("tools = %v, want the connector's tools %v", names, want)
 		}
 		for _, tool := range list.Tools {
 			a := tool.Annotations
@@ -559,5 +559,56 @@ func TestMCPConnectorChartsAndReports(t *testing.T) {
 
 	if after := counts(); after != before {
 		t.Errorf("charting and reporting saved something: dashboards/widgets/grids %s before, %s after", before, after)
+	}
+}
+
+// TestMCPConnectorQueriesRecordsAsThePerson: list_tables and query_records
+// read a model's tables as the person — the records they may see, counted
+// and summed by the engine.
+func TestMCPConnectorQueriesRecordsAsThePerson(t *testing.T) {
+	f := setupConnector(t)
+	// Reed cannot see the Americas at all.
+	f.setAccessRules(f.roID, member(f.geo["AMER"], "hidden"))
+	formID := idOf(f.call("POST", "/api/forms", f.dev, map[string]any{
+		"name": "deal", "label": "Deal", "fields": []map[string]any{
+			{"name": "region", "label": "Region", "type": "dimension", "dimension_id": f.geoDim},
+			{"name": "amount", "label": "Amount", "type": "number"},
+		},
+	}))
+	for _, d := range []struct {
+		region string
+		amount float64
+	}{{"UK", 10}, {"UK", 15}, {"DE", 5}, {"US", 100}} {
+		f.call("POST", "/api/forms/"+formID+"/records", f.westRep, map[string]any{"data": map[string]any{"region": d.region, "amount": d.amount}})
+	}
+	reed := f.as(f.ro)
+
+	tables := reed.must("list_tables", f.ctxArgs(nil))
+	list, _ := tables["tables"].([]any)
+	if len(list) != 1 || list[0].(map[string]any)["id"] != formID {
+		t.Fatalf("list_tables = %v", tables)
+	}
+	totals := reed.must("query_records", f.ctxArgs(map[string]any{
+		"table_id":   formID,
+		"group_by":   []map[string]any{{"field": "region"}},
+		"aggregates": []map[string]any{{"op": "count"}, {"op": "sum", "field": "amount"}},
+	}))
+	got := map[string]float64{}
+	rows, _ := totals["rows"].([]any)
+	for _, r := range rows {
+		row := r.(map[string]any)
+		got[row["region"].(string)] = row["sum_amount"].(float64)
+	}
+	if len(got) != 2 || got["UK"] != 25 || got["DE"] != 5 {
+		t.Errorf("Reed's totals by region = %v, want UK 25 and DE 5 (the US is hidden from him)", got)
+	}
+	page := reed.must("query_records", f.ctxArgs(map[string]any{
+		"table_id": formID, "filters": []map[string]any{{"field": "amount", "op": "gt", "value": 9}},
+	}))
+	if page["total"] != 2.0 {
+		t.Errorf("Reed's records over 9 = %v, want the two UK records", page["total"])
+	}
+	if _, errText := reed.call("query_records", f.ctxArgs(map[string]any{"table_id": formID, "aggregates": []map[string]any{{"op": "sum", "field": "region"}}})); !strings.HasPrefix(errText, "invalid_request") {
+		t.Errorf("a sum of text: %q, want invalid_request", errText)
 	}
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/mavericks-engine/mavericks/pkg/config"
 	"github.com/mavericks-engine/mavericks/pkg/db"
 	"github.com/mavericks-engine/mavericks/pkg/logger"
+	"github.com/mavericks-engine/mavericks/pkg/memlimit"
 	"github.com/mavericks-engine/mavericks/pkg/tenantdb"
 	"github.com/mavericks-engine/mavericks/pkg/wake"
 )
@@ -53,6 +54,9 @@ const (
 
 func main() {
 	log := logger.New("integration")
+	if limit, ok := memlimit.Set(); ok {
+		log.Info().Int64("bytes", limit).Msg("Go memory limit set from the container's")
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 

@@ -83,6 +83,7 @@ func (h *handler) runStepsOn(ctx context.Context, tx pgx.Tx, sessionID, modelID,
 		TriggerRule: func(context.Context, string, map[string]any) (string, error) {
 			return "", aiassistant.ErrNotDryRunnable
 		},
+		Recalculate:  func(context.Context, string) (string, error) { return "", aiassistant.ErrNotDryRunnable },
 		CheckMetrics: live.CheckMetrics, CheckMembers: live.CheckMembers,
 		ImportFile: func(ctx context.Context, req aiassistant.FileImportRequest) (string, error) {
 			return h.aiCheckImportFile(ctx, tx, sessionID, req)
@@ -218,7 +219,11 @@ func checkFormPosting(ctx context.Context, tx pgx.Tx, mappingID string) (int, er
 	var n int
 	if err := tx.QueryRow(ctx, `
 		SELECT count(fr.id) FROM model.form_metric_mapping m
-		LEFT JOIN runtime.form_record fr ON fr.form_id = m.form_id AND fr.status::text = ANY(m.posting_statuses::text[])
+		JOIN model.form_def fd ON fd.id = m.form_id AND fd.model_id = m.model_id
+		LEFT JOIN runtime.form_record fr ON fr.form_id = m.form_id
+		     AND (fr.status IS NULL OR fr.status::text = ANY(m.posting_statuses::text[])
+		          OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(fd.fields) = 'array' THEN fd.fields ELSE '[]'::jsonb END) e
+		                         WHERE e->>'type' = 'status'))
 		WHERE m.id = $1::uuid GROUP BY m.id`, mappingID).Scan(&n); err != nil {
 		return 0, fmt.Errorf("form integration %s not found", mappingID)
 	}

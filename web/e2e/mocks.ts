@@ -83,6 +83,7 @@ const forms = [
       { name: "vendor", label: "Vendor", type: "text", required: true },
       { name: "amount", label: "Amount", type: "number", required: true },
       { name: "category", label: "Category", type: "select", required: false, options: ["Software", "Services"] },
+      { name: "status", label: "Status", type: "status", required: false },
     ],
     created_at: "2026-05-01T09:00:00Z",
   },
@@ -111,7 +112,7 @@ const dashboards = [
     ],
   },
   { id: "dash-2", name: "OPEX Dashboard", tags: ["finance", "actuals"], folder_id: null, widgets: [] },
-  { id: "dash-3", name: "OPEX form 2", tags: ["finance"], widgets: [{ id: "w3", widget_type: "form", ref_id: "form-1", content: null, sort_order: 0, col_start: 1, col_span: 12 }] },
+  { id: "dash-3", name: "OPEX form 2", tags: ["finance"], widgets: [{ id: "w3", widget_type: "form", ref_id: "form-1", content: null, sort_order: 0, col_start: 1, col_span: 12, widget_props: { new_record_button: true } }] },
   { id: "dash-4", name: "Sales Pipeline", tags: ["sales"], widgets: [] },
   // Prose and a picture: what the sign-up tour is written in, and what any
   // tenant can write for its own people.
@@ -528,6 +529,7 @@ export async function mockApi(page: Page, overrides: { license?: unknown; tenant
     if (path.startsWith("/api/dashboards/")) return ok(dashboards.find((d) => d.id === path.split("/").pop()) ?? dashboards[0]);
     if (path === "/api/grid") return ok(gridData);
     if (path === "/api/forms") return ok(forms);
+    if (path.endsWith("/records/query")) return ok({ kind: "records", table: { id: "form-1", name: "purchase_request", label: "Purchase Request" }, columns: [], records, total: records.length, statuses: ["draft", "submitted", "approved", "rejected"] });
     if (path.endsWith("/records")) return ok(records);
     if (path === "/api/tasks") return ok(tasks);
     if (path === "/api/workflow/history" || path === "/api/workflow/my-history") return ok(history);

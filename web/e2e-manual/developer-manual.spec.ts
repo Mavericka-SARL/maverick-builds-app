@@ -58,7 +58,7 @@ test("console tabs", async ({ page }) => {
     ["Models", "01-models.png"],
     ["Metrics", "02-metrics.png"],
     ["Dimensions", "03-dimensions.png"],
-    ["Forms", "04-forms.png"],
+    ["Records", "04-records.png"],
     ["Dashboards", "06-dashboards.png"],
     ["Workflows", "07-workflows.png"],
     ["Triggers", "08-triggers.png"],
@@ -115,9 +115,9 @@ test("models, metrics and dimensions", async ({ page }) => {
   await shotMain(page, "37-dependency-graph.png");
 });
 
-test("forms and grids", async ({ page }) => {
+test("records and grids", async ({ page }) => {
   await openConsole(page);
-  await tab(page, "Forms");
+  await tab(page, "Records");
   await main(page).getByRole("button", { name: "Edit" }).first().click();
   await settle(page);
   await shotMain(page, "23-form-editor.png");
@@ -199,7 +199,7 @@ test("integrations", async ({ page }) => {
   await shotMain(page, "34-integrations-rest-api.png");
 
   await tab(page, "Integrations");
-  await main(page).getByText("Form Records", { exact: true }).first().click();
+  await main(page).getByText("Records", { exact: true }).first().click();
   await settle(page);
   await main(page).getByRole("button", { name: "New integration" }).first().click();
   await settle(page);

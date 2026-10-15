@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -95,7 +96,9 @@ func TestFormSyncIsAnAdministrators(t *testing.T) {
 // refuses a record's re-post (here the creator was made read-only on the
 // metric after submitting), the posting the record already holds stays:
 // it used to be deleted before the check, so the refused caller withdrew
-// the contribution and the next recompute dropped it from the metric.
+// the contribution and the next recompute dropped it from the metric. The
+// edit itself is now refused, saying why — it used to save while its
+// posting was dropped in the background.
 func TestFormRecordRefusedRepostKeepsContribution(t *testing.T) {
 	f := setupRecordFixture(t)
 	mappingID, metricID := f.mapRecordsToMetric("submitted")
@@ -105,9 +108,16 @@ func TestFormRecordRefusedRepostKeepsContribution(t *testing.T) {
 	f.expect(http.StatusOK, http.MethodPut, "/api/business-admin/users/"+f.userID[prOwner]+"/access-rules", prBA,
 		map[string]any{"rules": []map[string]string{{"rule_type": "metric", "ref_id": metricID, "access": "read"}}})
 	// The record is the owner's to edit; the metric is no longer theirs to write.
-	f.expect(http.StatusOK, http.MethodPut, "/api/records/"+rec, prOwner, map[string]any{"data": map[string]any{"amount": 15}})
+	raw := f.expect(http.StatusForbidden, http.MethodPut, "/api/records/"+rec, prOwner, map[string]any{"data": map[string]any{"amount": 15}})
+	if !strings.Contains(string(raw), "read-only for you") {
+		t.Errorf("the refusal does not say the metric is read-only: %s", raw)
+	}
+	got := decodeObj(t, f.expect(http.StatusOK, http.MethodGet, "/api/records/"+rec, prOwner, nil))
+	if data, _ := got["data"].(map[string]any); data["amount"] != 10.0 {
+		t.Errorf("the refused edit changed the record: %v", got["data"])
+	}
 
-	// The re-post runs detached from the request; give it time to act.
+	// Give a background re-post, were one started, time to act.
 	time.Sleep(1500 * time.Millisecond)
 	var kept float64
 	if err := f.pool.QueryRow(context.Background(),
@@ -220,7 +230,7 @@ func TestFormRecordTenantLevelApplication(t *testing.T) {
 	}
 	raw := in(http.StatusOK, http.MethodPost, "/api/forms", prDev, map[string]any{
 		"name": "shared_expense", "label": "Shared expense",
-		"fields": []map[string]any{{"name": "amount", "label": "Amount", "type": "number"}},
+		"fields": []map[string]any{{"name": "amount", "label": "Amount", "type": "number"}, {"name": "status", "label": "Status", "type": "status"}},
 	})
 	formID, _ := decodeObj(t, raw)["id"].(string)
 	if formID == "" {
@@ -256,4 +266,39 @@ func TestFormRecordTenantLevelApplication(t *testing.T) {
 	if status, _, exists := f.dbRecord(rec); !exists || status != "approved" {
 		t.Errorf("record after the refused calls: exists=%v status=%q, want approved", exists, status)
 	}
+}
+
+// TestRecordPostsWithinItsCreatorsAccess pins the owner's decision of
+// 2026-10-06: a record posts within its creator's access, and an approver
+// needs no write access where it posts. An approval is refused, saying
+// why, when the creator has lost write access since the record was saved.
+func TestRecordPostsWithinItsCreatorsAccess(t *testing.T) {
+	f := setupRecordFixture(t)
+	mappingID, metricID := f.mapRecordsToMetric("approved")
+	readOnly := func(persona string) {
+		t.Helper()
+		f.expect(http.StatusOK, http.MethodPut, "/api/business-admin/users/"+f.userID[persona]+"/access-rules", prBA,
+			map[string]any{"rules": []map[string]string{{"rule_type": "metric", "ref_id": metricID, "access": "read"}}})
+	}
+
+	// The approver may only read the metric; the creator may write it.
+	readOnly(prBA)
+	first := f.create(prOwner, "submitted", 10)
+	f.expect(http.StatusOK, http.MethodPut, "/api/records/"+first, prBA, map[string]any{"status": "approved"})
+	f.waitPosted("an approval by an approver who may only read the metric", mappingID, metricID, 1, 10)
+
+	// The creator lost write access after submitting: the approval is refused.
+	second := f.create(prOwner, "submitted", 5)
+	readOnly(prOwner)
+	raw := f.expect(http.StatusForbidden, http.MethodPut, "/api/records/"+second, prBA, map[string]any{"status": "approved"})
+	if !strings.Contains(string(raw), "read-only for the record's creator") {
+		t.Errorf("the refusal does not say the creator may only read the metric: %s", raw)
+	}
+	if status, _, _ := f.dbRecord(second); status != "submitted" {
+		t.Errorf("the refused approval moved the record to %s", status)
+	}
+	// Nor may the creator save a new one there, even as a draft.
+	f.expect(http.StatusForbidden, http.MethodPost, "/api/forms/"+f.formID+"/records", prOwner,
+		map[string]any{"data": map[string]any{"amount": 1}, "status": "draft"})
+	f.waitPosted("after the refusals", mappingID, metricID, 1, 10)
 }

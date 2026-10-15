@@ -101,7 +101,7 @@ test("Create Trigger on a workflow row makes a rule for the workflow's own start
     await dialog.getByRole("button", { name: "Create Trigger", exact: true }).click();
     await expect.poll(() => posted.length).toBe(i + 1);
     expect(posted[i], wf.trigger_event).toMatchObject({ trigger_type: type, workflow_def_id: wf.id, workflow_name: wf.name, ...source });
-    // No source for the events that name none: those fire for any form or import.
+    // No source for the events that name none: those fire for any table or import.
     if (!("source_form_id" in source)) expect(posted[i].source_form_id, wf.trigger_event).toBeUndefined();
     if (!("source_integration_id" in source)) expect(posted[i].source_integration_id, wf.trigger_event).toBeUndefined();
   }
@@ -131,7 +131,7 @@ test("Developer › Triggers fills in the form or integration a per-source workf
   const workflow = page.getByLabel("Workflow", { exact: true });
   await expect(workflow.locator("option", { hasText: "Purchase approval" })).toHaveCount(1, { timeout: 15_000 });
   await workflow.selectOption({ label: "Purchase approval (1 steps)" });
-  await expect(page.getByLabel("Source form")).toHaveValue("form-1");
+  await expect(page.getByLabel("Source table")).toHaveValue("form-1");
 
   await workflow.selectOption({ label: "OPEX loaded (1 steps)" });
   await expect(page.getByLabel("Source integration")).toHaveValue("int-1");

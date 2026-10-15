@@ -740,6 +740,13 @@ func (s *Store) ReplaceResultsTx(ctx context.Context, tx pgx.Tx, modelID, revisi
 	}
 	// Values go as numeric, every digit of the float64 kept (a float8 cast
 	// keeps 15): a pick-list option's code is a 16-digit number.
+	//
+	// Planned for these arrays each time (QueryExecModeCacheDescribe): a
+	// statement prepared once and run again gets Postgres's generic plan
+	// after five runs, which takes an array parameter for 10 rows and keep
+	// for 1, and so checked keep once per result row — 108,000 results
+	// took minutes instead of a second, and a pass after every import
+	// held the revision's calculations up behind it.
 	_, err := tx.Exec(ctx, `
 		WITH new AS (
 		    SELECT d::jsonb AS dims, v AS value, t AS text
@@ -758,7 +765,7 @@ func (s *Store) ReplaceResultsTx(ctx context.Context, tx pgx.Tx, modelID, revisi
 		INSERT INTO runtime.calc_result (model_id, revision_id, dim_members, metric_id, value, partition_key, text_value)
 		SELECT $1::uuid, $2::uuid, n.dims, $3::uuid, n.value, $7, n.text
 		FROM new n WHERE NOT EXISTS (SELECT 1 FROM keep k WHERE k.dim_members = n.dims)
-	`, modelID, revisionID, metricID, dims, values, texts, partitionKey)
+	`, pgx.QueryExecModeCacheDescribe, modelID, revisionID, metricID, dims, values, texts, partitionKey)
 	return err
 }
 

@@ -46,6 +46,8 @@ func buildDashboard(dev *api, d dims, m metrics, g grids, frm formResult, wf wor
 	addWidget(dev, dashID, widget{
 		WidgetType: "form", RefID: strPtr(frm.formID),
 		PosX: 0, PosY: 510, SizeW: 580, SizeH: 300,
+		// People file their travel requests here.
+		WidgetProps: map[string]any{"new_record_button": true},
 	})
 	addWidget(dev, dashID, widget{
 		WidgetType: "automation_button", RefID: strPtr(wf.automationRuleID),

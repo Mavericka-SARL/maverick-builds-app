@@ -12,6 +12,248 @@ import (
 	ht "github.com/ogen-go/ogen/http"
 )
 
+// Ref: #/components/schemas/APIToken
+type APIToken struct {
+	ID   OptUUID   `json:"id"`
+	Name OptString `json:"name"`
+	// The token's first characters, to tell tokens apart.
+	Hint       OptString         `json:"hint"`
+	Access     OptAPITokenAccess `json:"access"`
+	CreatedAt  OptDateTime       `json:"created_at"`
+	ExpiresAt  OptDateTime       `json:"expires_at"`
+	LastUsedAt OptNilDateTime    `json:"last_used_at"`
+	Expired    OptBool           `json:"expired"`
+}
+
+// GetID returns the value of ID.
+func (s *APIToken) GetID() OptUUID {
+	return s.ID
+}
+
+// GetName returns the value of Name.
+func (s *APIToken) GetName() OptString {
+	return s.Name
+}
+
+// GetHint returns the value of Hint.
+func (s *APIToken) GetHint() OptString {
+	return s.Hint
+}
+
+// GetAccess returns the value of Access.
+func (s *APIToken) GetAccess() OptAPITokenAccess {
+	return s.Access
+}
+
+// GetCreatedAt returns the value of CreatedAt.
+func (s *APIToken) GetCreatedAt() OptDateTime {
+	return s.CreatedAt
+}
+
+// GetExpiresAt returns the value of ExpiresAt.
+func (s *APIToken) GetExpiresAt() OptDateTime {
+	return s.ExpiresAt
+}
+
+// GetLastUsedAt returns the value of LastUsedAt.
+func (s *APIToken) GetLastUsedAt() OptNilDateTime {
+	return s.LastUsedAt
+}
+
+// GetExpired returns the value of Expired.
+func (s *APIToken) GetExpired() OptBool {
+	return s.Expired
+}
+
+// SetID sets the value of ID.
+func (s *APIToken) SetID(val OptUUID) {
+	s.ID = val
+}
+
+// SetName sets the value of Name.
+func (s *APIToken) SetName(val OptString) {
+	s.Name = val
+}
+
+// SetHint sets the value of Hint.
+func (s *APIToken) SetHint(val OptString) {
+	s.Hint = val
+}
+
+// SetAccess sets the value of Access.
+func (s *APIToken) SetAccess(val OptAPITokenAccess) {
+	s.Access = val
+}
+
+// SetCreatedAt sets the value of CreatedAt.
+func (s *APIToken) SetCreatedAt(val OptDateTime) {
+	s.CreatedAt = val
+}
+
+// SetExpiresAt sets the value of ExpiresAt.
+func (s *APIToken) SetExpiresAt(val OptDateTime) {
+	s.ExpiresAt = val
+}
+
+// SetLastUsedAt sets the value of LastUsedAt.
+func (s *APIToken) SetLastUsedAt(val OptNilDateTime) {
+	s.LastUsedAt = val
+}
+
+// SetExpired sets the value of Expired.
+func (s *APIToken) SetExpired(val OptBool) {
+	s.Expired = val
+}
+
+type APITokenAccess string
+
+const (
+	APITokenAccessRead  APITokenAccess = "read"
+	APITokenAccessWrite APITokenAccess = "write"
+)
+
+// AllValues returns all APITokenAccess values.
+func (APITokenAccess) AllValues() []APITokenAccess {
+	return []APITokenAccess{
+		APITokenAccessRead,
+		APITokenAccessWrite,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s APITokenAccess) MarshalText() ([]byte, error) {
+	switch s {
+	case APITokenAccessRead:
+		return []byte(s), nil
+	case APITokenAccessWrite:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *APITokenAccess) UnmarshalText(data []byte) error {
+	switch APITokenAccess(data) {
+	case APITokenAccessRead:
+		*s = APITokenAccessRead
+		return nil
+	case APITokenAccessWrite:
+		*s = APITokenAccessWrite
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// Ref: #/components/schemas/APITokenCreate
+type APITokenCreate struct {
+	// What will use the token.
+	Name          string               `json:"name"`
+	Access        APITokenCreateAccess `json:"access"`
+	ExpiresInDays OptInt               `json:"expires_in_days"`
+}
+
+// GetName returns the value of Name.
+func (s *APITokenCreate) GetName() string {
+	return s.Name
+}
+
+// GetAccess returns the value of Access.
+func (s *APITokenCreate) GetAccess() APITokenCreateAccess {
+	return s.Access
+}
+
+// GetExpiresInDays returns the value of ExpiresInDays.
+func (s *APITokenCreate) GetExpiresInDays() OptInt {
+	return s.ExpiresInDays
+}
+
+// SetName sets the value of Name.
+func (s *APITokenCreate) SetName(val string) {
+	s.Name = val
+}
+
+// SetAccess sets the value of Access.
+func (s *APITokenCreate) SetAccess(val APITokenCreateAccess) {
+	s.Access = val
+}
+
+// SetExpiresInDays sets the value of ExpiresInDays.
+func (s *APITokenCreate) SetExpiresInDays(val OptInt) {
+	s.ExpiresInDays = val
+}
+
+type APITokenCreateAccess string
+
+const (
+	APITokenCreateAccessRead  APITokenCreateAccess = "read"
+	APITokenCreateAccessWrite APITokenCreateAccess = "write"
+)
+
+// AllValues returns all APITokenCreateAccess values.
+func (APITokenCreateAccess) AllValues() []APITokenCreateAccess {
+	return []APITokenCreateAccess{
+		APITokenCreateAccessRead,
+		APITokenCreateAccessWrite,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s APITokenCreateAccess) MarshalText() ([]byte, error) {
+	switch s {
+	case APITokenCreateAccessRead:
+		return []byte(s), nil
+	case APITokenCreateAccessWrite:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *APITokenCreateAccess) UnmarshalText(data []byte) error {
+	switch APITokenCreateAccess(data) {
+	case APITokenCreateAccessRead:
+		*s = APITokenCreateAccessRead
+		return nil
+	case APITokenCreateAccessWrite:
+		*s = APITokenCreateAccessWrite
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// Ref: #/components/schemas/APITokenCreated
+type APITokenCreated struct {
+	// The token (mvx_pat_…), shown this once: only a hash is kept.
+	Token    OptString   `json:"token"`
+	APIToken OptAPIToken `json:"api_token"`
+}
+
+// GetToken returns the value of Token.
+func (s *APITokenCreated) GetToken() OptString {
+	return s.Token
+}
+
+// GetAPIToken returns the value of APIToken.
+func (s *APITokenCreated) GetAPIToken() OptAPIToken {
+	return s.APIToken
+}
+
+// SetToken sets the value of Token.
+func (s *APITokenCreated) SetToken(val OptString) {
+	s.Token = val
+}
+
+// SetAPIToken sets the value of APIToken.
+func (s *APITokenCreated) SetAPIToken(val OptAPIToken) {
+	s.APIToken = val
+}
+
+func (*APITokenCreated) createAPITokenRes() {}
+
 type ActivateRevisionBadRequest Error
 
 func (*ActivateRevisionBadRequest) activateRevisionRes() {}
@@ -5046,6 +5288,26 @@ func (s *ConnectorSettingsScope) SetDeploymentSettingsAvailable(val OptBool) {
 	s.DeploymentSettingsAvailable = val
 }
 
+// CreateAPITokenBadRequest is response for CreateAPIToken operation.
+type CreateAPITokenBadRequest struct{}
+
+func (*CreateAPITokenBadRequest) createAPITokenRes() {}
+
+// CreateAPITokenConflict is response for CreateAPIToken operation.
+type CreateAPITokenConflict struct{}
+
+func (*CreateAPITokenConflict) createAPITokenRes() {}
+
+// CreateAPITokenForbidden is response for CreateAPIToken operation.
+type CreateAPITokenForbidden struct{}
+
+func (*CreateAPITokenForbidden) createAPITokenRes() {}
+
+// CreateAPITokenUnauthorized is response for CreateAPIToken operation.
+type CreateAPITokenUnauthorized struct{}
+
+func (*CreateAPITokenUnauthorized) createAPITokenRes() {}
+
 type CreateAdminApplicationOK struct {
 	ID        OptUUID   `json:"id"`
 	CreatedAt OptString `json:"created_at"`
@@ -6156,6 +6418,9 @@ type CreateFormRequest struct {
 	Name   OptString   `json:"name"`
 	Label  OptString   `json:"label"`
 	Fields []FormField `json:"fields"`
+	// Each person who does not administer the application sees only the records they created. On an
+	// update, omitted keeps the table's setting.
+	OwnRecordsOnly OptBool `json:"own_records_only"`
 }
 
 // GetName returns the value of Name.
@@ -6173,6 +6438,11 @@ func (s *CreateFormRequest) GetFields() []FormField {
 	return s.Fields
 }
 
+// GetOwnRecordsOnly returns the value of OwnRecordsOnly.
+func (s *CreateFormRequest) GetOwnRecordsOnly() OptBool {
+	return s.OwnRecordsOnly
+}
+
 // SetName sets the value of Name.
 func (s *CreateFormRequest) SetName(val OptString) {
 	s.Name = val
@@ -6186,6 +6456,11 @@ func (s *CreateFormRequest) SetLabel(val OptString) {
 // SetFields sets the value of Fields.
 func (s *CreateFormRequest) SetFields(val []FormField) {
 	s.Fields = val
+}
+
+// SetOwnRecordsOnly sets the value of OwnRecordsOnly.
+func (s *CreateFormRequest) SetOwnRecordsOnly(val OptBool) {
+	s.OwnRecordsOnly = val
 }
 
 type CreateGridBadRequest Error
@@ -6686,8 +6961,9 @@ func (s *CreateMetricRequestTimeSummary) UnmarshalText(data []byte) error {
 // Ref: #/components/schemas/CreateRecordRequest
 type CreateRecordRequest struct {
 	Data OptCreateRecordRequestData `json:"data"`
-	// The new record's status. Anyone who reaches the form may create a draft or a submitted record;
-	// approved and rejected are for an administrator of the form's application (403 otherwise).
+	// The new record's status, in a table with a status field (draft when omitted); a table without one
+	// refuses any status (400). Anyone who reaches the table may create a draft or a submitted record;
+	// approved and rejected are for an administrator of the table's application (403 otherwise).
 	Status OptCreateRecordRequestStatus `json:"status"`
 }
 
@@ -6722,8 +6998,9 @@ func (s *CreateRecordRequestData) init() CreateRecordRequestData {
 	return m
 }
 
-// The new record's status. Anyone who reaches the form may create a draft or a submitted record;
-// approved and rejected are for an administrator of the form's application (403 otherwise).
+// The new record's status, in a table with a status field (draft when omitted); a table without one
+// refuses any status (400). Anyone who reaches the table may create a draft or a submitted record;
+// approved and rejected are for an administrator of the table's application (403 otherwise).
 type CreateRecordRequestStatus string
 
 const (
@@ -9933,12 +10210,14 @@ func (s *FolderRequest) SetParentID(val OptUUID) {
 
 // Ref: #/components/schemas/FormDef
 type FormDef struct {
-	ID        uuid.UUID   `json:"id"`
-	ModelID   uuid.UUID   `json:"model_id"`
-	Name      string      `json:"name"`
-	Label     string      `json:"label"`
-	Fields    []FormField `json:"fields"`
-	CreatedAt time.Time   `json:"created_at"`
+	ID      uuid.UUID   `json:"id"`
+	ModelID uuid.UUID   `json:"model_id"`
+	Name    string      `json:"name"`
+	Label   string      `json:"label"`
+	Fields  []FormField `json:"fields"`
+	// Each person who does not administer the application sees only the records they created.
+	OwnRecordsOnly OptBool   `json:"own_records_only"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // GetID returns the value of ID.
@@ -9964,6 +10243,11 @@ func (s *FormDef) GetLabel() string {
 // GetFields returns the value of Fields.
 func (s *FormDef) GetFields() []FormField {
 	return s.Fields
+}
+
+// GetOwnRecordsOnly returns the value of OwnRecordsOnly.
+func (s *FormDef) GetOwnRecordsOnly() OptBool {
+	return s.OwnRecordsOnly
 }
 
 // GetCreatedAt returns the value of CreatedAt.
@@ -9996,6 +10280,11 @@ func (s *FormDef) SetFields(val []FormField) {
 	s.Fields = val
 }
 
+// SetOwnRecordsOnly sets the value of OwnRecordsOnly.
+func (s *FormDef) SetOwnRecordsOnly(val OptBool) {
+	s.OwnRecordsOnly = val
+}
+
 // SetCreatedAt sets the value of CreatedAt.
 func (s *FormDef) SetCreatedAt(val time.Time) {
 	s.CreatedAt = val
@@ -10003,6 +10292,11 @@ func (s *FormDef) SetCreatedAt(val time.Time) {
 
 func (*FormDef) createFormRes() {}
 
+// A field of a table of records. An autocode field's value is a code the server gives each new
+// record (code_prefix followed by the next number, padded to code_digits); a person saving a record
+// never sets it. A status field gives the table's records a status (draft, submitted, approved,
+// rejected), held by the record rather than in its data; a table has at most one, and without one
+// its records have no status and count in their metrics as soon as they are saved.
 // Ref: #/components/schemas/FormField
 type FormField struct {
 	Name     string        `json:"name"`
@@ -10018,6 +10312,10 @@ type FormField struct {
 	MetricID OptUUID `json:"metric_id"`
 	// Set when type=metric — name of the sibling field holding the numeric amount.
 	ValueField OptString `json:"value_field"`
+	// Set when type=autocode — text before the number (EXP-).
+	CodePrefix OptString `json:"code_prefix"`
+	// Set when type=autocode — digits the number is padded to; 0 means 4.
+	CodeDigits OptInt `json:"code_digits"`
 }
 
 // GetName returns the value of Name.
@@ -10065,6 +10363,16 @@ func (s *FormField) GetValueField() OptString {
 	return s.ValueField
 }
 
+// GetCodePrefix returns the value of CodePrefix.
+func (s *FormField) GetCodePrefix() OptString {
+	return s.CodePrefix
+}
+
+// GetCodeDigits returns the value of CodeDigits.
+func (s *FormField) GetCodeDigits() OptInt {
+	return s.CodeDigits
+}
+
 // SetName sets the value of Name.
 func (s *FormField) SetName(val string) {
 	s.Name = val
@@ -10110,6 +10418,16 @@ func (s *FormField) SetValueField(val OptString) {
 	s.ValueField = val
 }
 
+// SetCodePrefix sets the value of CodePrefix.
+func (s *FormField) SetCodePrefix(val OptString) {
+	s.CodePrefix = val
+}
+
+// SetCodeDigits sets the value of CodeDigits.
+func (s *FormField) SetCodeDigits(val OptInt) {
+	s.CodeDigits = val
+}
+
 type FormFieldType string
 
 const (
@@ -10120,6 +10438,8 @@ const (
 	FormFieldTypeBoolean   FormFieldType = "boolean"
 	FormFieldTypeDimension FormFieldType = "dimension"
 	FormFieldTypeMetric    FormFieldType = "metric"
+	FormFieldTypeAutocode  FormFieldType = "autocode"
+	FormFieldTypeStatus    FormFieldType = "status"
 )
 
 // AllValues returns all FormFieldType values.
@@ -10132,6 +10452,8 @@ func (FormFieldType) AllValues() []FormFieldType {
 		FormFieldTypeBoolean,
 		FormFieldTypeDimension,
 		FormFieldTypeMetric,
+		FormFieldTypeAutocode,
+		FormFieldTypeStatus,
 	}
 }
 
@@ -10151,6 +10473,10 @@ func (s FormFieldType) MarshalText() ([]byte, error) {
 	case FormFieldTypeDimension:
 		return []byte(s), nil
 	case FormFieldTypeMetric:
+		return []byte(s), nil
+	case FormFieldTypeAutocode:
+		return []byte(s), nil
+	case FormFieldTypeStatus:
 		return []byte(s), nil
 	default:
 		return nil, errors.Errorf("invalid value: %q", s)
@@ -10181,6 +10507,12 @@ func (s *FormFieldType) UnmarshalText(data []byte) error {
 	case FormFieldTypeMetric:
 		*s = FormFieldTypeMetric
 		return nil
+	case FormFieldTypeAutocode:
+		*s = FormFieldTypeAutocode
+		return nil
+	case FormFieldTypeStatus:
+		*s = FormFieldTypeStatus
+		return nil
 	default:
 		return errors.Errorf("invalid value: %q", data)
 	}
@@ -10188,7 +10520,7 @@ func (s *FormFieldType) UnmarshalText(data []byte) error {
 
 // Ref: #/components/schemas/FormImportRequest
 type FormImportRequest struct {
-	// Raw CSV text; required unless xlsx_base64 is given. Columns match form field names, falling back
+	// Raw CSV text; required unless xlsx_base64 is given. Columns match table field names, falling back
 	// to labels.
 	Csv OptString `json:"csv"`
 	// Base64-encoded .xlsx workbook; required unless csv is given.
@@ -10340,24 +10672,32 @@ func (s *FormMetricMappingDimensionMappings) init() FormMetricMappingDimensionMa
 	return m
 }
 
-// What the caller the form is listed to may do with its records as a whole, decided by the same
+// What the caller the table is listed to may do with its records as a whole, decided by the same
 // scope the record routes decide by, so the interface offers only what the server accepts. A caller
-// who reaches the form's application may create records as draft or submitted; an administrator of
+// who reaches the table's application may create records as draft or submitted; an administrator of
 // the application (a business_admin of its workspace, a developer or tenant_admin within their scope,
 //
-//	a platform_admin) may also create them in any status and sync the form.
+//	a platform_admin) may also create them in any status and sync the table.
 //
 // Ref: #/components/schemas/FormPermissions
 type FormPermissions struct {
-	// The caller may re-post the form's records into their metrics (POST /api/forms/{id}/sync).
+	// The caller may re-post the table's records into their metrics (POST /api/forms/{id}/sync).
 	Sync bool `json:"sync"`
-	// The statuses the caller may create a record in, in lifecycle order; empty when none.
+	// The caller may create records (POST /api/forms/{id}/records, an import).
+	Create bool `json:"create"`
+	// In a table with a status field, the statuses the caller may create a record in, in lifecycle order;
+	//  empty otherwise (a record of a table without one has no status).
 	CreateStatuses []FormPermissionsCreateStatusesItem `json:"create_statuses"`
 }
 
 // GetSync returns the value of Sync.
 func (s *FormPermissions) GetSync() bool {
 	return s.Sync
+}
+
+// GetCreate returns the value of Create.
+func (s *FormPermissions) GetCreate() bool {
+	return s.Create
 }
 
 // GetCreateStatuses returns the value of CreateStatuses.
@@ -10368,6 +10708,11 @@ func (s *FormPermissions) GetCreateStatuses() []FormPermissionsCreateStatusesIte
 // SetSync sets the value of Sync.
 func (s *FormPermissions) SetSync(val bool) {
 	s.Sync = val
+}
+
+// SetCreate sets the value of Create.
+func (s *FormPermissions) SetCreate(val bool) {
+	s.Create = val
 }
 
 // SetCreateStatuses sets the value of CreateStatuses.
@@ -10432,10 +10777,12 @@ func (s *FormPermissionsCreateStatusesItem) UnmarshalText(data []byte) error {
 
 // Ref: #/components/schemas/FormRecord
 type FormRecord struct {
-	ID     uuid.UUID        `json:"id"`
-	FormID uuid.UUID        `json:"form_id"`
-	Data   FormRecordData   `json:"data"`
-	Status FormRecordStatus `json:"status"`
+	ID     uuid.UUID      `json:"id"`
+	FormID uuid.UUID      `json:"form_id"`
+	Data   FormRecordData `json:"data"`
+	// Draft, submitted, approved or rejected; empty for a record without a status (its table has no
+	// status field, or did not when it was saved).
+	Status string `json:"status"`
 	// The user who created the record; null for a legacy record whose creator was not recorded or was
 	// deleted.
 	CreatedBy   NilUUID           `json:"created_by"`
@@ -10460,7 +10807,7 @@ func (s *FormRecord) GetData() FormRecordData {
 }
 
 // GetStatus returns the value of Status.
-func (s *FormRecord) GetStatus() FormRecordStatus {
+func (s *FormRecord) GetStatus() string {
 	return s.Status
 }
 
@@ -10500,7 +10847,7 @@ func (s *FormRecord) SetData(val FormRecordData) {
 }
 
 // SetStatus sets the value of Status.
-func (s *FormRecord) SetStatus(val FormRecordStatus) {
+func (s *FormRecord) SetStatus(val string) {
 	s.Status = val
 }
 
@@ -10536,61 +10883,6 @@ func (s *FormRecordData) init() FormRecordData {
 		*s = m
 	}
 	return m
-}
-
-type FormRecordStatus string
-
-const (
-	FormRecordStatusDraft     FormRecordStatus = "draft"
-	FormRecordStatusSubmitted FormRecordStatus = "submitted"
-	FormRecordStatusApproved  FormRecordStatus = "approved"
-	FormRecordStatusRejected  FormRecordStatus = "rejected"
-)
-
-// AllValues returns all FormRecordStatus values.
-func (FormRecordStatus) AllValues() []FormRecordStatus {
-	return []FormRecordStatus{
-		FormRecordStatusDraft,
-		FormRecordStatusSubmitted,
-		FormRecordStatusApproved,
-		FormRecordStatusRejected,
-	}
-}
-
-// MarshalText implements encoding.TextMarshaler.
-func (s FormRecordStatus) MarshalText() ([]byte, error) {
-	switch s {
-	case FormRecordStatusDraft:
-		return []byte(s), nil
-	case FormRecordStatusSubmitted:
-		return []byte(s), nil
-	case FormRecordStatusApproved:
-		return []byte(s), nil
-	case FormRecordStatusRejected:
-		return []byte(s), nil
-	default:
-		return nil, errors.Errorf("invalid value: %q", s)
-	}
-}
-
-// UnmarshalText implements encoding.TextUnmarshaler.
-func (s *FormRecordStatus) UnmarshalText(data []byte) error {
-	switch FormRecordStatus(data) {
-	case FormRecordStatusDraft:
-		*s = FormRecordStatusDraft
-		return nil
-	case FormRecordStatusSubmitted:
-		*s = FormRecordStatusSubmitted
-		return nil
-	case FormRecordStatusApproved:
-		*s = FormRecordStatusApproved
-		return nil
-	case FormRecordStatusRejected:
-		*s = FormRecordStatusRejected
-		return nil
-	default:
-		return errors.Errorf("invalid value: %q", data)
-	}
 }
 
 // Ref: #/components/schemas/FormulaRefsRequest
@@ -13503,6 +13795,10 @@ type ImportUploadBadRequest Error
 
 func (*ImportUploadBadRequest) importUploadRes() {}
 
+type ImportUploadConflict Error
+
+func (*ImportUploadConflict) importUploadRes() {}
+
 type ImportUploadForbidden Error
 
 func (*ImportUploadForbidden) importUploadRes() {}
@@ -13518,6 +13814,9 @@ type ImportUploadOK struct {
 	ValidRows  OptInt    `json:"valid_rows"`
 	ErrorRows  OptInt    `json:"error_rows"`
 	RevisionID OptUUID   `json:"revision_id"`
+	// True when this is the answer of an import sent before under the same Idempotency-Key; nothing was
+	// applied.
+	Replayed OptBool `json:"replayed"`
 }
 
 // GetJobID returns the value of JobID.
@@ -13550,6 +13849,11 @@ func (s *ImportUploadOK) GetRevisionID() OptUUID {
 	return s.RevisionID
 }
 
+// GetReplayed returns the value of Replayed.
+func (s *ImportUploadOK) GetReplayed() OptBool {
+	return s.Replayed
+}
+
 // SetJobID sets the value of JobID.
 func (s *ImportUploadOK) SetJobID(val OptUUID) {
 	s.JobID = val
@@ -13580,6 +13884,11 @@ func (s *ImportUploadOK) SetRevisionID(val OptUUID) {
 	s.RevisionID = val
 }
 
+// SetReplayed sets the value of Replayed.
+func (s *ImportUploadOK) SetReplayed(val OptBool) {
+	s.Replayed = val
+}
+
 func (*ImportUploadOK) importUploadRes() {}
 
 // Ref: #/components/schemas/ImportUploadRequest
@@ -13589,7 +13898,10 @@ type ImportUploadRequest struct {
 	// Base64-encoded .xlsx workbook; required unless csv is given.
 	XlsxBase64 OptString `json:"xlsx_base64"`
 	// Defaults to the model's active revision.
-	RevisionID OptUUID                          `json:"revision_id"`
+	RevisionID OptUUID `json:"revision_id"`
+	// Incremental adds each number to the cell's value (sent twice, a file adds twice — send an
+	// Idempotency-Key); replace sets the file's cells and leaves the others; full_reload removes the
+	// revision's typed values the caller may write, then sets the file's.
 	ImportMode OptImportUploadRequestImportMode `json:"import_mode"`
 }
 
@@ -13633,6 +13945,9 @@ func (s *ImportUploadRequest) SetImportMode(val OptImportUploadRequestImportMode
 	s.ImportMode = val
 }
 
+// Incremental adds each number to the cell's value (sent twice, a file adds twice — send an
+// Idempotency-Key); replace sets the file's cells and leaves the others; full_reload removes the
+// revision's typed values the caller may write, then sets the file's.
 type ImportUploadRequestImportMode string
 
 const (
@@ -14486,6 +14801,20 @@ func (s *LicenseInfoState) UnmarshalText(data []byte) error {
 	}
 }
 
+// ListAPITokensForbidden is response for ListAPITokens operation.
+type ListAPITokensForbidden struct{}
+
+func (*ListAPITokensForbidden) listAPITokensRes() {}
+
+type ListAPITokensOKApplicationJSON []APIToken
+
+func (*ListAPITokensOKApplicationJSON) listAPITokensRes() {}
+
+// ListAPITokensUnauthorized is response for ListAPITokens operation.
+type ListAPITokensUnauthorized struct{}
+
+func (*ListAPITokensUnauthorized) listAPITokensRes() {}
+
 type ListAiConversionsOKApplicationJSON []AiConversion
 
 func (*ListAiConversionsOKApplicationJSON) listAiConversionsRes() {}
@@ -15257,13 +15586,19 @@ func (*ListWorkflowsOKApplicationJSON) listWorkflowsRes() {}
 // Merged schema.
 // Ref: #/components/schemas/ListedForm
 type ListedForm struct {
-	ID          uuid.UUID       `json:"id"`
-	ModelID     uuid.UUID       `json:"model_id"`
-	Name        string          `json:"name"`
-	Label       string          `json:"label"`
-	Fields      []FormField     `json:"fields"`
-	CreatedAt   time.Time       `json:"created_at"`
-	Permissions FormPermissions `json:"permissions"`
+	ID      uuid.UUID   `json:"id"`
+	ModelID uuid.UUID   `json:"model_id"`
+	Name    string      `json:"name"`
+	Label   string      `json:"label"`
+	Fields  []FormField `json:"fields"`
+	// Each person who does not administer the application sees only the records they created.
+	OwnRecordsOnly OptBool         `json:"own_records_only"`
+	CreatedAt      time.Time       `json:"created_at"`
+	Permissions    FormPermissions `json:"permissions"`
+	// Each field a live mapping takes a dimension member from, with the statuses in which a record posts
+	// ("" for a record without a status). A member the caller may only read cannot be chosen there for a
+	// save that would post: the server refuses that save.
+	PostingFields ListedFormPostingFields `json:"posting_fields"`
 }
 
 // GetID returns the value of ID.
@@ -15291,6 +15626,11 @@ func (s *ListedForm) GetFields() []FormField {
 	return s.Fields
 }
 
+// GetOwnRecordsOnly returns the value of OwnRecordsOnly.
+func (s *ListedForm) GetOwnRecordsOnly() OptBool {
+	return s.OwnRecordsOnly
+}
+
 // GetCreatedAt returns the value of CreatedAt.
 func (s *ListedForm) GetCreatedAt() time.Time {
 	return s.CreatedAt
@@ -15299,6 +15639,11 @@ func (s *ListedForm) GetCreatedAt() time.Time {
 // GetPermissions returns the value of Permissions.
 func (s *ListedForm) GetPermissions() FormPermissions {
 	return s.Permissions
+}
+
+// GetPostingFields returns the value of PostingFields.
+func (s *ListedForm) GetPostingFields() ListedFormPostingFields {
+	return s.PostingFields
 }
 
 // SetID sets the value of ID.
@@ -15326,6 +15671,11 @@ func (s *ListedForm) SetFields(val []FormField) {
 	s.Fields = val
 }
 
+// SetOwnRecordsOnly sets the value of OwnRecordsOnly.
+func (s *ListedForm) SetOwnRecordsOnly(val OptBool) {
+	s.OwnRecordsOnly = val
+}
+
 // SetCreatedAt sets the value of CreatedAt.
 func (s *ListedForm) SetCreatedAt(val time.Time) {
 	s.CreatedAt = val
@@ -15334,6 +15684,25 @@ func (s *ListedForm) SetCreatedAt(val time.Time) {
 // SetPermissions sets the value of Permissions.
 func (s *ListedForm) SetPermissions(val FormPermissions) {
 	s.Permissions = val
+}
+
+// SetPostingFields sets the value of PostingFields.
+func (s *ListedForm) SetPostingFields(val ListedFormPostingFields) {
+	s.PostingFields = val
+}
+
+// Each field a live mapping takes a dimension member from, with the statuses in which a record posts
+// ("" for a record without a status). A member the caller may only read cannot be chosen there for a
+// save that would post: the server refuses that save.
+type ListedFormPostingFields map[string][]string
+
+func (s *ListedFormPostingFields) init() ListedFormPostingFields {
+	m := *s
+	if m == nil {
+		m = map[string][]string{}
+		*s = m
+	}
+	return m
 }
 
 type MarkNotificationReadOK struct {
@@ -16940,6 +17309,98 @@ func (s *NotificationTemplateVars) init() NotificationTemplateVars {
 		*s = m
 	}
 	return m
+}
+
+// NewOptAPIToken returns new OptAPIToken with value set to v.
+func NewOptAPIToken(v APIToken) OptAPIToken {
+	return OptAPIToken{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptAPIToken is optional APIToken.
+type OptAPIToken struct {
+	Value APIToken
+	Set   bool
+}
+
+// IsSet returns true if OptAPIToken was set.
+func (o OptAPIToken) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptAPIToken) Reset() {
+	var v APIToken
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptAPIToken) SetTo(v APIToken) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptAPIToken) Get() (v APIToken, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptAPIToken) Or(d APIToken) APIToken {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptAPITokenAccess returns new OptAPITokenAccess with value set to v.
+func NewOptAPITokenAccess(v APITokenAccess) OptAPITokenAccess {
+	return OptAPITokenAccess{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptAPITokenAccess is optional APITokenAccess.
+type OptAPITokenAccess struct {
+	Value APITokenAccess
+	Set   bool
+}
+
+// IsSet returns true if OptAPITokenAccess was set.
+func (o OptAPITokenAccess) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptAPITokenAccess) Reset() {
+	var v APITokenAccess
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptAPITokenAccess) SetTo(v APITokenAccess) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptAPITokenAccess) Get() (v APITokenAccess, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptAPITokenAccess) Or(d APITokenAccess) APITokenAccess {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
 }
 
 // NewOptAiConversionColumnMap returns new OptAiConversionColumnMap with value set to v.
@@ -20867,6 +21328,190 @@ func (o OptProtoTimestamp) Or(d ProtoTimestamp) ProtoTimestamp {
 	return d
 }
 
+// NewOptRecordsQuery returns new OptRecordsQuery with value set to v.
+func NewOptRecordsQuery(v RecordsQuery) OptRecordsQuery {
+	return OptRecordsQuery{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptRecordsQuery is optional RecordsQuery.
+type OptRecordsQuery struct {
+	Value RecordsQuery
+	Set   bool
+}
+
+// IsSet returns true if OptRecordsQuery was set.
+func (o OptRecordsQuery) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptRecordsQuery) Reset() {
+	var v RecordsQuery
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptRecordsQuery) SetTo(v RecordsQuery) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptRecordsQuery) Get() (v RecordsQuery, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptRecordsQuery) Or(d RecordsQuery) RecordsQuery {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptRecordsQueryFiltersItemOp returns new OptRecordsQueryFiltersItemOp with value set to v.
+func NewOptRecordsQueryFiltersItemOp(v RecordsQueryFiltersItemOp) OptRecordsQueryFiltersItemOp {
+	return OptRecordsQueryFiltersItemOp{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptRecordsQueryFiltersItemOp is optional RecordsQueryFiltersItemOp.
+type OptRecordsQueryFiltersItemOp struct {
+	Value RecordsQueryFiltersItemOp
+	Set   bool
+}
+
+// IsSet returns true if OptRecordsQueryFiltersItemOp was set.
+func (o OptRecordsQueryFiltersItemOp) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptRecordsQueryFiltersItemOp) Reset() {
+	var v RecordsQueryFiltersItemOp
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptRecordsQueryFiltersItemOp) SetTo(v RecordsQueryFiltersItemOp) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptRecordsQueryFiltersItemOp) Get() (v RecordsQueryFiltersItemOp, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptRecordsQueryFiltersItemOp) Or(d RecordsQueryFiltersItemOp) RecordsQueryFiltersItemOp {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptRecordsQueryGroupByItemPeriod returns new OptRecordsQueryGroupByItemPeriod with value set to v.
+func NewOptRecordsQueryGroupByItemPeriod(v RecordsQueryGroupByItemPeriod) OptRecordsQueryGroupByItemPeriod {
+	return OptRecordsQueryGroupByItemPeriod{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptRecordsQueryGroupByItemPeriod is optional RecordsQueryGroupByItemPeriod.
+type OptRecordsQueryGroupByItemPeriod struct {
+	Value RecordsQueryGroupByItemPeriod
+	Set   bool
+}
+
+// IsSet returns true if OptRecordsQueryGroupByItemPeriod was set.
+func (o OptRecordsQueryGroupByItemPeriod) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptRecordsQueryGroupByItemPeriod) Reset() {
+	var v RecordsQueryGroupByItemPeriod
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptRecordsQueryGroupByItemPeriod) SetTo(v RecordsQueryGroupByItemPeriod) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptRecordsQueryGroupByItemPeriod) Get() (v RecordsQueryGroupByItemPeriod, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptRecordsQueryGroupByItemPeriod) Or(d RecordsQueryGroupByItemPeriod) RecordsQueryGroupByItemPeriod {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptRecordsQueryResultColumnsItemKind returns new OptRecordsQueryResultColumnsItemKind with value set to v.
+func NewOptRecordsQueryResultColumnsItemKind(v RecordsQueryResultColumnsItemKind) OptRecordsQueryResultColumnsItemKind {
+	return OptRecordsQueryResultColumnsItemKind{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptRecordsQueryResultColumnsItemKind is optional RecordsQueryResultColumnsItemKind.
+type OptRecordsQueryResultColumnsItemKind struct {
+	Value RecordsQueryResultColumnsItemKind
+	Set   bool
+}
+
+// IsSet returns true if OptRecordsQueryResultColumnsItemKind was set.
+func (o OptRecordsQueryResultColumnsItemKind) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptRecordsQueryResultColumnsItemKind) Reset() {
+	var v RecordsQueryResultColumnsItemKind
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptRecordsQueryResultColumnsItemKind) SetTo(v RecordsQueryResultColumnsItemKind) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptRecordsQueryResultColumnsItemKind) Get() (v RecordsQueryResultColumnsItemKind, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptRecordsQueryResultColumnsItemKind) Or(d RecordsQueryResultColumnsItemKind) RecordsQueryResultColumnsItemKind {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptRemoveAdminUserFromTenantOKStatus returns new OptRemoveAdminUserFromTenantOKStatus with value set to v.
 func NewOptRemoveAdminUserFromTenantOKStatus(v RemoveAdminUserFromTenantOKStatus) OptRemoveAdminUserFromTenantOKStatus {
 	return OptRemoveAdminUserFromTenantOKStatus{
@@ -23451,12 +24096,57 @@ type PutGoogleConnectionServiceUnavailable struct{}
 
 func (*PutGoogleConnectionServiceUnavailable) putGoogleConnectionRes() {}
 
+type QueryFormRecordsBadRequest Error
+
+func (*QueryFormRecordsBadRequest) queryFormRecordsRes() {}
+
+type QueryFormRecordsNotFound Error
+
+func (*QueryFormRecordsNotFound) queryFormRecordsRes() {}
+
+type RecalculateRevisionForbidden Error
+
+func (*RecalculateRevisionForbidden) recalculateRevisionRes() {}
+
+type RecalculateRevisionNotFound Error
+
+func (*RecalculateRevisionNotFound) recalculateRevisionRes() {}
+
+type RecalculateRevisionOK struct {
+	// False when the revision has no calculated metric.
+	Recalculating OptBool `json:"recalculating"`
+	// The calculated metrics being recalculated.
+	Metrics OptInt `json:"metrics"`
+}
+
+// GetRecalculating returns the value of Recalculating.
+func (s *RecalculateRevisionOK) GetRecalculating() OptBool {
+	return s.Recalculating
+}
+
+// GetMetrics returns the value of Metrics.
+func (s *RecalculateRevisionOK) GetMetrics() OptInt {
+	return s.Metrics
+}
+
+// SetRecalculating sets the value of Recalculating.
+func (s *RecalculateRevisionOK) SetRecalculating(val OptBool) {
+	s.Recalculating = val
+}
+
+// SetMetrics sets the value of Metrics.
+func (s *RecalculateRevisionOK) SetMetrics(val OptInt) {
+	s.Metrics = val
+}
+
+func (*RecalculateRevisionOK) recalculateRevisionRes() {}
+
 // What the caller the record is served to may do to it, computed by the same rule the record's
-// update and delete check ("submitter + admins"). An administrator of the form's application (a
+// update and delete check ("submitter + admins"). An administrator of the table's application (a
 // business_admin of its workspace, a developer or tenant_admin within their scope, a platform_admin)
 // may edit any record, set any status and delete it. The record's creator may edit and delete it
 // while it is draft or submitted, and move it only between draft and submitted. Anyone else who
-// reaches the form may only read it.
+// reaches the table may only read it.
 // Ref: #/components/schemas/RecordPermissions
 type RecordPermissions struct {
 	// The caller may change the record's fields.
@@ -23550,6 +24240,800 @@ func (s *RecordPermissionsSetStatusItem) UnmarshalText(data []byte) error {
 	default:
 		return errors.Errorf("invalid value: %q", data)
 	}
+}
+
+// Ref: #/components/schemas/RecordsQuery
+type RecordsQuery struct {
+	// All must hold.
+	Filters []RecordsQueryFiltersItem `json:"filters"`
+	// Keeps records any of whose field values, member names or status contain the text.
+	Search OptString `json:"search"`
+	// Records end newest first. In a totals query, sort by a group or an aggregate key (sum_amount).
+	Sort    []RecordsQuerySortItem    `json:"sort"`
+	GroupBy []RecordsQueryGroupByItem `json:"group_by"`
+	// Totals per group; a group_by without aggregates counts records.
+	Aggregates []RecordsQueryAggregatesItem `json:"aggregates"`
+	// Records per page (default 100, at most 1000) or groups (default 1000, at most 5000).
+	Limit  OptInt `json:"limit"`
+	Offset OptInt `json:"offset"`
+}
+
+// GetFilters returns the value of Filters.
+func (s *RecordsQuery) GetFilters() []RecordsQueryFiltersItem {
+	return s.Filters
+}
+
+// GetSearch returns the value of Search.
+func (s *RecordsQuery) GetSearch() OptString {
+	return s.Search
+}
+
+// GetSort returns the value of Sort.
+func (s *RecordsQuery) GetSort() []RecordsQuerySortItem {
+	return s.Sort
+}
+
+// GetGroupBy returns the value of GroupBy.
+func (s *RecordsQuery) GetGroupBy() []RecordsQueryGroupByItem {
+	return s.GroupBy
+}
+
+// GetAggregates returns the value of Aggregates.
+func (s *RecordsQuery) GetAggregates() []RecordsQueryAggregatesItem {
+	return s.Aggregates
+}
+
+// GetLimit returns the value of Limit.
+func (s *RecordsQuery) GetLimit() OptInt {
+	return s.Limit
+}
+
+// GetOffset returns the value of Offset.
+func (s *RecordsQuery) GetOffset() OptInt {
+	return s.Offset
+}
+
+// SetFilters sets the value of Filters.
+func (s *RecordsQuery) SetFilters(val []RecordsQueryFiltersItem) {
+	s.Filters = val
+}
+
+// SetSearch sets the value of Search.
+func (s *RecordsQuery) SetSearch(val OptString) {
+	s.Search = val
+}
+
+// SetSort sets the value of Sort.
+func (s *RecordsQuery) SetSort(val []RecordsQuerySortItem) {
+	s.Sort = val
+}
+
+// SetGroupBy sets the value of GroupBy.
+func (s *RecordsQuery) SetGroupBy(val []RecordsQueryGroupByItem) {
+	s.GroupBy = val
+}
+
+// SetAggregates sets the value of Aggregates.
+func (s *RecordsQuery) SetAggregates(val []RecordsQueryAggregatesItem) {
+	s.Aggregates = val
+}
+
+// SetLimit sets the value of Limit.
+func (s *RecordsQuery) SetLimit(val OptInt) {
+	s.Limit = val
+}
+
+// SetOffset sets the value of Offset.
+func (s *RecordsQuery) SetOffset(val OptInt) {
+	s.Offset = val
+}
+
+type RecordsQueryAggregatesItem struct {
+	Op RecordsQueryAggregatesItemOp `json:"op"`
+	// Every op but count takes one.
+	Field OptString `json:"field"`
+}
+
+// GetOp returns the value of Op.
+func (s *RecordsQueryAggregatesItem) GetOp() RecordsQueryAggregatesItemOp {
+	return s.Op
+}
+
+// GetField returns the value of Field.
+func (s *RecordsQueryAggregatesItem) GetField() OptString {
+	return s.Field
+}
+
+// SetOp sets the value of Op.
+func (s *RecordsQueryAggregatesItem) SetOp(val RecordsQueryAggregatesItemOp) {
+	s.Op = val
+}
+
+// SetField sets the value of Field.
+func (s *RecordsQueryAggregatesItem) SetField(val OptString) {
+	s.Field = val
+}
+
+type RecordsQueryAggregatesItemOp string
+
+const (
+	RecordsQueryAggregatesItemOpCount         RecordsQueryAggregatesItemOp = "count"
+	RecordsQueryAggregatesItemOpCountDistinct RecordsQueryAggregatesItemOp = "count_distinct"
+	RecordsQueryAggregatesItemOpSum           RecordsQueryAggregatesItemOp = "sum"
+	RecordsQueryAggregatesItemOpAvg           RecordsQueryAggregatesItemOp = "avg"
+	RecordsQueryAggregatesItemOpMin           RecordsQueryAggregatesItemOp = "min"
+	RecordsQueryAggregatesItemOpMax           RecordsQueryAggregatesItemOp = "max"
+)
+
+// AllValues returns all RecordsQueryAggregatesItemOp values.
+func (RecordsQueryAggregatesItemOp) AllValues() []RecordsQueryAggregatesItemOp {
+	return []RecordsQueryAggregatesItemOp{
+		RecordsQueryAggregatesItemOpCount,
+		RecordsQueryAggregatesItemOpCountDistinct,
+		RecordsQueryAggregatesItemOpSum,
+		RecordsQueryAggregatesItemOpAvg,
+		RecordsQueryAggregatesItemOpMin,
+		RecordsQueryAggregatesItemOpMax,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s RecordsQueryAggregatesItemOp) MarshalText() ([]byte, error) {
+	switch s {
+	case RecordsQueryAggregatesItemOpCount:
+		return []byte(s), nil
+	case RecordsQueryAggregatesItemOpCountDistinct:
+		return []byte(s), nil
+	case RecordsQueryAggregatesItemOpSum:
+		return []byte(s), nil
+	case RecordsQueryAggregatesItemOpAvg:
+		return []byte(s), nil
+	case RecordsQueryAggregatesItemOpMin:
+		return []byte(s), nil
+	case RecordsQueryAggregatesItemOpMax:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *RecordsQueryAggregatesItemOp) UnmarshalText(data []byte) error {
+	switch RecordsQueryAggregatesItemOp(data) {
+	case RecordsQueryAggregatesItemOpCount:
+		*s = RecordsQueryAggregatesItemOpCount
+		return nil
+	case RecordsQueryAggregatesItemOpCountDistinct:
+		*s = RecordsQueryAggregatesItemOpCountDistinct
+		return nil
+	case RecordsQueryAggregatesItemOpSum:
+		*s = RecordsQueryAggregatesItemOpSum
+		return nil
+	case RecordsQueryAggregatesItemOpAvg:
+		*s = RecordsQueryAggregatesItemOpAvg
+		return nil
+	case RecordsQueryAggregatesItemOpMin:
+		*s = RecordsQueryAggregatesItemOpMin
+		return nil
+	case RecordsQueryAggregatesItemOpMax:
+		*s = RecordsQueryAggregatesItemOpMax
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type RecordsQueryFiltersItem struct {
+	// A field name, or status, created_at, updated_at, created_by (value "me" is the caller), id.
+	Field string                       `json:"field"`
+	Op    OptRecordsQueryFiltersItemOp `json:"op"`
+	// One value. Dates are YYYY-MM-DD; text compares without case.
+	Value jx.Raw `json:"value"`
+	// The values of in and not_in; [low, high] for between.
+	Values []jx.Raw `json:"values"`
+}
+
+// GetField returns the value of Field.
+func (s *RecordsQueryFiltersItem) GetField() string {
+	return s.Field
+}
+
+// GetOp returns the value of Op.
+func (s *RecordsQueryFiltersItem) GetOp() OptRecordsQueryFiltersItemOp {
+	return s.Op
+}
+
+// GetValue returns the value of Value.
+func (s *RecordsQueryFiltersItem) GetValue() jx.Raw {
+	return s.Value
+}
+
+// GetValues returns the value of Values.
+func (s *RecordsQueryFiltersItem) GetValues() []jx.Raw {
+	return s.Values
+}
+
+// SetField sets the value of Field.
+func (s *RecordsQueryFiltersItem) SetField(val string) {
+	s.Field = val
+}
+
+// SetOp sets the value of Op.
+func (s *RecordsQueryFiltersItem) SetOp(val OptRecordsQueryFiltersItemOp) {
+	s.Op = val
+}
+
+// SetValue sets the value of Value.
+func (s *RecordsQueryFiltersItem) SetValue(val jx.Raw) {
+	s.Value = val
+}
+
+// SetValues sets the value of Values.
+func (s *RecordsQueryFiltersItem) SetValues(val []jx.Raw) {
+	s.Values = val
+}
+
+type RecordsQueryFiltersItemOp string
+
+const (
+	RecordsQueryFiltersItemOpEq         RecordsQueryFiltersItemOp = "eq"
+	RecordsQueryFiltersItemOpNe         RecordsQueryFiltersItemOp = "ne"
+	RecordsQueryFiltersItemOpIn         RecordsQueryFiltersItemOp = "in"
+	RecordsQueryFiltersItemOpNotIn      RecordsQueryFiltersItemOp = "not_in"
+	RecordsQueryFiltersItemOpGt         RecordsQueryFiltersItemOp = "gt"
+	RecordsQueryFiltersItemOpGte        RecordsQueryFiltersItemOp = "gte"
+	RecordsQueryFiltersItemOpLt         RecordsQueryFiltersItemOp = "lt"
+	RecordsQueryFiltersItemOpLte        RecordsQueryFiltersItemOp = "lte"
+	RecordsQueryFiltersItemOpBetween    RecordsQueryFiltersItemOp = "between"
+	RecordsQueryFiltersItemOpContains   RecordsQueryFiltersItemOp = "contains"
+	RecordsQueryFiltersItemOpStartsWith RecordsQueryFiltersItemOp = "starts_with"
+	RecordsQueryFiltersItemOpEmpty      RecordsQueryFiltersItemOp = "empty"
+	RecordsQueryFiltersItemOpNotEmpty   RecordsQueryFiltersItemOp = "not_empty"
+)
+
+// AllValues returns all RecordsQueryFiltersItemOp values.
+func (RecordsQueryFiltersItemOp) AllValues() []RecordsQueryFiltersItemOp {
+	return []RecordsQueryFiltersItemOp{
+		RecordsQueryFiltersItemOpEq,
+		RecordsQueryFiltersItemOpNe,
+		RecordsQueryFiltersItemOpIn,
+		RecordsQueryFiltersItemOpNotIn,
+		RecordsQueryFiltersItemOpGt,
+		RecordsQueryFiltersItemOpGte,
+		RecordsQueryFiltersItemOpLt,
+		RecordsQueryFiltersItemOpLte,
+		RecordsQueryFiltersItemOpBetween,
+		RecordsQueryFiltersItemOpContains,
+		RecordsQueryFiltersItemOpStartsWith,
+		RecordsQueryFiltersItemOpEmpty,
+		RecordsQueryFiltersItemOpNotEmpty,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s RecordsQueryFiltersItemOp) MarshalText() ([]byte, error) {
+	switch s {
+	case RecordsQueryFiltersItemOpEq:
+		return []byte(s), nil
+	case RecordsQueryFiltersItemOpNe:
+		return []byte(s), nil
+	case RecordsQueryFiltersItemOpIn:
+		return []byte(s), nil
+	case RecordsQueryFiltersItemOpNotIn:
+		return []byte(s), nil
+	case RecordsQueryFiltersItemOpGt:
+		return []byte(s), nil
+	case RecordsQueryFiltersItemOpGte:
+		return []byte(s), nil
+	case RecordsQueryFiltersItemOpLt:
+		return []byte(s), nil
+	case RecordsQueryFiltersItemOpLte:
+		return []byte(s), nil
+	case RecordsQueryFiltersItemOpBetween:
+		return []byte(s), nil
+	case RecordsQueryFiltersItemOpContains:
+		return []byte(s), nil
+	case RecordsQueryFiltersItemOpStartsWith:
+		return []byte(s), nil
+	case RecordsQueryFiltersItemOpEmpty:
+		return []byte(s), nil
+	case RecordsQueryFiltersItemOpNotEmpty:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *RecordsQueryFiltersItemOp) UnmarshalText(data []byte) error {
+	switch RecordsQueryFiltersItemOp(data) {
+	case RecordsQueryFiltersItemOpEq:
+		*s = RecordsQueryFiltersItemOpEq
+		return nil
+	case RecordsQueryFiltersItemOpNe:
+		*s = RecordsQueryFiltersItemOpNe
+		return nil
+	case RecordsQueryFiltersItemOpIn:
+		*s = RecordsQueryFiltersItemOpIn
+		return nil
+	case RecordsQueryFiltersItemOpNotIn:
+		*s = RecordsQueryFiltersItemOpNotIn
+		return nil
+	case RecordsQueryFiltersItemOpGt:
+		*s = RecordsQueryFiltersItemOpGt
+		return nil
+	case RecordsQueryFiltersItemOpGte:
+		*s = RecordsQueryFiltersItemOpGte
+		return nil
+	case RecordsQueryFiltersItemOpLt:
+		*s = RecordsQueryFiltersItemOpLt
+		return nil
+	case RecordsQueryFiltersItemOpLte:
+		*s = RecordsQueryFiltersItemOpLte
+		return nil
+	case RecordsQueryFiltersItemOpBetween:
+		*s = RecordsQueryFiltersItemOpBetween
+		return nil
+	case RecordsQueryFiltersItemOpContains:
+		*s = RecordsQueryFiltersItemOpContains
+		return nil
+	case RecordsQueryFiltersItemOpStartsWith:
+		*s = RecordsQueryFiltersItemOpStartsWith
+		return nil
+	case RecordsQueryFiltersItemOpEmpty:
+		*s = RecordsQueryFiltersItemOpEmpty
+		return nil
+	case RecordsQueryFiltersItemOpNotEmpty:
+		*s = RecordsQueryFiltersItemOpNotEmpty
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type RecordsQueryGroupByItem struct {
+	Field string `json:"field"`
+	// A date field's period.
+	Period OptRecordsQueryGroupByItemPeriod `json:"period"`
+}
+
+// GetField returns the value of Field.
+func (s *RecordsQueryGroupByItem) GetField() string {
+	return s.Field
+}
+
+// GetPeriod returns the value of Period.
+func (s *RecordsQueryGroupByItem) GetPeriod() OptRecordsQueryGroupByItemPeriod {
+	return s.Period
+}
+
+// SetField sets the value of Field.
+func (s *RecordsQueryGroupByItem) SetField(val string) {
+	s.Field = val
+}
+
+// SetPeriod sets the value of Period.
+func (s *RecordsQueryGroupByItem) SetPeriod(val OptRecordsQueryGroupByItemPeriod) {
+	s.Period = val
+}
+
+// A date field's period.
+type RecordsQueryGroupByItemPeriod string
+
+const (
+	RecordsQueryGroupByItemPeriodDay     RecordsQueryGroupByItemPeriod = "day"
+	RecordsQueryGroupByItemPeriodWeek    RecordsQueryGroupByItemPeriod = "week"
+	RecordsQueryGroupByItemPeriodMonth   RecordsQueryGroupByItemPeriod = "month"
+	RecordsQueryGroupByItemPeriodQuarter RecordsQueryGroupByItemPeriod = "quarter"
+	RecordsQueryGroupByItemPeriodYear    RecordsQueryGroupByItemPeriod = "year"
+)
+
+// AllValues returns all RecordsQueryGroupByItemPeriod values.
+func (RecordsQueryGroupByItemPeriod) AllValues() []RecordsQueryGroupByItemPeriod {
+	return []RecordsQueryGroupByItemPeriod{
+		RecordsQueryGroupByItemPeriodDay,
+		RecordsQueryGroupByItemPeriodWeek,
+		RecordsQueryGroupByItemPeriodMonth,
+		RecordsQueryGroupByItemPeriodQuarter,
+		RecordsQueryGroupByItemPeriodYear,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s RecordsQueryGroupByItemPeriod) MarshalText() ([]byte, error) {
+	switch s {
+	case RecordsQueryGroupByItemPeriodDay:
+		return []byte(s), nil
+	case RecordsQueryGroupByItemPeriodWeek:
+		return []byte(s), nil
+	case RecordsQueryGroupByItemPeriodMonth:
+		return []byte(s), nil
+	case RecordsQueryGroupByItemPeriodQuarter:
+		return []byte(s), nil
+	case RecordsQueryGroupByItemPeriodYear:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *RecordsQueryGroupByItemPeriod) UnmarshalText(data []byte) error {
+	switch RecordsQueryGroupByItemPeriod(data) {
+	case RecordsQueryGroupByItemPeriodDay:
+		*s = RecordsQueryGroupByItemPeriodDay
+		return nil
+	case RecordsQueryGroupByItemPeriodWeek:
+		*s = RecordsQueryGroupByItemPeriodWeek
+		return nil
+	case RecordsQueryGroupByItemPeriodMonth:
+		*s = RecordsQueryGroupByItemPeriodMonth
+		return nil
+	case RecordsQueryGroupByItemPeriodQuarter:
+		*s = RecordsQueryGroupByItemPeriodQuarter
+		return nil
+	case RecordsQueryGroupByItemPeriodYear:
+		*s = RecordsQueryGroupByItemPeriodYear
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// Ref: #/components/schemas/RecordsQueryResult
+type RecordsQueryResult struct {
+	Kind  RecordsQueryResultKind  `json:"kind"`
+	Table RecordsQueryResultTable `json:"table"`
+	// The table's columns (records), or the groups and aggregates (totals), each with a key, label and
+	// kind.
+	Columns []RecordsQueryResultColumnsItem `json:"columns"`
+	Records []FormRecord                    `json:"records"`
+	// Records matching in all.
+	Total       OptInt                       `json:"total"`
+	Rows        []RecordsQueryResultRowsItem `json:"rows"`
+	TotalGroups OptInt                       `json:"total_groups"`
+	Query       RecordsQuery                 `json:"query"`
+	Limits      RecordsQueryResultLimits     `json:"limits"`
+	// The statuses a record of the table may have; absent without a status field.
+	Statuses []string `json:"statuses"`
+}
+
+// GetKind returns the value of Kind.
+func (s *RecordsQueryResult) GetKind() RecordsQueryResultKind {
+	return s.Kind
+}
+
+// GetTable returns the value of Table.
+func (s *RecordsQueryResult) GetTable() RecordsQueryResultTable {
+	return s.Table
+}
+
+// GetColumns returns the value of Columns.
+func (s *RecordsQueryResult) GetColumns() []RecordsQueryResultColumnsItem {
+	return s.Columns
+}
+
+// GetRecords returns the value of Records.
+func (s *RecordsQueryResult) GetRecords() []FormRecord {
+	return s.Records
+}
+
+// GetTotal returns the value of Total.
+func (s *RecordsQueryResult) GetTotal() OptInt {
+	return s.Total
+}
+
+// GetRows returns the value of Rows.
+func (s *RecordsQueryResult) GetRows() []RecordsQueryResultRowsItem {
+	return s.Rows
+}
+
+// GetTotalGroups returns the value of TotalGroups.
+func (s *RecordsQueryResult) GetTotalGroups() OptInt {
+	return s.TotalGroups
+}
+
+// GetQuery returns the value of Query.
+func (s *RecordsQueryResult) GetQuery() RecordsQuery {
+	return s.Query
+}
+
+// GetLimits returns the value of Limits.
+func (s *RecordsQueryResult) GetLimits() RecordsQueryResultLimits {
+	return s.Limits
+}
+
+// GetStatuses returns the value of Statuses.
+func (s *RecordsQueryResult) GetStatuses() []string {
+	return s.Statuses
+}
+
+// SetKind sets the value of Kind.
+func (s *RecordsQueryResult) SetKind(val RecordsQueryResultKind) {
+	s.Kind = val
+}
+
+// SetTable sets the value of Table.
+func (s *RecordsQueryResult) SetTable(val RecordsQueryResultTable) {
+	s.Table = val
+}
+
+// SetColumns sets the value of Columns.
+func (s *RecordsQueryResult) SetColumns(val []RecordsQueryResultColumnsItem) {
+	s.Columns = val
+}
+
+// SetRecords sets the value of Records.
+func (s *RecordsQueryResult) SetRecords(val []FormRecord) {
+	s.Records = val
+}
+
+// SetTotal sets the value of Total.
+func (s *RecordsQueryResult) SetTotal(val OptInt) {
+	s.Total = val
+}
+
+// SetRows sets the value of Rows.
+func (s *RecordsQueryResult) SetRows(val []RecordsQueryResultRowsItem) {
+	s.Rows = val
+}
+
+// SetTotalGroups sets the value of TotalGroups.
+func (s *RecordsQueryResult) SetTotalGroups(val OptInt) {
+	s.TotalGroups = val
+}
+
+// SetQuery sets the value of Query.
+func (s *RecordsQueryResult) SetQuery(val RecordsQuery) {
+	s.Query = val
+}
+
+// SetLimits sets the value of Limits.
+func (s *RecordsQueryResult) SetLimits(val RecordsQueryResultLimits) {
+	s.Limits = val
+}
+
+// SetStatuses sets the value of Statuses.
+func (s *RecordsQueryResult) SetStatuses(val []string) {
+	s.Statuses = val
+}
+
+func (*RecordsQueryResult) queryFormRecordsRes() {}
+
+type RecordsQueryResultColumnsItem struct {
+	Key   OptString                            `json:"key"`
+	Label OptString                            `json:"label"`
+	Kind  OptRecordsQueryResultColumnsItemKind `json:"kind"`
+}
+
+// GetKey returns the value of Key.
+func (s *RecordsQueryResultColumnsItem) GetKey() OptString {
+	return s.Key
+}
+
+// GetLabel returns the value of Label.
+func (s *RecordsQueryResultColumnsItem) GetLabel() OptString {
+	return s.Label
+}
+
+// GetKind returns the value of Kind.
+func (s *RecordsQueryResultColumnsItem) GetKind() OptRecordsQueryResultColumnsItemKind {
+	return s.Kind
+}
+
+// SetKey sets the value of Key.
+func (s *RecordsQueryResultColumnsItem) SetKey(val OptString) {
+	s.Key = val
+}
+
+// SetLabel sets the value of Label.
+func (s *RecordsQueryResultColumnsItem) SetLabel(val OptString) {
+	s.Label = val
+}
+
+// SetKind sets the value of Kind.
+func (s *RecordsQueryResultColumnsItem) SetKind(val OptRecordsQueryResultColumnsItemKind) {
+	s.Kind = val
+}
+
+type RecordsQueryResultColumnsItemKind string
+
+const (
+	RecordsQueryResultColumnsItemKindText     RecordsQueryResultColumnsItemKind = "text"
+	RecordsQueryResultColumnsItemKindNumber   RecordsQueryResultColumnsItemKind = "number"
+	RecordsQueryResultColumnsItemKindDate     RecordsQueryResultColumnsItemKind = "date"
+	RecordsQueryResultColumnsItemKindBoolean  RecordsQueryResultColumnsItemKind = "boolean"
+	RecordsQueryResultColumnsItemKindDatetime RecordsQueryResultColumnsItemKind = "datetime"
+	RecordsQueryResultColumnsItemKindStatus   RecordsQueryResultColumnsItemKind = "status"
+	RecordsQueryResultColumnsItemKindUser     RecordsQueryResultColumnsItemKind = "user"
+)
+
+// AllValues returns all RecordsQueryResultColumnsItemKind values.
+func (RecordsQueryResultColumnsItemKind) AllValues() []RecordsQueryResultColumnsItemKind {
+	return []RecordsQueryResultColumnsItemKind{
+		RecordsQueryResultColumnsItemKindText,
+		RecordsQueryResultColumnsItemKindNumber,
+		RecordsQueryResultColumnsItemKindDate,
+		RecordsQueryResultColumnsItemKindBoolean,
+		RecordsQueryResultColumnsItemKindDatetime,
+		RecordsQueryResultColumnsItemKindStatus,
+		RecordsQueryResultColumnsItemKindUser,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s RecordsQueryResultColumnsItemKind) MarshalText() ([]byte, error) {
+	switch s {
+	case RecordsQueryResultColumnsItemKindText:
+		return []byte(s), nil
+	case RecordsQueryResultColumnsItemKindNumber:
+		return []byte(s), nil
+	case RecordsQueryResultColumnsItemKindDate:
+		return []byte(s), nil
+	case RecordsQueryResultColumnsItemKindBoolean:
+		return []byte(s), nil
+	case RecordsQueryResultColumnsItemKindDatetime:
+		return []byte(s), nil
+	case RecordsQueryResultColumnsItemKindStatus:
+		return []byte(s), nil
+	case RecordsQueryResultColumnsItemKindUser:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *RecordsQueryResultColumnsItemKind) UnmarshalText(data []byte) error {
+	switch RecordsQueryResultColumnsItemKind(data) {
+	case RecordsQueryResultColumnsItemKindText:
+		*s = RecordsQueryResultColumnsItemKindText
+		return nil
+	case RecordsQueryResultColumnsItemKindNumber:
+		*s = RecordsQueryResultColumnsItemKindNumber
+		return nil
+	case RecordsQueryResultColumnsItemKindDate:
+		*s = RecordsQueryResultColumnsItemKindDate
+		return nil
+	case RecordsQueryResultColumnsItemKindBoolean:
+		*s = RecordsQueryResultColumnsItemKindBoolean
+		return nil
+	case RecordsQueryResultColumnsItemKindDatetime:
+		*s = RecordsQueryResultColumnsItemKindDatetime
+		return nil
+	case RecordsQueryResultColumnsItemKindStatus:
+		*s = RecordsQueryResultColumnsItemKindStatus
+		return nil
+	case RecordsQueryResultColumnsItemKindUser:
+		*s = RecordsQueryResultColumnsItemKindUser
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type RecordsQueryResultKind string
+
+const (
+	RecordsQueryResultKindRecords RecordsQueryResultKind = "records"
+	RecordsQueryResultKindTotals  RecordsQueryResultKind = "totals"
+)
+
+// AllValues returns all RecordsQueryResultKind values.
+func (RecordsQueryResultKind) AllValues() []RecordsQueryResultKind {
+	return []RecordsQueryResultKind{
+		RecordsQueryResultKindRecords,
+		RecordsQueryResultKindTotals,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s RecordsQueryResultKind) MarshalText() ([]byte, error) {
+	switch s {
+	case RecordsQueryResultKindRecords:
+		return []byte(s), nil
+	case RecordsQueryResultKindTotals:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *RecordsQueryResultKind) UnmarshalText(data []byte) error {
+	switch RecordsQueryResultKind(data) {
+	case RecordsQueryResultKindRecords:
+		*s = RecordsQueryResultKindRecords
+		return nil
+	case RecordsQueryResultKindTotals:
+		*s = RecordsQueryResultKindTotals
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+type RecordsQueryResultLimits map[string]int
+
+func (s *RecordsQueryResultLimits) init() RecordsQueryResultLimits {
+	m := *s
+	if m == nil {
+		m = map[string]int{}
+		*s = m
+	}
+	return m
+}
+
+type RecordsQueryResultRowsItem map[string]jx.Raw
+
+func (s *RecordsQueryResultRowsItem) init() RecordsQueryResultRowsItem {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
+
+type RecordsQueryResultTable struct {
+	ID    OptUUID   `json:"id"`
+	Name  OptString `json:"name"`
+	Label OptString `json:"label"`
+}
+
+// GetID returns the value of ID.
+func (s *RecordsQueryResultTable) GetID() OptUUID {
+	return s.ID
+}
+
+// GetName returns the value of Name.
+func (s *RecordsQueryResultTable) GetName() OptString {
+	return s.Name
+}
+
+// GetLabel returns the value of Label.
+func (s *RecordsQueryResultTable) GetLabel() OptString {
+	return s.Label
+}
+
+// SetID sets the value of ID.
+func (s *RecordsQueryResultTable) SetID(val OptUUID) {
+	s.ID = val
+}
+
+// SetName sets the value of Name.
+func (s *RecordsQueryResultTable) SetName(val OptString) {
+	s.Name = val
+}
+
+// SetLabel sets the value of Label.
+func (s *RecordsQueryResultTable) SetLabel(val OptString) {
+	s.Label = val
+}
+
+type RecordsQuerySortItem struct {
+	Field string  `json:"field"`
+	Desc  OptBool `json:"desc"`
+}
+
+// GetField returns the value of Field.
+func (s *RecordsQuerySortItem) GetField() string {
+	return s.Field
+}
+
+// GetDesc returns the value of Desc.
+func (s *RecordsQuerySortItem) GetDesc() OptBool {
+	return s.Desc
+}
+
+// SetField sets the value of Field.
+func (s *RecordsQuerySortItem) SetField(val string) {
+	s.Field = val
+}
+
+// SetDesc sets the value of Desc.
+func (s *RecordsQuerySortItem) SetDesc(val OptBool) {
+	s.Desc = val
 }
 
 type RejectAiProposalConflict Error
@@ -23923,6 +25407,37 @@ func (*ResendAdminUserInvitationOK) resendAdminUserInvitationRes() {}
 type ResendAdminUserInvitationServiceUnavailable Error
 
 func (*ResendAdminUserInvitationServiceUnavailable) resendAdminUserInvitationRes() {}
+
+// RevokeAPITokenForbidden is response for RevokeAPIToken operation.
+type RevokeAPITokenForbidden struct{}
+
+func (*RevokeAPITokenForbidden) revokeAPITokenRes() {}
+
+// RevokeAPITokenNotFound is response for RevokeAPIToken operation.
+type RevokeAPITokenNotFound struct{}
+
+func (*RevokeAPITokenNotFound) revokeAPITokenRes() {}
+
+type RevokeAPITokenOK struct {
+	Revoked OptBool `json:"revoked"`
+}
+
+// GetRevoked returns the value of Revoked.
+func (s *RevokeAPITokenOK) GetRevoked() OptBool {
+	return s.Revoked
+}
+
+// SetRevoked sets the value of Revoked.
+func (s *RevokeAPITokenOK) SetRevoked(val OptBool) {
+	s.Revoked = val
+}
+
+func (*RevokeAPITokenOK) revokeAPITokenRes() {}
+
+// RevokeAPITokenUnauthorized is response for RevokeAPIToken operation.
+type RevokeAPITokenUnauthorized struct{}
+
+func (*RevokeAPITokenUnauthorized) revokeAPITokenRes() {}
 
 type RevokeAdminUserAppAccessOK struct {
 	Status OptString `json:"status"`

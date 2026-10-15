@@ -75,6 +75,9 @@ type ReadHooks struct {
 	// ModelLinkSources lists the models a link may read (the developer's own
 	// model-link-sources route).
 	ModelLinkSources func(ctx context.Context, modelID, grid string) (string, error)
+	// QueryRecords answers a records query on a table (its records, or
+	// totals over them) through the records query route, as the developer.
+	QueryRecords func(ctx context.Context, tableID string, query json.RawMessage) (string, error)
 }
 
 // WithReadHooks sets the read executor's gateway hooks and returns it.

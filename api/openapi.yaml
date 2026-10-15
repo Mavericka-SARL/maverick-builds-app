@@ -39,8 +39,8 @@ tags:
     description: Business-facing CSV/XLSX fact import and saved integration execution (any authenticated actor — writes are scoped by the generic write guard, not a platform role).
   - name: Workflow
     description: Runtime workflow execution — starting/submitting instances, history, notifications. Separate from the Developer Console's workflow-authoring surface.
-  - name: CRUD Forms
-    description: User-facing CRUD forms and their submitted records (any authenticated actor).
+  - name: Records
+    description: Tables of records (the API's "forms") and the records people save in them (any authenticated actor).
   - name: Automation
     description: Event/manual automation rules that start workflow instances, and their execution history.
   - name: Business Dashboards
@@ -51,7 +51,13 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: JWT
+      description: >-
+        A sign-in token (a JWT the console holds), or a personal API token
+        (mvx_pat_…) a person made under Account › API tokens for a script. A
+        personal token acts as its owner — their tenant, roles and access
+        rules — until it expires or is revoked; a read-only one reads (GET,
+        and POST /api/forms/{id}/records/query) and nothing else. No token
+        reaches /api/me/api-tokens.
     scimBearer:
       type: http
       scheme: bearer
@@ -2031,13 +2037,47 @@ components:
         model:    { type: string, description: "Falls back to the caller's stored settings, then the provider's default model" }
         api_key:  { type: string, description: "Falls back to the caller's stored (decrypted) key, then a provider-specific env var" }
 
+    APIToken:
+      type: object
+      properties:
+        id:           { type: string, format: uuid }
+        name:         { type: string }
+        hint:         { type: string, description: "The token's first characters, to tell tokens apart" }
+        access:       { type: string, enum: [read, write] }
+        created_at:   { type: string, format: date-time }
+        expires_at:   { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time, nullable: true }
+        expired:      { type: boolean }
+
+    APITokenCreate:
+      type: object
+      required: [name, access]
+      properties:
+        name:            { type: string, maxLength: 100, description: What will use the token }
+        access:          { type: string, enum: [read, write] }
+        expires_in_days: { type: integer, minimum: 1, maximum: 365, default: 90 }
+
+    APITokenCreated:
+      type: object
+      properties:
+        token:     { type: string, description: "The token (mvx_pat_…), shown this once: only a hash is kept" }
+        api_token: { $ref: "#/components/schemas/APIToken" }
+
     ImportUploadRequest:
       type: object
       properties:
         csv:          { type: string, description: "Raw CSV text; required unless xlsx_base64 is given" }
         xlsx_base64:  { type: string, description: "Base64-encoded .xlsx workbook; required unless csv is given" }
         revision_id:  { type: string, format: uuid, description: "Defaults to the model's active revision" }
-        import_mode:  { type: string, enum: [incremental, replace, full_reload], default: incremental }
+        import_mode:
+          type: string
+          enum: [incremental, replace, full_reload]
+          default: incremental
+          description: >-
+            incremental adds each number to the cell's value (sent twice, a
+            file adds twice — send an Idempotency-Key); replace sets the
+            file's cells and leaves the others; full_reload removes the
+            revision's typed values the caller may write, then sets the file's.
 
     ProtoTimestamp:
       type: object
@@ -2112,17 +2152,25 @@ components:
 
     FormField:
       type: object
+      description: >-
+        A field of a table of records. An autocode field's value is a code the server gives each new
+        record (code_prefix followed by the next number, padded to code_digits); a person saving a
+        record never sets it. A status field gives the table's records a status (draft, submitted,
+        approved, rejected), held by the record rather than in its data; a table has at most one, and
+        without one its records have no status and count in their metrics as soon as they are saved.
       required: [name, label, type, required]
       properties:
         name:            { type: string }
         label:           { type: string }
-        type:            { type: string, enum: [text, number, select, date, boolean, dimension, metric] }
+        type:            { type: string, enum: [text, number, select, date, boolean, dimension, metric, autocode, status] }
         required:        { type: boolean }
         options:         { type: array, items: { type: string } }
         dimension_id:    { type: string, format: uuid, description: "Set when type=dimension" }
         allowed_members: { type: array, items: { type: string }, description: "Set when type=dimension" }
         metric_id:       { type: string, format: uuid, description: "Set when type=metric" }
         value_field:     { type: string, description: "Set when type=metric — name of the sibling field holding the numeric amount" }
+        code_prefix:     { type: string, maxLength: 20, description: "Set when type=autocode — text before the number (EXP-)" }
+        code_digits:     { type: integer, minimum: 0, maximum: 12, description: "Set when type=autocode — digits the number is padded to; 0 means 4" }
 
     FormDef:
       type: object
@@ -2133,34 +2181,49 @@ components:
         name:       { type: string }
         label:      { type: string }
         fields:     { type: array, items: { $ref: "#/components/schemas/FormField" } }
+        own_records_only:
+          type: boolean
+          description: Each person who does not administer the application sees only the records they created.
         created_at: { type: string, format: date-time }
 
     ListedForm:
-      description: A form as GET /api/forms lists it — its definition and what the caller may do with its records.
+      description: A table as GET /api/forms lists it — its definition and what the caller may do with its records.
       allOf:
         - $ref: "#/components/schemas/FormDef"
         - type: object
-          required: [permissions]
+          required: [permissions, posting_fields]
           properties:
             permissions: { $ref: "#/components/schemas/FormPermissions" }
+            posting_fields:
+              type: object
+              description: >-
+                Each field a live mapping takes a dimension member from, with the statuses in which a
+                record posts ("" for a record without a status). A member the caller may only read cannot
+                be chosen there for a save that would post: the server refuses that save.
+              additionalProperties: { type: array, items: { type: string } }
 
     FormPermissions:
       type: object
       description: >-
-        What the caller the form is listed to may do with its records as a whole, decided by the same
+        What the caller the table is listed to may do with its records as a whole, decided by the same
         scope the record routes decide by, so the interface offers only what the server accepts. A
-        caller who reaches the form's application may create records as draft or submitted; an
+        caller who reaches the table's application may create records as draft or submitted; an
         administrator of the application (a business_admin of its workspace, a developer or
         tenant_admin within their scope, a platform_admin) may also create them in any status and
-        sync the form.
-      required: [sync, create_statuses]
+        sync the table.
+      required: [sync, create, create_statuses]
       properties:
         sync:
           type: boolean
-          description: The caller may re-post the form's records into their metrics (POST /api/forms/{id}/sync).
+          description: The caller may re-post the table's records into their metrics (POST /api/forms/{id}/sync).
+        create:
+          type: boolean
+          description: The caller may create records (POST /api/forms/{id}/records, an import).
         create_statuses:
           type: array
-          description: The statuses the caller may create a record in, in lifecycle order; empty when none.
+          description: >-
+            In a table with a status field, the statuses the caller may create a record in, in lifecycle
+            order; empty otherwise (a record of a table without one has no status).
           items: { type: string, enum: [draft, submitted, approved, rejected] }
 
     CreateFormRequest:
@@ -2169,6 +2232,11 @@ components:
         name:   { type: string }
         label:  { type: string }
         fields: { type: array, items: { $ref: "#/components/schemas/FormField" } }
+        own_records_only:
+          type: boolean
+          description: >-
+            Each person who does not administer the application sees only the records they created. On an
+            update, omitted keeps the table's setting.
 
     FormRecord:
       type: object
@@ -2177,7 +2245,9 @@ components:
         id:         { type: string, format: uuid }
         form_id:    { type: string, format: uuid }
         data:       { type: object, additionalProperties: {} }
-        status:     { type: string, enum: [draft, submitted, approved, rejected] }
+        status:
+          type: string
+          description: draft, submitted, approved or rejected; empty for a record without a status (its table has no status field, or did not when it was saved).
         created_by:
           type: string
           format: uuid
@@ -2191,11 +2261,11 @@ components:
       type: object
       description: >-
         What the caller the record is served to may do to it, computed by the same rule the record's
-        update and delete check ("submitter + admins"). An administrator of the form's application (a
+        update and delete check ("submitter + admins"). An administrator of the table's application (a
         business_admin of its workspace, a developer or tenant_admin within their scope, a
         platform_admin) may edit any record, set any status and delete it. The record's creator may
         edit and delete it while it is draft or submitted, and move it only between draft and
-        submitted. Anyone else who reaches the form may only read it.
+        submitted. Anyone else who reaches the table may only read it.
       required: [edit, delete, set_status]
       properties:
         edit:   { type: boolean, description: The caller may change the record's fields. }
@@ -2212,11 +2282,11 @@ components:
         status:
           type: string
           enum: [draft, submitted, approved, rejected]
-          default: draft
           description: >-
-            The new record's status. Anyone who reaches the form may create a draft or a submitted
-            record; approved and rejected are for an administrator of the form's application (403
-            otherwise).
+            The new record's status, in a table with a status field (draft when omitted); a table
+            without one refuses any status (400). Anyone who reaches the table may create a draft or a
+            submitted record; approved and rejected are for an administrator of the table's application
+            (403 otherwise).
 
     UpdateRecordRequest:
       type: object
@@ -2230,10 +2300,90 @@ components:
           enum: [draft, submitted, approved, rejected]
           description: The record's new status; omitted, the record keeps its status.
 
+    RecordsQuery:
+      type: object
+      properties:
+        filters:
+          type: array
+          description: All must hold.
+          items:
+            type: object
+            required: [field]
+            properties:
+              field:
+                type: string
+                description: A field name, or status, created_at, updated_at, created_by (value "me" is the caller), id.
+              op:
+                type: string
+                enum: [eq, ne, in, not_in, gt, gte, lt, lte, between, contains, starts_with, empty, not_empty]
+                default: eq
+              value:  { description: One value. Dates are YYYY-MM-DD; text compares without case. }
+              values: { type: array, items: {}, description: "The values of in and not_in; [low, high] for between." }
+        search:
+          type: string
+          description: Keeps records any of whose field values, member names or status contain the text.
+        sort:
+          type: array
+          description: Records end newest first. In a totals query, sort by a group or an aggregate key (sum_amount).
+          items:
+            type: object
+            required: [field]
+            properties:
+              field: { type: string }
+              desc:  { type: boolean }
+        group_by:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            required: [field]
+            properties:
+              field:  { type: string }
+              period: { type: string, enum: [day, week, month, quarter, year], description: "A date field's period" }
+        aggregates:
+          type: array
+          description: Totals per group; a group_by without aggregates counts records.
+          items:
+            type: object
+            required: [op]
+            properties:
+              op:    { type: string, enum: [count, count_distinct, sum, avg, min, max] }
+              field: { type: string, description: Every op but count takes one. }
+        limit:  { type: integer, minimum: 1, description: "Records per page (default 100, at most 1000) or groups (default 1000, at most 5000)" }
+        offset: { type: integer, minimum: 0 }
+
+    RecordsQueryResult:
+      type: object
+      required: [kind, table, columns, query, limits]
+      properties:
+        kind:  { type: string, enum: [records, totals] }
+        table:
+          type: object
+          properties:
+            id:    { type: string, format: uuid }
+            name:  { type: string }
+            label: { type: string }
+        columns:
+          type: array
+          description: The table's columns (records), or the groups and aggregates (totals), each with a key, label and kind.
+          items:
+            type: object
+            properties:
+              key:   { type: string }
+              label: { type: string }
+              kind:  { type: string, enum: [text, number, date, boolean, datetime, status, user] }
+        records:      { type: array, items: { $ref: "#/components/schemas/FormRecord" } }
+        total:        { type: integer, description: Records matching in all. }
+        rows:         { type: array, items: { type: object, additionalProperties: {} } }
+        total_groups: { type: integer }
+        query:        { $ref: "#/components/schemas/RecordsQuery" }
+        limits:       { type: object, additionalProperties: { type: integer } }
+        statuses:     { type: array, items: { type: string }, description: "The statuses a record of the table may have; absent without a status field." }
+
     FormImportRequest:
       type: object
       properties:
-        csv:         { type: string, description: "Raw CSV text; required unless xlsx_base64 is given. Columns match form field names, falling back to labels." }
+        csv:         { type: string, description: "Raw CSV text; required unless xlsx_base64 is given. Columns match table field names, falling back to labels." }
         xlsx_base64: { type: string, description: "Base64-encoded .xlsx workbook; required unless csv is given" }
 
     AutomationRule:
@@ -2564,6 +2714,61 @@ paths:
         "400": { description: Unknown preference or value }
         "401": { description: Unauthorized }
         "404": { description: Account not found }
+
+  /api/me/api-tokens:
+    get:
+      operationId: listAPITokens
+      summary: The caller's personal API tokens not revoked (signed in, never with a token)
+      responses:
+        "200":
+          description: Tokens, newest first; the token itself is never listed
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/APIToken" }
+        "401": { description: Unauthorized }
+        "403": { description: Asked with an API token }
+    post:
+      operationId: createAPIToken
+      summary: Make a personal API token for a script; the answer carries the token, once
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/APITokenCreate" }
+      responses:
+        "200":
+          description: The token, shown this once, and its list entry
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/APITokenCreated" }
+        "400": { description: No name, a name over 100 characters, access other than read or write, or an expiry outside 1–365 days }
+        "401": { description: Unauthorized }
+        "403": { description: Asked with an API token }
+        "409": { description: The caller holds 20 live tokens already }
+
+  /api/me/api-tokens/{id}:
+    delete:
+      operationId: revokeAPIToken
+      summary: Revoke one of the caller's personal API tokens; it stops working at once
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revoked: { type: boolean }
+        "401": { description: Unauthorized }
+        "403": { description: Asked with an API token }
+        "404": { description: Not one of the caller's live tokens }
 
   /api/admin/connector-settings:
     get:
@@ -4231,6 +4436,32 @@ paths:
         "400": { $ref: "#/components/responses/FormulaRejected" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/developer/revisions/{id}/recalculate:
+    post:
+      operationId: recalculateRevision
+      tags: [Developer Console]
+      summary: Recalculate every calculated metric of a revision, in the background
+      description: >-
+        Answers at once; GET /api/grid reports recalc_pending until the pass
+        lands. For values a recalculation cut short left stale.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Recalculation started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recalculating: { type: boolean, description: "false when the revision has no calculated metric" }
+                  metrics:       { type: integer, description: The calculated metrics being recalculated }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/developer/metrics:
     post:
       operationId: createMetric
@@ -5859,14 +6090,14 @@ paths:
     get:
       operationId: listFormMappings
       tags: [Developer Console]
-      summary: List form-to-metric mappings for a model
+      summary: List table-to-metric mappings for a model
       parameters:
         - name: revision_id
           in: query
           schema: { type: string, format: uuid }
       responses:
         "200":
-          description: Form mapping list
+          description: Table mapping list
           content:
             application/json:
               schema:
@@ -5876,7 +6107,11 @@ paths:
     post:
       operationId: createFormMapping
       tags: [Developer Console]
-      summary: Create a form-to-metric mapping (posts submitted form field values into a metric's facts)
+      summary: Create a table-to-metric mapping (posts table field values into a metric's facts)
+      description: >-
+        The table, grid, input metric and dimensions must be the model's, in the revision (400
+        otherwise, without saying whether the id exists elsewhere); the source field and every mapped
+        field must be fields of the table.
       requestBody:
         required: true
         content:
@@ -5899,7 +6134,10 @@ paths:
     patch:
       operationId: updateFormMapping
       tags: [Developer Console]
-      summary: Update a form-to-metric mapping (immediately re-applies it to already-submitted records)
+      summary: Update a table-to-metric mapping (immediately re-applies it to already-submitted records)
+      description: >-
+        What the mapping names is checked as on create, against the mapping's own model, revision and
+        table (400).
       parameters:
         - name: id
           in: path
@@ -5920,7 +6158,7 @@ paths:
     delete:
       operationId: deleteFormMapping
       tags: [Developer Console]
-      summary: Delete a form-to-metric mapping
+      summary: Delete a table-to-metric mapping
       parameters:
         - name: id
           in: path
@@ -5937,7 +6175,7 @@ paths:
     post:
       operationId: backfillFormMapping
       tags: [Developer Console]
-      summary: Re-apply a form-to-metric mapping against all already-submitted records
+      summary: Re-apply a table-to-metric mapping against all already-submitted records
       parameters:
         - name: id
           in: path
@@ -8185,6 +8423,22 @@ paths:
       operationId: importUpload
       tags: [Import & Integrations]
       summary: Import facts from a CSV or XLSX file (atomic — any row failing validation rejects the whole file)
+      description: >-
+        A file is its rows entered top to bottom: rows naming the same cell
+        combine as entering them one after another would (incremental adds
+        each number; replace and full_reload keep the cell's last row; a text
+        or pick-list cell takes its last row in every mode). A client that may
+        send an import again — after a closed connection, a timeout or a 502 —
+        sends an Idempotency-Key: the same key from the same person for the
+        same model returns the first import's answer and applies nothing.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >-
+            Any string up to 255 characters naming this import, new for each
+            file. Sent again, the import is not applied a second time.
+          schema: { type: string, maxLength: 255 }
       requestBody:
         required: true
         content:
@@ -8192,7 +8446,7 @@ paths:
             schema: { $ref: "#/components/schemas/ImportUploadRequest" }
       responses:
         "200":
-          description: Import committed
+          description: Import committed (or, under an Idempotency-Key already used, the first import's answer)
           content:
             application/json:
               schema:
@@ -8204,7 +8458,13 @@ paths:
                   valid_rows:  { type: integer }
                   error_rows:  { type: integer }
                   revision_id: { type: string, format: uuid }
+                  replayed:    { type: boolean, description: "true when this is the answer of an import sent before under the same Idempotency-Key; nothing was applied" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "409":
+          description: An import sent under this Idempotency-Key is still running; ask again once it has finished
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "403":
           description: This revision is system-managed and read-only, or the write guard denied the write
           content:
@@ -8451,7 +8711,7 @@ paths:
   /api/dimensions:
     get:
       operationId: listPublicDimensions
-      tags: [CRUD Forms]
+      tags: [Records]
       summary: List all dimensions with members for the current model (any authenticated user)
       parameters:
         - name: revision_id
@@ -8471,7 +8731,7 @@ paths:
   /api/dimensions/{dimId}/members:
     post:
       operationId: addBusinessMember
-      tags: [CRUD Forms]
+      tags: [Records]
       summary: A user adds a member to a business-maintained dimension
       description: >-
         For a dimension the developer marked business_maintained (403 otherwise), on the open revision. The
@@ -8502,7 +8762,7 @@ paths:
   /api/dimensions/{dimId}/members/{memberId}:
     patch:
       operationId: updateBusinessMember
-      tags: [CRUD Forms]
+      tags: [Records]
       summary: A user renames a member of a business-maintained dimension, or sets its properties
       description: Label and properties only; a code or parent sent is refused with 400 (they are the developer's).
       parameters:
@@ -8520,7 +8780,7 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
       operationId: deleteBusinessMember
-      tags: [CRUD Forms]
+      tags: [Records]
       summary: A user removes a member of a business-maintained dimension
       description: >-
         A member with members under it, one a formula names (MEMBER_IN_USE) or a pick-list cell holds is
@@ -8537,15 +8797,15 @@ paths:
   /api/forms:
     get:
       operationId: listForms
-      tags: [CRUD Forms]
-      summary: List CRUD forms for the current model's revision
+      tags: [Records]
+      summary: List tables of records for the current model's revision
       parameters:
         - name: revision_id
           in: query
           schema: { type: string, format: uuid }
       responses:
         "200":
-          description: Form list, each form with the caller's permissions on its records
+          description: Table list, each table with the caller's permissions on its records
           content:
             application/json:
               schema:
@@ -8554,14 +8814,14 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
     post:
       operationId: createForm
-      tags: [CRUD Forms]
-      summary: Create a CRUD form
+      tags: [Records]
+      summary: Create a table of records
       parameters:
         - name: revision_id
           in: query
           schema: { type: string, format: uuid }
           description: >-
-            The revision the form belongs to; it must be a revision of the model (404 otherwise, a
+            The revision the table belongs to; it must be a revision of the model (404 otherwise, a
             malformed id included). Omitted, the model's active revision.
       requestBody:
         required: true
@@ -8570,7 +8830,7 @@ paths:
             schema: { $ref: "#/components/schemas/CreateFormRequest" }
       responses:
         "200":
-          description: Form created
+          description: Table created
           content:
             application/json:
               schema: { $ref: "#/components/schemas/FormDef" }
@@ -8579,9 +8839,9 @@ paths:
   /api/forms/{id}:
     patch:
       operationId: updateForm
-      tags: [CRUD Forms]
-      summary: Update a form's name, label, or fields
-      description: Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
+      tags: [Records]
+      summary: Update a table's name, label, or fields
+      description: Within the caller's builder scope (403 for a table outside it, 404 for one that does not exist).
       parameters:
         - name: id
           in: path
@@ -8594,7 +8854,7 @@ paths:
             schema: { $ref: "#/components/schemas/CreateFormRequest" }
       responses:
         "200":
-          description: Form updated
+          description: Table updated
           content:
             application/json:
               schema: { type: object, properties: { status: { type: string } } }
@@ -8603,11 +8863,11 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
       operationId: deleteForm
-      tags: [CRUD Forms]
-      summary: Delete a form
+      tags: [Records]
+      summary: Delete a table
       description: >-
-        Within the caller's builder scope (403 for a form outside it, 404 for
-        one that does not exist). Deletes every record of the form with it.
+        Within the caller's builder scope (403 for a table outside it, 404 for
+        one that does not exist). Deletes every record of the table with it.
       parameters:
         - name: id
           in: path
@@ -8615,7 +8875,7 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "200":
-          description: Form deleted
+          description: Table deleted
           content:
             application/json:
               schema: { type: object, properties: { status: { type: string } } }
@@ -8625,11 +8885,11 @@ paths:
   /api/forms/{id}/records:
     get:
       operationId: listFormRecords
-      tags: [CRUD Forms]
-      summary: List a form's records the caller may see, newest first, a page at a time
+      tags: [Records]
+      summary: List a table's records the caller may see, newest first, a page at a time
       description: >-
-        For a caller who reaches the form's application the way the business console opens it; anyone
-        else gets 404, as for a form that does not exist. Records the caller's access rules withhold are
+        For a caller who reaches the table's application the way the business console opens it; anyone
+        else gets 404, as for a table that does not exist. Records the caller's access rules withhold are
         left out before the page is filled, so they neither shorten a page nor end the list early. Each
         record carries the caller's permissions on it. When more records may follow, the X-Next-Cursor
         response header carries the cursor for the next page.
@@ -8661,11 +8921,15 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
     post:
       operationId: createFormRecord
-      tags: [CRUD Forms]
-      summary: Submit a new record to a form (posts to any live form-metric mappings and dispatches form_submit automation rules)
+      tags: [Records]
+      summary: Submit a new record to a table (posts to any live form-metric mappings and dispatches form_submit automation rules)
       description: >-
-        For a caller who reaches the form's application (404 otherwise). The caller becomes the record's
-        creator. A record created submitted dispatches form_submit rules, one created approved (by an
+        For a caller who reaches the table's application (404 otherwise). The caller becomes the record's
+        creator; each autocode field gives it the next code. Its values are checked (400, with every
+        problem listed): a member or metric hidden from the caller is no member or metric to them. A
+        record that would post into a cell the caller may not write — a read-only member or metric, a
+        locked cell — is refused (403) rather than saved without its posting. A record created without
+        a status or as submitted dispatches form_submit rules, one created approved (by an
         administrator) form_approval rules.
       parameters:
         - name: id
@@ -8687,13 +8951,45 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/forms/{id}/records/query:
+    post:
+      operationId: queryFormRecords
+      tags: [Records]
+      summary: Query a table's records — a filtered, searched, sorted page, or totals grouped by fields
+      description: >-
+        Read-only, for a caller who reaches the table's application (404 otherwise), over exactly the
+        records the record list shows them: a table showing each person their own records shows a
+        non-administrator theirs, and records naming a member or metric hidden from them are left out
+        of pages, counts and totals alike. Without group_by or aggregates it answers a page of records
+        (each with the caller's permissions) and how many match in all; with them, one row per group
+        holding each aggregate, and how many groups there are. A dimension or person group also carries
+        its name (key_label). The chat connector's query_records and the AI assistant's query_records
+        are this route.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecordsQuery" }
+      responses:
+        "200":
+          description: Records or totals
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordsQueryResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/forms/{id}/export:
     get:
       operationId: exportFormRecords
-      tags: [CRUD Forms]
-      summary: Export a form's records as CSV or XLSX
+      tags: [Records]
+      summary: Export a table's records as CSV or XLSX
       description: >-
-        For a caller who reaches the form's application (404 otherwise); records the caller's access
+        For a caller who reaches the table's application (404 otherwise); records the caller's access
         rules withhold are left out.
       parameters:
         - name: id
@@ -8703,6 +8999,12 @@ paths:
         - name: format
           in: query
           schema: { type: string, enum: [csv, xlsx], default: csv }
+        - name: query
+          in: query
+          description: >-
+            Optional records query (RecordsQuery as JSON, without group_by or aggregates): the export then
+            holds the records it matches, in its order — what the records widget shows.
+          schema: { type: string }
       responses:
         "200":
           description: File download
@@ -8717,10 +9019,10 @@ paths:
   /api/forms/{id}/import:
     post:
       operationId: importFormRecords
-      tags: [CRUD Forms]
-      summary: Bulk-create form records from an uploaded CSV or XLSX (atomic — any row failing validation rejects the whole file)
+      tags: [Records]
+      summary: Bulk-create table records from an uploaded CSV or XLSX (atomic — any row failing validation rejects the whole file)
       description: >-
-        For a caller who reaches the form's application (404 otherwise), who becomes each record's
+        For a caller who reaches the table's application (404 otherwise), who becomes each record's
         creator. A row's optional status column sets its status; a row whose status the caller may not
         create (approved or rejected, unless the caller administers the application) fails validation.
       parameters:
@@ -8766,13 +9068,13 @@ paths:
   /api/forms/{id}/sync:
     post:
       operationId: syncFormMappings
-      tags: [CRUD Forms]
-      summary: Re-apply every live form-metric mapping against all of a form's existing records
+      tags: [Records]
+      summary: Re-apply every live form-metric mapping against all of a table's existing records
       description: >-
-        For an administrator of the form's application (a business_admin of
+        For an administrator of the table's application (a business_admin of
         its workspace, a developer or tenant admin within their scope, a
-        platform admin): a sync re-posts every record of the form, other
-        people's included. 403 for a caller who reaches the form without
+        platform admin): a sync re-posts every record of the table, other
+        people's included. 403 for a caller who reaches the table without
         administering it, 404 for anyone else. A record whose re-post the
         caller's write guard refuses keeps the posting it has.
       parameters:
@@ -8797,10 +9099,10 @@ paths:
   /api/records/{id}:
     get:
       operationId: getFormRecord
-      tags: [CRUD Forms]
-      summary: Read one form record, with the caller's permissions on it
+      tags: [Records]
+      summary: Read one table record, with the caller's permissions on it
       description: >-
-        For a caller who reaches the record's form's application the way the business console opens it
+        For a caller who reaches the record's table's application the way the business console opens it
         and whose access rules do not withhold the record; anyone else gets 404, as for a record that
         does not exist.
       parameters:
@@ -8817,8 +9119,8 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
     put:
       operationId: updateFormRecord
-      tags: [CRUD Forms]
-      summary: Update a form record's data and/or status (dispatches form_submit/form_approval automation rules on status transitions)
+      tags: [Records]
+      summary: Update a table record's data and/or status (dispatches form_submit/form_approval automation rules on status transitions)
       description: >-
         A caller who does not reach the record gets 404 (see getFormRecord). One who does may make the
         change its permissions allow (RecordPermissions: edit, and set_status for a new status) and gets
@@ -8854,8 +9156,8 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
     delete:
       operationId: deleteFormRecord
-      tags: [CRUD Forms]
-      summary: Delete a form record
+      tags: [Records]
+      summary: Delete a table record
       description: >-
         404 for a caller who does not reach the record, 403 for one whose permissions do not include
         delete, 409 when the record changed status since it was read.

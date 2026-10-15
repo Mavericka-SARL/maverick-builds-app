@@ -233,8 +233,8 @@ test("business admin sidebar groups read User and Business Admin", async ({ page
   await loadAs(page, "finance");
   const labels = page.locator(".mvx-sidebar-nav__group-label");
   await expect(labels).toHaveText(["User", "Business Admin"], { useInnerText: false });
-  // Forms have no screen of their own: records are worked on in a
-  // dashboard's form widget.
+  // Tables of records have no screen of their own for a business admin:
+  // records are worked on in a dashboard's records widget.
   await expect(page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Dashboards" })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Forms" })).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Records" })).toHaveCount(0);
 });

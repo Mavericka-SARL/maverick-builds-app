@@ -119,6 +119,13 @@ type Hooks struct {
 	// TriggerRule fires an automation rule through its manual trigger route,
 	// as the developer. A proposal check answers ErrNotDryRunnable.
 	TriggerRule func(ctx context.Context, ruleID string, payload map[string]any) (string, error)
+	// Recalculate recalculates every calculated metric of a revision through
+	// the developer's own route (POST /api/developer/revisions/{id}/recalculate).
+	Recalculate func(ctx context.Context, revisionID string) (string, error)
+	// RepostTable re-posts every record of a table through its live
+	// mappings, as the developer: what saving a table that gained or lost
+	// its status field runs, since which records count changed.
+	RepostTable func(ctx context.Context, formID string) error
 }
 
 // WithHooks sets the executor's gateway hooks and returns it.
@@ -534,6 +541,8 @@ func (e *WriteExecutor) Execute(ctx context.Context, tool string, params json.Ra
 		return e.runIntegration(ctx, params)
 	case "trigger_automation_rule":
 		return e.triggerAutomationRule(ctx, params)
+	case "recalculate_revision":
+		return e.recalculateRevision(ctx, params)
 	}
 	if fn, ok := e.editTools()[tool]; ok {
 		return fn(ctx, params)
@@ -1016,9 +1025,13 @@ func (e *WriteExecutor) deleteMetric(ctx context.Context, raw json.RawMessage) (
 
 // ── create_dimension ──────────────────────────────────────────────────────────
 
+// dimensionAggRule is what a dimension's agg_rule column holds: nothing
+// reads it — a metric's agg_rule decides how its values roll up — so the
+// assistant neither takes nor shows one.
+const dimensionAggRule = "sum"
+
 type createDimensionParams struct {
 	Name                string `json:"name"`
-	AggRule             string `json:"agg_rule"`
 	RevisionID          string `json:"revision_id"`
 	ParentDimensionName string `json:"parent_dimension_name"` // if set, this dimension is a child of that one — members' parent_code resolves against the PARENT dimension's members
 	ParentDimensionID   string `json:"parent_dimension_id"`   // the same, by id (either field)
@@ -1112,9 +1125,6 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 	if p.Name == "" {
 		return "", "", fmt.Errorf("name is required")
 	}
-	if p.AggRule == "" {
-		p.AggRule = "sum"
-	}
 	timeCfg := timedim.Config{Type: p.DimensionType, Granularity: p.TimeGranularity, FiscalYearStartMonth: p.FiscalYearStart}
 	if err := timedim.ValidateConfig(&timeCfg); err != nil {
 		return "", "", err
@@ -1176,14 +1186,14 @@ func (e *WriteExecutor) createDimension(ctx context.Context, raw json.RawMessage
 			INSERT INTO model.dimension_def (model_id, name, agg_rule, revision_id, parent_dimension_id, dimension_type, time_granularity, fiscal_year_start_month, tags,
 			                                 source_dimension_id, source_property)
 			VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, $7, $8, $9, $10::uuid, $11) RETURNING id::text
-		`, e.modelID, p.Name, p.AggRule, revID, parentDimID, timeCfg.Type, granularity, fiscalStart, tags.Clean(p.Tags),
+		`, e.modelID, p.Name, dimensionAggRule, revID, parentDimID, timeCfg.Type, granularity, fiscalStart, tags.Clean(p.Tags),
 			sourceDimID, sourceProp).Scan(&newID)
 	} else {
 		err = e.pool.QueryRow(ctx, `
 			INSERT INTO model.dimension_def (model_id, name, agg_rule, parent_dimension_id, dimension_type, time_granularity, fiscal_year_start_month, tags,
 			                                 source_dimension_id, source_property)
 			VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7, $8, $9::uuid, $10) RETURNING id::text
-		`, e.modelID, p.Name, p.AggRule, parentDimID, timeCfg.Type, granularity, fiscalStart, tags.Clean(p.Tags),
+		`, e.modelID, p.Name, dimensionAggRule, parentDimID, timeCfg.Type, granularity, fiscalStart, tags.Clean(p.Tags),
 			sourceDimID, sourceProp).Scan(&newID)
 	}
 	if err != nil {
@@ -2819,7 +2829,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 				WHERE o.model_id=$1::uuid AND o.revision_id=$3::uuid
 			),
 			new_forms AS (
-				INSERT INTO model.form_def (model_id, name, label, fields, revision_id)
+				INSERT INTO model.form_def (model_id, name, label, fields, revision_id, own_records_only)
 				SELECT f.model_id, f.name, f.label,
 					COALESCE((
 						SELECT jsonb_agg(
@@ -2829,7 +2839,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 							ORDER BY e.ord)
 						FROM jsonb_array_elements(CASE WHEN jsonb_typeof(f.fields) = 'array' THEN f.fields ELSE '[]'::jsonb END) WITH ORDINALITY AS e(elem, ord)
 					), '[]'::jsonb),
-					$2::uuid
+					$2::uuid, f.own_records_only
 				FROM model.form_def f
 				WHERE f.model_id=$1::uuid AND f.revision_id=$3::uuid
 				RETURNING id AS new_id, name
@@ -3395,10 +3405,11 @@ func unmarshalArrayLen(raw json.RawMessage) (int, error) {
 // ── create_form_def ───────────────────────────────────────────────────────────
 
 type createFormDefParams struct {
-	Name       string              `json:"name"`
-	Label      string              `json:"label"`
-	Fields     []crudapp.FormField `json:"fields"`
-	RevisionID string              `json:"revision_id"`
+	Name           string              `json:"name"`
+	Label          string              `json:"label"`
+	Fields         []crudapp.FormField `json:"fields"`
+	OwnRecordsOnly bool                `json:"own_records_only"`
+	RevisionID     string              `json:"revision_id"`
 }
 
 func (e *WriteExecutor) createFormDef(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -3412,23 +3423,39 @@ func (e *WriteExecutor) createFormDef(ctx context.Context, raw json.RawMessage) 
 	if p.Label == "" {
 		p.Label = p.Name
 	}
+	if err := crudapp.ValidateFields(p.Fields); err != nil {
+		return "", "", err
+	}
 	revID := e.effectiveRevision(p.RevisionID)
 
 	fs := crudapp.NewStoreOn(e.pool)
 	form, err := fs.CreateForm(ctx, e.modelID, revID, p.Name, p.Label, p.Fields)
 	if err != nil {
-		return "", "", fmt.Errorf("create form: %w", err)
+		return "", "", fmt.Errorf("create table: %w", err)
 	}
-	return fmt.Sprintf("Form '%s' created (id: %s, %d field(s))", p.Name, form.ID, len(p.Fields)), form.ID, nil
+	if p.OwnRecordsOnly {
+		if err := fs.SetOwnRecordsOnly(ctx, form.ID, true); err != nil {
+			return "", "", err
+		}
+	}
+	return fmt.Sprintf("Table '%s' created (id: %s, %d field(s)%s)", p.Name, form.ID, len(p.Fields), ownRecordsNote(p.OwnRecordsOnly)), form.ID, nil
+}
+
+func ownRecordsNote(on bool) string {
+	if on {
+		return ", each person sees only their own records"
+	}
+	return ""
 }
 
 // ── update_form_def ───────────────────────────────────────────────────────────
 
 type updateFormDefParams struct {
-	FormID string              `json:"form_id"`
-	Name   string              `json:"name"`
-	Label  string              `json:"label"`
-	Fields []crudapp.FormField `json:"fields"`
+	FormID         string              `json:"form_id"`
+	Name           string              `json:"name"`
+	Label          string              `json:"label"`
+	Fields         []crudapp.FormField `json:"fields"`
+	OwnRecordsOnly *bool               `json:"own_records_only"`
 }
 
 // updateFormDef fetches the current row first for two reasons: (1) to
@@ -3477,11 +3504,32 @@ func (e *WriteExecutor) updateFormDef(ctx context.Context, raw json.RawMessage) 
 		_ = json.Unmarshal(curFieldsJSON, &fields)
 	}
 
-	fs := crudapp.NewStoreOn(e.pool)
-	if err := fs.UpdateForm(ctx, p.FormID, name, label, fields); err != nil {
-		return "", "", fmt.Errorf("update form: %w", err)
+	if err := crudapp.ValidateFields(fields); err != nil {
+		return "", "", err
 	}
-	return fmt.Sprintf("Form '%s' updated (%d field(s))", name, len(fields)), "", nil
+	fs := crudapp.NewStoreOn(e.pool)
+	change, err := fs.UpdateForm(ctx, p.FormID, name, label, fields)
+	if err != nil {
+		return "", "", fmt.Errorf("update table: %w", err)
+	}
+	if p.OwnRecordsOnly != nil {
+		if err := fs.SetOwnRecordsOnly(ctx, p.FormID, *p.OwnRecordsOnly); err != nil {
+			return "", "", err
+		}
+	}
+	note := ""
+	if change.CodesAssigned > 0 {
+		note += fmt.Sprintf(", %d existing record(s) given a code", change.CodesAssigned)
+	}
+	if change.StatusChanged {
+		if e.hooks.RepostTable != nil {
+			if err := e.hooks.RepostTable(ctx, p.FormID); err != nil {
+				return "", "", fmt.Errorf("re-post the table's records: %w", err)
+			}
+		}
+		note += ", its records re-posted (the status field decides which count)"
+	}
+	return fmt.Sprintf("Table '%s' updated (%d field(s)%s)", name, len(fields), note), "", nil
 }
 
 // ── set_user_access_rules ─────────────────────────────────────────────────────

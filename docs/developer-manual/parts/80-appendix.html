@@ -5,7 +5,7 @@
 <tr><td>Formulas</td><td>Cell addresses, external workbook references, XLOOKUP/INDEX/MATCH (LOOKUP by member is the equivalent), CHILDREN functions, the time functions POST, SPREAD, PROFILE and WEEKVALUE, a MOVINGSUM window that is not a whole-number literal, formulas on form fields. Also absent: SUMPRODUCT, VALUE, the IS… functions (ISBLANK, ISNUMBER, ISERROR — use IFERROR, IFNA or a comparison with <code>""</code>), array formulas, the <code>%</code> suffix, and text results (a result is stored as a number). The Formulas Manual lists every function that exists.</td></tr>
 <tr><td>Dimensions</td><td>Import preview and explicit sort/move controls in the member tree. (A dimension that groups another by a member property is built in the console: <b>Group members of</b> / <b>By property</b> and <b>Derive members</b>, see Dimensions.)</td></tr>
 <tr><td>Grids</td><td>Renaming a grid; a metric in more than one grid; collapsing hierarchy levels in the rendered grid (use the grid's Show level instead).</td></tr>
-<tr><td>Dashboards</td><td>Undo/redo, canvas zoom, alignment guides, layout templates, breakpoint preview; form-backed chart sources.</td></tr>
+<tr><td>Dashboards</td><td>Undo/redo, canvas zoom, alignment guides, layout templates, breakpoint preview; chart sources backed by records.</td></tr>
 <tr><td>Workflows</td><td>Drag-and-drop or edge drawing on the canvas (edit in the step list and panel); timeouts and escalations (SLA hours drives a one-time reminder to the people who can act on a step, nothing more); unpublish (archive instead); full BPMN.</td></tr>
 <tr><td>Triggers</td><td>Conditions or actions on the rule itself (they belong to workflow steps); a schedule on a workflow whose trigger is an event (schedules start manual workflows).</td></tr>
 <tr><td>Integrations</td><td>Supabase, ClickHouse and MySQL (marked coming soon); an SFTP file has no Shape step in the wizard (shape it through the HTTP API); Google Sheets through a person's own Google account (use a link-shared sheet or the tenant's service account).</td></tr>
@@ -30,7 +30,7 @@
 <tr><td>Trigger button on a dashboard is disabled</td><td>The rule is disabled, not manual, or gone. Triggers › enable it or pick another rule in Widget Properties.</td></tr>
 <tr><td>Validate reports a loop or unreachable step</td><td>Put a task or approval on the loop or route forward; give the step a route from the first step. Remember that a step without routes falls through to the next in list order.</td></tr>
 <tr><td>Test Run or Publish is disabled</td><td>Unsaved changes. Save first.</td></tr>
-<tr><td>"Event … not found in catalog" on a workflow</td><td>The form or integration that supplied the event was deleted. Pick another event under Starts on.</td></tr>
+<tr><td>"Event … not found in catalog" on a workflow</td><td>The table or integration that supplied the event was deleted. Pick another event under Starts on.</td></tr>
 <tr><td>Workflow start refused as a duplicate</td><td>"One active instance per scope" is on and an instance with the same members is running. Turn it off for per-request processes, or finish the running instance.</td></tr>
 <tr><td>Import rows rejected</td><td>Wrong member codes, a calculated metric as target, a locked scope, or hidden/read-only members for your user. Fix the file or the rule; use Validate before Commit.</td></tr>
 <tr><td>REST integration cannot be activated</td><td>Activation needs a successful test of the current configuration on the Response step.</td></tr>
@@ -49,7 +49,7 @@
 <tr><td>Calculated metric</td><td>A metric defined by a formula; read-only.</td></tr>
 <tr><td>Code</td><td>The identity of a dimension member; labels are display only.</td></tr>
 <tr><td>Context / selectors</td><td>The dimensions a widget lets the user choose; synced widgets share one selector per dimension.</td></tr>
-<tr><td>Form mapping</td><td>Rule that posts a form field into an input metric (Integrations › Form Records).</td></tr>
+<tr><td>Table mapping</td><td>Rule that posts a field of a table's records into an input metric (Integrations › Records).</td></tr>
 <tr><td>Grid</td><td>A set of metrics and dimensions shown as one table; a metric sits in at most one grid.</td></tr>
 <tr><td>Instance</td><td>One run of a workflow; keeps the definition it started with.</td></tr>
 <tr><td>Input metric</td><td>A metric users type into, import or post to.</td></tr>
@@ -59,8 +59,8 @@
 <tr><td>Revision</td><td>The unit of change; a complete copy of a model's definitions and values.</td></tr>
 <tr><td>System-managed revision</td><td>A revision written only by workflow approvals; read-only otherwise.</td></tr>
 <tr><td>Task</td><td>A workflow step waiting for a person, shown in the Workflow Inbox.</td></tr>
-<tr><td>Widget</td><td>One element on a dashboard: grid, chart, form, KPI, trigger, integration, text, import.</td></tr>
-<tr><td>Workflow object</td><td>What a workflow is about: a grid, a metric in a grid, or form records; defines its lock scope.</td></tr>
+<tr><td>Widget</td><td>One element on a dashboard: grid, chart, records, KPI, trigger, integration, text, import.</td></tr>
+<tr><td>Workflow object</td><td>What a workflow is about: a grid, a metric in a grid, or records of a table; defines its lock scope, and for records their status.</td></tr>
 </table>
 
 </body>

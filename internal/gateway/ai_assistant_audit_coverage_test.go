@@ -292,12 +292,12 @@ func TestAIUpdateDimensionIsAudited(t *testing.T) {
 
 	regionParams, _ := json.Marshal(map[string]string{"name": "region"})
 	cityParams, _ := json.Marshal(map[string]string{"name": "city"})
-	updateParams, _ := json.Marshal(map[string]string{"dimension_id": "city", "name": "town", "agg_rule": "average",
+	updateParams, _ := json.Marshal(map[string]string{"dimension_id": "city", "name": "town",
 		"parent_dimension_name": "region"})
 	proposal, err := aiassistant.NewProposalStore(f.pool).CreateProposal(ctx, sessionID, []aiassistant.ProposalStep{
 		{Tool: "create_dimension", Description: "Create dimension 'region'", Params: regionParams},
 		{Tool: "create_dimension", Description: "Create dimension 'city'", Params: cityParams},
-		{Tool: "update_dimension", Description: "Rename 'city' to 'town', average it, under region", Params: updateParams},
+		{Tool: "update_dimension", Description: "Rename 'city' to 'town', under region", Params: updateParams},
 	}, nil)
 	if err != nil {
 		t.Fatalf("create proposal: %v", err)
@@ -318,10 +318,10 @@ func TestAIUpdateDimensionIsAudited(t *testing.T) {
 	if row.resourceID != proposal.ID || row.category != "ai_assistant" || row.revisionID == nil || *row.revisionID != sess.DraftRevisionID {
 		t.Errorf("ai_proposal.confirmed row = %+v, want resource_id=%s category=ai_assistant revision_id=%s", row, proposal.ID, sess.DraftRevisionID)
 	}
-	var agg, parent string
+	var parent string
 	if err := f.pool.QueryRow(ctx, `
-		SELECT d.agg_rule, p.name FROM model.dimension_def d JOIN model.dimension_def p ON p.id = d.parent_dimension_id
-		WHERE d.revision_id=$1::uuid AND d.name='town'`, sess.DraftRevisionID).Scan(&agg, &parent); err != nil || agg != "average" || parent != "region" {
-		t.Errorf("updated in the draft: agg=%q parent=%q (err %v), want average under region", agg, parent, err)
+		SELECT p.name FROM model.dimension_def d JOIN model.dimension_def p ON p.id = d.parent_dimension_id
+		WHERE d.revision_id=$1::uuid AND d.name='town'`, sess.DraftRevisionID).Scan(&parent); err != nil || parent != "region" {
+		t.Errorf("updated in the draft: parent=%q (err %v), want under region", parent, err)
 	}
 }

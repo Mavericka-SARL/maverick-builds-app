@@ -30,6 +30,7 @@ func runFormAggregationTests(dev *api) {
 		"label": "QA Posting Form",
 		"fields": []map[string]any{
 			{"name": "amount", "label": "Amount", "type": "number", "required": true},
+			{"name": "status", "label": "Status", "type": "status"},
 		},
 	})
 	formID := id(form)

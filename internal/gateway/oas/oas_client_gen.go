@@ -102,7 +102,7 @@ type Invoker interface {
 	ArchiveWorkflow(ctx context.Context, params ArchiveWorkflowParams) (*WorkflowDefFull, error)
 	// BackfillFormMapping invokes backfillFormMapping operation.
 	//
-	// Re-apply a form-to-metric mapping against all already-submitted records.
+	// Re-apply a table-to-metric mapping against all already-submitted records.
 	//
 	// POST /api/developer/form-integrations/{id}/backfill
 	BackfillFormMapping(ctx context.Context, params BackfillFormMappingParams) (*BackfillFormMappingOK, error)
@@ -153,6 +153,12 @@ type Invoker interface {
 	//
 	// POST /api/ai/sessions/{id}/proposals/{pid}/confirm
 	ConfirmAiProposal(ctx context.Context, params ConfirmAiProposalParams) (ConfirmAiProposalRes, error)
+	// CreateAPIToken invokes createAPIToken operation.
+	//
+	// Make a personal API token for a script; the answer carries the token, once.
+	//
+	// POST /api/me/api-tokens
+	CreateAPIToken(ctx context.Context, request *APITokenCreate) (CreateAPITokenRes, error)
 	// CreateAdminApplication invokes createAdminApplication operation.
 	//
 	// Create an application under a tenant (a tenant admin: their own tenant only).
@@ -266,21 +272,27 @@ type Invoker interface {
 	CreateFolder(ctx context.Context, request *FolderRequest, params CreateFolderParams) (CreateFolderRes, error)
 	// CreateForm invokes createForm operation.
 	//
-	// Create a CRUD form.
+	// Create a table of records.
 	//
 	// POST /api/forms
 	CreateForm(ctx context.Context, request *CreateFormRequest, params CreateFormParams) (CreateFormRes, error)
 	// CreateFormMapping invokes createFormMapping operation.
 	//
-	// Create a form-to-metric mapping (posts submitted form field values into a metric's facts).
+	// The table, grid, input metric and dimensions must be the model's, in the revision (400 otherwise,
+	// without saying whether the id exists elsewhere); the source field and every mapped field must be
+	// fields of the table.
 	//
 	// POST /api/developer/form-integrations
 	CreateFormMapping(ctx context.Context, request *CreateFormMappingRequest) (CreateFormMappingRes, error)
 	// CreateFormRecord invokes createFormRecord operation.
 	//
-	// For a caller who reaches the form's application (404 otherwise). The caller becomes the record's
-	// creator. A record created submitted dispatches form_submit rules, one created approved (by an
-	// administrator) form_approval rules.
+	// For a caller who reaches the table's application (404 otherwise). The caller becomes the record's
+	// creator; each autocode field gives it the next code. Its values are checked (400, with every
+	// problem listed): a member or metric hidden from the caller is no member or metric to them. A
+	// record that would post into a cell the caller may not write — a read-only member or metric, a
+	// locked cell — is refused (403) rather than saved without its posting. A record created without a
+	// status or as submitted dispatches form_submit rules, one created approved (by an administrator)
+	// form_approval rules.
 	//
 	// POST /api/forms/{id}/records
 	CreateFormRecord(ctx context.Context, request *CreateRecordRequest, params CreateFormRecordParams) (CreateFormRecordRes, error)
@@ -460,14 +472,14 @@ type Invoker interface {
 	DeleteFolder(ctx context.Context, params DeleteFolderParams) (*DeleteFolderOK, error)
 	// DeleteForm invokes deleteForm operation.
 	//
-	// Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
-	// Deletes every record of the form with it.
+	// Within the caller's builder scope (403 for a table outside it, 404 for one that does not exist).
+	// Deletes every record of the table with it.
 	//
 	// DELETE /api/forms/{id}
 	DeleteForm(ctx context.Context, params DeleteFormParams) (DeleteFormRes, error)
 	// DeleteFormMapping invokes deleteFormMapping operation.
 	//
-	// Delete a form-to-metric mapping.
+	// Delete a table-to-metric mapping.
 	//
 	// DELETE /api/developer/form-integrations/{id}
 	DeleteFormMapping(ctx context.Context, params DeleteFormMappingParams) (*DeleteFormMappingOK, error)
@@ -581,8 +593,8 @@ type Invoker interface {
 	ExportAudit(ctx context.Context, params ExportAuditParams) (ExportAuditRes, error)
 	// ExportFormRecords invokes exportFormRecords operation.
 	//
-	// For a caller who reaches the form's application (404 otherwise); records the caller's access rules
-	// withhold are left out.
+	// For a caller who reaches the table's application (404 otherwise); records the caller's access
+	// rules withhold are left out.
 	//
 	// GET /api/forms/{id}/export
 	ExportFormRecords(ctx context.Context, params ExportFormRecordsParams) (ExportFormRecordsRes, error)
@@ -705,9 +717,9 @@ type Invoker interface {
 	GetDeveloperModel(ctx context.Context, params GetDeveloperModelParams) (*GetDeveloperModelOK, error)
 	// GetFormRecord invokes getFormRecord operation.
 	//
-	// For a caller who reaches the record's form's application the way the business console opens it and
-	// whose access rules do not withhold the record; anyone else gets 404, as for a record that does not
-	// exist.
+	// For a caller who reaches the record's table's application the way the business console opens it
+	// and whose access rules do not withhold the record; anyone else gets 404, as for a record that does
+	// not exist.
 	//
 	// GET /api/records/{id}
 	GetFormRecord(ctx context.Context, params GetFormRecordParams) (GetFormRecordRes, error)
@@ -874,9 +886,9 @@ type Invoker interface {
 	ImportDimensionMembers(ctx context.Context, request *ImportDimensionMembersReq) (ImportDimensionMembersRes, error)
 	// ImportFormRecords invokes importFormRecords operation.
 	//
-	// For a caller who reaches the form's application (404 otherwise), who becomes each record's creator.
-	//  A row's optional status column sets its status; a row whose status the caller may not create
-	// (approved or rejected, unless the caller administers the application) fails validation.
+	// For a caller who reaches the table's application (404 otherwise), who becomes each record's
+	// creator. A row's optional status column sets its status; a row whose status the caller may not
+	// create (approved or rejected, unless the caller administers the application) fails validation.
 	//
 	// POST /api/forms/{id}/import
 	ImportFormRecords(ctx context.Context, request *FormImportRequest, params ImportFormRecordsParams) (ImportFormRecordsRes, error)
@@ -911,10 +923,14 @@ type Invoker interface {
 	ImportTemplateWorkbook(ctx context.Context, request *ImportTemplateWorkbookReq) (ImportTemplateWorkbookRes, error)
 	// ImportUpload invokes importUpload operation.
 	//
-	// Import facts from a CSV or XLSX file (atomic — any row failing validation rejects the whole file).
+	// A file is its rows entered top to bottom: rows naming the same cell combine as entering them one
+	// after another would (incremental adds each number; replace and full_reload keep the cell's last
+	// row; a text or pick-list cell takes its last row in every mode). A client that may send an import
+	// again — after a closed connection, a timeout or a 502 — sends an Idempotency-Key: the same key
+	// from the same person for the same model returns the first import's answer and applies nothing.
 	//
 	// POST /api/import/upload
-	ImportUpload(ctx context.Context, request *ImportUploadRequest) (ImportUploadRes, error)
+	ImportUpload(ctx context.Context, request *ImportUploadRequest, params ImportUploadParams) (ImportUploadRes, error)
 	// IntegrationOAuthCallback invokes integrationOAuthCallback operation.
 	//
 	// Where the provider sends the browser after consent (public: the person arrives with the state
@@ -923,6 +939,12 @@ type Invoker interface {
 	//
 	// GET /api/integrations/oauth/callback
 	IntegrationOAuthCallback(ctx context.Context, params IntegrationOAuthCallbackParams) error
+	// ListAPITokens invokes listAPITokens operation.
+	//
+	// The caller's personal API tokens not revoked (signed in, never with a token).
+	//
+	// GET /api/me/api-tokens
+	ListAPITokens(ctx context.Context) (ListAPITokensRes, error)
 	// ListAdminApplications invokes listAdminApplications operation.
 	//
 	// List the applications in the caller's scope — every tenant's for a platform admin, their own
@@ -1097,23 +1119,23 @@ type Invoker interface {
 	ListDormancy(ctx context.Context) (ListDormancyRes, error)
 	// ListFormMappings invokes listFormMappings operation.
 	//
-	// List form-to-metric mappings for a model.
+	// List table-to-metric mappings for a model.
 	//
 	// GET /api/developer/form-integrations
 	ListFormMappings(ctx context.Context, params ListFormMappingsParams) (ListFormMappingsRes, error)
 	// ListFormRecords invokes listFormRecords operation.
 	//
-	// For a caller who reaches the form's application the way the business console opens it; anyone else
-	// gets 404, as for a form that does not exist. Records the caller's access rules withhold are left
-	// out before the page is filled, so they neither shorten a page nor end the list early. Each record
-	// carries the caller's permissions on it. When more records may follow, the X-Next-Cursor response
-	// header carries the cursor for the next page.
+	// For a caller who reaches the table's application the way the business console opens it; anyone
+	// else gets 404, as for a table that does not exist. Records the caller's access rules withhold are
+	// left out before the page is filled, so they neither shorten a page nor end the list early. Each
+	// record carries the caller's permissions on it. When more records may follow, the X-Next-Cursor
+	// response header carries the cursor for the next page.
 	//
 	// GET /api/forms/{id}/records
 	ListFormRecords(ctx context.Context, params ListFormRecordsParams) (ListFormRecordsRes, error)
 	// ListForms invokes listForms operation.
 	//
-	// List CRUD forms for the current model's revision.
+	// List tables of records for the current model's revision.
 	//
 	// GET /api/forms
 	ListForms(ctx context.Context, params ListFormsParams) (ListFormsRes, error)
@@ -1296,6 +1318,26 @@ type Invoker interface {
 	//
 	// PUT /api/developer/integrations/google-service-account
 	PutGoogleConnection(ctx context.Context, request *PutGoogleConnectionReq) (PutGoogleConnectionRes, error)
+	// QueryFormRecords invokes queryFormRecords operation.
+	//
+	// Read-only, for a caller who reaches the table's application (404 otherwise), over exactly the
+	// records the record list shows them: a table showing each person their own records shows a
+	// non-administrator theirs, and records naming a member or metric hidden from them are left out of
+	// pages, counts and totals alike. Without group_by or aggregates it answers a page of records (each
+	// with the caller's permissions) and how many match in all; with them, one row per group holding
+	// each aggregate, and how many groups there are. A dimension or person group also carries its name
+	// (key_label). The chat connector's query_records and the AI assistant's query_records are this
+	// route.
+	//
+	// POST /api/forms/{id}/records/query
+	QueryFormRecords(ctx context.Context, request OptRecordsQuery, params QueryFormRecordsParams) (QueryFormRecordsRes, error)
+	// RecalculateRevision invokes recalculateRevision operation.
+	//
+	// Answers at once; GET /api/grid reports recalc_pending until the pass lands. For values a
+	// recalculation cut short left stale.
+	//
+	// POST /api/developer/revisions/{id}/recalculate
+	RecalculateRevision(ctx context.Context, params RecalculateRevisionParams) (RecalculateRevisionRes, error)
 	// RejectAiProposal invokes rejectAiProposal operation.
 	//
 	// Reject a pending proposal without executing it.
@@ -1395,6 +1437,12 @@ type Invoker interface {
 	//
 	// POST /api/developer/workflows/{id}/restore
 	RestoreWorkflow(ctx context.Context, params RestoreWorkflowParams) (RestoreWorkflowRes, error)
+	// RevokeAPIToken invokes revokeAPIToken operation.
+	//
+	// Revoke one of the caller's personal API tokens; it stops working at once.
+	//
+	// DELETE /api/me/api-tokens/{id}
+	RevokeAPIToken(ctx context.Context, params RevokeAPITokenParams) (RevokeAPITokenRes, error)
 	// RevokeAdminUserAppAccess invokes revokeAdminUserAppAccess operation.
 	//
 	// Requires platform_admin or tenant_admin. See grantAdminUserAppAccess. When this is the last
@@ -1627,9 +1675,9 @@ type Invoker interface {
 	SwitchModelLinkSource(ctx context.Context, request *SwitchModelLinkSourceReq, params SwitchModelLinkSourceParams) (SwitchModelLinkSourceRes, error)
 	// SyncFormMappings invokes syncFormMappings operation.
 	//
-	// For an administrator of the form's application (a business_admin of its workspace, a developer or
-	// tenant admin within their scope, a platform admin): a sync re-posts every record of the form,
-	// other people's included. 403 for a caller who reaches the form without administering it, 404 for
+	// For an administrator of the table's application (a business_admin of its workspace, a developer or
+	// tenant admin within their scope, a platform admin): a sync re-posts every record of the table,
+	// other people's included. 403 for a caller who reaches the table without administering it, 404 for
 	// anyone else. A record whose re-post the caller's write guard refuses keeps the posting it has.
 	//
 	// POST /api/forms/{id}/sync
@@ -1797,13 +1845,14 @@ type Invoker interface {
 	UpdateFolder(ctx context.Context, request *FolderRequest, params UpdateFolderParams) (UpdateFolderRes, error)
 	// UpdateForm invokes updateForm operation.
 	//
-	// Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
+	// Within the caller's builder scope (403 for a table outside it, 404 for one that does not exist).
 	//
 	// PATCH /api/forms/{id}
 	UpdateForm(ctx context.Context, request *CreateFormRequest, params UpdateFormParams) (UpdateFormRes, error)
 	// UpdateFormMapping invokes updateFormMapping operation.
 	//
-	// Update a form-to-metric mapping (immediately re-applies it to already-submitted records).
+	// What the mapping names is checked as on create, against the mapping's own model, revision and
+	// table (400).
 	//
 	// PATCH /api/developer/form-integrations/{id}
 	UpdateFormMapping(ctx context.Context, request *UpdateFormMappingRequest, params UpdateFormMappingParams) (UpdateFormMappingRes, error)
@@ -3372,7 +3421,7 @@ func (c *Client) sendArchiveWorkflow(ctx context.Context, params ArchiveWorkflow
 
 // BackfillFormMapping invokes backfillFormMapping operation.
 //
-// Re-apply a form-to-metric mapping against all already-submitted records.
+// Re-apply a table-to-metric mapping against all already-submitted records.
 //
 // POST /api/developer/form-integrations/{id}/backfill
 func (c *Client) BackfillFormMapping(ctx context.Context, params BackfillFormMappingParams) (*BackfillFormMappingOK, error) {
@@ -4365,6 +4414,116 @@ func (c *Client) sendConfirmAiProposal(ctx context.Context, params ConfirmAiProp
 
 	stage = "DecodeResponse"
 	result, err := decodeConfirmAiProposalResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// CreateAPIToken invokes createAPIToken operation.
+//
+// Make a personal API token for a script; the answer carries the token, once.
+//
+// POST /api/me/api-tokens
+func (c *Client) CreateAPIToken(ctx context.Context, request *APITokenCreate) (CreateAPITokenRes, error) {
+	res, err := c.sendCreateAPIToken(ctx, request)
+	return res, err
+}
+
+func (c *Client) sendCreateAPIToken(ctx context.Context, request *APITokenCreate) (res CreateAPITokenRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("createAPIToken"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/me/api-tokens"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, CreateAPITokenOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/me/api-tokens"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeCreateAPITokenRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, CreateAPITokenOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeCreateAPITokenResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -6058,7 +6217,7 @@ func (c *Client) sendCreateFolder(ctx context.Context, request *FolderRequest, p
 
 // CreateForm invokes createForm operation.
 //
-// Create a CRUD form.
+// Create a table of records.
 //
 // POST /api/forms
 func (c *Client) CreateForm(ctx context.Context, request *CreateFormRequest, params CreateFormParams) (CreateFormRes, error) {
@@ -6189,7 +6348,9 @@ func (c *Client) sendCreateForm(ctx context.Context, request *CreateFormRequest,
 
 // CreateFormMapping invokes createFormMapping operation.
 //
-// Create a form-to-metric mapping (posts submitted form field values into a metric's facts).
+// The table, grid, input metric and dimensions must be the model's, in the revision (400 otherwise,
+// without saying whether the id exists elsewhere); the source field and every mapped field must be
+// fields of the table.
 //
 // POST /api/developer/form-integrations
 func (c *Client) CreateFormMapping(ctx context.Context, request *CreateFormMappingRequest) (CreateFormMappingRes, error) {
@@ -6299,9 +6460,13 @@ func (c *Client) sendCreateFormMapping(ctx context.Context, request *CreateFormM
 
 // CreateFormRecord invokes createFormRecord operation.
 //
-// For a caller who reaches the form's application (404 otherwise). The caller becomes the record's
-// creator. A record created submitted dispatches form_submit rules, one created approved (by an
-// administrator) form_approval rules.
+// For a caller who reaches the table's application (404 otherwise). The caller becomes the record's
+// creator; each autocode field gives it the next code. Its values are checked (400, with every
+// problem listed): a member or metric hidden from the caller is no member or metric to them. A
+// record that would post into a cell the caller may not write — a read-only member or metric, a
+// locked cell — is refused (403) rather than saved without its posting. A record created without a
+// status or as submitted dispatches form_submit rules, one created approved (by an administrator)
+// form_approval rules.
 //
 // POST /api/forms/{id}/records
 func (c *Client) CreateFormRecord(ctx context.Context, request *CreateRecordRequest, params CreateFormRecordParams) (CreateFormRecordRes, error) {
@@ -9780,8 +9945,8 @@ func (c *Client) sendDeleteFolder(ctx context.Context, params DeleteFolderParams
 
 // DeleteForm invokes deleteForm operation.
 //
-// Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
-// Deletes every record of the form with it.
+// Within the caller's builder scope (403 for a table outside it, 404 for one that does not exist).
+// Deletes every record of the table with it.
 //
 // DELETE /api/forms/{id}
 func (c *Client) DeleteForm(ctx context.Context, params DeleteFormParams) (DeleteFormRes, error) {
@@ -9906,7 +10071,7 @@ func (c *Client) sendDeleteForm(ctx context.Context, params DeleteFormParams) (r
 
 // DeleteFormMapping invokes deleteFormMapping operation.
 //
-// Delete a form-to-metric mapping.
+// Delete a table-to-metric mapping.
 //
 // DELETE /api/developer/form-integrations/{id}
 func (c *Client) DeleteFormMapping(ctx context.Context, params DeleteFormMappingParams) (*DeleteFormMappingOK, error) {
@@ -12297,8 +12462,8 @@ func (c *Client) sendExportAudit(ctx context.Context, params ExportAuditParams) 
 
 // ExportFormRecords invokes exportFormRecords operation.
 //
-// For a caller who reaches the form's application (404 otherwise); records the caller's access rules
-// withhold are left out.
+// For a caller who reaches the table's application (404 otherwise); records the caller's access
+// rules withhold are left out.
 //
 // GET /api/forms/{id}/export
 func (c *Client) ExportFormRecords(ctx context.Context, params ExportFormRecordsParams) (ExportFormRecordsRes, error) {
@@ -12379,6 +12544,23 @@ func (c *Client) sendExportFormRecords(ctx context.Context, params ExportFormRec
 		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
 			if val, ok := params.Format.Get(); ok {
 				return e.EncodeValue(conv.StringToString(string(val)))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode query")
+		}
+	}
+	{
+		// Encode "query" parameter.
+		cfg := uri.QueryParameterEncodingConfig{
+			Name:    "query",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.Query.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
 			}
 			return nil
 		}); err != nil {
@@ -14643,9 +14825,9 @@ func (c *Client) sendGetDeveloperModel(ctx context.Context, params GetDeveloperM
 
 // GetFormRecord invokes getFormRecord operation.
 //
-// For a caller who reaches the record's form's application the way the business console opens it and
-// whose access rules do not withhold the record; anyone else gets 404, as for a record that does not
-// exist.
+// For a caller who reaches the record's table's application the way the business console opens it
+// and whose access rules do not withhold the record; anyone else gets 404, as for a record that does
+// not exist.
 //
 // GET /api/records/{id}
 func (c *Client) GetFormRecord(ctx context.Context, params GetFormRecordParams) (GetFormRecordRes, error) {
@@ -17624,11 +17806,9 @@ func (c *Client) sendImportDimensionMembers(ctx context.Context, request *Import
 
 // ImportFormRecords invokes importFormRecords operation.
 //
-// For a caller who reaches the form's application (404 otherwise), who becomes each record's creator.
-//
-//	A row's optional status column sets its status; a row whose status the caller may not create
-//
-// (approved or rejected, unless the caller administers the application) fails validation.
+// For a caller who reaches the table's application (404 otherwise), who becomes each record's
+// creator. A row's optional status column sets its status; a row whose status the caller may not
+// create (approved or rejected, unless the caller administers the application) fails validation.
 //
 // POST /api/forms/{id}/import
 func (c *Client) ImportFormRecords(ctx context.Context, request *FormImportRequest, params ImportFormRecordsParams) (ImportFormRecordsRes, error) {
@@ -18203,15 +18383,19 @@ func (c *Client) sendImportTemplateWorkbook(ctx context.Context, request *Import
 
 // ImportUpload invokes importUpload operation.
 //
-// Import facts from a CSV or XLSX file (atomic — any row failing validation rejects the whole file).
+// A file is its rows entered top to bottom: rows naming the same cell combine as entering them one
+// after another would (incremental adds each number; replace and full_reload keep the cell's last
+// row; a text or pick-list cell takes its last row in every mode). A client that may send an import
+// again — after a closed connection, a timeout or a 502 — sends an Idempotency-Key: the same key
+// from the same person for the same model returns the first import's answer and applies nothing.
 //
 // POST /api/import/upload
-func (c *Client) ImportUpload(ctx context.Context, request *ImportUploadRequest) (ImportUploadRes, error) {
-	res, err := c.sendImportUpload(ctx, request)
+func (c *Client) ImportUpload(ctx context.Context, request *ImportUploadRequest, params ImportUploadParams) (ImportUploadRes, error) {
+	res, err := c.sendImportUpload(ctx, request, params)
 	return res, err
 }
 
-func (c *Client) sendImportUpload(ctx context.Context, request *ImportUploadRequest) (res ImportUploadRes, err error) {
+func (c *Client) sendImportUpload(ctx context.Context, request *ImportUploadRequest, params ImportUploadParams) (res ImportUploadRes, err error) {
 	otelAttrs := []attribute.KeyValue{
 		otelogen.OperationID("importUpload"),
 		semconv.HTTPRequestMethodKey.String("POST"),
@@ -18259,6 +18443,23 @@ func (c *Client) sendImportUpload(ctx context.Context, request *ImportUploadRequ
 	}
 	if err := encodeImportUploadRequest(request, r); err != nil {
 		return res, errors.Wrap(err, "encode request")
+	}
+
+	stage = "EncodeHeaderParams"
+	h := uri.NewHeaderEncoder(r.Header)
+	{
+		cfg := uri.HeaderParameterEncodingConfig{
+			Name:    "Idempotency-Key",
+			Explode: false,
+		}
+		if err := h.EncodeParam(cfg, func(e uri.Encoder) error {
+			if val, ok := params.IdempotencyKey.Get(); ok {
+				return e.EncodeValue(conv.StringToString(val))
+			}
+			return nil
+		}); err != nil {
+			return res, errors.Wrap(err, "encode header")
+		}
 	}
 
 	{
@@ -18449,6 +18650,113 @@ func (c *Client) sendIntegrationOAuthCallback(ctx context.Context, params Integr
 
 	stage = "DecodeResponse"
 	result, err := decodeIntegrationOAuthCallbackResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// ListAPITokens invokes listAPITokens operation.
+//
+// The caller's personal API tokens not revoked (signed in, never with a token).
+//
+// GET /api/me/api-tokens
+func (c *Client) ListAPITokens(ctx context.Context) (ListAPITokensRes, error) {
+	res, err := c.sendListAPITokens(ctx)
+	return res, err
+}
+
+func (c *Client) sendListAPITokens(ctx context.Context) (res ListAPITokensRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("listAPITokens"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/api/me/api-tokens"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ListAPITokensOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/api/me/api-tokens"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ListAPITokensOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeListAPITokensResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -21537,7 +21845,7 @@ func (c *Client) sendListDormancy(ctx context.Context) (res ListDormancyRes, err
 
 // ListFormMappings invokes listFormMappings operation.
 //
-// List form-to-metric mappings for a model.
+// List table-to-metric mappings for a model.
 //
 // GET /api/developer/form-integrations
 func (c *Client) ListFormMappings(ctx context.Context, params ListFormMappingsParams) (ListFormMappingsRes, error) {
@@ -21665,11 +21973,11 @@ func (c *Client) sendListFormMappings(ctx context.Context, params ListFormMappin
 
 // ListFormRecords invokes listFormRecords operation.
 //
-// For a caller who reaches the form's application the way the business console opens it; anyone else
-// gets 404, as for a form that does not exist. Records the caller's access rules withhold are left
-// out before the page is filled, so they neither shorten a page nor end the list early. Each record
-// carries the caller's permissions on it. When more records may follow, the X-Next-Cursor response
-// header carries the cursor for the next page.
+// For a caller who reaches the table's application the way the business console opens it; anyone
+// else gets 404, as for a table that does not exist. Records the caller's access rules withhold are
+// left out before the page is filled, so they neither shorten a page nor end the list early. Each
+// record carries the caller's permissions on it. When more records may follow, the X-Next-Cursor
+// response header carries the cursor for the next page.
 //
 // GET /api/forms/{id}/records
 func (c *Client) ListFormRecords(ctx context.Context, params ListFormRecordsParams) (ListFormRecordsRes, error) {
@@ -21833,7 +22141,7 @@ func (c *Client) sendListFormRecords(ctx context.Context, params ListFormRecords
 
 // ListForms invokes listForms operation.
 //
-// List CRUD forms for the current model's revision.
+// List tables of records for the current model's revision.
 //
 // GET /api/forms
 func (c *Client) ListForms(ctx context.Context, params ListFormsParams) (ListFormsRes, error) {
@@ -25206,6 +25514,269 @@ func (c *Client) sendPutGoogleConnection(ctx context.Context, request *PutGoogle
 	return result, nil
 }
 
+// QueryFormRecords invokes queryFormRecords operation.
+//
+// Read-only, for a caller who reaches the table's application (404 otherwise), over exactly the
+// records the record list shows them: a table showing each person their own records shows a
+// non-administrator theirs, and records naming a member or metric hidden from them are left out of
+// pages, counts and totals alike. Without group_by or aggregates it answers a page of records (each
+// with the caller's permissions) and how many match in all; with them, one row per group holding
+// each aggregate, and how many groups there are. A dimension or person group also carries its name
+// (key_label). The chat connector's query_records and the AI assistant's query_records are this
+// route.
+//
+// POST /api/forms/{id}/records/query
+func (c *Client) QueryFormRecords(ctx context.Context, request OptRecordsQuery, params QueryFormRecordsParams) (QueryFormRecordsRes, error) {
+	res, err := c.sendQueryFormRecords(ctx, request, params)
+	return res, err
+}
+
+func (c *Client) sendQueryFormRecords(ctx context.Context, request OptRecordsQuery, params QueryFormRecordsParams) (res QueryFormRecordsRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("queryFormRecords"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/forms/{id}/records/query"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, QueryFormRecordsOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/forms/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/records/query"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+	if err := encodeQueryFormRecordsRequest(request, r); err != nil {
+		return res, errors.Wrap(err, "encode request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, QueryFormRecordsOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeQueryFormRecordsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// RecalculateRevision invokes recalculateRevision operation.
+//
+// Answers at once; GET /api/grid reports recalc_pending until the pass lands. For values a
+// recalculation cut short left stale.
+//
+// POST /api/developer/revisions/{id}/recalculate
+func (c *Client) RecalculateRevision(ctx context.Context, params RecalculateRevisionParams) (RecalculateRevisionRes, error) {
+	res, err := c.sendRecalculateRevision(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendRecalculateRevision(ctx context.Context, params RecalculateRevisionParams) (res RecalculateRevisionRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("recalculateRevision"),
+		semconv.HTTPRequestMethodKey.String("POST"),
+		semconv.URLTemplateKey.String("/api/developer/revisions/{id}/recalculate"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, RecalculateRevisionOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [3]string
+	pathParts[0] = "/api/developer/revisions/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	pathParts[2] = "/recalculate"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "POST", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, RecalculateRevisionOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeRecalculateRevisionResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
 // RejectAiProposal invokes rejectAiProposal operation.
 //
 // Reject a pending proposal without executing it.
@@ -26940,6 +27511,131 @@ func (c *Client) sendRestoreWorkflow(ctx context.Context, params RestoreWorkflow
 
 	stage = "DecodeResponse"
 	result, err := decodeRestoreWorkflowResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// RevokeAPIToken invokes revokeAPIToken operation.
+//
+// Revoke one of the caller's personal API tokens; it stops working at once.
+//
+// DELETE /api/me/api-tokens/{id}
+func (c *Client) RevokeAPIToken(ctx context.Context, params RevokeAPITokenParams) (RevokeAPITokenRes, error) {
+	res, err := c.sendRevokeAPIToken(ctx, params)
+	return res, err
+}
+
+func (c *Client) sendRevokeAPIToken(ctx context.Context, params RevokeAPITokenParams) (res RevokeAPITokenRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("revokeAPIToken"),
+		semconv.HTTPRequestMethodKey.String("DELETE"),
+		semconv.URLTemplateKey.String("/api/me/api-tokens/{id}"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, RevokeAPITokenOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [2]string
+	pathParts[0] = "/api/me/api-tokens/"
+	{
+		// Encode "id" parameter.
+		e := uri.NewPathEncoder(uri.PathEncoderConfig{
+			Param:   "id",
+			Style:   uri.PathStyleSimple,
+			Explode: false,
+		})
+		if err := func() error {
+			return e.EncodeValue(conv.UUIDToString(params.ID))
+		}(); err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		encoded, err := e.Result()
+		if err != nil {
+			return res, errors.Wrap(err, "encode path")
+		}
+		pathParts[1] = encoded
+	}
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "DELETE", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, RevokeAPITokenOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer body.Close()
+
+	stage = "DecodeResponse"
+	result, err := decodeRevokeAPITokenResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}
@@ -30958,9 +31654,9 @@ func (c *Client) sendSwitchModelLinkSource(ctx context.Context, request *SwitchM
 
 // SyncFormMappings invokes syncFormMappings operation.
 //
-// For an administrator of the form's application (a business_admin of its workspace, a developer or
-// tenant admin within their scope, a platform admin): a sync re-posts every record of the form,
-// other people's included. 403 for a caller who reaches the form without administering it, 404 for
+// For an administrator of the table's application (a business_admin of its workspace, a developer or
+// tenant admin within their scope, a platform admin): a sync re-posts every record of the table,
+// other people's included. 403 for a caller who reaches the table without administering it, 404 for
 // anyone else. A record whose re-post the caller's write guard refuses keeps the posting it has.
 //
 // POST /api/forms/{id}/sync
@@ -34158,7 +34854,7 @@ func (c *Client) sendUpdateFolder(ctx context.Context, request *FolderRequest, p
 
 // UpdateForm invokes updateForm operation.
 //
-// Within the caller's builder scope (403 for a form outside it, 404 for one that does not exist).
+// Within the caller's builder scope (403 for a table outside it, 404 for one that does not exist).
 //
 // PATCH /api/forms/{id}
 func (c *Client) UpdateForm(ctx context.Context, request *CreateFormRequest, params UpdateFormParams) (UpdateFormRes, error) {
@@ -34286,7 +34982,8 @@ func (c *Client) sendUpdateForm(ctx context.Context, request *CreateFormRequest,
 
 // UpdateFormMapping invokes updateFormMapping operation.
 //
-// Update a form-to-metric mapping (immediately re-applies it to already-submitted records).
+// What the mapping names is checked as on create, against the mapping's own model, revision and
+// table (400).
 //
 // PATCH /api/developer/form-integrations/{id}
 func (c *Client) UpdateFormMapping(ctx context.Context, request *UpdateFormMappingRequest, params UpdateFormMappingParams) (UpdateFormMappingRes, error) {

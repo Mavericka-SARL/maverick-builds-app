@@ -72,7 +72,7 @@ data:
         "realm": [
           {"name": "platform_admin", "description": "Full access across all customers"},
           {"name": "tenant_admin", "description": "Manages one customer's workspaces, apps and users"},
-          {"name": "developer", "description": "Builds models, forms and workflows"},
+          {"name": "developer", "description": "Builds models, tables of records and workflows"},
           {"name": "business_admin", "description": "Administers business consoles within a workspace"},
           {"name": "business_user", "description": "Enters and reviews data"}
         ]
