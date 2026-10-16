@@ -68,12 +68,6 @@ type Handler interface {
 	//
 	// PATCH /api/admin/model-links/{id}
 	AdminSwitchModelLink(ctx context.Context, req *AdminSwitchModelLinkReq, params AdminSwitchModelLinkParams) (AdminSwitchModelLinkRes, error)
-	// ApplyMigration implements applyMigration operation.
-	//
-	// Generate and immediately apply a schema migration for a model.
-	//
-	// POST /api/developer/migration/apply
-	ApplyMigration(ctx context.Context, req *MigrationApplyRequest) (ApplyMigrationRes, error)
 	// ArchiveWorkflow implements archiveWorkflow operation.
 	//
 	// Archive a workflow definition.
@@ -627,12 +621,6 @@ type Handler interface {
 	//
 	// POST /api/developer/dimensions/{dimId}/members/generate
 	GenerateDimensionPeriods(ctx context.Context, req *GeneratePeriodsRequest, params GenerateDimensionPeriodsParams) (GenerateDimensionPeriodsRes, error)
-	// GenerateMigration implements generateMigration operation.
-	//
-	// Generate (but do not apply) the next schema migration for a model's current definition.
-	//
-	// POST /api/developer/migration/generate
-	GenerateMigration(ctx context.Context) (*GenerateMigrationOK, error)
 	// GetAdminBranding implements getAdminBranding operation.
 	//
 	// This tenant's branding (administrators; feature white_label).

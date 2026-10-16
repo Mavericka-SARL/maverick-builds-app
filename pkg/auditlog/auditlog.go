@@ -171,8 +171,6 @@ const (
 	EventFormIntegrationUpdated    EventType = "form_integration.updated"
 	EventFormIntegrationDeleted    EventType = "form_integration.deleted"
 	EventFormIntegrationBackfilled EventType = "form_integration.backfilled"
-	EventSchemaMigrationGenerated  EventType = "schema_migration.generated"
-	EventSchemaMigrationApplied    EventType = "schema_migration.applied"
 
 	// Batch 5 — AI Assistant (/api/ai/...), first real use of
 	// CategoryAIAssistant. Audited at session/document/proposal granularity,

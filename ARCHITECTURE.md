@@ -122,7 +122,6 @@ is the readable overview.
 | `internal/writeguard` | Shared system-managed, member-access, ancestor-cascade, and workflow-lock checks |
 | `internal/identity` | JWKS validation of Keycloak tokens |
 | `internal/aiassistant` | Provider adapters, chat/session stores, documents, proposals, read tools, and isolated-revision writes |
-| `internal/schemamigration` | Model-driven schema migration generation and tracking |
 | `internal/modeltransfer` | Model entity-graph export/import — the core behind the admin JSON export/import HTTP endpoints |
 | `internal/notification` | Notification persistence, e-mail dispatch (SMTP, STARTTLS or implicit TLS) and task reminders |
 | `internal/integration` | REST API connector definitions, sealed connections, the durable run queue and the worker |
@@ -144,7 +143,7 @@ each applied file's checksum, so a released migration must never be edited
 is still not one transaction, so a mid-file failure can leave schema state
 ahead of the registry.
 
-The migration history currently ends at `095_image_widget.sql` (97 files).
+`migrations/checksums.txt` lists every released migration in order.
 Fourteen named schemas organize the data:
 
 | Schema | Main ownership |
@@ -158,7 +157,7 @@ Fourteen named schemas organize the data:
 | `import` | import jobs, errors, and staging rows |
 | `audit` | partitioned audit events and partition registry |
 | `notification` | in-app/email/webhook notification state |
-| `deployment` | per-model auto-generated reporting-view schema migrations (`deployment.schema_migration`) |
+| `deployment` | empty: `143_drop_model_reporting_views.sql` dropped its last table, the log of per-model reporting views that nothing read |
 | `ai_assistant` | sessions, messages, settings, proposals, documents, and legacy actions |
 | `ops` | node statistics for the infrastructure view |
 | `platform` | cross-tenant directories and settings: editions (`platform.plan`), SSO and branding domains, tenant databases, user/application directories |

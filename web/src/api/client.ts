@@ -1707,13 +1707,6 @@ export interface FormImportRowError {
   message: string;
 }
 
-export interface MigrationFile {
-  filename: string;
-  sql: string;
-  rollback_sql: string;
-  checksum: string;
-}
-
 export interface BARole {
   id: string;
   name: string;
@@ -2617,17 +2610,6 @@ export const api = {
     apiFetch<{ status: string; notified: number }>(`/api/workflow/instances/${instanceId}/cancel`, {
       method: "POST", body: JSON.stringify({ reason: reason ?? "" }),
     }),
-
-  generateMigration: () =>
-    apiFetch<{ model_id: string; version_number: number; files: MigrationFile[] }>(
-      "/api/developer/migration/generate",
-      { method: "POST", body: JSON.stringify({}) },
-    ),
-  applyMigration: (model_id: string, version_number: number) =>
-    apiFetch<{ migration_id: string; version_number: number; status: string; files_applied: number }>(
-      "/api/developer/migration/apply",
-      { method: "POST", body: JSON.stringify({ model_id, version_number }) },
-    ),
 
   listGrids: (revisionId?: string) =>
     apiFetch<GridDef[]>(`/api/developer/grids${revisionId ? `?revision_id=${revisionId}` : ""}`),

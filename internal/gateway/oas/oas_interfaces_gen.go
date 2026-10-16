@@ -29,10 +29,6 @@ type AdminSwitchModelLinkRes interface {
 	adminSwitchModelLinkRes()
 }
 
-type ApplyMigrationRes interface {
-	applyMigrationRes()
-}
-
 type CancelIntegrationRunRes interface {
 	cancelIntegrationRunRes()
 }

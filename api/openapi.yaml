@@ -1147,13 +1147,6 @@ components:
         name:      { type: string }
         data_type: { type: string, default: text }
 
-    MigrationApplyRequest:
-      type: object
-      required: [model_id]
-      properties:
-        model_id:       { type: string, format: uuid }
-        version_number: { type: integer }
-
     GridDef:
       type: object
       required: [id, name, revision_id, tags, metric_ids, dimension_ids, dimension_levels]
@@ -5109,51 +5102,6 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
-
-  /api/developer/migration/generate:
-    post:
-      operationId: generateMigration
-      tags: [Developer Console]
-      summary: Generate (but do not apply) the next schema migration for a model's current definition
-      responses:
-        "200":
-          description: Generated migration files
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  model_id:       { type: string, format: uuid }
-                  version_number: { type: integer }
-                  files:
-                    type: object
-                    additionalProperties: { type: string }
-
-  /api/developer/migration/apply:
-    post:
-      operationId: applyMigration
-      tags: [Developer Console]
-      summary: Generate and immediately apply a schema migration for a model
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/MigrationApplyRequest" }
-      responses:
-        "200":
-          description: Migration applied
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  migration_id:   { type: string, format: uuid }
-                  version_number: { type: integer }
-                  status:         { type: string }
-                  files_applied:  { type: integer }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/developer/debug/facts:
     get:

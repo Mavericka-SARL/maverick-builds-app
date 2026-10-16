@@ -100,15 +100,6 @@ func (UnimplementedHandler) AdminSwitchModelLink(ctx context.Context, req *Admin
 	return r, ht.ErrNotImplemented
 }
 
-// ApplyMigration implements applyMigration operation.
-//
-// Generate and immediately apply a schema migration for a model.
-//
-// POST /api/developer/migration/apply
-func (UnimplementedHandler) ApplyMigration(ctx context.Context, req *MigrationApplyRequest) (r ApplyMigrationRes, _ error) {
-	return r, ht.ErrNotImplemented
-}
-
 // ArchiveWorkflow implements archiveWorkflow operation.
 //
 // Archive a workflow definition.
@@ -900,15 +891,6 @@ func (UnimplementedHandler) FillSampleValues(ctx context.Context, req *FillSampl
 //
 // POST /api/developer/dimensions/{dimId}/members/generate
 func (UnimplementedHandler) GenerateDimensionPeriods(ctx context.Context, req *GeneratePeriodsRequest, params GenerateDimensionPeriodsParams) (r GenerateDimensionPeriodsRes, _ error) {
-	return r, ht.ErrNotImplemented
-}
-
-// GenerateMigration implements generateMigration operation.
-//
-// Generate (but do not apply) the next schema migration for a model's current definition.
-//
-// POST /api/developer/migration/generate
-func (UnimplementedHandler) GenerateMigration(ctx context.Context) (r *GenerateMigrationOK, _ error) {
 	return r, ht.ErrNotImplemented
 }
 

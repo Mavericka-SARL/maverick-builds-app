@@ -41,7 +41,6 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/plan"
 	"github.com/mavericks-engine/mavericks/internal/query"
 	"github.com/mavericks-engine/mavericks/internal/rollup"
-	"github.com/mavericks-engine/mavericks/internal/schemamigration"
 	"github.com/mavericks-engine/mavericks/internal/tags"
 	"github.com/mavericks-engine/mavericks/internal/timedim"
 	"github.com/mavericks-engine/mavericks/internal/workflow"
@@ -434,8 +433,6 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("PATCH", "/api/developer/dashboards/{id}/widgets/{widgetId}", "developer", dev(h.developerDashboardAction))
 	register("DELETE", "/api/developer/dashboards/{id}/widgets/{widgetId}", "developer", dev(h.developerDashboardAction))
 	register("GET", "/api/folders", "any", cors(h.businessFolders))
-	register("POST", "/api/developer/migration/generate", "developer", dev(h.migrationGenerate))
-	register("POST", "/api/developer/migration/apply", "developer", dev(h.migrationApply))
 	// Import is open to any authenticated actor, same as /api/cells — the
 	// generic write guard (writeguard.CheckWrite, applied inside
 	// importpkg.Store.CommitImport) is what decides whether a given write is
@@ -5339,10 +5336,6 @@ func (h *handler) activateRevision(ctx context.Context, revisionID string) (mode
 	// revision once, so what becomes live is what its definitions say
 	// (contract C8).
 	go h.recalcRevisionCalculated(context.WithoutCancel(ctx), modelID, revisionID) //nolint:contextcheck
-	// The schema migration follows the revision that went live. It ran
-	// only on the AI promote, back when that activated: the assistant's
-	// metric and dimension writes have no other migration path.
-	go h.autoMigrate(context.Background(), modelID) //nolint:contextcheck
 	return modelID, nil
 }
 
@@ -5820,7 +5813,6 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 		Metadata: map[string]string{"name": req.Name, "revision_id": req.RevisionID},
 	})
 
-	go h.autoMigrate(context.Background(), modelID) //nolint:contextcheck
 	jsonOK(w, map[string]string{"id": newID, "status": "created"})
 }
 
@@ -6651,7 +6643,6 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 			ResourceType: "dimension", ResourceID: newID, RevisionID: body.RevisionID,
 			Metadata: map[string]string{"name": body.Name, "revision_id": body.RevisionID},
 		})
-		go h.autoMigrate(context.Background(), modelID) //nolint:contextcheck
 		if sourceDimID != nil {
 			if derived == nil {
 				derived = []string{}
@@ -9607,146 +9598,6 @@ func (h *handler) previewFormMapping(ctx context.Context, mappingID string) ([]m
 	return result, nil
 }
 
-// ── Schema Migration ──────────────────────────────────────────────────────────
-
-// autoMigrate regenerates and applies the schema migration silently after model changes.
-func (h *handler) autoMigrate(ctx context.Context, modelID string) {
-	store := schemamigration.NewStore(h.db.For(ctx))
-	gen := schemamigration.NewGenerator(h.db.For(ctx))
-
-	nextVer, err := store.NextVersion(ctx, modelID)
-	if err != nil {
-		h.log.Warn().Err(err).Msg("autoMigrate: next version")
-		return
-	}
-	files, err := gen.Generate(ctx, modelID, nextVer)
-	if err != nil {
-		h.log.Warn().Err(err).Msg("autoMigrate: generate")
-		return
-	}
-	rec, err := store.Create(ctx, modelID, "", nextVer, files)
-	if err != nil {
-		h.log.Warn().Err(err).Msg("autoMigrate: create record")
-		return
-	}
-	if err := store.Apply(ctx, rec.ID); err != nil {
-		h.log.Warn().Err(err).Msg("autoMigrate: apply")
-	}
-}
-
-func (h *handler) migrationGenerate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
-		return
-	}
-	ctx := r.Context()
-
-	modelID, err := h.resolveDemoModelID(ctx, r)
-	if err != nil {
-		jsonAccessErr(w, err, "resolve model")
-		return
-	}
-
-	store := schemamigration.NewStore(h.db.For(ctx))
-	gen := schemamigration.NewGenerator(h.db.For(ctx))
-
-	nextVer, err := store.NextVersion(ctx, modelID)
-	if err != nil {
-		jsonErr(w, fmt.Errorf("next version: %w", err), http.StatusInternalServerError)
-		return
-	}
-
-	files, err := gen.Generate(ctx, modelID, nextVer)
-	if err != nil {
-		jsonErr(w, fmt.Errorf("generate: %w", err), http.StatusInternalServerError)
-		return
-	}
-
-	if a, e := h.resolveActor(ctx, r); e == nil {
-		var appID string
-		_ = h.db.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, modelID).Scan(&appID)
-		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
-			Category: auditlog.CategoryModelChange, EventType: auditlog.EventSchemaMigrationGenerated,
-			ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
-			ApplicationID: appID, ResourceType: "model", ResourceID: modelID,
-			Metadata: map[string]string{"version_number": strconv.Itoa(int(nextVer))},
-		})
-	}
-	jsonOK(w, map[string]any{
-		"model_id":       modelID,
-		"version_number": nextVer,
-		"files":          files,
-	})
-}
-
-func (h *handler) migrationApply(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		jsonErr(w, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
-		return
-	}
-	ctx := r.Context()
-
-	var body struct {
-		ModelID       string `json:"model_id"`
-		VersionNumber int32  `json:"version_number"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
-		return
-	}
-	if body.ModelID == "" {
-		jsonErr(w, fmt.Errorf("model_id required"), http.StatusBadRequest)
-		return
-	}
-	// The model arrives in the body, so route-level guard(..., "developer")
-	// proves only that the caller is a developer SOMEWHERE. This endpoint
-	// generates and APPLIES a schema migration — DDL against the model's
-	// physical tables — so an unchecked model_id let a developer in one tenant
-	// alter another tenant's schema. The P0 sweep that introduced
-	// requireResourceAccess covered IDs taken from the URL path and missed the
-	// handful, like this one, that take them from the body.
-	if !h.requireResourceAccess(w, r, "model", body.ModelID) {
-		return
-	}
-
-	store := schemamigration.NewStore(h.db.For(ctx))
-	gen := schemamigration.NewGenerator(h.db.For(ctx))
-
-	files, err := gen.Generate(ctx, body.ModelID, body.VersionNumber)
-	if err != nil {
-		jsonErr(w, fmt.Errorf("generate: %w", err), http.StatusInternalServerError)
-		return
-	}
-
-	rec, err := store.Create(ctx, body.ModelID, "", body.VersionNumber, files)
-	if err != nil {
-		jsonErr(w, fmt.Errorf("create record: %w", err), http.StatusInternalServerError)
-		return
-	}
-
-	if err := store.Apply(ctx, rec.ID); err != nil {
-		jsonErr(w, fmt.Errorf("apply: %w", err), http.StatusInternalServerError)
-		return
-	}
-
-	if a, e := h.resolveActor(ctx, r); e == nil {
-		var appID string
-		_ = h.db.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, body.ModelID).Scan(&appID)
-		auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
-			Category: auditlog.CategoryModelChange, EventType: auditlog.EventSchemaMigrationApplied,
-			ActorUserID: a.UserID, ActorRole: strings.Join(a.Roles, ","),
-			ApplicationID: appID, ResourceType: "model", ResourceID: body.ModelID,
-			Metadata: map[string]string{"version_number": strconv.Itoa(int(body.VersionNumber)), "migration_id": rec.ID},
-		})
-	}
-	jsonOK(w, map[string]any{
-		"migration_id":   rec.ID,
-		"version_number": body.VersionNumber,
-		"status":         "applied",
-		"files_applied":  len(files),
-	})
-}
-
 // ── CRUD Forms ────────────────────────────────────────────────────────────────
 
 func (h *handler) appIDFromFormID(ctx context.Context, formID string) (string, error) {
@@ -11631,9 +11482,6 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		if err := h.deleteAndRemeasure(ctx, h.customerOfModel(ctx, modelID), `DELETE FROM model.metric_def WHERE id=$1::uuid`, metricID); err != nil {
 			jsonErr(w, err, deleteStatus(err))
 			return
-		}
-		if modelID != "" {
-			go h.autoMigrate(context.Background(), modelID) //nolint:contextcheck
 		}
 		if modelID != "" && len(dependentIDs) > 0 {
 			revRows, _ := h.db.Query(ctx,

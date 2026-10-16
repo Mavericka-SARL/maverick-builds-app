@@ -1,7 +1,7 @@
-// Developer Console workflow-authoring, integration, form-integration, and
-// schema-migration surfaces were entirely unaudited before this — including
-// workflow publish/archive, the explicit "revision-promotion" security-
-// sensitive case the backlog item calls out by name.
+// Developer Console workflow-authoring, integration and form-integration
+// surfaces were entirely unaudited before this — including workflow
+// publish/archive, the explicit "revision-promotion" security-sensitive case
+// the backlog item calls out by name.
 package gateway
 
 import (
@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func TestDeveloperWorkflowIntegrationMigrationMutationsAreAudited(t *testing.T) {
+func TestDeveloperWorkflowIntegrationMutationsAreAudited(t *testing.T) {
 	f := setupDevAuthoringFixture(t)
 
 	// ── workflow def: create, publish, archive, duplicate, update, delete ──
@@ -149,23 +149,6 @@ func TestDeveloperWorkflowIntegrationMigrationMutationsAreAudited(t *testing.T) 
 		t.Fatalf("delete form integration: status=%d", status)
 	}
 	f.latestAuditEvent(t, "form_integration.deleted")
-
-	// ── schema migration: generate, apply ──────────────────────────────────
-	status, body = f.do(t, "POST", "/api/developer/migration/generate", nil)
-	if status != http.StatusOK {
-		t.Fatalf("generate migration: status=%d body=%v", status, body)
-	}
-	if row := f.latestAuditEvent(t, "schema_migration.generated"); row.resourceID != f.modelID {
-		t.Errorf("schema_migration.generated resource_id = %s, want %s", row.resourceID, f.modelID)
-	}
-
-	status, body = f.do(t, "POST", "/api/developer/migration/apply", map[string]any{"model_id": f.modelID, "version_number": 1})
-	if status != http.StatusOK {
-		t.Fatalf("apply migration: status=%d body=%v", status, body)
-	}
-	if row := f.latestAuditEvent(t, "schema_migration.applied"); row.resourceID != f.modelID {
-		t.Errorf("schema_migration.applied resource_id = %s, want %s", row.resourceID, f.modelID)
-	}
 }
 
 // TestFormIntegrationPatchTriggeredReapplyIsAudited is a regression test:

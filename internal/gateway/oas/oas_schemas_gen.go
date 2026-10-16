@@ -2630,67 +2630,6 @@ func (s *AiToolCallArguments) init() AiToolCallArguments {
 	return m
 }
 
-type ApplyMigrationBadRequest Error
-
-func (*ApplyMigrationBadRequest) applyMigrationRes() {}
-
-type ApplyMigrationForbidden Error
-
-func (*ApplyMigrationForbidden) applyMigrationRes() {}
-
-type ApplyMigrationNotFound Error
-
-func (*ApplyMigrationNotFound) applyMigrationRes() {}
-
-type ApplyMigrationOK struct {
-	MigrationID   OptUUID   `json:"migration_id"`
-	VersionNumber OptInt    `json:"version_number"`
-	Status        OptString `json:"status"`
-	FilesApplied  OptInt    `json:"files_applied"`
-}
-
-// GetMigrationID returns the value of MigrationID.
-func (s *ApplyMigrationOK) GetMigrationID() OptUUID {
-	return s.MigrationID
-}
-
-// GetVersionNumber returns the value of VersionNumber.
-func (s *ApplyMigrationOK) GetVersionNumber() OptInt {
-	return s.VersionNumber
-}
-
-// GetStatus returns the value of Status.
-func (s *ApplyMigrationOK) GetStatus() OptString {
-	return s.Status
-}
-
-// GetFilesApplied returns the value of FilesApplied.
-func (s *ApplyMigrationOK) GetFilesApplied() OptInt {
-	return s.FilesApplied
-}
-
-// SetMigrationID sets the value of MigrationID.
-func (s *ApplyMigrationOK) SetMigrationID(val OptUUID) {
-	s.MigrationID = val
-}
-
-// SetVersionNumber sets the value of VersionNumber.
-func (s *ApplyMigrationOK) SetVersionNumber(val OptInt) {
-	s.VersionNumber = val
-}
-
-// SetStatus sets the value of Status.
-func (s *ApplyMigrationOK) SetStatus(val OptString) {
-	s.Status = val
-}
-
-// SetFilesApplied sets the value of FilesApplied.
-func (s *ApplyMigrationOK) SetFilesApplied(val OptInt) {
-	s.FilesApplied = val
-}
-
-func (*ApplyMigrationOK) applyMigrationRes() {}
-
 // The shape actually returned by GET /api/admin/audit (auditEventItem in internal/gateway/handler.
 // go). The endpoint accepts no query parameters despite the SQL comment structure suggesting filters
 // — it unconditionally returns the 200 most recent events.
@@ -11356,53 +11295,6 @@ func (s *GenerateDimensionPeriodsOK) SetCreated(val OptInt) {
 
 func (*GenerateDimensionPeriodsOK) generateDimensionPeriodsRes() {}
 
-type GenerateMigrationOK struct {
-	ModelID       OptUUID                     `json:"model_id"`
-	VersionNumber OptInt                      `json:"version_number"`
-	Files         OptGenerateMigrationOKFiles `json:"files"`
-}
-
-// GetModelID returns the value of ModelID.
-func (s *GenerateMigrationOK) GetModelID() OptUUID {
-	return s.ModelID
-}
-
-// GetVersionNumber returns the value of VersionNumber.
-func (s *GenerateMigrationOK) GetVersionNumber() OptInt {
-	return s.VersionNumber
-}
-
-// GetFiles returns the value of Files.
-func (s *GenerateMigrationOK) GetFiles() OptGenerateMigrationOKFiles {
-	return s.Files
-}
-
-// SetModelID sets the value of ModelID.
-func (s *GenerateMigrationOK) SetModelID(val OptUUID) {
-	s.ModelID = val
-}
-
-// SetVersionNumber sets the value of VersionNumber.
-func (s *GenerateMigrationOK) SetVersionNumber(val OptInt) {
-	s.VersionNumber = val
-}
-
-// SetFiles sets the value of Files.
-func (s *GenerateMigrationOK) SetFiles(val OptGenerateMigrationOKFiles) {
-	s.Files = val
-}
-
-type GenerateMigrationOKFiles map[string]string
-
-func (s *GenerateMigrationOKFiles) init() GenerateMigrationOKFiles {
-	m := *s
-	if m == nil {
-		m = map[string]string{}
-		*s = m
-	}
-	return m
-}
-
 // Ref: #/components/schemas/GeneratePeriodsRequest
 type GeneratePeriodsRequest struct {
 	// First period start (must sit on a boundary of the dimension's granularity).
@@ -16596,32 +16488,6 @@ func (s *MetricDefTimeSummary) UnmarshalText(data []byte) error {
 	}
 }
 
-// Ref: #/components/schemas/MigrationApplyRequest
-type MigrationApplyRequest struct {
-	ModelID       uuid.UUID `json:"model_id"`
-	VersionNumber OptInt    `json:"version_number"`
-}
-
-// GetModelID returns the value of ModelID.
-func (s *MigrationApplyRequest) GetModelID() uuid.UUID {
-	return s.ModelID
-}
-
-// GetVersionNumber returns the value of VersionNumber.
-func (s *MigrationApplyRequest) GetVersionNumber() OptInt {
-	return s.VersionNumber
-}
-
-// SetModelID sets the value of ModelID.
-func (s *MigrationApplyRequest) SetModelID(val uuid.UUID) {
-	s.ModelID = val
-}
-
-// SetVersionNumber sets the value of VersionNumber.
-func (s *MigrationApplyRequest) SetVersionNumber(val OptInt) {
-	s.VersionNumber = val
-}
-
 // Self-contained export of one model revision — the same entity set model.revision duplication
 // copies (dimensions, metrics, dependencies, grids, folders, dashboards, forms, form
 // records/mappings, integrations, workflows, automation rules, facts), plus an envelope. Nested
@@ -20137,52 +20003,6 @@ func (o OptFormRecord) Get() (v FormRecord, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptFormRecord) Or(d FormRecord) FormRecord {
-	if v, ok := o.Get(); ok {
-		return v
-	}
-	return d
-}
-
-// NewOptGenerateMigrationOKFiles returns new OptGenerateMigrationOKFiles with value set to v.
-func NewOptGenerateMigrationOKFiles(v GenerateMigrationOKFiles) OptGenerateMigrationOKFiles {
-	return OptGenerateMigrationOKFiles{
-		Value: v,
-		Set:   true,
-	}
-}
-
-// OptGenerateMigrationOKFiles is optional GenerateMigrationOKFiles.
-type OptGenerateMigrationOKFiles struct {
-	Value GenerateMigrationOKFiles
-	Set   bool
-}
-
-// IsSet returns true if OptGenerateMigrationOKFiles was set.
-func (o OptGenerateMigrationOKFiles) IsSet() bool { return o.Set }
-
-// Reset unsets value.
-func (o *OptGenerateMigrationOKFiles) Reset() {
-	var v GenerateMigrationOKFiles
-	o.Value = v
-	o.Set = false
-}
-
-// SetTo sets value to v.
-func (o *OptGenerateMigrationOKFiles) SetTo(v GenerateMigrationOKFiles) {
-	o.Set = true
-	o.Value = v
-}
-
-// Get returns value and boolean that denotes whether value was set.
-func (o OptGenerateMigrationOKFiles) Get() (v GenerateMigrationOKFiles, ok bool) {
-	if !o.Set {
-		return v, false
-	}
-	return o.Value, true
-}
-
-// Or returns value if set, or given parameter if does not.
-func (o OptGenerateMigrationOKFiles) Or(d GenerateMigrationOKFiles) GenerateMigrationOKFiles {
 	if v, ok := o.Get(); ok {
 		return v
 	}
