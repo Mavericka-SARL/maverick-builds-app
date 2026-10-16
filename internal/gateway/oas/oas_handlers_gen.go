@@ -48585,7 +48585,7 @@ func (s *Server) handleUpdateConnectorSettingsRequest(args [0]string, argsEscape
 
 // handleUpdateDashboardRequest handles updateDashboard operation.
 //
-// Rename, retag, or move a dashboard between folders.
+// Rename, retag, move a dashboard between folders, or set its selector bar.
 //
 // PATCH /api/developer/dashboards/{id}
 func (s *Server) handleUpdateDashboardRequest(args [1]string, argsEscaped bool, w http.ResponseWriter, r *http.Request) {
@@ -48736,7 +48736,7 @@ func (s *Server) handleUpdateDashboardRequest(args [1]string, argsEscaped bool, 
 		mreq := middleware.Request{
 			Context:          ctx,
 			OperationName:    UpdateDashboardOperation,
-			OperationSummary: "Rename, retag, or move a dashboard between folders",
+			OperationSummary: "Rename, retag, move a dashboard between folders, or set its selector bar",
 			OperationID:      "updateDashboard",
 			Body:             request,
 			RawBody:          rawBody,

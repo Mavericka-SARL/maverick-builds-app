@@ -383,3 +383,81 @@ func TestWorkflowLocksOnlyWhileAwaitingApproval(t *testing.T) {
 		t.Error("EU is not locked after its round was approved")
 	}
 }
+
+// A company-wide round (no member in its context) locks its revision while
+// its approval is open — any write, any member, any scenario — and only then:
+// at a task, after a rejection and after approval the revision is writable
+// (user's decision 2026-10-16), another revision is never locked, and a
+// record approval locks no grid values.
+func TestCompanyWideRoundLocksRevisionWhileAwaitingApproval(t *testing.T) {
+	pool, cleanup := setupWriteguardDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	f := seedFixture(t, pool)
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("query %q: %v", sql, err)
+		}
+		return id
+	}
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var appID string
+	if err := pool.QueryRow(ctx, `SELECT application_id::text FROM core.model WHERE id=$1::uuid`, f.modelID).Scan(&appID); err != nil {
+		t.Fatal(err)
+	}
+	otherRev := q(`INSERT INTO model.revision (model_id, name) VALUES ($1::uuid, 'Draft') RETURNING id::text`, f.modelID)
+	dimID := q(`INSERT INTO model.dimension_def (model_id, revision_id, name) VALUES ($1::uuid, $2::uuid, 'cost_type') RETURNING id::text`, f.modelID, f.revisionID)
+	memberID := q(`INSERT INTO model.dimension_member (dimension_id, code, label) VALUES ($1::uuid, 'BONUS', 'Bonus') RETURNING id::text`, dimID)
+	steps := `[{"id":"plan","type":"task","name":"Plan"},{"id":"review","type":"approval","name":"Management review"}]`
+	defID := q(`INSERT INTO workflow.workflow_def (application_id, name, trigger_event, steps, context_schema, status)
+	            VALUES ($1::uuid, 'HR Planning Round', 'manual', $2::jsonb, '[]'::jsonb, 'published') RETURNING id::text`, appID, steps)
+	inst := q(`INSERT INTO workflow.workflow_instance (workflow_def_id, status, context, started_by, steps_snapshot)
+	           VALUES ($1::uuid, 'running', jsonb_build_object('model_id', $2::text, 'revision_id', $3::text), $4::uuid, $5::jsonb) RETURNING id::text`,
+		defID, f.modelID, f.revisionID, f.userID, steps)
+	plan := q(`INSERT INTO workflow.workflow_step (instance_id, step_def_id, status) VALUES ($1::uuid, 'plan', 'in_progress') RETURNING id::text`, inst)
+	review := q(`INSERT INTO workflow.workflow_step (instance_id, step_def_id, status) VALUES ($1::uuid, 'review', 'pending') RETURNING id::text`, inst)
+	write := func(rev string, members []string) string {
+		t.Helper()
+		reason, err := CheckWriteMetrics(ctx, pool, f.modelID, rev, f.userID, members, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return reason
+	}
+	if r := write(f.revisionID, []string{memberID}); r != "" {
+		t.Errorf("locked at the round's planning task: %s", r)
+	}
+	exec(`UPDATE workflow.workflow_step SET status='completed', decision='complete', completed_at=now() WHERE id=$1::uuid`, plan)
+	exec(`UPDATE workflow.workflow_step SET status='in_progress' WHERE id=$1::uuid`, review)
+	if r := write(f.revisionID, []string{memberID}); !strings.Contains(r, "HR Planning Round") || !strings.Contains(r, "Management review") {
+		t.Errorf("a member write during the open approval = %q, want a lock naming the round and its step", r)
+	}
+	if r := write(f.revisionID, nil); r == "" {
+		t.Error("a dimensionless write (a setup value) during the open approval was allowed")
+	}
+	if r := write(otherRev, []string{memberID}); r != "" {
+		t.Errorf("another revision is locked: %s", r)
+	}
+	// A record approval waiting for a decision locks no grid values.
+	recDef := q(`INSERT INTO workflow.workflow_def (application_id, name, trigger_event, steps, context_schema, status)
+	             VALUES ($1::uuid, 'Expense approval', 'manual', $2::jsonb, '[]'::jsonb, 'published') RETURNING id::text`, appID, `[{"id":"ok","type":"approval"}]`)
+	recInst := q(`INSERT INTO workflow.workflow_instance (workflow_def_id, status, context, started_by)
+	              VALUES ($1::uuid, 'running', jsonb_build_object('record_id', gen_random_uuid()::text, 'revision_id', $2::text), $3::uuid) RETURNING id::text`, recDef, otherRev, f.userID)
+	q(`INSERT INTO workflow.workflow_step (instance_id, step_def_id, status) VALUES ($1::uuid, 'ok', 'in_progress') RETURNING id::text`, recInst)
+	if r := write(otherRev, []string{memberID}); r != "" {
+		t.Errorf("a record approval locked the revision: %s", r)
+	}
+	// Approved: writable again.
+	exec(`UPDATE workflow.workflow_step SET status='completed', decision='approve', completed_at=now() WHERE id=$1::uuid`, review)
+	exec(`UPDATE workflow.workflow_instance SET status='completed' WHERE id=$1::uuid`, inst)
+	if r := write(f.revisionID, []string{memberID}); r != "" {
+		t.Errorf("still locked after approval: %s", r)
+	}
+}

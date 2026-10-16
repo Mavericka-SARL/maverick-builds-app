@@ -2365,10 +2365,11 @@ func (e *WriteExecutor) setTags(ctx context.Context, raw json.RawMessage) (strin
 
 func (e *WriteExecutor) createDashboard(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p struct {
-		Name       string   `json:"name"`
-		Tags       []string `json:"tags"`
-		RevisionID string   `json:"revision_id"`
-		Folder     string   `json:"folder"`
+		Name        string             `json:"name"`
+		Tags        []string           `json:"tags"`
+		RevisionID  string             `json:"revision_id"`
+		Folder      string             `json:"folder"`
+		SelectorBar []selectorBarParam `json:"selector_bar"`
 	}
 	perr := decodeParams(raw, &p)
 	if isUnknownParam(perr) {
@@ -2386,16 +2387,42 @@ func (e *WriteExecutor) createDashboard(ctx context.Context, raw json.RawMessage
 	if revID == "" {
 		_ = e.pool.QueryRow(ctx, `SELECT COALESCE(active_revision_id::text,'') FROM core.model WHERE id=$1::uuid`, e.modelID).Scan(&revID)
 	}
+	bar, err := modeledit.NormalizeSelectorBar(ctx, e.pool, e.modelID, revID, selectorBarEntries(p.SelectorBar))
+	if err != nil {
+		return "", "", err
+	}
 
 	var newID string
 	err = e.pool.QueryRow(ctx, `
-		INSERT INTO model.dashboard_def (model_id, name, tags, revision_id, folder_id)
-		VALUES ($1::uuid, $2, $3, NULLIF($4,'')::uuid, $5::uuid) RETURNING id::text
-	`, e.modelID, p.Name, p.Tags, revID, folderID).Scan(&newID)
+		INSERT INTO model.dashboard_def (model_id, name, tags, revision_id, folder_id, selector_bar)
+		VALUES ($1::uuid, $2, $3, NULLIF($4,'')::uuid, $5::uuid, $6::jsonb) RETURNING id::text
+	`, e.modelID, p.Name, p.Tags, revID, folderID, modeledit.SelectorBarJSON(bar)).Scan(&newID)
 	if err != nil {
 		return "", "", fmt.Errorf("insert dashboard: %w", err)
 	}
 	return fmt.Sprintf("Dashboard '%s' created (id: %s)", p.Name, newID), newID, nil
+}
+
+// selectorBarParam is one selector of a dashboard's selector bar as the AI
+// Developer names it: the dimension by name or id ("dimension", or
+// "dimension_id" as the console's API spells it) and the member code it opens
+// on.
+type selectorBarParam struct {
+	Dimension   string `json:"dimension"`
+	DimensionID string `json:"dimension_id"`
+	Default     string `json:"default"`
+}
+
+func selectorBarEntries(ps []selectorBarParam) []modeledit.SelectorBarEntry {
+	out := make([]modeledit.SelectorBarEntry, 0, len(ps))
+	for _, p := range ps {
+		ref := p.Dimension
+		if ref == "" {
+			ref = p.DimensionID
+		}
+		out = append(out, modeledit.SelectorBarEntry{DimensionID: ref, Default: p.Default})
+	}
+	return out
 }
 
 // ── add_dashboard_widget ──────────────────────────────────────────────────────
@@ -2927,7 +2954,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 
 		// Copy dashboards + widgets
 		rows, err := tx.Query(ctx, `
-			SELECT id::text, name, tags, category, folder_id::text FROM model.dashboard_def
+			SELECT id::text, name, tags, category, folder_id::text, selector_bar FROM model.dashboard_def
 			WHERE model_id=$1::uuid AND revision_id=$2::uuid
 		`, e.modelID, srcID)
 		if err != nil {
@@ -2937,11 +2964,12 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			id, name, category string
 			tags               []string
 			folderID           *string
+			selectorBar        []byte
 		}
 		var dashRows []dashToCopy
 		for rows.Next() {
 			var d dashToCopy
-			if err := rows.Scan(&d.id, &d.name, &d.tags, &d.category, &d.folderID); err != nil {
+			if err := rows.Scan(&d.id, &d.name, &d.tags, &d.category, &d.folderID, &d.selectorBar); err != nil {
 				rows.Close()
 				return "", "", fmt.Errorf("scan dashboard to copy: %w", err)
 			}
@@ -2957,13 +2985,13 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 		for _, d := range dashRows {
 			var newDashID string
 			if err := tx.QueryRow(ctx, `
-				INSERT INTO model.dashboard_def (model_id, name, tags, category, revision_id, folder_id)
+				INSERT INTO model.dashboard_def (model_id, name, tags, category, revision_id, folder_id, selector_bar)
 				VALUES ($1::uuid, $2, $3, $4, $5::uuid,
 					(SELECT nf.id FROM model.dashboard_folder ofd
 					 JOIN model.dashboard_folder nf ON nf.model_id = ofd.model_id AND nf.name = ofd.name AND nf.revision_id = $5::uuid
-					 WHERE ofd.id = $6::uuid))
+					 WHERE ofd.id = $6::uuid), $7::jsonb)
 				RETURNING id::text
-			`, e.modelID, d.name, d.tags, d.category, newID, d.folderID).Scan(&newDashID); err != nil {
+			`, e.modelID, d.name, d.tags, d.category, newID, d.folderID, string(d.selectorBar)).Scan(&newDashID); err != nil {
 				return "", "", fmt.Errorf("copy dashboard %q: %w", d.name, err)
 			}
 			if _, err := tx.Exec(ctx, `
@@ -3241,6 +3269,9 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 				wp.id, string(remapped)); err != nil {
 				return "", "", fmt.Errorf("remap widget props into new revision: %w", err)
 			}
+		}
+		if err := modeltransfer.RemapRevisionSelectorBars(ctx, tx, e.modelID, newID, dimIDMap); err != nil {
+			return "", "", fmt.Errorf("remap selector bars into new revision: %w", err)
 		}
 
 		// Business-role dashboard grants follow the copies, or activating

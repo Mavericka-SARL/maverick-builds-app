@@ -14915,13 +14915,24 @@ func (s *CreateDashboardRequest) encodeFields(e *jx.Encoder) {
 			s.FolderID.Encode(e)
 		}
 	}
+	{
+		if s.SelectorBar != nil {
+			e.FieldStart("selector_bar")
+			e.ArrStart()
+			for _, elem := range s.SelectorBar {
+				elem.Encode(e)
+			}
+			e.ArrEnd()
+		}
+	}
 }
 
-var jsonFieldsNameOfCreateDashboardRequest = [4]string{
+var jsonFieldsNameOfCreateDashboardRequest = [5]string{
 	0: "name",
 	1: "tags",
 	2: "revision_id",
 	3: "folder_id",
+	4: "selector_bar",
 }
 
 // Decode decodes CreateDashboardRequest from json.
@@ -14983,6 +14994,23 @@ func (s *CreateDashboardRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"folder_id\"")
+			}
+		case "selector_bar":
+			if err := func() error {
+				s.SelectorBar = make([]SelectorBarEntry, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem SelectorBarEntry
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.SelectorBar = append(s.SelectorBar, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"selector_bar\"")
 			}
 		default:
 			return d.Skip()
@@ -19716,6 +19744,16 @@ func (s *DashboardDef) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.SelectorBar != nil {
+			e.FieldStart("selector_bar")
+			e.ArrStart()
+			for _, elem := range s.SelectorBar {
+				elem.Encode(e)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
 		e.FieldStart("widgets")
 		e.ArrStart()
 		for _, elem := range s.Widgets {
@@ -19725,12 +19763,13 @@ func (s *DashboardDef) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfDashboardDef = [5]string{
+var jsonFieldsNameOfDashboardDef = [6]string{
 	0: "id",
 	1: "name",
 	2: "tags",
 	3: "folder_id",
-	4: "widgets",
+	4: "selector_bar",
+	5: "widgets",
 }
 
 // Decode decodes DashboardDef from json.
@@ -19796,8 +19835,25 @@ func (s *DashboardDef) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"folder_id\"")
 			}
+		case "selector_bar":
+			if err := func() error {
+				s.SelectorBar = make([]SelectorBarEntry, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem SelectorBarEntry
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.SelectorBar = append(s.SelectorBar, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"selector_bar\"")
+			}
 		case "widgets":
-			requiredBitSet[0] |= 1 << 4
+			requiredBitSet[0] |= 1 << 5
 			if err := func() error {
 				s.Widgets = make([]DashboardWidget, 0)
 				if err := d.Arr(func(d *jx.Decoder) error {
@@ -19824,7 +19880,7 @@ func (s *DashboardDef) Decode(d *jx.Decoder) error {
 	// Validate required fields.
 	var failures []validate.FieldError
 	for i, mask := range [1]uint8{
-		0b00010111,
+		0b00100111,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
@@ -57737,6 +57793,119 @@ func (s *ScimTokenDefaultRole) UnmarshalJSON(data []byte) error {
 	return s.Decode(d)
 }
 
+// Encode implements json.Marshaler.
+func (s *SelectorBarEntry) Encode(e *jx.Encoder) {
+	e.ObjStart()
+	s.encodeFields(e)
+	e.ObjEnd()
+}
+
+// encodeFields encodes fields.
+func (s *SelectorBarEntry) encodeFields(e *jx.Encoder) {
+	{
+		e.FieldStart("dimension_id")
+		e.Str(s.DimensionID)
+	}
+	{
+		if s.Default.Set {
+			e.FieldStart("default")
+			s.Default.Encode(e)
+		}
+	}
+}
+
+var jsonFieldsNameOfSelectorBarEntry = [2]string{
+	0: "dimension_id",
+	1: "default",
+}
+
+// Decode decodes SelectorBarEntry from json.
+func (s *SelectorBarEntry) Decode(d *jx.Decoder) error {
+	if s == nil {
+		return errors.New("invalid: unable to decode SelectorBarEntry to nil")
+	}
+	var requiredBitSet [1]uint8
+
+	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
+		switch string(k) {
+		case "dimension_id":
+			requiredBitSet[0] |= 1 << 0
+			if err := func() error {
+				v, err := d.Str()
+				s.DimensionID = string(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"dimension_id\"")
+			}
+		case "default":
+			if err := func() error {
+				s.Default.Reset()
+				if err := s.Default.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"default\"")
+			}
+		default:
+			return d.Skip()
+		}
+		return nil
+	}); err != nil {
+		return errors.Wrap(err, "decode SelectorBarEntry")
+	}
+	// Validate required fields.
+	var failures []validate.FieldError
+	for i, mask := range [1]uint8{
+		0b00000001,
+	} {
+		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
+			// Mask only required fields and check equality to mask using XOR.
+			//
+			// If XOR result is not zero, result is not equal to expected, so some fields are missed.
+			// Bits of fields which would be set are actually bits of missed fields.
+			missed := bits.OnesCount8(result)
+			for bitN := 0; bitN < missed; bitN++ {
+				bitIdx := bits.TrailingZeros8(result)
+				fieldIdx := i*8 + bitIdx
+				var name string
+				if fieldIdx < len(jsonFieldsNameOfSelectorBarEntry) {
+					name = jsonFieldsNameOfSelectorBarEntry[fieldIdx]
+				} else {
+					name = strconv.Itoa(fieldIdx)
+				}
+				failures = append(failures, validate.FieldError{
+					Name:  name,
+					Error: validate.ErrFieldRequired,
+				})
+				// Reset bit.
+				result &^= 1 << bitIdx
+			}
+		}
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s *SelectorBarEntry) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *SelectorBarEntry) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d)
+}
+
 // Encode encodes SendAiMessageBadRequest as json.
 func (s *SendAiMessageBadRequest) Encode(e *jx.Encoder) {
 	unwrapped := (*Error)(s)
@@ -65272,12 +65441,23 @@ func (s *UpdateDashboardRequest) encodeFields(e *jx.Encoder) {
 			s.FolderID.Encode(e)
 		}
 	}
+	{
+		if s.SelectorBar != nil {
+			e.FieldStart("selector_bar")
+			e.ArrStart()
+			for _, elem := range s.SelectorBar {
+				elem.Encode(e)
+			}
+			e.ArrEnd()
+		}
+	}
 }
 
-var jsonFieldsNameOfUpdateDashboardRequest = [3]string{
+var jsonFieldsNameOfUpdateDashboardRequest = [4]string{
 	0: "name",
 	1: "tags",
 	2: "folder_id",
+	3: "selector_bar",
 }
 
 // Decode decodes UpdateDashboardRequest from json.
@@ -65326,6 +65506,23 @@ func (s *UpdateDashboardRequest) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"folder_id\"")
+			}
+		case "selector_bar":
+			if err := func() error {
+				s.SelectorBar = make([]SelectorBarEntry, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem SelectorBarEntry
+					if err := elem.Decode(d); err != nil {
+						return err
+					}
+					s.SelectorBar = append(s.SelectorBar, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"selector_bar\"")
 			}
 		default:
 			return d.Skip()

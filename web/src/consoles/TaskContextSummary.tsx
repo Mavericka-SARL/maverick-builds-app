@@ -14,7 +14,9 @@ export function TaskContextSummary({
   const entries: TaskContextEntry[] = contextDisplay?.length
     ? contextDisplay
     : Object.entries(context ?? {})
-        .filter(([k]) => !k.startsWith("_"))
+        // Ids a start path stored (model_id, record_id …) mean nothing on a
+        // card; the server names them in context_display.
+        .filter(([k]) => !k.startsWith("_") && !k.endsWith("_id"))
         .map(([k, v]) => ({ key: k, value: String(v), display: String(v) }));
   if (entries.length === 0) return null;
   return (

@@ -201,7 +201,7 @@ export function DashboardsView({ ctx, onOpenInstance }: { ctx: DemoContext; onOp
           {(detail.widgets ?? []).length === 0 ? (
             <p style={{ color: "var(--color-disabled)" }}>This dashboard has no widgets yet.</p>
           ) : (
-            <DashboardWidgetGrid widgets={detail.widgets ?? []} ctx={ctx} dashboardId={activeId ?? undefined} onOpenInstance={onOpenInstance} />
+            <DashboardWidgetGrid widgets={detail.widgets ?? []} ctx={ctx} dashboardId={activeId ?? undefined} selectorBar={detail.selector_bar} onOpenInstance={onOpenInstance} />
           )}
         </div>
       )}

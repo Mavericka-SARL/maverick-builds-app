@@ -2317,6 +2317,37 @@ type taskContextEntry struct {
 	DimensionName string `json:"dimension_name,omitempty"`
 }
 
+// technicalContextQueries name the ids a workflow's start path puts in its
+// context: the model and revision of a trigger, a record approval's table and
+// record, a grid or metric.
+var technicalContextQueries = map[string]string{
+	"model_id":    `SELECT name FROM core.model WHERE id::text = $1`,
+	"revision_id": `SELECT name FROM model.revision WHERE id::text = $1`,
+	"form_id":     `SELECT COALESCE(NULLIF(label, ''), name) FROM model.form_def WHERE id::text = $1`,
+	"grid_id":     `SELECT name FROM model.grid_def WHERE id::text = $1`,
+	"metric_id":   `SELECT COALESCE(NULLIF(label, ''), name) FROM model.metric_def WHERE id::text = $1`,
+	// A record: its table and, where the table numbers its records, its code.
+	"record_id": `SELECT COALESCE(NULLIF(f.label, ''), f.name) || COALESCE(' ' || (
+	                  SELECT r.data->>(fld->>'name')
+	                  FROM jsonb_array_elements(CASE WHEN jsonb_typeof(f.fields) = 'array' THEN f.fields ELSE '[]'::jsonb END) fld
+	                  WHERE fld->>'type' = 'autocode' AND r.data->>(fld->>'name') <> '' LIMIT 1), '')
+	              FROM runtime.form_record r JOIN model.form_def f ON f.id = r.form_id WHERE r.id::text = $1`,
+}
+
+// technicalContextName is the name of a technical id in a workflow context
+// (technical: the key is one technicalContextQueries knows); "" when it no
+// longer resolves.
+func (h *handler) technicalContextName(ctx context.Context, key, value string) (name string, technical bool) {
+	q, ok := technicalContextQueries[key]
+	if !ok {
+		return "", false
+	}
+	if err := h.db.QueryRow(ctx, q, value).Scan(&name); err != nil {
+		return "", true
+	}
+	return name, true
+}
+
 // contextDisplay resolves display names for a workflow context AFTER hidden
 // redaction (never resolve what redactHiddenContext removed). Schema vars
 // come first in schema order; context keys the schema doesn't know keep
@@ -2386,6 +2417,16 @@ func (h *handler) contextDisplay(ctx context.Context, schemaJSON []byte, taskCtx
 			continue
 		}
 		s := asString(v)
+		if name, technical := h.technicalContextName(ctx, k, s); technical {
+			// An id the start path stored (a trigger's model_id and
+			// revision_id, a record approval's form_id and record_id): the
+			// card names the thing, and leaves out an id that no longer
+			// resolves — a bare UUID tells the person doing the task nothing.
+			if name != "" {
+				out = append(out, taskContextEntry{Key: strings.TrimSuffix(k, "_id"), Value: name, Display: name})
+			}
+			continue
+		}
 		out = append(out, taskContextEntry{Key: k, Value: s, Display: s})
 	}
 	tail := out[schemaCount:]
@@ -4567,8 +4608,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		-- 5. Copy dashboards (folder_id is remapped in Step F below, after
 		-- folders themselves are copied)
 		new_dashes AS (
-			INSERT INTO model.dashboard_def (model_id, name, tags, category, revision_id)
-			SELECT model_id, name, tags, category, $2::uuid
+			INSERT INTO model.dashboard_def (model_id, name, tags, category, revision_id, selector_bar)
+			SELECT model_id, name, tags, category, $2::uuid, selector_bar
 			FROM model.dashboard_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 			RETURNING id AS new_id, name
 		),
@@ -5213,6 +5254,11 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 				wp.id, string(remapped)); err != nil {
 				return "", fmt.Errorf("revision widget-props remap failed: %w", err)
 			}
+		}
+
+		// A dashboard's selector bar names its dimensions by id too.
+		if err := modeltransfer.RemapRevisionSelectorBars(ctx, tx, modelID, newID, dimMap); err != nil {
+			return "", fmt.Errorf("revision selector-bar remap failed: %w", err)
 		}
 	}
 
@@ -15116,11 +15162,14 @@ type dashboardWidget struct {
 }
 
 type dashboardDefResponse struct {
-	ID       string            `json:"id"`
-	Name     string            `json:"name"`
-	Tags     []string          `json:"tags"`
-	FolderID *string           `json:"folder_id"`
-	Widgets  []dashboardWidget `json:"widgets"`
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Tags     []string `json:"tags"`
+	FolderID *string  `json:"folder_id"`
+	// SelectorBar: the selectors drawn once at the top of the dashboard,
+	// [{"dimension_id", "default"}] (modeledit.SelectorBarEntry).
+	SelectorBar json.RawMessage   `json:"selector_bar"`
+	Widgets     []dashboardWidget `json:"widgets"`
 }
 
 func (h *handler) developerDashboards(w http.ResponseWriter, r *http.Request) {
@@ -15148,11 +15197,11 @@ func (h *handler) developerDashboards(w http.ResponseWriter, r *http.Request) {
 		}
 		if revisionID != "" {
 			rows, err = h.db.Query(ctx,
-				`SELECT id::text, name, COALESCE(tags, '{}'), folder_id::text FROM model.dashboard_def WHERE model_id=$1::uuid AND revision_id=$2::uuid ORDER BY name`,
+				`SELECT id::text, name, COALESCE(tags, '{}'), folder_id::text, selector_bar FROM model.dashboard_def WHERE model_id=$1::uuid AND revision_id=$2::uuid ORDER BY name`,
 				modelID, revisionID)
 		} else {
 			rows, err = h.db.Query(ctx,
-				`SELECT id::text, name, COALESCE(tags, '{}'), folder_id::text FROM model.dashboard_def WHERE model_id=$1::uuid ORDER BY name`,
+				`SELECT id::text, name, COALESCE(tags, '{}'), folder_id::text, selector_bar FROM model.dashboard_def WHERE model_id=$1::uuid ORDER BY name`,
 				modelID)
 		}
 		if err != nil {
@@ -15163,7 +15212,7 @@ func (h *handler) developerDashboards(w http.ResponseWriter, r *http.Request) {
 		var dashboards []dashboardDefResponse
 		for rows.Next() {
 			var d dashboardDefResponse
-			if err := rows.Scan(&d.ID, &d.Name, &d.Tags, &d.FolderID); err != nil {
+			if err := rows.Scan(&d.ID, &d.Name, &d.Tags, &d.FolderID, &d.SelectorBar); err != nil {
 				continue
 			}
 			if d.Tags == nil {
@@ -15194,10 +15243,11 @@ func (h *handler) developerDashboards(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var body struct {
-			Name       string   `json:"name"`
-			Tags       []string `json:"tags"`
-			RevisionID string   `json:"revision_id"`
-			FolderID   string   `json:"folder_id"`
+			Name        string                       `json:"name"`
+			Tags        []string                     `json:"tags"`
+			RevisionID  string                       `json:"revision_id"`
+			FolderID    string                       `json:"folder_id"`
+			SelectorBar []modeledit.SelectorBarEntry `json:"selector_bar"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
 			jsonErr(w, fmt.Errorf("name required"), http.StatusBadRequest)
@@ -15221,18 +15271,23 @@ func (h *handler) developerDashboards(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
+		bar, err := modeledit.NormalizeSelectorBar(ctx, h.db, modelID, body.RevisionID, body.SelectorBar)
+		if err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		}
 		var newID string
 		if body.RevisionID != "" {
 			if err := h.db.QueryRow(ctx,
-				`INSERT INTO model.dashboard_def (model_id, name, tags, revision_id, folder_id) VALUES ($1::uuid,$2,$3,$4::uuid,NULLIF($5,'')::uuid) RETURNING id::text`,
-				modelID, body.Name, body.Tags, body.RevisionID, body.FolderID).Scan(&newID); err != nil {
+				`INSERT INTO model.dashboard_def (model_id, name, tags, revision_id, folder_id, selector_bar) VALUES ($1::uuid,$2,$3,$4::uuid,NULLIF($5,'')::uuid,$6::jsonb) RETURNING id::text`,
+				modelID, body.Name, body.Tags, body.RevisionID, body.FolderID, modeledit.SelectorBarJSON(bar)).Scan(&newID); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
 		} else {
 			if err := h.db.QueryRow(ctx,
-				`INSERT INTO model.dashboard_def (model_id, name, tags, folder_id) VALUES ($1::uuid,$2,$3,NULLIF($4,'')::uuid) RETURNING id::text`,
-				modelID, body.Name, body.Tags, body.FolderID).Scan(&newID); err != nil {
+				`INSERT INTO model.dashboard_def (model_id, name, tags, folder_id, selector_bar) VALUES ($1::uuid,$2,$3,NULLIF($4,'')::uuid,$5::jsonb) RETURNING id::text`,
+				modelID, body.Name, body.Tags, body.FolderID, modeledit.SelectorBarJSON(bar)).Scan(&newID); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -15418,13 +15473,15 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 				// dashboard where it is, null or "" moves it to the root, an
 				// ID files it in that folder.
 				FolderID json.RawMessage `json:"folder_id"`
+				// Replaces the whole bar; [] removes it.
+				SelectorBar *[]modeledit.SelectorBarEntry `json:"selector_bar"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				jsonErr(w, fmt.Errorf("invalid JSON body"), http.StatusBadRequest)
 				return
 			}
-			if body.Name == nil && body.Tags == nil && len(body.FolderID) == 0 {
-				jsonErr(w, fmt.Errorf("nothing to change: send name, tags and/or folder_id"), http.StatusBadRequest)
+			if body.Name == nil && body.Tags == nil && len(body.FolderID) == 0 && body.SelectorBar == nil {
+				jsonErr(w, fmt.Errorf("nothing to change: send name, tags, folder_id and/or selector_bar"), http.StatusBadRequest)
 				return
 			}
 			if body.Name != nil && strings.TrimSpace(*body.Name) == "" {
@@ -15441,8 +15498,8 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 					}
 				}
 			}
-			var dashModelID string
-			if err := h.db.QueryRow(ctx, `SELECT model_id::text FROM model.dashboard_def WHERE id=$1::uuid`, dashID).Scan(&dashModelID); err != nil {
+			var dashModelID, dashRevisionID string
+			if err := h.db.QueryRow(ctx, `SELECT model_id::text, COALESCE(revision_id::text,'') FROM model.dashboard_def WHERE id=$1::uuid`, dashID).Scan(&dashModelID, &dashRevisionID); err != nil {
 				jsonErr(w, fmt.Errorf("dashboard not found"), http.StatusNotFound)
 				return
 			}
@@ -15452,12 +15509,23 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 					return
 				}
 			}
+			var barJSON *string
+			if body.SelectorBar != nil {
+				bar, err := modeledit.NormalizeSelectorBar(ctx, h.db, dashModelID, dashRevisionID, *body.SelectorBar)
+				if err != nil {
+					jsonErr(w, err, http.StatusBadRequest)
+					return
+				}
+				j := modeledit.SelectorBarJSON(bar)
+				barJSON = &j
+			}
 			if _, err := h.db.Exec(ctx,
 				`UPDATE model.dashboard_def
 				 SET name=COALESCE($2, name), tags=COALESCE($3, tags),
-				     folder_id = CASE WHEN $4::boolean THEN NULLIF($5,'')::uuid ELSE folder_id END
+				     folder_id = CASE WHEN $4::boolean THEN NULLIF($5,'')::uuid ELSE folder_id END,
+				     selector_bar = COALESCE($6::jsonb, selector_bar)
 				 WHERE id=$1::uuid`,
-				dashID, body.Name, optionalTags(body.Tags), moveFolder, folderTarget); err != nil {
+				dashID, body.Name, optionalTags(body.Tags), moveFolder, folderTarget, barJSON); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -15472,6 +15540,9 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 				}
 				if moveFolder {
 					meta["folder_id"] = folderTarget
+				}
+				if barJSON != nil {
+					meta["selector_bar"] = *barJSON
 				}
 				auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 					Category: auditlog.CategoryModelChange, EventType: auditlog.EventDashboardUpdated,
@@ -15949,7 +16020,8 @@ func (h *handler) businessDashboardDetail(w http.ResponseWriter, r *http.Request
 	}
 
 	var name string
-	if err := h.db.QueryRow(ctx, `SELECT name FROM model.dashboard_def WHERE id=$1::uuid`, dashID).Scan(&name); err != nil {
+	var bar json.RawMessage
+	if err := h.db.QueryRow(ctx, `SELECT name, selector_bar FROM model.dashboard_def WHERE id=$1::uuid`, dashID).Scan(&name, &bar); err != nil {
 		jsonErr(w, fmt.Errorf("dashboard not found"), http.StatusNotFound)
 		return
 	}
@@ -15970,7 +16042,7 @@ func (h *handler) businessDashboardDetail(w http.ResponseWriter, r *http.Request
 	if widgets == nil {
 		widgets = []dashboardWidget{}
 	}
-	jsonOK(w, dashboardDefResponse{ID: dashID, Name: name, Widgets: widgets})
+	jsonOK(w, dashboardDefResponse{ID: dashID, Name: name, SelectorBar: bar, Widgets: widgets})
 }
 
 // validateMemberParent checks that a candidate parent_member_id is legal for a member
@@ -16750,7 +16822,9 @@ func (h *handler) baRoles(w http.ResponseWriter, r *http.Request) {
 		rows, err := h.db.Query(ctx, `
 			SELECT br.id::text, br.name,
 			       COUNT(DISTINCT brm.user_id) AS member_count,
-			       COALESCE(array_agg(brd.dashboard_id::text) FILTER (WHERE brd.dashboard_id IS NOT NULL), '{}') AS dashboard_ids
+			       -- DISTINCT: the member and dashboard joins multiply each
+			       -- other, so a role with 3 members listed every dashboard 3 times.
+			       COALESCE(array_agg(DISTINCT brd.dashboard_id::text) FILTER (WHERE brd.dashboard_id IS NOT NULL), '{}') AS dashboard_ids
 			FROM identity.business_role br
 			LEFT JOIN identity.business_role_member brm ON brm.role_id = br.id
 			LEFT JOIN identity.business_role_dashboard brd ON brd.role_id = br.id

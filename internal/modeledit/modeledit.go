@@ -228,7 +228,8 @@ func DeleteMember(ctx context.Context, db DB, dimID, memberID string) error {
 // alone would orphan every existing row under the old code — not deleted,
 // just unreachable by any current-code query. widget_props holds member codes
 // in three places (SYNC-02: facts were re-keyed but widgets kept the old
-// code, so a chart's saved context or a pinned KPI fell back to defaults).
+// code, so a chart's saved context or a pinned KPI fell back to defaults), and
+// a dashboard's selector bar holds one as each selector's default.
 // Paths are keyed by dimension id, so no other model's rows can match.
 //
 // Each statement is attempted; the errors of those that failed are joined.
@@ -260,6 +261,11 @@ func RekeyMemberCode(ctx context.Context, db DB, dimID, oldCode, newCode string)
 		       FROM jsonb_array_elements(widget_props->'show_members'->$1::text) WITH ORDINALITY AS x(e, o)))
 		  WHERE jsonb_typeof(widget_props->'show_members'->$1::text) = 'array'
 		    AND widget_props->'show_members'->$1::text ? $3`, "widget show_members"},
+		{`UPDATE model.dashboard_def
+		  SET selector_bar = (SELECT jsonb_agg(CASE WHEN e->>'dimension_id' = $1 AND e->>'default' = $3
+		                                            THEN jsonb_set(e, '{default}', to_jsonb($2::text)) ELSE e END ORDER BY o)
+		                      FROM jsonb_array_elements(selector_bar) WITH ORDINALITY AS x(e, o))
+		  WHERE selector_bar @> jsonb_build_array(jsonb_build_object('dimension_id', $1::text, 'default', $3::text))`, "dashboard selector_bar"},
 	} {
 		if _, err := db.Exec(ctx, s.q, dimID, newCode, oldCode); err != nil {
 			errs = append(errs, fmt.Errorf("re-key %s: %w", s.tag, err))

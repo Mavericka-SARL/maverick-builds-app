@@ -1831,7 +1831,7 @@ type Invoker interface {
 	UpdateConnectorSettings(ctx context.Context, request *UpdateConnectorSettingsReq) (UpdateConnectorSettingsRes, error)
 	// UpdateDashboard invokes updateDashboard operation.
 	//
-	// Rename, retag, or move a dashboard between folders.
+	// Rename, retag, move a dashboard between folders, or set its selector bar.
 	//
 	// PATCH /api/developer/dashboards/{id}
 	UpdateDashboard(ctx context.Context, request *UpdateDashboardRequest, params UpdateDashboardParams) (UpdateDashboardRes, error)
@@ -34442,7 +34442,7 @@ func (c *Client) sendUpdateConnectorSettings(ctx context.Context, request *Updat
 
 // UpdateDashboard invokes updateDashboard operation.
 //
-// Rename, retag, or move a dashboard between folders.
+// Rename, retag, move a dashboard between folders, or set its selector bar.
 //
 // PATCH /api/developer/dashboards/{id}
 func (c *Client) UpdateDashboard(ctx context.Context, request *UpdateDashboardRequest, params UpdateDashboardParams) (UpdateDashboardRes, error) {

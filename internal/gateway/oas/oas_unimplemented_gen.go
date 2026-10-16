@@ -2601,7 +2601,7 @@ func (UnimplementedHandler) UpdateConnectorSettings(ctx context.Context, req *Up
 
 // UpdateDashboard implements updateDashboard operation.
 //
-// Rename, retag, or move a dashboard between folders.
+// Rename, retag, move a dashboard between folders, or set its selector bar.
 //
 // PATCH /api/developer/dashboards/{id}
 func (UnimplementedHandler) UpdateDashboard(ctx context.Context, req *UpdateDashboardRequest, params UpdateDashboardParams) (r UpdateDashboardRes, _ error) {

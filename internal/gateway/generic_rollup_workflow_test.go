@@ -2050,6 +2050,40 @@ func TestContextDisplayResolvesNames(t *testing.T) {
 	if _, has := byKey["_hidden"]; has {
 		t.Error("_hidden internal key must not appear on the card")
 	}
+	// Technical ids a start path stored are named, never shown as UUIDs; one
+	// that no longer resolves is left off the card.
+	tech := h.contextDisplay(ctx, nil, map[string]any{
+		"model_id": f.modelID, "revision_id": f.workingRevID, "grid_id": f.gridStaffID,
+		"metric_id": f.amountMetricID, "form_id": "00000000-0000-0000-0000-000000000000",
+	})
+	techByKey := map[string]taskContextEntry{}
+	for _, e := range tech {
+		techByKey[e.Key] = e
+	}
+	var modelName, revName string
+	_ = f.pool.QueryRow(ctx, `SELECT name FROM core.model WHERE id=$1::uuid`, f.modelID).Scan(&modelName)
+	_ = f.pool.QueryRow(ctx, `SELECT name FROM model.revision WHERE id=$1::uuid`, f.workingRevID).Scan(&revName)
+	if e := techByKey["model"]; e.Display != modelName || e.Value != modelName {
+		t.Errorf("model = %+v, want the model's name %q", e, modelName)
+	}
+	if e := techByKey["revision"]; e.Display != revName {
+		t.Errorf("revision = %+v, want the revision's name %q", e, revName)
+	}
+	if e := techByKey["grid"]; e.Display == "" || e.Display == f.gridStaffID {
+		t.Errorf("grid = %+v, want the grid's name", e)
+	}
+	if e := techByKey["metric"]; e.Display == "" || e.Display == f.amountMetricID {
+		t.Errorf("metric = %+v, want the metric's name", e)
+	}
+	if _, has := techByKey["form"]; has || len(tech) != 4 {
+		t.Errorf("a dangling form_id must be left off; got %+v", tech)
+	}
+	for _, e := range tech {
+		if strings.Count(e.Display, "-") == 4 && len(e.Display) == 36 {
+			t.Errorf("%s still shows an id: %s", e.Key, e.Display)
+		}
+	}
+
 	// Schema order first: scope, ghost, note (extra follows).
 	if len(out) != 4 || out[0].Key != "scope" || out[1].Key != "ghost" || out[2].Key != "note" || out[3].Key != "extra" {
 		keys := make([]string, len(out))

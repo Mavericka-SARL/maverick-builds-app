@@ -507,6 +507,102 @@ func CheckWriteMetrics(ctx context.Context, pool *pgxpool.Pool, modelID, revisio
 			return lockReason, nil
 		}
 	}
+	if locked, lockReason, err := RevisionLockReason(ctx, pool, modelID, revisionID, metricIDs); err != nil {
+		return "", fmt.Errorf("check workflow lock: %w", err)
+	} else if locked {
+		return lockReason, nil
+	}
 
 	return "", nil
+}
+
+// RevisionLockReason reports whether revisionID is locked by a company-wide
+// round: a running workflow instance whose context names no dimension
+// members (no "Dimension member" vars) and no record, about this revision
+// (its context's revision_id, else the revision its workflow belongs to),
+// with an approval step open. While that approval waits for a decision
+// nobody changes the revision's values — every scenario — so the approver
+// decides on numbers that cannot move under them; approve or reject opens
+// it again. A member-scoped round locks only its members
+// (WorkflowLockReasonForMetrics) and keeps them locked once approved; a
+// company-wide round does not stay locked (user's decision, 2026-10-16:
+// a finished round must not freeze the whole model). One that declares
+// "Metric" vars locks only those metrics (unknown written metrics = locked,
+// as elsewhere). Until 2026-10-16 such a round locked nothing: a business
+// user changed a Base assumption during the HR model's management review.
+func RevisionLockReason(ctx context.Context, pool *pgxpool.Pool, modelID, revisionID string, metricIDs []string) (locked bool, reason string, err error) {
+	if revisionID == "" {
+		return false, "", nil
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT wd.name, COALESCE(d->>'name', s.step_def_id), wd.context_schema, wi.context
+		FROM workflow.workflow_instance wi
+		JOIN workflow.workflow_def wd ON wd.id = wi.workflow_def_id
+		JOIN workflow.workflow_step s ON s.instance_id = wi.id AND s.status = 'in_progress'
+		CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(COALESCE(wi.steps_snapshot, wd.steps)) = 'array'
+		                                            THEN COALESCE(wi.steps_snapshot, wd.steps) ELSE '[]'::jsonb END) d
+		WHERE wd.application_id = (SELECT application_id FROM core.model WHERE id = $1::uuid)
+		  AND wi.status = 'running'
+		  AND d->>'id' = s.step_def_id AND lower(d->>'type') IN ('approval', 'step_type_approval', '2')
+		  AND COALESCE(NULLIF(wi.context->>'revision_id', ''), wd.revision_id::text) = $2
+		  AND NOT (COALESCE(wi.context, '{}'::jsonb) ? 'record_id')
+		  AND COALESCE(wd.subject_type, '') = ''
+		ORDER BY wi.started_at DESC`, modelID, revisionID)
+	if err != nil {
+		return false, "", err
+	}
+	type round struct {
+		workflow, step string
+		metrics        []string
+	}
+	var rounds []round
+	for rows.Next() {
+		var wf, step string
+		var schemaJSON, ctxJSON []byte
+		if err := rows.Scan(&wf, &step, &schemaJSON, &ctxJSON); err != nil {
+			rows.Close()
+			return false, "", err
+		}
+		var vars []contextVarDef
+		_ = json.Unmarshal(schemaJSON, &vars)
+		var instCtx map[string]any
+		_ = json.Unmarshal(ctxJSON, &instCtx)
+		scoped := false
+		var metrics []string
+		for _, v := range vars {
+			switch v.DataType {
+			case "Dimension member":
+				if v.DimensionID != "" {
+					scoped = true
+				}
+			case "Metric":
+				if raw, ok := instCtx[v.Key].(string); ok && strings.TrimSpace(raw) != "" {
+					metrics = append(metrics, strings.TrimSpace(raw))
+				}
+			}
+		}
+		if !scoped {
+			rounds = append(rounds, round{workflow: wf, step: step, metrics: metrics})
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return false, "", err
+	}
+	for _, r := range rounds {
+		if len(r.metrics) > 0 && len(metricIDs) > 0 {
+			var crosses bool
+			if err := pool.QueryRow(ctx, `
+				SELECT EXISTS (SELECT 1 FROM model.metric_def w, model.metric_def l
+				               WHERE w.id::text = ANY($1) AND (l.id::text = ANY($2) OR lower(l.name) = ANY(SELECT lower(x) FROM unnest($2::text[]) x))
+				                 AND lower(w.name) = lower(l.name))`, metricIDs, r.metrics).Scan(&crosses); err != nil {
+				return false, "", err
+			}
+			if !crosses {
+				continue
+			}
+		}
+		return true, fmt.Sprintf("%q is waiting for approval (%s): this revision's values are locked until it is approved or rejected", r.workflow, r.step), nil
+	}
+	return false, "", nil
 }

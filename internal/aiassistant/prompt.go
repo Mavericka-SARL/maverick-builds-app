@@ -384,8 +384,12 @@ steps carefully.
 - Dashboard folders: create_dashboard_folder {"name", "parent"?}; update_dashboard_folder {"folder", "name"?,
   "parent"? ("" or null = top level)}; delete_dashboard_folder {"folder"} — its subfolders go too, its dashboards move
   to the top level. A folder is named by id or exact name.
-- Dashboards: create_dashboard also takes "folder". update_dashboard {"dashboard_id", "name"?, "folder"? ("" or null =
-  top level)}; tags change with set_tags. delete_dashboard {"dashboard_id"}.
+- Dashboards: create_dashboard also takes "folder" and "selector_bar". update_dashboard {"dashboard_id", "name"?,
+  "folder"? ("" or null = top level), "selector_bar"?}; tags change with set_tags. delete_dashboard {"dashboard_id"}.
+  "selector_bar" [{"dimension": name or id, "default": member code}] draws one selector per dimension at the top of
+  the dashboard, opening on "default" (left out: the first member); every grid and chart (sync_context false too) and
+  every KPI with kpi_context_mode "sync" or "bar" follows it and draws no selector of its own for that dimension. Use it when several widgets share a dimension such as a scenario or a
+  period; it replaces the whole bar, [] removes it. list_dashboards shows each dashboard's bar.
 - Widgets: list_dashboards shows every widget's id, type, what it shows, place and size. add_dashboard_widget takes
   "title" (the header text, shown) — give each widget the title its source shows, in the same step.
   update_dashboard_widget {"widget_id", and any of "ref_id", "title", "show_title", "widget_props", "pos_x", "pos_y",
@@ -902,7 +906,8 @@ Example — developer says "build a dashboard with KPI tiles over a chart and a 
   300x120, chart/grid 600x380. ref_id is the metric id for metric_kpi and
   the GRID id for chart and grid widgets; a chart also needs widget_props
   {"chart": {"chart_type", "dimension_id", "metric_ids"}}. A KPI tile you add shows the metric's total
-  (kpi_context_mode "total") unless you set "sync" (follow the dashboard's selectors) or pin it to one member with
+  (kpi_context_mode "total") unless you set "sync" (follow the dashboard's selectors), "bar" (the selector bar's member
+  for each bar dimension the metric has, the total over the rest — a company total per scenario) or pin it to one member with
   "kpi_scope": {"dimension_id": "<dimension id or name>", "member_code": "<code>"} (a tile of the RF scenario, of a
   calculated VAR member: one dimension, one member; the mode becomes "pin"); a
   chart you add leaves out total members such as FY next to its months (hide_rollup_members true) unless you set it

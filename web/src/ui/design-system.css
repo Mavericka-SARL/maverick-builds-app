@@ -2706,3 +2706,19 @@ tr:hover .mvx-member-label__actions,
   overflow: hidden;
   overflow-wrap: anywhere;
 }
+
+/* A dashboard's selector bar: the selectors every synced widget follows,
+   drawn once above the widgets and kept in view while the page scrolls. */
+.mvx-selector-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 6px 8px;
+  background: var(--color-page);
+  border-bottom: 1px solid var(--color-border);
+}

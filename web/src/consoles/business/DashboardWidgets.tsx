@@ -1,12 +1,12 @@
-import React, { useState } from "react";
+import React, { useContext, useEffect, useState } from "react";
 import { serialToISO } from "../dateSerial";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Check as CheckIcon } from "lucide-react";
-import { api, type AutomationRule, type DashboardWidget, type DemoContext, type WidgetProps, type GridData, type IntegrationDef, type FormDef, type ChartContextDim, type ButtonCorners } from "../../api/client";
+import { api, type AutomationRule, type DashboardWidget, type DemoContext, type WidgetProps, type GridData, type IntegrationDef, type FormDef, type ChartContextDim, type ButtonCorners, type SelectorBarEntry } from "../../api/client";
 import { ContextSelectors } from "../dashboard/ChartWidget";
-import { useSelectorOwnership, useWidgetContextSync } from "../dashboardContextSync";
+import { DashboardContextSyncContext, useSelectorOwnership, useWidgetContextSync } from "../dashboardContextSync";
 import { WidgetErrorBoundary, CommandButton, LoadingState, EmptyState, Button, useConfirm, RichText } from "../../ui";
-import { groupWidgetsIntoRows, INTRINSIC_HEIGHT_WIDGET_TYPES, BUTTON_WIDGET_TYPES, buttonRadius } from "../dashboardLayout";
+import { groupWidgetsIntoRows, INTRINSIC_HEIGHT_WIDGET_TYPES, BUTTON_WIDGET_TYPES, buttonRadius, defaultLeafCode } from "../dashboardLayout";
 import { DashboardContextSyncProvider } from "../DashboardContextSyncProvider";
 import { ChartWidget } from "../dashboard/ChartWidget";
 import { FormPanel } from "./FormPanel";
@@ -21,7 +21,7 @@ import { PlanningGrid } from "./PlanningGrid";
 // a fixed height + overflow:hidden) so taller-than-designed content grows
 // the row instead of getting silently clipped. See INTRINSIC_HEIGHT_WIDGET_TYPES
 // for why small widgets don't stretch to match a taller row-mate.
-export function DashboardWidgetGrid({ widgets, ctx, dashboardId, onOpenInstance }: { widgets: DashboardWidget[]; ctx: DemoContext; dashboardId?: string; onOpenInstance?: (instanceId: string) => void }) {
+export function DashboardWidgetGrid({ widgets, ctx, dashboardId, selectorBar, onOpenInstance }: { widgets: DashboardWidget[]; ctx: DemoContext; dashboardId?: string; selectorBar?: SelectorBarEntry[]; onOpenInstance?: (instanceId: string) => void }) {
   // The rendered dashboard is exactly as wide as the design canvas: at least
   // 1200px (60 columns of 20px), growing to the right edge of the widest
   // placement — the design canvas grows the same way. Pinning 60 columns
@@ -32,8 +32,17 @@ export function DashboardWidgetGrid({ widgets, ctx, dashboardId, onOpenInstance 
   const rightEdge = Math.max(0, ...widgets.map(w => (w.pos_x || 0) + (w.size_w || 300)));
   const columns = Math.max(60, Math.ceil(rightEdge / 20));
   const width = columns * 20;
+  const bar = (selectorBar ?? []).filter(e => e.dimension_id);
+  const barKey = bar.map(e => `${e.dimension_id}=${e.default ?? ""}`).join(",");
   return (
-    <DashboardContextSyncProvider key={dashboardId ?? "default"}>
+    // The bar is part of the key: a changed bar (the designer's Preview)
+    // starts the shared selection again from its defaults.
+    <DashboardContextSyncProvider
+      key={`${dashboardId ?? "default"}|${barKey}`}
+      reserved={bar.map(e => e.dimension_id)}
+      initial={Object.fromEntries(bar.filter(e => e.default).map(e => [e.dimension_id, e.default as string]))}
+    >
+      {bar.length > 0 && <DashboardSelectorBar entries={bar} ctx={ctx} />}
       {/* maxWidth pins the rendered dashboard to the design canvas's
           coordinate space (CANVAS_MIN_W in DashboardCanvas.tsx), so a
           widget designed at 600px wide IS 600px wide here — previously the
@@ -93,6 +102,55 @@ export function DashboardWidgetGrid({ widgets, ctx, dashboardId, onOpenInstance 
       </div>
       </div>
     </DashboardContextSyncProvider>
+  );
+}
+
+// The dashboard's selector bar: one selector per dimension the developer chose,
+// drawn once above every widget. It drives the dashboard's shared selection
+// directly; no widget draws a selector of its own for these dimensions, and
+// every grid and chart (sync_context false too) and every KPI in "sync" or
+// "bar" mode follows it.
+function DashboardSelectorBar({ entries, ctx }: { entries: SelectorBarEntry[]; ctx: DemoContext }) {
+  const sync = useContext(DashboardContextSyncContext);
+  // The same model-wide meta read the KPI tiles use (shared cache): every
+  // dimension with the members this viewer may see.
+  const { data: meta } = useQuery({
+    queryKey: ["grid-meta", ctx.revision_id],
+    queryFn: () => api.getGrid(ctx.revision_id, undefined, { metaOnly: true }),
+    staleTime: 30_000,
+  });
+  const m = meta as GridData | undefined;
+  const all = m?.all_dimensions ?? m?.dimensions ?? [];
+  const dims = entries
+    .map(e => all.find(d => d.id === e.dimension_id))
+    .filter((d): d is NonNullable<typeof d> => !!d && d.members.length > 0);
+
+  // Open on the developer's default when this viewer can see it, else on the
+  // dimension's first member — a default hidden from the viewer must not
+  // become the dashboard's selection.
+  const values = sync?.values;
+  const setValue = sync?.setValue;
+  useEffect(() => {
+    if (!setValue) return;
+    for (const d of dims) {
+      const current = values?.[d.id];
+      if (current && d.members.some(mm => mm.code === current)) continue;
+      const def = entries.find(e => e.dimension_id === d.id)?.default;
+      const code = def && d.members.some(mm => mm.code === def) ? def : defaultLeafCode(d);
+      if (code && code !== current) setValue(d.id, code);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dims.map(d => `${d.id}:${d.members.length}`).join(","), values, setValue]);
+
+  if (!sync || dims.length === 0) return null;
+  return (
+    <div className="mvx-selector-bar" role="toolbar" aria-label="Dashboard selectors">
+      <ContextSelectors
+        dims={dims as unknown as ChartContextDim[]}
+        context={sync.values}
+        onChange={sync.setValue}
+      />
+    </div>
   );
 }
 
@@ -180,9 +238,10 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps }: { metricId: stri
   // editor. Legacy widgets (no explicit mode) infer it from the old fields so
   // their behaviour is unchanged: a kpi_scope means "pin", sync_context===false
   // means "total", otherwise "sync".
-  const mode: "total" | "sync" | "pin" =
+  const mode: "total" | "sync" | "pin" | "bar" =
     widgetProps?.kpi_context_mode ??
     (staticScope ? "pin" : widgetProps?.sync_context === false ? "total" : "sync");
+  const sync = useContext(DashboardContextSyncContext);
 
   // Meta-only read: dimensions + metrics with no cells/totals, so it stays
   // fast on large models and gives us the metric's own dims for the selectors.
@@ -212,13 +271,24 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps }: { metricId: stri
   // path). Every mode reads totals_only and keys on (revision, scope) so KPIs
   // sharing a scope dedup to a single fetch.
   const syncScoped = syncOn && Object.keys(context).length > 0;
+  // "bar": the bar's member for each bar dimension this metric has; the
+  // total over the rest. Without a bar (or none of its dimensions on the
+  // metric) that is the whole-model total.
+  const barDimsOfMetric = mode === "bar" ? (sync?.barDims ?? []).filter(id => metric?.dimension_ids?.includes(id)) : [];
+  const barScope = Object.fromEntries(
+    barDimsOfMetric.filter(id => sync?.values[id]).map(id => [id, sync!.values[id]]),
+  );
   const scope: Record<string, string> | undefined =
     mode === "pin" && staticScope
       ? { [staticScope.dimension_id]: staticScope.member_code }
       : syncScoped
         ? context
-        : undefined;
-  const valueReady = mode !== "sync" || kpiDims.length === 0 || syncScoped;
+        : mode === "bar" && Object.keys(barScope).length > 0
+          ? barScope
+          : undefined;
+  const valueReady = mode === "bar"
+    ? !!metric && Object.keys(barScope).length === barDimsOfMetric.length
+    : mode !== "sync" || kpiDims.length === 0 || syncScoped;
   const scopeKey = JSON.stringify(scope ?? {});
   const { data: grid } = useQuery({
     queryKey: ["kpi-totals", ctx.revision_id, scopeKey],

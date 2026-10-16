@@ -201,7 +201,11 @@ type Dashboard struct {
 	Tags     []string `json:"tags"`
 	Category string   `json:"category"`
 	FolderID *string  `json:"folder_id,omitempty"`
-	Widgets  []Widget `json:"widgets"`
+	// SelectorBar is the dashboard's selector bar, [{"dimension_id",
+	// "default"}] (modeledit.SelectorBarEntry); absent in packages made
+	// before it existed.
+	SelectorBar json.RawMessage `json:"selector_bar,omitempty"`
+	Widgets     []Widget        `json:"widgets"`
 }
 
 type Form struct {
@@ -601,7 +605,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 
 	rows, err = q.Query(ctx, `
-		SELECT id::text, name, tags, COALESCE(category,''), folder_id::text
+		SELECT id::text, name, tags, COALESCE(category,''), folder_id::text, selector_bar
 		FROM model.dashboard_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -609,12 +613,16 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 	for rows.Next() {
 		var d Dashboard
-		if err := rows.Scan(&d.ID, &d.Name, &d.Tags, &d.Category, &d.FolderID); err != nil {
+		var bar []byte
+		if err := rows.Scan(&d.ID, &d.Name, &d.Tags, &d.Category, &d.FolderID, &bar); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		if d.Tags == nil {
 			d.Tags = []string{}
+		}
+		if len(bar) > 0 && string(bar) != "[]" {
+			d.SelectorBar = bar
 		}
 		d.Widgets = []Widget{}
 		pkg.Dashboards = append(pkg.Dashboards, d)
@@ -1257,6 +1265,7 @@ func (pkg *Package) looseRefs(fn refFunc) {
 		ig.Config, _ = rewriteRefs(ig.Config, jsonRefs{topOnly: true}, targetRefs(fn, config))
 	}
 	for i := range pkg.Dashboards {
+		doc(&pkg.Dashboards[i].SelectorBar, jsonRefs{})
 		for j := range pkg.Dashboards[i].Widgets {
 			wd := &pkg.Dashboards[i].Widgets[j]
 			col(widgetRefKinds[wd.WidgetType], &wd.RefID)
@@ -2129,10 +2138,12 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 		}
 		var newID string
 		if err = tx.QueryRow(ctx, `
-			INSERT INTO model.dashboard_def (model_id, revision_id, name, tags, category, folder_id)
-			VALUES ($1::uuid, $2::uuid, $3, COALESCE($4::text[],'{}'), $5, $6::uuid)
+			INSERT INTO model.dashboard_def (model_id, revision_id, name, tags, category, folder_id, selector_bar)
+			VALUES ($1::uuid, $2::uuid, $3, COALESCE($4::text[],'{}'), $5, $6::uuid, COALESCE($7::jsonb, '[]'::jsonb))
 			RETURNING id::text`,
-			modelID, revisionID, d.Name, d.Tags, d.Category, folderID).Scan(&newID); err != nil {
+			// The bar names dimensions by id: the package's, resolved
+			// to the ones just created (dimensions are imported first).
+			modelID, revisionID, d.Name, d.Tags, d.Category, folderID, jsonArg(refs.doc(d.SelectorBar, jsonRefs{}))).Scan(&newID); err != nil {
 			return "", fmt.Errorf("dashboard %q: %w", d.Name, err)
 		}
 		dashMap[d.ID] = newID

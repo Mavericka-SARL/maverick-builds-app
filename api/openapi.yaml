@@ -1231,7 +1231,17 @@ components:
         name:      { type: string }
         tags:      { type: array, items: { type: string } }
         folder_id: { type: string, format: uuid, nullable: true, description: "Dashboard folder this dashboard is filed under; null = at the root" }
+        selector_bar:
+          type: array
+          items: { $ref: "#/components/schemas/SelectorBarEntry" }
+          description: "The selectors drawn once at the top of the dashboard, in order. Every grid and chart on the dashboard, and every KPI following the dashboard's selectors or the bar, follows them and draws no selector of its own for those dimensions. Empty: the dashboard has no bar. Not returned by the list of a person's dashboards."
         widgets:   { type: array, items: { $ref: "#/components/schemas/DashboardWidget" } }
+    SelectorBarEntry:
+      type: object
+      required: [dimension_id]
+      properties:
+        dimension_id: { type: string, description: "A dimension of the dashboard's revision, by id (its name is accepted on writes and stored as the id)" }
+        default:      { type: string, description: "Member code the selector opens on; omitted or empty = the dimension's first member" }
 
     CreateDashboardRequest:
       type: object
@@ -1241,6 +1251,11 @@ components:
         tags:        { type: array, items: { type: string } }
         revision_id: { type: string, format: uuid }
         folder_id:   { type: string, format: uuid, description: "Folder to file the new dashboard under; omit or empty for the root. Must be a folder of the same model." }
+        selector_bar:
+          type: array
+          maxItems: 8
+          items: { $ref: "#/components/schemas/SelectorBarEntry" }
+          description: "Each dimension once, from the dashboard's revision; each default a member code of its dimension"
 
     UpdateDashboardRequest:
       type: object
@@ -1249,6 +1264,11 @@ components:
         name:      { type: string, minLength: 1 }
         tags:      { type: array, items: { type: string }, description: "Replaces the whole list; [] clears it. Stored lower case, white space as hyphens, repeats dropped" }
         folder_id: { type: string, nullable: true, description: "Omit to leave the dashboard where it is; null or an empty string moves it to the root; a folder UUID files it under that folder. Not format:uuid because the empty string is an accepted value." }
+        selector_bar:
+          type: array
+          maxItems: 8
+          items: { $ref: "#/components/schemas/SelectorBarEntry" }
+          description: "Replaces the whole bar; [] removes it. Each dimension once, from the dashboard's revision; each default a member code of its dimension"
 
     CreateWidgetRequest:
       type: object
@@ -5926,7 +5946,7 @@ paths:
     patch:
       operationId: updateDashboard
       tags: [Developer Console]
-      summary: Rename, retag, or move a dashboard between folders
+      summary: Rename, retag, move a dashboard between folders, or set its selector bar
       parameters:
         - name: id
           in: path

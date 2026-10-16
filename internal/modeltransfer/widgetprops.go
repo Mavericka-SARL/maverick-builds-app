@@ -2,7 +2,10 @@ package modeltransfer
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // RemapWidgetPropsIDs rewrites every metric and dimension ID embedded in a
@@ -165,4 +168,74 @@ func RemapWidgetPropsIDs(props []byte, metricMap, dimMap map[string]string) ([]b
 		return props, false
 	}
 	return out, true
+}
+
+// RemapSelectorBarIDs rewrites the dimension ids of a dashboard's selector
+// bar (model.dashboard_def.selector_bar, [{"dimension_id", "default"}])
+// through dimMap and reports whether anything changed. Same reasoning as
+// RemapWidgetPropsIDs: dimensions are revision-scoped, so a copied dashboard
+// whose bar kept the source's ids would show no selector at all. The member
+// code in "default" copies verbatim. An id absent from the map is kept.
+func RemapSelectorBarIDs(bar []byte, dimMap map[string]string) ([]byte, bool) {
+	if len(bar) == 0 || len(dimMap) == 0 {
+		return bar, false
+	}
+	var entries []map[string]any
+	if json.Unmarshal(bar, &entries) != nil {
+		return bar, false
+	}
+	changed := false
+	for _, e := range entries {
+		if id, ok := e["dimension_id"].(string); ok {
+			if to, ok := dimMap[id]; ok && to != id {
+				e["dimension_id"] = to
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return bar, false
+	}
+	out, err := json.Marshal(entries)
+	if err != nil {
+		return bar, false
+	}
+	return out, true
+}
+
+// RemapRevisionSelectorBars rewrites the dimension ids of the selector bars of
+// revisionID's dashboards through dimMap (old → new), after a copy into that
+// revision (a revision duplicate, the AI Developer's new revision).
+func RemapRevisionSelectorBars(ctx context.Context, tx pgx.Tx, modelID, revisionID string, dimMap map[string]string) error {
+	rows, err := tx.Query(ctx, `
+		SELECT id::text, selector_bar FROM model.dashboard_def
+		WHERE model_id = $1::uuid AND revision_id = $2::uuid AND selector_bar <> '[]'::jsonb`, modelID, revisionID)
+	if err != nil {
+		return err
+	}
+	type bar struct {
+		id  string
+		raw []byte
+	}
+	var bars []bar
+	for rows.Next() {
+		var b bar
+		if err := rows.Scan(&b.id, &b.raw); err != nil {
+			rows.Close()
+			return err
+		}
+		bars = append(bars, b)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, b := range bars {
+		if remapped, changed := RemapSelectorBarIDs(b.raw, dimMap); changed {
+			if _, err := tx.Exec(ctx, `UPDATE model.dashboard_def SET selector_bar = $2::jsonb WHERE id = $1::uuid`, b.id, string(remapped)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

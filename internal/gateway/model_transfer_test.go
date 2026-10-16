@@ -73,7 +73,8 @@ func TestModelExportImportTenantAdminOnly(t *testing.T) {
 		VALUES ($1::uuid, $2::uuid, 'staff import', 'csv_import', 'grid', $3::uuid)`,
 		f.modelID, f.workingRevID, f.gridStaffID)
 	rootFolderID := q(`INSERT INTO model.dashboard_folder (model_id, revision_id, name) VALUES ($1::uuid, $2::uuid, 'Root') RETURNING id::text`, f.modelID, f.workingRevID)
-	dashID := q(`INSERT INTO model.dashboard_def (model_id, revision_id, name, folder_id) VALUES ($1::uuid, $2::uuid, 'Filed Dash', $3::uuid) RETURNING id::text`, f.modelID, f.workingRevID, rootFolderID)
+	dashID := q(`INSERT INTO model.dashboard_def (model_id, revision_id, name, folder_id, selector_bar) VALUES ($1::uuid, $2::uuid, 'Filed Dash', $3::uuid, $4::jsonb) RETURNING id::text`,
+		f.modelID, f.workingRevID, rootFolderID, fmt.Sprintf(`[{"dimension_id":%q,"default":"DEPT_B"}]`, f.deptsDimID))
 	exec(`INSERT INTO model.dashboard_widget (dashboard_id, widget_type, ref_id, content) VALUES ($1::uuid, 'grid', $2, 'Staff')`, dashID, f.gridStaffID)
 	// A chart widget: ref_id points at the grid, but the metric/dimension it
 	// actually plots live inside widget_props, which the import used to copy
@@ -228,6 +229,15 @@ func TestModelExportImportTenantAdminOnly(t *testing.T) {
 		FROM workflow.automation_rule WHERE revision_id=$1::uuid AND name='route expenses'`, newRevID).Scan(&ruleWf, &ruleForm)
 	if ruleWf != newWfID || ruleForm != newFormID {
 		t.Errorf("imported rule refs = %q/%q, want %q/%q", ruleWf, ruleForm, newWfID, newFormID)
+	}
+
+	// The selector bar names the imported dimension, not the source's.
+	var barDim, barDefault string
+	if err := f.pool.QueryRow(ctx, `SELECT selector_bar->0->>'dimension_id', selector_bar->0->>'default' FROM model.dashboard_def WHERE model_id=$1::uuid AND name='Filed Dash'`, newModelID).Scan(&barDim, &barDefault); err != nil {
+		t.Fatalf("imported selector bar: %v", err)
+	}
+	if barDim != newDeptsDimID || barDefault != "DEPT_B" {
+		t.Errorf("imported selector bar = %s=%s, want %s=DEPT_B", barDim, barDefault, newDeptsDimID)
 	}
 
 	// Widget ref remapped to the imported grid.

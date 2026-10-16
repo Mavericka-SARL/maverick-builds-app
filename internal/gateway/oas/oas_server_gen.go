@@ -1811,7 +1811,7 @@ type Handler interface {
 	UpdateConnectorSettings(ctx context.Context, req *UpdateConnectorSettingsReq) (UpdateConnectorSettingsRes, error)
 	// UpdateDashboard implements updateDashboard operation.
 	//
-	// Rename, retag, or move a dashboard between folders.
+	// Rename, retag, move a dashboard between folders, or set its selector bar.
 	//
 	// PATCH /api/developer/dashboards/{id}
 	UpdateDashboard(ctx context.Context, req *UpdateDashboardRequest, params UpdateDashboardParams) (UpdateDashboardRes, error)

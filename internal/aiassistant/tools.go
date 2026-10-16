@@ -636,6 +636,11 @@ func (e *ToolExecutor) listDashboards(ctx context.Context) (string, error) {
 
 	rows, err := e.pool.Query(ctx, `
 		SELECT d.id::text, d.name, d.tags, COALESCE(f.name, ''),
+		       COALESCE((SELECT string_agg(COALESCE(dim.name, b.e->>'dimension_id') ||
+		                                   CASE WHEN COALESCE(b.e->>'default','') <> '' THEN ' = ' || (b.e->>'default') ELSE '' END,
+		                                   ', ' ORDER BY b.o)
+		                 FROM jsonb_array_elements(d.selector_bar) WITH ORDINALITY b(e, o)
+		                 LEFT JOIN model.dimension_def dim ON dim.id::text = b.e->>'dimension_id'), ''),
 		       w.id::text, COALESCE(w.widget_type, ''),
 		       COALESCE(md.name, gd.name, fd.name, w.ref_id, ''),
 		       COALESCE(w.pos_x, 0), COALESCE(w.pos_y, 0), COALESCE(w.size_w, 0), COALESCE(w.size_h, 0), COALESCE(w.title, ''),
@@ -660,12 +665,12 @@ func (e *ToolExecutor) listDashboards(ctx context.Context) (string, error) {
 	sb.WriteString("Dashboards:\n")
 	last := ""
 	for rows.Next() {
-		var id, name, folder string
+		var id, name, folder, bar string
 		var tagList []string
 		var wid *string
 		var wtype, ref, title, shows string
 		var x, y, w, h int
-		if err := rows.Scan(&id, &name, &tagList, &folder, &wid, &wtype, &ref, &x, &y, &w, &h, &title, &shows); err != nil {
+		if err := rows.Scan(&id, &name, &tagList, &folder, &bar, &wid, &wtype, &ref, &x, &y, &w, &h, &title, &shows); err != nil {
 			return "", err
 		}
 		if id != last {
@@ -675,6 +680,9 @@ func (e *ToolExecutor) listDashboards(ctx context.Context) (string, error) {
 				where = " in folder " + folder
 			}
 			fmt.Fprintf(&sb, "  %s (id:%s)%s%s\n", name, id, where, tagSuffix(tagList))
+			if bar != "" {
+				fmt.Fprintf(&sb, "    selector bar: %s\n", bar)
+			}
 		}
 		if wid == nil {
 			sb.WriteString("    no widgets\n")

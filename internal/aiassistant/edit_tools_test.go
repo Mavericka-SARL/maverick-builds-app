@@ -486,6 +486,25 @@ func TestDashboardFolderAndWidgetEdits(t *testing.T) {
 	}
 	h.must("delete_dashboard_widget", map[string]any{"widget_id": w})
 
+	// The selector bar: a dimension by name, stored by id; checked like the
+	// console's PATCH; shown by list_dashboards; [] removes it.
+	_, scenario := h.must("create_dimension", map[string]any{"name": "scenario", "members": []map[string]any{{"code": "BASE", "label": "Base"}, {"code": "DOWNSIDE", "label": "Downside"}}})
+	h.must("update_dashboard", map[string]any{"dashboard_id": dash, "selector_bar": []map[string]any{{"dimension": "scenario", "default": "BASE"}}})
+	if b := h.scalar(`SELECT (selector_bar->0->>'dimension_id') || '=' || (selector_bar->0->>'default') FROM model.dashboard_def WHERE id=$1::uuid`, dash); b != scenario+"=BASE" {
+		t.Errorf("selector bar = %s, want %s=BASE", b, scenario)
+	}
+	_, _, err = h.run("update_dashboard", map[string]any{"dashboard_id": dash, "selector_bar": []map[string]any{{"dimension": "scenario", "default": "UPSIDE"}}})
+	h.refused("a default that is not a member", err, "not a member code")
+	_, _, err = h.run("update_dashboard", map[string]any{"dashboard_id": dash, "selector_bar": []map[string]any{{"dimension": "nope"}}})
+	h.refused("an unknown dimension", err, "not in this dashboard's revision")
+	if out, err := aiassistant.NewToolExecutor(h.pool, h.modelID, h.revID).Execute(h.ctx, "list_dashboards", nil); err != nil || !strings.Contains(out, "selector bar: scenario = BASE") {
+		t.Errorf("list_dashboards does not show the bar: %v\n%s", err, out)
+	}
+	h.must("update_dashboard", map[string]any{"dashboard_id": dash, "selector_bar": []any{}})
+	if b := h.scalar(`SELECT selector_bar::text FROM model.dashboard_def WHERE id=$1::uuid`, dash); b != "[]" {
+		t.Errorf("cleared bar = %s", b)
+	}
+
 	h.must("update_dashboard", map[string]any{"dashboard_id": dash, "folder": "Monthly"})
 	h.must("delete_dashboard_folder", map[string]any{"folder": "Finance"})
 	if s := h.scalar(`SELECT (SELECT count(*) FROM model.dashboard_folder WHERE model_id=$1::uuid)::text || '|' ||

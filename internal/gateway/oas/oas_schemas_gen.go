@@ -5920,6 +5920,8 @@ type CreateDashboardRequest struct {
 	// Folder to file the new dashboard under; omit or empty for the root. Must be a folder of the same
 	// model.
 	FolderID OptUUID `json:"folder_id"`
+	// Each dimension once, from the dashboard's revision; each default a member code of its dimension.
+	SelectorBar []SelectorBarEntry `json:"selector_bar"`
 }
 
 // GetName returns the value of Name.
@@ -5942,6 +5944,11 @@ func (s *CreateDashboardRequest) GetFolderID() OptUUID {
 	return s.FolderID
 }
 
+// GetSelectorBar returns the value of SelectorBar.
+func (s *CreateDashboardRequest) GetSelectorBar() []SelectorBarEntry {
+	return s.SelectorBar
+}
+
 // SetName sets the value of Name.
 func (s *CreateDashboardRequest) SetName(val string) {
 	s.Name = val
@@ -5960,6 +5967,11 @@ func (s *CreateDashboardRequest) SetRevisionID(val OptUUID) {
 // SetFolderID sets the value of FolderID.
 func (s *CreateDashboardRequest) SetFolderID(val OptUUID) {
 	s.FolderID = val
+}
+
+// SetSelectorBar sets the value of SelectorBar.
+func (s *CreateDashboardRequest) SetSelectorBar(val []SelectorBarEntry) {
+	s.SelectorBar = val
 }
 
 type CreateDashboardWidgetOK struct {
@@ -7608,8 +7620,13 @@ type DashboardDef struct {
 	Name string    `json:"name"`
 	Tags []string  `json:"tags"`
 	// Dashboard folder this dashboard is filed under; null = at the root.
-	FolderID OptNilUUID        `json:"folder_id"`
-	Widgets  []DashboardWidget `json:"widgets"`
+	FolderID OptNilUUID `json:"folder_id"`
+	// The selectors drawn once at the top of the dashboard, in order. Every grid and chart on the
+	// dashboard, and every KPI following the dashboard's selectors or the bar, follows them and draws no
+	// selector of its own for those dimensions. Empty: the dashboard has no bar. Not returned by the
+	// list of a person's dashboards.
+	SelectorBar []SelectorBarEntry `json:"selector_bar"`
+	Widgets     []DashboardWidget  `json:"widgets"`
 }
 
 // GetID returns the value of ID.
@@ -7630,6 +7647,11 @@ func (s *DashboardDef) GetTags() []string {
 // GetFolderID returns the value of FolderID.
 func (s *DashboardDef) GetFolderID() OptNilUUID {
 	return s.FolderID
+}
+
+// GetSelectorBar returns the value of SelectorBar.
+func (s *DashboardDef) GetSelectorBar() []SelectorBarEntry {
+	return s.SelectorBar
 }
 
 // GetWidgets returns the value of Widgets.
@@ -7655,6 +7677,11 @@ func (s *DashboardDef) SetTags(val []string) {
 // SetFolderID sets the value of FolderID.
 func (s *DashboardDef) SetFolderID(val OptNilUUID) {
 	s.FolderID = val
+}
+
+// SetSelectorBar sets the value of SelectorBar.
+func (s *DashboardDef) SetSelectorBar(val []SelectorBarEntry) {
+	s.SelectorBar = val
 }
 
 // SetWidgets sets the value of Widgets.
@@ -26904,6 +26931,35 @@ func (s *ScimTokenDefaultRole) UnmarshalText(data []byte) error {
 	}
 }
 
+// Ref: #/components/schemas/SelectorBarEntry
+type SelectorBarEntry struct {
+	// A dimension of the dashboard's revision, by id (its name is accepted on writes and stored as the
+	// id).
+	DimensionID string `json:"dimension_id"`
+	// Member code the selector opens on; omitted or empty = the dimension's first member.
+	Default OptString `json:"default"`
+}
+
+// GetDimensionID returns the value of DimensionID.
+func (s *SelectorBarEntry) GetDimensionID() string {
+	return s.DimensionID
+}
+
+// GetDefault returns the value of Default.
+func (s *SelectorBarEntry) GetDefault() OptString {
+	return s.Default
+}
+
+// SetDimensionID sets the value of DimensionID.
+func (s *SelectorBarEntry) SetDimensionID(val string) {
+	s.DimensionID = val
+}
+
+// SetDefault sets the value of Default.
+func (s *SelectorBarEntry) SetDefault(val OptString) {
+	s.Default = val
+}
+
 type SendAiMessageBadRequest Error
 
 func (*SendAiMessageBadRequest) sendAiMessageRes() {}
@@ -29540,6 +29596,9 @@ type UpdateDashboardRequest struct {
 	// Omit to leave the dashboard where it is; null or an empty string moves it to the root; a folder
 	// UUID files it under that folder. Not format:uuid because the empty string is an accepted value.
 	FolderID OptNilString `json:"folder_id"`
+	// Replaces the whole bar; [] removes it. Each dimension once, from the dashboard's revision; each
+	// default a member code of its dimension.
+	SelectorBar []SelectorBarEntry `json:"selector_bar"`
 }
 
 // GetName returns the value of Name.
@@ -29557,6 +29616,11 @@ func (s *UpdateDashboardRequest) GetFolderID() OptNilString {
 	return s.FolderID
 }
 
+// GetSelectorBar returns the value of SelectorBar.
+func (s *UpdateDashboardRequest) GetSelectorBar() []SelectorBarEntry {
+	return s.SelectorBar
+}
+
 // SetName sets the value of Name.
 func (s *UpdateDashboardRequest) SetName(val OptString) {
 	s.Name = val
@@ -29570,6 +29634,11 @@ func (s *UpdateDashboardRequest) SetTags(val []string) {
 // SetFolderID sets the value of FolderID.
 func (s *UpdateDashboardRequest) SetFolderID(val OptNilString) {
 	s.FolderID = val
+}
+
+// SetSelectorBar sets the value of SelectorBar.
+func (s *UpdateDashboardRequest) SetSelectorBar(val []SelectorBarEntry) {
+	s.SelectorBar = val
 }
 
 type UpdateDashboardWidgetOK struct {

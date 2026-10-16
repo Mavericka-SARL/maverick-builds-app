@@ -526,14 +526,15 @@ func (e *WriteExecutor) resolveFolder(ctx context.Context, ref string) (*string,
 	return &id, nil
 }
 
-// updateDashboard is PATCH /api/developer/dashboards/{id}: rename and/or move
-// to a folder ("folder": "" or null = the top level). Tags change through
-// set_tags.
+// updateDashboard is PATCH /api/developer/dashboards/{id}: rename, move to a
+// folder ("folder": "" or null = the top level) and/or replace the selector
+// bar ("selector_bar": [] removes it). Tags change through set_tags.
 func (e *WriteExecutor) updateDashboard(ctx context.Context, raw json.RawMessage) (string, string, error) {
 	var p struct {
-		DashboardID string  `json:"dashboard_id"`
-		Name        string  `json:"name"`
-		Folder      *string `json:"folder"`
+		DashboardID string             `json:"dashboard_id"`
+		Name        string             `json:"name"`
+		Folder      *string            `json:"folder"`
+		SelectorBar []selectorBarParam `json:"selector_bar"`
 	}
 	perr := decodeParams(raw, &p)
 	if isUnknownParam(perr) {
@@ -543,8 +544,8 @@ func (e *WriteExecutor) updateDashboard(ctx context.Context, raw json.RawMessage
 		return "", "", fmt.Errorf("dashboard_id is required")
 	}
 	has := present(raw)
-	if p.Name == "" && !has["folder"] {
-		return "", "", fmt.Errorf("nothing to change: provide name and/or folder")
+	if p.Name == "" && !has["folder"] && !has["selector_bar"] {
+		return "", "", fmt.Errorf("nothing to change: provide name, folder and/or selector_bar")
 	}
 	dashID, err := e.requireInModel(ctx, "dashboard", p.DashboardID)
 	if err != nil {
@@ -573,6 +574,22 @@ func (e *WriteExecutor) updateDashboard(ctx context.Context, raw json.RawMessage
 			changed = append(changed, "moved to the top level")
 		} else {
 			changed = append(changed, "moved to folder "+ref)
+		}
+	}
+	if has["selector_bar"] {
+		var revID string
+		_ = e.pool.QueryRow(ctx, `SELECT COALESCE(revision_id::text,'') FROM model.dashboard_def WHERE id=$1::uuid`, dashID).Scan(&revID)
+		bar, err := modeledit.NormalizeSelectorBar(ctx, e.pool, e.modelID, revID, selectorBarEntries(p.SelectorBar))
+		if err != nil {
+			return "", "", err
+		}
+		if _, err := e.pool.Exec(ctx, `UPDATE model.dashboard_def SET selector_bar=$2::jsonb WHERE id=$1::uuid`, dashID, modeledit.SelectorBarJSON(bar)); err != nil {
+			return "", "", fmt.Errorf("set selector bar: %w", err)
+		}
+		if len(bar) == 0 {
+			changed = append(changed, "selector bar removed")
+		} else {
+			changed = append(changed, fmt.Sprintf("selector bar set (%d selectors)", len(bar)))
 		}
 	}
 	return "Dashboard " + strings.Join(changed, "; "), dashID, nil

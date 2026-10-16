@@ -11074,7 +11074,7 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 													return r, true
 												case "PATCH":
 													r.name = UpdateDashboardOperation
-													r.summary = "Rename, retag, or move a dashboard between folders"
+													r.summary = "Rename, retag, move a dashboard between folders, or set its selector bar"
 													r.operationID = "updateDashboard"
 													r.operationGroup = ""
 													r.pathPattern = "/api/developer/dashboards/{id}"

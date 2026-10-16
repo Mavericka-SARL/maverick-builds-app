@@ -817,7 +817,9 @@ export interface WidgetProps {
   // the dashboard's shared context selectors; "pin" = fixed to kpi_scope's
   // member. Absent falls back to the legacy behaviour (pin if kpi_scope set,
   // else sync unless sync_context===false, else total).
-  kpi_context_mode?: "total" | "sync" | "pin";
+  // "bar": the dashboard's selector bar for the dimensions on it, the total
+  // over every other dimension.
+  kpi_context_mode?: "total" | "sync" | "pin" | "bar";
   // automation_button: when set, clicking asks for confirmation with this
   // message before firing the rule. Empty/absent fires immediately.
   confirm_text?: string;
@@ -988,11 +990,20 @@ export interface DashboardFolder {
   parent_id: string | null;
 }
 
+// One selector of a dashboard's selector bar: drawn once at the top of the
+// dashboard; every widget following the shared selection follows it.
+export interface SelectorBarEntry {
+  dimension_id: string;
+  /** Member code the selector opens on; empty = the dimension's first member. */
+  default?: string;
+}
+
 export interface DashboardDef {
   id: string;
   name: string;
   tags: string[];
   folder_id: string | null;
+  selector_bar?: SelectorBarEntry[];
   widgets: DashboardWidget[];
 }
 
@@ -2654,7 +2665,7 @@ export const api = {
   // Partial: a field left out keeps the dashboard's own; tags replace the
   // list. folder_id: omit to leave the dashboard where it is, "" or null to
   // move it to the root, an id to file it under that folder.
-  updateDashboard: (id: string, body: { name?: string; tags?: string[]; folder_id?: string | null }) =>
+  updateDashboard: (id: string, body: { name?: string; tags?: string[]; folder_id?: string | null; selector_bar?: SelectorBarEntry[] }) =>
     apiFetch<{ status: string }>(`/api/developer/dashboards/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 
   // ── Dashboard folders ────────────────────────────────────────────────────

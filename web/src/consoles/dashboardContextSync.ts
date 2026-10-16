@@ -10,6 +10,9 @@ export interface DashboardContextSyncValue {
   // and just follows the shared value. Claiming is idempotent per widget.
   claimSelector: (dimId: string, widgetId: string) => boolean;
   releaseSelectors: (widgetId: string) => void;
+  // The dimensions on the dashboard's selector bar (empty without one): no
+  // widget claims their selector, and a KPI in "bar" mode is scoped by them.
+  barDims: string[];
 }
 
 export const DashboardContextSyncContext = createContext<DashboardContextSyncValue | undefined>(undefined);
@@ -30,6 +33,9 @@ export const DashboardContextSyncContext = createContext<DashboardContextSyncVal
 // provider, or with sync disabled, every widget owns all its selectors.
 // Claims happen during render (idempotent per widget, so StrictMode's
 // double render is safe) — tree order decides the owner; unmount releases.
+// A dimension on the dashboard's selector bar is drawn by the bar alone, for
+// every widget — one with sync off as well (sync off keeps a widget's OTHER
+// selectors to itself).
 export function useSelectorOwnership(syncEnabled: boolean): (dimId: string) => boolean {
   const sync = useContext(DashboardContextSyncContext);
   const widgetId = useId();
@@ -48,6 +54,7 @@ export function useSelectorOwnership(syncEnabled: boolean): (dimId: string) => b
   const active = syncEnabled && sync !== undefined;
   return useCallback(
     (dimId: string) => {
+      if (sync?.barDims.includes(dimId)) return false;
       if (!active || !sync) return true;
       const owns = sync.claimSelector(dimId, widgetId);
       if (owns) claimedRef.current.add(dimId);
@@ -80,9 +87,18 @@ export function useWidgetContextSync<T extends { id: string; members: LeafCodeMe
   const dimIdsKey = dims.map(d => d.id).join(",");
 
   useEffect(() => {
-    if (!active || !sync) return;
+    if (!sync) return;
     for (const d of dims) {
       const shared = sync.values[d.id];
+      // The selector bar's dimensions are followed by every widget, synced
+      // or not; the bar itself seeds them.
+      if (sync.barDims.includes(d.id)) {
+        if (shared !== undefined && local[d.id] !== shared) {
+          setLocal(prev => (prev[d.id] === shared ? prev : { ...prev, [d.id]: shared }));
+        }
+        continue;
+      }
+      if (!active) continue;
       if (shared === undefined) {
         // First synced widget to touch this dimension on this dashboard —
         // seed the shared pool from its own already-resolved default.

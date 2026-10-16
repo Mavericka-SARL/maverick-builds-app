@@ -297,3 +297,34 @@ func TestCreateRevisionKeepsEachKPITilesMetric(t *testing.T) {
 		t.Errorf("copied tiles point at %v, want revenue, cost, margin_value", got)
 	}
 }
+
+// A revision the AI Developer creates keeps each dashboard's selector bar, on
+// the new revision's own dimension.
+func TestCreateRevisionKeepsTheSelectorBar(t *testing.T) {
+	pool := setupWriteExecutorDB(t)
+	modelID := seedModel(t, pool)
+	revA := seedRevision(t, pool, modelID, "A")
+	exec := aiassistant.NewWriteExecutor(pool, modelID, revA)
+	ctx := context.Background()
+	run := func(tool string, p map[string]any) string {
+		t.Helper()
+		_, id, err := exec.Execute(ctx, tool, mustJSON(t, p))
+		if err != nil {
+			t.Fatalf("%s: %v", tool, err)
+		}
+		return id
+	}
+	run("create_dimension", map[string]any{"name": "scenario", "members": []map[string]any{{"code": "BASE", "label": "Base"}, {"code": "DOWNSIDE", "label": "Downside"}}})
+	run("create_dashboard", map[string]any{"name": "Compare", "selector_bar": []map[string]any{{"dimension": "scenario", "default": "DOWNSIDE"}}})
+	revB := run("create_revision", map[string]any{"name": "B", "source_revision_id": revA})
+	var barDim, barDefault, dimB string
+	if err := pool.QueryRow(ctx, `
+		SELECT d.selector_bar->0->>'dimension_id', d.selector_bar->0->>'default',
+		       (SELECT id::text FROM model.dimension_def WHERE revision_id = $1::uuid AND name = 'scenario')
+		FROM model.dashboard_def d WHERE d.revision_id = $1::uuid AND d.name = 'Compare'`, revB).Scan(&barDim, &barDefault, &dimB); err != nil {
+		t.Fatal(err)
+	}
+	if barDim != dimB || barDefault != "DOWNSIDE" {
+		t.Errorf("copied bar = %s=%s, want revision B's scenario %s=DOWNSIDE", barDim, barDefault, dimB)
+	}
+}

@@ -178,7 +178,7 @@
 <h3>Visibility and locks</h3>
 <ul>
   <li><b>Access rules</b> per user and per dimension member or metric: <b>write</b> (default), <b>read</b> (visible, not editable) or <b>hidden</b> (removed from grids, charts, selectors and totals shown to that user). A rule on a parent member cascades to its descendants. Rules are applied on the server; hidden data never reaches the browser.</li>
-  <li><b>Workflow locks.</b> While a workflow instance about a grid, metric or member scope waits at an approval step, and after it was approved, that scope is locked: typing and imports are refused with "… is locked: a workflow about it is awaiting approval or was approved". While it is at a task, a condition or a notification the scope stays editable, so a correction round's tasks can correct the data they are about; a reject that sends it back to a task opens it again, and a rejection or cancellation releases it.</li>
+  <li><b>Workflow locks.</b> While a workflow instance about a grid, metric or member scope waits at an approval step, and after it was approved, that scope is locked: typing and imports are refused with "… is locked: a workflow about it is awaiting approval or was approved". While it is at a task, a condition or a notification the scope stays editable, so a correction round's tasks can correct the data they are about; a reject that sends it back to a task opens it again, and a rejection or cancellation releases it. A company-wide round — one whose context names no member and no record, such as a planning round started from a dashboard button — locks its whole revision while its approval step waits ("… is waiting for approval (step): this revision's values are locked until it is approved or rejected"); approving or rejecting opens it again, and an approved company-wide round does not stay locked.</li>
   <li><b>Calculated metrics</b> are always read-only. <b>System-managed revisions</b> are read-only for everyone.</li>
 </ul>
 <h3>Workflows, triggers and notifications</h3>
@@ -426,7 +426,7 @@
 <tr><td><b>Grid</b></td><td><b>Grid</b>: one grid of the revision. Renders the editable planning table (below).</td></tr>
 <tr><td><b>Chart</b></td><td><b>Grid (source)</b>, then the chart editor (below). Add widget stays disabled until the chart configuration is complete.</td></tr>
 <tr><td><b>Records</b></td><td><b>Table</b>: people search, filter, sort, edit, import and export that table's records here. <b>Show the + New record button</b> (off by default) also lets them add records here.</td></tr>
-<tr><td><b>Metric KPI</b></td><td><b>Metric</b>: one number tile with a default context (whole model, follow selectors, or pinned to a member).</td></tr>
+<tr><td><b>Metric KPI</b></td><td><b>Metric</b>: one number tile with a default context (whole model, follow selectors, follow the selector bar, or pinned to a member).</td></tr>
 <tr><td><b>Trigger</b></td><td><b>Trigger</b>: an automation rule with trigger type manual that is enabled. If none exists the panel says so. Renders a button that starts the rule's workflow.</td></tr>
 <tr><td><b>Integration</b></td><td><b>Integration</b>: a REST API integration. Renders a button that runs it.</td></tr>
 <tr><td><b>Text</b></td><td><b>Content</b>: static text, styled in the properties panel.</td></tr>
@@ -441,7 +441,11 @@
   <li>Minimum sizes: grid 600×300, chart 360×240, records 360×300, KPI 220×120, import 320×280, text 240×100, buttons 40×20.</li>
   <li>The <b>×</b> on a card asks <b>Delete widget?</b>; the source object (grid, table, rule) is not deleted.</li>
 </ul>
-<p>Each card in Design mode shows a <b>Selectors</b> strip: which dimensions this widget lets the user choose, whether they are <b>synced</b>, <b>own</b>, <b>pinned</b> or <b>total</b>, and, when another widget owns the shared selector, "dim → Owner".</p>
+<p>Each card in Design mode shows a <b>Selectors</b> strip: which dimensions this widget lets the user choose, whether they are <b>synced</b>, <b>own</b>, <b>pinned</b> or <b>total</b>, and, when another widget owns the shared selector, "dim → Owner". A dimension on the dashboard's selector bar reads "dim (bar)".</p>
+
+<h4>Selector bar</h4>
+<p>Without a bar, synced widgets that share a dimension show one selector for it, on whichever widget appears first, which is not always the widget it matters most to. When several widgets share a dimension such as a scenario or a period, give the dashboard a <b>selector bar</b>: <b>Selector bar</b> in the Design toolbar, <b>+ Add dimension</b>, then pick the dimension and the member it <b>opens on</b> (or <i>first member</i>), and <b>Save selector bar</b>. It is saved on its own, not with the layout.</p>
+<p>The bar sits at the top of the dashboard, one selector per dimension, and stays in view while the page scrolls. Every grid and chart follows it and shows no selector of its own for those dimensions, also one with <b>Context sync</b> off, which keeps only its other selectors to itself. A KPI follows it when set to <b>Follow dashboard selectors</b> or <b>Follow the selector bar</b>. A tile showing a company total should use <b>Follow the selector bar</b>: <b>Follow dashboard selectors</b> also takes one member of each of the metric's other dimensions. A KPI pinned to a member or showing the whole-model total keeps that. A person who cannot see the opening member gets the dimension's first member they can see. The bar follows the dashboard into a new revision and into a model export; renaming a member code updates it. Up to 8 dimensions; a dimension appears once. The AI Developer sets it with <code>selector_bar</code> on <code>create_dashboard</code> and <code>update_dashboard</code>.</p>
 
 <h4>Widget Properties</h4>
 <figure><img src="img/26-dashboard-widget-properties.png" alt="Selected chart widget with the Widget Properties panel on the right"><figcaption>Selecting a widget opens Widget Properties. Changes go into a draft; Save at the bottom of the page writes them.</figcaption></figure>
@@ -455,7 +459,7 @@
 <tr><td><b>Default view</b> (grid)</td><td>For Metrics and each dimension of the grid: <b>Row</b>, <b>Column</b>, <b>Context</b> (a selector) or none. Default: metrics in rows, first dimension in columns, other dimensions as selectors.</td></tr>
 <tr><td><b>Metrics shown</b> (grid)</td><td>Which of the grid's metrics the widget shows and in what order (the arrows move one up or down); with metrics as a selector, the first is the one it opens on. All of them, in the grid's order, is the default and follows the grid. A metric deleted from the model leaves the list.</td></tr>
 <tr><td><b>&lt;Dimension&gt; members shown</b> (grid, per row or column dimension)</td><td><b>All members</b> (the default) follows the dimension, hierarchy and all. Untick it to choose members and their order — a table with FY, Q1, Q2 and H2 as its columns instead of every year, half, quarter and month; the arrows move one up or down. Totals among them still add up their months. Over the API and for the AI, <code>widget_props.show_members</code>: <code>{"&lt;dimension id&gt;": ["&lt;member code&gt;", …]}</code>; revision copies, model export and a member-code rename carry it.</td></tr>
-<tr><td><b>Default context</b> (KPI)</td><td><b>Whole-model total</b>, <b>Follow dashboard selectors</b>, or <b>Pin to a member</b> with a <b>Scope dimension</b> and <b>Scope member</b>.</td></tr>
+<tr><td><b>Default context</b> (KPI)</td><td><b>Whole-model total</b>, <b>Follow dashboard selectors</b> (a member of every one of the metric's dimensions), <b>Follow the selector bar (total of the rest)</b> (the bar's member for each bar dimension the metric has, the total over every other dimension: a company total per scenario), or <b>Pin to a member</b> with a <b>Scope dimension</b> and <b>Scope member</b>.</td></tr>
 <tr><td><b>Chart configuration</b></td><td>The chart editor (below).</td></tr>
 <tr><td>Buttons (Trigger, Integration)</td><td><b>Button label</b>, <b>Button color</b>, <b>Corners</b> (<b>Rounded</b>, the default; <b>Sharp</b>; <b>Pill</b> — the same in Design, Preview and on the dashboard), and for triggers a <b>Confirmation message</b> shown before the run (blank runs immediately).</td></tr>
 <tr><td><b>Source object</b> (table, KPI, trigger, integration)</td><td>Change the source. Grid, chart and import sources are fixed at placement. A Records widget's <b>Entry</b> section turns <b>Show the + New record button</b> on or off.</td></tr>
@@ -816,6 +820,7 @@
 <tr><td>Calculated metric</td><td>A metric defined by a formula; read-only.</td></tr>
 <tr><td>Code</td><td>The identity of a dimension member; labels are display only.</td></tr>
 <tr><td>Context / selectors</td><td>The dimensions a widget lets the user choose; synced widgets share one selector per dimension.</td></tr>
+<tr><td>Selector bar</td><td>A dashboard's own row of selectors at its top, one per chosen dimension, which every widget on it follows.</td></tr>
 <tr><td>Table mapping</td><td>Rule that posts a field of a table's records into an input metric (Integrations › Records).</td></tr>
 <tr><td>Grid</td><td>A set of metrics and dimensions shown as one table; a metric sits in at most one grid.</td></tr>
 <tr><td>Instance</td><td>One run of a workflow; keeps the definition it started with.</td></tr>

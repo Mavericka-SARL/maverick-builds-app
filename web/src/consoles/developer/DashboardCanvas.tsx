@@ -6,6 +6,7 @@ import { ChartWidgetEditor } from "../dashboard/ChartWidgetEditor";
 import { chartConfigFromDraft, isChartConfigComplete } from "../dashboard/chartTypes";
 import { DashboardWidgetGrid } from "../business/DashboardWidgets";
 import { DashboardLinkPicker } from "./DashboardLinkPicker";
+import { SelectorBarEditor } from "./SelectorBarEditor";
 import { defaultLeafCode, groupWidgetsIntoRows, buttonRadius } from "../dashboardLayout";
 import { Toolbar, ToolbarGroup, Button, SegmentedControl, FilterChip, StatusBadge, IconButton, Field, Select, TextInput, Textarea, NumberInput, Checkbox, PropertyPanel, ConfirmDialog, UnsavedChangesBar, useUnsavedGuard, RichText } from "../../ui";
 
@@ -110,6 +111,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [showBar, setShowBar] = useState(false);
   const [newWidget, setNewWidget] = useState({ widget_type: "grid", ref_id: "", content: "" });
   // A new records widget: whether it offers "+ New record" (off by default).
   const [newRecordButton, setNewRecordButton] = useState(false);
@@ -385,7 +387,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
   // designer could not tell which widget had which selector (reported live,
   // 2026-09-10) — design mode shows every widget's own set, separately.
   let sharedOwnerByDim: Record<string, DashboardWidget> = {};
-  function widgetSelectorInfo(w: DashboardWidget): { dims: string[]; mode: "shared" | "own" | "pinned" | "total" } | null {
+  function widgetSelectorInfo(w: DashboardWidget): { dims: string[]; mode: "shared" | "own" | "pinned" | "total" | "bar" } | null {
     const pd = propsDraft[w.id];
     const refId = pd?.ref_id !== undefined ? pd.ref_id : w.ref_id;
     const wp: WidgetProps = { ...(w.widget_props ?? {}), ...(pd?.widget_props ?? {}) };
@@ -394,19 +396,23 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
     const dimName = (id: string) => id === "__metrics__" ? "Metric"
       : (kpiScopeDims as DevDimension[]).find(d => d.id === id)?.name ?? id.slice(0, 8);
     const synced = wp.sync_context !== false;
+    // A dimension on the dashboard's selector bar is selected there, not on
+    // a widget that follows the shared selection.
+    const barIds = new Set((dash?.selector_bar ?? []).map(e => e.dimension_id));
+    const sharedName = (id: string) => barIds.has(id) ? `${dimName(id)} (bar)` : dimName(id);
     if (w.widget_type === "grid") {
       const g = (grids as GridDef[]).find(x => x.id === refId);
       if (!g) return null;
       // Same default PlanningGrid applies: first dimension on columns, the
       // rest as context selectors, unless the widget saved its own layout.
       const ctxIds = wp.default_view?.context ?? g.dimension_ids.slice(1);
-      return { dims: ctxIds.map(dimName), mode: synced ? "shared" : "own" };
+      return { dims: ctxIds.map(synced ? sharedName : dimName), mode: synced ? "shared" : "own" };
     }
     if (w.widget_type === "chart") {
       const g = (grids as GridDef[]).find(x => x.id === refId);
       if (!g) return null;
       const plotted = wp.chart?.dimension_id;
-      return { dims: g.dimension_ids.filter(id => id !== plotted).map(dimName), mode: synced ? "shared" : "own" };
+      return { dims: g.dimension_ids.filter(id => id !== plotted).map(synced ? sharedName : dimName), mode: synced ? "shared" : "own" };
     }
     if (w.widget_type === "metric_kpi") {
       const m = (metrics as Metric[]).find(x => x.id === refId);
@@ -414,7 +420,8 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
       const kmode = wp.kpi_context_mode ?? (wp.kpi_scope ? "pin" : synced ? "sync" : "total");
       if (kmode === "pin" && wp.kpi_scope) return { dims: [`${dimName(wp.kpi_scope.dimension_id)} = ${wp.kpi_scope.member_code}`], mode: "pinned" };
       if (kmode === "total") return { dims: [], mode: "total" };
-      return { dims: (m.dimension_ids ?? []).map(dimName), mode: "shared" };
+      if (kmode === "bar") return { dims: (m.dimension_ids ?? []).filter(id => barIds.has(id)).map(sharedName), mode: "bar" };
+      return { dims: (m.dimension_ids ?? []).map(sharedName), mode: "shared" };
     }
     return null;
   }
@@ -545,7 +552,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
             value={mode}
             onChange={(m) => {
               setMode(m);
-              if (m === "preview") { setSelectedId(null); setShowAdd(false); }
+              if (m === "preview") { setSelectedId(null); setShowAdd(false); setShowBar(false); }
             }}
           />
 
@@ -562,16 +569,33 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                       if (isActive) { setShowAdd(false); return; }
                       setNewWidget({ widget_type: type, ref_id: "", content: "" });
                       setShowAdd(true);
+                      setShowBar(false);
                     }}
                   >
                     {label}
                   </FilterChip>
                 );
               })}
+              <div style={{ width: 1, height: 20, background: "var(--color-border)", flexShrink: 0 }} />
+              <FilterChip active={showBar} onClick={() => { setShowBar(v => !v); setShowAdd(false); }}>
+                Selector bar{(dash?.selector_bar?.length ?? 0) > 0 ? ` (${dash?.selector_bar?.length})` : ""}
+              </FilterChip>
             </>
           )}
         </ToolbarGroup>
       </Toolbar>
+
+      {/* ── Selector bar ── */}
+      {showBar && mode === "design" && dash && (
+        <SelectorBarEditor
+          key={JSON.stringify(dash.selector_bar ?? [])}
+          dashId={dashId}
+          bar={dash.selector_bar ?? []}
+          dims={kpiScopeDims as DevDimension[]}
+          onSaved={invalidateAll}
+          onClose={() => setShowBar(false)}
+        />
+      )}
 
       {/* ── Add Widget Panel ── */}
       {showAdd && mode === "design" && (() => {
@@ -759,6 +783,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                   })}
                   ctx={previewCtx as DemoContext}
                   dashboardId={dashId}
+                  selectorBar={dash?.selector_bar}
                 />
               )}
             </div>
@@ -940,16 +965,17 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                       {mode === "design" && (() => {
                         const info = widgetSelectorInfo(w);
                         if (!info) return null;
-                        const badge = info.mode === "shared" ? "synced" : info.mode === "own" ? "own" : info.mode === "pinned" ? "pinned" : "total";
+                        const badge = info.mode === "shared" ? "synced" : info.mode === "own" ? "own" : info.mode === "pinned" ? "pinned" : info.mode === "bar" ? "bar" : "total";
                         const pos = ({ ...(w.widget_props ?? {}), ...(propsDraft[w.id]?.widget_props ?? {}) } as WidgetProps).selectors_position ?? "top";
-                        const tone = info.mode === "shared" ? "brand" : info.mode === "own" ? "warning" : "neutral";
+                        const tone = info.mode === "shared" || info.mode === "bar" ? "brand" : info.mode === "own" ? "warning" : "neutral";
                         return (
                           <div aria-label="Widget selectors" title={`Selectors (${badge}): ${info.dims.join(", ") || "none"}`} style={{ display: "flex", flexWrap: "nowrap", alignItems: "center", gap: 4, padding: "5px 10px", borderBottom: "1px solid var(--color-border-muted)", background: "var(--color-surface-faint)", fontSize: 11, overflow: "hidden", whiteSpace: "nowrap", flexShrink: 0 }}>
                             <span style={{ color: "var(--color-text-quiet)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 10 }}>Selectors</span>
                             <StatusBadge tone={tone}>{badge}</StatusBadge>
-                            {info.dims.length === 0 && <span style={{ color: "var(--color-text-quiet)" }}>{info.mode === "total" ? "none (grand total)" : "none"}</span>}
+                            {info.dims.length === 0 && <span style={{ color: "var(--color-text-quiet)" }}>{info.mode === "total" || info.mode === "bar" ? "none (grand total)" : "none"}</span>}
                             {info.dims.map(d => {
-                              const owner = info.mode === "shared" ? sharedOwnerByDim[d] : undefined;
+                              // A bar dimension is drawn by the bar, not by a widget.
+                              const owner = info.mode === "shared" && !d.endsWith(" (bar)") ? sharedOwnerByDim[d] : undefined;
                               if (owner && owner.id !== w.id) {
                                 const ownerName = owner.title || widgetSourceLabel(owner) || owner.widget_type.replace(/_/g, " ");
                                 return <span key={d} title={`Shared selector drawn on "${ownerName}"; this widget follows it`} style={{ color: "var(--color-text-quiet)", whiteSpace: "nowrap" }}>{d} → {ownerName}</span>;
@@ -1419,6 +1445,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                   >
                     <option value="total">Whole-model total</option>
                     <option value="sync">Follow dashboard selectors</option>
+                    <option value="bar">Follow the selector bar (total of the rest)</option>
                     {scopableDims.length > 0 && <option value="pin">Pin to a member</option>}
                   </Select>
                   {kmode === "pin" && scopableDims.length > 0 && (
