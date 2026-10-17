@@ -34,7 +34,7 @@
   .ok { border-left-color: var(--ok); }
   .note b:first-child { display: block; margin-bottom: .15em; }
   figure { margin: .8em 0 1em; page-break-inside: avoid; }
-  figure img { width: 100%; border: 1px solid var(--line); border-radius: 4px; }
+  figure img { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 4px; }
   figcaption { font-size: .86em; color: var(--muted); margin-top: .35em; }
   a { color: inherit; text-decoration: none; }
   .toc ul { columns: 2; column-gap: 2em; list-style: none; padding-left: 0; margin: .3em 0 .7em; }
@@ -62,7 +62,7 @@
      index. Print (the PDF) keeps the rules above. */
   @media screen {
     :root { --canvas:#eef1f6; --border:#c9d1dd; --head:#eceefa; --zebra:#fafbfd; --hit:#fff4cc; }
-    html { font-size: 15px; background: var(--canvas); scroll-behavior: smooth; }
+    html { font-size: 15px; background: var(--canvas); }
     body { box-sizing: border-box; max-width: 980px; margin: 32px auto 80px; padding: 44px 56px 56px; background: #fff;
            border: 1px solid var(--border); border-radius: 14px; line-height: 1.55;
            box-shadow: 0 1px 2px rgba(20,30,60,.05), 0 10px 30px rgba(20,30,60,.07); }
@@ -221,7 +221,7 @@
 
 <h3>The Metrics screen</h3>
 <p class="path">Sidebar: Developer › Metrics</p>
-<figure><img src="../developer-manual/img/20-metric-add-form.png" alt="Add metric form"><figcaption>The Add metric form. The Formula field takes the expression; the aggregation rule and time summary decide how its results total (chapter 15).</figcaption></figure>
+<figure><img src="../developer-manual/img/20-metric-add-form.png" width="1140" height="900" alt="Add metric form"><figcaption>The Add metric form. The Formula field takes the expression; the aggregation rule and time summary decide how its results total (chapter 15).</figcaption></figure>
 <table class="ctl">
 <tr><th>Where</th><th>What it does for formulas</th></tr>
 <tr><td><b>Add metric</b> form</td><td><b>Metric name</b> is the technical name formulas use (snake_case, for example <code>gross_margin</code>). With <b>Type</b> Calc, <b>Formula</b> takes the expression. <b>Aggregation rule</b> and <b>Time summary</b> decide the totals. As you type, names that are neither a metric nor a dimension of the revision are listed under the field ("Not a metric or dimension in this revision: …"). That is a hint: <b>Add metric</b> stays available, and the server then checks the whole formula and shows its message if it refuses it.</td></tr>
