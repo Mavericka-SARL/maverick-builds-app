@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>maverickbuilds.app Formulas Manual</title>
 <style>
   @page { size: A4; margin: 16mm 15mm 18mm 15mm; }
@@ -35,9 +36,13 @@
   figure { margin: .8em 0 1em; page-break-inside: avoid; }
   figure img { width: 100%; border: 1px solid var(--line); border-radius: 4px; }
   figcaption { font-size: .86em; color: var(--muted); margin-top: .35em; }
-  .toc ol { columns: 2; column-gap: 2em; padding-left: 1.4em; }
+  a { color: inherit; text-decoration: none; }
+  .toc ul { columns: 2; column-gap: 2em; list-style: none; padding-left: 0; margin: .3em 0 .7em; }
   .toc li { margin: .12em 0; break-inside: avoid; }
-  .toc .part { font-weight: 700; margin-top: .6em; list-style: none; margin-left: -1.4em; }
+  .toc .part { font-weight: 700; margin-top: .6em; }
+  .toc .part:first-child { margin-top: 0; }
+  .toc .n { display: inline-block; min-width: 1.7em; color: var(--muted); }
+  .side, .totop { display: none; }
   .path { font-size: .9em; color: var(--muted); margin: -.3em 0 .8em; }
   .small { font-size: .9em; color: var(--muted); }
   .kv td:first-child { width: 28%; font-weight: 600; }
@@ -52,54 +57,158 @@
   .ex td:last-child { width: 18%; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: .92em; }
   .idx td:first-child { width: 17%; font-family: "SF Mono", Menlo, Consolas, monospace; font-weight: 600; }
   .idx td:nth-child(2) { width: 36%; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: .9em; }
+  /* On screen: a bordered page on a soft background, a chapter sidebar on
+     wide windows, bordered tables and function cards, linked contents and
+     index. Print (the PDF) keeps the rules above. */
+  @media screen {
+    :root { --canvas:#eef1f6; --border:#c9d1dd; --head:#eceefa; --zebra:#fafbfd; --hit:#fff4cc; }
+    html { font-size: 15px; background: var(--canvas); scroll-behavior: smooth; }
+    body { box-sizing: border-box; max-width: 980px; margin: 32px auto 80px; padding: 44px 56px 56px; background: #fff;
+           border: 1px solid var(--border); border-radius: 14px; line-height: 1.55;
+           box-shadow: 0 1px 2px rgba(20,30,60,.05), 0 10px 30px rgba(20,30,60,.07); }
+    a { color: var(--accent); }
+    a:hover { text-decoration: underline; }
+    h2 { margin-top: 2.6em; scroll-margin-top: 20px; }
+    h2.first { margin-top: 1.6em; }
+    h3, h4, [id] { scroll-margin-top: 20px; }
+
+    .cover { height: auto; display: block; padding: 0 0 8px; }
+    .cover h1 { font-size: 2.3em; margin-top: .3em; }
+    .cover .meta { margin-top: 1.6em; border: 1px solid var(--border); border-radius: 10px; background: var(--zebra); overflow: hidden; }
+    .cover .meta div { margin: 0; padding: .55em 1em; border-top: 1px solid var(--line); }
+    .cover .meta div:first-child { border-top: 0; }
+
+    .toc { border: 1px solid var(--border); border-radius: 12px; padding: .2em 1.4em 1em; margin-top: 2em; }
+    .toc h2.first { border-bottom: 0; margin: .8em 0 .4em; }
+    .toc ul { columns: 2; column-gap: 2.4em; }
+    .toc li { margin: .18em 0; }
+
+    table { border-collapse: separate; border-spacing: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin: .7em 0 1.1em; }
+    th, td { border: 0; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); padding: .5em .75em; }
+    th:last-child, td:last-child { border-right: 0; }
+    tr:last-child > td { border-bottom: 0; }
+    th { background: var(--head); border-bottom-color: var(--border); }
+    tr:nth-child(even) > td { background: var(--zebra); }
+    td.sig { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: .9em; background: #f6f7fe; }
+    .kv td:first-child { background: #f6f7fe; }
+    td:target, .sig:target, h2:target { background: var(--hit) !important; }
+
+    .fn { border: 1px solid var(--border); border-radius: 10px; margin: 1.1em 0 1.2em; overflow: hidden; }
+    .fn:has(.sig:target) { border-color: #e2b93b; box-shadow: 0 0 0 3px var(--hit); }
+    .fn h4 { margin: 0 0 .45em; padding: .65em 1em; background: var(--soft); border-bottom: 1px solid var(--line); }
+    .fn > p { margin: .4em 0 .5em; padding: 0 1em; }
+    .fn table.ex { width: calc(100% - 2em); margin: .5em 1em 1em; }
+    .ex td:last-child { color: #145c37; background: #f1f8f4; }
+    .ex tr:nth-child(even) > td:last-child { background: #e9f4ed; }
+
+    .note { border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 8px; padding: .7em 1em; margin: 1em 0; }
+    .warn { border-left-color: var(--warn); }
+    .ok { border-left-color: var(--ok); }
+    pre { border-radius: 8px; }
+    figure img { border-color: var(--border); border-radius: 8px; }
+
+    .totop { display: block; position: fixed; right: 18px; bottom: 18px; padding: .5em 1em; border-radius: 999px; background: var(--accent);
+             color: #fff; font-weight: 600; font-size: .85em; box-shadow: 0 4px 14px rgba(40,40,120,.25); }
+    .totop:hover { text-decoration: none; filter: brightness(1.1); }
+  }
+  @media screen and (min-width: 1260px) {
+    .side { display: block; position: fixed; top: 0; bottom: 0; left: 0; width: 264px; box-sizing: border-box; overflow-y: auto;
+            padding: 24px 16px 32px 22px; background: #fff; border-right: 1px solid var(--border); font-size: .88em; line-height: 1.35; }
+    .side .brand { font-weight: 700; font-size: 1.1em; color: var(--ink); margin-bottom: .1em; }
+    .side .kicker { color: var(--accent); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; font-size: .75em; }
+    .side .group { margin: 1.2em 0 .35em; color: var(--muted); font-weight: 600; font-size: .8em; letter-spacing: .05em; text-transform: uppercase; }
+    .side a { display: block; color: var(--ink); padding: .28em .55em; border-radius: 6px; }
+    .side a:hover { background: var(--soft); color: var(--accent); text-decoration: none; }
+    .side .n { display: inline-block; min-width: 1.6em; color: var(--muted); }
+    .side .find { margin-top: 1em; border: 1px solid var(--border); background: var(--soft); font-weight: 600; text-align: center; }
+    body { margin-left: calc(50vw - 358px); }
+    .totop { display: none; }
+  }
+  @media screen and (max-width: 760px) {
+    html { font-size: 14px; }
+    body { margin: 0; padding: 20px 16px 48px; border: 0; border-radius: 0; box-shadow: none; }
+    table { display: block; overflow-x: auto; }
+    .toc { padding: .2em 1em .8em; }
+    .toc ul { columns: 1; }
+    .fn table.ex { width: auto; }
+  }
 </style>
 </head>
 <body>
+<nav class="side" aria-label="Chapters">
+  <div class="kicker">maverickbuilds.app</div>
+  <div class="brand"><a href="#contents" style="padding:0">Formulas Manual</a></div>
+  <a class="find" href="#function-index">Find a function (A–Z)</a>
+  <div class="group">Foundations</div>
+  <a href="#where"><span class="n">1</span>Where formulas live</a>
+  <a href="#evaluation"><span class="n">2</span>How a formula is evaluated</a>
+  <a href="#syntax"><span class="n">3</span>Syntax</a>
+  <a href="#values"><span class="n">4</span>Values, types and comparisons</a>
+  <a href="#errors"><span class="n">5</span>Errors and failing cells</a>
+  <div class="group">Function reference</div>
+  <a href="#logic"><span class="n">6</span>Logic</a>
+  <a href="#math"><span class="n">7</span>Math and rounding</a>
+  <a href="#aggregates"><span class="n">8</span>Aggregates over arguments</a>
+  <a href="#text"><span class="n">9</span>Text</a>
+  <a href="#dates"><span class="n">10</span>Dates</a>
+  <a href="#members"><span class="n">11</span>The cell's members and their properties</a>
+  <a href="#lookup"><span class="n">12</span>LOOKUP</a>
+  <a href="#conditional"><span class="n">13</span>Conditional aggregation</a>
+  <a href="#time"><span class="n">14</span>Time series</a>
+  <div class="group">Using formulas well</div>
+  <a href="#totals"><span class="n">15</span>Totals: aggregation rule and time summary</a>
+  <a href="#recipes"><span class="n">16</span>Recipes</a>
+  <a href="#validation"><span class="n">17</span>Validation, troubleshooting and limits</a>
+  <div class="group">Appendix</div>
+  <a href="#function-index"><span class="n">A</span>Function index</a>
+  <a href="#error-index"><span class="n">B</span>Error index</a>
+</nav>
+<a class="totop" href="#contents">↑ Contents</a>
 
 <section class="cover">
   <div class="kicker">maverickbuilds.app</div>
   <h1>maverickbuilds.app<br>Formulas Manual</h1>
   <div class="sub">The formula language of calculated metrics: every function, how a formula reads the model, and how its results total</div>
   <div class="meta">
-    <div><b>Edition:</b> 2026-09-28, describing the formula engine as built on top of repository commit 5289903</div>
+    <div><b>Edition:</b> 2026-10-17, describing the formula engine of release 2026.10.17</div>
     <div><b>Audience:</b> people with the <b>developer</b> role who write calculated metrics, and anyone reviewing a model's formulas</div>
     <div><b>Scope:</b> the formula language and the Metrics screen. The rest of the console is in the Developer Manual. No API calls, no scripts</div>
     <div><b>Verified by:</b> every function and example is asserted by <code>internal/formula/catalogue_test.go</code>; every recipe in chapter 16 was run live, cell by cell, by <code>cmd/verify-formula-catalogue</code></div>
-    <div><b>Source:</b> <code>docs/formulas-manual/parts/*.html</code>, rebuilt into this PDF with <code>build.sh</code></div>
+    <div><b>Source:</b> <code>docs/formulas-manual/parts/*.html</code>, rebuilt into this page and its PDF with <code>build.sh</code></div>
   </div>
 </section>
 
 <section class="toc">
-<h2 class="first">Contents</h2>
-<ol>
+<h2 class="first" id="contents">Contents</h2>
+<ul>
   <li class="part">Part I: Foundations</li>
-  <li>Where formulas live</li>
-  <li>How a formula is evaluated</li>
-  <li>Syntax</li>
-  <li>Values, types and comparisons</li>
-  <li>Errors and failing cells</li>
+  <li><a href="#where"><span class="n">1.</span>Where formulas live</a></li>
+  <li><a href="#evaluation"><span class="n">2.</span>How a formula is evaluated</a></li>
+  <li><a href="#syntax"><span class="n">3.</span>Syntax</a></li>
+  <li><a href="#values"><span class="n">4.</span>Values, types and comparisons</a></li>
+  <li><a href="#errors"><span class="n">5.</span>Errors and failing cells</a></li>
   <li class="part">Part II: Function reference</li>
-  <li>Logic</li>
-  <li>Math and rounding</li>
-  <li>Aggregates over arguments</li>
-  <li>Text</li>
-  <li>Dates</li>
-  <li>The cell's members and their properties</li>
-  <li>LOOKUP</li>
-  <li>Conditional aggregation</li>
-  <li>Time series</li>
+  <li><a href="#logic"><span class="n">6.</span>Logic</a></li>
+  <li><a href="#math"><span class="n">7.</span>Math and rounding</a></li>
+  <li><a href="#aggregates"><span class="n">8.</span>Aggregates over arguments</a></li>
+  <li><a href="#text"><span class="n">9.</span>Text</a></li>
+  <li><a href="#dates"><span class="n">10.</span>Dates</a></li>
+  <li><a href="#members"><span class="n">11.</span>The cell's members and their properties</a></li>
+  <li><a href="#lookup"><span class="n">12.</span>LOOKUP</a></li>
+  <li><a href="#conditional"><span class="n">13.</span>Conditional aggregation</a></li>
+  <li><a href="#time"><span class="n">14.</span>Time series</a></li>
   <li class="part">Part III: Using formulas well</li>
-  <li>Totals: aggregation rule and time summary</li>
-  <li>Recipes</li>
-  <li>Validation, troubleshooting and limits</li>
+  <li><a href="#totals"><span class="n">15.</span>Totals: aggregation rule and time summary</a></li>
+  <li><a href="#recipes"><span class="n">16.</span>Recipes</a></li>
+  <li><a href="#validation"><span class="n">17.</span>Validation, troubleshooting and limits</a></li>
   <li class="part">Appendix</li>
-  <li>Function index</li>
-  <li>Error index</li>
-</ol>
+  <li><a href="#function-index"><span class="n">A.</span>Function index</a></li>
+  <li><a href="#error-index"><span class="n">B.</span>Error index</a></li>
+</ul>
 <p class="small">74 functions: 45 general (logic, math, argument aggregates, text, dates), 10 dimensional (PARENT, LOOKUP and eight conditional aggregations) and 19 time series, plus the two member references <code>dimension</code> and <code>dimension.property</code>.</p>
 </section>
 
-<h2>1. Where formulas live</h2>
+<h2 id="where">1. Where formulas live</h2>
 <p>A formula belongs to a <b>calculated metric</b>, never to a cell. You write it once, on the metric, and the engine evaluates it at every cell of the grid the metric is placed on: one value per combination of that grid's members, plus the totals. There is no cell-by-cell override and no "recalculate" button: every change that could alter a result recalculates it on the server before the screens refresh.</p>
 <ul>
   <li><b>Input</b> metrics hold values that people type, import or post from forms. They have no formula.</li>
@@ -130,7 +239,7 @@
   <li>A metric that reads no other metric (for example <code>=DAYSINMONTH(YEAR(START()), MONTH(START()))</code>) is computed when the revision is activated or the metric is saved, not when an input changes.</li>
 </ul>
 
-<h2>2. How a formula is evaluated</h2>
+<h2 id="evaluation">2. How a formula is evaluated</h2>
 <h3>One cell at a time</h3>
 <p>For each cell of the metric's grid, the engine evaluates the formula with every name bound to the cell:</p>
 <table class="kv">
@@ -158,7 +267,7 @@
 <h3>What a result can be</h3>
 <p>Every stored result is a <b>number</b>. TRUE and FALSE are stored as 1 and 0; a blank result stores nothing (the cell stays empty, and it is left out of totals); a text result is an error (<code>#VALUE!</code>). Text functions are therefore used <i>inside</i> a formula, in comparisons, criteria and member codes, not as its final result. The metric's <b>Format</b> (number, percentage, currency) only changes how the number is shown.</p>
 
-<h2>3. Syntax</h2>
+<h2 id="syntax">3. Syntax</h2>
 <pre>=revenue - cost
 =IF(revenue = 0, 0, (revenue - cost) / revenue)
 =ROUND(quantity * unit_price, 2)
@@ -194,7 +303,7 @@
 </table>
 <p>Not part of the language: cell addresses (<code>A1</code> is just an unknown name), ranges (<code>A1:B2</code>), array formulas, named ranges, the <code>%</code> suffix, and references to other workbooks.</p>
 
-<h2>4. Values, types and comparisons</h2>
+<h2 id="values">4. Values, types and comparisons</h2>
 <table>
 <tr><th style="width:16%">Type</th><th>Where it comes from</th><th style="width:34%">In arithmetic</th></tr>
 <tr><td>Number</td><td>Metric values, number literals, number and date properties, most functions</td><td>Itself</td></tr>
@@ -215,7 +324,7 @@
 <h3>Numbers shown as text</h3>
 <p>Where a number becomes text (<code>&amp;</code>, <code>CONCAT</code>, <code>LEN</code>, a comparison with text) it is written with up to 15 significant digits and no exponent between 1e-9 and 1e21: <code>"Total " &amp; 1234567</code> is "Total 1234567", <code>"" &amp; (0.1 + 0.2)</code> is "0.3". For a fixed number of decimals use <code>TEXT(x, "0.00")</code>.</p>
 
-<h2>5. Errors and failing cells</h2>
+<h2 id="errors">5. Errors and failing cells</h2>
 <table>
 <tr><th style="width:15%">Value</th><th>Produced by</th></tr>
 <tr><td><code>#DIV/0!</code></td><td>Division by zero; <code>AVERAGE</code> of no numbers; <code>AVERAGEIFS</code> with no recorded match; <code>MOD</code> by 0; <code>CEILING</code>/<code>FLOOR</code> with significance 0</td></tr>
@@ -240,104 +349,110 @@
   <li>If every cell fails, the metric keeps its last successful results rather than showing zeros, except when the failures all name a member that no longer exists: then its results are cleared.</li>
 </ul>
 
-<h2>6. Logic</h2>
+<h2 id="logic">6. Logic</h2>
 <p>These functions evaluate only what they need. The branch not taken is never computed, so it can safely contain a division that would fail.</p>
 
-<div class="fn"><h4><span class="sig">IF(condition, then [, else])</span></h4>
+<div class="fn"><h4><span class="sig" id="fn-IF">IF(condition, then [, else])</span></h4>
 <p><i>then</i> when the condition is TRUE (or a non-zero number), otherwise <i>else</i>; without <i>else</i>, FALSE (stored as 0).</p>
-<table class="ex"><tr><td>IF(revenue = 0, 0, (revenue - cost) / revenue)</td><td>margin ratio, 0 when no revenue</td><td>0.25 for 1200/900</td></tr>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>IF(revenue = 0, 0, (revenue - cost) / revenue)</td><td>margin ratio, 0 when no revenue</td><td>0.25 for 1200/900</td></tr>
 <tr><td>IF(zero = 0, 0, revenue / zero)</td><td>untaken branch never divides</td><td>0</td></tr>
 <tr><td>IF(FALSE, 1)</td><td>no else</td><td>FALSE</td></tr></table></div>
 
-<div class="fn"><h4><span class="sig">IFS(condition1, value1 [, condition2, value2 …])</span></h4>
+<div class="fn"><h4><span class="sig" id="fn-IFS">IFS(condition1, value1 [, condition2, value2 …])</span></h4>
 <p>The value of the first TRUE condition. Arguments come in pairs; end with <code>TRUE, fallback</code>, because no match is <code>#N/A</code>.</p>
-<table class="ex"><tr><td>IFS(revenue &gt; 2000, "high", revenue &gt; 1000, "mid", TRUE, "low")</td><td>band</td><td>"mid" for 1200</td></tr>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>IFS(revenue &gt; 2000, "high", revenue &gt; 1000, "mid", TRUE, "low")</td><td>band</td><td>"mid" for 1200</td></tr>
 <tr><td>IFS(FALSE, 1)</td><td>nothing matches</td><td>#N/A</td></tr></table></div>
 
-<div class="fn"><h4><span class="sig">AND(a, b, …)</span> · <span class="sig">OR(a, b, …)</span> · <span class="sig">NOT(a)</span></h4>
+<div class="fn"><h4><span class="sig" id="fn-AND">AND(a, b, …)</span> · <span class="sig" id="fn-OR">OR(a, b, …)</span> · <span class="sig" id="fn-NOT">NOT(a)</span></h4>
 <p>TRUE when all / any argument is TRUE; NOT inverts. A number counts as TRUE when non-zero. AND stops at the first FALSE, OR at the first TRUE, so <code>OR(TRUE, 1/0)</code> is TRUE (Excel gives <code>#DIV/0!</code>).</p>
-<table class="ex"><tr><td>IF(AND(units &gt; 5, OR(region = "UK", region = "US")), 10, 0)</td><td>two conditions</td><td>10 or 0</td></tr>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>IF(AND(units &gt; 5, OR(region = "UK", region = "US")), 10, 0)</td><td>two conditions</td><td>10 or 0</td></tr>
 <tr><td>NOT(0)</td><td></td><td>TRUE</td></tr></table></div>
 
-<div class="fn"><h4><span class="sig">IFERROR(value, fallback)</span> · <span class="sig">IFNA(value, fallback)</span></h4>
+<div class="fn"><h4><span class="sig" id="fn-IFERROR">IFERROR(value, fallback)</span> · <span class="sig" id="fn-IFNA">IFNA(value, fallback)</span></h4>
 <p>IFERROR replaces any error with <i>fallback</i>; IFNA replaces only <code>#N/A</code> and lets every other error through.</p>
-<table class="ex"><tr><td>IFERROR(revenue / units, 0)</td><td>any error</td><td>0 when units = 0</td></tr>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>IFERROR(revenue / units, 0)</td><td>any error</td><td>0 when units = 0</td></tr>
 <tr><td>IFNA(LOOKUP(sales, region, "XX"), -1)</td><td>missing member</td><td>-1</td></tr>
 <tr><td>IFNA(1 / 0, 7)</td><td>not #N/A</td><td>#DIV/0!</td></tr></table></div>
 
-<div class="fn"><h4><span class="sig">SWITCH(expression, match1, result1 [, match2, result2 …] [, default])</span></h4>
+<div class="fn"><h4><span class="sig" id="fn-SWITCH">SWITCH(expression, match1, result1 [, match2, result2 …] [, default])</span></h4>
 <p>Compares <i>expression</i> with each match as <code>=</code> does (text ignoring case) and returns the paired result; an odd last argument is the default. No match and no default is <code>#N/A</code>. At least three arguments.</p>
-<table class="ex"><tr><td>SWITCH(region.currency, "EUR", 1.1, "USD", 1, 0)</td><td>per-currency factor</td><td>1.1 for EUR</td></tr>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>SWITCH(region.currency, "EUR", 1.1, "USD", 1, 0)</td><td>per-currency factor</td><td>1.1 for EUR</td></tr>
 <tr><td>SWITCH(MONTH(START()), 1, 0.1, 5, 0.25, 0)</td><td>by month</td><td>0.25 in May</td></tr></table></div>
 
-<h2>7. Math and rounding</h2>
+<h2 id="math">7. Math and rounding</h2>
 <p>All take numbers (TRUE/FALSE count as 1/0, blank as 0); text is <code>#VALUE!</code>.</p>
 <table>
 <tr><th style="width:26%">Function</th><th>Result</th><th style="width:34%">Examples</th></tr>
-<tr><td class="sig">ABS(x)</td><td>Absolute value.</td><td><code>ABS(-3.5)</code> = 3.5</td></tr>
-<tr><td class="sig">INT(x)</td><td>Rounds down to a whole number (toward minus infinity).</td><td><code>INT(7.8)</code> = 7, <code>INT(-7.2)</code> = -8</td></tr>
-<tr><td class="sig">ROUND(x, digits)</td><td>Rounds half away from zero to <i>digits</i> decimals; negative digits round to tens, hundreds, …</td><td><code>ROUND(3.14159, 2)</code> = 3.14, <code>ROUND(-2.5, 0)</code> = -3, <code>ROUND(1234.5, -2)</code> = 1200</td></tr>
-<tr><td class="sig">ROUNDUP(x, digits)</td><td>Rounds away from zero.</td><td><code>ROUNDUP(3.111, 2)</code> = 3.12, <code>ROUNDUP(-3.111, 2)</code> = -3.12</td></tr>
-<tr><td class="sig">ROUNDDOWN(x, digits)</td><td>Rounds toward zero.</td><td><code>ROUNDDOWN(-3.199, 2)</code> = -3.19, <code>ROUNDDOWN(1299, -2)</code> = 1200</td></tr>
-<tr><td class="sig">CEILING(x, significance)</td><td>Up to the next multiple of <i>significance</i> (toward plus infinity). Significance 0 is <code>#DIV/0!</code>.</td><td><code>CEILING(22, 5)</code> = 25, <code>CEILING(-22, 5)</code> = -20</td></tr>
-<tr><td class="sig">FLOOR(x, significance)</td><td>Down to the previous multiple. Significance 0 is <code>#DIV/0!</code>.</td><td><code>FLOOR(22, 5)</code> = 20, <code>FLOOR(-22, 5)</code> = -25</td></tr>
-<tr><td class="sig">MOD(x, divisor)</td><td>Remainder with the sign of the divisor, as in Excel. Divisor 0 is <code>#DIV/0!</code>.</td><td><code>MOD(23, 5)</code> = 3, <code>MOD(-7, 3)</code> = 2, <code>MOD(7, -3)</code> = -2</td></tr>
-<tr><td class="sig">POWER(x, y)</td><td>Same as <code>x^y</code>; a result that is not a real number is <code>#NUM!</code>.</td><td><code>POWER(1.05, 2)</code> = 1.1025, <code>POWER(-8, 1/3)</code> = #NUM!</td></tr>
-<tr><td class="sig">SQRT(x)</td><td>Square root; negative is <code>#NUM!</code>.</td><td><code>SQRT(144)</code> = 12</td></tr>
+<tr><td class="sig" id="fn-ABS">ABS(x)</td><td>Absolute value.</td><td><code>ABS(-3.5)</code> = 3.5</td></tr>
+<tr><td class="sig" id="fn-INT">INT(x)</td><td>Rounds down to a whole number (toward minus infinity).</td><td><code>INT(7.8)</code> = 7, <code>INT(-7.2)</code> = -8</td></tr>
+<tr><td class="sig" id="fn-ROUND">ROUND(x, digits)</td><td>Rounds half away from zero to <i>digits</i> decimals; negative digits round to tens, hundreds, …</td><td><code>ROUND(3.14159, 2)</code> = 3.14, <code>ROUND(-2.5, 0)</code> = -3, <code>ROUND(1234.5, -2)</code> = 1200</td></tr>
+<tr><td class="sig" id="fn-ROUNDUP">ROUNDUP(x, digits)</td><td>Rounds away from zero.</td><td><code>ROUNDUP(3.111, 2)</code> = 3.12, <code>ROUNDUP(-3.111, 2)</code> = -3.12</td></tr>
+<tr><td class="sig" id="fn-ROUNDDOWN">ROUNDDOWN(x, digits)</td><td>Rounds toward zero.</td><td><code>ROUNDDOWN(-3.199, 2)</code> = -3.19, <code>ROUNDDOWN(1299, -2)</code> = 1200</td></tr>
+<tr><td class="sig" id="fn-CEILING">CEILING(x, significance)</td><td>Up to the next multiple of <i>significance</i> (toward plus infinity). Significance 0 is <code>#DIV/0!</code>.</td><td><code>CEILING(22, 5)</code> = 25, <code>CEILING(-22, 5)</code> = -20</td></tr>
+<tr><td class="sig" id="fn-FLOOR">FLOOR(x, significance)</td><td>Down to the previous multiple. Significance 0 is <code>#DIV/0!</code>.</td><td><code>FLOOR(22, 5)</code> = 20, <code>FLOOR(-22, 5)</code> = -25</td></tr>
+<tr><td class="sig" id="fn-MOD">MOD(x, divisor)</td><td>Remainder with the sign of the divisor, as in Excel. Divisor 0 is <code>#DIV/0!</code>.</td><td><code>MOD(23, 5)</code> = 3, <code>MOD(-7, 3)</code> = 2, <code>MOD(7, -3)</code> = -2</td></tr>
+<tr><td class="sig" id="fn-POWER">POWER(x, y)</td><td>Same as <code>x^y</code>; a result that is not a real number is <code>#NUM!</code>.</td><td><code>POWER(1.05, 2)</code> = 1.1025, <code>POWER(-8, 1/3)</code> = #NUM!</td></tr>
+<tr><td class="sig" id="fn-SQRT">SQRT(x)</td><td>Square root; negative is <code>#NUM!</code>.</td><td><code>SQRT(144)</code> = 12</td></tr>
 </table>
 <div class="note ok"><b>Rounding rounds the number you see.</b> ROUND, ROUNDUP, ROUNDDOWN, CEILING and FLOOR work on the number's 15 significant digits with exact decimal arithmetic, as a spreadsheet does, not on its binary approximation: <code>ROUND(1.005, 2)</code> = 1.01, <code>ROUND(2.675, 2)</code> = 2.68, <code>ROUNDUP(0.1 + 0.2, 1)</code> = 0.3, <code>ROUNDDOWN(0.7 * 3, 1)</code> = 2.1, <code>CEILING(0.1 + 0.2, 0.1)</code> = 0.3. Digits that are not whole are truncated (<code>ROUND(x, 2.7)</code> rounds to 2 decimals).</div>
 
-<h2>8. Aggregates over arguments</h2>
+<h2 id="aggregates">8. Aggregates over arguments</h2>
 <p>These combine the values you list <i>in the formula</i>, at the same cell. To add up a metric across members, use SUMIFS (chapter 13) or a total (chapter 15); across periods, use the time functions (chapter 14).</p>
 <table>
 <tr><th style="width:26%">Function</th><th>Result</th><th style="width:34%">Examples</th></tr>
-<tr><td class="sig">SUM(a, b, …)</td><td>The sum. Blanks are skipped, TRUE counts 1, text is <code>#VALUE!</code>.</td><td><code>SUM(revenue, cost)</code> = 2100</td></tr>
-<tr><td class="sig">AVERAGE(a, b, …)</td><td>The mean of the non-blank arguments; none is <code>#DIV/0!</code>.</td><td><code>AVERAGE(2, 4)</code> = 3</td></tr>
-<tr><td class="sig">MIN(…)</td><td>The smallest; none is 0.</td><td><code>MIN(3, 1, 2)</code> = 1</td></tr>
-<tr><td class="sig">MAX(…)</td><td>The largest; none is 0.</td><td><code>MAX(0, revenue - cost - 500)</code> = 0 (floors at zero)</td></tr>
-<tr><td class="sig">COUNT(…)</td><td>How many arguments are numbers or TRUE/FALSE (not text, blank or errors).</td><td><code>COUNT(1, "a", TRUE, 1/0)</code> = 2</td></tr>
-<tr><td class="sig">COUNTA(…)</td><td>How many are not blank; errors are not counted (Excel counts them).</td><td><code>COUNTA(1, "a", "", 1/0)</code> = 3</td></tr>
+<tr><td class="sig" id="fn-SUM">SUM(a, b, …)</td><td>The sum. Blanks are skipped, TRUE counts 1, text is <code>#VALUE!</code>.</td><td><code>SUM(revenue, cost)</code> = 2100</td></tr>
+<tr><td class="sig" id="fn-AVERAGE">AVERAGE(a, b, …)</td><td>The mean of the non-blank arguments; none is <code>#DIV/0!</code>.</td><td><code>AVERAGE(2, 4)</code> = 3</td></tr>
+<tr><td class="sig" id="fn-MIN">MIN(…)</td><td>The smallest; none is 0.</td><td><code>MIN(3, 1, 2)</code> = 1</td></tr>
+<tr><td class="sig" id="fn-MAX">MAX(…)</td><td>The largest; none is 0.</td><td><code>MAX(0, revenue - cost - 500)</code> = 0 (floors at zero)</td></tr>
+<tr><td class="sig" id="fn-COUNT">COUNT(…)</td><td>How many arguments are numbers or TRUE/FALSE (not text, blank or errors).</td><td><code>COUNT(1, "a", TRUE, 1/0)</code> = 2</td></tr>
+<tr><td class="sig" id="fn-COUNTA">COUNTA(…)</td><td>How many are not blank; errors are not counted (Excel counts them).</td><td><code>COUNTA(1, "a", "", 1/0)</code> = 3</td></tr>
 </table>
 <p>A metric with no recorded value at the cell reads as 0, not blank, so <code>AVERAGE(q1_sales, q2_sales)</code> averages a missing quarter in as 0.</p>
 
-<h2>9. Text</h2>
+<h2 id="text">9. Text</h2>
 <p>A stored result is always a number, so text functions work inside a formula: in comparisons, criteria (chapter 13) and member codes (LOOKUP, TIMESUM). Numbers used as text read as described in chapter 4.</p>
 <table>
 <tr><th style="width:30%">Function</th><th>Result</th><th style="width:34%">Examples</th></tr>
-<tr><td class="sig">CONCAT(a, b, …)</td><td>The arguments joined, like <code>&amp;</code>.</td><td><code>CONCAT(region, "-", 2026)</code> = "DE-2026"</td></tr>
-<tr><td class="sig">TEXTJOIN(delimiter, skip_empty, a, …)</td><td>Joined with <i>delimiter</i>; with <i>skip_empty</i> TRUE, empty texts are left out.</td><td><code>TEXTJOIN("-", TRUE, "a", "", "b")</code> = "a-b"</td></tr>
-<tr><td class="sig">LEN(text)</td><td>Number of characters.</td><td><code>LEN("héllo")</code> = 5, <code>LEN(1234567)</code> = 7</td></tr>
-<tr><td class="sig">LEFT(text [, n])</td><td>The first <i>n</i> characters (default 1). Negative <i>n</i> is <code>#VALUE!</code>.</td><td><code>LEFT("abc", 2)</code> = "ab"</td></tr>
-<tr><td class="sig">RIGHT(text [, n])</td><td>The last <i>n</i> characters (default 1).</td><td><code>RIGHT(region.currency, 2)</code> = "UR" for EUR</td></tr>
-<tr><td class="sig">MID(text, start, n)</td><td><i>n</i> characters from position <i>start</i> (1 = first). Start below 1 or negative <i>n</i> is <code>#VALUE!</code>; past the end is "".</td><td><code>MID("abcdef", 2, 3)</code> = "bcd"</td></tr>
-<tr><td class="sig">UPPER(text) · LOWER(text)</td><td>Upper or lower case.</td><td><code>UPPER("aBc")</code> = "ABC"</td></tr>
-<tr><td class="sig">TRIM(text)</td><td>Removes leading and trailing spaces and collapses inner runs to one space.</td><td><code>TRIM("  a   b  ")</code> = "a b"</td></tr>
-<tr><td class="sig">TEXT(x, format)</td><td>A number as text. Formats: <code>"0"</code> or <code>"#"</code> (no decimals), <code>"0.0"</code>, <code>"0.00"</code>, <code>"0.000"</code>… (that many decimals, rounded as ROUND does), or a date layout containing <code>yyyy</code> with <code>mm</code> and <code>dd</code> (any case). Any other format gives the plain number; a text <i>x</i> is returned as is.</td><td><code>TEXT(3.14159, "0.00")</code> = "3.14", <code>TEXT(DATE(2026, 3, 5), "yyyy-mm-dd")</code> = "2026-03-05", <code>TEXT(START(), "yyyy-mm")</code> = "2026-03"</td></tr>
-<tr><td class="sig">SUBSTITUTE(text, old, new [, instance])</td><td>Replaces every <i>old</i> (case-sensitive), or only the <i>instance</i>-th one (1 or more). Empty <i>old</i> changes nothing.</td><td><code>SUBSTITUTE("a-b-c", "-", "+", 2)</code> = "a-b+c"</td></tr>
+<tr><td class="sig" id="fn-CONCAT">CONCAT(a, b, …)</td><td>The arguments joined, like <code>&amp;</code>.</td><td><code>CONCAT(region, "-", 2026)</code> = "DE-2026"</td></tr>
+<tr><td class="sig" id="fn-TEXTJOIN">TEXTJOIN(delimiter, skip_empty, a, …)</td><td>Joined with <i>delimiter</i>; with <i>skip_empty</i> TRUE, empty texts are left out.</td><td><code>TEXTJOIN("-", TRUE, "a", "", "b")</code> = "a-b"</td></tr>
+<tr><td class="sig" id="fn-LEN">LEN(text)</td><td>Number of characters.</td><td><code>LEN("héllo")</code> = 5, <code>LEN(1234567)</code> = 7</td></tr>
+<tr><td class="sig" id="fn-LEFT">LEFT(text [, n])</td><td>The first <i>n</i> characters (default 1). Negative <i>n</i> is <code>#VALUE!</code>.</td><td><code>LEFT("abc", 2)</code> = "ab"</td></tr>
+<tr><td class="sig" id="fn-RIGHT">RIGHT(text [, n])</td><td>The last <i>n</i> characters (default 1).</td><td><code>RIGHT(region.currency, 2)</code> = "UR" for EUR</td></tr>
+<tr><td class="sig" id="fn-MID">MID(text, start, n)</td><td><i>n</i> characters from position <i>start</i> (1 = first). Start below 1 or negative <i>n</i> is <code>#VALUE!</code>; past the end is "".</td><td><code>MID("abcdef", 2, 3)</code> = "bcd"</td></tr>
+<tr><td class="sig" id="fn-UPPER">UPPER(text) · LOWER(text)</td><td>Upper or lower case.</td><td><code>UPPER("aBc")</code> = "ABC"</td></tr>
+<tr><td class="sig" id="fn-TRIM">TRIM(text)</td><td>Removes leading and trailing spaces and collapses inner runs to one space.</td><td><code>TRIM("  a   b  ")</code> = "a b"</td></tr>
+<tr><td class="sig" id="fn-TEXT">TEXT(x, format)</td><td>A number as text. Formats: <code>"0"</code> or <code>"#"</code> (no decimals), <code>"0.0"</code>, <code>"0.00"</code>, <code>"0.000"</code>… (that many decimals, rounded as ROUND does), or a date layout containing <code>yyyy</code> with <code>mm</code> and <code>dd</code> (any case). Any other format gives the plain number; a text <i>x</i> is returned as is.</td><td><code>TEXT(3.14159, "0.00")</code> = "3.14", <code>TEXT(DATE(2026, 3, 5), "yyyy-mm-dd")</code> = "2026-03-05", <code>TEXT(START(), "yyyy-mm")</code> = "2026-03"</td></tr>
+<tr><td class="sig" id="fn-SUBSTITUTE">SUBSTITUTE(text, old, new [, instance])</td><td>Replaces every <i>old</i> (case-sensitive), or only the <i>instance</i>-th one (1 or more). Empty <i>old</i> changes nothing.</td><td><code>SUBSTITUTE("a-b-c", "-", "+", 2)</code> = "a-b+c"</td></tr>
 </table>
 <p>Typical uses: <code>IF(LEFT(region, 2) = "DE", …)</code>, a wildcard criterion built from the cell's member <code>SUMIFS(sales, product, LEFT(product, 1) &amp; "*")</code>, or a member code assembled for LOOKUP <code>LOOKUP(budget, period, TEXT(START(), "yyyy") &amp; "-01")</code>.</p>
 
-<h2>10. Dates</h2>
+<h2 id="dates">10. Dates</h2>
 <p>A date is a <b>serial number</b> of days, as in Excel: 1900-03-01 is 61 and 2026-03-05 is 46086, so dates subtract to a number of days and compare as numbers. Date properties and <code>START()</code>/<code>END()</code> give serials; <code>TEXT</code> shows one as a date.</p>
 <table>
 <tr><th style="width:30%">Function</th><th>Result</th><th style="width:34%">Examples</th></tr>
-<tr><td class="sig">TODAY()</td><td>Today's date (UTC). Recomputed only when the metric recalculates.</td><td><code>YEAR(TODAY())</code></td></tr>
-<tr><td class="sig">DATE(year, month, day)</td><td>The serial of that date. Months and days outside their range roll over.</td><td><code>DATE(2026, 13, 1)</code> = 2027-01-01, <code>DATE(2026, 3, 0)</code> = 2026-02-28</td></tr>
-<tr><td class="sig">YEAR(d) · MONTH(d) · DAY(d)</td><td>The parts of a date.</td><td><code>MONTH(DATE(2026, 3, 5))</code> = 3</td></tr>
-<tr><td class="sig">DAYS(end, start)</td><td><i>end</i> − <i>start</i> in days.</td><td><code>DAYS(DATE(2026, 3, 1), DATE(2026, 2, 1))</code> = 28</td></tr>
-<tr><td class="sig">EDATE(d, months)</td><td>The same day <i>months</i> later (negative: earlier); a day the target month lacks becomes its last day.</td><td><code>EDATE(DATE(2026, 1, 31), 1)</code> = 2026-02-28</td></tr>
-<tr><td class="sig">EOMONTH(d, months)</td><td>The last day of the month <i>months</i> away.</td><td><code>EOMONTH(DATE(2026, 1, 31), 0)</code> = 2026-01-31, <code>EOMONTH(DATE(2024, 1, 31), 1)</code> = 2024-02-29</td></tr>
-<tr><td class="sig">DAYSINMONTH(year, month)</td><td>Days in that month; a month outside 1–12 is <code>#NUM!</code>.</td><td><code>DAYSINMONTH(2024, 2)</code> = 29</td></tr>
-<tr><td class="sig">DAYSINYEAR(year)</td><td>366 in a leap year, else 365.</td><td><code>DAYSINYEAR(2026)</code> = 365</td></tr>
+<tr><td class="sig" id="fn-TODAY">TODAY()</td><td>Today's date (UTC). Recomputed only when the metric recalculates.</td><td><code>YEAR(TODAY())</code></td></tr>
+<tr><td class="sig" id="fn-DATE">DATE(year, month, day)</td><td>The serial of that date. Months and days outside their range roll over.</td><td><code>DATE(2026, 13, 1)</code> = 2027-01-01, <code>DATE(2026, 3, 0)</code> = 2026-02-28</td></tr>
+<tr><td class="sig" id="fn-YEAR">YEAR(d) · MONTH(d) · DAY(d)</td><td>The parts of a date.</td><td><code>MONTH(DATE(2026, 3, 5))</code> = 3</td></tr>
+<tr><td class="sig" id="fn-DAYS">DAYS(end, start)</td><td><i>end</i> − <i>start</i> in days.</td><td><code>DAYS(DATE(2026, 3, 1), DATE(2026, 2, 1))</code> = 28</td></tr>
+<tr><td class="sig" id="fn-EDATE">EDATE(d, months)</td><td>The same day <i>months</i> later (negative: earlier); a day the target month lacks becomes its last day.</td><td><code>EDATE(DATE(2026, 1, 31), 1)</code> = 2026-02-28</td></tr>
+<tr><td class="sig" id="fn-EOMONTH">EOMONTH(d, months)</td><td>The last day of the month <i>months</i> away.</td><td><code>EOMONTH(DATE(2026, 1, 31), 0)</code> = 2026-01-31, <code>EOMONTH(DATE(2024, 1, 31), 1)</code> = 2024-02-29</td></tr>
+<tr><td class="sig" id="fn-DAYSINMONTH">DAYSINMONTH(year, month)</td><td>Days in that month; a month outside 1–12 is <code>#NUM!</code>.</td><td><code>DAYSINMONTH(2024, 2)</code> = 29</td></tr>
+<tr><td class="sig" id="fn-DAYSINYEAR">DAYSINYEAR(year)</td><td>366 in a leap year, else 365.</td><td><code>DAYSINYEAR(2026)</code> = 365</td></tr>
 </table>
 <p>With a time dimension, <code>START()</code> and <code>END()</code> (chapter 14) give the current period's first and last day, so the date functions work per period: <code>DAYSINMONTH(YEAR(START()), MONTH(START()))</code> is the days in each month, <code>DAYS(START(), employees.hired)</code> is tenure in days at each period's start.</p>
 
 <div class="note"><b>The example model of chapters 11 to 16.</b> A <b>region</b> dimension World › EMEA › DE, UK and World › AMER › US, with declared properties <code>segment</code> (text), <code>factor</code> (number), <code>opened</code> (date) and <code>currency</code> (text): DE is Enterprise, 1.5, 2019-04-01, EUR; UK is SMB, 2, 2021-07-15, GBP; US is Enterprise, 0.5, 2020-01-10, USD. A <b>currency</b> dimension (EUR, GBP, USD) carries the input <code>fx_rate</code> (1.1, 1.25, 1). A monthly <b>period</b> time dimension runs FY26 › H1/H2 › Q1–Q4 › 2026-01 … 2026-12. The input <code>sales</code> on Plan [region, period] is 110, 55 and 197 for DE, UK and US in January (DE 100 + 10 per month, UK 50 + 5, US 200 − 3). Every number quoted below is what the engine produced for this model.</div>
 
-<h2>11. The cell's members and their properties</h2>
+<h2 id="members">11. The cell's members and their properties</h2>
 <div class="fn"><h4><span class="sig">dimension</span> — the member code</h4>
 <p>A dimension's bare name is the <b>code</b> of the cell's member of that dimension: <code>region</code> is "DE" in the DE row and "EMEA" in the EMEA row. Where the dimension is not pinned (a total, or a row that leaves it open) it is <b>blank</b>.</p>
-<table class="ex"><tr><td>IF(region = "UK", sales * 1.2, sales)</td><td>one member differs</td><td>66 for UK in Jan</td></tr>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>IF(region = "UK", sales * 1.2, sales)</td><td>one member differs</td><td>66 for UK in Jan</td></tr>
 <tr><td>IF(region = "EMEA", sales, 0)</td><td>at the grand total</td><td>0</td></tr>
 <tr><td>IF(region = "", 1, 0)</td><td>"am I a total?"</td><td>1 at a total</td></tr></table></div>
 
@@ -350,13 +465,15 @@
   <li>no value on the member, or the dimension not pinned → <b>blank</b>.</li>
 </ul>
 <p>A parent member has its own property values; it never inherits its children's. A property that is not declared is refused at save (<code>UNKNOWN_PROPERTY</code>), even if members carry values under that key.</p>
-<table class="ex"><tr><td>sales * region.factor</td><td>number property</td><td>165 for DE in Jan</td></tr>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>sales * region.factor</td><td>number property</td><td>165 for DE in Jan</td></tr>
 <tr><td>DAYS(START(), region.opened)</td><td>date property</td><td>days since opening</td></tr>
 <tr><td>IF(region.segment = "enterprise", 1, 0)</td><td>text, any case</td><td>1 for DE and US</td></tr></table></div>
 
-<div class="fn"><h4><span class="sig">PARENT(dimension)</span> — the parent's code</h4>
+<div class="fn"><h4><span class="sig" id="fn-PARENT">PARENT(dimension)</span> — the parent's code</h4>
 <p>The code of the parent of the cell's member; blank at a root member or where the dimension is not pinned. The argument must be a bare dimension name. To read the parent's <i>value</i>, combine it with LOOKUP: <code>LOOKUP(sales, region, PARENT(region))</code>.</p>
-<table class="ex"><tr><td>IF(PARENT(region) = "EMEA", 1, 0)</td><td></td><td>1 for DE and UK</td></tr></table></div>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>IF(PARENT(region) = "EMEA", 1, 0)</td><td></td><td>1 for DE and UK</td></tr></table></div>
 
 <ul>
   <li>Dimension and property names ignore case; so does comparing a member code with <code>=</code>. LOOKUP and TIMESUM match member codes <b>exactly</b>.</li>
@@ -364,10 +481,11 @@
   <li>If a metric and a dimension share a name, the name means the dimension where the cell pins it, and the metric elsewhere. Avoid the clash.</li>
 </ul>
 
-<h2>12. LOOKUP</h2>
-<div class="fn"><h4><span class="sig">LOOKUP(source, dimension1, member1 [, dimension2, member2 …])</span></h4>
+<h2 id="lookup">12. LOOKUP</h2>
+<div class="fn"><h4><span class="sig" id="fn-LOOKUP">LOOKUP(source, dimension1, member1 [, dimension2, member2 …])</span></h4>
 <p>The value of the metric <i>source</i> at the cell's own members, with each named dimension moved to the given member. It is the dimensional equivalent of XLOOKUP/INDEX/MATCH.</p>
 <table class="ex">
+<tr><th>Example</th><th>What it does</th><th>Result</th></tr>
 <tr><td>LOOKUP(sales, region, "DE")</td><td>a fixed member</td><td>110 in Jan, every row</td></tr>
 <tr><td>sales / LOOKUP(sales, region, PARENT(region))</td><td>share of parent</td><td>0.6667 for DE in Jan (110 ÷ 165)</td></tr>
 <tr><td>ROUND(sales * LOOKUP(fx_rate, currency, region.currency), 2)</td><td>a member from a property</td><td>121 for DE in Jan</td></tr>
@@ -385,16 +503,16 @@
   <li>LOOKUP is not allowed in an opening/closing recurrence (chapter 14).</li>
 </ul>
 
-<h2>13. Conditional aggregation</h2>
+<h2 id="conditional">13. Conditional aggregation</h2>
 <table>
 <tr><th style="width:42%">Form</th><th>Result</th><th style="width:18%">Nothing matches</th></tr>
-<tr><td class="sig">SUMIFS(source, range1, criterion1 [, …])</td><td>Sum of <i>source</i> over the matching members</td><td>0</td></tr>
-<tr><td class="sig">AVERAGEIFS(source, range1, criterion1 [, …])</td><td>Mean of the recorded values</td><td><code>#DIV/0!</code></td></tr>
-<tr><td class="sig">MINIFS / MAXIFS(source, range1, criterion1 [, …])</td><td>Smallest / largest recorded value</td><td>0</td></tr>
-<tr><td class="sig">COUNTIFS(range1, criterion1 [, …])</td><td>Number of matching member combinations</td><td>0</td></tr>
-<tr><td class="sig">SUMIF(range, criterion, source)</td><td>SUMIFS with one criterion, in Excel's argument order</td><td>0</td></tr>
-<tr><td class="sig">AVERAGEIF(range, criterion, source)</td><td>AVERAGEIFS with one criterion</td><td><code>#DIV/0!</code></td></tr>
-<tr><td class="sig">COUNTIF(range, criterion)</td><td>COUNTIFS with one criterion</td><td>0</td></tr>
+<tr><td class="sig" id="fn-SUMIFS">SUMIFS(source, range1, criterion1 [, …])</td><td>Sum of <i>source</i> over the matching members</td><td>0</td></tr>
+<tr><td class="sig" id="fn-AVERAGEIFS">AVERAGEIFS(source, range1, criterion1 [, …])</td><td>Mean of the recorded values</td><td><code>#DIV/0!</code></td></tr>
+<tr><td class="sig" id="fn-MINIFS">MINIFS / MAXIFS(source, range1, criterion1 [, …])</td><td>Smallest / largest recorded value</td><td>0</td></tr>
+<tr><td class="sig" id="fn-COUNTIFS">COUNTIFS(range1, criterion1 [, …])</td><td>Number of matching member combinations</td><td>0</td></tr>
+<tr><td class="sig" id="fn-SUMIF">SUMIF(range, criterion, source)</td><td>SUMIFS with one criterion, in Excel's argument order</td><td>0</td></tr>
+<tr><td class="sig" id="fn-AVERAGEIF">AVERAGEIF(range, criterion, source)</td><td>AVERAGEIFS with one criterion</td><td><code>#DIV/0!</code></td></tr>
+<tr><td class="sig" id="fn-COUNTIF">COUNTIF(range, criterion)</td><td>COUNTIFS with one criterion</td><td>0</td></tr>
 </table>
 <ul>
   <li>A <b>range</b> is a dimension (its member codes are tested), <code>dimension.property</code> (the members' typed property values are tested), or a <b>metric</b> whose dimensions are all the source's or related to them (its value is tested at every leaf combination of its dimensions; see <i>A metric as the range</i> below). A name that is both a dimension and a metric is the dimension.</li>
@@ -419,6 +537,7 @@
 <p>A text operand never equals or orders a number property; a member whose property value cannot be read as its type matches only <code>"&lt;&gt;…"</code>. An ordering (<code>&lt;</code>, <code>&gt;</code> …) never matches a blank.</p>
 
 <table class="ex">
+<tr><th>Example</th><th>What it does</th><th>Result</th></tr>
 <tr><td>SUMIFS(sales, region.segment, "Enterprise")</td><td>by property</td><td>307 in Jan (DE + US)</td></tr>
 <tr><td>AVERAGEIFS(sales, region.segment, region.segment)</td><td>peers of the cell</td><td>153.5 for DE and US, 55 for UK</td></tr>
 <tr><td>COUNTIFS(region.segment, "Enterprise", region.factor, "&gt;=1") + COUNTIF(region, "U*")</td><td>counts members</td><td>1 + 2 = 3</td></tr>
@@ -443,7 +562,7 @@
 <p>Two readings to tell apart on a cell that carries every dimension of the source — say a Region × Product grid. <code>SUMIFS(weighted_base, Region, Region)</code> keeps the cell's own Product too, so it is the cell's own value, not the region's total; the region's total over products is <code>LOOKUP(weighted_base, Product, "All Products")</code>, the source at the products' total member. The AI Developer's plan check warns of the first.</p>
 
 
-<h2>14. Time series</h2>
+<h2 id="time">14. Time series</h2>
 <h3>What they need</h3>
 <ul>
   <li>A dimension created with <b>Dimension type: Time</b> (Developer › Dimensions › New dimension), with a granularity (day, week, month, quarter, half year, year or custom) and the month the fiscal year starts. The type is fixed at creation: a dimension merely named "month" is not a time dimension.</li>
@@ -456,48 +575,51 @@
 <h3>Position</h3>
 <table>
 <tr><th style="width:32%">Function</th><th>Reads</th><th style="width:26%">Outside the periods</th></tr>
-<tr><td class="sig">PREVIOUS(x)</td><td>x one period back</td><td>0</td></tr>
-<tr><td class="sig">NEXT(x)</td><td>x one period ahead</td><td>0</td></tr>
-<tr><td class="sig">LAG(x, n, substitute [, mode])</td><td>x <i>n</i> periods back (negative <i>n</i> looks ahead)</td><td><i>substitute</i></td></tr>
-<tr><td class="sig">LEAD(x, n, substitute [, mode])</td><td>x <i>n</i> periods ahead</td><td><i>substitute</i></td></tr>
-<tr><td class="sig">OFFSET(x, n, substitute)</td><td>x at <i>n</i> periods (negative: back); LEAD without a mode</td><td><i>substitute</i></td></tr>
+<tr><td class="sig" id="fn-PREVIOUS">PREVIOUS(x)</td><td>x one period back</td><td>0</td></tr>
+<tr><td class="sig" id="fn-NEXT">NEXT(x)</td><td>x one period ahead</td><td>0</td></tr>
+<tr><td class="sig" id="fn-LAG">LAG(x, n, substitute [, mode])</td><td>x <i>n</i> periods back (negative <i>n</i> looks ahead)</td><td><i>substitute</i></td></tr>
+<tr><td class="sig" id="fn-LEAD">LEAD(x, n, substitute [, mode])</td><td>x <i>n</i> periods ahead</td><td><i>substitute</i></td></tr>
+<tr><td class="sig" id="fn-OFFSET">OFFSET(x, n, substitute)</td><td>x at <i>n</i> periods (negative: back); LEAD without a mode</td><td><i>substitute</i></td></tr>
 </table>
 <p><b>mode</b> (a bare keyword): <code>NONSTRICT</code> (default) accepts any <i>n</i>; <code>SEMISTRICT</code> returns the substitute when <i>n</i> &lt; 0; <code>STRICT</code> when <i>n</i> ≤ 0.</p>
 <p><b>Offsets.</b> <i>n</i> may be a whole-number literal or any expression that gives a whole number at the current period: a metric (<code>LAG(sales, lag_months, 0)</code>), a property (<code>LAG(sales, ROUND(region.factor, 0), 0)</code>), an <code>IF</code>. A literal like <code>1.5</code> is refused at save; an expression that gives a fraction fails that cell with <code>TIME_OFFSET_NOT_INTEGER</code>.</p>
 
 <h3>Windows and running totals</h3>
-<div class="fn"><h4><span class="sig">MOVINGSUM(x [, start [, end [, SUM | AVERAGE | MIN | MAX]]])</span></h4>
+<div class="fn"><h4><span class="sig" id="fn-MOVINGSUM">MOVINGSUM(x [, start [, end [, SUM | AVERAGE | MIN | MAX]]])</span></h4>
 <p>Reduces x over the periods from <i>current + start</i> to <i>current + end</i>, inclusive. One argument: every period. Two: from <i>current + start</i> to the last period. Periods outside the range are ignored; an empty window (start after end) is 0 for every method. <i>start</i> and <i>end</i> must be whole-number <b>literals</b> (<code>MOVING_WINDOW_NOT_LITERAL</code> otherwise).</p>
-<table class="ex"><tr><td>MOVINGSUM(sales, -2, 0)</td><td>trailing three periods</td><td></td></tr>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>MOVINGSUM(sales, -2, 0)</td><td>trailing three periods</td><td></td></tr>
 <tr><td>MOVINGSUM(sales, -2, 0, AVERAGE)</td><td>trailing three-period average</td><td></td></tr>
 <tr><td>MOVINGSUM(sales, 1, 3, MAX)</td><td>peak of the next three</td><td></td></tr></table></div>
-<div class="fn"><h4><span class="sig">CUMULATE(x [, reset])</span> · <span class="sig">DECUMULATE(x)</span></h4>
+<div class="fn"><h4><span class="sig" id="fn-CUMULATE">CUMULATE(x [, reset])</span> · <span class="sig" id="fn-DECUMULATE">DECUMULATE(x)</span></h4>
 <p>CUMULATE is the running total from the first period through the current one. With <i>reset</i>, a period where it is TRUE starts a new run (its own value included): <code>CUMULATE(sales, MOD(MONTH(START()), 3) = 1)</code> restarts every quarter. DECUMULATE is x minus x of the previous period (in the first period, x itself).</p></div>
 
 <h3>Period to date and whole period</h3>
 <table>
 <tr><th style="width:36%">Function</th><th>Result</th><th style="width:28%">Leaf granularity allowed</th></tr>
-<tr><td class="sig">MONTHTODATE(x)</td><td>Sum of x from the start of the month through the current period</td><td>day</td></tr>
-<tr><td class="sig">QUARTERTODATE(x)</td><td>… of the quarter</td><td>day, week, month</td></tr>
-<tr><td class="sig">HALFYEARTODATE(x)</td><td>… of the half year</td><td>day, week, month, quarter</td></tr>
-<tr><td class="sig">YEARTODATE(x)</td><td>… of the fiscal year</td><td>day, week, month, quarter, half year</td></tr>
-<tr><td class="sig">MONTHVALUE(m) · QUARTERVALUE(m) · HALFYEARVALUE(m) · YEARVALUE(m)</td><td>Metric <i>m</i> over the whole month / quarter / half / fiscal year containing the current period, reduced by <i>m</i>'s own time summary; periods with nothing recorded are skipped, except that <b>average</b> counts them as 0; a summary of <b>none</b> gives blank</td><td>as the matching *TODATE</td></tr>
+<tr><td class="sig" id="fn-MONTHTODATE">MONTHTODATE(x)</td><td>Sum of x from the start of the month through the current period</td><td>day</td></tr>
+<tr><td class="sig" id="fn-QUARTERTODATE">QUARTERTODATE(x)</td><td>… of the quarter</td><td>day, week, month</td></tr>
+<tr><td class="sig" id="fn-HALFYEARTODATE">HALFYEARTODATE(x)</td><td>… of the half year</td><td>day, week, month, quarter</td></tr>
+<tr><td class="sig" id="fn-YEARTODATE">YEARTODATE(x)</td><td>… of the fiscal year</td><td>day, week, month, quarter, half year</td></tr>
+<tr><td class="sig" id="fn-MONTHVALUE">MONTHVALUE(m) · QUARTERVALUE(m) · HALFYEARVALUE(m) · YEARVALUE(m)</td><td>Metric <i>m</i> over the whole month / quarter / half / fiscal year containing the current period, reduced by <i>m</i>'s own time summary; periods with nothing recorded are skipped, except that <b>average</b> counts them as 0; a summary of <b>none</b> gives blank</td><td>as the matching *TODATE</td></tr>
 </table>
 <ul>
   <li>Boundaries come from the periods' dates and the fiscal-year start, never from codes or labels. Quarters and halves count from the fiscal-year start month.</li>
   <li>A granularity too coarse for the function (MONTHTODATE on months) fails with <code>INVALID_TIME_MEMBER</code>, as does a current period that straddles the boundary (a week across a quarter end).</li>
   <li>The *VALUE functions take a bare metric name (<code>SOURCE_MUST_BE_METRIC</code>), and that metric must be dimensioned by the same time dimension (<code>TIME_DIMENSION_MISMATCH</code>). With summary <b>last</b> they give the last recorded value of the period (a closing balance); with <b>sum</b>, the period's total.</li>
 </ul>
-<table class="ex"><tr><td>ROUND(sales / YEARVALUE(sales) * 100, 4)</td><td>share of the year</td><td>6.5657 for DE in March (130 ÷ 1980)</td></tr>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>ROUND(sales / YEARVALUE(sales) * 100, 4)</td><td>share of the year</td><td>6.5657 for DE in March (130 ÷ 1980)</td></tr>
 <tr><td>ROUND(QUARTERTODATE(sales) / QUARTERVALUE(sales), 4)</td><td>quarter progress</td><td>0.6389 for DE in Feb (230 ÷ 360)</td></tr></table>
 
 <h3>Ranges and dates</h3>
-<div class="fn"><h4><span class="sig">TIMESUM(x [, start, end [, SUM | AVERAGE | MIN | MAX]])</span></h4>
+<div class="fn"><h4><span class="sig" id="fn-TIMESUM">TIMESUM(x [, start, end [, SUM | AVERAGE | MIN | MAX]])</span></h4>
 <p>Reduces x over the periods from <i>start</i> to <i>end</i>, given as period <b>codes</b> (<code>"2026-01"</code>, not labels or dates); an aggregate code means its first leaf as start and its last leaf as end, so <code>TIMESUM(sales, "Q2", "Q2")</code> is Q2. Without a range it covers every period. Start after end is an empty range, 0. An unknown code is refused when the metric is placed on its grid (<code>UNKNOWN_MEMBER</code>) and fails the cell with <code>#N/A</code> at run time. Exactly 1, 3 or 4 arguments.</p>
-<table class="ex"><tr><td>TIMESUM(sales, "Q2", "Q2")</td><td>fixed quarter, every period</td><td>DE: 450</td></tr>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>TIMESUM(sales, "Q2", "Q2")</td><td>fixed quarter, every period</td><td>DE: 450</td></tr>
 <tr><td>TIMESUM(sales, "H1", "H1", MAX)</td><td>peak month of H1</td><td>DE: 160</td></tr>
 <tr><td>TIMESUM(sales, "2026-01", "2026-03", AVERAGE)</td><td>Q1 average</td><td>DE: 120</td></tr></table></div>
-<div class="fn"><h4><span class="sig">START()</span> · <span class="sig">END()</span></h4>
+<div class="fn"><h4><span class="sig" id="fn-START">START()</span> · <span class="sig" id="fn-END">END()</span></h4>
 <p>The first and last day of the current leaf period as date serials (END is inclusive): <code>DAY(END())</code> is 31 in January; <code>DATE(2026, MONTH(START()), 15) - START()</code> is 14 in every month; <code>TEXT(START(), "yyyy-mm")</code> is the month's code on a monthly axis.</p></div>
 
 <h3>Reference values</h3>
@@ -534,7 +656,7 @@ closing = opening + flow           time summary: last</pre>
   <li>An error in any period a function reads makes the result that error, unless caught with IFERROR.</li>
 </ul>
 
-<h2>15. Totals: aggregation rule and time summary</h2>
+<h2 id="totals">15. Totals: aggregation rule and time summary</h2>
 <p>A formula computes the <b>leaf</b> cells (one member of every dimension, and a dated period on the time axis). Everything above them — EMEA, World, Q1, FY26, the grand total — comes from two settings on the metric, which you choose in the Add metric form or the row editor.</p>
 
 <h3>Aggregation rule: across ordinary dimensions</h3>
@@ -571,7 +693,7 @@ closing = opening + flow           time summary: last</pre>
 <h3>Users who cannot see every member</h3>
 <p>A user may have members hidden from them (Business Admin › access rules). Most metrics are then recomputed from what that user can see. A metric that reads <i>other</i> cells — a time function, LOOKUP, the SUMIFS family, TIMESUM or a *VALUE function — is shown from the stored result instead, and a cell whose result was built from a hidden member is <b>withheld</b>: blank ("—") in the grid, a missing point in a chart. A total that includes a withheld cell is withheld too. The engine never recomputes such a cell from the visible part alone, because that would show a number the model never produced.</p>
 
-<h2>16. Recipes</h2>
+<h2 id="recipes">16. Recipes</h2>
 <p>The formulas that read the model were computed live, cell by cell, on the example model (chapter 11) by <code>cmd/verify-formula-catalogue</code>; the one-line arithmetic ones are asserted by the function catalogue test.</p>
 <table>
 <tr><th style="width:24%">Need</th><th style="width:50%">Formula</th><th>Notes</th></tr>
@@ -603,7 +725,7 @@ closing = opening + flow           time summary: last</pre>
 <tr><td>Round up to a pack size</td><td><code>ROUNDUP(units / 12, 0) * 12</code> or <code>CEILING(units, 12)</code></td><td></td></tr>
 </table>
 
-<h2>17. Validation, troubleshooting and limits</h2>
+<h2 id="validation">17. Validation, troubleshooting and limits</h2>
 <h3>What the save refuses</h3>
 <p>Saving a metric (the Add metric form, the row editor or the AI Developer) checks the whole formula against the revision. A refused formula is not saved, and the message appears under the form, as below.</p>
 <table>
@@ -680,111 +802,111 @@ closing = opening + flow           time summary: last</pre>
 <tr><td>TEXT supports <code>0</code>, <code>#</code>, <code>0.00…</code> and <code>yyyy</code>/<code>mm</code>/<code>dd</code> date layouts</td><td>The full format language</td></tr>
 </table>
 
-<h2>Appendix A. Function index</h2>
+<h2 id="function-index">Appendix A. Function index</h2>
 <table class="idx">
 <tr><th>Function</th><th>Signature</th><th>Result</th><th style="width:8%">Chapter</th></tr>
-<tr><td>ABS</td><td>ABS(x)</td><td>Absolute value</td><td>7</td></tr>
-<tr><td>AND</td><td>AND(a, b, …)</td><td>TRUE when every argument is TRUE</td><td>6</td></tr>
-<tr><td>AVERAGE</td><td>AVERAGE(a, b, …)</td><td>Mean of the non-blank arguments</td><td>8</td></tr>
-<tr><td>AVERAGEIF</td><td>AVERAGEIF(range, criterion, source)</td><td>Mean of source over the matching members</td><td>13</td></tr>
-<tr><td>AVERAGEIFS</td><td>AVERAGEIFS(source, range, criterion, …)</td><td>Mean of source over the matching members</td><td>13</td></tr>
-<tr><td>CEILING</td><td>CEILING(x, significance)</td><td>Up to a multiple</td><td>7</td></tr>
-<tr><td>CONCAT</td><td>CONCAT(a, b, …)</td><td>Joins text</td><td>9</td></tr>
-<tr><td>COUNT</td><td>COUNT(a, b, …)</td><td>How many are numbers or TRUE/FALSE</td><td>8</td></tr>
-<tr><td>COUNTA</td><td>COUNTA(a, b, …)</td><td>How many are not blank</td><td>8</td></tr>
-<tr><td>COUNTIF</td><td>COUNTIF(range, criterion)</td><td>How many members match</td><td>13</td></tr>
-<tr><td>COUNTIFS</td><td>COUNTIFS(range, criterion, …)</td><td>How many member combinations match</td><td>13</td></tr>
-<tr><td>CUMULATE</td><td>CUMULATE(x [, reset])</td><td>Running total along time</td><td>14</td></tr>
-<tr><td>DATE</td><td>DATE(year, month, day)</td><td>A date serial</td><td>10</td></tr>
-<tr><td>DAY</td><td>DAY(date)</td><td>Day of the month</td><td>10</td></tr>
-<tr><td>DAYS</td><td>DAYS(end, start)</td><td>Days between two dates</td><td>10</td></tr>
-<tr><td>DAYSINMONTH</td><td>DAYSINMONTH(year, month)</td><td>Days in a month</td><td>10</td></tr>
-<tr><td>DAYSINYEAR</td><td>DAYSINYEAR(year)</td><td>365 or 366</td><td>10</td></tr>
-<tr><td>DECUMULATE</td><td>DECUMULATE(x)</td><td>Change from the previous period</td><td>14</td></tr>
-<tr><td>EDATE</td><td>EDATE(date, months)</td><td>Same day, months later</td><td>10</td></tr>
-<tr><td>END</td><td>END()</td><td>Last day of the current period</td><td>14</td></tr>
-<tr><td>EOMONTH</td><td>EOMONTH(date, months)</td><td>Last day of a month</td><td>10</td></tr>
-<tr><td>FLOOR</td><td>FLOOR(x, significance)</td><td>Down to a multiple</td><td>7</td></tr>
-<tr><td>HALFYEARTODATE</td><td>HALFYEARTODATE(x)</td><td>Sum from the half-year start</td><td>14</td></tr>
-<tr><td>HALFYEARVALUE</td><td>HALFYEARVALUE(metric)</td><td>The metric over the whole half year</td><td>14</td></tr>
-<tr><td>IF</td><td>IF(condition, then [, else])</td><td>Choice</td><td>6</td></tr>
-<tr><td>IFERROR</td><td>IFERROR(value, fallback)</td><td>Replaces any error</td><td>6</td></tr>
-<tr><td>IFNA</td><td>IFNA(value, fallback)</td><td>Replaces #N/A</td><td>6</td></tr>
-<tr><td>IFS</td><td>IFS(condition, value, …)</td><td>First true condition</td><td>6</td></tr>
-<tr><td>INT</td><td>INT(x)</td><td>Rounds down to a whole number</td><td>7</td></tr>
-<tr><td>LAG</td><td>LAG(x, n, substitute [, mode])</td><td>x n periods back</td><td>14</td></tr>
-<tr><td>LEAD</td><td>LEAD(x, n, substitute [, mode])</td><td>x n periods ahead</td><td>14</td></tr>
-<tr><td>LEFT</td><td>LEFT(text [, n])</td><td>First characters</td><td>9</td></tr>
-<tr><td>LEN</td><td>LEN(text)</td><td>Number of characters</td><td>9</td></tr>
-<tr><td>LOOKUP</td><td>LOOKUP(source, dimension, member, …)</td><td>The source at other members</td><td>12</td></tr>
-<tr><td>LOWER</td><td>LOWER(text)</td><td>Lower case</td><td>9</td></tr>
-<tr><td>MAX</td><td>MAX(a, b, …)</td><td>Largest argument</td><td>8</td></tr>
-<tr><td>MAXIFS</td><td>MAXIFS(source, range, criterion, …)</td><td>Largest recorded matching value</td><td>13</td></tr>
-<tr><td>MID</td><td>MID(text, start, n)</td><td>Characters from a position</td><td>9</td></tr>
-<tr><td>MIN</td><td>MIN(a, b, …)</td><td>Smallest argument</td><td>8</td></tr>
-<tr><td>MINIFS</td><td>MINIFS(source, range, criterion, …)</td><td>Smallest recorded matching value</td><td>13</td></tr>
-<tr><td>MOD</td><td>MOD(x, divisor)</td><td>Remainder</td><td>7</td></tr>
-<tr><td>MONTH</td><td>MONTH(date)</td><td>Month number</td><td>10</td></tr>
-<tr><td>MONTHTODATE</td><td>MONTHTODATE(x)</td><td>Sum from the month start (daily axis)</td><td>14</td></tr>
-<tr><td>MONTHVALUE</td><td>MONTHVALUE(metric)</td><td>The metric over the whole month (daily axis)</td><td>14</td></tr>
-<tr><td>MOVINGSUM</td><td>MOVINGSUM(x [, start [, end [, method]]])</td><td>Reduction over a window of periods</td><td>14</td></tr>
-<tr><td>NEXT</td><td>NEXT(x)</td><td>x one period ahead</td><td>14</td></tr>
-<tr><td>NOT</td><td>NOT(a)</td><td>Inverts</td><td>6</td></tr>
-<tr><td>OFFSET</td><td>OFFSET(x, n, substitute)</td><td>x n periods away</td><td>14</td></tr>
-<tr><td>OR</td><td>OR(a, b, …)</td><td>TRUE when any argument is TRUE</td><td>6</td></tr>
-<tr><td>PARENT</td><td>PARENT(dimension)</td><td>Parent member's code</td><td>11</td></tr>
-<tr><td>POWER</td><td>POWER(x, y)</td><td>x to the power y</td><td>7</td></tr>
-<tr><td>PREVIOUS</td><td>PREVIOUS(x)</td><td>x one period back</td><td>14</td></tr>
-<tr><td>QUARTERTODATE</td><td>QUARTERTODATE(x)</td><td>Sum from the quarter start</td><td>14</td></tr>
-<tr><td>QUARTERVALUE</td><td>QUARTERVALUE(metric)</td><td>The metric over the whole quarter</td><td>14</td></tr>
-<tr><td>RIGHT</td><td>RIGHT(text [, n])</td><td>Last characters</td><td>9</td></tr>
-<tr><td>ROUND</td><td>ROUND(x, digits)</td><td>Half away from zero</td><td>7</td></tr>
-<tr><td>ROUNDDOWN</td><td>ROUNDDOWN(x, digits)</td><td>Toward zero</td><td>7</td></tr>
-<tr><td>ROUNDUP</td><td>ROUNDUP(x, digits)</td><td>Away from zero</td><td>7</td></tr>
-<tr><td>SQRT</td><td>SQRT(x)</td><td>Square root</td><td>7</td></tr>
-<tr><td>START</td><td>START()</td><td>First day of the current period</td><td>14</td></tr>
-<tr><td>SUBSTITUTE</td><td>SUBSTITUTE(text, old, new [, instance])</td><td>Replaces text</td><td>9</td></tr>
-<tr><td>SUM</td><td>SUM(a, b, …)</td><td>Sum of the arguments</td><td>8</td></tr>
-<tr><td>SUMIF</td><td>SUMIF(range, criterion, source)</td><td>Sum of source over the matching members</td><td>13</td></tr>
-<tr><td>SUMIFS</td><td>SUMIFS(source, range, criterion, …)</td><td>Sum of source over the matching members</td><td>13</td></tr>
-<tr><td>SWITCH</td><td>SWITCH(expression, match, result, … [, default])</td><td>Value by match</td><td>6</td></tr>
-<tr><td>TEXT</td><td>TEXT(x, format)</td><td>A number as text</td><td>9</td></tr>
-<tr><td>TEXTJOIN</td><td>TEXTJOIN(delimiter, skip_empty, a, …)</td><td>Joins with a delimiter</td><td>9</td></tr>
-<tr><td>TIMESUM</td><td>TIMESUM(x [, start, end [, method]])</td><td>Reduction over a range of period codes</td><td>14</td></tr>
-<tr><td>TODAY</td><td>TODAY()</td><td>Today's date</td><td>10</td></tr>
-<tr><td>TRIM</td><td>TRIM(text)</td><td>Removes extra spaces</td><td>9</td></tr>
-<tr><td>UPPER</td><td>UPPER(text)</td><td>Upper case</td><td>9</td></tr>
-<tr><td>YEAR</td><td>YEAR(date)</td><td>Year</td><td>10</td></tr>
-<tr><td>YEARTODATE</td><td>YEARTODATE(x)</td><td>Sum from the fiscal-year start</td><td>14</td></tr>
-<tr><td>YEARVALUE</td><td>YEARVALUE(metric)</td><td>The metric over the whole fiscal year</td><td>14</td></tr>
+<tr><td><a href="#fn-ABS">ABS</a></td><td>ABS(x)</td><td>Absolute value</td><td><a href="#math">7</a></td></tr>
+<tr><td><a href="#fn-AND">AND</a></td><td>AND(a, b, …)</td><td>TRUE when every argument is TRUE</td><td><a href="#logic">6</a></td></tr>
+<tr><td><a href="#fn-AVERAGE">AVERAGE</a></td><td>AVERAGE(a, b, …)</td><td>Mean of the non-blank arguments</td><td><a href="#aggregates">8</a></td></tr>
+<tr><td><a href="#fn-AVERAGEIF">AVERAGEIF</a></td><td>AVERAGEIF(range, criterion, source)</td><td>Mean of source over the matching members</td><td><a href="#conditional">13</a></td></tr>
+<tr><td><a href="#fn-AVERAGEIFS">AVERAGEIFS</a></td><td>AVERAGEIFS(source, range, criterion, …)</td><td>Mean of source over the matching members</td><td><a href="#conditional">13</a></td></tr>
+<tr><td><a href="#fn-CEILING">CEILING</a></td><td>CEILING(x, significance)</td><td>Up to a multiple</td><td><a href="#math">7</a></td></tr>
+<tr><td><a href="#fn-CONCAT">CONCAT</a></td><td>CONCAT(a, b, …)</td><td>Joins text</td><td><a href="#text">9</a></td></tr>
+<tr><td><a href="#fn-COUNT">COUNT</a></td><td>COUNT(a, b, …)</td><td>How many are numbers or TRUE/FALSE</td><td><a href="#aggregates">8</a></td></tr>
+<tr><td><a href="#fn-COUNTA">COUNTA</a></td><td>COUNTA(a, b, …)</td><td>How many are not blank</td><td><a href="#aggregates">8</a></td></tr>
+<tr><td><a href="#fn-COUNTIF">COUNTIF</a></td><td>COUNTIF(range, criterion)</td><td>How many members match</td><td><a href="#conditional">13</a></td></tr>
+<tr><td><a href="#fn-COUNTIFS">COUNTIFS</a></td><td>COUNTIFS(range, criterion, …)</td><td>How many member combinations match</td><td><a href="#conditional">13</a></td></tr>
+<tr><td><a href="#fn-CUMULATE">CUMULATE</a></td><td>CUMULATE(x [, reset])</td><td>Running total along time</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-DATE">DATE</a></td><td>DATE(year, month, day)</td><td>A date serial</td><td><a href="#dates">10</a></td></tr>
+<tr><td><a href="#fn-YEAR">DAY</a></td><td>DAY(date)</td><td>Day of the month</td><td><a href="#dates">10</a></td></tr>
+<tr><td><a href="#fn-DAYS">DAYS</a></td><td>DAYS(end, start)</td><td>Days between two dates</td><td><a href="#dates">10</a></td></tr>
+<tr><td><a href="#fn-DAYSINMONTH">DAYSINMONTH</a></td><td>DAYSINMONTH(year, month)</td><td>Days in a month</td><td><a href="#dates">10</a></td></tr>
+<tr><td><a href="#fn-DAYSINYEAR">DAYSINYEAR</a></td><td>DAYSINYEAR(year)</td><td>365 or 366</td><td><a href="#dates">10</a></td></tr>
+<tr><td><a href="#fn-DECUMULATE">DECUMULATE</a></td><td>DECUMULATE(x)</td><td>Change from the previous period</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-EDATE">EDATE</a></td><td>EDATE(date, months)</td><td>Same day, months later</td><td><a href="#dates">10</a></td></tr>
+<tr><td><a href="#fn-END">END</a></td><td>END()</td><td>Last day of the current period</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-EOMONTH">EOMONTH</a></td><td>EOMONTH(date, months)</td><td>Last day of a month</td><td><a href="#dates">10</a></td></tr>
+<tr><td><a href="#fn-FLOOR">FLOOR</a></td><td>FLOOR(x, significance)</td><td>Down to a multiple</td><td><a href="#math">7</a></td></tr>
+<tr><td><a href="#fn-HALFYEARTODATE">HALFYEARTODATE</a></td><td>HALFYEARTODATE(x)</td><td>Sum from the half-year start</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-MONTHVALUE">HALFYEARVALUE</a></td><td>HALFYEARVALUE(metric)</td><td>The metric over the whole half year</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-IF">IF</a></td><td>IF(condition, then [, else])</td><td>Choice</td><td><a href="#logic">6</a></td></tr>
+<tr><td><a href="#fn-IFERROR">IFERROR</a></td><td>IFERROR(value, fallback)</td><td>Replaces any error</td><td><a href="#logic">6</a></td></tr>
+<tr><td><a href="#fn-IFNA">IFNA</a></td><td>IFNA(value, fallback)</td><td>Replaces #N/A</td><td><a href="#logic">6</a></td></tr>
+<tr><td><a href="#fn-IFS">IFS</a></td><td>IFS(condition, value, …)</td><td>First true condition</td><td><a href="#logic">6</a></td></tr>
+<tr><td><a href="#fn-INT">INT</a></td><td>INT(x)</td><td>Rounds down to a whole number</td><td><a href="#math">7</a></td></tr>
+<tr><td><a href="#fn-LAG">LAG</a></td><td>LAG(x, n, substitute [, mode])</td><td>x n periods back</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-LEAD">LEAD</a></td><td>LEAD(x, n, substitute [, mode])</td><td>x n periods ahead</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-LEFT">LEFT</a></td><td>LEFT(text [, n])</td><td>First characters</td><td><a href="#text">9</a></td></tr>
+<tr><td><a href="#fn-LEN">LEN</a></td><td>LEN(text)</td><td>Number of characters</td><td><a href="#text">9</a></td></tr>
+<tr><td><a href="#fn-LOOKUP">LOOKUP</a></td><td>LOOKUP(source, dimension, member, …)</td><td>The source at other members</td><td><a href="#lookup">12</a></td></tr>
+<tr><td><a href="#fn-UPPER">LOWER</a></td><td>LOWER(text)</td><td>Lower case</td><td><a href="#text">9</a></td></tr>
+<tr><td><a href="#fn-MAX">MAX</a></td><td>MAX(a, b, …)</td><td>Largest argument</td><td><a href="#aggregates">8</a></td></tr>
+<tr><td><a href="#fn-MINIFS">MAXIFS</a></td><td>MAXIFS(source, range, criterion, …)</td><td>Largest recorded matching value</td><td><a href="#conditional">13</a></td></tr>
+<tr><td><a href="#fn-MID">MID</a></td><td>MID(text, start, n)</td><td>Characters from a position</td><td><a href="#text">9</a></td></tr>
+<tr><td><a href="#fn-MIN">MIN</a></td><td>MIN(a, b, …)</td><td>Smallest argument</td><td><a href="#aggregates">8</a></td></tr>
+<tr><td><a href="#fn-MINIFS">MINIFS</a></td><td>MINIFS(source, range, criterion, …)</td><td>Smallest recorded matching value</td><td><a href="#conditional">13</a></td></tr>
+<tr><td><a href="#fn-MOD">MOD</a></td><td>MOD(x, divisor)</td><td>Remainder</td><td><a href="#math">7</a></td></tr>
+<tr><td><a href="#fn-YEAR">MONTH</a></td><td>MONTH(date)</td><td>Month number</td><td><a href="#dates">10</a></td></tr>
+<tr><td><a href="#fn-MONTHTODATE">MONTHTODATE</a></td><td>MONTHTODATE(x)</td><td>Sum from the month start (daily axis)</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-MONTHVALUE">MONTHVALUE</a></td><td>MONTHVALUE(metric)</td><td>The metric over the whole month (daily axis)</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-MOVINGSUM">MOVINGSUM</a></td><td>MOVINGSUM(x [, start [, end [, method]]])</td><td>Reduction over a window of periods</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-NEXT">NEXT</a></td><td>NEXT(x)</td><td>x one period ahead</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-NOT">NOT</a></td><td>NOT(a)</td><td>Inverts</td><td><a href="#logic">6</a></td></tr>
+<tr><td><a href="#fn-OFFSET">OFFSET</a></td><td>OFFSET(x, n, substitute)</td><td>x n periods away</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-OR">OR</a></td><td>OR(a, b, …)</td><td>TRUE when any argument is TRUE</td><td><a href="#logic">6</a></td></tr>
+<tr><td><a href="#fn-PARENT">PARENT</a></td><td>PARENT(dimension)</td><td>Parent member's code</td><td><a href="#members">11</a></td></tr>
+<tr><td><a href="#fn-POWER">POWER</a></td><td>POWER(x, y)</td><td>x to the power y</td><td><a href="#math">7</a></td></tr>
+<tr><td><a href="#fn-PREVIOUS">PREVIOUS</a></td><td>PREVIOUS(x)</td><td>x one period back</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-QUARTERTODATE">QUARTERTODATE</a></td><td>QUARTERTODATE(x)</td><td>Sum from the quarter start</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-MONTHVALUE">QUARTERVALUE</a></td><td>QUARTERVALUE(metric)</td><td>The metric over the whole quarter</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-RIGHT">RIGHT</a></td><td>RIGHT(text [, n])</td><td>Last characters</td><td><a href="#text">9</a></td></tr>
+<tr><td><a href="#fn-ROUND">ROUND</a></td><td>ROUND(x, digits)</td><td>Half away from zero</td><td><a href="#math">7</a></td></tr>
+<tr><td><a href="#fn-ROUNDDOWN">ROUNDDOWN</a></td><td>ROUNDDOWN(x, digits)</td><td>Toward zero</td><td><a href="#math">7</a></td></tr>
+<tr><td><a href="#fn-ROUNDUP">ROUNDUP</a></td><td>ROUNDUP(x, digits)</td><td>Away from zero</td><td><a href="#math">7</a></td></tr>
+<tr><td><a href="#fn-SQRT">SQRT</a></td><td>SQRT(x)</td><td>Square root</td><td><a href="#math">7</a></td></tr>
+<tr><td><a href="#fn-START">START</a></td><td>START()</td><td>First day of the current period</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-SUBSTITUTE">SUBSTITUTE</a></td><td>SUBSTITUTE(text, old, new [, instance])</td><td>Replaces text</td><td><a href="#text">9</a></td></tr>
+<tr><td><a href="#fn-SUM">SUM</a></td><td>SUM(a, b, …)</td><td>Sum of the arguments</td><td><a href="#aggregates">8</a></td></tr>
+<tr><td><a href="#fn-SUMIF">SUMIF</a></td><td>SUMIF(range, criterion, source)</td><td>Sum of source over the matching members</td><td><a href="#conditional">13</a></td></tr>
+<tr><td><a href="#fn-SUMIFS">SUMIFS</a></td><td>SUMIFS(source, range, criterion, …)</td><td>Sum of source over the matching members</td><td><a href="#conditional">13</a></td></tr>
+<tr><td><a href="#fn-SWITCH">SWITCH</a></td><td>SWITCH(expression, match, result, … [, default])</td><td>Value by match</td><td><a href="#logic">6</a></td></tr>
+<tr><td><a href="#fn-TEXT">TEXT</a></td><td>TEXT(x, format)</td><td>A number as text</td><td><a href="#text">9</a></td></tr>
+<tr><td><a href="#fn-TEXTJOIN">TEXTJOIN</a></td><td>TEXTJOIN(delimiter, skip_empty, a, …)</td><td>Joins with a delimiter</td><td><a href="#text">9</a></td></tr>
+<tr><td><a href="#fn-TIMESUM">TIMESUM</a></td><td>TIMESUM(x [, start, end [, method]])</td><td>Reduction over a range of period codes</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-TODAY">TODAY</a></td><td>TODAY()</td><td>Today's date</td><td><a href="#dates">10</a></td></tr>
+<tr><td><a href="#fn-TRIM">TRIM</a></td><td>TRIM(text)</td><td>Removes extra spaces</td><td><a href="#text">9</a></td></tr>
+<tr><td><a href="#fn-UPPER">UPPER</a></td><td>UPPER(text)</td><td>Upper case</td><td><a href="#text">9</a></td></tr>
+<tr><td><a href="#fn-YEAR">YEAR</a></td><td>YEAR(date)</td><td>Year</td><td><a href="#dates">10</a></td></tr>
+<tr><td><a href="#fn-YEARTODATE">YEARTODATE</a></td><td>YEARTODATE(x)</td><td>Sum from the fiscal-year start</td><td><a href="#time">14</a></td></tr>
+<tr><td><a href="#fn-MONTHVALUE">YEARVALUE</a></td><td>YEARVALUE(metric)</td><td>The metric over the whole fiscal year</td><td><a href="#time">14</a></td></tr>
 </table>
 <p class="small">Also: a bare dimension name (the cell's member code) and <code>dimension.property</code> (a member property), chapter 11. Keywords in fixed positions: <code>STRICT</code>, <code>SEMISTRICT</code>, <code>NONSTRICT</code> (LAG, LEAD) and <code>SUM</code>, <code>AVERAGE</code>, <code>MIN</code>, <code>MAX</code> (MOVINGSUM, TIMESUM).</p>
 
-<h2>Appendix B. Error index</h2>
+<h2 id="error-index">Appendix B. Error index</h2>
 <table>
 <tr><th style="width:30%">Code</th><th>Meaning</th><th style="width:10%">Chapter</th></tr>
-<tr><td><code>#DIV/0!</code></td><td>Division by zero, AVERAGE of nothing, AVERAGEIFS with no recorded match, MOD by 0, CEILING/FLOOR with significance 0</td><td>5</td></tr>
-<tr><td><code>#VALUE!</code></td><td>Wrong type; wrong number of arguments (refused at save); unknown keyword; impossible text position</td><td>5, 17</td></tr>
-<tr><td><code>#N/A</code></td><td>A member or period code that does not exist, or a blank one (LOOKUP, TIMESUM); IFS or SWITCH with no match</td><td>5, 12</td></tr>
-<tr><td><code>#NUM!</code></td><td>SQRT of a negative, a non-real power, DAYSINMONTH month outside 1–12, criteria over 1,000,000 combinations</td><td>5</td></tr>
-<tr><td><code>#NAME?</code></td><td>A name that is neither a metric nor a dimension (the save refuses these); a deleted metric still named by a formula</td><td>5, 17</td></tr>
-<tr><td><code>SOURCE_MUST_BE_METRIC</code></td><td>The source of LOOKUP, the SUMIFS family or a *VALUE function is not a metric name</td><td>12–14</td></tr>
-<tr><td><code>DIMENSION_ARGUMENT_REQUIRED</code></td><td>A dimension argument is not a bare dimension name</td><td>11–13</td></tr>
-<tr><td><code>UNKNOWN_PROPERTY</code></td><td>dimension.property names a property that is not declared</td><td>11</td></tr>
-<tr><td><code>UNKNOWN_MEMBER</code></td><td>A literal LOOKUP member or TIMESUM period code does not exist (save, placement, activation)</td><td>12, 14</td></tr>
-<tr><td><code>DIMENSION_NOT_ON_SOURCE</code></td><td>A LOOKUP or criteria dimension is neither the source's nor related to it</td><td>12, 13</td></tr>
-<tr><td><code>CONFLICTING_DIMENSION_ARGUMENTS</code></td><td>Two dimension arguments relate to the same dimension of the source</td><td>12, 13</td></tr>
-<tr><td><code>DIM_CONTEXT_REQUIRED</code></td><td>A dimensional function evaluated where there is no cell</td><td>17</td></tr>
-<tr><td><code>TIME_CONTEXT_REQUIRED</code></td><td>A time function evaluated where there is no period</td><td>14, 17</td></tr>
-<tr><td><code>TIME_DIMENSION_REQUIRED</code></td><td>A time function on a grid without a time dimension</td><td>14</td></tr>
-<tr><td><code>MULTIPLE_TIME_DIMENSIONS</code></td><td>A time function on a grid with two time dimensions</td><td>14</td></tr>
-<tr><td><code>TIME_DIMENSION_MISMATCH</code></td><td>A *VALUE source is not dimensioned by the cell's time dimension</td><td>14</td></tr>
-<tr><td><code>INVALID_TIME_MEMBER</code></td><td>A granularity too coarse for the function, or a period straddling its boundary</td><td>14</td></tr>
-<tr><td><code>TIME_OFFSET_NOT_INTEGER</code></td><td>An offset or window bound that is not a whole number</td><td>14</td></tr>
-<tr><td><code>MOVING_WINDOW_NOT_LITERAL</code></td><td>A MOVINGSUM window bound that is not a literal</td><td>14</td></tr>
-<tr><td><code>TEMPORAL_CYCLE_NOT_CAUSAL</code></td><td>A cycle not broken by time, or LOOKUP / SUMIFS / an unbounded time read inside a recurrence</td><td>14, 17</td></tr>
-<tr><td><code>METRIC_NAME_TAKEN</code>, <code>DIMENSION_NAME_TAKEN</code></td><td>The revision already has a metric (dimension) of that name, in any case</td><td>17</td></tr>
-<tr><td><code>METRIC_IN_USE, PROPERTY_IN_USE, DIMENSION_IN_USE, MEMBER_IN_USE</code></td><td>A delete refused while a formula (or, for a metric, a Rate total) uses what would be deleted</td><td>17</td></tr>
+<tr><td><code>#DIV/0!</code></td><td>Division by zero, AVERAGE of nothing, AVERAGEIFS with no recorded match, MOD by 0, CEILING/FLOOR with significance 0</td><td><a href="#errors">5</a></td></tr>
+<tr><td><code>#VALUE!</code></td><td>Wrong type; wrong number of arguments (refused at save); unknown keyword; impossible text position</td><td><a href="#errors">5</a>, <a href="#validation">17</a></td></tr>
+<tr><td><code>#N/A</code></td><td>A member or period code that does not exist, or a blank one (LOOKUP, TIMESUM); IFS or SWITCH with no match</td><td><a href="#errors">5</a>, <a href="#lookup">12</a></td></tr>
+<tr><td><code>#NUM!</code></td><td>SQRT of a negative, a non-real power, DAYSINMONTH month outside 1–12, criteria over 1,000,000 combinations</td><td><a href="#errors">5</a></td></tr>
+<tr><td><code>#NAME?</code></td><td>A name that is neither a metric nor a dimension (the save refuses these); a deleted metric still named by a formula</td><td><a href="#errors">5</a>, <a href="#validation">17</a></td></tr>
+<tr><td><code>SOURCE_MUST_BE_METRIC</code></td><td>The source of LOOKUP, the SUMIFS family or a *VALUE function is not a metric name</td><td><a href="#lookup">12</a>–<a href="#time">14</a></td></tr>
+<tr><td><code>DIMENSION_ARGUMENT_REQUIRED</code></td><td>A dimension argument is not a bare dimension name</td><td><a href="#members">11</a>–<a href="#conditional">13</a></td></tr>
+<tr><td><code>UNKNOWN_PROPERTY</code></td><td>dimension.property names a property that is not declared</td><td><a href="#members">11</a></td></tr>
+<tr><td><code>UNKNOWN_MEMBER</code></td><td>A literal LOOKUP member or TIMESUM period code does not exist (save, placement, activation)</td><td><a href="#lookup">12</a>, <a href="#time">14</a></td></tr>
+<tr><td><code>DIMENSION_NOT_ON_SOURCE</code></td><td>A LOOKUP or criteria dimension is neither the source's nor related to it</td><td><a href="#lookup">12</a>, <a href="#conditional">13</a></td></tr>
+<tr><td><code>CONFLICTING_DIMENSION_ARGUMENTS</code></td><td>Two dimension arguments relate to the same dimension of the source</td><td><a href="#lookup">12</a>, <a href="#conditional">13</a></td></tr>
+<tr><td><code>DIM_CONTEXT_REQUIRED</code></td><td>A dimensional function evaluated where there is no cell</td><td><a href="#validation">17</a></td></tr>
+<tr><td><code>TIME_CONTEXT_REQUIRED</code></td><td>A time function evaluated where there is no period</td><td><a href="#time">14</a>, <a href="#validation">17</a></td></tr>
+<tr><td><code>TIME_DIMENSION_REQUIRED</code></td><td>A time function on a grid without a time dimension</td><td><a href="#time">14</a></td></tr>
+<tr><td><code>MULTIPLE_TIME_DIMENSIONS</code></td><td>A time function on a grid with two time dimensions</td><td><a href="#time">14</a></td></tr>
+<tr><td><code>TIME_DIMENSION_MISMATCH</code></td><td>A *VALUE source is not dimensioned by the cell's time dimension</td><td><a href="#time">14</a></td></tr>
+<tr><td><code>INVALID_TIME_MEMBER</code></td><td>A granularity too coarse for the function, or a period straddling its boundary</td><td><a href="#time">14</a></td></tr>
+<tr><td><code>TIME_OFFSET_NOT_INTEGER</code></td><td>An offset or window bound that is not a whole number</td><td><a href="#time">14</a></td></tr>
+<tr><td><code>MOVING_WINDOW_NOT_LITERAL</code></td><td>A MOVINGSUM window bound that is not a literal</td><td><a href="#time">14</a></td></tr>
+<tr><td><code>TEMPORAL_CYCLE_NOT_CAUSAL</code></td><td>A cycle not broken by time, or LOOKUP / SUMIFS / an unbounded time read inside a recurrence</td><td><a href="#time">14</a>, <a href="#validation">17</a></td></tr>
+<tr><td><code>METRIC_NAME_TAKEN</code>, <code>DIMENSION_NAME_TAKEN</code></td><td>The revision already has a metric (dimension) of that name, in any case</td><td><a href="#validation">17</a></td></tr>
+<tr><td><code>METRIC_IN_USE, PROPERTY_IN_USE, DIMENSION_IN_USE, MEMBER_IN_USE</code></td><td>A delete refused while a formula (or, for a metric, a Rate total) uses what would be deleted</td><td><a href="#validation">17</a></td></tr>
 </table>
 </body>
 </html>

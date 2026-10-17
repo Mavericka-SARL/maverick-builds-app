@@ -406,6 +406,36 @@ var markdownLink = regexp.MustCompile(`\[([^\]]*)\]\(([^)]+)\)`)
 // dashboardLinks.ts): dashboard:Name, dashboard:Model/Name, dashboard:Model/.
 const dashboardScheme = "dashboard:"
 
+// TextLink is one [label](target) link of a text widget's Markdown.
+type TextLink struct {
+	Label  string
+	Target string
+	// Dashboard is true for a link to a dashboard. Model is then the model
+	// it names ("" for the text's own model) and Name the dashboard ("" for
+	// that model's first).
+	Dashboard   bool
+	Model, Name string
+}
+
+// TextLinks reads the links of a text widget's Markdown, in order. It is
+// the one reading of the link syntax: describe_dashboard here and the AI
+// developer's describe_dashboard both resolve what it returns.
+func TextLinks(text string) []TextLink {
+	var out []TextLink
+	for _, m := range markdownLink.FindAllStringSubmatch(text, -1) {
+		link := TextLink{Label: m[1], Target: m[2]}
+		if body, ok := strings.CutPrefix(link.Target, dashboardScheme); ok {
+			link.Dashboard, link.Name = true, body
+			if slash := strings.Index(body, "/"); slash >= 0 {
+				link.Model, link.Name = body[:slash], body[slash+1:]
+			}
+			link.Model, link.Name = decodeLinkPart(link.Model), decodeLinkPart(link.Name)
+		}
+		out = append(out, link)
+	}
+	return out
+}
+
 // linkResolver resolves a text widget's dashboard links against the models
 // and dashboards the person may open — as following one in the console
 // does, by name.
@@ -418,20 +448,15 @@ type linkResolver struct {
 
 func (l *linkResolver) resolve(ctx context.Context, text string) ([]DashboardLink, error) {
 	var out []DashboardLink
-	for _, m := range markdownLink.FindAllStringSubmatch(text, -1) {
-		label, href := m[1], m[2]
-		body, ok := strings.CutPrefix(href, dashboardScheme)
-		if !ok {
+	for _, tl := range TextLinks(text) {
+		label, href := tl.Label, tl.Target
+		if !tl.Dashboard {
 			if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") {
 				out = append(out, DashboardLink{Label: label, Href: href})
 			}
 			continue
 		}
-		modelName, dashName := "", body
-		if slash := strings.Index(body, "/"); slash >= 0 {
-			modelName, dashName = body[:slash], body[slash+1:]
-		}
-		modelName, dashName = decodeLinkPart(modelName), decodeLinkPart(dashName)
+		modelName, dashName := tl.Model, tl.Name
 		link := DashboardLink{Label: label}
 		target, err := l.model(ctx, modelName)
 		if err != nil {

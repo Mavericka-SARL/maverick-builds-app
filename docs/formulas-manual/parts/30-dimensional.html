@@ -1,10 +1,11 @@
 
 <div class="note"><b>The example model of chapters 11 to 16.</b> A <b>region</b> dimension World › EMEA › DE, UK and World › AMER › US, with declared properties <code>segment</code> (text), <code>factor</code> (number), <code>opened</code> (date) and <code>currency</code> (text): DE is Enterprise, 1.5, 2019-04-01, EUR; UK is SMB, 2, 2021-07-15, GBP; US is Enterprise, 0.5, 2020-01-10, USD. A <b>currency</b> dimension (EUR, GBP, USD) carries the input <code>fx_rate</code> (1.1, 1.25, 1). A monthly <b>period</b> time dimension runs FY26 › H1/H2 › Q1–Q4 › 2026-01 … 2026-12. The input <code>sales</code> on Plan [region, period] is 110, 55 and 197 for DE, UK and US in January (DE 100 + 10 per month, UK 50 + 5, US 200 − 3). Every number quoted below is what the engine produced for this model.</div>
 
-<h2>11. The cell's members and their properties</h2>
+<h2 id="members">11. The cell's members and their properties</h2>
 <div class="fn"><h4><span class="sig">dimension</span> — the member code</h4>
 <p>A dimension's bare name is the <b>code</b> of the cell's member of that dimension: <code>region</code> is "DE" in the DE row and "EMEA" in the EMEA row. Where the dimension is not pinned (a total, or a row that leaves it open) it is <b>blank</b>.</p>
-<table class="ex"><tr><td>IF(region = "UK", sales * 1.2, sales)</td><td>one member differs</td><td>66 for UK in Jan</td></tr>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>IF(region = "UK", sales * 1.2, sales)</td><td>one member differs</td><td>66 for UK in Jan</td></tr>
 <tr><td>IF(region = "EMEA", sales, 0)</td><td>at the grand total</td><td>0</td></tr>
 <tr><td>IF(region = "", 1, 0)</td><td>"am I a total?"</td><td>1 at a total</td></tr></table></div>
 
@@ -17,13 +18,15 @@
   <li>no value on the member, or the dimension not pinned → <b>blank</b>.</li>
 </ul>
 <p>A parent member has its own property values; it never inherits its children's. A property that is not declared is refused at save (<code>UNKNOWN_PROPERTY</code>), even if members carry values under that key.</p>
-<table class="ex"><tr><td>sales * region.factor</td><td>number property</td><td>165 for DE in Jan</td></tr>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>sales * region.factor</td><td>number property</td><td>165 for DE in Jan</td></tr>
 <tr><td>DAYS(START(), region.opened)</td><td>date property</td><td>days since opening</td></tr>
 <tr><td>IF(region.segment = "enterprise", 1, 0)</td><td>text, any case</td><td>1 for DE and US</td></tr></table></div>
 
-<div class="fn"><h4><span class="sig">PARENT(dimension)</span> — the parent's code</h4>
+<div class="fn"><h4><span class="sig" id="fn-PARENT">PARENT(dimension)</span> — the parent's code</h4>
 <p>The code of the parent of the cell's member; blank at a root member or where the dimension is not pinned. The argument must be a bare dimension name. To read the parent's <i>value</i>, combine it with LOOKUP: <code>LOOKUP(sales, region, PARENT(region))</code>.</p>
-<table class="ex"><tr><td>IF(PARENT(region) = "EMEA", 1, 0)</td><td></td><td>1 for DE and UK</td></tr></table></div>
+<table class="ex"><tr><th>Example</th><th>What it does</th><th>Result</th></tr>
+<tr><td>IF(PARENT(region) = "EMEA", 1, 0)</td><td></td><td>1 for DE and UK</td></tr></table></div>
 
 <ul>
   <li>Dimension and property names ignore case; so does comparing a member code with <code>=</code>. LOOKUP and TIMESUM match member codes <b>exactly</b>.</li>
@@ -31,10 +34,11 @@
   <li>If a metric and a dimension share a name, the name means the dimension where the cell pins it, and the metric elsewhere. Avoid the clash.</li>
 </ul>
 
-<h2>12. LOOKUP</h2>
-<div class="fn"><h4><span class="sig">LOOKUP(source, dimension1, member1 [, dimension2, member2 …])</span></h4>
+<h2 id="lookup">12. LOOKUP</h2>
+<div class="fn"><h4><span class="sig" id="fn-LOOKUP">LOOKUP(source, dimension1, member1 [, dimension2, member2 …])</span></h4>
 <p>The value of the metric <i>source</i> at the cell's own members, with each named dimension moved to the given member. It is the dimensional equivalent of XLOOKUP/INDEX/MATCH.</p>
 <table class="ex">
+<tr><th>Example</th><th>What it does</th><th>Result</th></tr>
 <tr><td>LOOKUP(sales, region, "DE")</td><td>a fixed member</td><td>110 in Jan, every row</td></tr>
 <tr><td>sales / LOOKUP(sales, region, PARENT(region))</td><td>share of parent</td><td>0.6667 for DE in Jan (110 ÷ 165)</td></tr>
 <tr><td>ROUND(sales * LOOKUP(fx_rate, currency, region.currency), 2)</td><td>a member from a property</td><td>121 for DE in Jan</td></tr>
@@ -52,16 +56,16 @@
   <li>LOOKUP is not allowed in an opening/closing recurrence (chapter 14).</li>
 </ul>
 
-<h2>13. Conditional aggregation</h2>
+<h2 id="conditional">13. Conditional aggregation</h2>
 <table>
 <tr><th style="width:42%">Form</th><th>Result</th><th style="width:18%">Nothing matches</th></tr>
-<tr><td class="sig">SUMIFS(source, range1, criterion1 [, …])</td><td>Sum of <i>source</i> over the matching members</td><td>0</td></tr>
-<tr><td class="sig">AVERAGEIFS(source, range1, criterion1 [, …])</td><td>Mean of the recorded values</td><td><code>#DIV/0!</code></td></tr>
-<tr><td class="sig">MINIFS / MAXIFS(source, range1, criterion1 [, …])</td><td>Smallest / largest recorded value</td><td>0</td></tr>
-<tr><td class="sig">COUNTIFS(range1, criterion1 [, …])</td><td>Number of matching member combinations</td><td>0</td></tr>
-<tr><td class="sig">SUMIF(range, criterion, source)</td><td>SUMIFS with one criterion, in Excel's argument order</td><td>0</td></tr>
-<tr><td class="sig">AVERAGEIF(range, criterion, source)</td><td>AVERAGEIFS with one criterion</td><td><code>#DIV/0!</code></td></tr>
-<tr><td class="sig">COUNTIF(range, criterion)</td><td>COUNTIFS with one criterion</td><td>0</td></tr>
+<tr><td class="sig" id="fn-SUMIFS">SUMIFS(source, range1, criterion1 [, …])</td><td>Sum of <i>source</i> over the matching members</td><td>0</td></tr>
+<tr><td class="sig" id="fn-AVERAGEIFS">AVERAGEIFS(source, range1, criterion1 [, …])</td><td>Mean of the recorded values</td><td><code>#DIV/0!</code></td></tr>
+<tr><td class="sig" id="fn-MINIFS">MINIFS / MAXIFS(source, range1, criterion1 [, …])</td><td>Smallest / largest recorded value</td><td>0</td></tr>
+<tr><td class="sig" id="fn-COUNTIFS">COUNTIFS(range1, criterion1 [, …])</td><td>Number of matching member combinations</td><td>0</td></tr>
+<tr><td class="sig" id="fn-SUMIF">SUMIF(range, criterion, source)</td><td>SUMIFS with one criterion, in Excel's argument order</td><td>0</td></tr>
+<tr><td class="sig" id="fn-AVERAGEIF">AVERAGEIF(range, criterion, source)</td><td>AVERAGEIFS with one criterion</td><td><code>#DIV/0!</code></td></tr>
+<tr><td class="sig" id="fn-COUNTIF">COUNTIF(range, criterion)</td><td>COUNTIFS with one criterion</td><td>0</td></tr>
 </table>
 <ul>
   <li>A <b>range</b> is a dimension (its member codes are tested), <code>dimension.property</code> (the members' typed property values are tested), or a <b>metric</b> whose dimensions are all the source's or related to them (its value is tested at every leaf combination of its dimensions; see <i>A metric as the range</i> below). A name that is both a dimension and a metric is the dimension.</li>
@@ -86,6 +90,7 @@
 <p>A text operand never equals or orders a number property; a member whose property value cannot be read as its type matches only <code>"&lt;&gt;…"</code>. An ordering (<code>&lt;</code>, <code>&gt;</code> …) never matches a blank.</p>
 
 <table class="ex">
+<tr><th>Example</th><th>What it does</th><th>Result</th></tr>
 <tr><td>SUMIFS(sales, region.segment, "Enterprise")</td><td>by property</td><td>307 in Jan (DE + US)</td></tr>
 <tr><td>AVERAGEIFS(sales, region.segment, region.segment)</td><td>peers of the cell</td><td>153.5 for DE and US, 55 for UK</td></tr>
 <tr><td>COUNTIFS(region.segment, "Enterprise", region.factor, "&gt;=1") + COUNTIF(region, "U*")</td><td>counts members</td><td>1 + 2 = 3</td></tr>

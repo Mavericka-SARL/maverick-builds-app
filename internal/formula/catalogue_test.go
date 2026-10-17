@@ -777,7 +777,7 @@ func TestFormulasManualIndexMatchesEngine(t *testing.T) {
 		t.Fatalf("read the manual's index: %v", err)
 	}
 	listed := map[string]bool{}
-	for _, m := range regexp.MustCompile(`<tr><td>([A-Z]+)</td>`).FindAllStringSubmatch(string(raw), -1) {
+	for _, m := range regexp.MustCompile(`<tr><td>(?:<a href="#[^"]+">)?([A-Z]+)(?:</a>)?</td>`).FindAllStringSubmatch(string(raw), -1) {
 		listed[m[1]] = true
 	}
 	for _, name := range BuiltinNames() {

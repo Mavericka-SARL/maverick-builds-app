@@ -453,8 +453,10 @@ Click a widget in Design and **Widget Properties** opens beside it:
 - **Default view** (grids) — place *Metrics* and each dimension in a Row, a Column or the Context. Without one, a grid shows metrics in rows, one dimension across the columns and the rest as selectors.
 - **Metrics shown** (grids) — which of the grid's metrics this widget shows, and in what order; and, for a row or column dimension, which of its members (*All members* by default).
 - **Context sync** (grids and charts) — on by default: widgets that share a dimension share one selector, so choosing a product once moves them all. Untick it to give a widget selectors of its own.
-- **Default context** (Metric KPI) — **Whole-model total**, **Follow dashboard selectors**, or **Pin to a member**.
-- **Chart configuration**, **Header**, **Appearance**, where the **Selectors** sit, and an exact **Position** and **Size**.`, 244),
+- **Default context** (Metric KPI) — **Whole-model total**, **Follow dashboard selectors**, **Follow the selector bar** (a company total for the bar's choice, such as a scenario), or **Pin to a member**.
+- **Chart configuration**, **Header**, **Appearance**, where the **Selectors** sit, and an exact **Position** and **Size**.
+
+When several widgets share a dimension such as a scenario or a period, press **Selector bar** in the Design toolbar: one selector per chosen dimension sits at the top of the page, and every grid and chart follows it, as does a KPI set to follow the selectors or the bar.`, 300),
 
 		[]modeltransfer.Widget{
 			{
@@ -546,7 +548,9 @@ It needs an AI provider key. Press **AI Settings** (the gear), choose the **LLM 
 
 ## Work with it
 
-Press **New session** and describe what you want. **Attach a document** adds a pdf, xlsx, docx, csv, txt or md file for it to work from. Each proposal arrives as an **Action plan**: read the steps, then press **Confirm & Execute** or **Cancel**.`, 328),
+Press **New session** and describe what you want. **Attach a document** adds a pdf, xlsx, docx, csv, txt or md file for it to work from. Each proposal arrives as an **Action plan**: read the steps, then press **Confirm & Execute** or **Cancel**.
+
+Ask it how something works, too. It reads your model — formulas, grids, workflows, and each dashboard's text and widgets — and the platform's manuals, and answers from them.`, 372),
 
 		devText(`## Where its changes land
 

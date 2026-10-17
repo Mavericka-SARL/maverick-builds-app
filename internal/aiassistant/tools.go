@@ -44,6 +44,11 @@ func ReadTools() []providers.ToolDef {
 			Parameters:  noParams,
 		},
 		{
+			Name:        "describe_dashboard",
+			Description: "Returns one dashboard of the working revision as its users see it: the business roles that may open it, its selector bar, then every widget in reading order — a text widget's whole Markdown (the instructions and explanations the page gives) with where each of its links leads, what each other widget reads (grid, metric, table, integration or automation rule), a button's label, and each widget's settings (widget_props, as update_dashboard_widget takes them) with the metrics, dimensions and grids their ids name. Call it to explain a dashboard or how the app is meant to be used, and before changing a text widget's content.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"dashboard_id":{"type":"string","description":"The dashboard's id from list_dashboards, or its exact name"}},"required":["dashboard_id"]}`),
+		},
+		{
 			Name:        "list_revisions",
 			Description: "Returns all revisions for the current model, indicating which is active.",
 			Parameters:  noParams,
@@ -252,6 +257,8 @@ func (e *ToolExecutor) execute(ctx context.Context, name string, args json.RawMe
 		return e.listGrids(ctx)
 	case "list_dashboards":
 		return e.listDashboards(ctx)
+	case "describe_dashboard":
+		return e.describeDashboard(ctx, args)
 	case "list_revisions":
 		return e.listRevisions(ctx)
 	case "list_workflows":
@@ -635,12 +642,7 @@ func (e *ToolExecutor) listDashboards(ctx context.Context) (string, error) {
 	}
 
 	rows, err := e.pool.Query(ctx, `
-		SELECT d.id::text, d.name, d.tags, COALESCE(f.name, ''),
-		       COALESCE((SELECT string_agg(COALESCE(dim.name, b.e->>'dimension_id') ||
-		                                   CASE WHEN COALESCE(b.e->>'default','') <> '' THEN ' = ' || (b.e->>'default') ELSE '' END,
-		                                   ', ' ORDER BY b.o)
-		                 FROM jsonb_array_elements(d.selector_bar) WITH ORDINALITY b(e, o)
-		                 LEFT JOIN model.dimension_def dim ON dim.id::text = b.e->>'dimension_id'), ''),
+		SELECT d.id::text, d.name, d.tags, COALESCE(f.name, ''), `+selectorBarSQL+`,
 		       w.id::text, COALESCE(w.widget_type, ''),
 		       COALESCE(md.name, gd.name, fd.name, w.ref_id, ''),
 		       COALESCE(w.pos_x, 0), COALESCE(w.pos_y, 0), COALESCE(w.size_w, 0), COALESCE(w.size_h, 0), COALESCE(w.title, ''),

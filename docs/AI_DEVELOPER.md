@@ -52,6 +52,7 @@ posting runs the gateway's own posting code the same way.
 | `get_model_summary`, `list_metrics`, `list_dimensions`, `list_revisions`, `list_users` | the model as the developer console shows it |
 | `list_grids` | each grid's metrics and dimensions, with a dimension's display level |
 | `list_dashboards` | the folders, then each dashboard's folder, tags and widgets — each widget's id, type, what it shows, place and size |
+| `describe_dashboard` | one dashboard of the working revision as its users see it: the business roles that may open it, its selector bar, then each widget in reading order — a text widget's whole Markdown with where each link leads (a dashboard of this model is checked in the working revision; another model's is named as written), what each other widget reads, a button's label, and its `widget_props` with the metrics, dimensions and grids their ids name. An image's picture is left out. The assistant reads it to explain how an app is used, and before changing a text widget's content, which `update_dashboard_widget` replaces whole |
 | `validate_formulas`, `check_grid_completeness` | the audit checks the console runs |
 | `list_workflows`, `get_workflow` | definitions; one in full — steps, context, subject, rules, and the Validate verdict |
 | `validate_workflow` | the editor's Validate button, for stored or not-yet-proposed steps |
@@ -84,7 +85,7 @@ on it.
 | Members | `add_dimension_member`, `update_dimension_member`, `delete_dimension_member`, `generate_time_members`, `reorder_dimension_members` | member add, edit (code, label, parent, period dates, properties), delete (refused with `MEMBER_IN_USE`), **Generate periods**, and the order of one level of members (`PUT …/members/order`; not on a time dimension) |
 | Properties | `add_dimension_property`, `update_dimension_property`, `delete_dimension_property` | the Dimension Properties panel |
 | Grids | `create_grid`, `update_grid`, `delete_grid`, `add_grid_metric`, `remove_grid_metric`, `reorder_grid_metrics`, `add_grid_dimension`, `update_grid_dimension`, `remove_grid_dimension` | the Grids screen, including a dimension's display level |
-| Dashboards | `create_dashboard_folder`, `update_dashboard_folder`, `delete_dashboard_folder`, `create_dashboard`, `update_dashboard`, `delete_dashboard`, `add_dashboard_widget`, `update_dashboard_widget`, `delete_dashboard_widget` | the Dashboards screen and its designer |
+| Dashboards | `create_dashboard_folder`, `update_dashboard_folder`, `delete_dashboard_folder`, `create_dashboard`, `update_dashboard`, `delete_dashboard`, `add_dashboard_widget`, `update_dashboard_widget`, `delete_dashboard_widget` | the Dashboards screen and its designer; `selector_bar` on `create_dashboard` and `update_dashboard` is the designer's **Selector bar** |
 | Integrations | `create_file_integration`, `import_file_data`, `create_export_integration`, `update_integration`, `delete_integration` | the Integrations tab: the Import Wizard's file import and **Save as integration**, the **Data Export** editor, an integration's rename, tags and delete (REST API connectors are configured only in their wizard) |
 | Other | `set_tags`, `create_revision`, `set_user_access_rules` | tag editors, **New revision**, the exception above |
 

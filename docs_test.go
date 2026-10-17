@@ -144,3 +144,26 @@ func TestManualsMatchTheirParts(t *testing.T) {
 		}
 	}
 }
+
+// A manual's contents, sidebar and function index jump within the page; a
+// link whose anchor was renamed or never written would scroll nowhere.
+func TestManualLinksWithinThePageResolve(t *testing.T) {
+	for _, path := range []string{"docs/formulas-manual/manual.html", "docs/developer-manual/manual.html"} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := map[string]bool{}
+		for _, m := range regexp.MustCompile(` id="([^"]+)"`).FindAllStringSubmatch(string(raw), -1) {
+			if ids[m[1]] {
+				t.Errorf("%s: id %q is used twice", path, m[1])
+			}
+			ids[m[1]] = true
+		}
+		for _, m := range regexp.MustCompile(`href="#([^"]+)"`).FindAllStringSubmatch(string(raw), -1) {
+			if !ids[m[1]] {
+				t.Errorf("%s: a link to #%s, which nothing on the page is", path, m[1])
+			}
+		}
+	}
+}

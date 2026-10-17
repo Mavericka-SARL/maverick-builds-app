@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>maverickbuilds.app Formulas Manual</title>
 <style>
   @page { size: A4; margin: 16mm 15mm 18mm 15mm; }
@@ -35,9 +36,13 @@
   figure { margin: .8em 0 1em; page-break-inside: avoid; }
   figure img { width: 100%; border: 1px solid var(--line); border-radius: 4px; }
   figcaption { font-size: .86em; color: var(--muted); margin-top: .35em; }
-  .toc ol { columns: 2; column-gap: 2em; padding-left: 1.4em; }
+  a { color: inherit; text-decoration: none; }
+  .toc ul { columns: 2; column-gap: 2em; list-style: none; padding-left: 0; margin: .3em 0 .7em; }
   .toc li { margin: .12em 0; break-inside: avoid; }
-  .toc .part { font-weight: 700; margin-top: .6em; list-style: none; margin-left: -1.4em; }
+  .toc .part { font-weight: 700; margin-top: .6em; }
+  .toc .part:first-child { margin-top: 0; }
+  .toc .n { display: inline-block; min-width: 1.7em; color: var(--muted); }
+  .side, .totop { display: none; }
   .path { font-size: .9em; color: var(--muted); margin: -.3em 0 .8em; }
   .small { font-size: .9em; color: var(--muted); }
   .kv td:first-child { width: 28%; font-weight: 600; }
@@ -52,49 +57,153 @@
   .ex td:last-child { width: 18%; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: .92em; }
   .idx td:first-child { width: 17%; font-family: "SF Mono", Menlo, Consolas, monospace; font-weight: 600; }
   .idx td:nth-child(2) { width: 36%; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: .9em; }
+  /* On screen: a bordered page on a soft background, a chapter sidebar on
+     wide windows, bordered tables and function cards, linked contents and
+     index. Print (the PDF) keeps the rules above. */
+  @media screen {
+    :root { --canvas:#eef1f6; --border:#c9d1dd; --head:#eceefa; --zebra:#fafbfd; --hit:#fff4cc; }
+    html { font-size: 15px; background: var(--canvas); scroll-behavior: smooth; }
+    body { box-sizing: border-box; max-width: 980px; margin: 32px auto 80px; padding: 44px 56px 56px; background: #fff;
+           border: 1px solid var(--border); border-radius: 14px; line-height: 1.55;
+           box-shadow: 0 1px 2px rgba(20,30,60,.05), 0 10px 30px rgba(20,30,60,.07); }
+    a { color: var(--accent); }
+    a:hover { text-decoration: underline; }
+    h2 { margin-top: 2.6em; scroll-margin-top: 20px; }
+    h2.first { margin-top: 1.6em; }
+    h3, h4, [id] { scroll-margin-top: 20px; }
+
+    .cover { height: auto; display: block; padding: 0 0 8px; }
+    .cover h1 { font-size: 2.3em; margin-top: .3em; }
+    .cover .meta { margin-top: 1.6em; border: 1px solid var(--border); border-radius: 10px; background: var(--zebra); overflow: hidden; }
+    .cover .meta div { margin: 0; padding: .55em 1em; border-top: 1px solid var(--line); }
+    .cover .meta div:first-child { border-top: 0; }
+
+    .toc { border: 1px solid var(--border); border-radius: 12px; padding: .2em 1.4em 1em; margin-top: 2em; }
+    .toc h2.first { border-bottom: 0; margin: .8em 0 .4em; }
+    .toc ul { columns: 2; column-gap: 2.4em; }
+    .toc li { margin: .18em 0; }
+
+    table { border-collapse: separate; border-spacing: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin: .7em 0 1.1em; }
+    th, td { border: 0; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); padding: .5em .75em; }
+    th:last-child, td:last-child { border-right: 0; }
+    tr:last-child > td { border-bottom: 0; }
+    th { background: var(--head); border-bottom-color: var(--border); }
+    tr:nth-child(even) > td { background: var(--zebra); }
+    td.sig { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: .9em; background: #f6f7fe; }
+    .kv td:first-child { background: #f6f7fe; }
+    td:target, .sig:target, h2:target { background: var(--hit) !important; }
+
+    .fn { border: 1px solid var(--border); border-radius: 10px; margin: 1.1em 0 1.2em; overflow: hidden; }
+    .fn:has(.sig:target) { border-color: #e2b93b; box-shadow: 0 0 0 3px var(--hit); }
+    .fn h4 { margin: 0 0 .45em; padding: .65em 1em; background: var(--soft); border-bottom: 1px solid var(--line); }
+    .fn > p { margin: .4em 0 .5em; padding: 0 1em; }
+    .fn table.ex { width: calc(100% - 2em); margin: .5em 1em 1em; }
+    .ex td:last-child { color: #145c37; background: #f1f8f4; }
+    .ex tr:nth-child(even) > td:last-child { background: #e9f4ed; }
+
+    .note { border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 8px; padding: .7em 1em; margin: 1em 0; }
+    .warn { border-left-color: var(--warn); }
+    .ok { border-left-color: var(--ok); }
+    pre { border-radius: 8px; }
+    figure img { border-color: var(--border); border-radius: 8px; }
+
+    .totop { display: block; position: fixed; right: 18px; bottom: 18px; padding: .5em 1em; border-radius: 999px; background: var(--accent);
+             color: #fff; font-weight: 600; font-size: .85em; box-shadow: 0 4px 14px rgba(40,40,120,.25); }
+    .totop:hover { text-decoration: none; filter: brightness(1.1); }
+  }
+  @media screen and (min-width: 1260px) {
+    .side { display: block; position: fixed; top: 0; bottom: 0; left: 0; width: 264px; box-sizing: border-box; overflow-y: auto;
+            padding: 24px 16px 32px 22px; background: #fff; border-right: 1px solid var(--border); font-size: .88em; line-height: 1.35; }
+    .side .brand { font-weight: 700; font-size: 1.1em; color: var(--ink); margin-bottom: .1em; }
+    .side .kicker { color: var(--accent); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; font-size: .75em; }
+    .side .group { margin: 1.2em 0 .35em; color: var(--muted); font-weight: 600; font-size: .8em; letter-spacing: .05em; text-transform: uppercase; }
+    .side a { display: block; color: var(--ink); padding: .28em .55em; border-radius: 6px; }
+    .side a:hover { background: var(--soft); color: var(--accent); text-decoration: none; }
+    .side .n { display: inline-block; min-width: 1.6em; color: var(--muted); }
+    .side .find { margin-top: 1em; border: 1px solid var(--border); background: var(--soft); font-weight: 600; text-align: center; }
+    body { margin-left: calc(50vw - 358px); }
+    .totop { display: none; }
+  }
+  @media screen and (max-width: 760px) {
+    html { font-size: 14px; }
+    body { margin: 0; padding: 20px 16px 48px; border: 0; border-radius: 0; box-shadow: none; }
+    table { display: block; overflow-x: auto; }
+    .toc { padding: .2em 1em .8em; }
+    .toc ul { columns: 1; }
+    .fn table.ex { width: auto; }
+  }
 </style>
 </head>
 <body>
+<nav class="side" aria-label="Chapters">
+  <div class="kicker">maverickbuilds.app</div>
+  <div class="brand"><a href="#contents" style="padding:0">Formulas Manual</a></div>
+  <a class="find" href="#function-index">Find a function (A–Z)</a>
+  <div class="group">Foundations</div>
+  <a href="#where"><span class="n">1</span>Where formulas live</a>
+  <a href="#evaluation"><span class="n">2</span>How a formula is evaluated</a>
+  <a href="#syntax"><span class="n">3</span>Syntax</a>
+  <a href="#values"><span class="n">4</span>Values, types and comparisons</a>
+  <a href="#errors"><span class="n">5</span>Errors and failing cells</a>
+  <div class="group">Function reference</div>
+  <a href="#logic"><span class="n">6</span>Logic</a>
+  <a href="#math"><span class="n">7</span>Math and rounding</a>
+  <a href="#aggregates"><span class="n">8</span>Aggregates over arguments</a>
+  <a href="#text"><span class="n">9</span>Text</a>
+  <a href="#dates"><span class="n">10</span>Dates</a>
+  <a href="#members"><span class="n">11</span>The cell's members and their properties</a>
+  <a href="#lookup"><span class="n">12</span>LOOKUP</a>
+  <a href="#conditional"><span class="n">13</span>Conditional aggregation</a>
+  <a href="#time"><span class="n">14</span>Time series</a>
+  <div class="group">Using formulas well</div>
+  <a href="#totals"><span class="n">15</span>Totals: aggregation rule and time summary</a>
+  <a href="#recipes"><span class="n">16</span>Recipes</a>
+  <a href="#validation"><span class="n">17</span>Validation, troubleshooting and limits</a>
+  <div class="group">Appendix</div>
+  <a href="#function-index"><span class="n">A</span>Function index</a>
+  <a href="#error-index"><span class="n">B</span>Error index</a>
+</nav>
+<a class="totop" href="#contents">↑ Contents</a>
 
 <section class="cover">
   <div class="kicker">maverickbuilds.app</div>
   <h1>maverickbuilds.app<br>Formulas Manual</h1>
   <div class="sub">The formula language of calculated metrics: every function, how a formula reads the model, and how its results total</div>
   <div class="meta">
-    <div><b>Edition:</b> 2026-09-28, describing the formula engine as built on top of repository commit 5289903</div>
+    <div><b>Edition:</b> 2026-10-17, describing the formula engine of release 2026.10.17</div>
     <div><b>Audience:</b> people with the <b>developer</b> role who write calculated metrics, and anyone reviewing a model's formulas</div>
     <div><b>Scope:</b> the formula language and the Metrics screen. The rest of the console is in the Developer Manual. No API calls, no scripts</div>
     <div><b>Verified by:</b> every function and example is asserted by <code>internal/formula/catalogue_test.go</code>; every recipe in chapter 16 was run live, cell by cell, by <code>cmd/verify-formula-catalogue</code></div>
-    <div><b>Source:</b> <code>docs/formulas-manual/parts/*.html</code>, rebuilt into this PDF with <code>build.sh</code></div>
+    <div><b>Source:</b> <code>docs/formulas-manual/parts/*.html</code>, rebuilt into this page and its PDF with <code>build.sh</code></div>
   </div>
 </section>
 
 <section class="toc">
-<h2 class="first">Contents</h2>
-<ol>
+<h2 class="first" id="contents">Contents</h2>
+<ul>
   <li class="part">Part I: Foundations</li>
-  <li>Where formulas live</li>
-  <li>How a formula is evaluated</li>
-  <li>Syntax</li>
-  <li>Values, types and comparisons</li>
-  <li>Errors and failing cells</li>
+  <li><a href="#where"><span class="n">1.</span>Where formulas live</a></li>
+  <li><a href="#evaluation"><span class="n">2.</span>How a formula is evaluated</a></li>
+  <li><a href="#syntax"><span class="n">3.</span>Syntax</a></li>
+  <li><a href="#values"><span class="n">4.</span>Values, types and comparisons</a></li>
+  <li><a href="#errors"><span class="n">5.</span>Errors and failing cells</a></li>
   <li class="part">Part II: Function reference</li>
-  <li>Logic</li>
-  <li>Math and rounding</li>
-  <li>Aggregates over arguments</li>
-  <li>Text</li>
-  <li>Dates</li>
-  <li>The cell's members and their properties</li>
-  <li>LOOKUP</li>
-  <li>Conditional aggregation</li>
-  <li>Time series</li>
+  <li><a href="#logic"><span class="n">6.</span>Logic</a></li>
+  <li><a href="#math"><span class="n">7.</span>Math and rounding</a></li>
+  <li><a href="#aggregates"><span class="n">8.</span>Aggregates over arguments</a></li>
+  <li><a href="#text"><span class="n">9.</span>Text</a></li>
+  <li><a href="#dates"><span class="n">10.</span>Dates</a></li>
+  <li><a href="#members"><span class="n">11.</span>The cell's members and their properties</a></li>
+  <li><a href="#lookup"><span class="n">12.</span>LOOKUP</a></li>
+  <li><a href="#conditional"><span class="n">13.</span>Conditional aggregation</a></li>
+  <li><a href="#time"><span class="n">14.</span>Time series</a></li>
   <li class="part">Part III: Using formulas well</li>
-  <li>Totals: aggregation rule and time summary</li>
-  <li>Recipes</li>
-  <li>Validation, troubleshooting and limits</li>
+  <li><a href="#totals"><span class="n">15.</span>Totals: aggregation rule and time summary</a></li>
+  <li><a href="#recipes"><span class="n">16.</span>Recipes</a></li>
+  <li><a href="#validation"><span class="n">17.</span>Validation, troubleshooting and limits</a></li>
   <li class="part">Appendix</li>
-  <li>Function index</li>
-  <li>Error index</li>
-</ol>
+  <li><a href="#function-index"><span class="n">A.</span>Function index</a></li>
+  <li><a href="#error-index"><span class="n">B.</span>Error index</a></li>
+</ul>
 <p class="small">74 functions: 45 general (logic, math, argument aggregates, text, dates), 10 dimensional (PARENT, LOOKUP and eight conditional aggregations) and 19 time series, plus the two member references <code>dimension</code> and <code>dimension.property</code>.</p>
 </section>

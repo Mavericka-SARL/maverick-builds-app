@@ -1,5 +1,5 @@
 
-<h2>1. Where formulas live</h2>
+<h2 id="where">1. Where formulas live</h2>
 <p>A formula belongs to a <b>calculated metric</b>, never to a cell. You write it once, on the metric, and the engine evaluates it at every cell of the grid the metric is placed on: one value per combination of that grid's members, plus the totals. There is no cell-by-cell override and no "recalculate" button: every change that could alter a result recalculates it on the server before the screens refresh.</p>
 <ul>
   <li><b>Input</b> metrics hold values that people type, import or post from forms. They have no formula.</li>
@@ -30,7 +30,7 @@
   <li>A metric that reads no other metric (for example <code>=DAYSINMONTH(YEAR(START()), MONTH(START()))</code>) is computed when the revision is activated or the metric is saved, not when an input changes.</li>
 </ul>
 
-<h2>2. How a formula is evaluated</h2>
+<h2 id="evaluation">2. How a formula is evaluated</h2>
 <h3>One cell at a time</h3>
 <p>For each cell of the metric's grid, the engine evaluates the formula with every name bound to the cell:</p>
 <table class="kv">
@@ -58,7 +58,7 @@
 <h3>What a result can be</h3>
 <p>Every stored result is a <b>number</b>. TRUE and FALSE are stored as 1 and 0; a blank result stores nothing (the cell stays empty, and it is left out of totals); a text result is an error (<code>#VALUE!</code>). Text functions are therefore used <i>inside</i> a formula, in comparisons, criteria and member codes, not as its final result. The metric's <b>Format</b> (number, percentage, currency) only changes how the number is shown.</p>
 
-<h2>3. Syntax</h2>
+<h2 id="syntax">3. Syntax</h2>
 <pre>=revenue - cost
 =IF(revenue = 0, 0, (revenue - cost) / revenue)
 =ROUND(quantity * unit_price, 2)
@@ -94,7 +94,7 @@
 </table>
 <p>Not part of the language: cell addresses (<code>A1</code> is just an unknown name), ranges (<code>A1:B2</code>), array formulas, named ranges, the <code>%</code> suffix, and references to other workbooks.</p>
 
-<h2>4. Values, types and comparisons</h2>
+<h2 id="values">4. Values, types and comparisons</h2>
 <table>
 <tr><th style="width:16%">Type</th><th>Where it comes from</th><th style="width:34%">In arithmetic</th></tr>
 <tr><td>Number</td><td>Metric values, number literals, number and date properties, most functions</td><td>Itself</td></tr>
@@ -115,7 +115,7 @@
 <h3>Numbers shown as text</h3>
 <p>Where a number becomes text (<code>&amp;</code>, <code>CONCAT</code>, <code>LEN</code>, a comparison with text) it is written with up to 15 significant digits and no exponent between 1e-9 and 1e21: <code>"Total " &amp; 1234567</code> is "Total 1234567", <code>"" &amp; (0.1 + 0.2)</code> is "0.3". For a fixed number of decimals use <code>TEXT(x, "0.00")</code>.</p>
 
-<h2>5. Errors and failing cells</h2>
+<h2 id="errors">5. Errors and failing cells</h2>
 <table>
 <tr><th style="width:15%">Value</th><th>Produced by</th></tr>
 <tr><td><code>#DIV/0!</code></td><td>Division by zero; <code>AVERAGE</code> of no numbers; <code>AVERAGEIFS</code> with no recorded match; <code>MOD</code> by 0; <code>CEILING</code>/<code>FLOOR</code> with significance 0</td></tr>

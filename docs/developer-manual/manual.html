@@ -51,7 +51,7 @@
   <h1>maverickbuilds.app<br>Developer Manual</h1>
   <div class="sub">Everything the developer role can do in the console, screen by screen, and the concepts behind it</div>
   <div class="meta">
-    <div><b>Edition:</b> 2026-09-15, describing the console as built at repository commit 577b65c</div>
+    <div><b>Edition:</b> 2026-10-17, describing the console of release 2026.10.17</div>
     <div><b>Audience:</b> people with the <b>developer</b> role who build applications: models, grids, dashboards, tables of records, workflows, triggers and integrations</div>
     <div><b>Scope:</b> the console only. No API calls, no scripts, no deployment</div>
     <div><b>Source:</b> <code>docs/developer-manual/parts/*.html</code>, rebuilt into this PDF with <code>build.sh</code></div>
@@ -731,7 +731,7 @@
       <li>integrations, as you build and run them in the Integrations tab: REST API connectors — an HTTPS API, an SFTP file, or a model link reading another model of the tenant — with their sign-in connections; Google Sheets integrations (it fetches a sheet you name, as the Sheets import does, previews it, and saves the integration); testing a connector, activating it, scheduling it and <b>Run now</b>; and firing an automation rule's manual trigger. A test without side effects (a GET request, an SFTP file, a model link) runs as soon as the assistant asks, writes nothing and shows it the first records; a test that may change the external system, a run and a trigger are plan steps you confirm. It does each through your own routes, as you: what you may not do, it may not do either — a model link, for instance, only for a developer of both models.</li>
     </ul>
     Each change is the screen's own action with the screen's checks: a dimension or member a formula still uses is refused, a new member code carries its stored values over, a leaf that gains its first child hands its values down to it.</li>
-  <li>Explaining: asked how something works, it looks it up in this manual and the Formulas manual, and in the model itself (its metrics and formulas, grids, workflows, triggers and integrations), and says where in the console it is.</li>
+  <li>Explaining: asked how something works, it looks it up in this manual and the Formulas manual, and in the model itself (its metrics and formulas, grids, dashboards — each page's text, its links and what every widget shows — workflows, triggers and integrations), and says where in the console it is.</li>
   <li>Asking: whatever only you know — an API's address, where its records sit, an SFTP server and file, which model and grid to read, what a field goes into — it asks for in the chat. It never asks for a password, key or token in the chat: those go into the plan card's sign-in fields. If you paste one into the chat anyway, it will not repeat it; rotate it, because the chat keeps it.</li>
   <li>The limits of the tenant's edition apply to the assistant as they apply to you.</li>
   <li>Plans are capped at 100 steps; long tasks are continued in a follow-up plan.</li>
