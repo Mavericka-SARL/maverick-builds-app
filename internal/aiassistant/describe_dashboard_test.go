@@ -26,7 +26,9 @@ func TestDescribeDashboardReadsThePageInFull(t *testing.T) {
 		"- [Same model, by its name](dashboard:Test Model/Inputs)\n" +
 		"- [Old page](dashboard:Gone)\n" +
 		"- [Sales](dashboard:Sales Model/Overview)\n" +
-		"- [Formulas](/docs/formulas-manual/manual.html)"
+		"- [Formulas](/docs/formulas-manual/manual.html)\n" +
+		"- [Your inbox](page:Workflow Inbox)\n" +
+		"- [Dimensions](page:Developer > Dimensions)"
 	h.must("add_dashboard_widget", map[string]any{"dashboard_id": start, "widget_type": "text", "content": text,
 		"pos_x": 0, "pos_y": 0, "size_w": 1200, "size_h": 200})
 	h.must("add_dashboard_widget", map[string]any{"dashboard_id": start, "widget_type": "metric_kpi", "ref_id": revenue,
@@ -61,6 +63,8 @@ func TestDescribeDashboardReadsThePageInFull(t *testing.T) {
 		`"Old page" → dashboard 'Gone', which the working revision does not have`,
 		`"Sales" → dashboard 'Overview' of model 'Sales Model' (another model`,
 		`"Formulas" → /docs/formulas-manual/manual.html`,
+		`"Your inbox" → the console page Workflow Inbox`,
+		`"Dimensions" → the console page Developer › Dimensions`,
 		"reads metric 'Revenue' (id:" + revenue + ")",
 		`title "EU revenue"`,
 		region + " = dimension Region",

@@ -11,6 +11,7 @@ import { useBusinessAdminSection } from "../consoles/business-admin/section";
 import { useDeveloperSection } from "../consoles/developer/DeveloperConsole";
 import { useAdminSection } from "../consoles/platform-admin/section";
 import { enabledSections, resolveTab, sectionOf, type ConsoleSection, type SectionId } from "./sections";
+import { ConsolePageContext, parsePageLink, resolvePageLink } from "./pageLinks";
 
 /**
  * The one console. Every role the signed-in user holds contributes its
@@ -41,11 +42,24 @@ export default function UnifiedConsole() {
   ];
   const sections = candidates.filter((s): s is ConsoleSection => s !== null);
   const owner = sections.find((s) => s.id === sectionOf(tab));
+  const navGroups = sections.flatMap((s) => s.navGroups);
+
+  // A text widget's "page:" link opens a page of this sidebar, as clicking
+  // it here would; one the reader's roles do not give them opens nothing.
+  const openPage = (href: string) => {
+    const target = parsePageLink(href);
+    const id = target && resolvePageLink(target, navGroups);
+    if (!id) return false;
+    setTab(id);
+    window.scrollTo({ top: 0 });
+    return true;
+  };
 
   return (
+    <ConsolePageContext.Provider value={openPage}>
     <AppShell
       brand={<BrandMark markClassName="mvx-app-shell__mark" logoClassName="mvx-app-shell__brand-img" />}
-      navGroups={sections.flatMap((s) => s.navGroups)}
+      navGroups={navGroups}
       activeNavId={tab}
       onNavSelect={(item) => setTab(item.id)}
       utility={
@@ -66,5 +80,6 @@ export default function UnifiedConsole() {
       <PlanBanner />
       {owner?.render(tab)}
     </AppShell>
+    </ConsolePageContext.Provider>
   );
 }

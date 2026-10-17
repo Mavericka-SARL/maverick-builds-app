@@ -37,7 +37,7 @@ func TestMCPConnectorReadsTheProcess(t *testing.T) {
 		devCall("POST", "/api/developer/dashboards/"+dash+"/widgets", body)
 	}
 	widget(overview, map[string]any{"widget_type": "text", "pos_y": 0,
-		"content": "## How we plan\nEnter revenue first, then costs.\n\nNext: [Targets](dashboard:Targets) · [Guide](https://example.com/guide) · [Old page](dashboard:Retired page)"})
+		"content": "## How we plan\nEnter revenue first, then costs.\n\nNext: [Targets](dashboard:Targets) · [Guide](https://example.com/guide) · [Old page](dashboard:Retired page) · [Approve](page:Workflow Inbox)"})
 	widget(overview, map[string]any{"widget_type": "chart", "ref_id": f.gridID, "title": "Revenue by region", "pos_y": 1,
 		"widget_props": map[string]any{"chart": map[string]any{"chart_type": "bar", "dimension_id": f.geoDim,
 			"metric_ids": []string{f.metric["revenue"], f.metric["cost"]}, "context_defaults": map[string]string{f.periodDim: "Q1"}}}})
@@ -81,7 +81,7 @@ func TestMCPConnectorReadsTheProcess(t *testing.T) {
 			t.Errorf("text widget: %v", text)
 		}
 		links := text["links"].([]any)
-		if len(links) != 3 {
+		if len(links) != 4 {
 			t.Fatalf("links = %v", links)
 		}
 		if l := links[0].(map[string]any); l["dashboard_id"] != targets || l["model_id"] != f.modelID {
@@ -92,6 +92,9 @@ func TestMCPConnectorReadsTheProcess(t *testing.T) {
 		}
 		if l := links[2].(map[string]any); l["dashboard_id"] != nil || !strings.Contains(l["note"].(string), "not one you can open") {
 			t.Errorf("a link to no dashboard: %v", l)
+		}
+		if l := links[3].(map[string]any); l["page"] != "Workflow Inbox" || l["href"] != nil {
+			t.Errorf("a link to a console page: %v", l)
 		}
 		chart := widgets[1].(map[string]any)
 		if chart["grid"].(map[string]any)["id"] != f.gridID || chart["chart_type"] != "bar" {

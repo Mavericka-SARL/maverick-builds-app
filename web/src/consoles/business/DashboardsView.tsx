@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useContext } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type AppInfo, type DemoContext, type DashboardDef, type DashboardFolder } from "../../api/client";
 import { LoadingState, EmptyState, Toolbar, ToolbarGroup, SearchInput, FilterChip, Button, Select, Tabs, SectionHeader, InlineAlert, InConsoleLinkContext } from "../../ui";
@@ -7,6 +7,7 @@ import { DashboardWidgetGrid } from "./DashboardWidgets";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { selectModel } from "./modelSelection";
 import { clearPendingDashboard, findModel, parseDashboardLink, peekPendingDashboard, sameName, setPendingDashboard } from "./dashboardLinks";
+import { ConsolePageContext, PAGE_SCHEME, pageLinkName } from "../../router/pageLinks";
 
 // Matches the Developer Console's folder controls: "" filters nothing,
 // this sentinel narrows to dashboards that aren't in any folder.
@@ -24,6 +25,7 @@ export function DashboardsView({ ctx, onOpenInstance }: { ctx: DemoContext; onOp
   useEffect(() => { clearPendingDashboard(); }, []);
   const [linkNotice, setLinkNotice] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const openPage = useContext(ConsolePageContext);
 
   const { data: dashboardsRaw = [], isLoading } = useQuery({
     queryKey: ["user-dashboards"],
@@ -86,8 +88,13 @@ export function DashboardsView({ ctx, onOpenInstance }: { ctx: DemoContext; onOp
     window.scrollTo({ top: 0 });
   }
 
-  /** Follows a text widget's dashboard: link. */
+  /** Follows a text widget's dashboard: or page: link. */
   async function followLink(href: string) {
+    if (href.startsWith(PAGE_SCHEME)) {
+      if (openPage?.(href)) setLinkNotice(null);
+      else setLinkNotice(`“${pageLinkName(href)}” is not a page in your console.`);
+      return;
+    }
     const target = parseDashboardLink(href);
     if (!target) return;
     if (!target.model) return openHere(target.dashboard);

@@ -82,7 +82,9 @@ give it to them, in the model's active revision.
   gives its alternative text, never the picture.
 - **Links are followed by name**, as in the console (a `dashboard:Model/Name` link target):
   resolved against the models and dashboards the person opens, or marked as
-  leading nowhere for them.
+  leading nowhere for them. A link to a page of the console's sidebar (a
+  `page:Developer › Dimensions` target) is named as `page`, unchecked: which
+  pages a person has depends on their roles in the console.
 - **Workflow steps without machinery.** Name, type, written instructions,
   role names, deadline hours, completion label and routing — never a
   condition, a notification's recipients or anything naming a person

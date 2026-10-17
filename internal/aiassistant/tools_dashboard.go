@@ -199,6 +199,8 @@ func (e *ToolExecutor) describeTextLinks(ctx context.Context, sb *strings.Builde
 	sb.WriteString("   links:\n")
 	for _, l := range links {
 		switch {
+		case l.Page != "":
+			fmt.Fprintf(sb, "   - %q → the console page %s (opens for readers whose roles give them that page)\n", l.Label, l.Page)
 		case !l.Dashboard:
 			fmt.Fprintf(sb, "   - %q → %s\n", l.Label, l.Target)
 		case l.Model != "" && l.Model != modelName:

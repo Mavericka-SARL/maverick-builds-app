@@ -126,6 +126,10 @@ type DashboardLink struct {
 	ModelName     string `json:"model_name,omitempty"`
 	DashboardID   string `json:"dashboard_id,omitempty"`
 	DashboardName string `json:"dashboard_name,omitempty"`
+	// Page is a page of the console's sidebar a "page:" link opens
+	// ("Developer › Dimensions"); which pages a person has depends on their
+	// roles, so it is named, not checked.
+	Page string `json:"page,omitempty"`
 	// Note says why a dashboard link leads nowhere for the person.
 	Note string `json:"note,omitempty"`
 }
@@ -406,6 +410,11 @@ var markdownLink = regexp.MustCompile(`\[([^\]]*)\]\(([^)]+)\)`)
 // dashboardLinks.ts): dashboard:Name, dashboard:Model/Name, dashboard:Model/.
 const dashboardScheme = "dashboard:"
 
+// pageScheme starts a link to a page of the console's sidebar, by the names
+// it shows (the console's router/pageLinks.ts): page:Workflow Inbox,
+// page:Developer › Dimensions.
+const pageScheme = "page:"
+
 // TextLink is one [label](target) link of a text widget's Markdown.
 type TextLink struct {
 	Label  string
@@ -415,6 +424,9 @@ type TextLink struct {
 	// that model's first).
 	Dashboard   bool
 	Model, Name string
+	// Page is the sidebar page a "page:" link names, as "Group › Page" or
+	// "Page"; empty for any other link.
+	Page string
 }
 
 // TextLinks reads the links of a text widget's Markdown, in order. It is
@@ -430,10 +442,23 @@ func TextLinks(text string) []TextLink {
 				link.Model, link.Name = body[:slash], body[slash+1:]
 			}
 			link.Model, link.Name = decodeLinkPart(link.Model), decodeLinkPart(link.Name)
+		} else if body, ok := strings.CutPrefix(link.Target, pageScheme); ok {
+			link.Page = pageLinkName(decodeLinkPart(body))
 		}
 		out = append(out, link)
 	}
 	return out
+}
+
+// pageLinkName writes a page link's target the way the sidebar reads:
+// "Developer › Dimensions" ("›" or ">" between group and page) or "Workflow
+// Inbox".
+func pageLinkName(body string) string {
+	parts := strings.FieldsFunc(body, func(r rune) bool { return r == '›' || r == '>' })
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return strings.Join(parts, " › ")
 }
 
 // linkResolver resolves a text widget's dashboard links against the models
@@ -450,6 +475,10 @@ func (l *linkResolver) resolve(ctx context.Context, text string) ([]DashboardLin
 	var out []DashboardLink
 	for _, tl := range TextLinks(text) {
 		label, href := tl.Label, tl.Target
+		if tl.Page != "" {
+			out = append(out, DashboardLink{Label: label, Page: tl.Page})
+			continue
+		}
 		if !tl.Dashboard {
 			if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") {
 				out = append(out, DashboardLink{Label: label, Href: href})

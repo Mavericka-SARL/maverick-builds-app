@@ -401,8 +401,11 @@ steps carefully.
   deleting and re-adding them.
 - A "text" widget's content is Markdown: # headings, **bold**, *italic*, - bullets, [label](https://...) links, and
   links to other dashboards by NAME: [label](dashboard:Dashboard name) for one of this model,
-  [label](dashboard:Model name/Dashboard name) for another model's ("Model name/" alone opens its first dashboard).
-  Use them for navigation pages, "Next" links and links between models.
+  [label](dashboard:Model name/Dashboard name) for another model's ("Model name/" alone opens its first dashboard),
+  and links to a page of the console's sidebar by the names it shows: [label](page:Workflow Inbox), or with its group
+  [label](page:Developer › Dimensions) when two groups have a page of that name (Roles, Dashboards, Models). A reader
+  whose roles do not give them the page is told so. Use them for navigation pages, "Next" links, links between models
+  and "where to do it" steps.
 - Workflows: archive_workflow_def {"workflow_def_id"} stops a workflow that has run from starting (delete_workflow_def
   only removes a draft that never ran); restore_workflow_def returns an archived one to draft, to be published again by
   a developer; duplicate_workflow_def {"workflow_def_id", "name"} makes a draft copy.

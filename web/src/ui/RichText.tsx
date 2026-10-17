@@ -18,7 +18,9 @@ import { InConsoleLinkContext, isInConsoleHref } from "./RichTextLinks";
  *     console and lose its state. A bare #fragment stays in place.
  *   [label](dashboard:Model name/Dashboard name) — another dashboard, opened
  *     in place by whoever provides InConsoleLinkContext (RichTextLinks).
- *     Names may hold spaces, so this one link runs to the closing ")".
+ *   [label](page:Developer › Dimensions) — a page of the console's sidebar
+ *     (router/pageLinks), followed the same way.
+ *     Names may hold spaces, so these two links run to the closing ")".
  *   - bullets, 1. numbers
  *   > quote
  *   ---        rule
@@ -26,7 +28,7 @@ import { InConsoleLinkContext, isInConsoleHref } from "./RichTextLinks";
  * Anything else is shown as written.
  */
 
-const INLINE = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\((?:dashboard:[^)\n]+|[^)\s]+)\))/g;
+const INLINE = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\((?:dashboard:[^)\n]+|page:[^)\n]+|[^)\s]+)\))/g;
 
 /** Only schemes a browser may follow from a tenant's own text. */
 function safeHref(raw: string): string | null {

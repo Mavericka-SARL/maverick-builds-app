@@ -687,7 +687,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
               </Field>
             )}
             {newWidget.widget_type === "text" && (
-              <Field label="Content" description="Markdown: # heading, **bold**, - bullets, [label](https://example.com), [label](dashboard:Model name/Dashboard name)">
+              <Field label="Content" description="Markdown: # heading, **bold**, - bullets, [label](https://example.com), [label](dashboard:Model name/Dashboard name), [label](page:Developer › Dimensions)">
                 <Textarea ref={newTextRef} value={newWidget.content} onChange={e => setNewWidget(w => ({ ...w, content: e.target.value }))} rows={4} style={{ width: "100%", resize: "vertical" }} placeholder="Text content…" />
                 {demoCtx && (
                   <DashboardLinkPicker
@@ -1722,7 +1722,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
               <div style={{ marginBottom: 12 }}>
                 <div className="mvx-prop-section">Content</div>
                 <div className="mvx-admin-muted" style={{ fontSize: 12, marginBottom: 4 }}>
-                  Markdown: <code># heading</code>, <code>**bold**</code>, <code>- bullets</code>, <code>[label](https://example.com)</code>; a link to a dashboard is <code>[label](dashboard:Model name/Dashboard name)</code>
+                  Markdown: <code># heading</code>, <code>**bold**</code>, <code>- bullets</code>, <code>[label](https://example.com)</code>; a link to a dashboard is <code>[label](dashboard:Model name/Dashboard name)</code>, to a page of the sidebar <code>[label](page:Workflow Inbox)</code> or <code>[label](page:Developer › Dimensions)</code>
                 </div>
                 <Textarea
                   ref={propTextRef}
