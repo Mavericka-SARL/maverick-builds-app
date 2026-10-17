@@ -1,8 +1,8 @@
-<h2>Records</h2>
+<h2 id="records">Records</h2>
 <p class="path">Sidebar: Developer › Records</p>
 <p>A table holds the records people save: purchase requests, expense claims, headcount changes, deals. This screen defines each table's fields. Records are entered, searched and reviewed through a <b>Records</b> widget on a dashboard; posting record values into planning cells is configured under Integrations › Records.</p>
-<figure><img src="img/04-records.png" alt="Records screen listing the Travel Expense Request table with its fields"><figcaption>The table list. Each card shows the display label, the technical name, the field count, whether its records have a status, and the field labels.</figcaption></figure>
-<h3>Controls</h3>
+<figure><img src="img/04-records.png" width="1140" height="900" alt="Records screen listing the Travel Expense Request table with its fields"><figcaption>The table list. Each card shows the display label, the technical name, the field count, whether its records have a status, and the field labels.</figcaption></figure>
+<h3 id="records-controls">Controls</h3>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
 <tr><td><b>Search tables and fields…</b></td><td>Keeps the tables whose name, label, or any field's name or label matches. The table being edited stays in view.</td></tr>
@@ -19,14 +19,14 @@
 <tr><td><b>Edit</b> on a card</td><td>Opens the same editor inline for that table. <b>Save</b> shows a green <b>Saved</b> — with how many records were given a code, or that records are being posted again — and closes; <b>Cancel</b> discards.</td></tr>
 <tr><td>Delete icon</td><td>Confirm <b>Delete table?</b>: "This removes the table and all its records."</td></tr>
 </table>
-<h3>Status and workflows</h3>
+<h3 id="records-status-and-workflows">Status and workflows</h3>
 <ul>
   <li><b>No status field, no status.</b> A table without a status field gives its records no status: a record counts in the metrics its integrations post into as soon as it is saved, and saving it fires the table's <i>submitted</i> trigger.</li>
   <li><b>A status field means approval.</b> With one, a new record starts as a draft. Its creator may move it between draft and submitted; an administrator may set any status. An integration posts a record only in the statuses it names (<i>approved</i> by default). Records saved before the field was added keep no status and keep counting.</li>
   <li><b>The workflow moves it.</b> A workflow whose subject is the table (<i>Single saved record in a table</i> or <i>Selected records in a table</i>, under the workflow's Properties) and which has an approval step drives the status of the record its run is about — the record a <i>form_submit</i> trigger names: <i>submitted</i> while the run is open, <i>approved</i> or <i>rejected</i> by its last decision, a draft again if the run is cancelled. The record is posted again as it moves, as the approver. A test run moves nothing.</li>
   <li><b>Adding or removing the field re-posts the table.</b> Removing a table's status field makes every record count, so its records are posted again; the Save message says so.</li>
 </ul>
-<h3>Rules and behaviour</h3>
+<h3 id="records-rules-and-behaviour">Rules and behaviour</h3>
 <ul>
   <li><b>Tables are per revision.</b> The list and the create action use the selected revision. Editing never moves a table to another revision.</li>
   <li><b>Same name overwrites.</b> Creating a table whose technical name already exists in the revision silently replaces that table's label and fields. Pick a new name for a new table.</li>
@@ -38,13 +38,13 @@
   <li><b>Posting to cells is a separate object.</b> A table mapping (Integrations › Records) decides which field feeds which input metric, at which dimension members, for which record statuses. Metric and Dimension field types exist so the mapping has something to read.</li>
   <li><b>Where tables appear.</b> Users and business admins open a table through a dashboard <b>Records</b> widget. A table that is on no dashboard is not reachable by them: place every table people fill in on a dashboard their business role is granted. The chat connector and the AI Developer read a table's records too (read-only; <i>query_records</i>).</li>
 </ul>
-<figure><img src="img/23-form-editor.png" alt="Inline table editor with field rows, types and Required checkboxes"><figcaption>The inline editor. Field rows carry a name, a label, a type and a Required flag; a Metric field shows its By ID / By name choice below the row, an Auto code field its prefix and digits.</figcaption></figure>
+<figure><img src="img/23-form-editor.png" width="1140" height="900" alt="Inline table editor with field rows, types and Required checkboxes"><figcaption>The inline editor. Field rows carry a name, a label, a type and a Required flag; a Metric field shows its By ID / By name choice below the row, an Auto code field its prefix and digits.</figcaption></figure>
 
-<h2>Grids</h2>
+<h2 id="grids">Grids</h2>
 <p class="path">Sidebar: Developer › Grids</p>
 <p>A grid is a selection of metrics and dimensions that is shown as one table. It holds no data of its own; the data lives in the model. The same metric can only sit in one grid, so grids partition the model's metrics into the tables users will edit.</p>
-<figure><img src="img/24-grid-configure.png" alt="Grid configuration with the metric picker on the left and the dimension picker on the right"><figcaption>Configure opens two pickers. Each tick saves immediately, which is why the closing button is Done rather than Save.</figcaption></figure>
-<h3>Controls</h3>
+<figure><img src="img/24-grid-configure.png" width="1140" height="900" alt="Grid configuration with the metric picker on the left and the dimension picker on the right"><figcaption>Configure opens two pickers. Each tick saves immediately, which is why the closing button is Done rather than Save.</figcaption></figure>
+<h3 id="grids-controls">Controls</h3>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
 <tr><td><b>Search grids, tags, metrics, dimensions…</b></td><td>Keeps the grids whose name or a tag matches, or that hold a matching metric or dimension. The open grid stays in view.</td></tr>
@@ -61,7 +61,7 @@
 <tr><td><b>Values</b></td><td>The grid's typed values in bulk, in the revision you work in. <b>Fill with sample values</b>: tick the input metrics, give each a range (from, to, decimals) or a <b>Fixed</b> value, and optionally the member codes to fill under per dimension (a parent stands for everything under it; empty fills all). <b>Only cells holding no value</b> keeps what is entered. <b>Preview</b> counts the cells, <b>Download CSV</b> gives every row it would write (the layout the import wizard reads), <b>Fill</b> writes them. <b>Clear values</b>: the same metrics and members; <b>Count</b> first, then <b>Clear values</b> deletes them. Members you may only read, and values a table's records post, stay; each cell's history keeps what was cleared. The AI Developer does both with <code>fill_sample_values</code> and <code>clear_input_values</code>.</td></tr>
 <tr><td>Delete icon</td><td>Confirm <b>Delete grid?</b>: "This removes the grid from all dashboards that use it."</td></tr>
 </table>
-<h3>Rules and behaviour</h3>
+<h3 id="grids-rules-and-behaviour">Rules and behaviour</h3>
 <ul>
   <li><b>One grid per metric.</b> Ticking a metric that already belongs to another grid is refused by the server and the box stays unticked after refresh. Untick it in the other grid first. Dimensions can be shared freely.</li>
   <li><b>Same revision.</b> Metrics and grid must be in the selected revision; a mismatch is refused.</li>

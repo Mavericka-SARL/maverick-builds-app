@@ -1,9 +1,9 @@
-<h2>Dashboards</h2>
+<h2 id="dashboards">Dashboards</h2>
 <p class="path">Sidebar: Developer › Dashboards</p>
 <p>A dashboard is the page a user opens. It is a free-form canvas of widgets: grids to plan in, charts and KPIs to read, records to enter and review, buttons that start workflows or integrations, text and pictures, and an import box. Dashboards are organised in folders and tagged, and are granted to business roles on the Users screen.</p>
-<figure><img src="img/06-dashboards.png" alt="Dashboards list with tag filters, tag chips and a Design button per dashboard"><figcaption>The dashboard list. Folders group dashboards; the Folder control on a row moves it; Design opens the canvas.</figcaption></figure>
+<figure><img src="img/06-dashboards.png" width="1140" height="900" alt="Dashboards list with tag filters, tag chips and a Design button per dashboard"><figcaption>The dashboard list. Folders group dashboards; the Folder control on a row moves it; Design opens the canvas.</figcaption></figure>
 
-<h3>The list</h3>
+<h3 id="dashboards-the-list">The list</h3>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
 <tr><td><b>Search dashboards…</b></td><td>Filters by name.</td></tr>
@@ -19,8 +19,8 @@
 </table>
 <div class="note"><b>Per revision.</b> The list shows the dashboards of the selected revision. A dashboard whose folder belongs to another revision is shown under "Unfiled (folder not in this revision)".</div>
 
-<h3>The canvas: Design and Preview</h3>
-<figure><img src="img/25-dashboard-design.png" alt="Dashboard canvas in Design mode with text, KPI, chart, grid and records widgets and a workflow button"><figcaption>Design mode. The toolbar carries the mode switch and one chip per widget type; widgets sit on a dotted 20-pixel grid.</figcaption></figure>
+<h3 id="dashboards-the-canvas-design-and-preview">The canvas: Design and Preview</h3>
+<figure><img src="img/25-dashboard-design.png" width="1140" height="900" alt="Dashboard canvas in Design mode with text, KPI, chart, grid and records widgets and a workflow button"><figcaption>Design mode. The toolbar carries the mode switch and one chip per widget type; widgets sit on a dotted 20-pixel grid.</figcaption></figure>
 <p>The toolbar shows <b>Dashboards</b> (back), the dashboard name, the widget count, the <b>Design</b> / <b>Preview</b> switch and, in Design mode, the widget palette: <b>Grid</b>, <b>Chart</b>, <b>Records</b>, <b>Metric KPI</b>, <b>Trigger</b>, <b>Integration</b>, <b>Text</b>, <b>Image</b>, <b>Import</b>.</p>
 <p><b>Text</b> takes a small Markdown subset — <code>#</code> headings, <code>**bold**</code>, <code>*italic*</code>, <code>`code`</code>, bullet and numbered lists, <code>&gt;</code> quotes, <code>---</code> rules and links — <code>[label](https://example.com)</code> to another site, or <code>[label](/docs/formulas-manual/manual.html)</code> to a page of this deployment such as the manuals it ships with. Both open in a new tab, so the console stays where it was. A link can also open another dashboard in place: <code>[label](dashboard:Dashboard name)</code> for one of the same model, <code>[label](dashboard:Model name/Dashboard name)</code> for one of another model, and <code>[label](dashboard:Model name/)</code> for another model's first dashboard. <b>Link to a dashboard…</b> under the text box writes one for you: pick a model and a dashboard, then <b>Insert link</b>. Such a link names the model and the dashboard rather than pointing at them, so it keeps working through a revision copy, an export and an import; rename the target and the link says it cannot find it. It follows the reader's own access: a model they cannot open or a dashboard their roles hide is reported, never shown. A link can open a page of the sidebar too, by the names it shows: <code>[label](page:Workflow Inbox)</code>, or with its group <code>[label](page:Developer › Dimensions)</code> when two groups have a page of that name (Roles, Dashboards, Models; without a group the first group in the sidebar wins). It opens the page as a click in the sidebar would; a reader whose roles do not give them that page is told so instead. In Design and Preview dashboard and page links are inert; they work under <b>User › Dashboards</b>. Plain text that uses none of it is shown as typed. <b>Image</b> takes a PNG, JPEG, SVG, WebP or GIF of up to 512 KB, chosen with a file picker; the picture is stored with the dashboard, so it travels with a revision copy, an export and an import, and it takes alternative text for screen readers and a <b>Fit</b> of "show all of it" or "fill the box". Together they are what an explanatory page is built from — the tour a new workspace starts with is written in exactly these widgets.</p>
 <ul>
@@ -57,7 +57,7 @@
 <p>The bar sits at the top of the dashboard, one selector per dimension, and stays in view while the page scrolls. Every grid and chart follows it and shows no selector of its own for those dimensions, also one with <b>Context sync</b> off, which keeps only its other selectors to itself. A KPI follows it when set to <b>Follow dashboard selectors</b> or <b>Follow the selector bar</b>. A tile showing a company total should use <b>Follow the selector bar</b>: <b>Follow dashboard selectors</b> also takes one member of each of the metric's other dimensions. A KPI pinned to a member or showing the whole-model total keeps that. A person who cannot see the opening member gets the dimension's first member they can see. The bar follows the dashboard into a new revision and into a model export; renaming a member code updates it. Up to 8 dimensions; a dimension appears once. The AI Developer sets it with <code>selector_bar</code> on <code>create_dashboard</code> and <code>update_dashboard</code>.</p>
 
 <h4>Widget Properties</h4>
-<figure><img src="img/26-dashboard-widget-properties.png" alt="Selected chart widget with the Widget Properties panel on the right"><figcaption>Selecting a widget opens Widget Properties. Changes go into a draft; Save at the bottom of the page writes them.</figcaption></figure>
+<figure><img src="img/26-dashboard-widget-properties.png" width="1140" height="900" alt="Selected chart widget with the Widget Properties panel on the right"><figcaption>Selecting a widget opens Widget Properties. Changes go into a draft; Save at the bottom of the page writes them.</figcaption></figure>
 <table class="ctl">
 <tr><th>Section</th><th>Options</th></tr>
 <tr><td><b>Header</b></td><td><b>Show title bar</b> and the title text.</td></tr>
@@ -79,7 +79,7 @@
 <div class="note warn"><b>Save is explicit.</b> Layout and property changes raise an unsaved-changes bar with <b>Save</b> and <b>Cancel</b>; leaving the page while dirty asks first. An incomplete chart configuration is never saved; the last complete one stays.</div>
 
 <h4>Chart editor</h4>
-<figure><img src="img/27-dashboard-add-chart.png" alt="Configure and place panel for a chart with chart type, plotted dimension and metric choices"><figcaption>The chart editor appears once a source grid is chosen, both when adding and in Widget Properties.</figcaption></figure>
+<figure><img src="img/27-dashboard-add-chart.png" width="1140" height="900" alt="Configure and place panel for a chart with chart type, plotted dimension and metric choices"><figcaption>The chart editor appears once a source grid is chosen, both when adding and in Widget Properties.</figcaption></figure>
 <table class="ctl">
 <tr><th>Field</th><th>Meaning</th></tr>
 <tr><td><b>Chart type</b></td><td><b>Bar Chart</b>, <b>Line Chart</b>, <b>Pie Chart</b>, <b>Scatter Plot</b>, <b>Histogram</b>. Switching drops metrics the new type cannot plot and says so.</td></tr>
@@ -93,8 +93,8 @@
 </table>
 <p>A configuration is complete when it has a type, a plotted dimension and the required metrics.</p>
 
-<h3>What users get: the planning grid</h3>
-<figure><img src="img/28-dashboard-preview.png" alt="Preview of the Regional Finance Overview dashboard with KPIs, a bar chart, an editable grid, a records widget and a workflow button"><figcaption>Preview. Input rows are editable, the calculated row is tinted and marked CALC, and the legend explains the tints.</figcaption></figure>
+<h3 id="dashboards-what-users-get-the-planning-grid">What users get: the planning grid</h3>
+<figure><img src="img/28-dashboard-preview.png" width="1140" height="900" alt="Preview of the Regional Finance Overview dashboard with KPIs, a bar chart, an editable grid, a records widget and a workflow button"><figcaption>Preview. Input rows are editable, the calculated row is tinted and marked CALC, and the legend explains the tints.</figcaption></figure>
 <ul>
   <li><b>Editing.</b> Input metrics are inputs; a value is committed on Enter or when leaving the cell. Non-numeric text is discarded. "Saving…" and "Save failed: …" appear while writing.</li>
   <li><b>Read-only cells.</b> Calculated metrics, aggregated parent members, members or metrics the user's access rules mark read-only, and grids that mirror another grid are not editable.</li>
@@ -106,5 +106,5 @@
   <li><b>Hidden members</b> never reach the browser: the server strips members and metrics the user may not see and flags read-only ones. If a widget is pinned to a member the viewer cannot see, the first visible member is used instead.</li>
 </ul>
 
-<h3>Making a dashboard reachable</h3>
+<h3 id="dashboards-making-a-dashboard-reachable">Making a dashboard reachable</h3>
 <p>A user sees a dashboard only when one of their business roles has been granted it. Grants are managed on the Users screen (Users chapter). Until then the dashboard exists only for developers.</p>

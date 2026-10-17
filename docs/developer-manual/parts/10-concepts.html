@@ -1,18 +1,38 @@
 <section class="toc">
-<h2 class="first">Contents</h2>
-<div style="columns:2; column-gap:2em">
-<p><b>Part I: General</b><br>About this manual<br>The platform and the developer role<br>Core concepts<br>Getting around the console</p>
-<p><b>Part II: Screens</b><br>Models<br>Metrics<br>Dimensions<br>Dependency Graph<br>Records<br>Grids<br>Dashboards<br>Workflows<br>Triggers<br>Integrations<br>AI Developer<br>Users<br>Roles</p>
-<p><b>Part III: Reference</b><br>Limits and what is not supported<br>Troubleshooting<br>Glossary</p>
-</div>
+<h2 class="first" id="contents">Contents</h2>
+<ul>
+  <li class="part">Part I: General</li>
+  <li><a href="#about">About this manual</a></li>
+  <li><a href="#platform">The platform and the developer role</a></li>
+  <li><a href="#concepts">Core concepts</a></li>
+  <li><a href="#console">Getting around the console</a></li>
+  <li class="part">Part II: Screens</li>
+  <li><a href="#models">Models</a></li>
+  <li><a href="#metrics">Metrics</a></li>
+  <li><a href="#dimensions">Dimensions</a></li>
+  <li><a href="#dependency-graph">Dependency Graph</a></li>
+  <li><a href="#records">Records</a></li>
+  <li><a href="#grids">Grids</a></li>
+  <li><a href="#dashboards">Dashboards</a></li>
+  <li><a href="#workflows">Workflows</a></li>
+  <li><a href="#triggers">Triggers</a></li>
+  <li><a href="#integrations">Integrations</a></li>
+  <li><a href="#ai-developer">AI Developer</a></li>
+  <li><a href="#users">Users</a></li>
+  <li><a href="#roles">Roles</a></li>
+  <li class="part">Part III: Reference</li>
+  <li><a href="#limits">Limits and what is not supported</a></li>
+  <li><a href="#troubleshooting">Troubleshooting</a></li>
+  <li><a href="#glossary">Glossary</a></li>
+</ul>
 </section>
 
-<h2>About this manual</h2>
+<h2 id="about">About this manual</h2>
 <p>This manual describes everything a person with the <b>developer</b> role can do in the maverickbuilds.app console, and the concepts needed to use those screens well. Part I explains the platform and its rules. Part II is a reference, one chapter per sidebar item, in sidebar order: what the screen is for, a screenshot, every control, and the rules behind it. Part III lists limits, common problems and terms.</p>
 <p>Everything here was taken from the console as built on the date on the cover, and every screenshot is from a live session. Exact labels are printed in <b>bold</b>; values you type are in <code>monospace</code>. Nothing in this manual requires the API or a script.</p>
 
-<h2>The platform and the developer role</h2>
-<h3>What maverickbuilds.app is</h3>
+<h2 id="platform">The platform and the developer role</h2>
+<h3 id="platform-what-maverickbuilds-app-is">What maverickbuilds.app is</h3>
 <p>maverickbuilds.app is a platform for building governed business applications without code. An application combines three kinds of capability that a developer configures and users operate:</p>
 <table>
 <tr><th style="width:18%">Mode</th><th>What the developer builds</th><th>What users do</th></tr>
@@ -20,8 +40,8 @@
 <tr><td>CRUD</td><td>Tables of records, record-to-metric posting, imports, integrations</td><td>Submit and manage records that feed the plan</td></tr>
 <tr><td>Execution</td><td>Workflows, triggers, notifications</td><td>Start approvals, act on tasks in their inbox, get notified</td></tr>
 </table>
-<p>The console is one application with one sidebar. Roles are additive: each role adds groups to the sidebar, never a second console. A developer sees the <b>Build</b> group (AI Developer, Metrics, Dimensions, Records, Grids, Dashboards, Workflows, Roles, Triggers, Integrations, Dependency Graph, Models) and the <b>Govern</b> group (Users). A developer who also holds business_admin sees the business <b>Run</b> and <b>Business Admin</b> groups as well; a tenant or platform administrator sees the administration groups.</p>
-<h3>The five roles</h3>
+<p>The console is one application with one sidebar. Roles are additive: each role adds groups to the sidebar, never a second console. A developer sees the <b>Developer</b> group (AI Developer, Metrics, Dimensions, Records, Grids, Dashboards, Workflows, Roles, Triggers, Integrations, Dependency Graph, Models) and, unless an administration group already has Users, the <b>Govern</b> group (Users). business_user adds the <b>User</b> group (Dashboards, Workflow Inbox, My History, Models), business_admin the <b>Business Admin</b> group, and a tenant or platform administrator sees the administration groups.</p>
+<h3 id="platform-the-five-roles">The five roles</h3>
 <table>
 <tr><th style="width:18%">Role</th><th>What it does</th><th style="width:34%">Relation to the developer</th></tr>
 <tr><td>platform_admin</td><td>Every tenant: tenants, applications, models, users, audit log, infrastructure</td><td>Creates applications and models; grants the developer role</td></tr>
@@ -32,8 +52,8 @@
 </table>
 <p>A developer can grant business_admin and business_user, never developer or administrator roles. A developer works inside the tenants they have been given; objects in other tenants are invisible.</p>
 
-<h2>Core concepts</h2>
-<h3>Ownership: tenant, application, model, revision</h3>
+<h2 id="concepts">Core concepts</h2>
+<h3 id="concepts-ownership-tenant-application-model-revision">Ownership: tenant, application, model, revision</h3>
 <pre>Tenant (customer)
   └ Application            mode planning / CRUD / execution; what users open
       └ Model              container of definitions and data; one is the "business default"
@@ -50,7 +70,7 @@
   <li><b>Model.</b> Owns everything below. An application usually has one; when it has several, the <b>business default</b> model is the one business consoles open.</li>
   <li><b>Revision.</b> Every definition and every value belongs to a revision. Exactly one revision per model is <b>active</b>: that is what users see and edit. A developer selects a revision on the Models screen and every Developer screen then works inside it.</li>
 </ul>
-<h3>Revisions</h3>
+<h3 id="concepts-revisions">Revisions</h3>
 <ul>
   <li><b>Creating a revision copies the model.</b> A new revision is a deep copy of the current one: metrics and their dependencies, dimensions with members and properties, grids, dashboards with widgets and folders, tables of records with their records and mappings, integrations, workflows and automation rules, and the latest value of every cell. Internal references are remapped so the copy is self-contained.</li>
   <li><b>Activating</b> switches the live revision; it can be changed again. The active revision cannot be deleted.</li>
@@ -59,13 +79,13 @@
   <li><b>Export and import.</b> Tenant administrators can export a revision as a package, with or without data, and import it into another tenant or environment. Developers do not have this control.</li>
   <li>There is no separate "version" concept. The revision is the unit of change; do not look for one.</li>
 </ul>
-<h3>Dimensions and members</h3>
+<h3 id="concepts-dimensions-and-members">Dimensions and members</h3>
 <ul>
   <li>A dimension is an axis; members are its values, identified by a <b>code</b> and shown by a <b>label</b>. Members can have parents, forming a hierarchy; parents are totals of their children under each metric's aggregation rule.</li>
   <li>A dimension can be declared a child of another dimension (for example Cost Centre under Department); its members are then attached to members of the parent dimension.</li>
   <li>Properties are typed attributes on members (text, number, date) that can drive groupings and rollups, and that formulas read as <code>dimension.property</code> (for example <code>employees.salary</code>).</li>
 </ul>
-<h3>Metrics, formulas and calculation</h3>
+<h3 id="concepts-metrics-formulas-and-calculation">Metrics, formulas and calculation</h3>
 <ul>
   <li><b>Input</b> metrics hold typed, imported or posted values. <b>Calculated</b> metrics are defined by a formula over other metrics and are never typed into.</li>
   <li><b>Calculation is server-side and immediate.</b> Writing a cell, changing a formula, deleting a metric or member, posting a record and committing an import all recalculate every dependent metric before the screen refreshes. There is no "recalculate" button.</li>
@@ -103,36 +123,36 @@
 <p>Not available: spreadsheet cell addresses (A1), XLOOKUP, INDEX and MATCH (use LOOKUP by member instead), functions that list or read a member's children (LOOKUP of a parent member already combines them), the time functions POST, SPREAD, PROFILE and WEEKVALUE, and MOVINGSUM windows that are not whole-number literals. Cross-dimension and property rollups of totals are configured on grids and dimensions. Validation happens when you save a metric: unknown names, unknown functions, a wrong number of arguments, syntax errors, self-references and cycles are refused, and so are an undeclared property, a member code that does not exist, a LOOKUP or SUMIFS source that is not a metric name, and a dimension argument the source does not carry (checked once the source is on a grid, again when a metric is placed on a grid and when a revision is activated).</p>
 <p>Every function, with its exact behaviour at the edges and a worked example, is in the separate <b>Formulas Manual</b> (<code>docs/formulas-manual/</code>).</p>
 <p><b>Restricted viewers.</b> A metric that reads other cells — a time-series function, LOOKUP, a SUMIFS-family function, TIMESUM or a *VALUE function — is shown from the server's stored result. When that result was built from a member a user cannot see, the user gets a blank cell ("—") or a missing chart point rather than a value computed from the visible part only, and a total that includes such a cell is blank too.</p>
-<h3>Data</h3>
+<h3 id="concepts-data">Data</h3>
 <ul>
   <li><b>Values are append-only.</b> Every write adds a new fact; the latest one at an intersection is the value. Nothing is ever overwritten in place, which is what makes history and audit possible.</li>
   <li><b>Formats</b> (Number, Percentage, Currency with symbol and decimals, Boolean, Text) control display everywhere the metric appears.</li>
   <li><b>Totals</b> in grids, charts and KPIs are computed by the server from the aggregation rules, never by the browser.</li>
   <li><b>Imports</b> run in <b>Incremental</b> mode (each imported value is added to the cell's current value), <b>Sync / replace</b> mode (the file is authoritative for the cells it lists) or <b>Full reload</b> (delete all data of the revision first).</li>
 </ul>
-<h3>Grids, dashboards and what users see</h3>
+<h3 id="concepts-grids-dashboards-and-what-users-see">Grids, dashboards and what users see</h3>
 <ul>
   <li>A <b>grid</b> is a selection of metrics and dimensions. A metric belongs to one grid at most.</li>
   <li>A <b>dashboard</b> is a canvas of widgets. A grid widget decides which dimension is rows, columns or a selector; charts and KPIs read from grids and metrics; records, trigger, integration, text and import widgets complete the page.</li>
   <li>Users reach a dashboard only when a <b>business role</b> they belong to has been granted it. Roles, grants and per-user access rules are managed in the Business Admin console.</li>
 </ul>
-<h3>Visibility and locks</h3>
+<h3 id="concepts-visibility-and-locks">Visibility and locks</h3>
 <ul>
   <li><b>Access rules</b> per user and per dimension member or metric: <b>write</b> (default), <b>read</b> (visible, not editable) or <b>hidden</b> (removed from grids, charts, selectors and totals shown to that user). A rule on a parent member cascades to its descendants. Rules are applied on the server; hidden data never reaches the browser.</li>
   <li><b>Workflow locks.</b> While a workflow instance about a grid, metric or member scope waits at an approval step, and after it was approved, that scope is locked: typing and imports are refused with "… is locked: a workflow about it is awaiting approval or was approved". While it is at a task, a condition or a notification the scope stays editable, so a correction round's tasks can correct the data they are about; a reject that sends it back to a task opens it again, and a rejection or cancellation releases it. A company-wide round — one whose context names no member and no record, such as a planning round started from a dashboard button — locks its whole revision while its approval step waits ("… is waiting for approval (step): this revision's values are locked until it is approved or rejected"); approving or rejecting opens it again, and an approved company-wide round does not stay locked.</li>
   <li><b>Calculated metrics</b> are always read-only. <b>System-managed revisions</b> are read-only for everyone.</li>
 </ul>
-<h3>Workflows, triggers and notifications</h3>
+<h3 id="concepts-workflows-triggers-and-notifications">Workflows, triggers and notifications</h3>
 <ul>
   <li>A <b>workflow definition</b> is steps and routes; a <b>trigger</b> (automation rule) starts it on an event; an <b>instance</b> is one run, keeping the definition it started with; a <b>task</b> is one step waiting for a person.</li>
   <li>Tasks appear in the business Workflow Inbox of everyone holding the assigned role. Users submit, business admins decide.</li>
   <li>Notifications are in-app (the bell) and are produced by notification steps, rework and failed starts.</li>
 </ul>
-<h3>Audit</h3>
+<h3 id="concepts-audit">Audit</h3>
 <p>Every change made through the console, by developers and users alike, is recorded in the audit log with the acting user, the object and the action. Administrators read it on the <b>Audit Log</b> screen; developers have no screen for it, but should know that their edits are attributable.</p>
 
-<h2>Getting around the console</h2>
-<figure><img src="img/13-account-menu.png" alt="Developer console with the account menu open showing email, roles and Sign out"><figcaption>The shell: sidebar groups on the left, the context bar at the top with Model and Revision, the notification bell and the account menu.</figcaption></figure>
+<h2 id="console">Getting around the console</h2>
+<figure><img src="img/13-account-menu.png" width="1400" height="900" alt="Developer console with the account menu open showing email, roles and Sign out"><figcaption>The shell: sidebar groups on the left, the context bar at the top with Model and Revision, the notification bell and the account menu.</figcaption></figure>
 <table class="ctl">
 <tr><th>Element</th><th>What it does</th></tr>
 <tr><td>Sidebar</td><td>Groups by role: <b>Build</b> and <b>Govern</b> for a developer. Click a group's name to fold it away and again to unfold it; the browser remembers which groups are folded. The collapse icon narrows it. Its top shows the product mark, or the tenant's own logo when white-labelled.</td></tr>

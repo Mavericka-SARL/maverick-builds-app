@@ -1,8 +1,8 @@
-<h2>AI Developer</h2>
+<h2 id="ai-developer">AI Developer</h2>
 <p class="path">Sidebar: Developer › AI Developer</p>
 <p>A chat assistant that can read the model and, when you approve, build, change and remove what you build on the other Developer screens, under the same checks. Model changes happen in an isolated <b>AI draft</b> revision that you promote or discard, so the live model is never touched by accident. Some changes are live as soon as you execute the plan, as they are on their own screens: business roles, user access rules, form records posted through a form integration, sign-in connections, whatever a run or a test sends to an external system, and a workflow a fired trigger starts.</p>
-<figure><img src="img/11-ai-developer.png" alt="AI Developer screen with the session list, chat area and message box"><figcaption>Sessions on the left, the conversation in the middle. Settings hold the provider and key; the Activity panel lists proposals.</figcaption></figure>
-<h3>Controls</h3>
+<figure><img src="img/11-ai-developer.png" width="1140" height="900" alt="AI Developer screen with the session list, chat area and message box"><figcaption>Sessions on the left, the conversation in the middle. Settings hold the provider and key; the Activity panel lists proposals.</figcaption></figure>
+<h3 id="ai-developer-controls">Controls</h3>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
 <tr><td><b>AI Settings</b> (gear)</td><td><b>LLM Provider</b>: OpenAI, Anthropic (Claude), Mistral, DeepSeek. <b>Model</b> name. <b>API Key</b> (kept server-side; "key saved" once set, leave blank to keep it). <b>Save settings</b>. Chatting is blocked until a key is set: "Set your API key in Settings before chatting."</td></tr>
@@ -15,7 +15,7 @@
 <tr><td><b>Converted files</b></td><td>Spreadsheets the assistant converted to the import layout, and files it wrote for you (a load file, a template, sample data), each with <b>CSV</b> and <b>Excel</b> download buttons. Nothing in them has been imported; ask it to import one, or attach it to the import wizard.</td></tr>
 <tr><td>Draft banner</td><td>"Working in an isolated draft revision — use it as your working revision to look it through; it goes live only when you Set active in Models." <b>Use as working revision</b> switches the console to the draft — it does not make it live — and finishes the session: the message box closes with "This session's draft is now your working revision…" and a <b>New session</b> button — a new session works on your working revision. Making it live is <b>Set active</b> in <b>Developer › Models</b>; <b>Discard</b> asks <b>Discard this draft?</b> and permanently removes every model change the AI made in this session (business roles, access rules and posted form records are not in the draft and stay).</td></tr>
 </table>
-<h3>What it can do</h3>
+<h3 id="ai-developer-what-it-can-do">What it can do</h3>
 <ul>
   <li>Read tools: describe metrics, dimensions, grids (with display levels), dashboard folders, dashboards and each widget, revisions, workflows, triggers, tables of records and their integrations, the records saved in a table (read-only, <i>query_records</i>: a page of records or totals), business roles and users; validate formulas and workflows; answer questions about the model and attached documents.</li>
   <li>Write tools, always through an approved plan:
@@ -38,10 +38,10 @@
 </ul>
 <div class="note"><b>Workflows and tables of records.</b> The assistant builds the whole chain a workflow needs: the business roles its steps are assigned to, the definition with every step type the editor offers, the automation rule that starts it, and the form and form integration that feed it. It also archives, restores and duplicates workflows, renames and deletes roles and sets the dashboards they may open, and backfills a form integration. It runs the same Validate check as the Workflows editor and reports the verdict with every change. Two things stay yours: <b>publishing</b> a workflow (the assistant leaves it as a draft and tells you so) and adding <b>members</b> to a role. The assistant uses the same validation as the screens, so a formula or a workflow it proposes is rejected under the same rules you would be.</div>
 
-<h2>Users</h2>
+<h2 id="users">Users</h2>
 <p class="path">Sidebar: Govern › Users (hidden when an admin section already provides it)</p>
 <p>The developer's Users screen invites people and gives them business roles, so that the applications you build have users. Deciding which applications and models a person may reach, and the platform roles above business level, stay with tenant and platform administrators.</p>
-<figure><img src="img/12-users.png" alt="Users screen with the user table and the Invite user button"><figcaption>Users of the tenant with their roles and workspace assignments.</figcaption></figure>
+<figure><img src="img/12-users.png" width="1140" height="900" alt="Users screen with the user table and the Invite user button"><figcaption>Users of the tenant with their roles and workspace assignments.</figcaption></figure>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
 <tr><td><b>Search name, e-mail, role, workspace…</b></td><td>Keeps the people whose name or e-mail matches, or who hold a matching role, or a role in a matching workspace or tenant ("n of m users"). The person being edited stays in view.</td></tr>
@@ -50,7 +50,7 @@
 <tr><td><b>Workspace roles</b></td><td>Place a person into a workspace with a business role. The <b>Resource access</b> section (which applications and models a person may open) is shown to administrators only.</td></tr>
 <tr><td>Delete user</td><td>Confirm <b>Delete user?</b>: removes the person and revokes all their access. You cannot delete your own account.</td></tr>
 </table>
-<h2>Roles</h2>
+<h2 id="roles">Roles</h2>
 <p class="path">Sidebar: Developer › Roles (hidden when you also hold business_admin: the Business Admin console's Roles tab is the same screen with members)</p>
 <p>Named business roles ("Budget Approvers", "Regional Managers"). Workflow tasks and approvals are assigned to these roles by name, or to the platform roles. A developer creates the roles their workflows need and decides which dashboards each may open; who is <b>in</b> a role is decided by a business admin.</p>
 <table class="ctl">
@@ -61,7 +61,7 @@
 <tr><td>Delete (bin)</td><td>Confirm <b>Delete role?</b>: removes the role, its members and its dashboard grants.</td></tr>
 </table>
 
-<h3>Where the rest of access is configured</h3>
+<h3 id="roles-where-the-rest-of-access-is-configured">Where the rest of access is configured</h3>
 <p>Three things decide what a user sees and may change. Role membership and access rules live in the <b>Business Admin</b> console (sidebar group <b>Business Admin</b>), which a developer sees only when they also hold the business_admin role or ask a business admin:</p>
 <ul>
   <li><b>Roles.</b> The roles above, with their members.</li>

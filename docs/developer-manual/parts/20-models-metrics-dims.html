@@ -1,8 +1,8 @@
-<h2>Models</h2>
+<h2 id="models">Models</h2>
 <p class="path">Sidebar: Developer › Models</p>
 <p>The Models screen lists every application and model you can reach, with their revisions. It is where you choose <em>which revision you are editing</em>; every other Build screen works inside that choice.</p>
-<figure><img src="img/01-models.png" alt="Models screen with the working-revision banner and one application with its model and revision"><figcaption>The banner names the selected revision and its short id. Applications are cards; each model lists its revisions with badges.</figcaption></figure>
-<h3>Controls</h3>
+<figure><img src="img/01-models.png" width="1140" height="900" alt="Models screen with the working-revision banner and one application with its model and revision"><figcaption>The banner names the selected revision and its short id. Applications are cards; each model lists its revisions with badges.</figcaption></figure>
+<h3 id="models-controls">Controls</h3>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
 <tr><td>Banner <b>Working in revision: …</b></td><td>The revision every Developer screen edits, with its short id. With nothing selected the banner is orange: "No revision selected — select a revision below to start working".</td></tr>
@@ -15,18 +15,18 @@
 <tr><td><b>New revision</b></td><td>Type a name, press Enter or <b>Save</b>. The new revision is a full copy of the model's current state (see Concepts › Revisions).</td></tr>
 <tr><td><b>Set as business default</b> / badge <b>business default</b></td><td>Business consoles (dashboards, workflows, grids) open the default model of an application. With several models in one application, pick which one users get.</td></tr>
 </table>
-<h3>Rules and behaviour</h3>
+<h3 id="models-rules-and-behaviour">Rules and behaviour</h3>
 <ul>
   <li><b>Selection is per session and not saved.</b> On a fresh sign-in the console pre-selects the most recently created revision, and if you skip this screen it falls back to a default revision that may belong to another application. Check the header (<b>Model</b> and <b>Revision</b>) before creating anything.</li>
   <li><b>Applications and models are created by administrators</b>: on the Applications screen of the tenant or platform admin, or at the top of this screen for a developer who is also one. A developer alone creates revisions, not applications or models.</li>
   <li><b>Active means live.</b> Users always see the active revision. Build and test in a non-active revision, then <b>Set active</b>.</li>
 </ul>
 
-<h2>Metrics</h2>
+<h2 id="metrics">Metrics</h2>
 <p class="path">Sidebar: Developer › Metrics</p>
 <p>A metric is a measure of the model: an <b>Input</b> metric is typed in by users, imported or posted from records; a <b>Calc</b> metric is computed from a formula over other metrics. The list groups inputs first, then a <b>Calculated</b> section.</p>
-<figure><img src="img/02-metrics.png" alt="Metrics list with input and calculated metrics, type badges, formulas and the Used by column"><figcaption>Each row shows technical name, label, type badges (Input or Calc, aggregation rule, format), the formula, and which calculated metrics use this one.</figcaption></figure>
-<h3>The list</h3>
+<figure><img src="img/02-metrics.png" width="1140" height="900" alt="Metrics list with input and calculated metrics, type badges, formulas and the Used by column"><figcaption>Each row shows technical name, label, type badges (Input or Calc, aggregation rule, format), the formula, and which calculated metrics use this one.</figcaption></figure>
+<h3 id="metrics-the-list">The list</h3>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
 <tr><td><b>Search metrics…</b></td><td>Filters by name, label, formula or tag; the footer reads "n results of m metrics".</td></tr>
@@ -37,8 +37,8 @@
 <tr><td>Delete icon</td><td>Confirm <b>Delete metric?</b>: "This permanently removes …", or, when other metrics read it, "… is read by …. The delete is refused until no metric reads it: change those formulas first." A metric that another metric reads, in its formula or as the numerator or denominator of its Rate total, cannot be deleted: the refusal (<code>METRIC_IN_USE</code>) appears under the row and names those metrics.</td></tr>
 <tr><td><b>Add metric</b> / <b>Cancel</b></td><td>Opens the add form under the list. Its last field, <b>Tags</b>, takes free-form labels: type one and press Enter or comma. Tags are stored lower case with spaces as hyphens, and the row editor has the same field.</td></tr>
 </table>
-<h3>The add form</h3>
-<figure><img src="img/20-metric-add-form.png" alt="Add metric form with name, type, format, formula and aggregation rule"><figcaption>Adding a calculated metric. Names are checked as you type (a hint under the field); the server checks the whole formula when you add the metric.</figcaption></figure>
+<h3 id="metrics-the-add-form">The add form</h3>
+<figure><img src="img/20-metric-add-form.png" width="1140" height="900" alt="Add metric form with name, type, format, formula and aggregation rule"><figcaption>Adding a calculated metric. Names are checked as you type (a hint under the field); the server checks the whole formula when you add the metric.</figcaption></figure>
 <table class="ctl">
 <tr><th>Field</th><th>Meaning</th></tr>
 <tr><td><b>Metric name</b></td><td>Technical name in snake_case; formulas refer to it, in any case. Example <code>gross_margin</code>. A name another metric of the revision already has, even in another case, is refused (<code>METRIC_NAME_TAKEN</code>); so is a dimension name that differs from an existing dimension's only in case (<code>DIMENSION_NAME_TAKEN</code>). A metric may not take a dimension's name, nor a dimension a metric's (<code>NAME_IS_OTHER_KIND</code>): in a formula the name could mean either, and a formula saved while only one existed stays bound to it. Name a pick-list for what it holds per row — <code>act_status</code> over the dimension <code>activity_statuses</code>.</td></tr>
@@ -50,8 +50,8 @@
 <tr><td><b>Time summary</b> (shown when the revision has a Time dimension; in the row editor only for metrics on a grid that carries one)</td><td>How the metric totals <i>across time</i>, independently of the aggregation rule: <b>sum</b> for flows (revenue, cost), <b>last</b> for a closing balance, <b>first</b> for an opening balance, <b>average</b>, <b>min</b>, <b>max</b>, or <b>none</b> when a time total is meaningless (no total is shown). A non-default choice shows as a "time: last" badge on the row.</td></tr>
 <tr><td><b>Add metric</b></td><td>Enabled when the name is filled, a Calc metric has a formula, and a Rate rule has both operands. The server then checks the whole formula and shows its message if it refuses it. After success the label reads <b>Added</b> and the form stays open for the next metric.</td></tr>
 </table>
-<h3>Editing</h3>
-<figure><img src="img/21-metric-edit-inline.png" alt="A metric row in inline edit mode"><figcaption>Inline editing: name, formula, aggregation rule, format, decimals and symbol, then Save or Cancel.</figcaption></figure>
+<h3 id="metrics-editing">Editing</h3>
+<figure><img src="img/21-metric-edit-inline.png" width="1140" height="900" alt="A metric row in inline edit mode"><figcaption>Inline editing: name, formula, aggregation rule, format, decimals and symbol, then Save or Cancel.</figcaption></figure>
 <ul>
   <li>Saving a changed formula or rule triggers recalculation; the row then shows a green <b>Recalc results</b> banner listing "revision → metric = value" per affected total. Dismiss it with the ×.</li>
   <li>While you type, names that are neither a metric nor a dimension of the revision are listed under the field ("Not a metric or dimension in this revision: …"), whichever style you use (<code>name</code> or <code>{name}</code>). That is a hint and never blocks <b>Save</b>: the server checks the formula when you save and shows its message if it refuses it.</li>
@@ -63,11 +63,11 @@
 <div class="note"><b>Highlight rules: a spreadsheet's conditional formatting.</b> Edit a metric and, under <b>Highlight cells</b>, add rules: <b>When</b> this cell (or another metric at the same cell), optionally <b>absolute</b>, a comparison (&gt; ≥ &lt; ≤ = ≠ between, not between, is blank, is not blank) with <b>a value</b> or <b>a metric</b>, <b>→</b> a tone (Red, Amber, Green, Blue). The first rule that holds tints the cell, on leaves and totals alike. A metric compared with is read at the same cell when it is on the grid, else at its total — a threshold setting on another grid. The workbook rule <code>ABS(S5)&gt;Setup!$B$12</code> on a Var % column is "When this cell, absolute, &gt; the metric <code>threshold_pct</code> → Red"; "= Review" on a pick-list compares its member's code. The metric row shows "1 highlight". Rules name metrics as formulas do, so revision copies and model export carry them; over the API they are <code>highlight_rules</code> (see <code>HighlightRule</code> in <code>api/openapi.yaml</code>).</div>
 <div class="note"><b>Formula language in short.</b> Optional leading <code>=</code>; names are case-insensitive; operators <code>+ - * / ^</code>, comparisons <code>= &lt;&gt; &lt; &lt;= &gt; &gt;=</code>, text join <code>&amp;</code>, parentheses; arguments separated by commas or semicolons. Functions: see Concepts › Formulas. A formula can read the cell's member (<code>region</code>), a member property (<code>employees.salary</code>), the parent member (<code>PARENT(region)</code>), another member's value (<code>LOOKUP</code>) and conditional totals (<code>SUMIFS</code> and its family). Not available: cell addresses like A1, XLOOKUP/INDEX/MATCH. Offsets between periods use the time-series functions on a Time dimension.</div>
 
-<h2>Dimensions</h2>
+<h2 id="dimensions">Dimensions</h2>
 <p class="path">Sidebar: Developer › Dimensions</p>
 <p>A dimension is an axis of the model (Department, Region, Product, Period). Its members are the values on that axis, optionally arranged in a hierarchy, and each member can carry property values used for grouping and rollups. A dimension is either <b>Standard</b> or <b>Time</b> — chosen explicitly when it is created and fixed afterwards. Only a Time dimension gives formulas a calendar to move along (PREVIOUS, LAG, MOVINGSUM, …); naming a standard dimension "month" does not.</p>
-<figure><img src="img/03-dimensions.png" alt="Dimensions screen with the department card open, listing its members by region with codes and actions"><figcaption>One card per dimension. The header shows member count and root count; the table lists members with code, children and actions.</figcaption></figure>
-<h3>Controls</h3>
+<figure><img src="img/03-dimensions.png" width="1140" height="900" alt="Dimensions screen with the department card open, listing its members by region with codes and actions"><figcaption>One card per dimension. The header shows member count and root count; the table lists members with code, children and actions.</figcaption></figure>
+<h3 id="dimensions-controls">Controls</h3>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
 <tr><td><b>New dimension</b> / <b>Cancel</b></td><td>Opens the form: <b>Name</b> (placeholder <code>department</code>), <b>Dimension type</b> (Standard or Time — required), then either <b>Parent dimension (optional)</b> for Standard, or <b>Granularity</b> (day, week, month, quarter, half year, year, custom) and <b>Fiscal year starts</b> (a month) for Time, and <b>Tags</b>. <b>Create</b>. The type, granularity and fiscal year cannot be changed later; create a new dimension instead.</td></tr>
@@ -86,8 +86,8 @@
 <tr><td>Edit member</td><td>Same inline row plus <b>Parent member</b> select (move within the hierarchy) and one input per property.</td></tr>
 <tr><td><b>Dimension Properties</b></td><td>"attributes of each member — use in formulas as &lt;dimension&gt;.&lt;property&gt;, e.g. as a SUMIFS criterion or a LOOKUP member". Add with <b>property_name</b> and a type (<b>text</b>, <b>number</b>, <b>date</b>), then <b>Add</b>. The name must be an identifier — letters, digits and <code>_</code>, not starting with a digit — and unique in the dimension regardless of case; otherwise the server's reason is shown under the list. Each property becomes a column in the member table when props are shown; values are edited per member (a date as <code>yyyy-mm-dd</code>).</td></tr>
 </table>
-<figure><img src="img/22-dimension-member-edit.png" alt="Member row in edit mode with code, label, parent member and property inputs"><figcaption>Editing a member: code, label, parent and property values in one row.</figcaption></figure>
-<h3>Rules and behaviour</h3>
+<figure><img src="img/22-dimension-member-edit.png" width="1140" height="900" alt="Member row in edit mode with code, label, parent member and property inputs"><figcaption>Editing a member: code, label, parent and property values in one row.</figcaption></figure>
+<h3 id="dimensions-rules-and-behaviour">Rules and behaviour</h3>
 <ul>
   <li><b>Codes are identity.</b> Data, imports and formulas refer to members by code; labels are for display. Changing a code re-keys the member for future writes. A member imported (or built by the AI Developer) without a code gets one made from its label: letters and digits in capitals, words joined by _, at most 10 characters (<i>North America East</i> → NORTH_AMER, the next one NORTH_AM_2); re-importing the same label updates that member. Only Latin letters and digits are kept: a label in another script (<i>Москва</i>) gets a generated code such as M_1A2B3C4D. Without a code a member is found by its label, so a file whose labels have changed — the same members in another language — adds new members beside the old ones: give the file a <code>code</code> column to rename members.</li>
   <li><b>Hierarchy and totals.</b> A parent's value is the rollup of its children by each metric's own aggregation rule (set on the metric; sum by default) — a dimension has no rollup rule of its own. Grids can show all levels, one level, or leaves only (Grids › Show).</li>
@@ -101,10 +101,10 @@
   <li>Dimensions are per revision, like everything else under Build.</li>
 </ul>
 
-<h2>Dependency Graph</h2>
+<h2 id="dependency-graph">Dependency Graph</h2>
 <p class="path">Sidebar: Developer › Dependency Graph</p>
 <p>A read-only map of every metric in the revision and the arrows between them: an arrow from A to B means B's formula uses A. Use it to understand what a change will recalculate and to spot metrics that are on no grid.</p>
-<figure><img src="img/37-dependency-graph.png" alt="Dependency graph with input and calculated metric nodes joined by arrows"><figcaption>Input metrics and calculated metrics are drawn as differently tinted cards; each card names the grids and dimensions of the metric.</figcaption></figure>
+<figure><img src="img/37-dependency-graph.png" width="1140" height="900" alt="Dependency graph with input and calculated metric nodes joined by arrows"><figcaption>Input metrics and calculated metrics are drawn as differently tinted cards; each card names the grids and dimensions of the metric.</figcaption></figure>
 <table class="ctl">
 <tr><th>Control</th><th>What it does</th></tr>
 <tr><td><b>Find metric…</b></td><td>Highlights matching nodes.</td></tr>
