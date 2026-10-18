@@ -1355,6 +1355,22 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                     For a row dimension with a hierarchy: users open and close
                     each parent row by clicking its arrow.
                   </p>
+                  <div className="mvx-prop-section" style={{ marginTop: 12 }}>Search</div>
+                  <Checkbox
+                    checked={!wp.hide_search}
+                    onChange={e => {
+                      const wid = selectedWidget!.id;
+                      setPropsDraft(prev => ({
+                        ...prev,
+                        [wid]: { ...prev[wid], widget_props: { ...wp, hide_search: e.target.checked ? undefined : true } },
+                      }));
+                    }}
+                    label="Show the search box"
+                  />
+                  <p style={{ fontSize: 11, color: "var(--color-text-quiet)", marginTop: 4 }}>
+                    "Find a row or column…" above the grid. Untick it for a
+                    grid of a few rows.
+                  </p>
                 </div>
               );
             })()}

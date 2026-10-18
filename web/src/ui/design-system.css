@@ -2151,6 +2151,38 @@ tr:hover .mvx-member-label__actions,
 }
 
 /* Legend under a planning grid naming the three cell roles. */
+/* Frozen panes (PlanningGrid): the table scrolls inside its own box, and its
+   header rows and row-label column stay in view. Sticky cells need an opaque
+   background: a row's own colour, else what the grid sits on (the page, or a
+   card). The header rows' top offsets are measured in PlanningGrid. A
+   collapsed row border stays behind when its cells stick, leaving a strip
+   the body shows through, so the header's lines are drawn by its cells. */
+.mvx-dash-cell { --mvx-grid-bg: var(--color-page); }
+.mvx-dash-cell--card { --mvx-grid-bg: var(--color-surface); }
+.mvx-grid-frozen > thead > tr,
+.mvx-grid-frozen > tbody > tr { background-color: var(--mvx-grid-bg, var(--color-surface)); }
+.mvx-grid-frozen > thead > tr { border-bottom: 0 !important; }
+.mvx-grid-frozen > thead > tr > th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background-color: inherit;
+  box-shadow: inset 0 -1px 0 var(--color-grid-col-header-border);
+}
+.mvx-grid-frozen > thead > tr:last-child > th { box-shadow: inset 0 -2px 0 var(--color-border); }
+.mvx-grid-frozen > tbody > tr > td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background-color: inherit;
+  box-shadow: inset -1px 0 0 var(--color-border);
+}
+.mvx-grid-frozen > thead > tr:first-child > th:first-child {
+  left: 0;
+  z-index: 3;
+  box-shadow: inset -1px -2px 0 var(--color-border);
+}
+
 .mvx-grid-legend {
   display: flex;
   flex-wrap: wrap;

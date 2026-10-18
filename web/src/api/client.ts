@@ -785,6 +785,8 @@ export interface WidgetProps {
   /** Grid widgets: a context selector takes several members (Region 1 +
       Region 3), and the grid shows their aggregate, read-only. */
   multi_select?: boolean;
+  /** Grid widgets: no "Find a row or column…" box (a grid of a few rows needs none). Shown by default. */
+  hide_search?: boolean;
   /** Records widgets: offer "+ New record" (to people who may create one). Off by default. */
   new_record_button?: boolean;
   /** Records widgets and boards: filters the viewer cannot remove (relative dates count from their day). */

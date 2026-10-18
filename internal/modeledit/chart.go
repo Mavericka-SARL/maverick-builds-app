@@ -229,7 +229,7 @@ var (
 	WidgetPropKeys = map[string]bool{"selectors_position": true, "background": true, "font_size": true, "font_weight": true,
 		"color": true, "font_family": true, "alt": true, "image_fit": true, "button_color": true, "default_view": true,
 		"metric_ids": true, "chart": true, "context": true, "kpi_scope": true, "kpi_context_mode": true, "confirm_text": true,
-		"sync_context": true, "show_members": true, "rows_collapsed": true, "multi_select": true, "button_corners": true,
+		"sync_context": true, "show_members": true, "rows_collapsed": true, "multi_select": true, "hide_search": true, "button_corners": true,
 		"new_record_button": true, "board": true, "record_filters": true, "record_columns": true, "record_sort": true}
 	ChartSettingKeys = map[string]bool{"chart_type": true, "dimension_id": true, "metric_ids": true, "x_metric_id": true,
 		"y_metric_id": true, "context_defaults": true, "bin_count": true, "show_legend": true, "show_values": true,

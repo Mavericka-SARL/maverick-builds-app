@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { serialToISO, isoToSerial } from "../dateSerial";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, GripVertical, Download, MoreVertical, Rows3, X as XIcon } from "lucide-react";
@@ -533,15 +533,36 @@ function pickMetrics<T extends { id: string }>(all: T[], ids?: string[]): T[] {
   return picked.length > 0 ? picked : all;
 }
 
-export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembers, syncContext, title, selectorsPosition, rowsCollapsed, multiSelect }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; metricIds?: string[]; showMembers?: Record<string, string[]>; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition;
+export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembers, syncContext, title, selectorsPosition, rowsCollapsed, multiSelect, hideSearch }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; metricIds?: string[]; showMembers?: Record<string, string[]>; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition;
   /** Parent rows start collapsed (widget_props.rows_collapsed, the developer's choice); the viewer opens and closes them by click. */
   rowsCollapsed?: boolean;
   /** Context selectors take several members (widget_props.multi_select): the grid shows their aggregate. */
-  multiSelect?: boolean }) {
+  multiSelect?: boolean;
+  /** No "Find a row or column…" box (widget_props.hide_search): a grid of a few rows needs none. */
+  hideSearch?: boolean }) {
   const qc = useQueryClient();
   // Parent rows the viewer flipped from the developer's default.
   const [rowsFlipped, setRowsFlipped] = useState<Set<string>>(() => new Set());
   const rowCollapsed = (code: string) => !!rowsCollapsed !== rowsFlipped.has(code);
+  // Frozen header: the table scrolls inside its own box (a dashboard widget's
+  // height), its header rows and row labels stay in view (.mvx-grid-frozen).
+  // Each header row sticks just below the rows above it, so a two-level
+  // header (FY 2026 over its months) stays whole.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // The box keeps at least its table's height up to 160px: a widget drawn
+  // shorter than toolbar + table scrolls as a whole, as it did before.
+  useLayoutEffect(() => {
+    const box = scrollRef.current, table = box?.querySelector<HTMLTableElement>("table.mvx-grid-frozen");
+    if (!box || !table) return;
+    // A row's own offset in the table (rows don't move, their cells do), so
+    // collapsed borders between header rows leave no gap.
+    const tableTop = table.getBoundingClientRect().top;
+    table.querySelectorAll<HTMLTableRowElement>(":scope > thead > tr").forEach(tr => {
+      const top = Math.floor(tr.getBoundingClientRect().top - tableTop);
+      for (const cell of Array.from(tr.cells)) cell.style.top = `${top}px`;
+    });
+    box.style.minHeight = `${Math.min(table.offsetHeight + box.offsetHeight - box.clientHeight, 160)}px`;
+  });
   const flipRow = (code: string) => setRowsFlipped(prev => {
     const next = new Set(prev);
     if (next.has(code)) next.delete(code); else next.add(code);
@@ -1496,14 +1517,14 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   }
 
   return (
-    <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+    <div style={{ display: "flex", gap: 16, height: "100%" }}>
       <CellHistoryDrawer cell={historyCell} onClose={() => setHistoryCell(null)} />
 
       {/* ── Main content ─────────────────────────────────────────────────────── */}
       {/* Selector placement (widget_props.selectors_position): the toolbar
           with the title/context selectors sits along the top edge by
           default, or the bottom, or as a column on the left/right. */}
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: selPos === "left" ? "row" : selPos === "right" ? "row-reverse" : "column", gap: selVertical ? 12 : 0 }}>
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: selPos === "left" ? "row" : selPos === "right" ? "row-reverse" : "column", gap: selVertical ? 12 : 0 }}>
 
         <div style={{ order: selPos === "bottom" ? 2 : 0, flexShrink: 0, ...(selVertical ? { maxWidth: 260, display: "flex", flexDirection: "column" } : {}) }}>
         {/* One row: widget title (when hosted in a dashboard widget),
@@ -1541,8 +1562,8 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
             )}
           </ToolbarGroup>
           <ToolbarGroup align="end">
-            <SearchInput value={find} onChange={e => setFind(e.target.value)} placeholder="Find a row or column…"
-              width={190} aria-label="Find in this grid" />
+            {!hideSearch && <SearchInput value={find} onChange={e => setFind(e.target.value)} placeholder="Find a row or column…"
+              width={190} aria-label="Find in this grid" />}
             {findMisses && <span className="mvx-admin-muted" style={{ fontSize: 12 }}>No match</span>}
             <GridActionsMenu
               canExport={!!gridDefId}
@@ -1555,13 +1576,13 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
         </Toolbar>
         </div>
 
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
         {/* ── Grid table ── */}
-        <div style={{ overflowX: "auto" }}>
+        <div ref={scrollRef} style={{ overflow: "auto", flex: "0 1 auto", minHeight: 0 }}>
 
           {metricsInRows ? (
             /* Metrics in ROWS */
-            <table style={{ borderCollapse: "collapse", fontSize: 13, width: "100%" }}>
+            <table className="mvx-grid-frozen" style={{ borderCollapse: "collapse", fontSize: 13, width: "100%" }}>
               <thead>
                 {hasColHierarchy && colHeaderLevels ? (
                   colHeaderLevels.map((level, li) => (
@@ -1644,7 +1665,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
 
           ) : (
             /* Metrics in COLS */
-            <table style={{ borderCollapse: "collapse", fontSize: 13, width: "100%",
+            <table className="mvx-grid-frozen" style={{ borderCollapse: "collapse", fontSize: 13, width: "100%",
               minWidth: Math.max(500, effectiveColCombos.length * numMetrics * 86 + (hasRowDims ? 160 : 80)) }}>
               <thead>
                 {hasColHierarchy && colHeaderLevels ? (

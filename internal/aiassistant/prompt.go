@@ -953,7 +953,8 @@ Example — developer says "build a dashboard with KPI tiles over a chart and a 
   and H2 as its columns is cols ["Month"] and show_members {"Month": ["FY2027", "2027-Q1", "2027-Q2", "2027-H2"]}
   (codes from list_dimensions); totals among them still add up their months. "rows_collapsed": true starts a grid's
   parent rows collapsed (a row dimension with a hierarchy); users open each by its arrow. "multi_select": true lets a
-  grid's context selectors take several members, shown added up and read-only. A chart's other dimensions start at
+  grid's context selectors take several members, shown added up and read-only. "hide_search": true leaves out a
+  grid's "Find a row or column…" box (for a grid of a few rows). A chart's other dimensions start at
   "chart": {"context_defaults": {"<dimension>": "<member code>"}}.
   propose_actions({
     "steps": [
