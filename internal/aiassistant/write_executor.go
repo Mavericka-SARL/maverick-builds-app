@@ -17,6 +17,7 @@ import (
 	"github.com/mavericks-engine/mavericks/internal/metricformula"
 	"github.com/mavericks-engine/mavericks/internal/modeledit"
 	"github.com/mavericks-engine/mavericks/internal/modeltransfer"
+	"github.com/mavericks-engine/mavericks/internal/recordpost"
 	"github.com/mavericks-engine/mavericks/internal/rollup"
 	"github.com/mavericks-engine/mavericks/internal/tags"
 	"github.com/mavericks-engine/mavericks/internal/timedim"
@@ -132,6 +133,9 @@ type Hooks struct {
 	// mappings, as the developer: what saving a table that gained or lost
 	// its status field runs, since which records count changed.
 	RepostTable func(ctx context.Context, formID string) error
+	// RevisionCopied rebuilds a copied revision's record postings, which a
+	// copy does not carry, as the developer console's copy does.
+	RevisionCopied func(ctx context.Context, revisionID string) error
 }
 
 // WithHooks sets the executor's gateway hooks and returns it.
@@ -2477,6 +2481,11 @@ func (e *WriteExecutor) addDashboardWidget(ctx context.Context, raw json.RawMess
 	if err := validateWidgetContent(p.WidgetType, p.Content); err != nil {
 		return "", "", err
 	}
+	if (p.WidgetType == "form" || p.WidgetType == "board") && p.RefID != nil {
+		if err := modeledit.CheckRecordWidgetProps(ctx, e.pool, p.WidgetType, *p.RefID, p.WidgetProps); err != nil {
+			return "", "", err
+		}
+	}
 	// A chart's widget_props carry their own UUIDs (plotted dimension and
 	// series metrics); remap them the same way or the chart body would query
 	// the wrong revision even when ref_id is right.
@@ -3191,7 +3200,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 					 WHERE og.id::text = wm.old_ref_id AND wm.widget_type IN ('grid', 'chart', 'import')),
 					(SELECT nf.id::text FROM model.form_def ofd
 					 JOIN model.form_def nf ON nf.model_id = ofd.model_id AND nf.name = ofd.name AND nf.revision_id = $2::uuid
-					 WHERE ofd.id::text = wm.old_ref_id AND wm.widget_type = 'form'),
+					 WHERE ofd.id::text = wm.old_ref_id AND wm.widget_type IN ('form', 'board')),
 					(SELECT nm.id::text FROM model.metric_def om
 					 JOIN model.metric_def nm ON nm.model_id = om.model_id AND nm.name = om.name AND nm.revision_id = $2::uuid
 					 WHERE om.id::text = wm.old_ref_id AND wm.widget_type = 'metric_kpi'),
@@ -3273,6 +3282,9 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 		if err := modeltransfer.RemapRevisionSelectorBars(ctx, tx, e.modelID, newID, dimIDMap); err != nil {
 			return "", "", fmt.Errorf("remap selector bars into new revision: %w", err)
 		}
+		if err := modeltransfer.RemapRevisionTables(ctx, tx, e.modelID, newID, srcID); err != nil {
+			return "", "", fmt.Errorf("remap table settings into new revision: %w", err)
+		}
 
 		// Business-role dashboard grants follow the copies, or activating
 		// this revision hides every dashboard from every business user —
@@ -3292,6 +3304,11 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 
 	if err := tx.Commit(ctx); err != nil {
 		return "", "", fmt.Errorf("commit revision copy: %w", err)
+	}
+	if e.hooks.RevisionCopied != nil {
+		if err := e.hooks.RevisionCopied(ctx, newID); err != nil {
+			return "", "", fmt.Errorf("post the copied records: %w", err)
+		}
 	}
 
 	return fmt.Sprintf("Revision '%s' created (id: %s)", p.Name, newID), newID, nil
@@ -3451,6 +3468,52 @@ type createFormDefParams struct {
 	Fields         []crudapp.FormField `json:"fields"`
 	OwnRecordsOnly bool                `json:"own_records_only"`
 	RevisionID     string              `json:"revision_id"`
+	tableSettingParams
+}
+
+// tableSettingParams are a table's settings beyond its fields, as the AI
+// names them: the dimension it keeps by name (or id), "" to stop keeping
+// one; the field labelling its members; who edits its records.
+type tableSettingParams struct {
+	KeepsDimension   *string `json:"keeps_dimension"`
+	MemberLabelField *string `json:"member_label_field"`
+	MemberRootLabel  *string `json:"member_root_label"`
+	EditAccess       *string `json:"edit_access"`
+}
+
+// applyTableSettings resolves p's dimension in revID and saves the
+// settings on form; it describes what it set for the tool's answer.
+func (e *WriteExecutor) applyTableSettings(ctx context.Context, form *crudapp.FormDef, revID string, p tableSettingParams) (string, error) {
+	s := recordpost.TableSettings{MemberLabelField: p.MemberLabelField, MemberRootLabel: p.MemberRootLabel, EditAccess: p.EditAccess}
+	if p.KeepsDimension != nil {
+		ref := strings.TrimSpace(*p.KeepsDimension)
+		id := ""
+		if ref != "" {
+			if err := e.pool.QueryRow(ctx, `
+				SELECT id::text FROM model.dimension_def
+				WHERE model_id = $1::uuid AND (revision_id IS NULL OR revision_id::text = $2)
+				  AND (id::text = $3 OR lower(name) = lower($3))
+				ORDER BY (id::text = $3) DESC LIMIT 1`, e.modelID, revID, ref).Scan(&id); err != nil {
+				return "", fmt.Errorf("keeps_dimension %q is no dimension of this revision", ref)
+			}
+		}
+		s.KeepsDimensionID = &id
+	}
+	if s.KeepsDimensionID == nil && s.MemberLabelField == nil && s.MemberRootLabel == nil && s.EditAccess == nil {
+		return "", nil
+	}
+	added, err := recordpost.ApplyTableSettingsOn(ctx, e.pool, form, s)
+	if err != nil {
+		return "", err
+	}
+	note := ""
+	if form.KeepsDimension() && s.KeepsDimensionID != nil {
+		note += fmt.Sprintf(", its records are the members of the dimension it keeps (%d added)", added)
+	}
+	if s.EditAccess != nil {
+		note += ", records editable by " + map[bool]string{true: "everyone who sees them", false: "their creator and administrators"}[form.EveryoneEdits()]
+	}
+	return note, nil
 }
 
 func (e *WriteExecutor) createFormDef(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -3479,7 +3542,11 @@ func (e *WriteExecutor) createFormDef(ctx context.Context, raw json.RawMessage) 
 			return "", "", err
 		}
 	}
-	return fmt.Sprintf("Table '%s' created (id: %s, %d field(s)%s)", p.Name, form.ID, len(p.Fields), ownRecordsNote(p.OwnRecordsOnly)), form.ID, nil
+	settingsNote, err := e.applyTableSettings(ctx, form, revID, p.tableSettingParams)
+	if err != nil {
+		return "", "", fmt.Errorf("table '%s' created, but: %w", p.Name, err)
+	}
+	return fmt.Sprintf("Table '%s' created (id: %s, %d field(s)%s%s)", p.Name, form.ID, len(p.Fields), ownRecordsNote(p.OwnRecordsOnly), settingsNote), form.ID, nil
 }
 
 func ownRecordsNote(on bool) string {
@@ -3497,6 +3564,7 @@ type updateFormDefParams struct {
 	Label          string              `json:"label"`
 	Fields         []crudapp.FormField `json:"fields"`
 	OwnRecordsOnly *bool               `json:"own_records_only"`
+	tableSettingParams
 }
 
 // updateFormDef fetches the current row first for two reasons: (1) to
@@ -3549,6 +3617,13 @@ func (e *WriteExecutor) updateFormDef(ctx context.Context, raw json.RawMessage) 
 		return "", "", err
 	}
 	fs := crudapp.NewStoreOn(e.pool)
+	before, err := fs.GetForm(ctx, p.FormID)
+	if err != nil {
+		return "", "", err
+	}
+	if err := crudapp.CheckFieldChange(before, fields); err != nil {
+		return "", "", err
+	}
 	change, err := fs.UpdateForm(ctx, p.FormID, name, label, fields)
 	if err != nil {
 		return "", "", fmt.Errorf("update table: %w", err)
@@ -3570,6 +3645,17 @@ func (e *WriteExecutor) updateFormDef(ctx context.Context, raw json.RawMessage) 
 		}
 		note += ", its records re-posted (the status field decides which count)"
 	}
+	after, err := fs.GetForm(ctx, p.FormID)
+	if err != nil {
+		return "", "", err
+	}
+	var revID string
+	_ = e.pool.QueryRow(ctx, `SELECT COALESCE(revision_id::text, '') FROM model.form_def WHERE id = $1::uuid`, p.FormID).Scan(&revID)
+	settingsNote, err := e.applyTableSettings(ctx, after, revID, p.tableSettingParams)
+	if err != nil {
+		return "", "", fmt.Errorf("table '%s' fields saved, but: %w", name, err)
+	}
+	note += settingsNote
 	return fmt.Sprintf("Table '%s' updated (%d field(s)%s)", name, len(fields), note), "", nil
 }
 

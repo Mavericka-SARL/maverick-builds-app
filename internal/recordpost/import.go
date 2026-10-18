@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mavericks-engine/mavericks/internal/crudapp"
 	"github.com/mavericks-engine/mavericks/internal/importpkg"
@@ -109,6 +110,7 @@ func (ps *Poster) ImportRows(ctx context.Context, req ImportRequest) (created in
 	}
 	var staged []stagedRecord
 	memberLeaves := map[string]map[string]bool{} // dimension id → code → leaf
+	today := time.Now().UTC().Format("2006-01-02")
 
 	for _, row := range req.Rows {
 		data := map[string]any{}
@@ -124,6 +126,7 @@ func (ps *Poster) ImportRows(ctx context.Context, req ImportRequest) (created in
 		if len(data) == 0 && statusRaw == "" {
 			continue // blank row
 		}
+		crudapp.ApplyDefaults(form, data, today)
 		rowValid := true
 		problems, pErr := ps.RecordValueProblems(ctx, view, form, nil, data, true, memberLeaves)
 		if pErr != nil {
@@ -172,8 +175,14 @@ func (ps *Poster) ImportRows(ctx context.Context, req ImportRequest) (created in
 		return len(staged), errs, nil
 	}
 
+	membersAdded := false
+	defer func() {
+		if membersAdded && ps.MembersChanged != nil {
+			ps.MembersChanged(context.WithoutCancel(ctx), form)
+		}
+	}()
 	for _, sr := range staged {
-		rec, cErr := store.CreateRecordWithStatus(ctx, form.ID, req.CreatorID, sr.status, sr.data)
+		rec, cErr := store.CreateRecordThen(ctx, form.ID, req.CreatorID, sr.status, sr.data, ps.AfterRecordCreated(req.CreatorID, &membersAdded))
 		if cErr != nil {
 			return created, nil, fmt.Errorf("create record: %w", cErr)
 		}

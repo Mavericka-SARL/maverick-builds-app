@@ -195,10 +195,8 @@ func (h *handler) adminModelImport(w http.ResponseWriter, r *http.Request) {
 	// The package carries input facts but no calc results (nor does Import
 	// write any); every calc metric in the imported model rendered blank in
 	// every grid and dashboard until a user happened to edit a cell (found
-	// live, 2026-09-10). Same in-process scheduler call as cell writes.
-	if err := h.recalcRevisionFromInputs(ctx, modelID, revisionID); err != nil {
-		h.log.Warn().Err(err).Str("model_id", modelID).Msg("recalc after model import failed")
-	}
+	// live, 2026-09-10). Nor does it carry the records' postings.
+	h.settleRevision(ctx, modelID, revisionID, act.UserID)
 
 	auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
 		Category: auditlog.CategoryModelChange, EventType: auditlog.EventModelImported,
@@ -212,6 +210,21 @@ func (h *handler) adminModelImport(w http.ResponseWriter, r *http.Request) {
 		out["notes"] = notes
 	}
 	jsonOK(w, out)
+}
+
+// settleRevision completes a revision made wholesale — imported from a
+// package or copied from another revision: its tables' postings rebuilt
+// from the records (it arrives without them, and the first record saved
+// there used to rebuild its table's totals from that one record alone,
+// found 2026-10-18), then every calculated metric recalculated. Failures
+// are logged: the revision itself is made.
+func (h *handler) settleRevision(ctx context.Context, modelID, revisionID, userID string) {
+	if _, err := h.records().RebuildPostings(ctx, modelID, revisionID, userID); err != nil {
+		h.log.Warn().Err(err).Str("revision_id", revisionID).Msg("rebuilding the records' postings of a new revision failed")
+	}
+	if err := h.recalcRevisionFromInputs(ctx, modelID, revisionID); err != nil {
+		h.log.Warn().Err(err).Str("revision_id", revisionID).Msg("recalc of a new revision failed")
+	}
 }
 
 // recalcRevisionFromInputs runs the calculation scheduler over every input

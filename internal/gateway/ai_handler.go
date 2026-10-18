@@ -922,7 +922,7 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 			"name":               fmt.Sprintf("AI Draft %s", time.Now().Format("2006-01-02 15:04:05.000")),
 			"source_revision_id": baseRevID,
 		})
-		draftExecutor := aiassistant.NewWriteExecutorWithActor(h.db.For(ctx), modelID, "", a.UserID)
+		draftExecutor := aiassistant.NewWriteExecutorWithActor(h.db.For(ctx), modelID, "", a.UserID).WithHooks(h.aiWriteHooks(modelID, a.UserID))
 		_, newRevID, dErr := draftExecutor.Execute(ctx, "create_revision", draftParams)
 		if dErr != nil {
 			jsonErr(w, fmt.Errorf("create draft revision: %w", dErr), http.StatusInternalServerError)
@@ -2054,6 +2054,10 @@ func (h *handler) aiWriteHooks(modelID, userID string) aiassistant.Hooks {
 			bgCtx := context.WithoutCancel(ctx)
 			go h.repostTable(bgCtx, formID, userID)
 			return nil
+		},
+		RevisionCopied: func(ctx context.Context, revisionID string) error {
+			_, err := h.records().RebuildPostings(ctx, modelID, revisionID, userID)
+			return err
 		},
 	}
 }

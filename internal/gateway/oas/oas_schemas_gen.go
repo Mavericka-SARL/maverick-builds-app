@@ -6501,6 +6501,17 @@ type CreateFormRequest struct {
 	// Each person who does not administer the application sees only the records they created. On an
 	// update, omitted keeps the table's setting.
 	OwnRecordsOnly OptBool `json:"own_records_only"`
+	// The dimension of the table's revision whose members its records become ("" to stop keeping one).
+	// The table needs an auto-code field and the dimension must be empty or hold only its records' codes.
+	//  Omitted keeps the setting.
+	KeepsDimensionID OptString `json:"keeps_dimension_id"`
+	// The text field labelling each member; omitted keeps it.
+	MemberLabelField OptString `json:"member_label_field"`
+	// The label of a total member (code ALL) the records' members sit under; "" for none, omitted keeps
+	// it.
+	MemberRootLabel OptString `json:"member_root_label"`
+	// Omitted keeps the setting.
+	EditAccess OptCreateFormRequestEditAccess `json:"edit_access"`
 }
 
 // GetName returns the value of Name.
@@ -6523,6 +6534,26 @@ func (s *CreateFormRequest) GetOwnRecordsOnly() OptBool {
 	return s.OwnRecordsOnly
 }
 
+// GetKeepsDimensionID returns the value of KeepsDimensionID.
+func (s *CreateFormRequest) GetKeepsDimensionID() OptString {
+	return s.KeepsDimensionID
+}
+
+// GetMemberLabelField returns the value of MemberLabelField.
+func (s *CreateFormRequest) GetMemberLabelField() OptString {
+	return s.MemberLabelField
+}
+
+// GetMemberRootLabel returns the value of MemberRootLabel.
+func (s *CreateFormRequest) GetMemberRootLabel() OptString {
+	return s.MemberRootLabel
+}
+
+// GetEditAccess returns the value of EditAccess.
+func (s *CreateFormRequest) GetEditAccess() OptCreateFormRequestEditAccess {
+	return s.EditAccess
+}
+
 // SetName sets the value of Name.
 func (s *CreateFormRequest) SetName(val OptString) {
 	s.Name = val
@@ -6541,6 +6572,68 @@ func (s *CreateFormRequest) SetFields(val []FormField) {
 // SetOwnRecordsOnly sets the value of OwnRecordsOnly.
 func (s *CreateFormRequest) SetOwnRecordsOnly(val OptBool) {
 	s.OwnRecordsOnly = val
+}
+
+// SetKeepsDimensionID sets the value of KeepsDimensionID.
+func (s *CreateFormRequest) SetKeepsDimensionID(val OptString) {
+	s.KeepsDimensionID = val
+}
+
+// SetMemberLabelField sets the value of MemberLabelField.
+func (s *CreateFormRequest) SetMemberLabelField(val OptString) {
+	s.MemberLabelField = val
+}
+
+// SetMemberRootLabel sets the value of MemberRootLabel.
+func (s *CreateFormRequest) SetMemberRootLabel(val OptString) {
+	s.MemberRootLabel = val
+}
+
+// SetEditAccess sets the value of EditAccess.
+func (s *CreateFormRequest) SetEditAccess(val OptCreateFormRequestEditAccess) {
+	s.EditAccess = val
+}
+
+// Omitted keeps the setting.
+type CreateFormRequestEditAccess string
+
+const (
+	CreateFormRequestEditAccessCreator  CreateFormRequestEditAccess = "creator"
+	CreateFormRequestEditAccessEveryone CreateFormRequestEditAccess = "everyone"
+)
+
+// AllValues returns all CreateFormRequestEditAccess values.
+func (CreateFormRequestEditAccess) AllValues() []CreateFormRequestEditAccess {
+	return []CreateFormRequestEditAccess{
+		CreateFormRequestEditAccessCreator,
+		CreateFormRequestEditAccessEveryone,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s CreateFormRequestEditAccess) MarshalText() ([]byte, error) {
+	switch s {
+	case CreateFormRequestEditAccessCreator:
+		return []byte(s), nil
+	case CreateFormRequestEditAccessEveryone:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *CreateFormRequestEditAccess) UnmarshalText(data []byte) error {
+	switch CreateFormRequestEditAccess(data) {
+	case CreateFormRequestEditAccessCreator:
+		*s = CreateFormRequestEditAccessCreator
+		return nil
+	case CreateFormRequestEditAccessEveryone:
+		*s = CreateFormRequestEditAccessEveryone
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 type CreateGridBadRequest Error
@@ -8360,7 +8453,9 @@ type DeleteFormRecordNotFound Error
 func (*DeleteFormRecordNotFound) deleteFormRecordRes() {}
 
 type DeleteFormRecordOK struct {
-	Status OptString `json:"status"`
+	Status  OptString `json:"status"`
+	Deleted OptInt    `json:"deleted"`
+	Cleared OptInt    `json:"cleared"`
 }
 
 // GetStatus returns the value of Status.
@@ -8368,9 +8463,29 @@ func (s *DeleteFormRecordOK) GetStatus() OptString {
 	return s.Status
 }
 
+// GetDeleted returns the value of Deleted.
+func (s *DeleteFormRecordOK) GetDeleted() OptInt {
+	return s.Deleted
+}
+
+// GetCleared returns the value of Cleared.
+func (s *DeleteFormRecordOK) GetCleared() OptInt {
+	return s.Cleared
+}
+
 // SetStatus sets the value of Status.
 func (s *DeleteFormRecordOK) SetStatus(val OptString) {
 	s.Status = val
+}
+
+// SetDeleted sets the value of Deleted.
+func (s *DeleteFormRecordOK) SetDeleted(val OptInt) {
+	s.Deleted = val
+}
+
+// SetCleared sets the value of Cleared.
+func (s *DeleteFormRecordOK) SetCleared(val OptInt) {
+	s.Cleared = val
 }
 
 func (*DeleteFormRecordOK) deleteFormRecordRes() {}
@@ -9442,6 +9557,9 @@ func (*Error) getDemoRes()                     {}
 func (*Error) getFormRecordRes()               {}
 func (*Error) getIntegrationRes()              {}
 func (*Error) getIntegrationRunRes()           {}
+func (*Error) getRecordDeletePlanRes()         {}
+func (*Error) getRecordHistoryRes()            {}
+func (*Error) getRelatedRecordsRes()           {}
 func (*Error) getWorkflowDefinitionRes()       {}
 func (*Error) getWorkflowRes()                 {}
 func (*Error) grantAdminUserAppAccessRes()     {}
@@ -10595,8 +10713,19 @@ type FormDef struct {
 	Label   string      `json:"label"`
 	Fields  []FormField `json:"fields"`
 	// Each person who does not administer the application sees only the records they created.
-	OwnRecordsOnly OptBool   `json:"own_records_only"`
-	CreatedAt      time.Time `json:"created_at"`
+	OwnRecordsOnly OptBool `json:"own_records_only"`
+	// The dimension whose members the table's records are: each record's auto-code is a member's code
+	// and member_label_field its label. Adding, renaming and deleting a record adds, renames and deletes
+	// the member; the dimension's members change no other way (409, code kept_by_table).
+	KeepsDimensionID OptUUID   `json:"keeps_dimension_id"`
+	MemberLabelField OptString `json:"member_label_field"`
+	// The label of the total member (code ALL) the records' members sit under, when there is one.
+	MemberRootLabel OptString `json:"member_root_label"`
+	// Who may change and delete the table's records: their creator and the application's administrators
+	// (creator), or everyone who sees them (everyone) — a member read-only for a person then makes the
+	// records naming it theirs to see only.
+	EditAccess OptFormDefEditAccess `json:"edit_access"`
+	CreatedAt  time.Time            `json:"created_at"`
 }
 
 // GetID returns the value of ID.
@@ -10627,6 +10756,26 @@ func (s *FormDef) GetFields() []FormField {
 // GetOwnRecordsOnly returns the value of OwnRecordsOnly.
 func (s *FormDef) GetOwnRecordsOnly() OptBool {
 	return s.OwnRecordsOnly
+}
+
+// GetKeepsDimensionID returns the value of KeepsDimensionID.
+func (s *FormDef) GetKeepsDimensionID() OptUUID {
+	return s.KeepsDimensionID
+}
+
+// GetMemberLabelField returns the value of MemberLabelField.
+func (s *FormDef) GetMemberLabelField() OptString {
+	return s.MemberLabelField
+}
+
+// GetMemberRootLabel returns the value of MemberRootLabel.
+func (s *FormDef) GetMemberRootLabel() OptString {
+	return s.MemberRootLabel
+}
+
+// GetEditAccess returns the value of EditAccess.
+func (s *FormDef) GetEditAccess() OptFormDefEditAccess {
+	return s.EditAccess
 }
 
 // GetCreatedAt returns the value of CreatedAt.
@@ -10664,12 +10813,76 @@ func (s *FormDef) SetOwnRecordsOnly(val OptBool) {
 	s.OwnRecordsOnly = val
 }
 
+// SetKeepsDimensionID sets the value of KeepsDimensionID.
+func (s *FormDef) SetKeepsDimensionID(val OptUUID) {
+	s.KeepsDimensionID = val
+}
+
+// SetMemberLabelField sets the value of MemberLabelField.
+func (s *FormDef) SetMemberLabelField(val OptString) {
+	s.MemberLabelField = val
+}
+
+// SetMemberRootLabel sets the value of MemberRootLabel.
+func (s *FormDef) SetMemberRootLabel(val OptString) {
+	s.MemberRootLabel = val
+}
+
+// SetEditAccess sets the value of EditAccess.
+func (s *FormDef) SetEditAccess(val OptFormDefEditAccess) {
+	s.EditAccess = val
+}
+
 // SetCreatedAt sets the value of CreatedAt.
 func (s *FormDef) SetCreatedAt(val time.Time) {
 	s.CreatedAt = val
 }
 
 func (*FormDef) createFormRes() {}
+
+// Who may change and delete the table's records: their creator and the application's administrators
+// (creator), or everyone who sees them (everyone) — a member read-only for a person then makes the
+// records naming it theirs to see only.
+type FormDefEditAccess string
+
+const (
+	FormDefEditAccessCreator  FormDefEditAccess = "creator"
+	FormDefEditAccessEveryone FormDefEditAccess = "everyone"
+)
+
+// AllValues returns all FormDefEditAccess values.
+func (FormDefEditAccess) AllValues() []FormDefEditAccess {
+	return []FormDefEditAccess{
+		FormDefEditAccessCreator,
+		FormDefEditAccessEveryone,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s FormDefEditAccess) MarshalText() ([]byte, error) {
+	switch s {
+	case FormDefEditAccessCreator:
+		return []byte(s), nil
+	case FormDefEditAccessEveryone:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *FormDefEditAccess) UnmarshalText(data []byte) error {
+	switch FormDefEditAccess(data) {
+	case FormDefEditAccessCreator:
+		*s = FormDefEditAccessCreator
+		return nil
+	case FormDefEditAccessEveryone:
+		*s = FormDefEditAccessEveryone
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
 
 // A field of a table of records. An autocode field's value is a code the server gives each new
 // record (code_prefix followed by the next number, padded to code_digits); a person saving a record
@@ -10695,6 +10908,26 @@ type FormField struct {
 	CodePrefix OptString `json:"code_prefix"`
 	// Set when type=autocode — digits the number is padded to; 0 means 4.
 	CodeDigits OptInt `json:"code_digits"`
+	// A new record's value when it is given none (a date's may be "today"); the server stores it for a
+	// record created without the field.
+	Default jx.Raw `json:"default"`
+	// Another field this one is filled in together with: when either holds a value, both must.
+	RequiredWith OptString `json:"required_with"`
+	// Kept and saved, not shown in the table's forms, lists and boards.
+	Hidden OptBool `json:"hidden"`
+	// Cannot be removed from the table while marked core.
+	Core OptBool `json:"core"`
+	// Each value the field takes is kept, with who gave it and when (GET /api/records/{id}/history).
+	History OptBool `json:"history"`
+	// A dimension field naming a member a table keeps: deleting that record is refused while this field
+	// names it (block, the default), deletes this record with it (cascade) or empties this field (clear).
+	OnDelete OptFormFieldOnDelete `json:"on_delete"`
+	// A number field shown as money.
+	Format OptFormFieldFormat `json:"format"`
+	// A date field shown as overdue once past, unless done_field holds one of done_values.
+	Deadline   OptBool   `json:"deadline"`
+	DoneField  OptString `json:"done_field"`
+	DoneValues []string  `json:"done_values"`
 }
 
 // GetName returns the value of Name.
@@ -10752,6 +10985,56 @@ func (s *FormField) GetCodeDigits() OptInt {
 	return s.CodeDigits
 }
 
+// GetDefault returns the value of Default.
+func (s *FormField) GetDefault() jx.Raw {
+	return s.Default
+}
+
+// GetRequiredWith returns the value of RequiredWith.
+func (s *FormField) GetRequiredWith() OptString {
+	return s.RequiredWith
+}
+
+// GetHidden returns the value of Hidden.
+func (s *FormField) GetHidden() OptBool {
+	return s.Hidden
+}
+
+// GetCore returns the value of Core.
+func (s *FormField) GetCore() OptBool {
+	return s.Core
+}
+
+// GetHistory returns the value of History.
+func (s *FormField) GetHistory() OptBool {
+	return s.History
+}
+
+// GetOnDelete returns the value of OnDelete.
+func (s *FormField) GetOnDelete() OptFormFieldOnDelete {
+	return s.OnDelete
+}
+
+// GetFormat returns the value of Format.
+func (s *FormField) GetFormat() OptFormFieldFormat {
+	return s.Format
+}
+
+// GetDeadline returns the value of Deadline.
+func (s *FormField) GetDeadline() OptBool {
+	return s.Deadline
+}
+
+// GetDoneField returns the value of DoneField.
+func (s *FormField) GetDoneField() OptString {
+	return s.DoneField
+}
+
+// GetDoneValues returns the value of DoneValues.
+func (s *FormField) GetDoneValues() []string {
+	return s.DoneValues
+}
+
 // SetName sets the value of Name.
 func (s *FormField) SetName(val string) {
 	s.Name = val
@@ -10807,10 +11090,147 @@ func (s *FormField) SetCodeDigits(val OptInt) {
 	s.CodeDigits = val
 }
 
+// SetDefault sets the value of Default.
+func (s *FormField) SetDefault(val jx.Raw) {
+	s.Default = val
+}
+
+// SetRequiredWith sets the value of RequiredWith.
+func (s *FormField) SetRequiredWith(val OptString) {
+	s.RequiredWith = val
+}
+
+// SetHidden sets the value of Hidden.
+func (s *FormField) SetHidden(val OptBool) {
+	s.Hidden = val
+}
+
+// SetCore sets the value of Core.
+func (s *FormField) SetCore(val OptBool) {
+	s.Core = val
+}
+
+// SetHistory sets the value of History.
+func (s *FormField) SetHistory(val OptBool) {
+	s.History = val
+}
+
+// SetOnDelete sets the value of OnDelete.
+func (s *FormField) SetOnDelete(val OptFormFieldOnDelete) {
+	s.OnDelete = val
+}
+
+// SetFormat sets the value of Format.
+func (s *FormField) SetFormat(val OptFormFieldFormat) {
+	s.Format = val
+}
+
+// SetDeadline sets the value of Deadline.
+func (s *FormField) SetDeadline(val OptBool) {
+	s.Deadline = val
+}
+
+// SetDoneField sets the value of DoneField.
+func (s *FormField) SetDoneField(val OptString) {
+	s.DoneField = val
+}
+
+// SetDoneValues sets the value of DoneValues.
+func (s *FormField) SetDoneValues(val []string) {
+	s.DoneValues = val
+}
+
+// A number field shown as money.
+type FormFieldFormat string
+
+const (
+	FormFieldFormatMoney FormFieldFormat = "money"
+)
+
+// AllValues returns all FormFieldFormat values.
+func (FormFieldFormat) AllValues() []FormFieldFormat {
+	return []FormFieldFormat{
+		FormFieldFormatMoney,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s FormFieldFormat) MarshalText() ([]byte, error) {
+	switch s {
+	case FormFieldFormatMoney:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *FormFieldFormat) UnmarshalText(data []byte) error {
+	switch FormFieldFormat(data) {
+	case FormFieldFormatMoney:
+		*s = FormFieldFormatMoney
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
+// A dimension field naming a member a table keeps: deleting that record is refused while this field
+// names it (block, the default), deletes this record with it (cascade) or empties this field (clear).
+type FormFieldOnDelete string
+
+const (
+	FormFieldOnDeleteBlock   FormFieldOnDelete = "block"
+	FormFieldOnDeleteCascade FormFieldOnDelete = "cascade"
+	FormFieldOnDeleteClear   FormFieldOnDelete = "clear"
+)
+
+// AllValues returns all FormFieldOnDelete values.
+func (FormFieldOnDelete) AllValues() []FormFieldOnDelete {
+	return []FormFieldOnDelete{
+		FormFieldOnDeleteBlock,
+		FormFieldOnDeleteCascade,
+		FormFieldOnDeleteClear,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s FormFieldOnDelete) MarshalText() ([]byte, error) {
+	switch s {
+	case FormFieldOnDeleteBlock:
+		return []byte(s), nil
+	case FormFieldOnDeleteCascade:
+		return []byte(s), nil
+	case FormFieldOnDeleteClear:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *FormFieldOnDelete) UnmarshalText(data []byte) error {
+	switch FormFieldOnDelete(data) {
+	case FormFieldOnDeleteBlock:
+		*s = FormFieldOnDeleteBlock
+		return nil
+	case FormFieldOnDeleteCascade:
+		*s = FormFieldOnDeleteCascade
+		return nil
+	case FormFieldOnDeleteClear:
+		*s = FormFieldOnDeleteClear
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
 type FormFieldType string
 
 const (
 	FormFieldTypeText      FormFieldType = "text"
+	FormFieldTypeLongtext  FormFieldType = "longtext"
+	FormFieldTypeURL       FormFieldType = "url"
 	FormFieldTypeNumber    FormFieldType = "number"
 	FormFieldTypeSelect    FormFieldType = "select"
 	FormFieldTypeDate      FormFieldType = "date"
@@ -10825,6 +11245,8 @@ const (
 func (FormFieldType) AllValues() []FormFieldType {
 	return []FormFieldType{
 		FormFieldTypeText,
+		FormFieldTypeLongtext,
+		FormFieldTypeURL,
 		FormFieldTypeNumber,
 		FormFieldTypeSelect,
 		FormFieldTypeDate,
@@ -10840,6 +11262,10 @@ func (FormFieldType) AllValues() []FormFieldType {
 func (s FormFieldType) MarshalText() ([]byte, error) {
 	switch s {
 	case FormFieldTypeText:
+		return []byte(s), nil
+	case FormFieldTypeLongtext:
+		return []byte(s), nil
+	case FormFieldTypeURL:
 		return []byte(s), nil
 	case FormFieldTypeNumber:
 		return []byte(s), nil
@@ -10867,6 +11293,12 @@ func (s *FormFieldType) UnmarshalText(data []byte) error {
 	switch FormFieldType(data) {
 	case FormFieldTypeText:
 		*s = FormFieldTypeText
+		return nil
+	case FormFieldTypeLongtext:
+		*s = FormFieldTypeLongtext
+		return nil
+	case FormFieldTypeURL:
+		*s = FormFieldTypeURL
 		return nil
 	case FormFieldTypeNumber:
 		*s = FormFieldTypeNumber
@@ -11430,6 +11862,77 @@ type GetAuditSettingsForbidden struct{}
 
 func (*GetAuditSettingsForbidden) getAuditSettingsRes() {}
 
+type GetBoardColumnsBadRequest Error
+
+func (*GetBoardColumnsBadRequest) getBoardColumnsRes() {}
+
+type GetBoardColumnsNotFound Error
+
+func (*GetBoardColumnsNotFound) getBoardColumnsRes() {}
+
+type GetBoardColumnsOK struct {
+	Columns []GetBoardColumnsOKColumnsItem `json:"columns"`
+}
+
+// GetColumns returns the value of Columns.
+func (s *GetBoardColumnsOK) GetColumns() []GetBoardColumnsOKColumnsItem {
+	return s.Columns
+}
+
+// SetColumns sets the value of Columns.
+func (s *GetBoardColumnsOK) SetColumns(val []GetBoardColumnsOKColumnsItem) {
+	s.Columns = val
+}
+
+func (*GetBoardColumnsOK) getBoardColumnsRes() {}
+
+type GetBoardColumnsOKColumnsItem struct {
+	Key      string    `json:"key"`
+	Label    string    `json:"label"`
+	Color    OptString `json:"color"`
+	ReadOnly OptBool   `json:"read_only"`
+}
+
+// GetKey returns the value of Key.
+func (s *GetBoardColumnsOKColumnsItem) GetKey() string {
+	return s.Key
+}
+
+// GetLabel returns the value of Label.
+func (s *GetBoardColumnsOKColumnsItem) GetLabel() string {
+	return s.Label
+}
+
+// GetColor returns the value of Color.
+func (s *GetBoardColumnsOKColumnsItem) GetColor() OptString {
+	return s.Color
+}
+
+// GetReadOnly returns the value of ReadOnly.
+func (s *GetBoardColumnsOKColumnsItem) GetReadOnly() OptBool {
+	return s.ReadOnly
+}
+
+// SetKey sets the value of Key.
+func (s *GetBoardColumnsOKColumnsItem) SetKey(val string) {
+	s.Key = val
+}
+
+// SetLabel sets the value of Label.
+func (s *GetBoardColumnsOKColumnsItem) SetLabel(val string) {
+	s.Label = val
+}
+
+// SetColor sets the value of Color.
+func (s *GetBoardColumnsOKColumnsItem) SetColor(val OptString) {
+	s.Color = val
+}
+
+// SetReadOnly sets the value of ReadOnly.
+func (s *GetBoardColumnsOKColumnsItem) SetReadOnly(val OptBool) {
+	s.ReadOnly = val
+}
+
 // GetCellHistoryForbidden is response for GetCellHistory operation.
 type GetCellHistoryForbidden struct{}
 
@@ -11922,6 +12425,247 @@ func (*GetMeUnauthorized) getMeRes() {}
 type GetNotificationSettingsForbidden struct{}
 
 func (*GetNotificationSettingsForbidden) getNotificationSettingsRes() {}
+
+type GetRecordHistoryOK struct {
+	History []GetRecordHistoryOKHistoryItem `json:"history"`
+}
+
+// GetHistory returns the value of History.
+func (s *GetRecordHistoryOK) GetHistory() []GetRecordHistoryOKHistoryItem {
+	return s.History
+}
+
+// SetHistory sets the value of History.
+func (s *GetRecordHistoryOK) SetHistory(val []GetRecordHistoryOKHistoryItem) {
+	s.History = val
+}
+
+func (*GetRecordHistoryOK) getRecordHistoryRes() {}
+
+type GetRecordHistoryOKHistoryItem struct {
+	Field      OptString `json:"field"`
+	FieldLabel OptString `json:"field_label"`
+	// The value before; null when empty.
+	Old jx.Raw `json:"old"`
+	// The value after; null when empty.
+	New           jx.Raw      `json:"new"`
+	ChangedBy     OptNilUUID  `json:"changed_by"`
+	ChangedByName OptString   `json:"changed_by_name"`
+	ChangedAt     OptDateTime `json:"changed_at"`
+}
+
+// GetField returns the value of Field.
+func (s *GetRecordHistoryOKHistoryItem) GetField() OptString {
+	return s.Field
+}
+
+// GetFieldLabel returns the value of FieldLabel.
+func (s *GetRecordHistoryOKHistoryItem) GetFieldLabel() OptString {
+	return s.FieldLabel
+}
+
+// GetOld returns the value of Old.
+func (s *GetRecordHistoryOKHistoryItem) GetOld() jx.Raw {
+	return s.Old
+}
+
+// GetNew returns the value of New.
+func (s *GetRecordHistoryOKHistoryItem) GetNew() jx.Raw {
+	return s.New
+}
+
+// GetChangedBy returns the value of ChangedBy.
+func (s *GetRecordHistoryOKHistoryItem) GetChangedBy() OptNilUUID {
+	return s.ChangedBy
+}
+
+// GetChangedByName returns the value of ChangedByName.
+func (s *GetRecordHistoryOKHistoryItem) GetChangedByName() OptString {
+	return s.ChangedByName
+}
+
+// GetChangedAt returns the value of ChangedAt.
+func (s *GetRecordHistoryOKHistoryItem) GetChangedAt() OptDateTime {
+	return s.ChangedAt
+}
+
+// SetField sets the value of Field.
+func (s *GetRecordHistoryOKHistoryItem) SetField(val OptString) {
+	s.Field = val
+}
+
+// SetFieldLabel sets the value of FieldLabel.
+func (s *GetRecordHistoryOKHistoryItem) SetFieldLabel(val OptString) {
+	s.FieldLabel = val
+}
+
+// SetOld sets the value of Old.
+func (s *GetRecordHistoryOKHistoryItem) SetOld(val jx.Raw) {
+	s.Old = val
+}
+
+// SetNew sets the value of New.
+func (s *GetRecordHistoryOKHistoryItem) SetNew(val jx.Raw) {
+	s.New = val
+}
+
+// SetChangedBy sets the value of ChangedBy.
+func (s *GetRecordHistoryOKHistoryItem) SetChangedBy(val OptNilUUID) {
+	s.ChangedBy = val
+}
+
+// SetChangedByName sets the value of ChangedByName.
+func (s *GetRecordHistoryOKHistoryItem) SetChangedByName(val OptString) {
+	s.ChangedByName = val
+}
+
+// SetChangedAt sets the value of ChangedAt.
+func (s *GetRecordHistoryOKHistoryItem) SetChangedAt(val OptDateTime) {
+	s.ChangedAt = val
+}
+
+type GetRelatedRecordsOK struct {
+	Related []GetRelatedRecordsOKRelatedItem `json:"related"`
+}
+
+// GetRelated returns the value of Related.
+func (s *GetRelatedRecordsOK) GetRelated() []GetRelatedRecordsOKRelatedItem {
+	return s.Related
+}
+
+// SetRelated sets the value of Related.
+func (s *GetRelatedRecordsOK) SetRelated(val []GetRelatedRecordsOKRelatedItem) {
+	s.Related = val
+}
+
+func (*GetRelatedRecordsOK) getRelatedRecordsRes() {}
+
+type GetRelatedRecordsOKRelatedItem struct {
+	Table      OptGetRelatedRecordsOKRelatedItemTable      `json:"table"`
+	Field      OptString                                   `json:"field"`
+	FieldLabel OptString                                   `json:"field_label"`
+	Columns    []GetRelatedRecordsOKRelatedItemColumnsItem `json:"columns"`
+	Records    []FormRecord                                `json:"records"`
+	Total      OptInt                                      `json:"total"`
+	CanCreate  OptBool                                     `json:"can_create"`
+}
+
+// GetTable returns the value of Table.
+func (s *GetRelatedRecordsOKRelatedItem) GetTable() OptGetRelatedRecordsOKRelatedItemTable {
+	return s.Table
+}
+
+// GetField returns the value of Field.
+func (s *GetRelatedRecordsOKRelatedItem) GetField() OptString {
+	return s.Field
+}
+
+// GetFieldLabel returns the value of FieldLabel.
+func (s *GetRelatedRecordsOKRelatedItem) GetFieldLabel() OptString {
+	return s.FieldLabel
+}
+
+// GetColumns returns the value of Columns.
+func (s *GetRelatedRecordsOKRelatedItem) GetColumns() []GetRelatedRecordsOKRelatedItemColumnsItem {
+	return s.Columns
+}
+
+// GetRecords returns the value of Records.
+func (s *GetRelatedRecordsOKRelatedItem) GetRecords() []FormRecord {
+	return s.Records
+}
+
+// GetTotal returns the value of Total.
+func (s *GetRelatedRecordsOKRelatedItem) GetTotal() OptInt {
+	return s.Total
+}
+
+// GetCanCreate returns the value of CanCreate.
+func (s *GetRelatedRecordsOKRelatedItem) GetCanCreate() OptBool {
+	return s.CanCreate
+}
+
+// SetTable sets the value of Table.
+func (s *GetRelatedRecordsOKRelatedItem) SetTable(val OptGetRelatedRecordsOKRelatedItemTable) {
+	s.Table = val
+}
+
+// SetField sets the value of Field.
+func (s *GetRelatedRecordsOKRelatedItem) SetField(val OptString) {
+	s.Field = val
+}
+
+// SetFieldLabel sets the value of FieldLabel.
+func (s *GetRelatedRecordsOKRelatedItem) SetFieldLabel(val OptString) {
+	s.FieldLabel = val
+}
+
+// SetColumns sets the value of Columns.
+func (s *GetRelatedRecordsOKRelatedItem) SetColumns(val []GetRelatedRecordsOKRelatedItemColumnsItem) {
+	s.Columns = val
+}
+
+// SetRecords sets the value of Records.
+func (s *GetRelatedRecordsOKRelatedItem) SetRecords(val []FormRecord) {
+	s.Records = val
+}
+
+// SetTotal sets the value of Total.
+func (s *GetRelatedRecordsOKRelatedItem) SetTotal(val OptInt) {
+	s.Total = val
+}
+
+// SetCanCreate sets the value of CanCreate.
+func (s *GetRelatedRecordsOKRelatedItem) SetCanCreate(val OptBool) {
+	s.CanCreate = val
+}
+
+type GetRelatedRecordsOKRelatedItemColumnsItem map[string]jx.Raw
+
+func (s *GetRelatedRecordsOKRelatedItemColumnsItem) init() GetRelatedRecordsOKRelatedItemColumnsItem {
+	m := *s
+	if m == nil {
+		m = map[string]jx.Raw{}
+		*s = m
+	}
+	return m
+}
+
+type GetRelatedRecordsOKRelatedItemTable struct {
+	ID    OptString `json:"id"`
+	Name  OptString `json:"name"`
+	Label OptString `json:"label"`
+}
+
+// GetID returns the value of ID.
+func (s *GetRelatedRecordsOKRelatedItemTable) GetID() OptString {
+	return s.ID
+}
+
+// GetName returns the value of Name.
+func (s *GetRelatedRecordsOKRelatedItemTable) GetName() OptString {
+	return s.Name
+}
+
+// GetLabel returns the value of Label.
+func (s *GetRelatedRecordsOKRelatedItemTable) GetLabel() OptString {
+	return s.Label
+}
+
+// SetID sets the value of ID.
+func (s *GetRelatedRecordsOKRelatedItemTable) SetID(val OptString) {
+	s.ID = val
+}
+
+// SetName sets the value of Name.
+func (s *GetRelatedRecordsOKRelatedItemTable) SetName(val OptString) {
+	s.Name = val
+}
+
+// SetLabel sets the value of Label.
+func (s *GetRelatedRecordsOKRelatedItemTable) SetLabel(val OptString) {
+	s.Label = val
+}
 
 // GetSsoSettingsForbidden is response for GetSsoSettings operation.
 type GetSsoSettingsForbidden struct{}
@@ -15924,9 +16668,20 @@ type ListedForm struct {
 	Label   string      `json:"label"`
 	Fields  []FormField `json:"fields"`
 	// Each person who does not administer the application sees only the records they created.
-	OwnRecordsOnly OptBool         `json:"own_records_only"`
-	CreatedAt      time.Time       `json:"created_at"`
-	Permissions    FormPermissions `json:"permissions"`
+	OwnRecordsOnly OptBool `json:"own_records_only"`
+	// The dimension whose members the table's records are: each record's auto-code is a member's code
+	// and member_label_field its label. Adding, renaming and deleting a record adds, renames and deletes
+	// the member; the dimension's members change no other way (409, code kept_by_table).
+	KeepsDimensionID OptUUID   `json:"keeps_dimension_id"`
+	MemberLabelField OptString `json:"member_label_field"`
+	// The label of the total member (code ALL) the records' members sit under, when there is one.
+	MemberRootLabel OptString `json:"member_root_label"`
+	// Who may change and delete the table's records: their creator and the application's administrators
+	// (creator), or everyone who sees them (everyone) — a member read-only for a person then makes the
+	// records naming it theirs to see only.
+	EditAccess  OptListedFormEditAccess `json:"edit_access"`
+	CreatedAt   time.Time               `json:"created_at"`
+	Permissions FormPermissions         `json:"permissions"`
 	// Each field a live mapping takes a dimension member from, with the statuses in which a record posts
 	// ("" for a record without a status). A member the caller may only read cannot be chosen there for a
 	// save that would post: the server refuses that save.
@@ -15961,6 +16716,26 @@ func (s *ListedForm) GetFields() []FormField {
 // GetOwnRecordsOnly returns the value of OwnRecordsOnly.
 func (s *ListedForm) GetOwnRecordsOnly() OptBool {
 	return s.OwnRecordsOnly
+}
+
+// GetKeepsDimensionID returns the value of KeepsDimensionID.
+func (s *ListedForm) GetKeepsDimensionID() OptUUID {
+	return s.KeepsDimensionID
+}
+
+// GetMemberLabelField returns the value of MemberLabelField.
+func (s *ListedForm) GetMemberLabelField() OptString {
+	return s.MemberLabelField
+}
+
+// GetMemberRootLabel returns the value of MemberRootLabel.
+func (s *ListedForm) GetMemberRootLabel() OptString {
+	return s.MemberRootLabel
+}
+
+// GetEditAccess returns the value of EditAccess.
+func (s *ListedForm) GetEditAccess() OptListedFormEditAccess {
+	return s.EditAccess
 }
 
 // GetCreatedAt returns the value of CreatedAt.
@@ -16008,6 +16783,26 @@ func (s *ListedForm) SetOwnRecordsOnly(val OptBool) {
 	s.OwnRecordsOnly = val
 }
 
+// SetKeepsDimensionID sets the value of KeepsDimensionID.
+func (s *ListedForm) SetKeepsDimensionID(val OptUUID) {
+	s.KeepsDimensionID = val
+}
+
+// SetMemberLabelField sets the value of MemberLabelField.
+func (s *ListedForm) SetMemberLabelField(val OptString) {
+	s.MemberLabelField = val
+}
+
+// SetMemberRootLabel sets the value of MemberRootLabel.
+func (s *ListedForm) SetMemberRootLabel(val OptString) {
+	s.MemberRootLabel = val
+}
+
+// SetEditAccess sets the value of EditAccess.
+func (s *ListedForm) SetEditAccess(val OptListedFormEditAccess) {
+	s.EditAccess = val
+}
+
 // SetCreatedAt sets the value of CreatedAt.
 func (s *ListedForm) SetCreatedAt(val time.Time) {
 	s.CreatedAt = val
@@ -16021,6 +16816,50 @@ func (s *ListedForm) SetPermissions(val FormPermissions) {
 // SetPostingFields sets the value of PostingFields.
 func (s *ListedForm) SetPostingFields(val ListedFormPostingFields) {
 	s.PostingFields = val
+}
+
+// Who may change and delete the table's records: their creator and the application's administrators
+// (creator), or everyone who sees them (everyone) — a member read-only for a person then makes the
+// records naming it theirs to see only.
+type ListedFormEditAccess string
+
+const (
+	ListedFormEditAccessCreator  ListedFormEditAccess = "creator"
+	ListedFormEditAccessEveryone ListedFormEditAccess = "everyone"
+)
+
+// AllValues returns all ListedFormEditAccess values.
+func (ListedFormEditAccess) AllValues() []ListedFormEditAccess {
+	return []ListedFormEditAccess{
+		ListedFormEditAccessCreator,
+		ListedFormEditAccessEveryone,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s ListedFormEditAccess) MarshalText() ([]byte, error) {
+	switch s {
+	case ListedFormEditAccessCreator:
+		return []byte(s), nil
+	case ListedFormEditAccessEveryone:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *ListedFormEditAccess) UnmarshalText(data []byte) error {
+	switch ListedFormEditAccess(data) {
+	case ListedFormEditAccessCreator:
+		*s = ListedFormEditAccessCreator
+		return nil
+	case ListedFormEditAccessEveryone:
+		*s = ListedFormEditAccessEveryone
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
 }
 
 // Each field a live mapping takes a dimension member from, with the statuses in which a record posts
@@ -18859,6 +19698,52 @@ func (o OptCreateFormMappingRequestDimensionMappings) Or(d CreateFormMappingRequ
 	return d
 }
 
+// NewOptCreateFormRequestEditAccess returns new OptCreateFormRequestEditAccess with value set to v.
+func NewOptCreateFormRequestEditAccess(v CreateFormRequestEditAccess) OptCreateFormRequestEditAccess {
+	return OptCreateFormRequestEditAccess{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptCreateFormRequestEditAccess is optional CreateFormRequestEditAccess.
+type OptCreateFormRequestEditAccess struct {
+	Value CreateFormRequestEditAccess
+	Set   bool
+}
+
+// IsSet returns true if OptCreateFormRequestEditAccess was set.
+func (o OptCreateFormRequestEditAccess) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptCreateFormRequestEditAccess) Reset() {
+	var v CreateFormRequestEditAccess
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptCreateFormRequestEditAccess) SetTo(v CreateFormRequestEditAccess) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptCreateFormRequestEditAccess) Get() (v CreateFormRequestEditAccess, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptCreateFormRequestEditAccess) Or(d CreateFormRequestEditAccess) CreateFormRequestEditAccess {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptCreateMetricRequestTimeSummary returns new OptCreateMetricRequestTimeSummary with value set to v.
 func NewOptCreateMetricRequestTimeSummary(v CreateMetricRequestTimeSummary) OptCreateMetricRequestTimeSummary {
 	return OptCreateMetricRequestTimeSummary{
@@ -19963,6 +20848,144 @@ func (o OptFloat64) Or(d float64) float64 {
 	return d
 }
 
+// NewOptFormDefEditAccess returns new OptFormDefEditAccess with value set to v.
+func NewOptFormDefEditAccess(v FormDefEditAccess) OptFormDefEditAccess {
+	return OptFormDefEditAccess{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptFormDefEditAccess is optional FormDefEditAccess.
+type OptFormDefEditAccess struct {
+	Value FormDefEditAccess
+	Set   bool
+}
+
+// IsSet returns true if OptFormDefEditAccess was set.
+func (o OptFormDefEditAccess) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptFormDefEditAccess) Reset() {
+	var v FormDefEditAccess
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptFormDefEditAccess) SetTo(v FormDefEditAccess) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptFormDefEditAccess) Get() (v FormDefEditAccess, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptFormDefEditAccess) Or(d FormDefEditAccess) FormDefEditAccess {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptFormFieldFormat returns new OptFormFieldFormat with value set to v.
+func NewOptFormFieldFormat(v FormFieldFormat) OptFormFieldFormat {
+	return OptFormFieldFormat{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptFormFieldFormat is optional FormFieldFormat.
+type OptFormFieldFormat struct {
+	Value FormFieldFormat
+	Set   bool
+}
+
+// IsSet returns true if OptFormFieldFormat was set.
+func (o OptFormFieldFormat) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptFormFieldFormat) Reset() {
+	var v FormFieldFormat
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptFormFieldFormat) SetTo(v FormFieldFormat) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptFormFieldFormat) Get() (v FormFieldFormat, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptFormFieldFormat) Or(d FormFieldFormat) FormFieldFormat {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptFormFieldOnDelete returns new OptFormFieldOnDelete with value set to v.
+func NewOptFormFieldOnDelete(v FormFieldOnDelete) OptFormFieldOnDelete {
+	return OptFormFieldOnDelete{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptFormFieldOnDelete is optional FormFieldOnDelete.
+type OptFormFieldOnDelete struct {
+	Value FormFieldOnDelete
+	Set   bool
+}
+
+// IsSet returns true if OptFormFieldOnDelete was set.
+func (o OptFormFieldOnDelete) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptFormFieldOnDelete) Reset() {
+	var v FormFieldOnDelete
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptFormFieldOnDelete) SetTo(v FormFieldOnDelete) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptFormFieldOnDelete) Get() (v FormFieldOnDelete, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptFormFieldOnDelete) Or(d FormFieldOnDelete) FormFieldOnDelete {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptFormRecord returns new OptFormRecord with value set to v.
 func NewOptFormRecord(v FormRecord) OptFormRecord {
 	return OptFormRecord{
@@ -20187,6 +21210,52 @@ func (o OptGetGridTotalsOnly) Get() (v GetGridTotalsOnly, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptGetGridTotalsOnly) Or(d GetGridTotalsOnly) GetGridTotalsOnly {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptGetRelatedRecordsOKRelatedItemTable returns new OptGetRelatedRecordsOKRelatedItemTable with value set to v.
+func NewOptGetRelatedRecordsOKRelatedItemTable(v GetRelatedRecordsOKRelatedItemTable) OptGetRelatedRecordsOKRelatedItemTable {
+	return OptGetRelatedRecordsOKRelatedItemTable{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptGetRelatedRecordsOKRelatedItemTable is optional GetRelatedRecordsOKRelatedItemTable.
+type OptGetRelatedRecordsOKRelatedItemTable struct {
+	Value GetRelatedRecordsOKRelatedItemTable
+	Set   bool
+}
+
+// IsSet returns true if OptGetRelatedRecordsOKRelatedItemTable was set.
+func (o OptGetRelatedRecordsOKRelatedItemTable) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptGetRelatedRecordsOKRelatedItemTable) Reset() {
+	var v GetRelatedRecordsOKRelatedItemTable
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptGetRelatedRecordsOKRelatedItemTable) SetTo(v GetRelatedRecordsOKRelatedItemTable) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptGetRelatedRecordsOKRelatedItemTable) Get() (v GetRelatedRecordsOKRelatedItemTable, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptGetRelatedRecordsOKRelatedItemTable) Or(d GetRelatedRecordsOKRelatedItemTable) GetRelatedRecordsOKRelatedItemTable {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -20693,6 +21762,52 @@ func (o OptInt64) Get() (v int64, ok bool) {
 
 // Or returns value if set, or given parameter if does not.
 func (o OptInt64) Or(d int64) int64 {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
+// NewOptListedFormEditAccess returns new OptListedFormEditAccess with value set to v.
+func NewOptListedFormEditAccess(v ListedFormEditAccess) OptListedFormEditAccess {
+	return OptListedFormEditAccess{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptListedFormEditAccess is optional ListedFormEditAccess.
+type OptListedFormEditAccess struct {
+	Value ListedFormEditAccess
+	Set   bool
+}
+
+// IsSet returns true if OptListedFormEditAccess was set.
+func (o OptListedFormEditAccess) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptListedFormEditAccess) Reset() {
+	var v ListedFormEditAccess
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptListedFormEditAccess) SetTo(v ListedFormEditAccess) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptListedFormEditAccess) Get() (v ListedFormEditAccess, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptListedFormEditAccess) Or(d ListedFormEditAccess) ListedFormEditAccess {
 	if v, ok := o.Get(); ok {
 		return v
 	}
@@ -24631,6 +25746,130 @@ func (s *RecalculateRevisionOK) SetMetrics(val OptInt) {
 
 func (*RecalculateRevisionOK) recalculateRevisionRes() {}
 
+// Ref: #/components/schemas/RecordDeletePlan
+type RecordDeletePlan struct {
+	CanDelete bool `json:"can_delete"`
+	// Why it cannot be deleted.
+	Refusal OptString `json:"refusal"`
+	// Records naming it under a block rule.
+	Blocked []RecordDeleteRef `json:"blocked"`
+	// Records deleted with it.
+	Cascade []RecordDeleteRef `json:"cascade"`
+	// Records whose field is emptied.
+	Clear []RecordDeleteRef `json:"clear"`
+}
+
+// GetCanDelete returns the value of CanDelete.
+func (s *RecordDeletePlan) GetCanDelete() bool {
+	return s.CanDelete
+}
+
+// GetRefusal returns the value of Refusal.
+func (s *RecordDeletePlan) GetRefusal() OptString {
+	return s.Refusal
+}
+
+// GetBlocked returns the value of Blocked.
+func (s *RecordDeletePlan) GetBlocked() []RecordDeleteRef {
+	return s.Blocked
+}
+
+// GetCascade returns the value of Cascade.
+func (s *RecordDeletePlan) GetCascade() []RecordDeleteRef {
+	return s.Cascade
+}
+
+// GetClear returns the value of Clear.
+func (s *RecordDeletePlan) GetClear() []RecordDeleteRef {
+	return s.Clear
+}
+
+// SetCanDelete sets the value of CanDelete.
+func (s *RecordDeletePlan) SetCanDelete(val bool) {
+	s.CanDelete = val
+}
+
+// SetRefusal sets the value of Refusal.
+func (s *RecordDeletePlan) SetRefusal(val OptString) {
+	s.Refusal = val
+}
+
+// SetBlocked sets the value of Blocked.
+func (s *RecordDeletePlan) SetBlocked(val []RecordDeleteRef) {
+	s.Blocked = val
+}
+
+// SetCascade sets the value of Cascade.
+func (s *RecordDeletePlan) SetCascade(val []RecordDeleteRef) {
+	s.Cascade = val
+}
+
+// SetClear sets the value of Clear.
+func (s *RecordDeletePlan) SetClear(val []RecordDeleteRef) {
+	s.Clear = val
+}
+
+func (*RecordDeletePlan) getRecordDeletePlanRes() {}
+
+// Ref: #/components/schemas/RecordDeleteRef
+type RecordDeleteRef struct {
+	TableID    OptUUID   `json:"table_id"`
+	TableLabel OptString `json:"table_label"`
+	Field      OptString `json:"field"`
+	FieldLabel OptString `json:"field_label"`
+	Count      OptInt    `json:"count"`
+}
+
+// GetTableID returns the value of TableID.
+func (s *RecordDeleteRef) GetTableID() OptUUID {
+	return s.TableID
+}
+
+// GetTableLabel returns the value of TableLabel.
+func (s *RecordDeleteRef) GetTableLabel() OptString {
+	return s.TableLabel
+}
+
+// GetField returns the value of Field.
+func (s *RecordDeleteRef) GetField() OptString {
+	return s.Field
+}
+
+// GetFieldLabel returns the value of FieldLabel.
+func (s *RecordDeleteRef) GetFieldLabel() OptString {
+	return s.FieldLabel
+}
+
+// GetCount returns the value of Count.
+func (s *RecordDeleteRef) GetCount() OptInt {
+	return s.Count
+}
+
+// SetTableID sets the value of TableID.
+func (s *RecordDeleteRef) SetTableID(val OptUUID) {
+	s.TableID = val
+}
+
+// SetTableLabel sets the value of TableLabel.
+func (s *RecordDeleteRef) SetTableLabel(val OptString) {
+	s.TableLabel = val
+}
+
+// SetField sets the value of Field.
+func (s *RecordDeleteRef) SetField(val OptString) {
+	s.Field = val
+}
+
+// SetFieldLabel sets the value of FieldLabel.
+func (s *RecordDeleteRef) SetFieldLabel(val OptString) {
+	s.FieldLabel = val
+}
+
+// SetCount sets the value of Count.
+func (s *RecordDeleteRef) SetCount(val OptInt) {
+	s.Count = val
+}
+
 // What the caller the record is served to may do to it, computed by the same rule the record's
 // update and delete check ("submitter + admins"). An administrator of the table's application (a
 // business_admin of its workspace, a developer or tenant_admin within their scope, a platform_admin)
@@ -24746,6 +25985,8 @@ type RecordsQuery struct {
 	// Records per page (default 100, at most 1000) or groups (default 1000, at most 5000).
 	Limit  OptInt `json:"limit"`
 	Offset OptInt `json:"offset"`
+	// The asker's day the relative date filters count from; the server's day (UTC) when omitted.
+	Today OptDate `json:"today"`
 }
 
 // GetFilters returns the value of Filters.
@@ -24783,6 +26024,11 @@ func (s *RecordsQuery) GetOffset() OptInt {
 	return s.Offset
 }
 
+// GetToday returns the value of Today.
+func (s *RecordsQuery) GetToday() OptDate {
+	return s.Today
+}
+
 // SetFilters sets the value of Filters.
 func (s *RecordsQuery) SetFilters(val []RecordsQueryFiltersItem) {
 	s.Filters = val
@@ -24816,6 +26062,11 @@ func (s *RecordsQuery) SetLimit(val OptInt) {
 // SetOffset sets the value of Offset.
 func (s *RecordsQuery) SetOffset(val OptInt) {
 	s.Offset = val
+}
+
+// SetToday sets the value of Today.
+func (s *RecordsQuery) SetToday(val OptDate) {
+	s.Today = val
 }
 
 type RecordsQueryAggregatesItem struct {
@@ -24915,8 +26166,10 @@ func (s *RecordsQueryAggregatesItemOp) UnmarshalText(data []byte) error {
 
 type RecordsQueryFiltersItem struct {
 	// A field name, or status, created_at, updated_at, created_by (value "me" is the caller), id.
-	Field string                       `json:"field"`
-	Op    OptRecordsQueryFiltersItemOp `json:"op"`
+	Field string `json:"field"`
+	// The relative date operations count from today (the query's today); next_days and last_days take a
+	// number of days as value and include today.
+	Op OptRecordsQueryFiltersItemOp `json:"op"`
 	// One value. Dates are YYYY-MM-DD; text compares without case.
 	Value jx.Raw `json:"value"`
 	// The values of in and not_in; [low, high] for between.
@@ -24963,22 +26216,31 @@ func (s *RecordsQueryFiltersItem) SetValues(val []jx.Raw) {
 	s.Values = val
 }
 
+// The relative date operations count from today (the query's today); next_days and last_days take a
+// number of days as value and include today.
 type RecordsQueryFiltersItemOp string
 
 const (
-	RecordsQueryFiltersItemOpEq         RecordsQueryFiltersItemOp = "eq"
-	RecordsQueryFiltersItemOpNe         RecordsQueryFiltersItemOp = "ne"
-	RecordsQueryFiltersItemOpIn         RecordsQueryFiltersItemOp = "in"
-	RecordsQueryFiltersItemOpNotIn      RecordsQueryFiltersItemOp = "not_in"
-	RecordsQueryFiltersItemOpGt         RecordsQueryFiltersItemOp = "gt"
-	RecordsQueryFiltersItemOpGte        RecordsQueryFiltersItemOp = "gte"
-	RecordsQueryFiltersItemOpLt         RecordsQueryFiltersItemOp = "lt"
-	RecordsQueryFiltersItemOpLte        RecordsQueryFiltersItemOp = "lte"
-	RecordsQueryFiltersItemOpBetween    RecordsQueryFiltersItemOp = "between"
-	RecordsQueryFiltersItemOpContains   RecordsQueryFiltersItemOp = "contains"
-	RecordsQueryFiltersItemOpStartsWith RecordsQueryFiltersItemOp = "starts_with"
-	RecordsQueryFiltersItemOpEmpty      RecordsQueryFiltersItemOp = "empty"
-	RecordsQueryFiltersItemOpNotEmpty   RecordsQueryFiltersItemOp = "not_empty"
+	RecordsQueryFiltersItemOpEq              RecordsQueryFiltersItemOp = "eq"
+	RecordsQueryFiltersItemOpNe              RecordsQueryFiltersItemOp = "ne"
+	RecordsQueryFiltersItemOpIn              RecordsQueryFiltersItemOp = "in"
+	RecordsQueryFiltersItemOpNotIn           RecordsQueryFiltersItemOp = "not_in"
+	RecordsQueryFiltersItemOpGt              RecordsQueryFiltersItemOp = "gt"
+	RecordsQueryFiltersItemOpGte             RecordsQueryFiltersItemOp = "gte"
+	RecordsQueryFiltersItemOpLt              RecordsQueryFiltersItemOp = "lt"
+	RecordsQueryFiltersItemOpLte             RecordsQueryFiltersItemOp = "lte"
+	RecordsQueryFiltersItemOpBetween         RecordsQueryFiltersItemOp = "between"
+	RecordsQueryFiltersItemOpContains        RecordsQueryFiltersItemOp = "contains"
+	RecordsQueryFiltersItemOpStartsWith      RecordsQueryFiltersItemOp = "starts_with"
+	RecordsQueryFiltersItemOpEmpty           RecordsQueryFiltersItemOp = "empty"
+	RecordsQueryFiltersItemOpNotEmpty        RecordsQueryFiltersItemOp = "not_empty"
+	RecordsQueryFiltersItemOpBeforeToday     RecordsQueryFiltersItemOp = "before_today"
+	RecordsQueryFiltersItemOpOnOrBeforeToday RecordsQueryFiltersItemOp = "on_or_before_today"
+	RecordsQueryFiltersItemOpToday           RecordsQueryFiltersItemOp = "today"
+	RecordsQueryFiltersItemOpOnOrAfterToday  RecordsQueryFiltersItemOp = "on_or_after_today"
+	RecordsQueryFiltersItemOpAfterToday      RecordsQueryFiltersItemOp = "after_today"
+	RecordsQueryFiltersItemOpNextDays        RecordsQueryFiltersItemOp = "next_days"
+	RecordsQueryFiltersItemOpLastDays        RecordsQueryFiltersItemOp = "last_days"
 )
 
 // AllValues returns all RecordsQueryFiltersItemOp values.
@@ -24997,6 +26259,13 @@ func (RecordsQueryFiltersItemOp) AllValues() []RecordsQueryFiltersItemOp {
 		RecordsQueryFiltersItemOpStartsWith,
 		RecordsQueryFiltersItemOpEmpty,
 		RecordsQueryFiltersItemOpNotEmpty,
+		RecordsQueryFiltersItemOpBeforeToday,
+		RecordsQueryFiltersItemOpOnOrBeforeToday,
+		RecordsQueryFiltersItemOpToday,
+		RecordsQueryFiltersItemOpOnOrAfterToday,
+		RecordsQueryFiltersItemOpAfterToday,
+		RecordsQueryFiltersItemOpNextDays,
+		RecordsQueryFiltersItemOpLastDays,
 	}
 }
 
@@ -25028,6 +26297,20 @@ func (s RecordsQueryFiltersItemOp) MarshalText() ([]byte, error) {
 	case RecordsQueryFiltersItemOpEmpty:
 		return []byte(s), nil
 	case RecordsQueryFiltersItemOpNotEmpty:
+		return []byte(s), nil
+	case RecordsQueryFiltersItemOpBeforeToday:
+		return []byte(s), nil
+	case RecordsQueryFiltersItemOpOnOrBeforeToday:
+		return []byte(s), nil
+	case RecordsQueryFiltersItemOpToday:
+		return []byte(s), nil
+	case RecordsQueryFiltersItemOpOnOrAfterToday:
+		return []byte(s), nil
+	case RecordsQueryFiltersItemOpAfterToday:
+		return []byte(s), nil
+	case RecordsQueryFiltersItemOpNextDays:
+		return []byte(s), nil
+	case RecordsQueryFiltersItemOpLastDays:
 		return []byte(s), nil
 	default:
 		return nil, errors.Errorf("invalid value: %q", s)
@@ -25075,6 +26358,27 @@ func (s *RecordsQueryFiltersItemOp) UnmarshalText(data []byte) error {
 		return nil
 	case RecordsQueryFiltersItemOpNotEmpty:
 		*s = RecordsQueryFiltersItemOpNotEmpty
+		return nil
+	case RecordsQueryFiltersItemOpBeforeToday:
+		*s = RecordsQueryFiltersItemOpBeforeToday
+		return nil
+	case RecordsQueryFiltersItemOpOnOrBeforeToday:
+		*s = RecordsQueryFiltersItemOpOnOrBeforeToday
+		return nil
+	case RecordsQueryFiltersItemOpToday:
+		*s = RecordsQueryFiltersItemOpToday
+		return nil
+	case RecordsQueryFiltersItemOpOnOrAfterToday:
+		*s = RecordsQueryFiltersItemOpOnOrAfterToday
+		return nil
+	case RecordsQueryFiltersItemOpAfterToday:
+		*s = RecordsQueryFiltersItemOpAfterToday
+		return nil
+	case RecordsQueryFiltersItemOpNextDays:
+		*s = RecordsQueryFiltersItemOpNextDays
+		return nil
+	case RecordsQueryFiltersItemOpLastDays:
+		*s = RecordsQueryFiltersItemOpLastDays
 		return nil
 	default:
 		return errors.Errorf("invalid value: %q", data)

@@ -182,7 +182,7 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 
 	created, errs, err := h.importFormRows(ctx, act, scope, form, header, rawRows)
 	if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
+		h.jsonLimitErr(w, err)
 		return
 	}
 	if len(errs) > 0 {

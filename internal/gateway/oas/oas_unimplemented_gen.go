@@ -939,6 +939,19 @@ func (UnimplementedHandler) GetAuditSettings(ctx context.Context) (r GetAuditSet
 	return r, ht.ErrNotImplemented
 }
 
+// GetBoardColumns implements getBoardColumns operation.
+//
+// The choices of a select field, or the leaf members of a dimension field's dimension in their order,
+//
+//	without those hidden from the caller (by an access rule, or a kept member whose record they do
+//
+// not see) or outside the field's allowed members; a member read-only for the caller is marked.
+//
+// GET /api/forms/{id}/board-columns
+func (UnimplementedHandler) GetBoardColumns(ctx context.Context, params GetBoardColumnsParams) (r GetBoardColumnsRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // GetBranding implements getBranding operation.
 //
 // The brand to apply — a signed-in caller's tenant, else the tenant registered for the request's
@@ -1123,6 +1136,35 @@ func (UnimplementedHandler) GetMyWorkflowHistory(ctx context.Context) (r []Workf
 //
 // GET /api/notifications/settings
 func (UnimplementedHandler) GetNotificationSettings(ctx context.Context) (r GetNotificationSettingsRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// GetRecordDeletePlan implements getRecordDeletePlan operation.
+//
+// What deleting a record would do — refused, or the records deleted and cleared with it.
+//
+// GET /api/records/{id}/delete-plan
+func (UnimplementedHandler) GetRecordDeletePlan(ctx context.Context, params GetRecordDeletePlanParams) (r GetRecordDeletePlanRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// GetRecordHistory implements getRecordHistory operation.
+//
+// A member hidden from the caller reads as {"hidden": true}, not by its code.
+//
+// GET /api/records/{id}/history
+func (UnimplementedHandler) GetRecordHistory(ctx context.Context, params GetRecordHistoryParams) (r GetRecordHistoryRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// GetRelatedRecords implements getRelatedRecords operation.
+//
+// For each dimension field of another table that names the dimension the record's table keeps: up to
+// 50 of its records naming this one, how many there are, and whether the caller may add one. Empty
+// for a record of a table keeping no dimension.
+//
+// GET /api/records/{id}/related
+func (UnimplementedHandler) GetRelatedRecords(ctx context.Context, params GetRelatedRecordsParams) (r GetRelatedRecordsRes, _ error) {
 	return r, ht.ErrNotImplemented
 }
 

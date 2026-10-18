@@ -239,3 +239,25 @@ func RemapRevisionSelectorBars(ctx context.Context, tx pgx.Tx, modelID, revision
 	}
 	return nil
 }
+
+// RemapRevisionTables carries the settings of srcRevisionID's tables beyond
+// their fields onto their copies in revisionID, matched by name: who may edit
+// their records, and the dimension a table keeps (its copy in revisionID, by
+// name) with the field labelling its members. Run after a copy into that
+// revision, once its dimensions and tables exist.
+func RemapRevisionTables(ctx context.Context, tx pgx.Tx, modelID, revisionID, srcRevisionID string) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE model.form_def nf
+		SET edit_access = of.edit_access,
+		    keeps_dimension_id = nd.id,
+		    member_label_field = CASE WHEN nd.id IS NULL THEN NULL ELSE of.member_label_field END,
+		    member_root_label = CASE WHEN nd.id IS NULL THEN NULL ELSE of.member_root_label END
+		FROM model.form_def of
+		LEFT JOIN model.dimension_def od ON od.id = of.keeps_dimension_id
+		LEFT JOIN model.dimension_def nd ON nd.model_id = od.model_id AND nd.name = od.name AND nd.revision_id = $2::uuid
+		WHERE of.model_id = $1::uuid AND of.revision_id = $3::uuid
+		  AND nf.model_id = $1::uuid AND nf.revision_id = $2::uuid AND nf.name = of.name
+		  AND (of.edit_access <> 'creator' OR of.keeps_dimension_id IS NOT NULL)`,
+		modelID, revisionID, srcRevisionID)
+	return err
+}

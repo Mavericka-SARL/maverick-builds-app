@@ -655,7 +655,7 @@ func (e *ToolExecutor) listDashboards(ctx context.Context) (string, error) {
 		LEFT JOIN model.dashboard_widget w ON w.dashboard_id = d.id
 		LEFT JOIN model.metric_def md ON w.widget_type = 'metric_kpi' AND md.id::text = w.ref_id
 		LEFT JOIN model.grid_def gd ON w.widget_type IN ('chart','grid','import') AND gd.id::text = w.ref_id
-		LEFT JOIN model.form_def fd ON w.widget_type = 'form' AND fd.id::text = w.ref_id
+		LEFT JOIN model.form_def fd ON w.widget_type IN ('form', 'board') AND fd.id::text = w.ref_id
 		WHERE d.model_id=$1::uuid
 		  AND (d.revision_id = $2::uuid OR d.revision_id IS NULL)
 		ORDER BY d.name, d.id, w.pos_y, w.pos_x`, e.modelID, e.revID)
@@ -777,7 +777,8 @@ func (e *ToolExecutor) listForms(ctx context.Context) (string, error) {
 		SELECT id::text, name, label, jsonb_array_length(CASE WHEN jsonb_typeof(fields) = 'array' THEN fields ELSE '[]'::jsonb END),
 		       EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(fields) = 'array' THEN fields ELSE '[]'::jsonb END) e
 		               WHERE e->>'type' = 'status'),
-		       own_records_only
+		       own_records_only, edit_access = 'everyone',
+		       COALESCE((SELECT d.name FROM model.dimension_def d WHERE d.id = keeps_dimension_id), '')
 		FROM model.form_def
 		WHERE model_id=$1::uuid AND (revision_id IS NULL OR revision_id=$2::uuid)
 		ORDER BY name`, e.modelID, e.revID)
@@ -792,8 +793,9 @@ func (e *ToolExecutor) listForms(ctx context.Context) (string, error) {
 	for rows.Next() {
 		var id, name, label string
 		var fieldCount int
-		var hasStatus, ownOnly bool
-		if rows.Scan(&id, &name, &label, &fieldCount, &hasStatus, &ownOnly) != nil {
+		var hasStatus, ownOnly, everyone bool
+		var keeps string
+		if rows.Scan(&id, &name, &label, &fieldCount, &hasStatus, &ownOnly, &everyone, &keeps) != nil {
 			continue
 		}
 		count++
@@ -803,6 +805,12 @@ func (e *ToolExecutor) listForms(ctx context.Context) (string, error) {
 		}
 		if ownOnly {
 			notes += ", each person sees only their own"
+		}
+		if everyone {
+			notes += ", everyone who sees a record may edit it"
+		}
+		if keeps != "" {
+			notes += ", its records are the members of dimension " + keeps
 		}
 		fmt.Fprintf(&sb, "  %s (id:%s, %s) — %d field(s)%s\n", name, id, label, fieldCount, notes)
 	}

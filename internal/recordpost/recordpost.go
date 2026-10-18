@@ -50,6 +50,10 @@ import (
 type Poster struct {
 	Pool func(context.Context) *pgxpool.Pool
 	Log  zerolog.Logger
+	// MembersChanged, when set, is told a table keeping a dimension added
+	// members to it (an import of its records), after they are saved: what
+	// reads the dimension's members is recalculated.
+	MembersChanged func(ctx context.Context, form *crudapp.FormDef)
 }
 
 // OnPool is a Poster on one pool.
@@ -221,6 +225,13 @@ func (v *AccessView) Visibility(form *crudapp.FormDef, reach, admin bool, userID
 			vis.Nothing = true
 		}
 	}
+	// A table keeping a dimension: a record is the member its code names,
+	// hidden with it.
+	if form.KeepsDimension() {
+		if codes := v.hiddenCodes[form.KeepsDimensionID]; len(codes) > 0 {
+			vis.HiddenCodes = map[string][]string{form.CodeField().Name: slices.Sorted(maps.Keys(codes))}
+		}
+	}
 	for _, f := range form.Fields {
 		switch {
 		case f.Type == "dimension" && f.DimensionID != "":
@@ -244,6 +255,139 @@ func (v *AccessView) Visibility(form *crudapp.FormDef, reach, admin bool, userID
 		}
 	}
 	return vis
+}
+
+// maxLinkDepth bounds how far VisibilityFor follows tables naming the
+// members other tables keep (a task names a deal, which names an account).
+const maxLinkDepth = 4
+
+// VisibilityFor is which of form's records userID sees (AccessView.Visibility),
+// and beyond it: a record that belongs to a record userID does not see is
+// withheld too — a manager kept from an account sees neither its deals nor
+// those deals' tasks. A record belongs to the record a dimension field of it
+// names, of a dimension a table keeps, when that field's delete rule is block
+// or cascade; a field emptied when its record is deleted (clear) is a mere
+// reference — a deal stays visible when its primary contact has moved to an
+// account hidden from the person. view is userID's access view of form's
+// revision.
+func (ps *Poster) VisibilityFor(ctx context.Context, view *AccessView, form *crudapp.FormDef, reach, admin bool, userID string) (crudapp.Visibility, error) {
+	return ps.linkedVisibility(ctx, view, form, reach, admin, userID, map[string]bool{form.ID: true})
+}
+
+func (ps *Poster) linkedVisibility(ctx context.Context, view *AccessView, form *crudapp.FormDef, reach, admin bool, userID string, seen map[string]bool) (crudapp.Visibility, error) {
+	vis := view.Visibility(form, reach, admin, userID)
+	if vis.Nothing || len(seen) > maxLinkDepth {
+		return vis, nil
+	}
+	keepers, err := ps.KeepersOf(ctx, form)
+	if err != nil || len(keepers) == 0 {
+		return vis, err
+	}
+	store := crudapp.NewStore(ps.db(ctx))
+	for _, f := range form.Fields {
+		keeper := keepers[f.DimensionID]
+		if f.Type != "dimension" || keeper == nil || seen[keeper.ID] || f.DeleteRule() == crudapp.OnDeleteClear {
+			continue
+		}
+		next := maps.Clone(seen)
+		next[keeper.ID] = true
+		kvis, err := ps.linkedVisibility(ctx, view, keeper, reach, admin, userID, next)
+		if err != nil {
+			return vis, err
+		}
+		withheld, err := store.WithheldCodes(ctx, keeper, kvis)
+		if err != nil {
+			return vis, err
+		}
+		if len(withheld) == 0 {
+			continue
+		}
+		if vis.HiddenCodes == nil {
+			vis.HiddenCodes = map[string][]string{}
+		}
+		merged := append(slices.Clone(vis.HiddenCodes[f.Name]), withheld...)
+		slices.Sort(merged)
+		vis.HiddenCodes[f.Name] = slices.Compact(merged)
+	}
+	return vis, nil
+}
+
+// KeepersOf maps each dimension form's dimension fields name to the table
+// keeping its members, for the dimensions a table keeps (none for most).
+func (ps *Poster) KeepersOf(ctx context.Context, form *crudapp.FormDef) (map[string]*crudapp.FormDef, error) {
+	if !form.ModelKeeps && !form.KeepsDimension() {
+		return nil, nil
+	}
+	var dims []string
+	for _, f := range form.Fields {
+		if f.Type == "dimension" && f.DimensionID != "" {
+			dims = append(dims, f.DimensionID)
+		}
+	}
+	if len(dims) == 0 {
+		return nil, nil
+	}
+	rows, err := ps.db(ctx).Query(ctx,
+		`SELECT id::text FROM model.form_def WHERE keeps_dimension_id = ANY($1::uuid[])`, dims)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil || len(ids) == 0 {
+		return nil, err
+	}
+	store := crudapp.NewStore(ps.db(ctx))
+	out := map[string]*crudapp.FormDef{}
+	for _, id := range ids {
+		k, err := store.GetForm(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if k.KeepsDimension() {
+			out[k.KeepsDimensionID] = k
+		}
+	}
+	return out, nil
+}
+
+// ReadOnlyCode reports whether member code of dimension dimID is read-only
+// for the view's person.
+func (v *AccessView) ReadOnlyCode(dimID, code string) bool { return v.readCodes[dimID][code] }
+
+// HiddenCode reports whether member code of dimension dimID is hidden from
+// the view's person.
+func (v *AccessView) HiddenCode(dimID, code string) bool { return v.hiddenCodes[dimID][code] }
+
+// ReadOnlyMember is the label of a field of form whose value in data is a
+// member read-only for the view's person ("" when none is): in a table
+// everyone edits, such a record is theirs to see, not to change.
+func (v *AccessView) ReadOnlyMember(form *crudapp.FormDef, data map[string]any) string {
+	if len(v.readCodes) == 0 {
+		return ""
+	}
+	if form.KeepsDimension() {
+		if code := form.MemberCode(data); code != "" && v.readCodes[form.KeepsDimensionID][code] {
+			return firstNonEmpty(form.CodeField().Label, form.CodeField().Name)
+		}
+	}
+	for _, f := range form.Fields {
+		if f.Type != "dimension" || f.DimensionID == "" {
+			continue
+		}
+		if s, ok := data[f.Name].(string); ok && v.readCodes[f.DimensionID][s] {
+			return firstNonEmpty(f.Label, f.Name)
+		}
+	}
+	return ""
 }
 
 // FieldProblem is a value a record may not hold.
@@ -325,6 +469,13 @@ func (ps *Poster) RecordValueProblems(ctx context.Context, view *AccessView, for
 			if len(f.Options) > 0 && !slices.Contains(f.Options, s) {
 				bad(f, "%q is not one of the choices of %s", s, label)
 			}
+		case f.Type == crudapp.FieldURL:
+			u, ok := crudapp.NormalizeURL(fmt.Sprintf("%v", v))
+			if !ok {
+				bad(f, "%s is a link (https://…), not %v", label, v)
+				continue
+			}
+			data[f.Name] = u
 		case f.Type == "dimension" && f.DimensionID != "":
 			code := fmt.Sprintf("%v", v)
 			// A member hidden from the person is no member to them: the
@@ -354,7 +505,36 @@ func (ps *Poster) RecordValueProblems(ctx context.Context, view *AccessView, for
 			}
 		}
 	}
+	// Fields filled in together: either holding a value asks for both.
+	if required {
+		for _, f := range form.Fields {
+			if f.RequiredWith == "" {
+				continue
+			}
+			other := form.Field(f.RequiredWith)
+			if other == nil {
+				continue
+			}
+			if hasValue(data[f.Name]) != hasValue(data[other.Name]) {
+				missing, filled := f, *other
+				if hasValue(data[f.Name]) {
+					missing, filled = *other, f
+				}
+				bad(missing, "%s is required when %s is filled in", firstNonEmpty(missing.Label, missing.Name), firstNonEmpty(filled.Label, filled.Name))
+			}
+		}
+	}
 	return problems, nil
+}
+
+func hasValue(v any) bool {
+	if v == nil {
+		return false
+	}
+	if s, ok := v.(string); ok {
+		return strings.TrimSpace(s) != ""
+	}
+	return true
 }
 
 // tableInputMetrics are the names and labels of the input metrics of
@@ -487,14 +667,76 @@ func (m formMapping) value(data map[string]any) (float64, bool) {
 }
 
 // members is the {dimension id: member code} coordinate data names for m.
-func (m formMapping) members(data map[string]any) map[string]string {
+// A date (YYYY-MM-DD) mapped to a time dimension names the period holding
+// it (period, when not nil): a deal's close date posts into its month.
+func (m formMapping) members(data map[string]any, period periodOf) map[string]string {
 	out := map[string]string{}
 	for dimID, fieldName := range m.dimMappings {
 		if fv, ok := data[fieldName]; ok && fv != nil {
-			out[dimID] = fmt.Sprintf("%v", fv)
+			code := fmt.Sprintf("%v", fv)
+			if period != nil {
+				if p, ok := period(dimID, code); ok {
+					code = p
+				}
+			}
+			out[dimID] = code
 		}
 	}
 	return out
+}
+
+// periodOf names the period of time dimension dimID that holds a date
+// value, false when value is not a date or the dimension has no period
+// holding it (a dimension that is not a time dimension has none).
+type periodOf func(dimID, value string) (string, bool)
+
+// datedMember is a time dimension's period: its code and first and last
+// days.
+type datedMember struct {
+	code       string
+	start, end time.Time
+}
+
+// periodResolver is a periodOf reading each dimension's periods once, and
+// only when a value is a date: a coordinate that is already a member code
+// (2026-11) costs nothing.
+func (ps *Poster) periodResolver(ctx context.Context) periodOf {
+	periods := map[string][]datedMember{}
+	loaded := map[string]bool{}
+	return func(dimID, value string) (string, bool) {
+		if len(value) != 10 {
+			return "", false
+		}
+		day, err := time.Parse("2006-01-02", value)
+		if err != nil {
+			return "", false
+		}
+		if !loaded[dimID] {
+			loaded[dimID] = true
+			rows, err := ps.db(ctx).Query(ctx, `
+				SELECT code, period_start, period_end FROM model.dimension_member
+				WHERE dimension_id = $1::uuid AND period_start IS NOT NULL
+				ORDER BY period_end - period_start, time_index`, dimID)
+			if err != nil {
+				return "", false
+			}
+			for rows.Next() {
+				var dm datedMember
+				if rows.Scan(&dm.code, &dm.start, &dm.end) == nil {
+					periods[dimID] = append(periods[dimID], dm)
+				}
+			}
+			rows.Close()
+		}
+		// The shortest period holding the day: a daily dimension's day, a
+		// monthly one's month.
+		for _, p := range periods[dimID] {
+			if !day.Before(p.start) && !day.After(p.end) {
+				return p.code, true
+			}
+		}
+		return "", false
+	}
 }
 
 // postingRevision is the revision m posts into: its own, or for a
@@ -523,7 +765,7 @@ type plannedPosting struct {
 // planned is what a record (status, data) posts through m; nil when it
 // posts nothing. anyStatus asks what it posts in whichever status m posts
 // in: what it will post once approved, for a draft.
-func (m formMapping) planned(hasStatus bool, status string, data map[string]any, anyStatus bool) *plannedPosting {
+func (m formMapping) planned(hasStatus bool, status string, data map[string]any, anyStatus bool, period periodOf) *plannedPosting {
 	if data == nil {
 		return nil
 	}
@@ -538,7 +780,7 @@ func (m formMapping) planned(hasStatus bool, status string, data map[string]any,
 	if !ok {
 		return nil
 	}
-	return &plannedPosting{value: v, members: m.members(data)}
+	return &plannedPosting{value: v, members: m.members(data, period)}
 }
 
 func samePosting(a, b *plannedPosting) bool {
@@ -595,11 +837,12 @@ func (ps *Poster) PostingRefusal(ctx context.Context, creatorID string, forYou b
 		}
 	}
 	hasStatus := form.HasStatus()
+	period := ps.periodResolver(ctx)
 	for _, m := range mappings {
 		before := posted[m.id]
 		var after *plannedPosting
 		if to != nil {
-			after = m.planned(hasStatus, to.Status, to.Data, true)
+			after = m.planned(hasStatus, to.Status, to.Data, true, period)
 		}
 		if samePosting(before, after) {
 			continue
@@ -743,7 +986,16 @@ func RetryTransient(ctx context.Context, attempts int, op func() error) error {
 	return err
 }
 
+// Apply posts one record through each of its table's live mappings and
+// rebuilds the totals they post into.
 func (ps *Poster) Apply(ctx context.Context, recordID, formID, status string, data map[string]any, userID string) error {
+	return ps.apply(ctx, recordID, formID, status, data, userID, false)
+}
+
+// apply is Apply; deferTotals leaves the totals and the recalculation to
+// the caller, who posts many records and rebuilds each total once
+// (RebuildPostings).
+func (ps *Poster) apply(ctx context.Context, recordID, formID, status string, data map[string]any, userID string, deferTotals bool) error {
 	// Every caller fires this from its own `go func()` per record
 	// status-transition, so two calls for the SAME record (e.g. its
 	// creation-as-draft call and a subsequent approve call) race with no
@@ -790,6 +1042,7 @@ func (ps *Poster) Apply(ctx context.Context, recordID, formID, status string, da
 
 	var affected []struct{ RevisionID, MetricID string }
 	var affectedModelID string
+	period := ps.periodResolver(ctx)
 
 	for _, m := range mappings {
 		eligible := m.postsAt(hasStatus, status)
@@ -811,14 +1064,16 @@ func (ps *Poster) Apply(ctx context.Context, recordID, formID, status string, da
 			_, _ = ps.db(ctx).Exec(ctx,
 				`DELETE FROM runtime.form_record_posting WHERE mapping_id=$1::uuid AND form_record_id=$2::uuid`,
 				m.id, recordID)
-			ps.RecomputeFactInput(ctx, m.id, revisionID, userID)
+			if !deferTotals {
+				ps.RecomputeFactInput(ctx, m.id, revisionID, userID)
+			}
 			affected = append(affected, struct{ RevisionID, MetricID string }{revisionID, m.targetMetricID})
 			affectedModelID = m.modelID
 			continue
 		}
 
 		// Build dim_members from dimension_mappings {dim_id: form_field_name}
-		dimMembers := m.members(data)
+		dimMembers := m.members(data, period)
 
 		// Generic write guard — the same check cells() applies to every
 		// interactive grid writeback (writeguard.MetricAccess +
@@ -873,7 +1128,9 @@ func (ps *Poster) Apply(ctx context.Context, recordID, formID, status string, da
 			_, _ = ps.db(ctx).Exec(ctx,
 				`DELETE FROM runtime.form_record_posting WHERE mapping_id=$1::uuid AND form_record_id=$2::uuid`,
 				m.id, recordID)
-			ps.RecomputeFactInput(ctx, m.id, revisionID, userID)
+			if !deferTotals {
+				ps.RecomputeFactInput(ctx, m.id, revisionID, userID)
+			}
 			affected = append(affected, struct{ RevisionID, MetricID string }{revisionID, m.targetMetricID})
 			affectedModelID = m.modelID
 			continue
@@ -924,7 +1181,9 @@ func (ps *Poster) Apply(ctx context.Context, recordID, formID, status string, da
 			continue
 		}
 
-		ps.RecomputeFactInput(ctx, m.id, revisionID, userID)
+		if !deferTotals {
+			ps.RecomputeFactInput(ctx, m.id, revisionID, userID)
+		}
 
 		affected = append(affected, struct{ RevisionID, MetricID string }{revisionID, m.targetMetricID})
 		affectedModelID = m.modelID
@@ -937,8 +1196,59 @@ func (ps *Poster) Apply(ctx context.Context, recordID, formID, status string, da
 	// scoping entirely, silently skipping recalc altogether whenever the
 	// model had no active revision yet (e.g. pre-promote), or recalculating
 	// the wrong revision when a mapping's own revision differed from it.
-	ps.recalc(ctx, affectedModelID, affected)
+	if !deferTotals {
+		ps.recalc(ctx, affectedModelID, affected)
+	}
 	return nil
+}
+
+// RebuildPostings gives every record of a revision's tables its postings
+// through their live mappings: what a revision made wholesale needs —
+// imported from a package, or copied from another revision. It arrives
+// with its records and the totals they posted, but not the postings a
+// total is rebuilt from, so the first record saved there rebuilt each of
+// its table's totals from that one record, and every other record's value
+// left the grid. Each record posts as Apply posts it (its status, its
+// value, leaf members, within its creator's access); the totals stay as
+// they arrived until the next save rebuilds them from every record, as in
+// the revision they came from. It returns how many records it went through.
+func (ps *Poster) RebuildPostings(ctx context.Context, modelID, revisionID, userID string) (int, error) {
+	ids := func(sql string, args ...any) ([]string, error) {
+		rows, err := ps.db(ctx).Query(ctx, sql, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return nil, err
+			}
+			out = append(out, id)
+		}
+		return out, rows.Err()
+	}
+	forms, err := ids(`
+		SELECT DISTINCT form_id::text FROM model.form_metric_mapping
+		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND live_posting`, modelID, revisionID)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, formID := range forms {
+		records, err := ids(`SELECT id::text FROM runtime.form_record WHERE form_id=$1::uuid ORDER BY created_at, id`, formID)
+		if err != nil {
+			return n, err
+		}
+		for _, recordID := range records {
+			if err := ps.apply(ctx, recordID, formID, "", nil, userID, true); err != nil {
+				return n, err
+			}
+			n++
+		}
+	}
+	return n, nil
 }
 
 // recomputeFactInput aggregates all active postings for a mapping/metric

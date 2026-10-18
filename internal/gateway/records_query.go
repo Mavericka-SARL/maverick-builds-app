@@ -135,6 +135,11 @@ func (h *handler) checkRecordSave(ctx context.Context, scope formRecordScope, re
 	if err != nil || len(problems) > 0 {
 		return 0, "", problems, err
 	}
+	// In a table everyone edits, a member read-only for the caller is one
+	// they see records of but do not put a record in.
+	if field := scope.readOnlyMember(to.Data); field != "" {
+		return http.StatusForbidden, fmt.Sprintf("forbidden: the %s of this record is read-only for you", field), nil, nil
+	}
 	code, msg, err := h.postingRefusal(ctx, creator, creator == scope.userID, scope.form, recordID, to)
 	return code, msg, nil, err
 }

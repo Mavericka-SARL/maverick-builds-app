@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -30,7 +31,61 @@ type FormField struct {
 	// by the next number, padded with zeros to CodeDigits (EXP-0042).
 	CodePrefix string `json:"code_prefix,omitempty"`
 	CodeDigits int    `json:"code_digits,omitempty"`
+
+	// Default is the value a new record starts with when it is given none:
+	// the form's starting value, and what the server stores for a record
+	// created without the field.
+	Default any `json:"default,omitempty"`
+	// RequiredWith names another field this one is filled in together with:
+	// when either holds a value, both must (a next action's description and
+	// its date).
+	RequiredWith string `json:"required_with,omitempty"`
+	// Hidden fields are kept and saved but not shown in the table's forms,
+	// lists and boards.
+	Hidden bool `json:"hidden,omitempty"`
+	// Core fields cannot be removed from the table while they are marked
+	// core.
+	Core bool `json:"core,omitempty"`
+	// History keeps each value the field takes, who gave it and when
+	// (runtime.record_field_history), shown with the record.
+	History bool `json:"history,omitempty"`
+	// OnDelete is what happens to this table's records when the record
+	// they name through a dimension field is deleted, where the dimension
+	// is kept by a table: "block" (the default: that record cannot be
+	// deleted while one names it), "cascade" (they are deleted with it) or
+	// "clear" (the field is emptied).
+	OnDelete string `json:"on_delete,omitempty"`
+	// Format shows a number field's values: "money" (two decimals, grouped
+	// thousands); "" plain.
+	Format string `json:"format,omitempty"`
+	// Deadline marks a date field whose date, once past, shows the record
+	// as overdue — unless DoneField holds one of DoneValues (a task that is
+	// completed is not overdue).
+	Deadline   bool     `json:"deadline,omitempty"`
+	DoneField  string   `json:"done_field,omitempty"`
+	DoneValues []string `json:"done_values,omitempty"`
 }
+
+// Delete rules of a dimension field naming a kept dimension's member.
+const (
+	OnDeleteBlock   = "block"
+	OnDeleteCascade = "cascade"
+	OnDeleteClear   = "clear"
+)
+
+// DeleteRule is f's rule, the default when it names none.
+func (f FormField) DeleteRule() string {
+	if f.OnDelete == "" {
+		return OnDeleteBlock
+	}
+	return f.OnDelete
+}
+
+// Who may change a table's records (model.form_def.edit_access).
+const (
+	EditCreator  = "creator"
+	EditEveryone = "everyone"
+)
 
 // Field types the server gives values to rather than the person saving a
 // record: an autocode field's code, and a status field's status (which
@@ -50,9 +105,81 @@ type FormDef struct {
 	Fields  []FormField `json:"fields"`
 	// OwnRecordsOnly: a person who does not administer the table's
 	// application sees only the records they created.
-	OwnRecordsOnly bool      `json:"own_records_only"`
-	CreatedAt      time.Time `json:"created_at"`
+	OwnRecordsOnly bool `json:"own_records_only"`
+	// KeepsDimensionID is the dimension whose members are this table's
+	// records ("" when it keeps none): each record's auto-code is a member's
+	// code and its MemberLabelField the member's label.
+	KeepsDimensionID string `json:"keeps_dimension_id,omitempty"`
+	MemberLabelField string `json:"member_label_field,omitempty"`
+	// MemberRootLabel, when set, labels the total member (code RootMemberCode)
+	// every record's member sits under.
+	MemberRootLabel string `json:"member_root_label,omitempty"`
+	// EditAccess is who may change and delete the table's records:
+	// EditCreator (their creator and the application's administrators) or
+	// EditEveryone (everyone who sees them).
+	EditAccess string    `json:"edit_access"`
+	CreatedAt  time.Time `json:"created_at"`
+	// ModelKeeps: some table of the table's model keeps a dimension, so its
+	// dimension fields may link to records (read with the table, so a model
+	// without any pays nothing to find that out).
+	ModelKeeps bool `json:"-"`
 }
+
+// CodeField is the table's first auto-code field, nil when it has none:
+// the code of the member a record is, in a table that keeps a dimension.
+func (f *FormDef) CodeField() *FormField {
+	for i := range f.Fields {
+		if f.Fields[i].Type == FieldAutoCode {
+			return &f.Fields[i]
+		}
+	}
+	return nil
+}
+
+// Field is the table's field named name, nil when it has none.
+func (f *FormDef) Field(name string) *FormField {
+	for i := range f.Fields {
+		if f.Fields[i].Name == name {
+			return &f.Fields[i]
+		}
+	}
+	return nil
+}
+
+// RootMemberCode is the code of the total member a kept dimension's
+// members sit under, when its table names one (MemberRootLabel).
+const RootMemberCode = "ALL"
+
+// KeepsDimension reports whether the table's records are a dimension's
+// members.
+func (f *FormDef) KeepsDimension() bool { return f.KeepsDimensionID != "" && f.CodeField() != nil }
+
+// MemberCode is the code of the member rec is, "" when the table keeps no
+// dimension or rec has no code.
+func (f *FormDef) MemberCode(data map[string]any) string {
+	if !f.KeepsDimension() {
+		return ""
+	}
+	s, _ := data[f.CodeField().Name].(string)
+	return s
+}
+
+// MemberLabel is the label of the member a record holding data is: its
+// label field, else its code.
+func (f *FormDef) MemberLabel(data map[string]any) string {
+	if f.MemberLabelField != "" {
+		if v, ok := data[f.MemberLabelField]; ok && v != nil {
+			if s := strings.TrimSpace(fmt.Sprint(v)); s != "" {
+				return s
+			}
+		}
+	}
+	return f.MemberCode(data)
+}
+
+// EveryoneEdits reports whether everyone who sees the table's records may
+// change them.
+func (f *FormDef) EveryoneEdits() bool { return f.EditAccess == EditEveryone }
 
 // StatusField is the table's status field, nil when it has none: a table
 // without one gives its records no status.
@@ -145,23 +272,29 @@ func (s *Store) CreateForm(ctx context.Context, modelID, revisionID, name, label
 	}
 
 	return &FormDef{
-		ID:        id,
-		ModelID:   modelID,
-		Name:      name,
-		Label:     label,
-		Fields:    fields,
-		CreatedAt: createdAt,
+		ID:         id,
+		ModelID:    modelID,
+		Name:       name,
+		Label:      label,
+		Fields:     fields,
+		EditAccess: EditCreator,
+		CreatedAt:  createdAt,
 	}, nil
 }
+
+// formDefColumns are what GetForm and ListForms read of a model.form_def row.
+const formDefColumns = `id::text, model_id::text, name, label, fields, own_records_only,
+	COALESCE(keeps_dimension_id::text, ''), COALESCE(member_label_field, ''), COALESCE(member_root_label, ''), edit_access, created_at,
+	EXISTS (SELECT 1 FROM model.form_def k WHERE k.model_id = form_def.model_id AND k.keeps_dimension_id IS NOT NULL)`
 
 func (s *Store) GetForm(ctx context.Context, formID string) (*FormDef, error) {
 	var f FormDef
 	var fieldsJSON []byte
 
 	err := s.db.QueryRow(ctx, `
-		SELECT id::text, model_id::text, name, label, fields, own_records_only, created_at
+		SELECT `+formDefColumns+`
 		FROM model.form_def WHERE id = $1::uuid
-	`, formID).Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.OwnRecordsOnly, &f.CreatedAt)
+	`, formID).Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreatedAt, &f.ModelKeeps)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("form %s not found", formID)
 	}
@@ -177,7 +310,7 @@ func (s *Store) GetForm(ctx context.Context, formID string) (*FormDef, error) {
 // ones. An empty revisionID lists every form for the model.
 func (s *Store) ListForms(ctx context.Context, modelID, revisionID string) ([]*FormDef, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id::text, model_id::text, name, label, fields, own_records_only, created_at
+		SELECT `+formDefColumns+`
 		FROM model.form_def
 		WHERE model_id = $1::uuid
 		  AND ($2 = '' OR revision_id IS NULL OR revision_id::text = $2)
@@ -192,7 +325,7 @@ func (s *Store) ListForms(ctx context.Context, modelID, revisionID string) ([]*F
 	for rows.Next() {
 		var f FormDef
 		var fieldsJSON []byte
-		if err := rows.Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.OwnRecordsOnly, &f.CreatedAt); err != nil {
+		if err := rows.Scan(&f.ID, &f.ModelID, &f.Name, &f.Label, &fieldsJSON, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess, &f.CreatedAt, &f.ModelKeeps); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(fieldsJSON, &f.Fields)
@@ -257,6 +390,16 @@ func (s *Store) UpdateForm(ctx context.Context, formID, name, label string, fiel
 // records they created.
 func (s *Store) SetOwnRecordsOnly(ctx context.Context, formID string, on bool) error {
 	_, err := s.db.Exec(ctx, `UPDATE model.form_def SET own_records_only=$2 WHERE id=$1::uuid`, formID, on)
+	return err
+}
+
+// SetEditAccess sets who may change and delete the table's records
+// (EditCreator or EditEveryone).
+func (s *Store) SetEditAccess(ctx context.Context, formID, access string) error {
+	if access != EditCreator && access != EditEveryone {
+		return fmt.Errorf("edit_access is %q or %q, not %q", EditCreator, EditEveryone, access)
+	}
+	_, err := s.db.Exec(ctx, `UPDATE model.form_def SET edit_access=$2 WHERE id=$1::uuid`, formID, access)
 	return err
 }
 
@@ -393,6 +536,17 @@ func (s *Store) CreateRecord(ctx context.Context, formID, userID string, data ma
 // the caller. Each auto-code field of the table gives the record the next
 // code, whatever data holds for it.
 func (s *Store) CreateRecordWithStatus(ctx context.Context, formID, userID, status string, data map[string]any) (*FormRecord, error) {
+	return s.CreateRecordThen(ctx, formID, userID, status, data, nil)
+}
+
+// AfterCreate runs inside a record's creating transaction, once the record
+// row exists: what fails in it undoes the record (the member a record of a
+// table keeping a dimension is, its first history).
+type AfterCreate func(ctx context.Context, tx dbx.DB, form *FormDef, rec *FormRecord) error
+
+// CreateRecordThen is CreateRecordWithStatus running then, when not nil, in
+// the same transaction.
+func (s *Store) CreateRecordThen(ctx context.Context, formID, userID, status string, data map[string]any, then AfterCreate) (*FormRecord, error) {
 	form, err := s.GetForm(ctx, formID)
 	if err != nil {
 		return nil, err
@@ -432,15 +586,11 @@ func (s *Store) CreateRecordWithStatus(ctx context.Context, formID, userID, stat
 	if err != nil {
 		return nil, fmt.Errorf("create record: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, err
-	}
-
 	var createdBy *string
 	if userID != "" {
 		createdBy = &userID
 	}
-	return &FormRecord{
+	rec := &FormRecord{
 		ID:        id,
 		FormID:    formID,
 		Data:      data,
@@ -448,7 +598,16 @@ func (s *Store) CreateRecordWithStatus(ctx context.Context, formID, userID, stat
 		CreatedBy: createdBy,
 		CreatedAt: createdAt,
 		UpdatedAt: updatedAt,
-	}, nil
+	}
+	if then != nil {
+		if err := then(ctx, tx, form, rec); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return rec, nil
 }
 
 func (s *Store) ListRecords(ctx context.Context, formID string, limit int) ([]*FormRecord, error) {
@@ -556,6 +715,13 @@ func (s *Store) UpdateRecord(ctx context.Context, recordID, status string, data 
 // creator was saving) is not overwritten. ErrRecordChanged otherwise. A nil
 // data saves an empty object.
 func (s *Store) UpdateRecordFrom(ctx context.Context, recordID, fromStatus, status string, data map[string]any) error {
+	return s.UpdateRecordThen(ctx, recordID, fromStatus, status, data, nil)
+}
+
+// UpdateRecordThen is UpdateRecordFrom running then, when not nil, in the
+// same transaction once the record is saved: what fails in it undoes the
+// save (the member a record of a table keeping a dimension is, its history).
+func (s *Store) UpdateRecordThen(ctx context.Context, recordID, fromStatus, status string, data map[string]any, then func(ctx context.Context, tx dbx.DB) error) error {
 	if data == nil {
 		data = map[string]any{}
 	}
@@ -563,7 +729,16 @@ func (s *Store) UpdateRecordFrom(ctx context.Context, recordID, fromStatus, stat
 	if err != nil {
 		return err
 	}
-	tag, err := s.db.Exec(ctx, `
+	db := s.db
+	var tx pgx.Tx
+	if then != nil {
+		if tx, err = s.db.Begin(ctx); err != nil {
+			return err
+		}
+		defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+		db = tx
+	}
+	tag, err := db.Exec(ctx, `
 		UPDATE runtime.form_record
 		SET data = $2, status = NULLIF($3,'')::runtime.record_status, updated_at = now()
 		WHERE id = $1::uuid AND status IS NOT DISTINCT FROM NULLIF($4,'')::runtime.record_status
@@ -574,7 +749,13 @@ func (s *Store) UpdateRecordFrom(ctx context.Context, recordID, fromStatus, stat
 	if tag.RowsAffected() == 0 {
 		return ErrRecordChanged
 	}
-	return nil
+	if then == nil {
+		return nil
+	}
+	if err := then(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // DeleteRecordFrom deletes a record only while it is still in fromStatus

@@ -215,6 +215,14 @@ type Form struct {
 	Fields json.RawMessage `json:"fields"`
 	// OwnRecordsOnly: each person sees only the records they created.
 	OwnRecordsOnly bool `json:"own_records_only,omitempty"`
+	// KeepsDimensionID is the package dimension whose members the table's
+	// records are, with the field labelling them; EditAccess who may change
+	// its records ("" for the creator and administrators). Absent in
+	// packages made before tables could keep a dimension.
+	KeepsDimensionID string `json:"keeps_dimension_id,omitempty"`
+	MemberLabelField string `json:"member_label_field,omitempty"`
+	MemberRootLabel  string `json:"member_root_label,omitempty"`
+	EditAccess       string `json:"edit_access,omitempty"`
 }
 
 type FormRecord struct {
@@ -657,7 +665,9 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 
 	// Forms, records, metric mappings.
 	rows, err = q.Query(ctx, `
-		SELECT id::text, name, label, COALESCE(fields,'[]'::jsonb), own_records_only
+		SELECT id::text, name, label, COALESCE(fields,'[]'::jsonb), own_records_only,
+		       COALESCE(keeps_dimension_id::text, ''), COALESCE(member_label_field, ''), COALESCE(member_root_label, ''),
+		       CASE WHEN edit_access = 'creator' THEN '' ELSE edit_access END
 		FROM model.form_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -665,7 +675,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 	for rows.Next() {
 		var f Form
-		if err := rows.Scan(&f.ID, &f.Name, &f.Label, &f.Fields, &f.OwnRecordsOnly); err != nil {
+		if err := rows.Scan(&f.ID, &f.Name, &f.Label, &f.Fields, &f.OwnRecordsOnly, &f.KeepsDimensionID, &f.MemberLabelField, &f.MemberRootLabel, &f.EditAccess); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -1281,7 +1291,7 @@ func (pkg *Package) looseRefs(fn refFunc) {
 // kinds the dashboard writer checks it against); a type not listed resolves
 // through every kind.
 var widgetRefKinds = map[string]string{
-	"grid": "grid", "chart": "grid", "import": "grid", "form": "form",
+	"grid": "grid", "chart": "grid", "import": "grid", "form": "form", "board": "form",
 	"metric_kpi": "metric", "integration_button": "integration", "automation_button": "rule",
 }
 
@@ -2041,11 +2051,19 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 	for _, f := range pkg.Forms {
 		fields := refs.doc(f.Fields, jsonRefs{})
 		var newID string
+		editAccess := f.EditAccess
+		if editAccess == "" {
+			editAccess = "creator"
+		}
+		keeps, labelField, rootLabel := dimMap[f.KeepsDimensionID], f.MemberLabelField, f.MemberRootLabel
+		if keeps == "" {
+			labelField, rootLabel = "", ""
+		}
 		if err = tx.QueryRow(ctx, `
-			INSERT INTO model.form_def (model_id, revision_id, name, label, fields, own_records_only)
-			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE($5::jsonb,'[]'::jsonb), $6)
+			INSERT INTO model.form_def (model_id, revision_id, name, label, fields, own_records_only, edit_access, keeps_dimension_id, member_label_field, member_root_label)
+			VALUES ($1::uuid, $2::uuid, $3, $4, COALESCE($5::jsonb,'[]'::jsonb), $6, $7, NULLIF($8,'')::uuid, NULLIF($9,''), NULLIF($10,''))
 			RETURNING id::text`,
-			modelID, revisionID, f.Name, f.Label, jsonArg(fields), f.OwnRecordsOnly).Scan(&newID); err != nil {
+			modelID, revisionID, f.Name, f.Label, jsonArg(fields), f.OwnRecordsOnly, editAccess, keeps, labelField, rootLabel).Scan(&newID); err != nil {
 			return "", fmt.Errorf("form %q: %w", f.Name, err)
 		}
 		formMap[f.ID] = newID
@@ -2063,6 +2081,26 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 			fid, jsonArg(rec.Data), rec.Status, importerID); err != nil {
 			return "", fmt.Errorf("form record: %w", err)
 		}
+	}
+	// A kept dimension's members are its table's records: a package without
+	// the records (definitions only) leaves the dimension without members
+	// nobody could change.
+	if _, err = tx.Exec(ctx, `SELECT set_config('mvx.kept_member_write', 'on', true)`); err != nil {
+		return "", err
+	}
+	if _, err = tx.Exec(ctx, `
+		DELETE FROM model.dimension_member m
+		USING model.form_def fd
+		WHERE fd.model_id = $1::uuid AND fd.revision_id = $2::uuid AND m.dimension_id = fd.keeps_dimension_id
+		  AND NOT (fd.member_root_label IS NOT NULL AND m.code = 'ALL')
+		  AND NOT EXISTS (
+		      SELECT 1 FROM runtime.form_record r, jsonb_array_elements(fd.fields) f
+		      WHERE r.form_id = fd.id AND f->>'type' = 'autocode' AND r.data->>(f->>'name') = m.code)`,
+		modelID, revisionID); err != nil {
+		return "", fmt.Errorf("kept dimension members: %w", err)
+	}
+	if _, err = tx.Exec(ctx, `SELECT set_config('mvx.kept_member_write', '', true)`); err != nil {
+		return "", err
 	}
 	// mappingMap correlates each exported mapping's original ID to its
 	// freshly created one, so the facts loop below can remap

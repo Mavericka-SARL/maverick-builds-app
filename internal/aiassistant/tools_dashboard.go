@@ -108,7 +108,7 @@ func (e *ToolExecutor) describeDashboard(ctx context.Context, raw json.RawMessag
 		FROM model.dashboard_widget w
 		LEFT JOIN model.metric_def md ON w.widget_type = 'metric_kpi' AND md.id::text = w.ref_id
 		LEFT JOIN model.grid_def gd ON w.widget_type IN ('chart','grid','import') AND gd.id::text = w.ref_id
-		LEFT JOIN model.form_def fd ON w.widget_type = 'form' AND fd.id::text = w.ref_id
+		LEFT JOIN model.form_def fd ON w.widget_type IN ('form', 'board') AND fd.id::text = w.ref_id
 		LEFT JOIN model.integration_def idf ON w.widget_type = 'integration_button' AND idf.id::text = w.ref_id
 		LEFT JOIN workflow.automation_rule ar ON w.widget_type = 'automation_button' AND ar.id::text = w.ref_id
 		WHERE w.dashboard_id = $1::uuid
@@ -231,7 +231,7 @@ func widgetRefNoun(widgetType string) string {
 	switch widgetType {
 	case "metric_kpi":
 		return "metric"
-	case "form":
+	case "form", "board":
 		return "table"
 	case "integration_button":
 		return "integration"

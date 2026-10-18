@@ -3,7 +3,42 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
 import { api, type GridDef, type DevDimension } from "../../api/client";
 import { GridValuesDialog } from "./GridValuesDialog";
-import { Toolbar, ToolbarGroup, Button, Field, TextInput, SearchInput, EmptyState, IconButton, Checkbox, StatusBadge, Select, FilterChip, TagInput, TagFilter, useConfirm } from "../../ui";
+import { Toolbar, ToolbarGroup, Button, Field, TextInput, SearchInput, EmptyState, IconButton, Checkbox, StatusBadge, Select, FilterChip, TagInput, TagFilter, useConfirm, UnsavedChangesBar, useUnsavedGuard } from "../../ui";
+
+/** What the open grid's picker will save: its metrics in order, its dimensions and their levels. */
+interface GridDraft {
+  gridId: string;
+  metric_ids: string[];
+  dimension_ids: string[];
+  levels: Record<string, number | null>;
+}
+
+function draftOf(g: GridDef): GridDraft {
+  return { gridId: g.id, metric_ids: [...g.metric_ids], dimension_ids: [...g.dimension_ids], levels: { ...(g.dimension_levels ?? {}) } };
+}
+
+/** Whether d differs from the grid as saved. */
+function draftChanged(g: GridDef, d: GridDraft): boolean {
+  return d.metric_ids.join() !== g.metric_ids.join()
+    || [...d.dimension_ids].sort().join() !== [...g.dimension_ids].sort().join()
+    || d.dimension_ids.some(id => (d.levels[id] ?? null) !== (g.dimension_levels?.[id] ?? null));
+}
+
+/** Writes d over g: dimensions out and in, their levels, metrics out and in, then the metric order. */
+async function saveDraft(g: GridDef, d: GridDraft) {
+  for (const id of g.dimension_ids) if (!d.dimension_ids.includes(id)) await api.removeGridDimension(g.id, id);
+  for (const id of d.dimension_ids) if (!g.dimension_ids.includes(id)) await api.addGridDimension(g.id, id);
+  for (const id of d.dimension_ids) {
+    const want = d.levels[id] ?? null;
+    const had = g.dimension_ids.includes(id) ? (g.dimension_levels?.[id] ?? null) : null;
+    if (want !== had) await api.setGridDimLevel(g.id, id, want);
+  }
+  for (const id of g.metric_ids) if (!d.metric_ids.includes(id)) await api.removeGridMetric(g.id, id);
+  for (const id of d.metric_ids) if (!g.metric_ids.includes(id)) await api.addGridMetric(g.id, id);
+  // Added metrics land at the end; the order is sent when it is not that.
+  const afterAdds = [...g.metric_ids.filter(id => d.metric_ids.includes(id)), ...d.metric_ids.filter(id => !g.metric_ids.includes(id))];
+  if (afterAdds.join() !== d.metric_ids.join()) await api.reorderGridMetrics(g.id, d.metric_ids);
+}
 
 /**
  * A grid's picker lists every metric and dimension in the model. At a hundred
@@ -64,7 +99,10 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
   // most of its contents for no reason.
   const [metricFilter, setMetricFilter] = useState("");
   const [dimFilter, setDimFilter] = useState("");
-  const openGrid = (id: string | null) => { setExpandedGrid(id); setMetricFilter(""); setDimFilter(""); };
+  // The open grid's metrics and dimensions as edited: written by Save,
+  // dropped by Cancel, as the dashboard designer's changes are.
+  const [draft, setDraft] = useState<GridDraft | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const { data: model } = useQuery({ queryKey: ["dev-model", revisionId], queryFn: () => api.getDevModel(revisionId) });
   const { data: dims = [] } = useQuery({ queryKey: ["dev-dimensions", revisionId], queryFn: () => api.getDevDimensions(revisionId) });
@@ -73,6 +111,23 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
   const [valuesGrid, setValuesGrid] = useState<string | null>(null);
 
   const inv = () => qc.invalidateQueries({ queryKey: ["dev-grids", revisionId] });
+  const openGridDef = (grids as GridDef[]).find(g => g.id === expandedGrid);
+  const isDirty = !!draft && !!openGridDef && draft.gridId === openGridDef.id && draftChanged(openGridDef, draft);
+  const { guard: guardUnsaved, guardElement } = useUnsavedGuard(isDirty);
+  const openGrid = (g: GridDef | null) => guardUnsaved(() => {
+    setExpandedGrid(g?.id ?? null);
+    setDraft(g ? draftOf(g) : null);
+    setSaveError(null);
+    setMetricFilter("");
+    setDimFilter("");
+  });
+  const save = useMutation({
+    mutationFn: ({ g, d }: { g: GridDef; d: GridDraft }) => saveDraft(g, d),
+    onMutate: () => setSaveError(null),
+    onError: (e: Error) => setSaveError(`Not everything was saved — ${e.message}`),
+    onSettled: inv,
+  });
+  const edit = (fn: (d: GridDraft) => GridDraft) => setDraft(d => (d ? fn(d) : d));
 
   const createGrid = useMutation({
     mutationFn: () => api.createGrid({ name: newName, revision_id: revisionId, tags: newTags }),
@@ -82,41 +137,20 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
     mutationFn: (id: string) => api.deleteGrid(id),
     onSuccess: inv,
   });
-  const addMetric = useMutation({
-    mutationFn: ({ gridId, metricId }: { gridId: string; metricId: string }) => api.addGridMetric(gridId, metricId),
-    onSuccess: inv,
-  });
-  const removeMetric = useMutation({
-    mutationFn: ({ gridId, metricId }: { gridId: string; metricId: string }) => api.removeGridMetric(gridId, metricId),
-    onSuccess: inv,
-  });
-  // The order a grid shows its metrics in (rows of a statement such as a
-  // P&L): swap a metric with its neighbour and send the whole order.
-  const reorderMetrics = useMutation({
-    mutationFn: ({ gridId, metricIds }: { gridId: string; metricIds: string[] }) => api.reorderGridMetrics(gridId, metricIds),
-    onSuccess: inv,
-  });
-  const moveMetric = (g: GridDef, metricId: string, delta: -1 | 1) => {
-    const ids = [...g.metric_ids];
+  const moveMetric = (metricId: string, delta: -1 | 1) => edit(d => {
+    const ids = [...d.metric_ids];
     const i = ids.indexOf(metricId);
     const j = i + delta;
-    if (i < 0 || j < 0 || j >= ids.length) return;
+    if (i < 0 || j < 0 || j >= ids.length) return d;
     [ids[i], ids[j]] = [ids[j], ids[i]];
-    reorderMetrics.mutate({ gridId: g.id, metricIds: ids });
-  };
-  const addDim = useMutation({
-    mutationFn: ({ gridId, dimId }: { gridId: string; dimId: string }) => api.addGridDimension(gridId, dimId),
-    onSuccess: inv,
+    return { ...d, metric_ids: ids };
   });
-  const removeDim = useMutation({
-    mutationFn: ({ gridId, dimId }: { gridId: string; dimId: string }) => api.removeGridDimension(gridId, dimId),
-    onSuccess: inv,
-  });
-  const setDimLevel = useMutation({
-    mutationFn: ({ gridId, dimId, level }: { gridId: string; dimId: string; level: number | null }) =>
-      api.setGridDimLevel(gridId, dimId, level),
-    onSuccess: inv,
-  });
+  const toggleMetric = (metricId: string) => edit(d => ({
+    ...d, metric_ids: d.metric_ids.includes(metricId) ? d.metric_ids.filter(x => x !== metricId) : [...d.metric_ids, metricId],
+  }));
+  const toggleDim = (dimId: string) => edit(d => ({
+    ...d, dimension_ids: d.dimension_ids.includes(dimId) ? d.dimension_ids.filter(x => x !== dimId) : [...d.dimension_ids, dimId],
+  }));
   const { confirm, confirmElement } = useConfirm();
 
   // A grid matches by its own name, a tag, or a metric or dimension it
@@ -203,12 +237,9 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
                     <Pencil size={14} />
                   </IconButton>
                 )}
-                {/* "Done", not "Close": every change here is written as it is
-                    made, so there is nothing pending and nothing to discard —
-                    "Close" next to a delete button reads as though there might
-                    be. */}
-                <Button size="sm" onClick={() => openGrid(expandedGrid === g.id ? null : g.id)}>
-                  {expandedGrid === g.id ? "Done" : "Configure"}
+                {/* Changes wait for Save or Cancel; closing with unsaved ones asks first. */}
+                <Button size="sm" onClick={() => openGrid(expandedGrid === g.id ? null : g)}>
+                  {expandedGrid === g.id ? "Close" : "Configure"}
                 </Button>
                 <Button size="sm" variant="ghost" aria-label={`Values of ${g.name}`} title="Fill with sample values, or clear values"
                   onClick={() => setValuesGrid(g.id)}>
@@ -223,7 +254,17 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
                   <Trash2 size={14} />
                 </IconButton>
               </div>
-              {expandedGrid === g.id && (
+              {expandedGrid === g.id && draft?.gridId === g.id && (isDirty || saveError) && (
+                <div style={{ padding: "12px 16px 0" }}>
+                  <UnsavedChangesBar
+                    onSave={() => save.mutate({ g, d: draft })}
+                    onCancel={() => { setDraft(draftOf(g)); setSaveError(null); }}
+                    saving={save.isPending}
+                    error={saveError ?? undefined}
+                  />
+                </div>
+              )}
+              {expandedGrid === g.id && draft?.gridId === g.id && (() => { const view = draft; return (
                 <div className="mvx-admin-object__body" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
                   <div>
                     <div className="mvx-admin-revisions__label" style={{ marginBottom: 10 }}>Metrics</div>
@@ -242,13 +283,13 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
                       const matches = model.metrics.filter(m =>
                         !q || (m.label || "").toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
                       const renderMetric = (m: typeof matches[number]) => {
-                        const included = g.metric_ids.includes(m.id);
-                        const position = g.metric_ids.indexOf(m.id);
+                        const included = view.metric_ids.includes(m.id);
+                        const position = view.metric_ids.indexOf(m.id);
                         const box = (
                           <Checkbox
                             key={m.id}
                             checked={included}
-                            onChange={() => included ? removeMetric.mutate({ gridId: g.id, metricId: m.id }) : addMetric.mutate({ gridId: g.id, metricId: m.id })}
+                            onChange={() => toggleMetric(m.id)}
                             label={
                               <>
                                 {m.label || m.name}{" "}
@@ -262,23 +303,23 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
                           <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 4 }}>
                             <div style={{ flex: 1 }}>{box}</div>
                             <IconButton aria-label={`Move ${m.name} up`} title="Move up" size={24}
-                              disabled={position <= 0 || reorderMetrics.isPending}
-                              onClick={() => moveMetric(g, m.id, -1)}>
+                              disabled={position <= 0}
+                              onClick={() => moveMetric(m.id, -1)}>
                               <ArrowUp size={14} />
                             </IconButton>
                             <IconButton aria-label={`Move ${m.name} down`} title="Move down" size={24}
-                              disabled={position >= g.metric_ids.length - 1 || reorderMetrics.isPending}
-                              onClick={() => moveMetric(g, m.id, 1)}>
+                              disabled={position >= view.metric_ids.length - 1}
+                              onClick={() => moveMetric(m.id, 1)}>
                               <ArrowDown size={14} />
                             </IconButton>
                           </div>
                         );
                       };
                       // In the grid's own order — the order its rows show in.
-                      const inGrid = g.metric_ids
+                      const inGrid = view.metric_ids
                         .map(id => matches.find(m => m.id === id))
                         .filter((m): m is typeof matches[number] => m !== undefined);
-                      const available = matches.filter(m => !g.metric_ids.includes(m.id));
+                      const available = matches.filter(m => !view.metric_ids.includes(m.id));
                       return (
                         <>
                           <PickerSection label="In this grid" count={inGrid.length}>
@@ -306,9 +347,9 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
                     const q = dimFilter.trim().toLowerCase();
                     const matches = (dims as DevDimension[]).filter(d => !q || d.name.toLowerCase().includes(q));
                     const renderDim = (d: DevDimension) => {
-                      const included = g.dimension_ids.includes(d.id);
+                      const included = view.dimension_ids.includes(d.id);
                       const hasHierarchy = d.members.some(m => m.parent_member_id);
-                      const currentLevel = g.dimension_levels?.[d.id] ?? null;
+                      const currentLevel = view.levels[d.id] ?? null;
                       // Compute max depth for dynamic level options
                       const maxDepth = d.members.reduce((mx, m) => {
                         let depth = 0, cur = m;
@@ -323,7 +364,7 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
                         <div key={d.id} style={{ marginBottom: 10 }}>
                           <Checkbox
                             checked={included}
-                            onChange={() => included ? removeDim.mutate({ gridId: g.id, dimId: d.id }) : addDim.mutate({ gridId: g.id, dimId: d.id })}
+                            onChange={() => toggleDim(d.id)}
                             label={<>{d.name} <span className="mvx-admin-muted">{d.members.length} members</span></>}
                           />
                           {included && hasHierarchy && (
@@ -332,10 +373,9 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
                               <Select
                                 aria-label={`Hierarchy level for ${d.name}`}
                                 value={currentLevel === null ? "" : String(currentLevel)}
-                                onChange={e => setDimLevel.mutate({
-                                  gridId: g.id, dimId: d.id,
-                                  level: e.target.value === "" ? null : parseInt(e.target.value),
-                                })}
+                                onChange={e => edit(dr => ({
+                                  ...dr, levels: { ...dr.levels, [d.id]: e.target.value === "" ? null : parseInt(e.target.value) },
+                                }))}
                               >
                                 <option value="">All levels (hierarchy)</option>
                                 <option value="0">Root only (level 0)</option>
@@ -349,8 +389,8 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
                         </div>
                       );
                     };
-                    const inGrid = matches.filter(d => g.dimension_ids.includes(d.id));
-                    const available = matches.filter(d => !g.dimension_ids.includes(d.id));
+                    const inGrid = matches.filter(d => view.dimension_ids.includes(d.id));
+                    const available = matches.filter(d => !view.dimension_ids.includes(d.id));
                     return (
                       <>
                         <PickerSection label="In this grid" count={inGrid.length}>
@@ -364,12 +404,13 @@ export function GridsTab({ revisionId }: { revisionId?: string }) {
                     })()}
                   </div>
                 </div>
-              )}
+              ); })()}
             </div>
           ))}
         </div>
       )}
       {confirmElement}
+      {guardElement}
       {valuesGrid && model && (() => {
         const g = grids.find(x => x.id === valuesGrid);
         return g ? <GridValuesDialog grid={g} metrics={model.metrics} dims={dims} open onClose={() => setValuesGrid(null)} /> : null;

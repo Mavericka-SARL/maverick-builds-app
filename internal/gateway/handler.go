@@ -707,6 +707,10 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/records/{id}", "any", cors(h.recordAction))
 	register("PUT", "/api/records/{id}", "any", cors(h.recordAction))
 	register("DELETE", "/api/records/{id}", "any", cors(h.recordAction))
+	register("GET", "/api/records/{id}/related", "any", cors(h.recordRelated))
+	register("GET", "/api/records/{id}/delete-plan", "any", cors(h.recordDeletePlan))
+	register("GET", "/api/records/{id}/history", "any", cors(h.recordHistory))
+	register("GET", "/api/forms/{id}/board-columns", "any", cors(h.recordBoardColumns))
 	// Rule *management* is developer-only, matching the Developer
 	// Console's own AutomationTab.tsx (never referenced from any business
 	// console) and the CategoryModelChange audit category these events
@@ -4418,11 +4422,14 @@ func (h *handler) developerRevisions(w http.ResponseWriter, r *http.Request) {
 		// nothing else ever recalculates a revision nobody has edited yet —
 		// without this, every calc metric in the new revision rendered blank
 		// until a user happened to write a cell (found live, 2026-09-10).
-		if err := h.recalcRevisionFromInputs(ctx, modelID, newID); err != nil {
-			h.log.Warn().Err(err).Str("revision_id", newID).Msg("recalc after revision duplication failed")
-		}
-
+		// Nor does it carry the records' postings.
 		revAct, _ := h.resolveActor(ctx, r)
+		settler := ""
+		if revAct != nil {
+			settler = revAct.UserID
+		}
+		h.settleRevision(ctx, modelID, newID, settler)
+
 		revActorID, revActorRole := "", ""
 		if revAct != nil {
 			revActorID, revActorRole = revAct.UserID, strings.Join(revAct.Roles, ",")
@@ -5166,7 +5173,7 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 				 WHERE og.id::text = wm.old_ref_id AND wm.widget_type IN ('grid', 'chart', 'import')),
 				(SELECT nf.id::text FROM model.form_def ofd
 				 JOIN model.form_def nf ON nf.model_id = ofd.model_id AND nf.name = ofd.name AND nf.revision_id = $2::uuid
-				 WHERE ofd.id::text = wm.old_ref_id AND wm.widget_type = 'form'),
+				 WHERE ofd.id::text = wm.old_ref_id AND wm.widget_type IN ('form', 'board')),
 				(SELECT nm.id::text FROM model.metric_def om
 				 JOIN model.metric_def nm ON nm.model_id = om.model_id AND nm.name = om.name AND nm.revision_id = $2::uuid
 				 WHERE om.id::text = wm.old_ref_id AND wm.widget_type = 'metric_kpi'),
@@ -5257,6 +5264,10 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		if err := modeltransfer.RemapRevisionSelectorBars(ctx, tx, modelID, newID, dimMap); err != nil {
 			return "", fmt.Errorf("revision selector-bar remap failed: %w", err)
 		}
+	}
+	// Tables keep who edits them and the dimension they keep.
+	if err := modeltransfer.RemapRevisionTables(ctx, tx, modelID, newID, srcRevID); err != nil {
+		return "", fmt.Errorf("revision table settings remap failed: %w", err)
 	}
 
 	// Step K: carry business-role dashboard grants onto the copies. Business
@@ -6482,6 +6493,9 @@ type devDimension struct {
 	// BusinessMaintained: users add, rename and remove members.
 	BusinessMaintained bool        `json:"business_maintained"`
 	Members            []devMember `json:"members"`
+	// keptBy is the table whose records are the dimension's members, ""
+	// for none (GET /api/dimensions reads it with the dimension).
+	keptBy string
 }
 
 func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
@@ -9191,7 +9205,7 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 		imported, rowErrs, iErr := h.importFormRows(ctx, act, scope, form, header, rows)
 		if iErr != nil {
 			h.recordIntegrationRun(ctx, intID, act.UserID, imported, 0, "error", iErr.Error())
-			jsonErr(w, iErr, http.StatusInternalServerError)
+			h.jsonLimitErr(w, iErr)
 			return
 		}
 		if len(rowErrs) > 0 {
@@ -10251,6 +10265,7 @@ func (h *handler) forms(w http.ResponseWriter, r *http.Request) {
 			// OwnRecordsOnly: each person who does not administer the
 			// application sees only the records they created.
 			OwnRecordsOnly bool `json:"own_records_only"`
+			tableSettings
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
@@ -10271,6 +10286,11 @@ func (h *handler) forms(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			form.OwnRecordsOnly = true
+		}
+		if code, err := h.applyTableSettings(ctx, form, body.tableSettings); err != nil {
+			// The table is made; what it may not keep is said.
+			jsonErr(w, fmt.Errorf("the table was created, but %w", err), code)
+			return
 		}
 		if a, e := h.resolveActor(ctx, r); e == nil {
 			var appID string
@@ -10330,7 +10350,9 @@ func (h *handler) publicDimensions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dimRows, err := h.db.Query(ctx,
-		`SELECT id::text, name, agg_rule FROM model.dimension_def
+		`SELECT id::text, name, agg_rule,
+		        COALESCE((SELECT f.id::text FROM model.form_def f WHERE f.keeps_dimension_id = dimension_def.id LIMIT 1), '')
+		 FROM model.dimension_def
 		 WHERE model_id=$1::uuid
 		   AND ($2 = '' OR revision_id IS NULL OR revision_id::text = $2)
 		 ORDER BY created_at`,
@@ -10344,7 +10366,7 @@ func (h *handler) publicDimensions(w http.ResponseWriter, r *http.Request) {
 	var dims []devDimension
 	for dimRows.Next() {
 		var d devDimension
-		if err := dimRows.Scan(&d.ID, &d.Name, &d.AggRule); err != nil {
+		if err := dimRows.Scan(&d.ID, &d.Name, &d.AggRule, &d.keptBy); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -10419,6 +10441,14 @@ func (h *handler) publicDimensions(w http.ResponseWriter, r *http.Request) {
 			}
 			dims[i].Members = kept
 		}
+	}
+
+	// A dimension a table keeps: a member whose record the caller does not
+	// see is no member to them either (a contact of an account they are
+	// kept from), as the records naming it are withheld.
+	if err := h.dropWithheldKeptMembers(ctx, a, dims); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
 	}
 
 	if dims == nil {
@@ -10545,6 +10575,7 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			if body.Data == nil {
 				body.Data = map[string]any{}
 			}
+			crudapp.ApplyDefaults(scope.form, body.Data, time.Now().UTC().Format("2006-01-02"))
 			if code, msg, problems, err := h.checkRecordSave(ctx, scope, nil, &recordState{Status: body.Status, Data: body.Data}, true); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
@@ -10555,13 +10586,27 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, errors.New(msg), code)
 				return
 			}
-			rec, err := store.CreateRecordWithStatus(ctx, formID, userID, body.Status, body.Data)
+			// A record of a table keeping a dimension is a new member: within
+			// the edition's members per dimension.
+			if scope.form.KeepsDimension() {
+				if cid, _ := h.customerOfDimension(ctx, scope.form.KeepsDimensionID); cid != "" && h.plans != nil {
+					if err := h.plans.CheckMembers(ctx, h.db.For(ctx), cid, scope.form.KeepsDimensionID, 1); err != nil {
+						h.jsonLimitErr(w, err)
+						return
+					}
+				}
+			}
+			membersAdded := false
+			rec, err := store.CreateRecordThen(ctx, formID, userID, body.Status, body.Data, h.records().AfterRecordCreated(userID, &membersAdded))
 			if err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
 			scope.permit(rec)
 			bgCtx := context.WithoutCancel(ctx)
+			if membersAdded {
+				go h.recalcDimensionDependents(bgCtx, scope.form.KeepsDimensionID) //nolint:contextcheck
+			}
 			appID, revisionID := scope.appID, scope.revisionID
 			// Apply form-metric mappings (status-based posting rules).
 			go func() { _ = h.applyFormMappings(bgCtx, rec.ID, formID, rec.Status, body.Data, userID) }()
@@ -10615,12 +10660,20 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 			Fields []crudapp.FormField `json:"fields"`
 			// Omitted, the table keeps its setting.
 			OwnRecordsOnly *bool `json:"own_records_only"`
+			tableSettings
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
 			jsonErr(w, fmt.Errorf("invalid body"), http.StatusBadRequest)
 			return
 		}
 		if err := crudapp.ValidateFields(body.Fields); err != nil {
+			jsonErr(w, err, http.StatusBadRequest)
+			return
+		}
+		if before, err := store.GetForm(ctx, formID); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		} else if err := crudapp.CheckFieldChange(before, body.Fields); err != nil {
 			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
@@ -10634,6 +10687,14 @@ func (h *handler) formsRouter(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
+		}
+		// The fields are saved: the settings apply to the table as it now is.
+		if after, err := store.GetForm(ctx, formID); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		} else if code, err := h.applyTableSettings(ctx, after, body.tableSettings); err != nil {
+			jsonErr(w, fmt.Errorf("the fields were saved, but %w", err), code)
+			return
 		}
 		a, actErr := h.resolveActor(ctx, r)
 		// A table that gained or lost its status field counts other records
@@ -10765,7 +10826,7 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, errors.New(msg), code)
 			return
 		}
-		if err := store.UpdateRecordFrom(ctx, recordID, oldStatus, newStatus, data); errors.Is(err, crudapp.ErrRecordChanged) {
+		if err := store.UpdateRecordThen(ctx, recordID, oldStatus, newStatus, data, recordSavedHook(scope.form, recordID, rec.Data, data, act.UserID)); errors.Is(err, crudapp.ErrRecordChanged) {
 			jsonErr(w, fmt.Errorf("the record changed since it was read; reload it and try again"), http.StatusConflict)
 			return
 		} else if err != nil {
@@ -10808,6 +10869,12 @@ func (h *handler) recordAction(w http.ResponseWriter, r *http.Request) {
 		}
 		if !access.CanDelete(rec.Status) {
 			jsonErr(w, fmt.Errorf("forbidden: you may not delete this record"), http.StatusForbidden)
+			return
+		}
+		// A record that is a kept dimension's member goes by the delete
+		// rules of the fields naming it (deleteKeptRecord).
+		if scope.form.KeepsDimension() {
+			h.deleteKeptRecord(w, r, act, scope, rec)
 			return
 		}
 		// A creator deleting their record withdraws what it posted: only
@@ -13055,6 +13122,13 @@ func (h *handler) adminRevisions(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err, http.StatusInternalServerError)
 		return
 	}
+	// As the developer's revision copy: the records' postings, then the
+	// calculated metrics.
+	settler := ""
+	if a, e := h.resolveActor(ctx, r); e == nil {
+		settler = a.UserID
+	}
+	h.settleRevision(ctx, body.ModelID, id, settler)
 
 	if a, e := h.resolveActor(ctx, r); e == nil {
 		var appID string
@@ -14376,6 +14450,13 @@ func jsonErr(w http.ResponseWriter, err error, code int) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": pgErr.Message, "code": "plan_limit", "limit": "max_storage_mb"})
 		return
 	}
+	// A member write the kept-member guard refused (migration 144), on
+	// whichever path: the dimension's members are a table's records.
+	if errors.As(err, &pgErr) && pgErr.Code == keptMemberCode {
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": pgErr.Message, "code": "kept_by_table"})
+		return
+	}
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 }
@@ -15167,6 +15248,7 @@ var widgetRefOwnerSQL = map[string]string{
 	"chart":              `SELECT model_id::text, COALESCE(revision_id::text,'') FROM model.grid_def WHERE id=$1::uuid`,
 	"import":             `SELECT model_id::text, COALESCE(revision_id::text,'') FROM model.grid_def WHERE id=$1::uuid`,
 	"form":               `SELECT model_id::text, COALESCE(revision_id::text,'') FROM model.form_def WHERE id=$1::uuid`,
+	"board":              `SELECT model_id::text, COALESCE(revision_id::text,'') FROM model.form_def WHERE id=$1::uuid`,
 	"metric_kpi":         `SELECT model_id::text, COALESCE(revision_id::text,'') FROM model.metric_def WHERE id=$1::uuid`,
 	"integration_button": `SELECT model_id::text, COALESCE(revision_id::text,'') FROM model.integration_def WHERE id=$1::uuid`,
 }
@@ -15475,6 +15557,12 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 			jsonErr(w, err, http.StatusBadRequest)
 			return
 		}
+		if (body.WidgetType == "form" || body.WidgetType == "board") && body.RefID != nil {
+			if err := modeledit.CheckRecordWidgetProps(ctx, h.db.For(ctx), body.WidgetType, *body.RefID, body.WidgetProps); err != nil {
+				jsonErr(w, err, http.StatusBadRequest)
+				return
+			}
+		}
 		if body.WidgetType == "chart" || body.WidgetType == "grid" {
 			gridRef := ""
 			if body.RefID != nil {
@@ -15582,6 +15670,25 @@ func (h *handler) developerDashboardAction(w http.ResponseWriter, r *http.Reques
 			if err := modeledit.CheckWidgetPropKeys(body.WidgetProps, stored); err != nil {
 				jsonErr(w, err, http.StatusBadRequest)
 				return
+			}
+		}
+		if (body.RefID != nil && *body.RefID != "") || (len(body.WidgetProps) > 0 && string(body.WidgetProps) != "null") {
+			// A records widget or board as it will be: its table's fields.
+			var wType, refID string
+			var props []byte
+			if err := h.db.QueryRow(ctx,
+				`SELECT widget_type, COALESCE(ref_id::text,''), COALESCE(widget_props,'null'::jsonb) FROM model.dashboard_widget WHERE id=$1::uuid AND dashboard_id=$2::uuid`,
+				widgetID, dashID).Scan(&wType, &refID, &props); err == nil && (wType == "form" || wType == "board") {
+				if body.RefID != nil && *body.RefID != "" {
+					refID = *body.RefID
+				}
+				if len(body.WidgetProps) > 0 && string(body.WidgetProps) != "null" {
+					props = body.WidgetProps
+				}
+				if err := modeledit.CheckRecordWidgetProps(ctx, h.db.For(ctx), wType, refID, props); err != nil {
+					jsonErr(w, err, http.StatusBadRequest)
+					return
+				}
 			}
 		}
 		if (body.RefID != nil && *body.RefID != "") || (len(body.WidgetProps) > 0 && string(body.WidgetProps) != "null") {

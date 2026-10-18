@@ -23,7 +23,9 @@ type (
 
 // records is the record poster on the caller's tenant database.
 func (h *handler) records() *recordpost.Poster {
-	return &recordpost.Poster{Pool: h.db.For, Log: h.log}
+	return &recordpost.Poster{Pool: h.db.For, Log: h.log, MembersChanged: func(ctx context.Context, form *crudapp.FormDef) {
+		h.recalcDimensionDependents(ctx, form.KeepsDimensionID)
+	}}
 }
 
 func (h *handler) accessViewFor(ctx context.Context, userID string, form *crudapp.FormDef) (*accessView, error) {
@@ -77,6 +79,15 @@ func retryTransient(ctx context.Context, attempts int, op func() error) error {
 // /api/forms/{id}/import, and a saved csv_import or google_sheets
 // integration whose target is a table.
 func (h *handler) importFormRows(ctx context.Context, act *actor, scope formRecordScope, form *crudapp.FormDef, header []string, rawRows []importpkg.RawRow) (int, []formRowError, error) {
+	// Each record of a table keeping a dimension is a new member: within the
+	// edition's members per dimension, as a record saved by hand is.
+	if form.KeepsDimension() && h.plans != nil {
+		if cid, _ := h.customerOfDimension(ctx, form.KeepsDimensionID); cid != "" {
+			if err := h.plans.CheckMembers(ctx, h.db.For(ctx), cid, form.KeepsDimensionID, len(rawRows)); err != nil {
+				return 0, nil, err
+			}
+		}
+	}
 	return h.records().ImportRows(ctx, recordpost.ImportRequest{
 		Form: form, CreatorID: act.UserID, Header: header, Rows: rawRows,
 		NewStatus: scope.newRecordStatus(),

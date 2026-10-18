@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useReducer, useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, X, Copy, Trash2 } from "lucide-react";
 import { api, type WidgetProps, type SelectorsPosition, type WidgetBackground, type GridChartConfig, type DashboardWidget, type DashboardDef, type DemoContext, type GridDef, type FormDef, type AutomationRule, type IntegrationDef, type Metric, type DevDimension, type GridDefaultView, type ButtonCorners } from "../../api/client";
 import { ChartWidgetEditor } from "../dashboard/ChartWidgetEditor";
@@ -7,6 +7,7 @@ import { chartConfigFromDraft, isChartConfigComplete } from "../dashboard/chartT
 import { DashboardWidgetGrid } from "../business/DashboardWidgets";
 import { DashboardLinkPicker } from "./DashboardLinkPicker";
 import { SelectorBarEditor } from "./SelectorBarEditor";
+import { BoardSettingsEditor, RecordPresetsEditor } from "./RecordWidgetSettings";
 import { defaultLeafCode, groupWidgetsIntoRows, buttonRadius } from "../dashboardLayout";
 import { Toolbar, ToolbarGroup, Button, SegmentedControl, FilterChip, StatusBadge, IconButton, Field, Select, TextInput, Textarea, NumberInput, Checkbox, PropertyPanel, ConfirmDialog, UnsavedChangesBar, useUnsavedGuard, RichText } from "../../ui";
 
@@ -45,6 +46,7 @@ const PALETTE_TYPES = [
   { type: "grid",               label: "Grid" },
   { type: "chart",              label: "Chart" },
   { type: "form",               label: "Records" },
+  { type: "board",              label: "Board" },
   { type: "metric_kpi",         label: "Metric KPI" },
   { type: "automation_button",  label: "Trigger" },
   { type: "integration_button", label: "Integration" },
@@ -58,6 +60,7 @@ const WIDGET_SIZES: Record<string, WidgetSizes> = {
   grid:               { minW: 600, minH: 300, defW: 800, defH: 400 },
   chart:              { minW: 360, minH: 240, defW: 600, defH: 360 },
   form:               { minW: 360, minH: 300, defW: 500, defH: 400 },
+  board:              { minW: 560, minH: 320, defW: 1100, defH: 520 },
   text:               { minW: 240, minH: 100, defW: 300, defH: 120 },
   automation_button:  { minW: 40, minH: 20, defW: 200, defH: 60 },
   integration_button: { minW: 40, minH: 20, defW: 200, defH: 60 },
@@ -115,8 +118,17 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
   const [newWidget, setNewWidget] = useState({ widget_type: "grid", ref_id: "", content: "" });
   // A new records widget: whether it offers "+ New record" (off by default).
   const [newRecordButton, setNewRecordButton] = useState(false);
+  // A new board's column field: what its columns are.
+  const [newBoardColumn, setNewBoardColumn] = useState("");
   const [imageError, setImageError] = useState("");
   const [propsDraft, setPropsDraft] = useState<Record<string, { ref_id?: string; content?: string; title?: string | null; show_title?: boolean; widget_props?: WidgetProps | null }>>({});
+  // Widgets added (or duplicated) and removed since the last save: like
+  // moves and property edits, they are written by Save and dropped by Cancel.
+  // An added widget has a local id ("new-…") until then.
+  const [pendingAdds, setPendingAdds] = useState<DashboardWidget[]>([]);
+  const [pendingDeletes, setPendingDeletes] = useState<Set<string>>(() => new Set());
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const newIdRef = useRef(0);
 
   const [newChartDraft, setNewChartDraft] = useState<Partial<GridChartConfig>>({ chart_type: "bar", context_defaults: {} });
 
@@ -303,68 +315,64 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
     setTimeout(() => setSaveStatus(s => s === "saved" ? "idle" : s), 2000);
   };
 
-  const addWidget = useMutation({
-    mutationFn: async () => {
-      const existing = dash?.widgets ?? [];
-      const { defW, defH } = getWidgetSizes(newWidget.widget_type);
-      const occupied = existing.map(w => draftRef.current[w.id] ?? { x: w.pos_x, y: w.pos_y, w: w.size_w, h: w.size_h });
-      const { x, y } = findAutoPlace(occupied, defW, defH);
-      const chartCfg = newWidget.widget_type === "chart" ? chartConfigFromDraft(newChartDraft) : null;
-      return api.addDashboardWidget(dashId, {
-        widget_type: newWidget.widget_type,
-        ref_id: newWidget.ref_id || undefined,
-        content: newWidget.content || undefined,
-        pos_x: x, pos_y: y, size_w: defW, size_h: defH,
-        sort_order: existing.length, col_start: 1, col_span: 12,
-        widget_props: chartCfg ? { chart: chartCfg }
-          : newWidget.widget_type === "form" && newRecordButton ? { new_record_button: true }
-          : undefined,
-      });
-    },
-    onSuccess: () => {
-      invalidateAll();
-      setShowAdd(false);
-      setNewWidget({ widget_type: "grid", ref_id: "", content: "" });
-      setNewRecordButton(false);
-      setNewChartDraft({ chart_type: "bar", context_defaults: {} });
-      markSaved();
-    },
-  });
-  const removeWidget = useMutation({
-    mutationFn: (widgetId: string) => api.removeDashboardWidget(dashId, widgetId),
-    onSuccess: () => { invalidateAll(); setDeleteConfirmId(null); setSelectedId(null); },
-  });
-  const duplicateWidget = useMutation({
-    mutationFn: async (widgetId: string) => {
-      const w = widgetsRef.current.find(ww => ww.id === widgetId);
-      if (!w) return;
-      // Duplicate what's currently on screen, including any not-yet-saved
-      // drag/resize/property edits — not just the last-saved server copy.
-      const rect = getRect(w);
-      const pd = propsDraft[w.id];
-      const title = pd?.title !== undefined ? pd.title : w.title;
-      const showTitle = pd?.show_title !== undefined ? pd.show_title : w.show_title;
-      const existing = widgetsRef.current.map(ww => draftRef.current[ww.id] ?? { x: ww.pos_x, y: ww.pos_y, w: ww.size_w, h: ww.size_h });
-      const { x, y } = findAutoPlace(existing, rect.w, rect.h);
-      const created = await api.addDashboardWidget(dashId, {
-        widget_type: w.widget_type,
-        ref_id: (pd?.ref_id !== undefined ? pd.ref_id : w.ref_id) || undefined,
-        content: (pd?.content !== undefined ? pd.content : w.content) || undefined,
-        pos_x: x, pos_y: y, size_w: rect.w, size_h: rect.h,
-        sort_order: widgetsRef.current.length, col_start: 1, col_span: 12,
-        widget_props: pd?.widget_props !== undefined ? pd.widget_props : w.widget_props,
-      });
-      // title/show_title aren't accepted at creation (POST) — only PATCH
-      // supports them — so a second call carries them over when set.
-      if (created?.id && (title || showTitle)) {
-        await api.updateDashboardWidget(dashId, created.id, { title: title ?? undefined, show_title: showTitle });
-      }
-      return created;
-    },
-    onSuccess: () => { invalidateAll(); markSaved(); },
-  });
+  // Place a new widget on the canvas, unsaved until Save.
+  const addWidget = () => {
+    const { defW, defH } = getWidgetSizes(newWidget.widget_type);
+    const occupied = widgetsRef.current.map(w => getRect(w));
+    const { x, y } = findAutoPlace(occupied, defW, defH);
+    const chartCfg = newWidget.widget_type === "chart" ? chartConfigFromDraft(newChartDraft) : null;
+    const id = `new-${++newIdRef.current}`;
+    const w: DashboardWidget = {
+      id, widget_type: newWidget.widget_type, ref_id: newWidget.ref_id || null, content: newWidget.content || null,
+      title: null, show_title: false,
+      widget_props: chartCfg ? { chart: chartCfg }
+        : newWidget.widget_type === "form" && newRecordButton ? { new_record_button: true }
+        : newWidget.widget_type === "board" ? { board: { column_field: newBoardColumn }, ...(newRecordButton ? { new_record_button: true } : {}) }
+        : null,
+      sort_order: widgetsRef.current.length, col_start: 1, col_span: 12, pos_x: x, pos_y: y, size_w: defW, size_h: defH,
+    };
+    setPendingAdds(a => [...a, w]);
+    setSelectedId(id);
+    setShowAdd(false);
+    setNewWidget({ widget_type: "grid", ref_id: "", content: "" });
+    setNewRecordButton(false);
+    setNewBoardColumn("");
+    setNewChartDraft({ chart_type: "bar", context_defaults: {} });
+  };
+  // Remove a widget: one added since the last save simply goes; a saved one
+  // is deleted by Save.
+  const removeWidget = (widgetId: string) => {
+    if (widgetId.startsWith("new-")) setPendingAdds(a => a.filter(w => w.id !== widgetId));
+    else setPendingDeletes(d => new Set(d).add(widgetId));
+    delete draftRef.current[widgetId];
+    setPropsDraft(p => { const n = { ...p }; delete n[widgetId]; return n; });
+    setDeleteConfirmId(null);
+    setSelectedId(null);
+  };
+  // Duplicate what's currently on screen, including any not-yet-saved
+  // drag/resize/property edits — not just the last-saved server copy.
+  const duplicateWidget = (widgetId: string) => {
+    const w = widgetsRef.current.find(ww => ww.id === widgetId);
+    if (!w) return;
+    const rect = getRect(w);
+    const pd = propsDraft[w.id];
+    const existing = widgetsRef.current.map(ww => getRect(ww));
+    const { x, y } = findAutoPlace(existing, rect.w, rect.h);
+    const id = `new-${++newIdRef.current}`;
+    setPendingAdds(a => [...a, {
+      ...w, id,
+      ref_id: (pd?.ref_id !== undefined ? pd.ref_id : w.ref_id) || null,
+      content: (pd?.content !== undefined ? pd.content : w.content) || null,
+      title: pd?.title !== undefined ? pd.title : w.title,
+      show_title: pd?.show_title !== undefined ? pd.show_title : w.show_title,
+      widget_props: pd?.widget_props !== undefined ? pd.widget_props : w.widget_props,
+      pos_x: x, pos_y: y, size_w: rect.w, size_h: rect.h, sort_order: widgetsRef.current.length,
+    }]);
+    setSelectedId(id);
+  };
 
-  const widgets = dash?.widgets ?? [];
+  // What the canvas shows: the saved widgets, less those removed, plus those added.
+  const widgets = [...(dash?.widgets ?? []).filter(w => !pendingDeletes.has(w.id)), ...pendingAdds];
   widgetsRef.current = widgets;
 
   function widgetSourceLabel(w: DashboardWidget): string {
@@ -372,7 +380,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
     const refId  = pd?.ref_id  !== undefined ? pd.ref_id  : w.ref_id;
     if (w.widget_type === "text" || w.widget_type === "image") return "";
     if (w.widget_type === "grid")               return (grids as GridDef[]).find(g => g.id === refId)?.name ?? refId?.slice(0, 8) ?? "—";
-    if (w.widget_type === "form")               return (forms as FormDef[]).find(f => f.id === refId)?.label ?? refId?.slice(0, 8) ?? "—";
+    if (w.widget_type === "form" || w.widget_type === "board") return (forms as FormDef[]).find(f => f.id === refId)?.label ?? refId?.slice(0, 8) ?? "—";
     if (w.widget_type === "automation_button")  return (rules as AutomationRule[]).find(r => r.id === refId)?.name ?? refId?.slice(0, 8) ?? "—";
     if (w.widget_type === "integration_button") return (integrations as IntegrationDef[]).find(i => i.id === refId)?.name ?? refId?.slice(0, 8) ?? "—";
     if (w.widget_type === "metric_kpi")         return (metrics as Metric[]).find(m => m.id === refId)?.label ?? refId?.slice(0, 8) ?? "—";
@@ -420,7 +428,13 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
       const kmode = wp.kpi_context_mode ?? (wp.kpi_scope ? "pin" : synced ? "sync" : "total");
       if (kmode === "pin" && wp.kpi_scope) return { dims: [`${dimName(wp.kpi_scope.dimension_id)} = ${wp.kpi_scope.member_code}`], mode: "pinned" };
       if (kmode === "total") return { dims: [], mode: "total" };
-      if (kmode === "bar") return { dims: (m.dimension_ids ?? []).filter(id => barIds.has(id)).map(sharedName), mode: "bar" };
+      if (kmode === "bar") return {
+        dims: [
+          ...(m.dimension_ids ?? []).filter(id => barIds.has(id)).map(sharedName),
+          ...(wp.kpi_scope && !barIds.has(wp.kpi_scope.dimension_id) ? [`${dimName(wp.kpi_scope.dimension_id)} = ${wp.kpi_scope.member_code}`] : []),
+        ],
+        mode: "bar",
+      };
       return { dims: (m.dimension_ids ?? []).map(sharedName), mode: "shared" };
     }
     return null;
@@ -432,6 +446,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
       if (!newWidget.ref_id) return true;
       return chartConfigFromDraft(newChartDraft) === null;
     }
+    if (newWidget.widget_type === "board") return !newWidget.ref_id || !newBoardColumn;
     return !newWidget.ref_id;
   }
 
@@ -454,11 +469,43 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
   async function saveLayout() {
     const layoutDirty = draftRef.current;
     const propsDirty  = propsDraft;
-    const allIds = new Set([...Object.keys(layoutDirty), ...Object.keys(propsDirty)]);
-    if (allIds.size === 0) return;
+    const allIds = new Set([...Object.keys(layoutDirty), ...Object.keys(propsDirty)].filter(id => !id.startsWith("new-")));
+    if (allIds.size === 0 && pendingAdds.length === 0 && pendingDeletes.size === 0) return;
     setSaveStatus("saving");
+    setSaveError(null);
+    // Each added widget is created with what it now holds; one that saved is
+    // no longer pending, so a failure part-way leaves only the rest to save.
+    const adds = [...pendingAdds];
     try {
-      await Promise.all([...allIds].map(id => {
+      while (adds.length > 0) {
+        const w = adds[0];
+        const layout = layoutDirty[w.id] ?? { x: w.pos_x, y: w.pos_y, w: w.size_w, h: w.size_h };
+        const props = propsDirty[w.id];
+        const refId = props?.ref_id !== undefined ? props.ref_id : w.ref_id;
+        const content = props?.content !== undefined ? props.content : w.content;
+        const title = props?.title !== undefined ? props.title : w.title;
+        const showTitle = props?.show_title !== undefined ? props.show_title : w.show_title;
+        let widgetProps = props?.widget_props !== undefined ? props.widget_props : w.widget_props;
+        if (w.widget_type === "chart" && !isChartConfigComplete(widgetProps?.chart ?? {})) widgetProps = w.widget_props;
+        const created = await api.addDashboardWidget(dashId, {
+          widget_type: w.widget_type, ref_id: refId || undefined, content: content || undefined,
+          pos_x: layout.x, pos_y: layout.y, size_w: layout.w, size_h: layout.h,
+          sort_order: w.sort_order, col_start: 1, col_span: 12, widget_props: widgetProps,
+        });
+        // title/show_title aren't accepted at creation (POST) — only PATCH.
+        if (created?.id && (title || showTitle)) {
+          await api.updateDashboardWidget(dashId, created.id, { title: title ?? undefined, show_title: showTitle });
+        }
+        adds.shift();
+        delete draftRef.current[w.id];
+        setPropsDraft(p => { const n = { ...p }; delete n[w.id]; return n; });
+      }
+      setPendingAdds([]);
+      for (const id of pendingDeletes) {
+        await api.removeDashboardWidget(dashId, id);
+        setPendingDeletes(d => { const n = new Set(d); n.delete(id); return n; });
+      }
+      await Promise.all([...allIds].filter(id => !pendingDeletes.has(id)).map(id => {
         const orig   = widgetsRef.current.find(ww => ww.id === id);
         if (!orig) return Promise.resolve();
         const layout = layoutDirty[id];
@@ -486,8 +533,11 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
       setPropsDraft({});
       markSaved();
       invalidateAll();
-    } catch {
+    } catch (e) {
+      setPendingAdds(adds);
       setSaveStatus("error");
+      setSaveError((e as Error).message);
+      invalidateAll();
     }
   }
 
@@ -506,7 +556,8 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
 
   // Computed before the loading early-return: useUnsavedGuard is a hook, so
   // it has to run on every render, not only once the canvas has data.
-  const isDirty = Object.keys(draftRef.current).length > 0 || Object.keys(propsDraft).length > 0;
+  const isDirty = Object.keys(draftRef.current).length > 0 || Object.keys(propsDraft).length > 0
+    || pendingAdds.length > 0 || pendingDeletes.size > 0;
   // Leaving the designer — via Back, a reload, or closing the tab — used to
   // drop an unsaved layout silently, even though the UnsavedChangesBar was
   // sitting right there saying it wasn't saved.
@@ -657,6 +708,29 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                 />
               </>
             )}
+            {newWidget.widget_type === "board" && (() => {
+              const table = (forms as FormDef[]).find(f => f.id === newWidget.ref_id);
+              const columnFields = (table?.fields ?? []).filter(f => (f.type === "dimension" && f.dimension_id) || f.type === "select");
+              return (
+                <>
+                  <Field label="Table">
+                    <Select value={newWidget.ref_id} onChange={e => { setNewWidget(w => ({ ...w, ref_id: e.target.value })); setNewBoardColumn(""); }}>
+                      <option value="">— select —</option>
+                      {(forms as FormDef[]).map(f => <option key={f.id} value={f.id}>{f.label || f.name}</option>)}
+                    </Select>
+                  </Field>
+                  {table && (
+                    <Field label="Columns" description="A dimension field — its members are the columns — or a select field.">
+                      <Select value={newBoardColumn} onChange={e => setNewBoardColumn(e.target.value)} aria-label="Board columns">
+                        <option value="">— select —</option>
+                        {columnFields.map(f => <option key={f.name} value={f.name}>{f.label || f.name}</option>)}
+                      </Select>
+                    </Field>
+                  )}
+                  <Checkbox checked={newRecordButton} onChange={e => setNewRecordButton(e.target.checked)} label="Show the + New button" />
+                </>
+              );
+            })()}
             {newWidget.widget_type === "metric_kpi" && (
               <Field label="Metric">
                 <Select value={newWidget.ref_id} onChange={e => setNewWidget(w => ({ ...w, ref_id: e.target.value }))}>
@@ -727,11 +801,9 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
               </Field>
             )}
           </div>
-          <Button variant="primary" disabled={addWidgetDisabled()} loading={addWidget.isPending} loadingLabel="Adding…"
-            onClick={() => addWidget.mutate()}>
+          <Button variant="primary" disabled={addWidgetDisabled()} onClick={addWidget}>
             Add widget
           </Button>
-          {addWidget.isError && <p className="mvx-admin-error" style={{ marginTop: 8 }}>{(addWidget.error as Error).message}</p>}
         </div>
         );
       })()}
@@ -741,10 +813,14 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
       {isDirty && mode === "design" && (
         <UnsavedChangesBar
           onSave={saveLayout}
-          onCancel={() => { draftRef.current = {}; setPropsDraft({}); setSaveStatus("idle"); }}
+          onCancel={() => {
+            draftRef.current = {}; setPropsDraft({}); setPendingAdds([]); setPendingDeletes(new Set());
+            setSaveStatus("idle"); setSaveError(null);
+            if (selectedId?.startsWith("new-")) setSelectedId(null);
+          }}
           saving={saveStatus === "saving"}
           saveLabel="Save"
-          error={saveStatus === "error" ? "Layout save failed. Please try again." : undefined}
+          error={saveStatus === "error" ? `Not saved: ${saveError ?? "please try again."}` : undefined}
         />
       )}
 
@@ -1094,8 +1170,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
             footer={
               <div style={{ display: "flex", gap: 8 }}>
                 <Button variant="secondary" size="sm" leadingIcon={<Copy size={13} />} style={{ flex: 1 }}
-                  loading={duplicateWidget.isPending} loadingLabel="Duplicating…"
-                  onClick={() => duplicateWidget.mutate(selectedWidget.id)}>
+                  onClick={() => duplicateWidget(selectedWidget.id)}>
                   Duplicate
                 </Button>
                 <Button variant="dangerSecondary" size="sm" leadingIcon={<Trash2 size={13} />} style={{ flex: 1 }}
@@ -1222,6 +1297,39 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                     Off, people only read, search and work on the records here;
                     Import still adds records for those who may create them.
                   </p>
+                </div>
+              );
+            })()}
+
+            {/* Records widget: the filters it keeps, its columns and order */}
+            {selectedWidget.widget_type === "form" && (() => {
+              const wp = { ...(selectedWidget.widget_props ?? {}), ...(propsDraft[selectedWidget.id]?.widget_props ?? {}) };
+              const table = (forms as FormDef[]).find(f => f.id === (propsDraft[selectedWidget.id]?.ref_id ?? selectedWidget.ref_id));
+              if (!table) return null;
+              return (
+                <div style={{ marginBottom: 12 }}>
+                  <RecordPresetsEditor form={table} dims={kpiScopeDims as DevDimension[]} metrics={metrics as Metric[]} value={wp} withColumns
+                    onChange={patch => {
+                      const wid = selectedWidget!.id;
+                      setPropsDraft(prev => ({ ...prev, [wid]: { ...prev[wid], widget_props: { ...wp, ...patch } } }));
+                    }} />
+                </div>
+              );
+            })()}
+
+            {/* Board: its columns, cards, totals, the filters it keeps and + New */}
+            {selectedWidget.widget_type === "board" && (() => {
+              const wp = { ...(selectedWidget.widget_props ?? {}), ...(propsDraft[selectedWidget.id]?.widget_props ?? {}) };
+              const table = (forms as FormDef[]).find(f => f.id === (propsDraft[selectedWidget.id]?.ref_id ?? selectedWidget.ref_id));
+              if (!table) return null;
+              const wid = selectedWidget!.id;
+              const setWp = (patch: Partial<WidgetProps>) => setPropsDraft(prev => ({ ...prev, [wid]: { ...prev[wid], widget_props: { ...wp, ...patch } } }));
+              return (
+                <div style={{ marginBottom: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div className="mvx-prop-section">Board</div>
+                  <BoardSettingsEditor form={table} dims={kpiScopeDims as DevDimension[]} value={wp.board ?? { column_field: "" }} onChange={board => setWp({ board })} />
+                  <Checkbox checked={!!wp.new_record_button} label="Show the + New button" onChange={e => setWp({ new_record_button: e.target.checked || undefined })} />
+                  <RecordPresetsEditor form={table} dims={kpiScopeDims as DevDimension[]} metrics={metrics as Metric[]} value={wp} withColumns={false} onChange={setWp} />
                 </div>
               );
             })()}
@@ -1368,7 +1476,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
             {selectedWidget.widget_type !== "text" && selectedWidget.widget_type !== "grid" && selectedWidget.widget_type !== "chart" && selectedWidget.widget_type !== "import" && (
               <div style={{ marginBottom: 12 }}>
                 <div className="mvx-prop-section">
-                  {selectedWidget.widget_type === "form" ? "Table"
+                  {selectedWidget.widget_type === "form" || selectedWidget.widget_type === "board" ? "Table"
                   : selectedWidget.widget_type === "metric_kpi" ? "Metric"
                   : selectedWidget.widget_type === "automation_button" ? "Trigger"
                   : "Integration"}
@@ -1383,7 +1491,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                   aria-label="Source object"
                 >
                   <option value="">— none —</option>
-                  {selectedWidget.widget_type === "form"               && (forms as FormDef[]).map(f => <option key={f.id} value={f.id}>{f.label || f.name}</option>)}
+                  {(selectedWidget.widget_type === "form" || selectedWidget.widget_type === "board") && (forms as FormDef[]).map(f => <option key={f.id} value={f.id}>{f.label || f.name}</option>)}
                   {selectedWidget.widget_type === "metric_kpi"         && (metrics as Metric[]).map(m => <option key={m.id} value={m.id}>{m.label || m.name}</option>)}
                   {selectedWidget.widget_type === "automation_button"  && eligibleRules.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                   {selectedWidget.widget_type === "integration_button" && (integrations as IntegrationDef[]).map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
@@ -1434,7 +1542,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                         const d0 = scopableDims[0];
                         const code = defaultLeafCode(d0);
                         patchWp({ kpi_context_mode: next, kpi_scope: code ? { dimension_id: d0.id, member_code: code } : undefined });
-                      } else if (next !== "pin") {
+                      } else if (next !== "pin" && next !== "bar") {
                         patchWp({ kpi_context_mode: next, kpi_scope: undefined });
                       } else {
                         patchWp({ kpi_context_mode: next });
@@ -1448,7 +1556,15 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                     <option value="bar">Follow the selector bar (total of the rest)</option>
                     {scopableDims.length > 0 && <option value="pin">Pin to a member</option>}
                   </Select>
-                  {kmode === "pin" && scopableDims.length > 0 && (
+                  {kmode === "bar" && scopableDims.length > 0 && (
+                    <Checkbox checked={!!scope} label="Also pin a member of a dimension the bar does not hold"
+                      onChange={e => {
+                        const d0 = scopableDims[0];
+                        const code = d0 ? defaultLeafCode(d0) : undefined;
+                        setScope(e.target.checked && code ? { dimension_id: d0.id, member_code: code } : undefined);
+                      }} />
+                  )}
+                  {(kmode === "pin" || (kmode === "bar" && !!scope)) && scopableDims.length > 0 && (
                     <>
                       <Select
                         value={scope?.dimension_id ?? scopableDims[0].id}
@@ -1909,8 +2025,8 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                 The underlying source object will not be deleted.
               </>
             ) : ""}
-            confirmLabel={removeWidget.isPending ? "Deleting…" : "Delete"}
-            onConfirm={() => { if (deleteConfirmId) removeWidget.mutate(deleteConfirmId); }}
+            confirmLabel="Delete"
+            onConfirm={() => { if (deleteConfirmId) removeWidget(deleteConfirmId); }}
             onCancel={() => setDeleteConfirmId(null)}
           />
         );

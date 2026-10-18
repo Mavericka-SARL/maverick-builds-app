@@ -43,6 +43,10 @@ type formRecordScope struct {
 	// scope (a developer or tenant admin within their scope, a platform
 	// admin: actorCanAccessModel on a builder route).
 	admin bool
+	// view is the caller's access view of the table's revision, read for a
+	// table everyone edits (a record naming a member read-only for them is
+	// theirs to see only); nil otherwise.
+	view *accessView
 }
 
 // resolveFormRecordScope decides reach and admin for act on formID. A form
@@ -85,6 +89,11 @@ func (h *handler) resolveFormRecordScope(ctx context.Context, act *actor, formID
 		return s, err
 	}
 	s.admin = admin
+	if s.form.EveryoneEdits() && !admin {
+		if s.view, err = h.accessViewFor(ctx, s.userID, s.form); err != nil {
+			return s, err
+		}
+	}
 	return s, nil
 }
 
@@ -132,17 +141,36 @@ func (h *handler) administersModel(ctx context.Context, act *actor, modelID stri
 
 // access is who the scope's caller is to rec.
 func (s formRecordScope) access(rec *crudapp.FormRecord) crudapp.RecordAccess {
-	return crudapp.RecordAccess{
+	a := crudapp.RecordAccess{
 		Reach:    s.reach,
 		Admin:    s.admin,
 		Creator:  rec != nil && rec.CreatedBy != nil && *rec.CreatedBy == s.userID,
 		Statuses: s.hasStatus(),
+		Everyone: s.everyoneEdits(),
 	}
+	if a.Everyone && rec != nil {
+		a.ReadOnly = s.readOnlyMember(rec.Data) != ""
+	}
+	return a
 }
 
 // createAccess is who the scope's caller is to a record they are creating.
 func (s formRecordScope) createAccess() crudapp.RecordAccess {
-	return crudapp.RecordAccess{Reach: s.reach, Admin: s.admin, Creator: true, Statuses: s.hasStatus()}
+	return crudapp.RecordAccess{Reach: s.reach, Admin: s.admin, Creator: true, Statuses: s.hasStatus(), Everyone: s.everyoneEdits()}
+}
+
+// everyoneEdits reports whether the scope's table lets everyone who sees a
+// record change it.
+func (s formRecordScope) everyoneEdits() bool { return s.form != nil && s.form.EveryoneEdits() }
+
+// readOnlyMember is the label of a field whose member in data is read-only
+// for the scope's caller, in a table everyone edits ("" when none is, and
+// always for an administrator).
+func (s formRecordScope) readOnlyMember(data map[string]any) string {
+	if s.view == nil || s.admin || !s.everyoneEdits() {
+		return ""
+	}
+	return s.view.ReadOnlyMember(s.form, data)
 }
 
 // hasStatus reports whether the scope's table has a status field.

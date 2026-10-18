@@ -2,7 +2,7 @@ import React, { useContext, useEffect, useState } from "react";
 import { serialToISO } from "../dateSerial";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Check as CheckIcon } from "lucide-react";
-import { api, type AutomationRule, type DashboardWidget, type DemoContext, type WidgetProps, type GridData, type IntegrationDef, type FormDef, type ChartContextDim, type ButtonCorners, type SelectorBarEntry } from "../../api/client";
+import { api, type AutomationRule, type DashboardWidget, type DemoContext, type WidgetProps, type GridData, type IntegrationDef, type FormDef, type ChartContextDim, type ButtonCorners, type SelectorBarEntry, type RecordFilter, type BoardSettings } from "../../api/client";
 import { ContextSelectors } from "../dashboard/ChartWidget";
 import { DashboardContextSyncContext, useSelectorOwnership, useWidgetContextSync } from "../dashboardContextSync";
 import { WidgetErrorBoundary, CommandButton, LoadingState, EmptyState, Button, useConfirm, RichText } from "../../ui";
@@ -10,6 +10,7 @@ import { groupWidgetsIntoRows, INTRINSIC_HEIGHT_WIDGET_TYPES, BUTTON_WIDGET_TYPE
 import { DashboardContextSyncProvider } from "../DashboardContextSyncProvider";
 import { ChartWidget } from "../dashboard/ChartWidget";
 import { FormPanel } from "./FormPanel";
+import { BoardPanel } from "./BoardPanel";
 import { ImportWidget } from "./ImportWidget";
 import { downloadBlob, fileToBase64 } from "./blobUtils";
 import { PlanningGrid } from "./PlanningGrid";
@@ -194,7 +195,15 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
   } else if (widget.widget_type === "form" && widget.ref_id) {
     inner = (
       <div className="mvx-panel" style={{ padding: 0, overflow: "hidden" }}>
-        <FormWidgetPanel formId={widget.ref_id} ctx={ctx} newRecordButton={!!widget.widget_props?.new_record_button} />
+        <FormWidgetPanel formId={widget.ref_id} ctx={ctx} newRecordButton={!!widget.widget_props?.new_record_button}
+          fixedFilters={widget.widget_props?.record_filters} columns={widget.widget_props?.record_columns} fixedSort={widget.widget_props?.record_sort} />
+      </div>
+    );
+  } else if (widget.widget_type === "board" && widget.ref_id && widget.widget_props?.board) {
+    inner = (
+      <div className="mvx-panel" style={{ padding: 0, overflow: "hidden", height: "100%" }}>
+        <BoardWidgetPanel formId={widget.ref_id} ctx={ctx} settings={widget.widget_props.board} title={widget.title ?? undefined}
+          newRecordButton={!!widget.widget_props?.new_record_button} fixedFilters={widget.widget_props?.record_filters} />
       </div>
     );
   } else if (widget.widget_type === "integration_button" && widget.ref_id) {
@@ -275,9 +284,15 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps }: { metricId: stri
   // total over the rest. Without a bar (or none of its dimensions on the
   // metric) that is the whole-model total.
   const barDimsOfMetric = mode === "bar" ? (sync?.barDims ?? []).filter(id => metric?.dimension_ids?.includes(id)) : [];
-  const barScope = Object.fromEntries(
+  const barScope: Record<string, string> = Object.fromEntries(
     barDimsOfMetric.filter(id => sync?.values[id]).map(id => [id, sync!.values[id]]),
   );
+  // A tile following the bar may also pin a member of a dimension the bar
+  // does not hold ("open deals": the stage pinned, the bar's period and
+  // manager followed).
+  if (mode === "bar" && staticScope && !barDimsOfMetric.includes(staticScope.dimension_id) && metric?.dimension_ids?.includes(staticScope.dimension_id)) {
+    barScope[staticScope.dimension_id] = staticScope.member_code;
+  }
   const scope: Record<string, string> | undefined =
     mode === "pin" && staticScope
       ? { [staticScope.dimension_id]: staticScope.member_code }
@@ -287,7 +302,7 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps }: { metricId: stri
           ? barScope
           : undefined;
   const valueReady = mode === "bar"
-    ? !!metric && Object.keys(barScope).length === barDimsOfMetric.length
+    ? !!metric && barDimsOfMetric.every(id => !!barScope[id])
     : mode !== "sync" || kpiDims.length === 0 || syncScoped;
   const scopeKey = JSON.stringify(scope ?? {});
   const { data: grid } = useQuery({
@@ -575,7 +590,14 @@ function triggerWhen(triggerType: string): string {
 // the list defaulted to the active one (found live, 2026-09-11). Tables reach
 // business users and business admins only this way; see FormPanel. The
 // widget offers "+ New record" only when its developer added the button.
-export function FormWidgetPanel({ formId, ctx: hostCtx, newRecordButton }: { formId: string; ctx?: DemoContext; newRecordButton?: boolean }) {
+export function FormWidgetPanel({ formId, ctx: hostCtx, newRecordButton, fixedFilters, columns, fixedSort }: {
+  formId: string;
+  ctx?: DemoContext;
+  newRecordButton?: boolean;
+  fixedFilters?: RecordFilter[];
+  columns?: string[];
+  fixedSort?: { field: string; desc?: boolean };
+}) {
   const { data: formsRaw = [], isLoading } = useQuery({
     queryKey: ["forms", hostCtx?.revision_id ?? ""],
     queryFn: () => api.listForms(hostCtx?.revision_id),
@@ -585,5 +607,26 @@ export function FormWidgetPanel({ formId, ctx: hostCtx, newRecordButton }: { for
   const revisionId = (hostCtx ?? demoCtx)?.revision_id ?? "";
   const form = (formsRaw as FormDef[]).find((f) => f.id === formId);
   if (!form) return isLoading ? <LoadingState /> : <EmptyState label="Table not found." />;
-  return <FormPanel form={form} revisionId={revisionId} newRecordButton={newRecordButton} />;
+  return <FormPanel form={form} revisionId={revisionId} newRecordButton={newRecordButton} fixedFilters={fixedFilters} columns={columns} fixedSort={fixedSort} />;
+}
+
+// A board widget's body: the table's records as cards in columns (BoardPanel).
+export function BoardWidgetPanel({ formId, ctx: hostCtx, settings, newRecordButton, fixedFilters, title }: {
+  formId: string;
+  ctx?: DemoContext;
+  settings: BoardSettings;
+  newRecordButton?: boolean;
+  fixedFilters?: RecordFilter[];
+  title?: string;
+}) {
+  const { data: formsRaw = [], isLoading } = useQuery({
+    queryKey: ["forms", hostCtx?.revision_id ?? ""],
+    queryFn: () => api.listForms(hostCtx?.revision_id),
+    refetchInterval: 20_000,
+  });
+  const { data: demoCtx } = useQuery({ queryKey: ["demo"], queryFn: api.getDemo, enabled: !hostCtx });
+  const revisionId = (hostCtx ?? demoCtx)?.revision_id ?? "";
+  const form = (formsRaw as FormDef[]).find((f) => f.id === formId);
+  if (!form) return isLoading ? <LoadingState /> : <EmptyState label="Table not found." />;
+  return <BoardPanel form={form} revisionId={revisionId} settings={settings} newRecordButton={newRecordButton} fixedFilters={fixedFilters} title={title} />;
 }

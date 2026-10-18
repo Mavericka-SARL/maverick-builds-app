@@ -273,6 +273,8 @@ func (s *Session) DescribeDashboard(ctx context.Context, p Pinned, dashboardID s
 			}
 		case "form":
 			info.Action = "a form people fill in on this dashboard"
+		case "board":
+			info.Action = "a board of a table's records in columns; moving a card changes the record"
 		case "automation_button":
 			info.Type = "button"
 			info.Title = firstNonEmpty(str(w.Content), info.Title)

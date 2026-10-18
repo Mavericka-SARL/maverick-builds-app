@@ -661,6 +661,7 @@ var widgetRefKind = map[string]string{
 	"grid":               "grid",
 	"import":             "grid",
 	"form":               "form",
+	"board":              "form",
 	"integration_button": "integration",
 }
 
@@ -757,6 +758,21 @@ func (e *WriteExecutor) updateDashboardWidget(ctx context.Context, raw json.RawM
 			stored = []byte(*props)
 		}
 		if err := modeledit.CheckWidgetProps(ctx, e.pool, widgetType, refID, stored); err != nil {
+			return "", "", err
+		}
+	}
+	if (widgetType == "form" || widgetType == "board") && (p.RefID != nil || props != nil) {
+		// A records widget or board as it will be, over its table's fields.
+		var refID string
+		var stored []byte
+		_ = e.pool.QueryRow(ctx, `SELECT COALESCE(ref_id::text,''), COALESCE(widget_props,'null'::jsonb) FROM model.dashboard_widget WHERE id=$1::uuid`, widgetID).Scan(&refID, &stored)
+		if p.RefID != nil && *p.RefID != "" {
+			refID = *p.RefID
+		}
+		if props != nil {
+			stored = []byte(*props)
+		}
+		if err := modeledit.CheckRecordWidgetProps(ctx, e.pool, widgetType, refID, stored); err != nil {
 			return "", "", err
 		}
 	}

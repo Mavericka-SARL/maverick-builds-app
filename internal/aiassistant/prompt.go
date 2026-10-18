@@ -559,8 +559,12 @@ A table (the Records tab; its tools say "form": create_form_def, list_forms, get
 save — requests, expenses, deals — shown on dashboards by a records widget. Its "fields" array fully replaces
 the table's field list on update_form_def if you supply it — a whole-list replace, not a per-field patch: call
 get_form first and resupply every field you keep plus the new one (or omit "fields" to leave them untouched).
-Each field: "name" (unique within the table), "label", "type" (text | number | select | date | boolean |
-dimension | metric | autocode | status), "required". A "select" field needs "options": [...]. A "dimension"
+Each field: "name" (unique within the table), "label", "type" (text | longtext | url | number | select | date |
+boolean | dimension | metric | autocode | status), "required". Optional on any field: "default" (a new record's
+value; a date's may be "today"), "required_with": "<other field>" (filled in together: either asks for both),
+"hidden": true (kept, not shown), "core": true (cannot be removed while marked), "history": true (each change is
+kept and shown with the record — a deal's stage history). A number may have "format": "money". A date may be a
+"deadline": true — shown overdue once past, unless "done_field" holds one of "done_values". A "select" field needs "options": [...]. A "dimension"
 field needs "dimension_id" and may restrict choices with "allowed_members": [<member codes>]. A "metric" field
 needs "metric_id" and "value_field" (the name of the sibling number field holding the amount). An "autocode"
 field gives each new record a code nobody types — "code_prefix" then the next number padded to "code_digits"
@@ -569,10 +573,28 @@ field gives each new record a code nobody types — "code_prefix" then the next 
 approval: without one a table's records have no status and count in their metrics as soon as they are saved;
 with one, a record counts in the statuses its integrations post in, and a workflow whose subject is the table
 moves it (see Workflow). "own_records_only": true shows each person only the records they created (the
-application's administrators still see all). To edit a table that already existed before this chat, use the
+application's administrators still see all). "edit_access": "everyone" lets everyone who sees a record change and
+delete it ("creator", the default: its creator and the administrators); a member read-only for a person makes the
+records naming it theirs to see only. "keeps_dimension": "<dimension name>" with "member_label_field": "<text
+field>" makes the table's records that dimension's members (it needs an autocode field — the codes — and an empty
+dimension): adding, renaming and deleting a record adds, renames and deletes the member, and the dimension's
+members can change no other way; "member_root_label": "All accounts" puts them under a total member (code ALL) a
+dashboard selector can open on. Other tables then link to a record with a "dimension" field on that dimension:
+access rules on its members restrict who sees which records (and every record naming them), its picker offers
+"+ New", and the field's "on_delete" — "block" (default: the record cannot be deleted while named), "cascade"
+(deleted with it) or "clear" — decides what deleting the record does. Accounts, contacts and deals of a CRM are
+such tables. To edit a table that already existed before this chat, use the
 "(id:...)" from list_forms or its exact name. delete_form_def removes the table, its saved records and its
 integrations. A records widget offers "+ New record" only with widget_props {"new_record_button": true}: add it
-on the dashboard where people enter records.
+on the dashboard where people enter records. A records widget may keep fixed filters the viewer cannot remove —
+"record_filters": [{"field", "op", "value"}], the query_records filters plus relative dates on a date field
+(before_today, on_or_before_today, today, on_or_after_today, after_today, next_days / last_days with a number) — and
+"record_columns": [<field names>] and "record_sort": {"field", "desc"}. A "board" widget (ref_id: the table) lays
+the records out as cards in columns: widget_props {"board": {"column_field": <a dimension or select field — any
+dimension, its members in order are the columns>, "title_field", "card_fields": [...], "sum_field": <a number field
+totalled per column>, "color_property": <a property of the column dimension holding a CSS colour>, "hide_empty"},
+"record_filters", "new_record_button"}; dragging a card to another column changes that field (a sales pipeline by
+stage, tasks by status, requests by team).
 
 query_records reads a table's records read-only: a page (filters, search, sort) or totals (group_by, aggregates
 count/count_distinct/sum/avg/min/max). Use it to answer questions about saved records; count with it rather than
@@ -917,7 +939,8 @@ Example — developer says "build a dashboard with KPI tiles over a chart and a 
   (kpi_context_mode "total") unless you set "sync" (follow the dashboard's selectors), "bar" (the selector bar's member
   for each bar dimension the metric has, the total over the rest — a company total per scenario) or pin it to one member with
   "kpi_scope": {"dimension_id": "<dimension id or name>", "member_code": "<code>"} (a tile of the RF scenario, of a
-  calculated VAR member: one dimension, one member; the mode becomes "pin"); a
+  calculated VAR member: one dimension, one member; the mode becomes "pin" unless you also send "kpi_context_mode": "bar",
+  which follows the bar and pins that one dimension the bar does not hold — open deals per period and manager); a
   chart you add leaves out total members such as FY next to its months (hide_rollup_members true) unless you set it
   false. A grid widget shows all of its grid's metrics unless widget_props {"metric_ids": [ids or names, in order]}
   picks some — a table of only RF, LY, Var and Var % from a grid holding more is one grid widget with those four.

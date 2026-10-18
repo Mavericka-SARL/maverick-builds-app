@@ -2193,7 +2193,7 @@ components:
       properties:
         name:            { type: string }
         label:           { type: string }
-        type:            { type: string, enum: [text, number, select, date, boolean, dimension, metric, autocode, status] }
+        type:            { type: string, enum: [text, longtext, url, number, select, date, boolean, dimension, metric, autocode, status] }
         required:        { type: boolean }
         options:         { type: array, items: { type: string } }
         dimension_id:    { type: string, format: uuid, description: "Set when type=dimension" }
@@ -2202,6 +2202,16 @@ components:
         value_field:     { type: string, description: "Set when type=metric — name of the sibling field holding the numeric amount" }
         code_prefix:     { type: string, maxLength: 20, description: "Set when type=autocode — text before the number (EXP-)" }
         code_digits:     { type: integer, minimum: 0, maximum: 12, description: "Set when type=autocode — digits the number is padded to; 0 means 4" }
+        default:         { description: "A new record's value when it is given none (a date's may be \"today\"); the server stores it for a record created without the field" }
+        required_with:   { type: string, description: "Another field this one is filled in together with: when either holds a value, both must" }
+        hidden:          { type: boolean, description: "Kept and saved, not shown in the table's forms, lists and boards" }
+        core:            { type: boolean, description: "Cannot be removed from the table while marked core" }
+        history:         { type: boolean, description: "Each value the field takes is kept, with who gave it and when (GET /api/records/{id}/history)" }
+        on_delete:       { type: string, enum: [block, cascade, clear], description: "A dimension field naming a member a table keeps: deleting that record is refused while this field names it (block, the default), deletes this record with it (cascade) or empties this field (clear)" }
+        format:          { type: string, enum: [money], description: "A number field shown as money" }
+        deadline:        { type: boolean, description: "A date field shown as overdue once past, unless done_field holds one of done_values" }
+        done_field:      { type: string }
+        done_values:     { type: array, items: { type: string } }
 
     FormDef:
       type: object
@@ -2215,6 +2225,22 @@ components:
         own_records_only:
           type: boolean
           description: Each person who does not administer the application sees only the records they created.
+        keeps_dimension_id:
+          type: string
+          format: uuid
+          description: >-
+            The dimension whose members the table's records are: each record's auto-code is a member's code
+            and member_label_field its label. Adding, renaming and deleting a record adds, renames and deletes
+            the member; the dimension's members change no other way (409, code kept_by_table).
+        member_label_field: { type: string }
+        member_root_label:  { type: string, description: "The label of the total member (code ALL) the records' members sit under, when there is one" }
+        edit_access:
+          type: string
+          enum: [creator, everyone]
+          description: >-
+            Who may change and delete the table's records: their creator and the application's administrators
+            (creator), or everyone who sees them (everyone) — a member read-only for a person then makes the
+            records naming it theirs to see only.
         created_at: { type: string, format: date-time }
 
     ListedForm:
@@ -2268,6 +2294,15 @@ components:
           description: >-
             Each person who does not administer the application sees only the records they created. On an
             update, omitted keeps the table's setting.
+        keeps_dimension_id:
+          type: string
+          description: >-
+            The dimension of the table's revision whose members its records become ("" to stop keeping one).
+            The table needs an auto-code field and the dimension must be empty or hold only its records' codes.
+            Omitted keeps the setting.
+        member_label_field: { type: string, description: "The text field labelling each member; omitted keeps it." }
+        member_root_label:  { type: string, description: "The label of a total member (code ALL) the records' members sit under; \"\" for none, omitted keeps it." }
+        edit_access: { type: string, enum: [creator, everyone], description: "Omitted keeps the setting." }
 
     FormRecord:
       type: object
@@ -2346,8 +2381,10 @@ components:
                 description: A field name, or status, created_at, updated_at, created_by (value "me" is the caller), id.
               op:
                 type: string
-                enum: [eq, ne, in, not_in, gt, gte, lt, lte, between, contains, starts_with, empty, not_empty]
+                enum: [eq, ne, in, not_in, gt, gte, lt, lte, between, contains, starts_with, empty, not_empty,
+                       before_today, on_or_before_today, today, on_or_after_today, after_today, next_days, last_days]
                 default: eq
+                description: The relative date operations count from today (the query's today); next_days and last_days take a number of days as value and include today.
               value:  { description: One value. Dates are YYYY-MM-DD; text compares without case. }
               values: { type: array, items: {}, description: "The values of in and not_in; [low, high] for between." }
         search:
@@ -2382,6 +2419,7 @@ components:
               field: { type: string, description: Every op but count takes one. }
         limit:  { type: integer, minimum: 1, description: "Records per page (default 100, at most 1000) or groups (default 1000, at most 5000)" }
         offset: { type: integer, minimum: 0 }
+        today:  { type: string, format: date, description: "The asker's day the relative date filters count from; the server's day (UTC) when omitted." }
 
     RecordsQueryResult:
       type: object
@@ -2410,6 +2448,25 @@ components:
         query:        { $ref: "#/components/schemas/RecordsQuery" }
         limits:       { type: object, additionalProperties: { type: integer } }
         statuses:     { type: array, items: { type: string }, description: "The statuses a record of the table may have; absent without a status field." }
+
+    RecordDeleteRef:
+      type: object
+      properties:
+        table_id:    { type: string, format: uuid }
+        table_label: { type: string }
+        field:       { type: string }
+        field_label: { type: string }
+        count:       { type: integer }
+
+    RecordDeletePlan:
+      type: object
+      required: [can_delete, blocked, cascade, clear]
+      properties:
+        can_delete: { type: boolean }
+        refusal:    { type: string, description: Why it cannot be deleted, when it cannot. }
+        blocked:    { type: array, items: { $ref: "#/components/schemas/RecordDeleteRef" }, description: "Records naming it under a block rule" }
+        cascade:    { type: array, items: { $ref: "#/components/schemas/RecordDeleteRef" }, description: "Records deleted with it" }
+        clear:      { type: array, items: { $ref: "#/components/schemas/RecordDeleteRef" }, description: "Records whose field is emptied" }
 
     FormImportRequest:
       type: object
@@ -9256,17 +9313,159 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "200":
-          description: Record deleted
+          description: >-
+            Record deleted. A record of a table keeping a dimension takes its member with it, and the records
+            naming it go by their fields' delete rules: deleted counts it and the records deleted with it,
+            cleared the records whose field was emptied.
           content:
             application/json:
-              schema: { type: object, properties: { status: { type: string } } }
+              schema:
+                type: object
+                properties:
+                  status:  { type: string }
+                  deleted: { type: integer }
+                  cleared: { type: integer }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409":
-          description: The record changed since it was read; nothing was deleted
+          description: The record changed since it was read, or records name it under a "block" rule; nothing was deleted
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+
+  /api/records/{id}/delete-plan:
+    get:
+      operationId: getRecordDeletePlan
+      tags: [Records]
+      summary: What deleting a record would do — refused, or the records deleted and cleared with it
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The plan; nothing is deleted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordDeletePlan" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/records/{id}/related:
+    get:
+      operationId: getRelatedRecords
+      tags: [Records]
+      summary: The records of other tables naming a record of a table that keeps a dimension, as the caller sees them
+      description: >-
+        For each dimension field of another table that names the dimension the record's table keeps: up to
+        50 of its records naming this one, how many there are, and whether the caller may add one. Empty for
+        a record of a table keeping no dimension.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The related records
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [related]
+                properties:
+                  related:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        table:       { type: object, properties: { id: { type: string }, name: { type: string }, label: { type: string } } }
+                        field:       { type: string }
+                        field_label: { type: string }
+                        columns:     { type: array, items: { type: object, additionalProperties: {} } }
+                        records:     { type: array, items: { $ref: "#/components/schemas/FormRecord" } }
+                        total:       { type: integer }
+                        can_create:  { type: boolean }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/records/{id}/history:
+    get:
+      operationId: getRecordHistory
+      tags: [Records]
+      summary: Each value the record's history fields took, who gave it and when, oldest first
+      description: 'A member hidden from the caller reads as {"hidden": true}, not by its code.'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The history
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [history]
+                properties:
+                  history:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        field:           { type: string }
+                        field_label:     { type: string }
+                        old:             { description: "The value before; null when empty" }
+                        new:             { description: "The value after; null when empty" }
+                        changed_by:      { type: string, format: uuid, nullable: true }
+                        changed_by_name: { type: string }
+                        changed_at:      { type: string, format: date-time }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/forms/{id}/board-columns:
+    get:
+      operationId: getBoardColumns
+      tags: [Records]
+      summary: A board's columns for the caller
+      description: >-
+        The choices of a select field, or the leaf members of a dimension field's dimension in their order,
+        without those hidden from the caller (by an access rule, or a kept member whose record they do not
+        see) or outside the field's allowed members; a member read-only for the caller is marked.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: field
+          in: query
+          required: true
+          schema: { type: string }
+          description: The dimension or select field whose members or choices are the columns.
+        - name: color_property
+          in: query
+          schema: { type: string }
+          description: The dimension's member property holding each column's colour.
+      responses:
+        "200":
+          description: The columns
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [columns]
+                properties:
+                  columns:
+                    type: array
+                    items:
+                      type: object
+                      required: [key, label]
+                      properties:
+                        key:       { type: string }
+                        label:     { type: string }
+                        color:     { type: string }
+                        read_only: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/automation/rules:
     get:

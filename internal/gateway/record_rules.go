@@ -19,11 +19,14 @@ func (h *handler) recordVisibility(ctx context.Context, scope formRecordScope) (
 	if !scope.reach || scope.form == nil {
 		return crudapp.Visibility{Nothing: true}, nil
 	}
-	view, err := h.accessViewFor(ctx, scope.userID, scope.form)
-	if err != nil {
-		return crudapp.Visibility{}, err
+	view := scope.view
+	if view == nil {
+		var err error
+		if view, err = h.accessViewFor(ctx, scope.userID, scope.form); err != nil {
+			return crudapp.Visibility{}, err
+		}
 	}
-	return view.Visibility(scope.form, scope.reach, scope.admin, scope.userID), nil
+	return h.records().VisibilityFor(ctx, view, scope.form, scope.reach, scope.admin, scope.userID)
 }
 
 // jsonFieldProblems answers a save refused for its values: 400, the first

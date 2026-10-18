@@ -1919,10 +1919,39 @@ func (s *CreateFormRequest) Validate() error {
 			Error: err,
 		})
 	}
+	if err := func() error {
+		if value, ok := s.EditAccess.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "edit_access",
+			Error: err,
+		})
+	}
 	if len(failures) > 0 {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
+}
+
+func (s CreateFormRequestEditAccess) Validate() error {
+	switch s {
+	case "creator":
+		return nil
+	case "everyone":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s *CreateMetricRequest) Validate() error {
@@ -2980,10 +3009,39 @@ func (s *FormDef) Validate() error {
 			Error: err,
 		})
 	}
+	if err := func() error {
+		if value, ok := s.EditAccess.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "edit_access",
+			Error: err,
+		})
+	}
 	if len(failures) > 0 {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
+}
+
+func (s FormDefEditAccess) Validate() error {
+	switch s {
+	case "creator":
+		return nil
+	case "everyone":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s *FormField) Validate() error {
@@ -3061,15 +3119,77 @@ func (s *FormField) Validate() error {
 			Error: err,
 		})
 	}
+	if err := func() error {
+		if value, ok := s.OnDelete.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "on_delete",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		if value, ok := s.Format.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "format",
+			Error: err,
+		})
+	}
 	if len(failures) > 0 {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
 }
 
+func (s FormFieldFormat) Validate() error {
+	switch s {
+	case "money":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
+}
+
+func (s FormFieldOnDelete) Validate() error {
+	switch s {
+	case "block":
+		return nil
+	case "cascade":
+		return nil
+	case "clear":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
+}
+
 func (s FormFieldType) Validate() error {
 	switch s {
 	case "text":
+		return nil
+	case "longtext":
+		return nil
+	case "url":
 		return nil
 	case "number":
 		return nil
@@ -3272,6 +3392,29 @@ func (s *GetAiSessionOK) Validate() error {
 	return nil
 }
 
+func (s *GetBoardColumnsOK) Validate() error {
+	if s == nil {
+		return validate.ErrNilPointer
+	}
+
+	var failures []validate.FieldError
+	if err := func() error {
+		if s.Columns == nil {
+			return errors.New("nil is invalid value")
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "columns",
+			Error: err,
+		})
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
 func (s GetCellHistoryOKApplicationJSON) Validate() error {
 	alias := ([]CellHistoryEntry)(s)
 	if alias == nil {
@@ -3425,6 +3568,106 @@ func (s GetGridTotalsOnly) Validate() error {
 	default:
 		return errors.Errorf("invalid value: %v", s)
 	}
+}
+
+func (s *GetRecordHistoryOK) Validate() error {
+	if s == nil {
+		return validate.ErrNilPointer
+	}
+
+	var failures []validate.FieldError
+	if err := func() error {
+		if s.History == nil {
+			return errors.New("nil is invalid value")
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "history",
+			Error: err,
+		})
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
+func (s *GetRelatedRecordsOK) Validate() error {
+	if s == nil {
+		return validate.ErrNilPointer
+	}
+
+	var failures []validate.FieldError
+	if err := func() error {
+		if s.Related == nil {
+			return errors.New("nil is invalid value")
+		}
+		var failures []validate.FieldError
+		for i, elem := range s.Related {
+			if err := func() error {
+				if err := elem.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				failures = append(failures, validate.FieldError{
+					Name:  fmt.Sprintf("[%d]", i),
+					Error: err,
+				})
+			}
+		}
+		if len(failures) > 0 {
+			return &validate.Error{Fields: failures}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "related",
+			Error: err,
+		})
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
+func (s *GetRelatedRecordsOKRelatedItem) Validate() error {
+	if s == nil {
+		return validate.ErrNilPointer
+	}
+
+	var failures []validate.FieldError
+	if err := func() error {
+		var failures []validate.FieldError
+		for i, elem := range s.Records {
+			if err := func() error {
+				if err := elem.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				failures = append(failures, validate.FieldError{
+					Name:  fmt.Sprintf("[%d]", i),
+					Error: err,
+				})
+			}
+		}
+		if len(failures) > 0 {
+			return &validate.Error{Fields: failures}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "records",
+			Error: err,
+		})
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
 }
 
 func (s *GetWorkflowDefinitionOK) Validate() error {
@@ -5160,6 +5403,24 @@ func (s *ListedForm) Validate() error {
 		})
 	}
 	if err := func() error {
+		if value, ok := s.EditAccess.Get(); ok {
+			if err := func() error {
+				if err := value.Validate(); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "edit_access",
+			Error: err,
+		})
+	}
+	if err := func() error {
 		if err := s.Permissions.Validate(); err != nil {
 			return err
 		}
@@ -5185,6 +5446,17 @@ func (s *ListedForm) Validate() error {
 		return &validate.Error{Fields: failures}
 	}
 	return nil
+}
+
+func (s ListedFormEditAccess) Validate() error {
+	switch s {
+	case "creator":
+		return nil
+	case "everyone":
+		return nil
+	default:
+		return errors.Errorf("invalid value: %v", s)
+	}
 }
 
 func (s ListedFormPostingFields) Validate() error {
@@ -5800,6 +6072,51 @@ func (s *PromoteAiDraftOK) Validate() error {
 	return nil
 }
 
+func (s *RecordDeletePlan) Validate() error {
+	if s == nil {
+		return validate.ErrNilPointer
+	}
+
+	var failures []validate.FieldError
+	if err := func() error {
+		if s.Blocked == nil {
+			return errors.New("nil is invalid value")
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "blocked",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		if s.Cascade == nil {
+			return errors.New("nil is invalid value")
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "cascade",
+			Error: err,
+		})
+	}
+	if err := func() error {
+		if s.Clear == nil {
+			return errors.New("nil is invalid value")
+		}
+		return nil
+	}(); err != nil {
+		failures = append(failures, validate.FieldError{
+			Name:  "clear",
+			Error: err,
+		})
+	}
+	if len(failures) > 0 {
+		return &validate.Error{Fields: failures}
+	}
+	return nil
+}
+
 func (s *RecordPermissions) Validate() error {
 	if s == nil {
 		return validate.ErrNilPointer
@@ -6108,6 +6425,20 @@ func (s RecordsQueryFiltersItemOp) Validate() error {
 	case "empty":
 		return nil
 	case "not_empty":
+		return nil
+	case "before_today":
+		return nil
+	case "on_or_before_today":
+		return nil
+	case "today":
+		return nil
+	case "on_or_after_today":
+		return nil
+	case "after_today":
+		return nil
+	case "next_days":
+		return nil
+	case "last_days":
 		return nil
 	default:
 		return errors.Errorf("invalid value: %v", s)

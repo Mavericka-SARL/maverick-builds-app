@@ -138,13 +138,26 @@ type Query struct {
 	// Limit and Offset page the records or groups.
 	Limit  int `json:"limit,omitempty"`
 	Offset int `json:"offset,omitempty"`
+	// Today is the asker's day (YYYY-MM-DD) that the relative date filters
+	// (before_today, next_days, …) count from; the server's day (UTC) when
+	// omitted.
+	Today string `json:"today,omitempty"`
+}
+
+// Relative date filter operations: a date compared with the query's day.
+// next_days and last_days take a number of days (Value) and include today.
+var relativeDateOps = map[string]bool{
+	"before_today": true, "on_or_before_today": true, "today": true,
+	"on_or_after_today": true, "after_today": true, "next_days": true, "last_days": true,
 }
 
 // Filter keeps the records whose Field compares to Value (or Values) by Op.
 type Filter struct {
 	Field string `json:"field"`
 	// Op: eq, ne, in, not_in, gt, gte, lt, lte, between, contains,
-	// starts_with, empty, not_empty.
+	// starts_with, empty, not_empty; on a date: before_today,
+	// on_or_before_today, today, on_or_after_today, after_today, next_days
+	// and last_days (Value: a number of days).
 	Op     string `json:"op"`
 	Value  any    `json:"value,omitempty"`
 	Values []any  `json:"values,omitempty"`
@@ -235,6 +248,7 @@ func (q Query) IsTotals() bool { return len(q.GroupBy) > 0 || len(q.Aggregates) 
 type qb struct {
 	form   *FormDef
 	userID string
+	today  string
 	args   []any
 	conds  []string
 }
@@ -345,6 +359,9 @@ func (b *qb) filter(f Filter) error {
 		op = "eq"
 	}
 	e := b.expr(c)
+	if relativeDateOps[op] {
+		return b.relativeDate(c, e, op, f.Value)
+	}
 	switch op {
 	case "empty", "not_empty":
 		cond := e + " IS NULL"
@@ -396,7 +413,7 @@ func (b *qb) filter(f Filter) error {
 			return queryErr("%s of %s takes a list of values", op, c.Label)
 		}
 	default:
-		return queryErr("%q is not a filter operation (eq, ne, in, not_in, gt, gte, lt, lte, between, contains, starts_with, empty, not_empty)", f.Op)
+		return queryErr("%q is not a filter operation (eq, ne, in, not_in, gt, gte, lt, lte, between, contains, starts_with, empty, not_empty, before_today, on_or_before_today, today, on_or_after_today, after_today, next_days, last_days)", f.Op)
 	}
 	ordered := c.Kind == KindNumber || c.Kind == KindDate || c.Kind == KindDateTime
 	if (op == "gt" || op == "gte" || op == "lt" || op == "lte" || op == "between") && !ordered {
@@ -459,6 +476,43 @@ func (b *qb) filter(f Filter) error {
 		b.conds = append(b.conds, lhs+" IN ("+strings.Join(params, ", ")+")")
 	case "not_in":
 		b.conds = append(b.conds, "NOT COALESCE("+lhs+" IN ("+strings.Join(params, ", ")+"), false)")
+	}
+	return nil
+}
+
+// relativeDate adds a date filter counted from the query's day: e is
+// column c's value.
+func (b *qb) relativeDate(c Column, e, op string, v any) error {
+	if c.Kind != KindDate && c.Kind != KindDateTime {
+		return queryErr("%s compares dates; %s is %s", op, c.Label, c.Kind)
+	}
+	lhs := e
+	if c.Kind == KindDateTime {
+		lhs = "(" + e + " AT TIME ZONE 'UTC')::date"
+	}
+	day := b.arg(b.today) + "::date"
+	switch op {
+	case "before_today":
+		b.conds = append(b.conds, lhs+" < "+day)
+	case "on_or_before_today":
+		b.conds = append(b.conds, lhs+" <= "+day)
+	case "today":
+		b.conds = append(b.conds, lhs+" = "+day)
+	case "on_or_after_today":
+		b.conds = append(b.conds, lhs+" >= "+day)
+	case "after_today":
+		b.conds = append(b.conds, lhs+" > "+day)
+	case "next_days", "last_days":
+		n, err := numberValue(v)
+		if err != nil || n < 0 || n > 3660 || n != math.Trunc(n) {
+			return queryErr("%s of %s takes a whole number of days (0 to 3660)", op, c.Label)
+		}
+		days := b.arg(int(n)) + "::int"
+		if op == "next_days" {
+			b.conds = append(b.conds, lhs+" BETWEEN "+day+" AND "+day+" + "+days)
+		} else {
+			b.conds = append(b.conds, lhs+" BETWEEN "+day+" - "+days+" AND "+day)
+		}
 	}
 	return nil
 }
@@ -566,7 +620,13 @@ func columnKeys(f *FormDef) string {
 
 // where builds the WHERE clause of q for the person vis describes.
 func (s *Store) where(form *FormDef, vis Visibility, userID string, q Query) (*qb, error) {
-	b := &qb{form: form, userID: userID}
+	today := strings.TrimSpace(q.Today)
+	if today == "" {
+		today = time.Now().UTC().Format("2006-01-02")
+	} else if _, err := time.Parse("2006-01-02", today); err != nil {
+		return nil, queryErr("today is a date (YYYY-MM-DD), not %q", q.Today)
+	}
+	b := &qb{form: form, userID: userID, today: today}
 	b.visibility(vis)
 	for _, f := range q.Filters {
 		if err := b.filter(f); err != nil {
@@ -575,6 +635,56 @@ func (s *Store) where(form *FormDef, vis Visibility, userID string, q Query) (*q
 	}
 	b.search(q.Search)
 	return b, nil
+}
+
+// HasColumn reports whether a query may name key in the table.
+func (f *FormDef) HasColumn(key string) bool {
+	_, ok := f.column(key)
+	return ok
+}
+
+// CheckFilters says what is wrong with filters on form's records, nil
+// when the records query answers them: a widget's fixed filters are
+// checked when they are saved, not when someone opens the dashboard.
+func CheckFilters(form *FormDef, filters []Filter) error {
+	b := &qb{form: form, today: time.Now().UTC().Format("2006-01-02")}
+	for _, f := range filters {
+		if err := b.filter(f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// WithheldCodes are the codes of the records of form, a table keeping a
+// dimension, that the person vis describes does not see: the members whose
+// records are hidden from them. Nil when vis hides nothing.
+func (s *Store) WithheldCodes(ctx context.Context, form *FormDef, vis Visibility) ([]string, error) {
+	if !form.KeepsDimension() {
+		return nil, nil
+	}
+	b := &qb{form: form}
+	b.visibility(vis)
+	scope, rest := b.conds[0], b.conds[1:]
+	if len(rest) == 0 {
+		return nil, nil
+	}
+	code := "r.data->>" + b.arg(form.CodeField().Name) + "::text"
+	rows, err := s.db.Query(ctx, "SELECT DISTINCT "+code+" FROM runtime.form_record r WHERE "+scope+
+		" AND COALESCE("+code+", '') <> '' AND NOT COALESCE(("+strings.Join(rest, " AND ")+"), false)", b.args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 const recordColumns = `r.id::text, r.form_id::text, r.data, COALESCE(r.status::text, ''), r.created_by::text, r.created_at, r.updated_at`

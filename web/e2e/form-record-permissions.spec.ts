@@ -109,7 +109,17 @@ async function deleteFromRow(page: Page, vendor: string) {
   await page.getByRole("alertdialog").getByRole("button", { name: "Delete" }).click();
 }
 
-const editor = (page: Page) => page.locator(".mvx-panel", { hasText: "Edit Record" });
+// The editor opens as a dialog over the list.
+const editor = (page: Page) => page.getByRole("dialog", { name: /^Edit / });
+
+// The list is read again as when the person comes back to the tab after a
+// while (past the 30-second freshness of what was read): what another person
+// changed meanwhile arrives while the editor is open. Needs page.clock.install()
+// before the page loads.
+async function refreshList(page: Page) {
+  await page.clock.fastForward(31_000);
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+}
 
 // What a business user of the workspace (u-1) is told.
 function asSubmitter(): Rec[] {
@@ -320,6 +330,8 @@ test("a business admin may edit, set any status on and delete every record", asy
   await row(page, "Rejected Vendor").getByRole("button", { name: "Edit record" }).click();
   await expect(status).toHaveValue("rejected");
   expect(await optionsOf(status)).toEqual(ALL_STATUSES);
+  // The editor is a dialog over the list: closed before the next record is opened.
+  await editor(page).getByRole("button", { name: "Cancel" }).click();
 
   await row(page, "Other Vendor").getByRole("button", { name: "Edit record" }).click();
   await expect(status).toHaveValue("submitted");
@@ -340,6 +352,7 @@ test("a business admin may edit, set any status on and delete every record", asy
 });
 
 test("dashboard form widget: a save does not undo a decision made while the editor was open", async ({ page }) => {
+  await page.clock.install();
   await mockApi(page);
   const server = await serveRecords(page, asAdmin());
   await loadAs(page, "finance");
@@ -349,25 +362,23 @@ test("dashboard form widget: a save does not undo a decision made while the edit
   const status = page.getByLabel("Status", { exact: true });
   await expect(status).toHaveValue("submitted");
 
-  // Another admin approves it; this list refreshes (here: after a delete).
+  // Another admin approves it; the list is read again.
   setServerStatus(server, "rec-other", "approved");
-  await deleteFromRow(page, "Decided Vendor");
-  await expect(row(page, "Other Vendor").getByText("approved")).toBeVisible();
+  await refreshList(page);
 
   await expect(editor(page).getByText("This record was moved to approved while you were editing it.")).toBeVisible();
   await expect(status).toHaveValue("approved");
   await page.getByRole("button", { name: "Save" }).click();
-  await expect.poll(() => server.sent.length).toBe(2);
-  expect(server.sent[1]).toMatchObject({ method: "PUT", path: "/api/records/rec-other" });
-  expect(server.sent[1].body).not.toHaveProperty("status");
+  await expect.poll(() => server.sent.length).toBe(1);
+  expect(server.sent[0]).toMatchObject({ method: "PUT", path: "/api/records/rec-other" });
+  expect(server.sent[0].body).not.toHaveProperty("status");
 });
 
 test("dashboard form widget: losing the right to edit closes the editor with a notice, and it does not come back", async ({ page }) => {
+  await page.clock.install();
   await mockApi(page);
   const server = await serveRecords(page, [
     { id: "rec-own", vendor: "Own Vendor", status: "submitted", createdBy: "u-1", caller: "creator" },
-    { id: "rec-own-2", vendor: "Northwind Supplies", status: "draft", createdBy: "u-1", caller: "creator" },
-    { id: "rec-own-3", vendor: "Contoso Parts", status: "draft", createdBy: "u-1", caller: "creator" },
   ]);
   await loadAs(page, "finance");
   await openFormDashboard(page, "Own Vendor");
@@ -375,18 +386,16 @@ test("dashboard form widget: losing the right to edit closes the editor with a n
   await row(page, "Own Vendor").getByRole("button", { name: "Edit record" }).click();
   await editor(page).getByRole("textbox").first().fill("Unsaved change");
 
-  // An admin approves it; the list refreshes.
+  // An admin approves it; the list is read again.
   setServerStatus(server, "rec-own", "approved");
-  await deleteFromRow(page, "Northwind Supplies");
-  await expect(row(page, "Northwind Supplies")).toHaveCount(0);
+  await refreshList(page);
   await expect(editor(page)).toHaveCount(0);
   await expect(page.getByText("This record can no longer be edited — it is now approved. Your changes were not saved.")).toBeVisible();
 
   // Re-opened by an admin, it is editable again — but the old editor and
   // its draft do not reappear on their own.
   setServerStatus(server, "rec-own", "submitted");
-  await deleteFromRow(page, "Contoso Parts");
-  await expect(row(page, "Contoso Parts")).toHaveCount(0);
+  await refreshList(page);
   await expect(row(page, "Own Vendor").getByRole("button", { name: "Edit record" })).toBeVisible();
   await expect(editor(page)).toHaveCount(0);
   expect(server.sent.filter((s) => s.method === "PUT")).toHaveLength(0);
@@ -408,6 +417,7 @@ test("dashboard form widget edit dialog, defensive: status read-only when only t
   await expect(status).toBeDisabled();
   await expect(status).toHaveValue("submitted");
   await expect(row(page, "Fixed Status Vendor").getByRole("button", { name: "Delete record" })).toHaveCount(0);
+  await editor(page).getByRole("button", { name: "Cancel" }).click();
 
   await row(page, "Fields Only Vendor").getByRole("button", { name: "Edit record" }).click();
   await expect(editor(page).getByRole("textbox").first()).toHaveValue("Fields Only Vendor");

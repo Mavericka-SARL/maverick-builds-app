@@ -787,6 +787,14 @@ export interface WidgetProps {
   multi_select?: boolean;
   /** Records widgets: offer "+ New record" (to people who may create one). Off by default. */
   new_record_button?: boolean;
+  /** Records widgets and boards: filters the viewer cannot remove (relative dates count from their day). */
+  record_filters?: RecordFilter[];
+  /** Records widgets: the columns shown, in order (all fields when absent). */
+  record_columns?: string[];
+  /** Records widgets: the order the records are listed in. */
+  record_sort?: { field: string; desc?: boolean };
+  /** Board widgets: the records as cards in columns. */
+  board?: BoardSettings;
   /** Widget surface: "white" draws the widget on a card (surface + border),
       "none" draws it straight on the page. Absent = the type's default
       (KPI tiles are cards, everything else is bare). */
@@ -1197,7 +1205,7 @@ export interface FormField {
   label: string;
   /** autocode: a code the server gives each new record; status: the records'
       status (draft, submitted, approved, rejected), set by a workflow. */
-  type: "text" | "number" | "select" | "date" | "boolean" | "dimension" | "metric" | "autocode" | "status";
+  type: "text" | "longtext" | "url" | "number" | "select" | "date" | "boolean" | "dimension" | "metric" | "autocode" | "status";
   required: boolean;
   options?: string[];
   // dimension type
@@ -1210,7 +1218,28 @@ export interface FormField {
   // code_digits (0 = 4).
   code_prefix?: string;
   code_digits?: number;
+  /** A new record's value when it is given none; a date's may be "today". */
+  default?: string | number | boolean;
+  /** Another field this one is filled in together with: either asks for both. */
+  required_with?: string;
+  /** Kept and saved, not shown in forms, lists and boards. */
+  hidden?: boolean;
+  /** Cannot be removed from the table while marked core. */
+  core?: boolean;
+  /** Each change is kept and shown with the record. */
+  history?: boolean;
+  /** A dimension field naming a member a table keeps: what deleting that record does to this one. */
+  on_delete?: "block" | "cascade" | "clear";
+  /** A number shown as money. */
+  format?: "money";
+  /** A date shown as overdue once past — unless done_field holds one of done_values. */
+  deadline?: boolean;
+  done_field?: string;
+  done_values?: string[];
 }
+
+/** Who may change and delete a table's records. */
+export type EditAccess = "creator" | "everyone";
 
 /** A table of records (the API still says "form"). */
 export interface FormDef {
@@ -1221,6 +1250,13 @@ export interface FormDef {
   fields: FormField[];
   /** Each person who does not administer the application sees only the records they created. */
   own_records_only?: boolean;
+  /** The dimension whose members this table's records are (its auto-code their codes), and the field labelling them. */
+  keeps_dimension_id?: string;
+  member_label_field?: string;
+  /** The label of a total member (code ALL) the records' members sit under. */
+  member_root_label?: string;
+  /** Who may change and delete its records: their creator and administrators (default), or everyone who sees them. */
+  edit_access?: EditAccess;
   created_at: string;
   /** Served by GET /api/forms; absent from an older server, which the UI then treats as no permission. */
   permissions?: FormPermissions;
@@ -1270,6 +1306,81 @@ export interface FormRecord {
   permissions?: FormRecordPermissions;
 }
 
+/** A board widget's layout: columns are the members of a dimension field (any
+    dimension) or the choices of a select field; moving a card sets that field. */
+export interface BoardSettings {
+  column_field: string;
+  /** Titles each card (the table's first text field when absent). */
+  title_field?: string;
+  card_fields?: string[];
+  /** A number field totalled per column. */
+  sum_field?: string;
+  /** The column dimension's member property holding each column's CSS colour. */
+  color_property?: string;
+  /** Leave out the columns no card is in. */
+  hide_empty?: boolean;
+}
+
+/** One column of a board, for the viewer. */
+export interface BoardColumn {
+  key: string;
+  label: string;
+  color?: string;
+  /** Its cards are the viewer's to see; nothing moves into it. */
+  read_only?: boolean;
+}
+
+/** A table's settings beyond its fields; each omitted keeps what the table has. */
+export interface TableSettings {
+  /** The dimension whose members the records are ("" to stop keeping one). */
+  keeps_dimension_id?: string;
+  member_label_field?: string;
+  member_root_label?: string;
+  edit_access?: EditAccess;
+}
+
+/** How many records of a table a delete touches through one of its fields. */
+export interface RecordDeleteRef {
+  table_id: string;
+  table_label: string;
+  field: string;
+  field_label: string;
+  count: number;
+}
+
+/** What deleting a record would do. */
+export interface RecordDeletePlan {
+  can_delete: boolean;
+  /** Why it cannot be deleted, when it cannot. */
+  refusal?: string;
+  blocked: RecordDeleteRef[];
+  cascade: RecordDeleteRef[];
+  clear: RecordDeleteRef[];
+}
+
+/** One table's records naming a record (an account's deals). */
+export interface RelatedRecords {
+  table: { id: string; name: string; label: string };
+  field: string;
+  field_label: string;
+  columns: RecordColumn[];
+  records: FormRecord[];
+  total: number;
+  can_create: boolean;
+}
+
+/** One value a history field of a record took. */
+export interface RecordHistoryEntry {
+  field: string;
+  field_label: string;
+  /** null for empty; {hidden: true} for a member hidden from the viewer. */
+  old: unknown;
+  new: unknown;
+  changed_by: string | null;
+  changed_by_name: string;
+  changed_at: string;
+}
+
 /** Every record status, in the order a record moves through them. */
 export const RECORD_STATUSES = ["draft", "submitted", "approved", "rejected"] as const;
 
@@ -1277,9 +1388,19 @@ export const RECORD_STATUSES = ["draft", "submitted", "approved", "rejected"] as
 export interface RecordFilter {
   /** A field name, or status, created_at, updated_at, created_by ("me" is the caller). */
   field: string;
-  op?: "eq" | "ne" | "in" | "not_in" | "gt" | "gte" | "lt" | "lte" | "between" | "contains" | "starts_with" | "empty" | "not_empty";
+  op?: "eq" | "ne" | "in" | "not_in" | "gt" | "gte" | "lt" | "lte" | "between" | "contains" | "starts_with" | "empty" | "not_empty"
+    | RelativeDateOp;
   value?: unknown;
   values?: unknown[];
+}
+
+/** Date filters counted from the asker's day; next_days and last_days take a number of days. */
+export type RelativeDateOp = "before_today" | "on_or_before_today" | "today" | "on_or_after_today" | "after_today" | "next_days" | "last_days";
+
+/** Today in the viewer's own time zone (YYYY-MM-DD): what relative date filters count from. */
+export function localToday(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 /** The records query: a page of records, or with group_by/aggregates totals over them. */
@@ -1291,6 +1412,8 @@ export interface RecordsQuery {
   aggregates?: { op: "count" | "count_distinct" | "sum" | "avg" | "min" | "max"; field?: string }[];
   limit?: number;
   offset?: number;
+  /** The day relative date filters count from (the server's UTC day when omitted). */
+  today?: string;
 }
 
 /** A column a records query names: a field, or one every record has. */
@@ -2436,9 +2559,9 @@ export const api = {
   getDimensions: () => apiFetch<DevDimension[]>("/api/dimensions"),
   listForms: (revisionId?: string) =>
     apiFetch<FormDef[]>(`/api/forms${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
-  createForm: (body: { name: string; label: string; fields: FormField[]; own_records_only?: boolean }, revisionId?: string) =>
+  createForm: (body: { name: string; label: string; fields: FormField[]; own_records_only?: boolean } & TableSettings, revisionId?: string) =>
     apiFetch<FormDef>(`/api/forms${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`, { method: "POST", body: JSON.stringify(body) }),
-  updateForm: (id: string, body: { name: string; label: string; fields: FormField[]; own_records_only?: boolean }) =>
+  updateForm: (id: string, body: { name: string; label: string; fields: FormField[]; own_records_only?: boolean } & TableSettings) =>
     apiFetch<{ status: string; codes_assigned?: number; status_field_changed?: boolean }>(`/api/forms/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteForm: (id: string) =>
     apiFetch<{ status: string }>(`/api/forms/${id}`, { method: "DELETE" }),
@@ -2455,7 +2578,18 @@ export const api = {
   syncForm: (formId: string) =>
     apiFetch<{ status: string; mappings: number; records_processed: number }>(`/api/forms/${formId}/sync`, { method: "POST" }),
   deleteRecord: (recordId: string) =>
-    apiFetch<{ status: string }>(`/api/records/${recordId}`, { method: "DELETE" }),
+    apiFetch<{ status: string; deleted?: number; cleared?: number }>(`/api/records/${recordId}`, { method: "DELETE" }),
+  /** One record, as the caller may see it (404 when they may not). */
+  getRecord: (recordId: string) => apiFetch<FormRecord>(`/api/records/${recordId}`),
+  /** What deleting a record would do: refused, or the records deleted or cleared with it. */
+  recordDeletePlan: (recordId: string) => apiFetch<RecordDeletePlan>(`/api/records/${recordId}/delete-plan`),
+  /** The records of other tables naming a record of a table that keeps a dimension. */
+  recordRelated: (recordId: string) => apiFetch<{ related: RelatedRecords[] }>(`/api/records/${recordId}/related`),
+  /** A board's columns for the viewer: the choices of a select field, or the leaf members of a dimension field in order. */
+  boardColumns: (formId: string, field: string, colorProperty?: string) =>
+    apiFetch<{ columns: BoardColumn[] }>(`/api/forms/${formId}/board-columns?field=${encodeURIComponent(field)}${colorProperty ? `&color_property=${encodeURIComponent(colorProperty)}` : ""}`),
+  /** The changes of a record's history fields, oldest first. */
+  recordHistory: (recordId: string) => apiFetch<{ history: RecordHistoryEntry[] }>(`/api/records/${recordId}/history`),
 
   // Exports this form's records — one row per record, field names as columns
   // (plus id/status/created_at) — the shape importFormRecords/

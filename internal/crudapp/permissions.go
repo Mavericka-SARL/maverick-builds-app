@@ -44,6 +44,12 @@ type RecordAccess struct {
 	// Statuses: the record's table has a status field. Without one no
 	// record of it has a status to set, and none is created with one.
 	Statuses bool
+	// Everyone: the record's table lets everyone who sees a record change
+	// it (EditEveryone), as its creator may.
+	Everyone bool
+	// ReadOnly: in such a table, the record names a member that is
+	// read-only for the caller — it is theirs to see, not to change.
+	ReadOnly bool
 }
 
 // RecordPermissions is what one caller may do to one record. It is served
@@ -68,6 +74,9 @@ type RecordPermissions struct {
 //     no status, is a draft or is submitted, and may move it only between
 //     draft and submitted: never to a decided status, and not once it is
 //     decided.
+//   - In a table everyone edits (Everyone), everyone who sees the record
+//     may do what its creator may — unless it names a member read-only for
+//     them (ReadOnly), creator included: then they read it only.
 //   - Anyone else who reaches the table may read the record, and do
 //     nothing else to it.
 //
@@ -82,7 +91,8 @@ func (a RecordAccess) Permissions(status string) RecordPermissions {
 		if a.Statuses {
 			p.SetStatus = otherStatuses(RecordStatuses, status)
 		}
-	case a.Creator && (status == "" || slices.Contains(creatorStatuses, status)):
+	case a.Everyone && a.ReadOnly:
+	case (a.Creator || a.Everyone) && (status == "" || slices.Contains(creatorStatuses, status)):
 		p.Edit, p.Delete = true, true
 		if a.Statuses {
 			p.SetStatus = otherStatuses(creatorStatuses, status)

@@ -293,6 +293,10 @@ type GetAuditSettingsRes interface {
 	getAuditSettingsRes()
 }
 
+type GetBoardColumnsRes interface {
+	getBoardColumnsRes()
+}
+
 type GetBusinessDashboardRes interface {
 	getBusinessDashboardRes()
 }
@@ -347,6 +351,18 @@ type GetMeRes interface {
 
 type GetNotificationSettingsRes interface {
 	getNotificationSettingsRes()
+}
+
+type GetRecordDeletePlanRes interface {
+	getRecordDeletePlanRes()
+}
+
+type GetRecordHistoryRes interface {
+	getRecordHistoryRes()
+}
+
+type GetRelatedRecordsRes interface {
+	getRelatedRecordsRes()
 }
 
 type GetSsoSettingsRes interface {

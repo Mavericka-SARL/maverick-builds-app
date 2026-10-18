@@ -1,143 +1,20 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { invalidateModelData } from "../modelDataQueries";
-import { X as XIcon, Pencil as PencilIcon, Plus as PlusIcon, Trash2, Upload, Download, ArrowUp, ArrowDown, Filter } from "lucide-react";
-import { api, statusFieldOf, type Metric, type DevDimension, type DevDimensionMember, type FormDef, type FormRecord, type FormField, recordStatusOptions, type FormImportRowError, type ApiError, type RecordFilter } from "../../api/client";
-import { Button, InlineAlert, LoadingState, StatusBadge, IconButton, Field, Select, TextInput, NumberInput, SearchInput, FilterBar, FilterBarGroup, FilterChip, useConfirm } from "../../ui";
-import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
+import { X as XIcon, Pencil as PencilIcon, Plus as PlusIcon, Upload, Download, ArrowUp, ArrowDown, Filter, Lock } from "lucide-react";
+import { api, statusFieldOf, type Metric, type DevDimension, type FormDef, type FormRecord, recordStatusOptions, type FormImportRowError, type ApiError, type RecordFilter } from "../../api/client";
+import { Button, Dialog, InlineAlert, LoadingState, IconButton, Field, Select, TextInput, SearchInput, FilterBar, FilterBarGroup, FilterChip } from "../../ui";
 import { downloadBlob, fileToBase64 } from "./blobUtils";
 import { canCreateRecords, canSyncForm, createStatusesOf, createStatusFor, syncFailure, syncRefused, type SyncMessage } from "./formPermissions";
-import { describeFilter, displayValue, filterOps, listColumns, listQuery, memberLabels, nextSort, postsMember, statusLabel, type FilterOp, type ListColumn, type ListSort } from "./recordList";
-
-// A record's dimension field only ever lets the user pick a real, concrete
-// member (e.g. a specific department) — never an aggregate/rollup node,
-// unlike the chart/grid context selectors' HierarchicalMemberSelect usage
-// (see HierarchicalMemberSelect's leafOnly prop). DevDimensionMember's
-// parent_member_id is an ID reference (developer-console shape), not the
-// parent_code the shared tree builder keys on, so each member is adapted
-// to carry its resolved parent's code instead.
-interface DimFormMember extends DevDimensionMember {
-  parent_code?: string;
-}
-
-function toDimFormMembers(allMembers: DevDimensionMember[]): DimFormMember[] {
-  const byId = new Map(allMembers.map(m => [m.id, m]));
-  return allMembers.map(m => ({
-    ...m,
-    label: m.label || m.code,
-    parent_code: m.parent_member_id ? byId.get(m.parent_member_id)?.code : undefined,
-  }));
-}
-
-// ── Shared record field input renderer ────────────────────────────────────────
-
-// id is the one Field clones onto its child, so the field's label names the
-// control it renders. readOnlyMembersOut: the record is the person's own and
-// posts this field's member into a metric — within its creator's access —
-// so members the person may only read are not offered (the server refuses
-// such a save).
-export function FormFieldInput({
-  f, value, onChange, dims, metrics, id, readOnlyMembersOut,
-}: {
-  f: FormField;
-  value: unknown;
-  onChange: (v: unknown) => void;
-  dims: DevDimension[];
-  metrics: Metric[];
-  id?: string;
-  readOnlyMembersOut?: boolean;
-}) {
-  if (f.type === "autocode") {
-    // The server gives the code; nobody types it.
-    return <TextInput id={id} value={value ? String(value) : "Given when the record is saved"} readOnly disabled style={{ width: "100%" }} />;
-  }
-  if (f.type === "dimension") {
-    const dim = dims.find(d => d.id === f.dimension_id) ?? dims.find(d => d.name === f.dimension_id);
-    const allMembers = toDimFormMembers(dim?.members ?? []);
-    const allowedSet = f.allowed_members && f.allowed_members.length > 0 ? new Set(f.allowed_members) : null;
-    const selectable = allowedSet || readOnlyMembersOut
-      ? (m: DimFormMember) => (!allowedSet || allowedSet.has(m.code)) && !(readOnlyMembersOut && m.access === "read")
-      : undefined;
-    return (
-      <HierarchicalMemberSelect
-        id={id}
-        ariaLabel={f.label || dim?.name || "Select…"}
-        members={allMembers}
-        value={String(value ?? "")}
-        onChange={onChange}
-        placeholder="Select…"
-        leafOnly
-        isSelectable={selectable}
-        className="mvx-hier-select__trigger--full-width"
-      />
-    );
-  }
-  if (f.type === "metric") {
-    if (f.metric_id) {
-      // Pre-configured metric — just enter the amount.
-      return (
-        <NumberInput
-          id={id}
-          value={String(value ?? "")}
-          onChange={e => onChange(e.target.value === "" ? "" : parseFloat(e.target.value))}
-          style={{ width: "100%" }}
-        />
-      );
-    }
-    // Dynamic metric selection — choose which input metric to write to.
-    return (
-      <Select id={id} value={String(value ?? "")} onChange={e => onChange(e.target.value)} style={{ width: "100%" }}>
-        <option value="">Select metric…</option>
-        {metrics.filter(m => m.is_input).map(m => <option key={m.id} value={m.name}>{m.label || m.name}</option>)}
-      </Select>
-    );
-  }
-  if (f.type === "select") {
-    return (
-      <Select id={id} value={String(value ?? "")} onChange={e => onChange(e.target.value)} style={{ width: "100%" }}>
-        <option value="">Select…</option>
-        {(f.options ?? []).map(o => <option key={o} value={o}>{o}</option>)}
-      </Select>
-    );
-  }
-  if (f.type === "boolean") {
-    return (
-      <input type="checkbox" className="mvx-checkbox" id={id}
-        checked={!!value}
-        onChange={e => onChange(e.target.checked)}
-      />
-    );
-  }
-  return (
-    <TextInput
-      id={id}
-      type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"}
-      value={String(value ?? "")}
-      onChange={e => onChange(f.type === "number" ? (e.target.value === "" ? "" : parseFloat(e.target.value)) : e.target.value)}
-      style={{ width: "100%" }}
-    />
-  );
-}
-
-/** A record's status, read-only; a record without one says so. */
-export function RecordStatusBadge({ status }: { status: string }) {
-  return (
-    <StatusBadge tone={status === "approved" ? "success" : status === "rejected" ? "danger" : status === "submitted" ? "warning" : "neutral"}>
-      {statusLabel(status)}
-    </StatusBadge>
-  );
-}
-
-/** The fields a person fills in: not the status, which is set apart. */
-function inputFields(form: FormDef): FormField[] {
-  return form.fields.filter(f => f.type !== "status");
-}
+import { defaultsOf, describeFilter, filterOps, listColumns, listQuery, memberLabels, nextSort, postsMember, recordTitle, statusLabel, type FilterOp, type ListColumn, type ListSort } from "./recordList";
+import { RecordStatusBadge } from "./RecordFieldInput";
+import { DeleteRecordButton, RecordDialog, RecordFields, RecordFieldValue } from "./RecordLinks";
 
 const PAGE = 50;
 
 // ── Filter builder: one condition at a time, added as a chip ─────────────────
 
-function FilterBuilder({ cols, dims, metrics, statuses, onAdd, onCancel }: {
+export function FilterBuilder({ cols, dims, metrics, statuses, onAdd, onCancel }: {
   cols: ListColumn[];
   dims: DevDimension[];
   metrics: Metric[];
@@ -164,6 +41,7 @@ function FilterBuilder({ cols, dims, metrics, statuses, onAdd, onCancel }: {
     return value;
   };
   const ready = !opDef.takesValue || value !== "" || col?.kind === "status";
+  const counts = op === "next_days" || op === "last_days";
   let input: React.ReactNode;
   if (!opDef.takesValue) input = null;
   else if (col?.kind === "status") {
@@ -205,8 +83,8 @@ function FilterBuilder({ cols, dims, metrics, statuses, onAdd, onCancel }: {
     );
   } else {
     input = (
-      <TextInput aria-label="Value" value={value} onChange={e => setValue(e.target.value)} style={{ width: 160 }}
-        type={col?.kind === "number" ? "number" : col?.kind === "date" || col?.kind === "datetime" ? "date" : "text"} />
+      <TextInput aria-label={counts ? "Days" : "Value"} value={value} onChange={e => setValue(e.target.value)} style={{ width: counts ? 80 : 160 }}
+        type={col?.kind === "number" || counts ? "number" : col?.kind === "date" || col?.kind === "datetime" ? "date" : "text"} />
     );
   }
   return (
@@ -219,7 +97,7 @@ function FilterBuilder({ cols, dims, metrics, statuses, onAdd, onCancel }: {
       </Select>
       {input}
       <Button size="sm" variant="primary" disabled={!ready}
-        onClick={() => onAdd(opDef.takesValue ? { field: col.key, op, value: typed() } : { field: col.key, op })}>
+        onClick={() => onAdd(opDef.takesValue ? { field: col.key, op, value: counts ? Number(value) : typed() } : { field: col.key, op })}>
         Add filter
       </Button>
       <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
@@ -237,14 +115,23 @@ function FilterBuilder({ cols, dims, metrics, statuses, onAdd, onCancel }: {
  * so this is the one place records are worked on. Every action is offered
  * only when the server's per-table and per-record permissions say the
  * caller may take it; "+ New record" also only when the widget's developer
- * added it (newRecordButton).
+ * added it (newRecordButton). A widget may keep filters its viewers cannot
+ * remove (fixedFilters: overdue tasks), and choose its columns and order.
  */
-export function FormPanel({ form, revisionId, newRecordButton = false }: { form: FormDef; revisionId: string; newRecordButton?: boolean }) {
+export function FormPanel({ form, revisionId, newRecordButton = false, fixedFilters, columns, fixedSort }: {
+  form: FormDef;
+  revisionId: string;
+  newRecordButton?: boolean;
+  fixedFilters?: RecordFilter[];
+  columns?: string[];
+  fixedSort?: { field: string; desc?: boolean };
+}) {
   const qc = useQueryClient();
   const formId = form.id;
   const hasStatus = !!statusFieldOf(form);
-  const fields = inputFields(form);
-  const cols = useMemo(() => listColumns(form), [form]);
+  const cols = useMemo(() => listColumns(form, columns), [form, columns]);
+  // Every column, for describing filters on fields the widget does not show.
+  const allCols = useMemo(() => listColumns(form), [form]);
   const [showNewRecord, setShowNewRecord] = useState(false);
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   // The status the user picked for the new record; null until they pick.
@@ -263,8 +150,9 @@ export function FormPanel({ form, revisionId, newRecordButton = false }: { form:
   // shown once that record has left the list.
   const [recordError, setRecordError] = useState<{ recordId: string; message: string } | null>(null);
   const [importErrors, setImportErrors] = useState<FormImportRowError[] | null>(null);
+  // The record opened as its own page (a row clicked): its fields, the records naming it, its history.
+  const [opened, setOpened] = useState<FormRecord | null>(null);
   const importRef = React.useRef<HTMLInputElement>(null);
-  const { confirm, confirmElement } = useConfirm();
 
   // What the list shows: the search (sent once typing pauses), filters, sort and how many pages.
   const [searchText, setSearchText] = useState("");
@@ -280,9 +168,12 @@ export function FormPanel({ form, revisionId, newRecordButton = false }: { form:
   const listKey = JSON.stringify([search, filters, sort]);
   const [paging, setPaging] = useState<{ key: string; pages: number }>({ key: listKey, pages: 1 });
   const pages = paging.key === listKey ? paging.pages : 1;
-  const query = listQuery({ search, filters, sort, limit: PAGE * pages });
+  const query = listQuery({ search, filters, sort: sort ?? (fixedSort ? { field: fixedSort.field, desc: !!fixedSort.desc } : null), limit: PAGE * pages, fixedFilters });
 
   const { data: dimsRaw = [] } = useQuery({ queryKey: ["dimensions"], queryFn: api.getDimensions });
+  // The model's tables: a field naming a member another table keeps offers "+ New" of it.
+  const { data: formsRaw = [] } = useQuery({ queryKey: ["forms", revisionId], queryFn: () => api.listForms(revisionId || undefined) });
+  const forms = formsRaw as FormDef[];
   // Who is working: a record of their own posts within their access.
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: api.getMe });
   const dims = dimsRaw as DevDimension[];
@@ -369,18 +260,6 @@ export function FormPanel({ form, revisionId, newRecordButton = false }: { form:
     },
   });
 
-  const deleteRec = useMutation({
-    mutationFn: (id: string) => api.deleteRecord(id),
-    onMutate: () => setRecordError(null),
-    onError: (err: Error, id) => setRecordError({ recordId: id, message: `Record not deleted — ${err.message}` }),
-    onSuccess: (_res, id) => {
-      // Deleting the record being edited closes its editor; it is not
-      // "removed by someone else".
-      if (editing?.id === id) closeEditor();
-      qc.invalidateQueries({ queryKey: ["records"] });
-      invalidateModelData(qc);
-    },
-  });
   const shownRecordError = recordError && records.some((r) => r.id === recordError.recordId) ? recordError.message : null;
 
   const syncForm = useMutation({
@@ -426,7 +305,7 @@ export function FormPanel({ form, revisionId, newRecordButton = false }: { form:
     onMutate: () => setImportErrors(null),
   });
 
-  const filtered = search !== "" || filters.length > 0;
+  const filtered = search !== "" || filters.length > 0 || (fixedFilters?.length ?? 0) > 0;
   const statusChoices = page?.statuses ?? (hasStatus ? ["draft", "submitted", "approved", "rejected"] : []);
 
   return (
@@ -440,7 +319,7 @@ export function FormPanel({ form, revisionId, newRecordButton = false }: { form:
                 size="sm"
                 variant={showNewRecord ? "secondary" : "primary"}
                 leadingIcon={showNewRecord ? undefined : <PlusIcon size={13} />}
-                onClick={() => { setShowNewRecord((v) => !v); closeEditor(); }}
+                onClick={() => { if (!showNewRecord) setDraft(defaultsOf(form)); setShowNewRecord((v) => !v); closeEditor(); }}
               >
                 {showNewRecord ? "Cancel" : "New record"}
               </Button>
@@ -527,12 +406,8 @@ export function FormPanel({ form, revisionId, newRecordButton = false }: { form:
       {newRecordButton && canCreate && showNewRecord && (
         <div className="mvx-panel" style={{ margin: 16, maxWidth: 560, padding: 20 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {fields.map((f: FormField) => (
-              <Field key={f.name} label={f.label} required={f.required && f.type !== "autocode"}>
-                <FormFieldInput f={f} value={draft[f.name]} onChange={v => setDraft(d => ({ ...d, [f.name]: v }))} dims={dims} metrics={metrics}
-                  readOnlyMembersOut={postsMember(form, f)} />
-              </Field>
-            ))}
+            <RecordFields form={form} forms={forms} draft={draft} setDraft={setDraft} dims={dims} metrics={metrics} revisionId={revisionId}
+              readOnlyOut={f => postsMember(form, f)} />
             {/* The statuses the server accepts for this caller; no choice when there is one. */}
             {hasStatus && createStatuses.length > 1 && (
               <Field label={statusFieldOf(form)?.label || "Status"}>
@@ -559,6 +434,12 @@ export function FormPanel({ form, revisionId, newRecordButton = false }: { form:
           <Button size="sm" variant="ghost" leadingIcon={<Filter size={13} />} onClick={() => setBuildingFilter(v => !v)} aria-expanded={buildingFilter}>
             Filter
           </Button>
+          {(fixedFilters ?? []).map((f, i) => (
+            <FilterChip key={`fixed-${i}`} active disabled aria-label={`Filter set on this widget: ${describeFilter(f, allCols, dims, metrics)}`}
+              title="Set on this widget">
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Lock size={11} aria-hidden="true" />{describeFilter(f, allCols, dims, metrics)}</span>
+            </FilterChip>
+          ))}
           {filters.map((f, i) => (
             <FilterChip key={i} active aria-label={`Remove filter: ${describeFilter(f, cols, dims, metrics)}`}
               onClick={() => setFilters(fs => fs.filter((_, j) => j !== i))} onClear={() => setFilters(fs => fs.filter((_, j) => j !== i))}>
@@ -609,7 +490,10 @@ export function FormPanel({ form, revisionId, newRecordButton = false }: { form:
                 const statuses = recordStatusOptions(rec);
                 const isEditing = editingRecord?.id === rec.id;
                 return (
-                  <tr key={rec.id} style={isEditing ? { background: "var(--color-brand-50)" } : undefined}>
+                  <tr key={rec.id} style={isEditing ? { background: "var(--color-brand-50)" } : undefined}
+                    className="mvx-row-link" tabIndex={0} title="Open the record"
+                    onClick={(e) => { if (!(e.target as HTMLElement).closest("button, select, a, input, textarea")) setOpened(rec); }}
+                    onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) setOpened(rec); }}>
                     {cols.map((c) => {
                       if (c.kind === "status") {
                         return (
@@ -633,7 +517,7 @@ export function FormPanel({ form, revisionId, newRecordButton = false }: { form:
                       if (c.key === "created_at") {
                         return <td key={c.key} className="mvx-admin-muted">{new Date(rec.created_at).toLocaleDateString()}</td>;
                       }
-                      return <td key={c.key}>{displayValue(c.field, rec.data[c.key], dims, metrics)}</td>;
+                      return <td key={c.key}>{c.field ? <RecordFieldValue form={form} f={c.field} data={rec.data} dims={dims} metrics={metrics} /> : String(rec.data[c.key] ?? "—")}</td>;
                     })}
                     <td style={{ whiteSpace: "nowrap" }}>
                       <div style={{ display: "flex", gap: 2 }}>
@@ -659,10 +543,9 @@ export function FormPanel({ form, revisionId, newRecordButton = false }: { form:
                           </IconButton>
                         )}
                         {rec.permissions?.delete && (
-                          <IconButton aria-label="Delete record" title="Delete" danger size={26}
-                            onClick={() => confirm({ title: "Delete record?", body: "This record will be permanently removed.", confirmLabel: "Delete", onConfirm: () => deleteRec.mutate(rec.id) })}>
-                            <Trash2 size={13} />
-                          </IconButton>
+                          <DeleteRecordButton record={rec} withPlan={!!form.keeps_dimension_id}
+                            onDeleted={() => { setRecordError(null); if (editing?.id === rec.id) closeEditor(); }}
+                            onError={(message) => setRecordError({ recordId: rec.id, message })} />
                         )}
                       </div>
                     </td>
@@ -676,7 +559,6 @@ export function FormPanel({ form, revisionId, newRecordButton = false }: { form:
               )}
             </tbody>
           </table>
-          {confirmElement}
         </div>
       )}
       {records.length < total && (
@@ -695,22 +577,22 @@ export function FormPanel({ form, revisionId, newRecordButton = false }: { form:
         <InlineAlert tone="warning" className="mvx-toolbar--spaced">{editNotice}</InlineAlert>
       )}
 
-      {/* Edit record form */}
+      {opened && (
+        <RecordDialog form={form} forms={forms} record={opened} revisionId={revisionId} onClose={() => setOpened(null)} />
+      )}
+
+      {/* Edit record form: a dialog over the list, where the person is,
+          not a panel below a long list they would have to scroll to. */}
       {editingRecord && (
-        <div className="mvx-panel" style={{ margin: "0 16px 16px", maxWidth: 560, padding: 20, borderColor: "var(--color-brand-200)", background: "var(--color-brand-50)" }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-brand-700)", marginBottom: 16 }}>Edit Record</div>
+        <Dialog open onClose={closeEditor} title={`Edit ${recordTitle(form, editingRecord)}`} width={640}>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {statusMovedMeanwhile && (
               <InlineAlert tone="warning">
                 This record was moved to {statusLabel(editingRecord.status)} while you were editing it. Saving keeps that status unless you pick another.
               </InlineAlert>
             )}
-            {fields.map((f: FormField) => (
-              <Field key={f.name} label={f.label} required={f.required && f.type !== "autocode"}>
-                <FormFieldInput f={f} value={editDraft[f.name]} onChange={v => setEditDraft(d => ({ ...d, [f.name]: v }))} dims={dims} metrics={metrics}
-                  readOnlyMembersOut={postsMember(form, f) && !!me && editingRecord.created_by === me.user_id} />
-              </Field>
-            ))}
+            <RecordFields form={form} forms={forms} draft={editDraft} setDraft={setEditDraft} dims={dims} metrics={metrics} revisionId={revisionId}
+              readOnlyOut={f => postsMember(form, f) && !!me && editingRecord.created_by === me.user_id} />
             {editStatusOptions.options.length > 0 && (
               <Field label={statusFieldOf(form)?.label || "Status"}>
                 <Select
@@ -733,7 +615,7 @@ export function FormPanel({ form, revisionId, newRecordButton = false }: { form:
             </div>
             {saveEdit.isError && <p className="mvx-admin-error">{(saveEdit.error as Error).message}</p>}
           </div>
-        </div>
+        </Dialog>
       )}
     </div>
   );

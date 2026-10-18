@@ -2722,3 +2722,67 @@ tr:hover .mvx-member-label__actions,
   background: var(--color-page);
   border-bottom: 1px solid var(--color-border);
 }
+
+/* ── Records: deadlines, and the board widget (cards in columns) ─────────── */
+.mvx-overdue { color: var(--color-danger-text); font-weight: 600; }
+.mvx-due-today { color: var(--color-warning-text); font-weight: 600; }
+
+.mvx-board-wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.mvx-board__header {
+  padding: 12px 16px; background: var(--color-surface-subtle);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--color-border);
+}
+.mvx-board {
+  display: flex; gap: 12px; padding: 12px 16px 16px; overflow-x: auto; flex: 1; min-height: 0; align-items: stretch;
+}
+.mvx-board__column {
+  flex: 0 0 260px; display: flex; flex-direction: column; min-height: 120px;
+  background: var(--color-surface-muted); border: 1px solid var(--color-border);
+  border-top: 4px solid var(--color-border-strong); border-radius: var(--radius-panel);
+}
+.mvx-board__column--over { outline: 2px solid var(--color-brand-500); outline-offset: -2px; }
+.mvx-board__column--readonly { opacity: 0.85; }
+.mvx-board__column-head {
+  display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--color-border);
+  font-size: 13px;
+}
+.mvx-board__column-title { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mvx-board__column-count {
+  font-size: 11px; padding: 1px 7px; border-radius: var(--radius-pill);
+  background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-text-muted);
+}
+.mvx-board__column-sum { font-size: 12px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.mvx-board__add {
+  all: unset; cursor: pointer; display: inline-flex; padding: 2px; border-radius: var(--radius-button); color: var(--color-text-muted);
+}
+.mvx-board__add:hover, .mvx-board__add:focus-visible { background: var(--color-surface); color: var(--color-text); }
+.mvx-board__cards { display: flex; flex-direction: column; gap: 8px; padding: 8px; overflow-y: auto; flex: 1; }
+.mvx-board__card {
+  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card); padding: 8px 10px; cursor: pointer; font-size: 12px;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.mvx-board__card[draggable="true"] { cursor: grab; }
+.mvx-board__card:focus-visible { outline: 2px solid var(--color-brand-500); outline-offset: 1px; }
+.mvx-board__card-title { font-size: 13px; font-weight: 600; color: var(--color-text-strong); }
+.mvx-board__card-field { color: var(--color-text); overflow-wrap: anywhere; }
+.mvx-board__move { margin-top: 4px; font-size: 11px; max-width: 100%; }
+.mvx-board__empty { font-size: 12px; color: var(--color-text-quiet); text-align: center; padding: 12px 0; }
+@media (max-width: 640px) {
+  .mvx-board__column { flex-basis: 220px; }
+}
+
+/* ── A record as its own page (RecordDialog) ──────────────────────────────── */
+.mvx-record-page { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); gap: 28px; align-items: start; }
+@media (max-width: 900px) { .mvx-record-page { grid-template-columns: minmax(0, 1fr); } }
+.mvx-record-fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 7px 14px; margin: 0; font-size: 13px; }
+.mvx-record-fields dt { color: var(--color-text-muted); }
+.mvx-record-fields dd { margin: 0; overflow-wrap: anywhere; }
+.mvx-link-button {
+  all: unset; cursor: pointer; color: var(--color-brand-500); text-decoration: underline; text-underline-offset: 2px;
+}
+.mvx-link-button:focus-visible { outline: 2px solid var(--color-brand-500); outline-offset: 2px; border-radius: 2px; }
+.mvx-row-link { cursor: pointer; }
+.mvx-row-link:hover td { background: var(--color-surface-subtle); }
+.mvx-row-link:focus-visible { outline: 2px solid var(--color-brand-500); outline-offset: -2px; }

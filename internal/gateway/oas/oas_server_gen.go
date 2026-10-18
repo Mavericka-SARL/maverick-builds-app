@@ -651,6 +651,14 @@ type Handler interface {
 	//
 	// GET /api/admin/audit/settings
 	GetAuditSettings(ctx context.Context) (GetAuditSettingsRes, error)
+	// GetBoardColumns implements getBoardColumns operation.
+	//
+	// The choices of a select field, or the leaf members of a dimension field's dimension in their order,
+	//  without those hidden from the caller (by an access rule, or a kept member whose record they do
+	// not see) or outside the field's allowed members; a member read-only for the caller is marked.
+	//
+	// GET /api/forms/{id}/board-columns
+	GetBoardColumns(ctx context.Context, params GetBoardColumnsParams) (GetBoardColumnsRes, error)
 	// GetBranding implements getBranding operation.
 	//
 	// The brand to apply — a signed-in caller's tenant, else the tenant registered for the request's
@@ -781,6 +789,26 @@ type Handler interface {
 	//
 	// GET /api/notifications/settings
 	GetNotificationSettings(ctx context.Context) (GetNotificationSettingsRes, error)
+	// GetRecordDeletePlan implements getRecordDeletePlan operation.
+	//
+	// What deleting a record would do — refused, or the records deleted and cleared with it.
+	//
+	// GET /api/records/{id}/delete-plan
+	GetRecordDeletePlan(ctx context.Context, params GetRecordDeletePlanParams) (GetRecordDeletePlanRes, error)
+	// GetRecordHistory implements getRecordHistory operation.
+	//
+	// A member hidden from the caller reads as {"hidden": true}, not by its code.
+	//
+	// GET /api/records/{id}/history
+	GetRecordHistory(ctx context.Context, params GetRecordHistoryParams) (GetRecordHistoryRes, error)
+	// GetRelatedRecords implements getRelatedRecords operation.
+	//
+	// For each dimension field of another table that names the dimension the record's table keeps: up to
+	// 50 of its records naming this one, how many there are, and whether the caller may add one. Empty
+	// for a record of a table keeping no dimension.
+	//
+	// GET /api/records/{id}/related
+	GetRelatedRecords(ctx context.Context, params GetRelatedRecordsParams) (GetRelatedRecordsRes, error)
 	// GetSignupOptions implements getSignupOptions operation.
 	//
 	// Whether public self-service sign-up is open on this deployment and on what terms (public; see

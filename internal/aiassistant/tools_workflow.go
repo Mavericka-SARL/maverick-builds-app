@@ -108,10 +108,17 @@ func (e *ToolExecutor) getForm(ctx context.Context, raw json.RawMessage) (string
 	var name, label string
 	var fields json.RawMessage
 	var ownOnly bool
-	if err := e.pool.QueryRow(ctx, `SELECT name, label, fields, own_records_only FROM model.form_def WHERE id=$1::uuid`, id).Scan(&name, &label, &fields, &ownOnly); err != nil {
+	var editAccess, keeps, labelField string
+	if err := e.pool.QueryRow(ctx, `
+		SELECT f.name, f.label, f.fields, f.own_records_only, f.edit_access, COALESCE(d.name, ''), COALESCE(f.member_label_field, '')
+		FROM model.form_def f LEFT JOIN model.dimension_def d ON d.id = f.keeps_dimension_id
+		WHERE f.id=$1::uuid`, id).Scan(&name, &label, &fields, &ownOnly, &editAccess, &keeps, &labelField); err != nil {
 		return "", fmt.Errorf("load table: %w", err)
 	}
-	out := map[string]any{"id": id, "name": name, "label": label, "fields": rawOrNull(fields), "own_records_only": ownOnly}
+	out := map[string]any{"id": id, "name": name, "label": label, "fields": rawOrNull(fields), "own_records_only": ownOnly, "edit_access": editAccess}
+	if keeps != "" {
+		out["keeps_dimension"], out["member_label_field"] = keeps, labelField
+	}
 	b, _ := json.MarshalIndent(out, "", "  ")
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Table '%s' (id:%s):\n%s\n", name, id, b)

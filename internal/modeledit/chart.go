@@ -204,7 +204,7 @@ func seriesGrids(ctx context.Context, db DB, metricIDs []string) string {
 // WidgetTypes are the dashboard widget types the console renders
 // (DashboardWidgets.tsx). Another type saved, drew nothing, and said
 // nothing: the AI Developer added "workflow_button" widgets for a trigger.
-var WidgetTypes = []string{"grid", "chart", "form", "metric_kpi", "automation_button", "integration_button", "text", "image", "import"}
+var WidgetTypes = []string{"grid", "chart", "form", "board", "metric_kpi", "automation_button", "integration_button", "text", "image", "import"}
 
 // CheckWidgetType refuses a widget type the console does not render.
 func CheckWidgetType(t string) error {
@@ -230,7 +230,7 @@ var (
 		"color": true, "font_family": true, "alt": true, "image_fit": true, "button_color": true, "default_view": true,
 		"metric_ids": true, "chart": true, "context": true, "kpi_scope": true, "kpi_context_mode": true, "confirm_text": true,
 		"sync_context": true, "show_members": true, "rows_collapsed": true, "multi_select": true, "button_corners": true,
-		"new_record_button": true}
+		"new_record_button": true, "board": true, "record_filters": true, "record_columns": true, "record_sort": true}
 	ChartSettingKeys = map[string]bool{"chart_type": true, "dimension_id": true, "metric_ids": true, "x_metric_id": true,
 		"y_metric_id": true, "context_defaults": true, "bin_count": true, "show_legend": true, "show_values": true,
 		"value_format": true, "refresh_seconds": true, "hide_rollup_members": true}

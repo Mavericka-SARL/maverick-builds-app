@@ -50,11 +50,41 @@ test("search filters the dimension list", async ({ page }) => {
   await expect(page.getByRole("checkbox", { name: /Region/ })).toBeVisible();
 });
 
-test("the panel closes with Done, since every change is already saved", async ({ page }) => {
+test("changes wait for Save: Cancel undoes them, Save writes them, Close closes", async ({ page }) => {
+  const sent: { method: string; path: string }[] = [];
   await openGridConfig(page);
-  // "Close" next to a delete button reads as though there might be something
-  // pending to discard; there never is.
-  await expect(page.getByRole("button", { name: "Done" })).toBeVisible();
-  await page.getByRole("button", { name: "Done" }).click();
+  await page.route((url) => /^\/api\/developer\/grids\/[^/]+\/(metrics|dimensions)\//.test(url.pathname), (route) => {
+    sent.push({ method: route.request().method(), path: new URL(route.request().url()).pathname });
+    return route.fulfill({ json: { status: "ok" } });
+  });
+  // The grid as the server has it: Revenue in it once saved.
+  await page.route((url) => url.pathname === "/api/developer/grids", (route) => route.fulfill({ json: [
+    { id: "grid-1", name: "OPEX Planning Grid", metric_ids: ["m2", "m3", "m4", ...(sent.length > 0 ? ["m1"] : [])], dimension_ids: ["d1", "d2"] },
+  ] }));
+  // Revenue is available, not in the grid: ticking it adds it.
+  const revenue = page.getByRole("checkbox", { name: /Revenue/ });
+  await revenue.check();
+  // Nothing is written until Save.
+  await expect(page.getByText("Unsaved changes")).toBeVisible();
+  expect(sent).toEqual([]);
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByText("Unsaved changes")).toHaveCount(0);
+  await expect(revenue).not.toBeChecked();
+
+  await revenue.check();
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect.poll(() => sent.length).toBe(1);
+  expect(sent[0]).toEqual({ method: "POST", path: "/api/developer/grids/grid-1/metrics/m1" });
+
+  await page.getByRole("button", { name: "Close" }).click();
+  await expect(page.getByLabel("Search metrics")).toHaveCount(0);
+});
+
+test("closing with unsaved changes asks first", async ({ page }) => {
+  await openGridConfig(page);
+  await page.getByRole("checkbox", { name: /Revenue/ }).check();
+  await page.getByRole("button", { name: "Close" }).click();
+  await expect(page.getByRole("alertdialog")).toContainText("Discard unsaved changes?");
+  await page.getByRole("alertdialog").getByRole("button", { name: "Discard changes" }).click();
   await expect(page.getByLabel("Search metrics")).toHaveCount(0);
 });
