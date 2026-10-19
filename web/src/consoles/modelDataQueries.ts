@@ -19,3 +19,13 @@ const MODEL_DATA_QUERY_KEYS = ["grid", "grid-meta", "grid-cells", "kpi-totals", 
 export function invalidateModelData(qc: QueryClient): Promise<void> {
   return Promise.all(MODEL_DATA_QUERY_KEYS.map((k) => qc.invalidateQueries({ queryKey: [k] }))).then(() => undefined);
 }
+
+// Every grid of a page sees the same recalculation land; the first to see it
+// reloads the page's data and the others, within half a second, do not.
+let lastRecalcRefresh = 0;
+export function refreshAfterRecalc(qc: QueryClient): void {
+  const now = Date.now();
+  if (now - lastRecalcRefresh < 500) return;
+  lastRecalcRefresh = now;
+  void invalidateModelData(qc);
+}

@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { invalidateModelData } from "../modelDataQueries";
-import { X as XIcon, Pencil as PencilIcon, Plus as PlusIcon, Upload, Download, ArrowUp, ArrowDown, Filter, Lock } from "lucide-react";
+import { X as XIcon, Pencil as PencilIcon, Plus as PlusIcon, Upload, Download, ArrowUp, ArrowDown, Filter, Lock, RefreshCw } from "lucide-react";
 import { api, statusFieldOf, type Metric, type DevDimension, type FormDef, type FormRecord, recordStatusOptions, type FormImportRowError, type ApiError, type RecordFilter } from "../../api/client";
-import { Button, Dialog, InlineAlert, LoadingState, IconButton, Field, Select, TextInput, SearchInput, FilterBar, FilterBarGroup, FilterChip } from "../../ui";
+import { ActionsMenu, Button, Dialog, InlineAlert, LoadingState, IconButton, Field, Select, TextInput, SearchInput, FilterBar, FilterBarGroup, FilterChip } from "../../ui";
 import { downloadBlob, fileToBase64 } from "./blobUtils";
 import { canCreateRecords, canSyncForm, createStatusesOf, createStatusFor, syncFailure, syncRefused, type SyncMessage } from "./formPermissions";
-import { defaultsOf, describeFilter, filterOps, listColumns, listQuery, memberLabels, nextSort, postsMember, recordTitle, statusLabel, type FilterOp, type ListColumn, type ListSort } from "./recordList";
+import { cellClass, defaultsOf, describeFilter, filterOps, listColumns, listQuery, localDate, memberLabels, newRecordLabel, nextSort, postsMember, recordTitle, statusLabel, type FilterOp, type ListColumn, type ListSort } from "./recordList";
 import { RecordStatusBadge } from "./RecordFieldInput";
 import { DeleteRecordButton, RecordDialog, RecordFields, RecordFieldValue } from "./RecordLinks";
 
@@ -117,10 +117,14 @@ export function FilterBuilder({ cols, dims, metrics, statuses, onAdd, onCancel }
  * caller may take it; "+ New record" also only when the widget's developer
  * added it (newRecordButton). A widget may keep filters its viewers cannot
  * remove (fixedFilters: overdue tasks), and choose its columns and order.
+ * Its header names the widget (title) or the table, says which filters the
+ * widget keeps, and holds one primary action — the new record — with the
+ * rest (export, import, sync) under "⋯".
  */
-export function FormPanel({ form, revisionId, newRecordButton = false, fixedFilters, columns, fixedSort }: {
+export function FormPanel({ form, revisionId, title, newRecordButton = false, fixedFilters, columns, fixedSort }: {
   form: FormDef;
   revisionId: string;
+  title?: string;
   newRecordButton?: boolean;
   fixedFilters?: RecordFilter[];
   columns?: string[];
@@ -310,64 +314,53 @@ export function FormPanel({ form, revisionId, newRecordButton = false, fixedFilt
 
   return (
     <div>
-      <div style={{ borderBottom: "1px solid var(--color-border)" }}>
-        <div style={{ padding: "12px 16px", background: "var(--color-surface-subtle)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontWeight: 600, fontSize: 14 }}>{form.label}</span>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <div>
+        <div className="mvx-panel-head">
+          <div className="mvx-panel-head__titles">
+            <span className="mvx-panel-head__title">{title || form.label}</span>
+            {(fixedFilters ?? []).length > 0 && (
+              <span className="mvx-panel-head__note" title="Set on this widget">
+                <Lock size={11} aria-hidden="true" />
+                {(fixedFilters ?? []).map((f, i) => (
+                  <React.Fragment key={i}>
+                    {i > 0 && " · "}
+                    <span aria-label={`Filter set on this widget: ${describeFilter(f, allCols, dims, metrics)}`}>{describeFilter(f, allCols, dims, metrics)}</span>
+                  </React.Fragment>
+                ))}
+              </span>
+            )}
+          </div>
+          <div className="mvx-panel-head__actions">
             {newRecordButton && canCreate && (
               <Button
                 size="sm"
-                variant={showNewRecord ? "secondary" : "primary"}
-                leadingIcon={showNewRecord ? undefined : <PlusIcon size={13} />}
-                onClick={() => { if (!showNewRecord) setDraft(defaultsOf(form)); setShowNewRecord((v) => !v); closeEditor(); }}
+                variant="primary"
+                leadingIcon={<PlusIcon size={13} />}
+                onClick={() => { setDraft(defaultsOf(form)); setNewStatusPick(null); createRecord.reset(); setShowNewRecord(true); closeEditor(); }}
               >
-                {showNewRecord ? "Cancel" : "New record"}
+                {newRecordLabel(form)}
               </Button>
             )}
-            <Button
-              size="sm"
-              leadingIcon={<Download size={13} />}
-              loading={exportRecords.isPending}
-              loadingLabel="Exporting…"
-              onClick={() => exportRecords.mutate()}
-            >
-              Export
-            </Button>
-            {/* Import creates records: offered only to a caller who may create one. */}
+            <ActionsMenu label={`${form.label} actions`} items={[
+              { label: exportRecords.isPending ? "Exporting…" : "Export", icon: <Download size={14} />, disabled: exportRecords.isPending, onSelect: () => exportRecords.mutate() },
+              // Import creates records: offered only to a caller who may create one.
+              ...(canCreate ? [{ label: importRecords.isPending ? "Importing…" : "Import", icon: <Upload size={14} />, disabled: importRecords.isPending, onSelect: () => importRef.current?.click() }] : []),
+              // Sync re-posts the records into the grids: only a table that posts into one has it.
+              ...(canSync && form.posts ? [{ label: syncForm.isPending ? "Syncing…" : "Sync to grid", icon: <RefreshCw size={14} />, disabled: syncForm.isPending, onSelect: () => { setSyncMsg(null); syncForm.mutate(); } }] : []),
+            ]} />
             {canCreate && (
-              <>
-                <Button
-                  size="sm"
-                  leadingIcon={<Upload size={13} />}
-                  loading={importRecords.isPending}
-                  loadingLabel="Importing…"
-                  onClick={() => importRef.current?.click()}
-                >
-                  Import
-                </Button>
-                <input
-                  ref={importRef}
-                  type="file"
-                  aria-label={`Import records into ${form.label}`}
-                  accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                  style={{ display: "none" }}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    e.target.value = "";
-                    if (file) importRecords.mutate(file);
-                  }}
-                />
-              </>
-            )}
-            {canSync && (
-              <Button
-                size="sm"
-                loading={syncForm.isPending}
-                loadingLabel="Syncing…"
-                onClick={() => { setSyncMsg(null); syncForm.mutate(); }}
-              >
-                Sync to grid
-              </Button>
+              <input
+                ref={importRef}
+                type="file"
+                aria-label={`Import records into ${form.label}`}
+                accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (file) importRecords.mutate(file);
+                }}
+              />
             )}
           </div>
         </div>
@@ -404,7 +397,7 @@ export function FormPanel({ form, revisionId, newRecordButton = false, fixedFilt
 
       {/* New record form: offered when the widget has the button and the server lets this caller create */}
       {newRecordButton && canCreate && showNewRecord && (
-        <div className="mvx-panel" style={{ margin: 16, maxWidth: 560, padding: 20 }}>
+        <Dialog open onClose={() => setShowNewRecord(false)} title={newRecordLabel(form)} width={640}>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <RecordFields form={form} forms={forms} draft={draft} setDraft={setDraft} dims={dims} metrics={metrics} revisionId={revisionId}
               readOnlyOut={f => postsMember(form, f)} />
@@ -418,28 +411,25 @@ export function FormPanel({ form, revisionId, newRecordButton = false, fixedFilt
                 </Select>
               </Field>
             )}
-            <Button variant="primary" style={{ alignSelf: "flex-start" }} loading={createRecord.isPending} loadingLabel="Saving…" onClick={() => createRecord.mutate()}>
-              Save
-            </Button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button variant="primary" loading={createRecord.isPending} loadingLabel="Saving…" onClick={() => createRecord.mutate()}>
+                Save
+              </Button>
+              <Button variant="ghost" onClick={() => setShowNewRecord(false)}>Cancel</Button>
+            </div>
             {createRecord.isError && <p className="mvx-admin-error">{(createRecord.error as Error).message}</p>}
           </div>
-        </div>
+        </Dialog>
       )}
 
       {/* Search, filters and how many match */}
-      <FilterBar>
+      <FilterBar className="mvx-filter-bar--inset">
         <FilterBarGroup>
           <SearchInput value={searchText} onChange={e => setSearchText(e.target.value)} placeholder="Search records…" width={220}
             aria-label={`Search ${form.label}`} />
           <Button size="sm" variant="ghost" leadingIcon={<Filter size={13} />} onClick={() => setBuildingFilter(v => !v)} aria-expanded={buildingFilter}>
             Filter
           </Button>
-          {(fixedFilters ?? []).map((f, i) => (
-            <FilterChip key={`fixed-${i}`} active disabled aria-label={`Filter set on this widget: ${describeFilter(f, allCols, dims, metrics)}`}
-              title="Set on this widget">
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Lock size={11} aria-hidden="true" />{describeFilter(f, allCols, dims, metrics)}</span>
-            </FilterChip>
-          ))}
           {filters.map((f, i) => (
             <FilterChip key={i} active aria-label={`Remove filter: ${describeFilter(f, cols, dims, metrics)}`}
               onClick={() => setFilters(fs => fs.filter((_, j) => j !== i))} onClear={() => setFilters(fs => fs.filter((_, j) => j !== i))}>
@@ -469,7 +459,7 @@ export function FormPanel({ form, revisionId, newRecordButton = false, fixedFilt
                 {cols.map((c) => {
                   const sorted = sort?.field === c.key ? (sort.desc ? "descending" : "ascending") : undefined;
                   return (
-                    <th key={c.key} aria-sort={sorted ?? "none"}>
+                    <th key={c.key} aria-sort={sorted ?? "none"} className={c.kind === "number" ? "mvx-cell--num" : undefined}>
                       <button type="button" className="mvx-th-sort" onClick={() => setSort(s => nextSort(s, c.key))}
                         title={`Sort by ${c.label}`}
                         style={{ all: "unset", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -515,9 +505,9 @@ export function FormPanel({ form, revisionId, newRecordButton = false, fixedFilt
                         );
                       }
                       if (c.key === "created_at") {
-                        return <td key={c.key} className="mvx-admin-muted">{new Date(rec.created_at).toLocaleDateString()}</td>;
+                        return <td key={c.key} className="mvx-admin-muted mvx-cell--nowrap">{localDate(rec.created_at)}</td>;
                       }
-                      return <td key={c.key}>{c.field ? <RecordFieldValue form={form} f={c.field} data={rec.data} dims={dims} metrics={metrics} /> : String(rec.data[c.key] ?? "—")}</td>;
+                      return <td key={c.key} className={cellClass(c)}>{c.field ? <RecordFieldValue form={form} f={c.field} data={rec.data} dims={dims} metrics={metrics} /> : String(rec.data[c.key] ?? "—")}</td>;
                     })}
                     <td style={{ whiteSpace: "nowrap" }}>
                       <div style={{ display: "flex", gap: 2 }}>

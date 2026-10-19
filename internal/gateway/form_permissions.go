@@ -50,6 +50,9 @@ type servedForm struct {
 	// where a member the person may only read cannot be chosen, since the
 	// save would post into it.
 	PostingFields map[string][]string `json:"posting_fields"`
+	// Posts: the table has a live mapping, so its records post into a grid
+	// (and a sync has something to do).
+	Posts bool `json:"posts"`
 }
 
 // withFormPermissions pairs each form with act's permissions on it. A caller
@@ -77,11 +80,11 @@ func (h *handler) withFormPermissions(ctx context.Context, act *actor, forms []*
 			scope.formID, scope.form = f.ID, f
 			served.Permissions = scope.formPermissions()
 		}
-		posting, err := h.postingFields(ctx, f)
+		posting, posts, err := h.records().PostingOf(ctx, f)
 		if err != nil {
 			return nil, err
 		}
-		served.PostingFields = posting
+		served.PostingFields, served.Posts = posting, posts
 		out = append(out, served)
 	}
 	return out, nil

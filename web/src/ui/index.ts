@@ -2,6 +2,8 @@ export { Button } from "./Button";
 export type { ButtonVariant, ButtonSize } from "./Button";
 
 export { IconButton } from "./IconButton";
+export { ActionsMenu } from "./ActionsMenu";
+export type { ActionsMenuItem } from "./ActionsMenu";
 
 export { Badge } from "./Badge";
 export { KindTag } from "./KindTag";

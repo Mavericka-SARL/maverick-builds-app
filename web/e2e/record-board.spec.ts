@@ -106,7 +106,9 @@ test.describe("board widget", () => {
     await expect(cols.nth(2)).toHaveAttribute("aria-label", "Closed Won");
     const qual = page.getByRole("listitem", { name: "Qualification" });
     await expect(qual.locator(".mvx-board__column-count")).toHaveText("2");
-    await expect(qual.locator(".mvx-board__column-sum")).toContainText("1,050.00");
+    // The total reads whole; its title has it in full.
+    await expect(qual.locator(".mvx-board__column-sum")).toHaveText("1,050");
+    await expect(qual.locator(".mvx-board__column-sum")).toHaveAttribute("title", "Deal Value total: 1,050.00");
     await expect(qual.getByRole("article", { name: "Big" })).toContainText("Acme");
     // A next action whose date has passed reads as overdue.
     await expect(qual.getByRole("article", { name: "Big" }).locator(".mvx-overdue")).toContainText("overdue");

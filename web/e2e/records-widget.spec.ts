@@ -4,7 +4,7 @@
  *
  *  - the widget's list is the server's records query: search, filters and a
  *    header sort are sent to it (so they cover every record, not one page);
- *  - "+ New record" shows only when the widget's developer added it;
+ *  - "+ New deal" (the table's record) shows only when the widget's developer added it;
  *  - a table without a status field shows no status column and creates
  *    records without a status;
  *  - a member the person may only read is not offered where the save posts
@@ -48,7 +48,7 @@ const RECORDS = [
 
 type Server = { queries: Body[]; posts: Body[] };
 
-async function serve(page: Page, form: Body, widgetProps: Body | undefined): Promise<Server> {
+async function serve(page: Page, form: Body, widgetProps: Body | undefined, widget: Body = {}): Promise<Server> {
   const server: Server = { queries: [], posts: [] };
   await page.route((url) => url.pathname === "/api/forms", (route) => route.fulfill({ json: [form] }));
   await page.route((url) => url.pathname === "/api/dimensions", (route) => route.fulfill({ json: DIMS }));
@@ -61,7 +61,7 @@ async function serve(page: Page, form: Body, widgetProps: Body | undefined): Pro
     return route.fulfill({ json: { ...RECORDS[0], id: "r3" } });
   });
   const dashboard = { id: "dash-3", name: "OPEX form 2", tags: ["finance"], folder_id: null,
-    widgets: [{ id: "w3", widget_type: "form", ref_id: "form-1", content: null, sort_order: 0, col_start: 1, col_span: 12, widget_props: widgetProps ?? null }] };
+    widgets: [{ id: "w3", widget_type: "form", ref_id: "form-1", content: null, sort_order: 0, col_start: 1, col_span: 12, widget_props: widgetProps ?? null, ...widget }] };
   await page.route((url) => url.pathname === "/api/dashboards/dash-3", (route) => route.fulfill({ json: dashboard }));
   return server;
 }
@@ -107,14 +107,25 @@ test("the list is the records query: search, filters and a header sort go to the
   await expect(page.getByRole("button", { name: /Remove filter/ })).toHaveCount(0);
 });
 
-test("+ New record shows only when the widget's developer added it", async ({ page }) => {
+test("a titled list has one heading — the widget's title, saying which filters it keeps", async ({ page }) => {
+  await mockApi(page);
+  await serve(page, table(), { record_filters: [{ field: "region", op: "eq", value: "US" }] }, { title: "US deals", show_title: true });
+  await loadAs(page, "dept_head");
+  await openWidget(page);
+  await expect(page.locator(".mvx-panel-head__title")).toHaveText("US deals");
+  await expect(page.locator(".mvx-widget__header")).toHaveCount(0);
+  await expect(page.getByLabel("Filter set on this widget: Region is United States")).toBeVisible();
+});
+
+test("+ New deal shows only when the widget's developer added it", async ({ page }) => {
   await mockApi(page);
   await serve(page, table(), undefined);
   await loadAs(page, "dept_head");
   await openWidget(page);
-  await expect(page.getByRole("button", { name: "New record" })).toHaveCount(0);
-  // Import still adds records for a person who may create them.
-  await expect(page.getByRole("button", { name: "Import" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New deal" })).toHaveCount(0);
+  // Import, under the list's "⋯", still adds records for a person who may create them.
+  await page.getByRole("button", { name: "Deals actions" }).click();
+  await expect(page.getByRole("menuitem", { name: "Import" })).toBeVisible();
 });
 
 test("a new record: no status in a table without one, the code is the server's, a read-only member is not offered where it posts", async ({ page }) => {
@@ -122,7 +133,7 @@ test("a new record: no status in a table without one, the code is the server's, 
   const server = await serve(page, table(), { new_record_button: true });
   await loadAs(page, "dept_head");
   await openWidget(page);
-  await page.getByRole("button", { name: "New record" }).click();
+  await page.getByRole("button", { name: "New deal" }).click();
 
   await expect(page.getByLabel("Code")).toHaveValue("Given when the record is saved");
   await expect(page.getByLabel("Code")).toBeDisabled();
@@ -144,7 +155,7 @@ test("a read-only member is offered where the save posts nothing", async ({ page
   await serve(page, table({ posting_fields: {} }), { new_record_button: true });
   await loadAs(page, "dept_head");
   await openWidget(page);
-  await page.getByRole("button", { name: "New record" }).click();
+  await page.getByRole("button", { name: "New deal" }).click();
   await newRecordRegion(page).click();
   await expect(page.getByRole("option", { name: "Europe" })).toBeVisible();
 });

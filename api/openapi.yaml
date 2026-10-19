@@ -2270,9 +2270,12 @@ components:
       allOf:
         - $ref: "#/components/schemas/FormDef"
         - type: object
-          required: [permissions, posting_fields]
+          required: [permissions, posting_fields, posts]
           properties:
             permissions: { $ref: "#/components/schemas/FormPermissions" }
+            posts:
+              type: boolean
+              description: The table has a live mapping, so its records post into a grid and a sync re-posts them.
             posting_fields:
               type: object
               description: >-

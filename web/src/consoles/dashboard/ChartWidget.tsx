@@ -25,6 +25,38 @@ import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
 import { defaultLeafCode } from "../dashboardLayout";
 import { useSelectorOwnership, useSyncSetter, useWidgetContextSync, DashboardContextSyncContext } from "../dashboardContextSync";
 
+// ── Category labels ───────────────────────────────────────────────────────────
+
+// A bar chart's category label, on up to two lines and shortened with "…" to
+// the width its bar has, so no category goes unlabelled (the axis used to
+// drop every label that would overlap a neighbour); the full name is the
+// label's tooltip. Wider charts and shorter names show it whole.
+function CategoryTick(props: { x?: number; y?: number; payload?: { value: string }; width?: number; visibleTicksCount?: number }) {
+  const { x = 0, y = 0, payload, width = 0, visibleTicksCount = 1 } = props;
+  const label = String(payload?.value ?? "");
+  const perTick = width > 0 && visibleTicksCount > 0 ? width / visibleTicksCount : 80;
+  const maxChars = Math.max(4, Math.floor((perTick - 6) / 6));
+  const lines: string[] = [];
+  let line = "";
+  for (const word of label.split(/\s+/)) {
+    const next = line ? `${line} ${word}` : word;
+    if (next.length <= maxChars || !line) { line = next; continue; }
+    lines.push(line);
+    line = word;
+  }
+  if (line) lines.push(line);
+  const shown = lines.slice(0, 2).map(l => (l.length > maxChars ? l.slice(0, maxChars - 1) + "…" : l));
+  if (lines.length > 2) shown[1] = (shown[1].length >= maxChars ? shown[1].slice(0, maxChars - 1) : shown[1]) + "…";
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <title>{label}</title>
+      <text textAnchor="middle" fontSize={11} fill="var(--color-text-muted)">
+        {shown.map((l, i) => <tspan key={i} x={0} dy={i === 0 ? 12 : 13}>{l}</tspan>)}
+      </text>
+    </g>
+  );
+}
+
 // ── Value formatter for axes ──────────────────────────────────────────────────
 
 function makeAxisFormatter(format: string | undefined, currencySymbol: string) {
@@ -104,7 +136,10 @@ function BarChartRenderer({ data, config, currencySymbol, onCategoryClick }: { d
         style={{ cursor: onCategoryClick ? "pointer" : undefined }}
         onClick={onCategoryClick ? (state) => { const i = tooltipIndex(state); if (i !== null) onCategoryClick(i); } : undefined}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-        <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+        {/* Every category labelled while there are few enough to read; a long run keeps the axis's own spacing. */}
+        {data.categories.length <= 24
+          ? <XAxis dataKey="name" interval={0} height={36} tick={<CategoryTick />} />
+          : <XAxis dataKey="name" tick={{ fontSize: 11 }} />}
         <YAxis tickFormatter={fmt} tick={{ fontSize: 11 }} />
         <Tooltip formatter={(v: unknown) => formatValue(v as number, config.value_format, currencySymbol)} />
         {showLegend && <Legend wrapperStyle={{ fontSize: 12 }} />}

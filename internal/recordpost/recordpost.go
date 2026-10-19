@@ -924,9 +924,16 @@ func (ps *Poster) postingCellRefusal(ctx context.Context, userID string, forYou 
 // from, the statuses in which a record posts ("" for a record without a
 // status): where a member the person may only read cannot be picked.
 func (ps *Poster) PostingFields(ctx context.Context, form *crudapp.FormDef) (map[string][]string, error) {
+	fields, _, err := ps.PostingOf(ctx, form)
+	return fields, err
+}
+
+// PostingOf is PostingFields, and whether the table posts into a grid at
+// all: it has a live mapping (one may take no member from a field).
+func (ps *Poster) PostingOf(ctx context.Context, form *crudapp.FormDef) (map[string][]string, bool, error) {
 	mappings, err := ps.liveFormMappings(ctx, form.ID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	out := map[string][]string{}
 	statuses := []string{""}
@@ -943,7 +950,7 @@ func (ps *Poster) PostingFields(ctx context.Context, form *crudapp.FormDef) (map
 			}
 		}
 	}
-	return out, nil
+	return out, len(mappings) > 0, nil
 }
 
 // Apply evaluates all live form-metric mappings for a given record

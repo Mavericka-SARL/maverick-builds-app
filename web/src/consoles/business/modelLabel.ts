@@ -14,5 +14,7 @@ export function useModelLabel(ctx: DemoContext | undefined, enabled: boolean): s
   const list = apps as AppInfo[];
   const app = list.find(a => a.models?.some(m => m.id === ctx.model_id));
   const model = app?.models?.find(m => m.id === ctx.model_id);
-  return app && model ? `${app.name} · ${model.name}` : null;
+  if (!app || !model) return null;
+  // An application named after its one model ("CRM") is named once.
+  return app.name.trim().toLowerCase() === model.name.trim().toLowerCase() ? model.name : `${app.name} · ${model.name}`;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Filter, Lock, Plus as PlusIcon } from "lucide-react";
 import {
@@ -7,7 +7,7 @@ import {
 import { Button, FilterBar, FilterBarGroup, FilterChip, InlineAlert, LoadingState, SearchInput, Select } from "../../ui";
 import { invalidateModelData } from "../modelDataQueries";
 import { canCreateRecords } from "./formPermissions";
-import { describeFilter, displayValue, listColumns, listQuery, recordTitle } from "./recordList";
+import { describeFilter, displayValue, listColumns, listQuery, newRecordLabel, recordTitle } from "./recordList";
 import { FilterBuilder } from "./FormPanel";
 import { RecordDialog, RecordFieldValue } from "./RecordLinks";
 
@@ -133,7 +133,10 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
     move.mutate({ rec, to });
   };
   const money = sumField?.format === "money";
-  const fmtSum = (n: number) => n.toLocaleString(undefined, money ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : { maximumFractionDigits: 2 });
+  // A column's total reads at a glance — whole (1,050), large ones short
+  // (15.8M); its title has the figure in full.
+  const fmtSum = (n: number) => n.toLocaleString(undefined, Math.abs(n) >= 100_000 ? { notation: "compact", maximumFractionDigits: 1 } : { maximumFractionDigits: 0 });
+  const fullSum = (n: number) => n.toLocaleString(undefined, money ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : { maximumFractionDigits: 2 });
   const canCreate = newRecordButton && canCreateRecords(form);
 
   if (!colField) {
@@ -141,23 +144,33 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
   }
   return (
     <div className="mvx-board-wrap">
-      <div className="mvx-board__header">
-        <span style={{ fontWeight: 600, fontSize: 14 }}>{title || form.label}</span>
+      <div className="mvx-panel-head">
+        <div className="mvx-panel-head__titles">
+          <span className="mvx-panel-head__title">{title || form.label}</span>
+          {(fixedFilters ?? []).length > 0 && (
+            <span className="mvx-panel-head__note" title="Set on this widget">
+              <Lock size={11} aria-hidden="true" />
+              {(fixedFilters ?? []).map((f, i) => (
+                <Fragment key={i}>
+                  {i > 0 && " · "}
+                  <span aria-label={`Filter set on this widget: ${describeFilter(f, listCols, dims, metrics)}`}>{describeFilter(f, listCols, dims, metrics)}</span>
+                </Fragment>
+              ))}
+            </span>
+          )}
+        </div>
         {canCreate && (
-          <Button size="sm" variant="primary" leadingIcon={<PlusIcon size={13} />} onClick={() => setCreatingIn(columns[0]?.key ?? NONE)}>
-            New {form.label.replace(/s$/, "").toLowerCase()}
-          </Button>
+          <div className="mvx-panel-head__actions">
+            <Button size="sm" variant="primary" leadingIcon={<PlusIcon size={13} />} onClick={() => setCreatingIn(columns[0]?.key ?? NONE)}>
+              {newRecordLabel(form)}
+            </Button>
+          </div>
         )}
       </div>
-      <FilterBar>
+      <FilterBar className="mvx-filter-bar--inset">
         <FilterBarGroup>
           <SearchInput value={searchText} onChange={e => setSearchText(e.target.value)} placeholder="Search cards…" width={200} aria-label={`Search ${form.label}`} />
           <Button size="sm" variant="ghost" leadingIcon={<Filter size={13} />} onClick={() => setBuildingFilter(v => !v)} aria-expanded={buildingFilter}>Filter</Button>
-          {(fixedFilters ?? []).map((f, i) => (
-            <FilterChip key={`fixed-${i}`} active disabled title="Set on this widget" aria-label={`Filter set on this widget: ${describeFilter(f, listCols, dims, metrics)}`}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Lock size={11} aria-hidden="true" />{describeFilter(f, listCols, dims, metrics)}</span>
-            </FilterChip>
-          ))}
           {filters.map((f, i) => (
             <FilterChip key={i} active aria-label={`Remove filter: ${describeFilter(f, listCols, dims, metrics)}`}
               onClick={() => setFilters(fs => fs.filter((_, j) => j !== i))} onClear={() => setFilters(fs => fs.filter((_, j) => j !== i))}>
@@ -201,7 +214,7 @@ export function BoardPanel({ form, revisionId, settings, fixedFilters, newRecord
                     {col.label}
                   </span>
                   <span className="mvx-board__column-count" aria-label={`${t?.count ?? 0} records`}>{t?.count ?? 0}</span>
-                  {sumField && <span className="mvx-board__column-sum" title={`${sumField.label} total`}>{fmtSum(t?.sum ?? 0)}</span>}
+                  {sumField && <span className="mvx-board__column-sum" title={`${sumField.label} total: ${fullSum(t?.sum ?? 0)}`}>{fmtSum(t?.sum ?? 0)}</span>}
                   {canCreate && canMoveInto(col) && (
                     <button type="button" className="mvx-board__add" aria-label={`New card in ${col.label}`} onClick={() => setCreatingIn(col.key)}>
                       <PlusIcon size={13} aria-hidden="true" />

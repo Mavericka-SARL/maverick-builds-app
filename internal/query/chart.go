@@ -805,7 +805,16 @@ func (r *ChartResolver) fetchInput(modelID, revisionID string) rollup.RawValue {
 // its dim_members so a fetch(combo) lookup matches. This is getInputValue's
 // old per-combo query with the combo filter removed — run once, not per leaf.
 func (r *ChartResolver) loadInputFactMap(ctx context.Context, modelID, revisionID, metricID string) (map[string]float64, error) {
+	// The form-covered combos are read once (calculation.LoadInputValueMap
+	// says why): a correlated NOT EXISTS rescanned the metric per combo.
 	rows, err := r.pool.Query(ctx, `
+		WITH covered AS MATERIALIZED (
+			SELECT DISTINCT fi.dim_members
+			FROM runtime.fact_input fi
+			JOIN model.form_metric_mapping fmm ON fmm.id = fi.source_ref
+			WHERE fi.model_id=$1::uuid AND fi.revision_id=$2::uuid AND fi.metric_id=$3::uuid
+			  AND fmm.aggregation IN ('replace', 'last')
+		)
 		SELECT value, dim_members FROM (
 			SELECT DISTINCT ON (dim_members) value, dim_members
 			FROM runtime.fact_input
@@ -814,13 +823,7 @@ func (r *ChartResolver) loadInputFactMap(ctx context.Context, modelID, revisionI
 			  AND source_ref IS NULL
 			ORDER BY dim_members, entered_at DESC, id DESC
 		) direct
-		WHERE NOT EXISTS (
-			SELECT 1 FROM runtime.fact_input fi2
-			JOIN model.form_metric_mapping fmm ON fmm.id = fi2.source_ref
-			WHERE fi2.model_id=$1::uuid AND fi2.revision_id=$2::uuid
-			  AND fi2.metric_id=$3::uuid AND fi2.dim_members = direct.dim_members
-			  AND fmm.aggregation IN ('replace', 'last')
-		)
+		WHERE NOT EXISTS (SELECT 1 FROM covered c WHERE c.dim_members = direct.dim_members)
 		UNION ALL
 		SELECT value, dim_members
 		FROM runtime.fact_input

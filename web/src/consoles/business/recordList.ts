@@ -227,3 +227,40 @@ export function listQuery(opts: { search: string; filters: RecordFilter[]; sort:
 export function postsMember(form: FormDef, field: FormField): boolean {
   return (form.posting_fields?.[field.name] ?? []).length > 0;
 }
+
+/** A table's label for one of its records: "Accounts" → "Account", "Categories" → "Category". */
+export function singular(label: string): string {
+  return label.endsWith("ies") ? label.slice(0, -3) + "y" : label.endsWith("s") ? label.slice(0, -1) : label;
+}
+
+/** What the button adding a record of form says: "New account", "New document link". */
+export function newRecordLabel(form: Pick<FormDef, "label">): string {
+  return `New ${singular(form.label).toLowerCase()}`;
+}
+
+/**
+ * How a column's cells lay out: a number aligns right, a code, date or
+ * yes/no stays on one line, free text keeps a readable width.
+ */
+export function cellClass(c: ListColumn): string | undefined {
+  if (c.kind === "number") return "mvx-cell--num";
+  if (c.kind === "date" || c.kind === "datetime" || c.kind === "boolean" || c.field?.type === "autocode") return "mvx-cell--nowrap";
+  if (c.field?.type === "text" || c.field?.type === "longtext") return "mvx-cell--text";
+  return undefined;
+}
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+/** A moment's local date as date fields show theirs: 2026-10-18. */
+export function localDate(ts: string): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/** A moment's local date and time, in the same form: 2026-10-18 09:43. */
+export function localDateTime(ts: string): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  return `${localDate(ts)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}

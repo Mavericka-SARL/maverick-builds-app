@@ -471,6 +471,39 @@ func dimKey(dimMembers map[string]string) string {
 	return string(b)
 }
 
+// inputValueMapSQL is LoadInputValueMap's statement ($1 model, $2 revision,
+// $3 metric). The form-covered combos (normally none) are read once, as the
+// grid's own read does (817d927): a NOT EXISTS correlated to fact_input
+// itself was planned, under the prepared statement's generic plan, as a
+// nested loop rescanning every row of the metric per combo — 315ms instead
+// of 4ms for 504 combos, and a recalculation reads every input it needs
+// (actual-through-month in the CPG model: 4.4s → 0.8s, 2026-10-19).
+const inputValueMapSQL = `
+		WITH covered AS MATERIALIZED (
+			SELECT DISTINCT fi.dim_members
+			FROM runtime.fact_input fi
+			JOIN model.form_metric_mapping fmm ON fmm.id = fi.source_ref
+			WHERE fi.model_id=$1::uuid AND fi.revision_id=$2::uuid AND fi.metric_id=$3::uuid
+			  AND fmm.aggregation IN ('replace', 'last')
+		)
+		SELECT dim_members::text, SUM(value)::float8
+		FROM (
+			SELECT direct.dim_members, direct.value FROM (
+				SELECT DISTINCT ON (dim_members) dim_members, value
+				FROM runtime.fact_input
+				WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid
+				  AND source_ref IS NULL
+				ORDER BY dim_members, entered_at DESC, id DESC
+			) direct
+			WHERE NOT EXISTS (SELECT 1 FROM covered c WHERE c.dim_members = direct.dim_members)
+			UNION ALL
+			SELECT dim_members, value FROM runtime.fact_input
+			WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid
+			  AND source_ref IS NOT NULL
+		) fi
+		GROUP BY dim_members
+	`
+
 // LoadInputValueMap returns metricID's latest recorded value at every
 // dim_members combo it has ever been entered against (including '{}', a
 // legitimate combo for a dimensionless metric), keyed by dimKey.
@@ -489,30 +522,7 @@ func dimKey(dimMembers map[string]string) string {
 // grid's own revenue−cost) once precomputed slice totals were compared
 // against the grid's scoped recompute.
 func (s *Store) LoadInputValueMap(ctx context.Context, modelID, revisionID, metricID string) (map[string]float64, error) {
-	rows, err := s.db.Query(ctx, `
-		SELECT dim_members::text, SUM(value)::float8
-		FROM (
-			SELECT direct.dim_members, direct.value FROM (
-				SELECT DISTINCT ON (dim_members) dim_members, value
-				FROM runtime.fact_input
-				WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid
-				  AND source_ref IS NULL
-				ORDER BY dim_members, entered_at DESC, id DESC
-			) direct
-			WHERE NOT EXISTS (
-				SELECT 1 FROM runtime.fact_input fi2
-				JOIN model.form_metric_mapping fmm ON fmm.id = fi2.source_ref
-				WHERE fi2.model_id=$1::uuid AND fi2.revision_id=$2::uuid
-				  AND fi2.metric_id=$3::uuid AND fi2.dim_members = direct.dim_members
-				  AND fmm.aggregation IN ('replace', 'last')
-			)
-			UNION ALL
-			SELECT dim_members, value FROM runtime.fact_input
-			WHERE model_id=$1::uuid AND revision_id=$2::uuid AND metric_id=$3::uuid
-			  AND source_ref IS NOT NULL
-		) fi
-		GROUP BY dim_members
-	`, modelID, revisionID, metricID)
+	rows, err := s.db.Query(ctx, inputValueMapSQL, modelID, revisionID, metricID)
 	return scanDimValueMap(rows, err)
 }
 

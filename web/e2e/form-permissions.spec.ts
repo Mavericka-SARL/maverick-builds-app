@@ -23,7 +23,7 @@ const BUSINESS_USER: FormPerms = { sync: false, create_statuses: ["draft", "subm
 const ADMIN: FormPerms = { sync: true, create_statuses: ALL_STATUSES };
 
 const FORM = {
-  id: "form-1", model_id: "model-1", name: "purchase_request", label: "Purchase Request",
+  id: "form-1", model_id: "model-1", name: "purchase_request", label: "Purchase Request", posts: true,
   fields: [
     { name: "vendor", label: "Vendor", type: "text", required: true },
     { name: "amount", label: "Amount", type: "number", required: true },
@@ -42,11 +42,11 @@ type Server = { posts: Record<string, unknown>[]; syncs: number; perms: FormPerm
 
 // Serves form-1 with server.perms (none: an older server) and one record,
 // accepts a new record, and answers a sync with syncStatus.
-async function serveForm(page: Page, perms: FormPerms | undefined, syncStatus = 200): Promise<Server> {
+async function serveForm(page: Page, perms: FormPerms | undefined, syncStatus = 200, over: Record<string, unknown> = {}): Promise<Server> {
   const server: Server = { posts: [], syncs: 0, perms };
   // Registered after mockApi, so these answer first.
   await page.route((url) => url.pathname === "/api/forms", (route) =>
-    route.fulfill({ json: [{ ...FORM, ...(server.perms ? { permissions: server.perms } : {}) }] }));
+    route.fulfill({ json: [{ ...FORM, ...over, ...(server.perms ? { permissions: server.perms } : {}) }] }));
   await page.route((url) => url.pathname === "/api/forms/form-1/records", (route) => {
     const req = route.request();
     if (req.method() === "POST") {
@@ -92,8 +92,20 @@ async function optionsOf(select: ReturnType<Page["getByLabel"]>) {
 const alert = (page: Page, tone: "success" | "danger", text: string | RegExp) =>
   page.locator(`.mvx-inline-alert--${tone}`).filter({ hasText: text });
 
+// The list's secondary actions (Export, Import, Sync to grid) are under its "⋯" menu.
+async function actions(page: Page): Promise<string[]> {
+  await page.getByRole("button", { name: "Purchase Request actions" }).click();
+  const names = await page.getByRole("menuitem").allInnerTexts();
+  await page.keyboard.press("Escape");
+  return names.map(n => n.trim());
+}
+async function act(page: Page, name: string) {
+  await page.getByRole("button", { name: "Purchase Request actions" }).click();
+  await page.getByRole("menuitem", { name }).click();
+}
+
 async function fillNewRecord(page: Page) {
-  await page.getByRole("button", { name: "New record" }).click();
+  await page.getByRole("button", { name: "New purchase request" }).click();
   // By its label: Field ties the label to the control FormFieldInput renders.
   await page.getByLabel("Vendor").fill("Beta Soft");
   await expect(page.getByLabel("Amount")).toHaveAttribute("type", "number");
@@ -105,9 +117,7 @@ for (const s of surfaces) {
     const server = await serveForm(page, BUSINESS_USER);
     await s.open(page);
 
-    await expect(page.getByRole("button", { name: "Sync to grid" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Import" })).toHaveCount(1);
-    await expect(page.getByRole("button", { name: "Export" })).toHaveCount(1);
+    expect(await actions(page)).toEqual(["Export", "Import"]);
 
     await fillNewRecord(page);
     const status = page.getByLabel("Status");
@@ -124,7 +134,7 @@ for (const s of surfaces) {
     const server = await serveForm(page, ADMIN);
     await s.open(page);
 
-    await page.getByRole("button", { name: "Sync to grid" }).click();
+    await act(page, "Sync to grid");
     await expect.poll(() => server.syncs).toBe(1);
     await expect(alert(page, "success", /Synced — 1 record\(s\)/)).toBeVisible();
 
@@ -135,6 +145,13 @@ for (const s of surfaces) {
     await page.getByRole("button", { name: "Save" }).click();
     await expect.poll(() => server.posts.length).toBe(1);
     expect(server.posts[0]).toMatchObject({ status: "draft" });
+  });
+
+  test(`${s.name}: a table that posts into no grid offers an administrator no Sync`, async ({ page }) => {
+    await mockApi(page);
+    await serveForm(page, ADMIN, 200, { posts: false });
+    await s.open(page);
+    expect(await actions(page)).toEqual(["Export", "Import"]);
   });
 
   test(`${s.name}: a single create status is not offered as a choice`, async ({ page }) => {
@@ -157,14 +174,14 @@ for (const s of surfaces) {
     await s.open(page);
     server.perms = BUSINESS_USER;
 
-    await page.getByRole("button", { name: "Sync to grid" }).click();
+    await act(page, "Sync to grid");
     await expect.poll(() => server.syncs).toBe(1);
     await expect(alert(page, "danger", "Only an administrator of this application can sync.")).toBeVisible();
     await expect(page.locator(".mvx-inline-alert--success")).toHaveCount(0);
     await expect(page.getByText(/Sync failed/)).toHaveCount(0);
     // The list is reloaded at once (not at the next 20 s poll), and the
-    // button follows it.
-    await expect(page.getByRole("button", { name: "Sync to grid" })).toHaveCount(0);
+    // menu follows it.
+    await expect.poll(() => actions(page)).toEqual(["Export", "Import"]);
   });
 
   test(`${s.name}: an older server that sends no permissions gets neither Sync nor New record`, async ({ page }) => {
@@ -172,8 +189,7 @@ for (const s of surfaces) {
     await serveForm(page, undefined);
     await s.open(page);
 
-    await expect(page.getByRole("button", { name: "Sync to grid" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "New record" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Import" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "New purchase request" })).toHaveCount(0);
+    expect(await actions(page)).toEqual(["Export"]);
   });
 }

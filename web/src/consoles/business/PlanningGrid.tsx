@@ -9,7 +9,7 @@ import { LoadingState, ErrorState, Toolbar, ToolbarGroup, Select, PropertyPanel,
 import { defaultLeafCode } from "../dashboardLayout";
 import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
 import { evalMemberFormula } from "./memberFormula";
-import { invalidateModelData } from "../modelDataQueries";
+import { invalidateModelData, refreshAfterRecalc } from "../modelDataQueries";
 import { useSelectorOwnership, useSyncSetter, useWidgetContextSync } from "../dashboardContextSync";
 import { downloadBlob } from "./blobUtils";
 import { parseCellNumber } from "./cellNumber";
@@ -677,13 +677,23 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     queryKey: ["grid-cells", ctx.revision_id, gridDefId ?? "all", scopeKey],
     queryFn: () => api.getGrid(ctx.revision_id, gridDefId, { scope }),
     enabled: pivotContextReady,
-    refetchInterval: 2000,
+    // While a write's dependents are being recalculated the grid asks every
+    // 0.4 s instead of every 2 s, so the result shows as soon as it lands.
+    refetchInterval: (q) => (q.state.data?.recalc_pending ? 400 : 2000),
     placeholderData: (prev) => prev, // keep last slice visible while a new scope loads
   });
 
   // A write answered before its dependents were recalculated: calculated
-  // cells show as pending until the grid's 2 s poll reports the pass landed.
+  // cells show as pending until the grid's poll reports the pass landed.
   const recalcPending = !!cellsData?.recalc_pending;
+  // When it lands, every widget of the page reads the new values at once:
+  // the KPI tiles and charts reloaded when the value was saved, before the
+  // pass, and would otherwise wait for their own 2 s poll.
+  const wasPending = useRef(false);
+  useEffect(() => {
+    if (wasPending.current && !recalcPending) refreshAfterRecalc(qc);
+    wasPending.current = recalcPending;
+  }, [recalcPending, qc]);
 
   // Merge cheap metadata with the scoped cells so everything downstream still
   // reads a single `grid` object (dimensions/metrics from meta, cells/totals

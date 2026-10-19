@@ -199,7 +199,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
   } else if (widget.widget_type === "form" && widget.ref_id) {
     inner = (
       <div className="mvx-panel" style={{ padding: 0, overflow: "hidden" }}>
-        <FormWidgetPanel formId={widget.ref_id} ctx={ctx} newRecordButton={!!widget.widget_props?.new_record_button}
+        <FormWidgetPanel formId={widget.ref_id} ctx={ctx} title={widget.show_title && widget.title ? widget.title : undefined} newRecordButton={!!widget.widget_props?.new_record_button}
           fixedFilters={widget.widget_props?.record_filters} columns={widget.widget_props?.record_columns} fixedSort={widget.widget_props?.record_sort} />
       </div>
     );
@@ -215,7 +215,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
   } else if (widget.widget_type === "chart" && widget.ref_id && widget.widget_props?.chart) {
     inner = <ChartWidget widget={widget} ctx={ctx} />;
   } else if (widget.widget_type === "metric_kpi" && widget.ref_id) {
-    inner = <MetricKpiWidget metricId={widget.ref_id} ctx={ctx} widgetProps={widget.widget_props ?? undefined} />;
+    inner = <MetricKpiWidget metricId={widget.ref_id} ctx={ctx} widgetProps={widget.widget_props ?? undefined} title={widget.show_title && widget.title ? widget.title : undefined} />;
   } else if (widget.widget_type === "import" && widget.ref_id) {
     inner = (
       <div className="mvx-panel" style={{ padding: 16 }}>
@@ -229,7 +229,10 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
   const isNoPad = widget.widget_type === "grid" || widget.widget_type === "form" || widget.widget_type === "chart" || widget.widget_type === "image";
   const widgetLabel = widget.title || widget.widget_type.replace(/_/g, " ");
 
-  if (widget.show_title && widget.title && widget.widget_type !== "grid") {
+  // A grid, a records list, a board and a KPI tile carry their title in
+  // their own header or card; the others get a title band above them.
+  const titleInside = widget.widget_type === "grid" || widget.widget_type === "form" || widget.widget_type === "board" || widget.widget_type === "metric_kpi";
+  if (widget.show_title && widget.title && !titleInside) {
     return (
       <WidgetErrorBoundary widgetLabel={widgetLabel}>
         <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -245,7 +248,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
   return <WidgetErrorBoundary widgetLabel={widgetLabel}>{inner}</WidgetErrorBoundary>;
 }
 
-export function MetricKpiWidget({ metricId, ctx, widgetProps }: { metricId: string; ctx: DemoContext; widgetProps?: WidgetProps }) {
+export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricId: string; ctx: DemoContext; widgetProps?: WidgetProps; title?: string }) {
   const staticScope = widgetProps?.kpi_scope;
   // How this tile picks its context, set by the developer in the widget
   // editor. Legacy widgets (no explicit mode) infer it from the old fields so
@@ -392,7 +395,7 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps }: { metricId: stri
       <div className="mvx-kpi__body">
         {metric && (
           <span className="mvx-kpi__label">
-            {metric.label || metric.name}{scopeLabel && <span className="mvx-kpi__scope"> · {scopeLabel}</span>}
+            {title ?? <>{metric.label || metric.name}{scopeLabel && <span className="mvx-kpi__scope"> · {scopeLabel}</span>}</>}
           </span>
         )}
         <span className="mvx-kpi__value" style={widgetProps?.color ? { color: widgetProps.color } : undefined}>{valueReady && g ? formatted : "—"}</span>
@@ -594,9 +597,10 @@ function triggerWhen(triggerType: string): string {
 // the list defaulted to the active one (found live, 2026-09-11). Tables reach
 // business users and business admins only this way; see FormPanel. The
 // widget offers "+ New record" only when its developer added the button.
-export function FormWidgetPanel({ formId, ctx: hostCtx, newRecordButton, fixedFilters, columns, fixedSort }: {
+export function FormWidgetPanel({ formId, ctx: hostCtx, title, newRecordButton, fixedFilters, columns, fixedSort }: {
   formId: string;
   ctx?: DemoContext;
+  title?: string;
   newRecordButton?: boolean;
   fixedFilters?: RecordFilter[];
   columns?: string[];
@@ -611,7 +615,7 @@ export function FormWidgetPanel({ formId, ctx: hostCtx, newRecordButton, fixedFi
   const revisionId = (hostCtx ?? demoCtx)?.revision_id ?? "";
   const form = (formsRaw as FormDef[]).find((f) => f.id === formId);
   if (!form) return isLoading ? <LoadingState /> : <EmptyState label="Table not found." />;
-  return <FormPanel form={form} revisionId={revisionId} newRecordButton={newRecordButton} fixedFilters={fixedFilters} columns={columns} fixedSort={fixedSort} />;
+  return <FormPanel form={form} revisionId={revisionId} title={title} newRecordButton={newRecordButton} fixedFilters={fixedFilters} columns={columns} fixedSort={fixedSort} />;
 }
 
 // A board widget's body: the table's records as cards in columns (BoardPanel).

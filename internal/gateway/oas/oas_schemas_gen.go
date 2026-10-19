@@ -17065,6 +17065,8 @@ type ListedForm struct {
 	EditAccess  OptListedFormEditAccess `json:"edit_access"`
 	CreatedAt   time.Time               `json:"created_at"`
 	Permissions FormPermissions         `json:"permissions"`
+	// The table has a live mapping, so its records post into a grid and a sync re-posts them.
+	Posts bool `json:"posts"`
 	// Each field a live mapping takes a dimension member from, with the statuses in which a record posts
 	// ("" for a record without a status). A member the caller may only read cannot be chosen there for a
 	// save that would post: the server refuses that save.
@@ -17131,6 +17133,11 @@ func (s *ListedForm) GetPermissions() FormPermissions {
 	return s.Permissions
 }
 
+// GetPosts returns the value of Posts.
+func (s *ListedForm) GetPosts() bool {
+	return s.Posts
+}
+
 // GetPostingFields returns the value of PostingFields.
 func (s *ListedForm) GetPostingFields() ListedFormPostingFields {
 	return s.PostingFields
@@ -17194,6 +17201,11 @@ func (s *ListedForm) SetCreatedAt(val time.Time) {
 // SetPermissions sets the value of Permissions.
 func (s *ListedForm) SetPermissions(val FormPermissions) {
 	s.Permissions = val
+}
+
+// SetPosts sets the value of Posts.
+func (s *ListedForm) SetPosts(val bool) {
+	s.Posts = val
 }
 
 // SetPostingFields sets the value of PostingFields.

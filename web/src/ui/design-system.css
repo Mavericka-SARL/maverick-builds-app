@@ -2779,11 +2779,6 @@ tr:hover .mvx-member-label__actions,
 .mvx-due-today { color: var(--color-warning-text); font-weight: 600; }
 
 .mvx-board-wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.mvx-board__header {
-  padding: 12px 16px; background: var(--color-surface-subtle);
-  display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
-  border-bottom: 1px solid var(--color-border);
-}
 .mvx-board {
   display: flex; gap: 12px; padding: 12px 16px 16px; overflow-x: auto; flex: 1; min-height: 0; align-items: stretch;
 }
@@ -2818,7 +2813,11 @@ tr:hover .mvx-member-label__actions,
 .mvx-board__card:focus-visible { outline: 2px solid var(--color-brand-500); outline-offset: 1px; }
 .mvx-board__card-title { font-size: 13px; font-weight: 600; color: var(--color-text-strong); }
 .mvx-board__card-field { color: var(--color-text); overflow-wrap: anywhere; }
-.mvx-board__move { margin-top: 4px; font-size: 11px; max-width: 100%; }
+.mvx-board__move.mvx-select {
+  margin-top: 4px; align-self: flex-start; width: auto; max-width: 100%;
+  height: 26px; padding: 0 6px; font-size: 11px; color: var(--color-text-muted);
+  border-color: var(--color-border); background: var(--color-surface-subtle);
+}
 .mvx-board__empty { font-size: 12px; color: var(--color-text-quiet); text-align: center; padding: 12px 0; }
 @media (max-width: 640px) {
   .mvx-board__column { flex-basis: 220px; }
@@ -2837,3 +2836,34 @@ tr:hover .mvx-member-label__actions,
 .mvx-row-link { cursor: pointer; }
 .mvx-row-link:hover td { background: var(--color-surface-subtle); }
 .mvx-row-link:focus-visible { outline: 2px solid var(--color-brand-500); outline-offset: -2px; }
+
+/* ── A records or board panel: header, toolbar, secondary actions ─────────── */
+.mvx-panel-head {
+  padding: 12px 16px; background: var(--color-surface-subtle); border-bottom: 1px solid var(--color-border);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.mvx-panel-head__titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mvx-panel-head__title { font-weight: 600; font-size: 14px; color: var(--color-text-strong); }
+.mvx-panel-head__note {
+  font-size: 12px; color: var(--color-text-muted); display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap;
+}
+.mvx-panel-head__actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+/* The filter bar inside a panel keeps the panel's own padding. */
+.mvx-filter-bar.mvx-filter-bar--inset {
+  padding: 8px 16px; margin-bottom: 0; min-height: 0; border-bottom: 1px solid var(--color-border);
+}
+.mvx-actions-menu {
+  position: fixed; z-index: 1200; min-width: 180px; padding: 4px;
+  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-button);
+  box-shadow: var(--shadow-popover, 0 4px 16px rgba(0, 0, 0, 0.12));
+}
+.mvx-actions-menu__item {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 12px; border: none; border-radius: 4px;
+  background: transparent; font: inherit; font-size: 13px; color: var(--color-text); cursor: pointer; text-align: left;
+}
+.mvx-actions-menu__item:hover:not(:disabled), .mvx-actions-menu__item:focus-visible { background: var(--color-surface-subtle); }
+.mvx-actions-menu__item:disabled { color: var(--color-text-quiet); cursor: default; }
+/* Cells that read as one token do not wrap; numbers align right; text keeps a readable width. */
+.mvx-cell--nowrap { white-space: nowrap; }
+.mvx-cell--num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mvx-cell--text { min-width: 140px; }

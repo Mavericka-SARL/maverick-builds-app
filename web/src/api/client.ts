@@ -1281,6 +1281,8 @@ export interface FormDef {
   /** Each field a live mapping takes a member from, with the statuses in
       which a record posts ("" for a record without a status). */
   posting_fields?: Record<string, string[]>;
+  /** The table has a live mapping posting its records into a grid. */
+  posts?: boolean;
 }
 
 /** The table's status field, when it has one. */

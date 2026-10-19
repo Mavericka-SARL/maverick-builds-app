@@ -11,7 +11,7 @@ import { FormFieldInput, RecordStatusBadge } from "./RecordFieldInput";
 import { canCreateRecords, createStatusesOf, createStatusFor } from "./formPermissions";
 import {
   defaultsOf, displayValue, editableFields, isDueToday, isOverdue, keeperOf, memberLabels, pairedField, postsMember,
-  recordTitle, statusLabel,
+  localDateTime, recordTitle, singular, statusLabel,
 } from "./recordList";
 
 /** How one field of a record reads: a link opens in a new tab; a deadline that has passed says overdue. */
@@ -94,9 +94,6 @@ export function RecordFields({ form, forms, draft, setDraft, dims, metrics, revi
   );
 }
 
-function singular(label: string): string {
-  return label.endsWith("ies") ? label.slice(0, -3) + "y" : label.endsWith("s") ? label.slice(0, -1) : label;
-}
 
 /**
  * A new record of keeper, a table keeping a dimension, made from another
@@ -268,7 +265,7 @@ export function RecordHistorySection({ form, recordId, dims }: { form: FormDef; 
         <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12, display: "flex", flexDirection: "column", gap: 3 }}>
           {data.history.map((h, i) => (
             <li key={i}>
-              <span className="mvx-admin-muted">{new Date(h.changed_at).toLocaleString()}</span>{" "}
+              <span className="mvx-admin-muted">{localDateTime(h.changed_at)}</span>{" "}
               {h.field_label}: {h.old === null ? <strong>{show(h.field, h.new)}</strong> : <>{show(h.field, h.old)} → <strong>{show(h.field, h.new)}</strong></>}
               {h.changed_by_name && <span className="mvx-admin-muted"> · {h.changed_by_name}</span>}
             </li>
@@ -513,7 +510,7 @@ function RecordView({ step, forms, revisionId, onOpen, onAdd, onDone }: {
         )}
       </div>
       <span className="mvx-admin-muted" style={{ fontSize: 11 }}>
-        Created {new Date(record.created_at).toLocaleString()} · updated {new Date(record.updated_at).toLocaleString()}
+        Created {localDateTime(record.created_at)} · updated {localDateTime(record.updated_at)}
       </span>
     </div>
   ) : null;

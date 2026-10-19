@@ -40,10 +40,6 @@ func (h *handler) postingRefusal(ctx context.Context, creatorID string, forYou b
 	return h.records().PostingRefusal(ctx, creatorID, forYou, form, recordID, to)
 }
 
-func (h *handler) postingFields(ctx context.Context, form *crudapp.FormDef) (map[string][]string, error) {
-	return h.records().PostingFields(ctx, form)
-}
-
 func (h *handler) applyFormMappings(ctx context.Context, recordID, formID, status string, data map[string]any, userID string) error {
 	return h.records().Apply(ctx, recordID, formID, status, data, userID)
 }

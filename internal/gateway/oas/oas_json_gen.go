@@ -43423,12 +43423,16 @@ func (s *ListedForm) encodeFields(e *jx.Encoder) {
 		s.Permissions.Encode(e)
 	}
 	{
+		e.FieldStart("posts")
+		e.Bool(s.Posts)
+	}
+	{
 		e.FieldStart("posting_fields")
 		s.PostingFields.Encode(e)
 	}
 }
 
-var jsonFieldsNameOfListedForm = [13]string{
+var jsonFieldsNameOfListedForm = [14]string{
 	0:  "id",
 	1:  "model_id",
 	2:  "name",
@@ -43441,7 +43445,8 @@ var jsonFieldsNameOfListedForm = [13]string{
 	9:  "edit_access",
 	10: "created_at",
 	11: "permissions",
-	12: "posting_fields",
+	12: "posts",
+	13: "posting_fields",
 }
 
 // Decode decodes ListedForm from json.
@@ -43591,8 +43596,20 @@ func (s *ListedForm) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"permissions\"")
 			}
-		case "posting_fields":
+		case "posts":
 			requiredBitSet[1] |= 1 << 4
+			if err := func() error {
+				v, err := d.Bool()
+				s.Posts = bool(v)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"posts\"")
+			}
+		case "posting_fields":
+			requiredBitSet[1] |= 1 << 5
 			if err := func() error {
 				if err := s.PostingFields.Decode(d); err != nil {
 					return err
@@ -43612,7 +43629,7 @@ func (s *ListedForm) Decode(d *jx.Decoder) error {
 	var failures []validate.FieldError
 	for i, mask := range [2]uint8{
 		0b00011111,
-		0b00011100,
+		0b00111100,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.
