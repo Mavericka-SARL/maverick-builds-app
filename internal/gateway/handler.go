@@ -8292,9 +8292,10 @@ func (h *handler) importDimensionMembers(w http.ResponseWriter, r *http.Request)
 		jsonErr(w, fmt.Errorf("empty csv"), http.StatusBadRequest)
 		return
 	}
-	colIdx := make(map[string]int, len(header))
-	for i, col := range header {
-		colIdx[strings.ToLower(strings.TrimSpace(col))] = i
+	colIdx, err := fileColumnIndex(header)
+	if err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
+		return
 	}
 	imported, errs, importErr := h.importDimensionMembersCSV(ctx, body.DimensionID, cr, colIdx)
 	if le := (*plan.LimitError)(nil); errors.As(importErr, &le) {

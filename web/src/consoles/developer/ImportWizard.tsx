@@ -5,8 +5,10 @@ import { Button, IconButton, TextInput, Select, Field, StatusBadge, Stepper, Inl
 import { GoogleServiceAccountPanel } from "./GoogleServiceAccountPanel";
 import { fileToBase64 } from "../business/blobUtils";
 import { ShapeStep, type Shaped, type ShapeSource } from "./ShapeStep";
+import { invalidateModelData } from "../modelDataQueries";
 import {
   api,
+  type ApiError,
   type IntegrationDef,
   type GridDef,
   type FormDef,
@@ -42,6 +44,8 @@ interface FieldOption {
   label: string;
   required: boolean;
   group?: string; // fields sharing a group are alternatives; at least one must be mapped
+  groupLabel?: string; // how a missing group is named; its fields' labels by default
+  requires?: string; // a field that is mapped only together with this one
 }
 
 interface ColMapping {
@@ -79,6 +83,9 @@ interface WizardConfig {
   // link-shared sheet server-side and then flows through the same steps.
   source?: "file" | "google_sheets";
   sheetUrl?: string;
+  // Running a saved integration: its column map, which the run applies on
+  // the server, is the mapping the map step starts from.
+  savedColumnMap?: Record<string, string>;
 }
 
 interface CommitResult {
@@ -86,6 +93,8 @@ interface CommitResult {
   errorRows: number;
   status: "success" | "error";
   message?: string;
+  // A refused import's rows, as the server reported them.
+  rowErrors?: Array<{ row: number; column: string; message: string; raw_value?: string }>;
 }
 
 // ── Parsing utilities ──────────────────────────────────────────────────────────
@@ -129,21 +138,44 @@ async function parseFile(file: File, sheet?: string): Promise<ParsedFile> {
 
 // ── Auto-mapping ───────────────────────────────────────────────────────────────
 
+// Each target is given to one column at most. Every column naming a target
+// exactly is matched first; only then may a column naming one loosely
+// ("Region code" for region) take a target still free, and only when exactly
+// one fits. A first-come loose match mapped parent_code onto code, because
+// "parentcode" contains "code", and the dimension import then took each
+// member's parent as its code: members relabelled, the new ones never made.
 function autoMap(headers: string[], opts: FieldOption[]): ColMapping[] {
   const norm = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, "");
-  return headers.map(col => {
+  // A target's names: its value, its label, and the label without a
+  // "dim: " or "metric: " prefix.
+  const names = (o: FieldOption) => [o.value, o.label, o.label.replace(/^[^:]*:\s*/, "")].map(norm).filter(Boolean);
+  const taken = new Set<string>();
+  const target = new Map<string, string>();
+  const claim = (col: string, o: FieldOption) => { taken.add(o.value); target.set(col, o.value); };
+  headers.forEach(col => {
     const cn = norm(col);
-    const match = opts.find(o =>
-      norm(o.value) === cn || norm(o.label) === cn ||
-      norm(o.value).includes(cn) || cn.includes(norm(o.value)) ||
-      norm(o.label).includes(cn) || cn.includes(norm(o.label))
-    );
-    return {
-      sourceCol: col,
-      targetField: match?.value ?? "",
-      status: (match ? "auto" : "ignored") as MappingStatus,
-    };
+    const exact = cn ? opts.find(o => !taken.has(o.value) && names(o).includes(cn)) : undefined;
+    if (exact) claim(col, exact);
   });
+  headers.forEach(col => {
+    const cn = norm(col);
+    if (target.has(col) || !cn) return;
+    const fits = opts.filter(o => !taken.has(o.value) && names(o).some(n => n.includes(cn) || cn.includes(n)));
+    if (fits.length === 1) claim(col, fits[0]);
+  });
+  return headers.map(col => ({
+    sourceCol: col,
+    targetField: target.get(col) ?? "",
+    status: (target.has(col) ? "auto" : "ignored") as MappingStatus,
+  }));
+}
+
+// The column map an integration saves: every column of the file, a column
+// left unmapped as "ignore". A column the map does not name is imported
+// under its own header when the integration runs, so an unnamed one would
+// be imported by the run although the wizard left it out.
+function columnMapOf(mappings: ColMapping[]): Record<string, string> {
+  return Object.fromEntries(mappings.map(m => [m.sourceCol, m.targetField || "ignore"]));
 }
 
 // ── Target field builders ──────────────────────────────────────────────────────
@@ -154,12 +186,21 @@ function getFieldOptions(
   forms: FormDef[],
   dims: DevDimension[],
   knownProps: string[] = [],
+  metrics: DevMetric[] = [],
 ): FieldOption[] {
   const opts: FieldOption[] = [];
   if (cfg.targetType === "grid") {
-    opts.push({ value: "metric", label: "metric", required: false, group: "metric" });
-    opts.push({ value: "value",  label: "value",  required: true });
     const grid = grids.find(g => g.id === cfg.targetId);
+    // A grid's values come in one column per metric — the layout of the
+    // grid's export and of the dashboard import — or in a metric column
+    // naming each row's metric beside a value column.
+    const values = { required: false, group: "values", groupLabel: "a metric column, or metric and value" };
+    opts.push({ value: "metric", label: "metric", ...values, requires: "value" });
+    opts.push({ value: "value", label: "value", ...values, requires: "metric" });
+    const gridMetricIds = new Set(grid?.metric_ids ?? []);
+    metrics
+      .filter(m => m.is_input && (!grid || gridMetricIds.has(m.id)))
+      .forEach(m => opts.push({ value: m.name, label: `metric: ${m.label || m.name}`, ...values }));
     const gridDimIds = new Set(grid?.dimension_ids ?? []);
     dims
       .filter(d => !grid || gridDimIds.has(d.id))
@@ -209,11 +250,15 @@ function resolveAndSerialize(
   const escape = (v: string) => /[,"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
   const active = mappings.filter(m => m.targetField);
 
-  // Resolve any metric identifier (label or name/code) → UUID required by the backend
-  const metricByLabel = new Map(ctx.metrics.map(m => [m.label.toLowerCase(), m.id]));
-  const metricByName  = new Map(ctx.metrics.map(m => [m.name.toLowerCase(),  m.id]));
-  const resolveMetric = (v: string) =>
-    metricByLabel.get(v.toLowerCase()) ?? metricByName.get(v.toLowerCase()) ?? v;
+  // A metric named by its label is sent by its name, which the server
+  // resolves in the target revision itself. The wizard used to send the
+  // metric's id from the metrics it had loaded, so a stale list sent ids the
+  // revision no longer has and failed every row.
+  const metricName = new Map(ctx.metrics.map(m => [m.name.toLowerCase(), m.name]));
+  for (const m of ctx.metrics) {
+    if (m.label && !metricName.has(m.label.toLowerCase())) metricName.set(m.label.toLowerCase(), m.name);
+  }
+  const resolveMetric = (v: string) => metricName.get(v.trim().toLowerCase()) ?? v;
 
   // Build dimension member lookups: dim.name → Map(label.lower → code)
   const dimLabelToCode = new Map<string, Map<string, string>>();
@@ -233,7 +278,7 @@ function resolveAndSerialize(
     const tf = m.targetField;
     const srcIdx = headers.indexOf(m.sourceCol);
 
-    // "metric" (unified) or legacy "metric_id"/"metric_name" → always resolve to UUID
+    // "metric" (unified) or legacy "metric_id"/"metric_name": the metric's name
     if (tf === "metric" || tf === "metric_id" || tf === "metric_name") {
       return { header: "metric_id", srcIdx, transform: resolveMetric };
     }
@@ -671,14 +716,26 @@ function MapColumnsStep({
     fieldOptions.filter(f => f.group === g).some(f => mappedTargets.has(f.value))
   );
   const unnamedProperty = mappings.some(m => m.targetField === "property:");
-  const requiredMapped = ungroupedOk && groupsOk && !unnamedProperty;
+  // A field mapped without the one it goes with (metric without value).
+  const unpaired = fieldOptions.filter(f => f.requires && mappedTargets.has(f.value) && !mappedTargets.has(f.requires));
+  // Two columns into one target: the import would keep one of them per row
+  // and drop the other without a word. A saved integration's run refuses
+  // such a map on the server.
+  const sharedTargets = [...mappedTargets]
+    .filter(t => t !== "property:")
+    .map(t => ({ target: t, cols: mappings.filter(m => m.targetField === t).map(m => m.sourceCol) }))
+    .filter(s => s.cols.length > 1);
+  const requiredMapped = ungroupedOk && groupsOk && unpaired.length === 0 && sharedTargets.length === 0 && !unnamedProperty;
 
   const missingLabels = [
     ...fieldOptions.filter(f => f.required && !f.group && !mappedTargets.has(f.value)).map(f => f.label),
     ...groups
       .filter(g => !fieldOptions.filter(f => f.group === g).some(f => mappedTargets.has(f.value)))
-      .map(g => fieldOptions.filter(f => f.group === g).map(f => f.label.split(" —")[0]).join(" or ")),
+      .map(g => fieldOptions.find(f => f.group === g && f.groupLabel)?.groupLabel
+        ?? fieldOptions.filter(f => f.group === g).map(f => f.label.split(" —")[0]).join(" or ")),
+    ...unpaired.map(f => `${f.requires} (to go with ${f.value})`),
   ];
+  const targetLabel = (t: string) => fieldOptions.find(o => o.value === t)?.label ?? t;
 
   const setTarget = (sourceCol: string, targetField: string) => {
     onMappingChange(mappings.map(m =>
@@ -716,12 +773,17 @@ function MapColumnsStep({
   return (
     <div>
       {/* Required fields check */}
-      {!requiredMapped && (
+      {missingLabels.length > 0 && (
         <InlineAlert tone="warning" className="mvx-toolbar--spaced">
           Map all required target fields before proceeding.
           Still missing: {missingLabels.join(", ")}
         </InlineAlert>
       )}
+      {sharedTargets.map(s => (
+        <InlineAlert key={s.target} tone="warning" className="mvx-toolbar--spaced">
+          Columns {s.cols.map(c => `"${c}"`).join(" and ")} both map to {targetLabel(s.target)} — map all but one of them to (ignore).
+        </InlineAlert>
+      ))}
 
       {justSaved && (
         <InlineAlert tone="success" className="mvx-toolbar--spaced">
@@ -975,6 +1037,11 @@ function CommitStep({
         // upload endpoint is the GRID importer and rejects dimension CSVs
         // ("label matches no metric or dimension", reported live).
         out = await api.importDimensionMembers(config.targetId, csv);
+      } else if (config.targetType === "form") {
+        // Records too: sent to the grid importer, a table's columns were
+        // refused as matching no metric or dimension.
+        const res = await api.importFormRecords(config.targetId, csv);
+        out = { rows_imported: res.records_created, error_rows: 0 };
       } else {
         const res = await api.uploadImport(csv, config.revisionId, config.importMode);
         out = { rows_imported: res.valid_rows, error_rows: res.error_rows };
@@ -993,7 +1060,7 @@ function CommitStep({
           const shaped = cleanReshape(config.reshape ?? {});
           await api.updateIntegrationConfig(config.draftId, {
             ...(isEmptyReshape(shaped) ? {} : { reshape: shaped }),
-            column_map: Object.fromEntries(mappings.filter(m => m.targetField).map(m => [m.sourceCol, m.targetField])),
+            column_map: columnMapOf(mappings),
             ...(config.source === "google_sheets" ? { sheet_url: config.sheetUrl, import_mode: config.importMode } : {}),
           });
         } catch { /* draft stays a draft; the import result stands */ }
@@ -1003,10 +1070,21 @@ function CommitStep({
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["import-jobs"] });
       qc.invalidateQueries({ queryKey: ["dev-integrations"] });
+      // What the import changed, refetched: the console holds the
+      // dimensions above its pages, so the Dimensions page went on showing
+      // the members from before the import until the page was reloaded.
+      if (config.targetType === "dimension") {
+        for (const key of ["dev-dimensions", "dev-dimensions-all", "dim-props"]) qc.invalidateQueries({ queryKey: [key] });
+      } else {
+        if (config.targetType === "form") qc.invalidateQueries({ queryKey: ["records"] });
+        void invalidateModelData(qc);
+      }
       setResult({ rowsImported: data.rows_imported, errorRows: data.error_rows, status: "success" });
     },
     onError: (e) => {
-      setResult({ rowsImported: 0, errorRows: 0, status: "error", message: e instanceof Error ? e.message : "Import failed" });
+      const rows = (e as ApiError).body?.errors;
+      setResult({ rowsImported: 0, errorRows: 0, status: "error", message: e instanceof Error ? e.message : "Import failed",
+        rowErrors: Array.isArray(rows) ? rows as CommitResult["rowErrors"] : undefined });
     },
   });
 
@@ -1027,6 +1105,28 @@ function CommitStep({
           <>
             <h3 style={{ margin: "0 0 8px", color: "var(--color-danger)" }}>Import Failed</h3>
             <p className="mvx-admin-muted" style={{ margin: "0 0 20px", fontSize: 13 }}>{result.message}</p>
+            {result.rowErrors && result.rowErrors.length > 0 && (
+              <div className="mvx-table-wrap" style={{ margin: "0 0 20px", textAlign: "left" }}>
+                <table className="mvx-table mvx-table--compact">
+                  <thead><tr><th>Row</th><th>Column</th><th>Problem</th><th>Value</th></tr></thead>
+                  <tbody>
+                    {result.rowErrors.slice(0, 100).map((e, i) => (
+                      <tr key={i}>
+                        <td className="mvx-admin-mono mvx-admin-muted">{e.row}</td>
+                        <td className="mvx-admin-mono">{e.column}</td>
+                        <td>{e.message}</td>
+                        <td className="mvx-admin-mono mvx-admin-muted">{e.raw_value ?? ""}</td>
+                      </tr>
+                    ))}
+                    {result.rowErrors.length > 100 && (
+                      <tr><td colSpan={4} className="mvx-admin-muted" style={{ textAlign: "center" }}>
+                        … {result.rowErrors.length - 100} more not shown
+                      </td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </>
         )}
         <Button variant="primary" onClick={onDone}>Done</Button>
@@ -1203,6 +1303,14 @@ function ImportWizard({
     metrics: (model as DevModel | undefined)?.metrics ?? [],
     dims: dims as DevDimension[],
   };
+  // The grid's metrics as map targets: the working revision's, which the
+  // grid's metric_ids name (the console holds the same query).
+  const { data: workingModel } = useQuery({
+    queryKey: ["dev-model", workingRevisionId],
+    queryFn: () => api.getDevModel(workingRevisionId),
+    enabled: config.targetType === "grid",
+  });
+  const gridMetrics = (workingModel as DevModel | undefined)?.metrics ?? [];
 
   // Known property names for the target dimension: declared attributes
   // (model.dimension_property) plus keys already present on its members.
@@ -1220,7 +1328,7 @@ function ImportWizard({
   }, [config.targetType, config.targetId, declaredProps, dims]);
 
   const fieldOptions = parsedFile
-    ? getFieldOptions(config, grids as GridDef[], forms as FormDef[], dims as DevDimension[], knownProps)
+    ? getFieldOptions(config, grids as GridDef[], forms as FormDef[], dims as DevDimension[], knownProps, gridMetrics)
     : [];
 
   // For row-level validation: only flag fields that are actually mapped and required
@@ -1239,8 +1347,8 @@ function ImportWizard({
     if (!sourceFile) return;
     const pf = { ...sourceFile, headers: shaped.headers, rows: shaped.rows };
     setParsedFile(pf);
-    const opts = getFieldOptions(config, grids as GridDef[], forms as FormDef[], dims as DevDimension[], knownProps);
-    const saved = config.editIntegration?.config.column_map ?? {};
+    const opts = getFieldOptions(config, grids as GridDef[], forms as FormDef[], dims as DevDimension[], knownProps, gridMetrics);
+    const saved = config.editIntegration?.config.column_map ?? config.savedColumnMap ?? {};
     setMappings(autoMap(pf.headers, opts).map(m => saved[m.sourceCol] !== undefined
       ? { ...m, targetField: saved[m.sourceCol] === "ignore" ? "" : saved[m.sourceCol], status: saved[m.sourceCol] === "ignore" ? "ignored" : "manual" }
       : m));
@@ -1250,7 +1358,7 @@ function ImportWizard({
     const r = cleanReshape(config.reshape ?? {});
     return isEmptyReshape(r) ? {} : { reshape: r };
   };
-  const columnMap = () => Object.fromEntries(mappings.filter(m => m.targetField).map(m => [m.sourceCol, m.targetField]));
+  const columnMap = () => columnMapOf(mappings);
 
   // Edit mode: the integration's other settings stay as they are.
   const saveChanges = useMutation({
@@ -1506,7 +1614,7 @@ function SavedIntegrationsList({
                 />
                 {d.config?.column_map && (
                   <span className="mvx-admin-muted" style={{ fontSize: 11 }}>
-                    {Object.keys(d.config.column_map).length} columns mapped
+                    {Object.values(d.config.column_map).filter(t => t !== "ignore").length} columns mapped
                   </span>
                 )}
                 {d.config?.reshape && describeReshape(d.config.reshape) && (
@@ -1547,7 +1655,8 @@ function SavedIntegrationsList({
                 <Button
                   size="sm"
                   leadingIcon={<Play size={13} />}
-                  onClick={() => onRun({ integrationId: d.id, integrationName: d.name, targetType: d.target_type as TargetType, targetId: d.target_id })}
+                  onClick={() => onRun({ integrationId: d.id, integrationName: d.name, targetType: d.target_type as TargetType, targetId: d.target_id,
+                    ...(d.config?.column_map ? { savedColumnMap: d.config.column_map } : {}) })}
                 >
                   Run Import
                 </Button>
@@ -1701,7 +1810,7 @@ export function ExcelImportSection({ revisionId }: { revisionId?: string } = {})
           <div className="mvx-panel" style={{ marginTop: 24, padding: 16, background: "var(--color-surface-subtle)", fontSize: 13, color: "var(--color-text-muted)" }}>
             <strong style={{ color: "var(--color-text)" }}>CSV format by target type:</strong>
             <ul style={{ margin: "8px 0 0", paddingLeft: 20, lineHeight: 1.8 }}>
-              <li><strong>Grid:</strong> <code>metric_id, value</code> + one column per dimension with member codes</li>
+              <li><strong>Grid:</strong> one column per dimension with member codes, and one column per metric (e.g. <code>region, month, revenue, qty</code>) — or a <code>metric</code> column naming each row's metric beside a <code>value</code> column</li>
               <li><strong>Table of records:</strong> columns = field names (e.g. <code>amount, description, date</code>)</li>
               <li><strong>Dimension:</strong> <code>code, label</code> and optionally <code>parent_code</code></li>
             </ul>

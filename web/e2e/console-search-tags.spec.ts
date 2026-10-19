@@ -193,8 +193,8 @@ test("users: search by name, e-mail or role", async ({ page }) => {
   await nav(page, "Users").click();
   const search = page.getByPlaceholder("Search name, e-mail, role, workspace…");
   const rows = page.locator("table.mvx-table tbody tr");
-  const all = await rows.count();
-  expect(all).toBeGreaterThan(1);
+  // The list loads after the page: counted at once, a slow run read 0 rows.
+  await expect(rows.nth(1)).toBeVisible();
   await search.fill("alex@example");
   await expect(rows).toHaveCount(1);
   await expect(rows.first()).toContainText("Alex Smith");

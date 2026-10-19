@@ -85,11 +85,31 @@ func rowsCSV(header []string, rows []importpkg.RawRow) (*csv.Reader, map[string]
 	if _, err := cr.Read(); err != nil {
 		return nil, nil, fmt.Errorf("file header: %w", err)
 	}
-	colIdx := make(map[string]int, len(header))
-	for i, col := range header {
-		colIdx[strings.ToLower(strings.TrimSpace(col))] = i
+	colIdx, err := fileColumnIndex(header)
+	if err != nil {
+		return nil, nil, err
 	}
 	return cr, colIdx, nil
+}
+
+// fileColumnIndex maps each lower-case column name of a file's header to its
+// position, refusing a name the header holds twice: the index kept the last
+// one, so a file with two code columns imported each member's parent as its
+// code — members relabelled, the new ones never made — and said it had
+// imported every row.
+func fileColumnIndex(header []string) (map[string]int, error) {
+	colIdx := make(map[string]int, len(header))
+	for i, col := range header {
+		key := strings.ToLower(strings.TrimSpace(col))
+		if key == "" {
+			continue
+		}
+		if prev, dup := colIdx[key]; dup {
+			return nil, fmt.Errorf("columns %d and %d are both named %q — a file names each column once", prev+1, i+1, strings.TrimSpace(col))
+		}
+		colIdx[key] = i
+	}
+	return colIdx, nil
 }
 
 // commitGridRows writes resolved rows into a revision the way every grid

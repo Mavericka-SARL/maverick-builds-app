@@ -289,3 +289,31 @@ func TestFileImportRefusesADimensionTheGridLacks(t *testing.T) {
 		t.Errorf("run without a period column: %d %s — want 400 naming the unmapped grid dimension", status, body)
 	}
 }
+
+// A file naming a column twice is refused, not read as its last copy: two
+// code columns made the dimension import take each member's parent as its
+// code (the Import Wizard had mapped parent_code onto code, 2026-10-19).
+func TestFileColumnIndexRefusesARepeatedColumn(t *testing.T) {
+	idx, err := fileColumnIndex([]string{"Code", "label", " parent_code ", ""})
+	if err != nil {
+		t.Fatalf("distinct columns: %v", err)
+	}
+	if idx["code"] != 0 || idx["parent_code"] != 2 {
+		t.Errorf("index = %v", idx)
+	}
+	if _, empty := idx[""]; empty {
+		t.Errorf("an unnamed column is indexed: %v", idx)
+	}
+	// Unnamed columns may repeat: they are no column of the import.
+	if _, err := fileColumnIndex([]string{"code", "", "label", " "}); err != nil {
+		t.Errorf("repeated unnamed columns: %v", err)
+	}
+
+	_, err = fileColumnIndex([]string{"code", "label", "CODE"})
+	if err == nil || !strings.Contains(err.Error(), `columns 1 and 3 are both named "CODE"`) {
+		t.Fatalf("repeated column: err = %v", err)
+	}
+	if _, _, err := rowsCSV([]string{"code", "code"}, nil); err == nil {
+		t.Error("rowsCSV accepted a repeated column")
+	}
+}
