@@ -1,0 +1,13 @@
+-- A dashboard's place in its revision's order: the order of the Dashboards
+-- page's tabs, and the first one is where everyone lands.
+--
+-- Dashboards were listed by name, so a model that wanted its guide first and
+-- its pages in the order of its workflow numbered their names ("1 Start
+-- here"), and names sort as text: "10 Plan Summary" came before "2 How to
+-- adapt" (found 2026-10-18, the shared planning models, 17 dashboards in HR).
+--
+-- NULL is unordered: those dashboards list after the ordered ones, by name,
+-- as every dashboard did before. The developer sets the order
+-- (PUT /api/developer/dashboards/order, or the AI Developer's
+-- reorder_dashboards); a revision copy and a model package carry it.
+ALTER TABLE model.dashboard_def ADD COLUMN sort_order integer;

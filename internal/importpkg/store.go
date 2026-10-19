@@ -299,6 +299,16 @@ func (s *Store) CommitImport(ctx context.Context, jobID, modelID, revisionID, us
 		return nil, fmt.Errorf("%w: %s", ErrWriteDenied, reason)
 	}
 
+	// A cell its metric's closed rules close takes no input (migration 147):
+	// the import is refused as a typed cell would be.
+	if closedCells, cErr := s.resolveStagedCells(ctx, jobID); cErr != nil {
+		return nil, fmt.Errorf("resolve staged cells: %w", cErr)
+	} else if reason, gErr := writeguard.ClosedReason(ctx, s.pool, revisionID, closedCells); gErr != nil {
+		return nil, fmt.Errorf("write guard: %w", gErr)
+	} else if reason != "" {
+		return nil, fmt.Errorf("%w: %s", ErrWriteDenied, reason)
+	}
+
 	// Metric-level access — CheckWriteMetrics above covers the workflow
 	// lock, mirroring HTTP /api/cells' own two separate checks
 	// (MetricAccess + CheckWrite). Without this, a user hidden/
@@ -565,6 +575,32 @@ func (s *Store) resolveStagedMetricIDs(ctx context.Context, jobID string) ([]str
 		metricIDs = append(metricIDs, id)
 	}
 	return metricIDs, rows.Err()
+}
+
+// resolveStagedCells lists the staged cells of the job's metrics that carry
+// closed rules, for writeguard.ClosedReason (none: no query of the cells).
+func (s *Store) resolveStagedCells(ctx context.Context, jobID string) ([]writeguard.Cell, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT st.metric_id::text, st.dim_members FROM import.import_staging st
+		JOIN model.metric_def m ON m.id = st.metric_id
+		WHERE st.job_id=$1::uuid AND m.closed_when <> '[]'::jsonb`, jobID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var cells []writeguard.Cell
+	for rows.Next() {
+		var metricID string
+		var raw []byte
+		if err := rows.Scan(&metricID, &raw); err != nil {
+			return nil, err
+		}
+		var codes map[string]string
+		if json.Unmarshal(raw, &codes) == nil {
+			cells = append(cells, writeguard.Cell{MetricID: metricID, DimCodes: codes})
+		}
+	}
+	return cells, rows.Err()
 }
 
 func (s *Store) GetImportErrors(ctx context.Context, jobID string, limit int32) ([]*importpkgv1.ImportError, error) {

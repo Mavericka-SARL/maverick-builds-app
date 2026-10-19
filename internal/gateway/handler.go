@@ -428,6 +428,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/developer/dashboards", "developer", dev(h.developerDashboards))
 	register("POST", "/api/developer/dashboards", "developer", dev(h.developerDashboards))
 	register("PATCH", "/api/developer/dashboards/{id}", "developer", dev(h.developerDashboardAction))
+	register("PUT", "/api/developer/dashboards/order", "developer", dev(h.reorderDashboards))
 	register("DELETE", "/api/developer/dashboards/{id}", "developer", dev(h.developerDashboardAction))
 	register("POST", "/api/developer/dashboards/{id}/widgets", "developer", dev(h.developerDashboardAction))
 	register("PATCH", "/api/developer/dashboards/{id}/widgets/{widgetId}", "developer", dev(h.developerDashboardAction))
@@ -626,6 +627,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux, routes *[]RouteInfo) {
 	register("GET", "/api/workflow/my-history", "any", cors(h.workflowMyHistory))
 	register("GET", "/api/workflow/definitions", "any", cors(h.workflowDefinitions))
 	register("GET", "/api/workflow/definitions/{id}", "any", cors(h.workflowDefinition))
+	register("GET", "/api/workflow/status", "any", cors(h.workflowStatus))
 	register("POST", "/api/workflow/instances", "any", cors(h.workflowStartInstance))
 	register("PATCH", "/api/workflow/instances/{id}", "business_admin", ba(h.workflowInstanceAction))
 	register("POST", "/api/workflow/instances/{id}/cancel", "developer_or_business_admin", baOrDev(h.workflowInstanceCancel))
@@ -1938,6 +1940,9 @@ type metricRow struct {
 	// HighlightRules tint the metric's cells (metricformula.HighlightRule).
 	// Only set in /api/grid.
 	HighlightRules json.RawMessage `json:"highlight_rules,omitempty"`
+	// ClosedWhen: the cells that take no input (metricformula.ClosedRule,
+	// migration 147). Only set in /api/grid.
+	ClosedWhen json.RawMessage `json:"closed_when,omitempty"`
 }
 
 // aggregateEvaluated reports metricRow.AggregateEvaluated for m — the
@@ -2898,8 +2903,12 @@ type gridDimMember struct {
 }
 
 type gridDimension struct {
-	ID                string  `json:"id"`
-	Name              string  `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Label is the dimension's display name ("Plan case" for plan_case),
+	// shown on selectors and headers; empty: the name is shown. Formulas
+	// and every API keep naming the dimension by Name.
+	Label             string  `json:"label,omitempty"`
 	DimensionType     string  `json:"dimension_type"`                    // "standard" | "time"
 	TimeGranularity   *string `json:"time_granularity,omitempty"`        // time dimensions only
 	FiscalYearStart   *int    `json:"fiscal_year_start_month,omitempty"` // time dimensions only
@@ -3158,7 +3167,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	var dimParam interface{}
 	if gridDefID != "" {
 		dimQuery = `
-			SELECT d.id::text, d.name, gd.display_level, d.parent_dimension_id::text,
+			SELECT d.id::text, d.name, COALESCE(d.label, ''), gd.display_level, d.parent_dimension_id::text,
 			       d.source_dimension_id::text, d.source_property,
 			       d.dimension_type, d.time_granularity, d.fiscal_year_start_month,
 			       m.id::text, m.code, m.label, m.properties,
@@ -3181,7 +3190,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		// pre-revision legacy and stay visible. Dimensions order by name
 		// alone, the grid-definition branch's rule: no name is special.
 		dimQuery = `
-			SELECT d.id::text, d.name, NULL::int AS display_level, d.parent_dimension_id::text,
+			SELECT d.id::text, d.name, COALESCE(d.label, ''), NULL::int AS display_level, d.parent_dimension_id::text,
 			       d.source_dimension_id::text, d.source_property,
 			       d.dimension_type, d.time_granularity, d.fiscal_year_start_month,
 			       m.id::text, m.code, m.label, m.properties,
@@ -3207,12 +3216,12 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	dimMap := map[string]*gridDimension{}
 	dimOrder := []string{}
 	for dimRows.Next() {
-		var dimID, dimName, memberID, code, label, parentCode, parentMemberID, dimType string
+		var dimID, dimName, dimLabel, memberID, code, label, parentCode, parentMemberID, dimType string
 		var displayLevel, fiscalStart, timeIndex *int
 		var parentDimensionID, sourceDimensionID, sourceProperty, granularity, periodStart, periodEnd *string
 		var properties json.RawMessage
 		var memberFormula string
-		if err := dimRows.Scan(&dimID, &dimName, &displayLevel, &parentDimensionID, &sourceDimensionID, &sourceProperty,
+		if err := dimRows.Scan(&dimID, &dimName, &dimLabel, &displayLevel, &parentDimensionID, &sourceDimensionID, &sourceProperty,
 			&dimType, &granularity, &fiscalStart,
 			&memberID, &code, &label, &properties, &parentCode, &parentMemberID, &periodStart, &periodEnd, &timeIndex, &memberFormula); err != nil {
 			dimRows.Close()
@@ -3220,7 +3229,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if _, ok := dimMap[dimID]; !ok {
-			dimMap[dimID] = &gridDimension{ID: dimID, Name: dimName, DisplayLevel: displayLevel, ParentDimensionID: parentDimensionID, SourceDimensionID: sourceDimensionID, SourceProperty: sourceProperty,
+			dimMap[dimID] = &gridDimension{ID: dimID, Name: dimName, Label: dimLabel, DisplayLevel: displayLevel, ParentDimensionID: parentDimensionID, SourceDimensionID: sourceDimensionID, SourceProperty: sourceProperty,
 				DimensionType: dimType, TimeGranularity: granularity, FiscalYearStart: fiscalStart}
 			dimOrder = append(dimOrder, dimID)
 		}
@@ -3247,7 +3256,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	var allDims []gridDimension
 	if gridDefID != "" {
 		allDimRows, adErr := h.db.Query(ctx, `
-			SELECT d.id::text, d.name, d.parent_dimension_id::text,
+			SELECT d.id::text, d.name, COALESCE(d.label, ''), d.parent_dimension_id::text,
 			       d.source_dimension_id::text, d.source_property,
 			       d.dimension_type, d.time_granularity, d.fiscal_year_start_month,
 			       m.id::text, m.code, m.label, m.properties,
@@ -3266,12 +3275,12 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		allDimMap := map[string]*gridDimension{}
 		allDimOrder := []string{}
 		for allDimRows.Next() {
-			var dimID, dimName, memberID, code, label, parentCode, parentMemberID, dimType string
+			var dimID, dimName, dimLabel, memberID, code, label, parentCode, parentMemberID, dimType string
 			var parentDimensionID, sourceDimensionID, sourceProperty, granularity, periodStart, periodEnd *string
 			var fiscalStart, timeIndex *int
 			var properties json.RawMessage
 			var memberFormula string
-			if err := allDimRows.Scan(&dimID, &dimName, &parentDimensionID, &sourceDimensionID, &sourceProperty,
+			if err := allDimRows.Scan(&dimID, &dimName, &dimLabel, &parentDimensionID, &sourceDimensionID, &sourceProperty,
 				&dimType, &granularity, &fiscalStart,
 				&memberID, &code, &label, &properties, &parentCode, &parentMemberID, &periodStart, &periodEnd, &timeIndex, &memberFormula); err != nil {
 				allDimRows.Close()
@@ -3279,7 +3288,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if _, ok := allDimMap[dimID]; !ok {
-				allDimMap[dimID] = &gridDimension{ID: dimID, Name: dimName, ParentDimensionID: parentDimensionID, SourceDimensionID: sourceDimensionID, SourceProperty: sourceProperty,
+				allDimMap[dimID] = &gridDimension{ID: dimID, Name: dimName, Label: dimLabel, ParentDimensionID: parentDimensionID, SourceDimensionID: sourceDimensionID, SourceProperty: sourceProperty,
 					DimensionType: dimType, TimeGranularity: granularity, FiscalYearStart: fiscalStart}
 				allDimOrder = append(allDimOrder, dimID)
 			}
@@ -3532,7 +3541,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		metricRows2, err = h.db.Query(ctx, `
 			SELECT rev.id::text, rev.name, rev.is_input, rev.formula, rev.agg_rule,
 			       rev.format, rev.format_decimals, rev.format_currency, rev.time_summary,
-			       COALESCE(rev.picklist_dimension_id::text,''), rev.highlight_rules
+			       COALESCE(rev.picklist_dimension_id::text,''), rev.highlight_rules, rev.closed_when
 			FROM model.grid_metric gm
 			JOIN model.metric_def orig ON orig.id = gm.metric_id
 			JOIN model.metric_def rev
@@ -3546,7 +3555,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		metricRows2, err = h.db.Query(ctx, `
 			SELECT id::text, name, is_input, formula, agg_rule,
 			       format, format_decimals, format_currency, time_summary,
-			       COALESCE(picklist_dimension_id::text,''), highlight_rules
+			       COALESCE(picklist_dimension_id::text,''), highlight_rules, closed_when
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid
 			ORDER BY is_input DESC, name
 		`, modelID, revisionID)
@@ -3557,7 +3566,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 	}
 	for metricRows2.Next() {
 		var mr metricRow
-		if err := metricRows2.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID, &mr.HighlightRules); err != nil {
+		if err := metricRows2.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID, &mr.HighlightRules, &mr.ClosedWhen); err != nil {
 			metricRows2.Close()
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
@@ -3616,7 +3625,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		allRows, aErr := h.db.Query(ctx, `
 			SELECT id::text, name, is_input, formula, agg_rule,
 			       format, format_decimals, format_currency, time_summary,
-			       COALESCE(picklist_dimension_id::text,''), highlight_rules
+			       COALESCE(picklist_dimension_id::text,''), highlight_rules, closed_when
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid
 			ORDER BY is_input DESC, name
 		`, modelID, revisionID)
@@ -3626,7 +3635,7 @@ func (h *handler) grid(w http.ResponseWriter, r *http.Request) {
 		}
 		for allRows.Next() {
 			var mr metricRow
-			if err := allRows.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID, &mr.HighlightRules); err != nil {
+			if err := allRows.Scan(&mr.ID, &mr.Name, &mr.IsInput, &mr.Formula, &mr.AggRule, &mr.Format, &mr.FormatDecimals, &mr.FormatCurrency, &mr.TimeSummary, &mr.PicklistDimensionID, &mr.HighlightRules, &mr.ClosedWhen); err != nil {
 				allRows.Close()
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
@@ -4558,8 +4567,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		-- 1. Copy metrics; capture old→new ID mapping via name join
 		new_metrics AS (
 			INSERT INTO model.metric_def
-			  (model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, revision_id, lineage_id, highlight_rules, picklist_allow_parents)
-			SELECT model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, $2::uuid, lineage_id, highlight_rules, picklist_allow_parents
+			  (model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, revision_id, lineage_id, highlight_rules, picklist_allow_parents, closed_when)
+			SELECT model_id, name, label, formula, storage_type, is_input, agg_rule, format, format_decimals, format_currency, time_summary, tags, $2::uuid, lineage_id, highlight_rules, picklist_allow_parents, closed_when
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 			RETURNING id AS new_id, name
 		),
@@ -4583,9 +4592,9 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		new_dims AS (
 			INSERT INTO model.dimension_def
 			  (model_id, name, agg_rule, properties, revision_id, source_property,
-			   dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained)
+			   dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label)
 			SELECT model_id, name, agg_rule, properties, $2::uuid, source_property,
-			       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained
+			       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label
 			FROM model.dimension_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 			RETURNING id AS new_id, name
 		),
@@ -4612,8 +4621,8 @@ func (h *handler) duplicateRevision(ctx context.Context, tx pgx.Tx, modelID, nam
 		-- 5. Copy dashboards (folder_id is remapped in Step F below, after
 		-- folders themselves are copied)
 		new_dashes AS (
-			INSERT INTO model.dashboard_def (model_id, name, tags, category, revision_id, selector_bar)
-			SELECT model_id, name, tags, category, $2::uuid, selector_bar
+			INSERT INTO model.dashboard_def (model_id, name, tags, category, revision_id, selector_bar, sort_order)
+			SELECT model_id, name, tags, category, $2::uuid, selector_bar, sort_order
 			FROM model.dashboard_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 			RETURNING id AS new_id, name
 		),
@@ -5470,8 +5479,10 @@ type devMetric struct {
 	PicklistAllowParents bool `json:"picklist_allow_parents,omitempty"`
 	// HighlightRules tint its cells (metricformula.HighlightRule).
 	HighlightRules json.RawMessage `json:"highlight_rules"`
-	DependsOn      []string        `json:"depends_on"`
-	DependedBy     []string        `json:"depended_by"`
+	// ClosedWhen: the cells that take no input (metricformula.ClosedRule).
+	ClosedWhen json.RawMessage `json:"closed_when"`
+	DependsOn  []string        `json:"depends_on"`
+	DependedBy []string        `json:"depended_by"`
 	// Tags: free-form labels the developer console filters by.
 	Tags []string `json:"tags"`
 	// CalcError is set when this metric's most recent calculation attempt
@@ -5521,7 +5532,7 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 		SELECT m.id::text, m.name, m.is_input, m.formula, m.agg_rule,
 		       COALESCE(m.agg_numerator_metric_id::text,''), COALESCE(m.agg_denominator_metric_id::text,''),
 		       m.format, m.format_decimals, m.format_currency, m.time_summary, m.tags,
-		       COALESCE(m.picklist_dimension_id::text,''), m.picklist_allow_parents, m.highlight_rules,
+		       COALESCE(m.picklist_dimension_id::text,''), m.picklist_allow_parents, m.highlight_rules, m.closed_when,
 		       COALESCE(
 		           (SELECT string_agg(dep.name, ',')
 		            FROM model.calc_dependency cd
@@ -5553,7 +5564,7 @@ func (h *handler) developerModel(w http.ResponseWriter, r *http.Request) {
 		var dependsOnCSV, dependedByCSV string
 		if err := rows.Scan(&dm.ID, &dm.Name, &dm.IsInput, &dm.Formula, &dm.AggRule,
 			&dm.AggNumeratorMetricID, &dm.AggDenominatorMetricID,
-			&dm.Format, &dm.FormatDecimals, &dm.FormatCurrency, &dm.TimeSummary, &dm.Tags, &dm.PicklistDimensionID, &dm.PicklistAllowParents, &dm.HighlightRules, &dependsOnCSV, &dependedByCSV, &dm.CalcError); err != nil {
+			&dm.Format, &dm.FormatDecimals, &dm.FormatCurrency, &dm.TimeSummary, &dm.Tags, &dm.PicklistDimensionID, &dm.PicklistAllowParents, &dm.HighlightRules, &dm.ClosedWhen, &dependsOnCSV, &dependedByCSV, &dm.CalcError); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -5633,6 +5644,8 @@ type addMetricReq struct {
 	PicklistAllowParents bool `json:"picklist_allow_parents"`
 	// HighlightRules tint its cells (metricformula.CheckHighlightRules).
 	HighlightRules json.RawMessage `json:"highlight_rules"`
+	// ClosedWhen closes cells to input (metricformula.CheckClosedRules).
+	ClosedWhen json.RawMessage `json:"closed_when"`
 }
 
 func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
@@ -5690,6 +5703,15 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 	highlights, err := metricformula.CheckHighlightRules(ctx, h.db.For(ctx), modelID, req.RevisionID, req.Name, req.HighlightRules)
 	if err != nil {
 		jsonErr(w, err, http.StatusBadRequest)
+		return
+	}
+	closedRules, err := metricformula.CheckClosedRules(ctx, h.db.For(ctx), modelID, req.RevisionID, "", req.ClosedWhen)
+	if err != nil {
+		jsonErr(w, err, http.StatusBadRequest)
+		return
+	}
+	if string(closedRules) != "[]" && !req.IsInput {
+		jsonErr(w, fmt.Errorf("closed_when is for input metrics: a calculated metric takes no input anyway"), http.StatusBadRequest)
 		return
 	}
 
@@ -5793,6 +5815,9 @@ func (h *handler) developerMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	if metricInsertErr == nil && string(highlights) != "[]" {
 		_, metricInsertErr = tx.Exec(ctx, `UPDATE model.metric_def SET highlight_rules=$2::jsonb WHERE id=$1::uuid`, newID, string(highlights))
+	}
+	if metricInsertErr == nil && string(closedRules) != "[]" {
+		_, metricInsertErr = tx.Exec(ctx, `UPDATE model.metric_def SET closed_when=$2::jsonb WHERE id=$1::uuid`, newID, string(closedRules))
 	}
 	if metricInsertErr != nil {
 		if metricformula.IsUniqueViolation(metricInsertErr) {
@@ -6478,8 +6503,10 @@ type devMember struct {
 }
 
 type devDimension struct {
-	ID                string   `json:"id"`
-	Name              string   `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Label is the display name (gridDimension.Label); empty: the name.
+	Label             string   `json:"label,omitempty"`
 	AggRule           string   `json:"agg_rule"`
 	ParentDimensionID *string  `json:"parent_dimension_id"`
 	DimensionType     string   `json:"dimension_type"` // "standard" | "time" — explicit, immutable
@@ -6681,7 +6708,7 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 		dimArgs = []any{modelID, revisionID}
 	}
 	dimRows, err := h.db.Query(ctx,
-		`SELECT id::text, name, agg_rule, parent_dimension_id::text, dimension_type, time_granularity, fiscal_year_start_month, tags,
+		`SELECT id::text, name, COALESCE(label, ''), agg_rule, parent_dimension_id::text, dimension_type, time_granularity, fiscal_year_start_month, tags,
 		        source_dimension_id::text, source_property, business_maintained
 		 FROM model.dimension_def WHERE model_id=$1::uuid AND `+dimFilter+` ORDER BY created_at`,
 		dimArgs...)
@@ -6694,7 +6721,7 @@ func (h *handler) developerDimensions(w http.ResponseWriter, r *http.Request) {
 	var dims []devDimension
 	for dimRows.Next() {
 		var d devDimension
-		if err := dimRows.Scan(&d.ID, &d.Name, &d.AggRule, &d.ParentDimensionID, &d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart, &d.Tags,
+		if err := dimRows.Scan(&d.ID, &d.Name, &d.Label, &d.AggRule, &d.ParentDimensionID, &d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart, &d.Tags,
 			&d.SourceDimensionID, &d.SourceProperty, &d.BusinessMaintained); err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return
@@ -11170,6 +11197,8 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			Label *string `json:"label"`
 			// Omitted leaves the highlight rules; [] removes them.
 			HighlightRules *json.RawMessage `json:"highlight_rules"`
+			// Omitted leaves the closed rules; [] removes them.
+			ClosedWhen *json.RawMessage `json:"closed_when"`
 			// IsInput switches the metric between input and calculated
 			// (modeledit.SwitchMetricKind); omitted keeps it. Becoming
 			// calculated takes a formula, and DropValues for an input that
@@ -11258,7 +11287,19 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 			}
 			metricIsInput = *patch.IsInput
 		}
-		var highlights json.RawMessage // set when the request sends highlight_rules
+		var highlights json.RawMessage  // set when the request sends highlight_rules
+		var closedRules json.RawMessage // set when the request sends closed_when
+		if patch.ClosedWhen != nil {
+			var cErr error
+			if closedRules, cErr = metricformula.CheckClosedRules(ctx, h.db.For(ctx), modelID, metricRevisionID, metricID, *patch.ClosedWhen); cErr != nil {
+				jsonErr(w, cErr, http.StatusBadRequest)
+				return
+			}
+			if string(closedRules) != "[]" && !metricIsInput {
+				jsonErr(w, fmt.Errorf("closed_when is for input metrics: a calculated metric takes no input anyway"), http.StatusBadRequest)
+				return
+			}
+		}
 		{
 			// A pick-list keeps its dimension unless the request changes it;
 			// leaving the format drops it. Becoming one takes the pick-list's
@@ -11393,6 +11434,12 @@ func (h *handler) developerMetricAction(w http.ResponseWriter, r *http.Request) 
 		}
 		if highlights != nil {
 			if _, err := tx.Exec(ctx, `UPDATE model.metric_def SET highlight_rules=$2::jsonb WHERE id=$1::uuid`, metricID, string(highlights)); err != nil {
+				jsonErr(w, err, http.StatusInternalServerError)
+				return
+			}
+		}
+		if closedRules != nil {
+			if _, err := tx.Exec(ctx, `UPDATE model.metric_def SET closed_when=$2::jsonb WHERE id=$1::uuid`, metricID, string(closedRules)); err != nil {
 				jsonErr(w, err, http.StatusInternalServerError)
 				return
 			}
@@ -11784,6 +11831,8 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				AggRule           string    `json:"agg_rule"`
 				ParentDimensionID *string   `json:"parent_dimension_id"`
 				Tags              *[]string `json:"tags"`
+				// Label: the display name; "" clears it (the name is shown).
+				Label *string `json:"label"`
 				// Users maintain its members (business_members.go).
 				BusinessMaintained *bool `json:"business_maintained"`
 			}
@@ -11834,6 +11883,17 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 					return
 				}
 			}
+			if body.Label != nil {
+				label := strings.TrimSpace(*body.Label)
+				if len(label) > 80 {
+					jsonErr(w, fmt.Errorf("label: at most 80 characters"), http.StatusBadRequest)
+					return
+				}
+				if _, err := h.db.Exec(ctx, `UPDATE model.dimension_def SET label=NULLIF($2,'') WHERE id=$1::uuid`, dimID, label); err != nil {
+					jsonErr(w, err, http.StatusInternalServerError)
+					return
+				}
+			}
 			// dimension_type / time_granularity / fiscal_year_start_month are
 			// deliberately not updatable: they are immutable after creation
 			// (a DB trigger enforces it too).
@@ -11869,7 +11929,11 @@ func (h *handler) developerDimensionAction(w http.ResponseWriter, r *http.Reques
 				// formula reading through the grouping recalculates.
 				go h.recalcDimensionDependents(context.WithoutCancel(ctx), dimID) //nolint:contextcheck
 			}
-			h.auditDimensionUpdated(ctx, r, dimID, "dimension", map[string]string{"name": body.Name})
+			auditMeta := map[string]string{"name": body.Name}
+			if body.Label != nil {
+				auditMeta["label"] = strings.TrimSpace(*body.Label)
+			}
+			h.auditDimensionUpdated(ctx, r, dimID, "dimension", auditMeta)
 			if grouping.Write {
 				if derived == nil {
 					derived = []string{}
@@ -15126,11 +15190,11 @@ func (h *handler) developerDashboards(w http.ResponseWriter, r *http.Request) {
 		}
 		if revisionID != "" {
 			rows, err = h.db.Query(ctx,
-				`SELECT id::text, name, COALESCE(tags, '{}'), folder_id::text, selector_bar FROM model.dashboard_def WHERE model_id=$1::uuid AND revision_id=$2::uuid ORDER BY name`,
+				`SELECT id::text, name, COALESCE(tags, '{}'), folder_id::text, selector_bar FROM model.dashboard_def WHERE model_id=$1::uuid AND revision_id=$2::uuid ORDER BY sort_order NULLS LAST, name`,
 				modelID, revisionID)
 		} else {
 			rows, err = h.db.Query(ctx,
-				`SELECT id::text, name, COALESCE(tags, '{}'), folder_id::text, selector_bar FROM model.dashboard_def WHERE model_id=$1::uuid ORDER BY name`,
+				`SELECT id::text, name, COALESCE(tags, '{}'), folder_id::text, selector_bar FROM model.dashboard_def WHERE model_id=$1::uuid ORDER BY sort_order NULLS LAST, name`,
 				modelID)
 		}
 		if err != nil {
@@ -15874,12 +15938,12 @@ func (h *handler) businessDashboards(w http.ResponseWriter, r *http.Request) {
 	if activeRevisionID != "" {
 		rows, qErr = h.db.Query(ctx,
 			`SELECT dd.id::text, dd.name, COALESCE(dd.tags, '{}'), dd.folder_id::text FROM model.dashboard_def dd
-			 WHERE dd.model_id=$1::uuid AND dd.revision_id=$2::uuid`+roleFilter("$3")+` ORDER BY dd.name`,
+			 WHERE dd.model_id=$1::uuid AND dd.revision_id=$2::uuid`+roleFilter("$3")+` ORDER BY dd.sort_order NULLS LAST, dd.name`,
 			modelID, activeRevisionID, a.UserID)
 	} else {
 		rows, qErr = h.db.Query(ctx,
 			`SELECT dd.id::text, dd.name, COALESCE(dd.tags, '{}'), dd.folder_id::text FROM model.dashboard_def dd
-			 WHERE dd.model_id=$1::uuid`+roleFilter("$2")+` ORDER BY dd.name`,
+			 WHERE dd.model_id=$1::uuid`+roleFilter("$2")+` ORDER BY dd.sort_order NULLS LAST, dd.name`,
 			modelID, a.UserID)
 	}
 	if qErr != nil {
@@ -16681,7 +16745,7 @@ func (h *handler) baAvailable(w http.ResponseWriter, r *http.Request) {
 			JOIN core.model m ON m.id = dd.model_id
 			WHERE dd.model_id=$1::uuid
 			  AND dd.revision_id = m.active_revision_id
-			ORDER BY dd.name`, modelID)
+			ORDER BY dd.sort_order NULLS LAST, dd.name`, modelID)
 		if err != nil {
 			jsonErr(w, err, http.StatusInternalServerError)
 			return

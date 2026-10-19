@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, LayoutDashboard, Trash2, FolderPlus, Folder, Pencil } from "lucide-react";
+import { Plus, LayoutDashboard, Trash2, FolderPlus, Folder, Pencil, ArrowUp, ArrowDown } from "lucide-react";
 import { api, type DashboardDef, type DashboardFolder } from "../../api/client";
 import { Toolbar, ToolbarGroup, SearchInput, FilterChip, TagInput, TagFilter, Button, Field, TextInput, Select, EmptyState, IconButton, useConfirm } from "../../ui";
 import { DashboardCanvas } from "./DashboardCanvas";
@@ -117,6 +117,17 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
       api.updateDashboard(dash.id, { folder_id: folderID }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["dev-dashboards"] }),
   });
+  // Order: the list comes in the revision's order (the Dashboards page's
+  // tabs). Moving one swaps it with its neighbour in the group shown.
+  const reorder = useMutation({
+    mutationFn: (ids: string[]) => api.reorderDashboards(ids),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["dev-dashboards"] }),
+  });
+  const move = (items: DashboardDef[], i: number, dir: -1 | 1) => {
+    const a = items[i], b = items[i + dir];
+    if (!a || !b) return;
+    reorder.mutate(dashboards.map(d => (d.id === a.id ? b.id : d.id === b.id ? a.id : d.id)));
+  };
   const deleteDashboard = useMutation({
     mutationFn: (id: string) => api.deleteDashboard(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["dev-dashboards"] }),
@@ -254,6 +265,7 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
         {filterTag ? ` tagged "${filterTag}"` : ""}
         {filterFolder === ROOT_OPTION ? ` outside any folder` : ""}
         {filterFolder && filterFolder !== ROOT_OPTION ? ` in "${folderByID.get(filterFolder)?.path ?? "folder"}"` : ""}
+        {" "}— in the order of the Dashboards page's tabs; the first is where everyone lands. Move one with its arrows.
       </p>
 
       {filtered.length === 0 && folders.length === 0 && <EmptyState label="No dashboards match." />}
@@ -291,7 +303,7 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
               <p className="mvx-admin-muted" style={{ margin: 0, fontSize: 13 }}>Empty — move a dashboard here with its Folder control.</p>
             )}
 
-            {group.items.map(dash => (
+            {group.items.map((dash, di) => (
               <div key={dash.id} className="mvx-admin-object">
                 <div className="mvx-admin-object__header" style={{ flexWrap: "wrap", borderBottom: "none" }}>
                   {editingDashId === dash.id ? (
@@ -339,6 +351,14 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
                           {folderOptions(UNFILED_LABEL)}
                         </Select>
                         )}
+                        <IconButton aria-label={`Move ${dash.name} up`} title="Move up (earlier tab)"
+                          disabled={di === 0 || reorder.isPending} onClick={() => move(group.items, di, -1)}>
+                          <ArrowUp size={14} />
+                        </IconButton>
+                        <IconButton aria-label={`Move ${dash.name} down`} title="Move down (later tab)"
+                          disabled={di === group.items.length - 1 || reorder.isPending} onClick={() => move(group.items, di, 1)}>
+                          <ArrowDown size={14} />
+                        </IconButton>
                         <Button size="sm" leadingIcon={<LayoutDashboard size={13} />}
                           onClick={() => { setCanvasDashId(dash.id); setCanvasDashName(dash.name); }}>
                           Design
@@ -368,6 +388,7 @@ export function DashboardsTab({ revisionId }: { revisionId?: string }) {
         ))}
       </div>
       {moveDashboard.isError && <p className="mvx-admin-error">{(moveDashboard.error as Error).message}</p>}
+      {reorder.isError && <p className="mvx-admin-error">{(reorder.error as Error).message}</p>}
       {confirmElement}
     </div>
   );

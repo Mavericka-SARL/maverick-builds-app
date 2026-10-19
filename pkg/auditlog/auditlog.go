@@ -147,8 +147,12 @@ const (
 	EventDashboardCreated EventType = "dashboard.created"
 	EventDashboardUpdated EventType = "dashboard.updated"
 	EventDashboardDeleted EventType = "dashboard.deleted"
-	EventWidgetUpdated    EventType = "widget.updated"
-	EventWidgetDeleted    EventType = "widget.deleted"
+	// EventDashboardsReordered: a developer set the order of a revision's
+	// dashboards (PUT /api/developer/dashboards/order); the metadata carries
+	// the whole new order.
+	EventDashboardsReordered EventType = "dashboard.reordered"
+	EventWidgetUpdated       EventType = "widget.updated"
+	EventWidgetDeleted       EventType = "widget.deleted"
 
 	// Batch 4 — Developer Console, workflow-authoring + integration +
 	// migration surfaces. EventWorkflowPublished/Archived are deliberately

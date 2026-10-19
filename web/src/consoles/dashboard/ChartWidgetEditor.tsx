@@ -264,6 +264,17 @@ export function ChartWidgetEditor({ gridDefId, draft, ctx, onChange }: ChartWidg
         </label>
       )}
 
+      {chartType === "line" && (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={draft.y_axis_from_zero ?? true}
+            onChange={e => onChange({ y_axis_from_zero: e.target.checked ? undefined : false })}
+          />
+          Start the value axis at 0 <span style={{ color: "var(--color-text-quiet)" }}>(untick to fit it to the data)</span>
+        </label>
+      )}
+
       <div>
         <label style={lbl}>REFRESH INTERVAL</label>
         <select

@@ -153,6 +153,12 @@ func (h *handler) prepareCell(ctx context.Context, a *actor, revisionID string, 
 	} else if reason != "" {
 		return preparedCell{}, refuseCell(http.StatusForbidden, "%s", reason)
 	}
+	// A cell its metric's closed rules close takes no input (migration 147).
+	if reason, err := writeguard.ClosedReason(ctx, h.db.For(ctx), revisionID, []writeguard.Cell{{MetricID: req.MetricID, DimCodes: req.DimCodes}}); err != nil {
+		return preparedCell{}, refuseCell(http.StatusInternalServerError, "write guard: %v", err)
+	} else if reason != "" {
+		return preparedCell{}, refuseCell(http.StatusForbidden, "%s", reason)
+	}
 
 	// A pick-list cell holds a member of its dimension (the value must be
 	// one's key, or Member names one), a text metric's cell its text, and

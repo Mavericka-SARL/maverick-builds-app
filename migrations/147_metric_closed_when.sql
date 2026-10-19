@@ -1,0 +1,12 @@
+-- Where an input metric takes no input: rules like a metric's highlight rules,
+-- [{"metric": "<calculated metric of the same grid>", "op": "=", "value": 1}].
+-- A cell where any rule holds is closed: the grid shows it read-only and every
+-- write path (cells, batches, imports, the AI Developer, the chat connector)
+-- refuses a value for it.
+--
+-- Found 2026-10-18 on the CPG rolling forecast: the months up to Actual Through
+-- Month hold actuals, yet a planning % could still be typed there (where it
+-- changes nothing), and an actual could be typed into a month still to come.
+-- The condition reads a calculated metric's stored value at the same cell, so
+-- it follows a setting such as Actual Through Month once recalculation has run.
+ALTER TABLE model.metric_def ADD COLUMN closed_when jsonb NOT NULL DEFAULT '[]'::jsonb;

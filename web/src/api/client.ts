@@ -55,6 +55,8 @@ export interface DevMetric {
   picklist_allow_parents?: boolean;
   // How its cells are tinted (conditional highlighting).
   highlight_rules?: HighlightRule[];
+  // Where its cells take no input.
+  closed_when?: ClosedRule[];
   depends_on: string[];
   depended_by: string[];
   calc_error?: string;
@@ -93,9 +95,15 @@ export interface DimMember {
   formula?: string;
 }
 
+/** What a person reads for a dimension: its display name, else its name
+ *  (formulas, criteria and every API keep the name). */
+export const dimLabel = (d: { name: string; label?: string | null }) => d.label || d.name;
+
 export interface DimInfo {
   id: string;
   name: string;
+  /** Display name ("Plan case" for plan_case); absent: the name is shown. */
+  label?: string;
   dimension_type?: DimensionType;      // "time" only when explicitly created as such — a name like "month" never implies it
   time_granularity?: TimeGranularity;  // time dimensions only
   fiscal_year_start_month?: number;    // time dimensions only
@@ -517,6 +525,8 @@ export interface Metric {
   picklist_allow_parents?: boolean; // parents are offered too (else leaves only)
   // How its cells are tinted: the first rule that holds gives the tone.
   highlight_rules?: HighlightRule[];
+  // Where its cells take no input: shown read-only, refused by every write.
+  closed_when?: ClosedRule[];
   value: number | null;
   readonly?: boolean;   // true = "read" access rule — visible but not editable
   dimension_ids?: string[]; // this metric's OWN grid's dimension IDs, ordered (populated by /api/metrics and /api/grid's all_metrics)
@@ -639,6 +649,7 @@ export interface DimProperty {
 export interface DevDimension {
   id: string;
   name: string;
+  label?: string;
   agg_rule: string;
   parent_dimension_id?: string | null; // set when this whole dimension is a declared child of another (e.g. Cabinet -> Department)
   dimension_type: DimensionType;       // explicit and immutable after creation
@@ -700,6 +711,10 @@ export interface GridChartConfig {
   // own children produces a bar that dwarfs the rest. Context selectors keep
   // theirs — choosing "All Regions" there is meaningful, not a distortion.
   hide_rollup_members?: boolean;
+  // Line charts: false fits the value axis to the data instead of starting
+  // it at 0, so plan and last year a few percent apart do not read as two
+  // flat lines (owner request, 2026-10-18). Bars always start at 0.
+  y_axis_from_zero?: boolean;
 }
 
 export interface GridChartCategory {
@@ -733,6 +748,7 @@ export interface ChartContextMember {
 export interface ChartContextDim {
   id: string;
   name: string;
+  label?: string;
   members: ChartContextMember[];
 }
 
@@ -2013,6 +2029,32 @@ export interface AIProposalWithSummary extends AIProposal {
 // cell — with value or with metric than (its value at the cell when it is
 // on the grid, else its total), and tints the cell with tone.
 export type HighlightTone = "negative" | "warning" | "positive" | "info";
+export interface WorkflowStatusStep {
+  id: string;
+  name: string;
+  type: string;
+  roles: string[];
+  state: "done" | "current" | "sent_back" | "skipped" | "pending";
+  since?: string;
+  due_at?: string;
+  completed_at?: string;
+}
+
+export interface WorkflowRunStatus {
+  workflow: string;
+  found: boolean;
+  instance: { status: string; started_at: string; completed_at?: string | null } | null;
+  steps: WorkflowStatusStep[];
+}
+
+/** A cell of an input metric where this holds takes no input (metric.closed_when):
+ *  a calculated metric of the same grid compared with a number (a blank is 0). */
+export interface ClosedRule {
+  metric: string;
+  op: "=" | "<>" | ">" | ">=" | "<" | "<=";
+  value: number;
+}
+
 export interface HighlightRule {
   metric?: string;
   abs?: boolean;
@@ -2300,6 +2342,8 @@ export const api = {
   // Published workflow definitions with their context schemas — the
   // Planning workspace renders its start-workflow dialog from these.
   listWorkflowDefinitions: () => apiFetch<WorkflowDefPublic[]>("/api/workflow/definitions"),
+  // Where the latest run of a published workflow stands (the workflow-status widget).
+  workflowStatus: (name: string) => apiFetch<WorkflowRunStatus>(`/api/workflow/status?name=${encodeURIComponent(name)}`),
 
   /**
    * `tenantId` is the task's own tenant (Task.tenant_id): an inbox spans every
@@ -2364,7 +2408,7 @@ export const api = {
   getDevDimensions: (revisionId?: string) =>
     apiFetch<DevDimension[]>(`/api/developer/dimensions${revisionId ? `?revision_id=${revisionId}` : ""}`),
 
-  addMetric: (body: { name: string; label?: string; is_input: boolean; formula: string; revision_id?: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string; picklist_allow_parents?: boolean; highlight_rules?: HighlightRule[] }) =>
+  addMetric: (body: { name: string; label?: string; is_input: boolean; formula: string; revision_id?: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string; picklist_allow_parents?: boolean; highlight_rules?: HighlightRule[]; closed_when?: ClosedRule[] }) =>
     apiFetch<{ id: string; status: string }>("/api/developer/metrics", {
       method: "POST",
       body: JSON.stringify(body),
@@ -2613,7 +2657,7 @@ export const api = {
   deleteMetric: (id: string) =>
     apiFetch<{ status: string }>(`/api/developer/metrics/${id}`, { method: "DELETE" }),
   updateMetric: (id: string, body: { name: string; label?: string; formula: string; agg_rule?: string; agg_numerator_metric_id?: string; agg_denominator_metric_id?: string; format?: string; format_decimals?: number; format_currency?: string; time_summary?: TimeSummary; tags?: string[]; picklist_dimension_id?: string; picklist_allow_parents?: boolean; highlight_rules?: HighlightRule[];
-    is_input?: boolean; drop_values?: boolean }) =>
+    closed_when?: ClosedRule[]; is_input?: boolean; drop_values?: boolean }) =>
     apiFetch<{ status: string; recalc: Array<{ revision_id: string; metric: string; value: number | null }> }>(
       `/api/developer/metrics/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 
@@ -2622,7 +2666,7 @@ export const api = {
     apiFetch<{ id: string; status: string; derived_members?: string[] }>("/api/developer/dimensions", { method: "POST", body: JSON.stringify(body) }),
   // A partial update: a field left out keeps its value; parent_dimension_id: null detaches,
   // source_dimension_id: null clears a property grouping.
-  updateDimension: (id: string, body: { name?: string; agg_rule?: string; parent_dimension_id?: string | null; tags?: string[];
+  updateDimension: (id: string, body: { name?: string; label?: string; agg_rule?: string; parent_dimension_id?: string | null; tags?: string[];
     source_dimension_id?: string | null; source_property?: string; derive_members?: boolean; business_maintained?: boolean }) =>
     apiFetch<{ status: string; derived_members?: string[] }>(`/api/developer/dimensions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteDimension: (id: string) =>
@@ -2785,6 +2829,10 @@ export const api = {
   // move it to the root, an id to file it under that folder.
   updateDashboard: (id: string, body: { name?: string; tags?: string[]; folder_id?: string | null; selector_bar?: SelectorBarEntry[] }) =>
     apiFetch<{ status: string }>(`/api/developer/dashboards/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  // The order of a revision's dashboards: every one of them, once, in the
+  // order the Dashboards page shows its tabs (the first is where people land).
+  reorderDashboards: (dashboardIds: string[]) =>
+    apiFetch<{ status: string }>("/api/developer/dashboards/order", { method: "PUT", body: JSON.stringify({ dashboard_ids: dashboardIds }) }),
 
   // ── Dashboard folders ────────────────────────────────────────────────────
   listFolders: (revisionId?: string) =>

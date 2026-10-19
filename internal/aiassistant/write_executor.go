@@ -596,6 +596,8 @@ type createMetricParams struct {
 	PicklistAllowParents bool `json:"picklist_allow_parents"`
 	// HighlightRules tint its cells (metricformula.HighlightRule).
 	HighlightRules json.RawMessage `json:"highlight_rules"`
+	// ClosedWhen closes its cells to input (metricformula.ClosedRule).
+	ClosedWhen json.RawMessage `json:"closed_when"`
 }
 
 func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -637,6 +639,13 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 	highlights, err := metricformula.CheckHighlightRules(ctx, e.pool, e.modelID, revID, p.Name, p.HighlightRules)
 	if err != nil {
 		return "", "", err
+	}
+	closedRules, err := metricformula.CheckClosedRules(ctx, e.pool, e.modelID, revID, "", p.ClosedWhen)
+	if err != nil {
+		return "", "", err
+	}
+	if string(closedRules) != "[]" && !p.IsInput {
+		return "", "", fmt.Errorf("closed_when is for input metrics: a calculated metric takes no input anyway")
 	}
 	if p.AggRule == "" {
 		p.AggRule = "sum"
@@ -725,6 +734,11 @@ func (e *WriteExecutor) createMetric(ctx context.Context, raw json.RawMessage) (
 			return "", "", fmt.Errorf("set highlight rules: %w", err)
 		}
 	}
+	if string(closedRules) != "[]" {
+		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET closed_when=$2::jsonb WHERE id=$1::uuid`, newID, string(closedRules)); err != nil {
+			return "", "", fmt.Errorf("set closed rules: %w", err)
+		}
+	}
 
 	// Wire formula dependencies from the edges the validator resolved. It
 	// looked them up within the metric's own revision; the loop that used to
@@ -778,6 +792,8 @@ type updateMetricParams struct {
 	DropValues bool  `json:"drop_values"`
 	// HighlightRules: left out keeps them; [] removes them.
 	HighlightRules json.RawMessage `json:"highlight_rules"`
+	// ClosedWhen: left out keeps them; [] removes them.
+	ClosedWhen json.RawMessage `json:"closed_when"`
 }
 
 func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (string, string, error) {
@@ -989,6 +1005,20 @@ func (e *WriteExecutor) updateMetric(ctx context.Context, raw json.RawMessage) (
 		}
 		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET highlight_rules=$2::jsonb WHERE id=$1::uuid`, p.MetricID, string(highlights)); err != nil {
 			return "", "", fmt.Errorf("set highlight rules: %w", err)
+		}
+	}
+	if has("closed_when") {
+		closedRules, err := metricformula.CheckClosedRules(ctx, e.pool, e.modelID, metricRev, p.MetricID, p.ClosedWhen)
+		if err != nil {
+			return "", "", err
+		}
+		var isInput bool
+		_ = e.pool.QueryRow(ctx, `SELECT is_input FROM model.metric_def WHERE id=$1::uuid`, p.MetricID).Scan(&isInput)
+		if string(closedRules) != "[]" && !isInput {
+			return "", "", fmt.Errorf("closed_when is for input metrics: a calculated metric takes no input anyway")
+		}
+		if _, err := e.pool.Exec(ctx, `UPDATE model.metric_def SET closed_when=$2::jsonb WHERE id=$1::uuid`, p.MetricID, string(closedRules)); err != nil {
+			return "", "", fmt.Errorf("set closed rules: %w", err)
 		}
 	}
 	// Re-wire dependencies when the formula changed.
@@ -2592,8 +2622,8 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 	if srcID != "" {
 		// Copy metrics
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO model.metric_def (model_id, name, label, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules, picklist_allow_parents)
-			SELECT model_id, name, label, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules, picklist_allow_parents
+			INSERT INTO model.metric_def (model_id, name, label, formula, is_input, revision_id, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules, picklist_allow_parents, closed_when)
+			SELECT model_id, name, label, formula, is_input, $2::uuid, format, format_decimals, format_currency, agg_rule, time_summary, tags, lineage_id, highlight_rules, picklist_allow_parents, closed_when
 			FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 		`, e.modelID, newID, srcID); err != nil {
 			return "", "", fmt.Errorf("copy metrics into new revision: %w", err)
@@ -2667,9 +2697,9 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			WITH
 			new_dims AS (
 				INSERT INTO model.dimension_def (model_id, name, agg_rule, properties, revision_id, source_property,
-				                                 dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained)
+				                                 dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label)
 				SELECT model_id, name, agg_rule, properties, $2::uuid, source_property,
-				       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained
+				       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label
 				FROM model.dimension_def WHERE model_id=$1::uuid AND revision_id=$3::uuid
 				RETURNING id AS new_id, name
 			),
@@ -2963,7 +2993,7 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 
 		// Copy dashboards + widgets
 		rows, err := tx.Query(ctx, `
-			SELECT id::text, name, tags, category, folder_id::text, selector_bar FROM model.dashboard_def
+			SELECT id::text, name, tags, category, folder_id::text, selector_bar, sort_order FROM model.dashboard_def
 			WHERE model_id=$1::uuid AND revision_id=$2::uuid
 		`, e.modelID, srcID)
 		if err != nil {
@@ -2974,11 +3004,12 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 			tags               []string
 			folderID           *string
 			selectorBar        []byte
+			sortOrder          *int32
 		}
 		var dashRows []dashToCopy
 		for rows.Next() {
 			var d dashToCopy
-			if err := rows.Scan(&d.id, &d.name, &d.tags, &d.category, &d.folderID, &d.selectorBar); err != nil {
+			if err := rows.Scan(&d.id, &d.name, &d.tags, &d.category, &d.folderID, &d.selectorBar, &d.sortOrder); err != nil {
 				rows.Close()
 				return "", "", fmt.Errorf("scan dashboard to copy: %w", err)
 			}
@@ -2994,13 +3025,13 @@ func (e *WriteExecutor) createRevision(ctx context.Context, raw json.RawMessage)
 		for _, d := range dashRows {
 			var newDashID string
 			if err := tx.QueryRow(ctx, `
-				INSERT INTO model.dashboard_def (model_id, name, tags, category, revision_id, folder_id, selector_bar)
+				INSERT INTO model.dashboard_def (model_id, name, tags, category, revision_id, folder_id, selector_bar, sort_order)
 				VALUES ($1::uuid, $2, $3, $4, $5::uuid,
 					(SELECT nf.id FROM model.dashboard_folder ofd
 					 JOIN model.dashboard_folder nf ON nf.model_id = ofd.model_id AND nf.name = ofd.name AND nf.revision_id = $5::uuid
-					 WHERE ofd.id = $6::uuid), $7::jsonb)
+					 WHERE ofd.id = $6::uuid), $7::jsonb, $8)
 				RETURNING id::text
-			`, e.modelID, d.name, d.tags, d.category, newID, d.folderID, string(d.selectorBar)).Scan(&newDashID); err != nil {
+			`, e.modelID, d.name, d.tags, d.category, newID, d.folderID, string(d.selectorBar), d.sortOrder).Scan(&newDashID); err != nil {
 				return "", "", fmt.Errorf("copy dashboard %q: %w", d.name, err)
 			}
 			if _, err := tx.Exec(ctx, `

@@ -2,8 +2,9 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invalidateModelData } from "../modelDataQueries";
 import { Plus, X, Pencil, Trash2, Check, AlertTriangle } from "lucide-react";
-import { api, type DevModel, type DevMetric, type TimeSummary, type HighlightRule, TIME_SUMMARIES } from "../../api/client";
+import { api, type DevModel, type DevMetric, type TimeSummary, type HighlightRule, type ClosedRule, TIME_SUMMARIES } from "../../api/client";
 import { HighlightRulesEditor } from "./HighlightRulesEditor";
+import { ClosedRulesEditor } from "./ClosedRulesEditor";
 import { Toolbar, ToolbarGroup, SearchInput, Button, TextInput, Select, NumberInput, StatusBadge, IconButton, useConfirm, Field, SegmentedControl, FilterChip, TagInput, TagFilter } from "../../ui";
 
 // Time summary (how a metric totals ACROSS its time dimension) is only
@@ -240,6 +241,7 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
   const [isInput, setIsInput] = useState(m.is_input);
   const [tags, setTags] = useState<string[]>(m.tags ?? []);
   const [highlightRules, setHighlightRules] = useState<HighlightRule[]>(m.highlight_rules ?? []);
+  const [closedRules, setClosedRules] = useState<ClosedRule[]>(m.closed_when ?? []);
   const [recalcResults, setRecalcResults] = useState<RecalcRow[] | null>(null);
   // The recalc reports revision ids; the banner names them. Fetched only
   // while a banner is showing, for this metric's own model.
@@ -272,6 +274,7 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
       picklist_dimension_id: isPicklist ? picklistDim : "",
       picklist_allow_parents: isPicklist ? allowParents : false,
       highlight_rules: highlightRules,
+      ...(isInput ? { closed_when: closedRules } : {}),
     }),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["dev-model"] });
@@ -414,6 +417,15 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
               <HighlightRulesEditor rules={highlightRules} onChange={setHighlightRules}
                 metricNames={allMetrics.filter(x => x.id !== m.id).map(x => x.name)} />
             </div>
+            {isInput && (
+              <div style={{ marginTop: 8 }}>
+                <div className="mvx-admin-muted" style={{ marginBottom: 4 }}>
+                  Closed cells (no input where a rule holds — e.g. months up to the actuals: a calculated metric of the same grid):
+                </div>
+                <ClosedRulesEditor rules={closedRules} onChange={setClosedRules}
+                  metricNames={allMetrics.filter(x => x.id !== m.id && !x.is_input).map(x => x.name)} />
+              </div>
+            )}
             {invalidRefs.length > 0 && (
               <p className="mvx-admin-muted" style={{ marginTop: 4 }}>
                 Not a metric or dimension in this revision: {invalidRefs.join(", ")}

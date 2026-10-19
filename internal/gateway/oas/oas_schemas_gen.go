@@ -5097,6 +5097,113 @@ func (s *ClearValuesResult) SetDryRun(val OptBool) {
 func (*ClearValuesResult) clearGridValuesRes()   {}
 func (*ClearValuesResult) clearMetricValuesRes() {}
 
+// Ref: #/components/schemas/ClosedRule
+type ClosedRule struct {
+	// A calculated metric on the same grid, read at the cell (a blank counts as 0).
+	Metric string       `json:"metric"`
+	Op     ClosedRuleOp `json:"op"`
+	Value  float64      `json:"value"`
+}
+
+// GetMetric returns the value of Metric.
+func (s *ClosedRule) GetMetric() string {
+	return s.Metric
+}
+
+// GetOp returns the value of Op.
+func (s *ClosedRule) GetOp() ClosedRuleOp {
+	return s.Op
+}
+
+// GetValue returns the value of Value.
+func (s *ClosedRule) GetValue() float64 {
+	return s.Value
+}
+
+// SetMetric sets the value of Metric.
+func (s *ClosedRule) SetMetric(val string) {
+	s.Metric = val
+}
+
+// SetOp sets the value of Op.
+func (s *ClosedRule) SetOp(val ClosedRuleOp) {
+	s.Op = val
+}
+
+// SetValue sets the value of Value.
+func (s *ClosedRule) SetValue(val float64) {
+	s.Value = val
+}
+
+type ClosedRuleOp string
+
+const (
+	ClosedRuleOpEq          ClosedRuleOp = "="
+	ClosedRuleOpLessGreater ClosedRuleOp = "<>"
+	ClosedRuleOpGreater     ClosedRuleOp = ">"
+	ClosedRuleOpGreaterEq   ClosedRuleOp = ">="
+	ClosedRuleOpLess        ClosedRuleOp = "<"
+	ClosedRuleOpLessEq      ClosedRuleOp = "<="
+)
+
+// AllValues returns all ClosedRuleOp values.
+func (ClosedRuleOp) AllValues() []ClosedRuleOp {
+	return []ClosedRuleOp{
+		ClosedRuleOpEq,
+		ClosedRuleOpLessGreater,
+		ClosedRuleOpGreater,
+		ClosedRuleOpGreaterEq,
+		ClosedRuleOpLess,
+		ClosedRuleOpLessEq,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s ClosedRuleOp) MarshalText() ([]byte, error) {
+	switch s {
+	case ClosedRuleOpEq:
+		return []byte(s), nil
+	case ClosedRuleOpLessGreater:
+		return []byte(s), nil
+	case ClosedRuleOpGreater:
+		return []byte(s), nil
+	case ClosedRuleOpGreaterEq:
+		return []byte(s), nil
+	case ClosedRuleOpLess:
+		return []byte(s), nil
+	case ClosedRuleOpLessEq:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *ClosedRuleOp) UnmarshalText(data []byte) error {
+	switch ClosedRuleOp(data) {
+	case ClosedRuleOpEq:
+		*s = ClosedRuleOpEq
+		return nil
+	case ClosedRuleOpLessGreater:
+		*s = ClosedRuleOpLessGreater
+		return nil
+	case ClosedRuleOpGreater:
+		*s = ClosedRuleOpGreater
+		return nil
+	case ClosedRuleOpGreaterEq:
+		*s = ClosedRuleOpGreaterEq
+		return nil
+	case ClosedRuleOpLess:
+		*s = ClosedRuleOpLess
+		return nil
+	case ClosedRuleOpLessEq:
+		*s = ClosedRuleOpLessEq
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
 // Ref: #/components/schemas/ColumnMapping
 type ColumnMapping struct {
 	SourceColumn OptString `json:"source_column"`
@@ -6906,6 +7013,9 @@ type CreateMetricRequest struct {
 	// How the metric's cells are tinted; the first rule that holds wins. [] removes them; omitted keeps
 	// them on PATCH.
 	HighlightRules []HighlightRule `json:"highlight_rules"`
+	// Input metrics: the cells that take no input — where any rule holds the grid shows the cell
+	// read-only and every write refuses it. [] removes them; omitted keeps them on PATCH.
+	ClosedWhen []ClosedRule `json:"closed_when"`
 	// How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
 	// dimension): sum for flows, last for a closing balance, first for an opening balance, none when a
 	// time total is meaningless.
@@ -6977,6 +7087,11 @@ func (s *CreateMetricRequest) GetHighlightRules() []HighlightRule {
 	return s.HighlightRules
 }
 
+// GetClosedWhen returns the value of ClosedWhen.
+func (s *CreateMetricRequest) GetClosedWhen() []ClosedRule {
+	return s.ClosedWhen
+}
+
 // GetTimeSummary returns the value of TimeSummary.
 func (s *CreateMetricRequest) GetTimeSummary() OptCreateMetricRequestTimeSummary {
 	return s.TimeSummary
@@ -7045,6 +7160,11 @@ func (s *CreateMetricRequest) SetPicklistAllowParents(val OptBool) {
 // SetHighlightRules sets the value of HighlightRules.
 func (s *CreateMetricRequest) SetHighlightRules(val []HighlightRule) {
 	s.HighlightRules = val
+}
+
+// SetClosedWhen sets the value of ClosedWhen.
+func (s *CreateMetricRequest) SetClosedWhen(val []ClosedRule) {
+	s.ClosedWhen = val
 }
 
 // SetTimeSummary sets the value of TimeSummary.
@@ -8846,8 +8966,10 @@ func (s *DevRevision) SetIsActive(val bool) {
 
 // Ref: #/components/schemas/Dimension
 type Dimension struct {
-	ID                uuid.UUID  `json:"id"`
-	Name              string     `json:"name"`
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+	// Display name selectors and headers show; absent: the name.
+	Label             OptString  `json:"label"`
 	AggRule           string     `json:"agg_rule"`
 	ParentDimensionID OptNilUUID `json:"parent_dimension_id"`
 	// Explicit and immutable. A dimension called month is NOT a time dimension unless marked so.
@@ -8878,6 +9000,11 @@ func (s *Dimension) GetID() uuid.UUID {
 // GetName returns the value of Name.
 func (s *Dimension) GetName() string {
 	return s.Name
+}
+
+// GetLabel returns the value of Label.
+func (s *Dimension) GetLabel() OptString {
+	return s.Label
 }
 
 // GetAggRule returns the value of AggRule.
@@ -8938,6 +9065,11 @@ func (s *Dimension) SetID(val uuid.UUID) {
 // SetName sets the value of Name.
 func (s *Dimension) SetName(val string) {
 	s.Name = val
+}
+
+// SetLabel sets the value of Label.
+func (s *Dimension) SetLabel(val OptString) {
+	s.Label = val
 }
 
 // SetAggRule sets the value of AggRule.
@@ -9562,6 +9694,7 @@ func (*Error) getRecordHistoryRes()            {}
 func (*Error) getRelatedRecordsRes()           {}
 func (*Error) getWorkflowDefinitionRes()       {}
 func (*Error) getWorkflowRes()                 {}
+func (*Error) getWorkflowStatusRes()           {}
 func (*Error) grantAdminUserAppAccessRes()     {}
 func (*Error) grantAdminUserModelAccessRes()   {}
 func (*Error) importDimensionMembersRes()      {}
@@ -13000,6 +13133,244 @@ func (s *GetWorkflowDefinitionOKStepsItemType) UnmarshalText(data []byte) error 
 	}
 }
 
+type GetWorkflowStatusOK struct {
+	Workflow string                            `json:"workflow"`
+	Found    bool                              `json:"found"`
+	Instance OptNilGetWorkflowStatusOKInstance `json:"instance"`
+	Steps    []GetWorkflowStatusOKStepsItem    `json:"steps"`
+}
+
+// GetWorkflow returns the value of Workflow.
+func (s *GetWorkflowStatusOK) GetWorkflow() string {
+	return s.Workflow
+}
+
+// GetFound returns the value of Found.
+func (s *GetWorkflowStatusOK) GetFound() bool {
+	return s.Found
+}
+
+// GetInstance returns the value of Instance.
+func (s *GetWorkflowStatusOK) GetInstance() OptNilGetWorkflowStatusOKInstance {
+	return s.Instance
+}
+
+// GetSteps returns the value of Steps.
+func (s *GetWorkflowStatusOK) GetSteps() []GetWorkflowStatusOKStepsItem {
+	return s.Steps
+}
+
+// SetWorkflow sets the value of Workflow.
+func (s *GetWorkflowStatusOK) SetWorkflow(val string) {
+	s.Workflow = val
+}
+
+// SetFound sets the value of Found.
+func (s *GetWorkflowStatusOK) SetFound(val bool) {
+	s.Found = val
+}
+
+// SetInstance sets the value of Instance.
+func (s *GetWorkflowStatusOK) SetInstance(val OptNilGetWorkflowStatusOKInstance) {
+	s.Instance = val
+}
+
+// SetSteps sets the value of Steps.
+func (s *GetWorkflowStatusOK) SetSteps(val []GetWorkflowStatusOKStepsItem) {
+	s.Steps = val
+}
+
+func (*GetWorkflowStatusOK) getWorkflowStatusRes() {}
+
+type GetWorkflowStatusOKInstance struct {
+	Status      OptString      `json:"status"`
+	StartedAt   OptDateTime    `json:"started_at"`
+	CompletedAt OptNilDateTime `json:"completed_at"`
+}
+
+// GetStatus returns the value of Status.
+func (s *GetWorkflowStatusOKInstance) GetStatus() OptString {
+	return s.Status
+}
+
+// GetStartedAt returns the value of StartedAt.
+func (s *GetWorkflowStatusOKInstance) GetStartedAt() OptDateTime {
+	return s.StartedAt
+}
+
+// GetCompletedAt returns the value of CompletedAt.
+func (s *GetWorkflowStatusOKInstance) GetCompletedAt() OptNilDateTime {
+	return s.CompletedAt
+}
+
+// SetStatus sets the value of Status.
+func (s *GetWorkflowStatusOKInstance) SetStatus(val OptString) {
+	s.Status = val
+}
+
+// SetStartedAt sets the value of StartedAt.
+func (s *GetWorkflowStatusOKInstance) SetStartedAt(val OptDateTime) {
+	s.StartedAt = val
+}
+
+// SetCompletedAt sets the value of CompletedAt.
+func (s *GetWorkflowStatusOKInstance) SetCompletedAt(val OptNilDateTime) {
+	s.CompletedAt = val
+}
+
+type GetWorkflowStatusOKStepsItem struct {
+	ID          string                            `json:"id"`
+	Name        string                            `json:"name"`
+	Type        string                            `json:"type"`
+	Roles       []string                          `json:"roles"`
+	State       GetWorkflowStatusOKStepsItemState `json:"state"`
+	Since       OptDateTime                       `json:"since"`
+	DueAt       OptDateTime                       `json:"due_at"`
+	CompletedAt OptDateTime                       `json:"completed_at"`
+}
+
+// GetID returns the value of ID.
+func (s *GetWorkflowStatusOKStepsItem) GetID() string {
+	return s.ID
+}
+
+// GetName returns the value of Name.
+func (s *GetWorkflowStatusOKStepsItem) GetName() string {
+	return s.Name
+}
+
+// GetType returns the value of Type.
+func (s *GetWorkflowStatusOKStepsItem) GetType() string {
+	return s.Type
+}
+
+// GetRoles returns the value of Roles.
+func (s *GetWorkflowStatusOKStepsItem) GetRoles() []string {
+	return s.Roles
+}
+
+// GetState returns the value of State.
+func (s *GetWorkflowStatusOKStepsItem) GetState() GetWorkflowStatusOKStepsItemState {
+	return s.State
+}
+
+// GetSince returns the value of Since.
+func (s *GetWorkflowStatusOKStepsItem) GetSince() OptDateTime {
+	return s.Since
+}
+
+// GetDueAt returns the value of DueAt.
+func (s *GetWorkflowStatusOKStepsItem) GetDueAt() OptDateTime {
+	return s.DueAt
+}
+
+// GetCompletedAt returns the value of CompletedAt.
+func (s *GetWorkflowStatusOKStepsItem) GetCompletedAt() OptDateTime {
+	return s.CompletedAt
+}
+
+// SetID sets the value of ID.
+func (s *GetWorkflowStatusOKStepsItem) SetID(val string) {
+	s.ID = val
+}
+
+// SetName sets the value of Name.
+func (s *GetWorkflowStatusOKStepsItem) SetName(val string) {
+	s.Name = val
+}
+
+// SetType sets the value of Type.
+func (s *GetWorkflowStatusOKStepsItem) SetType(val string) {
+	s.Type = val
+}
+
+// SetRoles sets the value of Roles.
+func (s *GetWorkflowStatusOKStepsItem) SetRoles(val []string) {
+	s.Roles = val
+}
+
+// SetState sets the value of State.
+func (s *GetWorkflowStatusOKStepsItem) SetState(val GetWorkflowStatusOKStepsItemState) {
+	s.State = val
+}
+
+// SetSince sets the value of Since.
+func (s *GetWorkflowStatusOKStepsItem) SetSince(val OptDateTime) {
+	s.Since = val
+}
+
+// SetDueAt sets the value of DueAt.
+func (s *GetWorkflowStatusOKStepsItem) SetDueAt(val OptDateTime) {
+	s.DueAt = val
+}
+
+// SetCompletedAt sets the value of CompletedAt.
+func (s *GetWorkflowStatusOKStepsItem) SetCompletedAt(val OptDateTime) {
+	s.CompletedAt = val
+}
+
+type GetWorkflowStatusOKStepsItemState string
+
+const (
+	GetWorkflowStatusOKStepsItemStateDone     GetWorkflowStatusOKStepsItemState = "done"
+	GetWorkflowStatusOKStepsItemStateCurrent  GetWorkflowStatusOKStepsItemState = "current"
+	GetWorkflowStatusOKStepsItemStateSentBack GetWorkflowStatusOKStepsItemState = "sent_back"
+	GetWorkflowStatusOKStepsItemStateSkipped  GetWorkflowStatusOKStepsItemState = "skipped"
+	GetWorkflowStatusOKStepsItemStatePending  GetWorkflowStatusOKStepsItemState = "pending"
+)
+
+// AllValues returns all GetWorkflowStatusOKStepsItemState values.
+func (GetWorkflowStatusOKStepsItemState) AllValues() []GetWorkflowStatusOKStepsItemState {
+	return []GetWorkflowStatusOKStepsItemState{
+		GetWorkflowStatusOKStepsItemStateDone,
+		GetWorkflowStatusOKStepsItemStateCurrent,
+		GetWorkflowStatusOKStepsItemStateSentBack,
+		GetWorkflowStatusOKStepsItemStateSkipped,
+		GetWorkflowStatusOKStepsItemStatePending,
+	}
+}
+
+// MarshalText implements encoding.TextMarshaler.
+func (s GetWorkflowStatusOKStepsItemState) MarshalText() ([]byte, error) {
+	switch s {
+	case GetWorkflowStatusOKStepsItemStateDone:
+		return []byte(s), nil
+	case GetWorkflowStatusOKStepsItemStateCurrent:
+		return []byte(s), nil
+	case GetWorkflowStatusOKStepsItemStateSentBack:
+		return []byte(s), nil
+	case GetWorkflowStatusOKStepsItemStateSkipped:
+		return []byte(s), nil
+	case GetWorkflowStatusOKStepsItemStatePending:
+		return []byte(s), nil
+	default:
+		return nil, errors.Errorf("invalid value: %q", s)
+	}
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *GetWorkflowStatusOKStepsItemState) UnmarshalText(data []byte) error {
+	switch GetWorkflowStatusOKStepsItemState(data) {
+	case GetWorkflowStatusOKStepsItemStateDone:
+		*s = GetWorkflowStatusOKStepsItemStateDone
+		return nil
+	case GetWorkflowStatusOKStepsItemStateCurrent:
+		*s = GetWorkflowStatusOKStepsItemStateCurrent
+		return nil
+	case GetWorkflowStatusOKStepsItemStateSentBack:
+		*s = GetWorkflowStatusOKStepsItemStateSentBack
+		return nil
+	case GetWorkflowStatusOKStepsItemStateSkipped:
+		*s = GetWorkflowStatusOKStepsItemStateSkipped
+		return nil
+	case GetWorkflowStatusOKStepsItemStatePending:
+		*s = GetWorkflowStatusOKStepsItemStatePending
+		return nil
+	default:
+		return errors.Errorf("invalid value: %q", data)
+	}
+}
+
 // A tenant's Google service account, public half only.
 // Ref: #/components/schemas/GoogleConnection
 type GoogleConnection struct {
@@ -13595,8 +13966,10 @@ func (s *GridDefDimensionLevels) init() GridDefDimensionLevels {
 
 // Ref: #/components/schemas/GridDimension
 type GridDimension struct {
-	ID            uuid.UUID                  `json:"id"`
-	Name          string                     `json:"name"`
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+	// Display name selectors and headers show; absent: the name.
+	Label         OptString                  `json:"label"`
 	DimensionType GridDimensionDimensionType `json:"dimension_type"`
 	// Time dimensions only.
 	TimeGranularity OptGridDimensionTimeGranularity `json:"time_granularity"`
@@ -13616,6 +13989,11 @@ func (s *GridDimension) GetID() uuid.UUID {
 // GetName returns the value of Name.
 func (s *GridDimension) GetName() string {
 	return s.Name
+}
+
+// GetLabel returns the value of Label.
+func (s *GridDimension) GetLabel() OptString {
+	return s.Label
 }
 
 // GetDimensionType returns the value of DimensionType.
@@ -13651,6 +14029,11 @@ func (s *GridDimension) SetID(val uuid.UUID) {
 // SetName sets the value of Name.
 func (s *GridDimension) SetName(val string) {
 	s.Name = val
+}
+
+// SetLabel sets the value of Label.
+func (s *GridDimension) SetLabel(val OptString) {
+	s.Label = val
 }
 
 // SetDimensionType sets the value of DimensionType.
@@ -17080,6 +17463,9 @@ type MetricDef struct {
 	// How the metric's cells are tinted; the first rule that holds wins. [] removes them; omitted keeps
 	// them on PATCH.
 	HighlightRules []HighlightRule `json:"highlight_rules"`
+	// Input metrics: the cells that take no input — where any rule holds the grid shows the cell
+	// read-only and every write refuses it. [] removes them; omitted keeps them on PATCH.
+	ClosedWhen []ClosedRule `json:"closed_when"`
 	// Names of metrics/dimensions this formula references.
 	DependsOn []string `json:"depends_on"`
 	// Names of metrics whose formula references this one.
@@ -17151,6 +17537,11 @@ func (s *MetricDef) GetPicklistAllowParents() OptBool {
 // GetHighlightRules returns the value of HighlightRules.
 func (s *MetricDef) GetHighlightRules() []HighlightRule {
 	return s.HighlightRules
+}
+
+// GetClosedWhen returns the value of ClosedWhen.
+func (s *MetricDef) GetClosedWhen() []ClosedRule {
+	return s.ClosedWhen
 }
 
 // GetDependsOn returns the value of DependsOn.
@@ -17231,6 +17622,11 @@ func (s *MetricDef) SetPicklistAllowParents(val OptBool) {
 // SetHighlightRules sets the value of HighlightRules.
 func (s *MetricDef) SetHighlightRules(val []HighlightRule) {
 	s.HighlightRules = val
+}
+
+// SetClosedWhen sets the value of ClosedWhen.
+func (s *MetricDef) SetClosedWhen(val []ClosedRule) {
+	s.ClosedWhen = val
 }
 
 // SetDependsOn sets the value of DependsOn.
@@ -22250,6 +22646,69 @@ func (o OptNilFloat64) Or(d float64) float64 {
 	return d
 }
 
+// NewOptNilGetWorkflowStatusOKInstance returns new OptNilGetWorkflowStatusOKInstance with value set to v.
+func NewOptNilGetWorkflowStatusOKInstance(v GetWorkflowStatusOKInstance) OptNilGetWorkflowStatusOKInstance {
+	return OptNilGetWorkflowStatusOKInstance{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptNilGetWorkflowStatusOKInstance is optional nullable GetWorkflowStatusOKInstance.
+type OptNilGetWorkflowStatusOKInstance struct {
+	Value GetWorkflowStatusOKInstance
+	Set   bool
+	Null  bool
+}
+
+// IsSet returns true if OptNilGetWorkflowStatusOKInstance was set.
+func (o OptNilGetWorkflowStatusOKInstance) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptNilGetWorkflowStatusOKInstance) Reset() {
+	var v GetWorkflowStatusOKInstance
+	o.Value = v
+	o.Set = false
+	o.Null = false
+}
+
+// SetTo sets value to v.
+func (o *OptNilGetWorkflowStatusOKInstance) SetTo(v GetWorkflowStatusOKInstance) {
+	o.Set = true
+	o.Null = false
+	o.Value = v
+}
+
+// IsNull returns true if value is Null.
+func (o OptNilGetWorkflowStatusOKInstance) IsNull() bool { return o.Null }
+
+// SetToNull sets value to null.
+func (o *OptNilGetWorkflowStatusOKInstance) SetToNull() {
+	o.Set = true
+	o.Null = true
+	var v GetWorkflowStatusOKInstance
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptNilGetWorkflowStatusOKInstance) Get() (v GetWorkflowStatusOKInstance, ok bool) {
+	if o.Null {
+		return v, false
+	}
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptNilGetWorkflowStatusOKInstance) Or(d GetWorkflowStatusOKInstance) GetWorkflowStatusOKInstance {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
+
 // NewOptNilInt returns new OptNilInt with value set to v.
 func NewOptNilInt(v int) OptNilInt {
 	return OptNilInt{
@@ -27059,6 +27518,44 @@ func (s *RenameAiSessionReq) SetTitle(val string) {
 	s.Title = val
 }
 
+type ReorderDashboardsBadRequest Error
+
+func (*ReorderDashboardsBadRequest) reorderDashboardsRes() {}
+
+type ReorderDashboardsNotFound Error
+
+func (*ReorderDashboardsNotFound) reorderDashboardsRes() {}
+
+type ReorderDashboardsOK struct {
+	Status OptString `json:"status"`
+}
+
+// GetStatus returns the value of Status.
+func (s *ReorderDashboardsOK) GetStatus() OptString {
+	return s.Status
+}
+
+// SetStatus sets the value of Status.
+func (s *ReorderDashboardsOK) SetStatus(val OptString) {
+	s.Status = val
+}
+
+func (*ReorderDashboardsOK) reorderDashboardsRes() {}
+
+type ReorderDashboardsReq struct {
+	DashboardIds []uuid.UUID `json:"dashboard_ids"`
+}
+
+// GetDashboardIds returns the value of DashboardIds.
+func (s *ReorderDashboardsReq) GetDashboardIds() []uuid.UUID {
+	return s.DashboardIds
+}
+
+// SetDashboardIds sets the value of DashboardIds.
+func (s *ReorderDashboardsReq) SetDashboardIds(val []uuid.UUID) {
+	s.DashboardIds = val
+}
+
 type ReorderDimensionMembersBadRequest Error
 
 func (*ReorderDimensionMembersBadRequest) reorderDimensionMembersRes() {}
@@ -30872,7 +31369,10 @@ func (*UpdateDimensionPropertyOK) updateDimensionPropertyRes() {}
 // A partial update: a field left out keeps its value.
 // Ref: #/components/schemas/UpdateDimensionRequest
 type UpdateDimensionRequest struct {
-	Name    OptString `json:"name"`
+	Name OptString `json:"name"`
+	// Display name selectors and headers show (formulas keep naming the dimension by name); empty shows
+	// the name again.
+	Label   OptString `json:"label"`
 	AggRule OptString `json:"agg_rule"`
 	// Send null to detach the dimension from its parent.
 	ParentDimensionID OptNilUUID `json:"parent_dimension_id"`
@@ -30892,6 +31392,11 @@ type UpdateDimensionRequest struct {
 // GetName returns the value of Name.
 func (s *UpdateDimensionRequest) GetName() OptString {
 	return s.Name
+}
+
+// GetLabel returns the value of Label.
+func (s *UpdateDimensionRequest) GetLabel() OptString {
+	return s.Label
 }
 
 // GetAggRule returns the value of AggRule.
@@ -30932,6 +31437,11 @@ func (s *UpdateDimensionRequest) GetBusinessMaintained() OptBool {
 // SetName sets the value of Name.
 func (s *UpdateDimensionRequest) SetName(val OptString) {
 	s.Name = val
+}
+
+// SetLabel sets the value of Label.
+func (s *UpdateDimensionRequest) SetLabel(val OptString) {
+	s.Label = val
 }
 
 // SetAggRule sets the value of AggRule.
@@ -31435,6 +31945,9 @@ type UpdateMetricRequest struct {
 	// How the metric's cells are tinted; the first rule that holds wins. [] removes them; omitted keeps
 	// them on PATCH.
 	HighlightRules []HighlightRule `json:"highlight_rules"`
+	// Input metrics: the cells that take no input — where any rule holds the grid shows the cell
+	// read-only and every write refuses it. [] removes them; omitted keeps them on PATCH.
+	ClosedWhen []ClosedRule `json:"closed_when"`
 	// How the metric aggregates ACROSS its time dimension (agg_rule stays the rule for every other
 	// dimension): sum for flows, last for a closing balance, first for an opening balance, none when a
 	// time total is meaningless.
@@ -31506,6 +32019,11 @@ func (s *UpdateMetricRequest) GetHighlightRules() []HighlightRule {
 	return s.HighlightRules
 }
 
+// GetClosedWhen returns the value of ClosedWhen.
+func (s *UpdateMetricRequest) GetClosedWhen() []ClosedRule {
+	return s.ClosedWhen
+}
+
 // GetTimeSummary returns the value of TimeSummary.
 func (s *UpdateMetricRequest) GetTimeSummary() OptUpdateMetricRequestTimeSummary {
 	return s.TimeSummary
@@ -31574,6 +32092,11 @@ func (s *UpdateMetricRequest) SetDropValues(val OptBool) {
 // SetHighlightRules sets the value of HighlightRules.
 func (s *UpdateMetricRequest) SetHighlightRules(val []HighlightRule) {
 	s.HighlightRules = val
+}
+
+// SetClosedWhen sets the value of ClosedWhen.
+func (s *UpdateMetricRequest) SetClosedWhen(val []ClosedRule) {
+	s.ClosedWhen = val
 }
 
 // SetTimeSummary sets the value of TimeSummary.

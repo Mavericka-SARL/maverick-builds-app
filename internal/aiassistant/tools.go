@@ -140,7 +140,7 @@ var WriteToolNames = []string{
 	"create_grid", "update_grid", "delete_grid",
 	"add_grid_metric", "remove_grid_metric", "reorder_grid_metrics", "add_grid_dimension", "update_grid_dimension", "remove_grid_dimension",
 	"create_dashboard_folder", "update_dashboard_folder", "delete_dashboard_folder",
-	"create_dashboard", "update_dashboard", "delete_dashboard",
+	"create_dashboard", "update_dashboard", "delete_dashboard", "reorder_dashboards",
 	"add_dashboard_widget", "update_dashboard_widget", "delete_dashboard_widget",
 	"set_tags", "create_revision",
 	"create_workflow_def", "update_workflow_def", "delete_workflow_def",
@@ -390,7 +390,8 @@ func (e *ToolExecutor) listMetrics(ctx context.Context) (string, error) {
 	rows, err := e.pool.Query(ctx, `
 		SELECT m.name, m.is_input, COALESCE(m.formula,''), m.format, m.agg_rule, m.tags, COALESCE(m.label,''),
 		       COALESCE((SELECT d.name FROM model.dimension_def d WHERE d.id = m.picklist_dimension_id),''),
-		       CASE WHEN m.highlight_rules = '[]'::jsonb THEN '' ELSE m.highlight_rules::text END
+		       CASE WHEN m.highlight_rules = '[]'::jsonb THEN '' ELSE m.highlight_rules::text END,
+		       CASE WHEN m.closed_when = '[]'::jsonb THEN '' ELSE m.closed_when::text END
 		FROM model.metric_def m
 		WHERE m.model_id=$1::uuid AND m.revision_id=$2::uuid
 		ORDER BY m.is_input DESC, m.name`, e.modelID, e.revID)
@@ -405,13 +406,16 @@ func (e *ToolExecutor) listMetrics(ctx context.Context) (string, error) {
 		var name, formula, format, agg string
 		var isInput bool
 		var tagList []string
-		var label, picklist, highlights string
-		_ = rows.Scan(&name, &isInput, &formula, &format, &agg, &tagList, &label, &picklist, &highlights)
+		var label, picklist, highlights, closed string
+		_ = rows.Scan(&name, &isInput, &formula, &format, &agg, &tagList, &label, &picklist, &highlights, &closed)
 		if picklist != "" {
 			format += " of " + picklist
 		}
 		if highlights != "" {
 			agg += ", highlight_rules: " + highlights
+		}
+		if closed != "" {
+			agg += ", closed_when: " + closed
 		}
 		if label != "" {
 			name = fmt.Sprintf("%s \"%s\"", name, label)
@@ -489,7 +493,7 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 		       COALESCE(m.properties,'{}'::jsonb)::text,
 		       d.dimension_type, COALESCE(d.time_granularity,''), COALESCE(d.fiscal_year_start_month,0),
 		       COALESCE(m.period_start::text,''), COALESCE(m.period_end::text,''), d.tags, COALESCE(btrim(m.formula),''),
-		       d.business_maintained
+		       d.business_maintained, COALESCE(d.label,'')
 		FROM model.dimension_def d
 		LEFT JOIN model.dimension_member m ON m.dimension_id = d.id
 		LEFT JOIN model.dimension_member pm ON pm.id = m.parent_member_id
@@ -510,9 +514,13 @@ func (e *ToolExecutor) listDimensions(ctx context.Context) (string, error) {
 		var fiscalStart int
 		var tagList []string
 		var businessMaintained bool
-		_ = rows.Scan(&dname, &code, &label, &parent, &propsRaw, &dimType, &granularity, &fiscalStart, &pStart, &pEnd, &tagList, &memberFormula, &businessMaintained)
+		var dimLabel string
+		_ = rows.Scan(&dname, &code, &label, &parent, &propsRaw, &dimType, &granularity, &fiscalStart, &pStart, &pEnd, &tagList, &memberFormula, &businessMaintained, &dimLabel)
 		if len(tagList) > 0 {
 			dimTags[dname] = " [" + strings.TrimPrefix(tagSuffix(tagList), ", ") + "]"
+		}
+		if dimLabel != "" && !strings.Contains(dimTags[dname], "shown as") {
+			dimTags[dname] += fmt.Sprintf(" [shown as %q]", dimLabel)
 		}
 		if businessMaintained && !strings.Contains(dimTags[dname], "business-maintained") {
 			dimTags[dname] += " [business-maintained: users add, rename and remove its members]"
@@ -658,7 +666,7 @@ func (e *ToolExecutor) listDashboards(ctx context.Context) (string, error) {
 		LEFT JOIN model.form_def fd ON w.widget_type IN ('form', 'board') AND fd.id::text = w.ref_id
 		WHERE d.model_id=$1::uuid
 		  AND (d.revision_id = $2::uuid OR d.revision_id IS NULL)
-		ORDER BY d.name, d.id, w.pos_y, w.pos_x`, e.modelID, e.revID)
+		ORDER BY d.sort_order NULLS LAST, d.name, d.id, w.pos_y, w.pos_x`, e.modelID, e.revID)
 	if err != nil {
 		return "", err
 	}

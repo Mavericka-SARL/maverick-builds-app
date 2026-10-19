@@ -89,8 +89,11 @@ type Dimension struct {
 	// revision (migration 099) — what access rules resolve by. Kept on
 	// import so an imported revision lines up with the source model's
 	// other revisions; absent in packages exported before it existed.
-	LineageID         string          `json:"lineage_id,omitempty"`
-	Name              string          `json:"name"`
+	LineageID string `json:"lineage_id,omitempty"`
+	Name      string `json:"name"`
+	// Label is the display name (migration 146); absent when the name is
+	// shown, and in packages made before it existed.
+	Label             *string         `json:"label,omitempty"`
 	AggRule           string          `json:"agg_rule"`
 	Properties        json.RawMessage `json:"properties,omitempty"`
 	ParentDimensionID *string         `json:"parent_dimension_id,omitempty"`
@@ -142,6 +145,9 @@ type Metric struct {
 	PicklistAllowParents bool `json:"picklist_allow_parents,omitempty"`
 	// HighlightRules tint its cells, naming metrics by name (migration 111).
 	HighlightRules json.RawMessage `json:"highlight_rules,omitempty"`
+	// ClosedWhen closes cells to input, naming metrics by name (migration
+	// 147); absent when none, and in packages made before it existed.
+	ClosedWhen json.RawMessage `json:"closed_when,omitempty"`
 }
 
 type Dependency struct {
@@ -205,7 +211,11 @@ type Dashboard struct {
 	// "default"}] (modeledit.SelectorBarEntry); absent in packages made
 	// before it existed.
 	SelectorBar json.RawMessage `json:"selector_bar,omitempty"`
-	Widgets     []Widget        `json:"widgets"`
+	// SortOrder is the dashboard's place in the revision's order (the
+	// Dashboards page's tabs); absent when never ordered, and in packages
+	// made before it existed.
+	SortOrder *int32   `json:"sort_order,omitempty"`
+	Widgets   []Widget `json:"widgets"`
 }
 
 type Form struct {
@@ -414,7 +424,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 
 	// Dimensions + members + typed properties.
 	rows, err := q.Query(ctx, `
-		SELECT id::text, name, agg_rule, properties, parent_dimension_id::text, source_dimension_id::text, source_property,
+		SELECT id::text, name, NULLIF(label, ''), agg_rule, properties, parent_dimension_id::text, source_dimension_id::text, source_property,
 		       dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id::text, business_maintained
 		FROM model.dimension_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
@@ -423,7 +433,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 	for rows.Next() {
 		var d Dimension
-		if err := rows.Scan(&d.ID, &d.Name, &d.AggRule, &d.Properties, &d.ParentDimensionID, &d.SourceDimensionID, &d.SourceProperty,
+		if err := rows.Scan(&d.ID, &d.Name, &d.Label, &d.AggRule, &d.Properties, &d.ParentDimensionID, &d.SourceDimensionID, &d.SourceProperty,
 			&d.DimensionType, &d.TimeGranularity, &d.FiscalYearStart, &d.Tags, &d.LineageID, &d.BusinessMaintained); err != nil {
 			rows.Close()
 			return nil, err
@@ -481,7 +491,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 		SELECT id::text, name, formula, storage_type::text, is_input, agg_rule,
 		       COALESCE(format,''), COALESCE(format_decimals,0), COALESCE(format_currency,''), time_summary, tags, lineage_id::text,
 		       agg_numerator_metric_id::text, agg_denominator_metric_id::text, COALESCE(label,''), picklist_dimension_id::text,
-		       NULLIF(highlight_rules, '[]'::jsonb), picklist_allow_parents
+		       NULLIF(highlight_rules, '[]'::jsonb), picklist_allow_parents, NULLIF(closed_when, '[]'::jsonb)
 		FROM model.metric_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -490,7 +500,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for rows.Next() {
 		var m Metric
 		if err := rows.Scan(&m.ID, &m.Name, &m.Formula, &m.StorageType, &m.IsInput, &m.AggRule, &m.Format, &m.FormatDecimals, &m.FormatCurrency, &m.TimeSummary, &m.Tags, &m.LineageID,
-			&m.AggNumeratorMetricID, &m.AggDenominatorMetricID, &m.Label, &m.PicklistDimensionID, &m.HighlightRules, &m.PicklistAllowParents); err != nil {
+			&m.AggNumeratorMetricID, &m.AggDenominatorMetricID, &m.Label, &m.PicklistDimensionID, &m.HighlightRules, &m.PicklistAllowParents, &m.ClosedWhen); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -613,7 +623,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	}
 
 	rows, err = q.Query(ctx, `
-		SELECT id::text, name, tags, COALESCE(category,''), folder_id::text, selector_bar
+		SELECT id::text, name, tags, COALESCE(category,''), folder_id::text, selector_bar, sort_order
 		FROM model.dashboard_def WHERE model_id=$1::uuid AND (revision_id=$2::uuid OR revision_id IS NULL) ORDER BY created_at`,
 		modelID, revisionID)
 	if err != nil {
@@ -622,7 +632,7 @@ func CollectExportWithOptions(ctx context.Context, q Queryer, modelID, revisionI
 	for rows.Next() {
 		var d Dashboard
 		var bar []byte
-		if err := rows.Scan(&d.ID, &d.Name, &d.Tags, &d.Category, &d.FolderID, &bar); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.Tags, &d.Category, &d.FolderID, &bar, &d.SortOrder); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -1831,13 +1841,13 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 		}
 		if err = tx.QueryRow(ctx, `
 			INSERT INTO model.dimension_def (model_id, revision_id, name, agg_rule, properties, source_property,
-			                                 dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained)
+			                                 dimension_type, time_granularity, fiscal_year_start_month, tags, lineage_id, business_maintained, label)
 			VALUES ($1::uuid, $2::uuid, $3, COALESCE(NULLIF($4::text,''),'sum'), COALESCE($5::jsonb,'[]'::jsonb), $6, $7, $8, $9,
-			        COALESCE($10::text[],'{}'), COALESCE($11::uuid, gen_random_uuid()), $12)
+			        COALESCE($10::text[],'{}'), COALESCE($11::uuid, gen_random_uuid()), $12, NULLIF(btrim($13), ''))
 			RETURNING id::text`,
 			modelID, revisionID, d.Name, d.AggRule, jsonArg(d.Properties), d.SourceProperty,
 			dimType, d.TimeGranularity, d.FiscalYearStart, d.Tags, lineage(d.LineageID),
-			d.BusinessMaintained && dimType != timedim.TypeTime).Scan(&newID); err != nil {
+			d.BusinessMaintained && dimType != timedim.TypeTime, d.Label).Scan(&newID); err != nil {
 			return "", fmt.Errorf("dimension %q: %w", d.Name, err)
 		}
 		dimMap[d.ID] = newID
@@ -1966,6 +1976,15 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 			}
 			if _, err = tx.Exec(ctx, `UPDATE model.metric_def SET highlight_rules=$2::jsonb WHERE id=$1::uuid`, metricMap[m.ID], string(rules)); err != nil {
 				return "", fmt.Errorf("metric %q highlight rules: %w", m.Name, err)
+			}
+		}
+		if len(m.ClosedWhen) > 0 {
+			rules, cErr := metricformula.CheckClosedRules(ctx, tx, modelID, revisionID, "", m.ClosedWhen)
+			if cErr != nil {
+				return "", fmt.Errorf("metric %q: %w", m.Name, cErr)
+			}
+			if _, err = tx.Exec(ctx, `UPDATE model.metric_def SET closed_when=$2::jsonb WHERE id=$1::uuid`, metricMap[m.ID], string(rules)); err != nil {
+				return "", fmt.Errorf("metric %q closed rules: %w", m.Name, err)
 			}
 		}
 		if picklistDim != "" {
@@ -2176,12 +2195,12 @@ func importRevision(ctx context.Context, tx pgx.Tx, modelID, revisionName string
 		}
 		var newID string
 		if err = tx.QueryRow(ctx, `
-			INSERT INTO model.dashboard_def (model_id, revision_id, name, tags, category, folder_id, selector_bar)
-			VALUES ($1::uuid, $2::uuid, $3, COALESCE($4::text[],'{}'), $5, $6::uuid, COALESCE($7::jsonb, '[]'::jsonb))
+			INSERT INTO model.dashboard_def (model_id, revision_id, name, tags, category, folder_id, selector_bar, sort_order)
+			VALUES ($1::uuid, $2::uuid, $3, COALESCE($4::text[],'{}'), $5, $6::uuid, COALESCE($7::jsonb, '[]'::jsonb), $8)
 			RETURNING id::text`,
 			// The bar names dimensions by id: the package's, resolved
 			// to the ones just created (dimensions are imported first).
-			modelID, revisionID, d.Name, d.Tags, d.Category, folderID, jsonArg(refs.doc(d.SelectorBar, jsonRefs{}))).Scan(&newID); err != nil {
+			modelID, revisionID, d.Name, d.Tags, d.Category, folderID, jsonArg(refs.doc(d.SelectorBar, jsonRefs{})), d.SortOrder).Scan(&newID); err != nil {
 			return "", fmt.Errorf("dashboard %q: %w", d.Name, err)
 		}
 		dashMap[d.ID] = newID

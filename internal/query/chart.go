@@ -51,6 +51,9 @@ type ChartConfig struct {
 	// Only the plotted axis: the context selectors keep their rollups, where
 	// picking "All Regions" is a meaningful choice rather than a distortion.
 	HideRollupMembers bool `json:"hide_rollup_members,omitempty"`
+	// YAxisFromZero false fits a line chart's value axis to the data; the
+	// console draws it (ChartWidget), the server only keeps the setting.
+	YAxisFromZero *bool `json:"y_axis_from_zero,omitempty"`
 }
 
 // ChartRequest is the runtime request body — only context is overridable.
@@ -87,8 +90,10 @@ type ChartContextMember struct {
 // ChartContextDim is one context-selector dimension for a chart — every
 // hidden-filtered grid dimension except the plotted one.
 type ChartContextDim struct {
-	ID      string               `json:"id"`
-	Name    string               `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Label is the dimension's display name (migration 146); empty: Name.
+	Label   string               `json:"label,omitempty"`
 	Members []ChartContextMember `json:"members"`
 }
 
@@ -356,6 +361,7 @@ func (r *ChartResolver) Resolve(
 	}
 
 	contextDims := buildContextDims(gridDims, dimNames, cfg.DimensionID)
+	r.labelContextDims(ctx, contextDims)
 	asOf := time.Now().UTC().Format(time.RFC3339)
 
 	switch cfg.ChartType {
@@ -456,6 +462,35 @@ func buildContextDims(gridDims map[string][]dimMember, dimNames map[string]strin
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// labelContextDims fills each selector dimension's display name. Names stay
+// names everywhere a formula reads them (dimNames); only what a person reads
+// takes the label. A failed read leaves the names showing.
+func (r *ChartResolver) labelContextDims(ctx context.Context, dims []ChartContextDim) {
+	if len(dims) == 0 {
+		return
+	}
+	ids := make([]string, len(dims))
+	for i, d := range dims {
+		ids[i] = d.ID
+	}
+	rows, err := r.pool.Query(ctx, `SELECT id::text, label FROM model.dimension_def
+		WHERE id::text = ANY($1) AND COALESCE(label, '') <> ''`, ids)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	labels := map[string]string{}
+	for rows.Next() {
+		var id, label string
+		if rows.Scan(&id, &label) == nil {
+			labels[id] = label
+		}
+	}
+	for i := range dims {
+		dims[i].Label = labels[dims[i].ID]
+	}
 }
 
 // ── Category charts (bar, line, pie) ─────────────────────────────────────────

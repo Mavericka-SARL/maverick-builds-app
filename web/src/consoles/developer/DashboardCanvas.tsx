@@ -53,6 +53,7 @@ const PALETTE_TYPES = [
   { type: "text",               label: "Text" },
   { type: "image",              label: "Image" },
   { type: "import",             label: "Import" },
+  { type: "workflow_status",    label: "Workflow status" },
 ];
 
 type WidgetSizes = { minW: number; minH: number; defW: number; defH: number };
@@ -66,6 +67,7 @@ const WIDGET_SIZES: Record<string, WidgetSizes> = {
   integration_button: { minW: 40, minH: 20, defW: 200, defH: 60 },
   metric_kpi:         { minW: 220, minH: 120, defW: 260, defH: 140 },
   import:             { minW: 320, minH: 280, defW: 420, defH: 360 },
+  workflow_status:    { minW: 300, minH: 160, defW: 520, defH: 260 },
 };
 const FALLBACK_SIZES: WidgetSizes = { minW: 80, minH: 60, defW: 400, defH: 200 };
 function getWidgetSizes(type: string): WidgetSizes { return WIDGET_SIZES[type] ?? FALLBACK_SIZES; }
@@ -268,6 +270,8 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
   // so a widget could be bound to something this revision does not have.
   const { data: forms = [] }       = useQuery({ queryKey: ["forms", revisionId], queryFn: () => api.listForms(revisionId) });
   const { data: rules = [] }       = useQuery({ queryKey: ["automation-rules", revisionId], queryFn: () => api.listAutomationRules(revisionId) });
+  // Published workflows, for a workflow-status widget (named by name).
+  const { data: workflowDefs = [] } = useQuery({ queryKey: ["workflow-definitions"], queryFn: () => api.listWorkflowDefinitions() });
   // Only a manual, enabled rule can actually run from a dashboard button.
   // Offering the rest produced buttons that looked live and failed on click:
   // an event- or schedule-triggered rule fires from its own source, and a
@@ -386,6 +390,7 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
     if (w.widget_type === "metric_kpi")         return (metrics as Metric[]).find(m => m.id === refId)?.label ?? refId?.slice(0, 8) ?? "—";
     if (w.widget_type === "chart")              return (grids as GridDef[]).find(g => g.id === refId)?.name ?? refId?.slice(0, 8) ?? "—";
     if (w.widget_type === "import")             return (grids as GridDef[]).find(g => g.id === refId)?.name ?? refId?.slice(0, 8) ?? "—";
+    if (w.widget_type === "workflow_status")    return refId ?? "—";
     return "—";
   }
 
@@ -737,6 +742,18 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                   <option value="">— select —</option>
                   {(metrics as Metric[]).map(m => <option key={m.id} value={m.id}>{m.label || m.name}</option>)}
                 </Select>
+              </Field>
+            )}
+            {newWidget.widget_type === "workflow_status" && (
+              <Field label="Workflow">
+                <Select value={newWidget.ref_id} onChange={e => setNewWidget(w => ({ ...w, ref_id: e.target.value }))}>
+                  <option value="">— select —</option>
+                  {workflowDefs.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}
+                </Select>
+                <p className="mvx-admin-muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
+                  Where its latest run stands: each step, the current one with its roles and how long it has waited.
+                  {workflowDefs.length === 0 && " Publish a workflow first."}
+                </p>
               </Field>
             )}
             {newWidget.widget_type === "automation_button" && (

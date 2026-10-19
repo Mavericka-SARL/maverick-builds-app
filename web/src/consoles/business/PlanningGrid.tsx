@@ -2,7 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from "re
 import { serialToISO, isoToSerial } from "../dateSerial";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, GripVertical, Download, MoreVertical, Rows3, X as XIcon } from "lucide-react";
-import { api, type DemoContext, type GridData, type Metric, type DimMember, type DimInfo, type GridDefaultView , type SelectorsPosition, type HighlightRule, type HighlightTone } from "../../api/client";
+import { api, dimLabel, type DemoContext, type GridData, type Metric, type DimMember, type DimInfo, type GridDefaultView , type SelectorsPosition, type HighlightRule, type HighlightTone } from "../../api/client";
 import { CellHistoryDrawer, type CellRef } from "../../ee/cellhistory/CellHistoryDrawer";
 import { AddMemberRow, MemberLabel } from "./BusinessMemberControls";
 import { LoadingState, ErrorState, Toolbar, ToolbarGroup, Select, PropertyPanel, IconButton, SearchInput } from "../../ui";
@@ -12,6 +12,7 @@ import { evalMemberFormula } from "./memberFormula";
 import { invalidateModelData } from "../modelDataQueries";
 import { useSelectorOwnership, useSyncSetter, useWidgetContextSync } from "../dashboardContextSync";
 import { downloadBlob } from "./blobUtils";
+import { parseCellNumber } from "./cellNumber";
 
 // ── Grid actions menu ─────────────────────────────────────────────────────────
 
@@ -613,6 +614,9 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   });
 
   const [editing, setEditing]   = useState<Record<string, string>>({});
+  // A cell whose text is not a number: it keeps the text, outlined, and the
+  // grid says it was not saved (it used to revert silently).
+  const [badInput, setBadInput] = useState<{ key: string; raw: string } | null>(null);
   // Right-click on an input cell opens its change history (enterprise).
   const [historyCell, setHistoryCell] = useState<CellRef | null>(null);
   const [showPivot, setShowPivot] = useState(false);
@@ -1144,6 +1148,12 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     const key = getKey(metric.id, fc);
     const raw = editing[key];
     if (raw === undefined) return;
+    const value = isTextMetric(metric) || raw.trim() === "" ? null : parseCellNumber(raw);
+    if (!isTextMetric(metric) && raw.trim() !== "" && value === null) {
+      setBadInput({ key, raw });
+      return;
+    }
+    if (badInput?.key === key) setBadInput(null);
     setEditing(e => { const n = { ...e }; delete n[key]; return n; });
     const dim_codes: Record<string, string> = {};
     dims.forEach((d, i) => { dim_codes[d.id] = fc[i]?.code ?? ""; });
@@ -1162,8 +1172,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
       writeback.mutate({ cellKey: key, metric_id: metric.id, dim_codes, clear: true });
       return;
     }
-    const value = parseFloat(raw.replace(/,/g, ""));
-    if (!isNaN(value)) {
+    if (value !== null) {
       setPending((p) => ({ ...p, [key]: value }));
       writeback.mutate({ cellKey: key, metric_id: metric.id, dim_codes, value });
     }
@@ -1212,7 +1221,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
           {ids.map(id => {
             const isMetrics = id === METRICS_ID;
             const dim = dims.find(d => d.id === id);
-            const name = isMetrics ? "Metrics" : (dim?.name ?? id);
+            const name = isMetrics ? "Metrics" : (dim ? dimLabel(dim) : id);
             return (
               <div
                 key={id}
@@ -1272,6 +1281,15 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   const hasColDims = colDims.length > 0;
   const hasRowDims = rowDims.length > 0;
   const numMetrics = gridMetrics.length;
+  // With the metric in a context selector the header row under the columns
+  // has nothing to name; it shows only when it also holds the corner label.
+  const metricHeaderRow = !metricsInContext || (!hasColDims && !hasColHierarchy);
+  // One metric to choose is no choice: its name shows as text instead.
+  const metricChoice = metricsInContext && visibleMetrics.length > 1;
+  // Nothing for the toolbar row but the ··· menu: no row, the menu moves to
+  // the legend line under the grid.
+  const ownedCtxDims = ctxDims.filter(dim => ownsSelector(dim.id));
+  const toolbarRow = !!title || ownedCtxDims.length > 0 || metricsInContext || !hideSearch;
 
   // The Total row of one column. Same return contract as resolveCell:
   // null = withheld, undefined = no value ("—").
@@ -1354,6 +1372,26 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   }
   const toneClass = (t: HighlightTone | null) => (t ? `mvx-cell--tone-${t}` : "");
 
+  // Closed rules (metric.closed_when): a cell where one holds takes no input.
+  // The server refuses such a write too (writeguard.ClosedReason).
+  function cellClosed(m: Metric, fc: DimMember[]): boolean {
+    if (!m.closed_when?.length) return false;
+    return m.closed_when.some(r => {
+      const other = metricByName.get(r.metric.toLowerCase());
+      if (!other) return false;
+      const v = Number((onGrid.has(other.id) ? getVal(other.id, fc) : g.totals[other.id]) ?? 0);
+      switch (r.op) {
+        case "=": return v === r.value;
+        case "<>": return v !== r.value;
+        case ">": return v > r.value;
+        case ">=": return v >= r.value;
+        case "<": return v < r.value;
+        case "<=": return v <= r.value;
+      }
+      return false;
+    });
+  }
+
   // ── Shared cell renderers ─────────────────────────────────────────────────
   function inputCell(m: Metric, fc: DimMember[], borderLeft?: string) {
     const isParent = comboIsAgg(fc);
@@ -1365,7 +1403,8 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     // cross-dimension rollup (rollup_source_grid_id) — a rolled-up total
     // (e.g. a cost center's summed salary) isn't a real fact cell, so
     // there's nothing meaningful to write back.
-    const isReadOnly = isParent || !!m.readonly || fc.some(member => member.readonly || !!member.formula) || !!g.rollup_source_grid_id;
+    const closed = cellClosed(m, fc);
+    const isReadOnly = isParent || closed || !!m.readonly || fc.some(member => member.readonly || !!member.formula) || !!g.rollup_source_grid_id;
 
     const isText = isTextMetric(m);
     const note = isText ? (g.texts?.[key] ?? "") : "";
@@ -1376,7 +1415,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
           className={[isParent ? "mvx-cell--agg" : "mvx-cell--readonly", val == null && !note ? "mvx-cell--empty" : "", tone].filter(Boolean).join(" ")}
           style={{ ...td, textAlign: isText ? "left" : "right", borderLeft, ...(isText ? textCellStyle : {}) }}
           onContextMenu={isParent ? undefined : (e) => openHistory(e, m, fc)}
-          title={isParent ? undefined : (note ? `${note}\n\nRight-click for history` : "Right-click for history")}
+          title={isParent ? undefined : closed ? "Closed: this cell takes no input. Right-click for history" : (note ? `${note}\n\nRight-click for history` : "Right-click for history")}
         >
           {isText ? (isParent ? "" : note || (val ? fmtMetric(m, val) : "—")) : fmtMetric(m, val)}
         </td>
@@ -1470,6 +1509,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
         <input
           value={dispVal} placeholder="—"
           className={["mvx-cell-input", isActive ? "mvx-cell-input--active" : ""].filter(Boolean).join(" ")}
+          aria-invalid={badInput?.key === key || undefined}
           onChange={e => setEditing(p => ({ ...p, [key]: e.target.value }))}
           onBlur={() => commitCell(m, fc)}
           onKeyDown={e => e.key === "Enter" && commitCell(m, fc)}
@@ -1531,14 +1571,14 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
             context selectors, and the ··· actions — the title used to sit
             in its own header row with the menu on the next, stacking two
             mostly-empty bars (reported live). */}
-        <Toolbar className="mvx-toolbar--tight">
+        {toolbarRow && <Toolbar className="mvx-toolbar--tight">
           <ToolbarGroup>
             {title && <span style={{ fontWeight: 600, fontSize: "var(--font-size-body)", marginRight: 6 }}>{title}</span>}
-            {ctxDims.filter(dim => ownsSelector(dim.id)).map(dim => (
+            {ownedCtxDims.map(dim => (
               <div key={dim.id} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                <span className="mvx-admin-muted" style={{ fontWeight: 500 }}>{dim.name}:</span>
+                <span className="mvx-admin-muted" style={{ fontWeight: 500 }}>{dimLabel(dim)}:</span>
                 <HierarchicalMemberSelect
-                  ariaLabel={`${dim.name} context`}
+                  ariaLabel={`${dimLabel(dim)} context`}
                   members={selectorMembers(dim.id)}
                   value={filterSel[dim.id] ?? defaultLeafCode(dim) ?? ""}
                   onChange={code => setFilterValue(dim.id, code)}
@@ -1548,7 +1588,10 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                 />
               </div>
             ))}
-            {metricsInContext && (
+            {metricsInContext && !metricChoice && gridMetrics[0] && (
+              <span style={{ fontSize: 12, color: "var(--color-brand-600)", fontWeight: 500 }}>{gridMetrics[0].label}</span>
+            )}
+            {metricChoice && (
               <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                 <span style={{ fontSize: 12, color: "var(--color-brand-600)", fontWeight: 500 }}>Metric:</span>
                 <Select
@@ -1573,7 +1616,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
               onTogglePivot={() => setShowPivot(p => !p)}
             />
           </ToolbarGroup>
-        </Toolbar>
+        </Toolbar>}
         </div>
 
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
@@ -1672,8 +1715,8 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                   colHeaderLevels.map((level, li) => (
                     <tr key={li} style={{ background: "var(--color-grid-col-header-bg)", borderBottom: li === colHeaderLevels.length - 1 ? "2px solid var(--color-border)" : "1px solid var(--color-grid-col-header-border)" }}>
                       {li === 0 && (
-                        <th style={{ ...th, minWidth: 160 }} rowSpan={colHeaderLevels.length + 1}>
-                          {hasRowDims ? rowDims.map(d => d.name).join(" / ") : ""}
+                        <th style={{ ...th, minWidth: 160 }} rowSpan={colHeaderLevels.length + (metricHeaderRow ? 1 : 0)}>
+                          {hasRowDims ? rowDims.map(dimLabel).join(" / ") : ""}
                         </th>
                       )}
                       {level.map((cell, ci) => (
@@ -1695,8 +1738,8 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                   ))
                 ) : hasColDims ? (
                   <tr style={{ background: "var(--color-grid-col-header-bg)", borderBottom: "1px solid var(--color-grid-col-header-border)" }}>
-                    <th style={{ ...th, minWidth: 160 }} rowSpan={2}>
-                      {hasRowDims ? rowDims.map(d => d.name).join(" / ") : ""}
+                    <th style={{ ...th, minWidth: 160 }} rowSpan={metricHeaderRow ? 2 : 1}>
+                      {hasRowDims ? rowDims.map(dimLabel).join(" / ") : ""}
                     </th>
                     {colCombos.map((cc, ci) => (
                       <th key={comboKey(cc)} colSpan={numMetrics} {...pickComboProps(cc, colDims)}
@@ -1706,10 +1749,10 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                     ))}
                   </tr>
                 ) : null}
-                <tr style={{ background: "var(--color-surface-faint)", borderBottom: "2px solid var(--color-border)" }}>
+                {metricHeaderRow && <tr style={{ background: "var(--color-surface-faint)", borderBottom: "2px solid var(--color-border)" }}>
                   {!hasColDims && !hasColHierarchy && (
                     <th style={{ ...th, minWidth: 160 }}>
-                      {hasRowDims ? rowDims.map(d => d.name).join(" / ") : ""}
+                      {hasRowDims ? rowDims.map(dimLabel).join(" / ") : ""}
                     </th>
                   )}
                   {effectiveColCombos.flatMap((cc, ci) =>
@@ -1720,12 +1763,12 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                           borderLeft: hasColDims && ci > 0 && gridMetrics[0]?.id === m.id ? "1px solid var(--color-border-muted)" : undefined,
                           color: m.is_input ? "var(--color-text-strong)" : "var(--color-grid-calc-text)",
                         }}>
-                        {metricsInContext ? " " : m.label}
+                        {m.label}
                         {!metricsInContext && <div style={{ fontSize: 10, fontWeight: 400, color: "var(--color-disabled)" }}>{m.is_input ? "INPUT" : "CALC"}</div>}
                       </th>
                     ))
                   )}
-                </tr>
+                </tr>}
               </thead>
               <tbody>
                 {(hasRowHierarchy && flatRowEntries
@@ -1814,10 +1857,26 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
           {gridMetrics.some(m => !m.is_input) && <span><span className="mvx-grid-legend__swatch mvx-grid-legend__swatch--calc" />Calculated</span>}
           <span><span className="mvx-grid-legend__swatch mvx-grid-legend__swatch--readonly" />Read-only / total</span>
           {pushSync && <span>Click a row or column label to select it in synced widgets</span>}
+          {!toolbarRow && (
+            <span style={{ marginLeft: "auto" }}>
+              <GridActionsMenu
+                canExport={!!gridDefId}
+                exporting={exportGrid.isPending}
+                onExport={() => exportGrid.mutate()}
+                pivotActive={showPivot}
+                onTogglePivot={() => setShowPivot(p => !p)}
+              />
+            </span>
+          )}
         </div>
         {writeback.isPending && <p className="mvx-grid-status mvx-grid-status--saving">Saving…</p>}
         {!writeback.isPending && recalcPending && <p className="mvx-grid-status mvx-grid-status--saving" role="status">Recalculating…</p>}
         {writeback.isError && <p className="mvx-grid-status mvx-grid-status--error">Save failed: {(writeback.error as Error).message}</p>}
+        {badInput && editing[badInput.key] !== undefined && (
+          <p className="mvx-grid-status mvx-grid-status--error" role="alert">
+            “{badInput.raw}” is not a number, so it was not saved. Type a number such as 14.8, 1,250 or (2) for a reduction.
+          </p>
+        )}
         </div>
 
       </div>

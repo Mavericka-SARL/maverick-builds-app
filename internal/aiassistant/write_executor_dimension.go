@@ -89,6 +89,8 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 		SourceProperty      json.RawMessage `json:"source_property"`
 		// Users add, rename and remove its members.
 		BusinessMaintained *bool `json:"business_maintained"`
+		// Label: the display name selectors and headers show; "" clears it.
+		Label *string `json:"label"`
 	}
 	var sent map[string]json.RawMessage
 	if err := decodeParams(raw, &p); err != nil {
@@ -170,9 +172,12 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 	if err := metricformula.CheckRenameFreeOfOtherKind(ctx, e.pool, dimID, name, "dimension"); err != nil {
 		return "", "", err
 	}
-	if name == "" && p.Tags == nil && !parentSent && !sourceSent && !propSent && !p.DeriveMembers {
-		return "", "", fmt.Errorf("nothing to change: provide name, tags, parent_dimension_id, " +
-			"source_dimension_id, source_property or derive_members")
+	if name == "" && p.Tags == nil && !parentSent && !sourceSent && !propSent && !p.DeriveMembers && p.BusinessMaintained == nil && p.Label == nil {
+		return "", "", fmt.Errorf("nothing to change: provide name, label, tags, parent_dimension_id, " +
+			"source_dimension_id, source_property, business_maintained or derive_members")
+	}
+	if p.Label != nil && len(strings.TrimSpace(*p.Label)) > 80 {
+		return "", "", fmt.Errorf("label: at most 80 characters")
 	}
 
 	grouping, err := metricformula.PlanGroupingPatch(ctx, e.pool, dimID, metricformula.GroupingPatchRequest{
@@ -205,6 +210,11 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 		return "", "", fmt.Errorf("update dimension: %w", err)
 	}
 
+	if p.Label != nil {
+		if _, err := e.pool.Exec(ctx, `UPDATE model.dimension_def SET label=NULLIF($2,'') WHERE id=$1::uuid`, dimID, strings.TrimSpace(*p.Label)); err != nil {
+			return "", "", fmt.Errorf("update dimension: %w", err)
+		}
+	}
 	if p.BusinessMaintained != nil {
 		if *p.BusinessMaintained {
 			if err := metricformula.CheckBusinessMaintainable(ctx, e.pool, dimID); err != nil {
@@ -230,6 +240,13 @@ func (e *WriteExecutor) updateDimension(ctx context.Context, raw json.RawMessage
 	}
 	if name != "" && name != curName {
 		changes = append(changes, fmt.Sprintf("renamed from '%s'", curName))
+	}
+	if p.Label != nil {
+		if l := strings.TrimSpace(*p.Label); l != "" {
+			changes = append(changes, fmt.Sprintf("shown as '%s'", l))
+		} else {
+			changes = append(changes, "shown by its name")
+		}
 	}
 	if p.Tags != nil {
 		changes = append(changes, "tags set")

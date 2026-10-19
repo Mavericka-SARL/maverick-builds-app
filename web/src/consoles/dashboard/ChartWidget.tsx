@@ -18,6 +18,7 @@ import {
   type HistogramChartData,
   type ChartData,
   type ChartContextDim,
+  dimLabel,
 } from "../../api/client";
 import { CHART_COLORS, formatValue, CHART_TYPE_LABELS, isChartConfigComplete } from "./chartTypes";
 import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
@@ -52,11 +53,11 @@ export function ContextSelectors({
       {dims.map(dim => (
         <div key={dim.id} style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <label htmlFor={`ctx-${dim.id}`} style={{ fontSize: 12, color: "var(--color-text-muted)", fontWeight: 500, whiteSpace: "nowrap" }}>
-            {dim.name}:
+            {dimLabel(dim)}:
           </label>
           <HierarchicalMemberSelect
             id={`ctx-${dim.id}`}
-            ariaLabel={dim.name}
+            ariaLabel={dimLabel(dim)}
             members={dim.members}
             value={context[dim.id] ?? defaultLeafCode({ members: dim.members }) ?? ""}
             onChange={code => onChange(dim.id, code)}
@@ -139,7 +140,8 @@ function LineChartRenderer({ data, config, currencySymbol, onCategoryClick }: { 
         onClick={onCategoryClick ? (state) => { const i = tooltipIndex(state); if (i !== null) onCategoryClick(i); } : undefined}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
         <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-        <YAxis tickFormatter={fmt} tick={{ fontSize: 11 }} />
+        <YAxis tickFormatter={fmt} tick={{ fontSize: 11 }}
+          domain={config.y_axis_from_zero === false ? ["auto", "auto"] : [0, "auto"]} />
         <Tooltip formatter={(v: unknown) => formatValue(v as number, config.value_format, currencySymbol)} />
         {showLegend && <Legend wrapperStyle={{ fontSize: 12 }} />}
         {data.series.map((s, i) => (

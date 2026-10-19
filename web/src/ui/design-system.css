@@ -1243,8 +1243,11 @@
   gap: 4px;
 }
 
+/* Many tabs flow onto more rows; each label stays on one line (17 dashboard
+   tabs used to shrink into three-line labels, reported 2026-10-18). */
 .mvx-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 2px;
   border-bottom: 1px solid var(--color-border);
   margin-bottom: var(--space-5);
@@ -1263,6 +1266,8 @@
   font-family: var(--font-sans);
   font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
   cursor: pointer;
   transition: color var(--motion-fast), border-color var(--motion-fast);
 }
@@ -2151,6 +2156,19 @@ tr:hover .mvx-member-label__actions,
 }
 
 /* Legend under a planning grid naming the three cell roles. */
+/* Workflow status widget: the steps of the latest run, the current one marked. */
+.mvx-wfstatus__head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-bottom: 10px; }
+.mvx-wfstatus__steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.mvx-wfstatus__step { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 13px; color: var(--color-text-muted); }
+.mvx-wfstatus__mark { width: 14px; text-align: center; flex-shrink: 0; }
+.mvx-wfstatus__step--done { color: var(--color-text); }
+.mvx-wfstatus__step--done .mvx-wfstatus__mark { color: var(--color-success, #16a34a); }
+.mvx-wfstatus__step--current { color: var(--color-text-strong); font-weight: 600; }
+.mvx-wfstatus__step--current .mvx-wfstatus__mark { color: var(--color-brand-600); }
+.mvx-wfstatus__step--sent_back .mvx-wfstatus__mark { color: var(--color-warning, #d97706); }
+.mvx-wfstatus__meta { font-weight: 400; font-size: 12px; color: var(--color-text-muted); }
+.mvx-wfstatus__late { color: var(--color-danger); font-weight: 600; }
+
 /* Frozen panes (PlanningGrid): the table scrolls inside its own box, and its
    header rows and row-label column stay in view. Sticky cells need an opaque
    background: a row's own colour, else what the grid sits on (the page, or a
@@ -2240,6 +2258,7 @@ tr:hover .mvx-member-label__actions,
 /* A calculated cell whose recalculation is still running (recalc_pending). */
 .mvx-cell--pending { opacity: 0.45; transition: opacity 150ms ease-in; }
 .mvx-grid-status--error { color: var(--color-danger); }
+.mvx-cell-input[aria-invalid="true"] { border-color: var(--color-danger); background: var(--color-danger-bg); }
 
 /* Pivot panel drop zones and draggable chips */
 .mvx-pivot-zone {

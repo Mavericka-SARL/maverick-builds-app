@@ -7963,6 +7963,63 @@ func decodeGetWorkflowInstancesParams(args [1]string, argsEscaped bool, r *http.
 	return params, nil
 }
 
+// GetWorkflowStatusParams is parameters of getWorkflowStatus operation.
+type GetWorkflowStatusParams struct {
+	Name string
+}
+
+func unpackGetWorkflowStatusParams(packed middleware.Parameters) (params GetWorkflowStatusParams) {
+	{
+		key := middleware.ParameterKey{
+			Name: "name",
+			In:   "query",
+		}
+		params.Name = packed[key].(string)
+	}
+	return params
+}
+
+func decodeGetWorkflowStatusParams(args [0]string, argsEscaped bool, r *http.Request) (params GetWorkflowStatusParams, _ error) {
+	q := uri.NewQueryDecoder(r.URL.Query())
+	// Decode query: name.
+	if err := func() error {
+		cfg := uri.QueryParameterDecodingConfig{
+			Name:    "name",
+			Style:   uri.QueryStyleForm,
+			Explode: true,
+		}
+
+		if err := q.HasParam(cfg); err == nil {
+			if err := q.DecodeParam(cfg, func(d uri.Decoder) error {
+				val, err := d.DecodeValue()
+				if err != nil {
+					return err
+				}
+
+				c, err := conv.ToString(val)
+				if err != nil {
+					return err
+				}
+
+				params.Name = c
+				return nil
+			}); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+		return nil
+	}(); err != nil {
+		return params, &ogenerrors.DecodeParamError{
+			Name: "name",
+			In:   "query",
+			Err:  err,
+		}
+	}
+	return params, nil
+}
+
 // GetWorkflowUsageParams is parameters of getWorkflowUsage operation.
 type GetWorkflowUsageParams struct {
 	ID uuid.UUID

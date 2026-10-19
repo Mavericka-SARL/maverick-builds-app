@@ -869,6 +869,16 @@ type Handler interface {
 	//
 	// GET /api/developer/workflows/{id}/instances
 	GetWorkflowInstances(ctx context.Context, params GetWorkflowInstancesParams) ([]WorkflowInstanceSummary, error)
+	// GetWorkflowStatus implements getWorkflowStatus operation.
+	//
+	// One published workflow of the caller's model, by name: its latest run (test runs left out) and
+	// each human step (task, approval) in the definition's order — done, current (since when, due when,
+	//  for which roles), sent back, skipped or still to come. Anyone who opens the model may read it; it
+	// names no person, comment or run context. found is false when the model has no published workflow
+	// of that name.
+	//
+	// GET /api/workflow/status
+	GetWorkflowStatus(ctx context.Context, params GetWorkflowStatusParams) (GetWorkflowStatusRes, error)
 	// GetWorkflowUsage implements getWorkflowUsage operation.
 	//
 	// List the automation rules that reference a workflow definition.
@@ -1422,6 +1432,16 @@ type Handler interface {
 	//
 	// PATCH /api/ai/sessions/{id}
 	RenameAiSession(ctx context.Context, req *RenameAiSessionReq, params RenameAiSessionParams) (RenameAiSessionRes, error)
+	// ReorderDashboards implements reorderDashboards operation.
+	//
+	// Dashboard_ids must be exactly the dashboards of one revision, each once, in the wanted order: the
+	// order of the Dashboards page's tabs (and of every list of dashboards), whose first is where
+	// everyone lands. A dashboard never ordered (created later) lists after the ordered ones, by name. A
+	// revision copy and a model package carry the order. Audited as dashboard.reordered. A dashboard
+	// outside the caller's scope answers 404.
+	//
+	// PUT /api/developer/dashboards/order
+	ReorderDashboards(ctx context.Context, req *ReorderDashboardsReq) (ReorderDashboardsRes, error)
 	// ReorderDimensionMembers implements reorderDimensionMembers operation.
 	//
 	// Member_ids must be exactly the current children of parent_member_id in this dimension (null for

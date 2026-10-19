@@ -37,6 +37,7 @@ func (e *WriteExecutor) editTools() map[string]writeTool {
 		"generate_time_members":     e.generateTimeMembers,
 		"reorder_dimension_members": e.reorderDimensionMembers,
 		"reorder_grid_metrics":      e.reorderGridMetrics,
+		"reorder_dashboards":        e.reorderDashboards,
 		"update_grid":               e.updateGrid,
 		"delete_grid":               e.deleteGrid,
 		"remove_grid_metric":        e.removeGridMetric,
@@ -251,6 +252,44 @@ func (e *WriteExecutor) reorderGridMetrics(ctx context.Context, raw json.RawMess
 		return "", "", fmt.Errorf("reorder grid metrics: %w", err)
 	}
 	return fmt.Sprintf("Grid metrics reordered: %s", strings.Join(p.Metrics, ", ")), "", nil
+}
+
+// reorderDashboards is PUT /api/developer/dashboards/order: the order of the
+// revision's dashboards (the Dashboards page's tabs; the first is where
+// everyone lands), given as every dashboard of the revision, by name or id,
+// once each.
+func (e *WriteExecutor) reorderDashboards(ctx context.Context, raw json.RawMessage) (string, string, error) {
+	var p struct {
+		Dashboards []string `json:"dashboards"`
+	}
+	perr := decodeParams(raw, &p)
+	if isUnknownParam(perr) {
+		return "", "", perr
+	}
+	if perr != nil || len(p.Dashboards) == 0 {
+		return "", "", fmt.Errorf("dashboards (every dashboard of the revision, by name, in the wanted order) is required")
+	}
+	ids := make([]string, 0, len(p.Dashboards))
+	for _, ref := range p.Dashboards {
+		id, err := e.requireInModel(ctx, "dashboard", ref)
+		if err != nil {
+			return "", "", err
+		}
+		ids = append(ids, id)
+	}
+	rev := e.revID
+	if rev == "" {
+		_ = e.pool.QueryRow(ctx, `SELECT COALESCE(revision_id::text, '') FROM model.dashboard_def WHERE id=$1::uuid`, ids[0]).Scan(&rev)
+	}
+	names, err := modeledit.ReorderDashboards(ctx, e.pool, e.modelID, rev, ids)
+	if err != nil {
+		var re *modeledit.ReorderError
+		if errors.As(err, &re) {
+			return "", "", fmt.Errorf("%w (list_dashboards shows them)", err)
+		}
+		return "", "", fmt.Errorf("reorder dashboards: %w", err)
+	}
+	return fmt.Sprintf("Dashboards reordered: %s", strings.Join(names, ", ")), "", nil
 }
 
 // generateTimeMembers is POST /api/developer/dimensions/{id}/members/generate:

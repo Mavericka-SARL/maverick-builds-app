@@ -1,0 +1,11 @@
+-- A dimension's display name: what selectors, headers and pivot panels show
+-- ("Plan case", "Cost center"), while formulas, criteria pairs and every API
+-- keep naming the dimension by its name (plan_case, cost_center).
+--
+-- Renaming the dimension was the only way to change what users read, and a
+-- rename breaks every formula that names it (found 2026-10-18: the shared
+-- planning models' selector bars read "plan_case:" and "cost_center:").
+--
+-- NULL or empty: the name is shown, as before. A revision copy and a model
+-- package carry it.
+ALTER TABLE model.dimension_def ADD COLUMN label text;

@@ -4,6 +4,10 @@
  *    setup grid needs none); other grids keep it;
  *  - frozen panes: a grid scrolls inside its widget, and its header rows and
  *    row-label column stay where they are.
+ *  - a grid with nothing for its toolbar row but the ··· menu has no such row
+ *    (the menu sits on the legend line); a single metric in context shows its
+ *    name, not a one-choice selector, and no blank header row under the
+ *    columns (owner request, 2026-10-18).
  *
  * Self-contained: CI runs without a gateway.
  */
@@ -26,6 +30,14 @@ const gridData = {
   access_rules: { dim_members: {}, metrics: {} },
 };
 
+// A setup grid: one setting, no dimensions.
+const setupData = {
+  ...gridData,
+  metrics: [{ id: "m-atm", name: "actual_through_month", label: "Actual Through Month", is_input: true, agg_rule: "sum", format: "number", format_decimals: 0 }],
+  dimensions: [],
+  cells: { "m-atm": 9 },
+};
+
 const widget = (id: string, ref: string, pos_y: number, size_h: number, props: Record<string, unknown>) => ({
   id, widget_type: "grid", ref_id: ref, content: null, sort_order: pos_y, pos_x: 0, pos_y, size_w: 900, size_h, widget_props: props,
 });
@@ -34,7 +46,7 @@ const dashboard = {
   name: "Frozen Dashboard",
   tags: [],
   widgets: [
-    widget("w-setup", "setup-grid", 0, 140, { hide_search: true, default_view: { rows: ["__metrics__"], cols: [], context: ["product", "month"] } }),
+    widget("w-setup", "setup-grid", 0, 140, { hide_search: true, default_view: { rows: ["__metrics__"], cols: [], context: [] } }),
     widget("w-plan", "plan-grid", 160, 320, { default_view: { rows: ["product"], cols: ["month"], context: ["__metrics__"] } }),
   ],
 };
@@ -43,7 +55,8 @@ async function mockDashboard(page: Page) {
   const json = (body: unknown) => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
   await page.route("**/api/dashboards", (route) => route.fulfill(json([dashboard])));
   await page.route(`**/api/dashboards/${DASH_ID}`, (route) => route.fulfill(json(dashboard)));
-  await page.route("**/api/grid*", (route) => route.fulfill(json(gridData)));
+  await page.route("**/api/grid*", (route) =>
+    route.fulfill(json(new URL(route.request().url()).searchParams.get("grid_def_id") === "setup-grid" ? setupData : gridData)));
 }
 
 test("hide_search leaves out the search box of that grid only", async ({ page }) => {
@@ -86,4 +99,24 @@ test("the header rows and the row labels stay in view while the grid scrolls", a
   // ... and the two header rows and the label column stay put.
   await expect.poll(read).toEqual(before);
   expect(before.month).toBeGreaterThan(before.year);
+});
+
+test("no empty toolbar row, no one-choice metric selector, no blank header row", async ({ page }) => {
+  await mockApi(page);
+  await mockDashboard(page);
+  await loadAs(page, "dept_head");
+  const setup = page.locator(".mvx-dash-cell").nth(0);
+  const plan = page.locator(".mvx-dash-cell").nth(1);
+  await expect(plan.locator("tbody td", { hasText: "Product 30" })).toHaveCount(1, { timeout: 15_000 });
+
+  // The setup grid: hide_search, no title, no selectors → no toolbar row; the
+  // menu is on the legend line.
+  await expect(setup.locator(".mvx-toolbar")).toHaveCount(0);
+  await expect(setup.locator(".mvx-grid-legend").getByRole("button", { name: "Grid actions" })).toBeVisible();
+
+  // The plan grid: one metric in context → its name, no selector; two header
+  // rows (FY over its months), not three.
+  await expect(plan.getByLabel("Metric context")).toHaveCount(0);
+  await expect(plan.locator(".mvx-toolbar")).toContainText("Plan %");
+  await expect(plan.locator("table.mvx-grid-frozen thead tr")).toHaveCount(2);
 });

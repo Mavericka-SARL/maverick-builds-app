@@ -719,6 +719,7 @@ components:
       properties:
         id:      { type: string, format: uuid }
         name:    { type: string }
+        label:   { type: string, description: "Display name selectors and headers show; absent: the name" }
         dimension_type:          { type: string, enum: [standard, time] }
         time_granularity:        { type: string, enum: [day, week, month, quarter, half_year, year, custom], description: "Time dimensions only" }
         fiscal_year_start_month: { type: integer, minimum: 1, maximum: 12, description: "Time dimensions only" }
@@ -907,6 +908,10 @@ components:
           type: array
           items: { $ref: "#/components/schemas/HighlightRule" }
           description: "How the metric's cells are tinted; the first rule that holds wins. [] removes them; omitted keeps them on PATCH."
+        closed_when:
+          type: array
+          items: { $ref: "#/components/schemas/ClosedRule" }
+          description: "Input metrics: the cells that take no input — where any rule holds the grid shows the cell read-only and every write refuses it. [] removes them; omitted keeps them on PATCH."
         depends_on:      { type: array, items: { type: string }, description: "Names of metrics/dimensions this formula references" }
         depended_by:     { type: array, items: { type: string }, description: "Names of metrics whose formula references this one" }
         tags:            { type: array, items: { type: string }, description: "Free-form labels the developer console filters by" }
@@ -930,6 +935,7 @@ components:
       properties:
         id:                   { type: string, format: uuid }
         name:                 { type: string }
+        label:                { type: string, description: "Display name selectors and headers show; absent: the name" }
         agg_rule:             { type: string }
         parent_dimension_id:  { type: string, format: uuid, nullable: true }
         dimension_type:
@@ -944,6 +950,13 @@ components:
         business_maintained:  { type: boolean, description: "Users add, rename and remove this dimension's members (POST/PATCH/DELETE /api/dimensions/{dimId}/members); not for a time dimension or a property grouping" }
         members:              { type: array, items: { $ref: "#/components/schemas/DimensionMember" }, description: "Time members in chronological order" }
 
+    ClosedRule:
+      type: object
+      required: [metric, op, value]
+      properties:
+        metric: { type: string, description: "A calculated metric on the same grid, read at the cell (a blank counts as 0)" }
+        op:     { type: string, enum: ["=", "<>", ">", ">=", "<", "<="] }
+        value:  { type: number }
     HighlightRule:
       type: object
       required: [op, tone]
@@ -1011,6 +1024,10 @@ components:
           type: array
           items: { $ref: "#/components/schemas/HighlightRule" }
           description: "How the metric's cells are tinted; the first rule that holds wins. [] removes them; omitted keeps them on PATCH."
+        closed_when:
+          type: array
+          items: { $ref: "#/components/schemas/ClosedRule" }
+          description: "Input metrics: the cells that take no input — where any rule holds the grid shows the cell read-only and every write refuses it. [] removes them; omitted keeps them on PATCH."
         time_summary:
           type: string
           enum: [sum, average, min, max, first, last, none]
@@ -1044,6 +1061,10 @@ components:
           type: array
           items: { $ref: "#/components/schemas/HighlightRule" }
           description: "How the metric's cells are tinted; the first rule that holds wins. [] removes them; omitted keeps them on PATCH."
+        closed_when:
+          type: array
+          items: { $ref: "#/components/schemas/ClosedRule" }
+          description: "Input metrics: the cells that take no input — where any rule holds the grid shows the cell read-only and every write refuses it. [] removes them; omitted keeps them on PATCH."
         time_summary:
           type: string
           enum: [sum, average, min, max, first, last, none]
@@ -1103,6 +1124,7 @@ components:
       description: "A partial update: a field left out keeps its value."
       properties:
         name:                 { type: string }
+        label:                { type: string, maxLength: 80, description: "Display name selectors and headers show (formulas keep naming the dimension by name); empty shows the name again" }
         agg_rule:             { type: string }
         parent_dimension_id:  { type: string, format: uuid, nullable: true, description: "Send null to detach the dimension from its parent" }
         tags:                 { type: array, items: { type: string } }
@@ -4164,6 +4186,54 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/WorkflowInstance" }
 
+  /api/workflow/status:
+    get:
+      operationId: getWorkflowStatus
+      tags: [Workflows]
+      summary: Where the latest run of a published workflow stands (a dashboard's workflow-status widget)
+      description: >-
+        One published workflow of the caller's model, by name: its latest run (test runs left out) and each human
+        step (task, approval) in the definition's order — done, current (since when, due when, for which roles),
+        sent back, skipped or still to come. Anyone who opens the model may read it; it names no person, comment or
+        run context. found is false when the model has no published workflow of that name.
+      parameters:
+        - name: name
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The workflow's latest run
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workflow, found, steps]
+                properties:
+                  workflow: { type: string }
+                  found:    { type: boolean }
+                  instance:
+                    type: object
+                    nullable: true
+                    properties:
+                      status:       { type: string }
+                      started_at:   { type: string, format: date-time }
+                      completed_at: { type: string, format: date-time, nullable: true }
+                  steps:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, type, roles, state]
+                      properties:
+                        id:           { type: string }
+                        name:         { type: string }
+                        type:         { type: string }
+                        roles:        { type: array, items: { type: string } }
+                        state:        { type: string, enum: [done, current, sent_back, skipped, pending] }
+                        since:        { type: string, format: date-time }
+                        due_at:       { type: string, format: date-time }
+                        completed_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/BadRequest" }
   /api/workflow/definitions/{id}:
     get:
       operationId: getWorkflowDefinition
@@ -5947,6 +6017,38 @@ paths:
                   status: { type: string }
         "400": { $ref: "#/components/responses/BadRequest" }
 
+  /api/developer/dashboards/order:
+    put:
+      operationId: reorderDashboards
+      tags: [Developer Console]
+      summary: Set the order of a revision's dashboards (developer only)
+      description: >-
+        dashboard_ids must be exactly the dashboards of one revision, each once, in the wanted order: the order of
+        the Dashboards page's tabs (and of every list of dashboards), whose first is where everyone lands. A
+        dashboard never ordered (created later) lists after the ordered ones, by name. A revision copy and a model
+        package carry the order. Audited as dashboard.reordered. A dashboard outside the caller's scope answers 404.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dashboard_ids]
+              properties:
+                dashboard_ids:
+                  type: array
+                  items: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Dashboards reordered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/developer/dashboards/{id}:
     patch:
       operationId: updateDashboard

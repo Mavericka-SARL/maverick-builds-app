@@ -331,12 +331,13 @@ function DimInlineRow({
 function DimHeaderEditor({ dim, onClose }: { dim: DevDimension; onClose: () => void }) {
   const qc = useQueryClient();
   const [name, setName] = useState(dim.name);
+  const [label, setLabel] = useState(dim.label ?? "");
   const [tags, setTags] = useState<string[]>(dim.tags ?? []);
   const [businessMaintained, setBusinessMaintained] = useState(!!dim.business_maintained);
   // A time dimension's periods and a grouping's derived members are not typed.
   const canOpen = dim.dimension_type !== "time" && !dim.source_dimension_id;
   const save = useMutation({
-    mutationFn: () => api.updateDimension(dim.id, { name, tags, ...(canOpen && businessMaintained !== !!dim.business_maintained ? { business_maintained: businessMaintained } : {}) }),
+    mutationFn: () => api.updateDimension(dim.id, { name, tags, ...(label.trim() !== (dim.label ?? "") ? { label: label.trim() } : {}), ...(canOpen && businessMaintained !== !!dim.business_maintained ? { business_maintained: businessMaintained } : {}) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["dev-dimensions"] }); onClose(); },
   });
   return (
@@ -346,6 +347,12 @@ function DimHeaderEditor({ dim, onClose }: { dim: DevDimension; onClose: () => v
           onKeyDown={(e) => e.key === "Enter" && name && save.mutate()} />
         <Button variant="primary" size="sm" disabled={!name} loading={save.isPending} onClick={() => save.mutate()}>Save</Button>
         <Button size="sm" onClick={onClose}>Cancel</Button>
+      </div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <span className="mvx-admin-muted">Display name:</span>
+        <TextInput value={label} onChange={(e) => setLabel(e.target.value)} style={{ width: 180 }} aria-label="Display name"
+          placeholder={name} maxLength={80} />
+        <span className="mvx-admin-muted">what selectors and headers show; formulas keep the name</span>
       </div>
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
         <span className="mvx-admin-muted">Tags:</span>
@@ -578,6 +585,7 @@ function DimensionCard({ dim, allDims, activeTag, onTagClick, open, onToggleOpen
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <CollapseToggle expanded={open} onToggle={onToggleOpen} label={dim.name} />
             <code style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text)" }}>{dim.name}</code>
+            {dim.label && <span className="mvx-admin-muted" title="Display name">shown as “{dim.label}”</span>}
             <DimTagChips tags={dim.tags} active={activeTag} onClick={onTagClick} />
             {dim.business_maintained && (
               <span title="Users add, rename and remove its members from the grid">
@@ -996,6 +1004,7 @@ function TimeDimensionCard({ dim, activeTag, onTagClick, open, onToggleOpen }: D
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <CollapseToggle expanded={open} onToggle={onToggleOpen} label={dim.name} />
             <code style={{ fontSize: 14, fontWeight: 700, color: "var(--color-text)" }}>{dim.name}</code>
+            {dim.label && <span className="mvx-admin-muted" title="Display name">shown as “{dim.label}”</span>}
             <DimTagChips tags={dim.tags} active={activeTag} onClick={onTagClick} />
             <StatusBadge tone="brand">time · {(dim.time_granularity ?? "").replace("_", " ")}</StatusBadge>
             <span className="mvx-admin-muted">

@@ -385,6 +385,10 @@ type GetWorkflowRes interface {
 	getWorkflowRes()
 }
 
+type GetWorkflowStatusRes interface {
+	getWorkflowStatusRes()
+}
+
 type GrantAdminUserAppAccessRes interface {
 	grantAdminUserAppAccessRes()
 }
@@ -603,6 +607,10 @@ type RemoveSsoRes interface {
 
 type RenameAiSessionRes interface {
 	renameAiSessionRes()
+}
+
+type ReorderDashboardsRes interface {
+	reorderDashboardsRes()
 }
 
 type ReorderDimensionMembersRes interface {

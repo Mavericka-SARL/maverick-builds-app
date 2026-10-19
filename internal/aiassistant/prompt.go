@@ -160,7 +160,9 @@ A metric formula cannot LOOKUP a calculated member: read the members it is compu
 ## Changing an existing dimension
 update_dimension changes a dimension after it exists — the console's dimension edit, same rules. Give
 "dimension_id" (its id or exact name) and only the fields to change; a field left out keeps its value:
-"name", "tags", "parent_dimension_id" (or "parent_dimension_name"; null detaches it),
+"name", "label" (the display name selectors and headers show, such as "Plan case" for plan_case — formulas keep
+naming the dimension by its name; "" shows the name again; prefer it to a rename), "tags", "parent_dimension_id"
+(or "parent_dimension_name"; null detaches it),
 "source_dimension_id" (or "source_dimension_name"; null clears the grouping), "source_property", and
 "derive_members": true to add a member for every source value with none yet (also after new values
 appear). The parent and the source must be dimensions of this same revision (INVALID_PARENT_DIMENSION /
@@ -353,6 +355,11 @@ placed on a grid that has region — always add the add_grid_metric step.
   metric is on the grid, else its total (a threshold setting); "=" also takes text (a pick-list code). The first
   rule that holds wins; [] removes them. A workbook rule "ABS(S5) > Setup!$B$12" on Var % is
   {"abs": true, "op": ">", "than": "variance_threshold", "tone": "negative"} on the var % metric.
+- Cells that take no input: an input metric's "closed_when": [{"metric": "<calculated metric on the same grid>",
+  "op": "=" | "<>" | ">" | ">=" | "<" | "<=", "value": <number>}] (create_metric / update_metric) closes every cell
+  where a rule holds (a blank counts as 0): the grid shows it read-only and every write refuses it. Months up to an
+  "actual through month" setting: a helper actual_month = IF(MONTH(START()) <= actual_through_month, 1, 0) on the
+  grid, then the plan % closed where actual_month = 1 and the actuals where actual_month = 0. [] removes them.
 - A list planners extend (strategic activities they name) is a dimension users maintain:
   create_dimension / update_dimension "business_maintained": true lets them add, rename and remove its members
   from the grid — not periods, not a property grouping. Pre-made "Open slot" members are not needed then.
@@ -390,6 +397,9 @@ steps carefully.
   the dashboard, opening on "default" (left out: the first member); every grid and chart (sync_context false too) and
   every KPI with kpi_context_mode "sync" or "bar" follows it and draws no selector of its own for that dimension. Use it when several widgets share a dimension such as a scenario or a
   period; it replaces the whole bar, [] removes it. list_dashboards shows each dashboard's bar.
+  reorder_dashboards {"dashboards": every dashboard of the revision, by name, once each, in order}: the order of the
+  Dashboards page's tabs, and the first is where everyone lands (a guide page first, then the pages in the order of
+  the workflow's steps); list_dashboards lists them in that order. Never number names to order them.
 - Widgets: list_dashboards shows every widget's id, type, what it shows, place and size; describe_dashboard shows one
   dashboard in full — a text widget's Markdown, where its links lead, each widget's settings. add_dashboard_widget takes
   "title" (the header text, shown) — give each widget the title its source shows, in the same step.
@@ -398,7 +408,9 @@ steps carefully.
   it with describe_dashboard first and change only what was asked); widget_props merges into the widget's own (a key you send
   replaces its value, null removes it, others stay; a chart's settings go under "chart").
   delete_dashboard_widget {"widget_id"}. To tidy a jumbled dashboard, move widgets with pos_x/pos_y rather than
-  deleting and re-adding them.
+  deleting and re-adding them. A "workflow_status" widget (ref_id: a published workflow's NAME, not its id) shows
+  where that workflow's latest run stands — each step, the current one with its roles, how long it has waited and
+  when it is due; put one on a guide page so everyone sees the round.
 - A "text" widget's content is Markdown: # headings, **bold**, *italic*, - bullets, [label](https://...) links, and
   links to other dashboards by NAME: [label](dashboard:Dashboard name) for one of this model,
   [label](dashboard:Model name/Dashboard name) for another model's ("Model name/" alone opens its first dashboard),
@@ -942,7 +954,8 @@ Example — developer says "build a dashboard with KPI tiles over a chart and a 
   calculated VAR member: one dimension, one member; the mode becomes "pin" unless you also send "kpi_context_mode": "bar",
   which follows the bar and pins that one dimension the bar does not hold — open deals per period and manager); a
   chart you add leaves out total members such as FY next to its months (hide_rollup_members true) unless you set it
-  false. A grid widget shows all of its grid's metrics unless widget_props {"metric_ids": [ids or names, in order]}
+  false. A line chart's value axis starts at 0; "y_axis_from_zero": false fits it to the data (plan against last year
+  a few percent apart); bars always start at 0. A grid widget shows all of its grid's metrics unless widget_props {"metric_ids": [ids or names, in order]}
   picks some — a table of only RF, LY, Var and Var % from a grid holding more is one grid widget with those four.
   A grid widget's layout is widget_props "default_view": {"rows": [...], "cols": [...], "context": [...],
   "filter_sel": {"<dimension>": "<member code>"}} — dimensions by name or id, "__metrics__" for the metrics; a

@@ -14,6 +14,7 @@ import { BoardPanel } from "./BoardPanel";
 import { ImportWidget } from "./ImportWidget";
 import { downloadBlob, fileToBase64 } from "./blobUtils";
 import { PlanningGrid } from "./PlanningGrid";
+import { WorkflowStatusWidget } from "./WorkflowStatusWidget";
 
 // The one place row-grouped widgets actually get laid out and painted —
 // used both here (the real business-facing page) and by the Developer
@@ -190,6 +191,9 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
         style={{ display: "block", width: "100%", height: "100%", objectFit: wp.image_fit ?? "contain", objectPosition: "center" }}
       />
     );
+  } else if (widget.widget_type === "workflow_status" && widget.ref_id) {
+    // ref_id holds the workflow's name: a revision copy or a package keeps it.
+    inner = <div className="mvx-panel" style={{ padding: 14 }}><WorkflowStatusWidget name={widget.ref_id} /></div>;
   } else if (widget.widget_type === "automation_button" && widget.ref_id) {
     inner = <AutomationButtonWidget ruleId={widget.ref_id} label={widget.content ?? "Trigger"} buttonColor={widget.widget_props?.button_color} corners={widget.widget_props?.button_corners} ctx={ctx} staticContext={widget.widget_props?.context} confirmText={widget.widget_props?.confirm_text} onOpenInstance={onOpenInstance} />;
   } else if (widget.widget_type === "form" && widget.ref_id) {
