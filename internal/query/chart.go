@@ -54,6 +54,14 @@ type ChartConfig struct {
 	// YAxisFromZero false fits a line chart's value axis to the data; the
 	// console draws it (ChartWidget), the server only keeps the setting.
 	YAxisFromZero *bool `json:"y_axis_from_zero,omitempty"`
+	// Stacked stacks a bar chart's series (a mix: revenue by segment); the
+	// console draws it, the server only keeps the setting.
+	Stacked bool `json:"stacked,omitempty"`
+	// ActualMetricID is a metric of the chart's grid that is 1 in the
+	// periods holding actuals (is_actual): the chart draws those solid and
+	// the others as forecast (hatched bars, a dashed line), as IBCS reads
+	// actual against forecast (2026-10-20).
+	ActualMetricID string `json:"actual_metric_id,omitempty"`
 }
 
 // ChartRequest is the runtime request body — only context is overridable.
@@ -104,6 +112,9 @@ type CategoryChartData struct {
 	Categories  []GridChartCategory `json:"categories"`
 	Series      []GridChartSeries   `json:"series"`
 	ContextDims []ChartContextDim   `json:"context_dims"`
+	// Actual marks, per category, the periods that hold actuals — the
+	// chart's ActualMetricID nonzero there. Absent without one.
+	Actual []bool `json:"actual,omitempty"`
 	// Context is the context the data was actually resolved for. It differs
 	// from the request when a member the caller asked for is hidden from
 	// them — the resolver then substitutes that dimension's default visible
@@ -1163,7 +1174,7 @@ func soleRoot(dim *rollup.Dimension, code string) bool {
 // aggregate is its leaf values combined (sum, count, and an average whose
 // formula depends on the members) rather than its formula evaluated once
 // at aggregated inputs (formula, rate, and a pure-ratio average) — the
-// scheduler's own split (executePartition's collapse, oneDimSliceRows'
+// scheduler's own split (calculation.EffectiveAggRule, oneDimSliceRows'
 // useEval), so a point and the grid's rows are the same number.
 func leafWise(aggRule string, dimConditional bool) bool {
 	switch aggRule {

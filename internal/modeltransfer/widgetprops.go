@@ -21,6 +21,8 @@ import (
 //	chart.x_metric_id         scatter X metric
 //	chart.y_metric_id         scatter Y metric
 //	kpi_scope.dimension_id    dimension a metric_kpi widget is scoped to
+//	kpi_compare.dimension_id  dimension of the member a KPI is compared with
+//	chart.actual_metric_id    the flag metric marking a chart's actual periods
 //
 // plus chart.context_defaults, whose KEYS are dimension IDs (its values are
 // member codes, which copy verbatim and need no remap), and a grid widget's
@@ -101,6 +103,7 @@ func RemapWidgetPropsIDs(props []byte, metricMap, dimMap map[string]string) ([]b
 		remapStr(dimMap, chart, "dimension_id")
 		remapStr(metricMap, chart, "x_metric_id")
 		remapStr(metricMap, chart, "y_metric_id")
+		remapStr(metricMap, chart, "actual_metric_id")
 
 		if ids, ok := chart["metric_ids"].([]any); ok {
 			for i, raw := range ids {
@@ -133,6 +136,9 @@ func RemapWidgetPropsIDs(props []byte, metricMap, dimMap map[string]string) ([]b
 
 	if scope, ok := root["kpi_scope"].(map[string]any); ok {
 		remapStr(dimMap, scope, "dimension_id")
+	}
+	if cmp, ok := root["kpi_compare"].(map[string]any); ok {
+		remapStr(dimMap, cmp, "dimension_id")
 	}
 
 	if view, ok := root["default_view"].(map[string]any); ok {

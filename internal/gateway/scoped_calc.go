@@ -164,18 +164,15 @@ type leafValue struct {
 // period and the periods by timeSummary (an average counts every leaf
 // period of axis, one with no value as 0, so axis must already be trimmed
 // to the scope); without one, by aggRule. ok is false when there is nothing
-// to reduce or the summary is 'none'.
-func combineLeaves(leaves []leafValue, axis *rollup.Dimension, aggRule, timeSummary string) (float64, bool) {
+// to reduce or the summary is 'none'. oneLeaf says the scope narrows every
+// non-time dimension to one leaf (singleLeafScope): agg_rule none has a
+// total only there, its periods reduced by the time summary.
+func combineLeaves(leaves []leafValue, axis *rollup.Dimension, aggRule, timeSummary string, oneLeaf bool) (float64, bool) {
 	if len(leaves) == 0 {
 		return 0, false
 	}
-	if !rollup.Aggregates(rollup.AggRule(aggRule)) {
-		// agg_rule none: a scope of one leaf is that leaf, anything wider
-		// has no total.
-		if len(leaves) == 1 {
-			return leaves[0].value, true
-		}
-		return 0, false
+	if !rollup.Aggregates(rollup.AggRule(aggRule)) && !oneLeaf {
+		return 0, false // agg_rule none: no total across members
 	}
 	if axis == nil {
 		vals := make([]float64, len(leaves))
@@ -200,6 +197,22 @@ func combineLeaves(leaves []leafValue, axis *rollup.Dimension, aggRule, timeSumm
 		return 0, false
 	}
 	return calculation.TimeSummaryOver(timeSummary, ordered, len(periods))
+}
+
+// singleLeafScope reports whether the scope (rollupDims, scope-trimmed to
+// the pinned subtrees) leaves one member, a leaf, of each of the metric's
+// non-time dimensions — the combo rollup.LeafCombo asks for.
+func singleLeafScope(rollupDims map[string]*rollup.Dimension, ownDims []string) bool {
+	for _, d := range ownDims {
+		dim := rollupDims[d]
+		if dim == nil {
+			return false
+		}
+		if !dim.IsTime && len(dim.Members) != 1 {
+			return false
+		}
+	}
+	return true
 }
 
 // isFormulaRule: the total and rollups are the formula evaluated at the
@@ -238,9 +251,10 @@ func (sr *scopedReads) serve(m metricRow, sm *servedMetric, ownDims []string, ro
 		timeSummary = "sum"
 	}
 	// The scheduler evaluates the formula at the aggregate for these rules
-	// (tsEvaluator.finish's useEval), so their totals come from its rows.
-	evalTotal := isFormulaRule(m.AggRule) ||
-		(m.AggRule == string(rollup.AggAverage) && !calculation.FormulaReferencesDims(formulaText, dimIDToName))
+	// (calculation.EffectiveAggRule), so their totals and rollup cells come
+	// from its rows.
+	rule := calculation.EffectiveAggRule(m.AggRule, formulaText, dimIDToName)
+	evalTotal := isFormulaRule(rule)
 
 	withheldLeaf := map[string]bool{}
 	var leaves []leafValue
@@ -258,7 +272,7 @@ func (sr *scopedReads) serve(m metricRow, sm *servedMetric, ownDims []string, ro
 	}
 
 	axis := timeAxisOf(rollupDims, ownDims)
-	if isFormulaRule(m.AggRule) {
+	if evalTotal {
 		// Rollup cells are the scheduler's own rows, formula re-evaluated at
 		// the aggregate; one whose read set touches a hidden member (its
 		// subtree holds one) is withheld.
@@ -340,7 +354,7 @@ func (sr *scopedReads) serve(m metricRow, sm *servedMetric, ownDims []string, ro
 		res.withheld = append(res.withheld, m.ID) // no partial totals
 	case axis != nil && timeSummary == "none":
 	default:
-		res.total, res.hasTotal = combineLeaves(leaves, axis, m.AggRule, timeSummary)
+		res.total, res.hasTotal = combineLeaves(leaves, axis, rule, timeSummary, singleLeafScope(rollupDims, ownDims))
 	}
 	return res
 }
@@ -374,8 +388,50 @@ func (sr *scopedReads) persistedTotal(m metricRow, sm *servedMetric, ownDims []s
 	if sr.withheld(m.ID, combo) {
 		return 0, false, append(withheld, m.ID)
 	}
-	v, ok := sm.Rows[comboKey(combo)]
+	if v, ok := sm.Rows[comboKey(combo)]; ok {
+		return v, ok, withheld
+	}
+	// Under two pins or more no slice row exists, but the scheduler's rollup
+	// row does: every unpinned dimension at its one root ("Consolidated"
+	// beside the pinned month and scenario). A variance % that LOOKUPs
+	// another dimension served no total at all — its FY column and KPI tile
+	// were empty though the cells were there.
+	rooted := make(map[string]string, len(ownDims))
+	for _, d := range ownDims {
+		if code, ok := combo[d]; ok {
+			rooted[d] = code
+			continue
+		}
+		root, ok := soleRoot(sr.Dims[d])
+		if !ok {
+			return 0, false, withheld
+		}
+		rooted[d] = root
+	}
+	if sr.withheld(m.ID, rooted) {
+		return 0, false, append(withheld, m.ID)
+	}
+	v, ok := sm.Rows[comboKey(rooted)]
 	return v, ok, withheld
+}
+
+// soleRoot is the code of dim's one top-level member, when it has exactly
+// one: the member a total over the dimension is filed under.
+func soleRoot(dim *rollup.Dimension) (string, bool) {
+	if dim == nil {
+		return "", false
+	}
+	root := ""
+	for _, m := range dim.Members {
+		if m.ParentCode != "" {
+			continue
+		}
+		if root != "" {
+			return "", false
+		}
+		root = m.Code
+	}
+	return root, root != ""
 }
 
 func containsString(list []string, s string) bool {
@@ -544,16 +600,10 @@ func scopeOrdinaryMetric(
 	if len(combos) == 0 {
 		combos = []map[string]string{{}}
 	}
-	// Mirror executePartition's own collapse for a pure ratio metric
-	// (agg_rule "average" whose formula isn't itself dimension-conditional):
-	// a ratio-of-sums computed once, not an average of per-combo ratios —
-	// otherwise a restricted caller sees a numerically different value than
-	// the unrestricted calc_result everyone else reads.
-	collapsed := false
-	if m.AggRule == string(rollup.AggAverage) && len(combos) > 1 && !calculation.FormulaReferencesDims(*m.Formula, dimIDToName) {
-		combos = []map[string]string{{}}
-		collapsed = true
-	}
+	// A pure ratio (agg_rule "average" whose formula reads no member) totals
+	// as "formula", as executePartition does (calculation.EffectiveAggRule):
+	// a ratio-of-sums at the total, its own value at every cell.
+	rule := calculation.EffectiveAggRule(m.AggRule, *m.Formula, dimIDToName)
 	evalCombo := func(combo map[string]string) (float64, error) {
 		values := make(map[string]float64, len(refs))
 		for _, ref := range refs {
@@ -616,20 +666,21 @@ func scopeOrdinaryMetric(
 		return
 	}
 	axis := timeAxisOf(rollupDims, ownDims)
-	if collapsed || isFormulaRule(m.AggRule) {
+	if isFormulaRule(rule) {
 		axis = nil
 	}
+	oneLeaf := singleLeafScope(rollupDims, ownDims)
 	if axis != nil {
-		if v, ok := combineLeaves(leaves, axis, m.AggRule, m.TimeSummary); ok {
+		if v, ok := combineLeaves(leaves, axis, rule, m.TimeSummary, oneLeaf); ok {
 			totals[m.ID] = v
 			working[m.ID] = v
 		}
-	} else if v, ok := combineLeaves(leaves, nil, m.AggRule, m.TimeSummary); ok {
+	} else if v, ok := combineLeaves(leaves, nil, rule, m.TimeSummary, oneLeaf); ok {
 		totals[m.ID] = v
 		working[m.ID] = v
 	}
 
-	if !isFormulaRule(m.AggRule) {
+	if !isFormulaRule(rule) {
 		return
 	}
 	// Rollup cells for rules the client cannot combine — the scoped twin of

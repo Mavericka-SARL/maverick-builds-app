@@ -43,8 +43,8 @@ func TestClosedCells_Route(t *testing.T) {
 	// actual_month's stored values: M01 and M02 are actual, M03 is not (a
 	// blank counts as 0).
 	for _, c := range []string{"M01", "M02"} {
-		q(`INSERT INTO runtime.calc_result (model_id, revision_id, metric_id, dim_members, value, partition_key)
-			VALUES ($1::uuid, $2::uuid, $3::uuid, jsonb_build_object($4::text, $5::text), 1, 'test') RETURNING id::text`,
+		q(`INSERT INTO runtime.calc_result (model_id, revision_id, metric_id, dim_members, value)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, jsonb_build_object($4::text, $5::text), 1) RETURNING id::text`,
 			f.modelA, f.revA, actualMonth, month, c)
 	}
 	_ = other

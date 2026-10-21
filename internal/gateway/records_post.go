@@ -21,6 +21,9 @@ type (
 	formRowError = recordpost.RowError
 )
 
+// newMemberCache caches the members a record's values name, for one save.
+func newMemberCache() *recordpost.MemberCache { return recordpost.NewMemberCache() }
+
 // records is the record poster on the caller's tenant database.
 func (h *handler) records() *recordpost.Poster {
 	return &recordpost.Poster{Pool: h.db.For, Log: h.log, MembersChanged: func(ctx context.Context, form *crudapp.FormDef) {
@@ -32,7 +35,7 @@ func (h *handler) accessViewFor(ctx context.Context, userID string, form *crudap
 	return h.records().AccessViewFor(ctx, userID, form)
 }
 
-func (h *handler) recordValueProblems(ctx context.Context, view *accessView, form *crudapp.FormDef, current, data map[string]any, required bool, leaves map[string]map[string]bool) ([]fieldProblem, error) {
+func (h *handler) recordValueProblems(ctx context.Context, view *accessView, form *crudapp.FormDef, current, data map[string]any, required bool, leaves *recordpost.MemberCache) ([]fieldProblem, error) {
 	return h.records().RecordValueProblems(ctx, view, form, current, data, required, leaves)
 }
 
@@ -72,9 +75,10 @@ func retryTransient(ctx context.Context, attempts int, op func() error) error {
 
 // importFormRows creates a record of form for each row as act, in the
 // statuses scope lets them create (recordpost.ImportRows): POST
-// /api/forms/{id}/import, and a saved csv_import or google_sheets
-// integration whose target is a table.
-func (h *handler) importFormRows(ctx context.Context, act *actor, scope formRecordScope, form *crudapp.FormDef, header []string, rawRows []importpkg.RawRow) (int, []formRowError, error) {
+// /api/forms/{id}/import, a saved csv_import or google_sheets integration
+// whose target is a table, and the AI Developer's import of an attached
+// file. dryRun checks every row and creates nothing.
+func (h *handler) importFormRows(ctx context.Context, act *actor, scope formRecordScope, form *crudapp.FormDef, header []string, rawRows []importpkg.RawRow, dryRun bool) (int, []formRowError, error) {
 	// Each record of a table keeping a dimension is a new member: within the
 	// edition's members per dimension, as a record saved by hand is.
 	if form.KeepsDimension() && h.plans != nil {
@@ -94,5 +98,6 @@ func (h *handler) importFormRows(ctx context.Context, act *actor, scope formReco
 			return ""
 		},
 		AppID: scope.appID, RevisionID: scope.revisionID,
+		DryRun: dryRun,
 	})
 }

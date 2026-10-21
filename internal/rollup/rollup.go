@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unsafe"
 )
 
 // Member is one dimension member, stripped to just what rollup arithmetic
@@ -66,6 +67,8 @@ type Dimension struct {
 	// Calculated are the dimension's calculated members, kept out of
 	// Members (see CalculatedMember).
 	Calculated []CalculatedMember
+
+	idx unsafe.Pointer // *memberIndex, built on first use (index.go)
 }
 
 // AggRule is how multiple resolved values combine into one.
@@ -107,6 +110,14 @@ const (
 // Aggregates reports whether rule gives totals at all (every rule but
 // AggNone).
 func Aggregates(rule AggRule) bool { return rule != AggNone }
+
+// LeafCombo is leafCombo for the readers that total agg_rule none
+// themselves (the scheduler's rows, the scoped read): a value exists only
+// at one leaf intersection of the non-time dimensions, time totalled by the
+// time summary.
+func LeafCombo(dims map[string]*Dimension, metricDimIDs []string, combo map[string]string) bool {
+	return leafCombo(dims, metricDimIDs, combo)
+}
 
 // leafCombo reports whether combo names one leaf intersection of the
 // metric's own non-time dimensions: each pinned to a member with nothing
@@ -629,13 +640,10 @@ func ResolveTimeRecorded(
 
 // childrenOf returns dim's members whose ParentCode is parentCode.
 func childrenOf(dim *Dimension, parentCode string) []Member {
-	var out []Member
-	for _, m := range dim.Members {
-		if m.ParentCode != "" && m.ParentCode == parentCode {
-			out = append(out, m)
-		}
+	if parentCode == "" {
+		return nil
 	}
-	return out
+	return dim.index().children[parentCode]
 }
 
 // allLeafCodes returns every leaf (childless) member's code in dim — used
@@ -737,11 +745,31 @@ func Relates(dims map[string]*Dimension, ownDimID, otherDimID string) bool {
 	if _, ok := dims[ownDimID]; !ok {
 		return false
 	}
-	if _, ok := dims[otherDimID]; !ok {
+	other, ok := dims[otherDimID]
+	if !ok {
 		return false
 	}
-	kind, _ := relation(dims, ownDimID, otherDimID)
-	return kind != relationNone
+	// relation without building the chains it would return: every cell
+	// read normalizes its combo through here.
+	return chainReaches(dims, ownDimID, otherDimID) || chainReaches(dims, otherDimID, ownDimID) ||
+		(other.SourceDimensionID == ownDimID && other.SourceProperty != "")
+}
+
+// chainReaches reports whether ancestorID is a parent dimension of fromID,
+// at any level dimensionChainTo follows: len(dimensionChainTo(dims, fromID,
+// ancestorID, 0)) > 1 for fromID != ancestorID.
+func chainReaches(dims map[string]*Dimension, fromID, ancestorID string) bool {
+	for k := 1; k <= maxDepth; k++ {
+		d, ok := dims[fromID]
+		if !ok || d.ParentDimensionID == "" {
+			return false
+		}
+		fromID = d.ParentDimensionID
+		if fromID == ancestorID {
+			return true
+		}
+	}
+	return false
 }
 
 // relate finds the resolved code-set for ownDimID against whichever of
@@ -884,10 +912,8 @@ func ancestorCodeInChain(dims map[string]*Dimension, chain []string, startMember
 }
 
 func findMember(dim *Dimension, code string) *Member {
-	for i := range dim.Members {
-		if dim.Members[i].Code == code {
-			return &dim.Members[i]
-		}
+	if i, ok := dim.index().byCode[code]; ok {
+		return &dim.Members[i]
 	}
 	return nil
 }

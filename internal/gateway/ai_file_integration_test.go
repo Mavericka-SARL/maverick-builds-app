@@ -554,3 +554,57 @@ func TestDeveloperBuildsAndDownloadsExportsInTheConsole(t *testing.T) {
 		t.Errorf("a deleted export downloaded: %d", status)
 	}
 }
+
+// A download taken while the revision's values are being recalculated waits
+// for the pass, and says so when it is still running instead of handing over
+// the values that pass is replacing: an approved budget was frozen from a
+// file of zeros downloaded right after the model was loaded.
+func TestExportWaitsForAPendingRecalculation(t *testing.T) {
+	f := newSalesFileFixture(t)
+	_, do := f.serve(t, nil)
+	ctx := context.Background()
+	status, body := do(f.devSub, "POST", "/api/developer/integrations?revision_id="+f.revID, map[string]any{
+		"type": "file_export", "name": "Revenue", "target_id": f.grid,
+		"config": map[string]any{"format": "csv", "metrics": []string{"revenue"}},
+	})
+	if status != http.StatusOK {
+		t.Fatalf("create: %d %s", status, body)
+	}
+	var created struct{ ID string }
+	_ = json.Unmarshal(body, &created)
+	pending := func() {
+		t.Helper()
+		if _, err := f.pool.Exec(ctx, `
+			INSERT INTO runtime.revision_recalc_state (revision_id, requested, done, updated_at) VALUES ($1::uuid, 1, 0, now())
+			ON CONFLICT (revision_id) DO UPDATE SET requested = runtime.revision_recalc_state.done + 1, updated_at = now()`, f.revID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	done := func() {
+		if _, err := f.pool.Exec(ctx, `UPDATE runtime.revision_recalc_state SET done = requested WHERE revision_id = $1::uuid`, f.revID); err != nil {
+			t.Error(err)
+		}
+	}
+	old := exportRecalcWait
+	defer func() { exportRecalcWait = old }()
+
+	// Still running when the wait is over: refused, saying why.
+	exportRecalcWait = 300 * time.Millisecond
+	pending()
+	status, body = do(f.devSub, "GET", "/api/integrations/"+created.ID+"/export", nil)
+	if status != http.StatusConflict || !strings.Contains(string(body), "being recalculated") {
+		t.Fatalf("download during a recalculation: %d %s, want 409 saying so", status, body)
+	}
+
+	// The pass lands during the wait: the file comes.
+	exportRecalcWait = 5 * time.Second
+	go func() { time.Sleep(300 * time.Millisecond); done() }()
+	start := time.Now()
+	status, body = do(f.devSub, "GET", "/api/integrations/"+created.ID+"/export", nil)
+	if status != http.StatusOK || !strings.HasPrefix(string(body), "geography") {
+		t.Fatalf("download after the pass: %d %s", status, body)
+	}
+	if waited := time.Since(start); waited < 250*time.Millisecond {
+		t.Errorf("the download did not wait for the pending pass (%v)", waited)
+	}
+}

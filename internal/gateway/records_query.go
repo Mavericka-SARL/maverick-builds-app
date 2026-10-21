@@ -131,7 +131,7 @@ func (h *handler) checkRecordSave(ctx context.Context, scope formRecordScope, re
 			creator = *rec.CreatedBy
 		}
 	}
-	problems, err := h.recordValueProblems(ctx, view, scope.form, current, to.Data, required, map[string]map[string]bool{})
+	problems, err := h.recordValueProblems(ctx, view, scope.form, current, to.Data, required, newMemberCache())
 	if err != nil || len(problems) > 0 {
 		return 0, "", problems, err
 	}

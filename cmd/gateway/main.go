@@ -403,8 +403,8 @@ func main() {
 	// database dbPool is ("" in shared mode). gate paces the loops: a plain
 	// timer for the shared database; with a database per tenant, a Waker's,
 	// so a quiet tenant's loops sleep instead of polling it.
-	startBackground := func(dbPool *pgxpool.Pool, customerID string, blog zerolog.Logger, id string, gate wake.Gate) {
-		go workflow.RunScheduler(schedCtx, workflow.NewStore(dbPool), blog,
+	startBackground := func(bgCtx context.Context, dbPool *pgxpool.Pool, customerID string, blog zerolog.Logger, id string, gate wake.Gate) {
+		go workflow.RunScheduler(bgCtx, workflow.NewStore(dbPool), blog,
 			schedulerPollInterval, schedulerMisfireThreshold, id, gate)
 		store := notification.NewStore(dbPool)
 		dispatcher := &notification.Dispatcher{Store: store, Mailer: mailer, Log: blog,
@@ -417,32 +417,32 @@ func main() {
 				return branding.EmailNameForUser(ctx, dbPool, recipientUserID)
 			},
 			Gate: gate}
-		go dispatcher.Run(schedCtx, notificationDispatchInterval)
+		go dispatcher.Run(bgCtx, notificationDispatchInterval)
 		reminder := &notification.Reminder{Store: store, Log: blog, Gate: gate}
-		go reminder.Run(schedCtx, reminderInterval)
+		go reminder.Run(bgCtx, reminderInterval)
 		// Enterprise audit retention: sweeps only while the licence includes
 		// it with full rights (Has, not Usable) — deleting is irreversible,
 		// so keeping events is the safe failure from the moment a key lapses.
-		go auditexport.RunRetention(schedCtx, dbPool, blog, auditRetentionInterval, func() bool { return lic.Has(license.FeatureAuditExport) })
+		go auditexport.RunRetention(bgCtx, dbPool, blog, auditRetentionInterval, func() bool { return lic.Has(license.FeatureAuditExport) })
 		// Plan limits: a tenant over its plan is marked read-only here,
 		// whichever path put it over (internal/plan).
-		go plan.RunSweep(schedCtx, dbPool, planEnforcer, planSweepInterval, blog, gate)
+		go plan.RunSweep(bgCtx, dbPool, planEnforcer, planSweepInterval, blog, gate)
 		// The one-off passes below wait for the tenant's first visit, so a
 		// start spreads them out instead of opening every database at once.
 		once := func(pass func()) {
 			go func() {
-				if gate.Wait(schedCtx, 0) {
+				if gate.Wait(bgCtx, 0) {
 					pass()
 				}
 			}()
 		}
 		// Results stored by an older calculation engine are recalculated
 		// once (internal/calculation.EngineVersion).
-		once(func() { calculation.RunEngineUpgrade(schedCtx, dbPool, blog) })
+		once(func() { calculation.RunEngineUpgrade(bgCtx, dbPool, blog) })
 		// Tenants that signed up earlier get the starter models they lack,
 		// and the current content of those they have (internal/startersync).
-		once(func() { startersync.Run(schedCtx, dbPool, blog) })
-		go modelLinks.Run(schedCtx, dbPool, customerID, blog, id, gate)
+		once(func() { startersync.Run(bgCtx, dbPool, blog) })
+		go modelLinks.Run(bgCtx, dbPool, customerID, blog, id, gate)
 	}
 	if router != nil {
 		// Each tenant's next scheduled item, for the loops above: a quiet
@@ -472,11 +472,11 @@ func main() {
 				BackupRetentionDays: c.BackupRetentionDays, Log: log.With().Str("job", "dormancy").Logger(),
 			}, 6*time.Hour)
 		}
-		router.Watch(schedCtx, tenantWatchInterval, func(t tenantdb.Tenant, tpool *pgxpool.Pool) {
-			startBackground(tpool, t.CustomerID, log.With().Str("tenant", t.CustomerID).Logger(), workerID+"-"+t.CustomerID[:8], router.Gate(t.CustomerID, tpool))
+		router.Watch(schedCtx, tenantWatchInterval, func(tctx context.Context, t tenantdb.Tenant, tpool *pgxpool.Pool) {
+			startBackground(tctx, tpool, t.CustomerID, log.With().Str("tenant", t.CustomerID).Logger(), workerID+"-"+t.CustomerID[:8], router.Gate(t.CustomerID, tpool))
 		})
 	} else {
-		startBackground(pool, "", log, workerID, wake.Timer{})
+		startBackground(schedCtx, pool, "", log, workerID, wake.Timer{})
 	}
 
 	stop := make(chan os.Signal, 1)

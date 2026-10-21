@@ -715,6 +715,12 @@ export interface GridChartConfig {
   // it at 0, so plan and last year a few percent apart do not read as two
   // flat lines (owner request, 2026-10-18). Bars always start at 0.
   y_axis_from_zero?: boolean;
+  // Bar charts: the series stacked (a mix: revenue by segment).
+  stacked?: boolean;
+  // A metric of the chart's grid that is 1 in the periods holding actuals:
+  // those are drawn solid, the others as forecast (hatched bars, a dashed
+  // line) — IBCS's actual against forecast.
+  actual_metric_id?: string;
 }
 
 export interface GridChartCategory {
@@ -758,6 +764,8 @@ export interface CategoryChartData {
   categories: GridChartCategory[];
   series: GridChartSeries[];
   context_dims: ChartContextDim[];
+  /** Per category: the period holds actuals (the chart's actual_metric_id is nonzero there). */
+  actual?: boolean[];
   /** The context the data was resolved for — differs from the request when a
       requested member is hidden from this viewer and the server substituted
       the dimension's default visible member. */
@@ -846,6 +854,14 @@ export interface WidgetProps {
   // "bar": the dashboard's selector bar for the dimensions on it, the total
   // over every other dimension.
   kpi_context_mode?: "total" | "sync" | "pin" | "bar";
+  // metric_kpi: the member the value is compared with (Budget, Prior year):
+  // the tile shows it and the difference, toned by kpi_good.
+  kpi_compare?: { dimension_id: string; member_code: string; label?: string };
+  // "up": more than the comparison is good (revenue); "down": less is (costs).
+  kpi_good?: "up" | "down";
+  // metric_kpi and grid: how amounts are written — "auto" (a tile's default:
+  // €20.1M), "k" thousands, "m" millions, "none" every digit (a grid's default).
+  number_scale?: NumberScale;
   // automation_button: when set, clicking asks for confirmation with this
   // message before firing the rule. Empty/absent fires immediately.
   confirm_text?: string;
@@ -2057,6 +2073,8 @@ export interface ClosedRule {
   value: number;
 }
 
+export type NumberScale = "auto" | "k" | "m" | "none";
+
 export interface HighlightRule {
   metric?: string;
   abs?: boolean;
@@ -2065,6 +2083,9 @@ export interface HighlightRule {
   value2?: number;
   than?: string;
   tone: HighlightTone;
+  /** Only at these members (codes) — of `dimension` when it is named, else of any dimension: a variance column. */
+  members?: string[];
+  dimension?: string;
 }
 
 // One SSE event from the streaming /messages endpoint. Fields are populated

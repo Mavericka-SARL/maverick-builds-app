@@ -398,3 +398,123 @@ func TestThePlanCheckCoversWorkflowsFormsAndFileImports(t *testing.T) {
 		t.Fatalf("imported %d value(s), want 2", n)
 	}
 }
+
+// TestThePlanCheckRefusesAnInvalidWorkflow: a plan whose workflow a
+// developer could not publish — a step no route reaches, as gpt-5-mini's
+// fork routed straight to its join — goes back to the assistant with
+// Validate's findings; the corrected one is proposed.
+func TestThePlanCheckRefusesAnInvalidWorkflow(t *testing.T) {
+	propose := func(steps ...map[string]any) providers.ChatResponse {
+		b, _ := json.Marshal(map[string]any{"steps": steps})
+		return providers.ChatResponse{FinishReason: "tool_calls", Message: providers.Message{Role: "assistant",
+			ToolCalls: []providers.ToolCall{{ID: "call_propose", Name: "propose_actions", Arguments: b}}}}
+	}
+	flow := func(firstRoute string) []map[string]any {
+		return []map[string]any{
+			proposeStep("create_workflow_def", "Create workflow 'Close'", map[string]any{"name": "Close", "trigger_event": "manual"}),
+			proposeStep("update_workflow_def", "Steps of 'Close'", map[string]any{"workflow_def_id": ref(1), "steps": []map[string]any{
+				{"id": "load", "name": "Load actuals", "type": "task", "assignee_roles": []string{"Controllers"}, "routes": map[string]string{"next": firstRoute}},
+				{"id": "review", "name": "Review", "type": "task", "assignee_roles": []string{"FP&A"}, "routes": map[string]string{"next": "end-completed"}},
+			}}),
+		}
+	}
+	fake := &multiScriptProvider{resps: []providers.ChatResponse{
+		propose(flow("end-completed")...), // "review" unreachable
+		propose(flow("review")...),
+		{FinishReason: "stop", Message: providers.Message{Role: "assistant", Content: "ok"}},
+	}}
+	f := newPlanFixture(t, fake)
+	sess := f.session(t)
+	if status, body := f.post(t, "/api/ai/sessions/"+sess.ID+"/messages", map[string]string{"content": "Build the close workflow"}); status != http.StatusOK {
+		t.Fatalf("message: %d %s", status, body)
+	}
+	msgs, _ := f.chat.ListMessages(f.ctx, sess.ID)
+	var refused string
+	for _, m := range msgs {
+		if m.Role == "tool" && strings.HasPrefix(m.Content, "Proposal NOT shown") {
+			refused = m.Content
+		}
+	}
+	if !strings.Contains(refused, "would be saved invalid") || !strings.Contains(refused, `"Review" is unreachable`) {
+		t.Errorf("the plan with an unreachable step was not sent back with Validate's finding:\n%s", refused)
+	}
+	pending, err := f.proposals.ListPendingProposals(f.ctx, sess.ID)
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("the corrected plan: pending %v %+v", err, pending)
+	}
+	if n := f.count(`SELECT count(*) FROM workflow.workflow_def`); n != 0 {
+		t.Errorf("the check left %d workflow defs behind", n)
+	}
+}
+
+// TestThePlanCheckWarnsOfTilesThatAddUpEverything: a KPI tile pinned to
+// one member while the dashboard's selector bar holds another of its
+// metric's dimensions adds that dimension up (every scenario: $141.9M for
+// €20.1M), and a currency amount without a currency shows dollars — both
+// go back to the assistant as warnings; the tile following the bar does
+// not.
+func TestThePlanCheckWarnsOfTilesThatAddUpEverything(t *testing.T) {
+	f := newPlanFixture(t, &multiScriptProvider{})
+	sess := f.session(t)
+	plan := func(mode string) []aiassistant.ProposalStep {
+		var steps []aiassistant.ProposalStep
+		add := func(tool string, params map[string]any) {
+			b, _ := json.Marshal(params)
+			steps = append(steps, aiassistant.ProposalStep{Tool: tool, Description: tool, Params: b})
+		}
+		add("create_metric", map[string]any{"name": "revenue_eur", "is_input": true, "format": "currency", "agg_rule": "sum"})
+		add("create_grid", map[string]any{"name": "Revenue"})
+		add("add_grid_dimension", map[string]any{"grid_id": ref(2), "dimension_id": "Cost Center"})
+		add("add_grid_dimension", map[string]any{"grid_id": ref(2), "dimension_id": "Setup Item"})
+		add("add_grid_metric", map[string]any{"grid_id": ref(2), "metric_id": "revenue_eur"})
+		add("create_dashboard", map[string]any{"name": "Board", "selector_bar": []map[string]any{{"dimension": "Cost Center"}}})
+		add("add_dashboard_widget", map[string]any{"dashboard_id": ref(6), "widget_type": "metric_kpi", "ref_id": "revenue_eur",
+			"widget_props": map[string]any{"kpi_context_mode": mode, "kpi_scope": map[string]string{"dimension_id": "Setup Item", "member_code": "FX"}}})
+		return steps
+	}
+	check, err := f.h.aiCheckProposal(f.ctx, sess.ID, f.modelID, f.revID, f.devID, plan("pin"))
+	if err != nil || len(check.problems) > 0 {
+		t.Fatalf("check: %v %v", err, check.problems)
+	}
+	all := strings.Join(check.warnings, "\n")
+	if !strings.Contains(all, "step 7 (add_dashboard_widget") || !strings.Contains(all, "adds up every member of Cost Center") {
+		t.Errorf("no warning for the pinned tile adding up the selector bar's dimension:\n%s", all)
+	}
+	if !strings.Contains(all, "step 1 (create_metric revenue_eur): a currency amount without format_currency") {
+		t.Errorf("no warning for the currency without a currency:\n%s", all)
+	}
+	check, err = f.h.aiCheckProposal(f.ctx, sess.ID, f.modelID, f.revID, f.devID, plan("bar"))
+	if err != nil || strings.Contains(strings.Join(check.warnings, "\n"), "adds up every member") {
+		t.Errorf("the tile following the selector bar was warned of: %v %v", err, check.warnings)
+	}
+}
+
+// TestThePlanCheckTakesACarriedForwardPair: opening = LAG(closing) and
+// closing = opening + amount pass the check as one plan (ordered as the
+// turn orders it), and running it leaves both formulas as written.
+func TestThePlanCheckTakesACarriedForwardPair(t *testing.T) {
+	f := newPlanFixture(t, &multiScriptProvider{})
+	sess := f.session(t)
+	steps := aiassistant.OrderByDependencies([]aiassistant.ProposalStep{
+		{Tool: "create_metric", Description: "opening", Params: json.RawMessage(`{"name":"cash_opening","formula":"LAG(cash_closing, 1, 0)","is_input":false,"format":"number"}`)},
+		{Tool: "create_metric", Description: "closing", Params: json.RawMessage(`{"name":"cash_closing","formula":"cash_opening + amount","is_input":false,"format":"number"}`)},
+	})
+	check, err := f.h.aiCheckProposal(f.ctx, sess.ID, f.modelID, f.revID, f.devID, steps)
+	if err != nil || len(check.problems) > 0 {
+		t.Fatalf("the pair was refused: %v %v", err, check.problems)
+	}
+	tx, err := f.h.db.For(f.ctx).Begin(f.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(f.ctx) }()
+	if out, _, err := f.h.runStepsOn(f.ctx, tx, sess.ID, f.modelID, f.revID, f.devID, steps); err != nil || len(out.problems) > 0 {
+		t.Fatalf("run: %v %v", err, out.problems)
+	}
+	for name, want := range map[string]string{"cash_opening": "LAG(cash_closing, 1, 0)", "cash_closing": "cash_opening + amount"} {
+		var got string
+		if err := tx.QueryRow(f.ctx, `SELECT formula FROM model.metric_def WHERE revision_id=$1::uuid AND name=$2`, f.revID, name).Scan(&got); err != nil || strings.TrimPrefix(got, "=") != want {
+			t.Errorf("%s formula %q (%v), want %q", name, got, err, want)
+		}
+	}
+}

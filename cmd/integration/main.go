@@ -130,11 +130,11 @@ func main() {
 	// One worker per tenant database, including tenants created while this
 	// process runs.
 	var wg sync.WaitGroup
-	router.Watch(ctx, tenantWatchInterval, func(t tenantdb.Tenant, tpool *pgxpool.Pool) {
+	router.Watch(ctx, tenantWatchInterval, func(tctx context.Context, t tenantdb.Tenant, tpool *pgxpool.Pool) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runWorker(ctx, log.With().Str("tenant", t.CustomerID).Logger(), tpool, base+"-"+t.CustomerID[:8], allowInsecure, router.Gate(t.CustomerID, tpool))
+			runWorker(tctx, log.With().Str("tenant", t.CustomerID).Logger(), tpool, base+"-"+t.CustomerID[:8], allowInsecure, router.Gate(t.CustomerID, tpool))
 		}()
 	})
 	<-ctx.Done()

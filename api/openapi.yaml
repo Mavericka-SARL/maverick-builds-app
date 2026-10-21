@@ -970,6 +970,11 @@ components:
         value2: { type: number, description: "between / not_between: the upper bound" }
         than:   { type: string, description: "Compare with this metric instead of value: at the same cell when it is on the grid, else its total (a threshold setting)" }
         tone:   { type: string, enum: [negative, warning, positive, info] }
+        members:
+          type: array
+          items: { type: string }
+          description: "Only the cells of these members (codes): a variance column. Of `dimension` when it is named, else of any dimension"
+        dimension: { type: string, description: "The dimension `members` belong to, by name" }
 
     BusinessMemberRequest:
       type: object

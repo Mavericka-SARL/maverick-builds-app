@@ -19,8 +19,8 @@ import (
 //     at the point, a pin on the region's sole root (World) dropped, as the
 //     grid's scope drops it; no row (EMEA × Feb) is no point, and a
 //     restricted viewer whose grid withholds the total gets no World bar;
-//   - a collapsed non-served one (revenue * 2) on a time dimension gets its
-//     '{}' total row, which the scoped read at World equals;
+//   - a non-served one (revenue * 2) on a time dimension gets its '{}'
+//     total row, which the scoped read at World equals, and keeps its cells;
 //   - /api/grid flags both aggregate_evaluated, so the browser reads their
 //     parents from the server instead of reducing leaf cells.
 //
@@ -55,8 +55,16 @@ func TestPureRatioAverageReadsTheSchedulersAggregate(t *testing.T) {
 	f.await("prva", map[string]string{f.region: "EMEA"}, emea)
 	f.await("prva", map[string]string{f.period: "2026-02"}, 603)
 	f.await("prva", map[string]string{}, world)
-	// The collapsed pure ratio's total: its one evaluation at '{}'.
+	// The pure ratio's total: its formula evaluated at '{}'. Its cells are
+	// still each intersection's own value — they used to collapse into that
+	// one row, leaving a month × region grid with no monthly values — and a
+	// rollup is the formula at its aggregate: EMEA × February = 2 × (102 + 202).
 	f.await("rav", map[string]string{}, 2*revenueTotal)
+	f.await("rav", map[string]string{f.region: "UK", f.period: "2026-02"}, 204)
+	f.await("rav", map[string]string{f.region: "EMEA", f.period: "2026-02"}, 608)
+	g := f.grid(f.dev, f.plan, "")
+	f.served(g, "pure ratio leaf", f.at("rav", "UK", "2026-02"), 204)
+	f.served(g, "pure ratio leaf", f.at("rav", "US", "2026-06"), 612)
 
 	// Scoped reads: the World scope is the unscoped total.
 	totalsOnly := func(persona, scope string) gridRead {

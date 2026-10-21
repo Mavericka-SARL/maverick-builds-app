@@ -2421,7 +2421,11 @@ func (e *WriteExecutor) createDashboard(ctx context.Context, raw json.RawMessage
 	if revID == "" {
 		_ = e.pool.QueryRow(ctx, `SELECT COALESCE(active_revision_id::text,'') FROM core.model WHERE id=$1::uuid`, e.modelID).Scan(&revID)
 	}
-	bar, err := modeledit.NormalizeSelectorBar(ctx, e.pool, e.modelID, revID, selectorBarEntries(p.SelectorBar))
+	entries, err := e.selectorBarEntries(ctx, p.SelectorBar)
+	if err != nil {
+		return "", "", err
+	}
+	bar, err := modeledit.NormalizeSelectorBar(ctx, e.pool, e.modelID, revID, entries)
 	if err != nil {
 		return "", "", err
 	}
@@ -2447,16 +2451,30 @@ type selectorBarParam struct {
 	Default     string `json:"default"`
 }
 
-func selectorBarEntries(ps []selectorBarParam) []modeledit.SelectorBarEntry {
+// selectorBarEntries resolves each entry's dimension, by name or id, into
+// this executor's revision (requireInModel), as every other reference is: a
+// session's first plan is checked against the working revision and runs in
+// the draft copied from it at confirm time, so an id the assistant read from
+// the working revision names the draft's copy. It used to reach
+// NormalizeSelectorBar as given, which refused it ("not in this dashboard's
+// revision"), and the steps after it were skipped.
+func (e *WriteExecutor) selectorBarEntries(ctx context.Context, ps []selectorBarParam) ([]modeledit.SelectorBarEntry, error) {
 	out := make([]modeledit.SelectorBarEntry, 0, len(ps))
 	for _, p := range ps {
 		ref := p.Dimension
 		if ref == "" {
 			ref = p.DimensionID
 		}
+		if ref != "" {
+			id, err := e.requireInModel(ctx, "dimension", ref)
+			if err != nil {
+				return nil, fmt.Errorf("selector_bar: %w", err)
+			}
+			ref = id
+		}
 		out = append(out, modeledit.SelectorBarEntry{DimensionID: ref, Default: p.Default})
 	}
-	return out
+	return out, nil
 }
 
 // ── add_dashboard_widget ──────────────────────────────────────────────────────
@@ -3700,19 +3718,29 @@ func (e *WriteExecutor) updateFormDef(ctx context.Context, raw json.RawMessage) 
 // actually knows, and the executor owns the resolution.
 type setUserAccessRulesParams struct {
 	UserEmail string `json:"user_email"`
-	Rules     []struct {
+	// Rules replace the member rules in the active revision; nil (left out
+	// while MetricRules is given) keeps them.
+	Rules *[]struct {
 		Dimension  string `json:"dimension"`
 		MemberCode string `json:"member_code"`
 		Access     string `json:"access"`
 	} `json:"rules"`
+	// MetricRules replace the metric rules in the active revision (the
+	// Business Admin › Access Rules metric rules); nil keeps them.
+	MetricRules *[]struct {
+		Metric string `json:"metric"`
+		Access string `json:"access"`
+	} `json:"metric_rules"`
 }
 
-// setUserAccessRules replaces the target user's member rules in the active
-// revision — the rules it can name — mirroring the business-admin console's
-// PUT /access-rules for that slice (writeguard.ReplaceUserMemberRulesInRevision).
-// Metric and button rules, rules on members gone from the active revision
-// (which still restrict old revisions' copies) and rules on other models'
-// members are kept: the tool cannot express them, so it must not wipe them.
+// setUserAccessRules replaces the target user's member rules and/or metric
+// rules in the active revision — the rules it can name — mirroring the
+// business-admin console's PUT /access-rules for that slice
+// (writeguard.ReplaceUserMemberRulesInRevision,
+// ReplaceUserMetricRulesInRevision). A kind left out is kept. Button rules,
+// rules on members or metrics gone from the active revision (which still
+// restrict old revisions' copies) and rules in other models are kept: the
+// tool cannot express them, so it must not wipe them.
 // This is a business-admin capability deliberately extended to the
 // AI Developer at the owner's direction (2026-08-26), the first AI tool that
 // reaches outside the developer role's own powers.
@@ -3735,12 +3763,33 @@ func (e *WriteExecutor) setUserAccessRules(ctx context.Context, raw json.RawMess
 	if strings.TrimSpace(p.UserEmail) == "" {
 		return "", "", fmt.Errorf("user_email is required")
 	}
-	for i, r := range p.Rules {
+	if p.Rules == nil && p.MetricRules == nil {
+		return "", "", fmt.Errorf("rules (member rules) and/or metric_rules are required; [] removes that kind")
+	}
+	var memberRules []struct {
+		Dimension  string `json:"dimension"`
+		MemberCode string `json:"member_code"`
+		Access     string `json:"access"`
+	}
+	if p.Rules != nil {
+		memberRules = *p.Rules
+	}
+	for i, r := range memberRules {
 		if r.Access != "read" && r.Access != "hidden" {
 			return "", "", fmt.Errorf("rule %d: access must be \"read\" or \"hidden\", got %q", i+1, r.Access)
 		}
 		if strings.TrimSpace(r.Dimension) == "" || strings.TrimSpace(r.MemberCode) == "" {
 			return "", "", fmt.Errorf("rule %d: dimension and member_code are required", i+1)
+		}
+	}
+	if p.MetricRules != nil {
+		for i, r := range *p.MetricRules {
+			if r.Access != "read" && r.Access != "hidden" {
+				return "", "", fmt.Errorf("metric rule %d: access must be \"read\" or \"hidden\", got %q", i+1, r.Access)
+			}
+			if strings.TrimSpace(r.Metric) == "" {
+				return "", "", fmt.Errorf("metric rule %d: metric is required — its name", i+1)
+			}
 		}
 	}
 
@@ -3776,8 +3825,8 @@ func (e *WriteExecutor) setUserAccessRules(ctx context.Context, raw json.RawMess
 	}
 
 	type resolved struct{ memberID, access, label string }
-	rules := make([]resolved, 0, len(p.Rules))
-	for _, r := range p.Rules {
+	rules := make([]resolved, 0, len(memberRules))
+	for _, r := range memberRules {
 		var memberID string
 		if err := e.pool.QueryRow(ctx, `
 			SELECT m.id::text FROM model.dimension_member m
@@ -3790,18 +3839,43 @@ func (e *WriteExecutor) setUserAccessRules(ctx context.Context, raw json.RawMess
 		}
 		rules = append(rules, resolved{memberID, r.Access, r.Dimension + "/" + r.MemberCode})
 	}
+	var metricRules []resolved
+	if p.MetricRules != nil {
+		for _, r := range *p.MetricRules {
+			var metricID string
+			if err := e.pool.QueryRow(ctx, `
+				SELECT id::text FROM model.metric_def
+				WHERE model_id = $1::uuid AND (revision_id = $2::uuid OR revision_id IS NULL) AND lower(name) = lower($3)
+				ORDER BY revision_id NULLS LAST LIMIT 1
+			`, e.modelID, activeRev, strings.TrimSpace(r.Metric)).Scan(&metricID); err != nil {
+				return "", "", fmt.Errorf("no metric %q in the active revision", r.Metric)
+			}
+			metricRules = append(metricRules, resolved{metricID, r.Access, r.Metric})
+		}
+	}
 
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {
 		return "", "", fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	inputs := make([]writeguard.RuleInput, len(rules))
-	for i, r := range rules {
-		inputs[i] = writeguard.RuleInput{Type: "dimension_member", RefID: r.memberID, Access: r.access}
+	if p.Rules != nil {
+		inputs := make([]writeguard.RuleInput, len(rules))
+		for i, r := range rules {
+			inputs[i] = writeguard.RuleInput{Type: "dimension_member", RefID: r.memberID, Access: r.access}
+		}
+		if err := writeguard.ReplaceUserMemberRulesInRevision(ctx, tx, targetID, activeRev, inputs); err != nil {
+			return "", "", fmt.Errorf("set rules: %w", err)
+		}
 	}
-	if err := writeguard.ReplaceUserMemberRulesInRevision(ctx, tx, targetID, activeRev, inputs); err != nil {
-		return "", "", fmt.Errorf("set rules: %w", err)
+	if p.MetricRules != nil {
+		inputs := make([]writeguard.RuleInput, len(metricRules))
+		for i, r := range metricRules {
+			inputs[i] = writeguard.RuleInput{Type: "metric", RefID: r.memberID, Access: r.access}
+		}
+		if err := writeguard.ReplaceUserMetricRulesInRevision(ctx, tx, targetID, activeRev, inputs); err != nil {
+			return "", "", fmt.Errorf("set metric rules: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", "", fmt.Errorf("commit rules: %w", err)
@@ -3813,15 +3887,28 @@ func (e *WriteExecutor) setUserAccessRules(ctx context.Context, raw json.RawMess
 		Category: auditlog.CategoryAdmin, EventType: auditlog.EventUserAccessRulesUpdated,
 		ActorUserID: e.userID, ActorRole: "developer(ai_assistant)",
 		ResourceType: "identity_user", ResourceID: targetID,
-		Metadata: map[string]string{"source": "ai_assistant", "rules": fmt.Sprintf("%d", len(rules))},
+		Metadata: map[string]string{"source": "ai_assistant", "rules": fmt.Sprintf("%d", len(rules)+len(metricRules))},
 	})
 
-	parts := make([]string, len(rules))
-	for i, r := range rules {
-		parts[i] = r.label + "=" + r.access
+	list := func(rs []resolved) string {
+		if len(rs) == 0 {
+			return "none"
+		}
+		parts := make([]string, len(rs))
+		for i, r := range rs {
+			parts[i] = r.label + "=" + r.access
+		}
+		return strings.Join(parts, ", ")
 	}
-	return fmt.Sprintf("Member access rules for %s in the active revision replaced: %s (previous member rules there removed; unlisted members stay fully accessible; metric rules and rules on members not in the active revision are kept)",
-		p.UserEmail, strings.Join(parts, ", ")), "", nil
+	var done []string
+	if p.Rules != nil {
+		done = append(done, "member access rules replaced: "+list(rules)+" (unlisted members stay fully accessible)")
+	}
+	if p.MetricRules != nil {
+		done = append(done, "metric access rules replaced: "+list(metricRules)+" (unlisted metrics stay fully accessible)")
+	}
+	return fmt.Sprintf("For %s in the active revision, %s; rules of other models, and on members or metrics not in the active revision, are kept",
+		p.UserEmail, strings.Join(done, "; ")), "", nil
 }
 
 // validationName is the metric name validation messages name: the new

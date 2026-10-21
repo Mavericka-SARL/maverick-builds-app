@@ -415,7 +415,7 @@ function MetricRow({ m, modelId, allMetrics, dimNames, dims, onTimeGrid, activeT
             <div style={{ marginTop: 8 }}>
               <div className="mvx-admin-muted" style={{ marginBottom: 4 }}>Highlight cells (the first rule that holds tints the cell):</div>
               <HighlightRulesEditor rules={highlightRules} onChange={setHighlightRules}
-                metricNames={allMetrics.filter(x => x.id !== m.id).map(x => x.name)} />
+                metricNames={allMetrics.filter(x => x.id !== m.id).map(x => x.name)} dimensionNames={dims.map(d => d.name)} />
             </div>
             {isInput && (
               <div style={{ marginTop: 8 }}>

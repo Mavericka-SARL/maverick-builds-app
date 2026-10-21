@@ -618,7 +618,11 @@ func (e *WriteExecutor) updateDashboard(ctx context.Context, raw json.RawMessage
 	if has["selector_bar"] {
 		var revID string
 		_ = e.pool.QueryRow(ctx, `SELECT COALESCE(revision_id::text,'') FROM model.dashboard_def WHERE id=$1::uuid`, dashID).Scan(&revID)
-		bar, err := modeledit.NormalizeSelectorBar(ctx, e.pool, e.modelID, revID, selectorBarEntries(p.SelectorBar))
+		entries, err := e.selectorBarEntries(ctx, p.SelectorBar)
+		if err != nil {
+			return "", "", err
+		}
+		bar, err := modeledit.NormalizeSelectorBar(ctx, e.pool, e.modelID, revID, entries)
 		if err != nil {
 			return "", "", err
 		}
@@ -1302,8 +1306,9 @@ func mergeWidgetProps(widgetType string, stored, given json.RawMessage) (json.Ra
 
 // checkWidgetProps refuses widget_props the console would not read — an
 // unknown key, at the top or under "chart"; a kpi_scope that is not one
-// member of one dimension; a scope with a mode other than "pin" — and
-// resolves the scope's dimension by id or name.
+// member of one dimension; a scope with a mode other than "pin" or "bar"
+// (a tile following the selector bar that pins one dimension the bar does
+// not hold) — and resolves the scope's dimension by id or name.
 func (e *WriteExecutor) checkWidgetProps(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return raw, nil
@@ -1340,11 +1345,11 @@ func (e *WriteExecutor) checkWidgetProps(ctx context.Context, raw json.RawMessag
 		}
 	}
 	mode, _ := props["kpi_context_mode"].(string)
-	if v, ok := props["kpi_context_mode"]; ok && v != nil && mode != "total" && mode != "sync" && mode != "pin" {
-		return nil, fmt.Errorf(`kpi_context_mode is "total" (the whole model), "sync" (the dashboard's selectors) or "pin" (with kpi_scope)`)
+	if v, ok := props["kpi_context_mode"]; ok && v != nil && mode != "total" && mode != "sync" && mode != "pin" && mode != "bar" {
+		return nil, fmt.Errorf(`kpi_context_mode is "total" (the whole model), "sync" (the dashboard's selectors), "bar" (the selector bar's members) or "pin" (with kpi_scope)`)
 	}
 	if v, ok := props["kpi_scope"]; ok && v != nil {
-		const shape = `kpi_scope is {"dimension_id": "<dimension id or name>", "member_code": "<member code>"} — one member of one dimension — with "kpi_context_mode": "pin"`
+		const shape = `kpi_scope is {"dimension_id": "<dimension id or name>", "member_code": "<member code>"} — one member of one dimension — with "kpi_context_mode": "pin", or "bar" to pin a dimension the selector bar does not hold`
 		scope, ok := v.(map[string]any)
 		dim, _ := scope["dimension_id"].(string)
 		code, _ := scope["member_code"].(string)
@@ -1353,7 +1358,7 @@ func (e *WriteExecutor) checkWidgetProps(ctx context.Context, raw json.RawMessag
 		}
 		if mode == "" {
 			props["kpi_context_mode"] = "pin"
-		} else if mode != "pin" {
+		} else if mode != "pin" && mode != "bar" {
 			return nil, fmt.Errorf("kpi_context_mode %q contradicts kpi_scope: %s", mode, shape)
 		}
 		id, err := e.requireInModel(ctx, "dimension", dim)
@@ -1361,6 +1366,45 @@ func (e *WriteExecutor) checkWidgetProps(ctx context.Context, raw json.RawMessag
 			return nil, fmt.Errorf("kpi_scope: %w", err)
 		}
 		scope["dimension_id"] = id
+	}
+	if v, ok := props["kpi_compare"]; ok && v != nil {
+		const shape = `kpi_compare is {"dimension_id": "<dimension id or name>", "member_code": "<member code>", "label": "<optional>"} — the member the tile's value is compared with (Budget, Prior year): the tile shows it and the difference`
+		cmp, ok := v.(map[string]any)
+		dim, _ := cmp["dimension_id"].(string)
+		code, _ := cmp["member_code"].(string)
+		if !ok || dim == "" || code == "" {
+			return nil, fmt.Errorf("%s", shape)
+		}
+		for k := range cmp {
+			if k != "dimension_id" && k != "member_code" && k != "label" {
+				return nil, fmt.Errorf("%s", shape)
+			}
+		}
+		id, err := e.requireInModel(ctx, "dimension", dim)
+		if err != nil {
+			return nil, fmt.Errorf("kpi_compare: %w", err)
+		}
+		cmp["dimension_id"] = id
+	}
+	if v, ok := props["kpi_good"]; ok && v != nil && v != "up" && v != "down" {
+		return nil, fmt.Errorf(`kpi_good is "up" (more than the comparison is good: revenue) or "down" (less is good: costs)`)
+	}
+	if v, ok := props["number_scale"]; ok && v != nil && v != "auto" && v != "none" && v != "k" && v != "m" {
+		return nil, fmt.Errorf(`number_scale is "auto" (20.1M), "k" (thousands), "m" (millions) or "none" (every digit)`)
+	}
+	if chart, ok := props["chart"].(map[string]any); ok {
+		if v, ok := chart["stacked"]; ok && v != nil {
+			if _, isBool := v.(bool); !isBool {
+				return nil, fmt.Errorf("chart.stacked is true or false")
+			}
+		}
+		if ref, _ := chart["actual_metric_id"].(string); ref != "" {
+			id, err := e.requireInModel(ctx, "metric", ref)
+			if err != nil {
+				return nil, fmt.Errorf("chart.actual_metric_id (the metric that is 1 in the periods that hold actuals): %w", err)
+			}
+			chart["actual_metric_id"] = id
+		}
 	}
 	if err := e.resolveWidgetLayout(ctx, props); err != nil {
 		return nil, err

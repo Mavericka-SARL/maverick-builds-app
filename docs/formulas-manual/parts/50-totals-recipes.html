@@ -6,7 +6,7 @@
 <table>
 <tr><th style="width:14%">Rule</th><th>Value at a parent member or total</th><th style="width:30%">Use it for</th></tr>
 <tr><td><b>Sum</b></td><td>The sum of every leaf under it (a leaf with no value adds 0).</td><td>Amounts: sales, cost, margin, headcount</td></tr>
-<tr><td><b>Average</b></td><td>The mean of the leaves under it that have a value; never a mean of the children's means. If the formula does not depend on the members (no dimension, property or PARENT in it), it is instead evaluated once on the totalled inputs, like Formula.</td><td>Levels that are averaged, such as a score</td></tr>
+<tr><td><b>Average</b></td><td>The mean of the leaves under it that have a value; never a mean of the children's means. If the formula does not depend on the members (no dimension, property or PARENT in it), its totals are instead the formula evaluated on the totalled inputs, like Formula; each cell keeps its own value.</td><td>Levels that are averaged, such as a score</td></tr>
 <tr><td><b>Count</b></td><td>The number of leaves under it whose value is recorded and not 0.</td><td>"How many regions are active"</td></tr>
 <tr><td><b>Formula</b></td><td>The metric's own formula evaluated on the totalled inputs. Calculated metrics only.</td><td>Ratios and percentages: <code>margin_pct</code> at World is total margin ÷ total sales</td></tr>
 <tr><td><b>Rate</b></td><td>The total of a <b>Numerator</b> metric divided by the total of a <b>Denominator</b> metric, both chosen in the form.</td><td>Blended rates: an average price is total revenue ÷ total units</td></tr>

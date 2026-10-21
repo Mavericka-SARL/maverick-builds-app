@@ -103,19 +103,25 @@ func (h *handler) cellMetric(ctx context.Context, a *actor, modelID, metricID st
 	// The model_id predicate matters: without it, an is_input metric from a
 	// completely different tenant's model would otherwise pass.
 	var isInput bool
-	var format string
+	var format, label string
 	if err := h.db.QueryRow(ctx,
-		`SELECT is_input, COALESCE(format,'') FROM model.metric_def WHERE id=$1::uuid AND model_id=$2::uuid`, metricID, modelID,
-	).Scan(&isInput, &format); err != nil || !isInput {
+		`SELECT is_input, COALESCE(format,''), COALESCE(NULLIF(label,''), name) FROM model.metric_def WHERE id=$1::uuid AND model_id=$2::uuid`, metricID, modelID,
+	).Scan(&isInput, &format, &label); err != nil {
 		return "", refuseCell(http.StatusForbidden, "metric is not writable")
 	}
 	// The caller must not be restricted to read-only or hidden access for it.
+	// The refusal names a metric the caller may see, and never a hidden one.
 	access, err := writeguard.MetricAccess(ctx, h.db.For(ctx), a.UserID, metricID)
 	if err != nil {
 		return "", refuseCell(http.StatusInternalServerError, "check metric access: %v", err)
 	}
-	if access == "hidden" || access == "read" {
-		return "", refuseCell(http.StatusForbidden, "access denied")
+	switch {
+	case access == "hidden":
+		return "", refuseCell(http.StatusForbidden, "access denied: this metric is hidden from you (an access rule)")
+	case !isInput:
+		return "", refuseCell(http.StatusForbidden, "metric is not writable: %s is calculated, its cells take no input", label)
+	case access == "read":
+		return "", refuseCell(http.StatusForbidden, "access denied: %s is read-only for you (an access rule), so its cells take no input from you", label)
 	}
 	return format, nil
 }
@@ -126,6 +132,32 @@ type preparedCell struct {
 	dimMembers string // the cell's coordinate as stored: {dimId: memberCode}
 	write      cellWrite
 	req        writebackReq
+}
+
+// recalcWrittenCells recalculates what the stored cells reach, following
+// the cells (calculation.RecalcAffectedCells): the cells they reach are
+// recalculated, not every cell of every metric. A coordinate that does not
+// parse has its metric recalculated whole.
+func recalcWrittenCells(ctx context.Context, scheduler *calculation.Scheduler, modelID, revisionID string, cells []preparedCell) error {
+	changed := make([]calculation.ChangedCell, 0, len(cells))
+	var whole []string
+	for _, c := range cells {
+		var combo map[string]string
+		if err := json.Unmarshal([]byte(c.dimMembers), &combo); err != nil {
+			whole = append(whole, c.metricID)
+			continue
+		}
+		changed = append(changed, calculation.ChangedCell{MetricID: c.metricID, Combo: combo})
+	}
+	if len(whole) > 0 {
+		if err := scheduler.RecalcAffected(ctx, modelID, revisionID, whole); err != nil {
+			return err
+		}
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	return scheduler.RecalcAffectedCells(ctx, modelID, revisionID, changed)
 }
 
 // prepareCell checks one cell of a metric already checked (cellMetric):
@@ -396,7 +428,7 @@ func (h *handler) cellsBatch(w http.ResponseWriter, r *http.Request) {
 	recalc := func(ctx context.Context) {
 		calcLog := h.log.With().Str("op", "cells_batch").Logger()
 		scheduler := calculation.NewScheduler(calcLog, calculation.NewStore(h.db.For(ctx)))
-		if err := scheduler.RecalcAffected(ctx, req.ModelID, revisionID, metricIDs); err != nil {
+		if err := recalcWrittenCells(ctx, scheduler, req.ModelID, revisionID, cells); err != nil {
 			h.log.Warn().Err(err).Msg("recalc failed after a batch write")
 		}
 	}

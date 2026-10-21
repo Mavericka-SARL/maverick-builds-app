@@ -186,7 +186,7 @@ func TestMigrateAllAndWatch(t *testing.T) {
 	defer cancel()
 	var mu sync.Mutex
 	started := map[string]int{}
-	r.Watch(wctx, 50*time.Millisecond, func(t tenantdb.Tenant, _ *pgxpool.Pool) {
+	r.Watch(wctx, 50*time.Millisecond, func(_ context.Context, t tenantdb.Tenant, _ *pgxpool.Pool) {
 		mu.Lock()
 		started[t.CustomerID]++
 		mu.Unlock()
@@ -232,7 +232,7 @@ func TestWatchedPoolOutlivesIdleTimeout(t *testing.T) {
 	held := make(chan *pgxpool.Pool, 1)
 	wctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	r.Watch(wctx, time.Hour, func(_ tenantdb.Tenant, p *pgxpool.Pool) { held <- p })
+	r.Watch(wctx, time.Hour, func(_ context.Context, _ tenantdb.Tenant, p *pgxpool.Pool) { held <- p })
 	bg := <-held
 
 	// B appears after Watch's only pass, so nothing holds its pool.
@@ -331,5 +331,87 @@ func TestEachLeavesNoConnections(t *testing.T) {
 	}
 	if open != 0 {
 		t.Fatalf("%d connections to tenant databases left open after Each", open)
+	}
+}
+
+// A tenant's background loops end when the tenant goes: deprovisioned here
+// (its pool closed under them), deleted by another replica (gone from the
+// catalog), or forgotten while still ready — then they start again on a
+// fresh pool. They used to run on against the closed pool, logging "closed
+// pool" every pass until the process restarted.
+func TestWatchEndsTheLoopsOfATenantThatGoes(t *testing.T) {
+	ctx := context.Background()
+	r, _ := newRouter(t)
+	a, err := r.Provision(ctx, "A", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := r.Provision(ctx, "B", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var mu sync.Mutex
+	loops := map[string][]context.Context{}
+	r.Watch(wctx, 50*time.Millisecond, func(lctx context.Context, tn tenantdb.Tenant, _ *pgxpool.Pool) {
+		mu.Lock()
+		loops[tn.CustomerID] = append(loops[tn.CustomerID], lctx)
+		mu.Unlock()
+	})
+	latest := func(id string) context.Context {
+		mu.Lock()
+		defer mu.Unlock()
+		if l := loops[id]; len(l) > 0 {
+			return l[len(l)-1]
+		}
+		return nil
+	}
+	ended := func(c context.Context) bool {
+		select {
+		case <-c.Done():
+			return true
+		case <-time.After(2 * time.Second):
+			return false
+		}
+	}
+	aCtx, bCtx := latest(a.Tenant.CustomerID), latest(b.Tenant.CustomerID)
+	if aCtx == nil || bCtx == nil {
+		t.Fatalf("watch started %v", loops)
+	}
+
+	// Deprovisioned here: its loops end at once.
+	if err := r.Deprovision(ctx, a.Tenant.CustomerID); err != nil {
+		t.Fatal(err)
+	}
+	if !ended(aCtx) {
+		t.Fatal("the loops of a deprovisioned tenant kept running")
+	}
+
+	// Forgotten while still ready: ended, then started again.
+	r.Forget(b.Tenant.CustomerID)
+	if !ended(bCtx) {
+		t.Fatal("Forget did not end the tenant's loops")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for latest(b.Tenant.CustomerID) == bCtx && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	bAgain := latest(b.Tenant.CustomerID)
+	if bAgain == bCtx || bAgain.Err() != nil {
+		t.Fatal("a forgotten tenant that is still ready was not watched again")
+	}
+
+	// Deleted by another replica: gone from the catalog, ended at the next pass.
+	if err := r.Catalog().Delete(ctx, b.Tenant.CustomerID); err != nil {
+		t.Fatal(err)
+	}
+	if !ended(bAgain) {
+		t.Fatal("the loops of a tenant gone from the catalog kept running")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if n := len(loops[a.Tenant.CustomerID]); n != 1 {
+		t.Fatalf("the deprovisioned tenant was started %d times", n)
 	}
 }

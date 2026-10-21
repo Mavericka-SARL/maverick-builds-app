@@ -270,6 +270,24 @@ func (h *handler) recalcRevisionFromInputs(ctx context.Context, modelID, revisio
 func (h *handler) recalcRevisionCalculated(ctx context.Context, modelID, revisionID string) {
 	ctx, done := h.backgroundRecalc(ctx, "recalculation of a revision")
 	defer done()
+	seq := h.requestRecalc(ctx, revisionID)
+	defer h.recalcDone(ctx, revisionID, seq)
+	h.recalcCalculated(ctx, modelID, revisionID)
+}
+
+// recalcRevisionInBackground is recalcRevisionCalculated after the request
+// has answered, recorded as pending before it does: from the first read on,
+// the grid shows calculated cells, and the KPI tiles their values, as about
+// to change. An activation's recalculation used to run unrecorded, and the
+// tiles showed half-computed figures (EBITDA equal to gross profit) as final.
+func (h *handler) recalcRevisionInBackground(ctx context.Context, modelID, revisionID string) {
+	h.recalcInBackground(ctx, revisionID, "recalculation of a revision", func(bg context.Context) {
+		h.recalcCalculated(bg, modelID, revisionID)
+	})
+}
+
+// recalcCalculated recomputes every calculated metric of the revision.
+func (h *handler) recalcCalculated(ctx context.Context, modelID, revisionID string) {
 	rows, err := h.db.Query(ctx,
 		`SELECT id::text FROM model.metric_def WHERE model_id=$1::uuid AND revision_id=$2::uuid AND NOT is_input`,
 		modelID, revisionID)

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from "react";
+import React, { useState, useEffect, useContext, useId } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ResponsiveContainer,
@@ -122,9 +122,18 @@ function tooltipIndex(state: unknown): number | null {
 
 type CategoryClick = ((index: number) => void) | undefined;
 
+// A forecast period's bar (the chart's actual_metric_id is 0 there): the
+// series' colour hatched on the background, outlined — IBCS draws actual
+// solid and forecast hatched.
+function hatchId(uid: string, i: number) {
+  return `mvx-hatch-${uid.replace(/[^a-zA-Z0-9_-]/g, "")}-${i}`;
+}
+
 function BarChartRenderer({ data, config, currencySymbol, onCategoryClick }: { data: CategoryChartData; config: GridChartConfig; currencySymbol: string; onCategoryClick?: CategoryClick }) {
+  const uid = useId();
   const fmt = makeAxisFormatter(config.value_format, currencySymbol);
   const showLegend = config.show_legend ?? data.series.length > 1;
+  const actual = data.actual && data.actual.length === data.categories.length && data.actual.some(a => !a) ? data.actual : undefined;
   const chartData = data.categories.map((cat, i) => {
     const row: Record<string, unknown> = { name: cat.label };
     data.series.forEach(s => { row[s.label] = s.values[i] ?? null; });
@@ -143,11 +152,26 @@ function BarChartRenderer({ data, config, currencySymbol, onCategoryClick }: { d
         <YAxis tickFormatter={fmt} tick={{ fontSize: 11 }} />
         <Tooltip formatter={(v: unknown) => formatValue(v as number, config.value_format, currencySymbol)} />
         {showLegend && <Legend wrapperStyle={{ fontSize: 12 }} />}
+        {actual && (
+          <defs>
+            {data.series.map((s, i) => (
+              <pattern key={s.metric_id} id={hatchId(uid, i)} patternUnits="userSpaceOnUse" width={6} height={6} patternTransform="rotate(45)">
+                <rect width={6} height={6} fill="var(--color-surface)" />
+                <line x1={0} y1={0} x2={0} y2={6} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} />
+              </pattern>
+            ))}
+          </defs>
+        )}
         {data.series.map((s, i) => (
-          <Bar key={s.metric_id} dataKey={s.label} fill={CHART_COLORS[i % CHART_COLORS.length]}>
+          <Bar key={s.metric_id} dataKey={s.label} fill={CHART_COLORS[i % CHART_COLORS.length]}
+            stackId={config.stacked ? "stack" : undefined}>
+            {actual && actual.map((a, j) => (
+              <Cell key={j} fill={a ? CHART_COLORS[i % CHART_COLORS.length] : `url(#${hatchId(uid, i)})`}
+                stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={a ? 0 : 1} />
+            ))}
             {config.show_values && (
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              <LabelList dataKey={s.label} position="top" formatter={fmt as any} style={{ fontSize: 10 }} />
+              <LabelList dataKey={s.label} position={config.stacked ? "center" : "top"} formatter={fmt as any} style={{ fontSize: 10 }} />
             )}
           </Bar>
         ))}
@@ -160,11 +184,23 @@ function LineChartRenderer({ data, config, currencySymbol, onCategoryClick }: { 
   const fmt = makeAxisFormatter(config.value_format, currencySymbol);
   const showDots = data.categories.length <= 24;
   const showLegend = config.show_legend ?? data.series.length > 1;
+  // With actual periods marked, each series is two lines: solid over the
+  // actuals, dashed over the forecast from the last actual point on, so
+  // the two meet (IBCS: actual solid, forecast dashed).
+  const actual = data.actual && data.actual.length === data.categories.length && data.actual.some(a => !a) && data.actual.some(a => a)
+    ? data.actual : undefined;
+  const fcKey = (label: string) => `${label} (forecast)`;
   const chartData = data.categories.map((cat, i) => {
     const row: Record<string, unknown> = { name: cat.label };
     data.series.forEach(s => {
-      const v = s.values[i];
-      row[s.label] = v === null ? undefined : v;
+      const raw = s.values[i];
+      const v = raw === null ? undefined : raw;
+      if (!actual) {
+        row[s.label] = v;
+        return;
+      }
+      row[s.label] = actual[i] ? v : undefined;
+      row[fcKey(s.label)] = !actual[i] || actual[i + 1] === false ? v : undefined;
     });
     return row;
   });
@@ -186,6 +222,17 @@ function LineChartRenderer({ data, config, currencySymbol, onCategoryClick }: { 
             dataKey={s.label}
             stroke={CHART_COLORS[i % CHART_COLORS.length]}
             dot={showDots}
+            connectNulls={false}
+          />
+        ))}
+        {actual && data.series.map((s, i) => (
+          <Line
+            key={s.metric_id + ":fc"}
+            type="linear"
+            dataKey={fcKey(s.label)}
+            stroke={CHART_COLORS[i % CHART_COLORS.length]}
+            strokeDasharray="5 4"
+            dot={showDots ? { r: 3, fill: "var(--color-surface)", strokeWidth: 1.5 } : false}
             connectNulls={false}
           />
         ))}

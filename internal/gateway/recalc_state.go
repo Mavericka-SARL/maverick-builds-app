@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"time"
 
 	"github.com/mavericks-engine/mavericks/internal/calculation"
 )
@@ -45,20 +46,15 @@ func (h *handler) recalcAfterImport(ctx context.Context, modelID, revisionID, wh
 }
 
 func (h *handler) requestRecalc(ctx context.Context, revisionID string) int64 {
-	var seq int64
-	if err := h.db.For(ctx).QueryRow(ctx, `
-		INSERT INTO runtime.revision_recalc_state (revision_id, requested, updated_at) VALUES ($1::uuid, 1, now())
-		ON CONFLICT (revision_id) DO UPDATE SET requested = runtime.revision_recalc_state.requested + 1, updated_at = now()
-		RETURNING requested`, revisionID).Scan(&seq); err != nil {
+	seq, err := calculation.RequestRecalc(ctx, h.db.For(ctx), revisionID)
+	if err != nil {
 		h.log.Warn().Err(err).Str("revision", revisionID).Msg("record a pending recalculation")
 	}
 	return seq
 }
 
 func (h *handler) recalcDone(ctx context.Context, revisionID string, seq int64) {
-	if _, err := h.db.For(ctx).Exec(ctx, `
-		UPDATE runtime.revision_recalc_state SET done = GREATEST(done, $2), updated_at = now()
-		WHERE revision_id = $1::uuid`, revisionID, seq); err != nil {
+	if err := calculation.RecalcFinished(ctx, h.db.For(ctx), revisionID, seq); err != nil {
 		h.log.Warn().Err(err).Str("revision", revisionID).Msg("record a finished recalculation")
 	}
 }
@@ -70,4 +66,25 @@ func (h *handler) recalcPending(ctx context.Context, revisionID string) bool {
 		SELECT requested > done AND updated_at > now() - $2::interval
 		FROM runtime.revision_recalc_state WHERE revision_id = $1::uuid`, revisionID, recalcStaleAfter).Scan(&pending)
 	return pending
+}
+
+// exportRecalcWait is how long a file export waits for its revision's
+// pending recalculation before refusing.
+var exportRecalcWait = 20 * time.Second
+
+// waitRecalculated waits up to limit for revisionID's pending recalculation
+// to land; false while it is still running then (or the request ended).
+func (h *handler) waitRecalculated(ctx context.Context, revisionID string, limit time.Duration) bool {
+	deadline := time.Now().Add(limit)
+	for h.recalcPending(ctx, revisionID) {
+		if time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	return true
 }

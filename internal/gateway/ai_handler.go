@@ -807,11 +807,15 @@ turn:
 		}
 	}
 
-	// 6. Save final assistant reply.
+	// 6. Save final assistant reply, and the server's note when the reply
+	// follows a refused plan or claims a change no proposal made.
 	saved, err := store.SaveMessage(ctx, sessionID, "assistant", finalReply, nil, "", "")
 	if err != nil {
 		sendSSE("error", map[string]string{"error": err.Error()})
 		return
+	}
+	if note := noChangeNote(finalReply, retries.attempts > 0); note != "" {
+		_, _ = store.SaveMessage(ctx, sessionID, "assistant", note, nil, "", "")
 	}
 
 	allMsgs, _ := store.ListMessages(ctx, sessionID)
@@ -1015,7 +1019,7 @@ func (h *handler) aiConfirmProposal(w http.ResponseWriter, r *http.Request) {
 	// Calculated metrics the plan created, changed or placed on a grid get
 	// their results now, as they do when a developer saves one: an AI-built
 	// P&L stayed blank until an input happened to change.
-	go h.recalcRevisionCalculated(context.WithoutCancel(ctx), modelID, revID) //nolint:contextcheck
+	h.recalcRevisionInBackground(ctx, modelID, revID)
 
 	// Save a summary message into the chat.
 	summary := buildExecutionSummary(steps)
@@ -1205,7 +1209,7 @@ func (h *handler) aiPromoteDraft(w http.ResponseWriter, r *http.Request) {
 	// what the developer looks through in the console is what its
 	// definitions say (contract C8). Activation recomputes again, and runs
 	// the schema migration (activateRevision).
-	go h.recalcRevisionCalculated(context.WithoutCancel(ctx), modelID, draftRevID) //nolint:contextcheck
+	h.recalcRevisionInBackground(ctx, modelID, draftRevID)
 
 	if err := h.aiChatStore(ctx).SetDraftRevisionID(ctx, sessionID, ""); err != nil {
 		jsonErr(w, err, http.StatusInternalServerError)

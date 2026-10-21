@@ -496,7 +496,7 @@ func TestDashboardFolderAndWidgetEdits(t *testing.T) {
 	_, _, err = h.run("update_dashboard", map[string]any{"dashboard_id": dash, "selector_bar": []map[string]any{{"dimension": "scenario", "default": "UPSIDE"}}})
 	h.refused("a default that is not a member", err, "not a member code")
 	_, _, err = h.run("update_dashboard", map[string]any{"dashboard_id": dash, "selector_bar": []map[string]any{{"dimension": "nope"}}})
-	h.refused("an unknown dimension", err, "not in this dashboard's revision")
+	h.refused("an unknown dimension", err, "dimension \"nope\" not found in the working revision")
 	if out, err := aiassistant.NewToolExecutor(h.pool, h.modelID, h.revID).Execute(h.ctx, "list_dashboards", nil); err != nil || !strings.Contains(out, "selector bar: scenario = BASE") {
 		t.Errorf("list_dashboards does not show the bar: %v\n%s", err, out)
 	}
@@ -674,6 +674,18 @@ func TestAIWidgetPropsAreChecked(t *testing.T) {
 		"widget_props": map[string]any{"kpi_scope": map[string]any{"dimension_id": "scenario", "member_code": "RF"}}})
 	if got := h.scalar(`SELECT widget_props->>'kpi_context_mode' || ' ' || (widget_props->'kpi_scope'->>'dimension_id') FROM model.dashboard_widget WHERE id=$1::uuid`, w); got != "pin "+dim {
 		t.Errorf("stored mode and scope dimension = %q, want pin and the dimension's id", got)
+	}
+	// "bar" follows the selector bar, alone or pinning one dimension the bar
+	// does not hold — the tiles the prompt describes and a developer builds.
+	_, w = h.must("add_dashboard_widget", map[string]any{"dashboard_id": dash, "widget_type": "metric_kpi", "ref_id": rev, "pos_x": 300, "pos_y": 200,
+		"widget_props": map[string]any{"kpi_context_mode": "bar"}})
+	if got := h.scalar(`SELECT widget_props->>'kpi_context_mode' FROM model.dashboard_widget WHERE id=$1::uuid`, w); got != "bar" {
+		t.Errorf("stored mode = %q, want bar", got)
+	}
+	_, w = h.must("add_dashboard_widget", map[string]any{"dashboard_id": dash, "widget_type": "metric_kpi", "ref_id": rev, "pos_x": 600, "pos_y": 200,
+		"widget_props": map[string]any{"kpi_context_mode": "bar", "kpi_scope": map[string]any{"dimension_id": "scenario", "member_code": "LY"}}})
+	if got := h.scalar(`SELECT widget_props->>'kpi_context_mode' || ' ' || (widget_props->'kpi_scope'->>'dimension_id') FROM model.dashboard_widget WHERE id=$1::uuid`, w); got != "bar "+dim {
+		t.Errorf("stored mode and scope dimension = %q, want bar and the dimension's id", got)
 	}
 
 	// show_members: dimension by name, stored by id; codes, not labels.

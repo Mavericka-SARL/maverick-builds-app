@@ -34,6 +34,13 @@ type HighlightRule struct {
 	Than string `json:"than,omitempty"`
 	// Tone: negative | warning | positive | info.
 	Tone string `json:"tone"`
+	// Members limits the rule to the cells of these members (codes) — of
+	// Dimension when it is named, else of any dimension. A variance is a
+	// member (a calculated VAR column beside Plan and Actual), and a rule
+	// "> 0 is red" on a cost line used to colour the costs themselves; with
+	// "members": ["VAR"] it colours the variance only (2026-10-20, IBCS).
+	Members   []string `json:"members,omitempty"`
+	Dimension string   `json:"dimension,omitempty"`
 }
 
 // HighlightOps and HighlightTones are what a rule may say.
@@ -60,7 +67,7 @@ func CheckHighlightRules(ctx context.Context, q Querier, modelID, revisionID, me
 	var rules []HighlightRule
 	if err := dec.Decode(&rules); err != nil {
 		return nil, invalidCode(CodeInvalidHighlightRule,
-			`highlight_rules is a list of {"op", "value" | "than", "abs", "metric", "tone"}: %v`, err)
+			`highlight_rules is a list of {"op", "value" | "than", "abs", "metric", "tone", "members", "dimension"}: %v`, err)
 	}
 	if len(rules) > maxHighlightRules {
 		return nil, invalidCode(CodeInvalidHighlightRule, "a metric has at most %d highlight rules (this has %d)", maxHighlightRules, len(rules))
@@ -135,6 +142,9 @@ func CheckHighlightRules(ctx context.Context, q Querier, modelID, revisionID, me
 		if r.Abs && (subjectFormat == FormatText || subjectFormat == FormatPicklist || isText) {
 			return nil, invalidCode(CodeInvalidHighlightRule, "%s: abs is for numbers", at)
 		}
+		if err := checkRuleMembers(ctx, q, modelID, revisionID, r, at); err != nil {
+			return nil, err
+		}
 	}
 	out, err := json.Marshal(rules)
 	if err != nil {
@@ -150,4 +160,44 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// checkRuleMembers resolves a rule's dimension by name (its canonical
+// spelling kept) and checks each of its members is a code of it — of some
+// dimension of the revision when it names none, calculated members
+// included.
+func checkRuleMembers(ctx context.Context, q Querier, modelID, revisionID string, r *HighlightRule, at string) error {
+	if r.Dimension != "" && len(r.Members) == 0 {
+		return invalidCode(CodeInvalidHighlightRule, `%s: "dimension" goes with "members", the member codes the rule is for`, at)
+	}
+	if len(r.Members) == 0 {
+		return nil
+	}
+	if r.Dimension != "" {
+		var name string
+		if err := q.QueryRow(ctx, `
+			SELECT name FROM model.dimension_def
+			WHERE model_id=$1::uuid AND lower(name)=lower($2) AND (revision_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid OR revision_id IS NULL)
+			ORDER BY (name = $2) DESC LIMIT 1`, modelID, r.Dimension, revisionID).Scan(&name); err != nil {
+			return invalidCode(CodeInvalidHighlightRule, "%s: %q is no dimension of this revision", at, r.Dimension)
+		}
+		r.Dimension = name
+	}
+	for _, code := range r.Members {
+		var found bool
+		if err := q.QueryRow(ctx, `
+			SELECT EXISTS (SELECT 1 FROM model.dimension_member m JOIN model.dimension_def d ON d.id = m.dimension_id
+			WHERE d.model_id=$1::uuid AND (d.revision_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid OR d.revision_id IS NULL)
+			  AND m.code = $3 AND ($4 = '' OR d.name = $4))`, modelID, revisionID, code, r.Dimension).Scan(&found); err != nil {
+			return err
+		}
+		if !found {
+			where := "any dimension"
+			if r.Dimension != "" {
+				where = r.Dimension
+			}
+			return invalidCode(CodeInvalidHighlightRule, "%s: %q is no member of %s", at, code, where)
+		}
+	}
+	return nil
 }

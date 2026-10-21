@@ -328,3 +328,45 @@ func TestCreateRevisionKeepsTheSelectorBar(t *testing.T) {
 		t.Errorf("copied bar = %s=%s, want revision B's scenario %s=DOWNSIDE", barDim, barDefault, dimB)
 	}
 }
+
+// A session's first plan is checked on the working revision and runs in the
+// draft copied from it: a selector bar naming the working revision's
+// dimension by id lands on the draft's copy, as every other reference does.
+// It was refused ("not in this dashboard's revision") and the steps after it
+// skipped.
+func TestSelectorBarIDFromTheWorkingRevisionRemaps(t *testing.T) {
+	pool := setupWriteExecutorDB(t)
+	modelID := seedModel(t, pool)
+	revA := seedRevision(t, pool, modelID, "A")
+	ctx := context.Background()
+	run := func(exec *aiassistant.WriteExecutor, tool string, p map[string]any) string {
+		t.Helper()
+		_, id, err := exec.Execute(ctx, tool, mustJSON(t, p))
+		if err != nil {
+			t.Fatalf("%s: %v", tool, err)
+		}
+		return id
+	}
+	execA := aiassistant.NewWriteExecutor(pool, modelID, revA)
+	dimA := run(execA, "create_dimension", map[string]any{"name": "scenario", "members": []map[string]any{{"code": "BASE", "label": "Base"}, {"code": "DOWNSIDE", "label": "Downside"}}})
+	dashA := run(execA, "create_dashboard", map[string]any{"name": "Compare"})
+	revB := run(execA, "create_revision", map[string]any{"name": "Draft", "source_revision_id": revA})
+
+	execB := aiassistant.NewWriteExecutor(pool, modelID, revB)
+	run(execB, "update_dashboard", map[string]any{"dashboard_id": dashA, "selector_bar": []map[string]any{{"dimension_id": dimA, "default": "DOWNSIDE"}}})
+	run(execB, "create_dashboard", map[string]any{"name": "Second", "selector_bar": []map[string]any{{"dimension_id": dimA, "default": "BASE"}}})
+	var dimB string
+	if err := pool.QueryRow(ctx, `SELECT id::text FROM model.dimension_def WHERE revision_id=$1::uuid AND name='scenario'`, revB).Scan(&dimB); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"Compare": dimB + "=DOWNSIDE", "Second": dimB + "=BASE"} {
+		var got string
+		if err := pool.QueryRow(ctx, `SELECT (selector_bar->0->>'dimension_id') || '=' || (selector_bar->0->>'default')
+			FROM model.dashboard_def WHERE revision_id=$1::uuid AND name=$2`, revB, name).Scan(&got); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got != want {
+			t.Errorf("draft dashboard %s bar = %s, want the draft's scenario %s", name, got, want)
+		}
+	}
+}

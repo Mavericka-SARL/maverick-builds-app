@@ -60,7 +60,6 @@ type ImportRequest struct {
 // dry run.
 func (ps *Poster) ImportRows(ctx context.Context, req ImportRequest) (created int, errs []RowError, err error) {
 	form := req.Form
-	store := crudapp.NewStore(ps.db(ctx))
 
 	// Match each column header to a field by name, then by label
 	// (case-insensitive) — how an exported file names its columns. Columns
@@ -109,7 +108,7 @@ func (ps *Poster) ImportRows(ctx context.Context, req ImportRequest) (created in
 		status string
 	}
 	var staged []stagedRecord
-	memberLeaves := map[string]map[string]bool{} // dimension id → code → leaf
+	memberLeaves := NewMemberCache()
 	today := time.Now().UTC().Format("2006-01-02")
 
 	for _, row := range req.Rows {
@@ -181,23 +180,76 @@ func (ps *Poster) ImportRows(ctx context.Context, req ImportRequest) (created in
 			ps.MembersChanged(context.WithoutCancel(ctx), form)
 		}
 	}()
+	// Every row in one transaction: a file imports whole or not at all. Each
+	// record used to commit on its own, so a request cut off part-way — a
+	// client timeout, a closed tab — left the rows made so far (2,568 of a
+	// 9,000-row GL file) with nothing saying which.
+	tx, err := ps.db(ctx).Begin(ctx)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // a no-op after Commit
+	txStore := crudapp.NewStoreOn(tx)
+	recs := make([]*crudapp.FormRecord, 0, len(staged))
 	for _, sr := range staged {
-		rec, cErr := store.CreateRecordThen(ctx, form.ID, req.CreatorID, sr.status, sr.data, ps.AfterRecordCreated(req.CreatorID, &membersAdded))
+		rec, cErr := txStore.CreateRecordThen(ctx, form.ID, req.CreatorID, sr.status, sr.data, ps.AfterRecordCreated(req.CreatorID, &membersAdded))
 		if cErr != nil {
-			return created, nil, fmt.Errorf("create record: %w", cErr)
+			membersAdded = false
+			return 0, nil, fmt.Errorf("create record: %w", cErr)
 		}
-		created++
-		recID, status, data, creator := rec.ID, sr.status, sr.data, req.CreatorID
-		if req.Inline {
-			_ = ps.Apply(ctx, recID, form.ID, status, data, creator)
-		} else {
-			bgCtx := context.WithoutCancel(ctx)
-			go func() { _ = ps.Apply(bgCtx, recID, form.ID, status, data, creator) }()
-		}
-		// The rules a record created by hand fires: an automation that
-		// starts a workflow per submitted expense did not start for
-		// imported ones.
-		ps.DispatchRecordCreated(ctx, req.AppID, req.RevisionID, form.ID, recID, status, creator)
+		recs = append(recs, rec)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		membersAdded = false
+		return 0, nil, fmt.Errorf("create records: %w", err)
+	}
+	created = len(recs)
+	creator := req.CreatorID
+	// Posted as one batch: each record's postings, then every total they
+	// post into rebuilt once and one recalculation. Each record used to post
+	// on its own goroutine, rebuilding its totals and recalculating
+	// everything downstream per record — hundreds of overlapping passes for
+	// one file (about nine records a second on an FP&A model).
+	if req.Inline {
+		ps.postBatch(ctx, form.ID, recs, creator)
+	} else {
+		bgCtx := context.WithoutCancel(ctx)
+		go ps.postBatch(bgCtx, form.ID, recs, creator)
+	}
+	// The rules a record created by hand fires: an automation that starts a
+	// workflow per submitted expense did not start for imported ones. The
+	// records exist now whatever happens to the request.
+	dispatchCtx := context.WithoutCancel(ctx)
+	for _, rec := range recs {
+		ps.DispatchRecordCreated(dispatchCtx, req.AppID, req.RevisionID, form.ID, rec.ID, rec.Status, creator)
 	}
 	return created, errs, nil
+}
+
+// postBatch posts records created together through their table's live
+// mappings, rebuilds each mapping's total once and recalculates once.
+func (ps *Poster) postBatch(ctx context.Context, formID string, recs []*crudapp.FormRecord, userID string) {
+	if len(recs) == 0 {
+		return
+	}
+	defer ps.pending(ctx, formID)()
+	for _, rec := range recs {
+		if err := ps.apply(ctx, rec.ID, formID, rec.Status, rec.Data, userID, true); err != nil {
+			ps.Log.Warn().Err(err).Str("record_id", rec.ID).Msg("import: posting a record failed")
+		}
+	}
+	mappings, err := ps.liveFormMappings(ctx, formID)
+	if err != nil {
+		ps.Log.Error().Err(err).Str("form_id", formID).Msg("import: read mappings to rebuild totals")
+		return
+	}
+	var affected []struct{ RevisionID, MetricID string }
+	modelID := ""
+	for _, m := range mappings {
+		revisionID := ps.postingRevision(ctx, m)
+		ps.RecomputeFactInput(ctx, m.id, revisionID, userID)
+		affected = append(affected, struct{ RevisionID, MetricID string }{revisionID, m.targetMetricID})
+		modelID = m.modelID
+	}
+	ps.recalc(ctx, modelID, affected)
 }

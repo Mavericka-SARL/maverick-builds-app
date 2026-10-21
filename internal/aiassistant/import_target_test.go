@@ -24,8 +24,8 @@ func TestImportTargetInfersTheKind(t *testing.T) {
 	}{
 		{"", "Revenue", "grid", "g1", ""},
 		{"", "Region", "dimension", "d1", ""},
-		{"", "Both", "", "", "both a grid and a dimension"},
-		{"", "Nothing", "", "", "neither a grid nor a dimension"},
+		{"", "Both", "", "", "names more than one of a grid, a dimension and a table"},
+		{"", "Nothing", "", "", "neither a grid, a dimension nor a table"},
 		{"grid", "Revenue", "grid", "g1", ""},
 		{"grid", "Region", "", "", "not found"},
 		{"metric", "Revenue", "", "", "target_type must be"},

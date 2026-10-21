@@ -2,6 +2,7 @@ package aiassistant
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -58,9 +59,9 @@ func LintProposalStep(tool string, params json.RawMessage) error {
 		}
 	}
 	if parseErr == nil && literalOnly(node) {
-		return fmt.Errorf("metric %q: the formula %q reads nothing, so every cell is that constant — a placeholder, not a calculation. "+
+		return placeholderFormulaError{fmt.Sprintf("metric %q: the formula %q reads nothing, so every cell is that constant — a placeholder, not a calculation. "+
 			"Write the real formula (a total of other metrics by a property is SUMIFS(source, {Dimension}.property, \"value\")), "+
-			"or ask the developer how this line is computed", p.Name, p.Formula)
+			"or ask the developer how this line is computed", p.Name, p.Formula)}
 	}
 	if tool != "create_metric" || p.Format != "percentage" {
 		return nil
@@ -381,4 +382,50 @@ func SelfCriteriaSums(text string) []SelfCriteriaSum {
 	}
 	walk(node)
 	return out
+}
+
+// placeholderFormulaError is LintProposalStep refusing a formula that reads
+// nothing.
+type placeholderFormulaError struct{ msg string }
+
+func (e placeholderFormulaError) Error() string { return e.msg }
+
+// FilledLater reports, by step index, the create_metric steps whose metric
+// a later update_metric of the same plan gives a formula that reads
+// something: their constant formula is a placeholder the plan replaces —
+// how OrderByDependencies creates a carried-forward pair — not one left in
+// the model, so LintProposalStep's refusal of it does not apply.
+func FilledLater(steps []ProposalStep) map[int]bool {
+	out := map[int]bool{}
+	for i, s := range steps {
+		if s.Tool != "create_metric" {
+			continue
+		}
+		var c struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(s.Params, &c) != nil || c.Name == "" {
+			continue
+		}
+		for _, later := range steps[i+1:] {
+			var u struct {
+				MetricID string `json:"metric_id"`
+				Formula  string `json:"formula"`
+			}
+			if later.Tool != "update_metric" || json.Unmarshal(later.Params, &u) != nil || !strings.EqualFold(strings.TrimSpace(u.MetricID), strings.TrimSpace(c.Name)) {
+				continue
+			}
+			if node, err := formula.Parse(strings.TrimPrefix(strings.TrimSpace(u.Formula), "=")); err == nil && !literalOnly(node) {
+				out[i] = true
+			}
+		}
+	}
+	return out
+}
+
+// IsPlaceholderFormula reports whether err is LintProposalStep refusing a
+// formula that reads nothing.
+func IsPlaceholderFormula(err error) bool {
+	var p placeholderFormulaError
+	return errors.As(err, &p)
 }

@@ -116,6 +116,22 @@ func (s *Store) MarkDirtyTx(ctx context.Context, tx pgx.Tx, keys []string, model
 	return nil
 }
 
+// MarkCalculating is MarkDirty and ClaimForCalculation in one statement,
+// for a pass that holds its revision's lock (lockRevision): the partition
+// is created or set calculating. One round trip less per metric of a pass.
+func (s *Store) MarkCalculating(ctx context.Context, key, modelID, metricID, revisionID, timePartition string) error {
+	_, err := s.db.Exec(ctx, `
+		INSERT INTO runtime.metric_partition_state
+		    (partition_key, model_id, metric_id, revision_id, time_partition, status)
+		VALUES ($1, $2::uuid, $3::uuid, $4::uuid, $5, 'calculating')
+		ON CONFLICT (partition_key) DO UPDATE SET status = 'calculating', updated_at = now()
+	`, key, modelID, metricID, revisionID, timePartition)
+	if err != nil {
+		return fmt.Errorf("mark calculating %s: %w", key, err)
+	}
+	return nil
+}
+
 // ClaimForCalculation atomically transitions a partition from dirty → calculating.
 // Returns false if already claimed by another worker.
 func (s *Store) ClaimForCalculation(ctx context.Context, key string) (bool, error) {
@@ -467,8 +483,169 @@ func (s *Store) LoadMetricDimensionIDs(ctx context.Context, modelID, revisionID 
 // building the maps below from DB rows and when looking a combo up in them,
 // so both sides always go through the same Go json.Marshal call.
 func dimKey(dimMembers map[string]string) string {
-	b, _ := json.Marshal(dimMembers)
-	return string(b)
+	// json.Marshal's own output, built directly when no key or code needs
+	// escaping (dimension IDs are UUIDs, codes are mostly plain): every
+	// read of a dependency value builds one, and json.Marshal's reflection
+	// was a tenth of a recalculation's time (2026-10-20).
+	var keys [8]string
+	if dimMembers == nil || len(dimMembers) > len(keys) {
+		b, _ := json.Marshal(dimMembers)
+		return string(b)
+	}
+	n, size := 0, 2
+	for k, v := range dimMembers {
+		if !plainJSON(k) || !plainJSON(v) {
+			b, _ := json.Marshal(dimMembers)
+			return string(b)
+		}
+		i := n
+		for i > 0 && keys[i-1] > k {
+			keys[i] = keys[i-1]
+			i--
+		}
+		keys[i] = k
+		n++
+		size += len(k) + len(v) + 6
+	}
+	var b strings.Builder
+	b.Grow(size)
+	b.WriteByte('{')
+	for i, k := range keys[:n] {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteByte('"')
+		b.WriteString(k)
+		b.WriteString(`":"`)
+		b.WriteString(dimMembers[k])
+		b.WriteByte('"')
+	}
+	b.WriteByte('}')
+	return b.String()
+}
+
+// keyOf is dimKey of the combo a row's dim_members::text holds; false when
+// it is no object of strings. PostgreSQL writes a jsonb object as
+// {"k": "v", "k2": "v2"}, which is read here directly when no string needs
+// an escape — every calculated value a pass or a grid read loads goes
+// through it, and json.Unmarshal took most of a 19,500-row read
+// (2026-10-20).
+func keyOf(raw string) (string, bool) {
+	if k, ok := plainObjectKey(raw); ok {
+		return k, true
+	}
+	var dm map[string]string
+	if err := json.Unmarshal([]byte(raw), &dm); err != nil {
+		return "", false
+	}
+	return dimKey(dm), true
+}
+
+// plainObjectKey is keyOf's direct path: raw is a flat object of at most
+// eight string members, none with an escape or a character json.Marshal
+// writes escaped.
+func plainObjectKey(raw string) (string, bool) {
+	var keys, vals [8]string
+	n, i := 0, 0
+	skip := func() {
+		for i < len(raw) && raw[i] == ' ' {
+			i++
+		}
+	}
+	str := func() (string, bool) {
+		if i >= len(raw) || raw[i] != '"' {
+			return "", false
+		}
+		j := i + 1
+		for j < len(raw) && raw[j] != '"' {
+			j++
+		}
+		if j >= len(raw) {
+			return "", false
+		}
+		v := raw[i+1 : j]
+		if !plainJSON(v) {
+			return "", false
+		}
+		i = j + 1
+		return v, true
+	}
+	if len(raw) < 2 || raw[0] != '{' {
+		return "", false
+	}
+	i = 1
+	skip()
+	if i < len(raw) && raw[i] == '}' {
+		return "{}", i == len(raw)-1
+	}
+	for {
+		skip()
+		k, ok := str()
+		if !ok {
+			return "", false
+		}
+		skip()
+		if i >= len(raw) || raw[i] != ':' {
+			return "", false
+		}
+		i++
+		skip()
+		v, ok := str()
+		if !ok || n == len(keys) {
+			return "", false
+		}
+		at := n
+		for at > 0 && keys[at-1] > k {
+			keys[at], vals[at] = keys[at-1], vals[at-1]
+			at--
+		}
+		if at > 0 && keys[at-1] == k {
+			return "", false // a repeated key: json.Unmarshal's rules
+		}
+		keys[at], vals[at] = k, v
+		n++
+		skip()
+		if i >= len(raw) {
+			return "", false
+		}
+		if raw[i] == '}' {
+			if i != len(raw)-1 {
+				return "", false
+			}
+			break
+		}
+		if raw[i] != ',' {
+			return "", false
+		}
+		i++
+	}
+	var b strings.Builder
+	b.Grow(len(raw))
+	b.WriteByte('{')
+	for j := 0; j < n; j++ {
+		if j > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteByte('"')
+		b.WriteString(keys[j])
+		b.WriteString(`":"`)
+		b.WriteString(vals[j])
+		b.WriteByte('"')
+	}
+	b.WriteByte('}')
+	return b.String(), true
+}
+
+// plainJSON reports whether s is written by encoding/json as itself between
+// quotes: printable ASCII other than the characters it escapes.
+func plainJSON(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < 0x20 || c > 0x7e || c == '"' || c == '\\' || c == '<' || c == '>' || c == '&' {
+			return false
+		}
+	}
+	return true
 }
 
 // inputValueMapSQL is LoadInputValueMap's statement ($1 model, $2 revision,
@@ -545,11 +722,11 @@ func (s *Store) LoadInputTextMap(ctx context.Context, modelID, revisionID, metri
 		if err := rows.Scan(&raw, &text); err != nil {
 			return nil, err
 		}
-		var dm map[string]string
-		if json.Unmarshal([]byte(raw), &dm) != nil || text == "" {
+		k, ok := keyOf(raw)
+		if !ok || text == "" {
 			continue
 		}
-		out[dimKey(dm)] = text
+		out[k] = text
 	}
 	return out, rows.Err()
 }
@@ -571,9 +748,8 @@ func (s *Store) LoadCalcTextMap(ctx context.Context, modelID, revisionID, metric
 		if err := rows.Scan(&raw, &text); err != nil {
 			return nil, err
 		}
-		var dm map[string]string
-		if json.Unmarshal([]byte(raw), &dm) == nil {
-			out[dimKey(dm)] = text
+		if k, ok := keyOf(raw); ok {
+			out[k] = text
 		}
 	}
 	return out, rows.Err()
@@ -683,14 +859,14 @@ func (s *Store) LoadAllCalcValueMapsScoped(ctx context.Context, modelID, revisio
 		if err := rows.Scan(&metricID, &raw, &value); err != nil {
 			return nil, err
 		}
-		var dm map[string]string
-		if err := json.Unmarshal([]byte(raw), &dm); err != nil {
+		k, ok := keyOf(raw)
+		if !ok {
 			continue
 		}
 		if out[metricID] == nil {
 			out[metricID] = make(map[string]float64)
 		}
-		out[metricID][dimKey(dm)] = value
+		out[metricID][k] = value
 	}
 	return out, rows.Err()
 }
@@ -707,11 +883,11 @@ func scanDimValueMap(rows pgx.Rows, err error) (map[string]float64, error) {
 		if err := rows.Scan(&raw, &value); err != nil {
 			return nil, err
 		}
-		var dm map[string]string
-		if err := json.Unmarshal([]byte(raw), &dm); err != nil {
+		k, ok := keyOf(raw)
+		if !ok {
 			continue
 		}
-		out[dimKey(dm)] = value
+		out[k] = value
 	}
 	return out, rows.Err()
 }
@@ -740,7 +916,7 @@ type CalcResultRow struct {
 // '{}' total without removing the last one, so a busy workspace's
 // calc_result was mostly rows nobody would read again: one tenant held
 // 260 MB for 200,000 live rows after 7.3 million deletes.
-func (s *Store) ReplaceResultsTx(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID, partitionKey string, rows []CalcResultRow) error {
+func (s *Store) ReplaceResultsTx(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID string, rows []CalcResultRow) error {
 	dims := make([]string, len(rows))
 	values := make([]float64, len(rows))
 	texts := make([]*string, len(rows))
@@ -757,6 +933,13 @@ func (s *Store) ReplaceResultsTx(ctx context.Context, tx pgx.Tx, modelID, revisi
 	// for 1, and so checked keep once per result row — 108,000 results
 	// took minutes instead of a second, and a pass after every import
 	// held the revision's calculations up behind it.
+	//
+	// gone tests keep with NOT IN, not NOT EXISTS: keep is a CTE whose size
+	// the planner guesses as one row, and NOT EXISTS against it was planned
+	// as a nested-loop anti join — every row of the metric compared with
+	// every kept row, 190 million comparisons and 30 s for a 19,503-cell
+	// metric, on every recalculation. NOT IN is a hashed subplan whatever
+	// the guess (keep's id and calc_at are never NULL).
 	_, err := tx.Exec(ctx, `
 		WITH new AS (
 		    SELECT d::jsonb AS dims, v AS value, t AS text
@@ -766,17 +949,79 @@ func (s *Store) ReplaceResultsTx(ctx context.Context, tx pgx.Tx, modelID, revisi
 		    FROM runtime.calc_result c JOIN new n ON n.dims = c.dim_members
 		    WHERE c.model_id = $1::uuid AND c.revision_id = $2::uuid AND c.metric_id = $3::uuid
 		      AND c.value = n.value AND c.text_value IS NOT DISTINCT FROM n.text
-		      AND c.partition_key IS NOT DISTINCT FROM $7
 		    ORDER BY c.dim_members, c.calc_at DESC),
 		gone AS (
 		    DELETE FROM runtime.calc_result c
 		    WHERE c.model_id = $1::uuid AND c.revision_id = $2::uuid AND c.metric_id = $3::uuid
-		      AND NOT EXISTS (SELECT 1 FROM keep k WHERE k.id = c.id AND k.calc_at = c.calc_at))
-		INSERT INTO runtime.calc_result (model_id, revision_id, dim_members, metric_id, value, partition_key, text_value)
-		SELECT $1::uuid, $2::uuid, n.dims, $3::uuid, n.value, $7, n.text
+		      AND (c.id, c.calc_at) NOT IN (SELECT k.id, k.calc_at FROM keep k))
+		INSERT INTO runtime.calc_result (model_id, revision_id, dim_members, metric_id, value, text_value)
+		SELECT $1::uuid, $2::uuid, n.dims, $3::uuid, n.value, n.text
 		FROM new n WHERE NOT EXISTS (SELECT 1 FROM keep k WHERE k.dim_members = n.dims)
-	`, pgx.QueryExecModeCacheDescribe, modelID, revisionID, metricID, dims, values, texts, partitionKey)
+	`, pgx.QueryExecModeCacheDescribe, modelID, revisionID, metricID, dims, values, texts)
 	return err
+}
+
+// ApplyResultsDiffTx changes a metric's result set by a difference: it
+// deletes the rows at del (dimKeys) and inserts ins. It reports whether
+// the metric then holds want rows — the size of the set the difference
+// was taken against; when it does not, the caller replaces the whole set.
+// Planned for its arrays each time, as ReplaceResultsTx is.
+func (s *Store) ApplyResultsDiffTx(ctx context.Context, tx pgx.Tx, modelID, revisionID, metricID string, del []string, ins []CalcResultRow, want int) (bool, error) {
+	if len(del) > 0 {
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM runtime.calc_result
+			WHERE model_id = $1::uuid AND revision_id = $2::uuid AND metric_id = $3::uuid
+			  AND dim_members IN (SELECT k::jsonb FROM unnest($4::text[]) AS u(k))
+		`, pgx.QueryExecModeCacheDescribe, modelID, revisionID, metricID, del); err != nil {
+			return false, err
+		}
+	}
+	if len(ins) > 0 {
+		dims := make([]string, len(ins))
+		values := make([]float64, len(ins))
+		texts := make([]*string, len(ins))
+		for i, r := range ins {
+			dims[i], values[i], texts[i] = dimKey(r.DimMembers), r.Value, r.Text
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO runtime.calc_result (model_id, revision_id, dim_members, metric_id, value, text_value)
+			SELECT $1::uuid, $2::uuid, d::jsonb, $3::uuid, v, t
+			FROM unnest($4::text[], $5::numeric[], $6::text[]) AS n(d, v, t)
+		`, pgx.QueryExecModeCacheDescribe, modelID, revisionID, metricID, dims, values, texts); err != nil {
+			return false, err
+		}
+	}
+	var n int
+	if err := tx.QueryRow(ctx, `
+		SELECT count(*) FROM runtime.calc_result
+		WHERE model_id = $1::uuid AND revision_id = $2::uuid AND metric_id = $3::uuid
+	`, modelID, revisionID, metricID).Scan(&n); err != nil {
+		return false, err
+	}
+	return n == want, nil
+}
+
+// LoadPartitionStatuses returns each metric's partition status in
+// timePartition (dirty, calculating, clean, error); a metric with no
+// partition there is absent.
+func (s *Store) LoadPartitionStatuses(ctx context.Context, modelID, revisionID, timePartition string) (map[string]string, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT metric_id::text, status FROM runtime.metric_partition_state
+		WHERE model_id = $1::uuid AND revision_id = $2::uuid AND time_partition = $3
+	`, modelID, revisionID, timePartition)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, status string
+		if err := rows.Scan(&id, &status); err != nil {
+			return nil, err
+		}
+		out[id] = status
+	}
+	return out, rows.Err()
 }
 
 // ClearAllResults deletes every calc_result row of a metric, the '{}'

@@ -205,14 +205,19 @@ func ShapeCSV(data []byte, r *Reshape) (header []string, rows []RawRow, err erro
 // readCSVGrid reads CSV text. Rows may differ in length (a title row above
 // the header is shorter), and a stray quote inside a field is kept as text;
 // any other malformation is an error naming its line, never a silent end of
-// the file.
+// the file. A blank line is a blank row, as in a workbook: encoding/csv
+// skips it, so a loader's header_row 5 for a sheet with a title, a note and
+// two blank lines above its header found the header there in the workbook
+// and a data row in the same sheet saved as CSV (2026-10-20).
 func readCSVGrid(data []byte, delim rune) ([][]string, error) {
-	cr := csv.NewReader(bytes.NewReader(bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))))
+	text := bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
+	cr := csv.NewReader(bytes.NewReader(text))
 	cr.Comma = delim
 	cr.FieldsPerRecord = -1
 	cr.LazyQuotes = true
 	cr.TrimLeadingSpace = true
 	var grid [][]string
+	next, newlines, consumed := 1, 0, int64(0) // the line after the last record, the line breaks read, the offset
 	for {
 		rec, err := cr.Read()
 		if errors.Is(err, io.EOF) {
@@ -221,7 +226,15 @@ func readCSVGrid(data []byte, delim rune) ([][]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read CSV: %w", err)
 		}
+		if line, _ := cr.FieldPos(0); line > next {
+			for ; next < line; next++ {
+				grid = append(grid, []string{})
+			}
+		}
 		grid = append(grid, rec)
+		end := cr.InputOffset()
+		newlines += bytes.Count(text[consumed:end], []byte("\n"))
+		next, consumed = newlines+1, end
 	}
 	if len(grid) == 0 {
 		return nil, fmt.Errorf("read header: the file is empty")
@@ -302,7 +315,12 @@ func ShapeGrid(grid [][]string, r *Reshape) (header []string, rows []RawRow, err
 	}
 	h := r.HeaderRow
 	if h == 0 {
+		// No header row named: the first row that is not blank (a CSV
+		// starting with blank lines read as before they were rows).
 		h = 1
+		for h < len(grid) && isBlankRecord(grid[h-1]) {
+			h++
+		}
 	}
 	if h > len(grid) {
 		return nil, nil, fmt.Errorf("the sheet has %d row(s); reshape.header_row is %d", len(grid), h)

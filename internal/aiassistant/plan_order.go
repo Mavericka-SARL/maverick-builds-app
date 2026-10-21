@@ -25,6 +25,7 @@ func OrderByDependencies(steps []ProposalStep) []ProposalStep {
 			return steps
 		}
 	}
+	steps = splitMetricCycles(steps)
 	n := len(steps)
 	creator := map[string]int{} // lower-cased metric/grid name -> creating step
 	needs := make([][]string, n)
@@ -113,6 +114,86 @@ func OrderByDependencies(steps []ProposalStep) []ProposalStep {
 		sort.Ints(ready)
 		done[ready[0]] = true
 		out = append(out, steps[ready[0]])
+	}
+	return out
+}
+
+// splitMetricCycles lets a plan create metrics whose formulas name each
+// other — a carried-forward pair, opening = LAG(closing) and closing =
+// opening + hires - leavers: neither can be created first, since a formula
+// may name only metrics that exist, so the plan check refused it and the
+// AI Developer needed a second proposal to fill in placeholders
+// (2026-10-20). Each metric of such a cycle is created with the formula 0,
+// and an update_metric step setting its formula follows once every metric
+// it names exists (OrderByDependencies places it). A cycle time does not
+// break is still refused, at that step, by the engine's own check.
+func splitMetricCycles(steps []ProposalStep) []ProposalStep {
+	type metric struct {
+		name    string
+		formula string
+		refs    []string
+	}
+	creator := map[string]int{}
+	metrics := map[int]metric{}
+	for i, s := range steps {
+		if s.Tool != "create_metric" {
+			continue
+		}
+		var p map[string]any
+		if json.Unmarshal(s.Params, &p) != nil {
+			continue
+		}
+		name, _ := p["name"].(string)
+		f, _ := p["formula"].(string)
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name == "" || strings.TrimSpace(f) == "" {
+			continue
+		}
+		refs, err := formula.ExtractRefs(f)
+		if err != nil {
+			continue
+		}
+		if _, dup := creator[name]; !dup {
+			creator[name] = i
+		}
+		metrics[i] = metric{name: name, formula: f, refs: refs}
+	}
+	// reaches[i][j]: i's formula names j, directly or through others.
+	reaches := map[int]map[int]bool{}
+	for i, m := range metrics {
+		reaches[i] = map[int]bool{}
+		for _, r := range m.refs {
+			if j, ok := creator[strings.ToLower(strings.TrimSpace(r))]; ok && j != i {
+				reaches[i][j] = true
+			}
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for i := range reaches {
+			for j := range reaches[i] {
+				for k := range reaches[j] {
+					if !reaches[i][k] {
+						reaches[i][k], changed = true, true
+					}
+				}
+			}
+		}
+	}
+	var out []ProposalStep
+	for i, s := range steps {
+		m, ok := metrics[i]
+		if !ok || !reaches[i][i] {
+			out = append(out, s)
+			continue
+		}
+		var p map[string]any
+		_ = json.Unmarshal(s.Params, &p)
+		p["formula"] = "0"
+		created, _ := json.Marshal(p)
+		update, _ := json.Marshal(map[string]any{"metric_id": p["name"], "formula": m.formula})
+		out = append(out, ProposalStep{Tool: s.Tool, Description: s.Description + " (its formula follows once the metrics it reads exist)", Params: created},
+			ProposalStep{Tool: "update_metric", Description: "Set the formula of '" + m.name + "': " + m.formula, Params: update})
 	}
 	return out
 }

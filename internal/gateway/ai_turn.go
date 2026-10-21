@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -235,4 +236,30 @@ func compactJSON(raw json.RawMessage) string {
 		return string(raw)
 	}
 	return b.String()
+}
+
+// A turn changes nothing unless it ends with a proposal the developer then
+// confirms. gpt-5-mini twice replied that pages were created, reordered and
+// granted to roles ("already applied") in turns whose plans the plan check
+// had refused — no proposal was shown, nothing ran (2026-10-20). Under such
+// a reply the server says so itself.
+
+// claimsChange matches a reply that reports a change as made.
+var claimsChange = regexp.MustCompile(`(?i)\b(i\s*(have|'ve)|i|we\s*(have|'ve)|has been|have been|is now|are now|was|were|already)\s+` +
+	`(been\s+)?(created|added|applied|updated|renamed|deleted|removed|granted|reordered|moved|set up|configured|saved|changed|built|wired|connected|made)\b`)
+
+// noChangeNote is the server's note under the final reply of a turn that
+// ended without a proposal: refused says the plan check sent a plan back
+// this turn. "" when the reply neither follows a refused plan nor claims a
+// change (a question answered).
+func noChangeNote(reply string, refused bool) string {
+	switch {
+	case refused:
+		return "(From the server.) No change was made in this turn: the plan check refused the plan, so no proposal was shown and nothing ran. " +
+			"Anything the reply above describes as done is not in the model."
+	case claimsChange.MatchString(reply):
+		return "(From the server.) No change was made in this turn: no proposal was made, and the model changes only when you confirm one. " +
+			"Anything the reply above describes as done is not in the model."
+	}
+	return ""
 }

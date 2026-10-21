@@ -2157,13 +2157,13 @@ func nextFireTime(cronExpr, timezone string, now time.Time) (time.Time, error) {
 	if timezone != "" {
 		l, err := time.LoadLocation(timezone)
 		if err != nil {
-			return time.Time{}, fmt.Errorf("invalid timezone %q: %w", timezone, err)
+			return time.Time{}, fmt.Errorf("%w: invalid timezone %q: %w", ErrRuleScheduleInvalid, timezone, err)
 		}
 		loc = l
 	}
 	sched, err := cron.ParseStandard(cronExpr)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid cron expression %q: %w", cronExpr, err)
+		return time.Time{}, fmt.Errorf("%w: invalid cron expression %q: %w", ErrRuleScheduleInvalid, cronExpr, err)
 	}
 	return sched.Next(now.In(loc)), nil
 }
@@ -2192,6 +2192,12 @@ type Execution struct {
 // ErrRuleWorkflowInvalid marks a rule whose bound workflow def isn't a legal
 // target, so HTTP callers can map it to 400/403 rather than a generic 500.
 var ErrRuleWorkflowInvalid = errors.New("automation rule's workflow is not a valid target")
+
+// ErrRuleScheduleInvalid is a schedule-triggered rule without a valid
+// schedule: no cron expression, one that does not parse, an unknown
+// timezone. Like ErrRuleWorkflowInvalid it is the request's fault, answered
+// 400 — it used to be a 500.
+var ErrRuleScheduleInvalid = errors.New("the rule's schedule is not valid")
 
 // ValidateRuleWorkflowDef enforces the invariant an automation rule's
 // workflow_def_id has to satisfy: it must exist, be published, and belong to
@@ -2252,7 +2258,7 @@ func (s *Store) CreateAutomationRuleScoped(ctx context.Context, appID, revisionI
 	var nextFireAt *time.Time
 	if triggerType == "schedule" {
 		if sched == nil || sched.CronExpr == "" {
-			return nil, fmt.Errorf("cron_expr is required for a schedule-triggered rule")
+			return nil, fmt.Errorf("%w: cron_expr is required for a schedule-triggered rule", ErrRuleScheduleInvalid)
 		}
 		timezone = sched.Timezone
 		if timezone == "" {
@@ -2991,7 +2997,7 @@ func (s *Store) UpdateAutomationRuleScoped(ctx context.Context, ruleID, name, de
 	var nextFireAt *time.Time
 	if sched != nil {
 		if sched.CronExpr == "" {
-			return nil, fmt.Errorf("cron_expr is required when updating schedule config")
+			return nil, fmt.Errorf("%w: cron_expr is required when updating schedule config", ErrRuleScheduleInvalid)
 		}
 		tz := sched.Timezone
 		if tz == "" {

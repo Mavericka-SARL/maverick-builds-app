@@ -111,6 +111,11 @@ func CheckChartMetrics(ctx context.Context, db DB, gridID string, widgetProps js
 			MetricIDs   []string `json:"metric_ids"`
 			XMetricID   string   `json:"x_metric_id"`
 			YMetricID   string   `json:"y_metric_id"`
+			// ContextDefaults: dimension id → member code, the chart's
+			// filter until a viewer picks another.
+			ContextDefaults map[string]string `json:"context_defaults"`
+			// ActualMetricID: the flag metric marking actual periods.
+			ActualMetricID string `json:"actual_metric_id"`
 		} `json:"chart"`
 	}
 	if json.Unmarshal(widgetProps, &props) != nil || props.Chart == nil {
@@ -151,6 +156,10 @@ func CheckChartMetrics(ctx context.Context, db DB, gridID string, widgetProps js
 		return fmt.Errorf("%s holds dimension members (a pick-list), not quantities, so a chart cannot plot it — "+
 			"chart a number that counts or sums by it instead (COUNTIFS / SUMIFS over the pick-list)", strings.Join(picklists, ", "))
 	}
+	if c.ActualMetricID != "" && !onGrid[c.ActualMetricID] {
+		return fmt.Errorf("the chart marks its actual periods by %s, which grid %q does not hold: give that grid a metric reading it (formula = %s, 1 where a period holds actuals) and mark the chart by that one",
+			metricName(ctx, db, c.ActualMetricID), gridName, metricName(ctx, db, c.ActualMetricID))
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("the chart reads grid %q, which does not hold %s: a chart plots only its own grid's metrics. "+
 			"Point it at the grid that holds them, or give that grid a metric reading each one (formula = the other metric) and plot those%s",
@@ -161,6 +170,36 @@ func CheckChartMetrics(ctx context.Context, db DB, gridID string, widgetProps js
 		if err := db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model.grid_dimension WHERE grid_id=$1::uuid AND dimension_id=$2::uuid)`,
 			gridID, c.DimensionID).Scan(&ok); err == nil && !ok {
 			return fmt.Errorf("the chart plots along a dimension grid %q does not have", gridName)
+		}
+	}
+	// Chart-data refuses a context naming a dimension the grid lacks, the
+	// plotted one, or no member of it, on every load ("context dimension …
+	// not in grid"): refused here, when the chart is saved, instead. Live, an
+	// AI-built cash-flow chart filtered by a view dimension its grid did not
+	// have saved and answered 400 on every load.
+	dims := make([]string, 0, len(c.ContextDefaults))
+	for id := range c.ContextDefaults {
+		dims = append(dims, id)
+	}
+	sort.Strings(dims)
+	for _, dimID := range dims {
+		code := c.ContextDefaults[dimID]
+		var name string
+		var onGrid, member bool
+		if err := db.QueryRow(ctx, `
+			SELECT d.name,
+			       EXISTS(SELECT 1 FROM model.grid_dimension gd WHERE gd.grid_id = $1::uuid AND gd.dimension_id = d.id),
+			       EXISTS(SELECT 1 FROM model.dimension_member m WHERE m.dimension_id = d.id AND m.code = $3)
+			FROM model.dimension_def d WHERE d.id::text = $2`, gridID, dimID, code).Scan(&name, &onGrid, &member); err != nil {
+			return fmt.Errorf("the chart's context_defaults name %q, which is not a dimension id", dimID)
+		}
+		switch {
+		case dimID == c.DimensionID:
+			return fmt.Errorf("the chart's context_defaults pin %s, the dimension it plots along: leave it out", name)
+		case !onGrid:
+			return fmt.Errorf("the chart's context_defaults pin %s, which grid %q does not have: a chart filters only by its grid's dimensions", name, gridName)
+		case !member:
+			return fmt.Errorf("the chart's context_defaults pin %s to %q, which is not a member code of it", name, code)
 		}
 	}
 	return nil
@@ -230,10 +269,12 @@ var (
 		"color": true, "font_family": true, "alt": true, "image_fit": true, "button_color": true, "default_view": true,
 		"metric_ids": true, "chart": true, "context": true, "kpi_scope": true, "kpi_context_mode": true, "confirm_text": true,
 		"sync_context": true, "show_members": true, "rows_collapsed": true, "multi_select": true, "hide_search": true, "button_corners": true,
-		"new_record_button": true, "board": true, "record_filters": true, "record_columns": true, "record_sort": true}
+		"new_record_button": true, "board": true, "record_filters": true, "record_columns": true, "record_sort": true,
+		"kpi_compare": true, "kpi_good": true, "number_scale": true}
 	ChartSettingKeys = map[string]bool{"chart_type": true, "dimension_id": true, "metric_ids": true, "x_metric_id": true,
 		"y_metric_id": true, "context_defaults": true, "bin_count": true, "show_legend": true, "show_values": true,
-		"value_format": true, "refresh_seconds": true, "hide_rollup_members": true, "y_axis_from_zero": true}
+		"value_format": true, "refresh_seconds": true, "hide_rollup_members": true, "y_axis_from_zero": true,
+		"stacked": true, "actual_metric_id": true}
 )
 
 // CheckWidgetPropKeys refuses a widget_props key — at the top or under

@@ -14224,6 +14224,11 @@ type HighlightRule struct {
 	// (a threshold setting).
 	Than OptString         `json:"than"`
 	Tone HighlightRuleTone `json:"tone"`
+	// Only the cells of these members (codes): a variance column. Of `dimension` when it is named, else
+	// of any dimension.
+	Members []string `json:"members"`
+	// The dimension `members` belong to, by name.
+	Dimension OptString `json:"dimension"`
 }
 
 // GetMetric returns the value of Metric.
@@ -14261,6 +14266,16 @@ func (s *HighlightRule) GetTone() HighlightRuleTone {
 	return s.Tone
 }
 
+// GetMembers returns the value of Members.
+func (s *HighlightRule) GetMembers() []string {
+	return s.Members
+}
+
+// GetDimension returns the value of Dimension.
+func (s *HighlightRule) GetDimension() OptString {
+	return s.Dimension
+}
+
 // SetMetric sets the value of Metric.
 func (s *HighlightRule) SetMetric(val OptString) {
 	s.Metric = val
@@ -14294,6 +14309,16 @@ func (s *HighlightRule) SetThan(val OptString) {
 // SetTone sets the value of Tone.
 func (s *HighlightRule) SetTone(val HighlightRuleTone) {
 	s.Tone = val
+}
+
+// SetMembers sets the value of Members.
+func (s *HighlightRule) SetMembers(val []string) {
+	s.Members = val
+}
+
+// SetDimension sets the value of Dimension.
+func (s *HighlightRule) SetDimension(val OptString) {
+	s.Dimension = val
 }
 
 type HighlightRuleOp string

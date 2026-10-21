@@ -49,7 +49,6 @@ CREATE TABLE runtime.calc_result (
     dim_members   JSONB NOT NULL DEFAULT '{}',
     metric_id     UUID NOT NULL REFERENCES model.metric_def(id) ON DELETE CASCADE,
     value         NUMERIC,
-    partition_key TEXT NOT NULL,
     calc_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (id, calc_at)
 ) PARTITION BY RANGE (calc_at);

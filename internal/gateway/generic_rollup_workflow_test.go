@@ -233,7 +233,7 @@ func setupRollupFixture(t *testing.T) *rollupFixture {
 		if dimID != "" {
 			dm = fmt.Sprintf(`{"%s":"%s"}`, dimID, code)
 		}
-		exec(`INSERT INTO runtime.calc_result (model_id, revision_id, dim_members, metric_id, value, partition_key) VALUES ($1::uuid, $2::uuid, $3::jsonb, $4::uuid, $5, 'test')`,
+		exec(`INSERT INTO runtime.calc_result (model_id, revision_id, dim_members, metric_id, value) VALUES ($1::uuid, $2::uuid, $3::jsonb, $4::uuid, $5)`,
 			f.modelID, f.workingRevID, dm, metricID, val)
 	}
 	writeCalc(f.deptTotalMetricID, f.deptsDimID, "DEPT_A", 150)
@@ -1895,8 +1895,8 @@ func TestDimensionMemberRenameReKeysFactAndCalcRows(t *testing.T) {
 
 	dimMembers := fmt.Sprintf(`{"%s":"STAFF_A1"}`, f.staffDimID)
 	if _, err := f.pool.Exec(ctx, `
-		INSERT INTO runtime.calc_result (model_id, revision_id, dim_members, metric_id, value, partition_key)
-		VALUES ($1::uuid, $2::uuid, $3::jsonb, $4::uuid, 42, 'test-calc-pk-1')
+		INSERT INTO runtime.calc_result (model_id, revision_id, dim_members, metric_id, value)
+		VALUES ($1::uuid, $2::uuid, $3::jsonb, $4::uuid, 42)
 	`, f.modelID, f.workingRevID, dimMembers, f.deptTotalMetricID); err != nil {
 		t.Fatalf("seed calc_result: %v", err)
 	}

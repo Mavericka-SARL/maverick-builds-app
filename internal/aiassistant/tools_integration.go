@@ -102,8 +102,8 @@ func integrationToolDefs() []toolDef {
 			Parameters: `{"type":"object","properties":{
 				"file":{"type":"string","description":"The attached file's name, as listed under Attached documents"},
 				"sheet":{"type":"string","description":"Worksheet name; omit for the first sheet"},
-				"target_type":{"type":"string","enum":["grid","dimension"]},
-				"target_id":{"type":"string","description":"The grid or dimension: id or exact name"},
+				"target_type":{"type":"string","enum":["grid","dimension","table"]},
+				"target_id":{"type":"string","description":"The grid, dimension or table of records: id or exact name"},
 				"reshape":` + reshapeSchema + `,
 				"column_map":{"type":"object","description":"File column -> model field, applied AFTER reshape (see the File import section of your instructions); omit to use the headers as they are"},
 				"after_steps":{"type":"array","description":"Write steps of the proposal you are preparing, in propose_actions' step shape ({tool, description, params}), run first in a dry run (nothing is kept) so the file previews into a grid or dimension they create; target_id may then be \"<created in step N>\" or the new name","items":{"type":"object"}}
@@ -153,7 +153,7 @@ type toolDef struct{ Name, Description, Parameters string }
 // dimension into the working revision, as requireInModel does for write
 // tools — refusing a name two of them share.
 func (e *ToolExecutor) resolveRef(ctx context.Context, kind, ref string) (string, error) {
-	table := map[string]string{"grid": "model.grid_def", "dimension": "model.dimension_def"}[kind]
+	table := map[string]string{"grid": "model.grid_def", "dimension": "model.dimension_def", "form": "model.form_def"}[kind]
 	ref = strings.TrimSpace(ref)
 	if table == "" || ref == "" {
 		return "", fmt.Errorf("%s is required — its id or exact name", kind)
@@ -291,7 +291,7 @@ func (e *ToolExecutor) previewFileImport(ctx context.Context, raw json.RawMessag
 		// after they run, on the dry run's transaction.
 		req.TargetType, req.TargetID, req.AfterSteps = cmpOr(p.TargetType, "grid"), p.TargetID, p.AfterSteps
 		if req.TargetType != "grid" && req.TargetType != "dimension" {
-			return "", fmt.Errorf(`target_type is "grid" or "dimension"`)
+			return "", fmt.Errorf(`after_steps previews into a grid or a dimension (target_type "grid" or "dimension"); a table's import is previewed once the table exists`)
 		}
 		if strings.TrimSpace(req.TargetID) == "" {
 			return "", fmt.Errorf("target_id is required: the grid or dimension's id, exact name, or \"<created in step N>\" of after_steps")
@@ -395,20 +395,24 @@ func (e *ToolExecutor) previewExport(ctx context.Context, raw json.RawMessage) (
 	return e.hooks.PreviewExport(ctx, e.revID, gridID, p.Name, p.Spec)
 }
 
+// importTargetKind is the stored target_type: a table of records is a
+// "form" in model.integration_def, as the Import Wizard saves it.
 func importTargetKind(targetType string) (string, error) {
 	switch targetType {
 	case "grid":
 		return "grid", nil
 	case "dimension":
 		return "dimension", nil
+	case "table", "form":
+		return "form", nil
 	}
-	return "", fmt.Errorf("target_type must be \"grid\" (metric values) or \"dimension\" (members), not %q", targetType)
+	return "", fmt.Errorf("target_type must be \"grid\" (metric values), \"dimension\" (members) or \"table\" (records), not %q", targetType)
 }
 
 // importTarget returns the target's kind and id. A target_type left out is
 // read from target_id: the assistant named the grid or dimension and kept
 // omitting the type (live, six plans in a row), so a target that resolves as
-// exactly one of the two settles it.
+// exactly one grid, dimension or table settles it.
 func importTarget(targetType, targetID string, resolve func(kind, ref string) (string, error)) (string, string, error) {
 	if targetType != "" || targetID == "" {
 		kind, err := importTargetKind(targetType)
@@ -418,17 +422,19 @@ func importTarget(targetType, targetID string, resolve func(kind, ref string) (s
 		id, err := resolve(kind, targetID)
 		return kind, id, err
 	}
-	gridID, gridErr := resolve("grid", targetID)
-	dimID, dimErr := resolve("dimension", targetID)
-	switch {
-	case gridErr == nil && dimErr == nil:
-		return "", "", fmt.Errorf("%q names both a grid and a dimension: set target_type to \"grid\" (metric values) or \"dimension\" (members)", targetID)
-	case gridErr == nil:
-		return "grid", gridID, nil
-	case dimErr == nil:
-		return "dimension", dimID, nil
+	var kinds, ids []string
+	for _, kind := range []string{"grid", "dimension", "form"} {
+		if id, err := resolve(kind, targetID); err == nil {
+			kinds, ids = append(kinds, kind), append(ids, id)
+		}
 	}
-	return "", "", fmt.Errorf("target_id %q is neither a grid nor a dimension of this revision (list_grids / list_dimensions)", targetID)
+	switch len(kinds) {
+	case 1:
+		return kinds[0], ids[0], nil
+	case 0:
+		return "", "", fmt.Errorf("target_id %q is neither a grid, a dimension nor a table of this revision (list_grids / list_dimensions / list_forms)", targetID)
+	}
+	return "", "", fmt.Errorf("%q names more than one of a grid, a dimension and a table: set target_type to \"grid\" (metric values), \"dimension\" (members) or \"table\" (records)", targetID)
 }
 
 var importModes = map[string]bool{"incremental": true, "replace": true, "full_reload": true}
@@ -570,6 +576,9 @@ func (e *WriteExecutor) createFileIntegration(ctx context.Context, raw json.RawM
 
 func fileImportConfig(targetType string, columnMap map[string]string, mode string) (fileIntegrationConfig, error) {
 	cfg := fileIntegrationConfig{ColumnMap: columnMap}
+	if targetType == "form" && mode != "" {
+		return cfg, fmt.Errorf("import_mode applies to grid imports only — a table import adds a record per row")
+	}
 	if targetType == "grid" {
 		if mode == "" {
 			mode = "replace"
@@ -673,7 +682,7 @@ func (e *WriteExecutor) updateIntegration(ctx context.Context, raw json.RawMessa
 	targetID := row.TargetID
 	if p.TargetID != "" {
 		kind := row.TargetType
-		if kind != "grid" && kind != "dimension" {
+		if kind != "grid" && kind != "dimension" && kind != "form" {
 			return "", "", fmt.Errorf("a %s integration's target is changed in the console", row.TargetType)
 		}
 		if targetID, err = e.requireInModel(ctx, kind, p.TargetID); err != nil {
@@ -879,7 +888,7 @@ func (e *WriteExecutor) importFileData(ctx context.Context, raw json.RawMessage)
 		req.TargetID = p.TargetID
 	}
 	if req.TargetID == "" {
-		return "", "", fmt.Errorf("target_id is required (the grid or dimension to import into), with the reshape and column_map — "+
+		return "", "", fmt.Errorf("target_id is required (the grid, dimension or table to import into), with the reshape and column_map — "+
 			"or preview_file_import %s until it reports no errors, then import it with just file and sheet", sheetName(p.File, p.Sheet))
 	}
 	kind, targetID, err := importTarget(req.TargetType, req.TargetID, func(kind, ref string) (string, error) {

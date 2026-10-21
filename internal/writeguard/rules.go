@@ -256,6 +256,37 @@ func ReplaceUserMemberRulesInRevision(ctx context.Context, tx Execer, userID, re
 	return replaceRules(ctx, tx, userID, rules, memberInRevisionScopeSQL, revisionID)
 }
 
+// metricInRevisionScopeSQL limits a replace to the metric rules that
+// resolve in revision $4: a 'metric' rule whose lineage (or, lacking one,
+// whose ref_id row) is a metric of that revision — or a revision-less metric
+// of the same model.
+const metricInRevisionScopeSQL = `
+		  AND rule_type = 'metric'
+		  AND EXISTS (
+		      SELECT 1 FROM model.metric_def md
+		      WHERE (md.revision_id = $4::uuid
+		             OR (md.revision_id IS NULL
+		                 AND md.model_id = (SELECT model_id FROM model.revision WHERE id = $4::uuid)))
+		        AND (md.lineage_id = identity.user_access_rule.ref_lineage_id
+		             OR md.id::text = identity.user_access_rule.ref_id))`
+
+// ReplaceUserMetricRulesInRevision is ReplaceUserMemberRulesInRevision for
+// metric rules: only the user's metric rules that resolve in revisionID are
+// replaced; member and button rules, and metric rules of other models or of
+// metrics gone from that revision, are kept. Every rule in rules must be a
+// 'metric' rule.
+func ReplaceUserMetricRulesInRevision(ctx context.Context, tx Execer, userID, revisionID string, rules []RuleInput) error {
+	for _, r := range rules {
+		if r.Type != "metric" {
+			return fmt.Errorf("rule %s %s: only metric rules can be replaced here", r.Type, r.RefID)
+		}
+	}
+	if !uuidRE.MatchString(revisionID) {
+		return fmt.Errorf("revision id %q is not a uuid", revisionID)
+	}
+	return replaceRules(ctx, tx, userID, rules, metricInRevisionScopeSQL, revisionID)
+}
+
 // replaceRules deletes userID's rules that match scopeSQL (all of them when
 // it is empty) and are not in rules, then upserts rules. scopeArgs are $4...
 func replaceRules(ctx context.Context, tx Execer, userID string, rules []RuleInput, scopeSQL string, scopeArgs ...any) error {

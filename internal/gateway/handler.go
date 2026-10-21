@@ -891,6 +891,11 @@ func (h *handler) resolveDevActor(ctx context.Context, r *http.Request) (*actor,
 // as a switchable dev persona. Predefined personas keep their legacy short
 // key; everyone else is addressed by keycloak_sub (resolveDevActor accepts
 // both). Dev mode only: 404s in production so it leaks nothing.
+//
+// With dedicated tenant databases a tenant's people live in its own
+// database, so the control database alone listed only the platform
+// administrators: every tenant database is read too, its people labelled
+// with their tenant.
 func (h *handler) devPersonaList(w http.ResponseWriter, r *http.Request) {
 	if !h.devMode {
 		jsonErr(w, fmt.Errorf("not found"), http.StatusNotFound)
@@ -906,8 +911,53 @@ func (h *handler) devPersonaList(w http.ResponseWriter, r *http.Request) {
 	for key, sub := range devPersonas {
 		subToKey[sub] = key
 	}
+	list := []devPersona{}
+	seen := map[string]bool{}
+	add := func(db devPersonaQuerier, tenantName string) error {
+		people, err := listDevPersonas(ctx, db, subToKey, tenantName)
+		if err != nil {
+			return err
+		}
+		for _, p := range people {
+			if !seen[p.Key] {
+				seen[p.Key] = true
+				list = append(list, p)
+			}
+		}
+		return nil
+	}
+	if err := add(h.db.Control(), ""); err != nil {
+		jsonErr(w, err, http.StatusInternalServerError)
+		return
+	}
+	if router := h.db.Router(); router != nil {
+		if err := router.Each(ctx, func(t tenantdb.Tenant, pool *pgxpool.Pool) error {
+			return add(pool, t.Name)
+		}); err != nil {
+			jsonErr(w, err, http.StatusInternalServerError)
+			return
+		}
+	}
+	jsonOK(w, list)
+}
 
-	rows, err := h.db.Query(ctx, `
+// devPersona is one switchable identity of GET /api/dev/personas.
+type devPersona struct {
+	Key    string   `json:"key"` // value to send as X-Dev-User
+	Label  string   `json:"label"`
+	Email  string   `json:"email"`
+	Roles  []string `json:"roles"`
+	Tenant string   `json:"tenant"`
+}
+
+type devPersonaQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// listDevPersonas lists one database's people; tenantName labels those the
+// database does not name a tenant for (a dedicated tenant database's own).
+func listDevPersonas(ctx context.Context, db devPersonaQuerier, subToKey map[string]string, tenantName string) ([]devPersona, error) {
+	rows, err := db.Query(ctx, `
 		SELECT COALESCE(u.keycloak_sub,''), u.display_name, u.email,
 		       COALESCE(string_agg(DISTINCT ra.role::text, ','), ''),
 		       COALESCE(c.name, (
@@ -937,27 +987,20 @@ func (h *handler) devPersonaList(w http.ResponseWriter, r *http.Request) {
 		ORDER BY min(u.created_at)
 	`)
 	if err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 	defer rows.Close()
-
-	type devPersona struct {
-		Key    string   `json:"key"` // value to send as X-Dev-User
-		Label  string   `json:"label"`
-		Email  string   `json:"email"`
-		Roles  []string `json:"roles"`
-		Tenant string   `json:"tenant"`
-	}
 	var list []devPersona
 	for rows.Next() {
 		var sub, name, email, rolesCSV, tenant string
 		if err := rows.Scan(&sub, &name, &email, &rolesCSV, &tenant); err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
-			return
+			return nil, err
 		}
 		if sub == "" {
 			continue // no sub → not addressable via X-Dev-User
+		}
+		if tenant == "" {
+			tenant = tenantName
 		}
 		p := devPersona{Key: sub, Label: name, Email: email, Roles: []string{}, Tenant: tenant}
 		if key, ok := subToKey[sub]; ok {
@@ -968,14 +1011,7 @@ func (h *handler) devPersonaList(w http.ResponseWriter, r *http.Request) {
 		}
 		list = append(list, p)
 	}
-	if err := rows.Err(); err != nil {
-		jsonErr(w, err, http.StatusInternalServerError)
-		return
-	}
-	if list == nil {
-		list = []devPersona{}
-	}
-	jsonOK(w, list)
+	return list, rows.Err()
 }
 
 func (h *handler) resolveJWTActor(ctx context.Context, r *http.Request) (*actor, error) {
@@ -1951,11 +1987,10 @@ func aggregateEvaluated(m metricRow, dimIDToName map[string]string) bool {
 	if m.IsInput {
 		return false
 	}
-	if isFormulaRule(m.AggRule) {
-		return true
+	if m.Formula == nil {
+		return isFormulaRule(m.AggRule)
 	}
-	return m.AggRule == string(rollup.AggAverage) && m.Formula != nil &&
-		!calculation.FormulaReferencesDims(*m.Formula, dimIDToName)
+	return isFormulaRule(calculation.EffectiveAggRule(m.AggRule, *m.Formula, dimIDToName))
 }
 
 func (h *handler) metrics(w http.ResponseWriter, r *http.Request) {
@@ -2097,6 +2132,16 @@ func (h *handler) metrics(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, result)
 }
 
+// ruleErrStatus answers an automation rule's create or update error: a
+// schedule or workflow that is not valid is the request's (400), anything
+// else the server's.
+func ruleErrStatus(err error) int {
+	if errors.Is(err, workflow.ErrRuleScheduleInvalid) || errors.Is(err, workflow.ErrRuleWorkflowInvalid) {
+		return http.StatusBadRequest
+	}
+	return http.StatusInternalServerError
+}
+
 // ── /api/cells (writeback) ────────────────────────────────────────────────────
 
 type writebackReq struct {
@@ -2191,7 +2236,7 @@ func (h *handler) cells(w http.ResponseWriter, r *http.Request) {
 	recalc := func(ctx context.Context) {
 		calcLog := h.log.With().Str("op", "cells").Logger()
 		scheduler := calculation.NewScheduler(calcLog, calculation.NewStore(h.db.For(ctx)))
-		if err := scheduler.RecalcAffected(ctx, req.ModelID, req.RevisionID, []string{req.MetricID}); err != nil {
+		if err := recalcWrittenCells(ctx, scheduler, req.ModelID, req.RevisionID, []preparedCell{cell}); err != nil {
 			h.log.Warn().Err(err).Msg("recalc failed after writeback")
 		}
 	}
@@ -5355,7 +5400,7 @@ func (h *handler) activateRevision(ctx context.Context, revisionID string) (mode
 	// developer's activate and the AI promote-draft — recomputes the whole
 	// revision once, so what becomes live is what its definitions say
 	// (contract C8).
-	go h.recalcRevisionCalculated(context.WithoutCancel(ctx), modelID, revisionID) //nolint:contextcheck
+	h.recalcRevisionInBackground(ctx, modelID, revisionID)
 	return modelID, nil
 }
 
@@ -9230,7 +9275,7 @@ func (h *handler) integrationRun(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, fmt.Errorf("table not found"), http.StatusNotFound)
 			return
 		}
-		imported, rowErrs, iErr := h.importFormRows(ctx, act, scope, form, header, rows)
+		imported, rowErrs, iErr := h.importFormRows(ctx, act, scope, form, header, rows, false)
 		if iErr != nil {
 			h.recordIntegrationRun(ctx, intID, act.UserID, imported, 0, "error", iErr.Error())
 			h.jsonLimitErr(w, iErr)
@@ -11012,7 +11057,7 @@ func (h *handler) automationRules(w http.ResponseWriter, r *http.Request) {
 		}
 		rule, err := store.CreateAutomationRuleScoped(ctx, appID, revisionID, body.Name, body.Description, body.TriggerType, body.WorkflowName, body.WorkflowDefID, body.SourceFormID, body.SourceGridID, body.SourceIntegrationID, sched)
 		if err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
+			jsonErr(w, err, ruleErrStatus(err))
 			return
 		}
 		if a, e := h.resolveActor(ctx, r); e == nil {
@@ -13049,7 +13094,7 @@ func (h *handler) adminModelAction(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			// Same recompute activateRevision runs (contract C8).
-			go h.recalcRevisionCalculated(context.WithoutCancel(ctx), id, newActiveRevisionID) //nolint:contextcheck
+			h.recalcRevisionInBackground(ctx, id, newActiveRevisionID)
 		}
 		if a, e := h.resolveActor(ctx, r); e == nil {
 			auditlog.Log(ctx, h.db.For(ctx), h.log, auditlog.Fields{
@@ -14464,7 +14509,7 @@ func (h *handler) automationRuleAction(w http.ResponseWriter, r *http.Request) {
 		}
 		updated, err := store.UpdateAutomationRuleScoped(ctx, ruleID, body.Name, body.Description, body.TriggerType, body.WorkflowName, body.WorkflowDefID, body.SourceFormID, body.SourceGridID, body.SourceIntegrationID, body.Enabled, sched)
 		if err != nil {
-			jsonErr(w, err, http.StatusInternalServerError)
+			jsonErr(w, err, ruleErrStatus(err))
 			return
 		}
 		if a, e := h.resolveActor(ctx, r); e == nil {
@@ -16191,7 +16236,17 @@ func (h *handler) applyInputAggregation(
 				leaves = append(leaves, leafValue{combo: combo, value: v})
 			}
 		}
-		if total, ok := combineLeaves(leaves, axis, rule, m.TimeSummary); ok {
+		oneLeaf := true // the scope pins every non-time dimension to one leaf
+		for _, d := range ownDims {
+			if dim := rdims[d]; dim == nil || dim.IsTime {
+				continue
+			} else if sub, pinned := scopeSubtrees[d]; pinned {
+				oneLeaf = oneLeaf && len(sub) == 1
+			} else {
+				oneLeaf = oneLeaf && len(dim.Members) == 1
+			}
+		}
+		if total, ok := combineLeaves(leaves, axis, rule, m.TimeSummary, oneLeaf); ok {
 			totals[m.ID] = total
 		} else {
 			delete(totals, m.ID)
@@ -18371,6 +18426,21 @@ func (h *handler) dashboardWidgetAction(w http.ResponseWriter, r *http.Request) 
 		}
 		jsonErr(w, err, http.StatusBadRequest)
 		return
+	}
+	// The periods holding actuals, read as a one-series chart of the flag
+	// metric in the same context: a flag the viewer cannot read, or one not
+	// on the grid, leaves the chart unmarked rather than failing it.
+	if cat, ok := result.(*query.CategoryChartData); ok && cfg.ActualMetricID != "" && cfg.ChartType != query.ChartPie {
+		flagCfg := *cfg
+		flagCfg.ChartType, flagCfg.MetricIDs, flagCfg.ActualMetricID = query.ChartBar, []string{cfg.ActualMetricID}, ""
+		if flags, ferr := resolver.Resolve(ctx, &flagCfg, cat.Context, modelID, revisionID, gridDefID, a.UserID); ferr == nil {
+			if fc, ok := flags.(*query.CategoryChartData); ok && len(fc.Series) == 1 && len(fc.Categories) == len(cat.Categories) {
+				cat.Actual = make([]bool, len(fc.Categories))
+				for i, v := range fc.Series[0].Values {
+					cat.Actual[i] = v != nil && *v != 0
+				}
+			}
+		}
 	}
 
 	jsonOK(w, result)

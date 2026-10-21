@@ -417,6 +417,14 @@ func (h *handler) integrationExport(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, fmt.Errorf("export %q has an unreadable spec", name), http.StatusInternalServerError)
 		return
 	}
+	// Built while a recalculation runs, the file would hold the values that
+	// pass is about to replace — zeros on a model just built or loaded, and
+	// an approved budget was frozen from such a file. Wait for the pass a
+	// little, then say so instead of handing the file over.
+	if !h.waitRecalculated(ctx, revisionID, exportRecalcWait) {
+		jsonErr(w, fmt.Errorf("export %q: this revision's values are being recalculated — download it again in a moment", name), http.StatusConflict)
+		return
+	}
 	t, err := h.renderExport(r, gridID, revisionID, spec)
 	if err != nil {
 		jsonErr(w, err, errStatus(err, http.StatusInternalServerError))

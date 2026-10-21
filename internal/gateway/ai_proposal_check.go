@@ -49,9 +49,24 @@ func (h *handler) aiCheckProposal(ctx context.Context, sessionID, modelID, revID
 		return proposalCheck{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	out, _, err := h.runStepsOn(ctx, tx, sessionID, modelID, revID, userID, steps)
+	out, created, err := h.runStepsOn(ctx, tx, sessionID, modelID, revID, userID, steps)
+	if err == nil && len(out.problems) == 0 {
+		resolved := make([]aiassistant.ProposalStep, len(steps))
+		for i, s := range steps {
+			s.Params = resolveParamRefs(storedParams(s.Params), created)
+			resolved[i] = s
+		}
+		out.problems = append(out.problems, aiassistant.PlanWorkflowProblems(ctx, tx, modelID, revID, resolved)...)
+	}
 	if err == nil && len(out.problems) == 0 {
 		out.warnings = planWarnings(ctx, tx, modelID, revID, steps)
+		resolved := make([]aiassistant.ProposalStep, len(steps))
+		for i, s := range steps {
+			s.Params = resolveParamRefs(storedParams(s.Params), created)
+			resolved[i] = s
+		}
+		out.warnings = append(out.warnings, kpiTileWarnings(ctx, tx, resolved, created)...)
+		out.warnings = append(out.warnings, currencyWarnings(ctx, tx, modelID, revID, resolved)...)
 	}
 	return out, err
 }
@@ -92,7 +107,7 @@ func (h *handler) runStepsOn(ctx context.Context, tx pgx.Tx, sessionID, modelID,
 		},
 		CheckMetrics: live.CheckMetrics, CheckMembers: live.CheckMembers,
 		ImportFile: func(ctx context.Context, req aiassistant.FileImportRequest) (string, error) {
-			return h.aiCheckImportFile(ctx, tx, sessionID, req)
+			return h.aiCheckImportFile(ctx, tx, sessionID, userID, req)
 		},
 		WriteValues: func(ctx context.Context, req aiassistant.ValuesWriteRequest) (string, error) {
 			return h.aiCheckWriteValues(ctx, tx, req)
@@ -106,6 +121,7 @@ func (h *handler) runStepsOn(ctx context.Context, tx pgx.Tx, sessionID, modelID,
 	})
 	created := make([]string, len(steps))
 	blocked := map[int]bool{} // 0-based steps whose result later steps cannot use
+	filled := aiassistant.FilledLater(steps)
 	for i, step := range steps {
 		if _, ok := usesBlockedStep(step.Params, blocked); ok {
 			blocked[i] = true
@@ -113,6 +129,9 @@ func (h *handler) runStepsOn(ctx context.Context, tx pgx.Tx, sessionID, modelID,
 			continue
 		}
 		lintErr := aiassistant.LintProposalStep(step.Tool, storedParams(step.Params))
+		if filled[i] && aiassistant.IsPlaceholderFormula(lintErr) {
+			lintErr = nil
+		}
 		if lintErr == nil {
 			lintErr = percentUnitsLint(ctx, tx, modelID, revID, step)
 		}
@@ -172,10 +191,27 @@ func storedParams(raw json.RawMessage) json.RawMessage {
 // the model as the plan's earlier steps leave it, and refused exactly as the
 // import refuses it; its values are not staged (that store works on the
 // pool), so nothing is written for them.
-func (h *handler) aiCheckImportFile(ctx context.Context, tx pgx.Tx, sessionID string, req aiassistant.FileImportRequest) (string, error) {
+func (h *handler) aiCheckImportFile(ctx context.Context, tx pgx.Tx, sessionID, userID string, req aiassistant.FileImportRequest) (string, error) {
 	f, err := h.loadAttachedFile(ctx, sessionID, req)
 	if err != nil {
 		return "", err
+	}
+	if req.TargetType == "form" {
+		// Records are checked outside the plan's transaction (the records
+		// path runs on its own): a table this plan creates cannot be checked.
+		var exists bool
+		_ = h.db.For(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model.form_def WHERE id=$1::uuid)`, req.TargetID).Scan(&exists)
+		if !exists {
+			return "", aiassistant.ErrNotDryRunnable
+		}
+		n, problems, table, err := h.aiTableImport(ctx, userID, f, req.TargetID, true)
+		if err == nil && problems != "" {
+			err = fmt.Errorf("import rejected: %s", strings.TrimSpace(problems))
+		}
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d record(s) from %s into table '%s'", n, f.describe(), table), nil
 	}
 	if req.TargetType == "dimension" {
 		cr, colIdx, err := dimensionCSV(f)

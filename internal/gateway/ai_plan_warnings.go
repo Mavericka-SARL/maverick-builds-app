@@ -315,3 +315,139 @@ func looksLikeLevel(name, label string) bool {
 	}
 	return false
 }
+
+// kpiTileWarnings names each KPI tile a plan adds or changes that adds up
+// members nobody adds: pinned to one member (kpi_context_mode "pin") or
+// showing the whole model ("total"), it totals every member of the
+// metric's other dimensions — every scenario, every month of every year.
+// gpt-5-mini pinned revenue tiles to the view dimension only, and they
+// showed $141.9M for an FY2026 revenue of €20.1M (2026-10-20). A dimension
+// the dashboard's selector bar holds, or a time dimension, left that way
+// is named. created are the dry run's ids by step (add_dashboard_widget's
+// widget).
+func kpiTileWarnings(ctx context.Context, tx pgx.Tx, steps []aiassistant.ProposalStep, created []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for i, step := range steps {
+		var widgetID string
+		switch step.Tool {
+		case "add_dashboard_widget":
+			if i < len(created) {
+				widgetID = created[i]
+			}
+		case "update_dashboard_widget":
+			var p struct {
+				WidgetID string `json:"widget_id"`
+			}
+			_ = json.Unmarshal(step.Params, &p)
+			widgetID = p.WidgetID
+		default:
+			continue
+		}
+		if widgetID == "" || seen[widgetID] {
+			continue
+		}
+		seen[widgetID] = true
+		var kind, title string
+		var metricID *string
+		var propsRaw, barRaw []byte
+		if tx.QueryRow(ctx, `
+			SELECT w.widget_type, w.ref_id, COALESCE(NULLIF(w.title,''), ''), COALESCE(w.widget_props, '{}'::jsonb), d.selector_bar
+			FROM model.dashboard_widget w JOIN model.dashboard_def d ON d.id = w.dashboard_id
+			WHERE w.id::text = $1`, widgetID).Scan(&kind, &metricID, &title, &propsRaw, &barRaw) != nil || kind != "metric_kpi" || metricID == nil {
+			continue
+		}
+		var props struct {
+			Mode  string `json:"kpi_context_mode"`
+			Scope *struct {
+				DimensionID string `json:"dimension_id"`
+				MemberCode  string `json:"member_code"`
+			} `json:"kpi_scope"`
+		}
+		_ = json.Unmarshal(propsRaw, &props)
+		if props.Mode != "pin" && props.Mode != "total" {
+			continue
+		}
+		var bar []struct {
+			DimensionID string `json:"dimension_id"`
+		}
+		_ = json.Unmarshal(barRaw, &bar)
+		inBar := map[string]bool{}
+		for _, b := range bar {
+			inBar[b.DimensionID] = true
+		}
+		rows, err := tx.Query(ctx, `
+			SELECT DISTINCT d.id::text, d.name, d.dimension_type = 'time'
+			FROM model.grid_metric gm JOIN model.grid_dimension gd ON gd.grid_id = gm.grid_id
+			JOIN model.dimension_def d ON d.id = gd.dimension_id
+			WHERE gm.metric_id::text = $1 ORDER BY d.name`, *metricID)
+		if err != nil {
+			continue
+		}
+		var summed []string
+		for rows.Next() {
+			var id, name string
+			var isTime bool
+			if rows.Scan(&id, &name, &isTime) != nil {
+				continue
+			}
+			if props.Scope != nil && props.Scope.DimensionID == id {
+				continue
+			}
+			if inBar[id] || isTime {
+				summed = append(summed, name)
+			}
+		}
+		rows.Close()
+		if len(summed) == 0 {
+			continue
+		}
+		label := title
+		if label == "" {
+			label = "KPI tile"
+		}
+		pinned := "shows the whole model"
+		if props.Scope != nil {
+			pinned = fmt.Sprintf("is pinned to %s only", props.Scope.MemberCode)
+		}
+		out = append(out, fmt.Sprintf(`step %d (%s %s): the tile %s, so it adds up every member of %s — every scenario, every period. `+
+			`Set "kpi_context_mode": "bar" (it keeps kpi_scope and takes the rest from the selector bar), or pin those dimensions too`,
+			i+1, step.Tool, label, pinned, strings.Join(summed, ", ")))
+	}
+	return out
+}
+
+// currencyWarnings names each metric a plan makes a currency amount
+// without saying its currency: format_currency then stays "$", and the
+// education model's euros showed as dollars ($141.9M, 2026-10-20). The
+// symbol the model's other amounts use is suggested when there is one.
+func currencyWarnings(ctx context.Context, tx pgx.Tx, modelID, revID string, steps []aiassistant.ProposalStep) []string {
+	var usual string
+	_ = tx.QueryRow(ctx, `
+		SELECT format_currency FROM model.metric_def
+		WHERE model_id=$1::uuid AND revision_id=$2::uuid AND format='currency' AND format_currency NOT IN ('', '$')
+		GROUP BY 1 ORDER BY count(*) DESC LIMIT 1`, modelID, revID).Scan(&usual)
+	var out []string
+	for i, step := range steps {
+		if step.Tool != "create_metric" && step.Tool != "update_metric" {
+			continue
+		}
+		var p map[string]any
+		if json.Unmarshal(step.Params, &p) != nil || p["format"] != "currency" {
+			continue
+		}
+		if c, ok := p["format_currency"].(string); ok && strings.TrimSpace(c) != "" {
+			continue
+		}
+		name, _ := p["name"].(string)
+		if name == "" {
+			name, _ = p["metric_id"].(string)
+		}
+		hint := `say which: "format_currency": "€" (or "£", "$", "CHF" …) — left out, the amounts show as dollars`
+		if usual != "" {
+			hint = fmt.Sprintf(`the model's other amounts are in %s: set "format_currency": %q — left out, these show as dollars`, usual, usual)
+		}
+		out = append(out, fmt.Sprintf("step %d (%s %s): a currency amount without format_currency: %s", i+1, step.Tool, name, hint))
+	}
+	return out
+}

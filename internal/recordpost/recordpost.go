@@ -106,9 +106,105 @@ func (ps *Poster) recalc(ctx context.Context, modelID string, affected []struct{
 	}
 }
 
+// pending marks the revisions formID's live mappings post into as
+// awaiting a recalculation (calculation.RequestRecalc) and returns the func
+// that marks them finished. A posting runs after its request answered,
+// then recalculates what it posted into: the P&L of a model kept its old
+// totals for half a minute after a ledger import, with nothing saying they
+// were about to change (2026-10-20).
+func (ps *Poster) pending(ctx context.Context, formID string) func() {
+	mappings, err := ps.liveFormMappings(ctx, formID)
+	if err != nil || len(mappings) == 0 {
+		return func() {}
+	}
+	seqs := map[string]int64{}
+	for _, m := range mappings {
+		rev := ps.postingRevision(ctx, m)
+		if _, done := seqs[rev]; rev == "" || done {
+			continue
+		}
+		seq, err := calculation.RequestRecalc(ctx, ps.db(ctx), rev)
+		if err != nil {
+			ps.Log.Warn().Err(err).Str("revision", rev).Msg("record a pending recalculation")
+			continue
+		}
+		seqs[rev] = seq
+	}
+	return func() {
+		for rev, seq := range seqs {
+			if err := calculation.RecalcFinished(context.WithoutCancel(ctx), ps.db(ctx), rev, seq); err != nil {
+				ps.Log.Warn().Err(err).Str("revision", rev).Msg("record a finished recalculation")
+			}
+		}
+	}
+}
+
 func isForeignKeyViolation(err error) bool {
 	var pe *pgconn.PgError
 	return errors.As(err, &pe) && pe.Code == "23503"
+}
+
+// MemberCache holds the members of the dimensions a file's records name,
+// read once per dimension for the whole file.
+type MemberCache struct {
+	dims map[string]*dimMembers
+}
+
+type dimMembers struct {
+	leaf    map[string]bool     // code → has no children
+	byLabel map[string][]string // label → the codes of the members with it
+}
+
+// NewMemberCache is an empty MemberCache.
+func NewMemberCache() *MemberCache { return &MemberCache{dims: map[string]*dimMembers{}} }
+
+func (c *MemberCache) load(ctx context.Context, ps *Poster, dimID string) (*dimMembers, error) {
+	if m, ok := c.dims[dimID]; ok {
+		return m, nil
+	}
+	rows, err := ps.db(ctx).Query(ctx, `
+		SELECT m.code, COALESCE(m.label, ''), NOT EXISTS (SELECT 1 FROM model.dimension_member c
+		                           WHERE c.parent_member_id = m.id AND c.dimension_id = m.dimension_id)
+		FROM model.dimension_member m
+		WHERE m.dimension_id = $1::uuid AND NULLIF(btrim(m.formula),'') IS NULL`, dimID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	m := &dimMembers{leaf: map[string]bool{}, byLabel: map[string][]string{}}
+	for rows.Next() {
+		var code, label string
+		var leaf bool
+		if err := rows.Scan(&code, &label, &leaf); err != nil {
+			return nil, err
+		}
+		m.leaf[code] = leaf
+		if label != "" {
+			m.byLabel[label] = append(m.byLabel[label], code)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	c.dims[dimID] = m
+	return m, nil
+}
+
+// codeFor is the member code raw names in dimID: raw itself when a member
+// has it as its code, else the code of the one member whose label it is
+// exactly, else raw (no member: the caller says so).
+func (c *MemberCache) codeFor(ctx context.Context, ps *Poster, dimID, raw string) (string, error) {
+	m, err := c.load(ctx, ps, dimID)
+	if err != nil {
+		return "", err
+	}
+	if _, ok := m.leaf[raw]; ok {
+		return raw, nil
+	}
+	if codes := m.byLabel[raw]; len(codes) == 1 {
+		return codes[0], nil
+	}
+	return raw, nil
 }
 
 // AccessView is one person's access rules over one table's revision,
@@ -403,8 +499,8 @@ type FieldProblem struct {
 // checked again, so a record holding a value its table no longer allows
 // can still have its other fields or its status changed. required checks
 // that every required field has a value. leaves caches each dimension's
-// member codes across a file import.
-func (ps *Poster) RecordValueProblems(ctx context.Context, view *AccessView, form *crudapp.FormDef, current, data map[string]any, required bool, leaves map[string]map[string]bool) ([]FieldProblem, error) {
+// members across a file import (NewMemberCache).
+func (ps *Poster) RecordValueProblems(ctx context.Context, view *AccessView, form *crudapp.FormDef, current, data map[string]any, required bool, leaves *MemberCache) ([]FieldProblem, error) {
 	var problems []FieldProblem
 	bad := func(f crudapp.FormField, format string, args ...any) {
 		problems = append(problems, FieldProblem{Field: f.Name, Message: fmt.Sprintf(format, args...)})
@@ -477,11 +573,20 @@ func (ps *Poster) RecordValueProblems(ctx context.Context, view *AccessView, for
 			}
 			data[f.Name] = u
 		case f.Type == "dimension" && f.DimensionID != "":
-			code := fmt.Sprintf("%v", v)
+			raw := fmt.Sprintf("%v", v)
+			// A member is named by its code, or by its label when no code
+			// is the text and exactly one member's label is: a business
+			// user's file names members as people read them ("EdTech
+			// revenue"), and every loader needed a label → code map kept in
+			// step with the dimension (2026-10-20).
+			code, err := leaves.codeFor(ctx, ps, f.DimensionID, raw)
+			if err != nil {
+				return nil, err
+			}
 			// A member hidden from the person is no member to them: the
 			// message is the one an unknown code gets, confirming nothing.
 			if view.hiddenCodes[f.DimensionID][code] {
-				bad(f, "%q is not a member of %s (member codes match exactly)", code, label)
+				bad(f, "%q is not a member of %s (no member has this code or label)", raw, label)
 				continue
 			}
 			msg, err := ps.FormMemberProblem(ctx, f, code, leaves)
@@ -1003,6 +1108,9 @@ func (ps *Poster) Apply(ctx context.Context, recordID, formID, status string, da
 // the caller, who posts many records and rebuilds each total once
 // (RebuildPostings).
 func (ps *Poster) apply(ctx context.Context, recordID, formID, status string, data map[string]any, userID string, deferTotals bool) error {
+	if !deferTotals {
+		defer ps.pending(ctx, formID)()
+	}
 	// Every caller fires this from its own `go func()` per record
 	// status-transition, so two calls for the SAME record (e.g. its
 	// creation-as-draft call and a subsequent approve call) race with no
@@ -1535,37 +1643,15 @@ func (ps *Poster) WorkflowRecordStatus(ctx context.Context, recordID, status, by
 // member picker offers leaves only; a record naming another code was
 // created but its posting went where no grid reads. leaves caches each
 // dimension's codes (true for a leaf) across the file.
-func (ps *Poster) FormMemberProblem(ctx context.Context, field crudapp.FormField, raw string, leaves map[string]map[string]bool) (string, error) {
-	codes, ok := leaves[field.DimensionID]
-	if !ok {
-		codes = map[string]bool{}
-		rows, err := ps.db(ctx).Query(ctx, `
-			SELECT m.code, NOT EXISTS (SELECT 1 FROM model.dimension_member c
-			                           WHERE c.parent_member_id = m.id AND c.dimension_id = m.dimension_id)
-			FROM model.dimension_member m
-			WHERE m.dimension_id = $1::uuid AND NULLIF(btrim(m.formula),'') IS NULL`, field.DimensionID)
-		if err != nil {
-			return "", fmt.Errorf("read members of %s: %w", field.Label, err)
-		}
-		for rows.Next() {
-			var code string
-			var leaf bool
-			if err := rows.Scan(&code, &leaf); err != nil {
-				rows.Close()
-				return "", err
-			}
-			codes[code] = leaf
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return "", err
-		}
-		leaves[field.DimensionID] = codes
+func (ps *Poster) FormMemberProblem(ctx context.Context, field crudapp.FormField, raw string, leaves *MemberCache) (string, error) {
+	m, err := leaves.load(ctx, ps, field.DimensionID)
+	if err != nil {
+		return "", fmt.Errorf("read members of %s: %w", field.Label, err)
 	}
-	leaf, known := codes[raw]
+	leaf, known := m.leaf[raw]
 	switch {
 	case !known:
-		return fmt.Sprintf("%q is not a member of %s (member codes match exactly)", raw, field.Label), nil
+		return fmt.Sprintf("%q is not a member of %s (no member has this code or label)", raw, field.Label), nil
 	case !leaf:
 		return fmt.Sprintf("%q is not a leaf member of %s (has child members)", raw, field.Label), nil
 	case len(field.AllowedMembers) > 0 && !slices.Contains(field.AllowedMembers, raw):

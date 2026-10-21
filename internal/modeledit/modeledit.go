@@ -256,6 +256,9 @@ func RekeyMemberCode(ctx context.Context, db DB, dimID, oldCode, newCode string)
 		  SET widget_props = jsonb_set(widget_props, ARRAY['kpi_scope','member_code'], to_jsonb($2::text))
 		  WHERE widget_props->'kpi_scope'->>'dimension_id' = $1 AND widget_props->'kpi_scope'->>'member_code' = $3`, "widget kpi_scope"},
 		{`UPDATE model.dashboard_widget
+		  SET widget_props = jsonb_set(widget_props, ARRAY['kpi_compare','member_code'], to_jsonb($2::text))
+		  WHERE widget_props->'kpi_compare'->>'dimension_id' = $1 AND widget_props->'kpi_compare'->>'member_code' = $3`, "widget kpi_compare"},
+		{`UPDATE model.dashboard_widget
 		  SET widget_props = jsonb_set(widget_props, ARRAY['show_members',$1::text],
 		      (SELECT jsonb_agg(CASE WHEN e = to_jsonb($3::text) THEN to_jsonb($2::text) ELSE e END ORDER BY o)
 		       FROM jsonb_array_elements(widget_props->'show_members'->$1::text) WITH ORDINALITY AS x(e, o)))
@@ -266,6 +269,19 @@ func RekeyMemberCode(ctx context.Context, db DB, dimID, oldCode, newCode string)
 		                                            THEN jsonb_set(e, '{default}', to_jsonb($2::text)) ELSE e END ORDER BY o)
 		                      FROM jsonb_array_elements(selector_bar) WITH ORDINALITY AS x(e, o))
 		  WHERE selector_bar @> jsonb_build_array(jsonb_build_object('dimension_id', $1::text, 'default', $3::text))`, "dashboard selector_bar"},
+		// A highlight rule names the members it colours by code — of its
+		// dimension (by name), or of any when it names none.
+		{`UPDATE model.metric_def md
+		  SET highlight_rules = (SELECT jsonb_agg(CASE WHEN jsonb_typeof(r->'members') = 'array' AND r->'members' ? $3
+		                                                AND COALESCE(r->>'dimension', '') IN ('', d.name)
+		                                           THEN jsonb_set(r, '{members}', (SELECT jsonb_agg(CASE WHEN m = to_jsonb($3::text) THEN to_jsonb($2::text) ELSE m END ORDER BY mo)
+		                                                                          FROM jsonb_array_elements(r->'members') WITH ORDINALITY AS y(m, mo)))
+		                                           ELSE r END ORDER BY o)
+		                         FROM jsonb_array_elements(md.highlight_rules) WITH ORDINALITY AS x(r, o))
+		  FROM model.dimension_def d
+		  WHERE d.id = $1::uuid AND md.model_id = d.model_id AND md.revision_id IS NOT DISTINCT FROM d.revision_id
+		    AND jsonb_typeof(md.highlight_rules) = 'array'
+		    AND EXISTS (SELECT 1 FROM jsonb_array_elements(md.highlight_rules) r WHERE jsonb_typeof(r->'members') = 'array' AND r->'members' ? $3)`, "metric highlight_rules"},
 	} {
 		if _, err := db.Exec(ctx, s.q, dimID, newCode, oldCode); err != nil {
 			errs = append(errs, fmt.Errorf("re-key %s: %w", s.tag, err))

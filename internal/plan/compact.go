@@ -11,15 +11,23 @@ import (
 // sweep and the gateway call it there): a shared database's tables hold
 // every tenant at once.
 //
-// A table is rewritten when rows were deleted or updated in it since it was
-// last rewritten (runtime.table_compaction) and its files exceed its live
-// data (runtime.live_tables) by at least a megabyte — and, unless force, by
-// a fifth of their size, so the sweep leaves a large table alone for a
-// small gain. The gateway forces it straight after a model, application,
-// revision or metric is deleted. VACUUM FULL locks the table while it
-// rewrites it: about a second at a Playground workspace's size, longer for
-// a large table. SKIP_LOCKED leaves a table in use at that moment to the
-// next sweep. Returns the bytes given back.
+// A table is compacted when rows were deleted or updated in it since it
+// was last compacted (runtime.table_compaction) and its files exceed its
+// live data (runtime.live_tables) by at least a megabyte — and, unless
+// force, by a fifth of their size, so the sweep leaves a large table alone
+// for a small gain.
+//
+// Forced — straight after a model, application, revision or metric is
+// deleted — a table is rewritten (VACUUM FULL), which locks it while it
+// runs: about a second at a Playground workspace's size, longer for a large
+// table. SKIP_LOCKED leaves a table in use at that moment to the next
+// sweep. The sweep itself vacuums (VACUUM): the space becomes free for the
+// table's next rows and an empty end of its files goes back, and nothing
+// waits for it. It used to rewrite as well, and a model in use qualified
+// at almost every sweep — calculated results are rewritten as people type
+// — so every five minutes, and at every start, its grids and recalculations
+// stood still for the five seconds the rewrite of runtime.calc_result took
+// (2026-10-20). Returns the bytes given back.
 func Compact(ctx context.Context, db DB, force bool) (int64, error) {
 	type table struct {
 		oid            uint32
@@ -61,7 +69,11 @@ func Compact(ctx context.Context, db DB, force bool) (int64, error) {
 	}
 	var freed int64
 	for _, t := range tables {
-		if _, err := db.Exec(ctx, `VACUUM (FULL, SKIP_LOCKED) `+t.name); err != nil {
+		stmt := `VACUUM (SKIP_LOCKED) `
+		if force {
+			stmt = `VACUUM (FULL, SKIP_LOCKED) `
+		}
+		if _, err := db.Exec(ctx, stmt+t.name); err != nil {
 			return freed, err
 		}
 		// A rewritten table has a new file; a skipped one is tried again.
@@ -70,10 +82,16 @@ func Compact(ctx context.Context, db DB, force bool) (int64, error) {
 		if err := db.QueryRow(ctx, `SELECT pg_relation_filenode($1), pg_total_relation_size($1)`, t.oid).Scan(&filenode, &files); err != nil {
 			return freed, err
 		}
-		if filenode == t.filenode {
+		if files < t.files {
+			freed += t.files - files
+		}
+		// Only a rewrite is recorded: a vacuumed table is still one a
+		// forced compaction rewrites (a delete's, straight after the sweep
+		// its re-measure runs), and the sweep vacuums it again while it
+		// qualifies — nearly free when nothing changed since.
+		if !force || filenode == t.filenode {
 			continue
 		}
-		freed += t.files - files
 		if _, err := db.Exec(ctx, `
 			INSERT INTO runtime.table_compaction (relid, changed) VALUES ($1, $2)
 			ON CONFLICT (relid) DO UPDATE SET changed = EXCLUDED.changed`, t.oid, t.changed); err != nil {

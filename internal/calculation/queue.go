@@ -25,6 +25,8 @@ type passQueue struct {
 	cond    *sync.Cond
 	running bool
 	pending map[string]bool // metric ids the next pass calculates
+	forced  map[string]bool // of those, the ones a request asked for without cells
+	cells   []ChangedCell   // the cells the next pass's requests wrote
 	next    uint64          // the pass that takes pending when it starts
 	done    uint64          // the last pass finished
 	failed  map[uint64]error
@@ -45,7 +47,7 @@ func queueFor(pool *pgxpool.Pool, modelID, revisionID string) *passQueue {
 	if q, ok := passQueues.Load(key); ok {
 		return q.(*passQueue)
 	}
-	q := &passQueue{pending: map[string]bool{}, next: 1, failed: map[uint64]error{}}
+	q := &passQueue{pending: map[string]bool{}, forced: map[string]bool{}, next: 1, failed: map[uint64]error{}}
 	q.cond = sync.NewCond(&q.mu)
 	v, _ := passQueues.LoadOrStore(key, q)
 	return v.(*passQueue)
@@ -56,10 +58,21 @@ func queueFor(pool *pgxpool.Pool, modelID, revisionID string) *passQueue {
 // pass, which one of the waiting callers runs with every metric asked for
 // meanwhile. It returns the error of the pass that calculated metricIDs.
 func (q *passQueue) run(metricIDs []string, pass func(metricIDs []string) error) error {
+	return q.runRequest(passRequest{ids: metricIDs}, func(r passRequest) error { return pass(r.ids) })
+}
+
+// runRequest is run for a request that may name the cells it wrote: the
+// pass gets every request's metrics and cells, and the metrics some
+// request asked for without cells as forced.
+func (q *passQueue) runRequest(req passRequest, pass func(passRequest) error) error {
 	q.mu.Lock()
-	for _, id := range metricIDs {
+	for _, id := range req.ids {
 		q.pending[id] = true
+		if len(req.cells) == 0 {
+			q.forced[id] = true
+		}
 	}
+	q.cells = append(q.cells, req.cells...)
 	mine := q.next
 	for q.done < mine {
 		if q.running {
@@ -72,11 +85,12 @@ func (q *passQueue) run(metricIDs []string, pass func(metricIDs []string) error)
 			ids = append(ids, id)
 		}
 		slices.Sort(ids)
-		q.pending = map[string]bool{}
+		merged := passRequest{ids: ids, cells: q.cells, forced: q.forced}
+		q.pending, q.forced, q.cells = map[string]bool{}, map[string]bool{}, nil
 		gen := q.next
 		q.next++
 		q.mu.Unlock()
-		q.runPass(gen, ids, pass)
+		q.runPass(gen, merged, pass)
 		q.mu.Lock()
 	}
 	err := q.failed[mine]
@@ -86,7 +100,7 @@ func (q *passQueue) run(metricIDs []string, pass func(metricIDs []string) error)
 
 // runPass runs one pass and records it finished, even when it panics, so
 // the revision's queue never waits on a pass that is gone.
-func (q *passQueue) runPass(gen uint64, ids []string, pass func([]string) error) {
+func (q *passQueue) runPass(gen uint64, req passRequest, pass func(passRequest) error) {
 	var err error
 	defer func() {
 		q.mu.Lock()
@@ -103,5 +117,5 @@ func (q *passQueue) runPass(gen uint64, ids []string, pass func([]string) error)
 		q.cond.Broadcast()
 		q.mu.Unlock()
 	}()
-	err = pass(ids)
+	err = pass(req)
 }

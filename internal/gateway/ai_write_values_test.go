@@ -15,7 +15,7 @@ func TestAIDeveloperWritesInputValues(t *testing.T) {
 		proposeStep("create_dimension", "Region", map[string]any{"name": "region", "members": []map[string]any{
 			{"code": "ALL", "label": "All"}, {"code": "EU", "label": "Europe", "parent_code": "ALL"}, {"code": "US", "label": "US", "parent_code": "ALL"}}}),
 		proposeStep("create_metric", "Setting", map[string]any{"name": "actual_through_month", "is_input": true}),
-		proposeStep("create_metric", "Price", map[string]any{"name": "price", "is_input": true, "format": "currency"}),
+		proposeStep("create_metric", "Price", map[string]any{"name": "price", "is_input": true, "format": "currency", "format_currency": "€"}),
 		proposeStep("create_metric", "Double price", map[string]any{"name": "double_price", "formula": "price * 2"}),
 		proposeStep("create_grid", "Setup", map[string]any{"name": "Setup", "metrics": []string{"actual_through_month"}}),
 		proposeStep("create_grid", "Prices", map[string]any{"name": "Prices", "metrics": []string{"price", "double_price"}, "dimensions": []string{"region"}}),

@@ -354,7 +354,10 @@ placed on a grid that has region — always add the add_grid_metric step.
   = <> between (with "value" and "value2") not_between blank not_blank; "than" is read at the cell when that
   metric is on the grid, else its total (a threshold setting); "=" also takes text (a pick-list code). The first
   rule that holds wins; [] removes them. A workbook rule "ABS(S5) > Setup!$B$12" on Var % is
-  {"abs": true, "op": ">", "than": "variance_threshold", "tone": "negative"} on the var % metric.
+  {"abs": true, "op": ">", "than": "variance_threshold", "tone": "negative"} on the var % metric. A rule with
+  "members": ["<code>", …] (and "dimension": "<name>" when codes repeat across dimensions) tints only those
+  members' cells — a variance column: on a cost line [{"op": ">", "value": 0, "members": ["VAR"], "tone":
+  "negative"}, {"op": "<", "value": 0, "members": ["VAR"], "tone": "positive"}], on revenue the other way round.
 - Cells that take no input: an input metric's "closed_when": [{"metric": "<calculated metric on the same grid>",
   "op": "=" | "<>" | ">" | ">=" | "<" | "<=", "value": <number>}] (create_metric / update_metric) closes every cell
   where a rule holds (a blank counts as 0): the grid shows it read-only and every write refuses it. Months up to an
@@ -459,6 +462,8 @@ series from two grids, put a metric reading each (formula = the other metric) on
 Keep what the workbook shows, not only what it computes:
 - "format_decimals" follows the workbook's number format (0.0 → 1, 0.00 → 2, 0.0% → 1); left out it is 2 for a
   number, currency or percentage. Never 0 for an amount or rate that has decimals: 0.3 (USD m) would show as 0.
+- A currency amount says its currency: "format_currency": "€" (the workbook's symbol, "£", "CHF" …); left out
+  it is "$", and euros show as dollars.
 - Keep every guard the workbook's formula has: IF(d = 0, 0, n / d) where it divides by something that can be 0 (the
   engine answers #DIV/0! and the cell fails), IF(OR(id = "", type = ""), "", id & "|" & type) where it blanks an
   incomplete row. Translate the formula whole, never only its main branch.
@@ -627,7 +632,7 @@ and delete_form_integration {"form_integration_id"}.
 ## File import (attached spreadsheets)
 When the developer attaches a .xlsx, .xlsm or .csv file and wants its data in the model, the WHOLE file is
 imported — the text under "Attached documents" is only a sample of it. Work in this order:
-1. preview_file_import {"file", "sheet" (xlsx; omit = first), "target_type": "grid" | "dimension", "target_id",
+1. preview_file_import {"file", "sheet" (xlsx; omit = first), "target_type": "grid" | "dimension" | "table", "target_id",
    "reshape", "column_map"} — a dry run. It shows the sheet's first rows as read and, after reshape and
    column_map, the first rows as the import reads them. Repeat with a corrected reshape/column_map until it
    reports no errors: an import is all-or-nothing, one bad row rejects the file.
@@ -646,7 +651,11 @@ then be a model name. Grid fields: a metric name (wide file: one column per metr
 dimension name (the column holds that dimension's LEAF member codes — turn labels into codes with
 reshape.value_map, never by guessing); "ignore" to drop a column, and "*": "ignore" to drop every column the
 map does not name (a key column, notes, a typed total beside what you import). Dimension fields: "code", "label", "parent_code",
-"property:<name>", and for a time dimension "period_start"/"period_end". A file with no code column maps only
+"property:<name>", and for a time dimension "period_start"/"period_end". Table fields (target_type "table": a table of
+records — a ledger, deals, actuals — each row one record, posted through the table's mappings like a record saved
+by hand): a field's name or label, "status" in a table with a status field, "ignore"; a dimension field holds member
+codes (reshape.value_map turns labels into codes); no import_mode — every run adds its rows as new records, so a
+saved table loader is run once per new file. A file with no code column maps only
 "label": the engine gives each member a code made from its label (A-Z, 0-9 and _, at most 10 characters) — never
 invent codes. The same holds for create_dimension's members and add_dimension_member: leave "code" out when the
 source has none, and name a parent listed without a code by its label in "parent_code". import_mode (grid only): "replace"
@@ -916,8 +925,10 @@ Example — developer says "move members whose category property is hardware und
   })
 
 Example — developer says "restrict user X to write only to <member>":
-  set_user_access_rules REPLACES the target user's member access rules in the active revision in
-  one call (metric rules and rules on members not in the active revision are kept). Rules
+  set_user_access_rules REPLACES the target user's member access rules ("rules") and/or metric
+  access rules ("metric_rules": [{"metric": "<name>", "access": "read" | "hidden"}] — a metric
+  read-only or invisible for them, e.g. salaries hidden) in this model's active revision in one
+  call. A kind left out is kept, [] removes it; rules of other models are never touched. Rules
   identify everything by NAME — user_email, dimension name, member code — never UUIDs. Each
   rule's access is "read" (member visible but not writable) or "hidden" (member invisible
   everywhere). Access rules RESTRICT: a member with no rule stays fully writable, so "write only
@@ -952,10 +963,19 @@ Example — developer says "build a dashboard with KPI tiles over a chart and a 
   for each bar dimension the metric has, the total over the rest — a company total per scenario) or pin it to one member with
   "kpi_scope": {"dimension_id": "<dimension id or name>", "member_code": "<code>"} (a tile of the RF scenario, of a
   calculated VAR member: one dimension, one member; the mode becomes "pin" unless you also send "kpi_context_mode": "bar",
-  which follows the bar and pins that one dimension the bar does not hold — open deals per period and manager); a
+  which follows the bar and pins that one dimension the bar does not hold — open deals per period and manager). On a
+  dashboard with a selector bar a tile is "bar": "pin" and "total" add up every scenario and every period of every
+  year (an FY revenue of 20.1M showed as 141.9M); a
   chart you add leaves out total members such as FY next to its months (hide_rollup_members true) unless you set it
   false. A line chart's value axis starts at 0; "y_axis_from_zero": false fits it to the data (plan against last year
-  a few percent apart); bars always start at 0. A grid widget shows all of its grid's metrics unless widget_props {"metric_ids": [ids or names, in order]}
+  a few percent apart); bars always start at 0. chart "stacked": true stacks a bar chart's series (a mix by segment);
+  chart "actual_metric_id": "<metric of the chart's grid that is 1 in actual periods — a flag on another grid is read
+  by one placed here, formula = that flag>" draws those periods solid and
+  the rest as forecast (hatched bars, a dashed line). A KPI tile compares its value with another member —
+  widget_props "kpi_compare": {"dimension_id": "<dimension>", "member_code": "BUDGET"} and "kpi_good": "up" (revenue)
+  or "down" (costs) to colour the difference; "number_scale" is "auto" (a tile's default: 20.1M), "k", "m" or "none",
+  and on a grid widget "k" or "m" writes every amount in thousands or millions.
+  A grid widget shows all of its grid's metrics unless widget_props {"metric_ids": [ids or names, in order]}
   picks some — a table of only RF, LY, Var and Var % from a grid holding more is one grid widget with those four.
   A grid widget's layout is widget_props "default_view": {"rows": [...], "cols": [...], "context": [...],
   "filter_sel": {"<dimension>": "<member code>"}} — dimensions by name or id, "__metrics__" for the metrics; a

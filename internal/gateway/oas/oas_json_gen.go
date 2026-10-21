@@ -35401,9 +35401,25 @@ func (s *HighlightRule) encodeFields(e *jx.Encoder) {
 		e.FieldStart("tone")
 		s.Tone.Encode(e)
 	}
+	{
+		if s.Members != nil {
+			e.FieldStart("members")
+			e.ArrStart()
+			for _, elem := range s.Members {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.Dimension.Set {
+			e.FieldStart("dimension")
+			s.Dimension.Encode(e)
+		}
+	}
 }
 
-var jsonFieldsNameOfHighlightRule = [7]string{
+var jsonFieldsNameOfHighlightRule = [9]string{
 	0: "metric",
 	1: "abs",
 	2: "op",
@@ -35411,6 +35427,8 @@ var jsonFieldsNameOfHighlightRule = [7]string{
 	4: "value2",
 	5: "than",
 	6: "tone",
+	7: "members",
+	8: "dimension",
 }
 
 // Decode decodes HighlightRule from json.
@@ -35418,7 +35436,7 @@ func (s *HighlightRule) Decode(d *jx.Decoder) error {
 	if s == nil {
 		return errors.New("invalid: unable to decode HighlightRule to nil")
 	}
-	var requiredBitSet [1]uint8
+	var requiredBitSet [2]uint8
 
 	if err := d.ObjBytes(func(d *jx.Decoder, k []byte) error {
 		switch string(k) {
@@ -35492,6 +35510,35 @@ func (s *HighlightRule) Decode(d *jx.Decoder) error {
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"tone\"")
 			}
+		case "members":
+			if err := func() error {
+				s.Members = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Members = append(s.Members, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"members\"")
+			}
+		case "dimension":
+			if err := func() error {
+				s.Dimension.Reset()
+				if err := s.Dimension.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"dimension\"")
+			}
 		default:
 			return d.Skip()
 		}
@@ -35501,8 +35548,9 @@ func (s *HighlightRule) Decode(d *jx.Decoder) error {
 	}
 	// Validate required fields.
 	var failures []validate.FieldError
-	for i, mask := range [1]uint8{
+	for i, mask := range [2]uint8{
 		0b01000100,
+		0b00000000,
 	} {
 		if result := (requiredBitSet[i] & mask) ^ mask; result != 0 {
 			// Mask only required fields and check equality to mask using XOR.

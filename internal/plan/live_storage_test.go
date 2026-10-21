@@ -43,8 +43,8 @@ func TestStorageCountsLiveDataAndFallsWhenAModelIsDeleted(t *testing.T) {
 		metric := q(`INSERT INTO model.metric_def (model_id, revision_id, name, is_input, agg_rule) VALUES ($1::uuid, $2::uuid, 'Amount', true, 'sum') RETURNING id::text`, m.id, m.rev)
 		exec(`INSERT INTO runtime.fact_input (model_id, revision_id, dim_members, metric_id, value)
 			SELECT $1::uuid, $2::uuid, jsonb_build_object('region', 'r' || (i % 50), 'i', i), $3::uuid, i FROM generate_series(1, $4::int) i`, m.id, m.rev, metric, facts)
-		exec(`INSERT INTO runtime.calc_result (model_id, revision_id, dim_members, metric_id, value, partition_key)
-			SELECT $1::uuid, $2::uuid, jsonb_build_object('region', 'r' || (i % 50), 'i', i), $3::uuid, i * 2, 'p' FROM generate_series(1, $4::int) i`, m.id, m.rev, metric, facts)
+		exec(`INSERT INTO runtime.calc_result (model_id, revision_id, dim_members, metric_id, value)
+			SELECT $1::uuid, $2::uuid, jsonb_build_object('region', 'r' || (i % 50), 'i', i), $3::uuid, i * 2 FROM generate_series(1, $4::int) i`, m.id, m.rev, metric, facts)
 		return m
 	}
 	big, small := seed("Big", 60000), seed("Small", 6000)
@@ -109,6 +109,21 @@ func TestStorageCountsLiveDataAndFallsWhenAModelIsDeleted(t *testing.T) {
 	}
 	if n := q(`SELECT count(*)::text FROM runtime.fact_input_history`); n != "0" {
 		t.Fatalf("cell history after deleting the model = %s, want 0", n)
+	}
+
+	// The sweep's compaction vacuums: it rewrites no table — a rewrite
+	// locks the table, and a model in use would stand still for it every
+	// five minutes — and leaves the rewrite to the forced one.
+	node := func() string {
+		return q(`SELECT string_agg(pg_relation_filenode(i.inhrelid)::text, ',' ORDER BY i.inhrelid)
+			FROM pg_inherits i WHERE i.inhparent = 'runtime.fact_input'::regclass`)
+	}
+	nodeBefore := node()
+	if _, err := Compact(ctx, pool, false); err != nil {
+		t.Fatal(err)
+	}
+	if node() != nodeBefore {
+		t.Fatal("the sweep's compaction rewrote runtime.fact_input's partitions")
 	}
 
 	// Compacting gives the deleted model's disk back: the files shrink to

@@ -470,7 +470,7 @@ func CheckWriteMetrics(ctx context.Context, pool *pgxpool.Pool, modelID, revisio
 			return "", fmt.Errorf("check access rule: %w", err)
 		}
 		if access == "hidden" || access == "read" {
-			return "access denied: the write references a dimension member outside your access scope", nil
+			return memberRefusal(ctx, pool, memberID, access), nil
 		}
 		// A member with no rule of its own still isn't writable if an
 		// ancestor (structural or cross-dimension, walking parent_member_id
@@ -493,7 +493,7 @@ func CheckWriteMetrics(ctx context.Context, pool *pgxpool.Pool, modelID, revisio
 				return "", fmt.Errorf("check access rule: %w", err)
 			}
 			if ancAccess == "hidden" {
-				return "access denied: the write references a dimension member outside your access scope", nil
+				return memberRefusal(ctx, pool, memberID, "under hidden"), nil
 			}
 		}
 	}
@@ -514,6 +514,26 @@ func CheckWriteMetrics(ctx context.Context, pool *pgxpool.Pool, modelID, revisio
 	}
 
 	return "", nil
+}
+
+// memberRefusal says which member of a write an access rule refuses, and
+// how. A read-only member, which the writer sees, is named by its dimension
+// and code; a hidden one — by a rule of its own or under a hidden ancestor —
+// only by its dimension, confirming nothing about it. A refusal used to
+// name neither (2026-10-20): "the write references a dimension member
+// outside your access scope".
+func memberRefusal(ctx context.Context, pool *pgxpool.Pool, memberID, access string) string {
+	var dim, code string
+	if err := pool.QueryRow(ctx, `
+		SELECT COALESCE(NULLIF(d.name, ''), 'a dimension'), m.code
+		FROM model.dimension_member m JOIN model.dimension_def d ON d.id = m.dimension_id
+		WHERE m.id = $1::uuid`, memberID).Scan(&dim, &code); err != nil {
+		return "access denied: the write references a dimension member outside your access scope"
+	}
+	if access == "read" {
+		return fmt.Sprintf("access denied: %s %s is read-only for you (an access rule), so its cells take no input from you", dim, code)
+	}
+	return fmt.Sprintf("access denied: the member of %s this write names is hidden from you (an access rule)", dim)
 }
 
 // RevisionLockReason reports whether revisionID is locked by a company-wide

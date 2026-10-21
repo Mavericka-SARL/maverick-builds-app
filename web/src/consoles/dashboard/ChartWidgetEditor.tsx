@@ -264,6 +264,33 @@ export function ChartWidgetEditor({ gridDefId, draft, ctx, onChange }: ChartWidg
         </label>
       )}
 
+      {chartType === "bar" && (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={draft.stacked ?? false}
+            onChange={e => onChange({ stacked: e.target.checked || undefined })}
+          />
+          Stack the series <span style={{ color: "var(--color-text-quiet)" }}>(a mix: revenue by segment)</span>
+        </label>
+      )}
+
+      {(chartType === "bar" || chartType === "line") && (
+        <div>
+          {/* IBCS: actual periods solid, forecast hatched (bars) or dashed (lines). */}
+          <label style={lbl}>ACTUAL PERIODS MARKED BY</label>
+          <select
+            aria-label="Actual periods marked by"
+            value={draft.actual_metric_id ?? ""}
+            onChange={e => onChange({ actual_metric_id: e.target.value || undefined })}
+            style={inputS}
+          >
+            <option value="">— none: every period drawn alike —</option>
+            {metrics.map(m => <option key={m.id} value={m.id}>{m.label || m.name} (1 = actual)</option>)}
+          </select>
+        </div>
+      )}
+
       {chartType === "line" && (
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
           <input

@@ -2,13 +2,14 @@ import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from "re
 import { serialToISO, isoToSerial } from "../dateSerial";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, GripVertical, Download, MoreVertical, Rows3, X as XIcon } from "lucide-react";
-import { api, dimLabel, type DemoContext, type GridData, type Metric, type DimMember, type DimInfo, type GridDefaultView , type SelectorsPosition, type HighlightRule, type HighlightTone } from "../../api/client";
+import { api, dimLabel, type DemoContext, type GridData, type Metric, type DimMember, type DimInfo, type GridDefaultView , type SelectorsPosition, type HighlightRule, type HighlightTone, type NumberScale } from "../../api/client";
 import { CellHistoryDrawer, type CellRef } from "../../ee/cellhistory/CellHistoryDrawer";
 import { AddMemberRow, MemberLabel } from "./BusinessMemberControls";
 import { LoadingState, ErrorState, Toolbar, ToolbarGroup, Select, PropertyPanel, IconButton, SearchInput } from "../../ui";
 import { defaultLeafCode } from "../dashboardLayout";
 import { HierarchicalMemberSelect } from "../HierarchicalMemberSelect";
 import { evalMemberFormula } from "./memberFormula";
+import { scaleFor, scales, type Scale } from "../numberScale";
 import { invalidateModelData, refreshAfterRecalc } from "../modelDataQueries";
 import { useSelectorOwnership, useSyncSetter, useWidgetContextSync } from "../dashboardContextSync";
 import { downloadBlob } from "./blobUtils";
@@ -534,7 +535,9 @@ function pickMetrics<T extends { id: string }>(all: T[], ids?: string[]): T[] {
   return picked.length > 0 ? picked : all;
 }
 
-export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembers, syncContext, title, selectorsPosition, rowsCollapsed, multiSelect, hideSearch }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; metricIds?: string[]; showMembers?: Record<string, string[]>; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition;
+export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembers, syncContext, title, selectorsPosition, rowsCollapsed, multiSelect, hideSearch, numberScale }: { ctx: DemoContext; gridDefId?: string; defaultView?: GridDefaultView; metricIds?: string[]; showMembers?: Record<string, string[]>; syncContext?: boolean; title?: string; selectorsPosition?: SelectorsPosition;
+  /** Amounts in thousands or millions (widget_props.number_scale "k"/"m"); "auto" is a tile's, a grid keeps every digit. */
+  numberScale?: NumberScale;
   /** Parent rows start collapsed (widget_props.rows_collapsed, the developer's choice); the viewer opens and closes them by click. */
   rowsCollapsed?: boolean;
   /** Context selectors take several members (widget_props.multi_select): the grid shows their aggregate. */
@@ -542,6 +545,9 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   /** No "Find a row or column…" box (widget_props.hide_search): a grid of a few rows needs none. */
   hideSearch?: boolean }) {
   const qc = useQueryClient();
+  // A grid divides by one unit throughout ("k", "m"); "auto" sizes a tile's
+  // single number, and a table keeps its every digit then.
+  const gridScale = scaleFor(numberScale === "auto" ? undefined : numberScale);
   // Parent rows the viewer flipped from the developer's default.
   const [rowsFlipped, setRowsFlipped] = useState<Set<string>>(() => new Set());
   const rowCollapsed = (code: string) => !!rowsCollapsed !== rowsFlipped.has(code);
@@ -679,7 +685,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     enabled: pivotContextReady,
     // While a write's dependents are being recalculated the grid asks every
     // 0.4 s instead of every 2 s, so the result shows as soon as it lands.
-    refetchInterval: (q) => (q.state.data?.recalc_pending ? 400 : 2000),
+    refetchInterval: (q) => (q.state.data?.recalc_pending ? 250 : 2000),
     placeholderData: (prev) => prev, // keep last slice visible while a new scope loads
   });
 
@@ -1299,7 +1305,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
   // Nothing for the toolbar row but the ··· menu: no row, the menu moves to
   // the legend line under the grid.
   const ownedCtxDims = ctxDims.filter(dim => ownsSelector(dim.id));
-  const toolbarRow = !!title || ownedCtxDims.length > 0 || metricsInContext || !hideSearch;
+  const toolbarRow = !!title || ownedCtxDims.length > 0 || metricsInContext || !hideSearch || !!gridScale.unit;
 
   // The Total row of one column. Same return contract as resolveCell:
   // null = withheld, undefined = no value ("—").
@@ -1378,7 +1384,17 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
       if (atTotal) return probeAt(other, atTotal(other.id));
       return probeAt(other, getVal(other.id, fc), getKey(other.id, fc));
     };
-    return ruleTone(m.highlight_rules, probeAt(m, num, atTotal ? undefined : getKey(m.id, fc)), read);
+    // A rule with members holds only at their cells: the cell's member of
+    // the rule's dimension (by name), or of any of the grid's dimensions.
+    const at = (r: HighlightRule) => {
+      if (!r.members?.length) return true;
+      return dims.some((d, i) => {
+        if (r.dimension && d.name.toLowerCase() !== r.dimension.toLowerCase()) return false;
+        const code = fc[i]?.code;
+        return code !== undefined && r.members!.includes(code);
+      });
+    };
+    return ruleTone(m.highlight_rules.filter(at), probeAt(m, num, atTotal ? undefined : getKey(m.id, fc)), read);
   }
   const toneClass = (t: HighlightTone | null) => (t ? `mvx-cell--tone-${t}` : "");
 
@@ -1427,7 +1443,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
           onContextMenu={isParent ? undefined : (e) => openHistory(e, m, fc)}
           title={isParent ? undefined : closed ? "Closed: this cell takes no input. Right-click for history" : (note ? `${note}\n\nRight-click for history` : "Right-click for history")}
         >
-          {isText ? (isParent ? "" : note || (val ? fmtMetric(m, val) : "—")) : fmtMetric(m, val)}
+          {isText ? (isParent ? "" : note || (val ? fmtMetric(m, val) : "—")) : fmtMetric(m, val, gridScale)}
         </td>
       );
     }
@@ -1513,7 +1529,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
     const isActive = editing[key] !== undefined;
     const dispVal = editing[key] !== undefined
       ? editing[key]
-      : (val != null ? fmtMetric(m, val) : "");
+      : (val != null ? fmtMetric(m, val, gridScale) : "");
     return (
       <td className={tone || undefined} style={{ ...td, textAlign: "right", padding: "4px 5px", borderLeft }} onContextMenu={(e) => openHistory(e, m, fc)} title="Right-click for history">
         <input
@@ -1521,6 +1537,9 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
           className={["mvx-cell-input", isActive ? "mvx-cell-input--active" : ""].filter(Boolean).join(" ")}
           aria-invalid={badInput?.key === key || undefined}
           onChange={e => setEditing(p => ({ ...p, [key]: e.target.value }))}
+          // A scaled grid shows 1,061.6 (thousands); typing starts from
+          // every digit of the value, never from the scaled figure.
+          onFocus={() => { if (gridScale.div !== 1 && scales(m.format) && editing[key] === undefined && val != null) setEditing(p => ({ ...p, [key]: fmtMetric(m, val) })); }}
           onBlur={() => commitCell(m, fc)}
           onKeyDown={e => e.key === "Enter" && commitCell(m, fc)}
         />
@@ -1561,7 +1580,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
         title={recalcPending ? "Recalculating — this value is about to change" : undefined}
         style={{ ...td, textAlign: "right", borderLeft }}
       >
-        {fmtMetric(m, v)}
+        {fmtMetric(m, v, gridScale)}
       </td>
     );
   }
@@ -1584,6 +1603,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
         {toolbarRow && <Toolbar className="mvx-toolbar--tight">
           <ToolbarGroup>
             {title && <span style={{ fontWeight: 600, fontSize: "var(--font-size-body)", marginRight: 6 }}>{title}</span>}
+            {gridScale.unit && <span className="mvx-admin-muted" style={{ fontSize: 12, marginRight: 6 }} title="Amounts are divided by this unit; a typed value keeps every digit">in {gridScale.unit}</span>}
             {ownedCtxDims.map(dim => (
               <div key={dim.id} style={{ display: "flex", alignItems: "center", gap: 5 }}>
                 <span className="mvx-admin-muted" style={{ fontWeight: 500 }}>{dimLabel(dim)}:</span>
@@ -1850,7 +1870,7 @@ export function PlanningGrid({ ctx, gridDefId, defaultView, metricIds, showMembe
                           <td key={`tot-${comboKey(cc)}-${m.id}`}
                             className={toneClass(cellTone(m, cc, total, id => colTotal(id, cc))) || undefined}
                             style={{ ...td, textAlign: "right", fontWeight: 700, color: m.is_input ? "var(--color-text-strong)" : "var(--color-grid-calc-text)", borderLeft: bl }}>
-                            {fmtMetric(m, total)}
+                            {fmtMetric(m, total, gridScale)}
                           </td>
                         );
                       })
@@ -1981,10 +2001,16 @@ function overlay<T>(base: Record<string, T>, pending: Record<string, T | null>):
   return out;
 }
 
-function fmtMetric(m: Metric, n: number | null | undefined): string {
+function fmtMetric(m: Metric, n: number | null | undefined, scale?: Scale): string {
   if (n == null) return "—";
   if (m.format === "date") return n === 0 ? "—" : serialToISO(n);
-  const d = m.format_decimals ?? 0;
+  let d = m.format_decimals ?? 0;
+  // A grid's number_scale (thousands, millions) divides every amount alike;
+  // its caption says the unit once.
+  if (scale && scale.div !== 1 && scales(m.format)) {
+    n = n / scale.div;
+    d = scale.decimals ?? d;
+  }
   // Float noise below the shown precision (a variance of -1e-16) is 0, not "-$0.00".
   if (m.format !== "picklist" && Math.abs(n) < 0.5 * Math.pow(10, -d)) n = 0;
   switch (m.format) {

@@ -94,4 +94,4 @@
 <tr><td class="sig" id="fn-DAYSINMONTH">DAYSINMONTH(year, month)</td><td>Days in that month; a month outside 1–12 is <code>#NUM!</code>.</td><td><code>DAYSINMONTH(2024, 2)</code> = 29</td></tr>
 <tr><td class="sig" id="fn-DAYSINYEAR">DAYSINYEAR(year)</td><td>366 in a leap year, else 365.</td><td><code>DAYSINYEAR(2026)</code> = 365</td></tr>
 </table>
-<p>With a time dimension, <code>START()</code> and <code>END()</code> (chapter 14) give the current period's first and last day, so the date functions work per period: <code>DAYSINMONTH(YEAR(START()), MONTH(START()))</code> is the days in each month, <code>DAYS(START(), employees.hired)</code> is tenure in days at each period's start.</p>
+<p>With a time dimension, <code>START()</code> and <code>END()</code> (chapter 14) give the current period's first and last day, so the date functions work per period: <code>DAYSINMONTH(YEAR(START()), MONTH(START()))</code> is the days in each month, <code>DAYS(START(), employees.hired)</code> is tenure in days at each period's start. A text calculation is evaluated per period too: <code>IF(MONTH(START()) = 1, "Opening", "")</code> labels each January.</p>

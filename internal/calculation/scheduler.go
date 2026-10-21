@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
 	"github.com/mavericks-engine/mavericks/internal/formula"
@@ -77,6 +77,41 @@ func (s *Scheduler) RecalcAffected(ctx context.Context, modelID, revisionID stri
 	return s.recalcMetricIDs(ctx, modelID, revisionID, defs, affectedIDs)
 }
 
+// ChangedCell is one input cell a write changed: its metric and its
+// coordinate, {dimension ID: member code}.
+type ChangedCell struct {
+	MetricID string
+	Combo    map[string]string
+}
+
+// RecalcAffectedCells is RecalcAffected for written cells: knowing which
+// cells changed, the pass recalculates the cells they reach and writes
+// what differs (region.go), instead of every cell of every metric they
+// reach.
+func (s *Scheduler) RecalcAffectedCells(ctx context.Context, modelID, revisionID string, cells []ChangedCell) (err error) {
+	defer s.recoverAsError(&err, "recalculation")
+	if revisionID == "" {
+		return fmt.Errorf("revisionID is required")
+	}
+	defs, err := s.store.LoadModelMetrics(ctx, modelID, revisionID)
+	if err != nil {
+		return fmt.Errorf("load metrics: %w", err)
+	}
+	seen := map[string]bool{}
+	var inputs []string
+	for _, c := range cells {
+		if !seen[c.MetricID] {
+			seen[c.MetricID] = true
+			inputs = append(inputs, c.MetricID)
+		}
+	}
+	affectedIDs := withDependencyFree(defs, AffectedMetricIDs(defs, inputs))
+	if len(affectedIDs) == 0 {
+		return nil
+	}
+	return s.recalcRequest(ctx, modelID, revisionID, defs, passRequest{ids: affectedIDs, cells: cells})
+}
+
 // RecalcSpecific force-recomputes exactly the given metric IDs (plus any
 // prerequisite calc metrics metricformula.Plan pulls in via their still-current
 // dependency edges), regardless of whether the model's present-day
@@ -131,22 +166,46 @@ func lockRevision(modelID, revisionID string) func() {
 // of deriving one from AffectedMetricIDs's graph walk. On a pool, requests
 // that arrive while a pass runs share the next pass (passQueue).
 func (s *Scheduler) recalcMetricIDs(ctx context.Context, modelID, revisionID string, defs map[string]*MetricDef, affectedIDs []string) error {
-	if s.store.pool == nil {
-		return s.recalcPass(ctx, modelID, revisionID, defs, affectedIDs)
+	return s.recalcRequest(ctx, modelID, revisionID, defs, passRequest{ids: affectedIDs})
+}
+
+// passRequest is what a pass calculates: ids, and the written cells that
+// made them stale when the request knows them (RecalcAffectedCells).
+// Requests folded into one pass (passQueue) merge: a metric some request
+// named without cells is forced — calculated whole.
+type passRequest struct {
+	ids    []string
+	cells  []ChangedCell
+	forced map[string]bool // set by the queue; nil: every id without cells is forced
+}
+
+// forcedID reports whether the request calculates id whole.
+func (r passRequest) forcedID(id string) bool {
+	if r.forced != nil {
+		return r.forced[id]
 	}
-	return queueFor(s.store.pool, modelID, revisionID).run(affectedIDs, func(ids []string) error {
+	return len(r.cells) == 0
+}
+
+func (s *Scheduler) recalcRequest(ctx context.Context, modelID, revisionID string, defs map[string]*MetricDef, req passRequest) error {
+	if s.store.pool == nil {
+		return s.recalcPass(ctx, modelID, revisionID, defs, req)
+	}
+	return queueFor(s.store.pool, modelID, revisionID).runRequest(req, func(merged passRequest) error {
 		// The pass may calculate other requests' metrics as well: it runs
 		// on when this caller's request is cancelled, bounded as a
 		// background recalculation is.
 		passCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), RecalcTimeout)
 		defer cancel()
-		return s.recalcPass(passCtx, modelID, revisionID, defs, ids)
+		return s.recalcPass(passCtx, modelID, revisionID, defs, merged)
 	})
 }
 
-// recalcPass is one recalculation pass over affectedIDs.
-func (s *Scheduler) recalcPass(ctx context.Context, modelID, revisionID string, defs map[string]*MetricDef, affectedIDs []string) error {
+// recalcPass is one recalculation pass over req.ids.
+func (s *Scheduler) recalcPass(ctx context.Context, modelID, revisionID string, defs map[string]*MetricDef, req passRequest) error {
 	defer lockRevision(modelID, revisionID)()
+	ctx = withPassCache(ctx)
+	affectedIDs := req.ids
 	// Definitions were loaded before the lock; reload so a pass that queued
 	// behind another sees the graph as it is now.
 	if fresh, err := s.store.LoadModelMetrics(ctx, modelID, revisionID); err == nil {
@@ -208,33 +267,34 @@ func (s *Scheduler) recalcPass(ctx context.Context, modelID, revisionID string, 
 	meta := NewDimMetadata(allDims, dimIDToName, schema)
 	DescribeMetrics(meta, defs, metricDimIDs)
 
-	for _, comp := range components {
+	inc := s.newIncremental(ctx, modelID, revisionID, timePartition, req, allDims, metricDimIDs, dimIDToName, defs)
+	defer s.prefetchHeld(ctx, components, inc, modelID, revisionID)()
+
+	s.runComponents(ctx, components, defs, func(comp metricformula.Component) {
+		incs, run := inc.plan(comp)
+		if !run {
+			return
+		}
 		if comp.Recurrence {
-			s.runRecurrence(ctx, comp, modelID, revisionID, timePartition, allDims, metricDimIDs, dimIDToName, meta, defs)
-			continue
+			s.runRecurrence(ctx, comp, modelID, revisionID, timePartition, allDims, metricDimIDs, dimIDToName, meta, defs, incs)
+			inc.done(comp, incs)
+			return
 		}
 		metricID := comp.Members[0]
 		def, ok := defs[metricID]
 		if !ok || def.IsInput {
-			continue
+			return
 		}
+		defer inc.done(comp, incs)
 
 		pk := BuildPartitionKey(modelID, revisionID, metricID, timePartition)
-
-		// Mark dirty
-		if err := s.store.MarkDirty(ctx, []string{pk}, modelID, metricID, revisionID, timePartition); err != nil {
-			s.log.Error().Err(err).Str("partition_key", pk).Msg("mark dirty")
-			continue
-		}
-
-		// Claim and execute
-		claimed, err := s.store.ClaimForCalculation(ctx, pk)
-		if err != nil || !claimed {
-			continue
+		if err := s.store.MarkCalculating(ctx, pk, modelID, metricID, revisionID, timePartition); err != nil {
+			s.log.Error().Err(err).Str("partition_key", pk).Msg("mark calculating")
+			return
 		}
 
 		calcErr := s.guarded(def.Name, func() error {
-			return s.executePartition(ctx, def, modelID, revisionID, pk, allDims, metricDimIDs, dimIDToName, meta, defs)
+			return s.executePartition(ctx, def, modelID, revisionID, pk, allDims, metricDimIDs, dimIDToName, meta, defs, incs[metricID])
 		})
 		if calcErr != nil {
 			s.log.Error().Err(calcErr).Str("metric", def.Name).Msg("calculation failed")
@@ -242,8 +302,102 @@ func (s *Scheduler) recalcPass(ctx context.Context, modelID, revisionID string, 
 		} else {
 			s.store.MarkClean(ctx, pk) //nolint:errcheck
 		}
-	}
+	})
 	return nil
+}
+
+// runComponents runs fn for every component, each once all the components
+// it reads have finished, on up to passWorkers goroutines. One after
+// another, a driver change on the education FP&A model recalculated 97
+// metrics in a 2 s chain of evaluation and writes, most of which do not
+// read each other (2026-10-20). A component reads what its members depend
+// on (DependsOnID, and a ratio's numerator and denominator); Plan orders
+// those before it, so a dependency on a later component cannot occur and
+// is ignored. A finished component releases its dependents whether it
+// failed or not, as the sequential order did. On a transaction (no pool:
+// the AI plan check's dry run) the components run in order on this
+// goroutine — a transaction serves one statement at a time.
+func (s *Scheduler) runComponents(ctx context.Context, components []metricformula.Component, defs map[string]*MetricDef, fn func(metricformula.Component)) {
+	workers := passWorkers(s.store.pool)
+	if workers <= 1 || len(components) < 2 {
+		for _, comp := range components {
+			fn(comp)
+		}
+		return
+	}
+	owner := make(map[string]int, len(components))
+	for i, comp := range components {
+		for _, id := range comp.Members {
+			owner[id] = i
+		}
+	}
+	waiting := make([]int, len(components))
+	dependents := make([][]int, len(components))
+	for i, comp := range components {
+		seen := map[int]bool{}
+		for _, id := range comp.Members {
+			def := defs[id]
+			if def == nil {
+				continue
+			}
+			reads := append(append([]string{}, def.DependsOnID...), def.AggNumeratorID, def.AggDenominatorID)
+			for _, dep := range reads {
+				j, ok := owner[dep]
+				if !ok || j >= i || seen[j] {
+					continue
+				}
+				seen[j] = true
+				waiting[i]++
+				dependents[j] = append(dependents[j], i)
+			}
+		}
+	}
+	ready := make(chan int, len(components))
+	for i := range components {
+		if waiting[i] == 0 {
+			ready <- i
+		}
+	}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	left := len(components)
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range ready {
+				fn(components[i])
+				mu.Lock()
+				for _, d := range dependents[i] {
+					if waiting[d]--; waiting[d] == 0 {
+						ready <- d
+					}
+				}
+				if left--; left == 0 {
+					close(ready)
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// passWorkers is how many components of a pass run at once on pool: two of
+// its connections stay free for the reads the console makes meanwhile (a
+// tenant pool has 5 by default), and at most 4 run.
+func passWorkers(pool *pgxpool.Pool) int {
+	if pool == nil {
+		return 1
+	}
+	n := int(pool.Config().MaxConns) - 2
+	if n > 4 {
+		n = 4
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
 }
 
 // runRecurrence claims every member of a recurrence component, executes it
@@ -251,6 +405,7 @@ func (s *Scheduler) recalcPass(ctx context.Context, modelID, revisionID string, 
 func (s *Scheduler) runRecurrence(
 	ctx context.Context, comp metricformula.Component, modelID, revisionID, timePartition string,
 	allDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string, meta *DimMetadata, defs map[string]*MetricDef,
+	incs map[string]*increment,
 ) {
 	keys := make([]string, 0, len(comp.Members))
 	for _, id := range comp.Members {
@@ -259,18 +414,14 @@ func (s *Scheduler) runRecurrence(
 			continue
 		}
 		pk := BuildPartitionKey(modelID, revisionID, id, timePartition)
-		if err := s.store.MarkDirty(ctx, []string{pk}, modelID, id, revisionID, timePartition); err != nil {
-			s.log.Error().Err(err).Str("partition_key", pk).Msg("mark dirty")
-			return
-		}
-		claimed, err := s.store.ClaimForCalculation(ctx, pk)
-		if err != nil || !claimed {
+		if err := s.store.MarkCalculating(ctx, pk, modelID, id, revisionID, timePartition); err != nil {
+			s.log.Error().Err(err).Str("partition_key", pk).Msg("mark calculating")
 			return
 		}
 		keys = append(keys, pk)
 	}
 	calcErr := s.guarded("recurrence", func() error {
-		return s.executeRecurrence(ctx, comp, modelID, revisionID, BuildPartitionKey(modelID, revisionID, comp.Members[0], timePartition), allDims, metricDimIDs, dimIDToName, meta, defs)
+		return s.executeRecurrence(ctx, comp, modelID, revisionID, BuildPartitionKey(modelID, revisionID, comp.Members[0], timePartition), allDims, metricDimIDs, dimIDToName, meta, defs, incs)
 	})
 	for _, pk := range keys {
 		if calcErr != nil {
@@ -301,7 +452,13 @@ var errBlankResult = ErrBlankResult
 func (s *Scheduler) executePartition(
 	ctx context.Context, def *MetricDef, modelID, revisionID, partitionKey string,
 	allDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string, meta *DimMetadata, allDefs map[string]*MetricDef,
+	inc *increment,
 ) error {
+	if inc != nil {
+		if err := s.loadHeld(ctx, def, modelID, revisionID, inc); err != nil {
+			return err
+		}
+	}
 	// A time-series formula (PREVIOUS, LAG, MOVINGSUM, ...) on a declared
 	// time dimension takes the time-series path: one evaluation per leaf
 	// period with a time context, time_summary for its totals. A time
@@ -311,14 +468,14 @@ func (s *Scheduler) executePartition(
 	// dimension stays on the scalar path: its leaves are period-independent,
 	// and only how they reduce across time changes (time_summary, below).
 	if def.Text && !def.IsInput {
-		return s.executeText(ctx, def, modelID, revisionID, partitionKey, newEvalEnv(s, modelID, revisionID, allDims, metricDimIDs, dimIDToName, meta, allDefs))
+		return s.executeText(ctx, def, modelID, revisionID, partitionKey, newEvalEnv(s, modelID, revisionID, allDims, metricDimIDs, dimIDToName, meta, allDefs), inc)
 	}
 	axis, err := timeAxisFor(allDims, metricDimIDs[def.ID])
 	if err != nil {
 		return err
 	}
 	if axis != nil && usesTimeSeries(def.Formula) {
-		return s.executeTimeSeries(ctx, def, modelID, revisionID, partitionKey, axis, allDims, metricDimIDs, dimIDToName, meta, allDefs)
+		return s.executeTimeSeries(ctx, def, modelID, revisionID, partitionKey, axis, allDims, metricDimIDs, dimIDToName, meta, allDefs, inc)
 	}
 
 	env := newEvalEnv(s, modelID, revisionID, allDims, metricDimIDs, dimIDToName, meta, allDefs)
@@ -328,26 +485,32 @@ func (s *Scheduler) executePartition(
 	}
 
 	leafCombos := rollup.LeafCombos(allDims, metricDimIDs[def.ID])
+
 	if len(leafCombos) == 0 {
 		leafCombos = []map[string]string{{}}
 	}
 
-	// A pure ratio (agg_rule 'average', e.g. a utilization %) has no
-	// well-defined per-intersection value — persisting identical per-combo
-	// rows for it wouldn't be "per-intersection" in any real sense — unless
-	// the formula is itself dimension-conditional and must run per combo,
-	// in which case per-combo results are legitimately distinct and are
-	// averaged below as usual.
-	collapsed := false
-	if def.AggRule == "average" && len(leafCombos) > 1 && !FormulaReferencesDims(def.Formula, dimIDToName) {
-		leafCombos = []map[string]string{{}}
-		collapsed = true
-	}
+	// A pure ratio (agg_rule 'average' whose formula reads no member, e.g. a
+	// utilization %) totals like agg_rule 'formula': the formula evaluated
+	// on the totalled inputs at every total. Its cells are still each
+	// intersection's own value: the leaves used to be collapsed into that one
+	// revision-wide evaluation, so a [month, scenario] grid of
+	// (opening + closing) / 2 had no monthly values at all.
+	rule := EffectiveAggRule(def.AggRule, def.Formula, dimIDToName)
 
 	results := make([]CalcResultRow, 0, len(leafCombos))
 	var failures, skipped, memberNA int
 	var firstErr error
+	// In a pass following written cells, a cell outside the region they
+	// reach keeps the value it holds (region.go).
+	partial := inc.partial()
 	for _, combo := range leafCombos {
+		if partial && !inc.in.contains(combo) {
+			if v, ok := inc.old[dimKey(combo)]; ok {
+				results = append(results, CalcResultRow{DimMembers: combo, Value: v})
+			}
+			continue
+		}
 		v, noData, err := evalOne(combo)
 		if err != nil {
 			// A failure at an intersection where every referenced value is
@@ -387,9 +550,16 @@ func (s *Scheduler) executePartition(
 	// here never fail the partition — a missing rollup row renders as "—",
 	// the contract's safe state. Capped so a pathological member lattice
 	// degrades to leaves+grand-total rather than an explosion of rows.
-	if def.AggRule == string(rollup.AggFormula) || def.AggRule == string(rollup.AggRate) {
+	if rule == string(rollup.AggFormula) || rule == string(rollup.AggRate) {
 		const rollupComboCap = 20000
+		covers := coverTest(inc, allDims)
 		for _, combo := range rollup.RollupCombos(allDims, metricDimIDs[def.ID], rollupComboCap) {
+			if partial && !covers(combo) {
+				if v, ok := inc.old[dimKey(combo)]; ok {
+					results = append(results, CalcResultRow{DimMembers: combo, Value: v})
+				}
+				continue
+			}
 			v, _, evalErr := evalOne(combo)
 			if evalErr != nil {
 				continue // empty subtree or genuine per-combo error — no row, renders "—"
@@ -424,6 +594,8 @@ func (s *Scheduler) executePartition(
 			if err := s.store.ClearAllResults(ctx, modelID, revisionID, def.ID); err != nil {
 				return fmt.Errorf("clear stale results: %w", err)
 			}
+			s.remember(ctx, def.ID, nil)
+			inc.cleared(metricDimIDs[def.ID], allDims)
 			return nil
 		}
 		if memberNA == failures {
@@ -435,6 +607,8 @@ func (s *Scheduler) executePartition(
 			if err := s.store.ClearAllResults(ctx, modelID, revisionID, def.ID); err != nil {
 				return fmt.Errorf("clear stale results: %w", err)
 			}
+			s.remember(ctx, def.ID, nil)
+			inc.cleared(metricDimIDs[def.ID], allDims)
 		}
 		return fmt.Errorf("%d/%d combos failed to evaluate for metric %s (first error: %w)", failures, len(leafCombos), def.Name, firstErr)
 	}
@@ -451,9 +625,8 @@ func (s *Scheduler) executePartition(
 	//
 	// The per-member rows above are still computed and still written: they are
 	// individually meaningful, and this only replaces how they roll up. That
-	// is the difference from the 'average' shortcut further up, which throws
-	// the per-member rows away entirely.
-	aggregate := rollup.CombineAgg(vals, rollup.AggRule(def.AggRule))
+	// holds for a pure ratio under 'average' too (rule above).
+	aggregate := rollup.CombineAgg(vals, rollup.AggRule(rule))
 	writeAggregate := true
 	// On a time dimension, a combining rule (sum/average/count) reduces the
 	// non-time dimensions first and time last, by the metric's time_summary
@@ -463,16 +636,10 @@ func (s *Scheduler) executePartition(
 	// other dimension (Anaplan's Formula summary), so a margin percentage
 	// stays total_margin / total_revenue rather than a sum of quarterly
 	// percentages.
-	//
-	// A collapsed pure ratio is the exception: its one result is evalOne({})
-	// — the formula at the aggregate, across time too — so it already is the
-	// total (the scoped read's collapsed evalCombo gives the same number).
-	// summarizeOverTime would look for periods in it, find none and write
-	// no total at all.
-	if axis != nil && !collapsed && def.AggRule != string(rollup.AggFormula) && def.AggRule != string(rollup.AggRate) {
-		aggregate, writeAggregate = summarizeOverTime(results, axis, def.AggRule, def.TimeSummary, nil)
+	if axis != nil && rule != string(rollup.AggFormula) && rule != string(rollup.AggRate) {
+		aggregate, writeAggregate = summarizeOverTime(results, axis, rule, def.TimeSummary, nil)
 	}
-	if def.AggRule == string(rollup.AggFormula) {
+	if rule == string(rollup.AggFormula) {
 		total, _, totalErr := evalOne(map[string]string{})
 		switch {
 		case errors.Is(totalErr, errBlankResult):
@@ -493,14 +660,15 @@ func (s *Scheduler) executePartition(
 		}
 		aggregate = total
 	}
-	if !rollup.Aggregates(rollup.AggRule(def.AggRule)) && len(metricDimIDs[def.ID]) > 0 {
+	if !rollup.Aggregates(rollup.AggRule(def.AggRule)) && !rollup.LeafCombo(allDims, metricDimIDs[def.ID], map[string]string{}) {
 		// agg_rule none: values at the leaves only. A metric with no
-		// dimensions has one value, its '{}' row, and keeps it.
+		// dimensions has one value, its '{}' row, and keeps it; one whose
+		// only dimension is time totals by its time summary (above).
 		writeAggregate = false
 	}
-	// The single-combo case (leafCombos collapsed to just {} above, or the
-	// metric has no declared dims at all) is already fully covered by the
-	// aggregate row and must not be double-written.
+	// The single-combo case (the metric has no declared dims at all) is
+	// already fully covered by the aggregate row and must not be
+	// double-written.
 	var perComboRows []CalcResultRow
 	for _, r := range results {
 		if len(r.DimMembers) > 0 {
@@ -513,11 +681,12 @@ func (s *Scheduler) executePartition(
 	// re-resolving the whole slice on the fly (the multi-second scoped read on
 	// a large model). Combined exactly as scopeCalcCells (the live scoped
 	// read) does, so the fast path and the recompute fallback never disagree.
+	// agg_rule none gets the slices that pin every non-time dimension to a
+	// leaf: there time still totals by the time summary (a closing balance
+	// typed per scenario has its FY value).
 	dimConditional := FormulaReferencesDims(def.Formula, dimIDToName)
-	if rollup.Aggregates(rollup.AggRule(def.AggRule)) {
-		perComboRows = append(perComboRows, oneDimSliceRows(def.AggRule, dimConditional, metricDimIDs[def.ID], allDims, results, evalOne, axis, def.TimeSummary)...)
-		perComboRows = append(perComboRows, aggregatePeriodRows(def.AggRule, metricDimIDs[def.ID], results, axis, def.TimeSummary)...)
-	}
+	perComboRows = append(perComboRows, oneDimSliceRows(rule, dimConditional, metricDimIDs[def.ID], allDims, results, evalOne, axis, def.TimeSummary)...)
+	perComboRows = append(perComboRows, aggregatePeriodRows(rule, metricDimIDs[def.ID], results, axis, def.TimeSummary)...)
 
 	// Replace the metric's result set in one transaction: the '{}' total
 	// (none when this pass has none — time_summary 'none', a blank total)
@@ -529,14 +698,10 @@ func (s *Scheduler) executePartition(
 	if writeAggregate {
 		rows = append(rows, CalcResultRow{DimMembers: map[string]string{}, Value: aggregate})
 	}
-	if err := s.store.InTx(ctx, func(tx pgx.Tx) error {
-		if err := s.store.ReplaceResultsTx(ctx, tx, modelID, revisionID, def.ID, partitionKey, rows); err != nil {
-			return fmt.Errorf("write results: %w", err)
-		}
-		return nil
-	}); err != nil {
+	if err := s.persistRows(ctx, def, modelID, revisionID, rows, inc, metricDimIDs[def.ID], allDims); err != nil {
 		return err
 	}
+	s.remember(ctx, def.ID, rows)
 
 	if failures > 0 {
 		return fmt.Errorf("%d/%d combos failed to evaluate for metric %s (first error: %w)", failures, len(leafCombos)-skipped, def.Name, firstErr)
@@ -549,7 +714,7 @@ func (s *Scheduler) executePartition(
 // added up: agg_rule "formula" evaluates the formula at every total too (a
 // status at the total), any other rule gives leaves only. A cell whose text
 // is "" (or blank, or without data) has no row.
-func (s *Scheduler) executeText(ctx context.Context, def *MetricDef, modelID, revisionID, partitionKey string, env *evalEnv) error {
+func (s *Scheduler) executeText(ctx context.Context, def *MetricDef, modelID, revisionID, partitionKey string, env *evalEnv, inc *increment) error {
 	evalText, err := env.textEvaluator(ctx, def)
 	if err != nil {
 		return err
@@ -587,11 +752,10 @@ func (s *Scheduler) executeText(ctx context.Context, def *MetricDef, modelID, re
 		// Every cell failed: the last good rows stay, as for a number.
 		return fmt.Errorf("%d/%d combos failed to evaluate for metric %s (first error: %w)", failures, len(combos), def.Name, firstErr)
 	}
-	if err := s.store.InTx(ctx, func(tx pgx.Tx) error {
-		return s.store.ReplaceResultsTx(ctx, tx, modelID, revisionID, def.ID, partitionKey, rows)
-	}); err != nil {
+	if err := s.persistRows(ctx, def, modelID, revisionID, rows, inc, dimIDs, env.allDims); err != nil {
 		return err
 	}
+	s.remember(ctx, def.ID, rows)
 	if failures > 0 {
 		return fmt.Errorf("%d/%d combos failed to evaluate for metric %s (first error: %w)", failures, len(combos), def.Name, firstErr)
 	}
@@ -653,6 +817,9 @@ func oneDimSliceRows(
 		}
 		for _, m := range d.Members {
 			slice := map[string]string{dimID: m.Code}
+			if !rollup.Aggregates(rollup.AggRule(aggRule)) && !rollup.LeafCombo(dims, dimIDs, slice) {
+				continue // agg_rule none: no value across members
+			}
 			if useEval {
 				v, _, err := evalOne(slice)
 				if err != nil {
@@ -753,13 +920,7 @@ func (s *Scheduler) rateTotal(
 		if !ok {
 			return 0, fmt.Errorf("operand metric %s is not in this model/revision", id)
 		}
-		var valueMap map[string]float64
-		var err error
-		if d.IsInput {
-			valueMap, err = s.store.LoadInputValueMap(ctx, modelID, revisionID, id)
-		} else {
-			valueMap, err = s.store.LoadCalcValueMap(ctx, modelID, revisionID, id)
-		}
+		valueMap, err := s.valueMap(ctx, d, modelID, revisionID)
 		if err != nil {
 			return 0, fmt.Errorf("load values for %s: %w", d.Name, err)
 		}
@@ -792,6 +953,18 @@ func (s *Scheduler) rateTotal(
 		return 0, fmt.Errorf("denominator %s totals zero", allDefs[def.AggDenominatorID].Name)
 	}
 	return num / den, nil
+}
+
+// EffectiveAggRule is how a metric's totals are made: its agg_rule, except
+// that a pure ratio — agg_rule "average" whose formula reads no member —
+// totals as "formula" (the formula on the totalled inputs), as the Formulas
+// Manual says. Shared by the scheduler and the scoped read so both give the
+// same totals.
+func EffectiveAggRule(aggRule, expr string, dimIDToName map[string]string) string {
+	if aggRule == string(rollup.AggAverage) && !FormulaReferencesDims(expr, dimIDToName) {
+		return string(rollup.AggFormula)
+	}
+	return aggRule
 }
 
 // FormulaReferencesDims reports whether expr's value depends on the cell's

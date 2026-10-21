@@ -4,7 +4,8 @@ import { Button, IconButton, Select, TextInput } from "../../ui";
 
 // The developer's editor for a metric's highlight rules (conditional
 // highlighting): each rule compares the cell — or another metric at the
-// same cell — with a number, a text or another metric, and tints it. The
+// same cell — with a number, a text or another metric, and tints it; a rule
+// with members tints only those members' cells (a variance column). The
 // server checks them (metricformula.CheckHighlightRules); this keeps the
 // shape right while typing.
 
@@ -17,10 +18,12 @@ const TONES: { value: HighlightTone; label: string }[] = [
   { value: "negative", label: "Red" }, { value: "warning", label: "Amber" }, { value: "positive", label: "Green" }, { value: "info", label: "Blue" },
 ];
 
-export function HighlightRulesEditor({ rules, onChange, metricNames }: {
+export function HighlightRulesEditor({ rules, onChange, metricNames, dimensionNames = [] }: {
   rules: HighlightRule[];
   onChange: (rules: HighlightRule[]) => void;
   metricNames: string[];
+  /** Offered for "only at members of": a rule for a variance column only. */
+  dimensionNames?: string[];
 }) {
   const set = (i: number, patch: Partial<HighlightRule>) =>
     onChange(rules.map((r, j) => (j === i ? { ...r, ...patch } : r)));
@@ -74,6 +77,19 @@ export function HighlightRulesEditor({ rules, onChange, metricNames }: {
                 <TextInput aria-label="Upper value" value={r.value2 === undefined ? "" : String(r.value2)} style={{ width: 90 }}
                   onChange={e => set(i, { value2: Number(e.target.value) })} />
               </>
+            )}
+            <span className="mvx-admin-muted">at</span>
+            <TextInput aria-label="Only at members" placeholder="every cell" title="Member codes, comma-separated: the rule colours only their cells (a variance column)"
+              value={(r.members ?? []).join(", ")} style={{ width: 130 }}
+              onChange={e => {
+                const members = e.target.value.split(",").map(x => x.trim()).filter(Boolean);
+                set(i, { members: members.length ? members : undefined, dimension: members.length ? r.dimension : undefined });
+              }} />
+            {(r.members?.length ?? 0) > 0 && dimensionNames.length > 0 && (
+              <Select aria-label="Members of" value={r.dimension ?? ""} onChange={e => set(i, { dimension: e.target.value || undefined })} style={{ width: 130 }}>
+                <option value="">of any dimension</option>
+                {dimensionNames.map(n => <option key={n} value={n}>of {n}</option>)}
+              </Select>
             )}
             <span className="mvx-admin-muted">→</span>
             <Select aria-label="Tone" value={r.tone} onChange={e => set(i, { tone: e.target.value as HighlightTone })} style={{ width: 90 }}>

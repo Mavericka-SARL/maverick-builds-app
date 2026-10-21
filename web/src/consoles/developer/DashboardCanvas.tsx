@@ -1388,6 +1388,25 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                     "Find a row or column…" above the grid. Untick it for a
                     grid of a few rows.
                   </p>
+                  <div className="mvx-prop-section" style={{ marginTop: 12 }}>Number scale</div>
+                  <Select
+                    value={wp.number_scale === "k" || wp.number_scale === "m" ? wp.number_scale : "none"}
+                    onChange={e => {
+                      const wid = selectedWidget!.id;
+                      const v = e.target.value === "none" ? undefined : e.target.value as WidgetProps["number_scale"];
+                      setPropsDraft(prev => ({ ...prev, [wid]: { ...prev[wid], widget_props: { ...wp, number_scale: v } } }));
+                    }}
+                    style={{ width: "100%" }}
+                    aria-label="Grid number scale"
+                  >
+                    <option value="none">Every digit</option>
+                    <option value="k">Thousands</option>
+                    <option value="m">Millions</option>
+                  </Select>
+                  <p style={{ fontSize: 11, color: "var(--color-text-quiet)", marginTop: 4 }}>
+                    Numbers and amounts are divided by the unit, which the grid
+                    names once; percentages are not. A typed value keeps every digit.
+                  </p>
                 </div>
               );
             })()}
@@ -1623,6 +1642,65 @@ export function DashboardCanvas({ dashId, dashName, revisionId, onBack }: { dash
                       )}
                     </>
                   )}
+
+                  {/* IBCS: a headline figure beside what it is measured against. */}
+                  <div className="mvx-prop-section" style={{ marginTop: 10 }}>Compare with</div>
+                  {(() => {
+                    const cmp = currentWp.kpi_compare;
+                    const cmpDim = cmp ? scopableDims.find(d => d.id === cmp.dimension_id) : undefined;
+                    return (
+                      <>
+                        <Select
+                          value={cmp?.dimension_id ?? ""}
+                          onChange={e => {
+                            const dim = scopableDims.find(d => d.id === e.target.value);
+                            const code = dim ? (dim.members[0]?.code ?? defaultLeafCode(dim)) : undefined;
+                            patchWp({ kpi_compare: dim && code ? { dimension_id: dim.id, member_code: code } : undefined });
+                          }}
+                          style={{ width: "100%", marginBottom: 6 }}
+                          aria-label="Compare dimension"
+                        >
+                          <option value="">— no comparison —</option>
+                          {scopableDims.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                        </Select>
+                        {cmp && cmpDim && (
+                          <>
+                            <Select
+                              value={cmp.member_code}
+                              onChange={e => patchWp({ kpi_compare: { ...cmp, member_code: e.target.value } })}
+                              style={{ width: "100%", marginBottom: 6 }}
+                              aria-label="Compare member"
+                            >
+                              {cmpDim.members.map(m => <option key={m.code} value={m.code}>{m.label}</option>)}
+                            </Select>
+                            <Select
+                              value={currentWp.kpi_good ?? ""}
+                              onChange={e => patchWp({ kpi_good: (e.target.value || undefined) as WidgetProps["kpi_good"] })}
+                              style={{ width: "100%" }}
+                              aria-label="Good when"
+                            >
+                              <option value="">Difference not coloured</option>
+                              <option value="up">More is good (green above, red below)</option>
+                              <option value="down">Less is good (costs)</option>
+                            </Select>
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
+
+                  <div className="mvx-prop-section" style={{ marginTop: 10 }}>Number scale</div>
+                  <Select
+                    value={currentWp.number_scale ?? "auto"}
+                    onChange={e => patchWp({ number_scale: e.target.value === "auto" ? undefined : e.target.value as WidgetProps["number_scale"] })}
+                    style={{ width: "100%" }}
+                    aria-label="KPI number scale"
+                  >
+                    <option value="auto">By size (20.1M from a million)</option>
+                    <option value="k">Thousands (k)</option>
+                    <option value="m">Millions (M)</option>
+                    <option value="none">Every digit</option>
+                  </Select>
                 </div>
               );
             })()}

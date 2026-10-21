@@ -196,13 +196,7 @@ func (env *evalEnv) loadDependencies(ctx context.Context, def *MetricDef) (map[s
 		if !ok {
 			return nil, nil, fmt.Errorf("dependency %s not found in model", depID)
 		}
-		var valueMap map[string]float64
-		var err error
-		if depDef.IsInput {
-			valueMap, err = env.s.store.LoadInputValueMap(ctx, env.modelID, env.revisionID, depID)
-		} else {
-			valueMap, err = env.s.store.LoadCalcValueMap(ctx, env.modelID, env.revisionID, depID)
-		}
+		valueMap, err := env.s.valueMap(ctx, depDef, env.modelID, env.revisionID)
 		if err != nil {
 			return nil, nil, fmt.Errorf("load values for %s: %w", depDef.Name, err)
 		}
@@ -296,11 +290,7 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 	texts := map[string]map[string]string{}
 	for _, depID := range def.DependsOnID {
 		if dep := allDefs[depID]; def.Text && dep.Text {
-			load := env.s.store.LoadInputTextMap
-			if !dep.IsInput {
-				load = env.s.store.LoadCalcTextMap
-			}
-			m, err := load(ctx, env.modelID, env.revisionID, depID)
+			m, err := env.s.textMap(ctx, dep, env.modelID, env.revisionID)
 			if err != nil {
 				return nil, fmt.Errorf("load the text of %s: %w", dep.Name, err)
 			}
@@ -329,8 +319,9 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 	// absence cannot be told from zero here and doesn't need to be). The
 	// caller skips such combos instead of recording them as calculation
 	// failures.
-	evalCell := func(combo map[string]string, useMemo bool) (formula.Value, bool, error) {
-		reads.data = false
+	// bind resolves the formula's variables at combo: its plain references,
+	// the text of text metrics it reads, and the cell's own member codes.
+	bind := func(combo map[string]string) (map[string]formula.Value, map[string]float64, error) {
 		values := make(map[string]float64, len(def.DependsOnID))
 		notes := map[string]string{}
 		for _, depID := range def.DependsOnID {
@@ -344,23 +335,9 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 			}
 			v, _, err := resolveDependency(ctx, allDims, depDef, metricDimIDs[depID], combo, fetch[depID], rows[depID])
 			if err != nil {
-				return formula.Value{}, false, fmt.Errorf("resolve %s: %w", depDef.Name, err)
+				return nil, nil, fmt.Errorf("resolve %s: %w", depDef.Name, err)
 			}
 			values[depDef.Name] = v // bind unconditionally: preserves "0 on miss" formula-variable semantics
-		}
-		noData := func() bool {
-			if len(def.DependsOnID) == 0 || reads.data {
-				return false
-			}
-			for _, dv := range values {
-				if dv != 0 {
-					return false
-				}
-			}
-			return true
-		}
-		if parseErr != nil {
-			return formula.Value{}, noData(), parseErr
 		}
 		// Upper-cased keys, as EvalWithContext does: EvalNode does not.
 		vars := make(map[string]formula.Value, len(values)+len(combo))
@@ -376,7 +353,71 @@ func (env *evalEnv) valueEvaluator(ctx context.Context, def *MetricDef) (func(co
 				vars[strings.ToUpper(name)] = formula.StringVal(memberCode)
 			}
 		}
-		result := reads.meta.EncodeResult(def.Name, formula.EvalNode(&formula.EvalContext{Vars: vars, Dim: reads.context(combo, useMemo)}, node))
+		return vars, values, nil
+	}
+
+	// A text calculation on a time dimension is evaluated at its period
+	// (START(), END(), PREVIOUS of a number it reads), as the time-series
+	// path evaluates a number; another period's value is the formula's
+	// variables bound at that period. Number calculations with time
+	// functions never reach here (executeTimeSeries).
+	var axis *timeAxis
+	if def.Text {
+		axis, _ = timeAxisFor(allDims, metricDimIDs[def.ID])
+	}
+	var timeAt func(combo map[string]string, parent *formula.TimeEvalContext, useMemo bool) *formula.TimeEvalContext
+	timeAt = func(combo map[string]string, parent *formula.TimeEvalContext, useMemo bool) *formula.TimeEvalContext {
+		if axis == nil {
+			return nil
+		}
+		pos, ok := axis.index[combo[axis.dim.ID]]
+		if !ok {
+			return nil // an aggregate period: no current period
+		}
+		tc := axis.timeCtx(pos)
+		if parent != nil {
+			tc = parent.Child(pos)
+		}
+		tc.EvalAt = func(n formula.Node, at int) formula.Value {
+			if !tc.InRange(at) {
+				return formula.BlankVal()
+			}
+			shifted := make(map[string]string, len(combo))
+			for k, v := range combo {
+				shifted[k] = v
+			}
+			shifted[axis.dim.ID] = axis.periods[at].Code
+			vars, _, err := bind(shifted)
+			if err != nil {
+				return formula.ErrorVal(&formula.FormulaError{Code: "#REF!", Message: err.Error()})
+			}
+			return formula.EvalNode(&formula.EvalContext{Vars: vars, Dim: reads.context(shifted, useMemo), Time: timeAt(shifted, tc, useMemo)}, n)
+		}
+		tc.Span = axis.span
+		return tc
+	}
+
+	evalCell := func(combo map[string]string, useMemo bool) (formula.Value, bool, error) {
+		reads.data = false
+		vars, values, bindErr := bind(combo)
+		if bindErr != nil {
+			return formula.Value{}, false, bindErr
+		}
+		noData := func() bool {
+			if len(def.DependsOnID) == 0 || reads.data {
+				return false
+			}
+			for _, dv := range values {
+				if dv != 0 {
+					return false
+				}
+			}
+			return true
+		}
+		if parseErr != nil {
+			return formula.Value{}, noData(), parseErr
+		}
+		result := reads.meta.EncodeResult(def.Name, formula.EvalNode(&formula.EvalContext{Vars: vars, Dim: reads.context(combo, useMemo), Time: timeAt(combo, nil, useMemo)}, node))
 		if result.IsError() {
 			// A blank or unknown member is a configuration problem at this
 			// cell, never an absence of data — even when nothing was read

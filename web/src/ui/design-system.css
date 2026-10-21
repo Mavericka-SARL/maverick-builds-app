@@ -2052,6 +2052,22 @@
   white-space: nowrap;
 }
 
+/* A tile's comparison (widget_props.kpi_compare): the member it is
+   compared with, its value, and the difference toned by kpi_good — IBCS's
+   value / plan / Δ in one line under the number. */
+.mvx-kpi__compare {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mvx-kpi__delta { font-weight: 600; }
+.mvx-kpi__delta--good { color: var(--color-success); }
+.mvx-kpi__delta--bad { color: var(--color-danger); }
+
 .mvx-kpi__accent {
   height: 3px;
   width: 40px;

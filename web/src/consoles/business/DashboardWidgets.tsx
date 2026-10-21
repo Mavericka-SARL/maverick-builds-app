@@ -1,5 +1,6 @@
 import React, { useContext, useEffect, useState } from "react";
 import { serialToISO } from "../dateSerial";
+import { scaleFor, scales } from "../numberScale";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Check as CheckIcon } from "lucide-react";
 import { api, type AutomationRule, type DashboardWidget, type DemoContext, type WidgetProps, type GridData, type IntegrationDef, type FormDef, type ChartContextDim, type ButtonCorners, type SelectorBarEntry, type RecordFilter, type BoardSettings } from "../../api/client";
@@ -167,7 +168,7 @@ export function WidgetRenderer({ widget, ctx, onOpenInstance }: { widget: Dashbo
     // goes INTO the grid's own toolbar row (beside the ··· actions) instead
     // of a separate header bar — see the show_title branch below, which
     // deliberately skips grid widgets.
-    inner = <PlanningGrid ctx={ctx} gridDefId={widget.ref_id} defaultView={widget.widget_props?.default_view} metricIds={widget.widget_props?.metric_ids} showMembers={widget.widget_props?.show_members} syncContext={widget.widget_props?.sync_context !== false} selectorsPosition={widget.widget_props?.selectors_position} rowsCollapsed={widget.widget_props?.rows_collapsed} multiSelect={widget.widget_props?.multi_select} hideSearch={widget.widget_props?.hide_search} title={widget.show_title && widget.title ? widget.title : undefined} />;
+    inner = <PlanningGrid ctx={ctx} gridDefId={widget.ref_id} defaultView={widget.widget_props?.default_view} metricIds={widget.widget_props?.metric_ids} showMembers={widget.widget_props?.show_members} syncContext={widget.widget_props?.sync_context !== false} selectorsPosition={widget.widget_props?.selectors_position} rowsCollapsed={widget.widget_props?.rows_collapsed} multiSelect={widget.widget_props?.multi_select} hideSearch={widget.widget_props?.hide_search} numberScale={widget.widget_props?.number_scale} title={widget.show_title && widget.title ? widget.title : undefined} />;
   } else if (widget.widget_type === "text" && widget.content) {
     const wp = widget.widget_props ?? {};
     // Explanatory copy needs headings, emphasis, lists and links, so the
@@ -319,10 +320,16 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricI
     staleTime: 0,
     // Same cadence as the grid and chart widgets, so a change made elsewhere
     // (another user, a form, an import) reaches the card without a reload.
-    // A same-page write reaches it sooner via invalidateModelData.
-    refetchInterval: 2000,
+    // A same-page write reaches it sooner via invalidateModelData. While a
+    // recalculation is running (an activation, an import) it polls as the
+    // grid does, so the final figure replaces the interim one at once.
+    refetchInterval: (q) => ((q.state.data as GridData | undefined)?.recalc_pending ? 250 : 2000),
   });
   const g = grid as GridData | undefined;
+  // A calculated total read mid-recalculation is interim (EBITDA equal to
+  // gross profit while the costs are still computing): marked as the grid
+  // marks its calculated cells, never shown as final.
+  const pending = !!g?.recalc_pending && metric?.is_input === false;
 
   // Absent ≠ zero: a scoped read omits a calc metric whose slice genuinely
   // has no value (the scheduler writes no row where the formula can't
@@ -334,25 +341,69 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricI
   const value: number | undefined = g?.withheld?.includes(metricId) ? undefined : g?.totals?.[metricId];
   const fmt = metric?.format ?? "number";
 
+  // The comparison (widget_props.kpi_compare): the same total with one
+  // dimension pinned to another member — Budget beside Actual+Forecast,
+  // last year beside this one — when the metric has that dimension.
+  const compare = widgetProps?.kpi_compare;
+  const compareOn = !!compare && !!metric?.dimension_ids?.includes(compare.dimension_id);
+  const compareScope = compareOn ? { ...(scope ?? {}), [compare!.dimension_id]: compare!.member_code } : undefined;
+  const { data: compareGrid } = useQuery({
+    queryKey: ["kpi-totals", ctx.revision_id, JSON.stringify(compareScope ?? {})],
+    queryFn: () => api.getGrid(ctx.revision_id, undefined, { totalsOnly: true, scope: compareScope }),
+    enabled: valueReady && compareOn,
+    staleTime: 0,
+    refetchInterval: (q) => ((q.state.data as GridData | undefined)?.recalc_pending ? 250 : 2000),
+  });
+  const cg = compareGrid as GridData | undefined;
+  const compareValue: number | undefined = !compareOn || cg?.withheld?.includes(metricId) ? undefined : cg?.totals?.[metricId];
+
   // The same reading as the grid (PlanningGrid's fmtMetric): a Percentage
   // metric is stored in percent units (67.7 shows as 67.7%), and the metric's
   // decimals apply. The tile used to multiply by 100 (67.7 → 6772.1%) and to
-  // round currency to whole units whatever the metric said.
-  const decimals = metric?.format_decimals ?? (fmt === "percentage" ? 1 : 0);
-  const digits = { minimumFractionDigits: decimals, maximumFractionDigits: decimals };
-  const formatted = value === undefined
-    ? "—"
-    : fmt === "picklist"
-    ? (value === 0 ? "—" : metric?.picklist_options?.find(o => o.key === value)?.label ?? "—")
-    : fmt === "boolean"
-    ? (value ? "Yes" : "No")
-    : fmt === "date"
-    ? (value === 0 ? "—" : serialToISO(value))
-    : fmt === "currency"
-    ? `${value < 0 ? "-" : ""}${metric?.format_currency || "$"}${Math.abs(value).toLocaleString("en-US", digits)}`
-    : fmt === "percentage"
-    ? `${value.toLocaleString("en-US", digits)}%`
-    : value.toLocaleString("en-US", decimals ? digits : undefined);
+  // round currency to whole units whatever the metric said. An amount is
+  // written at the tile's number_scale — "auto" unless the developer chose
+  // otherwise: €20.1M, not €20,098,192 (IBCS).
+  const scaleMode = widgetProps?.number_scale ?? "auto";
+  const fmtValue = (v: number, scaleBy = v): string => {
+    const sc = scales(fmt) ? scaleFor(scaleMode, scaleBy) : scaleFor("none");
+    const dec = sc.decimals ?? metric?.format_decimals ?? (fmt === "percentage" ? 1 : 0);
+    const digits = { minimumFractionDigits: dec, maximumFractionDigits: dec };
+    const n = v / sc.div;
+    return fmt === "picklist"
+      ? (v === 0 ? "—" : metric?.picklist_options?.find(o => o.key === v)?.label ?? "—")
+      : fmt === "boolean"
+      ? (v ? "Yes" : "No")
+      : fmt === "date"
+      ? (v === 0 ? "—" : serialToISO(v))
+      : fmt === "currency"
+      ? `${n < 0 ? "-" : ""}${metric?.format_currency || "$"}${Math.abs(n).toLocaleString("en-US", digits)}${sc.suffix}`
+      : fmt === "percentage"
+      ? `${n.toLocaleString("en-US", digits)}%`
+      : `${n.toLocaleString("en-US", dec ? digits : undefined)}${sc.suffix}`;
+  };
+  const formatted = value === undefined ? "—" : fmtValue(value);
+  // The difference, in the comparison's unit; a percentage's difference is
+  // in points. Toned by kpi_good: "up" — more is good (revenue), "down" —
+  // less is good (costs); without it, untoned.
+  let compareLine: React.ReactNode = null;
+  if (compareOn && value !== undefined && compareValue !== undefined && fmt !== "picklist" && fmt !== "date" && fmt !== "boolean") {
+    const delta = value - compareValue;
+    const scaleBy = Math.max(Math.abs(value), Math.abs(compareValue));
+    const pct = compareValue !== 0 && fmt !== "percentage" ? (delta / Math.abs(compareValue)) * 100 : null;
+    const good = widgetProps?.kpi_good;
+    const tone = !good || delta === 0 ? "" : (delta > 0) === (good === "up") ? "mvx-kpi__delta--good" : "mvx-kpi__delta--bad";
+    const memberLabel = compare!.label
+      || (m?.all_dimensions ?? m?.dimensions)?.find(d => d.id === compare!.dimension_id)?.members.find(mm => mm.code === compare!.member_code)?.label
+      || compare!.member_code;
+    const deltaText = `${delta > 0 ? "+" : delta < 0 ? "−" : "±"}${fmtValue(Math.abs(delta), scaleBy).replace(/^-/, "")}${fmt === "percentage" ? " pts" : ""}`;
+    compareLine = (
+      <span className="mvx-kpi__compare" title={`${memberLabel}: ${fmtValue(compareValue, compareValue)}`}>
+        vs {memberLabel} {fmtValue(compareValue, scaleBy)} · <span className={["mvx-kpi__delta", tone].filter(Boolean).join(" ")}>
+          {deltaText}{pct !== null ? ` (${pct > 0 ? "+" : pct < 0 ? "−" : ""}${Math.abs(pct).toFixed(1)}%)` : ""}
+        </span>
+      </span>
+    );
+  }
 
   // No fallback to scope.member_code: a member absent from all_dimensions/
   // dimensions is exactly what a hidden dimension_member access rule looks
@@ -398,7 +449,13 @@ export function MetricKpiWidget({ metricId, ctx, widgetProps, title }: { metricI
             {title ?? <>{metric.label || metric.name}{scopeLabel && <span className="mvx-kpi__scope"> · {scopeLabel}</span>}</>}
           </span>
         )}
-        <span className="mvx-kpi__value" style={widgetProps?.color ? { color: widgetProps.color } : undefined}>{valueReady && g ? formatted : "—"}</span>
+        <span
+          className={["mvx-kpi__value", pending ? "mvx-cell--pending" : ""].filter(Boolean).join(" ")}
+          style={widgetProps?.color ? { color: widgetProps.color } : undefined}
+          title={pending ? "Recalculating — this value is about to change" : undefined}
+          aria-busy={pending || undefined}
+        >{valueReady && g ? formatted : "—"}</span>
+        {compareLine}
         <div className="mvx-kpi__accent" />
       </div>
     </div>

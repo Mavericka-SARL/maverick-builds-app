@@ -47,6 +47,12 @@ func TestRemapWidgetPropsIDs(t *testing.T) {
 			wantChanged: true,
 		},
 		{
+			name:        "kpi comparison dimension and a chart's actuals flag",
+			in:          `{"kpi_compare":{"dimension_id":"d-old","member_code":"BUDGET","label":"Budget"},"kpi_good":"up","chart":{"actual_metric_id":"m-old","stacked":true}}`,
+			want:        `{"kpi_compare":{"dimension_id":"d-new","member_code":"BUDGET","label":"Budget"},"kpi_good":"up","chart":{"actual_metric_id":"m-new","stacked":true}}`,
+			wantChanged: true,
+		},
+		{
 			// show_members moves its keys; the lists of member codes copy
 			// verbatim, in order.
 			name:        "grid show_members keys are dimension ids",

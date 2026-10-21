@@ -179,8 +179,8 @@ func seedModel(t *testing.T, tctx context.Context, pool *pgxpool.Pool, app, name
 	for _, sql := range []string{
 		`INSERT INTO runtime.fact_input (model_id, revision_id, dim_members, metric_id, value)
 		 SELECT $1::uuid, $2::uuid, jsonb_build_object('i', i), $3::uuid, i FROM generate_series(1, $4::int) i`,
-		`INSERT INTO runtime.calc_result (model_id, revision_id, dim_members, metric_id, value, partition_key)
-		 SELECT $1::uuid, $2::uuid, jsonb_build_object('i', i), $3::uuid, i * 2, 'p' FROM generate_series(1, $4::int) i`,
+		`INSERT INTO runtime.calc_result (model_id, revision_id, dim_members, metric_id, value)
+		 SELECT $1::uuid, $2::uuid, jsonb_build_object('i', i), $3::uuid, i * 2 FROM generate_series(1, $4::int) i`,
 	} {
 		if _, err := pool.Exec(tctx, sql, model, rev, metric, cells); err != nil {
 			t.Fatal(err)

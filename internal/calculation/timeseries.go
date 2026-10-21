@@ -171,11 +171,11 @@ func usesTimeSeries(formulaText string) bool {
 // period), then time (timeSummary; an average counts every period of the
 // reduction, one with no row as 0). subtrees optionally restricts the leaves
 // to member subtrees per dimension (a slice). ok=false when there is nothing
-// to reduce or the time summary is 'none'.
+// to reduce or the time summary is 'none'. agg_rule none never combines
+// members: a period with more than one value gives no total (callers pass
+// one non-time leaf, rollup.LeafCombo), but time still totals by the summary.
 func summarizeOverTime(leaves []CalcResultRow, axis *timeAxis, aggRule, timeSummaryRule string, subtrees map[string]map[string]bool) (float64, bool) {
-	if !rollup.Aggregates(rollup.AggRule(aggRule)) {
-		return 0, false
-	}
+	none := !rollup.Aggregates(rollup.AggRule(aggRule))
 	perPeriod := map[int][]float64{}
 	for _, r := range leaves {
 		pos, ok := axis.index[r.DimMembers[axis.dim.ID]]
@@ -204,6 +204,9 @@ func summarizeOverTime(leaves []CalcResultRow, axis *timeAxis, aggRule, timeSumm
 		}
 		periods++
 		if v, ok := perPeriod[pos]; ok {
+			if none && len(v) > 1 {
+				return 0, false
+			}
 			vals = append(vals, rollup.CombineAgg(v, rollup.AggRule(aggRule)))
 		}
 	}
@@ -296,12 +299,7 @@ func (s *Scheduler) newTSEvaluator(
 			}
 			continue
 		}
-		var valueMap map[string]float64
-		if depDef.IsInput {
-			valueMap, err = s.store.LoadInputValueMap(ctx, modelID, revisionID, depID)
-		} else {
-			valueMap, err = s.store.LoadCalcValueMap(ctx, modelID, revisionID, depID)
-		}
+		valueMap, err := s.valueMap(ctx, depDef, modelID, revisionID)
 		if err != nil {
 			return nil, fmt.Errorf("load values for %s: %w", depDef.Name, err)
 		}
@@ -490,8 +488,12 @@ func (e *tsEvaluator) summarize(nonTime map[string]string, metric string, positi
 
 // span fulfils TimeEvalContext.Span (TIMESUM): a period code — leaf or
 // aggregate — to the first and last leaf positions it covers.
-func (e *tsEvaluator) span(code string) (int, int, bool) {
-	positions := e.axis.leafPositions(code)
+func (e *tsEvaluator) span(code string) (int, int, bool) { return e.axis.span(code) }
+
+// span is formula.TimeEvalContext.Span over the axis: the first and last
+// leaf positions under code.
+func (a *timeAxis) span(code string) (int, int, bool) {
+	positions := a.leafPositions(code)
 	if len(positions) == 0 {
 		return 0, 0, false
 	}
@@ -646,8 +648,8 @@ func (e *tsEvaluator) evalLeaves(order []int, ov overlay, res *tsResults) {
 // first (agg_rule) and time last (time_summary).
 func (e *tsEvaluator) finish(res *tsResults) {
 	dimIDs := e.metricDims[e.def.ID]
-	useEval := e.def.AggRule == string(rollup.AggFormula) || e.def.AggRule == string(rollup.AggRate) ||
-		(e.def.AggRule == "average" && !FormulaReferencesDims(e.def.Formula, e.dimIDToName))
+	rule := EffectiveAggRule(e.def.AggRule, e.def.Formula, e.dimIDToName)
+	useEval := rule == string(rollup.AggFormula) || rule == string(rollup.AggRate)
 	timeID := e.axis.dim.ID
 
 	// periodValue: the metric at one period with the given non-time pins
@@ -807,6 +809,7 @@ func (a *timeAxis) order(dir metricformula.Direction) []int {
 func (s *Scheduler) executeTimeSeries(
 	ctx context.Context, def *MetricDef, modelID, revisionID, partitionKey string, axis *timeAxis,
 	allDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string, meta *DimMetadata, allDefs map[string]*MetricDef,
+	inc *increment,
 ) error {
 	if len(axis.periods) == 0 {
 		return fmt.Errorf("%s: time dimension has no periods", formula.CodeInvalidTimeMember)
@@ -820,7 +823,12 @@ func (s *Scheduler) executeTimeSeries(
 	if len(res.leaf) == 0 {
 		if res.failures == 0 {
 			// No data anywhere: every row goes, the '{}' total included.
-			return s.store.ClearAllResults(ctx, modelID, revisionID, def.ID)
+			if err := s.store.ClearAllResults(ctx, modelID, revisionID, def.ID); err != nil {
+				return err
+			}
+			s.remember(ctx, def.ID, nil)
+			inc.cleared(metricDimIDs[def.ID], allDims)
+			return nil
 		}
 		if res.memberNA == res.failures {
 			// Every cell names a member that does not exist: the last
@@ -828,17 +836,19 @@ func (s *Scheduler) executeTimeSeries(
 			if err := s.store.ClearAllResults(ctx, modelID, revisionID, def.ID); err != nil {
 				return fmt.Errorf("clear stale results: %w", err)
 			}
+			s.remember(ctx, def.ID, nil)
+			inc.cleared(metricDimIDs[def.ID], allDims)
 		}
 		return fmt.Errorf("%d combos failed to evaluate for metric %s (first error: %w)", res.failures, def.Name, res.firstErr)
 	}
 	e.finish(&res)
 	// One transaction, as the scalar path: a reader never sees the metric
 	// between the clear of its rows and the write of the new ones.
-	if err := s.store.InTx(ctx, func(tx pgx.Tx) error {
-		return s.persistTimeSeries(ctx, tx, def, modelID, revisionID, partitionKey, &res)
-	}); err != nil {
+	written := timeSeriesRows(&res)
+	if err := s.persistRows(ctx, def, modelID, revisionID, written, inc, metricDimIDs[def.ID], allDims); err != nil {
 		return err
 	}
+	s.remember(ctx, def.ID, written)
 	if res.failures > 0 {
 		return fmt.Errorf("%d combos failed to evaluate for metric %s (first error: %w)", res.failures, def.Name, res.firstErr)
 	}
@@ -848,15 +858,24 @@ func (s *Scheduler) executeTimeSeries(
 // persistTimeSeries replaces one metric's results inside tx: its '{}'
 // total — none when this pass has none (time_summary 'none', no period
 // with a value) — and every intersection.
-func (s *Scheduler) persistTimeSeries(ctx context.Context, tx pgx.Tx, def *MetricDef, modelID, revisionID, partitionKey string, res *tsResults) error {
+func (s *Scheduler) persistTimeSeries(ctx context.Context, tx pgx.Tx, def *MetricDef, modelID, revisionID, partitionKey string, res *tsResults,
+	inc *increment, dimIDs []string, allDims map[string]*rollup.Dimension,
+) ([]CalcResultRow, error) {
+	rows := timeSeriesRows(res)
+	if err := s.writeRowsTx(ctx, tx, def, modelID, revisionID, rows, inc, dimIDs, allDims); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// timeSeriesRows is the result set of a time-series metric: every
+// intersection and its '{}' total, when it has one.
+func timeSeriesRows(res *tsResults) []CalcResultRow {
 	rows := res.rows
 	if res.aggregate != nil {
-		rows = append(rows, CalcResultRow{DimMembers: map[string]string{}, Value: *res.aggregate})
+		rows = append(rows[:len(rows):len(rows)], CalcResultRow{DimMembers: map[string]string{}, Value: *res.aggregate})
 	}
-	if err := s.store.ReplaceResultsTx(ctx, tx, modelID, revisionID, def.ID, partitionKey, rows); err != nil {
-		return fmt.Errorf("write results: %w", err)
-	}
-	return nil
+	return rows
 }
 
 // executeRecurrence evaluates a causal component (spec §8.2): every member
@@ -867,7 +886,15 @@ func (s *Scheduler) persistTimeSeries(ctx context.Context, tx pgx.Tx, def *Metri
 func (s *Scheduler) executeRecurrence(
 	ctx context.Context, comp metricformula.Component, modelID, revisionID, partitionKey string,
 	allDims map[string]*rollup.Dimension, metricDimIDs map[string][]string, dimIDToName map[string]string, meta *DimMetadata, allDefs map[string]*MetricDef,
+	incs map[string]*increment,
 ) error {
+	for _, id := range comp.Members {
+		if inc := incs[id]; inc != nil && allDefs[id] != nil {
+			if err := s.loadHeld(ctx, allDefs[id], modelID, revisionID, inc); err != nil {
+				return err
+			}
+		}
+	}
 	var axis *timeAxis
 	ov := overlay{}
 	evals := make([]*tsEvaluator, 0, len(comp.Members))
@@ -928,16 +955,29 @@ func (s *Scheduler) executeRecurrence(
 		return err
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
+	written := make([][]CalcResultRow, len(evals))
 	for i, e := range evals {
 		if len(results[i].leaf) == 0 {
 			if err := s.store.ClearAllResultsTx(ctx, tx, modelID, revisionID, e.def.ID); err != nil {
 				return err
 			}
+			incs[e.def.ID].cleared(metricDimIDs[e.def.ID], allDims)
 			continue
 		}
-		if err := s.persistTimeSeries(ctx, tx, e.def, modelID, revisionID, partitionKey, &results[i]); err != nil {
+		if written[i], err = s.persistTimeSeries(ctx, tx, e.def, modelID, revisionID, partitionKey, &results[i], incs[e.def.ID], metricDimIDs[e.def.ID], allDims); err != nil {
 			return err
 		}
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		for _, id := range comp.Members {
+			if inc := incs[id]; inc != nil {
+				inc.out = nil // rolled back: nothing changed
+			}
+		}
+		return err
+	}
+	for i, e := range evals {
+		s.remember(ctx, e.def.ID, written[i])
+	}
+	return nil
 }

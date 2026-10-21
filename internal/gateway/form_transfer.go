@@ -180,7 +180,7 @@ func (h *handler) formImport(w http.ResponseWriter, r *http.Request, formID stri
 		return
 	}
 
-	created, errs, err := h.importFormRows(ctx, act, scope, form, header, rawRows)
+	created, errs, err := h.importFormRows(ctx, act, scope, form, header, rawRows, false)
 	if err != nil {
 		h.jsonLimitErr(w, err)
 		return

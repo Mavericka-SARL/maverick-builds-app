@@ -72,6 +72,9 @@ type Router struct {
 	retrying  bool
 	// used is when this process last recorded each tenant's use (Used).
 	used map[string]time.Time
+	// watching cancels the background loops Watch started for each tenant:
+	// Forget ends them with the tenant's pool.
+	watching map[string][]context.CancelFunc
 }
 
 // SetWaker lets this process's background loops sleep while their tenant is
@@ -206,12 +209,20 @@ func (r *Router) open(ctx context.Context, database string) (*pgxpool.Pool, erro
 }
 
 // Forget closes and drops the cached pool for a tenant (after deprovisioning
-// or when the catalog row changed).
+// or when the catalog row changed), and ends the background loops Watch
+// started on it: they used to run on against the closed pool, logging
+// "closed pool" every pass until the process restarted. Watch starts them
+// again on a fresh pool at its next pass if the tenant is still ready.
 func (r *Router) Forget(customerID string) {
 	r.mu.Lock()
 	e, ok := r.pools[customerID]
 	delete(r.pools, customerID)
+	cancels := r.watching[customerID]
+	delete(r.watching, customerID)
 	r.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
 	if ok {
 		e.pool.Close()
 	}
@@ -424,17 +435,32 @@ func (r *Router) retryUnreached(base context.Context) {
 // appears, until ctx ends. It is how per-database background loops (the
 // workflow scheduler, the integration worker) cover every tenant: each gets
 // its own goroutine with its own pool. start must return promptly and run its
-// loop on its own goroutine, honouring ctx.
-func (r *Router) Watch(ctx context.Context, interval time.Duration, start func(t Tenant, pool *pgxpool.Pool)) {
-	seen := map[string]bool{}
+// loop on its own goroutine, honouring the context it is given: that one
+// ends with ctx and also when the tenant goes (deprovisioned, deleted by
+// another replica, no longer ready), so its loops stop with it.
+func (r *Router) Watch(ctx context.Context, interval time.Duration, start func(ctx context.Context, t Tenant, pool *pgxpool.Pool)) {
+	// running is this Watch's tenants and the context their loops got: it
+	// ends when ctx does, when Forget drops the tenant (deprovisioned here),
+	// or at the next pass once the tenant is no longer ready or no longer in
+	// the catalog (deleted by another replica).
+	running := map[string]context.Context{}
+	var runMu sync.Mutex
 	tick := func() {
 		tenants, err := r.catalog.List(ctx)
 		if err != nil {
 			r.cfg.Log.Warn().Err(err).Msg("tenant watch: list catalog")
 			return
 		}
+		ready := map[string]bool{}
 		for _, t := range tenants {
-			if t.Status != StatusReady || seen[t.CustomerID] {
+			if t.Status != StatusReady {
+				continue
+			}
+			ready[t.CustomerID] = true
+			runMu.Lock()
+			tctx, ok := running[t.CustomerID]
+			runMu.Unlock()
+			if ok && tctx.Err() == nil {
 				continue
 			}
 			pool, err := r.hold(ctx, t.CustomerID)
@@ -442,8 +468,29 @@ func (r *Router) Watch(ctx context.Context, interval time.Duration, start func(t
 				r.cfg.Log.Warn().Err(err).Str("tenant", t.CustomerID).Msg("tenant watch: open pool")
 				continue
 			}
-			seen[t.CustomerID] = true
-			start(t, pool)
+			tctx, cancel := context.WithCancel(ctx)
+			r.mu.Lock()
+			if r.watching == nil {
+				r.watching = map[string][]context.CancelFunc{}
+			}
+			r.watching[t.CustomerID] = append(r.watching[t.CustomerID], cancel)
+			r.mu.Unlock()
+			runMu.Lock()
+			running[t.CustomerID] = tctx
+			runMu.Unlock()
+			start(tctx, t, pool)
+		}
+		var gone []string
+		runMu.Lock()
+		for id := range running {
+			if !ready[id] {
+				gone = append(gone, id)
+				delete(running, id)
+			}
+		}
+		runMu.Unlock()
+		for _, id := range gone {
+			r.Forget(id)
 		}
 	}
 	tick()

@@ -22,9 +22,16 @@ func TestAutomationRuleScheduleOverHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	missing := map[string]any{"name": "No cron", "trigger_type": "schedule", "workflow_def_id": f.wfDefID}
-	if status, body := f.do(t, "POST", "/api/automation/rules", "wt-dev", missing); status < 400 {
-		t.Errorf("schedule rule without cron_expr: %d %s, want an error", status, body)
+	// A schedule that is not valid is the request's fault: 400, never 500.
+	for label, bad := range map[string]map[string]any{
+		"without cron_expr":    {"name": "No cron", "trigger_type": "schedule", "workflow_def_id": f.wfDefID},
+		"with a bad cron":      {"name": "Bad cron", "trigger_type": "schedule", "workflow_def_id": f.wfDefID, "cron_expr": "every monday"},
+		"with an unknown zone": {"name": "Bad zone", "trigger_type": "schedule", "workflow_def_id": f.wfDefID, "cron_expr": "0 6 1 * *", "timezone": "Mars/Olympus"},
+		"with an unknown flow": {"name": "No flow", "trigger_type": "schedule", "workflow_def_id": "00000000-0000-0000-0000-000000000009", "cron_expr": "0 6 1 * *"},
+	} {
+		if status, body := f.do(t, "POST", "/api/automation/rules", "wt-dev", bad); status != http.StatusBadRequest {
+			t.Errorf("schedule rule %s: %d %s, want 400", label, status, body)
+		}
 	}
 
 	create := map[string]any{

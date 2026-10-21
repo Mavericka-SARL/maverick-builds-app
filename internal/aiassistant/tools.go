@@ -105,7 +105,7 @@ func ReadTools() []providers.ToolDef {
 		},
 		{
 			Name:        "list_users",
-			Description: "Returns the users of this application's workspaces: email, display name, roles, and their current access rules: member rules in the active revision (dimension/member=level) — the set set_user_access_rules replaces — plus metric rules and a count of member rules on members not in the active revision, which it keeps. Use before proposing set_user_access_rules.",
+			Description: "Returns the users of this application's workspaces: email, display name, roles, and their current access rules in the active revision: member rules (dimension/member=level) and metric rules (metric=level) — the sets set_user_access_rules' rules and metric_rules replace — plus a count of member rules on members not in the active revision, which it keeps. Use before proposing set_user_access_rules.",
 			Parameters:  noParams,
 		},
 		{
@@ -1035,7 +1035,7 @@ func (e *ToolExecutor) listUsers(ctx context.Context) (string, error) {
 		}
 		fmt.Fprintf(&b, "- %s (%s) — roles: %s — member access rules (active revision): %s", email, name, roles, rules)
 		if metricRules != "" {
-			fmt.Fprintf(&b, " — metric access rules (kept by set_user_access_rules; business admin console manages them): %s", metricRules)
+			fmt.Fprintf(&b, " — metric access rules (active revision; set_user_access_rules' metric_rules replaces them): %s", metricRules)
 		}
 		if otherMemberRules > 0 {
 			fmt.Fprintf(&b, " — %d other member rule(s) on members not in this model's active revision (kept by set_user_access_rules)", otherMemberRules)

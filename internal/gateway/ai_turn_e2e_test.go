@@ -397,7 +397,7 @@ func TestSendMessage_WarnsOfHiddenDecimals(t *testing.T) {
 	plan := []map[string]any{
 		{"tool": "create_dimension", "description": "Activities", "params": map[string]any{"name": "activity",
 			"members": []map[string]any{{"code": "A1", "label": "A1"}, {"code": "A2", "label": "A2"}}}},
-		turnMetricStep("increment", map[string]any{"is_input": true, "format": "currency", "format_decimals": 0}),
+		turnMetricStep("increment", map[string]any{"is_input": true, "format": "currency", "format_currency": "€", "format_decimals": 0}),
 		turnMetricStep("rate", map[string]any{"is_input": true, "format": "percentage", "agg_rule": "average", "time_summary": "average"}),
 		{"tool": "create_grid", "description": "Activities", "params": map[string]any{"name": "Activities", "dimensions": []string{"activity"}, "metrics": []string{"increment", "rate"}}},
 		{"tool": "write_input_values", "description": "Increments", "params": map[string]any{"metric_id": "increment", "values": []map[string]any{

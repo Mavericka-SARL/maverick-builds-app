@@ -612,6 +612,9 @@ func RunSweep(ctx context.Context, db DB, e *Enforcer, interval time.Duration, l
 	sweepAll := func(ctx context.Context) bool {
 		rows, err := db.Query(ctx, `SELECT id::text FROM core.customer`)
 		if err != nil {
+			if ctx.Err() != nil {
+				return false
+			}
 			log.Warn().Err(err).Msg("edition limits sweep: could not list tenants")
 			return false
 		}
@@ -625,6 +628,9 @@ func RunSweep(ctx context.Context, db DB, e *Enforcer, interval time.Duration, l
 		rows.Close()
 		for _, id := range ids {
 			t, err := e.Sweep(ctx, db, id)
+			if err != nil && ctx.Err() != nil {
+				return false // the loop ended (shutdown, or its tenant went) mid-pass
+			}
 			if err != nil {
 				log.Warn().Err(err).Str("tenant", id).Msg("edition limits sweep failed")
 				continue

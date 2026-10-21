@@ -277,11 +277,13 @@ type dbQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-func (h *handler) aiPreviewFileImport(ctx context.Context, sessionID string, req aiassistant.FileImportRequest) (string, error) {
-	return h.aiPreviewFileImportOn(ctx, h.db.For(ctx), sessionID, req)
+func (h *handler) aiPreviewFileImport(ctx context.Context, sessionID, userID string, req aiassistant.FileImportRequest) (string, error) {
+	return h.aiPreviewFileImportOn(ctx, h.db.For(ctx), sessionID, userID, req)
 }
 
-func (h *handler) aiPreviewFileImportOn(ctx context.Context, q dbQuerier, sessionID string, req aiassistant.FileImportRequest) (string, error) {
+// aiPreviewFileImportOn previews as userID, the person in the chat (a
+// table's records are created as them).
+func (h *handler) aiPreviewFileImportOn(ctx context.Context, q dbQuerier, sessionID, userID string, req aiassistant.FileImportRequest) (string, error) {
 	f, err := h.loadAttachedFile(ctx, sessionID, req)
 	if err != nil {
 		return "", err
@@ -292,6 +294,19 @@ func (h *handler) aiPreviewFileImportOn(ctx context.Context, q dbQuerier, sessio
 	}
 	var sb strings.Builder
 	sb.WriteString(f.layout(req))
+
+	if req.TargetType == "form" {
+		n, problems, table, err := h.aiTableImport(ctx, userID, f, req.TargetID, true)
+		switch {
+		case err != nil:
+			sb.WriteString("Cannot import: " + err.Error() + "\n")
+		case problems != "":
+			sb.WriteString(problems)
+		default:
+			fmt.Fprintf(&sb, "No errors. Would add %d record(s) to table '%s', each posted through the table's mappings.\n", n, table)
+		}
+		return sb.String(), nil
+	}
 
 	if req.TargetType == "dimension" {
 		if _, _, err := dimensionCSV(f); err != nil {
@@ -394,6 +409,21 @@ func (h *handler) aiImportFile(ctx context.Context, act *actor, sessionID string
 			h.recordIntegrationRun(ctx, req.IntegrationID, act.UserID, 0, 0, "error", err.Error())
 		}
 		return "", err
+	}
+
+	if req.TargetType == "form" {
+		n, problems, table, err := h.aiTableImport(ctx, act.UserID, f, req.TargetID, false)
+		if err == nil && problems != "" {
+			err = fmt.Errorf("%s", strings.TrimSpace(problems))
+		}
+		if err != nil {
+			return fail(err)
+		}
+		if req.IntegrationID != "" {
+			h.recordIntegrationRun(ctx, req.IntegrationID, act.UserID, n, 0, "success", "AI import of "+f.describe())
+		}
+		audit(n)
+		return fmt.Sprintf("Imported %d record(s) from %s into table '%s'", n, f.describe(), table), nil
 	}
 
 	if req.TargetType == "dimension" {
@@ -499,7 +529,7 @@ func (h *handler) aiReadHooks(r *http.Request, sessionID, modelID, userID string
 			if len(req.AfterSteps) > 0 {
 				return h.aiPreviewAfterSteps(ctx, sessionID, modelID, userID, req)
 			}
-			return h.aiPreviewFileImport(ctx, sessionID, req)
+			return h.aiPreviewFileImport(ctx, sessionID, userID, req)
 		},
 		PreviewExport: func(ctx context.Context, revisionID, gridID, name string, spec dataexport.Spec) (string, error) {
 			return h.aiPreviewExport(r.WithContext(ctx), gridID, name, spec)
@@ -740,7 +770,7 @@ func (h *handler) aiPreviewAfterSteps(ctx context.Context, sessionID, modelID, u
 		return "", fmt.Errorf("%s %q is neither in the working revision nor created by after_steps", req.TargetType, target)
 	}
 	req.TargetID = id
-	out, err := h.aiPreviewFileImportOn(ctx, tx, sessionID, req)
+	out, err := h.aiPreviewFileImportOn(ctx, tx, sessionID, userID, req)
 	if err != nil {
 		return "", err
 	}
@@ -752,3 +782,43 @@ func (h *handler) aiPreviewAfterSteps(ctx context.Context, sessionID, modelID, u
 }
 
 var afterStepRef = regexp.MustCompile(`^\s*<created in step (\d+)>\s*$`)
+
+// aiTableImport checks (dryRun) or imports an attached file into a records
+// table as userID, the person in the chat: the Import Wizard's table import
+// (importFormRows) — fields typed and required, the statuses they may
+// create, each record posted through the table's mappings, nothing created
+// when any row fails. problems lists the failing rows; the table's name
+// comes back for the message.
+func (h *handler) aiTableImport(ctx context.Context, userID string, f *attachedFile, tableID string, dryRun bool) (n int, problems, table string, err error) {
+	act, err := h.actorByUserID(ctx, userID)
+	if err != nil {
+		return 0, "", "", err
+	}
+	scope, err := h.resolveFormRecordScope(ctx, act, tableID)
+	if err != nil {
+		return 0, "", "", err
+	}
+	if scope.form == nil {
+		return 0, "", "", fmt.Errorf("table %s not found", tableID)
+	}
+	table = scope.form.Name
+	if !scope.reach {
+		return 0, "", table, fmt.Errorf("you cannot add records to table '%s'", table)
+	}
+	n, rowErrs, err := h.importFormRows(ctx, act, scope, scope.form, f.mapped, f.rows, dryRun)
+	if err != nil {
+		return 0, "", table, err
+	}
+	if len(rowErrs) > 0 {
+		lines := make([]map[string]any, 0, len(rowErrs))
+		for _, e := range rowErrs {
+			lines = append(lines, map[string]any{"row": e.Row, "column": e.Column, "message": e.Message})
+		}
+		return 0, fmt.Sprintf("%d row(s) fail validation — a table import is all-or-nothing, so nothing would be imported until they are fixed "+
+			"(map each column to a field name or label of the table, or \"ignore\"):\n%s", len(rowErrs), importErrorLines(lines, 15)), table, nil
+	}
+	if n == 0 {
+		return 0, "", table, fmt.Errorf("%s holds no rows for table '%s'", f.describe(), table)
+	}
+	return n, "", table, nil
+}
